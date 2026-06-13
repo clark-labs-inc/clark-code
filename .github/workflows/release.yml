@@ -63,10 +63,35 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "Clark Desktop ${{ github.ref_name }}"
-          releaseBody: "Download the installer for your platform below."
+          releaseBody: |
+            Download the installer for your platform from the assets below.
+
+            **macOS** builds are not yet notarized, so Gatekeeper blocks them on
+            first launch. After dragging Clark Desktop into Applications, open
+            **System Settings → Privacy & Security → Open Anyway**, or run:
+            `xattr -dr com.apple.quarantine "/Applications/Clark Desktop.app"`
+
+            **Windows** SmartScreen may warn on the unsigned installer. Click
+            **More info → Run anyway**.
+          # Each matrix leg uploads into the same draft release; the `publish`
+          # job below flips it public only after every platform has uploaded.
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
+
+  # Publish the draft once all platform builds have uploaded their installers,
+  # so the release never goes public missing one platform's assets.
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release edit "${{ github.ref_name }}" \
+            --repo "${{ github.repository }}" \
+            --draft=false --latest
 
 # The public download page lives in clark-ui (clarkchat.com/download) and
 # resolves these release assets via the GitHub Releases API — so there is no
