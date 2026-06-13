@@ -190,14 +190,25 @@ pub async fn clark_exchange_google_idtoken(
     if !signin.status().is_success() {
         let status = signin.status();
         let body = signin.text().await.unwrap_or_default();
-        return Err(format!("Clark rejected the Google sign-in ({status}): {body}"));
+        return Err(format!(
+            "Clark rejected the Google sign-in ({status}): {body}"
+        ));
     }
     let signin_body: Value = signin.json().await.unwrap_or(Value::Null);
 
     // Prefer the user echoed by sign-in; fall back to get-session if absent.
     let mut user = signin_body.get("user").cloned().unwrap_or(Value::Null);
-    if user.get("id").and_then(Value::as_str).unwrap_or_default().is_empty() {
-        if let Ok(resp) = client.get(format!("{base}/api/auth/get-session")).send().await {
+    if user
+        .get("id")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .is_empty()
+    {
+        if let Ok(resp) = client
+            .get(format!("{base}/api/auth/get-session"))
+            .send()
+            .await
+        {
             if let Ok(body) = resp.json::<Value>().await {
                 if let Some(u) = body.get("user") {
                     user = u.clone();
