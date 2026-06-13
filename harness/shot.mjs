@@ -1,0 +1,11 @@
+import { launch, VIEWPORT } from "./launch.mjs";
+const url = process.argv[2];
+const waitMs = parseInt(process.argv[3] || "2500", 10);
+const out = process.argv[4] || "/tmp/shot.png";
+const browser = await launch();
+const page = await browser.newPage({ viewport: VIEWPORT });
+await page.goto(url, { waitUntil: "domcontentloaded" });
+await page.waitForTimeout(waitMs);
+await page.screenshot({ path: out });
+await browser.close();
+console.log("saved", out);

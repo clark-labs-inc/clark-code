@@ -1,0 +1,13 @@
+import { chromium } from "playwright";
+const EXE = process.env.PLAYWRIGHT_CHROMIUM_PATH || undefined;
+const browser = await chromium.launch({ headless: true, executablePath: EXE });
+const page = await browser.newPage({ viewport: { width: 1360, height: 880 } });
+await page.goto("http://localhost:1420/", { waitUntil: "domcontentloaded" });
+await page.getByRole("button", { name: "New session" }).first().click();
+await page.waitForTimeout(400);
+await page.setInputFiles('input[type="file"]', ["/tmp/photo.png", "/tmp/notes.txt"]);
+await page.waitForTimeout(800);
+await page.getByLabel("Message Clark").fill("What's in these files?");
+await page.waitForTimeout(300);
+await page.screenshot({ path: "/tmp/clark-attach.png" });
+await browser.close(); console.log("ok");

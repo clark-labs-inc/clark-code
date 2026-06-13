@@ -1,0 +1,51 @@
+// Production bridge: thin wrapper over Tauri commands + events. The heavy
+// lifting (transport, projection) happens in the native `agent-core` host.
+//
+// The matching Rust commands are registered in src-tauri.
+
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import type { CoreBridge, ConnectConfig, SessionOptions } from "./bridge";
+import type { Upload } from "../lib/attachments";
+import type {
+  ClientResponse,
+  ContentBlock,
+  ProviderInfo,
+  Session,
+  Snapshot,
+} from "./types";
+
+export class TauriBridge implements CoreBridge {
+  listProviders(): Promise<ProviderInfo[]> {
+    return invoke<ProviderInfo[]>("provider_list");
+  }
+
+  connect(providerId: string, config: ConnectConfig): Promise<void> {
+    return invoke("provider_connect", { providerId, config });
+  }
+
+  newSession(providerId: string, options: SessionOptions): Promise<Session> {
+    return invoke<Session>("session_new", { providerId, options });
+  }
+
+  prompt(sessionId: string, blocks: ContentBlock[], attachments: Upload[] = []): Promise<void> {
+    return invoke("prompt", { sessionId, blocks, attachments });
+  }
+
+  cancel(sessionId: string, runId: string): Promise<void> {
+    return invoke("cancel", { sessionId, runId });
+  }
+
+  respond(sessionId: string, response: ClientResponse): Promise<void> {
+    return invoke("respond", { sessionId, response });
+  }
+
+  subscribe(handler: (snapshot: Snapshot) => void): () => void {
+    const unlisten = listen<Snapshot>("snapshot", (event) => {
+      handler(event.payload);
+    });
+    return () => {
+      void unlisten.then((fn) => fn());
+    };
+  }
+}

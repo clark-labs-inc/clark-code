@@ -1,0 +1,35 @@
+[package]
+name = "clark-desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Clark Desktop — open-source, cross-platform agent client."
+default-run = "clark-desktop"
+
+[lib]
+name = "clark_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+agent-core = { path = "../crates/agent-core", features = ["native"] }
+provider-acp = { path = "../crates/provider-acp" }
+provider-clark = { path = "../crates/provider-clark" }
+
+tauri = { version = "2", features = [] }
+tauri-plugin-shell = "2"
+# Native Google sign-in (system browser + localhost loopback). Returns a Google
+# ID token we exchange with Clark's Better Auth backend.
+tauri-plugin-google-auth = "0.5"
+# Server-to-server token exchange against Clark's auth API (no browser CORS).
+reqwest = { version = "0.12", default-features = false, features = ["json", "cookies", "rustls-tls"] }
+
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+futures.workspace = true
+tracing.workspace = true
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

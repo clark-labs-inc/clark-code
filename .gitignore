@@ -1,0 +1,28 @@
+# Rust
+/target
+**/target
+
+# Node / frontend
+node_modules
+app/dist
+app/node_modules
+*.tsbuildinfo
+
+# Tauri generated
+src-tauri/gen
+src-tauri/icon-source.png
+
+# Env / secrets — never commit
+.env
+.env.*
+!.env.example
+*.local
+
+# OS / editor
+.DS_Store
+.idea
+.vscode/*
+!.vscode/extensions.json
+
+# Demo recordings (local only)
+videos/
