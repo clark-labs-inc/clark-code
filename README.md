@@ -1,5 +1,11 @@
 # Clark Desktop
 
+<p align="center">
+  <img src="docs/clark-desktop-demo.gif" alt="Clark Desktop running an agent task end to end: web research, a live plan, file edits, and tool calls that build and publish a site" width="820">
+  <br/>
+  <em>One Clark run in the desktop app: web research → a live plan → file edits → tool calls that build and publish a site.</em>
+</p>
+
 Open-source, cross-platform desktop client for agentic work. One UI that talks
 to many agent backends through a single provider abstraction — **ACP** local CLI
 agents (Codex, Claude Code, Gemini, …) and the **Clark** runtime — with the
