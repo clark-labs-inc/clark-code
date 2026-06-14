@@ -179,6 +179,39 @@ async fn handle_cmd(cmd: Value, conn: &SharedConn, sink: &SharedSink) {
             }
         }
 
+        Some("load_session") => {
+            let sid = SessionId::new(cmd.get("session").and_then(Value::as_str).unwrap_or(""));
+            let mut c = conn.lock().await;
+            let Some(provider) = c.provider.as_mut() else {
+                return send(
+                    sink,
+                    json!({ "type": "error", "id": id, "message": "connect first" }),
+                )
+                .await;
+            };
+            match provider.load_session(sid).await {
+                Ok(session) => {
+                    let mut snapshot = Snapshot::new();
+                    snapshot.session = Some(session.id.clone());
+                    c.snapshot = snapshot.clone();
+                    drop(c);
+                    send(
+                        sink,
+                        json!({ "type": "session", "id": id, "session": session }),
+                    )
+                    .await;
+                    send(sink, json!({ "type": "snapshot", "snapshot": snapshot })).await;
+                }
+                Err(e) => {
+                    send(
+                        sink,
+                        json!({ "type": "error", "id": id, "message": e.to_string() }),
+                    )
+                    .await
+                }
+            }
+        }
+
         Some("prompt") => {
             let session = SessionId::new(cmd.get("session").and_then(Value::as_str).unwrap_or(""));
             let blocks: Vec<ContentBlock> =

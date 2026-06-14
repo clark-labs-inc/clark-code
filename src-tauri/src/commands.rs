@@ -67,6 +67,29 @@ pub async fn session_new(
 }
 
 #[tauri::command]
+pub async fn session_load(
+    id: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Value, String> {
+    tracing::info!(session = %id, "session_load");
+    let mut s = state.session.lock().await;
+    let provider = s.provider.as_mut().ok_or("connect a provider first")?;
+    let session = provider
+        .load_session(SessionId::new(id))
+        .await
+        .map_err(|e| e.to_string())?;
+    // The client restores the persisted transcript; start from a clean snapshot
+    // bound to the resumed session so new turns append correctly.
+    let mut snapshot = Snapshot::new();
+    snapshot.session = Some(session.id.clone());
+    s.snapshot = snapshot;
+    s.session = Some(session.clone());
+    let _ = app.emit("snapshot", &s.snapshot);
+    serde_json::to_value(&session).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub async fn prompt(
     app: AppHandle,
     session_id: String,

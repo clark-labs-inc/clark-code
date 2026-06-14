@@ -64,6 +64,18 @@ export class MockBridge implements CoreBridge {
     };
   }
 
+  async loadSession(providerId: string, id: string): Promise<Session> {
+    // The mock has no server state; the store restores the persisted snapshot.
+    const provider = PROVIDERS.find((p) => p.id === providerId) ?? PROVIDERS[0];
+    this.snapshot = { ...emptySnapshot(), session: id };
+    return {
+      id,
+      provider: provider.id,
+      capabilities: provider.capabilities,
+      mode: provider.capabilities.modes[0],
+    };
+  }
+
   async prompt(
     _sessionId: string,
     blocks: ContentBlock[],

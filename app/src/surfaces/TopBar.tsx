@@ -1,36 +1,30 @@
-import { Sun, Moon, Plus, LogOut } from "lucide-react";
-import { ClarkMark } from "./ClarkMark";
+import { Sun, Moon } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
 
 export function TopBar({ dark, onToggleTheme }: { dark: boolean; onToggleTheme: () => void }) {
   const session = useSessionStore((s) => s.session);
   const auth = useSessionStore((s) => s.auth);
   const signOutAuth = useSessionStore((s) => s.signOutAuth);
-  const reset = useSessionStore((s) => s.endSession);
+  const title = useSessionStore((s) =>
+    session ? s.conversations.find((c) => c.id === session.id)?.title : null,
+  );
 
   return (
     <header className="flex h-12 shrink-0 items-center gap-2.5 border-b border-border bg-bg-elevated/70 px-4 backdrop-blur">
-      <div className="flex items-center gap-2">
-        <ClarkMark size={20} className="rounded-[5px]" />
-        <span className="text-sm font-semibold tracking-tight text-ink">Clark</span>
-        {session && (
+      {session && (
+        <div className="flex min-w-0 items-center gap-2">
           <span
-            className="size-1.5 rounded-full bg-success"
+            className="size-1.5 shrink-0 rounded-full bg-success"
             title="Connected"
             aria-label="Connected"
           />
-        )}
-      </div>
+          <span className="truncate text-sm font-medium text-ink-secondary">
+            {title ?? "New conversation"}
+          </span>
+        </div>
+      )}
 
       <div className="ml-auto flex items-center gap-1">
-        {session && (
-          <button
-            onClick={() => void reset()}
-            className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-ink-secondary transition hover:bg-bg-hover"
-          >
-            <Plus className="size-3.5" /> New
-          </button>
-        )}
         <button
           onClick={onToggleTheme}
           aria-label={dark ? "Switch to light theme" : "Switch to dark theme"}
@@ -52,7 +46,6 @@ export function TopBar({ dark, onToggleTheme }: { dark: boolean; onToggleTheme: 
                 {auth.user.name.charAt(0).toUpperCase()}
               </span>
             )}
-            <LogOut className="size-3.5 text-ink-faint" />
           </button>
         )}
       </div>

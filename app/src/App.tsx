@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { useSessionStore } from "./store/sessionStore";
 import { useTheme } from "./lib/useTheme";
 import { TopBar } from "./surfaces/TopBar";
+import { Sidebar } from "./surfaces/Sidebar";
 import { StartCard } from "./surfaces/StartCard";
 import { Conversation } from "./surfaces/Conversation";
 import { Composer } from "./surfaces/Composer";
@@ -45,16 +46,19 @@ export default function App() {
   if (!auth) return <SignInScreen />;
 
   return (
-    <div className="flex h-screen w-screen flex-col overflow-hidden bg-bg text-ink">
-      <TopBar dark={dark} onToggleTheme={toggle} />
-      {session ? (
-        <>
-          <Conversation />
-          <Composer />
-        </>
-      ) : (
-        <StartCard />
-      )}
+    <div className="flex h-screen w-screen overflow-hidden bg-bg text-ink">
+      <Sidebar />
+      <div className="flex min-w-0 flex-1 flex-col">
+        <TopBar dark={dark} onToggleTheme={toggle} />
+        {session ? (
+          <>
+            <Conversation />
+            <Composer />
+          </>
+        ) : (
+          <StartCard />
+        )}
+      </div>
     </div>
   );
 }

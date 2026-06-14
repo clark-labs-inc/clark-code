@@ -21,6 +21,40 @@ import {
   type AuthMethod,
   type AuthSession,
 } from "../lib/auth";
+import {
+  loadIndex,
+  loadSnapshot,
+  saveSnapshot,
+  upsertMeta,
+  deleteConversation,
+  deriveTitle,
+  hasContent,
+  type ConversationMeta,
+} from "../lib/history";
+
+/** Past transcript (prefix) + live resumed turns → one displayed snapshot. */
+function mergeHistory(prefix: Snapshot, live: Snapshot): Snapshot {
+  const artifacts = [...prefix.artifacts];
+  const idx = new Map(artifacts.map((a, i) => [a.id, i]));
+  for (const a of live.artifacts) {
+    const at = idx.get(a.id);
+    if (at != null) artifacts[at] = a;
+    else {
+      idx.set(a.id, artifacts.length);
+      artifacts.push(a);
+    }
+  }
+  return {
+    session: live.session ?? prefix.session,
+    runs: { ...prefix.runs, ...live.runs },
+    timeline: [...prefix.timeline, ...live.timeline],
+    tool_calls: { ...prefix.tool_calls, ...live.tool_calls },
+    plan: live.plan ?? prefix.plan,
+    pending_permission: live.pending_permission,
+    artifacts,
+    focus: live.focus ?? prefix.focus,
+  };
+}
 
 interface SessionState {
   bridge: CoreBridge | null;
@@ -34,6 +68,10 @@ interface SessionState {
   auth: AuthSession | null;
   /** Files staged to send with the next message. */
   attachments: PendingAttachment[];
+  /** Saved conversations, newest first. */
+  conversations: ConversationMeta[];
+  /** Restored transcript when a past conversation is reopened (prefix to live). */
+  historyPrefix: Snapshot | null;
 
   init: () => Promise<void>;
   selectProvider: (id: string) => void;
@@ -41,6 +79,8 @@ interface SessionState {
   signOutAuth: () => void;
   startSession: () => Promise<void>;
   endSession: () => void;
+  openConversation: (id: string) => Promise<void>;
+  removeConversation: (id: string) => void;
   addFiles: (files: File[]) => Promise<void>;
   removeAttachment: (id: string) => void;
   send: (text: string) => Promise<void>;
@@ -58,12 +98,34 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   error: null,
   auth: loadAuthSession(),
   attachments: [],
+  conversations: loadIndex(),
+  historyPrefix: null,
 
   init: async () => {
     try {
       const bridge = await getBridge();
       const providers = await bridge.listProviders();
-      bridge.subscribe((snapshot) => set({ snapshot }));
+      // Fold each engine snapshot into the active conversation: merge with any
+      // restored history prefix, show it, and persist it so the chat survives a
+      // restart and can be reopened later.
+      bridge.subscribe((live) => {
+        const { historyPrefix, session } = get();
+        const snapshot = historyPrefix ? mergeHistory(historyPrefix, live) : live;
+        set({ snapshot });
+        if (session && hasContent(snapshot)) {
+          saveSnapshot(session.id, snapshot);
+          const prev = get().conversations.find((c) => c.id === session.id);
+          upsertMeta({
+            id: session.id,
+            title: deriveTitle(snapshot),
+            provider: session.provider,
+            mode: session.mode,
+            createdAt: prev?.createdAt ?? Date.now(),
+            updatedAt: Date.now(),
+          });
+          set({ conversations: loadIndex() });
+        }
+      });
       set({
         bridge,
         providers,
@@ -97,7 +159,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       const config = { endpoint: auth?.clark.endpoint, auth_token: auth?.clark.token };
       await bridge.connect(activeProvider, config);
       const session = await bridge.newSession(activeProvider, {});
-      set({ session, connecting: false });
+      set({ session, connecting: false, historyPrefix: null });
     } catch (e) {
       set({ error: String(e), connecting: false });
     }
@@ -105,7 +167,48 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
   endSession: () => {
     for (const a of get().attachments) if (a.previewUrl) URL.revokeObjectURL(a.previewUrl);
-    set({ session: null, snapshot: emptySnapshot(), error: null, attachments: [] });
+    set({
+      session: null,
+      snapshot: emptySnapshot(),
+      error: null,
+      attachments: [],
+      historyPrefix: null,
+      conversations: loadIndex(),
+    });
+  },
+
+  openConversation: async (id) => {
+    const { bridge, activeProvider, auth, session } = get();
+    if (!bridge || !activeProvider) return;
+    if (session?.id === id) return; // already open
+    const restored = loadSnapshot(id);
+    set({ connecting: true, error: null });
+    try {
+      const config = { endpoint: auth?.clark.endpoint, auth_token: auth?.clark.token };
+      await bridge.connect(activeProvider, config);
+      const resumed = await bridge.loadSession(activeProvider, id);
+      // Show the saved transcript immediately; live turns merge on top of it.
+      set({
+        session: resumed,
+        historyPrefix: restored,
+        snapshot: restored ?? emptySnapshot(),
+        connecting: false,
+        attachments: [],
+      });
+    } catch (e) {
+      set({ error: String(e), connecting: false });
+    }
+  },
+
+  removeConversation: (id) => {
+    deleteConversation(id);
+    const cleared = get().session?.id === id;
+    set({
+      conversations: loadIndex(),
+      ...(cleared
+        ? { session: null, snapshot: emptySnapshot(), historyPrefix: null }
+        : {}),
+    });
   },
 
   addFiles: async (files) => {

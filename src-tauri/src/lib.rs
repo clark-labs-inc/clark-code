@@ -55,6 +55,7 @@ pub fn run() {
             commands::provider_list,
             commands::provider_connect,
             commands::session_new,
+            commands::session_load,
             commands::prompt,
             commands::cancel,
             commands::respond,

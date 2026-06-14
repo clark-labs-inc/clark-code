@@ -30,6 +30,8 @@ export interface CoreBridge {
   listProviders(): Promise<ProviderInfo[]>;
   connect(providerId: string, config: ConnectConfig): Promise<void>;
   newSession(providerId: string, options: SessionOptions): Promise<Session>;
+  /** Resume a prior session by id (capability-gated: `load_session`). */
+  loadSession(providerId: string, id: string): Promise<Session>;
   prompt(sessionId: string, blocks: ContentBlock[], attachments?: Upload[]): Promise<void>;
   cancel(sessionId: string, runId: string): Promise<void>;
   respond(sessionId: string, response: ClientResponse): Promise<void>;

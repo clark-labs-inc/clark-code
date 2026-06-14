@@ -73,6 +73,12 @@ export class DevBridge implements CoreBridge {
     return r.session as Session;
   }
 
+  async loadSession(providerId: string, id: string): Promise<Session> {
+    const r = await this.call({ cmd: "load_session", provider: providerId, session: id });
+    if (r.type === "error") throw new Error(String(r.message));
+    return r.session as Session;
+  }
+
   async prompt(
     sessionId: string,
     blocks: ContentBlock[],

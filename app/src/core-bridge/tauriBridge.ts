@@ -28,6 +28,10 @@ export class TauriBridge implements CoreBridge {
     return invoke<Session>("session_new", { providerId, options });
   }
 
+  loadSession(providerId: string, id: string): Promise<Session> {
+    return invoke<Session>("session_load", { providerId, id });
+  }
+
   prompt(sessionId: string, blocks: ContentBlock[], attachments: Upload[] = []): Promise<void> {
     return invoke("prompt", { sessionId, blocks, attachments });
   }
