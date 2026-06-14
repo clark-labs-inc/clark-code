@@ -7,6 +7,7 @@
 //! streamed `{type:"event"}` frames into normalized events.
 
 mod provider;
+mod sse;
 mod translate;
 pub mod transport;
 

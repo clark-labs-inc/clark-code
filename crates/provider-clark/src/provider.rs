@@ -15,9 +15,10 @@ use async_channel::Sender;
 use async_trait::async_trait;
 use futures::StreamExt;
 use serde_json::{json, Value};
-use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::Mutex;
 
+use crate::sse;
 use crate::translate;
 use crate::transport::ClarkSocket;
 
@@ -37,6 +38,10 @@ struct EngineState {
     /// HTTP origin of the gateway (derived from the WS endpoint) used to turn
     /// relative artifact/preview paths into openable URLs.
     http_base: Option<String>,
+    /// Whether the resumable SSE event stream has been started for this session.
+    sse_started: bool,
+    /// Resume point for the SSE stream (0 = from the start of the conversation).
+    sse_after_seq: u64,
 }
 
 /// `ws://host/ws` → `http://host`, `wss://host/...` → `https://host`.
@@ -81,6 +86,14 @@ pub struct ClarkProvider {
     shared: Shared,
     tier_id: String,
     run_counter: AtomicU64,
+    /// HTTP(S) origin for the resumable SSE event stream.
+    api_base: Option<String>,
+    /// Bearer token reused for the SSE request.
+    token: Option<String>,
+    /// Sink the engine consumes (WS errors + SSE events merge here).
+    engine_tx: Option<UnboundedSender<Value>>,
+    /// Keeps the SSE stream alive; dropping it stops the stream.
+    sse: Option<sse::SseHandle>,
 }
 
 impl ClarkProvider {
@@ -90,6 +103,10 @@ impl ClarkProvider {
             shared: Arc::new(Mutex::new(EngineState::default())),
             tier_id: "clark".to_string(),
             run_counter: AtomicU64::new(0),
+            api_base: None,
+            token: None,
+            engine_tx: None,
+            sse: None,
         }
     }
 
@@ -250,9 +267,37 @@ impl Provider for ClarkProvider {
         if let Some(tier) = config.extra.get("tier_id").and_then(Value::as_str) {
             self.tier_id = tier.to_string();
         }
-        self.shared.lock().await.http_base = http_base_from_ws(&endpoint);
-        let (socket, rx) = ClarkSocket::connect(&endpoint, config.auth_token.as_deref()).await?;
-        tokio::spawn(engine(rx, self.shared.clone()));
+        let http_base = http_base_from_ws(&endpoint);
+        self.shared.lock().await.http_base = http_base.clone();
+        // The REST/SSE API is served on the gateway origin under `/api` (override
+        // via `extra.api_base` when the API lives on a different host).
+        self.api_base = config
+            .extra
+            .get("api_base")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .or(http_base);
+        self.token = config.auth_token.clone();
+
+        let (socket, mut ws_rx) =
+            ClarkSocket::connect(&endpoint, config.auth_token.as_deref()).await?;
+
+        // The engine consumes one merged channel. Events arrive over the
+        // resumable SSE stream (started on first prompt); the WS is kept for
+        // sending and only its error frames are forwarded here.
+        let (engine_tx, engine_rx) = tokio::sync::mpsc::unbounded_channel::<Value>();
+        tokio::spawn(engine(engine_rx, self.shared.clone()));
+        let ws_errors = engine_tx.clone();
+        tokio::spawn(async move {
+            while let Some(frame) = ws_rx.recv().await {
+                if frame.get("type").and_then(Value::as_str) == Some("error")
+                    && ws_errors.send(frame).is_err()
+                {
+                    break;
+                }
+            }
+        });
+        self.engine_tx = Some(engine_tx);
         self.socket = Some(socket);
         Ok(())
     }
@@ -345,6 +390,33 @@ impl Provider for ClarkProvider {
                 "client_request_id": uuid::Uuid::new_v4().to_string(),
             }))
             .await?;
+
+        // Start the resumable SSE event stream once per session, now that the
+        // message has created the conversation. It reconnects with `after_seq`
+        // on any drop, so a long run no longer freezes when the socket blips.
+        let start_sse = {
+            let mut s = self.shared.lock().await;
+            if s.sse_started {
+                None
+            } else {
+                s.sse_started = true;
+                Some(s.sse_after_seq)
+            }
+        };
+        if let (Some(after_seq), Some(api_base), Some(engine_tx)) =
+            (start_sse, self.api_base.clone(), self.engine_tx.clone())
+        {
+            self.sse = Some(sse::spawn(
+                sse::SseConfig {
+                    api_base,
+                    conversation_id: conversation_id.clone(),
+                    token: self.token.clone(),
+                    after_seq,
+                    reconnect_base_ms: None,
+                },
+                engine_tx,
+            ));
+        }
 
         Ok(rx.boxed())
     }

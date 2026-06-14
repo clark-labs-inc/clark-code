@@ -20,6 +20,10 @@ async-channel.workspace = true
 # without an OpenSSL/system-cert dependency; `ws://localhost` still works.
 tokio-tungstenite = { version = "0.29", features = ["rustls-tls-webpki-roots"] }
 uuid = { version = "1", features = ["v4"] }
+# Resumable SSE event stream (the gateway's `/api/conversations/{id}/events/stream`),
+# which auto-reconnects and replays from `after_seq` — the reliable event channel
+# clark-ui/clark-mobile use. `stream` exposes the chunked body reader.
+reqwest = { version = "0.12", default-features = false, features = ["stream", "rustls-tls"] }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
