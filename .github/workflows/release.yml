@@ -2,7 +2,8 @@ name: Release
 
 # Builds signed installers for macOS, Windows, and Linux on GitHub's native
 # runners (cross-compiling a Tauri app from one OS to the others is not viable),
-# and publishes them to a GitHub Release. Triggered by a version tag.
+# keeps an operator copy in a private GitHub Release, and publishes public
+# binaries to Clark-owned download hosting. Triggered by a version tag.
 on:
   push:
     tags: ["v*"]
@@ -10,6 +11,14 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+
+env:
+  AWS_REGION: us-west-2
+  CLARK_DESKTOP_DOWNLOAD_BUCKET: ${{ vars.CLARK_DESKTOP_DOWNLOAD_BUCKET || 'clark-desktop-downloads-prod' }}
+  CLARK_DESKTOP_DOWNLOAD_BASE_URL: ${{ vars.CLARK_DESKTOP_DOWNLOAD_BASE_URL || 'https://downloads.clarkchat.com/desktop' }}
+  CLARK_DESKTOP_DOWNLOAD_UPLOAD_ROLE_ARN: ${{ vars.CLARK_DESKTOP_DOWNLOAD_UPLOAD_ROLE_ARN || 'arn:aws:iam::293723385520:role/clark-desktop-downloads-prod-upload' }}
+  CLARK_DESKTOP_DOWNLOAD_DISTRIBUTION_ID: ${{ vars.CLARK_DESKTOP_DOWNLOAD_DISTRIBUTION_ID || '' }}
 
 jobs:
   build:
@@ -79,8 +88,126 @@ jobs:
           prerelease: false
           args: ${{ matrix.args }}
 
+      - name: Configure AWS credentials for public download upload
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.CLARK_DESKTOP_DOWNLOAD_UPLOAD_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Upload installers to public download hosting
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          tag="${GITHUB_REF_NAME}"
+          bucket="${CLARK_DESKTOP_DOWNLOAD_BUCKET}"
+          base_url="${CLARK_DESKTOP_DOWNLOAD_BASE_URL%/}"
+          records_dir="public-release-records"
+          mkdir -p "$records_dir"
+
+          mapfile -t files < <(
+            find src-tauri/target -type f \( \
+              -name "*.dmg" -o \
+              -name "*.msi" -o \
+              -name "*.exe" -o \
+              -name "*.AppImage" -o \
+              -name "*.deb" -o \
+              -name "*.rpm" -o \
+              -name "*.tar.gz" \
+            \) | sort
+          )
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "No installer assets found under src-tauri/target" >&2
+            exit 1
+          fi
+
+          sha256_file() {
+            if command -v sha256sum >/dev/null 2>&1; then
+              sha256sum "$1" | awk '{print $1}'
+            else
+              shasum -a 256 "$1" | awk '{print $1}'
+            fi
+          }
+
+          content_type_for() {
+            case "$1" in
+              *.dmg) echo "application/x-apple-diskimage" ;;
+              *.msi) echo "application/x-msi" ;;
+              *.exe) echo "application/vnd.microsoft.portable-executable" ;;
+              *.AppImage) echo "application/octet-stream" ;;
+              *.deb) echo "application/vnd.debian.binary-package" ;;
+              *.rpm) echo "application/x-rpm" ;;
+              *.tar.gz) echo "application/gzip" ;;
+              *) echo "application/octet-stream" ;;
+            esac
+          }
+
+          latest_alias_for() {
+            case "$1" in
+              *.dmg) echo "Clark.Desktop_universal.dmg" ;;
+              *x64-setup.exe) echo "Clark.Desktop_x64-setup.exe" ;;
+              *.msi) echo "Clark.Desktop_x64_en-US.msi" ;;
+              *.AppImage) echo "Clark.Desktop_amd64.AppImage" ;;
+              *.deb) echo "Clark.Desktop_amd64.deb" ;;
+              *.rpm) echo "Clark.Desktop_x86_64.rpm" ;;
+              *.app.tar.gz) echo "Clark.Desktop_universal.app.tar.gz" ;;
+              *) echo "" ;;
+            esac
+          }
+
+          jsonl="$(mktemp)"
+          for file in "${files[@]}"; do
+            name="$(basename "$file")"
+            size="$(wc -c < "$file" | tr -d '[:space:]')"
+            sha="$(sha256_file "$file")"
+            content_type="$(content_type_for "$name")"
+            version_key="desktop/releases/$tag/$name"
+            latest_key="desktop/latest/$name"
+
+            aws s3 cp "$file" "s3://$bucket/$version_key" \
+              --content-type "$content_type" \
+              --cache-control "public, max-age=31536000, immutable" \
+              --metadata "sha256=$sha,clark-version=$tag"
+            aws s3 cp "$file" "s3://$bucket/$latest_key" \
+              --content-type "$content_type" \
+              --cache-control "public, max-age=300" \
+              --metadata "sha256=$sha,clark-version=$tag"
+
+            alias_name="$(latest_alias_for "$name")"
+            if [ -n "$alias_name" ] && [ "$alias_name" != "$name" ]; then
+              aws s3 cp "$file" "s3://$bucket/desktop/latest/$alias_name" \
+                --content-type "$content_type" \
+                --cache-control "public, max-age=300" \
+                --metadata "sha256=$sha,clark-version=$tag"
+            fi
+
+            node -e '
+              const [name, url, size, sha] = process.argv.slice(1);
+              console.log(JSON.stringify({
+                name,
+                browser_download_url: url,
+                size: Number(size),
+                digest: `sha256:${sha}`,
+              }));
+            ' "$name" "$base_url/releases/$tag/$name" "$size" "$sha" >> "$jsonl"
+          done
+
+          node -e '
+            const fs = require("fs");
+            const lines = fs.readFileSync(process.argv[1], "utf8").trim().split(/\n+/).filter(Boolean);
+            const assets = lines.map((line) => JSON.parse(line));
+            fs.writeFileSync(process.argv[2], JSON.stringify(assets, null, 2) + "\n");
+          ' "$jsonl" "$records_dir/assets-${RUNNER_OS}.json"
+
+      - name: Upload public download asset records
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-download-records-${{ matrix.platform }}
+          path: public-release-records/*.json
+          if-no-files-found: error
+
   # Publish the draft once all platform builds have uploaded their installers,
-  # so the release never goes public missing one platform's assets.
+  # so no public manifest points at an incomplete platform set.
   publish:
     needs: build
     runs-on: ubuntu-latest
@@ -93,6 +220,63 @@ jobs:
             --repo "${{ github.repository }}" \
             --draft=false --latest
 
+      - name: Configure AWS credentials for public manifest upload
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.CLARK_DESKTOP_DOWNLOAD_UPLOAD_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Download public download asset records
+        uses: actions/download-artifact@v4
+        with:
+          pattern: desktop-download-records-*
+          path: release-records
+          merge-multiple: true
+
+      - name: Publish public download manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          tag="${GITHUB_REF_NAME}"
+          bucket="${CLARK_DESKTOP_DOWNLOAD_BUCKET}"
+          base_url="${CLARK_DESKTOP_DOWNLOAD_BASE_URL%/}"
+          manifest="$(mktemp)"
+
+          node -e '
+            const fs = require("fs");
+            const path = require("path");
+            const root = process.argv[1];
+            const tag = process.argv[2];
+            const baseUrl = process.argv[3].replace(/\/$/, "");
+            const assetsByName = new Map();
+            for (const file of fs.readdirSync(root).filter((name) => name.endsWith(".json")).sort()) {
+              const records = JSON.parse(fs.readFileSync(path.join(root, file), "utf8"));
+              for (const asset of records) assetsByName.set(asset.name, asset);
+            }
+            const assets = [...assetsByName.values()].sort((a, b) => a.name.localeCompare(b.name));
+            const manifest = {
+              tag_name: tag,
+              version: tag.replace(/^v/, ""),
+              generated_at: new Date().toISOString(),
+              base_url: baseUrl,
+              assets,
+            };
+            fs.writeFileSync(process.argv[4], JSON.stringify(manifest, null, 2) + "\n");
+          ' release-records "$tag" "$base_url" "$manifest"
+
+          aws s3 cp "$manifest" "s3://$bucket/desktop/releases/$tag/manifest.json" \
+            --content-type "application/json" \
+            --cache-control "public, max-age=31536000, immutable"
+          aws s3 cp "$manifest" "s3://$bucket/desktop/latest/manifest.json" \
+            --content-type "application/json" \
+            --cache-control "public, max-age=60"
+
+          if [ -n "${CLARK_DESKTOP_DOWNLOAD_DISTRIBUTION_ID}" ]; then
+            aws cloudfront create-invalidation \
+              --distribution-id "${CLARK_DESKTOP_DOWNLOAD_DISTRIBUTION_ID}" \
+              --paths "/desktop/latest/*"
+          fi
+
 # The public download page lives in clark-ui (clarkchat.com/download) and
-# resolves these release assets via the GitHub Releases API — so there is no
-# GitHub Pages deploy here.
+# resolves public CDN assets via https://downloads.clarkchat.com/desktop/latest/manifest.json.

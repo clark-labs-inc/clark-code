@@ -6,8 +6,8 @@
   <em>One Clark run in the desktop app: web research → a live plan → file edits → tool calls that build and publish a site.</em>
 </p>
 
-Open-source, cross-platform desktop client for agentic work. One UI that talks
-to many agent backends through a single provider abstraction — **ACP** local CLI
+Private, cross-platform desktop client for agentic work. One UI that talks to
+many agent backends through a single provider abstraction — **ACP** local CLI
 agents (Codex, Claude Code, Gemini, …) and the **Clark** runtime — with the
 performance-critical engine written once in Rust and shared across desktop,
 mobile, and web.
@@ -64,6 +64,8 @@ cargo tauri dev
 In a plain browser the UI runs against a **mock provider** that plays a scripted
 streaming run, so every surface is demonstrable without the native host.
 
-## License
+## Repository Status
 
-Apache-2.0. Clean-room: no code from the proprietary Clark repository is used.
+Private Clark repo. Clean-room: no code from the main Clark repository is
+copied into this client; shared behavior is reimplemented against provider
+contracts.

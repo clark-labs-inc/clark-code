@@ -45,8 +45,8 @@ export function SignInScreen() {
         </div>
         <h1 className="text-2xl font-semibold tracking-tight text-ink">Clark</h1>
         <p className="mt-2 text-sm text-ink-muted">
-          The open-source desktop client for agentic work — files, web, and
-          computer use, in one window.
+          The desktop client for agentic work — files, web, and computer use,
+          in one window.
         </p>
 
         <div className="mt-8 space-y-2.5">
@@ -84,7 +84,7 @@ export function SignInScreen() {
         )}
         {error && <p className="mt-3 text-xs text-danger">{error}</p>}
 
-        <p className="mt-8 text-xs text-ink-faint">Open source · Apache-2.0</p>
+        <p className="mt-8 text-xs text-ink-faint">Private beta · Clark Desktop</p>
       </motion.div>
     </div>
   );
