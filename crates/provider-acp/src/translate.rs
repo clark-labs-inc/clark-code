@@ -284,6 +284,9 @@ pub fn permission_request(params: &Value, rpc_id: &str) -> PermissionRequest {
             .unwrap_or("Permission required")
             .to_string(),
         options,
+        detail: None,
+        risk: None,
+        reason: None,
     }
 }
 

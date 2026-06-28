@@ -15,6 +15,8 @@ export interface ConversationMeta {
   title: string;
   provider: string;
   mode?: string;
+  /** Absolute project folder this conversation ran in (local coding). */
+  project?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -66,12 +68,30 @@ export function upsertMeta(meta: ConversationMeta): void {
   writeIndex(list);
 }
 
+/** A persisted transcript is never live: coerce any non-terminal run to a
+ *  settled status, and drop a stale permission prompt, so a reopened (or
+ *  reloaded) conversation never shows a stuck "Thinking…" or a dead prompt. */
+function settleRuns(snapshot: Snapshot): Snapshot {
+  let changed = false;
+  const runs: Snapshot["runs"] = {};
+  for (const [id, r] of Object.entries(snapshot.runs)) {
+    if (r.status === "running" || r.status === "queued" || r.status === "awaiting_input") {
+      runs[id] = { ...r, status: "cancelled" };
+      changed = true;
+    } else {
+      runs[id] = r;
+    }
+  }
+  if (!changed && !snapshot.pending_permission) return snapshot;
+  return { ...snapshot, runs, pending_permission: undefined };
+}
+
 export function loadSnapshot(id: string): Snapshot | null {
   const store = safeStore();
   if (!store) return null;
   try {
     const raw = store.getItem(SNAP_PREFIX + id);
-    return raw ? (JSON.parse(raw) as Snapshot) : null;
+    return raw ? settleRuns(JSON.parse(raw) as Snapshot) : null;
   } catch {
     return null;
   }

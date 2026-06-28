@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "Baseline capabilities for the main window. Sidecar/shell scopes for ACP agents are granted per-provider.",
   "windows": ["main"],
-  "permissions": ["core:default", "shell:default", "google-auth:default"]
+  "permissions": ["core:default", "shell:default", "dialog:default", "google-auth:default"]
 }

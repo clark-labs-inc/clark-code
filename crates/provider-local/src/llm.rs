@@ -1,0 +1,472 @@
+//! OpenAI-compatible streaming chat-completions client — the model seam.
+//!
+//! This is the only place that knows the model wire format. It speaks the
+//! ubiquitous `POST {base}/chat/completions` contract (OpenRouter, vLLM,
+//! llama.cpp, LM Studio, a future Clark passthrough, …): streamed
+//! `chat.completion.chunk` SSE frames carrying assistant text deltas and
+//! fragmented tool-call deltas. The parser reassembles those into a single
+//! [`AssistantTurn`]; text streams out live via a callback for the UI.
+
+use std::collections::BTreeMap;
+
+use futures::StreamExt;
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+use tokio_util::sync::CancellationToken;
+
+use crate::config::LocalConfig;
+
+/// A single message in the running transcript, serialized straight to the wire.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ChatMessage {
+    pub role: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_calls: Vec<WireToolCall>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+}
+
+impl ChatMessage {
+    pub fn system(text: impl Into<String>) -> Self {
+        Self::simple("system", text)
+    }
+    pub fn user(text: impl Into<String>) -> Self {
+        Self::simple("user", text)
+    }
+    pub fn tool(tool_call_id: impl Into<String>, content: impl Into<String>) -> Self {
+        Self {
+            role: "tool".into(),
+            content: Some(content.into()),
+            tool_calls: Vec::new(),
+            tool_call_id: Some(tool_call_id.into()),
+        }
+    }
+    fn simple(role: &str, text: impl Into<String>) -> Self {
+        Self {
+            role: role.into(),
+            content: Some(text.into()),
+            tool_calls: Vec::new(),
+            tool_call_id: None,
+        }
+    }
+}
+
+/// A tool call exactly as the wire represents it (arguments stay a JSON string).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WireToolCall {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub kind: String,
+    pub function: WireFunction,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WireFunction {
+    pub name: String,
+    /// Raw JSON arguments string (may be `""` for a no-arg call).
+    pub arguments: String,
+}
+
+impl WireToolCall {
+    pub fn function(id: impl Into<String>, name: impl Into<String>, arguments: String) -> Self {
+        Self {
+            id: id.into(),
+            kind: "function".into(),
+            function: WireFunction {
+                name: name.into(),
+                arguments,
+            },
+        }
+    }
+}
+
+/// A tool the model may call (advertised in the request `tools` array).
+#[derive(Clone, Debug, Serialize)]
+pub struct ToolSchema {
+    #[serde(rename = "type")]
+    pub kind: &'static str,
+    pub function: FunctionSchema,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct FunctionSchema {
+    pub name: String,
+    pub description: String,
+    pub parameters: Value,
+}
+
+impl ToolSchema {
+    pub fn function(
+        name: impl Into<String>,
+        description: impl Into<String>,
+        parameters: Value,
+    ) -> Self {
+        Self {
+            kind: "function",
+            function: FunctionSchema {
+                name: name.into(),
+                description: description.into(),
+                parameters,
+            },
+        }
+    }
+}
+
+/// The fully-assembled result of one model turn.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct AssistantTurn {
+    pub text: String,
+    pub tool_calls: Vec<WireToolCall>,
+    pub finish_reason: Option<String>,
+}
+
+/// Why a model call ended without producing a turn.
+#[derive(Debug)]
+pub enum LlmError {
+    /// The caller's cancellation token fired mid-request.
+    Cancelled,
+    /// The account is out of Clark credits (403). The UI prompts an upgrade.
+    InsufficientCredits,
+    /// Any other failure (transport, non-2xx, decode).
+    Message(String),
+}
+
+impl std::fmt::Display for LlmError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LlmError::Cancelled => f.write_str("model request cancelled"),
+            LlmError::InsufficientCredits => f.write_str("insufficient_credits"),
+            LlmError::Message(m) => f.write_str(m),
+        }
+    }
+}
+
+/// Streaming chat client bound to one endpoint/model.
+#[derive(Clone)]
+pub struct LlmClient {
+    http: reqwest::Client,
+    base_url: String,
+    model: String,
+    api_key: Option<String>,
+    headers: Vec<(String, String)>,
+    temperature: Option<f32>,
+}
+
+impl LlmClient {
+    pub fn new(config: &LocalConfig) -> Result<Self, String> {
+        Self::from_parts(
+            &config.base_url,
+            &config.model,
+            config.api_key.clone(),
+            config.headers.clone().into_iter().collect(),
+            config.temperature,
+        )
+    }
+
+    /// Build a client bound to an explicit endpoint/model (used for the agentic
+    /// research/memory model, which differs from the coding model).
+    pub fn from_parts(
+        base_url: &str,
+        model: &str,
+        api_key: Option<String>,
+        headers: Vec<(String, String)>,
+        temperature: Option<f32>,
+    ) -> Result<Self, String> {
+        let http = reqwest::Client::builder()
+            .build()
+            .map_err(|e| format!("llm client build failed: {e}"))?;
+        Ok(Self {
+            http,
+            base_url: base_url.trim_end_matches('/').to_string(),
+            model: model.to_string(),
+            api_key,
+            headers,
+            temperature,
+        })
+    }
+
+    /// One-shot completion with NO client tools (the agentic Clark path): send an
+    /// optional system + a user message, return the assembled assistant text.
+    pub async fn complete(
+        &self,
+        system: Option<&str>,
+        user: &str,
+        cancel: &CancellationToken,
+    ) -> Result<String, LlmError> {
+        let mut messages = Vec::new();
+        if let Some(s) = system {
+            messages.push(ChatMessage::system(s));
+        }
+        messages.push(ChatMessage::user(user));
+        let turn = self.stream_chat(&messages, &[], cancel, |_| {}).await?;
+        Ok(turn.text)
+    }
+
+    fn body(&self, messages: &[ChatMessage], tools: &[ToolSchema]) -> Value {
+        let mut body = json!({
+            "model": self.model,
+            "messages": messages,
+            "stream": true,
+        });
+        if !tools.is_empty() {
+            body["tools"] = serde_json::to_value(tools).unwrap_or(Value::Null);
+            body["tool_choice"] = json!("auto");
+        }
+        if let Some(t) = self.temperature {
+            body["temperature"] = json!(t);
+        }
+        body
+    }
+
+    /// Stream one chat completion. `on_text` receives assistant text deltas as
+    /// they arrive; the assembled turn (text + tool calls) is returned at the
+    /// end. Honors `cancel` both before and during the stream.
+    pub async fn stream_chat(
+        &self,
+        messages: &[ChatMessage],
+        tools: &[ToolSchema],
+        cancel: &CancellationToken,
+        mut on_text: impl FnMut(&str),
+    ) -> Result<AssistantTurn, LlmError> {
+        if cancel.is_cancelled() {
+            return Err(LlmError::Cancelled);
+        }
+        let url = format!("{}/chat/completions", self.base_url);
+        let mut req = self.http.post(&url).json(&self.body(messages, tools));
+        if let Some(key) = &self.api_key {
+            req = req.bearer_auth(key);
+        }
+        for (k, v) in &self.headers {
+            req = req.header(k.as_str(), v.as_str());
+        }
+
+        let resp = tokio::select! {
+            _ = cancel.cancelled() => return Err(LlmError::Cancelled),
+            r = req.send() => r.map_err(|e| LlmError::Message(format!("model request failed: {e}")))?,
+        };
+        let status = resp.status();
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            // Clark returns 403 with a credits message when the wallet is empty.
+            if status.as_u16() == 403 && body.to_lowercase().contains("credit") {
+                return Err(LlmError::InsufficientCredits);
+            }
+            return Err(LlmError::Message(format!(
+                "model endpoint returned {status}: {}",
+                body.chars().take(500).collect::<String>()
+            )));
+        }
+
+        let mut stream = resp.bytes_stream();
+        let mut buf: Vec<u8> = Vec::new();
+        let mut acc = Accumulator::default();
+        loop {
+            let next = tokio::select! {
+                _ = cancel.cancelled() => return Err(LlmError::Cancelled),
+                n = stream.next() => n,
+            };
+            match next {
+                None => break,
+                Some(Err(e)) => {
+                    return Err(LlmError::Message(format!("model stream error: {e}")));
+                }
+                Some(Ok(bytes)) => {
+                    buf.extend_from_slice(&bytes);
+                    if drain_lines(&mut buf, &mut acc, &mut on_text) {
+                        break; // saw [DONE]
+                    }
+                }
+            }
+        }
+        Ok(acc.finish())
+    }
+}
+
+/// Extract complete `\n`-terminated lines from `buf`, feeding each SSE `data:`
+/// frame to the accumulator. Returns `true` once a `[DONE]` sentinel is seen.
+fn drain_lines(buf: &mut Vec<u8>, acc: &mut Accumulator, on_text: &mut impl FnMut(&str)) -> bool {
+    let mut done = false;
+    while let Some(pos) = buf.iter().position(|&b| b == b'\n') {
+        let line: Vec<u8> = buf.drain(..=pos).collect();
+        let line = String::from_utf8_lossy(&line);
+        let line = line.trim_end_matches(['\r', '\n']);
+        let Some(rest) = line.strip_prefix("data:") else {
+            continue; // comments / `event:` / `id:` lines: ignore
+        };
+        let payload = rest.trim();
+        if payload.is_empty() {
+            continue;
+        }
+        if payload == "[DONE]" {
+            done = true;
+            break;
+        }
+        if let Ok(chunk) = serde_json::from_str::<Value>(payload) {
+            acc.push_chunk(&chunk, on_text);
+        }
+    }
+    done
+}
+
+/// Reassembles streamed `chat.completion.chunk`s into one [`AssistantTurn`].
+/// Tool calls arrive fragmented (an opening delta with `index`/`id`/`name`, then
+/// a run of `arguments` string fragments) and are buffered per index.
+#[derive(Default)]
+struct Accumulator {
+    text: String,
+    tool_calls: BTreeMap<u64, PartialToolCall>,
+    finish_reason: Option<String>,
+}
+
+#[derive(Default)]
+struct PartialToolCall {
+    id: String,
+    name: String,
+    arguments: String,
+}
+
+impl Accumulator {
+    fn push_chunk(&mut self, chunk: &Value, on_text: &mut impl FnMut(&str)) {
+        let Some(choices) = chunk.get("choices").and_then(Value::as_array) else {
+            return;
+        };
+        for choice in choices {
+            let delta = choice.get("delta").unwrap_or(&Value::Null);
+            if let Some(content) = delta.get("content").and_then(Value::as_str) {
+                if !content.is_empty() {
+                    self.text.push_str(content);
+                    on_text(content);
+                }
+            }
+            if let Some(calls) = delta.get("tool_calls").and_then(Value::as_array) {
+                for tc in calls {
+                    let index = tc.get("index").and_then(Value::as_u64).unwrap_or(0);
+                    let entry = self.tool_calls.entry(index).or_default();
+                    if let Some(id) = tc.get("id").and_then(Value::as_str) {
+                        if !id.is_empty() {
+                            entry.id = id.to_string();
+                        }
+                    }
+                    if let Some(func) = tc.get("function") {
+                        if let Some(name) = func.get("name").and_then(Value::as_str) {
+                            if !name.is_empty() {
+                                entry.name.push_str(name);
+                            }
+                        }
+                        if let Some(args) = func.get("arguments").and_then(Value::as_str) {
+                            entry.arguments.push_str(args);
+                        }
+                    }
+                }
+            }
+            if let Some(reason) = choice.get("finish_reason").and_then(Value::as_str) {
+                self.finish_reason = Some(reason.to_string());
+            }
+        }
+    }
+
+    fn finish(self) -> AssistantTurn {
+        let tool_calls = self
+            .tool_calls
+            .into_iter()
+            .filter(|(_, tc)| !tc.name.is_empty())
+            .enumerate()
+            .map(|(i, (index, tc))| {
+                let id = if tc.id.is_empty() {
+                    format!("call_{index}_{i}")
+                } else {
+                    tc.id
+                };
+                WireToolCall::function(id, tc.name, tc.arguments)
+            })
+            .collect();
+        AssistantTurn {
+            text: self.text,
+            tool_calls,
+            finish_reason: self.finish_reason,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn feed(frames: &[&str]) -> AssistantTurn {
+        let mut acc = Accumulator::default();
+        let mut sink = |_: &str| {};
+        for f in frames {
+            let v: Value = serde_json::from_str(f).unwrap();
+            acc.push_chunk(&v, &mut sink);
+        }
+        acc.finish()
+    }
+
+    #[test]
+    fn accumulates_streamed_text() {
+        let mut collected = String::new();
+        let mut acc = Accumulator::default();
+        for c in ["Hel", "lo ", "world"] {
+            let v = json!({"choices":[{"delta":{"content": c}}]});
+            acc.push_chunk(&v, &mut |s: &str| collected.push_str(s));
+        }
+        let turn = acc.finish();
+        assert_eq!(turn.text, "Hello world");
+        assert_eq!(collected, "Hello world");
+        assert!(turn.tool_calls.is_empty());
+    }
+
+    #[test]
+    fn reassembles_fragmented_tool_call() {
+        let turn = feed(&[
+            r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_a","function":{"name":"read_file","arguments":""}}]}}]}"#,
+            r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"path\":"}}]}}]}"#,
+            r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"a.rs\"}"}}]}}]}"#,
+            r#"{"choices":[{"delta":{},"finish_reason":"tool_calls"}]}"#,
+        ]);
+        assert_eq!(turn.tool_calls.len(), 1);
+        let tc = &turn.tool_calls[0];
+        assert_eq!(tc.id, "call_a");
+        assert_eq!(tc.function.name, "read_file");
+        assert_eq!(tc.function.arguments, r#"{"path":"a.rs"}"#);
+        assert_eq!(turn.finish_reason.as_deref(), Some("tool_calls"));
+    }
+
+    #[test]
+    fn reassembles_two_parallel_tool_calls_by_index() {
+        let turn = feed(&[
+            r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c0","function":{"name":"read_file","arguments":"{}"}}]}}]}"#,
+            r#"{"choices":[{"delta":{"tool_calls":[{"index":1,"id":"c1","function":{"name":"bash","arguments":"{}"}}]}}]}"#,
+        ]);
+        assert_eq!(turn.tool_calls.len(), 2);
+        assert_eq!(turn.tool_calls[0].id, "c0");
+        assert_eq!(turn.tool_calls[1].id, "c1");
+        assert_eq!(turn.tool_calls[1].function.name, "bash");
+    }
+
+    #[test]
+    fn synthesizes_id_when_missing() {
+        let turn = feed(&[
+            r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"grep","arguments":"{}"}}]}}]}"#,
+        ]);
+        assert_eq!(turn.tool_calls.len(), 1);
+        assert!(!turn.tool_calls[0].id.is_empty());
+    }
+
+    #[test]
+    fn drain_lines_handles_split_frames_and_done() {
+        let mut acc = Accumulator::default();
+        let mut sink = |_: &str| {};
+        // A frame split across two network chunks, then [DONE].
+        let mut buf = Vec::new();
+        buf.extend_from_slice(b"data: {\"choices\":[{\"delta\":{\"content\":\"hi");
+        assert!(!drain_lines(&mut buf, &mut acc, &mut sink));
+        buf.extend_from_slice(b"\"}}]}\n");
+        assert!(!drain_lines(&mut buf, &mut acc, &mut sink));
+        buf.extend_from_slice(b"data: [DONE]\n");
+        assert!(drain_lines(&mut buf, &mut acc, &mut sink));
+        assert_eq!(acc.finish().text, "hi");
+    }
+}

@@ -2,12 +2,14 @@
 //! gateway, behind the `agent_core::Provider` trait.
 //!
 //! Built from the observed wire contract (no Clark source): connect with an
-//! `Authorization: Bearer <token>` header, receive `{type:"connected"}`, send
-//! `resume_session` (protocol_version 2) then `send_message`, and translate the
-//! streamed `{type:"event"}` frames into normalized events.
+//! `Authorization: Bearer <token>` header, bind realtime with
+//! `resume_session` (protocol_version 2), submit turns through the canonical
+//! `/api/conversation-sync/commands` HTTP endpoint, and translate the streamed
+//! `{type:"event"}` frames into normalized events.
 
+pub mod command;
 mod provider;
-mod sse;
+pub mod sse;
 mod translate;
 pub mod transport;
 

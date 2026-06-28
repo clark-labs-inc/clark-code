@@ -21,10 +21,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Format
         run: cargo fmt --all --check
-      - name: Clippy (core + providers)
-        run: cargo clippy -p agent-core -p provider-acp --all-targets -- -D warnings
+      - name: Clippy (core + providers + devbridge)
+        run: cargo clippy -p agent-core -p provider-acp -p provider-clark -p provider-local -p devbridge --all-targets -- -D warnings
       - name: Test
-        run: cargo test -p agent-core -p provider-acp
+        run: cargo test -p agent-core -p provider-acp -p provider-clark -p provider-local
       - name: WASM build (agent-core)
         run: cargo check -p agent-core --target wasm32-unknown-unknown
 

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { memo, useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
@@ -11,17 +11,17 @@ function text(blocks: ContentBlock[]): string {
   return blocks.map((b) => (b.type === "text" ? b.text : `\`[${b.type}]\``)).join("");
 }
 
-const MD_CLASSES =
+export const MD_CLASSES =
   "text-ink [&_p]:my-2 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 " +
-  "[&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:my-0.5 " +
-  "[&_h1]:mb-1.5 [&_h1]:mt-3 [&_h1]:text-lg [&_h1]:font-semibold [&_h2]:mb-1.5 [&_h2]:mt-3 [&_h2]:font-semibold [&_h3]:mb-1 [&_h3]:mt-2.5 [&_h3]:font-semibold " +
-  "[&_a]:text-info [&_a]:underline [&_a]:underline-offset-2 [&_strong]:font-semibold " +
-  "[&_pre]:my-2 [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:border [&_pre]:border-border-subtle [&_pre]:bg-bg-sunken [&_pre]:p-3 [&_pre]:font-mono [&_pre]:text-xs " +
-  "[&_:not(pre)>code]:rounded [&_:not(pre)>code]:bg-bg-tertiary [&_:not(pre)>code]:px-1 [&_:not(pre)>code]:py-0.5 [&_:not(pre)>code]:font-mono [&_:not(pre)>code]:text-[0.85em] " +
+  "[&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ul]:marker:text-ink-faint [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_ol]:marker:text-ink-faint [&_li]:my-1 " +
+  "[&_h1]:mb-1.5 [&_h1]:mt-3 [&_h1]:text-lg [&_h1]:font-semibold [&_h1]:tracking-tight [&_h2]:mb-1.5 [&_h2]:mt-3 [&_h2]:font-semibold [&_h2]:tracking-tight [&_h3]:mb-1 [&_h3]:mt-2.5 [&_h3]:font-semibold " +
+  "[&_a]:text-ink [&_a]:underline [&_a]:decoration-ink-faint [&_a]:underline-offset-2 hover:[&_a]:decoration-ink [&_strong]:font-semibold [&_strong]:text-ink " +
+  "[&_pre]:my-2.5 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:border [&_pre]:border-border-subtle [&_pre]:bg-bg-sunken [&_pre]:p-3 [&_pre]:font-mono [&_pre]:text-xs [&_pre]:leading-relaxed [&_pre>code]:bg-transparent [&_pre>code]:p-0 [&_pre>code]:border-0 " +
+  "[&_:not(pre)>code]:rounded-[5px] [&_:not(pre)>code]:border [&_:not(pre)>code]:border-border-subtle [&_:not(pre)>code]:bg-chip [&_:not(pre)>code]:px-[0.32em] [&_:not(pre)>code]:py-[0.12em] [&_:not(pre)>code]:font-mono [&_:not(pre)>code]:text-[0.85em] [&_:not(pre)>code]:text-ink " +
   "[&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-3 [&_blockquote]:text-ink-muted " +
-  "[&_table]:my-2 [&_table]:w-full [&_th]:border [&_th]:border-border [&_th]:px-2 [&_th]:py-1 [&_th]:text-left [&_td]:border [&_td]:border-border [&_td]:px-2 [&_td]:py-1";
+  "[&_table]:my-2 [&_table]:w-full [&_table]:border-collapse [&_th]:border [&_th]:border-border-subtle [&_th]:px-2.5 [&_th]:py-1 [&_th]:text-left [&_th]:font-medium [&_th]:text-ink-secondary [&_td]:border [&_td]:border-border-subtle [&_td]:px-2.5 [&_td]:py-1";
 
-function Md({ children }: { children: string }) {
+export function Md({ children }: { children: string }) {
   return (
     <Markdown
       remarkPlugins={[remarkGfm]}
@@ -31,6 +31,40 @@ function Md({ children }: { children: string }) {
     >
       {children}
     </Markdown>
+  );
+}
+
+/** Memoized markdown: re-parses only when its text actually changes. Used for the
+ *  "settled" prefix of a streaming message so the bulk isn't re-parsed per frame. */
+const StableMd = memo(function StableMd({ children }: { children: string }) {
+  return <Md>{children}</Md>;
+});
+
+/** Split streaming markdown into a stable prefix (complete blocks) and a live
+ *  tail (the block being written). The boundary is the last blank line that sits
+ *  outside any open code fence, so we never cut a fence mid-stream. */
+function splitStable(text: string): [string, string] {
+  const lines = text.split("\n");
+  let fence = false;
+  let lastSafe = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (/^\s*(```|~~~)/.test(lines[i])) fence = !fence;
+    else if (!fence && lines[i].trim() === "") lastSafe = i;
+  }
+  if (lastSafe <= 0) return ["", text];
+  return [lines.slice(0, lastSafe).join("\n"), lines.slice(lastSafe).join("\n")];
+}
+
+/** Render markdown while it streams in: the completed-block prefix is memoized
+ *  (parsed once), only the trailing in-progress block re-parses each frame. This
+ *  turns an O(n²) per-token re-parse of a long answer into ~O(n). */
+function StreamingMd({ text }: { text: string }) {
+  const [prefix, tail] = splitStable(text);
+  return (
+    <>
+      {prefix && <StableMd>{prefix}</StableMd>}
+      <Md>{tail}</Md>
+    </>
   );
 }
 
@@ -69,15 +103,26 @@ function ThinkingBlock({ text }: { text: string }) {
   );
 }
 
-export function Message({ role, blocks }: { role: Role; blocks: ContentBlock[] }) {
+function MessageImpl({
+  role,
+  blocks,
+  streaming = false,
+}: {
+  role: Role;
+  blocks: ContentBlock[];
+  /** True for the assistant message currently being streamed — enables the
+   *  cheaper prefix-memoized markdown path. */
+  streaming?: boolean;
+}) {
   const reduce = useReducedMotion();
   const body = text(blocks);
 
   const inner = (() => {
     if (role === "user") {
+      // Codex form: a quiet right-aligned pill, not a loud accent bubble.
       return (
         <div className="flex justify-end">
-          <div className="max-w-[85%] whitespace-pre-wrap rounded-xl rounded-br-sm bg-accent px-3.5 py-2 text-sm text-on-accent">
+          <div className="max-w-[80%] whitespace-pre-wrap rounded-2xl rounded-br-md border border-border-subtle bg-bg-tertiary px-3.5 py-2 text-sm text-ink">
             {body}
           </div>
         </div>
@@ -88,30 +133,26 @@ export function Message({ role, blocks }: { role: Role; blocks: ContentBlock[] }
         <div className="border-l-2 border-border pl-3 text-sm italic text-ink-muted">{body}</div>
       );
     }
-    // Assistant: split into answer / narration / thinking spans.
+    // Assistant: full-width text (no avatar), split into answer / narration /
+    // thinking spans.
     const spans = parseNarration(body);
     return (
-      <div className="flex gap-2.5">
-        <div className="mt-0.5 grid size-5 shrink-0 place-items-center rounded-full bg-accent/10 text-[0.65rem] font-semibold text-accent">
-          C
-        </div>
-        <div className="min-w-0 flex-1 space-y-2">
-          {spans.map((span, i) => {
-            if (span.kind === "thinking") return <ThinkingBlock key={i} text={span.text} />;
-            return (
-              <div
-                key={i}
-                className={cn(
-                  "text-[0.9375rem] leading-relaxed",
-                  MD_CLASSES,
-                  span.kind === "narrate" && "text-ink-secondary",
-                )}
-              >
-                <Md>{span.text}</Md>
-              </div>
-            );
-          })}
-        </div>
+      <div className="min-w-0 space-y-2">
+        {spans.map((span, i) => {
+          if (span.kind === "thinking") return <ThinkingBlock key={i} text={span.text} />;
+          return (
+            <div
+              key={i}
+              className={cn(
+                "text-[0.9375rem] leading-relaxed",
+                MD_CLASSES,
+                span.kind === "narrate" && "text-ink-secondary",
+              )}
+            >
+              {streaming ? <StreamingMd text={span.text} /> : <Md>{span.text}</Md>}
+            </div>
+          );
+        })}
       </div>
     );
   })();
@@ -126,3 +167,21 @@ export function Message({ role, blocks }: { role: Role; blocks: ContentBlock[] }
     </motion.div>
   );
 }
+
+/** The host re-emits a fully-cloned snapshot on every streamed token, so without
+ *  memoization every message re-parses its markdown each token (the jank). Only
+ *  re-render a message when its role or text content actually changes. */
+function sameBlocks(a: ContentBlock[], b: ContentBlock[]): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((blk, i) => {
+    const other = b[i];
+    if (blk.type !== other.type) return false;
+    if (blk.type === "text") return blk.text === (other as { text: string }).text;
+    return JSON.stringify(blk) === JSON.stringify(other);
+  });
+}
+
+export const Message = memo(
+  MessageImpl,
+  (a, b) => a.role === b.role && a.streaming === b.streaming && sameBlocks(a.blocks, b.blocks),
+);

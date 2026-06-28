@@ -68,6 +68,7 @@ pub enum ToolKind {
     Execute,
     Think,
     Fetch,
+    Research,
     #[default]
     Other,
 }
@@ -172,6 +173,17 @@ pub struct PermissionRequest {
     pub tool_call: Option<ToolCallId>,
     pub title: String,
     pub options: Vec<PermissionOption>,
+    /// What the action will do, shown verbatim for review (a shell command, a
+    /// file path, or a diff). Lets the user see *exactly* what they're approving.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    /// Risk class for shell commands: "safe" | "caution" | "danger". Drives the
+    /// gate's styling and the auto-approve policy.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub risk: Option<String>,
+    /// Short, user-facing reason the action was flagged ("recursive delete").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
 }
 
 /// The agent workspace sub-surface a focus event points at.
@@ -280,6 +292,12 @@ impl PendingUpload {
 pub enum AgentEvent {
     RunStarted {
         run: RunId,
+    },
+    /// A working-tree snapshot was taken before this run's edits, so the UI can
+    /// offer "undo this run". `id` is an opaque restore handle (a git SHA).
+    Checkpoint {
+        run: RunId,
+        id: String,
     },
     MessageChunk {
         run: RunId,

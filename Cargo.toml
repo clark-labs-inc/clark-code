@@ -4,6 +4,7 @@ members = [
     "crates/agent-core",
     "crates/provider-acp",
     "crates/provider-clark",
+    "crates/provider-local",
     "crates/devbridge",
     "src-tauri",
 ]

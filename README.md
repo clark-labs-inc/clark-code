@@ -30,7 +30,7 @@ mobile, and web.
 React (Tauri WebView)  ──invoke/emit──►  agent-core (Rust, native + WASM)
    surfaces, store            │              domain · projection · Provider trait
                               ▼
-                  provider-acp (JSON-RPC/stdio)   provider-clark (WS+msgpack)
+                  provider-acp (JSON-RPC/stdio)   provider-clark (HTTP cmds + SSE)
                   local CLI agents via sidecar     remote Clark runtime
 ```
 
@@ -40,8 +40,11 @@ React (Tauri WebView)  ──invoke/emit──►  agent-core (Rust, native + WA
 | --- | --- |
 | `crates/agent-core` | Domain model, projection reducers, `Provider` trait, codecs. Native + WASM. |
 | `crates/provider-acp` | Agent Client Protocol adapter (JSON-RPC over stdio). |
+| `crates/provider-clark` | Clark runtime adapter: HTTP command writes (`/api/conversation-sync/commands`) + resumable SSE event stream, with a WS for realtime session binding. |
+| `crates/devbridge` | Dev-only WebSocket bridge that drives the real providers + projection from a browser (headless UI testing, video capture). Not shipped. |
 | `src-tauri` | Tauri 2 host: commands, event bridge, sidecar, state. |
 | `app` | Vite + React + TS + Tailwind v4 frontend. |
+| `harness` | Playwright scripts for local smoke runs, diagnostics, and screen capture against the running app. |
 
 ## Develop
 
@@ -50,12 +53,14 @@ Prerequisites: Rust (stable), Node 24+, pnpm 10+, and the
 
 ```bash
 # Rust engine: test + lint
-cargo test -p agent-core -p provider-acp
-cargo clippy -p agent-core -p provider-acp --all-targets
+cargo test -p agent-core -p provider-acp -p provider-clark
+cargo clippy -p agent-core -p provider-acp -p provider-clark -p devbridge --all-targets -- -D warnings
+cargo fmt --all --check
 
 # Frontend (browser preview uses a mock provider)
 cd app && pnpm install && pnpm dev      # http://localhost:1420
 pnpm test                               # vitest
+pnpm typecheck
 
 # Run the desktop app (spawns the Vite dev server automatically)
 cargo tauri dev

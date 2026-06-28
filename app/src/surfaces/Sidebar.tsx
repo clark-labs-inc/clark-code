@@ -1,7 +1,11 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { Plus, MessageSquare, Trash2, PanelLeftClose, PanelLeft } from "lucide-react";
+import {
+  Plus, MessageSquare, Trash2, PanelLeftClose, PanelLeft, FolderGit2,
+} from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
+import { projectName } from "../lib/localAgent";
+import { useIsNarrow } from "../lib/responsive";
 import { ClarkMark } from "./ClarkMark";
 import type { ConversationMeta } from "../lib/history";
 
@@ -34,7 +38,16 @@ function ConversationRow({ c, active }: { c: ConversationMeta; active: boolean }
         <MessageSquare className="size-3.5 shrink-0 text-ink-faint" />
         <span className="flex min-w-0 flex-col">
           <span className="truncate leading-tight">{c.title}</span>
-          <span className="text-[0.7rem] text-ink-faint">{relativeTime(c.updatedAt)}</span>
+          <span className="flex min-w-0 items-center gap-1 truncate text-xs text-ink-muted">
+            {c.project && (
+              <>
+                <FolderGit2 className="size-3 shrink-0" />
+                <span className="truncate">{projectName(c.project)}</span>
+                <span className="shrink-0 text-ink-faint">·</span>
+              </>
+            )}
+            <span className="shrink-0">{relativeTime(c.updatedAt)}</span>
+          </span>
         </span>
       </button>
       <button
@@ -54,17 +67,22 @@ export function Sidebar() {
   const conversations = useSessionStore((s) => s.conversations);
   const session = useSessionStore((s) => s.session);
   const newConversation = useSessionStore((s) => s.endSession);
+  // Below this width the full sidebar would crowd out the conversation, so it
+  // auto-collapses to the icon rail (and can't be expanded until there's room).
+  const narrow = useIsNarrow(768);
 
-  if (collapsed) {
+  if (collapsed || narrow) {
     return (
       <div className="flex w-12 shrink-0 flex-col items-center gap-2 border-r border-border bg-bg-elevated/40 py-3">
-        <button
-          onClick={() => setCollapsed(false)}
-          aria-label="Expand sidebar"
-          className="grid size-8 place-items-center rounded-lg text-ink-muted transition hover:bg-bg-hover"
-        >
-          <PanelLeft className="size-4" />
-        </button>
+        {!narrow && (
+          <button
+            onClick={() => setCollapsed(false)}
+            aria-label="Expand sidebar"
+            className="grid size-8 place-items-center rounded-lg text-ink-muted transition hover:bg-bg-hover"
+          >
+            <PanelLeft className="size-4" />
+          </button>
+        )}
         <button
           onClick={() => newConversation()}
           aria-label="New conversation"

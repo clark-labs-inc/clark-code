@@ -12,7 +12,7 @@ export type ContentBlock =
 
 export type ToolKind =
   | "read" | "edit" | "delete" | "move"
-  | "search" | "execute" | "think" | "fetch" | "other";
+  | "search" | "execute" | "think" | "fetch" | "research" | "other";
 
 export type ToolStatus = "pending" | "in_progress" | "completed" | "failed";
 
@@ -58,6 +58,12 @@ export interface PermissionRequest {
   tool_call?: string;
   title: string;
   options: PermissionOption[];
+  /** What the action does — a shell command or file path — shown for review. */
+  detail?: string;
+  /** Shell-command risk: "safe" | "caution" | "danger". */
+  risk?: string;
+  /** Why it was flagged ("recursive delete"). */
+  reason?: string;
 }
 
 export type WorkspaceSurfaceKind = "browser" | "terminal" | "files" | "website";
@@ -96,6 +102,8 @@ export interface RunView {
   id: string;
   status: RunStatus;
   outcome?: RunOutcome;
+  /** Restore handle for "undo this run" (a pre-run working-tree checkpoint). */
+  checkpoint?: string;
 }
 
 export type TimelineItem =
@@ -146,3 +154,24 @@ export type ClientResponse = {
   request: string;
   option: string;
 };
+
+/** One per-fact memory file under `<cwd>/.clark/memory/`. */
+export interface MemoryFactView {
+  file: string;
+  name?: string | null;
+  description?: string | null;
+  kind?: string | null;
+  body: string;
+}
+
+/** The per-repository memory for one project folder (index + fact files). */
+export interface MemoryOverview {
+  /** Absolute path to `<cwd>/.clark/memory`. */
+  dir: string;
+  /** Whether a `MEMORY.md` index has been written. */
+  exists: boolean;
+  /** Contents of the always-loaded `MEMORY.md` index, if present. */
+  index?: string | null;
+  /** Per-fact memory files (newest first). */
+  facts: MemoryFactView[];
+}

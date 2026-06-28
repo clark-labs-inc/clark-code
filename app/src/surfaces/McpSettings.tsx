@@ -1,0 +1,289 @@
+import { useEffect, useState } from "react";
+import { AnimatePresence, motion } from "motion/react";
+import { Blocks, Plus, Trash2, X, Loader2, CheckCircle2, AlertCircle } from "lucide-react";
+import { useSessionStore } from "../store/sessionStore";
+import {
+  loadMcpServers,
+  saveMcpServers,
+  enabledMcpConfigs,
+  blankServer,
+  parseArgs,
+  parseEnv,
+  envToText,
+  MCP_PRESETS,
+  type McpServer,
+} from "../lib/mcpServers";
+import { probeMcp, type McpStatus } from "../lib/mcp";
+import { cn } from "../lib/cn";
+
+const input =
+  "w-full rounded-lg border border-border bg-bg px-2.5 py-1.5 text-sm text-ink outline-none transition focus:border-accent placeholder:text-ink-muted";
+const label = "mb-1 block text-xs font-medium text-ink-secondary";
+
+function ServerCard({
+  server,
+  status,
+  onChange,
+  onRemove,
+}: {
+  server: McpServer;
+  status?: McpStatus;
+  onChange: (s: McpServer) => void;
+  onRemove: () => void;
+}) {
+  return (
+    <div className="rounded-xl border border-border-subtle bg-bg-elevated/40 p-3">
+      <div className="mb-2.5 flex items-center gap-2">
+        <input
+          value={server.name}
+          onChange={(e) => onChange({ ...server, name: e.target.value })}
+          placeholder="name (e.g. github)"
+          className={cn(input, "flex-1 font-medium")}
+          spellCheck={false}
+        />
+        <button
+          onClick={() => onChange({ ...server, enabled: !server.enabled })}
+          className={cn(
+            "rounded-md px-2 py-1 text-xs font-medium transition",
+            server.enabled
+              ? "bg-success/15 text-success"
+              : "bg-bg-tertiary text-ink-muted hover:bg-bg-hover",
+          )}
+        >
+          {server.enabled ? "Enabled" : "Disabled"}
+        </button>
+        <button
+          onClick={onRemove}
+          aria-label="Remove server"
+          className="grid size-7 place-items-center rounded-md text-ink-muted transition hover:bg-danger/15 hover:text-danger"
+        >
+          <Trash2 className="size-3.5" />
+        </button>
+      </div>
+
+      <div className="grid grid-cols-[1fr_1fr] gap-2">
+        <div>
+          <label className={label}>Command</label>
+          <input
+            value={server.command}
+            onChange={(e) => onChange({ ...server, command: e.target.value })}
+            placeholder="npx"
+            className={input}
+            spellCheck={false}
+          />
+        </div>
+        <div>
+          <label className={label}>Args (one per line)</label>
+          <textarea
+            value={server.args.join("\n")}
+            onChange={(e) => onChange({ ...server, args: parseArgs(e.target.value) })}
+            placeholder={"-y\n@modelcontextprotocol/server-filesystem\n."}
+            rows={3}
+            className={cn(input, "resize-none font-mono text-xs")}
+            spellCheck={false}
+          />
+        </div>
+      </div>
+
+      <div className="mt-2">
+        <label className={label}>Environment (KEY=value per line)</label>
+        <textarea
+          value={envToText(server.env)}
+          onChange={(e) => onChange({ ...server, env: parseEnv(e.target.value) })}
+          placeholder="GITHUB_TOKEN=ghp_…"
+          rows={2}
+          className={cn(input, "resize-none font-mono text-xs")}
+          spellCheck={false}
+        />
+      </div>
+
+      {status && (
+        <div
+          className={cn(
+            "mt-2.5 flex items-start gap-2 rounded-lg px-2.5 py-1.5 text-xs",
+            status.connected ? "bg-success/10 text-ink-secondary" : "bg-danger/10 text-ink-secondary",
+          )}
+        >
+          {status.connected ? (
+            <CheckCircle2 className="mt-0.5 size-3.5 shrink-0 text-success" />
+          ) : (
+            <AlertCircle className="mt-0.5 size-3.5 shrink-0 text-danger" />
+          )}
+          <span className="min-w-0">
+            {status.connected ? (
+              <>
+                Connected · {status.tool_count} tool{status.tool_count === 1 ? "" : "s"}
+                {status.tools.length > 0 && (
+                  <span className="ml-1 font-mono text-ink-faint">{status.tools.join(", ")}</span>
+                )}
+              </>
+            ) : (
+              <span className="text-danger">{status.error ?? "Failed to connect"}</span>
+            )}
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CatalogCard({ preset, onAdd }: { preset: (typeof MCP_PRESETS)[number]; onAdd: () => void }) {
+  return (
+    <div className="flex items-start gap-2 rounded-lg border border-border-subtle bg-bg-elevated/30 p-2.5">
+      <div className="min-w-0 flex-1">
+        <div className="text-sm font-medium text-ink">{preset.label}</div>
+        <div className="truncate text-xs text-ink-muted">{preset.description}</div>
+        {preset.needs && <div className="mt-0.5 text-[0.7rem] text-warning">needs {preset.needs}</div>}
+      </div>
+      <button
+        onClick={onAdd}
+        className="shrink-0 rounded-md bg-bg-tertiary px-2.5 py-1 text-xs font-medium text-ink-secondary transition hover:bg-ink hover:text-bg"
+      >
+        Add
+      </button>
+    </div>
+  );
+}
+
+const CATEGORIES = ["Code", "Web", "Data", "Knowledge"] as const;
+
+function Catalog({ onAdd, addBlank }: { onAdd: (make: (cwd: string) => McpServer) => void; addBlank: () => void }) {
+  return (
+    <div>
+      <div className="mb-2 flex items-center justify-between">
+        <p className="text-[0.7rem] font-medium uppercase tracking-wide text-ink-faint">Add a server</p>
+        <button
+          onClick={addBlank}
+          className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-medium text-ink-muted transition hover:bg-bg-hover hover:text-ink"
+        >
+          <Plus className="size-3" /> Custom
+        </button>
+      </div>
+      {CATEGORIES.map((cat) => {
+        const items = MCP_PRESETS.filter((p) => p.category === cat);
+        if (!items.length) return null;
+        return (
+          <div key={cat} className="mb-3 last:mb-0">
+            <p className="mb-1.5 text-[0.7rem] text-ink-faint">{cat}</p>
+            <div className="grid grid-cols-2 gap-2">
+              {items.map((p) => (
+                <CatalogCard key={p.id} preset={p} onAdd={() => onAdd(p.make)} />
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+export function McpSettings() {
+  const open = useSessionStore((s) => s.mcpOpen);
+  const setOpen = useSessionStore((s) => s.setMcpOpen);
+  const cwd = useSessionStore((s) => s.localSettings.cwd);
+  const [servers, setServers] = useState<McpServer[]>([]);
+  const [statuses, setStatuses] = useState<Record<string, McpStatus>>({});
+  const [testing, setTesting] = useState(false);
+
+  useEffect(() => {
+    if (open) setServers(loadMcpServers());
+  }, [open]);
+
+  const persist = (next: McpServer[]) => {
+    setServers(next);
+    saveMcpServers(next);
+  };
+  const update = (id: string, s: McpServer) => persist(servers.map((x) => (x.id === id ? s : x)));
+  const remove = (id: string) => persist(servers.filter((x) => x.id !== id));
+  const add = () => persist([...servers, blankServer()]);
+  const addPreset = (make: (cwd: string) => McpServer) => persist([...servers, make(cwd)]);
+  const enabledCount = servers.filter((s) => s.enabled && s.command.trim()).length;
+
+  const test = async () => {
+    setTesting(true);
+    try {
+      const results = await probeMcp(enabledMcpConfigs(servers));
+      setStatuses(Object.fromEntries(results.map((r) => [r.server, r])));
+    } catch {
+      /* probe is best-effort */
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  return (
+    <AnimatePresence>
+      {open && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.15 }}
+          className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-6"
+          onClick={() => setOpen(false)}
+        >
+          <motion.div
+            initial={{ opacity: 0, y: 8, scale: 0.99 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 8, scale: 0.99 }}
+            transition={{ duration: 0.15 }}
+            onClick={(e) => e.stopPropagation()}
+            className="flex max-h-[80vh] w-full max-w-2xl flex-col rounded-2xl border border-border bg-bg-elevated shadow-2xl"
+          >
+            <div className="flex items-center gap-2 border-b border-border-subtle px-4 py-3">
+              <Blocks className="size-4 text-ink-secondary" />
+              <h2 className="text-sm font-semibold text-ink">MCP servers</h2>
+              <span className="text-xs text-ink-muted">
+                Extend Clark Code with external tools
+              </span>
+              <button
+                onClick={() => setOpen(false)}
+                aria-label="Close"
+                className="ml-auto grid size-7 place-items-center rounded-md text-ink-muted transition hover:bg-bg-hover hover:text-ink"
+              >
+                <X className="size-4" />
+              </button>
+            </div>
+
+            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
+              {servers.length === 0 && (
+                <p className="px-1 pb-1 text-sm text-ink-muted">
+                  Add an MCP server to give Clark Code new tools. They appear alongside the
+                  built-ins and pass through the same approval gate.
+                </p>
+              )}
+              {servers.map((s) => (
+                <ServerCard
+                  key={s.id}
+                  server={s}
+                  status={statuses[s.name.trim()]}
+                  onChange={(next) => update(s.id, next)}
+                  onRemove={() => remove(s.id)}
+                />
+              ))}
+              {servers.length > 0 && <div className="border-t border-border-subtle" />}
+              <Catalog onAdd={addPreset} addBlank={add} />
+            </div>
+
+            <div className="flex items-center gap-2 border-t border-border-subtle px-4 py-3">
+              <span className="text-xs text-ink-faint">
+                {servers.length > 0
+                  ? `${enabledCount} enabled · ${servers.length} total`
+                  : "Configured per app · spawned when a session starts"}
+              </span>
+              <button
+                onClick={() => void test()}
+                disabled={testing || enabledCount === 0}
+                title={enabledCount === 0 ? "Add and enable a server first" : "Connect each server and list its tools"}
+                className="ml-auto flex items-center gap-1.5 rounded-lg bg-ink px-3 py-1.5 text-sm font-semibold text-bg transition hover:bg-accent-hover disabled:bg-bg-tertiary disabled:text-ink-muted"
+              >
+                {testing && <Loader2 className="size-3.5 animate-[spin_1s_linear_infinite]" />}
+                Test connections
+              </button>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+}

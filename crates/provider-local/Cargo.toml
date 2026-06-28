@@ -1,0 +1,33 @@
+[package]
+name = "provider-local"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Local coding-agent provider for clark-desktop: an OpenAI-compatible tool-calling loop that runs file/shell tools on the local machine and delegates research to Clark's sandbox."
+
+[dependencies]
+agent-core = { path = "../agent-core", features = ["native"] }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+futures.workspace = true
+async-trait.workspace = true
+tracing.workspace = true
+tokio.workspace = true
+async-channel.workspace = true
+uuid = { version = "1", features = ["v4"] }
+# OpenAI-compatible streaming chat client (mirrors provider-clark's reqwest setup
+# so `https://` works without a system OpenSSL/cert dependency).
+reqwest = { version = "0.12", default-features = false, features = ["stream", "json", "rustls-tls"] }
+tokio-util = { version = "0.7", default-features = false }
+glob = "0.3"
+regex = "1"
+walkdir = "2"
+# Unified diffs for `edit_file`/`write_file` results — the model sees what
+# changed and the UI renders a red/green diff (Codex/Claude-Code style).
+similar = "2"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util", "net"] }
+tempfile = "3"

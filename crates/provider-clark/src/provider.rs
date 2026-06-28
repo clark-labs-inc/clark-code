@@ -1,5 +1,6 @@
-//! `ClarkProvider` — the `agent_core::Provider` implementation over the Clark
-//! gateway WebSocket. Clean-room, built from the observed wire contract.
+//! `ClarkProvider` — the `agent_core::Provider` implementation over Clark's
+//! gateway command and realtime channels. Clean-room, built from the observed
+//! wire contract.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -18,6 +19,9 @@ use serde_json::{json, Value};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::Mutex;
 
+use crate::command::{
+    CancelRunCommand, CommandClient, ConfirmCommand, UserMessageCommand, UserMessageCommandType,
+};
 use crate::sse;
 use crate::translate;
 use crate::transport::ClarkSocket;
@@ -31,6 +35,12 @@ struct EngineState {
     run_sender: Option<Sender<AgentEvent>>,
     run_id: Option<RunId>,
     conversation_id: Option<String>,
+    /// True once the conversation exists on the backend. New desktop sessions
+    /// start as local ids; loaded sessions and accepted commands are committed.
+    conversation_committed: bool,
+    /// Backend job id for the current Clark run. Desktop `RunId`s are local UI
+    /// handles, while canonical cancel/confirm commands address this id.
+    backend_job_id: Option<String>,
     /// Whether any streamed assistant text was seen this run. If not, the final
     /// content from `run_completed` is surfaced as the answer (the gateway may
     /// `message_stream_bounce` and skip deltas when a turn resolves quickly).
@@ -90,6 +100,8 @@ pub struct ClarkProvider {
     api_base: Option<String>,
     /// Bearer token reused for the SSE request.
     token: Option<String>,
+    /// Canonical HTTP command client for conversation-mutating writes.
+    command: Option<CommandClient>,
     /// Sink the engine consumes (WS errors + SSE events merge here).
     engine_tx: Option<UnboundedSender<Value>>,
     /// Keeps the SSE stream alive; dropping it stops the stream.
@@ -105,6 +117,7 @@ impl ClarkProvider {
             run_counter: AtomicU64::new(0),
             api_base: None,
             token: None,
+            command: None,
             engine_tx: None,
             sse: None,
         }
@@ -141,6 +154,7 @@ async fn finish_run(shared: &Shared) {
     let tx = {
         let mut s = shared.lock().await;
         s.run_id = None;
+        s.backend_job_id = None;
         s.saw_agent_text = false;
         s.run_sender.take()
     };
@@ -199,7 +213,7 @@ async fn engine(mut rx: UnboundedReceiver<Value>, shared: Shared) {
                     }
                 }
 
-                if let Some(mut ev) = translate::event_to_agent(event, &run) {
+                for mut ev in translate::events_to_agent(event, &run) {
                     // Make relative artifact/preview URLs openable.
                     if let AgentEvent::Artifact { artifact, .. } = &mut ev {
                         if let Some(uri) = &artifact.uri {
@@ -278,13 +292,18 @@ impl Provider for ClarkProvider {
             .map(str::to_string)
             .or(http_base);
         self.token = config.auth_token.clone();
+        self.command = self
+            .api_base
+            .clone()
+            .map(|api_base| CommandClient::new(api_base, self.token.clone()))
+            .transpose()?;
 
         let (socket, mut ws_rx) =
             ClarkSocket::connect(&endpoint, config.auth_token.as_deref()).await?;
 
         // The engine consumes one merged channel. Events arrive over the
-        // resumable SSE stream (started on first prompt); the WS is kept for
-        // sending and only its error frames are forwarded here.
+        // resumable SSE stream (started on first prompt); the WS remains for
+        // realtime session binding, and only its error frames are forwarded.
         let (engine_tx, engine_rx) = tokio::sync::mpsc::unbounded_channel::<Value>();
         tokio::spawn(engine(engine_rx, self.shared.clone()));
         let ws_errors = engine_tx.clone();
@@ -314,7 +333,15 @@ impl Provider for ClarkProvider {
                 "session": self.session_message(&conversation_id),
             }))
             .await?;
-        self.shared.lock().await.conversation_id = Some(conversation_id.clone());
+        self.sse = None;
+        {
+            let mut s = self.shared.lock().await;
+            s.conversation_id = Some(conversation_id.clone());
+            s.conversation_committed = false;
+            s.backend_job_id = None;
+            s.sse_started = false;
+            s.sse_after_seq = 0;
+        }
         Ok(Session {
             id: SessionId::new(conversation_id),
             provider: self.id(),
@@ -331,7 +358,15 @@ impl Provider for ClarkProvider {
                 "session": self.session_message(id.as_str()),
             }))
             .await?;
-        self.shared.lock().await.conversation_id = Some(id.0.clone());
+        self.sse = None;
+        {
+            let mut s = self.shared.lock().await;
+            s.conversation_id = Some(id.0.clone());
+            s.conversation_committed = true;
+            s.backend_job_id = None;
+            s.sse_started = false;
+            s.sse_after_seq = 0;
+        }
         Ok(Session {
             id,
             provider: self.id(),
@@ -341,8 +376,16 @@ impl Provider for ClarkProvider {
     }
 
     async fn prompt(&mut self, session: &SessionId, input: PromptInput) -> Result<EventStream> {
-        let socket = self.socket()?;
+        let command = self.command.clone().ok_or(Error::NotConnected)?;
         let conversation_id = session.0.clone();
+        let command_type = {
+            let s = self.shared.lock().await;
+            if s.conversation_committed && s.conversation_id.as_deref() == Some(session.as_str()) {
+                UserMessageCommandType::SendMessage
+            } else {
+                UserMessageCommandType::StartRun
+            }
+        };
         let run = RunId::new(format!(
             "run-{}",
             self.run_counter.fetch_add(1, Ordering::SeqCst) + 1
@@ -353,6 +396,7 @@ impl Provider for ClarkProvider {
             s.run_sender = Some(tx.clone());
             s.run_id = Some(run.clone());
             s.conversation_id = Some(conversation_id.clone());
+            s.backend_job_id = None;
             s.saw_agent_text = false;
         }
         let _ = tx.send(AgentEvent::RunStarted { run }).await;
@@ -381,18 +425,28 @@ impl Provider for ClarkProvider {
             })
             .collect();
 
-        socket
-            .send(&json!({
-                "type": "send_message",
-                "session": self.session_message(&conversation_id),
-                "text": text,
-                "attachments": attachments,
-                "client_request_id": uuid::Uuid::new_v4().to_string(),
-            }))
+        let command_id = uuid::Uuid::new_v4().to_string();
+        let response = command
+            .send_user_message(UserMessageCommand {
+                command_type,
+                command_id,
+                conversation_id: conversation_id.clone(),
+                text,
+                attachments,
+                tier_id: self.tier_id.clone(),
+            })
             .await?;
+        let backend_job_id = response.job_id.clone();
+        let canonical_conversation_id = response.conversation_id.unwrap_or(conversation_id);
+        {
+            let mut s = self.shared.lock().await;
+            s.conversation_id = Some(canonical_conversation_id.clone());
+            s.conversation_committed = true;
+            s.backend_job_id = backend_job_id;
+        }
 
         // Start the resumable SSE event stream once per session, now that the
-        // message has created the conversation. It reconnects with `after_seq`
+        // command has created the conversation. It reconnects with `after_seq`
         // on any drop, so a long run no longer freezes when the socket blips.
         let start_sse = {
             let mut s = self.shared.lock().await;
@@ -409,7 +463,7 @@ impl Provider for ClarkProvider {
             self.sse = Some(sse::spawn(
                 sse::SseConfig {
                     api_base,
-                    conversation_id: conversation_id.clone(),
+                    conversation_id: canonical_conversation_id,
                     token: self.token.clone(),
                     after_seq,
                     reconnect_base_ms: None,
@@ -422,27 +476,54 @@ impl Provider for ClarkProvider {
     }
 
     async fn cancel(&mut self, session: &SessionId, _run: &RunId) -> Result<()> {
-        let socket = self.socket()?;
-        socket
-            .send(&json!({
-                "type": "cancel",
-                "session": self.session_message(session.as_str()),
-            }))
-            .await
+        let command = self.command.clone().ok_or(Error::NotConnected)?;
+        let (conversation_id, job_id) = {
+            let s = self.shared.lock().await;
+            (
+                s.conversation_id
+                    .clone()
+                    .unwrap_or_else(|| session.0.clone()),
+                s.backend_job_id.clone(),
+            )
+        };
+        let response = command
+            .cancel_run(CancelRunCommand {
+                command_id: uuid::Uuid::new_v4().to_string(),
+                conversation_id,
+                job_id,
+            })
+            .await?;
+        if response.accepted == Some(false) {
+            return Err(Error::Protocol("cancel command was not accepted".into()));
+        }
+        Ok(())
     }
 
     async fn respond(&mut self, session: &SessionId, response: ClientResponse) -> Result<()> {
         match response {
-            ClientResponse::Permission { option, .. } => {
-                let socket = self.socket()?;
+            ClientResponse::Permission { request, option } => {
+                let command = self.command.clone().ok_or(Error::NotConnected)?;
                 let approved = option.contains("allow") || option == "approve";
-                socket
-                    .send(&json!({
-                        "type": "confirm",
-                        "session": self.session_message(session.as_str()),
-                        "approved": approved,
-                    }))
-                    .await
+                let (conversation_id, job_id) = {
+                    let s = self.shared.lock().await;
+                    (
+                        s.conversation_id
+                            .clone()
+                            .unwrap_or_else(|| session.0.clone()),
+                        s.backend_job_id.clone(),
+                    )
+                };
+                command
+                    .confirm(ConfirmCommand {
+                        command_id: uuid::Uuid::new_v4().to_string(),
+                        conversation_id,
+                        action_id: request.0,
+                        approved,
+                        job_id,
+                        tier_id: self.tier_id.clone(),
+                    })
+                    .await?;
+                Ok(())
             }
         }
     }

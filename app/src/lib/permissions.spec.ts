@@ -1,0 +1,46 @@
+import { describe, expect, it } from "vitest";
+import { wouldAutoApprove } from "./permissions";
+import type { PermissionRequest } from "../core-bridge/types";
+
+function req(risk?: string): PermissionRequest {
+  return {
+    id: "p",
+    session: "s",
+    title: "Run a shell command?",
+    risk,
+    options: [{ id: "allow_once", label: "Allow once", kind: "allow_once" }],
+  };
+}
+
+describe("wouldAutoApprove", () => {
+  it("ask mode never auto-approves", () => {
+    for (const r of [undefined, "safe", "caution", "danger"]) {
+      expect(wouldAutoApprove("ask", req(r))).toBe(false);
+    }
+  });
+
+  it("auto mode approves all but destructive + external tools", () => {
+    expect(wouldAutoApprove("auto", req("safe"))).toBe(true);
+    expect(wouldAutoApprove("auto", req("caution"))).toBe(true);
+    expect(wouldAutoApprove("auto", req(undefined))).toBe(true); // file edits
+    expect(wouldAutoApprove("auto", req("danger"))).toBe(false); // asks
+    expect(wouldAutoApprove("auto", req("external"))).toBe(false); // MCP — asks
+  });
+
+  it("full mode approves everything (engine still blocks catastrophic)", () => {
+    for (const r of [undefined, "safe", "caution", "danger"]) {
+      expect(wouldAutoApprove("full", req(r))).toBe(true);
+    }
+  });
+
+  it("never approves a request with no allow option", () => {
+    const noAllow: PermissionRequest = {
+      id: "p",
+      session: "s",
+      title: "x",
+      risk: "safe",
+      options: [{ id: "reject_once", label: "Reject", kind: "reject_once" }],
+    };
+    expect(wouldAutoApprove("full", noAllow)).toBe(false);
+  });
+});

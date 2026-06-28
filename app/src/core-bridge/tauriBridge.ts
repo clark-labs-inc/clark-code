@@ -13,6 +13,7 @@ import type {
   ProviderInfo,
   Session,
   Snapshot,
+  MemoryOverview,
 } from "./types";
 
 export class TauriBridge implements CoreBridge {
@@ -51,5 +52,13 @@ export class TauriBridge implements CoreBridge {
     return () => {
       void unlisten.then((fn) => fn());
     };
+  }
+
+  extractMemory(cwd: string, apiKey: string, model?: string): Promise<string> {
+    return invoke<string>("local_extract_memory", { cwd, apiKey, model });
+  }
+
+  listMemory(cwd: string): Promise<MemoryOverview> {
+    return invoke<MemoryOverview>("local_list_memory", { cwd });
   }
 }

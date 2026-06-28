@@ -13,29 +13,19 @@ import {
   type Snapshot,
 } from "./types";
 
+// Mirrors the shipped app: one provider, the local coding agent (which has no
+// server-side session to resume — load_session is false).
 const PROVIDERS: ProviderInfo[] = [
   {
-    id: "acp",
-    label: "ACP (local CLI agent)",
+    id: "local",
+    label: "Clark Code",
     capabilities: {
       streaming: true,
       permissions: true,
       fs: true,
       terminal: true,
-      load_session: true,
-      modes: ["default", "plan"],
-    },
-  },
-  {
-    id: "clark",
-    label: "Clark",
-    capabilities: {
-      streaming: true,
-      permissions: true,
-      fs: true,
-      terminal: true,
-      load_session: true,
-      modes: ["clark", "clark_max"],
+      load_session: false,
+      modes: [],
     },
   },
 ];
@@ -124,7 +114,7 @@ export class MockBridge implements CoreBridge {
    *  permission gate → streamed answer → done. */
   private async playRun(userText: string) {
     const run = `run-${Date.now()}`;
-    this.snapshot.runs[run] = { id: run, status: "running" };
+    this.snapshot.runs[run] = { id: run, status: "running", checkpoint: "mock-checkpoint-sha" };
     this.snapshot.timeline.push({
       item: "message",
       run,
@@ -133,6 +123,19 @@ export class MockBridge implements CoreBridge {
     });
     this.emit();
     await sleep(250);
+
+    // Demo hook: "out of credits" reproduces the insufficient-credits failure so
+    // the upgrade banner can be seen in the browser preview.
+    if (userText.toLowerCase().includes("out of credits")) {
+      this.snapshot.runs[run] = {
+        id: run,
+        status: "failed",
+        outcome: { status: "failed", error: "insufficient_credits: out of Clark credits" },
+        checkpoint: "mock-checkpoint-sha",
+      };
+      this.emit();
+      return;
+    }
 
     this.snapshot.plan = {
       phases: [
@@ -194,15 +197,44 @@ export class MockBridge implements CoreBridge {
     this.emit();
     await sleep(250);
 
+    // A Clark research call — findings rendered as markdown with cited sources.
+    const research = `tc-research-${Date.now()}`;
+    this.snapshot.tool_calls[research] = {
+      id: research,
+      title: "clark_research: latest clap argument-parsing API",
+      kind: "research",
+      status: "completed",
+      locations: [],
+      raw_input: { query: "latest clap argument-parsing API" },
+      content: [
+        {
+          type: "text",
+          text:
+            "**clap 4.x** is the current standard for argument parsing in Rust. The " +
+            "derive API is recommended:\n\n" +
+            "- Add `clap = { version = \"4\", features = [\"derive\"] }`\n" +
+            "- Define a `#[derive(Parser)]` struct and call `Args::parse()`\n\n" +
+            "The builder API remains available for dynamic cases. See the docs at " +
+            "https://docs.rs/clap/latest/clap/ and the derive tutorial at " +
+            "https://docs.rs/clap/latest/clap/_derive/_tutorial/index.html.",
+        },
+      ],
+    };
+    this.snapshot.timeline.push({ item: "tool_call", id: research });
+    this.emit();
+    await sleep(250);
+
     this.snapshot.pending_permission = {
       id: "perm-1",
       session: "mock-session",
       tool_call: tc,
-      title: "Allow running `cargo build`?",
+      title: "Apply this edit?",
+      detail:
+        "diff src/main.rs\n@@ -1,3 +1,4 @@\n fn main() {\n-    println!(\"hi\");\n+    println!(\"hello, world\");\n+    parse_args();\n }",
       options: [
-        { id: "allow", label: "Allow", kind: "allow_once" },
-        { id: "always", label: "Always allow", kind: "allow_always" },
-        { id: "reject", label: "Reject", kind: "reject_once" },
+        { id: "allow_once", label: "Allow once", kind: "allow_once" },
+        { id: "allow_always", label: "Always allow edits", kind: "allow_always" },
+        { id: "reject_once", label: "Reject", kind: "reject_once" },
       ],
     };
     this.emit();
@@ -227,6 +259,7 @@ export class MockBridge implements CoreBridge {
       id: run,
       status: "done",
       outcome: { status: "done", stop_reason: "end_turn" },
+      checkpoint: "mock-checkpoint-sha",
     };
     this.emit();
   }

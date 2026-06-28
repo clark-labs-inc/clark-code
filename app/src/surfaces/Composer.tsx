@@ -1,10 +1,109 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent, type RefObject } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { ArrowUp, Square, Paperclip, X, FileText } from "lucide-react";
+import {
+  ArrowUp, Square, Plus, X, FileText, CornerDownRight, Pencil,
+  Shield, ShieldCheck, ShieldAlert, ChevronDown, Check,
+} from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
+import type { QueuedMessage } from "../store/sessionStore";
 import { useFileDrop, usePaste } from "../lib/attachmentSources";
 import { prettySize } from "../lib/attachments";
+import { PERMISSION_MODES, type PermissionMode } from "../lib/permissions";
 import { cn } from "../lib/cn";
+
+/** Close a popover when the user clicks outside of it. The listener is
+ *  registered once (not re-bound every render) and always calls the latest
+ *  `onClose` via a ref. */
+function useOutsideClose(ref: RefObject<HTMLElement | null>, onClose: () => void) {
+  const cb = useRef(onClose);
+  cb.current = onClose;
+  useEffect(() => {
+    const handler = (e: Event) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) cb.current();
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [ref]);
+}
+
+const MODE_ICON: Record<PermissionMode, typeof Shield> = {
+  ask: Shield,
+  auto: ShieldCheck,
+  full: ShieldAlert,
+};
+
+/** Codex-style approval policy selector. Full access is the default. */
+function PermissionPill() {
+  const mode = useSessionStore((s) => s.permissionMode);
+  const setMode = useSessionStore((s) => s.setPermissionMode);
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useOutsideClose(ref, () => setOpen(false));
+
+  const info = PERMISSION_MODES.find((m) => m.id === mode) ?? PERMISSION_MODES[2];
+  const Icon = MODE_ICON[mode];
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title="How Clark's actions are approved"
+        className={cn(
+          "flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-medium transition hover:bg-bg-hover",
+          mode === "full" ? "text-warning" : "text-ink-secondary",
+        )}
+      >
+        <Icon className="size-3.5" />
+        {info.label}
+        <ChevronDown className="size-3 opacity-70" />
+      </button>
+
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            key="menu"
+            role="menu"
+            initial={{ opacity: 0, y: 4, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 4, scale: 0.98 }}
+            transition={{ duration: 0.12 }}
+            className="absolute bottom-full left-0 z-30 mb-2 w-72 rounded-xl bg-bg-elevated p-1 shadow-lg ring-1 ring-border-subtle"
+          >
+            <div className="px-2.5 py-1.5 text-[0.7rem] font-medium uppercase tracking-wide text-ink-faint">
+              How should Clark act?
+            </div>
+            {PERMISSION_MODES.map((m) => {
+              const I = MODE_ICON[m.id];
+              return (
+                <button
+                  key={m.id}
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={m.id === mode}
+                  onClick={() => {
+                    setMode(m.id);
+                    setOpen(false);
+                  }}
+                  className="flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 text-left transition hover:bg-bg-hover"
+                >
+                  <I className={cn("mt-0.5 size-4 shrink-0", m.id === "full" ? "text-warning" : "text-ink-muted")} />
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm text-ink">{m.label}</span>
+                    <span className="block text-xs leading-snug text-ink-muted">{m.description}</span>
+                  </span>
+                  {m.id === mode && <Check className="mt-0.5 size-4 shrink-0 text-accent" />}
+                </button>
+              );
+            })}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
 
 function AttachmentChips() {
   const attachments = useSessionStore((s) => s.attachments);
@@ -21,12 +120,12 @@ function AttachmentChips() {
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.9 }}
             transition={{ duration: 0.15 }}
-            className="group relative flex items-center gap-2 rounded-lg border border-border bg-bg-elevated py-1 pl-1 pr-2"
+            className="group relative flex items-center gap-2 rounded-lg bg-bg-tertiary py-1 pl-1 pr-2"
           >
             {a.previewUrl ? (
               <img src={a.previewUrl} alt="" className="size-8 rounded-md object-cover" />
             ) : (
-              <span className="grid size-8 place-items-center rounded-md bg-bg-tertiary text-ink-muted">
+              <span className="grid size-8 place-items-center rounded-md bg-bg-sunken text-ink-muted">
                 <FileText className="size-4" />
               </span>
             )}
@@ -46,18 +145,76 @@ function AttachmentChips() {
   );
 }
 
+/** Messages typed while a run is active. They send automatically, in order,
+ *  when the run finishes — no interruption. Each can be edited or dropped. */
+function QueuedMessages({ onEdit }: { onEdit: (q: QueuedMessage) => void }) {
+  const queued = useSessionStore((s) => s.queued);
+  const removeQueued = useSessionStore((s) => s.removeQueued);
+  if (queued.length === 0) return null;
+  return (
+    <div className="mx-auto mb-2 max-w-3xl">
+      <div className="mb-1 px-1 text-[0.7rem] font-medium uppercase tracking-wide text-ink-faint">
+        Queued · sends when Clark finishes
+      </div>
+      <div className="space-y-1">
+        <AnimatePresence initial={false}>
+          {queued.map((q) => (
+            <motion.div
+              key={q.id}
+              layout
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              exit={{ opacity: 0, height: 0 }}
+              transition={{ duration: 0.16, ease: [0.4, 0, 0.2, 1] }}
+              className="group flex items-center gap-2 overflow-hidden rounded-lg bg-bg-secondary py-1.5 pl-2.5 pr-1.5"
+            >
+              <CornerDownRight className="size-3.5 shrink-0 text-ink-faint" />
+              <span className="min-w-0 flex-1 truncate text-xs text-ink-secondary">
+                {q.text || "(attachments only)"}
+              </span>
+              <span className="flex shrink-0 items-center gap-0.5 opacity-0 transition group-hover:opacity-100">
+                <button
+                  onClick={() => onEdit(q)}
+                  aria-label="Edit queued message"
+                  className="grid size-6 place-items-center rounded-md text-ink-muted transition hover:bg-bg-hover hover:text-ink"
+                >
+                  <Pencil className="size-3.5" />
+                </button>
+                <button
+                  onClick={() => removeQueued(q.id)}
+                  aria-label="Remove queued message"
+                  className="grid size-6 place-items-center rounded-md text-ink-muted transition hover:bg-danger/15 hover:text-danger"
+                >
+                  <X className="size-3.5" />
+                </button>
+              </span>
+            </motion.div>
+          ))}
+        </AnimatePresence>
+      </div>
+    </div>
+  );
+}
+
 export function Composer() {
   const [value, setValue] = useState("");
   const taRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const session = useSessionStore((s) => s.session);
   const send = useSessionStore((s) => s.send);
+  const removeQueued = useSessionStore((s) => s.removeQueued);
   const cancelActive = useSessionStore((s) => s.cancelActive);
-  const runs = useSessionStore((s) => s.snapshot.runs);
+  // Select the derived boolean, NOT the whole `runs` object: the snapshot is
+  // re-cloned on every streamed token, so subscribing to `runs` would re-render
+  // the composer (and any open popover) dozens of times a second — the flicker.
+  // A boolean only re-renders when busy actually flips.
+  const busy = useSessionStore((s) =>
+    Object.values(s.snapshot.runs).some((r) => r.status === "running" || r.status === "queued"),
+  );
   const attachments = useSessionStore((s) => s.attachments);
   const addFiles = useSessionStore((s) => s.addFiles);
+  const model = useSessionStore((s) => s.localSettings.model);
 
-  const busy = Object.values(runs).some((r) => r.status === "running" || r.status === "queued");
   const { dragging, handlers } = useFileDrop((files) => void addFiles(files));
   usePaste((files) => void addFiles(files), !!session);
 
@@ -68,13 +225,21 @@ export function Composer() {
     ta.style.height = Math.min(ta.scrollHeight, 200) + "px";
   }, [value]);
 
-  const canSend = !!session && (value.trim().length > 0 || attachments.length > 0);
+  const hasContent = value.trim().length > 0 || attachments.length > 0;
+  const canSend = !!session && hasContent;
 
   const submit = async () => {
     if (!canSend) return;
     const t = value;
     setValue("");
     await send(t.trim());
+  };
+
+  // Pull a queued message back into the composer to revise it.
+  const editQueued = (q: QueuedMessage) => {
+    setValue((v) => (v.trim() ? `${v}\n${q.text}` : q.text));
+    removeQueued(q.id);
+    taRef.current?.focus();
   };
 
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -85,72 +250,92 @@ export function Composer() {
   };
 
   return (
-    <div className="border-t border-border bg-bg px-5 py-3.5" {...handlers}>
+    <div className="bg-bg px-5 py-3.5" {...handlers}>
+      <QueuedMessages onEdit={editQueued} />
       <div
         className={cn(
-          "relative mx-auto max-w-3xl rounded-xl border bg-bg-elevated px-3 py-2 shadow-sm transition-colors",
-          dragging ? "border-accent/60 ring-2 ring-accent/15" : "border-border focus-within:border-accent/40",
+          "relative mx-auto max-w-3xl rounded-2xl bg-bg-elevated px-3 py-2.5 shadow-sm transition",
+          dragging
+            ? "ring-2 ring-accent/40"
+            : "ring-1 ring-transparent focus-within:ring-border-subtle",
         )}
       >
         {dragging && (
-          <div className="pointer-events-none absolute inset-0 z-10 grid place-items-center rounded-xl bg-bg-elevated/90 text-sm font-medium text-accent">
+          <div className="pointer-events-none absolute inset-0 z-10 grid place-items-center rounded-2xl bg-bg-elevated/90 text-sm font-medium text-ink">
             Drop files to attach
           </div>
         )}
 
         <AttachmentChips />
 
-        <div className="flex items-end gap-2">
-          <input
-            ref={fileRef}
-            type="file"
-            multiple
-            hidden
-            onChange={(e) => {
-              const files = Array.from(e.target.files ?? []);
-              if (files.length) void addFiles(files);
-              e.target.value = "";
-            }}
-          />
-          <button
-            onClick={() => fileRef.current?.click()}
-            disabled={!session}
-            aria-label="Attach files"
-            className="grid size-8 shrink-0 place-items-center rounded-lg text-ink-muted transition hover:bg-bg-hover disabled:opacity-40"
-          >
-            <Paperclip className="size-4" />
-          </button>
+        <input
+          ref={fileRef}
+          type="file"
+          multiple
+          hidden
+          onChange={(e) => {
+            const files = Array.from(e.target.files ?? []);
+            if (files.length) void addFiles(files);
+            e.target.value = "";
+          }}
+        />
 
-          <textarea
-            ref={taRef}
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
-            onKeyDown={onKey}
-            rows={1}
-            aria-label="Message Clark"
-            placeholder={session ? "Message Clark…  (paste or drop files to attach)" : "Start a session first"}
-            disabled={!session}
-            className="max-h-52 flex-1 resize-none bg-transparent py-1 text-sm leading-relaxed text-ink outline-none placeholder:text-ink-faint disabled:opacity-50"
-          />
+        <textarea
+          ref={taRef}
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={onKey}
+          rows={1}
+          aria-label="Message Clark"
+          placeholder={
+            !session
+              ? "Start a session to begin"
+              : busy
+                ? "Queue a follow-up…"
+                : "Ask Clark to make a change…"
+          }
+          disabled={!session}
+          className="composer-input max-h-52 w-full resize-none bg-transparent px-0.5 py-1 text-sm leading-relaxed text-ink outline-none placeholder:text-ink-muted disabled:opacity-50"
+        />
 
-          {busy ? (
+        <div className="mt-1.5 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-1">
             <button
-              onClick={() => void cancelActive()}
-              aria-label="Stop"
-              className="grid size-8 shrink-0 place-items-center rounded-lg bg-danger/12 text-danger transition hover:bg-danger/20"
+              onClick={() => fileRef.current?.click()}
+              disabled={!session}
+              aria-label="Attach files"
+              title="Attach files"
+              className="grid size-7 shrink-0 place-items-center rounded-full bg-bg-tertiary text-ink-muted transition hover:bg-bg-hover hover:text-ink disabled:opacity-40"
             >
-              <Square className="size-3.5 fill-current" />
+              <Plus className="size-4" />
             </button>
-          ) : (
-            <button
-              onClick={() => void submit()}
-              disabled={!canSend}
-              aria-label="Send"
-              className="grid size-8 shrink-0 place-items-center rounded-lg bg-accent text-on-accent transition hover:bg-accent-hover disabled:opacity-35"
-            >
-              <ArrowUp className="size-4" />
-            </button>
-          )}
+            <PermissionPill />
+          </div>
+
+          <div className="flex min-w-0 items-center gap-2.5">
+            <span className="hidden truncate font-mono text-xs text-ink-faint sm:inline">
+              {model || "clark-code"}
+            </span>
+            {busy && !hasContent ? (
+              <button
+                onClick={() => void cancelActive()}
+                aria-label="Stop"
+                className="grid size-8 shrink-0 place-items-center rounded-full bg-danger/12 text-danger transition hover:bg-danger/20"
+              >
+                <Square className="size-3 fill-current" />
+              </button>
+            ) : (
+              <button
+                onClick={() => void submit()}
+                disabled={!canSend}
+                aria-label={busy ? "Queue message" : "Send"}
+                title={busy ? "Queue message (sends when Clark finishes)" : "Send · ⇧↵ newline"}
+                className="grid size-8 shrink-0 place-items-center rounded-full bg-accent text-on-accent transition hover:bg-accent-hover disabled:bg-bg-tertiary disabled:text-ink-muted"
+              >
+                {busy ? <CornerDownRight className="size-4" /> : <ArrowUp className="size-4" />}
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>

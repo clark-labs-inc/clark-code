@@ -18,14 +18,23 @@ tauri-build = { version = "2", features = [] }
 agent-core = { path = "../crates/agent-core", features = ["native"] }
 provider-acp = { path = "../crates/provider-acp" }
 provider-clark = { path = "../crates/provider-clark" }
+provider-local = { path = "../crates/provider-local" }
 
 tauri = { version = "2", features = [] }
 tauri-plugin-shell = "2"
+# Fast, interactive in-app terminal: a real PTY (colors, resize, interactive
+# programs) streamed to an xterm.js view in the chat.
+portable-pty = "0.9"
+base64 = "0.22"
+# Native folder picker for selecting the local coding project root.
+tauri-plugin-dialog = "2"
 # Native Google sign-in (system browser + localhost loopback). Returns a Google
 # ID token we exchange with Clark's Better Auth backend.
 tauri-plugin-google-auth = "0.5"
 # Server-to-server token exchange against Clark's auth API (no browser CORS).
 reqwest = { version = "0.12", default-features = false, features = ["json", "cookies", "rustls-tls"] }
+# Percent-encode desktop conversation ids in REST sync URLs.
+urlencoding = "2"
 
 serde.workspace = true
 serde_json.workspace = true

@@ -1,9 +1,9 @@
 import { useState } from "react";
 import { motion } from "motion/react";
-import { ArrowRight, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { ClarkMark } from "./ClarkMark";
 import { useSessionStore } from "../store/sessionStore";
-import { isGoogleConfigured, type AuthMethod } from "../lib/auth";
+import { isGoogleConfigured } from "../lib/auth";
 
 function GoogleG({ className }: { className?: string }) {
   return (
@@ -18,17 +18,17 @@ function GoogleG({ className }: { className?: string }) {
 
 export function SignInScreen() {
   const signIn = useSessionStore((s) => s.signIn);
-  const [busy, setBusy] = useState<AuthMethod | null>(null);
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const go = async (method: AuthMethod) => {
-    setBusy(method);
+  const go = async () => {
+    setBusy(true);
     setError(null);
     try {
-      await signIn(method);
+      await signIn("google");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
-      setBusy(null);
+      setBusy(false);
     }
   };
 
@@ -43,36 +43,24 @@ export function SignInScreen() {
         <div className="mb-6 flex justify-center">
           <ClarkMark size={64} className="rounded-2xl" />
         </div>
-        <h1 className="text-2xl font-semibold tracking-tight text-ink">Clark</h1>
+        <h1 className="text-2xl font-semibold tracking-tight text-ink">Clark Code</h1>
         <p className="mt-2 text-sm text-ink-muted">
-          The desktop client for agentic work — files, web, and computer use,
-          in one window.
+          A coding agent on your machine — your files, your shell, your model,
+          with Clark for research.
         </p>
 
-        <div className="mt-8 space-y-2.5">
+        <div className="mt-8">
           <button
-            onClick={() => void go("google")}
-            disabled={!!busy}
+            onClick={() => void go()}
+            disabled={busy}
             className="flex w-full items-center justify-center gap-3 rounded-xl bg-ink px-4 py-3 text-sm font-semibold text-bg transition hover:bg-accent-hover disabled:opacity-60"
           >
-            {busy === "google" ? (
+            {busy ? (
               <Loader2 className="size-4 animate-[spin_1s_linear_infinite]" />
             ) : (
               <GoogleG className="size-4" />
             )}
             Continue with Google
-          </button>
-
-          <button
-            onClick={() => void go("demo")}
-            disabled={!!busy}
-            className="flex w-full items-center justify-center gap-2 rounded-xl border border-border bg-bg-elevated px-4 py-3 text-sm font-semibold text-ink transition hover:bg-bg-hover disabled:opacity-60"
-          >
-            {busy === "demo" ? (
-              <Loader2 className="size-4 animate-[spin_1s_linear_infinite]" />
-            ) : null}
-            Continue with demo account
-            {busy !== "demo" && <ArrowRight className="size-4 text-ink-muted" />}
           </button>
         </div>
 

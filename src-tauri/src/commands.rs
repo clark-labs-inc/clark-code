@@ -9,6 +9,7 @@ use agent_core::{AgentEvent, Role};
 use futures::StreamExt;
 use provider_acp::AcpProvider;
 use provider_clark::ClarkProvider;
+use provider_local::LocalAgentProvider;
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, State};
 
@@ -22,6 +23,7 @@ fn make_provider(id: &str) -> Result<Box<dyn Provider>, String> {
     match id {
         "acp" => Ok(Box::new(AcpProvider::new())),
         "clark" => Ok(Box::new(ClarkProvider::new())),
+        "local" => Ok(Box::new(LocalAgentProvider::new())),
         other => Err(format!("unknown provider: {other}")),
     }
 }
@@ -171,6 +173,77 @@ pub async fn respond(
         .map_err(|e| e.to_string())
 }
 
+/// Extract a per-repository project memory via Clark's agentic Platform API and
+/// write it to `<cwd>/.clark/memory/MEMORY.md`. Returns the memory text on
+/// success. Uses the production Clark Platform API with the given `ck_live_` key.
+#[tauri::command]
+pub async fn local_extract_memory(
+    cwd: String,
+    api_key: String,
+    model: Option<String>,
+) -> Result<String, String> {
+    provider_local::extract_repo_memory(
+        std::path::Path::new(&cwd),
+        provider_local::DEFAULT_BASE_URL,
+        Some(api_key.as_str()),
+        model
+            .as_deref()
+            .unwrap_or(provider_local::DEFAULT_RESEARCH_MODEL),
+    )
+    .await
+}
+
+/// One per-fact memory file, flattened for the UI.
+#[derive(serde::Serialize)]
+pub struct MemoryFactView {
+    pub file: String,
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub kind: Option<String>,
+    pub body: String,
+}
+
+/// Everything the memory viewer needs for one project folder.
+#[derive(serde::Serialize)]
+pub struct MemoryOverview {
+    /// Absolute path to `<cwd>/.clark/memory`.
+    pub dir: String,
+    /// Whether a project-memory index (`MEMORY.md`) has been written.
+    pub exists: bool,
+    /// Contents of the always-loaded `MEMORY.md` index, if present.
+    pub index: Option<String>,
+    /// Per-fact memory files (newest first).
+    pub facts: Vec<MemoryFactView>,
+}
+
+/// List the per-repository memory for `cwd`: the `MEMORY.md` index plus any
+/// per-fact files under `<cwd>/.clark/memory/`. Read-only; never writes.
+#[tauri::command]
+pub async fn local_list_memory(cwd: String) -> Result<MemoryOverview, String> {
+    if cwd.trim().is_empty() {
+        return Err("choose a project folder first".into());
+    }
+    let root = std::path::Path::new(&cwd);
+    let facts = provider_local::load_facts(root)
+        .into_iter()
+        .map(|f| MemoryFactView {
+            file: f.header.file,
+            name: f.header.name,
+            description: f.header.description,
+            kind: f.header.kind.map(|k| k.label().to_string()),
+            body: f.body,
+        })
+        .collect();
+    Ok(MemoryOverview {
+        dir: provider_local::memory_dir(root)
+            .to_string_lossy()
+            .to_string(),
+        exists: provider_local::has_memory(root),
+        index: provider_local::load_index(root),
+        facts,
+    })
+}
+
 /// Result of exchanging a Google ID token for a Clark session.
 #[derive(serde::Serialize)]
 pub struct GoogleAuthResult {
@@ -276,4 +349,198 @@ pub async fn clark_exchange_google_idtoken(
         name: str_field(&user, "name"),
         image: str_field(&user, "image"),
     })
+}
+
+// ---------------------------------------------------------------------------
+// Desktop conversation cloud sync
+//
+// The local coding agent's transcripts are stored on Clark via the desktop
+// conversation API (`/api/desktop/conversations`). Calls run host-side (reqwest)
+// so they aren't subject to WebView CORS, and authenticate with the user's Clark
+// JWT. The gateway serves both `/ws` and `/api/...` on one host, so the REST base
+// is the WS endpoint with an http(s) scheme and the `/ws` suffix dropped.
+
+/// Derive the HTTPS REST base from the gateway WS endpoint.
+fn clark_rest_base(endpoint: &str) -> String {
+    let mut base = endpoint.trim().to_string();
+    if let Some(rest) = base.strip_prefix("wss://") {
+        base = format!("https://{rest}");
+    } else if let Some(rest) = base.strip_prefix("ws://") {
+        base = format!("http://{rest}");
+    }
+    let base = base.trim_end_matches('/');
+    base.strip_suffix("/ws").unwrap_or(base).to_string()
+}
+
+/// Shared HTTP client for cloud sync. Built once and reused so connections stay
+/// warm (HTTP keep-alive / HTTP/2): each desktop-conversation write is then a
+/// single round-trip, not a fresh TLS handshake — that per-request rebuild was
+/// what made the REST sync feel slow.
+static CLOUD_HTTP: std::sync::LazyLock<reqwest::Client> = std::sync::LazyLock::new(|| {
+    reqwest::Client::builder()
+        .pool_idle_timeout(std::time::Duration::from_secs(90))
+        .build()
+        .expect("build cloud http client")
+});
+
+fn clark_http_client() -> Result<reqwest::Client, String> {
+    Ok(CLOUD_HTTP.clone())
+}
+
+async fn read_json_or_err(resp: reqwest::Response, what: &str) -> Result<Value, String> {
+    let status = resp.status();
+    let text = resp.text().await.unwrap_or_default();
+    if !status.is_success() {
+        return Err(format!("{what} failed ({status}): {text}"));
+    }
+    if text.trim().is_empty() {
+        return Ok(Value::Null);
+    }
+    serde_json::from_str(&text).map_err(|e| format!("{what}: invalid response: {e}"))
+}
+
+/// List the signed-in user's desktop conversations (metadata only).
+#[tauri::command]
+pub async fn desktop_conv_list(endpoint: String, token: String) -> Result<Value, String> {
+    let url = format!("{}/api/desktop/conversations", clark_rest_base(&endpoint));
+    let resp = clark_http_client()?
+        .get(url)
+        .header("Authorization", format!("Bearer {token}"))
+        .send()
+        .await
+        .map_err(|e| format!("desktop list request failed: {e}"))?;
+    read_json_or_err(resp, "desktop list").await
+}
+
+/// Fetch one desktop conversation including its full snapshot blob.
+#[tauri::command]
+pub async fn desktop_conv_get(
+    endpoint: String,
+    token: String,
+    id: String,
+) -> Result<Value, String> {
+    let url = format!(
+        "{}/api/desktop/conversations/{}",
+        clark_rest_base(&endpoint),
+        urlencoding::encode(&id)
+    );
+    let resp = clark_http_client()?
+        .get(url)
+        .header("Authorization", format!("Bearer {token}"))
+        .send()
+        .await
+        .map_err(|e| format!("desktop get request failed: {e}"))?;
+    read_json_or_err(resp, "desktop get").await
+}
+
+/// Insert or replace a desktop conversation snapshot.
+#[tauri::command]
+pub async fn desktop_conv_put(
+    endpoint: String,
+    token: String,
+    id: String,
+    title: String,
+    provider: String,
+    project: Option<String>,
+    snapshot: Value,
+) -> Result<Value, String> {
+    let url = format!(
+        "{}/api/desktop/conversations/{}",
+        clark_rest_base(&endpoint),
+        urlencoding::encode(&id)
+    );
+    let resp = clark_http_client()?
+        .put(url)
+        .header("Authorization", format!("Bearer {token}"))
+        .json(&serde_json::json!({
+            "title": title,
+            "provider": provider,
+            "project": project,
+            "snapshot": snapshot,
+        }))
+        .send()
+        .await
+        .map_err(|e| format!("desktop put request failed: {e}"))?;
+    read_json_or_err(resp, "desktop put").await
+}
+
+/// Probe MCP servers — connect each, list its tools, return status — then drop
+/// them. A stateless "test connection" for the MCP settings UI.
+#[tauri::command]
+pub async fn clark_mcp_probe(
+    servers: Vec<provider_local::McpServerConfig>,
+) -> Result<Vec<provider_local::McpStatus>, String> {
+    Ok(provider_local::probe_mcp_servers(&servers).await)
+}
+
+/// Restore the project's working tree to a pre-run checkpoint (one-click undo).
+/// `sha` is the run's `checkpoint` handle. Runs git off the UI thread.
+#[tauri::command]
+pub async fn clark_checkpoint_restore(cwd: String, sha: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        provider_local::restore_checkpoint(std::path::Path::new(&cwd), &sha)
+    })
+    .await
+    .map_err(|e| format!("restore task failed: {e}"))?
+}
+
+/// Provision (mint) a "Clark Code" platform API key for the signed-in user, so
+/// the desktop never has to ask the user to paste one. Returns the full
+/// `ck_live_…` key (shown only at creation — the caller persists it).
+#[tauri::command]
+pub async fn clark_provision_code_key(endpoint: String, token: String) -> Result<String, String> {
+    let url = format!("{}/api/platform/api-keys", clark_rest_base(&endpoint));
+    let resp = clark_http_client()?
+        .post(url)
+        .header("Authorization", format!("Bearer {token}"))
+        .json(&serde_json::json!({ "name": "Clark Code (Desktop)" }))
+        .send()
+        .await
+        .map_err(|e| format!("key provision request failed: {e}"))?;
+    let v = read_json_or_err(resp, "provision Clark Code key").await?;
+    v.get("key")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| "Clark did not return an API key".to_string())
+}
+
+/// Fetch the signed-in user's billing summary (subscription, plan, credits,
+/// recent ledger) — `GET /api/billing/me`. Returned verbatim to the UI.
+#[tauri::command]
+pub async fn clark_billing_me(endpoint: String, token: String) -> Result<Value, String> {
+    let url = format!("{}/api/billing/me", clark_rest_base(&endpoint));
+    let resp = clark_http_client()?
+        .get(url)
+        .header("Authorization", format!("Bearer {token}"))
+        .send()
+        .await
+        .map_err(|e| format!("billing request failed: {e}"))?;
+    read_json_or_err(resp, "billing").await
+}
+
+/// Delete a desktop conversation from the cloud.
+#[tauri::command]
+pub async fn desktop_conv_delete(
+    endpoint: String,
+    token: String,
+    id: String,
+) -> Result<(), String> {
+    let url = format!(
+        "{}/api/desktop/conversations/{}",
+        clark_rest_base(&endpoint),
+        urlencoding::encode(&id)
+    );
+    let resp = clark_http_client()?
+        .delete(url)
+        .header("Authorization", format!("Bearer {token}"))
+        .send()
+        .await
+        .map_err(|e| format!("desktop delete request failed: {e}"))?;
+    let status = resp.status();
+    if !status.is_success() {
+        let text = resp.text().await.unwrap_or_default();
+        return Err(format!("desktop delete failed ({status}): {text}"));
+    }
+    Ok(())
 }

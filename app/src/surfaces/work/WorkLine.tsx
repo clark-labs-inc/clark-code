@@ -1,35 +1,56 @@
-import { useState } from "react";
+import { memo, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
   FileText, FilePen, SquareTerminal, Search, Globe, Trash2, FolderInput,
-  Sparkles, Wrench, Check, X, Loader2, ChevronRight,
+  Sparkles, Wrench, X, Loader2, ChevronRight, Telescope, ExternalLink,
 } from "lucide-react";
 import { cn } from "../../lib/cn";
 import { lastProgressLine } from "../../lib/activity";
+import { callDiffStat, type DiffStat } from "../../lib/diff";
+import { extractSources } from "../../lib/sources";
+import { openExternal } from "../../lib/account";
+import { Md, MD_CLASSES } from "../Message";
 import type { ContentBlock, ToolCall, ToolKind, ToolStatus } from "../../core-bridge/types";
 
 const KIND_ICON: Record<ToolKind, typeof FileText> = {
   read: FileText, edit: FilePen, delete: Trash2, move: FolderInput,
-  search: Search, execute: SquareTerminal, think: Sparkles, fetch: Globe, other: Wrench,
+  search: Search, execute: SquareTerminal, think: Sparkles, fetch: Globe,
+  research: Telescope, other: Wrench,
 };
 
 const KIND_VERB: Record<ToolKind, string> = {
   read: "Read", edit: "Edit", delete: "Delete", move: "Move",
-  search: "Search", execute: "Run", think: "Think", fetch: "Fetch", other: "",
+  search: "Search", execute: "Ran", think: "Think", fetch: "Fetch",
+  research: "Researched", other: "",
 };
 
 function blocksText(blocks: ContentBlock[]): string {
   return blocks.map((b) => (b.type === "text" ? b.text : `[${b.type}]`)).join("");
 }
 
+// Codex restraint: completion is implied (no trailing check). Only surface the
+// states that need attention — in-progress and failed.
 function StatusGlyph({ status }: { status: ToolStatus }) {
-  if (status === "completed")
-    return <Check className="size-3.5 text-success" aria-label="done" />;
-  if (status === "failed")
-    return <X className="size-3.5 text-danger" aria-label="failed" />;
+  if (status === "failed") return <X className="size-3.5 text-danger" aria-label="failed" />;
   if (status === "in_progress")
-    return <Loader2 className="size-3.5 animate-[spin_1s_linear_infinite] text-accent" aria-label="in progress" />;
-  return <span className="size-1.5 rounded-full bg-ink-faint" aria-label="pending" />;
+    return (
+      <Loader2
+        className="size-3.5 animate-[spin_1s_linear_infinite] text-ink-muted"
+        aria-label="in progress"
+      />
+    );
+  return null;
+}
+
+/** Git-style added/removed counts, e.g. `+42 −3`. */
+function DiffStatBadge({ stat }: { stat: DiffStat }) {
+  return (
+    <span className="shrink-0 font-mono text-[0.7rem] tabular-nums">
+      {stat.adds > 0 && <span className="text-success">+{stat.adds}</span>}
+      {stat.adds > 0 && stat.dels > 0 && <span className="text-ink-faint"> </span>}
+      {stat.dels > 0 && <span className="text-danger">−{stat.dels}</span>}
+    </span>
+  );
 }
 
 function DiffBody({ text }: { text: string }) {
@@ -71,8 +92,54 @@ function cleanOutput(text: string): string {
     .trim();
 }
 
+/** The query a clark_research call ran, for the work-line label. */
+function researchQuery(call: ToolCall): string {
+  const q = (call.raw_input as { query?: string } | undefined)?.query;
+  return (q || call.title.replace(/^clark_research:\s*/, "")).trim();
+}
+
+/** Clark's research findings — rendered as markdown, with the cited sources
+ *  pulled out into clickable chips so the agent's web work is legible + trusted. */
+function ResearchDetail({ call }: { call: ToolCall }) {
+  const findings = blocksText(call.content).trim();
+  const sources = extractSources(findings);
+  if (!findings) {
+    return <p className="px-3 py-2.5 text-xs text-ink-faint">No findings.</p>;
+  }
+  return (
+    <div className="px-3 py-2.5">
+      <div className={cn("text-[0.85rem] leading-relaxed", MD_CLASSES)}>
+        <Md>{findings}</Md>
+      </div>
+      {sources.length > 0 && (
+        <div className="mt-3 border-t border-border-subtle pt-2.5">
+          <div className="mb-1.5 flex items-center gap-1.5 text-[0.7rem] font-medium uppercase tracking-wide text-ink-faint">
+            <Globe className="size-3" /> Sources
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {sources.map((s, i) => (
+              <button
+                key={i}
+                onClick={() => void openExternal(s.url)}
+                title={s.url}
+                className="flex items-center gap-1 rounded-md bg-chip px-2 py-0.5 text-xs text-ink-secondary transition hover:bg-bg-hover hover:text-ink"
+              >
+                {s.label}
+                <ExternalLink className="size-2.5 text-ink-faint" />
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Detail({ call }: { call: ToolCall }) {
   const raw = blocksText(call.content);
+  if (call.kind === "research") {
+    return <ResearchDetail call={call} />;
+  }
   if (call.kind === "edit" && raw.startsWith("diff ")) {
     return <DiffBody text={raw} />;
   }
@@ -96,7 +163,7 @@ function Detail({ call }: { call: ToolCall }) {
 }
 
 /** A single dense, expandable line of agent work (file/browser/terminal/tool). */
-export function WorkLine({ call, active }: { call: ToolCall; active: boolean }) {
+function WorkLineImpl({ call, active }: { call: ToolCall; active: boolean }) {
   const [open, setOpen] = useState(false);
   const reduce = useReducedMotion();
   const Icon = KIND_ICON[call.kind] ?? Wrench;
@@ -104,6 +171,7 @@ export function WorkLine({ call, active }: { call: ToolCall; active: boolean }) 
   const line = call.locations[0]?.line;
   const hasDetail = call.content.length > 0;
   const progressLine = active ? lastProgressLine(call) : undefined;
+  const stat = callDiffStat(call);
 
   return (
     <motion.div
@@ -118,49 +186,53 @@ export function WorkLine({ call, active }: { call: ToolCall; active: boolean }) 
         aria-expanded={open}
         disabled={!hasDetail}
         className={cn(
-          "flex w-full items-center gap-2 px-2.5 py-1 text-left text-[0.8125rem] leading-5",
-          hasDetail && "cursor-pointer hover:bg-bg-hover/60",
+          "group flex w-full items-center gap-1.5 rounded-md px-1 py-0.5 text-left text-[0.8125rem] leading-5 text-ink-muted",
+          hasDetail && "cursor-pointer hover:bg-bg-hover/50 hover:text-ink-secondary",
         )}
       >
-        <ChevronRight
-          className={cn(
-            "size-3 shrink-0 text-ink-faint transition-transform",
-            !hasDetail && "opacity-0",
-            open && "rotate-90",
-          )}
-        />
-        <Icon className="size-3.5 shrink-0 text-ink-muted" />
+        <Icon className="size-3.5 shrink-0 text-ink-faint" />
         {target ? (
-          <>
-            {KIND_VERB[call.kind] && (
-              <span className="shrink-0 font-medium text-ink-muted">{KIND_VERB[call.kind]}</span>
-            )}
-            <span className="truncate font-mono text-xs text-ink-secondary">
-              {target}
-              {line ? <span className="text-ink-faint">:{line}</span> : null}
-            </span>
-          </>
+          <span className="min-w-0 flex-1 truncate font-mono text-xs">
+            {KIND_VERB[call.kind] && <span className="text-ink-faint">{KIND_VERB[call.kind]} </span>}
+            <span className="text-ink-muted">{target}</span>
+            {line ? <span className="text-ink-faint">:{line}</span> : null}
+          </span>
         ) : (
           <span
             className={cn(
-              "truncate",
-              call.kind === "execute"
-                ? "font-mono text-xs text-ink-secondary"
-                : "font-medium text-ink",
+              "min-w-0 flex-1 truncate",
+              call.kind === "execute" ? "font-mono text-xs" : "",
             )}
           >
-            {call.title}
+            {call.kind === "research" ? (
+              <>
+                <span className="text-ink-faint">{active ? "Researching " : "Researched "}</span>
+                {researchQuery(call)}
+              </>
+            ) : (
+              <>
+                {call.kind === "execute" && <span className="text-ink-faint">Ran </span>}
+                {call.title}
+              </>
+            )}
           </span>
         )}
-        <span className="ml-auto shrink-0 pl-2">
+        <span className="flex shrink-0 items-center gap-1.5 pl-2">
+          {stat && <DiffStatBadge stat={stat} />}
+          {hasDetail && (
+            <ChevronRight
+              className={cn(
+                "size-3 text-ink-faint opacity-0 transition group-hover:opacity-100",
+                open && "rotate-90 opacity-100",
+              )}
+            />
+          )}
           <StatusGlyph status={call.status} />
         </span>
       </button>
 
       {active && !open && progressLine && (
-        <div className="truncate pb-1 pl-[1.9rem] pr-2.5 text-xs text-ink-muted">
-          {progressLine}
-        </div>
+        <div className="truncate pb-0.5 pl-[1.4rem] pr-2 text-xs text-ink-faint">{progressLine}</div>
       )}
 
       <AnimatePresence initial={false}>
@@ -170,9 +242,9 @@ export function WorkLine({ call, active }: { call: ToolCall; active: boolean }) 
             animate={{ height: "auto", opacity: 1 }}
             exit={reduce ? { opacity: 0 } : { height: 0, opacity: 0 }}
             transition={{ duration: 0.18, ease: [0.4, 0, 0.2, 1] }}
-            className="overflow-hidden border-t border-border-subtle bg-bg-secondary/40"
+            className="ml-[0.55rem] overflow-hidden border-l border-border-subtle"
           >
-            <div className="max-h-44 overflow-auto">
+            <div className="max-h-56 overflow-auto">
               <Detail call={call} />
             </div>
           </motion.div>
@@ -181,3 +253,16 @@ export function WorkLine({ call, active }: { call: ToolCall; active: boolean }) 
     </motion.div>
   );
 }
+
+/** Memoized: snapshots are re-cloned every token, so re-render a tool line only
+ *  when something it shows actually changed. */
+export const WorkLine = memo(
+  WorkLineImpl,
+  (a, b) =>
+    a.active === b.active &&
+    a.call.id === b.call.id &&
+    a.call.status === b.call.status &&
+    a.call.title === b.call.title &&
+    a.call.content.length === b.call.content.length &&
+    a.call.locations.length === b.call.locations.length,
+);

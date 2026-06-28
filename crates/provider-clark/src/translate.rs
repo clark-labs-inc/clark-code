@@ -102,6 +102,9 @@ fn tool_title(kind: ToolKind, action: Option<&str>, args: &Value) -> String {
             .map(str::to_string)
             .unwrap_or_else(|| "Running a command".into()),
         ToolKind::Think => "Thinking".into(),
+        ToolKind::Research => s(args, "query")
+            .map(|q| format!("Researching \u{201c}{q}\u{201d}"))
+            .unwrap_or_else(|| "Researching".into()),
         ToolKind::Other => target
             .map(str::to_string)
             .unwrap_or_else(|| "Working".into()),
@@ -138,6 +141,207 @@ fn workspace_surface(name: Option<&str>) -> WorkspaceSurfaceKind {
         "website" => WorkspaceSurfaceKind::Website,
         _ => WorkspaceSurfaceKind::Files,
     }
+}
+
+fn non_empty(value: Option<&str>) -> Option<&str> {
+    value.map(str::trim).filter(|s| !s.is_empty())
+}
+
+fn first_s<'a>(v: &'a Value, keys: &[&str]) -> Option<&'a str> {
+    keys.iter().find_map(|key| non_empty(s(v, key)))
+}
+
+fn preview_url(v: &Value) -> Option<&str> {
+    v.get("preview")
+        .and_then(|p| non_empty(s(p, "url")))
+        .or_else(|| str_at(v, &["preview", "url"]).and_then(|u| non_empty(Some(u))))
+}
+
+fn artifact_uri(v: &Value) -> Option<&str> {
+    first_s(
+        v,
+        &[
+            "uri",
+            "url",
+            "preview_url",
+            "artifact_url",
+            "download_url",
+            "pptx_url",
+            "pdf_artifact_url",
+        ],
+    )
+    .or_else(|| preview_url(v))
+}
+
+fn artifact_path(v: &Value) -> Option<&str> {
+    first_s(v, &["path", "source_path", "restore_target_path"])
+}
+
+fn openable_uri<'a>(artifact: &'a Value, path: Option<&'a str>) -> Option<&'a str> {
+    artifact_uri(artifact).or_else(|| {
+        path.filter(|p| {
+            p.starts_with("http://")
+                || p.starts_with("https://")
+                || p.starts_with("/api/")
+                || p.starts_with("/artifacts/")
+        })
+    })
+}
+
+fn artifact_kind(
+    kind: Option<&str>,
+    mime_type: Option<&str>,
+    uri: Option<&str>,
+    path: Option<&str>,
+    title: Option<&str>,
+) -> ArtifactKind {
+    let haystack = [kind, mime_type, uri, path, title]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_ascii_lowercase();
+
+    if haystack.contains("website")
+        || haystack.contains("webpage")
+        || haystack.contains("site")
+        || haystack.contains("text/html")
+        || haystack.contains(".html")
+    {
+        return ArtifactKind::Website;
+    }
+    if haystack.contains("presentation")
+        || haystack.contains("slide")
+        || haystack.contains("powerpoint")
+        || haystack.contains("pptx")
+        || haystack.contains(".ppt")
+    {
+        return ArtifactKind::Slides;
+    }
+    if haystack.contains("pdf") {
+        return ArtifactKind::Pdf;
+    }
+    if haystack.contains("image/")
+        || haystack.contains(".png")
+        || haystack.contains(".jpg")
+        || haystack.contains(".jpeg")
+        || haystack.contains(".gif")
+        || haystack.contains(".webp")
+        || haystack.contains(".svg")
+    {
+        return ArtifactKind::Image;
+    }
+    if haystack.contains("video/")
+        || haystack.contains(".mp4")
+        || haystack.contains(".webm")
+        || haystack.contains(".mov")
+    {
+        return ArtifactKind::Video;
+    }
+    if haystack.contains("audio/") {
+        return ArtifactKind::Media;
+    }
+    if haystack.contains("office")
+        || haystack.contains("document")
+        || haystack.contains("spreadsheet")
+        || haystack.contains(".docx")
+        || haystack.contains(".xlsx")
+        || haystack.contains(".csv")
+    {
+        return ArtifactKind::Office;
+    }
+    ArtifactKind::File
+}
+
+fn default_mime(kind: ArtifactKind) -> Option<String> {
+    match kind {
+        ArtifactKind::Website => Some("text/html".into()),
+        ArtifactKind::Pdf => Some("application/pdf".into()),
+        _ => None,
+    }
+}
+
+fn terminal_artifact_values(event: &Value) -> Vec<&Value> {
+    let Some(data) = event.get("data") else {
+        return vec![];
+    };
+    let sources = [
+        data.get("result_envelope")
+            .and_then(|r| r.get("payload"))
+            .and_then(|p| p.get("artifacts")),
+        data.get("canonical_terminal_record")
+            .and_then(|r| r.get("result_envelope"))
+            .and_then(|e| e.get("payload"))
+            .and_then(|p| p.get("artifacts")),
+        data.get("raw_terminal_record")
+            .and_then(|r| r.get("result_envelope"))
+            .and_then(|e| e.get("payload"))
+            .and_then(|p| p.get("artifacts")),
+        data.get("artifacts"),
+    ];
+
+    sources
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_array)
+        .find(|items| !items.is_empty())
+        .map(|items| items.iter().collect())
+        .unwrap_or_default()
+}
+
+fn terminal_artifact(artifact: &Value, index: usize) -> Option<Artifact> {
+    let kind_hint = first_s(artifact, &["kind", "type", "kind_label"]);
+    let mime_type = first_s(artifact, &["mime_type", "content_type"]);
+    let path = artifact_path(artifact);
+    let uri = openable_uri(artifact, path);
+    let title = first_s(artifact, &["title", "name", "filename", "label"])
+        .or_else(|| uri.map(basename))
+        .or_else(|| path.map(basename));
+    let kind = artifact_kind(kind_hint, mime_type, uri, path, title);
+    let id = if kind == ArtifactKind::Website {
+        "site".to_string()
+    } else {
+        first_s(artifact, &["id", "artifact_id"])
+            .or(uri)
+            .or(path)
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("terminal-artifact-{}", index + 1))
+    };
+    let title = title.map(str::to_string).unwrap_or_else(|| match kind {
+        ArtifactKind::Website => "Website".into(),
+        _ => format!("Output {}", index + 1),
+    });
+
+    Some(Artifact {
+        id,
+        title,
+        kind,
+        mime_type: mime_type.map(str::to_string).or_else(|| default_mime(kind)),
+        uri: uri.map(str::to_string),
+        tool_call: None,
+    })
+}
+
+/// Map one gateway event to zero or more normalized events. Terminal artifacts
+/// in completion envelopes are emitted before the final run state so the UI can
+/// render finished files/decks/sites even when no separate artifact event fired.
+pub fn events_to_agent(event: &Value, run: &RunId) -> Vec<AgentEvent> {
+    let ty = event.get("type").and_then(Value::as_str);
+    let mut events = Vec::new();
+    if matches!(ty, Some("run_completed") | Some("turn_completed")) {
+        for (index, artifact) in terminal_artifact_values(event).into_iter().enumerate() {
+            if let Some(artifact) = terminal_artifact(artifact, index) {
+                events.push(AgentEvent::Artifact {
+                    run: run.clone(),
+                    artifact,
+                });
+            }
+        }
+    }
+    if let Some(event) = event_to_agent(event, run) {
+        events.push(event);
+    }
+    events
 }
 
 /// Map one inner `event` object to an [`AgentEvent`]. `run` is the
@@ -433,6 +637,60 @@ mod tests {
             event_to_agent(&ev, &run()),
             Some(AgentEvent::RunFinished { outcome, .. }) if outcome.status == RunStatus::Done
         ));
+    }
+
+    #[test]
+    fn run_completed_emits_terminal_artifacts_before_finish() {
+        let ev = json!({
+            "type": "run_completed",
+            "data": {
+                "loop_outcome": "done",
+                "result_envelope": {
+                    "kind": "result",
+                    "payload": {
+                        "artifacts": [
+                            {
+                                "id": "/api/artifacts/conv-1/report.pdf",
+                                "title": "report.pdf",
+                                "kind": "pdf",
+                                "mime_type": "application/pdf",
+                                "url": "/api/artifacts/conv-1/report.pdf"
+                            },
+                            {
+                                "id": "published-site",
+                                "title": "Website",
+                                "kind": "website",
+                                "url": "/sites/conv-1/index.html"
+                            }
+                        ]
+                    }
+                }
+            }
+        });
+
+        let events = events_to_agent(&ev, &run());
+        assert_eq!(events.len(), 3);
+        match &events[0] {
+            AgentEvent::Artifact { artifact, .. } => {
+                assert_eq!(artifact.id, "/api/artifacts/conv-1/report.pdf");
+                assert_eq!(artifact.kind, ArtifactKind::Pdf);
+                assert_eq!(
+                    artifact.uri.as_deref(),
+                    Some("/api/artifacts/conv-1/report.pdf")
+                );
+            }
+            other => panic!("got {other:?}"),
+        }
+        match &events[1] {
+            AgentEvent::Artifact { artifact, .. } => {
+                assert_eq!(artifact.id, "site");
+                assert_eq!(artifact.kind, ArtifactKind::Website);
+                assert_eq!(artifact.mime_type.as_deref(), Some("text/html"));
+                assert_eq!(artifact.uri.as_deref(), Some("/sites/conv-1/index.html"));
+            }
+            other => panic!("got {other:?}"),
+        }
+        assert!(matches!(&events[2], AgentEvent::RunFinished { .. }));
     }
 
     #[test]

@@ -29,8 +29,8 @@ use tokio::sync::mpsc::UnboundedSender;
 const RECONNECT_BASE_MS: u64 = 1_000;
 const RECONNECT_MAX_MS: u64 = 15_000;
 /// Give up after this many *consecutive* "gone" responses (403/404/410). A fresh
-/// conversation can 404 briefly until the first `send_message` commits it, so we
-/// tolerate a few before concluding the stream is truly dead.
+/// conversation can 404 briefly until the first canonical command commits it,
+/// so we tolerate a few before concluding the stream is truly dead.
 const MAX_PERMANENT_STRIKES: u32 = 5;
 
 /// Where to stream a conversation's events from.
@@ -384,7 +384,13 @@ mod sim {
         let auth = head
             .lines()
             .find(|l| l.to_ascii_lowercase().starts_with("authorization:"))
-            .map(|l| l.splitn(2, ':').nth(1).unwrap_or("").trim().to_string());
+            .map(|l| {
+                l.split_once(':')
+                    .map(|(_, v)| v)
+                    .unwrap_or("")
+                    .trim()
+                    .to_string()
+            });
         (after, auth)
     }
 

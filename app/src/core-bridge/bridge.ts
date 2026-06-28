@@ -11,6 +11,7 @@ import type {
   Session,
   Snapshot,
   ContentBlock,
+  MemoryOverview,
 } from "./types";
 import type { Upload } from "../lib/attachments";
 
@@ -19,6 +20,9 @@ export interface ConnectConfig {
   command?: string[];
   cwd?: string;
   auth_token?: string;
+  /** Provider-specific extras (e.g. local coding: base_url, model, clark). */
+  extra?: Record<string, unknown>;
+  headers?: Record<string, string>;
 }
 
 export interface SessionOptions {
@@ -37,6 +41,18 @@ export interface CoreBridge {
   respond(sessionId: string, response: ClientResponse): Promise<void>;
   /** Subscribe to snapshot updates. Returns an unsubscribe fn. */
   subscribe(handler: (snapshot: Snapshot) => void): () => void;
+  /**
+   * Extract a per-repo project memory via Clark's Platform API and write it
+   * under the repo's `.clark/memory/`. Only the native (Tauri) bridge supports
+   * this.
+   */
+  extractMemory?(cwd: string, apiKey: string, model?: string): Promise<string>;
+  /**
+   * List the per-repo memory (the `MEMORY.md` index plus any per-fact files)
+   * under `<cwd>/.clark/memory/`. Read-only. Only the native (Tauri) bridge
+   * supports this.
+   */
+  listMemory?(cwd: string): Promise<MemoryOverview>;
 }
 
 let cached: CoreBridge | null = null;

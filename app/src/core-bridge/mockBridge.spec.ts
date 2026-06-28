@@ -25,15 +25,16 @@ function waitFor(predicate: (s: Snapshot) => boolean, bridge: MockBridge, ms = 4
 }
 
 describe("MockBridge", () => {
-  it("lists providers including acp and clark", async () => {
+  it("exposes the local coding provider", async () => {
     const b = new MockBridge();
     const providers = await b.listProviders();
-    expect(providers.map((p) => p.id).sort()).toEqual(["acp", "clark"]);
+    expect(providers.map((p) => p.id)).toEqual(["local"]);
+    expect(providers[0].capabilities.load_session).toBe(false);
   });
 
   it("produces a streaming run with user + agent messages, a tool call and a plan", async () => {
     const b = new MockBridge();
-    await b.newSession("acp", {});
+    await b.newSession("local", {});
     await b.prompt("mock-session", [{ type: "text", text: "look at main.rs" }]);
 
     const done = await waitFor(
@@ -57,7 +58,7 @@ describe("MockBridge", () => {
 
   it("clears the permission gate when resolved", async () => {
     const b = new MockBridge();
-    await b.newSession("acp", {});
+    await b.newSession("local", {});
     await b.prompt("mock-session", [{ type: "text", text: "build it" }]);
 
     const gated = await waitFor((s) => !!s.pending_permission, b);

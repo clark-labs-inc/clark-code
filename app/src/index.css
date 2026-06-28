@@ -1,75 +1,83 @@
 @import "tailwindcss";
 
 /* ----------------------------------------------------------------------------
-   Clark design language — "warm papyrus" (light, default) + clarkDark variant.
-   Dense type scale (15px base), subtle warm borders, 8px radii.
+   Clark Code design language — Codex-grade monochrome.
+   Near-black canvas, no chromatic accent (color is semantic only), a single
+   light primary action, and the "quiet-chip" vernacular: code, values, and tool
+   tokens render as soft monospace chips on a barely-there fill (--color-chip).
+   Inter UI + native mono. 14px base, calm density.
 ---------------------------------------------------------------------------- */
 @theme {
-  --color-bg: #f7f5f1;
-  --color-bg-secondary: #efece6;
-  --color-bg-tertiary: #e6e2da;
-  --color-bg-elevated: #fdfcfa;
-  --color-bg-hover: #ece8e0;
-  --color-bg-sunken: #e4e0d6;
+  /* Light (neutral) — secondary; dark is the canonical look. Every text token
+     meets WCAG AA (≥4.5:1) on its background; borders are firm, not hairline. */
+  --color-bg: #ffffff;
+  --color-bg-secondary: #f5f5f6;
+  --color-bg-tertiary: #e9e9eb;
+  --color-bg-elevated: #ffffff;
+  --color-bg-hover: #ebebed;
+  --color-bg-sunken: #f0f0f2;
 
-  --color-ink: #211f1c;
-  --color-ink-secondary: #544f49;
-  --color-ink-muted: #6b645d;
-  --color-ink-faint: #79716a;
+  --color-ink: #14141a; /* ~17:1 */
+  --color-ink-secondary: #36363c; /* ~10:1 */
+  --color-ink-muted: #52525a; /* ~7:1 */
+  --color-ink-faint: #6b6b74; /* ~5:1 — still legible */
 
-  --color-accent: #2b2926;
-  --color-accent-hover: #16140f;
-  --color-on-accent: #f7f5f1;
+  --color-accent: #14141a;
+  --color-accent-hover: #000000;
+  --color-on-accent: #ffffff;
 
-  --color-success: #5a6f55;
-  --color-warning: #84621f;
-  --color-danger: #8c4a45;
-  --color-info: #455a7f;
+  --color-success: #2f7d4d;
+  --color-warning: #855713;
+  --color-danger: #b03a32;
+  --color-info: #2f5390;
 
-  --color-border: rgba(40, 36, 32, 0.12);
-  --color-border-subtle: rgba(40, 36, 32, 0.06);
-  --color-border-strong: rgba(40, 36, 32, 0.2);
+  --color-chip: rgba(0, 0, 0, 0.06);
+  --color-border: rgba(0, 0, 0, 0.16);
+  --color-border-subtle: rgba(0, 0, 0, 0.09);
+  --color-border-strong: rgba(0, 0, 0, 0.32);
 
-  --font-sans: "DM Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", "Menlo", monospace;
+  --font-sans: "Inter", -apple-system, system-ui, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", "Menlo", monospace;
 
   --text-xs: 0.75rem;
   --text-sm: 0.8125rem;
-  --text-base: 0.9375rem;
-  --text-lg: 1.0625rem;
+  --text-base: 0.875rem;
+  --text-lg: 1rem;
 
-  --radius-sm: 4px;
-  --radius-md: 6px;
-  --radius-lg: 8px;
-  --radius-xl: 12px;
+  --radius-sm: 5px;
+  --radius-md: 7px;
+  --radius-lg: 10px;
+  --radius-xl: 14px;
 }
 
-/* Dark variant — official Clark 2026 brand (black tile, white C, DM Sans). */
+/* Dark — the canonical Clark Code look (Codex near-black monochrome). Every text
+   token meets WCAG AA on the near-black canvas; borders are clearly visible. */
 html.dark {
-  --color-bg: #0d0d0d;
-  --color-bg-secondary: #161616;
-  --color-bg-tertiary: #1f1f1f;
-  --color-bg-elevated: #161616;
-  --color-bg-hover: #262626;
-  --color-bg-sunken: #080808;
+  --color-bg: #0a0a0a;
+  --color-bg-secondary: #0e0e0f;
+  --color-bg-tertiary: #1a1a1c;
+  --color-bg-elevated: #17171a;
+  --color-bg-hover: #242427;
+  --color-bg-sunken: #050505;
 
-  --color-ink: #f5f5f4;
-  --color-ink-secondary: #d6d3d1;
-  --color-ink-muted: #a8a29e;
-  --color-ink-faint: #78716c;
+  --color-ink: #f4f4f3; /* ~16:1 */
+  --color-ink-secondary: #cbcac8; /* ~11:1 */
+  --color-ink-muted: #a0a09d; /* ~7:1 */
+  --color-ink-faint: #828280; /* ~4.8:1 — still legible */
 
-  --color-accent: #f5f5f4;
+  --color-accent: #f4f4f3;
   --color-accent-hover: #ffffff;
-  --color-on-accent: #0d0d0d;
+  --color-on-accent: #0a0a0a;
 
-  --color-success: #7faf75;
-  --color-warning: #d0a24a;
-  --color-danger: #d98a83;
-  --color-info: #8fa6c9;
+  --color-success: #74c08a;
+  --color-warning: #e2ad59;
+  --color-danger: #ec8e86;
+  --color-info: #98b0d5;
 
-  --color-border: rgba(255, 255, 255, 0.12);
-  --color-border-subtle: rgba(255, 255, 255, 0.07);
-  --color-border-strong: rgba(255, 255, 255, 0.2);
+  --color-chip: rgba(255, 255, 255, 0.09);
+  --color-border: rgba(255, 255, 255, 0.13);
+  --color-border-subtle: rgba(255, 255, 255, 0.08);
+  --color-border-strong: rgba(255, 255, 255, 0.26);
 }
 
 html,
@@ -84,19 +92,51 @@ body {
   color: var(--color-ink);
   font-family: var(--font-sans);
   font-size: var(--text-base);
-  line-height: 1.55;
+  line-height: 1.6;
+  letter-spacing: -0.006em;
+  /* Crisp text on macOS: thin grayscale antialiasing, real weights only (no
+     synthesized bold/italic), and proper kerning + contextual alternates. */
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
+  font-synthesis: none;
+  font-feature-settings: "kern" 1, "calt" 1;
+  font-optical-sizing: auto;
+  -webkit-text-size-adjust: 100%;
   overflow: hidden;
 }
 
+/* Code / mono: literal, sharp, evenly-spaced — no programming ligatures, and
+   tabular figures so columns of numbers line up. */
+code,
+pre,
+kbd,
+samp,
+.font-mono {
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0, "calt" 0, "tnum" 1;
+  letter-spacing: normal; /* monospace shouldn't inherit the body's tracking */
+}
+
+/* Refined icon strokes: lucide defaults to 2, which reads heavy at the 14–16px
+   sizes used throughout. 1.75 is crisper and more precise. */
+svg.lucide {
+  stroke-width: 1.75;
+}
+
+::selection {
+  background: var(--color-ink);
+  color: var(--color-bg);
+}
+
+/* Minimal scrollbars — present only on hover-over, never decorative. */
 ::-webkit-scrollbar {
-  width: 9px;
-  height: 9px;
+  width: 8px;
+  height: 8px;
 }
 ::-webkit-scrollbar-thumb {
   background: var(--color-border-strong);
-  border-radius: 6px;
+  border-radius: 8px;
   border: 2px solid transparent;
   background-clip: padding-box;
 }
@@ -105,11 +145,21 @@ body {
   background-clip: padding-box;
 }
 
-/* Focus ring — accessible, consistent. */
+/* Focus ring — high-contrast and clearly visible (accessibility).
+   NOTE: this rule is intentionally unlayered, so it beats Tailwind's layered
+   `outline-*` utilities (cascade layers lose to unlayered rules). To opt an
+   element out, add an equally-unlayered override below. */
 :focus-visible {
-  outline: 2px solid var(--color-accent);
+  outline: 2px solid var(--color-ink-secondary);
   outline-offset: 2px;
   border-radius: var(--radius-sm);
+}
+
+/* The composer textarea lives inside a pill that already highlights on focus
+   (focus-within:border-border-strong), so the element-level ring just draws a
+   stray box inside the pill. Suppress it here; the pill carries the focus cue. */
+.composer-input:focus-visible {
+  outline: none;
 }
 
 @keyframes spin {
@@ -121,9 +171,38 @@ body {
 }
 .breathe { animation: breathe 1.6s ease-in-out infinite; }
 
+/* Skeleton shimmer for render previews while content loads. */
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+.skeleton {
+  border-radius: var(--radius-sm);
+  background-color: var(--color-bg-hover);
+  background-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    color-mix(in oklab, var(--color-ink) 7%, transparent) 50%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  background-repeat: no-repeat;
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+
+/* Gentle, uniform fade-in for content that mounts without a motion wrapper. */
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(3px); }
+  to { opacity: 1; transform: none; }
+}
+.fade-in { animation: fade-in 0.22s ease both; }
+
+/* Respect reduced-motion for layout transitions, but keep essential progress
+   feedback (spinners, the "working" dots) gently animating — a frozen spinner
+   reads as broken. */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
-    animation-duration: 0.001ms !important;
     transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
   }
 }

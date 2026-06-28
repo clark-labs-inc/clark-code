@@ -19,7 +19,7 @@
 //
 // Swapping in a different identity provider only touches this file.
 
-export type AuthMethod = "demo" | "google";
+export type AuthMethod = "google";
 
 export interface AuthUser {
   name: string;
@@ -46,8 +46,8 @@ const config = {
   // Clark web origin hosting Better Auth + the /desktop-auth handoff page.
   // Defaults to production; override with VITE_CLARK_AUTH_ORIGIN (e.g. dev).
   clarkAuthOrigin: (env.VITE_CLARK_AUTH_ORIGIN ?? "https://www.clarkchat.com").replace(/\/+$/, ""),
-  // Demo/bypass connection (local stack). Endpoint defaults to the local gateway
-  // in dev; the token is never defaulted/committed.
+  // Local dev gateway fallback (override with VITE_CLARK_ENDPOINT); the token is
+  // never defaulted/committed.
   clarkEndpoint: env.VITE_CLARK_ENDPOINT ?? (import.meta.env.DEV ? "ws://localhost:8400/ws" : ""),
   clarkToken: env.VITE_CLARK_TOKEN,
 };
@@ -97,13 +97,6 @@ export function signOut(): void {
   } catch {
     /* ignore */
   }
-}
-
-export function signInDemo(): AuthSession {
-  return persist({
-    user: { name: "Demo", method: "demo" },
-    clark: { endpoint: config.clarkEndpoint, token: config.clarkToken },
-  });
 }
 
 // --- Google sign-in (real Clark Better Auth) --------------------------------

@@ -16,6 +16,9 @@ pub struct RunView {
     pub status: RunStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outcome: Option<RunOutcome>,
+    /// Restore handle for "undo this run" (set when a pre-run checkpoint exists).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checkpoint: Option<String>,
 }
 
 /// One ordered entry in the conversation timeline.
@@ -62,6 +65,20 @@ impl Snapshot {
     }
 }
 
+fn same_artifact_identity(left: &Artifact, right: &Artifact) -> bool {
+    if left.id == right.id {
+        return true;
+    }
+
+    let left_uri = left.uri.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    let right_uri = right
+        .uri
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    matches!((left_uri, right_uri), (Some(left_uri), Some(right_uri)) if left_uri == right_uri)
+}
+
 /// Apply a single event to a snapshot. Pure and idempotent w.r.t. identity
 /// (re-applying a `ToolCallUpdate` yields the same state).
 pub fn apply(snapshot: &mut Snapshot, event: &AgentEvent) {
@@ -71,7 +88,18 @@ pub fn apply(snapshot: &mut Snapshot, event: &AgentEvent) {
                 id: run.clone(),
                 status: RunStatus::Running,
                 outcome: None,
+                checkpoint: None,
             });
+        }
+
+        AgentEvent::Checkpoint { run, id } => {
+            let view = snapshot.runs.entry(run.clone()).or_insert_with(|| RunView {
+                id: run.clone(),
+                status: RunStatus::Running,
+                outcome: None,
+                checkpoint: None,
+            });
+            view.checkpoint = Some(id.clone());
         }
 
         AgentEvent::MessageChunk { run, role, delta } => {
@@ -120,6 +148,16 @@ pub fn apply(snapshot: &mut Snapshot, event: &AgentEvent) {
                 }
                 tc.content.extend(patch.append_content.iter().cloned());
             }
+            // A status change on a gated tool means its permission prompt was
+            // resolved (approved → it runs, denied → it fails), so clear the gate.
+            if snapshot
+                .pending_permission
+                .as_ref()
+                .and_then(|p| p.tool_call.as_ref())
+                == Some(id)
+            {
+                snapshot.pending_permission = None;
+            }
         }
 
         AgentEvent::Plan { plan, .. } => {
@@ -134,7 +172,11 @@ pub fn apply(snapshot: &mut Snapshot, event: &AgentEvent) {
         }
 
         AgentEvent::Artifact { artifact, .. } => {
-            if let Some(existing) = snapshot.artifacts.iter_mut().find(|a| a.id == artifact.id) {
+            if let Some(existing) = snapshot
+                .artifacts
+                .iter_mut()
+                .find(|a| same_artifact_identity(a, artifact))
+            {
                 // Update in place (e.g. URL filled in after publish).
                 *existing = artifact.clone();
             } else {
@@ -156,6 +198,7 @@ pub fn apply(snapshot: &mut Snapshot, event: &AgentEvent) {
                 id: run.clone(),
                 status: outcome.status,
                 outcome: None,
+                checkpoint: None,
             });
             view.status = outcome.status;
             view.outcome = Some(outcome.clone());
@@ -301,6 +344,9 @@ mod tests {
                     tool_call: None,
                     title: "Run command?".into(),
                     options: vec![],
+                    detail: None,
+                    risk: None,
+                    reason: None,
                 },
             },
         );
@@ -318,6 +364,51 @@ mod tests {
         );
         assert!(snap.pending_permission.is_none());
         assert_eq!(snap.runs[&run()].status, RunStatus::Done);
+    }
+
+    #[test]
+    fn permission_clears_when_its_gated_tool_proceeds() {
+        let tc = ToolCallId::new("tc-1");
+        let mut snap = reduce_all(&[
+            AgentEvent::ToolCall {
+                run: run(),
+                call: ToolCall {
+                    id: tc.clone(),
+                    title: "bash".into(),
+                    kind: ToolKind::Execute,
+                    status: ToolStatus::Pending,
+                    locations: vec![],
+                    content: vec![],
+                    raw_input: None,
+                },
+            },
+            AgentEvent::PermissionRequest {
+                request: PermissionRequest {
+                    id: crate::ids::PermissionRequestId::new("perm-tc-1"),
+                    session: SessionId::new("s"),
+                    tool_call: Some(tc.clone()),
+                    title: "Allow?".into(),
+                    options: vec![],
+                    detail: None,
+                    risk: None,
+                    reason: None,
+                },
+            },
+        ]);
+        assert!(snap.pending_permission.is_some());
+        // Approving the tool makes it proceed (InProgress) → the gate clears.
+        apply(
+            &mut snap,
+            &AgentEvent::ToolCallUpdate {
+                run: run(),
+                id: tc,
+                patch: ToolCallPatch {
+                    status: Some(ToolStatus::InProgress),
+                    ..Default::default()
+                },
+            },
+        );
+        assert!(snap.pending_permission.is_none());
     }
 
     #[test]
@@ -343,6 +434,44 @@ mod tests {
         assert_eq!(
             snap.plan.unwrap().phases[0].status,
             PlanPhaseStatus::Completed
+        );
+    }
+
+    #[test]
+    fn artifact_with_same_uri_updates_in_place_without_duplicate_timeline_entry() {
+        let first = AgentEvent::Artifact {
+            run: run(),
+            artifact: Artifact {
+                id: "artifact-path".into(),
+                title: "Draft report".into(),
+                kind: ArtifactKind::File,
+                mime_type: None,
+                uri: Some("http://localhost:8787/api/artifacts/conv-1/report.pdf".into()),
+                tool_call: None,
+            },
+        };
+        let second = AgentEvent::Artifact {
+            run: run(),
+            artifact: Artifact {
+                id: "artifact-url".into(),
+                title: "Final report".into(),
+                kind: ArtifactKind::Pdf,
+                mime_type: Some("application/pdf".into()),
+                uri: Some("http://localhost:8787/api/artifacts/conv-1/report.pdf".into()),
+                tool_call: None,
+            },
+        };
+
+        let snap = reduce_all(&[first, second]);
+        assert_eq!(snap.artifacts.len(), 1);
+        assert_eq!(snap.artifacts[0].id, "artifact-url");
+        assert_eq!(snap.artifacts[0].title, "Final report");
+        assert_eq!(
+            snap.timeline
+                .iter()
+                .filter(|i| matches!(i, TimelineItem::Artifact { .. }))
+                .count(),
+            1
         );
     }
 
@@ -412,6 +541,9 @@ mod tests {
                         label: "Allow".into(),
                         kind: PermissionOptionKind::AllowOnce,
                     }],
+                    detail: None,
+                    risk: None,
+                    reason: None,
                 },
             },
             AgentEvent::Artifact {

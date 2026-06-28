@@ -48,7 +48,7 @@ async fn live_clark_says_pong() {
             PromptInput::text("Reply with exactly one word: pong"),
         )
         .await
-        .expect("send_message");
+        .expect("canonical conversation command");
 
     let mut agent_text = String::new();
     let collect = async {
