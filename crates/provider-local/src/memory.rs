@@ -184,7 +184,7 @@ pub fn load_facts(root: &Path) -> Vec<MemoryFact> {
             },
         ));
     }
-    out.sort_by(|a, b| b.0.cmp(&a.0));
+    out.sort_by_key(|x| std::cmp::Reverse(x.0));
     out.into_iter().map(|(_, f)| f).collect()
 }
 
