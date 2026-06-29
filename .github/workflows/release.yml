@@ -25,16 +25,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # macOS-only for now: we ship a single signed + notarized universal
+        # build, and the download page is macOS-only. Re-add ubuntu-22.04 /
+        # windows-latest legs here (and wire their signing) to publish those.
         include:
           - platform: macos-latest
             args: "--target universal-apple-darwin"
             rust-targets: "aarch64-apple-darwin,x86_64-apple-darwin"
-          - platform: ubuntu-22.04
-            args: ""
-            rust-targets: ""
-          - platform: windows-latest
-            args: ""
-            rust-targets: ""
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
