@@ -98,6 +98,26 @@ export class MockBridge implements CoreBridge {
     return () => this.handlers.delete(handler);
   }
 
+  // A representative project tree so the @-mention picker is demoable in the
+  // browser preview without a native file walk.
+  async listFiles(): Promise<string[]> {
+    return [
+      "README.md",
+      "package.json",
+      "src/main.rs",
+      "src/lib.rs",
+      "src/store/sessionStore.ts",
+      "src/surfaces/Composer.tsx",
+      "src/surfaces/Conversation.tsx",
+      "src/lib/fuzzy.ts",
+      "tests/integration.rs",
+    ];
+  }
+
+  async openPath(): Promise<void> {
+    /* no-op in the browser preview */
+  }
+
   // --- internals -----------------------------------------------------------
 
   private lastRunId(): string | undefined {

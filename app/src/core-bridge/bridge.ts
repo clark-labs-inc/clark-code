@@ -53,6 +53,10 @@ export interface CoreBridge {
    * supports this.
    */
   listMemory?(cwd: string): Promise<MemoryOverview>;
+  /** Project-relative file paths under `cwd`, for the `@`-mention picker. */
+  listFiles?(cwd: string): Promise<string[]>;
+  /** Open a path in the OS default app, or reveal it in the file manager. */
+  openPath?(path: string, reveal?: boolean): Promise<void>;
 }
 
 let cached: CoreBridge | null = null;

@@ -28,6 +28,9 @@ portable-pty = "0.9"
 base64 = "0.22"
 # Native folder picker for selecting the local coding project root.
 tauri-plugin-dialog = "2"
+# Native OS notifications — fire when a run finishes/fails or blocks on a
+# permission gate while the window is in the background.
+tauri-plugin-notification = "2"
 # Native Google sign-in (system browser + localhost loopback). Returns a Google
 # ID token we exchange with Clark's Better Auth backend.
 tauri-plugin-google-auth = "0.5"

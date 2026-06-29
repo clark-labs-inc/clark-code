@@ -2,13 +2,15 @@ import { memo, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
   FileText, FilePen, SquareTerminal, Search, Globe, Trash2, FolderInput,
-  Sparkles, Wrench, X, Loader2, ChevronRight, Telescope, ExternalLink,
+  Sparkles, Wrench, X, Loader2, ChevronRight, Telescope, ExternalLink, FolderOpen,
 } from "lucide-react";
 import { cn } from "../../lib/cn";
 import { lastProgressLine } from "../../lib/activity";
 import { callDiffStat, type DiffStat } from "../../lib/diff";
 import { extractSources } from "../../lib/sources";
 import { openExternal } from "../../lib/account";
+import { openProjectPath } from "../../lib/openPath";
+import { useSessionStore } from "../../store/sessionStore";
 import { Md, MD_CLASSES } from "../Message";
 import type { ContentBlock, ToolCall, ToolKind, ToolStatus } from "../../core-bridge/types";
 
@@ -162,6 +164,34 @@ function Detail({ call }: { call: ToolCall }) {
   );
 }
 
+/** A header above an expanded file detail with open / reveal affordances. */
+function FileActions({ path }: { path: string }) {
+  const cwd = useSessionStore((s) => s.localSettings.cwd);
+  return (
+    <div className="flex items-center justify-between gap-2 border-b border-border-subtle px-3 py-1.5">
+      <span className="min-w-0 flex-1 truncate font-mono text-xs text-ink-muted">{path}</span>
+      <span className="flex shrink-0 items-center gap-0.5">
+        <button
+          onClick={() => void openProjectPath(cwd, path, false)}
+          title="Open file"
+          aria-label="Open file"
+          className="grid size-6 place-items-center rounded-md text-ink-faint transition hover:bg-bg-hover hover:text-ink"
+        >
+          <ExternalLink className="size-3.5" />
+        </button>
+        <button
+          onClick={() => void openProjectPath(cwd, path, true)}
+          title="Reveal in file manager"
+          aria-label="Reveal in file manager"
+          className="grid size-6 place-items-center rounded-md text-ink-faint transition hover:bg-bg-hover hover:text-ink"
+        >
+          <FolderOpen className="size-3.5" />
+        </button>
+      </span>
+    </div>
+  );
+}
+
 /** A single dense, expandable line of agent work (file/browser/terminal/tool). */
 function WorkLineImpl({ call, active }: { call: ToolCall; active: boolean }) {
   const [open, setOpen] = useState(false);
@@ -244,6 +274,7 @@ function WorkLineImpl({ call, active }: { call: ToolCall; active: boolean }) {
             transition={{ duration: 0.18, ease: [0.4, 0, 0.2, 1] }}
             className="ml-[0.55rem] overflow-hidden border-l border-border-subtle"
           >
+            {target && call.kind !== "research" && <FileActions path={target} />}
             <div className="max-h-56 overflow-auto">
               <Detail call={call} />
             </div>

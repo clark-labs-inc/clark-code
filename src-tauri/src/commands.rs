@@ -244,6 +244,71 @@ pub async fn local_list_memory(cwd: String) -> Result<MemoryOverview, String> {
     })
 }
 
+/// List project-relative file paths under `cwd` for the `@`-mention picker.
+/// Read-only; skips ignored directories. Runs the walk off the UI thread.
+#[tauri::command]
+pub async fn local_list_files(cwd: String) -> Result<Vec<String>, String> {
+    if cwd.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+    let root = std::path::PathBuf::from(cwd);
+    tokio::task::spawn_blocking(move || provider_local::list_project_files(&root))
+        .await
+        .map_err(|e| format!("list files failed: {e}"))
+}
+
+/// Open a file (or folder) with the OS default handler — for a source file on a
+/// dev machine that's typically the user's editor. `reveal` shows it in the file
+/// manager instead of opening it. Never executes the file directly.
+#[tauri::command]
+pub fn open_path(path: String, reveal: bool) -> Result<(), String> {
+    let p = path.trim();
+    if p.is_empty() {
+        return Err("empty path".into());
+    }
+    let mut cmd = open_command(p, reveal);
+    cmd.spawn().map(|_| ()).map_err(|e| e.to_string())
+}
+
+#[cfg(target_os = "macos")]
+fn open_command(path: &str, reveal: bool) -> std::process::Command {
+    let mut c = std::process::Command::new("open");
+    if reveal {
+        c.arg("-R");
+    }
+    c.arg(path);
+    c
+}
+
+#[cfg(target_os = "windows")]
+fn open_command(path: &str, reveal: bool) -> std::process::Command {
+    if reveal {
+        let mut c = std::process::Command::new("explorer");
+        c.arg(format!("/select,{path}"));
+        c
+    } else {
+        let mut c = std::process::Command::new("cmd");
+        c.args(["/C", "start", "", path]);
+        c
+    }
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn open_command(path: &str, reveal: bool) -> std::process::Command {
+    // No portable "reveal" on Linux — open the containing folder instead.
+    let target = if reveal {
+        std::path::Path::new(path)
+            .parent()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|| path.to_string())
+    } else {
+        path.to_string()
+    };
+    let mut c = std::process::Command::new("xdg-open");
+    c.arg(target);
+    c
+}
+
 /// Result of exchanging a Google ID token for a Clark session.
 #[derive(serde::Serialize)]
 pub struct GoogleAuthResult {

@@ -56,6 +56,7 @@ import {
   cloudDelete,
 } from "../lib/cloudHistory";
 import { provisionCodeKey, billingMe, type BillingSummary } from "../lib/account";
+import { notify } from "../lib/notify";
 
 /** A follow-up message the user sent while a run was active. It sends
  *  automatically when the run finishes — Codex-style, never interrupting. */
@@ -133,6 +134,10 @@ interface SessionState {
   terminalOpen: boolean;
   /** Whether the MCP servers settings modal is open. */
   mcpOpen: boolean;
+  /** Whether the ⌘K command palette is open. */
+  paletteOpen: boolean;
+  /** Whether the sidebar is collapsed to its icon rail. */
+  sidebarCollapsed: boolean;
   /** Billing summary (plan, subscription, credits) from Clark; null until loaded. */
   billing: BillingSummary | null;
   loadingBilling: boolean;
@@ -165,6 +170,10 @@ interface SessionState {
   toggleTerminal: () => void;
   setTerminalOpen: (open: boolean) => void;
   setMcpOpen: (open: boolean) => void;
+  setPaletteOpen: (open: boolean) => void;
+  togglePalette: () => void;
+  toggleSidebar: () => void;
+  setSidebarCollapsed: (collapsed: boolean) => void;
   cancelActive: () => Promise<void>;
   resolvePermission: (option: string) => Promise<void>;
 }
@@ -192,6 +201,8 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   permissionMode: loadPermissionMode(),
   terminalOpen: false,
   mcpOpen: false,
+  paletteOpen: false,
+  sidebarCollapsed: false,
   billing: null,
   loadingBilling: false,
 
@@ -219,6 +230,10 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       // firing before the one we just dispatched registers as a running run.
       let autoResolvedId: string | null = null;
       let dispatching = false;
+      // Native-notification edges: ping when a run finishes (busy→idle) or when a
+      // gate actually blocks for the user. Tracked across snapshots.
+      let prevBusy = false;
+      let notifiedPermId: string | null = null;
       // The host re-emits a fully cloned snapshot on every streamed token (tens
       // per second). Two throttles keep that from melting the UI:
       //   • render — coalesce to at most one React update per animation frame;
@@ -288,6 +303,19 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
         if (busyNow) dispatching = false; // a run is active again — clear the drain guard
 
+        // Native notification on the busy→idle edge (desktop only, and only when
+        // the window is unfocused — see notify()).
+        if (prevBusy && !busyNow && session) {
+          const failedRun = Object.values(snapshot.runs).some((r) => r.status === "failed");
+          const title = get().conversations.find((c) => c.id === session.id)?.title;
+          if (failedRun) {
+            void notify("Run failed", title ? `“${title}” ended with an error.` : "The agent ended unexpectedly.");
+          } else {
+            void notify("Clark finished", title ? `“${title}” is ready for review.` : "Your task is ready for review.");
+          }
+        }
+        prevBusy = busyNow;
+
         // Refresh the credit balance shortly after a turn settles so the credit
         // banner reflects spend (throttled — billing is a network call).
         if (!busyNow && session) {
@@ -312,9 +340,14 @@ export const useSessionStore = create<SessionState>((set, get) => ({
                 .respond(sess.id, { kind: "permission", request: pend.id, option: opt.id })
                 .catch((e) => set({ error: String(e) }));
             }
+          } else if (pend.id !== notifiedPermId && !wouldAutoApprove(get().permissionMode, pend)) {
+            // The gate will actually block for the user — ping them.
+            notifiedPermId = pend.id;
+            void notify("Approval needed", pend.title || "Clark is waiting for your approval.");
           }
         } else {
           autoResolvedId = null;
+          notifiedPermId = null;
         }
 
         // Drain the next queued message whenever idle and unblocked. Draining on
@@ -639,6 +672,10 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   toggleTerminal: () => set((s) => ({ terminalOpen: !s.terminalOpen })),
   setTerminalOpen: (open) => set({ terminalOpen: open }),
   setMcpOpen: (open) => set({ mcpOpen: open }),
+  setPaletteOpen: (open) => set({ paletteOpen: open }),
+  togglePalette: () => set((s) => ({ paletteOpen: !s.paletteOpen })),
+  toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
+  setSidebarCollapsed: (collapsed) => set({ sidebarCollapsed: collapsed }),
 
   cancelActive: async () => {
     const { bridge, session, snapshot } = get();

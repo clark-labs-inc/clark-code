@@ -1,11 +1,12 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
-  Plus, MessageSquare, Trash2, PanelLeftClose, PanelLeft, FolderGit2,
+  Plus, MessageSquare, Trash2, PanelLeftClose, PanelLeft, FolderGit2, Search, X,
 } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
 import { projectName } from "../lib/localAgent";
 import { useIsNarrow } from "../lib/responsive";
+import { fuzzyFilter } from "../lib/fuzzy";
 import { ClarkMark } from "./ClarkMark";
 import type { ConversationMeta } from "../lib/history";
 
@@ -63,13 +64,26 @@ function ConversationRow({ c, active }: { c: ConversationMeta; active: boolean }
 }
 
 export function Sidebar() {
-  const [collapsed, setCollapsed] = useState(false);
+  const collapsed = useSessionStore((s) => s.sidebarCollapsed);
+  const setCollapsed = useSessionStore((s) => s.setSidebarCollapsed);
   const conversations = useSessionStore((s) => s.conversations);
   const session = useSessionStore((s) => s.session);
   const newConversation = useSessionStore((s) => s.endSession);
+  const [filter, setFilter] = useState("");
   // Below this width the full sidebar would crowd out the conversation, so it
   // auto-collapses to the icon rail (and can't be expanded until there's room).
   const narrow = useIsNarrow(768);
+
+  const visible = useMemo(
+    () =>
+      fuzzyFilter(
+        conversations,
+        filter,
+        (c) => `${c.title} ${c.project ? projectName(c.project) : ""}`,
+        200,
+      ).map((m) => m.item),
+    [conversations, filter],
+  );
 
   if (collapsed || narrow) {
     return (
@@ -118,15 +132,43 @@ export function Sidebar() {
         </button>
       </div>
 
+      {conversations.length > 4 && (
+        <div className="px-2.5 pb-2">
+          <div className="flex items-center gap-2 rounded-lg bg-bg-sunken px-2.5 py-1.5 ring-1 ring-transparent focus-within:ring-border-subtle">
+            <Search className="size-3.5 shrink-0 text-ink-faint" />
+            <input
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              placeholder="Search conversations…"
+              aria-label="Search conversations"
+              className="composer-input min-w-0 flex-1 bg-transparent text-xs text-ink outline-none placeholder:text-ink-faint"
+            />
+            {filter && (
+              <button
+                onClick={() => setFilter("")}
+                aria-label="Clear search"
+                className="grid size-4 shrink-0 place-items-center rounded-full text-ink-faint transition hover:text-ink"
+              >
+                <X className="size-3" />
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       <div className="min-h-0 flex-1 overflow-y-auto px-2.5 pb-3">
         {conversations.length === 0 ? (
           <p className="px-1 py-6 text-center text-xs text-ink-faint">
             Your conversations will show up here.
           </p>
+        ) : visible.length === 0 ? (
+          <p className="px-1 py-6 text-center text-xs text-ink-faint">
+            No conversations match “{filter}”.
+          </p>
         ) : (
           <div className="flex flex-col gap-0.5">
             <AnimatePresence initial={false}>
-              {conversations.map((c) => (
+              {visible.map((c) => (
                 <motion.div
                   key={c.id}
                   layout

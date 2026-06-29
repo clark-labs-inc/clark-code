@@ -1,9 +1,10 @@
-import { memo, useState } from "react";
+import { memo, useRef, useState, type ReactNode } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { Brain, ChevronRight } from "lucide-react";
+import { Brain, ChevronRight, Copy, Check } from "lucide-react";
 import { cn } from "../lib/cn";
+import { useCopy } from "../lib/clipboard";
 import { parseNarration } from "../lib/narration";
 import type { ContentBlock, Role } from "../core-bridge/types";
 
@@ -21,12 +22,61 @@ export const MD_CLASSES =
   "[&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-3 [&_blockquote]:text-ink-muted " +
   "[&_table]:my-2 [&_table]:w-full [&_table]:border-collapse [&_th]:border [&_th]:border-border-subtle [&_th]:px-2.5 [&_th]:py-1 [&_th]:text-left [&_th]:font-medium [&_th]:text-ink-secondary [&_td]:border [&_td]:border-border-subtle [&_td]:px-2.5 [&_td]:py-1";
 
+/** A small icon button that copies and briefly confirms. */
+function CopyButton({
+  text,
+  className,
+  label = "Copy",
+}: {
+  text: string;
+  className?: string;
+  label?: string;
+}) {
+  const [copied, copy] = useCopy();
+  return (
+    <button
+      type="button"
+      onClick={() => copy(text)}
+      aria-label={copied ? "Copied" : label}
+      title={copied ? "Copied" : label}
+      className={cn(
+        "grid place-items-center rounded-md text-ink-faint transition hover:bg-bg-hover hover:text-ink-secondary",
+        className,
+      )}
+    >
+      {copied ? <Check className="size-3.5 text-success" /> : <Copy className="size-3.5" />}
+    </button>
+  );
+}
+
+/** A fenced code block with a hover-reveal copy button. Reads the rendered text
+ *  off the DOM so it captures exactly what the user sees. */
+function CodeBlock({ children }: { children?: ReactNode }) {
+  const ref = useRef<HTMLPreElement>(null);
+  const [copied, copy] = useCopy();
+  return (
+    <div className="group/code relative">
+      <pre ref={ref}>{children}</pre>
+      <button
+        type="button"
+        onClick={() => copy(ref.current?.textContent ?? "")}
+        aria-label={copied ? "Copied" : "Copy code"}
+        title={copied ? "Copied" : "Copy code"}
+        className="absolute right-2 top-2 grid size-7 place-items-center rounded-md bg-bg-elevated/80 text-ink-faint opacity-0 ring-1 ring-border-subtle backdrop-blur transition hover:text-ink group-hover/code:opacity-100"
+      >
+        {copied ? <Check className="size-3.5 text-success" /> : <Copy className="size-3.5" />}
+      </button>
+    </div>
+  );
+}
+
 export function Md({ children }: { children: string }) {
   return (
     <Markdown
       remarkPlugins={[remarkGfm]}
       components={{
         a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noreferrer noopener" />,
+        pre: ({ node: _node, children }) => <CodeBlock>{children}</CodeBlock>,
       }}
     >
       {children}
@@ -163,7 +213,18 @@ function MessageImpl({
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.2, ease: [0.4, 0, 0.2, 1] }}
     >
-      {inner}
+      {role === "agent" && !streaming && body.trim() ? (
+        <div className="group/msg relative">
+          {inner}
+          <CopyButton
+            text={body}
+            label="Copy message"
+            className="absolute -top-1 right-0 size-7 bg-bg-elevated/80 opacity-0 ring-1 ring-border-subtle backdrop-blur group-hover/msg:opacity-100"
+          />
+        </div>
+      ) : (
+        inner
+      )}
     </motion.div>
   );
 }

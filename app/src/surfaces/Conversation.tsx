@@ -1,5 +1,6 @@
-import { memo, useEffect, useRef } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
+import { ArrowDown } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
 import { currentActivity } from "../lib/activity";
 import { Message } from "./Message";
@@ -93,9 +94,17 @@ export function Conversation() {
   // Pin to the bottom only when the user is already there — never yank them up
   // while they're reading scrollback. Instant (not smooth) keeps streaming stable.
   const stuck = useRef(true);
+  const [atBottom, setAtBottom] = useState(true);
   const onScroll = () => {
     const el = scrollRef.current;
-    if (el) stuck.current = el.scrollHeight - el.scrollTop - el.clientHeight < 96;
+    if (!el) return;
+    const bottom = el.scrollHeight - el.scrollTop - el.clientHeight < 96;
+    stuck.current = bottom;
+    if (bottom !== atBottom) setAtBottom(bottom);
+  };
+  const scrollToBottom = () => {
+    const el = scrollRef.current;
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
   };
 
   const { timeline, tool_calls: toolCalls, artifacts, runs, pending_permission } = snapshot;
@@ -197,6 +206,17 @@ export function Conversation() {
           )}
         </AnimatePresence>
       </div>
+
+      {/* Jump-to-latest: a sticky pill (stays in the scroll flow — no positioned
+          ancestor) shown only when the user has scrolled up during/after a run. */}
+      {!atBottom && visible.length > 0 && (
+        <button
+          onClick={scrollToBottom}
+          className="sticky bottom-4 left-1/2 z-10 mx-auto flex w-fit -translate-x-1/2 items-center gap-1.5 rounded-full bg-bg-elevated px-3 py-1.5 text-xs font-medium text-ink-secondary shadow-lg ring-1 ring-border-subtle transition hover:text-ink"
+        >
+          <ArrowDown className="size-3.5" /> Jump to latest
+        </button>
+      )}
     </div>
   );
 }

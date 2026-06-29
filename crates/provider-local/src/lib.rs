@@ -15,6 +15,7 @@
 mod checkpoint;
 mod config;
 mod engine;
+mod files;
 mod llm;
 mod mcp;
 mod memory;
@@ -26,6 +27,7 @@ mod tools;
 
 pub use checkpoint::{is_git_repo, restore_checkpoint};
 pub use config::{LocalConfig, DEFAULT_BASE_URL, DEFAULT_RESEARCH_MODEL};
+pub use files::list_project_files;
 pub use mcp::{probe_mcp_servers, McpServerConfig, McpStatus};
 pub use memory::{
     extract_repo_memory, has_memory, load_facts, load_index, memory_dir, MemoryFact, MemoryHeader,

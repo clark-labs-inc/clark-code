@@ -53,6 +53,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_google_auth::init())
         .manage(AppState::new())
         .manage(terminal::Terminals::default())
@@ -66,6 +67,8 @@ pub fn run() {
             commands::respond,
             commands::local_extract_memory,
             commands::local_list_memory,
+            commands::local_list_files,
+            commands::open_path,
             commands::clark_exchange_google_idtoken,
             commands::clark_provision_code_key,
             commands::clark_billing_me,
