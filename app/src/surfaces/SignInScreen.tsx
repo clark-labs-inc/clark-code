@@ -72,7 +72,7 @@ export function SignInScreen() {
         )}
         {error && <p className="mt-3 text-xs text-danger">{error}</p>}
 
-        <p className="mt-8 text-xs text-ink-faint">Private beta · Clark Desktop</p>
+        <p className="mt-8 text-xs text-ink-faint">Private beta · Clark Code</p>
       </motion.div>
     </div>
   );

@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "Clark Desktop — cross-platform agent client."
+description = "Clark Code — local AI coding agent."
 default-run = "clark-desktop"
 
 [lib]

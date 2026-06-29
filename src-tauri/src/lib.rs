@@ -84,5 +84,5 @@ pub fn run() {
             terminal::terminal_close,
         ])
         .run(tauri::generate_context!())
-        .expect("error while running Clark Desktop");
+        .expect("error while running Clark Code");
 }

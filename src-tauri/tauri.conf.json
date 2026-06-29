@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Clark Desktop",
+  "productName": "Clark Code",
   "version": "0.1.1",
   "identifier": "com.clark.desktop",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Clark Desktop",
+        "title": "Clark Code",
         "width": 1320,
         "height": 860,
         "minWidth": 920,
