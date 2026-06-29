@@ -66,19 +66,27 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # macOS is built unsigned/ad-hoc (no Apple certs configured). Passing
-          # empty APPLE_* secrets makes `security import` fail, so they are
-          # intentionally omitted; add them back only once real certs exist.
+          # macOS code signing + notarization. tauri-action only acts on these on
+          # the macOS leg, and only when APPLE_CERTIFICATE is non-empty, so they
+          # are inert on Windows/Linux and the build falls back to unsigned if the
+          # secrets are ever removed. Identity: Developer ID Application: Clark
+          # Labs Inc. (TZWY28WKAP); notarization via the admin@ Apple ID's
+          # app-specific password.
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "Clark Desktop ${{ github.ref_name }}"
           releaseBody: |
             Download the installer for your platform from the assets below.
 
-            **macOS** builds are not yet notarized, so Gatekeeper blocks them on
-            first launch. After dragging Clark Desktop into Applications, open
-            **System Settings → Privacy & Security → Open Anyway**, or run:
-            `xattr -dr com.apple.quarantine "/Applications/Clark Desktop.app"`
+            **macOS** builds are signed with our Apple Developer ID (Clark Labs
+            Inc.) and notarized by Apple — drag Clark Desktop into Applications
+            and open it, no Gatekeeper workaround needed.
 
             **Windows** SmartScreen may warn on the unsigned installer. Click
             **More info → Run anyway**.
