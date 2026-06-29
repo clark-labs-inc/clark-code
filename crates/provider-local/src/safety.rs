@@ -60,26 +60,136 @@ impl Classification {
 
 /// Read-only / inspection programs — never mutate, safe to run unprompted.
 const READONLY: &[&str] = &[
-    "ls", "cat", "head", "tail", "pwd", "echo", "printf", "which", "type", "whoami", "id", "date",
-    "env", "printenv", "grep", "egrep", "fgrep", "rg", "ag", "find", "fd", "wc", "sort", "uniq",
-    "cut", "tr", "awk", "sed", "diff", "tree", "file", "stat", "du", "df", "basename", "dirname",
-    "realpath", "readlink", "uname", "hostname", "ps", "top", "true", "false", "test", "tee",
-    "column", "jq", "yq", "xargs", "tar", "unzip", "gzip", "gunzip", "base64", "md5", "shasum",
-    "sha256sum", "nproc", "sleep", "clear",
+    "ls",
+    "cat",
+    "head",
+    "tail",
+    "pwd",
+    "echo",
+    "printf",
+    "which",
+    "type",
+    "whoami",
+    "id",
+    "date",
+    "env",
+    "printenv",
+    "grep",
+    "egrep",
+    "fgrep",
+    "rg",
+    "ag",
+    "find",
+    "fd",
+    "wc",
+    "sort",
+    "uniq",
+    "cut",
+    "tr",
+    "awk",
+    "sed",
+    "diff",
+    "tree",
+    "file",
+    "stat",
+    "du",
+    "df",
+    "basename",
+    "dirname",
+    "realpath",
+    "readlink",
+    "uname",
+    "hostname",
+    "ps",
+    "top",
+    "true",
+    "false",
+    "test",
+    "tee",
+    "column",
+    "jq",
+    "yq",
+    "xargs",
+    "tar",
+    "unzip",
+    "gzip",
+    "gunzip",
+    "base64",
+    "md5",
+    "shasum",
+    "sha256sum",
+    "nproc",
+    "sleep",
+    "clear",
 ];
 
 /// Build / test / lint programs — standard dev loop, run without nagging.
 const DEV_TOOLS: &[&str] = &[
-    "cargo", "rustc", "rustfmt", "clippy-driver", "npm", "pnpm", "yarn", "bun", "node", "deno",
-    "tsc", "eslint", "prettier", "make", "cmake", "go", "python", "python3", "pip", "pip3", "pytest",
-    "ruff", "mypy", "black", "isort", "poetry", "uv", "ruby", "rake", "bundle", "gradle", "mvn",
-    "dotnet", "java", "javac", "php", "composer", "swift", "xcodebuild", "ctest", "ninja", "cmake",
+    "cargo",
+    "rustc",
+    "rustfmt",
+    "clippy-driver",
+    "npm",
+    "pnpm",
+    "yarn",
+    "bun",
+    "node",
+    "deno",
+    "tsc",
+    "eslint",
+    "prettier",
+    "make",
+    "cmake",
+    "go",
+    "python",
+    "python3",
+    "pip",
+    "pip3",
+    "pytest",
+    "ruff",
+    "mypy",
+    "black",
+    "isort",
+    "poetry",
+    "uv",
+    "ruby",
+    "rake",
+    "bundle",
+    "gradle",
+    "mvn",
+    "dotnet",
+    "java",
+    "javac",
+    "php",
+    "composer",
+    "swift",
+    "xcodebuild",
+    "ctest",
+    "ninja",
+    "cmake",
 ];
 
 /// Read-only git subcommands.
 const GIT_READONLY: &[&str] = &[
-    "status", "diff", "log", "show", "branch", "remote", "rev-parse", "ls-files", "blame", "config",
-    "describe", "tag", "stash", "fetch", "rev-list", "shortlog", "reflog", "cat-file", "for-each-ref",
+    "status",
+    "diff",
+    "log",
+    "show",
+    "branch",
+    "remote",
+    "rev-parse",
+    "ls-files",
+    "blame",
+    "config",
+    "describe",
+    "tag",
+    "stash",
+    "fetch",
+    "rev-list",
+    "shortlog",
+    "reflog",
+    "cat-file",
+    "for-each-ref",
 ];
 
 /// git subcommands that can destroy local work.
@@ -170,9 +280,7 @@ fn classify_segment(segment: &str) -> Classification {
             }
         }
         "rmdir" => Classification::new(CommandRisk::Caution, "removes a directory"),
-        "kill" | "killall" | "pkill" => {
-            Classification::new(CommandRisk::Danger, "kills processes")
-        }
+        "kill" | "killall" | "pkill" => Classification::new(CommandRisk::Danger, "kills processes"),
         "chmod" | "chown" | "chgrp" => {
             if flags.contains('r') {
                 Classification::new(CommandRisk::Danger, "recursive permission change")
@@ -199,7 +307,9 @@ fn classify_segment(segment: &str) -> Classification {
         p if INSTALLERS.contains(&p) => {
             Classification::new(CommandRisk::Caution, "installs system packages")
         }
-        p if is_publish(p, &lower) => Classification::new(CommandRisk::Danger, "publishes / deploys"),
+        p if is_publish(p, &lower) => {
+            Classification::new(CommandRisk::Danger, "publishes / deploys")
+        }
         p if READONLY.contains(&p) => Classification::safe(),
         p if DEV_TOOLS.contains(&p) => Classification::safe(),
         _ => Classification::new(CommandRisk::Caution, "unrecognized command"),
@@ -253,7 +363,10 @@ fn classify_node(tokens: &[&str]) -> Classification {
     if rest.contains("publish") {
         return Classification::new(CommandRisk::Danger, "publishes a package");
     }
-    if matches!(sub.as_str(), "install" | "i" | "add" | "ci" | "update" | "upgrade" | "remove" | "uninstall") {
+    if matches!(
+        sub.as_str(),
+        "install" | "i" | "add" | "ci" | "update" | "upgrade" | "remove" | "uninstall"
+    ) {
         return Classification::new(CommandRisk::Caution, "changes dependencies");
     }
     // npm test / run build / run lint, etc.
@@ -281,7 +394,7 @@ fn contains_root_target(lower: &str) -> bool {
     lower.split_whitespace().any(|t| {
         matches!(t, "/" | "/*" | "~" | "~/" | "/." | "$home" | "${home}")
             || t.starts_with("/*")
-            || (t == "*" )
+            || (t == "*")
     })
 }
 
@@ -303,7 +416,7 @@ fn is_root_destroyer(lower: &str) -> bool {
 /// Split a command line into logically separate commands on shell operators.
 fn split_segments(command: &str) -> Vec<&str> {
     command
-        .split(|c| c == ';' || c == '\n')
+        .split([';', '\n'])
         .flat_map(|s| s.split("&&"))
         .flat_map(|s| s.split("||"))
         .flat_map(|s| s.split('|'))

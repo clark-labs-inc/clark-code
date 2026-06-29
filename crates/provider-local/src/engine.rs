@@ -527,7 +527,12 @@ async fn hard_refusal(tc: &TurnContext, name: &str, info: &GateInfo) -> Option<S
 /// (a `cargo test` allow never approves `cargo test && rm -rf …`, which is
 /// classified Danger).
 async fn command_preapproved(tc: &TurnContext, name: &str, info: &GateInfo) -> bool {
-    if name != "bash" || !matches!(info.risk, Some(CommandRisk::Safe) | Some(CommandRisk::Caution)) {
+    if name != "bash"
+        || !matches!(
+            info.risk,
+            Some(CommandRisk::Safe) | Some(CommandRisk::Caution)
+        )
+    {
         return false;
     }
     let cmd = info.detail.clone().unwrap_or_default();

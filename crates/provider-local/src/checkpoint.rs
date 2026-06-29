@@ -180,8 +180,14 @@ mod tests {
         // Undo.
         restore_checkpoint(root, &sha).expect("restore");
 
-        assert_eq!(fs::read_to_string(root.join("keep.txt")).unwrap(), "original\n");
-        assert!(!root.join("new_file.txt").exists(), "created file should be gone");
+        assert_eq!(
+            fs::read_to_string(root.join("keep.txt")).unwrap(),
+            "original\n"
+        );
+        assert!(
+            !root.join("new_file.txt").exists(),
+            "created file should be gone"
+        );
         assert_eq!(
             fs::read_to_string(root.join("delete_me.txt")).unwrap(),
             "bye\n",

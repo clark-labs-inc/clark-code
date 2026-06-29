@@ -236,7 +236,9 @@ impl McpClient {
     pub fn executors(self: &Arc<Self>) -> Vec<Arc<dyn ToolExecutor>> {
         self.tools
             .iter()
-            .map(|def| Arc::new(McpTool::new(&self.name, def, self.clone())) as Arc<dyn ToolExecutor>)
+            .map(|def| {
+                Arc::new(McpTool::new(&self.name, def, self.clone())) as Arc<dyn ToolExecutor>
+            })
             .collect()
     }
 }
@@ -283,7 +285,10 @@ fn parse_tool_def(v: &Value) -> Option<McpToolDef> {
 }
 
 fn extract_content(result: &Value) -> (String, bool) {
-    let is_error = result.get("isError").and_then(Value::as_bool).unwrap_or(false);
+    let is_error = result
+        .get("isError")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     let text = result
         .get("content")
         .and_then(Value::as_array)
@@ -388,8 +393,14 @@ mod tests {
 
     #[test]
     fn namespaces_and_sanitizes_tool_names() {
-        assert_eq!(namespaced_tool_name("github", "create_issue"), "mcp_github_create_issue");
-        assert_eq!(namespaced_tool_name("my server", "do.thing"), "mcp_my_server_do_thing");
+        assert_eq!(
+            namespaced_tool_name("github", "create_issue"),
+            "mcp_github_create_issue"
+        );
+        assert_eq!(
+            namespaced_tool_name("my server", "do.thing"),
+            "mcp_my_server_do_thing"
+        );
         assert!(is_mcp_tool("mcp_github_create_issue"));
         assert!(!is_mcp_tool("read_file"));
         assert!(namespaced_tool_name(&"x".repeat(80), "y").len() <= 64);
