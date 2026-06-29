@@ -76,14 +76,28 @@ pub fn create_checkpoint(root: &Path) -> Option<String> {
         return None;
     }
 
-    // Build a commit for the snapshot, parented on HEAD when one exists.
+    // Build a commit for the snapshot, parented on HEAD when one exists. Set an
+    // explicit author/committer identity so this works even when the user has no
+    // global `user.name`/`user.email` configured — otherwise `commit-tree` fails
+    // with "committer identity unknown".
     let head = git_ok(root, &["rev-parse", "HEAD"]).ok();
     let mut args: Vec<&str> = vec!["commit-tree", tree.as_str(), "-m", "clark checkpoint"];
     if let Some(h) = head.as_deref() {
         args.push("-p");
         args.push(h);
     }
-    let sha = git_ok(root, &args).ok()?;
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(&args)
+        .env("GIT_AUTHOR_NAME", "Clark Code")
+        .env("GIT_AUTHOR_EMAIL", "checkpoint@clark.local")
+        .env("GIT_COMMITTER_NAME", "Clark Code")
+        .env("GIT_COMMITTER_EMAIL", "checkpoint@clark.local")
+        .output()
+        .ok()
+        .filter(|o| o.status.success())?;
+    let sha = String::from_utf8_lossy(&out.stdout).trim().to_string();
     if sha.is_empty() {
         return None;
     }
