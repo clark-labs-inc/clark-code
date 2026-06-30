@@ -154,7 +154,7 @@ jobs:
 
           latest_alias_for() {
             case "$1" in
-              *.dmg) echo "Clark.Code_universal.dmg" ;;
+              *.dmg) echo "ClarkCode.dmg" ;;
               *x64-setup.exe) echo "Clark.Code_x64-setup.exe" ;;
               *.msi) echo "Clark.Code_x64_en-US.msi" ;;
               *.AppImage) echo "Clark.Code_amd64.AppImage" ;;
