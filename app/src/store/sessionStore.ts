@@ -57,6 +57,7 @@ import {
 } from "../lib/cloudHistory";
 import { provisionCodeKey, billingMe, type BillingSummary } from "../lib/account";
 import { notify } from "../lib/notify";
+import { checkAndStageUpdate, relaunchApp, type StagedUpdate } from "../lib/updater";
 
 /** A follow-up message the user sent while a run was active. It sends
  *  automatically when the run finishes — Codex-style, never interrupting. */
@@ -141,6 +142,8 @@ interface SessionState {
   /** Billing summary (plan, subscription, credits) from Clark; null until loaded. */
   billing: BillingSummary | null;
   loadingBilling: boolean;
+  /** A downloaded + staged app update awaiting a relaunch to apply. */
+  update: StagedUpdate | null;
 
   init: () => Promise<void>;
   loadBilling: () => Promise<void>;
@@ -172,6 +175,10 @@ interface SessionState {
   setMcpOpen: (open: boolean) => void;
   setPaletteOpen: (open: boolean) => void;
   togglePalette: () => void;
+  /** Check for, download, verify, and stage a newer version (no-op outside the app). */
+  checkForUpdate: () => Promise<void>;
+  /** Relaunch into the staged update. */
+  applyUpdate: () => Promise<void>;
   toggleSidebar: () => void;
   setSidebarCollapsed: (collapsed: boolean) => void;
   cancelActive: () => Promise<void>;
@@ -205,6 +212,16 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   sidebarCollapsed: false,
   billing: null,
   loadingBilling: false,
+  update: null,
+
+  checkForUpdate: async () => {
+    if (get().update) return; // already staged
+    const staged = await checkAndStageUpdate();
+    if (staged) set({ update: staged });
+  },
+  applyUpdate: async () => {
+    await relaunchApp();
+  },
 
   loadBilling: async () => {
     const creds = cloudCreds(get().auth);
@@ -379,6 +396,10 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       void get().ensureCodeKey();
       void get().syncCloudIndex();
       void get().loadBilling();
+      // Auto-update: check shortly after launch, then every 6h. Downloads +
+      // verifies + stages in the background; the UI surfaces "Restart to update".
+      setTimeout(() => void get().checkForUpdate(), 4000);
+      setInterval(() => void get().checkForUpdate(), 6 * 60 * 60 * 1000);
     } catch (e) {
       set({ error: String(e) });
     }

@@ -1,5 +1,5 @@
 import { useEffect, useRef, type ReactNode } from "react";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { AnimatePresence, motion } from "motion/react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { NotebookText, X, RefreshCw, Sparkles, FolderGit2, FileText } from "lucide-react";
@@ -67,7 +67,6 @@ export function MemoryButton() {
 }
 
 function MemoryPopover() {
-  const reduce = useReducedMotion();
   const setOpen = useSessionStore((s) => s.setMemoryViewerOpen);
   const loading = useSessionStore((s) => s.loadingMemory);
   const overview = useSessionStore((s) => s.memoryOverview);
@@ -78,11 +77,11 @@ function MemoryPopover() {
 
   return (
     <motion.div
-      initial={reduce ? false : { opacity: 0, y: -6, scale: 0.98 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      exit={reduce ? { opacity: 0 } : { opacity: 0, y: -6, scale: 0.98 }}
-      transition={{ duration: 0.14 }}
-      className="absolute right-0 top-10 z-50 flex max-h-[70vh] w-[26rem] flex-col overflow-hidden rounded-xl border border-border bg-bg-elevated shadow-xl"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.1 }}
+      className="popover-surface absolute right-0 top-10 z-50 flex max-h-[70vh] w-[26rem] flex-col overflow-hidden rounded-xl border border-border bg-bg-elevated shadow-xl"
     >
       <header className="flex items-center gap-2 border-b border-border-subtle px-3 py-2.5">
         <NotebookText className="size-4 shrink-0 text-ink-muted" />

@@ -162,6 +162,19 @@ svg.lucide {
   outline: none;
 }
 
+/* WKWebView (Tauri's macOS webview) re-rasterizes a box-shadow on every frame of
+   a transform animation unless the element sits on its own compositing layer —
+   which is why the shadowed popovers/menus flicker on macOS but not in Chrome.
+   Pin them to a stable GPU layer so the shadow is painted once, then only the
+   layer is transformed. `will-change` is the modern promoter; backface-visibility
+   is the WebKit belt-and-suspenders. Neither sets `transform`, so they don't
+   fight Motion's inline animation. */
+.popover-surface {
+  will-change: transform;
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
+}
+
 @keyframes spin {
   to { transform: rotate(360deg); }
 }

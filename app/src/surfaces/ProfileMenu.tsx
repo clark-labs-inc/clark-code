@@ -85,11 +85,11 @@ export function ProfileMenu() {
         {open && (
           <motion.div
             key="profile"
-            initial={{ opacity: 0, y: 4, scale: 0.98 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 4, scale: 0.98 }}
-            transition={{ duration: 0.12 }}
-            className="absolute right-0 top-full z-30 mt-2 w-72 rounded-xl bg-bg-elevated p-1 shadow-lg ring-1 ring-border-subtle"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.1 }}
+            className="popover-surface absolute right-0 top-full z-30 mt-2 w-72 rounded-xl bg-bg-elevated p-1 shadow-lg ring-1 ring-border-subtle"
           >
             <div className="px-3 py-2.5">
               <div className="truncate text-sm font-medium text-ink">{user.name}</div>

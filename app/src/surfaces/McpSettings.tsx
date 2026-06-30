@@ -223,12 +223,12 @@ export function McpSettings() {
           onClick={() => setOpen(false)}
         >
           <motion.div
-            initial={{ opacity: 0, y: 8, scale: 0.99 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 8, scale: 0.99 }}
-            transition={{ duration: 0.15 }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.12 }}
             onClick={(e) => e.stopPropagation()}
-            className="flex max-h-[80vh] w-full max-w-2xl flex-col rounded-2xl border border-border bg-bg-elevated shadow-2xl"
+            className="popover-surface flex max-h-[80vh] w-full max-w-2xl flex-col rounded-2xl border border-border bg-bg-elevated shadow-2xl"
           >
             <div className="flex items-center gap-2 border-b border-border-subtle px-4 py-3">
               <Blocks className="size-4 text-ink-secondary" />

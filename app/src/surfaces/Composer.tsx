@@ -100,11 +100,11 @@ function PermissionPill() {
           <motion.div
             key="menu"
             role="menu"
-            initial={{ opacity: 0, y: 4, scale: 0.98 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 4, scale: 0.98 }}
-            transition={{ duration: 0.12 }}
-            className="absolute bottom-full left-0 z-30 mb-2 w-72 rounded-xl bg-bg-elevated p-1 shadow-lg ring-1 ring-border-subtle"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.1 }}
+            className="popover-surface absolute bottom-full left-0 z-30 mb-2 w-72 rounded-xl bg-bg-elevated p-1 shadow-lg ring-1 ring-border-subtle"
           >
             <div className="px-2.5 py-1.5 text-[0.7rem] font-medium uppercase tracking-wide text-ink-faint">
               How should Clark act?
@@ -244,11 +244,11 @@ function AutocompletePopover({
 }) {
   return (
     <motion.div
-      initial={{ opacity: 0, y: 4 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: 4 }}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
       transition={{ duration: 0.1 }}
-      className="absolute bottom-full left-0 z-30 mb-2 max-h-64 w-80 overflow-y-auto rounded-xl bg-bg-elevated p-1 shadow-lg ring-1 ring-border-subtle"
+      className="popover-surface absolute bottom-full left-0 z-30 mb-2 max-h-64 w-80 overflow-y-auto rounded-xl bg-bg-elevated p-1 shadow-lg ring-1 ring-border-subtle"
     >
       {suggestions.map((s, i) => {
         const key = s.kind === "file" ? s.path : `/${s.cmd.name}`;

@@ -62,7 +62,7 @@ function CodeBlock({ children }: { children?: ReactNode }) {
         onClick={() => copy(ref.current?.textContent ?? "")}
         aria-label={copied ? "Copied" : "Copy code"}
         title={copied ? "Copied" : "Copy code"}
-        className="absolute right-2 top-2 grid size-7 place-items-center rounded-md bg-bg-elevated/80 text-ink-faint opacity-0 ring-1 ring-border-subtle backdrop-blur transition hover:text-ink group-hover/code:opacity-100"
+        className="absolute right-2 top-2 grid size-7 place-items-center rounded-md bg-bg-elevated text-ink-faint opacity-0 ring-1 ring-border-subtle transition hover:text-ink group-hover/code:opacity-100"
       >
         {copied ? <Check className="size-3.5 text-success" /> : <Copy className="size-3.5" />}
       </button>
@@ -219,7 +219,7 @@ function MessageImpl({
           <CopyButton
             text={body}
             label="Copy message"
-            className="absolute -top-1 right-0 size-7 bg-bg-elevated/80 opacity-0 ring-1 ring-border-subtle backdrop-blur group-hover/msg:opacity-100"
+            className="absolute -top-1 right-0 size-7 bg-bg-elevated opacity-0 ring-1 ring-border-subtle group-hover/msg:opacity-100"
           />
         </div>
       ) : (

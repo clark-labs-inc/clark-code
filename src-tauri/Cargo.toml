@@ -31,6 +31,10 @@ tauri-plugin-dialog = "2"
 # Native OS notifications — fire when a run finishes/fails or blocks on a
 # permission gate while the window is in the background.
 tauri-plugin-notification = "2"
+# Secure in-app auto-update: checks a signed manifest on the downloads CDN,
+# verifies the Ed25519 signature, swaps the bundle, and relaunches.
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
 # Native Google sign-in (system browser + localhost loopback). Returns a Google
 # ID token we exchange with Clark's Better Auth backend.
 tauri-plugin-google-auth = "0.5"

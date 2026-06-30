@@ -1,9 +1,27 @@
-import { Sun, Moon, FolderGit2, SquareTerminal, Blocks } from "lucide-react";
+import { Sun, Moon, FolderGit2, SquareTerminal, Blocks, RefreshCw } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
 import { projectName } from "../lib/localAgent";
 import { cn } from "../lib/cn";
 import { MemoryButton } from "./MemoryPanel";
 import { ProfileMenu } from "./ProfileMenu";
+
+/** Non-blocking "an update is downloaded — restart to apply" affordance. Shows
+ *  only when a newer version has been staged; clicking relaunches into it. */
+function UpdatePill() {
+  const update = useSessionStore((s) => s.update);
+  const apply = useSessionStore((s) => s.applyUpdate);
+  if (!update) return null;
+  return (
+    <button
+      onClick={() => void apply()}
+      title={`Clark Code ${update.version} is ready — relaunch to update`}
+      className="flex items-center gap-1.5 rounded-lg bg-accent/15 px-2.5 py-1 text-xs font-medium text-accent transition hover:bg-accent/25"
+    >
+      <RefreshCw className="size-3.5" />
+      Restart to update
+    </button>
+  );
+}
 
 export function TopBar({ dark, onToggleTheme }: { dark: boolean; onToggleTheme: () => void }) {
   const session = useSessionStore((s) => s.session);
@@ -18,7 +36,7 @@ export function TopBar({ dark, onToggleTheme }: { dark: boolean; onToggleTheme: 
   const isLocal = session?.provider === "local";
 
   return (
-    <header className="flex h-12 shrink-0 items-center gap-2.5 border-b border-border bg-bg-elevated/70 px-4 backdrop-blur">
+    <header className="flex h-12 shrink-0 items-center gap-2.5 border-b border-border bg-bg-elevated px-4">
       {session && (
         <div className="flex min-w-0 items-center gap-2">
           <span
@@ -42,6 +60,7 @@ export function TopBar({ dark, onToggleTheme }: { dark: boolean; onToggleTheme: 
       )}
 
       <div className="ml-auto flex items-center gap-1">
+        <UpdatePill />
         {session && isLocal && projectCwd && <MemoryButton />}
         <button
           onClick={() => setMcpOpen(true)}
