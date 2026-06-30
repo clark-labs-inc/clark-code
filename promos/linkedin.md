@@ -1,35 +1,23 @@
-# LinkedIn — Clark Code launch
+# LinkedIn — Clark Code
 
 **Image:** `clark-code-linkedin-1200x627.png` (1.91:1)
 
 ---
 
-## Recommended
+## Post
 
-We just drew a clean line between our two products — and shipped the second one.
+A note on something we've been building.
 
-**Clark Agent** is the cloud computer-use agent you know: give it a goal and it browses, books, and fills things out for you. It's for the open web.
+Clark Agent runs in the cloud and uses a computer on your behalf, mostly for things on the web. People kept asking for the same idea but for code, on their own machine — so we made Clark Code.
 
-**Clark Code** is new. It's an AI coding IDE that runs on your own machine and works inside your real repository — reading, editing, and running your code, locally or on a remote host over SSH. It keeps a memory of your codebase, and Clark's research is a tool-call away.
+It's a coding app for the Mac. It opens your real repository and works inside it: reading, editing, and running your code, locally or on a remote machine over SSH. It tries to hold onto how your project is put together, so you're not re-explaining it every session.
 
-Same brain. Two bodies:
-→ Clark Agent points at the web.
-→ Clark Code points at your repo.
-
-Clark Code for macOS is signed, notarized, and ready to open your project. Windows and Linux next.
-
-clarkchat.com/clark-code
-
-#AI #DeveloperTools #Coding #AIAgents #ClarkLabs
+It's early, and macOS only for now. If you write code and want to try it, it's at clarkchat.com/clark-code. We'd genuinely like the feedback.
 
 ---
 
-## Shorter variant
+## Shorter
 
-Same Clark, two places to point it.
+We've been working on Clark Code — a coding app for the Mac that lets Clark work inside your real repository, reading and editing and running your code (locally, or on a remote machine over SSH).
 
-Clark Agent works the web for you from the cloud. Clark Code is a new AI coding IDE that works inside your real repo, on your Mac — local or over SSH, with a memory layer for your codebase.
-
-Clark Code for macOS is signed & notarized. Download → clarkchat.com/clark-code
-
-#AI #DeveloperTools #Coding #ClarkLabs
+It's early and Mac-only for now. If you'd like to try it: clarkchat.com/clark-code
