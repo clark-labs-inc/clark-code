@@ -46,7 +46,7 @@ impl ToolExecutor for ReadFile {
             Ok(p) => p,
             Err(e) => return ToolOutcome::error(e),
         };
-        let bytes = match tokio::fs::read(&resolved).await {
+        let bytes = match ctx.executor.read(&resolved).await {
             Ok(b) => b,
             Err(e) => return ToolOutcome::error(format!("{path}: {e}")),
         };
@@ -86,7 +86,7 @@ impl ToolExecutor for ReadFile {
             out.push_str(&format!("\n… [truncated at {MAX_READ_BYTES} bytes]\n"));
         }
         // Mark the file read so the model may now edit/overwrite it.
-        ctx.note_read(&resolved);
+        ctx.note_read(&resolved).await;
         let loc = ctx.sandbox.display(&resolved);
         ToolOutcome::ok(out).with_location(loc, Some(offset as u32))
     }
@@ -120,19 +120,21 @@ impl ToolExecutor for ListDir {
             Ok(p) => p,
             Err(e) => return ToolOutcome::error(e),
         };
-        let mut entries = match tokio::fs::read_dir(&resolved).await {
-            Ok(rd) => rd,
+        let entries = match ctx.executor.read_dir(&resolved).await {
+            Ok(e) => e,
             Err(e) => return ToolOutcome::error(format!("{path}: {e}")),
         };
         let mut names: Vec<String> = Vec::new();
-        while let Ok(Some(entry)) = entries.next_entry().await {
+        for entry in entries {
             if names.len() >= MAX_LIST_ENTRIES {
                 names.push("… [truncated]".to_string());
                 break;
             }
-            let name = entry.file_name().to_string_lossy().to_string();
-            let is_dir = entry.file_type().await.map(|t| t.is_dir()).unwrap_or(false);
-            names.push(if is_dir { format!("{name}/") } else { name });
+            names.push(if entry.is_dir {
+                format!("{}/", entry.name)
+            } else {
+                entry.name
+            });
         }
         names.sort();
         let body = if names.is_empty() {
@@ -172,23 +174,26 @@ impl ToolExecutor for Glob {
             Err(e) => return ToolOutcome::error(e),
         };
         let root = ctx.sandbox.root().to_path_buf();
-        let full = root.join(&pattern);
-        let glob_pat = full.to_string_lossy().to_string();
-        let paths = match glob::glob(&glob_pat) {
-            Ok(p) => p,
+        // Match the pattern (relative to the root) against the project's files.
+        // `walk` already skips ignored dirs; this also makes glob work remotely.
+        let matcher = match glob::Pattern::new(&pattern) {
+            Ok(m) => m,
             Err(e) => return ToolOutcome::error(format!("invalid glob `{pattern}`: {e}")),
         };
+        let entries = match ctx.executor.walk(&root).await {
+            Ok(e) => e,
+            Err(e) => return ToolOutcome::error(e),
+        };
         let mut hits: Vec<(std::time::SystemTime, String)> = Vec::new();
-        for entry in paths.flatten() {
-            if is_ignored(&entry) || !entry.starts_with(&root) {
+        for entry in entries {
+            let Ok(rel) = entry.path.strip_prefix(&root) else {
+                continue;
+            };
+            if !matcher.matches_path(rel) {
                 continue;
             }
-            let mtime = super::mtime_of(&entry).unwrap_or(std::time::UNIX_EPOCH);
-            let rel = entry
-                .strip_prefix(&root)
-                .map(|p| p.display().to_string())
-                .unwrap_or_else(|_| entry.display().to_string());
-            hits.push((mtime, rel));
+            let mtime = entry.modified.unwrap_or(std::time::UNIX_EPOCH);
+            hits.push((mtime, rel.display().to_string()));
             if hits.len() >= MAX_LIST_ENTRIES {
                 break;
             }
@@ -257,8 +262,10 @@ impl ToolExecutor for WriteFile {
         // Capture the prior contents so the result is a real diff (added/removed
         // lines), matching edit_file. New files diff against empty → all adds.
         let original = if existed {
-            tokio::fs::read_to_string(&resolved)
+            ctx.executor
+                .read(&resolved)
                 .await
+                .map(|b| String::from_utf8_lossy(&b).to_string())
                 .unwrap_or_default()
         } else {
             String::new()
@@ -270,20 +277,20 @@ impl ToolExecutor for WriteFile {
         } else {
             resolved.clone()
         };
-        if let Err(e) = ctx.guard_mutation(&key, false) {
+        if let Err(e) = ctx.guard_mutation(&key, false).await {
             return ToolOutcome::error(e);
         }
         if let Some(parent) = resolved.parent() {
-            if let Err(e) = tokio::fs::create_dir_all(parent).await {
+            if let Err(e) = ctx.executor.create_dir_all(parent).await {
                 return ToolOutcome::error(format!("creating {}: {e}", parent.display()));
             }
         }
-        if let Err(e) = tokio::fs::write(&resolved, content.as_bytes()).await {
+        if let Err(e) = ctx.executor.write(&resolved, content.as_bytes()).await {
             return ToolOutcome::error(format!("{path}: {e}"));
         }
         // The file now reflects what the model wrote, so further edits are safe.
         if let Ok(canon) = resolved.canonicalize() {
-            ctx.note_read(&canon);
+            ctx.note_read(&canon).await;
         }
         let verb = if existed { "Overwrote" } else { "Created" };
         let summary = format!("{verb} {path} ({} bytes).", content.len());
@@ -363,11 +370,11 @@ impl ToolExecutor for EditFile {
             Ok(p) => p,
             Err(e) => return ToolOutcome::error(e),
         };
-        if let Err(e) = ctx.guard_mutation(&resolved, true) {
+        if let Err(e) = ctx.guard_mutation(&resolved, true).await {
             return ToolOutcome::error(e);
         }
-        let original = match tokio::fs::read_to_string(&resolved).await {
-            Ok(s) => s,
+        let original = match ctx.executor.read(&resolved).await {
+            Ok(b) => String::from_utf8_lossy(&b).to_string(),
             Err(e) => return ToolOutcome::error(format!("{path}: {e}")),
         };
         let count = original.matches(&old).count();
@@ -384,11 +391,11 @@ impl ToolExecutor for EditFile {
         } else {
             original.replacen(&old, &new, 1)
         };
-        if let Err(e) = tokio::fs::write(&resolved, updated.as_bytes()).await {
+        if let Err(e) = ctx.executor.write(&resolved, updated.as_bytes()).await {
             return ToolOutcome::error(format!("{path}: {e}"));
         }
         // Refresh the read record so chained edits to the same file are allowed.
-        ctx.note_read(&resolved);
+        ctx.note_read(&resolved).await;
         let line = original[..original.find(&old).unwrap_or(0)]
             .matches('\n')
             .count() as u32
@@ -453,6 +460,7 @@ mod tests {
     fn ctx(dir: &std::path::Path) -> ToolCtx {
         ToolCtx {
             sandbox: Arc::new(Sandbox::new(dir).unwrap()),
+            executor: Arc::new(crate::exec::LocalExecutor),
             reads: Arc::new(Mutex::new(ReadTracker::default())),
             cancel: CancellationToken::new(),
         }

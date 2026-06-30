@@ -4,7 +4,6 @@
 use agent_core::domain::ToolKind;
 use async_trait::async_trait;
 use serde_json::{json, Value};
-use walkdir::WalkDir;
 
 use super::{arg_str, arg_str_opt, ToolCtx, ToolExecutor, ToolOutcome};
 
@@ -67,29 +66,34 @@ impl ToolExecutor for Grep {
         let mut total = 0usize;
         let mut truncated = false;
 
-        'walk: for entry in WalkDir::new(&base)
-            .into_iter()
-            .filter_entry(|e| !super::fs::is_ignored(e.path()))
-        {
+        // The executor yields files only, already skipping ignored dirs — on the
+        // local machine today, on the remote host once `RemoteExecutor` lands.
+        let entries = match ctx.executor.walk(&base).await {
+            Ok(e) => e,
+            Err(e) => return ToolOutcome::error(e),
+        };
+
+        'walk: for entry in &entries {
             if ctx.cancel.is_cancelled() {
                 break;
             }
-            let Ok(entry) = entry else { continue };
-            if !entry.file_type().is_file() {
-                continue;
-            }
-            let path = entry.path();
+            let path = entry.path.as_path();
             if let Some(filter) = &name_filter {
                 let name = path.file_name().map(|n| n.to_string_lossy().to_string());
                 if !name.map(|n| filter.matches(&n)).unwrap_or(false) {
                     continue;
                 }
             }
-            if entry.metadata().map(|m| m.len()).unwrap_or(0) > MAX_FILE_BYTES {
+            if entry.len > MAX_FILE_BYTES {
                 continue;
             }
-            let Ok(text) = std::fs::read_to_string(path) else {
-                continue; // skip non-UTF-8 / binary
+            let Ok(text) = ctx
+                .executor
+                .read(path)
+                .await
+                .and_then(|b| String::from_utf8(b).map_err(|_| "non-utf8".to_string()))
+            else {
+                continue; // skip non-UTF-8 / binary / unreadable
             };
             let mut file_count = 0usize;
             for (i, line) in text.lines().enumerate() {
@@ -151,6 +155,7 @@ mod tests {
             sandbox: Arc::new(Sandbox::new(dir).unwrap()),
             reads: Arc::new(Mutex::new(ReadTracker::default())),
             cancel: CancellationToken::new(),
+            executor: Arc::new(crate::exec::LocalExecutor),
         }
     }
 

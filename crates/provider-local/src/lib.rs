@@ -15,6 +15,7 @@
 mod checkpoint;
 mod config;
 mod engine;
+mod exec;
 mod files;
 mod llm;
 mod mcp;

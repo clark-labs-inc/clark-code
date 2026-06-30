@@ -2,7 +2,6 @@
 //! in the sandbox (a command can reach anywhere), which is why it is `mutating`
 //! and defaults to requiring user confirmation. Output is captured and bounded.
 
-use std::process::Stdio;
 use std::time::Duration;
 
 use agent_core::domain::ToolKind;
@@ -52,36 +51,23 @@ impl ToolExecutor for Bash {
             .unwrap_or(DEFAULT_TIMEOUT_MS)
             .min(MAX_TIMEOUT_MS);
 
-        let mut cmd = tokio::process::Command::new("/bin/sh");
-        cmd.arg("-c")
-            .arg(&command)
-            .current_dir(ctx.sandbox.root())
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-
-        let child = match cmd.spawn() {
-            Ok(c) => c,
-            Err(e) => return ToolOutcome::error(format!("failed to spawn shell: {e}")),
+        // Runs on the local machine, or on the remote host for a remote project —
+        // the executor decides. `cwd` is the project root either way.
+        let output = match ctx
+            .executor
+            .exec(
+                &command,
+                ctx.sandbox.root(),
+                Duration::from_millis(timeout_ms),
+                &ctx.cancel,
+            )
+            .await
+        {
+            Ok(o) => o,
+            Err(e) => return ToolOutcome::error(e),
         };
 
-        let wait = child.wait_with_output();
-        let output = tokio::select! {
-            _ = ctx.cancel.cancelled() => {
-                return ToolOutcome::error("command cancelled");
-            }
-            res = tokio::time::timeout(Duration::from_millis(timeout_ms), wait) => res,
-        };
-
-        let output = match output {
-            Ok(Ok(out)) => out,
-            Ok(Err(e)) => return ToolOutcome::error(format!("command failed: {e}")),
-            Err(_) => {
-                return ToolOutcome::error(format!("command timed out after {timeout_ms} ms"))
-            }
-        };
-
-        let code = output.status.code();
+        let code = output.code;
         let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
         let mut body = String::new();
@@ -136,6 +122,7 @@ mod tests {
             sandbox: Arc::new(Sandbox::new(dir).unwrap()),
             reads: Arc::new(Mutex::new(ReadTracker::default())),
             cancel: CancellationToken::new(),
+            executor: Arc::new(crate::exec::LocalExecutor),
         }
     }
 

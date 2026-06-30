@@ -38,6 +38,9 @@ pub struct LocalAgentProvider {
     reads: Arc<std::sync::Mutex<ReadTracker>>,
     /// Cancellation token for the in-flight run (replaced each prompt).
     cancel: CancellationToken,
+    /// Where this session's tool I/O runs — local today, remote (over the
+    /// exec-server) once a remote project is selected. Chosen in `new_session`.
+    executor: Arc<dyn crate::exec::Executor>,
     run_counter: AtomicU64,
     /// Last MCP connection result, surfaced to the settings UI.
     mcp_status: Vec<crate::mcp::McpStatus>,
@@ -60,6 +63,7 @@ impl LocalAgentProvider {
             control: Arc::new(Mutex::new(RunControl::default())),
             reads: Arc::new(std::sync::Mutex::new(ReadTracker::default())),
             cancel: CancellationToken::new(),
+            executor: Arc::new(crate::exec::LocalExecutor),
             run_counter: AtomicU64::new(0),
             mcp_status: Vec::new(),
         }
@@ -179,6 +183,7 @@ impl Provider for LocalAgentProvider {
                 sandbox,
                 reads: self.reads.clone(),
                 cancel,
+                executor: self.executor.clone(),
             },
             session: self.session.clone(),
             control: self.control.clone(),

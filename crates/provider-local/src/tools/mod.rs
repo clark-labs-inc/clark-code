@@ -63,11 +63,6 @@ impl ReadTracker {
     }
 }
 
-/// The current mtime of a path, if it can be read.
-pub(crate) fn mtime_of(path: &Path) -> Option<SystemTime> {
-    std::fs::metadata(path).and_then(|m| m.modified()).ok()
-}
-
 /// How a tool is gated before it runs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PermissionMode {
@@ -92,8 +87,11 @@ impl PermissionMode {
 
 /// Per-invocation context handed to every tool.
 pub struct ToolCtx {
-    /// Project-root containment for local file tools.
+    /// Project-root containment for file tools.
     pub sandbox: Arc<Sandbox>,
+    /// The execution backend the tools perform their I/O through — local today,
+    /// or a remote host (over the exec-server) for a remote project.
+    pub executor: Arc<dyn crate::exec::Executor>,
     /// Session-scoped read tracker enforcing read-before-edit/write.
     pub reads: Arc<Mutex<ReadTracker>>,
     /// Fires when the run is cancelled; long tools should bail on it.
@@ -102,8 +100,9 @@ pub struct ToolCtx {
 
 impl ToolCtx {
     /// Record a successful read of `path` (canonical) at its current mtime.
-    pub(crate) fn note_read(&self, path: &Path) {
-        if let Some(mtime) = mtime_of(path) {
+    /// mtime comes from the executor, so the invariant holds for remote files too.
+    pub(crate) async fn note_read(&self, path: &Path) {
+        if let Some(mtime) = self.executor.mtime(path).await {
             if let Ok(mut reads) = self.reads.lock() {
                 reads.record(path, mtime);
             }
@@ -112,8 +111,8 @@ impl ToolCtx {
 
     /// Verify `path` may be mutated, returning a model-facing error if not.
     /// `must_exist=false` (write) lets brand-new files through without a read.
-    pub(crate) fn guard_mutation(&self, path: &Path, must_exist: bool) -> Result<(), String> {
-        let current = mtime_of(path);
+    pub(crate) async fn guard_mutation(&self, path: &Path, must_exist: bool) -> Result<(), String> {
+        let current = self.executor.mtime(path).await;
         if current.is_none() {
             // File doesn't exist: only writes (creating it) are allowed.
             return if must_exist {
