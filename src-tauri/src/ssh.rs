@@ -30,7 +30,7 @@ use std::process::Stdio;
 use std::time::{Duration, Instant};
 
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::process::{Child, Command};
+use tokio::process::{Child, ChildStdin, Command};
 
 /// How long to wait on any single ssh control operation.
 const SSH_CONNECT_TIMEOUT: &str = "10";
@@ -46,15 +46,21 @@ pub struct RemoteSpec {
     pub local_binary: PathBuf,
 }
 
-/// A live remote connection. Dropping it kills both ssh channels (and with them
-/// the remote server, which exits when its controlling channel closes).
+/// A live remote connection. Field order matters: `_server_stdin` is declared
+/// first so it drops first — closing it sends EOF over the **still-open** ssh
+/// channel, which makes the remote watchdog kill the server (see
+/// [`start_server`]). This is why the server channel is *not* `kill_on_drop`: a
+/// SIGKILLed ssh client doesn't cleanly close its channel without keepalives, so
+/// the remote process would orphan. The same EOF fires if the whole app dies
+/// (the OS closes the pipe), so the remote is reaped either way. The tunnel is a
+/// plain forwarder with no remote process, so `kill_on_drop` is fine there.
 pub struct RemoteConn {
     pub ws_url: String,
     pub token: String,
     pub remote_root: String,
     pub arch: RemoteArch,
-    // Held only to keep the channels (and thus the remote server + tunnel) alive;
-    // both are spawned with `kill_on_drop`.
+    /// The server channel's stdin — the remote-shutdown signal. Drops first.
+    _server_stdin: ChildStdin,
     _server: Child,
     _tunnel: Child,
 }
@@ -113,7 +119,7 @@ pub async fn connect(spec: &RemoteSpec) -> Result<RemoteConn, String> {
     ensure_binary(&spec.host, &remote_bin, &spec.local_binary).await?;
 
     let token = new_token();
-    let (server, remote_port) =
+    let (server, server_stdin, remote_port) =
         start_server(&spec.host, &remote_bin, &spec.remote_root, &token).await?;
     let local_port = free_local_port()?;
     let tunnel = open_tunnel(&spec.host, local_port, remote_port).await?;
@@ -124,6 +130,7 @@ pub async fn connect(spec: &RemoteSpec) -> Result<RemoteConn, String> {
         token,
         remote_root: spec.remote_root.clone(),
         arch,
+        _server_stdin: server_stdin,
         _server: server,
         _tunnel: tunnel,
     })
@@ -161,38 +168,48 @@ async fn ensure_binary(host: &str, remote_bin: &str, local_binary: &Path) -> Res
     Ok(())
 }
 
-/// Run the server in the foreground of an ssh channel and read its bound port.
-/// The token is fed over stdin so it never lands in argv.
+/// Run the server on an ssh channel and read its bound port. Two jobs are done
+/// over the channel's **stdin**, so nothing sensitive lands in argv:
+///   1. the first line carries the capability token;
+///   2. the channel then blocks on `cat`, so stdin EOF (the channel closing on
+///      our end) is the signal to `kill` the server — a no-PTY `ssh host cmd`
+///      otherwise leaves the remote process orphaned when the client goes away.
+///
+/// Returns the child, its (kept-open) stdin, and the remote port. The caller
+/// must hold the stdin for the connection's lifetime; dropping it shuts the
+/// server down.
 async fn start_server(
     host: &str,
     remote_bin: &str,
     root: &str,
     token: &str,
-) -> Result<(Child, u16), String> {
-    // The remote shell reads the token from stdin, exports it, then exec's the
-    // server (so the server is PID 1 of the channel and dies with it).
+) -> Result<(Child, ChildStdin, u16), String> {
     let remote_cmd = format!(
-        "read CLARK_EXEC_TOKEN; export CLARK_EXEC_TOKEN; exec {} --root {} --listen 127.0.0.1:0",
+        "read CLARK_EXEC_TOKEN; export CLARK_EXEC_TOKEN; \
+         {} --root {} --listen 127.0.0.1:0 & SRV=$!; \
+         cat >/dev/null; kill \"$SRV\" 2>/dev/null",
         shq(remote_bin),
         shq(root)
     );
+    // Deliberately NOT kill_on_drop: shutdown is via stdin-EOF → the remote
+    // watchdog (a SIGKILLed ssh client wouldn't cleanly close its channel). The
+    // local ssh process exits on its own once the remote command finishes.
     let mut child = Command::new("ssh")
         .args(["-o", &connect_timeout(), host, &remote_cmd])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .kill_on_drop(true)
         .spawn()
         .map_err(|e| format!("spawning ssh (server): {e}"))?;
 
-    if let Some(mut stdin) = child.stdin.take() {
-        stdin
-            .write_all(format!("{token}\n").as_bytes())
-            .await
-            .map_err(|e| format!("sending token: {e}"))?;
-        let _ = stdin.flush().await;
-        // stdin drops here → EOF; the server doesn't read it past the token.
-    }
+    let mut stdin = child.stdin.take().ok_or("ssh produced no stdin")?;
+    stdin
+        .write_all(format!("{token}\n").as_bytes())
+        .await
+        .map_err(|e| format!("sending token: {e}"))?;
+    let _ = stdin.flush().await;
+    // Keep `stdin` open — the remote `cat` blocks on it; closing it kills the
+    // server. (Returned to the caller, who holds it in RemoteConn.)
 
     let stdout = child.stdout.take().ok_or("ssh produced no stdout")?;
     let mut lines = BufReader::new(stdout).lines();
@@ -211,7 +228,7 @@ async fn start_server(
     // Keep draining stdout so the channel never back-pressures the server.
     tokio::spawn(async move { while let Ok(Some(_)) = lines.next_line().await {} });
 
-    Ok((child, port))
+    Ok((child, stdin, port))
 }
 
 async fn open_tunnel(host: &str, local_port: u16, remote_port: u16) -> Result<Child, String> {
