@@ -1,0 +1,360 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Newsreader:ital,wght@0,500;0,600;1,500&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --bg:#0d0d0d;--bg2:#161616;--bg3:#1f1f1f;--line:rgba(255,255,255,.08);--line2:rgba(255,255,255,.13);
+    --ink:#f5f5f4;--ink2:#b8b6b1;--ink3:#8c8a85;--faint:#6f6d68;
+    --accent:#f5f5f4;--grn:#7a9a6b;--red:#b07b7b;--amber:#c4b896;
+    --sans:'DM Sans',sans-serif;--mono:'JetBrains Mono',monospace;--disp:'Newsreader',serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{width:1280px;height:720px;overflow:hidden;background:#000}
+  body{font-family:var(--sans);-webkit-font-smoothing:antialiased}
+  #viewport{position:relative;width:1280px;height:720px;overflow:hidden;background:#000}
+  #stage{position:absolute;top:0;left:0;width:1280px;height:720px;transform-origin:0 0;background:var(--bg)}
+
+  /* ---- app chrome ---- */
+  .topbar{height:46px;display:flex;align-items:center;gap:12px;padding:0 16px;border-bottom:1px solid var(--line);background:var(--bg2)}
+  .lights{display:flex;gap:7px}.lights i{width:11px;height:11px;border-radius:50%;background:#3a3a3a;display:block}
+  .brand{display:flex;align-items:center;gap:8px;font-weight:600;font-size:14px;color:var(--ink)}
+  .brand .mk{width:18px;height:18px;border-radius:5px;background:#000;display:grid;place-items:center}
+  .brand .mk svg{width:13px;height:13px}
+  .proj{margin-left:6px;display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11.5px;color:var(--ink3);background:var(--bg3);padding:4px 9px;border-radius:7px}
+  .proj .g{width:7px;height:7px;border-radius:50%;background:var(--grn)}
+  .remotechip{display:none;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;color:var(--ink);background:#23351f;border:1px solid #3a5230;padding:4px 9px;border-radius:7px}
+  .spacer{flex:1}
+  .pdot{width:24px;height:24px;border-radius:50%;background:linear-gradient(135deg,#5a5a5a,#2a2a2a)}
+
+  .body{display:flex;height:674px}
+  .side{width:188px;border-right:1px solid var(--line);background:var(--bg);padding:12px 10px;display:flex;flex-direction:column;gap:7px}
+  .newbtn{display:flex;align-items:center;gap:7px;font-size:12.5px;font-weight:600;color:var(--ink);background:var(--bg3);border:1px solid var(--line2);border-radius:8px;padding:8px 10px;justify-content:center}
+  .conv{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--ink3);padding:7px 8px;border-radius:7px}
+  .conv.on{background:var(--bg2);color:var(--ink2)}
+  .conv .ic{width:13px;height:13px;color:var(--faint)}
+  .conv .badge{margin-left:auto;font-family:var(--mono);font-size:8.5px;color:var(--grn)}
+
+  .main{flex:1;display:flex;flex-direction:column;min-width:0;position:relative}
+  .thread{flex:1;padding:18px 26px;display:flex;flex-direction:column;gap:14px;overflow:hidden}
+
+  .umsg{align-self:flex-end;max-width:74%;background:var(--bg3);color:var(--ink);border:1px solid var(--line2);border-radius:13px 13px 4px 13px;padding:10px 14px;font-size:14px;line-height:1.4}
+  .caret{display:inline-block;width:2px;height:15px;background:var(--ink);vertical-align:-2px;margin-left:1px}
+
+  .amsg{max-width:90%;display:flex;flex-direction:column;gap:9px}
+  .arow{display:flex;gap:9px;align-items:flex-start}
+  .aavatar{width:22px;height:22px;border-radius:6px;background:#000;border:1px solid var(--line2);display:grid;place-items:center;flex:none;margin-top:1px}
+  .aavatar svg{width:13px;height:13px}
+  .atext{font-size:13.5px;color:var(--ink2);line-height:1.5}
+
+  /* quiet tool chips (the real app style) */
+  .tool{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--ink3);background:var(--bg2);border:1px solid var(--line);border-radius:8px;padding:7px 11px;width:fit-content;opacity:0;transform:translateY(6px)}
+  .tool .tk{font-family:var(--mono);font-size:10px;color:var(--faint);background:var(--bg3);padding:2px 6px;border-radius:5px}
+  .tool .ok{width:14px;height:14px;border-radius:50%;background:rgba(122,154,107,.18);color:var(--grn);display:grid;place-items:center}
+  .tool .ok svg{width:9px;height:9px}
+  .tool b{color:var(--ink);font-weight:600}
+
+  /* diff card */
+  .diff{border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#0a0a0a;width:fit-content;min-width:520px;opacity:0;transform:translateY(8px)}
+  .diff .dh{display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--bg2);border-bottom:1px solid var(--line);font-family:var(--mono);font-size:11px;color:var(--ink2)}
+  .diff .dh .fp{color:var(--ink)}
+  .diff .dh .meta{margin-left:auto;font-size:10px}.diff .dh .add{color:var(--grn)}.diff .dh .del{color:var(--red)}
+  .diff .code{padding:8px 0;font-family:var(--mono);font-size:12px;line-height:1.75}
+  .diff .ln{display:block;padding:0 14px;white-space:pre;color:var(--ink2);opacity:0}
+  .diff .ln .n{color:#4d4b47;display:inline-block;width:26px;user-select:none}
+  .diff .ln.add{background:rgba(122,154,107,.13);border-left:2px solid var(--grn);padding-left:12px}
+  .diff .ln.del{background:rgba(176,123,123,.12);border-left:2px solid var(--red);padding-left:12px;color:#9a8f8a}
+  .kw{color:var(--amber)}.fn{color:#cdd6c6}.mut{color:var(--ink3)}
+
+  /* terminal card */
+  .term{border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#070707;width:fit-content;min-width:520px;opacity:0;transform:translateY(8px)}
+  .term .th{padding:6px 12px;background:var(--bg2);border-bottom:1px solid var(--line);font-family:var(--mono);font-size:10px;color:var(--faint)}
+  .term .tb{padding:9px 14px;font-family:var(--mono);font-size:12px;line-height:1.7;color:var(--ink2)}
+  .term .tb .l{display:block;opacity:0}
+  .term .tb .p{color:var(--grn)}.term .tb .g{color:var(--grn)}
+
+  /* composer */
+  .composer{margin:0 22px 18px;border:1px solid var(--line2);border-radius:14px;background:var(--bg2);padding:12px 14px;display:flex;align-items:center;gap:10px}
+  .composer .ph{flex:1;font-size:14px;color:var(--ink);min-height:18px}
+  .composer .ph.empty{color:var(--faint)}
+  .composer .send{width:30px;height:30px;border-radius:8px;background:var(--ink);display:grid;place-items:center}
+  .composer .send svg{width:15px;height:15px;color:#0d0d0d}
+
+  /* ---- start card overlay ---- */
+  #start{position:absolute;inset:0;background:var(--bg);display:grid;place-items:center;z-index:5}
+  .card{width:430px;text-align:center}
+  .card .mk{width:42px;height:42px;border-radius:11px;background:#000;border:1px solid var(--line2);display:grid;place-items:center;margin:0 auto 14px}
+  .card .mk svg{width:26px;height:26px}
+  .card h1{font-size:21px;font-weight:600;color:var(--ink)}
+  .card p{margin-top:7px;font-size:13.5px;color:var(--ink3)}
+  .seg{display:flex;gap:5px;background:var(--bg2);border:1px solid var(--line);border-radius:11px;padding:5px;margin:18px 0 12px}
+  .seg b{flex:1;display:flex;align-items:center;justify-content:center;gap:6px;font-size:13px;font-weight:600;color:var(--ink3);padding:8px;border-radius:8px}
+  .seg b.on{background:var(--ink);color:#0d0d0d}
+  .seg b svg{width:14px;height:14px}
+  .field{display:flex;align-items:center;gap:8px;background:var(--bg2);border:1px solid var(--line);border-radius:9px;padding:9px 12px;font-family:var(--mono);font-size:12px;color:var(--ink2);text-align:left}
+  .field svg{width:14px;height:14px;color:var(--faint);flex:none}
+  .gobtn{margin-top:12px;width:100%;background:var(--ink);color:#0d0d0d;font-weight:600;font-size:14px;padding:11px;border-radius:11px;display:flex;align-items:center;justify-content:center;gap:8px}
+
+  /* ---- approval gate overlay ---- */
+  #gate{position:absolute;inset:0;background:rgba(0,0,0,.5);display:grid;place-items:center;z-index:6;opacity:0;pointer-events:none}
+  .gatecard{width:420px;background:var(--bg2);border:1px solid var(--line2);border-radius:16px;padding:18px;box-shadow:0 30px 70px -20px #000}
+  .gatecard .gh{display:flex;align-items:center;gap:9px;font-size:14px;font-weight:600;color:var(--ink)}
+  .gatecard .gh .warn{width:24px;height:24px;border-radius:7px;background:rgba(196,184,150,.16);color:var(--amber);display:grid;place-items:center}
+  .gatecard .gh .warn svg{width:14px;height:14px}
+  .gatecard .cmd{margin:12px 0;font-family:var(--mono);font-size:12.5px;color:var(--ink);background:#0a0a0a;border:1px solid var(--line);border-radius:8px;padding:10px 12px}
+  .gatecard .cmd .danger{color:var(--red)}
+  .gatecard .gsub{font-size:12px;color:var(--ink3);line-height:1.45}
+  .gatebtns{display:flex;gap:9px;margin-top:14px}
+  .gb{flex:1;text-align:center;font-size:13px;font-weight:600;padding:10px;border-radius:9px}
+  .gb.deny{background:var(--bg3);color:var(--ink2);border:1px solid var(--line2)}
+  .gb.allow{background:var(--ink);color:#0d0d0d;box-shadow:0 0 0 0 rgba(245,245,244,0)}
+
+  /* ---- end card overlay ---- */
+  #end{position:absolute;inset:0;background:var(--bg);display:grid;place-items:center;z-index:7;opacity:0}
+  .endwrap{text-align:center}
+  .endwrap .mk{width:54px;height:54px;border-radius:14px;background:#000;border:1px solid var(--line2);display:grid;place-items:center;margin:0 auto 16px}
+  .endwrap .mk svg{width:34px;height:34px}
+  .endwrap h2{font-family:var(--disp);font-weight:600;font-size:34px;color:var(--ink);letter-spacing:-.01em}
+  .endwrap p{margin-top:10px;font-size:15px;color:var(--ink2)}
+  .endwrap .dl{margin-top:20px;display:inline-flex;align-items:center;gap:8px;background:var(--ink);color:#0d0d0d;font-weight:600;font-size:15px;padding:12px 22px;border-radius:12px}
+
+  /* ---- caption + cursor (outside the camera, fixed to viewport) ---- */
+  #caption{position:absolute;left:0;right:0;bottom:34px;z-index:30;display:flex;justify-content:center;pointer-events:none}
+  #caption .cap{max-width:80%;text-align:center;font-size:21px;font-weight:600;color:#fff;letter-spacing:-.01em;
+    background:rgba(0,0,0,.55);padding:9px 18px;border-radius:11px;backdrop-filter:blur(2px);box-shadow:0 6px 30px rgba(0,0,0,.5)}
+  #cursor{position:absolute;z-index:40;width:20px;height:20px;margin:-4px 0 0 -3px;pointer-events:none;opacity:0;
+    filter:drop-shadow(0 2px 3px rgba(0,0,0,.5))}
+  #vignette{position:absolute;inset:0;z-index:20;pointer-events:none;box-shadow:inset 0 0 120px 30px rgba(0,0,0,.45)}
+</style>
+</head>
+<body>
+<div id="viewport">
+  <div id="stage">
+    <!-- top bar -->
+    <div class="topbar">
+      <span class="lights"><i></i><i></i><i></i></span>
+      <span class="brand"><span class="mk"><svg viewBox="0 0 32 32"><path d="M 24.7 9.9 A 10.6 10.6 0 1 0 24.7 22.1" stroke="#fff" stroke-width="4.4" stroke-linecap="round" fill="none"/></svg></span>Clark Code</span>
+      <span class="proj" id="projchip"><span class="g"></span>api-service</span>
+      <span class="remotechip" id="rchip">⤓ scl · linux-x86_64</span>
+      <span class="spacer"></span>
+      <span class="pdot"></span>
+    </div>
+    <div class="body">
+      <div class="side">
+        <div class="newbtn">＋ New session</div>
+        <div class="conv on"><span class="ic">▣</span>Add /health endpoint</div>
+        <div class="conv"><span class="ic">▣</span>Refactor auth middleware</div>
+        <div class="conv"><span class="ic">▣</span>Fix flaky CI test</div>
+        <div class="conv"><span class="ic">⌥</span>Profile the slow query <span class="badge">remote</span></div>
+      </div>
+      <div class="main">
+        <div class="thread" id="thread">
+          <div class="umsg" id="umsg"><span id="utext"></span><span class="caret" id="ucaret" style="opacity:0"></span></div>
+          <div class="amsg" id="amsg">
+            <div class="arow">
+              <span class="aavatar"><svg viewBox="0 0 32 32"><path d="M 24.7 9.9 A 10.6 10.6 0 1 0 24.7 22.1" stroke="#fff" stroke-width="4.4" stroke-linecap="round" fill="none"/></svg></span>
+              <span class="atext" id="atext">On it — I'll add the endpoint and a test.</span>
+            </div>
+            <div class="tool" id="t1"><span class="ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4"><path d="M20 6 9 17l-5-5"/></svg></span><span class="tk">read</span> routes.rs</div>
+            <div class="tool" id="t2"><span class="ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4"><path d="M20 6 9 17l-5-5"/></svg></span><span class="tk">edit</span> <b>routes.rs</b> · +6 −1</div>
+            <div class="diff" id="diff">
+              <div class="dh"><span class="fp">src/routes.rs</span><span class="meta"><span class="add">+6</span> <span class="del">−1</span></span></div>
+              <div class="code">
+                <span class="ln" id="d1"><span class="n">12</span> <span class="kw">async fn</span> <span class="fn">routes</span>(app: Router) {</span>
+                <span class="ln del" id="d2"><span class="n">13</span>   app.route(<span class="mut">"/"</span>, get(index))</span>
+                <span class="ln add" id="d3"><span class="n">13</span>   app.route(<span class="mut">"/"</span>, get(index))</span>
+                <span class="ln add" id="d4"><span class="n">14</span>      .route(<span class="mut">"/health"</span>, get(|| <span class="kw">async</span> { <span class="mut">"ok"</span> }))</span>
+                <span class="ln" id="d5"><span class="n">15</span> }</span>
+              </div>
+            </div>
+            <div class="tool" id="t3"><span class="ok"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4"><path d="M20 6 9 17l-5-5"/></svg></span><span class="tk">test</span> added <b>health_returns_ok</b></div>
+            <div class="term" id="term">
+              <div class="th">bash · cargo test</div>
+              <div class="tb">
+                <span class="l" id="r1"><span class="p">$</span> cargo test</span>
+                <span class="l" id="r2"><span class="g">test result: ok.</span> 76 passed; 0 failed</span>
+              </div>
+            </div>
+            <div class="atext" id="afinal" style="opacity:0;margin-left:31px">Done. <b style="color:var(--ink)">/health</b> returns <span style="font-family:var(--mono);color:var(--grn)">ok</span> and the test passes.</div>
+          </div>
+        </div>
+        <div class="composer">
+          <span class="ph empty" id="ph">Ask Clark Code to change anything in this repo…</span>
+          <span class="send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 19V5M5 12l7-7 7 7"/></svg></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- start card -->
+    <div id="start">
+      <div class="card">
+        <div class="mk"><svg viewBox="0 0 32 32"><path d="M 24.7 9.9 A 10.6 10.6 0 1 0 24.7 22.1" stroke="#fff" stroke-width="4.4" stroke-linecap="round" fill="none"/></svg></div>
+        <h1>Start a session</h1>
+        <p>An AI coding agent that runs on your machine.</p>
+        <div class="seg">
+          <b class="on" id="segL">▣ Local</b>
+          <b id="segR">⤓ Remote</b>
+        </div>
+        <div class="field"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h6l2 2h10v9H3z"/></svg><span id="startpath">~/code/api-service</span></div>
+        <div class="gobtn" id="gobtn">New session →</div>
+      </div>
+    </div>
+
+    <!-- approval gate -->
+    <div id="gate">
+      <div class="gatecard">
+        <div class="gh"><span class="warn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg></span>Allow this command?</div>
+        <div class="cmd">$ <span class="danger">rm -rf build/</span></div>
+        <div class="gsub">Clark Code asks before anything destructive — your call, every time.</div>
+        <div class="gatebtns"><span class="gb deny">Deny</span><span class="gb allow" id="allowbtn">Allow once</span></div>
+      </div>
+    </div>
+
+    <!-- end card -->
+    <div id="end">
+      <div class="endwrap">
+        <div class="mk"><svg viewBox="0 0 32 32"><path d="M 24.7 9.9 A 10.6 10.6 0 1 0 24.7 22.1" stroke="#fff" stroke-width="4.4" stroke-linecap="round" fill="none"/></svg></div>
+        <h2>Clark Code</h2>
+        <p>Your repo. Your machine. Or any box over SSH.</p>
+        <span class="dl">↓ Download for Mac</span>
+        <p style="margin-top:14px;font-family:var(--mono);font-size:12px;color:var(--faint)">clarkchat.com/clark-code</p>
+      </div>
+    </div>
+  </div>
+
+  <div id="vignette"></div>
+  <svg id="cursor" viewBox="0 0 24 24" fill="#fff" stroke="#000" stroke-width="1"><path d="M5 2l14 11-6 1 3.5 6-2.5 1.5L11 15l-4 4z"/></svg>
+  <div id="caption"><div class="cap" id="cap"></div></div>
+</div>
+
+<script>
+const W=1280,H=720;
+const $=id=>document.getElementById(id);
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const lerp=(a,b,t)=>a+(b-a)*t;
+const smooth=t=>t*t*(3-2*t);
+// eased 0..1 ramp of x across [a,b]
+const ramp=(x,a,b)=>smooth(clamp((x-a)/(b-a),0,1));
+// reveal helper: opacity+rise for an element across [a,b]
+function reveal(el,x,a,b,rise=6){const p=ramp(x,a,b);el.style.opacity=p;el.style.transform=`translateY(${(1-p)*rise}px)`;}
+
+// camera path keyframes: {t, cx, cy, s}
+const PATH=[
+  {t:0.0,  cx:640, cy:340, s:1.05},   // A start card
+  {t:4.6,  cx:640, cy:340, s:1.05},
+  {t:6.2,  cx:660, cy:466, s:1.40},   // B composer (typing)
+  {t:10.6, cx:660, cy:466, s:1.40},
+  {t:12.0, cx:560, cy:430, s:1.62},   // C diff
+  {t:18.6, cx:560, cy:430, s:1.62},
+  {t:19.8, cx:560, cy:510, s:1.70},   // D terminal
+  {t:23.6, cx:560, cy:510, s:1.70},
+  {t:24.8, cx:640, cy:360, s:1.30},   // E gate
+  {t:29.0, cx:640, cy:360, s:1.30},
+  {t:30.2, cx:640, cy:300, s:1.05},   // F remote (pull back)
+  {t:34.6, cx:640, cy:300, s:1.05},
+  {t:35.4, cx:640, cy:360, s:1.00},   // G end
+  {t:41.0, cx:640, cy:360, s:1.00},
+];
+function camAt(t){
+  let a=PATH[0],b=PATH[PATH.length-1];
+  for(let i=0;i<PATH.length-1;i++){ if(t>=PATH[i].t && t<=PATH[i+1].t){a=PATH[i];b=PATH[i+1];break;} if(t>PATH[PATH.length-1].t){a=b=PATH[PATH.length-1];} }
+  const k=a===b?0:smooth((t-a.t)/(b.t-a.t));
+  return {cx:lerp(a.cx,b.cx,k), cy:lerp(a.cy,b.cy,k), s:lerp(a.s,b.s,k)};
+}
+
+// captions: {a,b,text}
+const CAPS=[
+  {a:0.4, b:4.4, t:"Clark Code — an AI coding agent on your Mac"},
+  {a:5.0, b:10.6, t:"Ask for what you want, in plain English"},
+  {a:11.4,b:18.6, t:"It reads and edits your real code"},
+  {a:19.4,b:23.6, t:"…and runs your tests, right there"},
+  {a:24.4,b:29.0, t:"Safe by default — it asks before risky commands"},
+  {a:29.8,b:34.6, t:"Or run it on a remote machine over SSH"},
+  {a:35.6,b:41.0, t:"Download free for Mac"},
+];
+
+function setCursor(x,y,show){const c=$('cursor');c.style.opacity=show?1:0;c.style.left=x+'px';c.style.top=y+'px';}
+
+function seek(t){
+  // camera
+  const c=camAt(t);
+  $('stage').style.transform=`translate(${W/2 - c.cx*c.s}px, ${H/2 - c.cy*c.s}px) scale(${c.s})`;
+  // cursor placed in STAGE coords, mapped through the camera to viewport
+  const curStage=(sx,sy,show)=>setCursor(W/2+(sx-c.cx)*c.s, H/2+(sy-c.cy)*c.s, show);
+
+  // caption
+  let cap='',op=0;
+  for(const k of CAPS){ if(t>=k.a-0.4 && t<=k.b+0.4){ cap=k.t; op=Math.min(ramp(t,k.a-0.4,k.a), 1-ramp(t,k.b,k.b+0.4)); } }
+  $('cap').textContent=cap; $('caption').style.opacity=clamp(op,0,1);
+
+  // ---- Scene A: start card (0–5.4) ----
+  const startGone = ramp(t,5.0,5.4);
+  $('start').style.opacity = 1-startGone;
+  $('start').style.display = startGone>=1 ? 'none':'grid';
+  // cursor moves to "New session" then click ~4.8
+  if(t<5.2){ const mv=ramp(t,3.4,4.6); curStage(lerp(560,640,mv), lerp(300,468,mv), t>3.0); }
+  $('gobtn').style.transform = (t>4.5&&t<5.0)?'scale(.97)':'scale(1)';
+
+  // ---- Scene B: composer typing (5.4–11) ----
+  const PROMPT="Add a /health endpoint and a test for it";
+  const typed = Math.floor(lerp(0,PROMPT.length, ramp(t,5.7,9.4)));
+  const ph=$('ph');
+  if(t>5.5 && t<10.8){ ph.classList.remove('empty'); ph.innerHTML=PROMPT.slice(0,typed)+(t<9.6?'<span class="caret"></span>':''); }
+  else if(t<=5.5){ ph.classList.add('empty'); ph.textContent="Ask Clark Code to change anything in this repo…"; }
+  // send click ~10.0
+  if(t>9.4&&t<11.2){ curStage(1238, 668, true); } else if(t>=5.4&&t<9.4){ curStage(710,668,t>5.6); }
+  document.querySelector('.composer .send').style.transform=(t>9.9&&t<10.3)?'scale(.9)':'scale(1)';
+
+  // user message appears after send (10.2)
+  reveal($('umsg'), t, 10.0, 10.5, 8);
+  $('umsg').style.opacity = (t<10.0)?0:1;
+  $('utext').textContent = (t>=10.0)?PROMPT:'';
+  // keep composer empty again after send
+  if(t>=10.2){ ph.classList.add('empty'); ph.innerHTML="Ask Clark Code to change anything in this repo…"; }
+
+  // ---- Scene C: agent works + diff (10.6–19) ----
+  $('amsg').style.opacity = ramp(t,10.6,11.0);
+  $('atext').style.opacity = ramp(t,10.9,11.4);
+  reveal($('t1'), t, 11.4, 11.9);
+  reveal($('t2'), t, 12.0, 12.5);
+  reveal($('diff'), t, 12.4, 13.0, 10);
+  // diff lines stagger
+  ['d1','d2','d3','d4','d5'].forEach((id,i)=>{ $(id).style.opacity = ramp(t, 13.0+i*0.35, 13.4+i*0.35); });
+  reveal($('t3'), t, 18.8, 19.2);
+
+  // ---- Scene D: terminal (19–24) ----
+  reveal($('term'), t, 19.4, 19.9, 10);
+  $('r1').style.opacity = ramp(t,19.9,20.2);
+  $('r2').style.opacity = ramp(t,21.4,21.9);
+
+  // ---- Scene E: gate (24.4–29.4) ----
+  const gateIn = ramp(t,24.4,24.9), gateOut=ramp(t,28.8,29.3);
+  const gv=$('gate'); gv.style.opacity=clamp(gateIn-gateOut,0,1);
+  const gc=document.querySelector('.gatecard'); gc.style.transform=`scale(${lerp(0.94,1,clamp(gateIn-gateOut,0,1))})`;
+  // cursor to Allow + press glow ~27.6
+  if(t>24.8&&t<29.0){ const mv=ramp(t,25.0,27.4); curStage(lerp(700,772,mv), lerp(415,452,mv), true); }
+  const allow=$('allowbtn'); allow.style.boxShadow=(t>27.4&&t<28.2)?'0 0 0 4px rgba(245,245,244,.25)':'0 0 0 0 rgba(245,245,244,0)';
+  allow.style.transform=(t>27.5&&t<27.9)?'scale(.97)':'scale(1)';
+
+  // ---- Scene F: remote (29.4–35) ----
+  const remoteOn = t>29.6;
+  $('rchip').style.display = remoteOn?'flex':'none';
+  $('projchip').style.opacity = remoteOn?0.35:1;
+  $('rchip').style.opacity = ramp(t,29.6,30.2);
+  // afinal answer reveals here
+  $('afinal').style.opacity = ramp(t,30.4,31.2);
+
+  // ---- Scene G: end (35.4–41) ----
+  const endIn=ramp(t,35.4,36.2);
+  $('end').style.opacity=endIn;
+  $('end').style.display = (t>35.0)?'grid':'none';
+  document.querySelector('.endwrap').style.transform=`translateY(${(1-smooth(clamp((t-35.4)/1.4,0,1)))*14}px)`;
+  if(t>35.2) setCursor(0,0,false);
+}
+window.seek=seek;
+window.__ready=true;
+seek(0);
+</script>
+</body>
+</html>
