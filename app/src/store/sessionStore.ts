@@ -41,6 +41,8 @@ import {
   type LocalAgentSettings,
 } from "../lib/localAgent";
 import { pickFolder } from "../lib/pickFolder";
+import { sshConnect, sshDisconnect, remoteTarget, type RemoteInfo } from "../lib/ssh";
+import { loadSshHosts, hostReady, type SshHost } from "../lib/sshHosts";
 import {
   loadPermissionMode,
   savePermissionMode,
@@ -115,6 +117,15 @@ interface SessionState {
   historyPrefix: Snapshot | null;
   /** Config for the "Local coding" provider (persisted to localStorage). */
   localSettings: LocalAgentSettings;
+  /** Where the next session runs: this machine, or a remote host over SSH. */
+  projectMode: "local" | "remote";
+  /** The saved SSH host selected for a remote session (id into sshHosts). */
+  selectedHostId: string | null;
+  /** The live remote connection for the active session (null when local). Held
+   *  for teardown (ssh_disconnect) and to tag the conversation as remote. */
+  activeRemote: RemoteInfo | null;
+  /** The SSH destination of the active remote session, for the history badge. */
+  activeRemoteHost: string | null;
   /** True while Clark is extracting the per-repo project memory. */
   extractingMemory: boolean;
   /** Last memory-extraction status message (success or error). */
@@ -135,6 +146,8 @@ interface SessionState {
   terminalOpen: boolean;
   /** Whether the MCP servers settings modal is open. */
   mcpOpen: boolean;
+  /** Whether the remote-hosts (SSH) settings modal is open. */
+  sshOpen: boolean;
   /** Whether the ⌘K command palette is open. */
   paletteOpen: boolean;
   /** Whether the sidebar is collapsed to its icon rail. */
@@ -149,6 +162,8 @@ interface SessionState {
   loadBilling: () => Promise<void>;
   selectProvider: (id: string) => void;
   setLocalSettings: (patch: Partial<LocalAgentSettings>) => void;
+  setProjectMode: (mode: "local" | "remote") => void;
+  setSelectedHostId: (id: string | null) => void;
   setProjectFolder: (path: string) => void;
   pickProjectFolder: () => Promise<void>;
   extractMemory: () => Promise<void>;
@@ -173,6 +188,7 @@ interface SessionState {
   toggleTerminal: () => void;
   setTerminalOpen: (open: boolean) => void;
   setMcpOpen: (open: boolean) => void;
+  setSshOpen: (open: boolean) => void;
   setPaletteOpen: (open: boolean) => void;
   togglePalette: () => void;
   /** Check for, download, verify, and stage a newer version (no-op outside the app). */
@@ -183,6 +199,15 @@ interface SessionState {
   setSidebarCollapsed: (collapsed: boolean) => void;
   cancelActive: () => Promise<void>;
   resolvePermission: (option: string) => Promise<void>;
+}
+
+/** Bring up the exec-server + tunnel for `host`. Throws a readable error if the
+ *  host is incomplete or the connection fails (unreachable, arch mismatch, …). */
+async function openRemote(host: SshHost): Promise<RemoteInfo> {
+  if (!hostReady(host)) {
+    throw new Error("This host needs a remote folder and an exec-server binary path.");
+  }
+  return sshConnect(host.host.trim(), host.remoteRoot.trim(), host.binaryPath.trim());
 }
 
 export const useSessionStore = create<SessionState>((set, get) => ({
@@ -198,6 +223,10 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   conversations: loadIndex(),
   historyPrefix: null,
   localSettings: loadLocalSettings(),
+  projectMode: "local",
+  selectedHostId: loadSshHosts()[0]?.id ?? null,
+  activeRemote: null,
+  activeRemoteHost: null,
   extractingMemory: false,
   memoryStatus: null,
   memoryViewerOpen: false,
@@ -208,6 +237,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   permissionMode: loadPermissionMode(),
   terminalOpen: false,
   mcpOpen: false,
+  sshOpen: false,
   paletteOpen: false,
   sidebarCollapsed: false,
   billing: null,
@@ -294,9 +324,12 @@ export const useSessionStore = create<SessionState>((set, get) => ({
             lastPersist = now;
             saveSnapshot(session.id, snapshot);
             const prev = get().conversations.find((c) => c.id === session.id);
+            const remoteHost = get().activeRemoteHost;
+            // Project folder is the remote root for a remote session, else local.
             const project =
               session.provider === "local"
-                ? get().localSettings.cwd.trim() || undefined
+                ? (remoteHost ? get().activeRemote?.cwd : get().localSettings.cwd.trim()) ||
+                  undefined
                 : undefined;
             const meta: ConversationMeta = {
               id: session.id,
@@ -304,6 +337,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
               provider: session.provider,
               mode: session.mode,
               project: project ?? prev?.project,
+              remoteHost: remoteHost ?? prev?.remoteHost,
               createdAt: prev?.createdAt ?? Date.now(),
               updatedAt: Date.now(),
             };
@@ -443,6 +477,9 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     set({ localSettings: next });
   },
 
+  setProjectMode: (mode) => set({ projectMode: mode, error: null }),
+  setSelectedHostId: (id) => set({ selectedHostId: id }),
+
   setProjectFolder: (path) => {
     get().setLocalSettings({ cwd: path });
     set({ recentProjects: addRecentProject(path), memoryStatus: null, memoryOverview: null });
@@ -521,9 +558,12 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   },
 
   startSession: async () => {
-    const { bridge, activeProvider, auth } = get();
+    const { bridge, activeProvider, auth, activeRemote: prevRemote } = get();
     if (!bridge || !activeProvider) return;
-    set({ connecting: true, error: null });
+    // Replacing any prior remote connection; tear it down (best-effort).
+    if (prevRemote) void sshDisconnect(prevRemote.id);
+    set({ connecting: true, error: null, activeRemote: null, activeRemoteHost: null });
+    let remote: RemoteInfo | null = null;
     try {
       const isLocal = activeProvider === "local";
       // Make sure a Clark Code key has been minted before the local provider
@@ -531,26 +571,53 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       // in flight or failed).
       if (isLocal) await get().ensureCodeKey();
       const localSettings = get().localSettings;
-      // The "Local coding" provider runs the loop on this machine against a
-      // configured model endpoint; every other provider connects with the
-      // signed-in Clark config (endpoint + token), no embedded credentials.
-      const config = isLocal
-        ? localConnectConfig(localSettings)
-        : { endpoint: auth?.clark.endpoint, auth_token: auth?.clark.token };
-      const options = isLocal ? { cwd: localSettings.cwd.trim() } : {};
+      const isRemote = isLocal && get().projectMode === "remote";
+
+      // Remote: bring up the exec-server + tunnel, then connect the provider to
+      // run its tools there. Local: run the loop on this machine. Other
+      // providers connect with the signed-in Clark config, no embedded creds.
+      let config;
+      let options;
+      let remoteHost: string | null = null;
+      if (isRemote) {
+        const host = loadSshHosts().find((h) => h.id === get().selectedHostId);
+        if (!host) throw new Error("Pick a remote host first, or add one.");
+        remote = await openRemote(host);
+        remoteHost = host.host.trim();
+        config = localConnectConfig(localSettings, remoteTarget(remote));
+        options = { cwd: remote.cwd };
+      } else if (isLocal) {
+        config = localConnectConfig(localSettings);
+        options = { cwd: localSettings.cwd.trim() };
+      } else {
+        config = { endpoint: auth?.clark.endpoint, auth_token: auth?.clark.token };
+        options = {};
+      }
+
       await bridge.connect(activeProvider, config);
       const session = await bridge.newSession(activeProvider, options);
-      if (isLocal && localSettings.cwd.trim()) {
+      if (isLocal && !isRemote && localSettings.cwd.trim()) {
         set({ recentProjects: addRecentProject(localSettings.cwd.trim()) });
       }
-      set({ session, connecting: false, historyPrefix: null, queued: [] });
+      set({
+        session,
+        connecting: false,
+        historyPrefix: null,
+        queued: [],
+        activeRemote: remote,
+        activeRemoteHost: remoteHost,
+      });
     } catch (e) {
+      // Brought up a tunnel but failed afterward → tear it back down.
+      if (remote) void sshDisconnect(remote.id);
       set({ error: String(e), connecting: false });
     }
   },
 
   endSession: () => {
     for (const a of get().attachments) if (a.previewUrl) URL.revokeObjectURL(a.previewUrl);
+    const r = get().activeRemote;
+    if (r) void sshDisconnect(r.id);
     set({
       session: null,
       snapshot: emptySnapshot(),
@@ -559,16 +626,19 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       historyPrefix: null,
       queued: [],
       terminalOpen: false,
+      activeRemote: null,
+      activeRemoteHost: null,
       conversations: loadIndex(),
     });
   },
 
   openConversation: async (id) => {
-    const { bridge, activeProvider, auth, session, providers, localSettings } = get();
+    const { bridge, activeProvider, auth, session, providers, localSettings, activeRemote: prevRemote } = get();
     if (!bridge || !activeProvider) return;
     if (session?.id === id) return; // already open
+    if (prevRemote) void sshDisconnect(prevRemote.id);
     let restored = loadSnapshot(id);
-    set({ connecting: true, error: null });
+    set({ connecting: true, error: null, activeRemote: null, activeRemoteHost: null });
     // Not cached locally (e.g. opened on another machine)? Pull it from Clark.
     if (!restored) {
       const creds = cloudCreds(get().auth);
@@ -584,13 +654,36 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         }
       }
     }
+    let remote: RemoteInfo | null = null;
     try {
       const isLocal = activeProvider === "local";
       const canResume =
         providers.find((p) => p.id === activeProvider)?.capabilities.load_session ?? false;
-      const config = isLocal
-        ? localConnectConfig(localSettings)
-        : { endpoint: auth?.clark.endpoint, auth_token: auth?.clark.token };
+
+      // A remote conversation reconnects its host (matched by SSH destination);
+      // the saved host must still exist on this device.
+      const meta = get().conversations.find((c) => c.id === id);
+      const wantRemote = isLocal && !!meta?.remoteHost;
+      let config;
+      let options;
+      let remoteHost: string | null = null;
+      if (wantRemote) {
+        const host = loadSshHosts().find((h) => h.host.trim() === meta!.remoteHost);
+        if (!host) {
+          throw new Error(`Add the SSH host "${meta!.remoteHost}" to reopen this remote conversation.`);
+        }
+        remote = await openRemote(host);
+        remoteHost = host.host.trim();
+        config = localConnectConfig(localSettings, remoteTarget(remote));
+        options = { cwd: remote.cwd };
+      } else if (isLocal) {
+        config = localConnectConfig(localSettings);
+        options = { cwd: localSettings.cwd.trim() };
+      } else {
+        config = { endpoint: auth?.clark.endpoint, auth_token: auth?.clark.token };
+        options = {};
+      }
+
       await bridge.connect(activeProvider, config);
       // Providers that can't resume (the local agent has no server-side session)
       // reopen as a fresh session bound to the project; the saved transcript shows
@@ -600,13 +693,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       // one, so the displayed id can stay stable.
       const opened = canResume
         ? await bridge.loadSession(activeProvider, id)
-        : {
-            ...(await bridge.newSession(
-              activeProvider,
-              isLocal ? { cwd: localSettings.cwd.trim() } : {},
-            )),
-            id,
-          };
+        : { ...(await bridge.newSession(activeProvider, options)), id };
       set({
         session: opened,
         historyPrefix: restored,
@@ -614,8 +701,11 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         connecting: false,
         attachments: [],
         queued: [],
+        activeRemote: remote,
+        activeRemoteHost: remoteHost,
       });
     } catch (e) {
+      if (remote) void sshDisconnect(remote.id);
       set({ error: String(e), connecting: false });
     }
   },
@@ -693,6 +783,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   toggleTerminal: () => set((s) => ({ terminalOpen: !s.terminalOpen })),
   setTerminalOpen: (open) => set({ terminalOpen: open }),
   setMcpOpen: (open) => set({ mcpOpen: open }),
+  setSshOpen: (open) => set({ sshOpen: open }),
   setPaletteOpen: (open) => set({ paletteOpen: open }),
   togglePalette: () => set((s) => ({ paletteOpen: !s.paletteOpen })),
   toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),

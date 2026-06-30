@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
-  Plus, MessageSquare, Trash2, PanelLeftClose, PanelLeft, FolderGit2, Search, X,
+  Plus, MessageSquare, Trash2, PanelLeftClose, PanelLeft, FolderGit2, Server, Search, X,
 } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
 import { projectName } from "../lib/localAgent";
@@ -40,12 +40,20 @@ function ConversationRow({ c, active }: { c: ConversationMeta; active: boolean }
         <span className="flex min-w-0 flex-col">
           <span className="truncate leading-tight">{c.title}</span>
           <span className="flex min-w-0 items-center gap-1 truncate text-xs text-ink-muted">
-            {c.project && (
+            {c.remoteHost ? (
               <>
-                <FolderGit2 className="size-3 shrink-0" />
-                <span className="truncate">{projectName(c.project)}</span>
+                <Server className="size-3 shrink-0 text-accent" />
+                <span className="truncate">{c.remoteHost}</span>
                 <span className="shrink-0 text-ink-faint">·</span>
               </>
+            ) : (
+              c.project && (
+                <>
+                  <FolderGit2 className="size-3 shrink-0" />
+                  <span className="truncate">{projectName(c.project)}</span>
+                  <span className="shrink-0 text-ink-faint">·</span>
+                </>
+              )
             )}
             <span className="shrink-0">{relativeTime(c.updatedAt)}</span>
           </span>

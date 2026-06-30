@@ -67,6 +67,7 @@ pub fn run() {
             commands::provider_connect,
             commands::ssh_connect,
             commands::ssh_disconnect,
+            commands::ssh_probe,
             commands::session_new,
             commands::session_load,
             commands::prompt,

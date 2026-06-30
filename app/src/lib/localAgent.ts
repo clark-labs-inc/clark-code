@@ -9,6 +9,7 @@
 import type { ConnectConfig } from "../core-bridge/bridge";
 import { loadAllowlist, loadDenylist } from "./commandPolicy";
 import { loadMcpServers, enabledMcpConfigs } from "./mcpServers";
+import type { RemoteTargetConfig } from "./ssh";
 
 const KEY = "clark-desktop:local-agent";
 
@@ -61,10 +62,15 @@ export function saveLocalSettings(settings: LocalAgentSettings): void {
  * project folder, an optional model id, and the `ck_live_` key. Research uses
  * the same key automatically.
  */
-export function localConnectConfig(s: LocalAgentSettings): ConnectConfig {
-  const project = s.cwd.trim();
+export function localConnectConfig(
+  s: LocalAgentSettings,
+  remote?: RemoteTargetConfig,
+): ConnectConfig {
+  // For a remote project the root lives on the remote host; tool I/O runs there
+  // over the exec-server. The command policy is still keyed by the project path.
+  const project = (remote ? remote.cwd : s.cwd).trim();
   return {
-    cwd: project || undefined,
+    cwd: remote ? undefined : project || undefined,
     auth_token: s.apiKey.trim() || undefined,
     extra: {
       model: s.model.trim() || "clark-code",
@@ -73,6 +79,8 @@ export function localConnectConfig(s: LocalAgentSettings): ConnectConfig {
       command_denylist: loadDenylist(project),
       // MCP servers to spawn + expose as tools.
       mcp_servers: enabledMcpConfigs(loadMcpServers()),
+      // When present, the provider runs this session's tools on the remote host.
+      ...(remote ? { remote } : {}),
     },
   };
 }

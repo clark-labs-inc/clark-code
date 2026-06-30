@@ -99,6 +99,14 @@ pub async fn ssh_disconnect(id: String, state: State<'_, AppState>) -> Result<()
     Ok(())
 }
 
+/// Read-only "test connection": reach `host` and report its architecture + home,
+/// without deploying or tunneling. Backs the SSH-host settings test button.
+#[tauri::command]
+pub async fn ssh_probe(host: String) -> Result<ssh::Probe, String> {
+    tracing::info!(%host, "ssh_probe");
+    ssh::probe(&host).await
+}
+
 #[tauri::command]
 pub async fn session_new(
     provider_id: String,

@@ -136,6 +136,27 @@ pub async fn connect(spec: &RemoteSpec) -> Result<RemoteConn, String> {
     })
 }
 
+/// Result of a read-only "test connection" against a host.
+#[derive(serde::Serialize)]
+pub struct Probe {
+    /// Detected architecture slug (e.g. `linux-x86_64`).
+    pub arch: String,
+    /// The remote `$HOME`, so the UI can show where the server will live.
+    pub home: String,
+}
+
+/// Reach a host and report its architecture + home — no deploy, no tunnel. Backs
+/// the settings "Test connection" button; surfaces the exact failures that bite
+/// at connect time (unreachable host, unsupported arch).
+pub async fn probe(host: &str) -> Result<Probe, String> {
+    let arch = detect_arch(host).await?;
+    let home = remote_home(host).await?;
+    Ok(Probe {
+        arch: arch.slug().to_string(),
+        home,
+    })
+}
+
 async fn detect_arch(host: &str) -> Result<RemoteArch, String> {
     RemoteArch::from_uname(&ssh_capture(host, "uname -sm").await?)
 }

@@ -15,8 +15,12 @@ export interface ConversationMeta {
   title: string;
   provider: string;
   mode?: string;
-  /** Absolute project folder this conversation ran in (local coding). */
+  /** Absolute project folder this conversation ran in (local, or the remote
+   *  project root for a remote session). */
   project?: string;
+  /** When set, this conversation ran on a remote host (the SSH destination);
+   *  reopening it re-establishes the tunnel. Distinguishes remote in the list. */
+  remoteHost?: string;
   createdAt: number;
   updatedAt: number;
 }

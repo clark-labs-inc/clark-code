@@ -1,8 +1,10 @@
+import { useEffect, useState } from "react";
 import { motion } from "motion/react";
-import { ArrowRight, FolderOpen, Folder } from "lucide-react";
+import { ArrowRight, FolderOpen, Folder, Server, Settings2 } from "lucide-react";
 import { ClarkMark } from "./ClarkMark";
 import { useSessionStore } from "../store/sessionStore";
 import { localSettingsReady, projectName, type LocalAgentSettings } from "../lib/localAgent";
+import { loadSshHosts, hostLabel, hostReady, type SshHost } from "../lib/sshHosts";
 import { inTauri } from "../lib/pickFolder";
 
 const SAMPLES = [
@@ -25,9 +27,31 @@ export function StartCard() {
   const activeProvider = useSessionStore((s) => s.activeProvider);
   const selectProvider = useSessionStore((s) => s.selectProvider);
   const local = useSessionStore((s) => s.localSettings);
+  const projectMode = useSessionStore((s) => s.projectMode);
+  const setProjectMode = useSessionStore((s) => s.setProjectMode);
+  const selectedHostId = useSessionStore((s) => s.selectedHostId);
+  const sshOpen = useSessionStore((s) => s.sshOpen);
 
   const isLocal = activeProvider === "local";
-  const blocked = isLocal ? localSettingsReady(local) : null;
+  const isRemote = isLocal && projectMode === "remote";
+
+  // Saved hosts live in localStorage; refresh when the manage-hosts modal closes.
+  const [hosts, setHosts] = useState<SshHost[]>(() => loadSshHosts());
+  useEffect(() => {
+    if (!sshOpen) setHosts(loadSshHosts());
+  }, [sshOpen]);
+  const selectedHost = hosts.find((h) => h.id === selectedHostId) ?? null;
+
+  const remoteBlocked = !selectedHost
+    ? "Add a remote host."
+    : !hostReady(selectedHost)
+      ? "This host needs a folder and exec-server binary."
+      : null;
+  const blocked = isLocal
+    ? isRemote
+      ? remoteBlocked
+      : localSettingsReady(local)
+    : null;
 
   const startWith = async (q?: string) => {
     if (blocked) return;
@@ -49,11 +73,32 @@ export function StartCard() {
           <ClarkMark size={44} className="mb-3 rounded-xl" />
           <h1 className="text-lg font-semibold text-ink">Start a session</h1>
           <p className="mt-1 text-sm text-ink-muted">
-            {isLocal
-              ? "Code on your machine with a local agent loop — your files, your shell, your model."
-              : "One window. Watch every step — files, web, and computer work — as it happens."}
+            {!isLocal
+              ? "One window. Watch every step — files, web, and computer work — as it happens."
+              : isRemote
+                ? "Code on a remote machine over SSH — its files, its shell, your model and approvals."
+                : "Code on your machine with a local agent loop — your files, your shell, your model."}
           </p>
         </div>
+
+        {isLocal && (
+          <div className="mb-4 flex gap-1 rounded-xl border border-border-subtle bg-bg-elevated/60 p-1">
+            {(["local", "remote"] as const).map((m) => (
+              <button
+                key={m}
+                onClick={() => setProjectMode(m)}
+                className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition ${
+                  projectMode === m
+                    ? "bg-accent text-on-accent"
+                    : "text-ink-secondary hover:bg-bg-hover"
+                }`}
+              >
+                {m === "remote" && <Server className="size-3.5" />}
+                {m === "local" ? "Local" : "Remote"}
+              </button>
+            ))}
+          </div>
+        )}
 
         {providers.length > 1 && (
           <div className="mb-4 flex gap-1 rounded-xl border border-border-subtle bg-bg-elevated/60 p-1">
@@ -73,7 +118,12 @@ export function StartCard() {
           </div>
         )}
 
-        {isLocal && <LocalSettingsForm settings={local} />}
+        {isLocal &&
+          (isRemote ? (
+            <RemoteSettingsForm hosts={hosts} selected={selectedHost} />
+          ) : (
+            <LocalSettingsForm settings={local} />
+          ))}
 
         <button
           onClick={() => void startWith()}
@@ -137,6 +187,77 @@ function LocalSettingsForm({ settings }: { settings: LocalAgentSettings }) {
         </p>
         {memoryStatus && <p className="mt-1 text-[11px] text-ink-secondary">{memoryStatus}</p>}
       </div>
+    </div>
+  );
+}
+
+function RemoteSettingsForm({ hosts, selected }: { hosts: SshHost[]; selected: SshHost | null }) {
+  const setSelectedHostId = useSessionStore((s) => s.setSelectedHostId);
+  const setSshOpen = useSessionStore((s) => s.setSshOpen);
+
+  if (hosts.length === 0) {
+    return (
+      <div className="mb-4 flex flex-col items-center gap-2 rounded-xl border border-border-subtle bg-bg-elevated/40 p-5 text-center">
+        <Server className="size-5 text-ink-muted" />
+        <p className="text-sm text-ink-muted">
+          No remote hosts yet. Add one to run Clark Code on another machine over SSH.
+        </p>
+        <button
+          onClick={() => setSshOpen(true)}
+          className="mt-1 rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-on-accent transition hover:bg-accent-hover"
+        >
+          Add a host
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mb-4 space-y-3 rounded-xl border border-border-subtle bg-bg-elevated/40 p-3">
+      <div>
+        <div className="mb-1 flex items-center justify-between">
+          <label className="block text-xs font-medium text-ink-secondary">Remote host</label>
+          <button
+            onClick={() => setSshOpen(true)}
+            className="flex items-center gap-1 text-xs text-ink-muted transition hover:text-ink"
+          >
+            <Settings2 className="size-3" /> Manage
+          </button>
+        </div>
+        <select
+          value={selected?.id ?? ""}
+          onChange={(e) => setSelectedHostId(e.target.value)}
+          className={inputCls}
+        >
+          {hosts.map((h) => (
+            <option key={h.id} value={h.id}>
+              {hostLabel(h)} — {h.host}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {selected && (
+        <p className="flex items-center gap-1.5 truncate text-xs text-ink-muted">
+          <Server className="size-3 shrink-0" />
+          <span className="font-medium text-ink-secondary">{selected.host}</span>
+          <span className="truncate font-mono">{selected.remoteRoot || "no folder set"}</span>
+        </p>
+      )}
+      {selected && !hostReady(selected) && (
+        <p className="text-xs text-warning">
+          This host is missing its folder or exec-server binary —{" "}
+          <button onClick={() => setSshOpen(true)} className="underline hover:text-ink">
+            edit it
+          </button>
+          .
+        </p>
+      )}
+
+      <p className="border-t border-border-subtle pt-3 text-xs text-ink-muted">
+        Files, edits, and the shell run on the remote machine; the model and the approval gate
+        stay here. Auth is your own SSH — nothing is stored.
+      </p>
     </div>
   );
 }

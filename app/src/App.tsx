@@ -11,6 +11,7 @@ import { TerminalPanel } from "./surfaces/TerminalPanel";
 import { CreditBanner } from "./surfaces/CreditBanner";
 import { OfflineBanner } from "./surfaces/OfflineBanner";
 import { McpSettings } from "./surfaces/McpSettings";
+import { SshSettings } from "./surfaces/SshSettings";
 import { CommandPalette } from "./surfaces/CommandPalette";
 import { SignInScreen } from "./surfaces/SignInScreen";
 
@@ -60,6 +61,7 @@ export default function App() {
         )}
       </div>
       <McpSettings />
+      <SshSettings />
       <CommandPalette dark={dark} onToggleTheme={toggle} />
     </div>
   );
