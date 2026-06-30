@@ -13,54 +13,41 @@
   *{box-sizing:border-box;margin:0;padding:0}
   html,body{width:100vw;height:100vh;overflow:hidden}
   body{background:var(--bg);color:var(--ink);font-family:var(--sans);
-       display:flex;flex-direction:column;padding:4.2vh 4vw 4vh;-webkit-font-smoothing:antialiased}
+       display:flex;flex-direction:column;padding:4.4vh 4vw;-webkit-font-smoothing:antialiased}
   .top{display:flex;align-items:center;justify-content:space-between}
-  .brand{display:flex;align-items:center;gap:.7vw;font-weight:600;font-size:2.1vw;letter-spacing:-.01em}
-  .brand svg{width:2.3vw;height:2.3vw}
-  .eyebrow{font-family:var(--mono);font-size:1.05vw;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:var(--faint)}
-  h1{font-family:var(--disp);font-weight:700;letter-spacing:-.015em;line-height:1.02;font-size:5.4vw;margin-top:3vh;max-width:24ch}
+  .brand{display:flex;align-items:center;gap:.7vw;font-weight:600;font-size:2vw;letter-spacing:-.01em}
+  .brand svg{width:2.2vw;height:2.2vw}
+  .eyebrow{font-family:var(--mono);font-size:1vw;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:var(--faint)}
+  .row{flex:1;display:flex;gap:3vw;align-items:center;margin-top:3vh;min-height:0}
+  .left{flex:1;display:flex;flex-direction:column;justify-content:center}
+  h1{font-family:var(--disp);font-weight:700;letter-spacing:-.015em;line-height:1.04;font-size:4vw}
   h1 em{font-style:italic;color:var(--ink2)}
-  .sub{margin-top:1.6vh;font-size:1.5vw;color:var(--ink2);max-width:62ch;line-height:1.4}
-  .frames{flex:1;display:flex;gap:1.6vw;margin-top:3.2vh;min-height:0}
-  .frame{flex:1;border:1px solid var(--line);border-radius:1vw;overflow:hidden;display:flex;flex-direction:column;
-         box-shadow:0 2.5vh 5vh -3vh rgba(40,36,32,.4)}
-  .flabel{display:flex;align-items:center;gap:.5vw;padding:1vh 1.1vw;font-family:var(--mono);font-size:.85vw;font-weight:600;letter-spacing:.12em;text-transform:uppercase}
-  .dot{width:.6vw;height:.6vw;border-radius:50%}
-  /* light browser */
-  .browser{background:#fbfaf7;flex:1;display:flex;flex-direction:column}
-  .bbar{display:flex;align-items:center;gap:.6vw;padding:1vh 1vw;background:#f1eee8;border-bottom:1px solid var(--line)}
-  .lights{display:flex;gap:.4vw}.lights i{width:.85vw;height:.85vw;border-radius:50%;display:block}
-  .url{flex:1;background:#fff;border:1px solid var(--line);border-radius:.5vw;padding:.55vh .8vw;color:var(--muted);font-family:var(--mono);font-size:.85vw}
-  .bbody{flex:1;display:grid;grid-template-columns:1.1fr 1fr}
-  .chat{padding:1.4vh 1vw;border-right:1px solid var(--line);display:flex;flex-direction:column;gap:1.1vh}
-  .ub{align-self:flex-end;max-width:92%;background:var(--accent);color:var(--on-accent);border-radius:.8vw .8vw .2vw .8vw;padding:.8vh 1vw;font-size:.92vw;line-height:1.35}
-  .step{display:flex;align-items:center;gap:.55vw;font-size:.88vw;color:var(--ink2)}
-  .ck{width:1.2vw;height:1.2vw;border-radius:50%;background:var(--accent);color:#fff;display:grid;place-items:center;flex:none;font-size:.7vw}
-  .ck.run{background:transparent;border:1.5px solid var(--faint)}
-  .vp{padding:1.3vh 1vw;background:var(--bg2);display:flex;align-items:center}
-  .vpc{width:100%;background:#fff;border:1px solid var(--line);border-radius:.7vw;overflow:hidden}
-  .vph{height:7vh;background:linear-gradient(135deg,#cdbfa6,#a98f6b)}
-  .vpp{padding:1.2vh 1vw}.vpt{font-weight:700;font-size:1vw}.vps{color:var(--muted);font-size:.85vw;margin-top:.3vh}
-  .reserve{margin-top:1.2vh;background:var(--accent);color:#fff;text-align:center;border-radius:.5vw;padding:.7vh;font-weight:600;font-size:.85vw;box-shadow:0 0 0 .25vw rgba(43,41,38,.14)}
-  /* dark IDE */
-  .ide{background:#0d0d0d;color:#e9e8e4;flex:1;display:flex;flex-direction:column}
-  .ibar{display:flex;align-items:center;gap:.7vw;padding:1vh 1vw;background:#161616;border-bottom:1px solid rgba(255,255,255,.08)}
-  .ititle{font-family:var(--mono);font-size:.85vw;color:#8c8a85}
-  .ibody{flex:1;display:grid;grid-template-columns:11vw 1fr}
-  .tree{padding:1.2vh .8vw;border-right:1px solid rgba(255,255,255,.08);display:flex;flex-direction:column;gap:.7vh;font-family:var(--mono);font-size:.82vw;color:#b8b6b1}
+  .sub{margin-top:2.4vh;font-size:1.4vw;color:var(--ink2);line-height:1.45;max-width:30ch}
+  .cta{display:inline-flex;align-items:center;gap:.6vw;background:var(--accent);color:var(--on-accent);font-weight:600;font-size:1.4vw;padding:1.5vh 1.7vw;border-radius:.8vw;margin-top:3.4vh;align-self:flex-start}
+  .note{margin-top:1.6vh;font-size:1vw;color:var(--faint)}
+  .note b{color:var(--ink2);font-weight:600}
+
+  /* big dark IDE */
+  .right{flex:1.32;height:100%;display:flex}
+  .ide{flex:1;background:#0d0d0d;color:#e9e8e4;border-radius:1vw;overflow:hidden;display:flex;flex-direction:column;
+       border:1px solid var(--line);box-shadow:0 3vh 7vh -3vh rgba(40,36,32,.45)}
+  .ibar{display:flex;align-items:center;gap:.7vw;padding:1.3vh 1.1vw;background:#161616;border-bottom:1px solid rgba(255,255,255,.08)}
+  .lights{display:flex;gap:.45vw}.lights i{width:.85vw;height:.85vw;border-radius:50%;display:block}
+  .ititle{font-family:var(--mono);font-size:.92vw;color:#8c8a85}
+  .ibody{flex:1;display:grid;grid-template-columns:9.5vw 1fr;min-height:0}
+  .tree{padding:1.5vh 1vw;border-right:1px solid rgba(255,255,255,.08);display:flex;flex-direction:column;gap:1.1vh;font-family:var(--mono);font-size:.92vw;color:#b8b6b1}
   .tree .f{padding-left:1vw}.tree .on{color:#f5f5f4}.tree .d{color:#8c8a85}.tree .m{color:#7a9a6b}
-  .ed{flex:1;display:flex;flex-direction:column;min-width:0}
-  .code{flex:1;padding:1.2vh 1vw;font-family:var(--mono);font-size:.9vw;line-height:1.7}
-  .ln{color:#4d4b47;display:inline-block;width:1.6vw}
+  .ed{display:flex;flex-direction:column;min-width:0}
+  .code{flex:1;padding:1.6vh 1.2vw;font-family:var(--mono);font-size:1vw;line-height:1.85}
+  .ln{color:#4d4b47;display:inline-block;width:1.8vw}
   .kw{color:#c4b896}.mut{color:#8c8a85}
-  .add{background:rgba(122,154,107,.16);display:block;border-left:.18vw solid #7a9a6b;margin:0 -1vw;padding:0 1vw 0 .82vw}
-  .del{background:rgba(190,120,120,.14);display:block;border-left:.18vw solid #b07b7b;margin:0 -1vw;padding:0 1vw 0 .82vw;color:#9a8f8a}
-  .term{border-top:1px solid rgba(255,255,255,.08);background:#0a0a0a;padding:1vh 1vw;font-family:var(--mono);font-size:.82vw;color:#b8b6b1;display:flex;flex-direction:column;gap:.4vh}
+  .add{background:rgba(122,154,107,.16);display:block;border-left:.2vw solid #7a9a6b;margin:0 -1.2vw;padding:0 1.2vw 0 1vw}
+  .del{background:rgba(190,120,120,.14);display:block;border-left:.2vw solid #b07b7b;margin:0 -1.2vw;padding:0 1.2vw 0 1vw;color:#9a8f8a}
+  .term{border-top:1px solid rgba(255,255,255,.08);background:#0a0a0a;padding:1.4vh 1.2vw;font-family:var(--mono);font-size:.9vw;color:#b8b6b1;display:flex;flex-direction:column;gap:.5vh}
   .grn{color:#7a9a6b}
-  .bottom{display:flex;align-items:center;gap:1.6vw;margin-top:3vh}
-  .cta{display:inline-flex;align-items:center;gap:.6vw;background:var(--accent);color:var(--on-accent);font-weight:600;font-size:1.5vw;padding:1.4vh 1.8vw;border-radius:.8vw}
-  .foot{font-size:1.25vw;color:var(--muted)}
-  .foot b{color:var(--ink);font-weight:600}
+  .chip{display:flex;align-items:center;gap:.6vw;padding:1.3vh 1.2vw;background:#161616;border-top:1px solid rgba(255,255,255,.08);color:#8c8a85;font-size:.9vw}
+  .chip b{color:#e9e8e4;font-weight:600}
+  .chip .c{width:1.2vw;height:1.2vw;border-radius:50%;background:rgba(122,154,107,.2);color:#7a9a6b;display:grid;place-items:center;font-size:.8vw;flex:none}
 </style>
 </head>
 <body>
@@ -69,32 +56,17 @@
       <svg viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#0d0d0d"/><path d="M 24.7 9.9 A 10.6 10.6 0 1 0 24.7 22.1" stroke="#fff" stroke-width="4.1" stroke-linecap="round" fill="none"/></svg>
       clark labs
     </span>
-    <span class="eyebrow">New · clarkchat.com/clark-code</span>
+    <span class="eyebrow">Clark Code · clarkchat.com/clark-code</span>
   </div>
 
-  <h1>Same Clark. <em>Two places</em> to point it.</h1>
-  <p class="sub">Clark Agent runs in the cloud and drives a computer for you. Clark Code runs on your Mac, inside your real repo.</p>
-
-  <div class="frames">
-    <!-- Agent -->
-    <div class="frame">
-      <div class="flabel" style="background:#fbfaf7;color:var(--faint)"><span class="dot" style="background:#a98f6b"></span>Clark Agent · in the cloud</div>
-      <div class="browser">
-        <div class="bbar"><span class="lights"><i style="background:#e6968a"></i><i style="background:#dcc07e"></i><i style="background:#a7c08a"></i></span><span class="url">clarkchat.com</span></div>
-        <div class="bbody">
-          <div class="chat">
-            <div class="ub">Find a top sushi spot nearby and book a table for 2 tonight at 7.</div>
-            <div class="step"><span class="ck">✓</span>Searched maps near you</div>
-            <div class="step"><span class="ck">✓</span>Compared 6 highly-rated spots</div>
-            <div class="step" style="color:var(--muted)"><span class="ck run"></span>Reserving on OpenTable…</div>
-          </div>
-          <div class="vp"><div class="vpc"><div class="vph"></div><div class="vpp"><div class="vpt">Sasaki — Omakase</div><div class="vps">★ 4.8 · Japanese · 0.4 mi</div><div class="reserve">Reserve · 7:00 PM · 2</div></div></div></div>
-        </div>
-      </div>
+  <div class="row">
+    <div class="left">
+      <h1>An AI coding agent that runs on <em>your</em> machine.</h1>
+      <p class="sub">It reads, edits, and runs your real repo. Local, or on a remote box over SSH. Same kind of tool as Codex or Claude Code — as a native Mac app.</p>
+      <span class="cta">↓ Download Clark Code for Mac</span>
+      <p class="note"><b>Signed &amp; notarized.</b> Apple silicon + Intel. Windows &amp; Linux soon.</p>
     </div>
-    <!-- Code -->
-    <div class="frame">
-      <div class="flabel" style="background:#161616;color:#8c8a85"><span class="dot" style="background:#e9e8e4"></span>Clark Code · on your Mac</div>
+    <div class="right">
       <div class="ide">
         <div class="ibar"><span class="lights"><i style="background:#3a3a3a"></i><i style="background:#3a3a3a"></i><i style="background:#3a3a3a"></i></span><span class="ititle">clark-desktop — Clark Code</span></div>
         <div class="ibody">
@@ -114,15 +86,11 @@
               <div><span class="grn">$</span> cargo test -p provider-local</div>
               <div><span class="grn">test result: ok.</span> 76 passed; 0 failed</div>
             </div>
+            <div class="chip"><span class="c">✓</span><span><b>Edited remote.rs</b> · ran tests · 76 passed</span></div>
           </div>
         </div>
       </div>
     </div>
-  </div>
-
-  <div class="bottom">
-    <span class="cta">↓ Download Clark Code for Mac</span>
-    <span class="foot"><b>Signed &amp; notarized.</b> Local or over SSH. Windows &amp; Linux soon.</span>
   </div>
 </body>
 </html>
