@@ -1,0 +1,25 @@
+[package]
+name = "exec-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "clark-exec-server: a tiny standalone WebSocket server that runs on a remote host and serves the exec-protocol against the local machine — 'LocalExecutor wrapped in a ws server'. Bound to loopback, reached only through an SSH port-forward."
+
+[lib]
+name = "exec_server"
+path = "src/lib.rs"
+
+[[bin]]
+name = "clark-exec-server"
+path = "src/bin/clark-exec-server.rs"
+
+[dependencies]
+exec-core = { path = "../exec-core" }
+exec-protocol = { path = "../exec-protocol" }
+serde.workspace = true
+serde_json.workspace = true
+futures.workspace = true
+tokio = { workspace = true, features = ["net", "rt-multi-thread", "io-util"] }
+tokio-util = { version = "0.7", default-features = false }
+tokio-tungstenite = "0.29"

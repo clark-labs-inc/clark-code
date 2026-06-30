@@ -440,15 +440,6 @@ fn edit_result(
 }
 
 /// Skip noisy/large directories that a coding agent rarely wants surfaced.
-pub(crate) fn is_ignored(path: &std::path::Path) -> bool {
-    path.components().any(|c| {
-        matches!(
-            c.as_os_str().to_string_lossy().as_ref(),
-            ".git" | "node_modules" | "target" | "dist" | ".next" | ".venv"
-        )
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

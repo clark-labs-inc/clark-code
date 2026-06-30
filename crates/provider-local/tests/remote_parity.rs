@@ -1,0 +1,335 @@
+//! Phase 2 verification: drive a real `clark-exec-server` over a loopback
+//! WebSocket and prove (a) `RemoteExecutor` is behaviorally identical to
+//! `LocalExecutor`, (b) a bad token is rejected, and (c) process output survives
+//! a dropped-and-reopened connection via `process/resume`.
+
+use std::path::PathBuf;
+use std::time::Duration;
+
+use exec_protocol::{
+    method, AuthParams, Notification, ProcessResumeParams, ProcessStartParams, Request, Response,
+    Stream as WireStream, PROTOCOL_VERSION,
+};
+use futures::{SinkExt, StreamExt};
+use provider_local::{Executor, LocalExecutor, RemoteExecutor};
+use tokio_tungstenite::tungstenite::Message;
+use tokio_util::sync::CancellationToken;
+
+const TOKEN: &str = "test-capability-token";
+
+/// Bind an ephemeral server, run it in the background, return its `ws://` URL.
+async fn start_server(root: Option<PathBuf>) -> String {
+    let server = exec_server::bind(exec_server::Config {
+        token: TOKEN.to_string(),
+        root,
+        addr: "127.0.0.1:0".to_string(),
+    })
+    .await
+    .expect("bind exec-server");
+    let addr = server.local_addr().expect("local_addr");
+    tokio::spawn(server.serve());
+    format!("ws://{addr}")
+}
+
+#[tokio::test]
+async fn remote_matches_local_for_every_primitive() {
+    let dir = tempfile::tempdir().unwrap();
+    let url = start_server(None).await;
+    let remote = RemoteExecutor::connect(&url, TOKEN).await.expect("connect");
+    let local = LocalExecutor;
+
+    // write + read round-trip (binary-safe).
+    let file = dir.path().join("nested/a.txt");
+    let bytes = vec![0u8, 159, 146, 150, b'h', b'i'];
+    remote.write(&file, &bytes).await.unwrap();
+    assert_eq!(remote.read(&file).await.unwrap(), bytes);
+    assert_eq!(local.read(&file).await.unwrap(), bytes, "landed on disk");
+
+    // metadata parity.
+    let rm = remote.metadata(&file).await.unwrap();
+    let lm = local.metadata(&file).await.unwrap();
+    assert_eq!(rm.len, lm.len);
+    assert_eq!(rm.is_dir, lm.is_dir);
+    assert_eq!(rm.len, bytes.len() as u64);
+
+    // create_dir_all + read_dir parity.
+    remote
+        .create_dir_all(&dir.path().join("sub"))
+        .await
+        .unwrap();
+    let mut rd: Vec<_> = remote
+        .read_dir(dir.path())
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|e| (e.name, e.is_dir))
+        .collect();
+    rd.sort();
+    assert!(rd.contains(&("nested".to_string(), true)));
+    assert!(rd.contains(&("sub".to_string(), true)));
+
+    // walk parity — same file set, ignored dirs skipped.
+    std::fs::create_dir_all(dir.path().join("node_modules/x")).unwrap();
+    std::fs::write(dir.path().join("node_modules/x/y.js"), "").unwrap();
+    let rel = |paths: Vec<PathBuf>| {
+        let mut v: Vec<String> = paths
+            .into_iter()
+            .map(|p| {
+                p.strip_prefix(dir.path())
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_string()
+            })
+            .collect();
+        v.sort();
+        v
+    };
+    let remote_walk = rel(remote
+        .walk(dir.path())
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|w| w.path)
+        .collect());
+    let local_walk = rel(local
+        .walk(dir.path())
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|w| w.path)
+        .collect());
+    assert_eq!(remote_walk, local_walk);
+    assert!(remote_walk.iter().any(|p| p == "nested/a.txt"));
+    assert!(!remote_walk.iter().any(|p| p.contains("node_modules")));
+
+    // exec parity — output + exit code.
+    let cancel = CancellationToken::new();
+    let out = remote
+        .exec(
+            "echo out; echo err 1>&2; exit 7",
+            dir.path(),
+            Duration::from_secs(10),
+            &cancel,
+        )
+        .await
+        .unwrap();
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "out");
+    assert_eq!(String::from_utf8_lossy(&out.stderr).trim(), "err");
+    assert_eq!(out.code, Some(7));
+}
+
+#[tokio::test]
+async fn exec_honors_cancel() {
+    let dir = tempfile::tempdir().unwrap();
+    let url = start_server(None).await;
+    let remote = RemoteExecutor::connect(&url, TOKEN).await.unwrap();
+
+    let cancel = CancellationToken::new();
+    cancel.cancel();
+    let err = remote
+        .exec("sleep 5", dir.path(), Duration::from_secs(10), &cancel)
+        .await
+        .unwrap_err();
+    assert!(err.contains("cancel"), "{err}");
+}
+
+#[tokio::test]
+async fn bad_token_is_rejected() {
+    let url = start_server(None).await;
+    let err = match RemoteExecutor::connect(&url, "wrong-token").await {
+        Ok(_) => panic!("a bad token must be rejected"),
+        Err(e) => e,
+    };
+    assert!(err.to_lowercase().contains("token"), "{err}");
+}
+
+#[tokio::test]
+async fn version_mismatch_is_rejected() {
+    let url = start_server(None).await;
+    let mut ws = tokio_tungstenite::connect_async(&url).await.unwrap().0;
+    let auth = Request::new(
+        1,
+        method::AUTH,
+        serde_json::to_value(AuthParams {
+            token: TOKEN.to_string(),
+            protocol_version: PROTOCOL_VERSION + 99,
+        })
+        .unwrap(),
+    );
+    send(&mut ws, &auth).await;
+    let resp = recv_response(&mut ws).await;
+    let err = resp.error.expect("version mismatch should error");
+    assert!(err.message.contains("protocol version"), "{}", err.message);
+}
+
+#[tokio::test]
+async fn root_containment_rejects_escape() {
+    let dir = tempfile::tempdir().unwrap();
+    let url = start_server(Some(dir.path().to_path_buf())).await;
+    let remote = RemoteExecutor::connect(&url, TOKEN).await.unwrap();
+
+    // Inside the root: fine.
+    let inside = dir.path().join("ok.txt");
+    remote.write(&inside, b"hi").await.unwrap();
+
+    // Outside the root (via ..): refused by the server's lexical containment.
+    let outside = dir.path().join("../escape.txt");
+    let err = remote.write(&outside, b"nope").await.unwrap_err();
+    assert!(err.contains("escapes project root"), "{err}");
+}
+
+#[tokio::test]
+async fn output_survives_reconnect_via_resume() {
+    let dir = tempfile::tempdir().unwrap();
+    let url = start_server(None).await;
+    let process_id = "resume-test-proc".to_string();
+    // Three chunks separated in time, so they get distinct sequence numbers.
+    let command = "printf 'A\\n'; sleep 0.2; printf 'B\\n'; sleep 0.2; printf 'C\\n'";
+
+    // --- Connection 1: start the process, read until the first chunk, then drop.
+    let last_seq;
+    {
+        let mut ws = tokio_tungstenite::connect_async(&url).await.unwrap().0;
+        authenticate(&mut ws).await;
+        let start = Request::new(
+            2,
+            method::PROCESS_START,
+            serde_json::to_value(ProcessStartParams {
+                process_id: process_id.clone(),
+                command: command.to_string(),
+                cwd: dir.path().to_string_lossy().to_string(),
+                timeout_ms: 10_000,
+            })
+            .unwrap(),
+        );
+        send(&mut ws, &start).await;
+        // Read frames until we observe the first "A" output chunk.
+        last_seq = read_until_chunk(&mut ws, "A").await;
+        assert!(last_seq >= 1, "saw the first chunk");
+        // Drop ws here (process keeps running on the server).
+    }
+
+    // --- Connection 2: re-auth, resume from last_seq, collect the rest + exit.
+    let mut ws = tokio_tungstenite::connect_async(&url).await.unwrap().0;
+    authenticate(&mut ws).await;
+    let resume = Request::new(
+        3,
+        method::PROCESS_RESUME,
+        serde_json::to_value(ProcessResumeParams {
+            process_id: process_id.clone(),
+            after_seq: last_seq,
+        })
+        .unwrap(),
+    );
+    send(&mut ws, &resume).await;
+
+    let mut resumed = String::new();
+    let exit_code = loop {
+        match recv_frame(&mut ws).await {
+            Frame::Note(n) if n.method == method::PROCESS_OUTPUT => {
+                let p: exec_protocol::ProcessOutputParams =
+                    serde_json::from_value(n.params).unwrap();
+                assert!(
+                    p.seq > last_seq,
+                    "resume must not replay already-seen output"
+                );
+                if p.stream == WireStream::Stdout {
+                    resumed.push_str(&String::from_utf8_lossy(
+                        &exec_protocol::b64_decode(&p.data).unwrap(),
+                    ));
+                }
+            }
+            Frame::Note(n) if n.method == method::PROCESS_EXIT => {
+                let p: exec_protocol::ProcessExitParams = serde_json::from_value(n.params).unwrap();
+                break p.code;
+            }
+            _ => {}
+        }
+    };
+
+    // B and C arrived after the reconnect; A (already seen) was not replayed.
+    assert!(
+        resumed.contains('B') && resumed.contains('C'),
+        "resumed tail = {resumed:?}"
+    );
+    assert!(
+        !resumed.contains('A'),
+        "A should not be replayed; got {resumed:?}"
+    );
+    assert_eq!(exit_code, Some(0));
+}
+
+// ---- raw-protocol test helpers ---------------------------------------------
+
+type Ws =
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
+
+enum Frame {
+    Resp(Response),
+    Note(Notification),
+}
+
+async fn send(ws: &mut Ws, req: &Request) {
+    ws.send(Message::Text(serde_json::to_string(req).unwrap().into()))
+        .await
+        .unwrap();
+}
+
+async fn recv_frame(ws: &mut Ws) -> Frame {
+    loop {
+        let Some(Ok(msg)) = ws.next().await else {
+            panic!("connection closed before a frame arrived");
+        };
+        if let Message::Text(t) = msg {
+            if let Ok(r) = serde_json::from_str::<Response>(&t) {
+                return Frame::Resp(r);
+            }
+            if let Ok(n) = serde_json::from_str::<Notification>(&t) {
+                return Frame::Note(n);
+            }
+        }
+    }
+}
+
+async fn recv_response(ws: &mut Ws) -> Response {
+    loop {
+        if let Frame::Resp(r) = recv_frame(ws).await {
+            return r;
+        }
+    }
+}
+
+async fn authenticate(ws: &mut Ws) {
+    let auth = Request::new(
+        1,
+        method::AUTH,
+        serde_json::to_value(AuthParams {
+            token: TOKEN.to_string(),
+            protocol_version: PROTOCOL_VERSION,
+        })
+        .unwrap(),
+    );
+    send(ws, &auth).await;
+    let resp = recv_response(ws).await;
+    assert!(resp.error.is_none(), "auth failed: {:?}", resp.error);
+}
+
+/// Read frames until a stdout output chunk containing `needle` is seen; returns
+/// the highest output `seq` observed so far (the resume cursor).
+async fn read_until_chunk(ws: &mut Ws, needle: &str) -> u64 {
+    let mut max_seq = 0;
+    loop {
+        if let Frame::Note(n) = recv_frame(ws).await {
+            if n.method == method::PROCESS_OUTPUT {
+                let p: exec_protocol::ProcessOutputParams =
+                    serde_json::from_value(n.params).unwrap();
+                max_seq = max_seq.max(p.seq);
+                let text = String::from_utf8_lossy(&exec_protocol::b64_decode(&p.data).unwrap())
+                    .to_string();
+                if text.contains(needle) {
+                    return max_seq;
+                }
+            }
+        }
+    }
+}

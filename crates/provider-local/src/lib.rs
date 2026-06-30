@@ -28,6 +28,9 @@ mod tools;
 
 pub use checkpoint::{is_git_repo, restore_checkpoint};
 pub use config::{LocalConfig, DEFAULT_BASE_URL, DEFAULT_RESEARCH_MODEL};
+// The execution backends. `LocalExecutor` is wired today; `RemoteExecutor`
+// (over clark-exec-server) is selected per session once remote projects land.
+pub use exec::{Executor, LocalExecutor, RemoteExecutor};
 pub use files::list_project_files;
 pub use mcp::{probe_mcp_servers, McpServerConfig, McpStatus};
 pub use memory::{

@@ -6,9 +6,8 @@
 
 use std::path::Path;
 
+use exec_core::is_ignored;
 use walkdir::WalkDir;
-
-use crate::tools::fs::is_ignored;
 
 /// Cap the listing so a huge monorepo can't balloon the IPC payload. The picker
 /// fuzzy-filters client-side, so this is a breadth bound on the walk, not a cap

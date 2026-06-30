@@ -1077,6 +1077,40 @@ dependencies = [
 ]
 
 [[package]]
+name = "exec-core"
+version = "0.1.4"
+dependencies = [
+ "async-trait",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "walkdir",
+]
+
+[[package]]
+name = "exec-protocol"
+version = "0.1.4"
+dependencies = [
+ "base64 0.22.1",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "exec-server"
+version = "0.1.4"
+dependencies = [
+ "exec-core",
+ "exec-protocol",
+ "futures",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-tungstenite",
+ "tokio-util",
+]
+
+[[package]]
 name = "fastrand"
 version = "2.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3060,6 +3094,9 @@ dependencies = [
  "agent-core",
  "async-channel",
  "async-trait",
+ "exec-core",
+ "exec-protocol",
+ "exec-server",
  "futures",
  "glob",
  "regex",
@@ -3070,6 +3107,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-tungstenite",
  "tokio-util",
  "tracing",
  "uuid",
