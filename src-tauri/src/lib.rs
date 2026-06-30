@@ -9,7 +9,9 @@ use agent_core::ProviderCapabilities;
 use serde::Serialize;
 
 mod commands;
-mod ssh;
+// Public so the gated `tests/remote_e2e.rs` harness can drive the real
+// orchestration against a live host; otherwise host-internal.
+pub mod ssh;
 mod state;
 mod terminal;
 
