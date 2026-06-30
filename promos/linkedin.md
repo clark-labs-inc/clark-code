@@ -4,22 +4,21 @@
 
 ---
 
-## Post
+## Recommended
 
-Introducing Clark Code — and a clearer line between our two products.
+We just drew a clean line between our two products — and shipped the second one.
 
-**Clark Agent** is our cloud computer-use agent. Give it a goal and it browses, clicks, books, and fills things out for you — best for research and anything that lives on the open web.
+**Clark Agent** is the cloud computer-use agent you know: give it a goal and it browses, books, and fills things out for you. It's for the open web.
 
-**Clark Code** is an AI coding IDE that runs on your own machine. It reads, edits, and runs your real repository — locally, or on a remote host over SSH — with a persistent memory of your codebase and Clark's research built in.
+**Clark Code** is new. It's an AI coding IDE that runs on your own machine and works inside your real repository — reading, editing, and running your code, locally or on a remote host over SSH. It keeps a memory of your codebase, and Clark's research is a tool-call away.
 
-One brain, two bodies:
+Same brain. Two bodies:
+→ Clark Agent points at the web.
+→ Clark Code points at your repo.
 
-• Clark Agent → the cloud, plus a browser it drives for you
-• Clark Code → your files, your shell, your git repo
+Clark Code for macOS is signed, notarized, and ready to open your project. Windows and Linux next.
 
-Clark Code for macOS is signed, notarized, and ready to open your repo. Windows and Linux are on the way.
-
-Download → clarkchat.com/clark-code
+clarkchat.com/clark-code
 
 #AI #DeveloperTools #Coding #AIAgents #ClarkLabs
 
@@ -29,7 +28,7 @@ Download → clarkchat.com/clark-code
 
 Same Clark, two places to point it.
 
-Clark Agent works the web for you from the cloud. Clark Code is an AI coding IDE that works inside your real repo, on your Mac — local or over SSH, with a memory layer for your codebase.
+Clark Agent works the web for you from the cloud. Clark Code is a new AI coding IDE that works inside your real repo, on your Mac — local or over SSH, with a memory layer for your codebase.
 
 Clark Code for macOS is signed & notarized. Download → clarkchat.com/clark-code
 

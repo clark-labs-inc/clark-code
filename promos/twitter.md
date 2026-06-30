@@ -4,31 +4,50 @@
 
 ---
 
-## Primary post
+## Recommended
 
-Same Clark. Two places to point it.
+Meet Clark Code.
 
-→ Clark Agent runs in the cloud and drives a computer for you — browsing, booking, errands.
+Clark Agent drives a computer for you in the cloud — browsing, booking, errands.
+Clark Code runs on your Mac and drives your codebase — reading, editing, and running your real repo. Local or over SSH.
 
-→ Clark Code is an AI coding IDE on your Mac. It reads, edits & runs your real repo. Local or over SSH.
+One brain. Two bodies.
 
-↓ Download Clark Code for Mac: clarkchat.com/clark-code
-
----
-
-## Optional follow-up (thread)
-
-**2/** Clark Code keeps a memory of your repo — its architecture, conventions, and the decisions you've made — so every session picks up where you left off. Clark's research is one tool-call away, inline.
-
-**3/** macOS build is signed + notarized, Apple silicon + Intel. New: point it at a remote box over SSH and the agent's tools run there while the model stays local. Windows & Linux soon.
+→ clarkchat.com/clark-code
 
 ---
 
-## Short variant (single tweet)
+## Punchy alt
 
-Two ways to work with Clark:
+Two ways to point Clark:
 
-☁️ Clark Agent — cloud computer-use agent. Give it a goal, watch it browse + book + fill things out.
-💻 Clark Code — an AI coding IDE on your Mac. Your files, your shell, your repo.
+→ at the web — Clark Agent, in the cloud
+→ at your codebase — Clark Code, on your Mac
 
-Download Clark Code → clarkchat.com/clark-code
+Clark Code ships today: repo-aware, signed, notarized. Local or over SSH.
+
+clarkchat.com/clark-code
+
+---
+
+## Thread
+
+**1/** Meet Clark Code — the same Clark, now living in your repo.
+
+Clark Agent points at the open web. Clark Code points at your codebase: your files, your shell, your git. On your Mac.
+
+**2/** It keeps a memory of your repo — architecture, conventions, the decisions you've made — so every session picks up where you left off. Clark's research is one tool-call away, inline.
+
+**3/** New: point it at a remote box over SSH and the agent's tools run there, while the model stays local. macOS build is signed + notarized, Apple silicon + Intel. Windows & Linux next.
+
+↓ clarkchat.com/clark-code
+
+---
+
+## Tagline bank
+
+- Same brain. Two bodies.
+- Clark, but on your laptop.
+- Point Clark at the web, or at your repo.
+- The coding IDE that already knows your codebase.
+- Your repo, with Clark living in it.
