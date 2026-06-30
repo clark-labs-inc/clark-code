@@ -10,9 +10,12 @@ use futures::StreamExt;
 use provider_acp::AcpProvider;
 use provider_clark::ClarkProvider;
 use provider_local::LocalAgentProvider;
+use serde::Serialize;
 use serde_json::Value;
+use std::path::PathBuf;
 use tauri::{AppHandle, Emitter, State};
 
+use crate::ssh::{self, RemoteSpec};
 use crate::{builtin_providers, AppState, ProviderInfo};
 
 /// Synthetic run id used to attribute the user's own message in the timeline.
@@ -43,6 +46,56 @@ pub async fn provider_connect(
     let mut provider = make_provider(&provider_id)?;
     provider.connect(config).await.map_err(|e| e.to_string())?;
     state.session.lock().await.provider = Some(provider);
+    Ok(())
+}
+
+/// What the frontend gets back after a remote project connects. The `remote`
+/// block is spread verbatim into the local provider's connect `extra` (see
+/// `LocalConfig`'s `RemoteTarget`), and `id` is used to disconnect later.
+#[derive(Serialize)]
+pub struct RemoteInfo {
+    pub id: String,
+    pub ws_url: String,
+    pub token: String,
+    pub cwd: String,
+    pub arch: String,
+}
+
+/// Bring up a remote project: deploy + start `clark-exec-server` on `host`, open
+/// the loopback tunnel, and return the `ws://` URL + token the local provider
+/// uses as its remote executor. The connection is kept alive in host state under
+/// the returned id until [`ssh_disconnect`].
+#[tauri::command]
+pub async fn ssh_connect(
+    host: String,
+    remote_root: String,
+    local_binary: String,
+    state: State<'_, AppState>,
+) -> Result<RemoteInfo, String> {
+    tracing::info!(%host, %remote_root, "ssh_connect");
+    let spec = RemoteSpec {
+        host,
+        remote_root,
+        local_binary: PathBuf::from(local_binary),
+    };
+    let conn = ssh::connect(&spec).await?;
+    let info = RemoteInfo {
+        id: uuid::Uuid::new_v4().to_string(),
+        ws_url: conn.ws_url.clone(),
+        token: conn.token.clone(),
+        cwd: conn.remote_root.clone(),
+        arch: conn.arch.slug().to_string(),
+    };
+    state.remotes.lock().await.insert(info.id.clone(), conn);
+    Ok(info)
+}
+
+/// Tear down a remote project: drop its `RemoteConn`, which kills the SSH
+/// channels and, with them, the remote server + tunnel. Idempotent.
+#[tauri::command]
+pub async fn ssh_disconnect(id: String, state: State<'_, AppState>) -> Result<(), String> {
+    tracing::info!(%id, "ssh_disconnect");
+    state.remotes.lock().await.remove(&id);
     Ok(())
 }
 

@@ -52,6 +52,23 @@ pub struct LocalConfig {
     pub clark: Option<ClarkResearchConfig>,
     /// Project root, when set at connect time. A session's `cwd` option wins.
     pub cwd: Option<String>,
+    /// When set, this session's tool I/O runs on a **remote** host (over the
+    /// exec-server) rather than locally. The host fills this in after it brings
+    /// up the SSH tunnel + server.
+    pub remote: Option<RemoteTarget>,
+}
+
+/// A remote project target. The agent's file/shell tools run against `cwd` on a
+/// remote host, reached through a `clark-exec-server` at `ws_url` (a local port
+/// the host forwarded over SSH) and authenticated with `token`.
+#[derive(Clone, Debug)]
+pub struct RemoteTarget {
+    /// `ws://127.0.0.1:<forwarded-port>` — the local end of the SSH tunnel.
+    pub ws_url: String,
+    /// Per-session capability token the exec-server checks on `auth`.
+    pub token: String,
+    /// Absolute project root **on the remote host**.
+    pub cwd: String,
 }
 
 /// How the `clark_research` tool reaches Clark: the same Platform API + key, with
@@ -140,6 +157,17 @@ impl LocalConfig {
 
         let cwd = config.cwd.clone().or_else(|| str_field(extra, "cwd"));
 
+        // A remote project rides in on `extra.remote = { ws_url, token, cwd }`,
+        // populated by the host once the SSH tunnel + exec-server are up. All
+        // three fields are required; a partial object is treated as "local".
+        let remote = extra.get("remote").and_then(|r| {
+            Some(RemoteTarget {
+                ws_url: str_field(r, "ws_url")?,
+                token: str_field(r, "token")?,
+                cwd: str_field(r, "cwd")?,
+            })
+        });
+
         Self {
             base_url,
             model,
@@ -156,6 +184,7 @@ impl LocalConfig {
                 .unwrap_or_default(),
             clark,
             cwd,
+            remote,
         }
     }
 
@@ -209,6 +238,36 @@ mod tests {
         assert_eq!(clark.base_url, DEFAULT_BASE_URL);
         assert_eq!(clark.api_key.as_deref(), Some("ck_live_abc"));
         assert_eq!(clark.model, DEFAULT_RESEARCH_MODEL);
+    }
+
+    #[test]
+    fn parses_remote_target_when_fully_specified() {
+        let pc = ProviderConfig {
+            auth_token: Some("ck_live_abc".into()),
+            extra: json!({
+                "remote": {
+                    "ws_url": "ws://127.0.0.1:54321",
+                    "token": "cap-token",
+                    "cwd": "/home/me/project"
+                }
+            }),
+            ..Default::default()
+        };
+        let cfg = LocalConfig::from_provider_config(&pc);
+        let remote = cfg.remote.expect("remote target parsed");
+        assert_eq!(remote.ws_url, "ws://127.0.0.1:54321");
+        assert_eq!(remote.token, "cap-token");
+        assert_eq!(remote.cwd, "/home/me/project");
+    }
+
+    #[test]
+    fn partial_remote_target_is_ignored() {
+        let pc = ProviderConfig {
+            // Missing `token` and `cwd` → not a usable remote target.
+            extra: json!({ "remote": { "ws_url": "ws://127.0.0.1:1" } }),
+            ..Default::default()
+        };
+        assert!(LocalConfig::from_provider_config(&pc).remote.is_none());
     }
 
     #[test]

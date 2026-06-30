@@ -42,6 +42,8 @@ tauri-plugin-google-auth = "0.5"
 reqwest = { version = "0.12", default-features = false, features = ["json", "cookies", "rustls-tls"] }
 # Percent-encode desktop conversation ids in REST sync URLs.
 urlencoding = "2"
+# Ids for live remote-project connections + capability tokens (SSH orchestration).
+uuid = { version = "1", features = ["v4"] }
 
 serde.workspace = true
 serde_json.workspace = true

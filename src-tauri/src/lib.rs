@@ -9,6 +9,7 @@ use agent_core::ProviderCapabilities;
 use serde::Serialize;
 
 mod commands;
+mod ssh;
 mod state;
 mod terminal;
 
@@ -62,6 +63,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::provider_list,
             commands::provider_connect,
+            commands::ssh_connect,
+            commands::ssh_disconnect,
             commands::session_new,
             commands::session_load,
             commands::prompt,

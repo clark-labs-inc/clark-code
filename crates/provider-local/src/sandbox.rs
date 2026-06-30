@@ -8,14 +8,25 @@
 
 use std::path::{Component, Path, PathBuf};
 
-/// A canonicalized project root that file paths are resolved against.
+/// Whether the root lives on this machine or on a remote host (reached through
+/// the exec-server). Remote roots can't be canonicalized — the filesystem isn't
+/// here — so containment is purely lexical for them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Mode {
+    Local,
+    Remote,
+}
+
+/// A project root that file paths are resolved against. Local roots are
+/// canonicalized (symlink-aware); remote roots are normalized lexically.
 #[derive(Clone, Debug)]
 pub struct Sandbox {
     root: PathBuf,
+    mode: Mode,
 }
 
 impl Sandbox {
-    /// Canonicalize `root`. Fails if it doesn't exist / isn't a directory.
+    /// Canonicalize a **local** `root`. Fails if it doesn't exist / isn't a dir.
     pub fn new(root: impl AsRef<Path>) -> Result<Self, String> {
         let root = root.as_ref();
         let canon = root
@@ -27,43 +38,76 @@ impl Sandbox {
                 canon.display()
             ));
         }
-        Ok(Self { root: canon })
+        Ok(Self {
+            root: canon,
+            mode: Mode::Local,
+        })
+    }
+
+    /// A **remote** project root: an absolute path on the remote host. The local
+    /// filesystem can't be consulted, so we only normalize lexically and enforce
+    /// containment lexically. The real enforcement is layered: the exec-server's
+    /// own `--root` confinement and the local safety gate both still apply.
+    pub fn new_remote(root: &str) -> Result<Self, String> {
+        let p = PathBuf::from(root);
+        if !p.is_absolute() {
+            return Err(format!(
+                "remote project root must be an absolute path: {root}"
+            ));
+        }
+        Ok(Self {
+            root: lexically_normalize(&p),
+            mode: Mode::Remote,
+        })
     }
 
     pub fn root(&self) -> &Path {
         &self.root
     }
 
-    /// Resolve a (possibly relative) path for **reading**. The target must exist
-    /// and, after symlink resolution, lie within the root.
+    /// Resolve a (possibly relative) path for **reading**. Local: the target must
+    /// exist and, after symlink resolution, lie within the root. Remote: the
+    /// lexically-normalized path must lie within the root.
     pub fn resolve_existing(&self, path: &str) -> Result<PathBuf, String> {
         let joined = self.join(path);
-        let canon = joined.canonicalize().map_err(|e| format!("{path}: {e}"))?;
-        self.ensure_contained(&canon)?;
-        Ok(canon)
+        match self.mode {
+            Mode::Local => {
+                let canon = joined.canonicalize().map_err(|e| format!("{path}: {e}"))?;
+                self.ensure_contained(&canon)?;
+                Ok(canon)
+            }
+            Mode::Remote => {
+                let normalized = lexically_normalize(&joined);
+                self.ensure_contained_lexical(&normalized)?;
+                Ok(normalized)
+            }
+        }
     }
 
     /// Resolve a (possibly relative) path for **writing**. The file need not
-    /// exist, but its nearest existing ancestor must resolve within the root, so
-    /// a new file can't be planted outside via `..` or a symlinked parent.
+    /// exist. Local: its nearest existing ancestor must resolve within the root,
+    /// so a new file can't be planted outside via `..` or a symlinked parent.
+    /// Remote: lexical containment only (no filesystem to stat).
     pub fn resolve_for_write(&self, path: &str) -> Result<PathBuf, String> {
         let joined = self.join(path);
         let normalized = lexically_normalize(&joined);
-        // Walk up to the first existing ancestor and canonicalize it.
-        let mut ancestor = normalized.as_path();
-        loop {
-            match ancestor.parent() {
-                Some(parent) => {
-                    if parent.exists() {
-                        let canon_parent = parent
-                            .canonicalize()
-                            .map_err(|e| format!("{}: {e}", parent.display()))?;
-                        self.ensure_contained(&canon_parent)?;
-                        break;
+        if self.mode == Mode::Local {
+            // Walk up to the first existing ancestor and canonicalize it.
+            let mut ancestor = normalized.as_path();
+            loop {
+                match ancestor.parent() {
+                    Some(parent) => {
+                        if parent.exists() {
+                            let canon_parent = parent
+                                .canonicalize()
+                                .map_err(|e| format!("{}: {e}", parent.display()))?;
+                            self.ensure_contained(&canon_parent)?;
+                            break;
+                        }
+                        ancestor = parent;
                     }
-                    ancestor = parent;
+                    None => return Err(format!("{path}: no existing parent directory")),
                 }
-                None => return Err(format!("{path}: no existing parent directory")),
             }
         }
         self.ensure_contained_lexical(&normalized)?;
@@ -179,5 +223,33 @@ mod tests {
         let sb = Sandbox::new(dir.path()).unwrap();
         let p = sb.resolve_for_write("a/b/c.txt").unwrap();
         assert!(p.ends_with("a/b/c.txt"));
+    }
+
+    #[test]
+    fn remote_resolves_lexically_without_touching_disk() {
+        // The remote root need not exist locally.
+        let sb = Sandbox::new_remote("/home/me/project").unwrap();
+        assert_eq!(sb.root(), Path::new("/home/me/project"));
+
+        // Relative + absolute paths inside the root resolve.
+        let r = sb.resolve_existing("src/main.rs").unwrap();
+        assert_eq!(r, Path::new("/home/me/project/src/main.rs"));
+        let w = sb.resolve_for_write("a/b/c.txt").unwrap();
+        assert_eq!(w, Path::new("/home/me/project/a/b/c.txt"));
+
+        // `..` escapes are refused lexically (read and write).
+        assert!(sb
+            .resolve_existing("../secret")
+            .unwrap_err()
+            .contains("escapes"));
+        assert!(sb
+            .resolve_for_write("../../etc/x")
+            .unwrap_err()
+            .contains("escapes"));
+    }
+
+    #[test]
+    fn remote_requires_absolute_root() {
+        assert!(Sandbox::new_remote("relative/path").is_err());
     }
 }

@@ -21,6 +21,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::config::LocalConfig;
 use crate::engine::{run_turn, Decision, RunControl, SessionState, TurnContext};
+use crate::exec::{Executor, LocalExecutor, RemoteExecutor};
 use crate::llm::{ChatMessage, LlmClient};
 use crate::prompt::system_prompt;
 use crate::sandbox::Sandbox;
@@ -116,11 +117,24 @@ impl Provider for LocalAgentProvider {
 
     async fn new_session(&mut self, options: SessionOptions) -> Result<Session> {
         let config = self.config()?.clone();
-        let cwd = options
-            .cwd
-            .or(config.cwd.clone())
-            .ok_or_else(|| Error::Unsupported("local provider requires a project `cwd`".into()))?;
-        let sandbox = Arc::new(Sandbox::new(&cwd).map_err(Error::Io)?);
+
+        // A remote project runs its tools on a remote host over the exec-server;
+        // a local project runs them here. Pick the sandbox + executor to match.
+        let (sandbox, executor): (Arc<Sandbox>, Arc<dyn Executor>) =
+            if let Some(remote) = &config.remote {
+                let sandbox = Arc::new(Sandbox::new_remote(&remote.cwd).map_err(Error::Other)?);
+                let exec = RemoteExecutor::connect(&remote.ws_url, &remote.token)
+                    .await
+                    .map_err(Error::Other)?;
+                (sandbox, Arc::new(exec))
+            } else {
+                let cwd = options.cwd.or(config.cwd.clone()).ok_or_else(|| {
+                    Error::Unsupported("local provider requires a project `cwd`".into())
+                })?;
+                let sandbox = Arc::new(Sandbox::new(&cwd).map_err(Error::Io)?);
+                (sandbox, Arc::new(LocalExecutor))
+            };
+        self.executor = executor;
 
         let prompt = system_prompt(&sandbox, config.clark.is_some());
         {
