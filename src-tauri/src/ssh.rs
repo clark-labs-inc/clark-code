@@ -35,6 +35,11 @@ use tokio::process::{Child, ChildStdin, Command};
 /// How long to wait on any single ssh control operation.
 const SSH_CONNECT_TIMEOUT: &str = "10";
 
+/// Where the per-arch, version-pinned `clark-exec-server` prebuilts live. The
+/// remote fetches `…/v<version>/clark-exec-server-<arch>` (+ `.sha256`) over
+/// HTTPS; see [`fetch_from_cdn`].
+const EXEC_SERVER_CDN_BASE: &str = "https://downloads.clarkchat.com/exec-server";
+
 /// What the caller asks to connect to.
 pub struct RemoteSpec {
     /// SSH destination passed verbatim to `ssh` — a `~/.ssh/config` alias or
@@ -42,8 +47,9 @@ pub struct RemoteSpec {
     pub host: String,
     /// Absolute project root **on the remote host**.
     pub remote_root: String,
-    /// Local `clark-exec-server` build to upload, compiled for the remote arch.
-    pub local_binary: PathBuf,
+    /// Optional **dev override**: a locally-built `clark-exec-server` to upload if
+    /// the version-pinned prebuilt isn't on the CDN. `None` in normal use.
+    pub local_binary: Option<PathBuf>,
 }
 
 /// A live remote connection. Field order matters: `_server_stdin` is declared
@@ -102,13 +108,6 @@ impl RemoteArch {
 
 /// Bring up the remote server + tunnel and return a ready connection.
 pub async fn connect(spec: &RemoteSpec) -> Result<RemoteConn, String> {
-    if !spec.local_binary.is_file() {
-        return Err(format!(
-            "local clark-exec-server binary not found at {} — build it for the remote's architecture first",
-            spec.local_binary.display()
-        ));
-    }
-
     let arch = detect_arch(&spec.host).await?;
     let home = remote_home(&spec.host).await?;
     let remote_bin = format!(
@@ -116,7 +115,7 @@ pub async fn connect(spec: &RemoteSpec) -> Result<RemoteConn, String> {
         env!("CARGO_PKG_VERSION"),
         arch.slug()
     );
-    ensure_binary(&spec.host, &remote_bin, &spec.local_binary).await?;
+    ensure_binary(&spec.host, &remote_bin, arch, &spec.local_binary).await?;
 
     let token = new_token();
     let (server, server_stdin, remote_port) =
@@ -170,23 +169,84 @@ async fn remote_home(host: &str) -> Result<String, String> {
     Ok(home)
 }
 
-/// Upload the server binary if the remote doesn't already have this exact
-/// version+arch. The version is in the filename, so a desktop upgrade naturally
-/// re-uploads. (Phase 5: fetch the version-pinned prebuilt from the CDN instead
-/// of uploading, falling back to upload for dev.)
-async fn ensure_binary(host: &str, remote_bin: &str, local_binary: &Path) -> Result<(), String> {
+/// Make sure this exact version+arch server is on the remote. The version is in
+/// the filename, so a desktop upgrade naturally re-deploys. We prefer the
+/// version-pinned prebuilt from the CDN; if it isn't there (or there's no
+/// network), we fall back to uploading a locally-built binary when one is given.
+async fn ensure_binary(
+    host: &str,
+    remote_bin: &str,
+    arch: RemoteArch,
+    local_binary: &Option<PathBuf>,
+) -> Result<(), String> {
     if ssh_ok(host, &format!("test -x {}", shq(remote_bin))).await {
-        return Ok(());
+        return Ok(()); // already deployed
     }
     let dir = remote_bin.rsplit_once('/').map(|(d, _)| d).unwrap_or(".");
     if !ssh_ok(host, &format!("mkdir -p {}", shq(dir))).await {
         return Err(format!("could not create {dir} on {host}"));
     }
-    scp(local_binary, &format!("{host}:{remote_bin}")).await?;
-    if !ssh_ok(host, &format!("chmod +x {}", shq(remote_bin))).await {
-        return Err(format!("could not chmod the uploaded server on {host}"));
+
+    // 1) Version-pinned prebuilt from the CDN (the normal path).
+    if fetch_from_cdn(host, remote_bin, arch).await.is_ok() {
+        return Ok(());
     }
-    Ok(())
+
+    // 2) Dev fallback: upload a locally-built binary if one was supplied.
+    if let Some(local) = local_binary {
+        if !local.is_file() {
+            return Err(format!(
+                "clark-exec-server isn't on the CDN for v{} ({}), and the local binary {} doesn't exist",
+                env!("CARGO_PKG_VERSION"),
+                arch.slug(),
+                local.display()
+            ));
+        }
+        scp(local, &format!("{host}:{remote_bin}")).await?;
+        if !ssh_ok(host, &format!("chmod +x {}", shq(remote_bin))).await {
+            return Err(format!("could not chmod the uploaded server on {host}"));
+        }
+        return Ok(());
+    }
+
+    Err(format!(
+        "couldn't deploy clark-exec-server to {host}: not on the CDN for v{} ({}), and no local binary was provided",
+        env!("CARGO_PKG_VERSION"),
+        arch.slug()
+    ))
+}
+
+/// Have the remote `curl` the version-pinned prebuilt + its `.sha256` from the
+/// CDN, verify the checksum (portable across `sha256sum`/`shasum`), and install
+/// it. Returns `Err` on any failure (no curl, 404, network, checksum mismatch)
+/// so the caller can fall back.
+async fn fetch_from_cdn(host: &str, remote_bin: &str, arch: RemoteArch) -> Result<(), String> {
+    let url = format!(
+        "{EXEC_SERVER_CDN_BASE}/v{}/clark-exec-server-{}",
+        env!("CARGO_PKG_VERSION"),
+        arch.slug()
+    );
+    // One self-contained /bin/sh script; `set -e` makes any step's failure abort.
+    let script = format!(
+        "set -e; url={url}; bin={bin}; tmp=\"$bin.part\"; \
+         command -v curl >/dev/null 2>&1 || {{ echo 'curl not found' >&2; exit 1; }}; \
+         curl -fsSL \"$url\" -o \"$tmp\"; \
+         want=$(curl -fsSL \"$url.sha256\" | awk '{{print $1}}'); \
+         if command -v sha256sum >/dev/null 2>&1; then got=$(sha256sum \"$tmp\" | awk '{{print $1}}'); \
+         else got=$(shasum -a 256 \"$tmp\" | awk '{{print $1}}'); fi; \
+         [ -n \"$want\" ] && [ \"$want\" = \"$got\" ] || {{ echo 'checksum mismatch' >&2; rm -f \"$tmp\"; exit 1; }}; \
+         chmod +x \"$tmp\"; mv \"$tmp\" \"$bin\"",
+        url = shq(&url),
+        bin = shq(remote_bin),
+    );
+    if ssh_ok(host, &script).await {
+        Ok(())
+    } else {
+        Err(format!(
+            "could not fetch clark-exec-server ({}) from the CDN",
+            arch.slug()
+        ))
+    }
 }
 
 /// Run the server on an ssh channel and read its bound port. Two jobs are done

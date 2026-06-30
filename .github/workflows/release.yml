@@ -288,5 +288,38 @@ jobs:
               --paths "/desktop/latest/*"
           fi
 
+  # The remote-projects feature (SSH) fetches a per-arch clark-exec-server from
+  # the CDN onto the remote host. Build all four targets on one macOS runner
+  # (cargo-zigbuild for the static Linux musl binaries, native for darwin) and
+  # publish them under exec-server/<tag>/ — see scripts/publish-exec-server.sh
+  # and src-tauri/src/ssh.rs `fetch_from_cdn`.
+  exec-server:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl,aarch64-unknown-linux-musl,aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+      - name: Install zig + cargo-zigbuild
+        run: |
+          brew install zig
+          cargo install cargo-zigbuild --locked
+      - name: Build clark-exec-server for all targets
+        run: |
+          cargo zigbuild --release -p exec-server --bin clark-exec-server \
+            --target x86_64-unknown-linux-musl --target aarch64-unknown-linux-musl
+          cargo build --release -p exec-server --bin clark-exec-server \
+            --target aarch64-apple-darwin --target x86_64-apple-darwin
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.CLARK_DESKTOP_DOWNLOAD_UPLOAD_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Publish to the downloads CDN
+        run: ./scripts/publish-exec-server.sh "${{ github.ref_name }}"
+
 # The public download page lives in clark-ui (clarkchat.com/download) and
 # resolves public CDN assets via https://downloads.clarkchat.com/desktop/latest/manifest.json.

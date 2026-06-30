@@ -26,18 +26,15 @@ use tokio_util::sync::CancellationToken;
 struct Env {
     host: String,
     root: String,
-    binary: PathBuf,
+    /// Optional dev override; unset means "fetch the prebuilt from the CDN".
+    binary: Option<PathBuf>,
 }
 
 fn env() -> Option<Env> {
     let host = std::env::var("CLARK_SSH_TEST_HOST").ok()?;
     let root = std::env::var("CLARK_SSH_TEST_ROOT").ok()?;
-    let binary = std::env::var("CLARK_SSH_TEST_BIN").ok()?;
-    Some(Env {
-        host,
-        root,
-        binary: PathBuf::from(binary),
-    })
+    let binary = std::env::var("CLARK_SSH_TEST_BIN").ok().map(PathBuf::from);
+    Some(Env { host, root, binary })
 }
 
 #[tokio::test]
@@ -69,7 +66,7 @@ async fn remote_project_round_trips_against_a_live_host() {
     let spec = RemoteSpec {
         host: env.host.clone(),
         remote_root: env.root.clone(),
-        local_binary: env.binary.clone(),
+        local_binary: env.binary.clone(), // None → CDN fetch
     };
     let conn = ssh::connect(&spec).await.expect("ssh::connect failed");
     eprintln!("connected: {} (arch {})", conn.ws_url, conn.arch.slug());

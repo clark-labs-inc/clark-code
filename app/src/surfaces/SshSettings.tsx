@@ -76,11 +76,13 @@ function HostCard({
       </div>
 
       <div className="mt-2">
-        <label className={label}>Exec-server binary · local path, built for the remote arch</label>
+        <label className={label}>
+          Exec-server binary <span className="text-ink-faint">· optional, dev override</span>
+        </label>
         <input
           value={host.binaryPath}
           onChange={(e) => onChange({ ...host, binaryPath: e.target.value })}
-          placeholder="…/target/x86_64-unknown-linux-musl/release/clark-exec-server"
+          placeholder="Leave blank — fetched automatically for the remote's arch"
           className={cn(input, "font-mono text-xs")}
           spellCheck={false}
         />

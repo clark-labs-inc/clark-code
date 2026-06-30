@@ -15,9 +15,10 @@ export interface SshHost {
   /** Absolute project root on the remote. */
   remoteRoot: string;
   /**
-   * Local path to a `clark-exec-server` built for the remote's architecture.
-   * Dev-only: the desktop uploads it on connect. Goes away once the binary is
-   * fetched from the downloads CDN (server-side feature, later phase).
+   * Optional **dev override**: a local path to a `clark-exec-server` built for
+   * the remote's architecture. Normally left blank — the desktop fetches the
+   * matching prebuilt from the downloads CDN. Set this only to test an unreleased
+   * build.
    */
   binaryPath: string;
 }
@@ -46,9 +47,10 @@ export function blankHost(): SshHost {
   return { id: crypto.randomUUID(), label: "", host: "", remoteRoot: "", binaryPath: "" };
 }
 
-/** Everything a host needs to connect is filled in. */
+/** Everything a host needs to connect is filled in. The binary path is optional
+ *  (the server is fetched from the CDN), so only host + folder are required. */
 export function hostReady(h: SshHost): boolean {
-  return Boolean(h.host.trim() && h.remoteRoot.trim() && h.binaryPath.trim());
+  return Boolean(h.host.trim() && h.remoteRoot.trim());
 }
 
 /** The label to show for a host (falls back to the destination). */

@@ -69,14 +69,17 @@ pub struct RemoteInfo {
 pub async fn ssh_connect(
     host: String,
     remote_root: String,
-    local_binary: String,
+    local_binary: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<RemoteInfo, String> {
     tracing::info!(%host, %remote_root, "ssh_connect");
     let spec = RemoteSpec {
         host,
         remote_root,
-        local_binary: PathBuf::from(local_binary),
+        // Empty/absent → rely on the CDN; a path is a dev override.
+        local_binary: local_binary
+            .filter(|s| !s.trim().is_empty())
+            .map(PathBuf::from),
     };
     let conn = ssh::connect(&spec).await?;
     let info = RemoteInfo {

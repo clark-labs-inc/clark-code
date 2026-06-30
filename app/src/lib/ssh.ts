@@ -30,17 +30,18 @@ export interface RemoteTargetConfig {
   cwd: string;
 }
 
-/** Bring up the remote server + tunnel. Throws with a readable message on
- *  failure (host unreachable, arch mismatch, binary missing, …). */
+/** Bring up the remote server + tunnel. The server is fetched from the CDN for
+ *  the remote's arch; `localBinary` is an optional dev override. Throws with a
+ *  readable message on failure (host unreachable, arch mismatch, …). */
 export function sshConnect(
   host: string,
   remoteRoot: string,
-  localBinary: string,
+  localBinary?: string,
 ): Promise<RemoteInfo> {
   return invoke<RemoteInfo>("ssh_connect", {
     host,
     remoteRoot,
-    localBinary,
+    localBinary: localBinary?.trim() || null,
   });
 }
 
