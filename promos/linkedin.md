@@ -2,22 +2,25 @@
 
 **Image:** `clark-code-linkedin-1200x627.png` (1.91:1)
 
+Clark Code is an AI coding agent — same category as Codex, Claude Code, Devin.
+Plain, honest voice; confident about the category, not hypey.
+
 ---
 
 ## Post
 
-A note on something we've been building.
+We've been building Clark Code — an AI coding agent that runs on your own machine.
 
-Clark Agent runs in the cloud and uses a computer on your behalf, mostly for things on the web. People kept asking for the same idea but for code, on their own machine — so we made Clark Code.
+It's in the same space as Codex, Claude Code, and Devin: you point it at a repository and it does the real work — reading the code, making edits, running tests. What's different is where it lives. It's a native Mac app, it keeps a memory of how your project is put together, and it can work on your laptop or on a remote machine over SSH while the model stays on your side.
 
-It's a coding app for the Mac. It opens your real repository and works inside it: reading, editing, and running your code, locally or on a remote machine over SSH. It tries to hold onto how your project is put together, so you're not re-explaining it every session.
-
-It's early, and macOS only for now. If you write code and want to try it, it's at clarkchat.com/clark-code. We'd genuinely like the feedback.
+It's early, and macOS only for now. If you write code, we'd love for you to try it and tell us where it falls short: clarkchat.com/clark-code
 
 ---
 
-## Shorter
+## Without naming competitors
 
-We've been working on Clark Code — a coding app for the Mac that lets Clark work inside your real repository, reading and editing and running your code (locally, or on a remote machine over SSH).
+We've been building Clark Code — an AI coding agent that runs on your own machine.
 
-It's early and Mac-only for now. If you'd like to try it: clarkchat.com/clark-code
+You point it at a repository and it does the real work: reading the code, making edits, running tests. It's a native Mac app, it keeps a memory of how your project is put together, and it can work either on your laptop or on a remote machine over SSH while the model stays on your side.
+
+It's early, and macOS only for now. If you write code, we'd love for you to try it and tell us where it falls short: clarkchat.com/clark-code
