@@ -10,7 +10,7 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "agent-core"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "async-channel",
  "async-trait",
@@ -509,7 +509,7 @@ dependencies = [
 
 [[package]]
 name = "clark-desktop"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "agent-core",
  "base64 0.22.1",
@@ -829,7 +829,7 @@ dependencies = [
 
 [[package]]
 name = "devbridge"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "agent-core",
  "futures",
@@ -1116,7 +1116,7 @@ dependencies = [
 
 [[package]]
 name = "exec-core"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "async-trait",
  "tempfile",
@@ -1127,7 +1127,7 @@ dependencies = [
 
 [[package]]
 name = "exec-protocol"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "base64 0.22.1",
  "serde",
@@ -1136,7 +1136,7 @@ dependencies = [
 
 [[package]]
 name = "exec-server"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "exec-core",
  "exec-protocol",
@@ -3110,7 +3110,7 @@ dependencies = [
 
 [[package]]
 name = "provider-acp"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "agent-core",
  "async-channel",
@@ -3125,7 +3125,7 @@ dependencies = [
 
 [[package]]
 name = "provider-clark"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "agent-core",
  "async-channel",
@@ -3143,7 +3143,7 @@ dependencies = [
 
 [[package]]
 name = "provider-local"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "agent-core",
  "async-channel",
