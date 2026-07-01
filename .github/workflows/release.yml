@@ -139,11 +139,14 @@ jobs:
 
           # macOS runners ship bash 3.2 (no `mapfile`), so read into the array
           # with a portable loop.
+          # Only files under a tauri `bundle/` dir are installers — scope to it so
+          # a Windows build's many stray *.exe (build scripts, the raw binary)
+          # never get picked up.
           files=()
           while IFS= read -r f; do
             files+=("$f")
           done < <(
-            find target -type f \( \
+            find target -type f -path "*/bundle/*" \( \
               -name "*.dmg" -o \
               -name "*.msi" -o \
               -name "*.exe" -o \
@@ -244,7 +247,7 @@ jobs:
           # is one bundle, so both arches share the signature. tauri.conf.json's
           # updater endpoint is desktop/latest/latest.json, so THIS is what makes
           # auto-update actually work — the CI never emitted it before.
-          sig_file="$(find target -type f -name '*.app.tar.gz.sig' | head -1 || true)"
+          sig_file="$(find target -type f -path "*/bundle/*" -name '*.app.tar.gz.sig' | head -1 || true)"
           if [ -n "$sig_file" ]; then
             sig="$(cat "$sig_file")"
             node -e '
