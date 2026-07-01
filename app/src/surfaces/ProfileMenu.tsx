@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { CreditCard, ExternalLink, LogOut, Loader2 } from "lucide-react";
+import { CreditCard, ExternalLink, LogOut, Loader2, Brain } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
 import { clarkBillingUrl, openExternal } from "../lib/account";
 import { cn } from "../lib/cn";
@@ -42,6 +42,8 @@ export function ProfileMenu() {
   const loading = useSessionStore((s) => s.loadingBilling);
   const loadBilling = useSessionStore((s) => s.loadBilling);
   const signOut = useSessionStore((s) => s.signOutAuth);
+  const memoriesEnabled = useSessionStore((s) => s.memoriesEnabled);
+  const setMemoriesEnabled = useSessionStore((s) => s.setMemoriesEnabled);
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -128,6 +130,29 @@ export function ProfileMenu() {
 
             <div className="mx-1 border-t border-border-subtle" />
 
+            <div className="px-2 py-1.5">
+              <button
+                type="button"
+                role="switch"
+                aria-checked={memoriesEnabled}
+                onClick={() => setMemoriesEnabled(!memoriesEnabled)}
+                className="flex w-full items-center justify-between gap-3 rounded-lg px-1.5 py-1.5 text-left transition hover:bg-bg-hover"
+              >
+                <span className="flex items-center gap-2.5">
+                  <Brain className="size-4 shrink-0 text-ink-muted" />
+                  <span className="leading-tight">
+                    <span className="block text-sm text-ink-secondary">Enable memories</span>
+                    <span className="block text-[11px] text-ink-faint">
+                      Remember facts across chats — per project and globally
+                    </span>
+                  </span>
+                </span>
+                <Toggle on={memoriesEnabled} />
+              </button>
+            </div>
+
+            <div className="mx-1 border-t border-border-subtle" />
+
             <button onClick={() => void openExternal(clarkBillingUrl())} className={ACTION}>
               <CreditCard className="size-4" />
               Manage subscription &amp; credits
@@ -146,5 +171,24 @@ export function ProfileMenu() {
         </div>
       )}
     </div>
+  );
+}
+
+/** A small on/off switch (presentational; the button owns the click + a11y). */
+function Toggle({ on }: { on: boolean }) {
+  return (
+    <span
+      className={cn(
+        "relative h-[18px] w-8 shrink-0 rounded-full transition-colors",
+        on ? "bg-accent" : "bg-bg-tertiary",
+      )}
+    >
+      <span
+        className={cn(
+          "absolute top-0.5 size-[14px] rounded-full bg-white shadow-sm transition-all",
+          on ? "left-[15px]" : "left-0.5",
+        )}
+      />
+    </span>
   );
 }

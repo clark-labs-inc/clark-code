@@ -42,17 +42,12 @@ export interface CoreBridge {
   /** Subscribe to snapshot updates. Returns an unsubscribe fn. */
   subscribe(handler: (snapshot: Snapshot) => void): () => void;
   /**
-   * Extract a per-repo project memory via Clark's Platform API and write it
-   * under the repo's `.clark/memory/`. Only the native (Tauri) bridge supports
-   * this.
-   */
-  extractMemory?(cwd: string, apiKey: string, model?: string): Promise<string>;
-  /**
-   * List the per-repo memory (the `MEMORY.md` index plus any per-fact files)
-   * under `<cwd>/.clark/memory/`. Read-only. Only the native (Tauri) bridge
-   * supports this.
+   * List the project-scoped memory (the `MEMORY.md` index plus any per-fact
+   * files) under `<cwd>/.clark/memory/`. Read-only. Native bridge only.
    */
   listMemory?(cwd: string): Promise<MemoryOverview>;
+  /** List the user's global memory under `~/.clark/memory/`. Native bridge only. */
+  listGlobalMemory?(): Promise<MemoryOverview>;
   /** Project-relative file paths under `cwd`, for the `@`-mention picker. */
   listFiles?(cwd: string): Promise<string[]>;
   /** Open a path in the OS default app, or reveal it in the file manager. */

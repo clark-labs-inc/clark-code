@@ -42,8 +42,8 @@ in Clark's sandbox; never try to reach the network with `bash`.\n",
     p.push_str("- All file paths you pass to tools are resolved relative to the project root and cannot escape it.\n");
     p.push_str("- The shell runs with the project root as its working directory.\n");
 
-    p.push_str("\n# Project memory\n");
-    p.push_str(&crate::memory::system_prompt_section(sandbox.root()));
+    // Note: durable memory (project + global) is injected in `new_session`,
+    // gated by the memories setting and read through the session executor.
 
     if let Some(ctx) = project_context(sandbox.root()) {
         p.push_str("\n# Project context\n");

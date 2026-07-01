@@ -23,6 +23,7 @@ use crate::sandbox::Sandbox;
 pub mod clark;
 pub mod fs;
 pub mod grep;
+pub mod memory;
 pub mod shell;
 
 /// Tracks which files the model has read this session, and their modification
@@ -204,8 +205,14 @@ pub struct ToolRegistry {
 
 impl ToolRegistry {
     /// The standard local coding tools, plus the Clark research tool when a
-    /// research endpoint is configured.
-    pub fn new(clark: Option<ClarkResearchConfig>) -> Self {
+    /// research endpoint is configured, plus the `memory` tool when memories are
+    /// enabled (`memory_global_dir` is `~/.clark/memory`, or `None` if home is
+    /// unresolved — the project scope still works).
+    pub fn new(
+        clark: Option<ClarkResearchConfig>,
+        memories_enabled: bool,
+        memory_global_dir: Option<PathBuf>,
+    ) -> Self {
         let mut tools: Vec<Arc<dyn ToolExecutor>> = vec![
             Arc::new(fs::ReadFile),
             Arc::new(fs::ListDir),
@@ -217,6 +224,9 @@ impl ToolRegistry {
         ];
         if let Some(cfg) = clark {
             tools.push(Arc::new(clark::ClarkResearchTool::new(cfg)));
+        }
+        if memories_enabled {
+            tools.push(Arc::new(memory::MemoryTool::new(memory_global_dir)));
         }
         Self {
             tools,
@@ -322,7 +332,7 @@ mod tests {
 
     #[test]
     fn registry_lists_local_tools_and_optionally_clark() {
-        let local = ToolRegistry::new(None);
+        let local = ToolRegistry::new(None, false, None);
         let names: Vec<_> = local
             .schemas()
             .iter()
@@ -332,14 +342,19 @@ mod tests {
         assert!(names.contains(&"edit_file".to_string()));
         assert!(names.contains(&"bash".to_string()));
         assert!(!names.contains(&"clark_research".to_string()));
+        assert!(!names.contains(&"memory".to_string()));
         assert!(local.get("read_file").is_some());
         assert!(local.get("nope").is_none());
 
-        let with_clark = ToolRegistry::new(Some(ClarkResearchConfig {
-            base_url: "https://api.clarkslabs.com/v1".into(),
-            api_key: Some("ck_live_x".into()),
-            model: "clark".into(),
-        }));
+        let with_clark = ToolRegistry::new(
+            Some(ClarkResearchConfig {
+                base_url: "https://api.clarkslabs.com/v1".into(),
+                api_key: Some("ck_live_x".into()),
+                model: "clark".into(),
+            }),
+            false,
+            None,
+        );
         let names: Vec<_> = with_clark
             .schemas()
             .iter()
@@ -349,8 +364,18 @@ mod tests {
     }
 
     #[test]
+    fn memory_tool_registered_only_when_enabled() {
+        let off = ToolRegistry::new(None, false, None);
+        assert!(off.get("memory").is_none());
+        let on = ToolRegistry::new(None, true, None);
+        assert!(on.get("memory").is_some());
+        // Memory writes are curated + path-constrained, so they don't gate.
+        assert!(!on.get("memory").unwrap().mutating());
+    }
+
+    #[test]
     fn mutating_tools_are_flagged() {
-        let reg = ToolRegistry::new(None);
+        let reg = ToolRegistry::new(None, false, None);
         assert!(reg.get("write_file").unwrap().mutating());
         assert!(reg.get("edit_file").unwrap().mutating());
         assert!(reg.get("bash").unwrap().mutating());

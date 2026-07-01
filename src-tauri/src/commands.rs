@@ -273,26 +273,6 @@ pub async fn respond(
         .map_err(|e| e.to_string())
 }
 
-/// Extract a per-repository project memory via Clark's agentic Platform API and
-/// write it to `<cwd>/.clark/memory/MEMORY.md`. Returns the memory text on
-/// success. Uses the production Clark Platform API with the given `ck_live_` key.
-#[tauri::command]
-pub async fn local_extract_memory(
-    cwd: String,
-    api_key: String,
-    model: Option<String>,
-) -> Result<String, String> {
-    provider_local::extract_repo_memory(
-        std::path::Path::new(&cwd),
-        provider_local::DEFAULT_BASE_URL,
-        Some(api_key.as_str()),
-        model
-            .as_deref()
-            .unwrap_or(provider_local::DEFAULT_RESEARCH_MODEL),
-    )
-    .await
-}
-
 /// One per-fact memory file, flattened for the UI.
 #[derive(serde::Serialize)]
 pub struct MemoryFactView {
@@ -303,12 +283,12 @@ pub struct MemoryFactView {
     pub body: String,
 }
 
-/// Everything the memory viewer needs for one project folder.
+/// Everything the memory viewer needs for one scope (project or global).
 #[derive(serde::Serialize)]
 pub struct MemoryOverview {
-    /// Absolute path to `<cwd>/.clark/memory`.
+    /// Absolute path to the scope's `.clark/memory` directory.
     pub dir: String,
-    /// Whether a project-memory index (`MEMORY.md`) has been written.
+    /// Whether the scope holds any memory (an index or at least one fact).
     pub exists: bool,
     /// Contents of the always-loaded `MEMORY.md` index, if present.
     pub index: Option<String>,
@@ -316,15 +296,14 @@ pub struct MemoryOverview {
     pub facts: Vec<MemoryFactView>,
 }
 
-/// List the per-repository memory for `cwd`: the `MEMORY.md` index plus any
-/// per-fact files under `<cwd>/.clark/memory/`. Read-only; never writes.
-#[tauri::command]
-pub async fn local_list_memory(cwd: String) -> Result<MemoryOverview, String> {
-    if cwd.trim().is_empty() {
-        return Err("choose a project folder first".into());
-    }
-    let root = std::path::Path::new(&cwd);
-    let facts = provider_local::load_facts(root)
+/// Read one scope's `.clark/memory` directory into a viewer overview. The
+/// directory is always local here (the desktop machine), so `LocalExecutor`.
+async fn memory_overview(mem_dir: &std::path::Path) -> MemoryOverview {
+    use provider_local::LocalExecutor;
+    let facts_raw = provider_local::load_facts(&LocalExecutor, mem_dir).await;
+    let index = provider_local::load_index(&LocalExecutor, mem_dir).await;
+    let exists = index.is_some() || !facts_raw.is_empty();
+    let facts = facts_raw
         .into_iter()
         .map(|f| MemoryFactView {
             file: f.header.file,
@@ -334,14 +313,31 @@ pub async fn local_list_memory(cwd: String) -> Result<MemoryOverview, String> {
             body: f.body,
         })
         .collect();
-    Ok(MemoryOverview {
-        dir: provider_local::memory_dir(root)
-            .to_string_lossy()
-            .to_string(),
-        exists: provider_local::has_memory(root),
-        index: provider_local::load_index(root),
+    MemoryOverview {
+        dir: mem_dir.to_string_lossy().to_string(),
+        exists,
+        index,
         facts,
-    })
+    }
+}
+
+/// List the project-scoped memory for `cwd` (`<cwd>/.clark/memory/`). Read-only.
+#[tauri::command]
+pub async fn local_list_memory(cwd: String) -> Result<MemoryOverview, String> {
+    if cwd.trim().is_empty() {
+        return Err("choose a project folder first".into());
+    }
+    let mem_dir = provider_local::memory_dir(std::path::Path::new(&cwd));
+    Ok(memory_overview(&mem_dir).await)
+}
+
+/// List the user's global memory (`~/.clark/memory/`). Read-only.
+#[tauri::command]
+pub async fn local_list_global_memory() -> Result<MemoryOverview, String> {
+    let Some(mem_dir) = provider_local::global_memory_dir() else {
+        return Err("could not resolve your home directory".into());
+    };
+    Ok(memory_overview(&mem_dir).await)
 }
 
 /// List project-relative file paths under `cwd` for the `@`-mention picker.

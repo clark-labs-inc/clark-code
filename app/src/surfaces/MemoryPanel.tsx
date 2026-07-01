@@ -1,11 +1,11 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { NotebookText, X, RefreshCw, Sparkles, FolderGit2, FileText } from "lucide-react";
+import { NotebookText, X, RefreshCw, FolderGit2, Globe, FileText } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
 import { projectName } from "../lib/localAgent";
 import { cn } from "../lib/cn";
-import type { MemoryFactView } from "../core-bridge/types";
+import type { MemoryFactView, MemoryOverview } from "../core-bridge/types";
 
 // Compact markdown styling for the small memory cards.
 const MD =
@@ -23,7 +23,7 @@ const KIND_TONE: Record<string, string> = {
   reference: "border-border text-ink-muted",
 };
 
-/** Top-bar control: a button that opens the per-folder memory viewer. */
+/** Top-bar control: a button that opens the memory viewer (project + global). */
 export function MemoryButton() {
   const open = useSessionStore((s) => s.memoryViewerOpen);
   const toggle = useSessionStore((s) => s.toggleMemoryViewer);
@@ -49,13 +49,11 @@ export function MemoryButton() {
     <div ref={wrapRef} className="relative">
       <button
         onClick={toggle}
-        aria-label={open ? "Hide project memory" : "Show project memory"}
-        title="Project memory (what the agent remembers about this folder)"
+        aria-label={open ? "Hide memory" : "Show memory"}
+        title="Memory (what the agent remembers)"
         className={cn(
           "grid size-8 place-items-center rounded-lg transition",
-          open
-            ? "bg-bg-hover text-ink"
-            : "text-ink-muted hover:bg-bg-hover hover:text-ink-secondary",
+          open ? "bg-bg-hover text-ink" : "text-ink-muted hover:bg-bg-hover hover:text-ink-secondary",
         )}
       >
         <NotebookText className="size-4" />
@@ -69,30 +67,25 @@ export function MemoryButton() {
 function MemoryPopover() {
   const setOpen = useSessionStore((s) => s.setMemoryViewerOpen);
   const loading = useSessionStore((s) => s.loadingMemory);
-  const overview = useSessionStore((s) => s.memoryOverview);
+  const project = useSessionStore((s) => s.memoryOverview);
+  const global = useSessionStore((s) => s.globalMemoryOverview);
   const reload = useSessionStore((s) => s.loadMemory);
+  const enabled = useSessionStore((s) => s.memoriesEnabled);
   const cwd = useSessionStore((s) => s.localSettings.cwd);
 
-  const isEmpty = !loading && overview && !overview.exists && overview.facts.length === 0;
-
   return (
-    <div
-      className="popover-surface absolute right-0 top-10 z-50 flex max-h-[70vh] w-[26rem] flex-col overflow-hidden rounded-xl border border-border bg-bg-elevated shadow-xl"
-    >
+    <div className="popover-surface absolute right-0 top-10 z-50 flex max-h-[70vh] w-[26rem] flex-col overflow-hidden rounded-xl border border-border bg-bg-elevated shadow-xl">
       <header className="flex items-center gap-2 border-b border-border-subtle px-3 py-2.5">
         <NotebookText className="size-4 shrink-0 text-ink-muted" />
         <div className="min-w-0">
-          <p className="text-sm font-medium text-ink">Project memory</p>
-          <p className="flex items-center gap-1 truncate text-[11px] text-ink-faint">
-            <FolderGit2 className="size-3 shrink-0" />
-            <span className="truncate" title={cwd}>
-              {cwd ? projectName(cwd) : "No folder"}
-            </span>
+          <p className="text-sm font-medium text-ink">Memory</p>
+          <p className="text-[11px] text-ink-faint">
+            {enabled ? "What the agent remembers, per project and globally" : "Currently off"}
           </p>
         </div>
         <button
           onClick={() => void reload()}
-          disabled={loading}
+          disabled={loading || !enabled}
           title="Reload from disk"
           aria-label="Reload memory"
           className="ml-auto grid size-7 place-items-center rounded-md text-ink-muted transition hover:bg-bg-hover hover:text-ink disabled:opacity-50"
@@ -109,54 +102,76 @@ function MemoryPopover() {
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
-        {loading && !overview ? (
-          <p className="py-6 text-center text-xs text-ink-faint">Reading memory…</p>
-        ) : !overview ? (
-          <p className="py-6 text-center text-xs text-ink-faint">
-            Project memory is available in the desktop app.
-          </p>
-        ) : isEmpty ? (
-          <div className="py-4 text-center">
-            <p className="text-sm font-medium text-ink-secondary">No memory yet</p>
+        {!enabled ? (
+          <div className="py-6 text-center">
+            <p className="text-sm font-medium text-ink-secondary">Memories are off</p>
             <p className="mx-auto mt-1 max-w-[20rem] text-xs text-ink-muted">
-              The agent maintains durable notes about this folder under{" "}
-              <code className="rounded bg-chip px-1 py-px font-mono text-[0.85em]">
-                .clark/memory
-              </code>
-              . Extract one with Clark to bootstrap it.
+              Turn on <span className="font-medium text-ink-secondary">Enable memories</span> in your
+              profile menu to let the agent remember durable facts across chats.
             </p>
           </div>
+        ) : loading && !project && !global ? (
+          <p className="py-6 text-center text-xs text-ink-faint">Reading memory…</p>
         ) : (
-          <div className="space-y-3">
-            {overview?.index && (
-              <section>
-                <SectionLabel icon={<FileText className="size-3" />} label="MEMORY.md (index)" />
-                <div className="rounded-lg border border-border-subtle bg-bg-sunken/60 px-3 py-2">
-                  <div className={MD}>
-                    <Markdown remarkPlugins={[remarkGfm]}>{overview.index}</Markdown>
-                  </div>
-                </div>
-              </section>
-            )}
-            {overview && overview.facts.length > 0 && (
-              <section>
-                <SectionLabel
-                  icon={<NotebookText className="size-3" />}
-                  label={`${overview.facts.length} memory ${overview.facts.length === 1 ? "note" : "notes"}`}
-                />
-                <div className="space-y-2">
-                  {overview.facts.map((f) => (
-                    <FactCard key={f.file} fact={f} />
-                  ))}
-                </div>
-              </section>
-            )}
+          <div className="space-y-4">
+            <Scope
+              icon={<FolderGit2 className="size-3" />}
+              label={cwd ? `Project · ${projectName(cwd)}` : "Project"}
+              overview={project}
+              empty={cwd ? "Nothing saved for this project yet." : "Choose a project folder to see its memory."}
+            />
+            <Scope
+              icon={<Globe className="size-3" />}
+              label="Global · all projects"
+              overview={global}
+              empty="Nothing saved globally yet."
+            />
           </div>
         )}
       </div>
 
-      <ExtractFooter />
+      <footer className="border-t border-border-subtle px-3 py-2 text-[11px] text-ink-faint">
+        The agent curates memory itself with its <code className="rounded bg-chip px-1 py-px font-mono">memory</code> tool.
+      </footer>
     </div>
+  );
+}
+
+/** One scope (project or global): its index + fact cards, or an empty hint. */
+function Scope({
+  icon,
+  label,
+  overview,
+  empty,
+}: {
+  icon: ReactNode;
+  label: string;
+  overview: MemoryOverview | null;
+  empty: string;
+}) {
+  const hasContent = overview && (overview.index || overview.facts.length > 0);
+  return (
+    <section>
+      <SectionLabel icon={icon} label={label} />
+      {!hasContent ? (
+        <p className="rounded-lg border border-dashed border-border-subtle px-3 py-2.5 text-xs text-ink-faint">
+          {empty}
+        </p>
+      ) : (
+        <div className="space-y-2">
+          {overview?.index && (
+            <div className="rounded-lg border border-border-subtle bg-bg-sunken/60 px-3 py-2">
+              <div className={MD}>
+                <Markdown remarkPlugins={[remarkGfm]}>{overview.index}</Markdown>
+              </div>
+            </div>
+          )}
+          {overview?.facts.map((f) => (
+            <FactCard key={f.file} fact={f} />
+          ))}
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -174,15 +189,13 @@ function FactCard({ fact }: { fact: MemoryFactView }) {
   return (
     <details className="group rounded-lg border border-border-subtle bg-bg-sunken/40 px-3 py-2">
       <summary className="flex cursor-pointer list-none items-center gap-2">
+        <FileText className="size-3 shrink-0 text-ink-faint" />
         <span className="min-w-0 flex-1 truncate text-xs font-medium text-ink-secondary">
           {fact.name || fact.description || fact.file}
         </span>
         {fact.kind && (
           <span
-            className={cn(
-              "shrink-0 rounded-full border px-1.5 py-px text-[10px] font-medium",
-              tone,
-            )}
+            className={cn("shrink-0 rounded-full border px-1.5 py-px text-[10px] font-medium", tone)}
           >
             {fact.kind}
           </span>
@@ -198,45 +211,5 @@ function FactCard({ fact }: { fact: MemoryFactView }) {
       )}
       <p className="mt-1.5 font-mono text-[10px] text-ink-faint">{fact.file}</p>
     </details>
-  );
-}
-
-/** Footer with the "update / extract" action — re-runs Clark extraction. */
-function ExtractFooter() {
-  const extract = useSessionStore((s) => s.extractMemory);
-  const extracting = useSessionStore((s) => s.extractingMemory);
-  const status = useSessionStore((s) => s.memoryStatus);
-  const hasMemory = useSessionStore((s) => !!s.memoryOverview?.exists);
-  const canExtract = useSessionStore(
-    (s) => !!s.localSettings.cwd.trim() && !!s.localSettings.apiKey.trim(),
-  );
-
-  return (
-    <footer className="border-t border-border-subtle px-3 py-2.5">
-      <button
-        type="button"
-        onClick={() => void extract()}
-        disabled={!canExtract || extracting}
-        title={
-          canExtract
-            ? "Clark re-reads the repo and rewrites MEMORY.md"
-            : "Add your Clark API key to extract memory"
-        }
-        className="flex w-full items-center justify-center gap-2 rounded-lg border border-border bg-bg px-3 py-2 text-sm font-medium text-ink-secondary transition hover:bg-bg-hover disabled:opacity-50"
-      >
-        {extracting ? (
-          <>
-            <RefreshCw className="size-3.5 animate-spin" />
-            Extracting…
-          </>
-        ) : (
-          <>
-            <Sparkles className="size-3.5" />
-            {hasMemory ? "Update memory with Clark" : "Extract memory with Clark"}
-          </>
-        )}
-      </button>
-      {status && <p className="mt-1.5 text-[11px] text-ink-muted">{status}</p>}
-    </footer>
   );
 }

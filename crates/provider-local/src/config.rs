@@ -56,6 +56,10 @@ pub struct LocalConfig {
     /// exec-server) rather than locally. The host fills this in after it brings
     /// up the SSH tunnel + server.
     pub remote: Option<RemoteTarget>,
+    /// Whether durable memory is enabled — exposes the `memory` tool and injects
+    /// the project + global memory into the system prompt. On by default; the
+    /// user turns it off from the profile menu (`extra.memories = false`).
+    pub memories_enabled: bool,
 }
 
 /// A remote project target. The agent's file/shell tools run against `cwd` on a
@@ -157,6 +161,12 @@ impl LocalConfig {
 
         let cwd = config.cwd.clone().or_else(|| str_field(extra, "cwd"));
 
+        // Memory is on by default; the profile toggle sends `memories = false`.
+        let memories_enabled = extra
+            .get("memories")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
+
         // A remote project rides in on `extra.remote = { ws_url, token, cwd }`,
         // populated by the host once the SSH tunnel + exec-server are up. All
         // three fields are required; a partial object is treated as "local".
@@ -185,6 +195,7 @@ impl LocalConfig {
             clark,
             cwd,
             remote,
+            memories_enabled,
         }
     }
 

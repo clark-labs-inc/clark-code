@@ -38,6 +38,8 @@ import {
   localConnectConfig,
   loadRecentProjects,
   addRecentProject,
+  loadMemoriesEnabled,
+  saveMemoriesEnabled,
   type LocalAgentSettings,
 } from "../lib/localAgent";
 import { pickFolder } from "../lib/pickFolder";
@@ -126,16 +128,19 @@ interface SessionState {
   activeRemote: RemoteInfo | null;
   /** The SSH destination of the active remote session, for the history badge. */
   activeRemoteHost: string | null;
-  /** True while Clark is extracting the per-repo project memory. */
-  extractingMemory: boolean;
-  /** Last memory-extraction status message (success or error). */
+  /** Whether durable memory is enabled (global user preference; the agent gets
+   *  the `memory` tool and its saved facts are injected into the prompt). */
+  memoriesEnabled: boolean;
+  /** Last memory status message (e.g. a load error). */
   memoryStatus: string | null;
-  /** Whether the per-folder memory viewer popover is open. */
+  /** Whether the memory viewer popover is open. */
   memoryViewerOpen: boolean;
-  /** True while the memory viewer is (re)loading the folder's memory. */
+  /** True while the memory viewer is (re)loading. */
   loadingMemory: boolean;
-  /** The last-loaded memory for the active project folder. */
+  /** The last-loaded project-scope memory for the active folder. */
   memoryOverview: MemoryOverview | null;
+  /** The last-loaded global-scope (per-user) memory. */
+  globalMemoryOverview: MemoryOverview | null;
   /** Recently opened project folders (newest first). */
   recentProjects: string[];
   /** Follow-up messages sent while a run is active; drained when it finishes. */
@@ -166,7 +171,7 @@ interface SessionState {
   setSelectedHostId: (id: string | null) => void;
   setProjectFolder: (path: string) => void;
   pickProjectFolder: () => Promise<void>;
-  extractMemory: () => Promise<void>;
+  setMemoriesEnabled: (on: boolean) => void;
   loadMemory: () => Promise<void>;
   toggleMemoryViewer: () => void;
   setMemoryViewerOpen: (open: boolean) => void;
@@ -227,11 +232,12 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   selectedHostId: loadSshHosts()[0]?.id ?? null,
   activeRemote: null,
   activeRemoteHost: null,
-  extractingMemory: false,
+  memoriesEnabled: loadMemoriesEnabled(),
   memoryStatus: null,
   memoryViewerOpen: false,
   loadingMemory: false,
   memoryOverview: null,
+  globalMemoryOverview: null,
   recentProjects: loadRecentProjects(),
   queued: [],
   permissionMode: loadPermissionMode(),
@@ -494,41 +500,26 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     }
   },
 
-  extractMemory: async () => {
-    const { bridge, localSettings: s } = get();
-    if (!bridge?.extractMemory) {
-      set({ memoryStatus: "Memory extraction needs the desktop app." });
-      return;
-    }
-    if (!s.cwd.trim() || !s.apiKey.trim()) {
-      set({ memoryStatus: "Choose a project folder and add your Clark API key first." });
-      return;
-    }
-    set({ extractingMemory: true, memoryStatus: "Clark is analyzing the repository…" });
-    try {
-      await bridge.extractMemory(s.cwd.trim(), s.apiKey.trim(), s.model.trim() || "clark");
-      set({ extractingMemory: false, memoryStatus: "Saved project memory to .clark/memory/MEMORY.md" });
-      await get().loadMemory();
-    } catch (e) {
-      set({ extractingMemory: false, memoryStatus: `Extraction failed: ${String(e)}` });
-    }
+  setMemoriesEnabled: (on) => {
+    saveMemoriesEnabled(on);
+    set({ memoriesEnabled: on });
   },
 
   loadMemory: async () => {
     const { bridge, localSettings: s } = get();
     const cwd = s.cwd.trim();
     if (!bridge?.listMemory) {
-      set({ memoryOverview: null });
-      return;
-    }
-    if (!cwd) {
-      set({ memoryOverview: null, memoryStatus: "Choose a project folder first." });
+      set({ memoryOverview: null, globalMemoryOverview: null });
       return;
     }
     set({ loadingMemory: true });
     try {
-      const memoryOverview = await bridge.listMemory(cwd);
-      set({ loadingMemory: false, memoryOverview });
+      // Project scope needs a folder; global scope is per-user (always available).
+      const [memoryOverview, globalMemoryOverview] = await Promise.all([
+        cwd ? bridge.listMemory(cwd) : Promise.resolve(null),
+        bridge.listGlobalMemory?.() ?? Promise.resolve(null),
+      ]);
+      set({ loadingMemory: false, memoryOverview, globalMemoryOverview });
     } catch (e) {
       set({ loadingMemory: false, memoryStatus: `Could not read memory: ${String(e)}` });
     }

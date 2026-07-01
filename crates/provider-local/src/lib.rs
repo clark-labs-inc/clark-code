@@ -3,9 +3,10 @@
 //! The agent loop runs **locally**: the model reasons over the production Clark
 //! Platform API (`https://api.clarkslabs.com/v1`, OpenAI-compatible, `ck_live_`
 //! key) and the tool calls execute on the user's own machine and codebase.
-//! Research (`clark_research`) and per-repo memory extraction route through the
-//! same agentic Platform API + key — Clark runs web search / browsing
-//! server-side and returns findings. The model sees one flat tool list;
+//! Research (`clark_research`) routes through the same agentic Platform API +
+//! key — Clark runs web search / browsing server-side and returns findings.
+//! Durable memory (project + global) is curated by the agent via the `memory`
+//! tool. The model sees one flat tool list;
 //! execution routes to local or remote backends behind a uniform
 //! [`tools::ToolExecutor`] trait.
 //!
@@ -37,7 +38,6 @@ pub use exec::{Executor, LocalExecutor, RemoteExecutor};
 pub use files::list_project_files;
 pub use mcp::{probe_mcp_servers, McpServerConfig, McpStatus};
 pub use memory::{
-    extract_repo_memory, has_memory, load_facts, load_index, memory_dir, MemoryFact, MemoryHeader,
-    MemoryType,
+    global_memory_dir, load_facts, load_index, memory_dir, MemoryFact, MemoryHeader, MemoryType,
 };
 pub use provider::LocalAgentProvider;

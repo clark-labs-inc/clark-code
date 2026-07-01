@@ -56,6 +56,27 @@ export function saveLocalSettings(settings: LocalAgentSettings): void {
   }
 }
 
+// Durable memory is a single global (per-user) preference, on by default. When
+// on, the agent gets the `memory` tool and its saved facts (project + global)
+// are injected into the system prompt.
+const MEMORIES_KEY = "clark-desktop:memories-enabled";
+
+export function loadMemoriesEnabled(): boolean {
+  try {
+    return localStorage.getItem(MEMORIES_KEY) !== "false";
+  } catch {
+    return true;
+  }
+}
+
+export function saveMemoriesEnabled(on: boolean): void {
+  try {
+    localStorage.setItem(MEMORIES_KEY, String(on));
+  } catch {
+    // Non-fatal.
+  }
+}
+
 /**
  * Build the `connect` config the native coding provider expects. Everything
  * routes through the production Clark Platform API; the only inputs are the
@@ -79,6 +100,8 @@ export function localConnectConfig(
       command_denylist: loadDenylist(project),
       // MCP servers to spawn + expose as tools.
       mcp_servers: enabledMcpConfigs(loadMcpServers()),
+      // Durable memory: exposes the `memory` tool + injects saved facts.
+      memories: loadMemoriesEnabled(),
       // When present, the provider runs this session's tools on the remote host.
       ...(remote ? { remote } : {}),
     },

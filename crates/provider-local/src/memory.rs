@@ -1,51 +1,28 @@
-//! Per-repository memory — a durable, project-scoped knowledge file the local
-//! agent reads every session and can update, and that **Clark can extract
-//! automatically** from the repo.
+//! Durable agent memory — two scopes the agent reads and maintains through the
+//! [`memory`](crate::tools) tool:
 //!
-//! Design adapted (clean-room) from Claude Code's `memdir`: an always-loaded
-//! `MEMORY.md` index plus optional per-fact markdown files with `name` /
-//! `description` / `type` frontmatter, all under `<root>/.clark/memory/`. Living
-//! in the project root means the agent's own sandboxed file tools already read
-//! and write them; nothing extra is needed for the model to maintain memory.
+//! - **project** — facts about *this* codebase, under `<root>/.clark/memory/`.
+//!   Read/written through the session's [`Executor`], so it lives on the local
+//!   disk for a local project and on the remote host for a remote one.
+//! - **global** — facts about the *user* across every project, under
+//!   `~/.clark/memory/` on the machine running the desktop app (always local).
 //!
-//! Extraction (`extract_repo_memory`) builds a bounded digest of the repo
-//! locally, then asks Clark's sandbox agent (web search + analysis) to distill a
-//! concise project memory, and writes it to `MEMORY.md`.
+//! Each scope is an always-loaded `MEMORY.md` index plus optional per-fact
+//! markdown files carrying `name` / `description` / `type` frontmatter. Design
+//! adapted clean-room from Claude Code's `memdir`. There is no "extraction" step:
+//! the agent curates memory itself via the tool as a conversation unfolds.
 
 use std::path::{Path, PathBuf};
 
-use tokio_util::sync::CancellationToken;
-use walkdir::WalkDir;
+use crate::exec::Executor;
 
-use crate::llm::LlmClient;
-
-/// Directory (relative to the project root) holding memory files.
+/// Directory (relative to a scope root) holding memory files.
 pub const MEMORY_SUBDIR: &str = ".clark/memory";
 /// Always-loaded index / project-memory file.
 pub const INDEX_FILE: &str = "MEMORY.md";
 
 const MAX_INDEX_BYTES: usize = 24_000;
-const MAX_DIGEST_BYTES: usize = 28_000;
-const MAX_KEY_FILE_BYTES: usize = 4_000;
-const MAX_TREE_ENTRIES: usize = 400;
-
-/// Root files worth feeding to the extractor verbatim.
-const KEY_FILES: &[&str] = &[
-    "README.md",
-    "README",
-    "AGENTS.md",
-    "CLAUDE.md",
-    "Cargo.toml",
-    "package.json",
-    "pyproject.toml",
-    "go.mod",
-    "pom.xml",
-    "build.gradle",
-    "Makefile",
-    "tsconfig.json",
-    "requirements.txt",
-    "Gemfile",
-];
+const MAX_FACT_BODY_BYTES: usize = 4_000;
 
 /// Memory taxonomy (mirrors the recall system's categories).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -94,27 +71,18 @@ pub struct MemoryFact {
     pub body: String,
 }
 
+/// The memory directory for a scope root (`<root>/.clark/memory`).
 pub fn memory_dir(root: &Path) -> PathBuf {
     root.join(MEMORY_SUBDIR)
 }
 
-pub fn index_path(root: &Path) -> PathBuf {
-    memory_dir(root).join(INDEX_FILE)
-}
-
-/// True once a project memory has been written (extraction is idempotent).
-pub fn has_memory(root: &Path) -> bool {
-    index_path(root).is_file()
-}
-
-/// Read the project-memory index, capped for prompt safety.
-pub fn load_index(root: &Path) -> Option<String> {
-    let text = std::fs::read_to_string(index_path(root)).ok()?;
-    let text = text.trim();
-    if text.is_empty() {
-        return None;
-    }
-    Some(truncate_chars(text, MAX_INDEX_BYTES))
+/// The user's global memory directory (`~/.clark/memory`) on the local machine,
+/// or `None` if the home directory can't be resolved.
+pub fn global_memory_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .filter(|h| !h.is_empty())
+        .map(|home| PathBuf::from(home).join(MEMORY_SUBDIR))
 }
 
 /// Parse the leading `--- ... ---` YAML-ish frontmatter for the fields we use.
@@ -143,39 +111,62 @@ pub fn parse_frontmatter(text: &str) -> (Option<String>, Option<String>, Option<
     (name, description, kind)
 }
 
-/// Scan per-fact memory files (everything but the index), newest first.
-pub fn scan(root: &Path) -> Vec<MemoryHeader> {
-    load_facts(root).into_iter().map(|f| f.header).collect()
+/// Return the text after the leading `--- … ---` frontmatter block (or the whole
+/// text if there is none).
+fn strip_frontmatter(text: &str) -> &str {
+    let trimmed = text.trim_start();
+    let Some(rest) = trimmed.strip_prefix("---") else {
+        return trimmed;
+    };
+    let Some(end) = rest.find("\n---") else {
+        return text;
+    };
+    let after_marker = &rest[end + 1..];
+    match after_marker.find('\n') {
+        Some(nl) => &after_marker[nl + 1..],
+        None => "",
+    }
 }
 
-/// Read every per-fact memory file (everything but the index) with its body,
-/// newest first. Bodies are capped so the result is safe to hand to the UI.
-pub fn load_facts(root: &Path) -> Vec<MemoryFact> {
-    let dir = memory_dir(root);
-    let mut out: Vec<(std::time::SystemTime, MemoryFact)> = Vec::new();
-    let Ok(entries) = std::fs::read_dir(&dir) else {
+async fn read_text(exec: &dyn Executor, path: &Path) -> Option<String> {
+    String::from_utf8(exec.read(path).await.ok()?).ok()
+}
+
+/// The scope's index (`MEMORY.md`), capped for prompt safety.
+pub async fn load_index(exec: &dyn Executor, mem_dir: &Path) -> Option<String> {
+    let text = read_text(exec, &mem_dir.join(INDEX_FILE)).await?;
+    let text = text.trim();
+    (!text.is_empty()).then(|| truncate_chars(text, MAX_INDEX_BYTES))
+}
+
+/// Every per-fact memory file (everything but the index) with its body, newest
+/// first. Bodies are capped so the result is safe to hand to the UI or model.
+pub async fn load_facts(exec: &dyn Executor, mem_dir: &Path) -> Vec<MemoryFact> {
+    let Ok(entries) = exec.read_dir(mem_dir).await else {
         return Vec::new();
     };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let name = entry.file_name().to_string_lossy().to_string();
-        if name == INDEX_FILE || !name.ends_with(".md") {
+    let mut out: Vec<(std::time::SystemTime, MemoryFact)> = Vec::new();
+    for e in entries {
+        if e.is_dir || e.name == INDEX_FILE || !e.name.ends_with(".md") {
             continue;
         }
-        let Ok(text) = std::fs::read_to_string(&path) else {
+        let path = mem_dir.join(&e.name);
+        let Some(text) = read_text(exec, &path).await else {
             continue;
         };
         let (n, d, k) = parse_frontmatter(&text);
-        let body = truncate_chars(strip_frontmatter(&text).trim(), MAX_KEY_FILE_BYTES);
-        let mtime = entry
-            .metadata()
-            .and_then(|m| m.modified())
+        let body = truncate_chars(strip_frontmatter(&text).trim(), MAX_FACT_BODY_BYTES);
+        let mtime = exec
+            .metadata(&path)
+            .await
+            .ok()
+            .and_then(|m| m.modified)
             .unwrap_or(std::time::UNIX_EPOCH);
         out.push((
             mtime,
             MemoryFact {
                 header: MemoryHeader {
-                    file: name,
+                    file: e.name,
                     name: n,
                     description: d,
                     kind: k,
@@ -188,166 +179,142 @@ pub fn load_facts(root: &Path) -> Vec<MemoryFact> {
     out.into_iter().map(|(_, f)| f).collect()
 }
 
-/// Return the text after the leading `--- … ---` frontmatter block (or the
-/// whole text if there is none).
-fn strip_frontmatter(text: &str) -> &str {
-    let trimmed = text.trim_start();
-    let Some(rest) = trimmed.strip_prefix("---") else {
-        return trimmed;
-    };
-    // `rest` begins right after the opening `---`; find the closing delimiter.
-    let Some(end) = rest.find("\n---") else {
-        return text;
-    };
-    // Skip past the closing `---` line to the start of the body.
-    let after_marker = &rest[end + 1..];
-    match after_marker.find('\n') {
-        Some(nl) => &after_marker[nl + 1..],
-        None => "",
+/// A compact listing of one scope for the system prompt: the index plus a
+/// one-line-per-fact catalog (no bodies). `None` when the scope is empty.
+pub async fn scope_listing(exec: &dyn Executor, mem_dir: &Path, label: &str) -> Option<String> {
+    let index = load_index(exec, mem_dir).await;
+    let facts = load_facts(exec, mem_dir).await;
+    if index.is_none() && facts.is_empty() {
+        return None;
     }
-}
-
-/// The system-prompt section: maintenance instructions plus the current index.
-pub fn system_prompt_section(root: &Path) -> String {
-    let mut s = String::new();
-    s.push_str(&format!(
-        "Durable, project-specific facts live in `{}/` ({} is the index). \
-Maintain them with your file tools: when you learn something lasting about this \
-project (architecture, conventions, build/test commands, gotchas, decisions), \
-record it there so future sessions benefit. Treat these as point-in-time notes — \
-verify against the current code before relying on them.\n",
-        MEMORY_SUBDIR, INDEX_FILE
-    ));
-    if let Some(index) = load_index(root) {
-        s.push_str("\nCurrent project memory:\n\n");
-        s.push_str(&index);
+    let mut s = format!("## {label} memory\n");
+    if let Some(idx) = index {
+        s.push_str(&idx);
         s.push('\n');
     }
-    // List any additional per-fact memory files so the agent knows to read them.
-    let facts = scan(root);
     if !facts.is_empty() {
-        s.push_str("\nAdditional memory files (read on demand):\n");
-        for f in facts {
+        s.push_str("\nSaved notes (use `memory` → recall for full text):\n");
+        for f in &facts {
             let kind = f
+                .header
                 .kind
                 .map(|k| format!("[{}] ", k.label()))
                 .unwrap_or_default();
-            let desc = f.description.unwrap_or_else(|| "(no description)".into());
-            s.push_str(&format!("- {kind}{}/{} — {desc}\n", MEMORY_SUBDIR, f.file));
+            let name = f.header.name.clone().unwrap_or_else(|| f.header.file.clone());
+            let desc = f.header.description.clone().unwrap_or_default();
+            s.push_str(&format!("- {kind}{name} — {desc}\n"));
         }
     }
-    s
+    Some(s)
 }
 
-/// Build a bounded, text digest of the repo for the extractor: a file tree plus
-/// the contents of well-known root files.
-pub fn build_repo_digest(root: &Path) -> String {
-    let mut digest = String::new();
-    digest.push_str("# Repository digest\n\n## File tree (partial)\n");
-
-    let mut count = 0usize;
-    for entry in WalkDir::new(root)
-        .max_depth(6)
-        .into_iter()
-        .filter_entry(|e| !is_skippable(e.path()))
-    {
-        let Ok(entry) = entry else { continue };
-        if !entry.file_type().is_file() {
-            continue;
-        }
-        if let Ok(rel) = entry.path().strip_prefix(root) {
-            digest.push_str(rel.to_string_lossy().as_ref());
-            digest.push('\n');
-            count += 1;
-            if count >= MAX_TREE_ENTRIES {
-                digest.push_str("… [tree truncated]\n");
-                break;
-            }
-        }
+/// Full recall of one scope for the `memory` tool: the index plus every fact's
+/// body. `None` when the scope is empty.
+pub async fn recall_scope(exec: &dyn Executor, mem_dir: &Path, label: &str) -> Option<String> {
+    let index = load_index(exec, mem_dir).await;
+    let facts = load_facts(exec, mem_dir).await;
+    if index.is_none() && facts.is_empty() {
+        return None;
     }
-
-    for name in KEY_FILES {
-        let path = root.join(name);
-        if let Ok(text) = std::fs::read_to_string(&path) {
-            digest.push_str(&format!("\n## {name}\n```\n"));
-            digest.push_str(&truncate_chars(&text, MAX_KEY_FILE_BYTES));
-            digest.push_str("\n```\n");
-        }
-        if digest.len() >= MAX_DIGEST_BYTES {
-            break;
-        }
+    let mut s = format!("## {label} memory\n");
+    if let Some(idx) = index {
+        s.push_str(&idx);
+        s.push_str("\n\n");
     }
-    truncate_chars(&digest, MAX_DIGEST_BYTES)
+    for f in &facts {
+        let name = f.header.name.clone().unwrap_or_else(|| f.header.file.clone());
+        let kind = f
+            .header
+            .kind
+            .map(|k| format!(" [{}]", k.label()))
+            .unwrap_or_default();
+        s.push_str(&format!("### {name}{kind}\n{}\n\n", f.body));
+    }
+    Some(s.trim_end().to_string())
 }
 
-/// The instruction wrapped around the digest for Clark.
-fn extraction_prompt(digest: &str) -> String {
-    format!(
-        "You are bootstrapping a project-memory note for a coding agent that works \
-in this repository. Below is a digest of the repo (file tree + key files). \
-Produce a CONCISE markdown memory (aim for under 150 lines) that a future agent \
-should know before working here. Cover, only where evident:\n\
-- What the project is and its purpose\n\
-- High-level architecture and how the main parts fit together\n\
-- Key entry points / important files and directories\n\
-- How to build, test, run, and lint (exact commands if you can infer them)\n\
-- Conventions and constraints worth honoring\n\
-- Non-obvious gotchas\n\
-Where it helps, you may use web search to identify the frameworks/libraries in \
-use and note current best practices. Do NOT invent facts not supported by the \
-digest. Output only the markdown memory, starting with a `# <Project> — project \
-memory` heading.\n\n{digest}"
-    )
-}
-
-/// Extract a project memory via Clark's agentic Platform API and write it to
-/// `<root>/.clark/memory/MEMORY.md`. Returns the written memory text. `base_url`
-/// is the Platform API (`…/v1`), `api_key` the `ck_live_` key, `model` an
-/// agentic Clark model.
-pub async fn extract_repo_memory(
-    root: &Path,
-    base_url: &str,
-    api_key: Option<&str>,
-    model: &str,
+/// Save one durable fact into a scope: write `<slug>.md` with frontmatter and add
+/// a pointer line to the scope's `MEMORY.md` index (creating it if needed).
+/// Returns the written file name.
+pub async fn save_memory(
+    exec: &dyn Executor,
+    mem_dir: &Path,
+    title: &str,
+    content: &str,
+    kind: Option<MemoryType>,
 ) -> Result<String, String> {
-    if !root.is_dir() {
-        return Err(format!("{} is not a directory", root.display()));
+    let slug = slugify(title);
+    if slug.is_empty() {
+        return Err("title must contain letters or digits".into());
     }
-    let digest = build_repo_digest(root);
-    let client = LlmClient::from_parts(
-        base_url,
-        model,
-        api_key.map(str::to_string),
-        Vec::new(),
-        None,
-    )?;
-    let memory = client
-        .complete(None, &extraction_prompt(&digest), &CancellationToken::new())
-        .await
-        .map_err(|e| e.to_string())?;
-    if memory.trim().is_empty() {
-        return Err("Clark returned an empty memory".into());
-    }
-
-    let dir = memory_dir(root);
-    std::fs::create_dir_all(&dir).map_err(|e| format!("creating {}: {e}", dir.display()))?;
-    let path = index_path(root);
+    let file = format!("{slug}.md");
+    let desc = content
+        .lines()
+        .find(|l| !l.trim().is_empty())
+        .unwrap_or(title)
+        .trim()
+        .replace(['\n', '\r'], " ");
+    let desc = truncate_chars(&desc, 200);
+    let kind_line = kind
+        .map(|k| format!("type: {}\n", k.label()))
+        .unwrap_or_default();
     let body = format!(
-        "<!-- Auto-extracted by Clark. Edit freely; the agent maintains this. -->\n\n{}\n",
-        memory.trim()
+        "---\nname: {}\ndescription: {}\n{}---\n\n{}\n",
+        title.trim(),
+        desc,
+        kind_line,
+        content.trim(),
     );
-    std::fs::write(&path, body).map_err(|e| format!("writing {}: {e}", path.display()))?;
-    Ok(memory)
+    exec.create_dir_all(mem_dir)
+        .await
+        .map_err(|e| format!("creating memory dir: {e}"))?;
+    exec.write(&mem_dir.join(&file), body.as_bytes())
+        .await
+        .map_err(|e| format!("writing memory: {e}"))?;
+
+    // Keep the index pointing at every fact (one line each), created on demand.
+    let index_path = mem_dir.join(INDEX_FILE);
+    let mut index = read_text(exec, &index_path)
+        .await
+        .unwrap_or_else(|| "# Memory index\n".to_string());
+    if !index.contains(&format!("]({file})")) {
+        if !index.ends_with('\n') {
+            index.push('\n');
+        }
+        index.push_str(&format!("- [{}]({file}) — {}\n", title.trim(), desc));
+        exec.write(&index_path, index.as_bytes())
+            .await
+            .map_err(|e| format!("writing index: {e}"))?;
+    }
+    Ok(file)
 }
 
-/// Skip the memory dir, VCS, and heavy build/vendor dirs while walking.
-fn is_skippable(path: &Path) -> bool {
-    path.components().any(|c| {
-        matches!(
-            c.as_os_str().to_string_lossy().as_ref(),
-            ".git" | "node_modules" | "target" | "dist" | ".next" | ".venv" | ".clark"
-        )
-    })
+/// Kebab-case a title into a safe file stem.
+fn slugify(title: &str) -> String {
+    let mut out = String::new();
+    let mut prev_dash = false;
+    for ch in title.trim().chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch.to_ascii_lowercase());
+            prev_dash = false;
+        } else if !prev_dash && !out.is_empty() {
+            out.push('-');
+            prev_dash = true;
+        }
+    }
+    let slug = out.trim_matches('-').to_string();
+    truncate_chars(&slug, 60).trim_matches('-').to_string()
+}
+
+/// Maintenance instructions for the system prompt (present whenever memory is on).
+pub fn memory_guidance() -> &'static str {
+    "You have a durable memory via the `memory` tool. Call it with action \"recall\" to \
+load saved facts before relying on them, and action \"remember\" to save a lasting fact — \
+scope \"project\" for things specific to this codebase (architecture, conventions, \
+build/test commands, gotchas, decisions), scope \"global\" for things true across all of \
+the user's projects (their preferences, environment, how they like you to work). Save \
+sparingly: durable, reusable facts only — never transient task details. Treat saved notes \
+as point-in-time and verify against the current code before relying on them.\n"
 }
 
 fn truncate_chars(s: &str, max: usize) -> String {
@@ -364,12 +331,12 @@ fn truncate_chars(s: &str, max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::exec::LocalExecutor;
 
     #[test]
     fn paths_are_under_dot_clark() {
         let root = Path::new("/proj");
         assert_eq!(memory_dir(root), Path::new("/proj/.clark/memory"));
-        assert_eq!(index_path(root), Path::new("/proj/.clark/memory/MEMORY.md"));
     }
 
     #[test]
@@ -383,92 +350,54 @@ mod tests {
     }
 
     #[test]
-    fn frontmatter_absent_yields_none() {
-        let (n, d, k) = parse_frontmatter("no frontmatter here");
-        assert!(n.is_none() && d.is_none() && k.is_none());
+    fn slugify_kebabs_and_trims() {
+        assert_eq!(slugify("Build & Test commands!"), "build-test-commands");
+        assert_eq!(slugify("  Hello   World  "), "hello-world");
+        assert_eq!(slugify("***"), "");
     }
 
-    #[test]
-    fn load_index_and_has_memory() {
+    #[tokio::test]
+    async fn save_then_recall_round_trips() {
         let dir = tempfile::tempdir().unwrap();
-        assert!(!has_memory(dir.path()));
-        assert!(load_index(dir.path()).is_none());
-        std::fs::create_dir_all(memory_dir(dir.path())).unwrap();
-        std::fs::write(index_path(dir.path()), "# Project memory\n\nIt builds.").unwrap();
-        assert!(has_memory(dir.path()));
-        assert!(load_index(dir.path()).unwrap().contains("It builds."));
-    }
-
-    #[test]
-    fn scan_reads_fact_files_not_index() {
-        let dir = tempfile::tempdir().unwrap();
-        let mdir = memory_dir(dir.path());
-        std::fs::create_dir_all(&mdir).unwrap();
-        std::fs::write(mdir.join("MEMORY.md"), "index").unwrap();
-        std::fs::write(
-            mdir.join("conventions.md"),
-            "---\nname: conv\ndescription: style rules\ntype: project\n---\nbody",
+        let mem = memory_dir(dir.path());
+        let exec = LocalExecutor;
+        let file = save_memory(
+            &exec,
+            &mem,
+            "Build command",
+            "Run `cargo build` from the repo root.",
+            Some(MemoryType::Project),
         )
+        .await
         .unwrap();
-        let scanned = scan(dir.path());
-        assert_eq!(scanned.len(), 1);
-        assert_eq!(scanned[0].name.as_deref(), Some("conv"));
-        assert_eq!(scanned[0].kind, Some(MemoryType::Project));
-    }
+        assert_eq!(file, "build-command.md");
 
-    #[test]
-    fn load_facts_returns_body_without_frontmatter() {
-        let dir = tempfile::tempdir().unwrap();
-        let mdir = memory_dir(dir.path());
-        std::fs::create_dir_all(&mdir).unwrap();
-        std::fs::write(mdir.join("MEMORY.md"), "index").unwrap();
-        std::fs::write(
-            mdir.join("conventions.md"),
-            "---\nname: conv\ndescription: style rules\ntype: project\n---\n\nUse 2-space indent.",
-        )
-        .unwrap();
-        let facts = load_facts(dir.path());
+        // Index created + points at the fact.
+        let index = load_index(&exec, &mem).await.unwrap();
+        assert!(index.contains("build-command.md"));
+
+        // Fact readable, frontmatter stripped from the body.
+        let facts = load_facts(&exec, &mem).await;
         assert_eq!(facts.len(), 1);
-        assert_eq!(facts[0].header.name.as_deref(), Some("conv"));
-        assert_eq!(facts[0].body, "Use 2-space indent.");
-        assert!(!facts[0].body.contains("style rules"));
+        assert_eq!(facts[0].header.name.as_deref(), Some("Build command"));
+        assert_eq!(facts[0].header.kind, Some(MemoryType::Project));
+        assert!(facts[0].body.contains("cargo build"));
+        assert!(!facts[0].body.contains("description:"));
+
+        // Recall bundles index + bodies; listing is index + catalog.
+        let recall = recall_scope(&exec, &mem, "Project").await.unwrap();
+        assert!(recall.contains("cargo build"));
+        let listing = scope_listing(&exec, &mem, "Project").await.unwrap();
+        assert!(listing.contains("Build command"));
     }
 
-    #[test]
-    fn strip_frontmatter_handles_missing_and_present() {
-        assert_eq!(strip_frontmatter("no fm\nbody").trim(), "no fm\nbody");
-        assert_eq!(
-            strip_frontmatter("---\nname: x\n---\nbody here").trim(),
-            "body here"
-        );
-    }
-
-    #[test]
-    fn system_prompt_section_includes_index_when_present() {
+    #[tokio::test]
+    async fn empty_scope_yields_none() {
         let dir = tempfile::tempdir().unwrap();
-        let without = system_prompt_section(dir.path());
-        assert!(without.contains(".clark/memory"));
-        assert!(!without.contains("Current project memory"));
-
-        std::fs::create_dir_all(memory_dir(dir.path())).unwrap();
-        std::fs::write(index_path(dir.path()), "Key fact: uses Tauri.").unwrap();
-        let with = system_prompt_section(dir.path());
-        assert!(with.contains("Current project memory"));
-        assert!(with.contains("uses Tauri"));
-    }
-
-    #[test]
-    fn digest_includes_tree_and_key_files() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join("src")).unwrap();
-        std::fs::write(dir.path().join("src/main.rs"), "fn main() {}").unwrap();
-        std::fs::write(dir.path().join("README.md"), "My cool project").unwrap();
-        std::fs::create_dir_all(dir.path().join("target")).unwrap();
-        std::fs::write(dir.path().join("target/junk"), "ignore me").unwrap();
-        let digest = build_repo_digest(dir.path());
-        assert!(digest.contains("src/main.rs"));
-        assert!(digest.contains("## README.md"));
-        assert!(digest.contains("My cool project"));
-        assert!(!digest.contains("target/junk"));
+        let exec = LocalExecutor;
+        assert!(scope_listing(&exec, &memory_dir(dir.path()), "Project")
+            .await
+            .is_none());
+        assert!(load_index(&exec, &memory_dir(dir.path())).await.is_none());
     }
 }

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { motion } from "motion/react";
 import { ArrowRight, FolderOpen, Folder, Server, Settings2 } from "lucide-react";
 import { ClarkMark } from "./ClarkMark";
@@ -6,6 +6,7 @@ import { useSessionStore } from "../store/sessionStore";
 import { localSettingsReady, projectName, type LocalAgentSettings } from "../lib/localAgent";
 import { loadSshHosts, hostLabel, hostReady, type SshHost } from "../lib/sshHosts";
 import { inTauri } from "../lib/pickFolder";
+import { useAppVersion } from "../lib/appInfo";
 
 const SAMPLES = [
   "In one sentence, what is the Rust programming language?",
@@ -31,6 +32,7 @@ export function StartCard() {
   const setProjectMode = useSessionStore((s) => s.setProjectMode);
   const selectedHostId = useSessionStore((s) => s.selectedHostId);
   const sshOpen = useSessionStore((s) => s.sshOpen);
+  const version = useAppVersion();
 
   const isLocal = activeProvider === "local";
   const isRemote = isLocal && projectMode === "remote";
@@ -47,11 +49,7 @@ export function StartCard() {
     : !hostReady(selectedHost)
       ? "This host needs a folder and exec-server binary."
       : null;
-  const blocked = isLocal
-    ? isRemote
-      ? remoteBlocked
-      : localSettingsReady(local)
-    : null;
+  const blocked = isLocal ? (isRemote ? remoteBlocked : localSettingsReady(local)) : null;
 
   const startWith = async (q?: string) => {
     if (blocked) return;
@@ -62,60 +60,44 @@ export function StartCard() {
   const samples = isLocal ? LOCAL_SAMPLES : SAMPLES;
 
   return (
-    <div className="flex flex-1 items-center justify-center overflow-y-auto p-6">
+    <div className="flex flex-1 flex-col items-center justify-center overflow-y-auto p-6">
       <motion.div
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.25 }}
-        className="w-full max-w-lg"
+        className="flex w-full max-w-md flex-col"
       >
-        <div className="mb-5 flex flex-col items-center text-center">
-          <ClarkMark size={44} className="mb-3 rounded-xl" />
-          <h1 className="text-lg font-semibold text-ink">Start a session</h1>
-          <p className="mt-1 text-sm text-ink-muted">
+        <div className="mb-6 flex flex-col items-center text-center">
+          <ClarkMark size={48} className="mb-3 rounded-2xl" />
+          <h1 className="text-xl font-semibold tracking-tight text-ink">Start a session</h1>
+          <p className="mt-1.5 max-w-sm text-sm text-ink-muted">
             {!isLocal
               ? "One window. Watch every step — files, web, and computer work — as it happens."
               : isRemote
-                ? "Code on a remote machine over SSH — its files, its shell, your model and approvals."
-                : "Code on your machine with a local agent loop — your files, your shell, your model."}
+                ? "Code on a remote machine over SSH — its files and shell, your model and approvals."
+                : "Code on your machine — your files, your shell, the model runs on Clark."}
           </p>
         </div>
 
         {isLocal && (
-          <div className="mb-4 flex gap-1 rounded-xl border border-border-subtle bg-bg-elevated/60 p-1">
-            {(["local", "remote"] as const).map((m) => (
-              <button
-                key={m}
-                onClick={() => setProjectMode(m)}
-                className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition ${
-                  projectMode === m
-                    ? "bg-accent text-on-accent"
-                    : "text-ink-secondary hover:bg-bg-hover"
-                }`}
-              >
-                {m === "remote" && <Server className="size-3.5" />}
-                {m === "local" ? "Local" : "Remote"}
-              </button>
-            ))}
-          </div>
+          <Segmented
+            className="mb-4"
+            value={projectMode}
+            onChange={(m) => setProjectMode(m as "local" | "remote")}
+            options={[
+              { value: "local", label: "Local" },
+              { value: "remote", label: "Remote", icon: <Server className="size-3.5" /> },
+            ]}
+          />
         )}
 
         {providers.length > 1 && (
-          <div className="mb-4 flex gap-1 rounded-xl border border-border-subtle bg-bg-elevated/60 p-1">
-            {providers.map((p) => (
-              <button
-                key={p.id}
-                onClick={() => selectProvider(p.id)}
-                className={`flex-1 rounded-lg px-3 py-1.5 text-sm font-medium transition ${
-                  p.id === activeProvider
-                    ? "bg-accent text-on-accent"
-                    : "text-ink-secondary hover:bg-bg-hover"
-                }`}
-              >
-                {p.label}
-              </button>
-            ))}
-          </div>
+          <Segmented
+            className="mb-4"
+            value={activeProvider ?? ""}
+            onChange={selectProvider}
+            options={providers.map((p) => ({ value: p.id, label: p.label }))}
+          />
         )}
 
         {isLocal &&
@@ -128,65 +110,85 @@ export function StartCard() {
         <button
           onClick={() => void startWith()}
           disabled={connecting || !!blocked}
-          className="mb-2 flex w-full items-center justify-center gap-2 rounded-xl bg-accent px-3 py-3 text-sm font-semibold text-on-accent transition hover:bg-accent-hover disabled:opacity-50"
+          className="mt-1 flex w-full items-center justify-center gap-2 rounded-xl bg-accent px-3 py-3 text-sm font-semibold text-on-accent transition hover:bg-accent-hover disabled:opacity-50"
         >
           {connecting ? "Connecting…" : "New session"}
           {!connecting && <ArrowRight className="size-4" />}
         </button>
 
-        {blocked && <p className="mb-3 text-center text-xs text-ink-faint">{blocked}</p>}
-        {error && <p className="mb-3 text-center text-xs text-danger">{error}</p>}
+        {blocked && <p className="mt-2 text-center text-xs text-ink-faint">{blocked}</p>}
+        {error && <p className="mt-2 text-center text-xs text-danger">{error}</p>}
 
-        <div className="mt-2 text-xs text-ink-faint">
-          <p className="mb-1.5 font-medium uppercase tracking-wider">Try</p>
-          <div className="space-y-1.5">
+        <div className="mt-6">
+          <p className="mb-1 px-1 text-[11px] font-medium uppercase tracking-wider text-ink-faint">
+            Try
+          </p>
+          <div className="flex flex-col">
             {samples.map((s) => (
               <button
                 key={s}
                 onClick={() => void startWith(s)}
                 disabled={connecting || !!blocked}
-                className="block w-full truncate rounded-lg border border-border-subtle bg-bg-elevated/60 px-3 py-2.5 text-left text-ink-secondary transition hover:bg-bg-hover disabled:opacity-50"
+                className="group flex items-center gap-2 rounded-lg px-1 py-1.5 text-left text-sm text-ink-muted transition hover:text-ink-secondary disabled:opacity-50"
               >
-                {s}
+                <ArrowRight className="size-3.5 shrink-0 text-ink-faint transition group-hover:translate-x-0.5 group-hover:text-ink-muted" />
+                <span className="truncate">{s}</span>
               </button>
             ))}
           </div>
+        </div>
+
+        <div className="mt-6 flex items-center justify-between border-t border-border-subtle pt-3 text-[11px] text-ink-faint">
+          <span>Clark Code</span>
+          {version && <span className="tabular-nums">v{version}</span>}
         </div>
       </motion.div>
     </div>
   );
 }
 
-function LocalSettingsForm({ settings }: { settings: LocalAgentSettings }) {
-  const extractMemory = useSessionStore((s) => s.extractMemory);
-  const extracting = useSessionStore((s) => s.extractingMemory);
-  const memoryStatus = useSessionStore((s) => s.memoryStatus);
-  const canExtract = !!settings.cwd.trim() && !!settings.apiKey.trim();
-
+/** A pill segmented control (local/remote, provider switch). */
+function Segmented({
+  value,
+  onChange,
+  options,
+  className,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  options: { value: string; label: string; icon?: ReactNode }[];
+  className?: string;
+}) {
   return (
-    <div className="mb-4 space-y-3 rounded-xl border border-border-subtle bg-bg-elevated/40 p-3">
-      <ProjectFolderField cwd={settings.cwd} />
-
-      <p className="text-xs text-ink-muted">
-        Clark Code is connected through your account — no API key needed. Coding runs
-        on this machine; the model and research run on Clark.
-      </p>
-
-      <div className="border-t border-border-subtle pt-3">
+    <div
+      className={`flex gap-1 rounded-xl border border-border-subtle bg-bg-elevated/60 p-1 ${className ?? ""}`}
+    >
+      {options.map((o) => (
         <button
-          type="button"
-          onClick={() => void extractMemory()}
-          disabled={!canExtract || extracting}
-          className="w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm font-medium text-ink-secondary transition hover:bg-bg-hover disabled:opacity-50"
+          key={o.value}
+          onClick={() => onChange(o.value)}
+          className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition ${
+            o.value === value
+              ? "bg-accent text-on-accent"
+              : "text-ink-secondary hover:bg-bg-hover"
+          }`}
         >
-          {extracting ? "Extracting project memory…" : "Extract project memory with Clark"}
+          {o.icon}
+          {o.label}
         </button>
-        <p className="mt-1 text-xs text-ink-muted">
-          Clark analyzes the repo and writes <code>.clark/memory/MEMORY.md</code>, which the agent
-          reads every session.
-        </p>
-        {memoryStatus && <p className="mt-1 text-[11px] text-ink-secondary">{memoryStatus}</p>}
-      </div>
+      ))}
+    </div>
+  );
+}
+
+function LocalSettingsForm({ settings }: { settings: LocalAgentSettings }) {
+  return (
+    <div className="mb-1">
+      <ProjectFolderField cwd={settings.cwd} />
+      <p className="mt-2 px-1 text-xs text-ink-faint">
+        Connected through your account — no API key. Coding runs on this machine; the model runs on
+        Clark.
+      </p>
     </div>
   );
 }
@@ -197,7 +199,7 @@ function RemoteSettingsForm({ hosts, selected }: { hosts: SshHost[]; selected: S
 
   if (hosts.length === 0) {
     return (
-      <div className="mb-4 flex flex-col items-center gap-2 rounded-xl border border-border-subtle bg-bg-elevated/40 p-5 text-center">
+      <div className="mb-1 flex flex-col items-center gap-2 rounded-xl border border-dashed border-border-subtle bg-bg-elevated/40 p-6 text-center">
         <Server className="size-5 text-ink-muted" />
         <p className="text-sm text-ink-muted">
           No remote hosts yet. Add one to run Clark Code on another machine over SSH.
@@ -213,39 +215,37 @@ function RemoteSettingsForm({ hosts, selected }: { hosts: SshHost[]; selected: S
   }
 
   return (
-    <div className="mb-4 space-y-3 rounded-xl border border-border-subtle bg-bg-elevated/40 p-3">
-      <div>
-        <div className="mb-1 flex items-center justify-between">
-          <label className="block text-xs font-medium text-ink-secondary">Remote host</label>
-          <button
-            onClick={() => setSshOpen(true)}
-            className="flex items-center gap-1 text-xs text-ink-muted transition hover:text-ink"
-          >
-            <Settings2 className="size-3" /> Manage
-          </button>
-        </div>
-        <select
-          value={selected?.id ?? ""}
-          onChange={(e) => setSelectedHostId(e.target.value)}
-          className={inputCls}
+    <div className="mb-1 space-y-2">
+      <div className="flex items-center justify-between px-1">
+        <label className="text-xs font-medium text-ink-secondary">Remote host</label>
+        <button
+          onClick={() => setSshOpen(true)}
+          className="flex items-center gap-1 text-xs text-ink-muted transition hover:text-ink"
         >
-          {hosts.map((h) => (
-            <option key={h.id} value={h.id}>
-              {hostLabel(h)} — {h.host}
-            </option>
-          ))}
-        </select>
+          <Settings2 className="size-3" /> Manage
+        </button>
       </div>
+      <select
+        value={selected?.id ?? ""}
+        onChange={(e) => setSelectedHostId(e.target.value)}
+        className={inputCls}
+      >
+        {hosts.map((h) => (
+          <option key={h.id} value={h.id}>
+            {hostLabel(h)} — {h.host}
+          </option>
+        ))}
+      </select>
 
       {selected && (
-        <p className="flex items-center gap-1.5 truncate text-xs text-ink-muted">
+        <p className="flex items-center gap-1.5 truncate px-1 text-xs text-ink-muted">
           <Server className="size-3 shrink-0" />
           <span className="font-medium text-ink-secondary">{selected.host}</span>
           <span className="truncate font-mono">{selected.remoteRoot || "no folder set"}</span>
         </p>
       )}
       {selected && !hostReady(selected) && (
-        <p className="text-xs text-warning">
+        <p className="px-1 text-xs text-warning">
           This host is missing its folder or exec-server binary —{" "}
           <button onClick={() => setSshOpen(true)} className="underline hover:text-ink">
             edit it
@@ -253,11 +253,6 @@ function RemoteSettingsForm({ hosts, selected }: { hosts: SshHost[]; selected: S
           .
         </p>
       )}
-
-      <p className="border-t border-border-subtle pt-3 text-xs text-ink-muted">
-        Files, edits, and the shell run on the remote machine; the model and the approval gate
-        stay here. Auth is your own SSH — nothing is stored.
-      </p>
     </div>
   );
 }
@@ -271,7 +266,9 @@ function ProjectFolderField({ cwd }: { cwd: string }) {
 
   return (
     <div>
-      <label className="mb-1 block text-xs font-medium text-ink-secondary">Project folder</label>
+      <label className="mb-1 block px-1 text-xs font-medium text-ink-secondary">
+        Project folder
+      </label>
       <div className="flex items-stretch gap-2">
         {tauri && (
           <button
@@ -292,33 +289,30 @@ function ProjectFolderField({ cwd }: { cwd: string }) {
         />
       </div>
       {cwd.trim() && (
-        <p className="mt-1 flex items-center gap-1.5 truncate text-xs text-ink-muted">
+        <p className="mt-1.5 flex items-center gap-1.5 truncate px-1 text-xs text-ink-muted">
           <Folder className="size-3 shrink-0" />
           <span className="font-medium text-ink-secondary">{projectName(cwd)}</span>
           <span className="truncate">{cwd}</span>
         </p>
       )}
       {recents.length > 0 && (
-        <div className="mt-2">
-          <p className="mb-1 text-[11px] uppercase tracking-wider text-ink-faint">Recent</p>
-          <div className="flex flex-wrap gap-1.5">
-            {recents.map((p) => (
-              <button
-                key={p}
-                type="button"
-                title={p}
-                onClick={() => setProject(p)}
-                className={`flex max-w-[12rem] items-center gap-1 rounded-md border px-2 py-1 text-xs transition ${
-                  p === cwd
-                    ? "border-accent bg-accent/10 text-ink"
-                    : "border-border-subtle bg-bg-elevated/60 text-ink-secondary hover:bg-bg-hover"
-                }`}
-              >
-                <Folder className="size-3 shrink-0" />
-                <span className="truncate">{projectName(p)}</span>
-              </button>
-            ))}
-          </div>
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {recents.map((p) => (
+            <button
+              key={p}
+              type="button"
+              title={p}
+              onClick={() => setProject(p)}
+              className={`flex max-w-[12rem] items-center gap-1 rounded-md border px-2 py-1 text-xs transition ${
+                p === cwd
+                  ? "border-accent bg-accent/10 text-ink"
+                  : "border-border-subtle bg-bg-elevated/60 text-ink-secondary hover:bg-bg-hover"
+              }`}
+            >
+              <Folder className="size-3 shrink-0" />
+              <span className="truncate">{projectName(p)}</span>
+            </button>
+          ))}
         </div>
       )}
     </div>

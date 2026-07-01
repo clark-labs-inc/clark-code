@@ -106,7 +106,11 @@ impl Provider for LocalAgentProvider {
     async fn connect(&mut self, config: ProviderConfig) -> Result<()> {
         let local = LocalConfig::from_provider_config(&config);
         let llm = LlmClient::new(&local).map_err(Error::Other)?;
-        let mut registry = ToolRegistry::new(local.clark.clone());
+        let mut registry = ToolRegistry::new(
+            local.clark.clone(),
+            local.memories_enabled,
+            crate::memory::global_memory_dir(),
+        );
         // Connect MCP servers and register their tools (failures are non-fatal).
         self.mcp_status = registry.connect_mcp(&local.mcp_servers).await;
         self.llm = Some(llm);
@@ -144,6 +148,36 @@ impl Provider for LocalAgentProvider {
                 .await
         {
             prompt.push_str(&skills);
+        }
+        // Durable memory, when enabled: list the project scope (through the
+        // session executor — local or remote) and the global scope (always
+        // local), and tell the agent it has the `memory` tool.
+        if config.memories_enabled {
+            let mut mem = String::new();
+            if let Some(proj) = crate::memory::scope_listing(
+                self.executor.as_ref(),
+                &crate::memory::memory_dir(sandbox.root()),
+                "Project",
+            )
+            .await
+            {
+                mem.push_str(&proj);
+                mem.push('\n');
+            }
+            if let Some(gdir) = crate::memory::global_memory_dir() {
+                if let Some(glob) =
+                    crate::memory::scope_listing(&crate::exec::LocalExecutor, &gdir, "Global").await
+                {
+                    mem.push_str(&glob);
+                    mem.push('\n');
+                }
+            }
+            prompt.push_str("\n# Memory\n");
+            prompt.push_str(crate::memory::memory_guidance());
+            if !mem.is_empty() {
+                prompt.push('\n');
+                prompt.push_str(&mem);
+            }
         }
         {
             let mut s = self.session.lock().await;
