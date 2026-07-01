@@ -172,7 +172,7 @@ function MessageImpl({
       // Codex form: a quiet right-aligned pill, not a loud accent bubble.
       return (
         <div className="flex justify-end">
-          <div className="max-w-[80%] whitespace-pre-wrap rounded-2xl rounded-br-md border border-border-subtle bg-bg-tertiary px-3.5 py-2 text-sm text-ink">
+          <div className="max-w-[80%] whitespace-pre-wrap [overflow-wrap:anywhere] rounded-2xl rounded-br-md border border-border-subtle bg-bg-tertiary px-3.5 py-2 text-sm text-ink">
             {body}
           </div>
         </div>
@@ -194,7 +194,7 @@ function MessageImpl({
             <div
               key={i}
               className={cn(
-                "text-[0.9375rem] leading-relaxed",
+                "text-[0.9375rem] leading-relaxed [overflow-wrap:anywhere]",
                 MD_CLASSES,
                 span.kind === "narrate" && "text-ink-secondary",
               )}
