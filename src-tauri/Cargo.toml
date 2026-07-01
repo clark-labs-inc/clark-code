@@ -38,6 +38,10 @@ tauri-plugin-process = "2"
 # Native Google sign-in (system browser + localhost loopback). Returns a Google
 # ID token we exchange with Clark's Better Auth backend.
 tauri-plugin-google-auth = "0.5"
+# Custom `clark://` URL scheme. The Google sign-in success page redirects here so
+# the OS hands focus back to Clark instead of stranding the user on the loopback
+# tab in their browser.
+tauri-plugin-deep-link = "2"
 # Server-to-server token exchange against Clark's auth API (no browser CORS).
 reqwest = { version = "0.12", default-features = false, features = ["json", "cookies", "rustls-tls"] }
 # Percent-encode desktop conversation ids in REST sync URLs.

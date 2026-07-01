@@ -118,6 +118,76 @@ function userFrom(p: { email?: string; name?: string; image?: string }): AuthUse
   };
 }
 
+// Branded page the loopback server returns after Google redirects back. Two
+// jobs: (1) look intentional instead of the plugin's bare "Go back to your
+// app :)" default, and (2) bounce focus to the app via the `clark://` deep link
+// so the user lands back in Clark instead of stranded on a localhost tab. The
+// plugin writes this body with no Content-Type header, so lead with `<!doctype
+// html>` to guarantee the browser sniffs it as HTML (and runs the redirect).
+const AUTH_SUCCESS_HTML = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Signed in to Clark Code</title>
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; display: grid; place-items: center;
+    font-family: "Inter", -apple-system, system-ui, "Segoe UI", sans-serif;
+    background: #ffffff; color: #14141a;
+  }
+  .card { text-align: center; padding: 40px 44px; max-width: 380px; }
+  .mark {
+    width: 44px; height: 44px; margin: 0 auto 20px; border-radius: 12px;
+    display: grid; place-items: center;
+    background: #14141a; color: #ffffff; font-weight: 600; font-size: 20px;
+  }
+  h1 { font-size: 1.0625rem; font-weight: 600; margin: 0 0 8px; }
+  p { font-size: 0.875rem; line-height: 1.5; color: #52525a; margin: 0 0 24px; }
+  a.btn {
+    display: inline-block; text-decoration: none;
+    background: #14141a; color: #ffffff;
+    padding: 10px 20px; border-radius: 7px; font-size: 0.875rem; font-weight: 500;
+  }
+  @media (prefers-color-scheme: dark) {
+    body { background: #0a0a0a; color: #f4f4f3; }
+    .mark { background: #f4f4f3; color: #0a0a0a; }
+    p { color: #a0a09d; }
+    a.btn { background: #f4f4f3; color: #0a0a0a; }
+  }
+</style>
+</head>
+<body>
+  <main class="card">
+    <div class="mark">C</div>
+    <h1>You're signed in</h1>
+    <p>You can close this tab and return to Clark Code.</p>
+    <a class="btn" href="clark://auth-complete">Return to Clark Code</a>
+  </main>
+  <script>
+    // Best-effort: hand focus back to the app automatically. The button above is
+    // the reliable fallback if the browser blocks the programmatic redirect.
+    setTimeout(function () {
+      try { window.location.replace("clark://auth-complete"); } catch (e) {}
+    }, 500);
+  </script>
+</body>
+</html>`;
+
+/** Pull the Clark window back to the foreground after a browser round-trip. */
+async function focusAppWindow(): Promise<void> {
+  try {
+    const { getCurrentWindow } = await import("@tauri-apps/api/window");
+    const w = getCurrentWindow();
+    await w.unminimize();
+    await w.setFocus();
+  } catch {
+    /* best-effort — the clark:// deep link handles focus in the packaged app */
+  }
+}
+
 /** Native: plugin OAuth → Google ID token → host exchanges for a Clark JWT. */
 async function googleSignInNative(): Promise<{ user: AuthUser; token: string }> {
   if (!config.googleDesktopClientId) {
@@ -131,6 +201,13 @@ async function googleSignInNative(): Promise<{ user: AuthUser; token: string }> 
     clientId: config.googleDesktopClientId,
     clientSecret: config.googleDesktopClientSecret,
     scopes: ["openid", "email", "profile"],
+    // Bind the loopback on 127.0.0.1 — matching the plugin's actual bind host —
+    // so the browser doesn't dead-end on an IPv6 `localhost` nothing listens on;
+    // the empty port lets the OS pick a free one.
+    redirectUri: "http://127.0.0.1",
+    // Branded, self-explaining success page that also deep-links focus back to
+    // the app, instead of the plugin's bare default text.
+    successHtmlResponse: AUTH_SUCCESS_HTML,
   });
   const idToken = res.idToken;
   if (!idToken) throw new Error("Google did not return an ID token.");
@@ -138,6 +215,7 @@ async function googleSignInNative(): Promise<{ user: AuthUser; token: string }> 
     authOrigin: config.clarkAuthOrigin,
     idToken,
   });
+  await focusAppWindow();
   return { user: userFrom(out), token: out.token };
 }
 
