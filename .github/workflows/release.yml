@@ -241,33 +241,36 @@ jobs:
             fs.writeFileSync(process.argv[2], JSON.stringify(assets, null, 2) + "\n");
           ' "$jsonl" "$records_dir/assets-${RUNNER_OS}.json"
 
-          # Updater manifest (latest.json). tauri-action signed the .app.tar.gz
-          # with the Ed25519 updater key and left the detached .sig on disk; point
-          # the darwin platforms at the canonical CDN payload. A universal build
-          # is one bundle, so both arches share the signature. tauri.conf.json's
-          # updater endpoint is desktop/latest/latest.json, so THIS is what makes
-          # auto-update actually work — the CI never emitted it before.
-          sig_file="$(find target -type f -path "*/bundle/*" -name '*.app.tar.gz.sig' | head -1 || true)"
-          if [ -n "$sig_file" ]; then
-            sig="$(cat "$sig_file")"
-            node -e '
-              const fs = require("fs");
-              const [version, sig, url, tag, repo] = process.argv.slice(1);
-              const platform = { signature: sig, url };
-              fs.writeFileSync("latest.json", JSON.stringify({
-                version,
-                notes: `See the release notes at https://github.com/${repo}/releases/tag/${tag}`,
-                pub_date: new Date().toISOString(),
-                platforms: { "darwin-aarch64": platform, "darwin-x86_64": platform },
-              }, null, 2) + "\n");
-            ' "$version" "$sig" "$base_url/latest/ClarkCode.app.tar.gz" "$tag" "$GITHUB_REPOSITORY"
-            aws s3 cp latest.json "s3://$bucket/desktop/latest/latest.json" \
-              --content-type "application/json" --cache-control "public, max-age=60"
-            aws s3 cp latest.json "s3://$bucket/desktop/releases/$tag/latest.json" \
-              --content-type "application/json" --cache-control "$IMM"
-          else
-            echo "note: no .app.tar.gz.sig found (non-macOS leg?) — skipping latest.json" >&2
-          fi
+          # Per-platform updater fragment for cross-platform auto-update. Each OS
+          # only produces its own updater artifact + detached .sig, so no single
+          # leg can write the whole latest.json — this emits just this leg's
+          # platform entries and the publish job merges all three. Map each
+          # updater artifact's .sig → its tauri platform key(s) + canonical CDN
+          # url (macOS: universal .app.tar.gz for both arches; Windows: the NSIS
+          # -setup.exe; Linux: the .AppImage). tauri.conf.json's updater endpoint
+          # is desktop/latest/latest.json.
+          find_sig() { find target -type f -path "*/bundle/*" -name "$1" | head -1; }
+          mac_sig="$(find_sig '*.app.tar.gz.sig')"
+          win_sig="$(find_sig '*-setup.exe.sig')"
+          linux_sig="$(find_sig '*.AppImage.sig')"
+          node -e '
+            const fs = require("fs");
+            const [base, macSig, winSig, linuxSig, out] = process.argv.slice(1);
+            const read = (p) => (p ? fs.readFileSync(p, "utf8").trim() : "");
+            const platforms = {};
+            if (macSig) {
+              const e = { signature: read(macSig), url: `${base}/latest/ClarkCode.app.tar.gz` };
+              platforms["darwin-aarch64"] = e;
+              platforms["darwin-x86_64"] = e;
+            }
+            if (winSig) {
+              platforms["windows-x86_64"] = { signature: read(winSig), url: `${base}/latest/ClarkCode_x64-setup.exe` };
+            }
+            if (linuxSig) {
+              platforms["linux-x86_64"] = { signature: read(linuxSig), url: `${base}/latest/ClarkCode_amd64.AppImage` };
+            }
+            fs.writeFileSync(out, JSON.stringify({ platforms }, null, 2) + "\n");
+          ' "$base_url" "$mac_sig" "$win_sig" "$linux_sig" "$records_dir/updater-${RUNNER_OS}.json"
 
       - name: Upload public download asset records
         uses: actions/upload-artifact@v4
@@ -320,7 +323,7 @@ jobs:
             const tag = process.argv[2];
             const baseUrl = process.argv[3].replace(/\/$/, "");
             const assetsByName = new Map();
-            for (const file of fs.readdirSync(root).filter((name) => name.endsWith(".json")).sort()) {
+            for (const file of fs.readdirSync(root).filter((name) => name.startsWith("assets-") && name.endsWith(".json")).sort()) {
               const records = JSON.parse(fs.readFileSync(path.join(root, file), "utf8"));
               for (const asset of records) assetsByName.set(asset.name, asset);
             }
@@ -341,6 +344,33 @@ jobs:
           aws s3 cp "$manifest" "s3://$bucket/desktop/latest/manifest.json" \
             --content-type "application/json" \
             --cache-control "public, max-age=60"
+
+          # Merge every leg's updater fragment into one cross-platform latest.json
+          # (the updater endpoint pinned in tauri.conf.json). This is what lets
+          # Windows + Linux (AppImage) auto-update, not just macOS.
+          latest="$(mktemp)"
+          node -e '
+            const fs = require("fs");
+            const path = require("path");
+            const [root, tag, repo, out] = process.argv.slice(1);
+            const platforms = {};
+            for (const f of fs.readdirSync(root).filter((n) => n.startsWith("updater-") && n.endsWith(".json"))) {
+              const frag = JSON.parse(fs.readFileSync(path.join(root, f), "utf8"));
+              Object.assign(platforms, frag.platforms || {});
+            }
+            const doc = {
+              version: tag.replace(/^v/, ""),
+              notes: `See the release notes at https://github.com/${repo}/releases/tag/${tag}`,
+              pub_date: new Date().toISOString(),
+              platforms,
+            };
+            fs.writeFileSync(out, JSON.stringify(doc, null, 2) + "\n");
+          ' release-records "$tag" "$GITHUB_REPOSITORY" "$latest"
+
+          aws s3 cp "$latest" "s3://$bucket/desktop/latest/latest.json" \
+            --content-type "application/json" --cache-control "public, max-age=60"
+          aws s3 cp "$latest" "s3://$bucket/desktop/releases/$tag/latest.json" \
+            --content-type "application/json" --cache-control "public, max-age=31536000, immutable"
 
           if [ -n "${CLARK_DESKTOP_DOWNLOAD_DISTRIBUTION_ID}" ]; then
             aws cloudfront create-invalidation \
