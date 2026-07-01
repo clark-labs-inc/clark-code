@@ -123,7 +123,7 @@ jobs:
           while IFS= read -r f; do
             files+=("$f")
           done < <(
-            find src-tauri/target -type f \( \
+            find target -type f \( \
               -name "*.dmg" -o \
               -name "*.msi" -o \
               -name "*.exe" -o \
@@ -134,7 +134,7 @@ jobs:
             \) | sort
           )
           if [ "${#files[@]}" -eq 0 ]; then
-            echo "No installer assets found under src-tauri/target" >&2
+            echo "No installer assets found under target" >&2
             exit 1
           fi
 
@@ -224,7 +224,7 @@ jobs:
           # is one bundle, so both arches share the signature. tauri.conf.json's
           # updater endpoint is desktop/latest/latest.json, so THIS is what makes
           # auto-update actually work — the CI never emitted it before.
-          sig_file="$(find src-tauri/target -type f -name '*.app.tar.gz.sig' | head -1 || true)"
+          sig_file="$(find target -type f -name '*.app.tar.gz.sig' | head -1 || true)"
           if [ -n "$sig_file" ]; then
             sig="$(cat "$sig_file")"
             node -e '
