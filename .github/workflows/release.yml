@@ -25,13 +25,21 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # macOS-only for now: we ship a single signed + notarized universal
-        # build, and the download page is macOS-only. Re-add ubuntu-22.04 /
-        # windows-latest legs here (and wire their signing) to publish those.
+        # One native runner per OS — cross-compiling a Tauri app isn't viable.
+        # macOS: one signed + notarized universal build. Windows: NSIS + MSI
+        # (unsigned — SmartScreen warns). Linux: .deb + .rpm + .AppImage. Each
+        # leg uploads its installers under canonical ClarkCode.* names; the
+        # updater latest.json is macOS-only (keyed on the .app.tar.gz.sig).
         include:
           - platform: macos-latest
             args: "--target universal-apple-darwin"
             rust-targets: "aarch64-apple-darwin,x86_64-apple-darwin"
+          - platform: ubuntu-22.04
+            args: ""
+            rust-targets: ""
+          - platform: windows-latest
+            args: ""
+            rust-targets: ""
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
@@ -47,7 +55,16 @@ jobs:
         if: matrix.platform == 'ubuntu-22.04'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+          # Tauri v2 build deps (webkit2gtk-4.1 + ayatana appindicator).
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libssl-dev \
+            libxdo-dev \
+            build-essential \
+            file \
+            patchelf
 
       - uses: pnpm/action-setup@v4
         with:
@@ -92,6 +109,9 @@ jobs:
 
             **Windows** SmartScreen may warn on the unsigned installer. Click
             **More info → Run anyway**.
+
+            **Linux** — `.AppImage` (portable, `chmod +x` and run), `.deb`
+            (Debian/Ubuntu), or `.rpm` (Fedora/RHEL).
           # Each matrix leg uploads into the same draft release; the `publish`
           # job below flips it public only after every platform has uploaded.
           releaseDraft: true
