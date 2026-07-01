@@ -119,15 +119,31 @@ pub struct ClaudeDiscovery {
     pub skills: Vec<provider_local::ClaudeSkill>,
 }
 
+/// A live remote project's tunnel, so discovery can read the remote `.claude`.
+#[derive(serde::Deserialize)]
+pub struct RemoteArg {
+    pub ws_url: String,
+    pub token: String,
+}
+
 /// Discover the MCP servers + skills a user already configured in Claude Code,
 /// so they can be imported with one click (skills are picked up automatically).
+/// Reads through an executor: local disk, or — when `remote` is given — the
+/// remote host's `.claude` over the exec-server tunnel.
 #[tauri::command]
-pub fn claude_discover(cwd: String) -> ClaudeDiscovery {
+pub async fn claude_discover(
+    cwd: String,
+    remote: Option<RemoteArg>,
+) -> Result<ClaudeDiscovery, String> {
     let root = std::path::PathBuf::from(cwd);
-    ClaudeDiscovery {
-        mcp: provider_local::discover_mcp_servers(&root),
-        skills: provider_local::discover_skills(&root),
-    }
+    let exec: Box<dyn provider_local::Executor> = match remote {
+        Some(r) => Box::new(provider_local::RemoteExecutor::connect(&r.ws_url, &r.token).await?),
+        None => Box::new(provider_local::LocalExecutor),
+    };
+    Ok(ClaudeDiscovery {
+        mcp: provider_local::discover_mcp_servers(exec.as_ref(), &root).await,
+        skills: provider_local::discover_skills(exec.as_ref(), &root).await,
+    })
 }
 
 #[tauri::command]

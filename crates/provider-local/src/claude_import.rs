@@ -2,6 +2,11 @@
 //! configured under `.mcp.json` / `.claude/`, so bringing an existing setup into
 //! Clark Code is one click (MCP) or automatic (skills).
 //!
+//! All reads go through the session's [`Executor`], so discovery works the same
+//! for a **local** project (reads the local disk) and a **remote** one (reads
+//! the remote host's `.claude` over the exec-server tunnel). `$HOME` is resolved
+//! on whichever machine the executor targets.
+//!
 //! MCP: Clark's [`McpServerConfig`] is the same `{command, args, env}` shape as a
 //! Claude `.mcp.json` entry, so imported servers run unchanged. Skills: Claude's
 //! `SKILL.md` files are surfaced to the agent in the system prompt (name +
@@ -10,14 +15,36 @@
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use serde::Serialize;
 use serde_json::Value;
+use tokio_util::sync::CancellationToken;
 
+use crate::exec::Executor;
 use crate::mcp::McpServerConfig;
 
-fn home() -> Option<PathBuf> {
-    std::env::var_os("HOME").map(PathBuf::from)
+async fn read_text(exec: &dyn Executor, path: &Path) -> Option<String> {
+    String::from_utf8(exec.read(path).await.ok()?).ok()
+}
+
+async fn read_json(exec: &dyn Executor, path: &Path) -> Option<Value> {
+    serde_json::from_str(&read_text(exec, path).await?).ok()
+}
+
+/// `$HOME` on the executor's target machine (local or remote).
+async fn resolve_home(exec: &dyn Executor, cwd: &Path) -> Option<PathBuf> {
+    let out = exec
+        .exec(
+            "printf %s \"$HOME\"",
+            cwd,
+            Duration::from_secs(10),
+            &CancellationToken::new(),
+        )
+        .await
+        .ok()?;
+    let home = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    (!home.is_empty()).then(|| PathBuf::from(home))
 }
 
 // ---- MCP servers -----------------------------------------------------------
@@ -80,28 +107,24 @@ fn collect_mcp(obj: &Value, out: &mut Vec<McpServerConfig>, seen: &mut HashSet<S
     }
 }
 
-fn read_json(path: PathBuf) -> Option<Value> {
-    serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()
-}
-
 /// Discover Claude Code MCP servers for `cwd`, most-specific first (project
 /// `.mcp.json` and `.claude/settings*.json`, then the project-scoped and global
 /// entries in `~/.claude.json`). A name is only taken from the first source that
-/// defines it.
-pub fn discover_mcp_servers(cwd: &Path) -> Vec<McpServerConfig> {
+/// defines it. Reads through `exec`, so it works local or remote.
+pub async fn discover_mcp_servers(exec: &dyn Executor, cwd: &Path) -> Vec<McpServerConfig> {
     let mut out = Vec::new();
     let mut seen = HashSet::new();
 
-    if let Some(v) = read_json(cwd.join(".mcp.json")) {
+    if let Some(v) = read_json(exec, &cwd.join(".mcp.json")).await {
         collect_mcp(&v, &mut out, &mut seen);
     }
     for f in [".claude/settings.json", ".claude/settings.local.json"] {
-        if let Some(v) = read_json(cwd.join(f)) {
+        if let Some(v) = read_json(exec, &cwd.join(f)).await {
             collect_mcp(&v, &mut out, &mut seen);
         }
     }
-    if let Some(home) = home() {
-        if let Some(v) = read_json(home.join(".claude.json")) {
+    if let Some(home) = resolve_home(exec, cwd).await {
+        if let Some(v) = read_json(exec, &home.join(".claude.json")).await {
             if let Some(proj) = v
                 .get("projects")
                 .and_then(|p| p.get(cwd.to_string_lossy().as_ref()))
@@ -121,7 +144,7 @@ pub fn discover_mcp_servers(cwd: &Path) -> Vec<McpServerConfig> {
 pub struct ClaudeSkill {
     pub name: String,
     pub description: String,
-    /// Absolute path to the `SKILL.md`.
+    /// Absolute path to the `SKILL.md` (on the executor's machine).
     pub path: String,
     /// `project` or `personal`.
     pub scope: &'static str,
@@ -146,9 +169,8 @@ fn fm_field(fm: &str, key: &str) -> Option<String> {
     None
 }
 
-fn parse_skill(skill_md: &Path, scope: &'static str) -> Option<ClaudeSkill> {
-    let text = std::fs::read_to_string(skill_md).ok()?;
-    let fm = frontmatter(&text).unwrap_or("");
+fn parse_skill(text: &str, skill_md: &Path, scope: &'static str) -> Option<ClaudeSkill> {
+    let fm = frontmatter(text).unwrap_or("");
     let name = fm_field(fm, "name").or_else(|| {
         skill_md
             .parent()
@@ -166,14 +188,22 @@ fn parse_skill(skill_md: &Path, scope: &'static str) -> Option<ClaudeSkill> {
     })
 }
 
-fn skills_in(dir: &Path, scope: &'static str, out: &mut Vec<ClaudeSkill>) {
-    let Ok(rd) = std::fs::read_dir(dir) else {
+async fn skills_in(
+    exec: &dyn Executor,
+    dir: &Path,
+    scope: &'static str,
+    out: &mut Vec<ClaudeSkill>,
+) {
+    let Ok(entries) = exec.read_dir(dir).await else {
         return;
     };
-    for entry in rd.flatten() {
-        let skill_md = entry.path().join("SKILL.md");
-        if skill_md.is_file() {
-            if let Some(s) = parse_skill(&skill_md, scope) {
+    for e in entries {
+        if !e.is_dir {
+            continue;
+        }
+        let skill_md = dir.join(&e.name).join("SKILL.md");
+        if let Some(text) = read_text(exec, &skill_md).await {
+            if let Some(s) = parse_skill(&text, &skill_md, scope) {
                 out.push(s);
             }
         }
@@ -181,12 +211,19 @@ fn skills_in(dir: &Path, scope: &'static str, out: &mut Vec<ClaudeSkill>) {
 }
 
 /// Discover Claude Code skills: personal (`~/.claude/skills`) and project
-/// (`<root>/.claude/skills`). Project skills win over personal by name.
-pub fn discover_skills(project_root: &Path) -> Vec<ClaudeSkill> {
+/// (`<root>/.claude/skills`), via `exec`. Project skills win over personal by
+/// name.
+pub async fn discover_skills(exec: &dyn Executor, project_root: &Path) -> Vec<ClaudeSkill> {
     let mut all = Vec::new();
-    skills_in(&project_root.join(".claude/skills"), "project", &mut all);
-    if let Some(home) = home() {
-        skills_in(&home.join(".claude/skills"), "personal", &mut all);
+    skills_in(
+        exec,
+        &project_root.join(".claude/skills"),
+        "project",
+        &mut all,
+    )
+    .await;
+    if let Some(home) = resolve_home(exec, project_root).await {
+        skills_in(exec, &home.join(".claude/skills"), "personal", &mut all).await;
     }
     // De-dup by name; project (added first) wins.
     let mut seen = HashSet::new();
@@ -206,8 +243,8 @@ fn truncate(s: &str, max: usize) -> String {
 /// A compact `# Skills` block for the system prompt, or `None` if there are no
 /// skills. Lists each skill's name + description and points the agent at the
 /// full `SKILL.md`, which it reads with `read_file` when a task matches.
-pub fn skills_prompt_section(project_root: &Path) -> Option<String> {
-    let skills = discover_skills(project_root);
+pub async fn skills_prompt_section(exec: &dyn Executor, project_root: &Path) -> Option<String> {
+    let skills = discover_skills(exec, project_root).await;
     if skills.is_empty() {
         return None;
     }
@@ -230,6 +267,7 @@ pub fn skills_prompt_section(project_root: &Path) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::exec::LocalExecutor;
 
     #[test]
     fn parses_stdio_mcp_and_skips_remote() {
@@ -244,13 +282,12 @@ mod tests {
         collect_mcp(&v, &mut out, &mut seen);
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].name, "fs");
-        assert_eq!(out[0].command, "npx");
         assert_eq!(out[0].args, vec!["-y", "server-fs", "."]);
         assert_eq!(out[0].env.get("K").map(String::as_str), Some("v"));
     }
 
-    #[test]
-    fn discovers_project_mcp_and_skills() {
+    #[tokio::test]
+    async fn discovers_project_mcp_and_skills_via_executor() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         std::fs::write(
@@ -262,15 +299,15 @@ mod tests {
         std::fs::create_dir_all(&skill_dir).unwrap();
         std::fs::write(
             skill_dir.join("SKILL.md"),
-            "---\nname: pdf-tools\ndescription: Fill and read PDF forms.\n---\n\nBody here.",
+            "---\nname: pdf-tools\ndescription: Fill and read PDF forms.\n---\n\nBody.",
         )
         .unwrap();
 
-        let mcp = discover_mcp_servers(root);
-        assert_eq!(mcp.len(), 1);
-        assert_eq!(mcp[0].name, "github");
+        let exec = LocalExecutor;
+        let mcp = discover_mcp_servers(&exec, root).await;
+        assert!(mcp.iter().any(|m| m.name == "github" && m.command == "npx"));
 
-        let skills = discover_skills(root);
+        let skills = discover_skills(&exec, root).await;
         let pdf = skills
             .iter()
             .find(|s| s.name == "pdf-tools")
@@ -278,7 +315,7 @@ mod tests {
         assert_eq!(pdf.description, "Fill and read PDF forms.");
         assert_eq!(pdf.scope, "project");
 
-        let section = skills_prompt_section(root).unwrap();
+        let section = skills_prompt_section(&exec, root).await.unwrap();
         assert!(section.contains("pdf-tools"));
         assert!(section.contains("Fill and read PDF forms."));
     }

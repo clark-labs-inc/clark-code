@@ -136,7 +136,15 @@ impl Provider for LocalAgentProvider {
             };
         self.executor = executor;
 
-        let prompt = system_prompt(&sandbox, config.clark.is_some());
+        let mut prompt = system_prompt(&sandbox, config.clark.is_some());
+        // Surface the user's Claude Code skills (read `.claude` through the
+        // session executor — the local disk, or the remote host over the tunnel).
+        if let Some(skills) =
+            crate::claude_import::skills_prompt_section(self.executor.as_ref(), sandbox.root())
+                .await
+        {
+            prompt.push_str(&skills);
+        }
         {
             let mut s = self.session.lock().await;
             s.transcript = vec![ChatMessage::system(prompt)];

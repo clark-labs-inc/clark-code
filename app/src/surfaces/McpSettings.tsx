@@ -180,7 +180,10 @@ function Catalog({ onAdd, addBlank }: { onAdd: (make: (cwd: string) => McpServer
 export function McpSettings() {
   const open = useSessionStore((s) => s.mcpOpen);
   const setOpen = useSessionStore((s) => s.setMcpOpen);
-  const cwd = useSessionStore((s) => s.localSettings.cwd);
+  const localCwd = useSessionStore((s) => s.localSettings.cwd);
+  const activeRemote = useSessionStore((s) => s.activeRemote);
+  // For a remote project, read its remote `.claude` over the tunnel.
+  const cwd = activeRemote?.cwd ?? localCwd;
   const [servers, setServers] = useState<McpServer[]>([]);
   const [statuses, setStatuses] = useState<Record<string, McpStatus>>({});
   const [testing, setTesting] = useState(false);
@@ -222,7 +225,10 @@ export function McpSettings() {
     setImporting(true);
     setImportNote(null);
     try {
-      const { mcp, skills } = await discoverClaude(cwd);
+      const remote = activeRemote
+        ? { ws_url: activeRemote.ws_url, token: activeRemote.token }
+        : undefined;
+      const { mcp, skills } = await discoverClaude(cwd, remote);
       const have = new Set(servers.map((s) => s.name.trim()));
       const added = mcp
         .filter((m) => m.name.trim() && !have.has(m.name.trim()))

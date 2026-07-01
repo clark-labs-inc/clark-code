@@ -20,7 +20,7 @@ use std::process::Command;
 use std::time::Duration;
 
 use clark_desktop_lib::ssh::{self, RemoteSpec};
-use provider_local::{Executor, RemoteExecutor};
+use provider_local::{discover_mcp_servers, discover_skills, Executor, RemoteExecutor};
 use tokio_util::sync::CancellationToken;
 
 struct Env {
@@ -138,4 +138,74 @@ async fn remote_project_round_trips_against_a_live_host() {
     // Give the kill-on-drop a beat to propagate before the test process exits.
     tokio::time::sleep(Duration::from_millis(200)).await;
     eprintln!("remote e2e: OK");
+}
+
+/// Claude-migration discovery must read the *remote* `.claude` over the tunnel.
+#[tokio::test]
+#[ignore = "needs a live SSH host; set CLARK_SSH_TEST_{HOST,ROOT}"]
+async fn discovers_claude_config_on_the_remote() {
+    let Some(env) = env() else {
+        eprintln!("skipping: set CLARK_SSH_TEST_HOST / _ROOT");
+        return;
+    };
+
+    // Seed a Claude setup on the remote: an .mcp.json + a project skill.
+    let seed = format!(
+        "mkdir -p {root}/.claude/skills/remote-skill && \
+         printf '%s' '{{\"mcpServers\":{{\"remote-mcp\":{{\"command\":\"echo\",\"args\":[\"hi\"]}}}}}}' > {root}/.mcp.json && \
+         printf '%s\\n' '---' 'name: remote-skill' 'description: A remote test skill.' '---' 'body' \
+           > {root}/.claude/skills/remote-skill/SKILL.md",
+        root = env.root
+    );
+    let ok = Command::new("ssh")
+        .args(["-o", "ConnectTimeout=10", &env.host, &seed])
+        .status()
+        .expect("seed")
+        .success();
+    assert!(ok, "failed to seed remote .claude");
+
+    let conn = ssh::connect(&RemoteSpec {
+        host: env.host.clone(),
+        remote_root: env.root.clone(),
+        local_binary: env.binary.clone(),
+    })
+    .await
+    .expect("ssh::connect");
+    let remote = RemoteExecutor::connect(&conn.ws_url, &conn.token)
+        .await
+        .expect("RemoteExecutor");
+
+    let root = std::path::Path::new(&env.root);
+    let mcp = discover_mcp_servers(&remote, root).await;
+    eprintln!(
+        "remote mcp: {:?}",
+        mcp.iter().map(|m| &m.name).collect::<Vec<_>>()
+    );
+    assert!(mcp
+        .iter()
+        .any(|m| m.name == "remote-mcp" && m.command == "echo"));
+
+    let skills = discover_skills(&remote, root).await;
+    eprintln!(
+        "remote skills: {:?}",
+        skills.iter().map(|s| &s.name).collect::<Vec<_>>()
+    );
+    let s = skills
+        .iter()
+        .find(|s| s.name == "remote-skill")
+        .expect("remote skill");
+    assert_eq!(s.description, "A remote test skill.");
+    assert_eq!(s.scope, "project");
+
+    let _ = Command::new("ssh")
+        .args([
+            "-o",
+            "ConnectTimeout=10",
+            &env.host,
+            &format!("rm -rf {}/.claude {}/.mcp.json", env.root, env.root),
+        ])
+        .status();
+    drop(conn);
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    eprintln!("remote claude discovery: OK");
 }

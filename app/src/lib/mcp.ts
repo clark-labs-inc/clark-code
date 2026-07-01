@@ -30,10 +30,13 @@ export interface ClaudeSkill {
 }
 
 /** MCP servers + skills discovered from an existing Claude Code setup in `cwd`
- *  (`.mcp.json`, `~/.claude.json`, `.claude/skills`). Empty in browser preview. */
+ *  (`.mcp.json`, `~/.claude.json`, `.claude/skills`). When `remote` is given,
+ *  reads the remote host's `.claude` over the exec-server tunnel; otherwise the
+ *  local disk. Empty in browser preview. */
 export async function discoverClaude(
   cwd: string,
+  remote?: { ws_url: string; token: string },
 ): Promise<{ mcp: McpServerConfig[]; skills: ClaudeSkill[] }> {
   if (!isTauri() || !cwd.trim()) return { mcp: [], skills: [] };
-  return invoke("claude_discover", { cwd: cwd.trim() });
+  return invoke("claude_discover", { cwd: cwd.trim(), remote: remote ?? null });
 }
