@@ -23,6 +23,11 @@ export interface ConversationMeta {
   remoteHost?: string;
   createdAt: number;
   updatedAt: number;
+  /** Soft-delete flag. Archived conversations are hidden from the main list
+   *  (shown under a collapsed "Archived" section) but never removed locally or
+   *  from the cloud, so they can be restored with the full transcript + artifacts.
+   *  Local-only for now; not round-tripped through the cloud summary. */
+  archived?: boolean;
 }
 
 const INDEX_KEY = "clark.history.index.v1";
@@ -69,6 +74,16 @@ function writeIndex(list: ConversationMeta[]): void {
 export function upsertMeta(meta: ConversationMeta): void {
   const list = loadIndex().filter((c) => c.id !== meta.id);
   list.push(meta);
+  writeIndex(list);
+}
+
+/** Toggle a conversation's soft-delete (archived) flag. Leaves the snapshot and
+ *  index entry intact so it can be restored with its full transcript. */
+export function setArchived(id: string, archived: boolean): void {
+  const list = loadIndex();
+  const found = list.find((c) => c.id === id);
+  if (!found || !!found.archived === archived) return;
+  found.archived = archived;
   writeIndex(list);
 }
 

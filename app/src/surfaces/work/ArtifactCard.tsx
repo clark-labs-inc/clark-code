@@ -4,6 +4,7 @@ import {
   Globe, Film, FileText, Image as ImageIcon, Presentation, ExternalLink, FileBox,
 } from "lucide-react";
 import type { Artifact, ArtifactKind } from "../../core-bridge/types";
+import { MarkdownDoc, isMarkdownDoc } from "./MarkdownDoc";
 
 const KIND_ICON: Record<ArtifactKind, typeof Globe> = {
   website: Globe, video: Film, media: Film, image: ImageIcon,
@@ -25,6 +26,11 @@ function isVideo(a: Artifact): boolean {
 export function ArtifactCard({ artifact }: { artifact: Artifact }) {
   const reduce = useReducedMotion();
   const [broke, setBroke] = useState(false);
+
+  // Markdown documents render as a rich inline viewer (scrollable doc + a slide
+  // "present" mode) rather than a bare "Open" card.
+  if (isMarkdownDoc(artifact)) return <MarkdownDoc artifact={artifact} />;
+
   const Icon = KIND_ICON[artifact.kind] ?? FileBox;
   const uri = artifact.uri;
 

@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use agent_core::provider::ProviderConfig;
 use serde_json::Value;
 
+use crate::compaction::CompactionConfig;
 use crate::tools::PermissionMode;
 
 /// Production Clark Platform API (OpenAI-compatible) base URL.
@@ -22,6 +23,14 @@ pub const DEFAULT_MODEL: &str = "clark-code";
 pub const DEFAULT_RESEARCH_MODEL: &str = "clark";
 /// Safety cap on tool-call ping-pong within a single turn.
 pub const DEFAULT_MAX_ITERATIONS: u32 = 50;
+/// Approximate transcript-token threshold where the local loop checkpoints old
+/// context before the next model request. GLM 5.2 gives us a 1M-token window, so
+/// leave plenty of room for the next turn instead of compacting early.
+pub const DEFAULT_AUTO_COMPACT_TOKEN_LIMIT: usize = 300_000;
+/// Approximate source budget for the summarization request itself.
+pub const DEFAULT_COMPACT_REQUEST_TOKEN_LIMIT: usize = 250_000;
+/// Approximate budget for preserving recent real user messages after compaction.
+pub const DEFAULT_COMPACT_RECENT_USER_TOKEN_BUDGET: usize = 20_000;
 
 /// Resolved configuration for one local-agent session.
 #[derive(Clone, Debug)]
@@ -60,6 +69,8 @@ pub struct LocalConfig {
     /// the project + global memory into the system prompt. On by default; the
     /// user turns it off from the profile menu (`extra.memories = false`).
     pub memories_enabled: bool,
+    /// Checkpoint compaction for the model-visible transcript.
+    pub compaction: CompactionConfig,
 }
 
 /// A remote project target. The agent's file/shell tools run against `cwd` on a
@@ -109,13 +120,22 @@ fn str_vec(extra: &Value, key: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
+fn usize_field(extra: &Value, key: &str) -> Option<usize> {
+    extra
+        .get(key)
+        .and_then(Value::as_u64)
+        .and_then(|n| usize::try_from(n).ok())
+}
+
 impl LocalConfig {
     /// Parse from the generic [`ProviderConfig`]. Unknown keys are ignored.
     ///
     /// Recognized `extra` keys: `model`, `temperature`, `max_iterations`,
     /// `permissions` (map of tool→`allow|ask|deny`), `research` (bool, default
-    /// true), `research_model`, and `base_url` (tests only). The key rides on
-    /// `auth_token`.
+    /// true), `research_model`, `auto_compact` (bool),
+    /// `auto_compact_token_limit`, `compact_request_token_limit`,
+    /// `compact_recent_user_token_budget`, and `base_url` (tests only). The key
+    /// rides on `auth_token`.
     pub fn from_provider_config(config: &ProviderConfig) -> Self {
         let extra = &config.extra;
 
@@ -167,6 +187,32 @@ impl LocalConfig {
             .and_then(Value::as_bool)
             .unwrap_or(true);
 
+        let compaction = if extra
+            .get("auto_compact")
+            .and_then(Value::as_bool)
+            .unwrap_or(true)
+        {
+            let auto_compact_token_limit = usize_field(extra, "auto_compact_token_limit")
+                .filter(|n| *n > 0)
+                .unwrap_or(DEFAULT_AUTO_COMPACT_TOKEN_LIMIT);
+            let compact_request_token_limit = usize_field(extra, "compact_request_token_limit")
+                .filter(|n| *n > 0)
+                .unwrap_or_else(|| {
+                    DEFAULT_COMPACT_REQUEST_TOKEN_LIMIT.min(auto_compact_token_limit)
+                });
+            let recent_user_token_budget = usize_field(extra, "compact_recent_user_token_budget")
+                .filter(|n| *n > 0)
+                .unwrap_or(DEFAULT_COMPACT_RECENT_USER_TOKEN_BUDGET);
+            CompactionConfig {
+                auto_compact_token_limit,
+                compact_request_token_limit,
+                recent_user_token_budget,
+                ..CompactionConfig::default()
+            }
+        } else {
+            CompactionConfig::disabled()
+        };
+
         // A remote project rides in on `extra.remote = { ws_url, token, cwd }`,
         // populated by the host once the SSH tunnel + exec-server are up. All
         // three fields are required; a partial object is treated as "local".
@@ -196,6 +242,7 @@ impl LocalConfig {
             cwd,
             remote,
             memories_enabled,
+            compaction,
         }
     }
 
@@ -232,6 +279,14 @@ mod tests {
         assert_eq!(cfg.base_url, DEFAULT_BASE_URL);
         assert_eq!(cfg.model, DEFAULT_MODEL);
         assert_eq!(cfg.max_iterations, DEFAULT_MAX_ITERATIONS);
+        assert_eq!(
+            cfg.compaction.auto_compact_token_limit,
+            DEFAULT_AUTO_COMPACT_TOKEN_LIMIT
+        );
+        assert_eq!(
+            cfg.compaction.compact_request_token_limit,
+            DEFAULT_COMPACT_REQUEST_TOKEN_LIMIT
+        );
         assert_eq!(cfg.mode_for("bash"), PermissionMode::Ask);
         // No key → research can't run, so it's disabled.
         assert!(cfg.clark.is_none());
@@ -279,6 +334,32 @@ mod tests {
             ..Default::default()
         };
         assert!(LocalConfig::from_provider_config(&pc).remote.is_none());
+    }
+
+    #[test]
+    fn parses_compaction_overrides() {
+        let pc = ProviderConfig {
+            extra: json!({
+                "auto_compact_token_limit": 1234,
+                "compact_request_token_limit": 1000,
+                "compact_recent_user_token_budget": 99
+            }),
+            ..Default::default()
+        };
+        let cfg = LocalConfig::from_provider_config(&pc);
+        assert_eq!(cfg.compaction.auto_compact_token_limit, 1234);
+        assert_eq!(cfg.compaction.compact_request_token_limit, 1000);
+        assert_eq!(cfg.compaction.recent_user_token_budget, 99);
+    }
+
+    #[test]
+    fn can_disable_compaction() {
+        let pc = ProviderConfig {
+            extra: json!({ "auto_compact": false }),
+            ..Default::default()
+        };
+        let cfg = LocalConfig::from_provider_config(&pc);
+        assert!(!cfg.compaction.enabled());
     }
 
     #[test]

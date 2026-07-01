@@ -11,7 +11,7 @@ use agent_core::provider::{ClientResponse, PromptInput, Provider, ProviderConfig
 use futures::StreamExt;
 use serde_json::json;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpListener;
+use tokio::net::{TcpListener, TcpStream};
 
 /// SSE body for the first model call: ask to read `hello.txt`.
 fn tool_call_body() -> String {
@@ -29,6 +29,16 @@ fn final_body() -> String {
     [
         r#"data: {"choices":[{"delta":{"content":"The file says: "}}]}"#,
         r#"data: {"choices":[{"delta":{"content":"hi"}}]}"#,
+        r#"data: {"choices":[{"delta":{},"finish_reason":"stop"}]}"#,
+        "data: [DONE]",
+        "",
+    ]
+    .join("\n\n")
+}
+
+fn compact_summary_body() -> String {
+    [
+        r#"data: {"choices":[{"delta":{"content":"Summary: the user asked a large coding question. Continue with a concise answer."}}]}"#,
         r#"data: {"choices":[{"delta":{},"finish_reason":"stop"}]}"#,
         "data: [DONE]",
         "",
@@ -63,13 +73,46 @@ async fn serve(listener: TcpListener, bodies: Vec<String>) {
         let Ok((mut sock, _)) = listener.accept().await else {
             return;
         };
-        // Read past the request headers so the client's write completes.
-        let mut buf = [0u8; 4096];
-        let _ = sock.read(&mut buf).await;
+        read_request(&mut sock).await;
         let n = calls.fetch_add(1, Ordering::SeqCst);
         let _ = sock.write_all(&http_response(&bodies[n])).await;
         let _ = sock.flush().await;
     }
+}
+
+async fn read_request(sock: &mut TcpStream) {
+    let mut buf = Vec::new();
+    let mut tmp = [0u8; 4096];
+    let mut content_length = None;
+    loop {
+        let Ok(n) = sock.read(&mut tmp).await else {
+            return;
+        };
+        if n == 0 {
+            return;
+        }
+        buf.extend_from_slice(&tmp[..n]);
+        if content_length.is_none() {
+            if let Some(headers_end) = find_headers_end(&buf) {
+                let headers = String::from_utf8_lossy(&buf[..headers_end]);
+                content_length = headers.lines().find_map(|line| {
+                    let (name, value) = line.split_once(':')?;
+                    name.eq_ignore_ascii_case("content-length")
+                        .then(|| value.trim().parse::<usize>().ok())
+                        .flatten()
+                });
+            }
+        }
+        if let (Some(headers_end), Some(len)) = (find_headers_end(&buf), content_length) {
+            if buf.len() >= headers_end + 4 + len {
+                return;
+            }
+        }
+    }
+}
+
+fn find_headers_end(buf: &[u8]) -> Option<usize> {
+    buf.windows(4).position(|w| w == b"\r\n\r\n")
 }
 
 #[tokio::test]
@@ -88,7 +131,8 @@ async fn local_loop_reads_file_and_answers() {
             auth_token: Some("test-key".into()),
             extra: json!({
                 "base_url": format!("http://{addr}/v1"),
-                "model": "fake-model"
+                "model": "fake-model",
+                "memories": false
             }),
             ..Default::default()
         })
@@ -161,6 +205,76 @@ async fn local_loop_reads_file_and_answers() {
 }
 
 #[tokio::test]
+async fn local_loop_auto_compacts_large_transcript_before_sampling() {
+    let dir = tempfile::tempdir().unwrap();
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(serve(listener, vec![compact_summary_body(), final_body()]));
+
+    let mut provider = provider_local::LocalAgentProvider::new();
+    provider
+        .connect(ProviderConfig {
+            auth_token: Some("test-key".into()),
+            extra: json!({
+                "base_url": format!("http://{addr}/v1"),
+                "model": "fake-model",
+                "memories": false,
+                "auto_compact_token_limit": 2_000,
+                "compact_request_token_limit": 1_500,
+                "compact_recent_user_token_budget": 200
+            }),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+    let session = provider
+        .new_session(SessionOptions {
+            cwd: Some(dir.path().to_string_lossy().to_string()),
+            mode: None,
+        })
+        .await
+        .unwrap();
+
+    let huge_prompt = format!(
+        "What should I do next?\n{}",
+        "important detail ".repeat(900)
+    );
+    let mut stream = provider
+        .prompt(&session.id, PromptInput::text(huge_prompt))
+        .await
+        .unwrap();
+
+    let mut events = Vec::new();
+    while let Some(ev) = stream.next().await {
+        let done = matches!(&ev, AgentEvent::RunFinished { .. });
+        events.push(ev);
+        if done {
+            break;
+        }
+    }
+
+    let text: String = events
+        .iter()
+        .filter_map(|e| match e {
+            AgentEvent::MessageChunk {
+                delta: ContentBlock::Text { text },
+                ..
+            } => Some(text.clone()),
+            _ => None,
+        })
+        .collect();
+    assert!(text.contains("The file says: hi"), "got: {text:?}");
+    assert!(
+        events.iter().any(
+            |e| matches!(e, AgentEvent::RunFinished { outcome, .. } if outcome.status == RunStatus::Done)
+        ),
+        "expected RunFinished Done: {events:?}"
+    );
+}
+
+#[tokio::test]
 async fn mutating_tool_waits_for_permission_then_writes() {
     let dir = tempfile::tempdir().unwrap();
 
@@ -172,7 +286,11 @@ async fn mutating_tool_waits_for_permission_then_writes() {
     provider
         .connect(ProviderConfig {
             auth_token: Some("test-key".into()),
-            extra: json!({ "base_url": format!("http://{addr}/v1"), "model": "fake" }),
+            extra: json!({
+                "base_url": format!("http://{addr}/v1"),
+                "model": "fake",
+                "memories": false
+            }),
             ..Default::default()
         })
         .await

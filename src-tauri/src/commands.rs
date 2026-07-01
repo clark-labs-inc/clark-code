@@ -353,6 +353,34 @@ pub async fn local_list_files(cwd: String) -> Result<Vec<String>, String> {
         .map_err(|e| format!("list files failed: {e}"))
 }
 
+/// Read an agent-authored document (Markdown) so the UI can render it inline.
+/// Confined to the app-managed workspace (`~/.clark/workspace`) — it never reads
+/// arbitrary files — and capped so a pathological file can't be slurped whole.
+#[tauri::command]
+pub async fn read_doc_text(path: String) -> Result<String, String> {
+    const MAX_DOC_BYTES: u64 = 4 * 1024 * 1024;
+    let root = provider_local::workspace_root()
+        .ok_or_else(|| "no workspace directory".to_string())?
+        .canonicalize()
+        .map_err(|e| format!("workspace: {e}"))?;
+    let canon = PathBuf::from(&path)
+        .canonicalize()
+        .map_err(|e| format!("{path}: {e}"))?;
+    if !canon.starts_with(&root) {
+        return Err("path is outside the document workspace".into());
+    }
+    let meta = std::fs::metadata(&canon).map_err(|e| e.to_string())?;
+    if !meta.is_file() {
+        return Err("not a file".into());
+    }
+    if meta.len() > MAX_DOC_BYTES {
+        return Err("document too large to preview".into());
+    }
+    tokio::task::spawn_blocking(move || std::fs::read_to_string(&canon).map_err(|e| e.to_string()))
+        .await
+        .map_err(|e| format!("read failed: {e}"))?
+}
+
 /// Open a file (or folder) with the OS default handler — for a source file on a
 /// dev machine that's typically the user's editor. `reveal` shows it in the file
 /// manager instead of opening it. Never executes the file directly.

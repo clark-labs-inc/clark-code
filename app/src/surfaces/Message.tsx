@@ -218,7 +218,7 @@ function MessageImpl({
           {inner}
           <CopyButton
             text={body}
-            label="Copy message"
+            label="Copy as Markdown"
             className="absolute -top-1 right-0 size-7 bg-bg-elevated opacity-0 ring-1 ring-border-subtle group-hover/msg:opacity-100"
           />
         </div>

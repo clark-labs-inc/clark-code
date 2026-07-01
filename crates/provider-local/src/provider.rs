@@ -3,7 +3,6 @@
 //! session is bound to a project root; each prompt drives a local tool-calling
 //! loop ([`crate::engine`]) whose normalized events stream back to the UI.
 
-use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -20,9 +19,10 @@ use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
 use crate::config::LocalConfig;
-use crate::engine::{run_turn, Decision, RunControl, SessionState, TurnContext};
+use crate::engine::{run_turn, TurnContext};
 use crate::exec::{Executor, LocalExecutor, RemoteExecutor};
-use crate::llm::{ChatMessage, LlmClient};
+use crate::llm::LlmClient;
+use crate::loop_state::{Decision, RunControl, SessionState};
 use crate::prompt::system_prompt;
 use crate::sandbox::Sandbox;
 use crate::tools::{ReadTracker, ToolCtx, ToolRegistry};
@@ -55,12 +55,7 @@ impl LocalAgentProvider {
             registry: None,
             sandbox: None,
             session_id: None,
-            session: Arc::new(Mutex::new(SessionState {
-                transcript: Vec::new(),
-                policy: HashMap::new(),
-                allow_commands: Vec::new(),
-                deny_commands: Vec::new(),
-            })),
+            session: Arc::new(Mutex::new(SessionState::default())),
             control: Arc::new(Mutex::new(RunControl::default())),
             reads: Arc::new(std::sync::Mutex::new(ReadTracker::default())),
             cancel: CancellationToken::new(),
@@ -106,11 +101,18 @@ impl Provider for LocalAgentProvider {
     async fn connect(&mut self, config: ProviderConfig) -> Result<()> {
         let local = LocalConfig::from_provider_config(&config);
         let llm = LlmClient::new(&local).map_err(Error::Other)?;
-        let mut registry = ToolRegistry::new(
-            local.clark.clone(),
-            local.memories_enabled,
-            crate::memory::global_memory_dir(),
-        );
+        let memory = local
+            .memories_enabled
+            .then(|| crate::tools::memory::MemoryConfig {
+                global_dir: crate::memory::global_memory_dir(),
+                personal: local.api_key.clone().map(|api_key| {
+                    crate::tools::memory::PersonalRecall {
+                        base_url: local.base_url.clone(),
+                        api_key,
+                    }
+                }),
+            });
+        let mut registry = ToolRegistry::new(local.clark.clone(), memory);
         // Connect MCP servers and register their tools (failures are non-fatal).
         self.mcp_status = registry.connect_mcp(&local.mcp_servers).await;
         self.llm = Some(llm);
@@ -124,9 +126,9 @@ impl Provider for LocalAgentProvider {
 
         // A remote project runs its tools on a remote host over the exec-server;
         // a local project runs them here. Pick the sandbox + executor to match.
-        let (sandbox, executor): (Arc<Sandbox>, Arc<dyn Executor>) =
+        let (sandbox, executor): (Sandbox, Arc<dyn Executor>) =
             if let Some(remote) = &config.remote {
-                let sandbox = Arc::new(Sandbox::new_remote(&remote.cwd).map_err(Error::Other)?);
+                let sandbox = Sandbox::new_remote(&remote.cwd).map_err(Error::Other)?;
                 let exec = RemoteExecutor::connect(&remote.ws_url, &remote.token)
                     .await
                     .map_err(Error::Other)?;
@@ -135,12 +137,31 @@ impl Provider for LocalAgentProvider {
                 let cwd = options.cwd.or(config.cwd.clone()).ok_or_else(|| {
                     Error::Unsupported("local provider requires a project `cwd`".into())
                 })?;
-                let sandbox = Arc::new(Sandbox::new(&cwd).map_err(Error::Io)?);
+                let sandbox = Sandbox::new(&cwd).map_err(Error::Io)?;
                 (sandbox, Arc::new(LocalExecutor))
             };
         self.executor = executor;
 
+        let id = SessionId::new(uuid::Uuid::new_v4().to_string());
+
+        // Provision a per-session, app-managed workspace for agent-authored
+        // documents (local sessions only — a remote executor can't reach a local
+        // path). Extend the sandbox to permit writes there in addition to the
+        // project root; the prompt then points the agent at it for documents.
+        let mut sandbox = sandbox;
+        if config.remote.is_none() {
+            if let Some(ws) = crate::workspace::session_workspace(id.as_str()) {
+                if std::fs::create_dir_all(&ws).is_ok() {
+                    sandbox = sandbox.with_docs(ws);
+                }
+            }
+        }
+        let sandbox = Arc::new(sandbox);
+
         let mut prompt = system_prompt(&sandbox, config.clark.is_some());
+        if let Some(docs) = sandbox.docs_root() {
+            prompt.push_str(&crate::workspace::prompt_section(docs));
+        }
         // Surface the user's Claude Code skills (read `.claude` through the
         // session executor — the local disk, or the remote host over the tunnel).
         if let Some(skills) =
@@ -172,6 +193,18 @@ impl Provider for LocalAgentProvider {
                     mem.push('\n');
                 }
             }
+            // Personal memory Clark extracted from the user's conversations
+            // (read-only; best-effort — offline / missing scope degrades silently).
+            if let Some(key) = &config.api_key {
+                if let Ok(mems) =
+                    crate::platform::recall_personal_memories(&config.base_url, key).await
+                {
+                    if let Some(sec) = crate::platform::personal_memory_section(&mems) {
+                        mem.push_str(&sec);
+                        mem.push('\n');
+                    }
+                }
+            }
             prompt.push_str("\n# Memory\n");
             prompt.push_str(crate::memory::memory_guidance());
             if !mem.is_empty() {
@@ -181,7 +214,8 @@ impl Provider for LocalAgentProvider {
         }
         {
             let mut s = self.session.lock().await;
-            s.transcript = vec![ChatMessage::system(prompt)];
+            s.system_prompt = prompt;
+            s.transcript.clear();
             s.policy = config.permissions.clone();
             s.allow_commands = config.command_allowlist.clone();
             s.deny_commands = config.command_denylist.clone();
@@ -192,7 +226,6 @@ impl Provider for LocalAgentProvider {
             *reads = ReadTracker::default();
         }
 
-        let id = SessionId::new(uuid::Uuid::new_v4().to_string());
         self.sandbox = Some(sandbox);
         self.session_id = Some(id.clone());
         Ok(Session {
@@ -214,14 +247,10 @@ impl Provider for LocalAgentProvider {
         let registry = self.registry.clone().ok_or(Error::NotConnected)?;
         let sandbox = self.sandbox.clone().ok_or(Error::NotConnected)?;
         let session_id = self.session_id.clone().ok_or(Error::NotConnected)?;
-        let max_iterations = self.config()?.max_iterations;
+        let config = self.config()?.clone();
+        let max_iterations = config.max_iterations;
 
         let text = prompt_text(&input);
-        {
-            let mut s = self.session.lock().await;
-            s.transcript.push(ChatMessage::user(text));
-        }
-
         // Fresh cancellation scope for this run.
         let cancel = CancellationToken::new();
         self.cancel = cancel.clone();
@@ -245,6 +274,10 @@ impl Provider for LocalAgentProvider {
             control: self.control.clone(),
             session_id,
             max_iterations,
+            compaction: config.compaction,
+            model: config.model,
+            temperature: config.temperature,
+            user_text: text,
         };
         tokio::spawn(run_turn(tc, tx, run));
         Ok(rx.boxed())
@@ -373,7 +406,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn new_session_seeds_transcript_with_system_prompt() {
+    async fn new_session_seeds_system_prompt_without_history() {
         let dir = tempfile::tempdir().unwrap();
         let mut p = LocalAgentProvider::new();
         p.connect(ProviderConfig::default()).await.unwrap();
@@ -384,7 +417,7 @@ mod tests {
         let session = p.new_session(opts).await.unwrap();
         assert_eq!(session.provider, ProviderId::new("local"));
         let s = p.session.lock().await;
-        assert_eq!(s.transcript.len(), 1);
-        assert_eq!(s.transcript[0].role, "system");
+        assert!(!s.system_prompt.is_empty());
+        assert!(s.transcript.is_empty());
     }
 }

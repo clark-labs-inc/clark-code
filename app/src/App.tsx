@@ -12,6 +12,7 @@ import { CreditBanner } from "./surfaces/CreditBanner";
 import { OfflineBanner } from "./surfaces/OfflineBanner";
 import { McpSettings } from "./surfaces/McpSettings";
 import { SshSettings } from "./surfaces/SshSettings";
+import { Settings } from "./surfaces/Settings";
 import { CommandPalette } from "./surfaces/CommandPalette";
 import { SignInScreen } from "./surfaces/SignInScreen";
 
@@ -39,6 +40,7 @@ export default function App() {
       },
     },
     { key: ".", mod: true, allowInInput: true, run: () => void useSessionStore.getState().cancelActive() },
+    { key: ",", mod: true, allowInInput: true, run: () => useSessionStore.getState().setSettingsOpen(true) },
   ]);
 
   if (!auth) return <SignInScreen />;
@@ -62,6 +64,7 @@ export default function App() {
       </div>
       <McpSettings />
       <SshSettings />
+      <Settings dark={dark} onToggleTheme={toggle} />
       <CommandPalette dark={dark} onToggleTheme={toggle} />
     </div>
   );

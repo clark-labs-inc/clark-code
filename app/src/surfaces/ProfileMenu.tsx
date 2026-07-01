@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { CreditCard, ExternalLink, LogOut, Loader2, Brain } from "lucide-react";
+import { CreditCard, ExternalLink, LogOut, Loader2, Brain, SlidersHorizontal } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
 import { clarkBillingUrl, openExternal } from "../lib/account";
 import { cn } from "../lib/cn";
@@ -44,6 +44,7 @@ export function ProfileMenu() {
   const signOut = useSessionStore((s) => s.signOutAuth);
   const memoriesEnabled = useSessionStore((s) => s.memoriesEnabled);
   const setMemoriesEnabled = useSessionStore((s) => s.setMemoriesEnabled);
+  const setSettingsOpen = useSessionStore((s) => s.setSettingsOpen);
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -153,6 +154,16 @@ export function ProfileMenu() {
 
             <div className="mx-1 border-t border-border-subtle" />
 
+            <button
+              onClick={() => {
+                setOpen(false);
+                setSettingsOpen(true);
+              }}
+              className={ACTION}
+            >
+              <SlidersHorizontal className="size-4" />
+              Settings
+            </button>
             <button onClick={() => void openExternal(clarkBillingUrl())} className={ACTION}>
               <CreditCard className="size-4" />
               Manage subscription &amp; credits

@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import {
-  Plus, MessageSquare, Trash2, PanelLeftClose, PanelLeft, FolderGit2, Server, Search, X,
+  Plus, MessageSquare, Archive, ArchiveRestore, ChevronRight, PanelLeftClose, PanelLeft,
+  FolderGit2, Server, Search, X,
 } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
 import { projectName } from "../lib/localAgent";
@@ -85,11 +86,13 @@ function GroupHeader({ group }: { group: ProjectGroup }) {
 
 function ConversationRow({ c, active }: { c: ConversationMeta; active: boolean }) {
   const open = useSessionStore((s) => s.openConversation);
-  const remove = useSessionStore((s) => s.removeConversation);
+  const archive = useSessionStore((s) => s.archiveConversation);
   return (
     <div
-      className={`group flex items-center gap-2 rounded-lg px-2.5 py-2 text-sm transition ${
-        active ? "bg-bg-hover text-ink" : "text-ink-secondary hover:bg-bg-hover"
+      className={`group relative flex items-center gap-2 rounded-lg px-2.5 py-2 text-sm transition ${
+        active
+          ? "bg-bg-hover text-ink before:absolute before:left-0 before:top-1/2 before:h-5 before:w-0.5 before:-translate-y-1/2 before:rounded-full before:bg-accent before:content-['']"
+          : "text-ink-secondary hover:bg-bg-hover"
       }`}
     >
       <button
@@ -104,14 +107,33 @@ function ConversationRow({ c, active }: { c: ConversationMeta; active: boolean }
         </span>
       </button>
       <button
-        onClick={() => remove(c.id)}
-        title="Delete conversation"
-        aria-label="Delete conversation"
-        className="shrink-0 rounded-md p-1 text-ink-faint opacity-0 transition hover:bg-danger/10 hover:text-danger group-hover:opacity-100"
+        onClick={() => archive(c.id)}
+        title="Archive conversation"
+        aria-label="Archive conversation"
+        className="shrink-0 rounded-md p-1 text-ink-faint opacity-0 transition hover:bg-bg-sunken hover:text-ink group-hover:opacity-100"
       >
-        <Trash2 className="size-3.5" />
+        <Archive className="size-3.5" />
       </button>
     </div>
+  );
+}
+
+/** A dimmed, minimal row inside the collapsed "Archived" section. Clicking it
+ *  restores the conversation (it never re-connects or opens — it just returns to
+ *  the active list, where it can be opened normally). */
+function ArchivedRow({ c }: { c: ConversationMeta }) {
+  const restore = useSessionStore((s) => s.restoreConversation);
+  return (
+    <button
+      onClick={() => restore(c.id)}
+      title={`Restore “${c.title}”`}
+      aria-label={`Restore ${c.title}`}
+      className="group flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-ink-faint transition hover:bg-bg-hover hover:text-ink-secondary"
+    >
+      <MessageSquare className="size-3.5 shrink-0 text-ink-faint" />
+      <span className="min-w-0 flex-1 truncate leading-tight">{c.title}</span>
+      <ArchiveRestore className="size-3.5 shrink-0 opacity-0 transition group-hover:opacity-100" />
+    </button>
   );
 }
 
@@ -122,6 +144,7 @@ export function Sidebar() {
   const session = useSessionStore((s) => s.session);
   const newConversation = useSessionStore((s) => s.endSession);
   const [filter, setFilter] = useState("");
+  const [archivedOpen, setArchivedOpen] = useState(false);
   // Below this width the full sidebar would crowd out the conversation, so it
   // auto-collapses to the icon rail (and can't be expanded until there's room).
   const narrow = useIsNarrow(768);
@@ -136,7 +159,14 @@ export function Sidebar() {
       ).map((m) => m.item),
     [conversations, filter],
   );
-  const groups = useMemo(() => groupByProject(visible), [visible]);
+  // Archived conversations are hidden from the project groups and collected into
+  // their own collapsed section (search still matches across both).
+  const activeConvos = useMemo(() => visible.filter((c) => !c.archived), [visible]);
+  const archivedConvos = useMemo(
+    () => visible.filter((c) => c.archived).sort((a, b) => b.updatedAt - a.updatedAt),
+    [visible],
+  );
+  const groups = useMemo(() => groupByProject(activeConvos), [activeConvos]);
 
   if (collapsed || narrow) {
     return (
@@ -230,6 +260,38 @@ export function Sidebar() {
                 </div>
               </section>
             ))}
+
+            {groups.length === 0 && archivedConvos.length > 0 && (
+              <p className="px-1 py-6 text-center text-xs text-ink-faint">
+                No active conversations.
+              </p>
+            )}
+
+            {archivedConvos.length > 0 && (
+              <section>
+                <button
+                  onClick={() => setArchivedOpen((o) => !o)}
+                  aria-expanded={archivedOpen}
+                  className="mt-3 mb-1 flex w-full items-center gap-1.5 px-1.5 text-[0.68rem] font-semibold uppercase tracking-wider text-ink-faint transition hover:text-ink-muted first:mt-0.5"
+                >
+                  <ChevronRight
+                    className={`size-3 shrink-0 transition-transform ${archivedOpen ? "rotate-90" : ""}`}
+                  />
+                  <Archive className="size-3 shrink-0" />
+                  <span>Archived</span>
+                  <span className="ml-auto shrink-0 font-mono text-[0.62rem] font-normal tracking-normal text-ink-faint/70">
+                    {archivedConvos.length}
+                  </span>
+                </button>
+                {archivedOpen && (
+                  <div className="flex flex-col gap-0.5">
+                    {archivedConvos.map((c) => (
+                      <ArchivedRow key={c.id} c={c} />
+                    ))}
+                  </div>
+                )}
+              </section>
+            )}
           </div>
         )}
       </div>

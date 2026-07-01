@@ -23,6 +23,10 @@ enum Mode {
 pub struct Sandbox {
     root: PathBuf,
     mode: Mode,
+    /// An additional allowed root (the app-managed document workspace, outside
+    /// the project). Writes/reads are permitted here as well as under `root`.
+    /// Canonical; `None` unless attached via [`Sandbox::with_docs`].
+    docs: Option<PathBuf>,
 }
 
 impl Sandbox {
@@ -41,6 +45,7 @@ impl Sandbox {
         Ok(Self {
             root: canon,
             mode: Mode::Local,
+            docs: None,
         })
     }
 
@@ -58,11 +63,33 @@ impl Sandbox {
         Ok(Self {
             root: lexically_normalize(&p),
             mode: Mode::Remote,
+            docs: None,
         })
     }
 
     pub fn root(&self) -> &Path {
         &self.root
+    }
+
+    /// Attach an additional writable/readable root — the app-managed document
+    /// workspace, which lives outside the project. The directory must exist; if
+    /// it can't be canonicalized the sandbox is returned unchanged. Only
+    /// meaningful for local sandboxes (a remote executor can't reach a local
+    /// path).
+    pub fn with_docs(mut self, dir: PathBuf) -> Self {
+        if self.mode == Mode::Local {
+            if let Ok(canon) = dir.canonicalize() {
+                if canon.is_dir() {
+                    self.docs = Some(canon);
+                }
+            }
+        }
+        self
+    }
+
+    /// The attached document-workspace root, if any (canonical).
+    pub fn docs_root(&self) -> Option<&Path> {
+        self.docs.as_deref()
     }
 
     /// Resolve a (possibly relative) path for **reading**. Local: the target must
@@ -123,8 +150,13 @@ impl Sandbox {
         }
     }
 
+    /// Whether `p` lies within the project root or the attached docs workspace.
+    fn allowed(&self, p: &Path) -> bool {
+        p.starts_with(&self.root) || self.docs.as_deref().is_some_and(|d| p.starts_with(d))
+    }
+
     fn ensure_contained(&self, canon: &Path) -> Result<(), String> {
-        if canon.starts_with(&self.root) {
+        if self.allowed(canon) {
             Ok(())
         } else {
             Err(format!(
@@ -136,7 +168,7 @@ impl Sandbox {
     }
 
     fn ensure_contained_lexical(&self, normalized: &Path) -> Result<(), String> {
-        if normalized.starts_with(&self.root) {
+        if self.allowed(normalized) {
             Ok(())
         } else {
             Err(format!(
@@ -251,5 +283,39 @@ mod tests {
     #[test]
     fn remote_requires_absolute_root() {
         assert!(Sandbox::new_remote("relative/path").is_err());
+    }
+
+    #[test]
+    fn docs_root_permits_reads_and_writes_outside_project() {
+        let proj = temp_root();
+        let docs = tempfile::tempdir().unwrap();
+        let sb = Sandbox::new(proj.path())
+            .unwrap()
+            .with_docs(docs.path().to_path_buf());
+        let docs_canon = sb.docs_root().expect("docs attached").to_path_buf();
+
+        // A new doc under the workspace resolves for writing.
+        let target = docs_canon.join("report.md");
+        let w = sb.resolve_for_write(target.to_str().unwrap()).unwrap();
+        assert!(w.ends_with("report.md"));
+
+        // An existing doc under the workspace resolves for reading.
+        std::fs::write(&target, "# Hi").unwrap();
+        let r = sb.resolve_existing(target.to_str().unwrap()).unwrap();
+        assert!(r.ends_with("report.md"));
+
+        // The project root still works, and escapes are still refused.
+        assert!(sb.resolve_for_write("src/new.rs").is_ok());
+        assert!(sb.resolve_for_write("/etc/evil.md").is_err());
+    }
+
+    #[test]
+    fn remote_ignores_docs_attachment() {
+        // A local docs path is meaningless for a remote executor.
+        let docs = tempfile::tempdir().unwrap();
+        let sb = Sandbox::new_remote("/home/me/project")
+            .unwrap()
+            .with_docs(docs.path().to_path_buf());
+        assert!(sb.docs_root().is_none());
     }
 }

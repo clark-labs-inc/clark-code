@@ -55,7 +55,26 @@ pub fn run() {
         .try_init()
         .ok();
 
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default();
+
+    // Single-instance must be registered FIRST so a second launch (e.g. the OS
+    // opening a `clark://` URL on Windows/Linux) is funneled into the already
+    // running process rather than spawning a new window. Its `deep-link` feature
+    // re-emits the URL, so the `on_open_url` handler below still fires; this
+    // callback just raises the existing window. macOS routes deep links to the
+    // running instance natively, so this is a belt-and-suspenders no-op there.
+    #[cfg(desktop)]
+    {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }));
+    }
+
+    builder
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
@@ -80,6 +99,7 @@ pub fn run() {
             commands::local_list_memory,
             commands::local_list_global_memory,
             commands::local_list_files,
+            commands::read_doc_text,
             commands::open_path,
             commands::clark_exchange_google_idtoken,
             commands::clark_provision_code_key,
@@ -109,6 +129,15 @@ pub fn run() {
                 }
             });
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            // Closing the window minimizes it instead of quitting, so the local
+            // agent loop, any in-flight run, and background sync keep running.
+            // The app still quits via Cmd+Q or the app menu.
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.minimize();
+            }
         })
         .run(tauri::generate_context!())
         .expect("error while running Clark Code");

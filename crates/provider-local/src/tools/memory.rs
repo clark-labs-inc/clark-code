@@ -16,15 +16,39 @@ use super::{arg_str, arg_str_opt, ToolCtx, ToolExecutor, ToolOutcome};
 use crate::exec::LocalExecutor;
 use crate::memory::{self, MemoryType};
 
-/// Recall/save durable memory across the project and global scopes.
+/// Read config for the user's Clark-hosted personal memory (recall only —
+/// Clark extracts it server-side; there is no client write path).
+#[derive(Clone)]
+pub struct PersonalRecall {
+    pub base_url: String,
+    pub api_key: String,
+}
+
+/// What the registry needs to expose the `memory` tool + inject memory at
+/// session start. `Some` ⇒ memories are enabled.
+#[derive(Clone, Default)]
+pub struct MemoryConfig {
+    /// `~/.clark/memory` for the local, agent-writable global scope.
+    pub global_dir: Option<PathBuf>,
+    /// Clark Platform recall of the user's extracted memory, when signed in.
+    pub personal: Option<PersonalRecall>,
+}
+
+/// Recall/save durable memory across the project, global (local), and personal
+/// (Clark-extracted) scopes.
 pub struct MemoryTool {
     /// `~/.clark/memory` on the local machine, or `None` if home is unresolved.
     global_dir: Option<PathBuf>,
+    /// Clark personal-memory recall, when signed in.
+    personal: Option<PersonalRecall>,
 }
 
 impl MemoryTool {
-    pub fn new(global_dir: Option<PathBuf>) -> Self {
-        Self { global_dir }
+    pub fn new(global_dir: Option<PathBuf>, personal: Option<PersonalRecall>) -> Self {
+        Self {
+            global_dir,
+            personal,
+        }
     }
 }
 
@@ -35,9 +59,10 @@ impl ToolExecutor for MemoryTool {
     }
 
     fn description(&self) -> &str {
-        "Recall or save durable memories. action \"recall\" returns saved facts from both \
-scopes; action \"remember\" saves one. scope \"project\" = facts about this codebase; scope \
-\"global\" = facts about the user across all their projects. Save durable, reusable facts only."
+        "Recall or save durable memories. action \"recall\" returns your saved facts (project + \
+global) plus personal memory Clark has learned about the user across their work; action \
+\"remember\" saves one. scope \"project\" = facts about this codebase; scope \"global\" = facts \
+about the user across all their projects. Save durable, reusable facts only."
     }
 
     fn parameters(&self) -> Value {
@@ -94,6 +119,17 @@ scopes; action \"remember\" saves one. scope \"project\" = facts about this code
                 if let Some(gdir) = &self.global_dir {
                     if let Some(s) = memory::recall_scope(&LocalExecutor, gdir, "Global").await {
                         out.push_str(&s);
+                        out.push_str("\n\n");
+                    }
+                }
+                // Personal memory Clark extracted from the user's conversations.
+                if let Some(p) = &self.personal {
+                    if let Ok(mems) =
+                        crate::platform::recall_personal_memories(&p.base_url, &p.api_key).await
+                    {
+                        if let Some(s) = crate::platform::personal_memory_section(&mems) {
+                            out.push_str(&s);
+                        }
                     }
                 }
                 if out.trim().is_empty() {

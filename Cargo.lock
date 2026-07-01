@@ -10,7 +10,7 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "agent-core"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "async-channel",
  "async-trait",
@@ -508,8 +508,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "clark-agent"
+version = "0.2.0"
+dependencies = [
+ "async-trait",
+ "futures",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "clark-agent-compaction"
+version = "0.1.0"
+source = "git+https://github.com/clark-labs-inc/clark-agent-compaction?rev=860f3159944ca78b33da4eea517e1df34ee8b490#860f3159944ca78b33da4eea517e1df34ee8b490"
+
+[[package]]
 name = "clark-desktop"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "agent-core",
  "base64 0.22.1",
@@ -529,6 +550,7 @@ dependencies = [
  "tauri-plugin-notification",
  "tauri-plugin-process",
  "tauri-plugin-shell",
+ "tauri-plugin-single-instance",
  "tauri-plugin-updater",
  "tokio",
  "tokio-util",
@@ -829,7 +851,7 @@ dependencies = [
 
 [[package]]
 name = "devbridge"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "agent-core",
  "futures",
@@ -1116,7 +1138,7 @@ dependencies = [
 
 [[package]]
 name = "exec-core"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "async-trait",
  "tempfile",
@@ -1127,7 +1149,7 @@ dependencies = [
 
 [[package]]
 name = "exec-protocol"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "base64 0.22.1",
  "serde",
@@ -1136,7 +1158,7 @@ dependencies = [
 
 [[package]]
 name = "exec-server"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "exec-core",
  "exec-protocol",
@@ -3110,7 +3132,7 @@ dependencies = [
 
 [[package]]
 name = "provider-acp"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "agent-core",
  "async-channel",
@@ -3125,7 +3147,7 @@ dependencies = [
 
 [[package]]
 name = "provider-clark"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "agent-core",
  "async-channel",
@@ -3143,11 +3165,13 @@ dependencies = [
 
 [[package]]
 name = "provider-local"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "agent-core",
  "async-channel",
  "async-trait",
+ "clark-agent",
+ "clark-agent-compaction",
  "exec-core",
  "exec-protocol",
  "exec-server",
@@ -3873,6 +3897,7 @@ version = "1.0.150"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e8014e44b4736ed0538adeecded0fce2a272f22dc9578a7eb6b2d9993c74cfb9"
 dependencies = [
+ "indexmap 2.14.0",
  "itoa",
  "memchr",
  "serde",
@@ -4016,6 +4041,12 @@ dependencies = [
  "cpufeatures",
  "digest",
 ]
+
+[[package]]
+name = "sha1_smol"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbfa15b3dddfee50a0fff136974b3e1bde555604ba463834a7eb7deb6417705d"
 
 [[package]]
 name = "sha2"
@@ -4637,6 +4668,22 @@ dependencies = [
  "tauri-plugin",
  "thiserror 2.0.18",
  "tokio",
+]
+
+[[package]]
+name = "tauri-plugin-single-instance"
+version = "2.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c8f29386f5e9fdc699182388a33ee80a56de436d91b67459e86afef426282af"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-plugin-deep-link",
+ "thiserror 2.0.18",
+ "tracing",
+ "windows-sys 0.60.2",
+ "zbus",
 ]
 
 [[package]]
@@ -5399,6 +5446,7 @@ dependencies = [
  "getrandom 0.4.2",
  "js-sys",
  "serde_core",
+ "sha1_smol",
  "wasm-bindgen",
 ]
 

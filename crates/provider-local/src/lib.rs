@@ -13,20 +13,26 @@
 //! It implements the same [`agent_core::Provider`] trait as every other backend,
 //! so the UI and projection layer are unchanged.
 
+mod agent_adapter;
 mod checkpoint;
 mod claude_import;
+mod compaction;
 mod config;
 mod engine;
 mod exec;
 mod files;
 mod llm;
+mod loop_state;
 mod mcp;
 mod memory;
+mod permissions;
+mod platform;
 mod prompt;
 mod provider;
 mod safety;
 mod sandbox;
 mod tools;
+mod workspace;
 
 pub use checkpoint::{is_git_repo, restore_checkpoint};
 // Migrate an existing Claude Code setup: discover its MCP servers + skills.
@@ -40,4 +46,7 @@ pub use mcp::{probe_mcp_servers, McpServerConfig, McpStatus};
 pub use memory::{
     global_memory_dir, load_facts, load_index, memory_dir, MemoryFact, MemoryHeader, MemoryType,
 };
+pub use platform::{personal_memory_section, recall_personal_memories, PersonalMemory};
 pub use provider::LocalAgentProvider;
+// The app-managed document workspace root, so the host can confine `read_doc_text`.
+pub use workspace::workspace_root;

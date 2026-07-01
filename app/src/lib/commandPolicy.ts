@@ -60,3 +60,9 @@ export function removeAllowed(project: string, command: string): void {
   const key = ALLOW_PREFIX + project;
   write(key, read(key).filter((c) => c !== normalize(command)));
 }
+
+export function removeDenied(project: string, command: string): void {
+  if (!project) return;
+  const key = DENY_PREFIX + project;
+  write(key, read(key).filter((c) => c !== normalize(command)));
+}

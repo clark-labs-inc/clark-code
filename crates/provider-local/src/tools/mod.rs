@@ -87,6 +87,7 @@ impl PermissionMode {
 }
 
 /// Per-invocation context handed to every tool.
+#[derive(Clone)]
 pub struct ToolCtx {
     /// Project-root containment for file tools.
     pub sandbox: Arc<Sandbox>,
@@ -206,13 +207,9 @@ pub struct ToolRegistry {
 impl ToolRegistry {
     /// The standard local coding tools, plus the Clark research tool when a
     /// research endpoint is configured, plus the `memory` tool when memories are
-    /// enabled (`memory_global_dir` is `~/.clark/memory`, or `None` if home is
-    /// unresolved — the project scope still works).
-    pub fn new(
-        clark: Option<ClarkResearchConfig>,
-        memories_enabled: bool,
-        memory_global_dir: Option<PathBuf>,
-    ) -> Self {
+    /// enabled (`memory` is `Some` with the local global dir + optional Clark
+    /// personal-recall config).
+    pub fn new(clark: Option<ClarkResearchConfig>, memory: Option<memory::MemoryConfig>) -> Self {
         let mut tools: Vec<Arc<dyn ToolExecutor>> = vec![
             Arc::new(fs::ReadFile),
             Arc::new(fs::ListDir),
@@ -225,8 +222,11 @@ impl ToolRegistry {
         if let Some(cfg) = clark {
             tools.push(Arc::new(clark::ClarkResearchTool::new(cfg)));
         }
-        if memories_enabled {
-            tools.push(Arc::new(memory::MemoryTool::new(memory_global_dir)));
+        if let Some(cfg) = memory {
+            tools.push(Arc::new(memory::MemoryTool::new(
+                cfg.global_dir,
+                cfg.personal,
+            )));
         }
         Self {
             tools,
@@ -280,7 +280,12 @@ impl ToolRegistry {
         self.tools.iter().find(|t| t.name() == name).cloned()
     }
 
+    pub fn executors(&self) -> impl Iterator<Item = Arc<dyn ToolExecutor>> + '_ {
+        self.tools.iter().cloned()
+    }
+
     /// Tool schemas in declaration order, for the request `tools` array.
+    #[cfg(test)]
     pub fn schemas(&self) -> Vec<crate::llm::ToolSchema> {
         self.tools
             .iter()
@@ -332,7 +337,7 @@ mod tests {
 
     #[test]
     fn registry_lists_local_tools_and_optionally_clark() {
-        let local = ToolRegistry::new(None, false, None);
+        let local = ToolRegistry::new(None, None);
         let names: Vec<_> = local
             .schemas()
             .iter()
@@ -352,7 +357,6 @@ mod tests {
                 api_key: Some("ck_live_x".into()),
                 model: "clark".into(),
             }),
-            false,
             None,
         );
         let names: Vec<_> = with_clark
@@ -365,9 +369,9 @@ mod tests {
 
     #[test]
     fn memory_tool_registered_only_when_enabled() {
-        let off = ToolRegistry::new(None, false, None);
+        let off = ToolRegistry::new(None, None);
         assert!(off.get("memory").is_none());
-        let on = ToolRegistry::new(None, true, None);
+        let on = ToolRegistry::new(None, Some(memory::MemoryConfig::default()));
         assert!(on.get("memory").is_some());
         // Memory writes are curated + path-constrained, so they don't gate.
         assert!(!on.get("memory").unwrap().mutating());
@@ -375,7 +379,7 @@ mod tests {
 
     #[test]
     fn mutating_tools_are_flagged() {
-        let reg = ToolRegistry::new(None, false, None);
+        let reg = ToolRegistry::new(None, None);
         assert!(reg.get("write_file").unwrap().mutating());
         assert!(reg.get("edit_file").unwrap().mutating());
         assert!(reg.get("bash").unwrap().mutating());

@@ -200,7 +200,11 @@ pub async fn scope_listing(exec: &dyn Executor, mem_dir: &Path, label: &str) -> 
                 .kind
                 .map(|k| format!("[{}] ", k.label()))
                 .unwrap_or_default();
-            let name = f.header.name.clone().unwrap_or_else(|| f.header.file.clone());
+            let name = f
+                .header
+                .name
+                .clone()
+                .unwrap_or_else(|| f.header.file.clone());
             let desc = f.header.description.clone().unwrap_or_default();
             s.push_str(&format!("- {kind}{name} — {desc}\n"));
         }
@@ -222,7 +226,11 @@ pub async fn recall_scope(exec: &dyn Executor, mem_dir: &Path, label: &str) -> O
         s.push_str("\n\n");
     }
     for f in &facts {
-        let name = f.header.name.clone().unwrap_or_else(|| f.header.file.clone());
+        let name = f
+            .header
+            .name
+            .clone()
+            .unwrap_or_else(|| f.header.file.clone());
         let kind = f
             .header
             .kind

@@ -27,7 +27,7 @@ import {
   loadSnapshot,
   saveSnapshot,
   upsertMeta,
-  deleteConversation,
+  setArchived,
   deriveTitle,
   hasContent,
   type ConversationMeta,
@@ -57,7 +57,6 @@ import {
   cloudList,
   cloudGet,
   scheduleCloudPut,
-  cloudDelete,
 } from "../lib/cloudHistory";
 import { provisionCodeKey, billingMe, type BillingSummary } from "../lib/account";
 import { notify } from "../lib/notify";
@@ -65,6 +64,15 @@ import { checkAndStageUpdate, relaunchApp, type StagedUpdate } from "../lib/upda
 
 /** A follow-up message the user sent while a run was active. It sends
  *  automatically when the run finishes — Codex-style, never interrupting. */
+/** The sections of the unified Settings view (left-rail order). */
+export type SettingsSection =
+  | "general"
+  | "project"
+  | "integrations"
+  | "commands"
+  | "account"
+  | "about";
+
 export interface QueuedMessage {
   id: string;
   text: string;
@@ -153,6 +161,9 @@ interface SessionState {
   mcpOpen: boolean;
   /** Whether the remote-hosts (SSH) settings modal is open. */
   sshOpen: boolean;
+  /** Whether the unified Settings modal is open, and which section it shows. */
+  settingsOpen: boolean;
+  settingsSection: SettingsSection;
   /** Whether the ⌘K command palette is open. */
   paletteOpen: boolean;
   /** Whether the sidebar is collapsed to its icon rail. */
@@ -184,7 +195,11 @@ interface SessionState {
   startSession: () => Promise<void>;
   endSession: () => void;
   openConversation: (id: string) => Promise<void>;
-  removeConversation: (id: string) => void;
+  /** Soft-delete: hide from the main list but keep the transcript locally and in
+   *  the cloud so it can be restored. Clears the view if it's the open chat. */
+  archiveConversation: (id: string) => void;
+  /** Bring an archived conversation back into the active list. */
+  restoreConversation: (id: string) => void;
   addFiles: (files: File[]) => Promise<void>;
   removeAttachment: (id: string) => void;
   send: (text: string) => Promise<void>;
@@ -194,6 +209,8 @@ interface SessionState {
   setTerminalOpen: (open: boolean) => void;
   setMcpOpen: (open: boolean) => void;
   setSshOpen: (open: boolean) => void;
+  /** Open/close the unified Settings modal, optionally jumping to a section. */
+  setSettingsOpen: (open: boolean, section?: SettingsSection) => void;
   setPaletteOpen: (open: boolean) => void;
   togglePalette: () => void;
   /** Check for, download, verify, and stage a newer version (no-op outside the app). */
@@ -244,6 +261,8 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   terminalOpen: false,
   mcpOpen: false,
   sshOpen: false,
+  settingsOpen: false,
+  settingsSection: "general",
   paletteOpen: false,
   sidebarCollapsed: false,
   billing: null,
@@ -337,6 +356,12 @@ export const useSessionStore = create<SessionState>((set, get) => ({
                 ? (remoteHost ? get().activeRemote?.cwd : get().localSettings.cwd.trim()) ||
                   undefined
                 : undefined;
+            // Only advance updatedAt when the timeline actually grew past the
+            // restored prefix — i.e. real new activity. Merely opening/resuming a
+            // conversation replays its transcript without adding turns, so its
+            // order (and its whole project group's) must stay put in the sidebar.
+            const baselineLen = historyPrefix ? historyPrefix.timeline.length : 0;
+            const grew = snapshot.timeline.length > baselineLen;
             const meta: ConversationMeta = {
               id: session.id,
               title: deriveTitle(snapshot),
@@ -345,7 +370,8 @@ export const useSessionStore = create<SessionState>((set, get) => ({
               project: project ?? prev?.project,
               remoteHost: remoteHost ?? prev?.remoteHost,
               createdAt: prev?.createdAt ?? Date.now(),
-              updatedAt: Date.now(),
+              updatedAt: grew ? Date.now() : (prev?.updatedAt ?? Date.now()),
+              archived: prev?.archived,
             };
             upsertMeta(meta);
             set({ conversations: loadIndex() });
@@ -466,8 +492,12 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       const remote = await cloudList(creds);
       for (const meta of remote) {
         const prev = get().conversations.find((c) => c.id === meta.id);
-        // Cloud wins for metadata unless the local copy is strictly newer.
-        if (!prev || meta.updatedAt >= prev.updatedAt) upsertMeta(meta);
+        // Cloud wins for metadata unless the local copy is strictly newer. The
+        // archived flag is local-only (not carried in the cloud summary), so
+        // preserve it across the merge rather than letting cloud clear it.
+        if (!prev || meta.updatedAt >= prev.updatedAt) {
+          upsertMeta({ ...meta, archived: prev?.archived });
+        }
       }
       set({ conversations: loadIndex() });
     } catch {
@@ -701,17 +731,37 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     }
   },
 
-  removeConversation: (id) => {
-    deleteConversation(id);
-    const creds = cloudCreds(get().auth);
-    if (creds) cloudDelete(creds, id).catch(() => {});
+  archiveConversation: (id) => {
+    // Soft-delete only: flag it archived, but keep the local snapshot and the
+    // cloud copy so it (and its artifacts) can be restored in full. No cloud
+    // delete is issued.
+    setArchived(id, true);
     const cleared = get().session?.id === id;
+    if (cleared) {
+      const r = get().activeRemote;
+      if (r) void sshDisconnect(r.id);
+    }
     set({
       conversations: loadIndex(),
       ...(cleared
-        ? { session: null, snapshot: emptySnapshot(), historyPrefix: null, queued: [] }
+        ? {
+            session: null,
+            snapshot: emptySnapshot(),
+            error: null,
+            attachments: [],
+            historyPrefix: null,
+            queued: [],
+            terminalOpen: false,
+            activeRemote: null,
+            activeRemoteHost: null,
+          }
         : {}),
     });
+  },
+
+  restoreConversation: (id) => {
+    setArchived(id, false);
+    set({ conversations: loadIndex() });
   },
 
   addFiles: async (files) => {
@@ -775,6 +825,8 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   setTerminalOpen: (open) => set({ terminalOpen: open }),
   setMcpOpen: (open) => set({ mcpOpen: open }),
   setSshOpen: (open) => set({ sshOpen: open }),
+  setSettingsOpen: (open, section) =>
+    set({ settingsOpen: open, ...(section ? { settingsSection: section } : {}) }),
   setPaletteOpen: (open) => set({ paletteOpen: open }),
   togglePalette: () => set((s) => ({ paletteOpen: !s.paletteOpen })),
   toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
