@@ -1,5 +1,4 @@
 import { useMemo, useState } from "react";
-import { motion, AnimatePresence } from "motion/react";
 import {
   Plus, MessageSquare, Trash2, PanelLeftClose, PanelLeft, FolderGit2, Server, Search, X,
 } from "lucide-react";
@@ -22,6 +21,68 @@ function relativeTime(ts: number): string {
   return new Date(ts).toLocaleDateString();
 }
 
+type GroupKind = "remote" | "local" | "none";
+interface ProjectGroup {
+  key: string;
+  label: string;
+  title: string; // full path / host for the tooltip
+  kind: GroupKind;
+  convos: ConversationMeta[];
+  latest: number;
+}
+
+/** Group conversations by their project (remote host, local folder, or none),
+ *  Codex-style: newest project first, newest conversation first within each. */
+function groupByProject(list: ConversationMeta[]): ProjectGroup[] {
+  const map = new Map<string, ProjectGroup>();
+  for (const c of list) {
+    let key: string, label: string, title: string, kind: GroupKind;
+    if (c.remoteHost) {
+      key = `r:${c.remoteHost}`;
+      label = c.remoteHost;
+      title = `Remote · ${c.remoteHost}${c.project ? ` · ${c.project}` : ""}`;
+      kind = "remote";
+    } else if (c.project) {
+      key = `p:${c.project}`;
+      label = projectName(c.project);
+      title = c.project;
+      kind = "local";
+    } else {
+      key = "none";
+      label = "Other";
+      title = "Conversations without a project";
+      kind = "none";
+    }
+    let g = map.get(key);
+    if (!g) {
+      g = { key, label, title, kind, convos: [], latest: 0 };
+      map.set(key, g);
+    }
+    g.convos.push(c);
+    g.latest = Math.max(g.latest, c.updatedAt);
+  }
+  const groups = [...map.values()];
+  for (const g of groups) g.convos.sort((a, b) => b.updatedAt - a.updatedAt);
+  groups.sort((a, b) => b.latest - a.latest);
+  return groups;
+}
+
+function GroupHeader({ group }: { group: ProjectGroup }) {
+  const Icon = group.kind === "remote" ? Server : group.kind === "local" ? FolderGit2 : MessageSquare;
+  return (
+    <div
+      title={group.title}
+      className="mt-3 mb-1 flex items-center gap-1.5 px-1.5 text-[0.68rem] font-semibold uppercase tracking-wider text-ink-faint first:mt-0.5"
+    >
+      <Icon className={`size-3 shrink-0 ${group.kind === "remote" ? "text-accent" : ""}`} />
+      <span className="truncate">{group.label}</span>
+      <span className="ml-auto shrink-0 font-mono text-[0.62rem] font-normal tracking-normal text-ink-faint/70">
+        {group.convos.length}
+      </span>
+    </div>
+  );
+}
+
 function ConversationRow({ c, active }: { c: ConversationMeta; active: boolean }) {
   const open = useSessionStore((s) => s.openConversation);
   const remove = useSessionStore((s) => s.removeConversation);
@@ -39,24 +100,7 @@ function ConversationRow({ c, active }: { c: ConversationMeta; active: boolean }
         <MessageSquare className="size-3.5 shrink-0 text-ink-faint" />
         <span className="flex min-w-0 flex-col">
           <span className="truncate leading-tight">{c.title}</span>
-          <span className="flex min-w-0 items-center gap-1 truncate text-xs text-ink-muted">
-            {c.remoteHost ? (
-              <>
-                <Server className="size-3 shrink-0 text-accent" />
-                <span className="truncate">{c.remoteHost}</span>
-                <span className="shrink-0 text-ink-faint">·</span>
-              </>
-            ) : (
-              c.project && (
-                <>
-                  <FolderGit2 className="size-3 shrink-0" />
-                  <span className="truncate">{projectName(c.project)}</span>
-                  <span className="shrink-0 text-ink-faint">·</span>
-                </>
-              )
-            )}
-            <span className="shrink-0">{relativeTime(c.updatedAt)}</span>
-          </span>
+          <span className="truncate text-xs text-ink-muted">{relativeTime(c.updatedAt)}</span>
         </span>
       </button>
       <button
@@ -87,11 +131,12 @@ export function Sidebar() {
       fuzzyFilter(
         conversations,
         filter,
-        (c) => `${c.title} ${c.project ? projectName(c.project) : ""}`,
+        (c) => `${c.title} ${c.project ? projectName(c.project) : ""} ${c.remoteHost ?? ""}`,
         200,
       ).map((m) => m.item),
     [conversations, filter],
   );
+  const groups = useMemo(() => groupByProject(visible), [visible]);
 
   if (collapsed || narrow) {
     return (
@@ -174,20 +219,17 @@ export function Sidebar() {
             No conversations match “{filter}”.
           </p>
         ) : (
-          <div className="flex flex-col gap-0.5">
-            <AnimatePresence initial={false}>
-              {visible.map((c) => (
-                <motion.div
-                  key={c.id}
-                  layout
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0, height: 0 }}
-                >
-                  <ConversationRow c={c} active={session?.id === c.id} />
-                </motion.div>
-              ))}
-            </AnimatePresence>
+          <div className="flex flex-col">
+            {groups.map((g) => (
+              <section key={g.key}>
+                <GroupHeader group={g} />
+                <div className="flex flex-col gap-0.5">
+                  {g.convos.map((c) => (
+                    <ConversationRow key={c.id} c={c} active={session?.id === c.id} />
+                  ))}
+                </div>
+              </section>
+            ))}
           </div>
         )}
       </div>
