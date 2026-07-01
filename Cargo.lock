@@ -510,6 +510,7 @@ dependencies = [
 [[package]]
 name = "clark-agent"
 version = "0.2.0"
+source = "git+https://github.com/clark-labs-inc/clark-agent?rev=739a0bdf627d81ef60414ec22061cdfa85741d43#739a0bdf627d81ef60414ec22061cdfa85741d43"
 dependencies = [
  "async-trait",
  "futures",
