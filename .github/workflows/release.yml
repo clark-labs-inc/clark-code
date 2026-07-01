@@ -117,7 +117,12 @@ jobs:
           mkdir -p "$records_dir"
           IMM="public, max-age=31536000, immutable"
 
-          mapfile -t files < <(
+          # macOS runners ship bash 3.2 (no `mapfile`), so read into the array
+          # with a portable loop.
+          files=()
+          while IFS= read -r f; do
+            files+=("$f")
+          done < <(
             find src-tauri/target -type f \( \
               -name "*.dmg" -o \
               -name "*.msi" -o \
