@@ -2,6 +2,10 @@
 /target
 **/target
 
+# Local-only cargo overrides (e.g. developing against a sibling clark-agent
+# checkout). Never committed — CI resolves the pinned git deps instead.
+.cargo/config.toml
+
 # Node / frontend
 node_modules
 app/dist
