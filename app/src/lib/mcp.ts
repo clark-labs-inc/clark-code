@@ -21,3 +21,19 @@ export async function probeMcp(servers: McpServerConfig[]): Promise<McpStatus[]>
   if (!isTauri() || servers.length === 0) return [];
   return invoke<McpStatus[]>("clark_mcp_probe", { servers });
 }
+
+export interface ClaudeSkill {
+  name: string;
+  description: string;
+  path: string;
+  scope: "project" | "personal";
+}
+
+/** MCP servers + skills discovered from an existing Claude Code setup in `cwd`
+ *  (`.mcp.json`, `~/.claude.json`, `.claude/skills`). Empty in browser preview. */
+export async function discoverClaude(
+  cwd: string,
+): Promise<{ mcp: McpServerConfig[]; skills: ClaudeSkill[] }> {
+  if (!isTauri() || !cwd.trim()) return { mcp: [], skills: [] };
+  return invoke("claude_discover", { cwd: cwd.trim() });
+}

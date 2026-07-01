@@ -50,6 +50,12 @@ in Clark's sandbox; never try to reach the network with `bash`.\n",
         p.push_str(&ctx);
     }
 
+    // Surface any Claude Code skills the user already has (progressive
+    // disclosure: the agent reads the full SKILL.md via read_file on demand).
+    if let Some(skills) = crate::claude_import::skills_prompt_section(sandbox.root()) {
+        p.push_str(&skills);
+    }
+
     p
 }
 

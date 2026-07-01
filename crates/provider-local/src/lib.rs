@@ -13,6 +13,7 @@
 //! so the UI and projection layer are unchanged.
 
 mod checkpoint;
+mod claude_import;
 mod config;
 mod engine;
 mod exec;
@@ -27,6 +28,8 @@ mod sandbox;
 mod tools;
 
 pub use checkpoint::{is_git_repo, restore_checkpoint};
+// Migrate an existing Claude Code setup: discover its MCP servers + skills.
+pub use claude_import::{discover_mcp_servers, discover_skills, ClaudeSkill};
 pub use config::{LocalConfig, DEFAULT_BASE_URL, DEFAULT_RESEARCH_MODEL};
 // The execution backends. `LocalExecutor` is wired today; `RemoteExecutor`
 // (over clark-exec-server) is selected per session once remote projects land.

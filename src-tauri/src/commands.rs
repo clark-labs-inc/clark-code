@@ -110,6 +110,26 @@ pub async fn ssh_probe(host: String) -> Result<ssh::Probe, String> {
     ssh::probe(&host).await
 }
 
+/// What Clark can migrate from an existing Claude Code setup in `cwd`.
+#[derive(serde::Serialize)]
+pub struct ClaudeDiscovery {
+    /// MCP servers found in `.mcp.json` / `~/.claude.json` / `.claude/settings*`.
+    pub mcp: Vec<provider_local::McpServerConfig>,
+    /// Skills found in `.claude/skills` (project + personal).
+    pub skills: Vec<provider_local::ClaudeSkill>,
+}
+
+/// Discover the MCP servers + skills a user already configured in Claude Code,
+/// so they can be imported with one click (skills are picked up automatically).
+#[tauri::command]
+pub fn claude_discover(cwd: String) -> ClaudeDiscovery {
+    let root = std::path::PathBuf::from(cwd);
+    ClaudeDiscovery {
+        mcp: provider_local::discover_mcp_servers(&root),
+        skills: provider_local::discover_skills(&root),
+    }
+}
+
 #[tauri::command]
 pub async fn session_new(
     provider_id: String,

@@ -7,6 +7,8 @@
 
 use agent_core::ProviderCapabilities;
 use serde::Serialize;
+use tauri::Manager;
+use tauri_plugin_deep_link::DeepLinkExt;
 
 mod commands;
 // Public so the gated `tests/remote_e2e.rs` harness can drive the real
@@ -60,6 +62,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_google_auth::init())
+        .plugin(tauri_plugin_deep_link::init())
         .manage(AppState::new())
         .manage(terminal::Terminals::default())
         .invoke_handler(tauri::generate_handler![
@@ -68,6 +71,7 @@ pub fn run() {
             commands::ssh_connect,
             commands::ssh_disconnect,
             commands::ssh_probe,
+            commands::claude_discover,
             commands::session_new,
             commands::session_load,
             commands::prompt,
@@ -91,6 +95,21 @@ pub fn run() {
             terminal::terminal_resize,
             terminal::terminal_close,
         ])
+        .setup(|app| {
+            // The Google sign-in success page (served by the loopback) redirects
+            // to `clark://auth-complete`; the OS routes that URL here so we can
+            // pull the window back to the foreground instead of leaving the user
+            // stranded on a browser tab.
+            let handle = app.handle().clone();
+            app.deep_link().on_open_url(move |_event| {
+                if let Some(window) = handle.get_webview_window("main") {
+                    let _ = window.unminimize();
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+            });
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("error while running Clark Code");
 }
