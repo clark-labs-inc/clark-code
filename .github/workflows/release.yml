@@ -104,16 +104,18 @@ jobs:
           role-to-assume: ${{ env.CLARK_DESKTOP_DOWNLOAD_UPLOAD_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Upload installers to public download hosting
+      - name: Publish installers + updater manifest to the downloads CDN
         shell: bash
         run: |
           set -euo pipefail
 
           tag="${GITHUB_REF_NAME}"
+          version="${tag#v}"
           bucket="${CLARK_DESKTOP_DOWNLOAD_BUCKET}"
           base_url="${CLARK_DESKTOP_DOWNLOAD_BASE_URL%/}"
           records_dir="public-release-records"
           mkdir -p "$records_dir"
+          IMM="public, max-age=31536000, immutable"
 
           mapfile -t files < <(
             find src-tauri/target -type f \( \
@@ -123,7 +125,7 @@ jobs:
               -name "*.AppImage" -o \
               -name "*.deb" -o \
               -name "*.rpm" -o \
-              -name "*.tar.gz" \
+              -name "*.app.tar.gz" \
             \) | sort
           )
           if [ "${#files[@]}" -eq 0 ]; then
@@ -147,59 +149,61 @@ jobs:
               *.AppImage) echo "application/octet-stream" ;;
               *.deb) echo "application/vnd.debian.binary-package" ;;
               *.rpm) echo "application/x-rpm" ;;
-              *.tar.gz) echo "application/gzip" ;;
+              *.app.tar.gz) echo "application/gzip" ;;
               *) echo "application/octet-stream" ;;
             esac
           }
 
-          latest_alias_for() {
+          # Stable, human-facing CDN names — what clarkchat.com/download and the
+          # in-app updater link to — independent of tauri's versioned bundle
+          # filenames. Used for BOTH the versioned and the latest/ keys so the two
+          # never diverge (the bug that forced a manual publish through v0.1.6).
+          canonical_for() {
             case "$1" in
               *.dmg) echo "ClarkCode.dmg" ;;
-              *x64-setup.exe) echo "Clark.Code_x64-setup.exe" ;;
-              *.msi) echo "Clark.Code_x64_en-US.msi" ;;
-              *.AppImage) echo "Clark.Code_amd64.AppImage" ;;
-              *.deb) echo "Clark.Code_amd64.deb" ;;
-              *.rpm) echo "Clark.Code_x86_64.rpm" ;;
-              *.app.tar.gz) echo "Clark.Code_universal.app.tar.gz" ;;
-              *) echo "" ;;
+              *.app.tar.gz) echo "ClarkCode.app.tar.gz" ;;
+              *x64-setup.exe) echo "ClarkCode_x64-setup.exe" ;;
+              *.msi) echo "ClarkCode_x64_en-US.msi" ;;
+              *.AppImage) echo "ClarkCode_amd64.AppImage" ;;
+              *.deb) echo "ClarkCode_amd64.deb" ;;
+              *.rpm) echo "ClarkCode_x86_64.rpm" ;;
+              *) basename "$1" ;;
             esac
+          }
+
+          # The .app.tar.gz is the updater payload, not a user download, so it is
+          # published but kept out of the download-page manifest.
+          in_download_manifest() {
+            case "$1" in *.app.tar.gz) return 1 ;; *) return 0 ;; esac
           }
 
           jsonl="$(mktemp)"
           for file in "${files[@]}"; do
-            name="$(basename "$file")"
+            canonical="$(canonical_for "$file")"
             size="$(wc -c < "$file" | tr -d '[:space:]')"
             sha="$(sha256_file "$file")"
-            content_type="$(content_type_for "$name")"
-            version_key="desktop/releases/$tag/$name"
-            latest_key="desktop/latest/$name"
+            content_type="$(content_type_for "$file")"
 
-            aws s3 cp "$file" "s3://$bucket/$version_key" \
+            aws s3 cp "$file" "s3://$bucket/desktop/releases/$tag/$canonical" \
               --content-type "$content_type" \
-              --cache-control "public, max-age=31536000, immutable" \
+              --cache-control "$IMM" \
               --metadata "sha256=$sha,clark-version=$tag"
-            aws s3 cp "$file" "s3://$bucket/$latest_key" \
+            aws s3 cp "$file" "s3://$bucket/desktop/latest/$canonical" \
               --content-type "$content_type" \
               --cache-control "public, max-age=300" \
               --metadata "sha256=$sha,clark-version=$tag"
 
-            alias_name="$(latest_alias_for "$name")"
-            if [ -n "$alias_name" ] && [ "$alias_name" != "$name" ]; then
-              aws s3 cp "$file" "s3://$bucket/desktop/latest/$alias_name" \
-                --content-type "$content_type" \
-                --cache-control "public, max-age=300" \
-                --metadata "sha256=$sha,clark-version=$tag"
+            if in_download_manifest "$file"; then
+              node -e '
+                const [name, url, size, sha] = process.argv.slice(1);
+                console.log(JSON.stringify({
+                  name,
+                  browser_download_url: url,
+                  size: Number(size),
+                  digest: `sha256:${sha}`,
+                }));
+              ' "$canonical" "$base_url/releases/$tag/$canonical" "$size" "$sha" >> "$jsonl"
             fi
-
-            node -e '
-              const [name, url, size, sha] = process.argv.slice(1);
-              console.log(JSON.stringify({
-                name,
-                browser_download_url: url,
-                size: Number(size),
-                digest: `sha256:${sha}`,
-              }));
-            ' "$name" "$base_url/releases/$tag/$name" "$size" "$sha" >> "$jsonl"
           done
 
           node -e '
@@ -208,6 +212,34 @@ jobs:
             const assets = lines.map((line) => JSON.parse(line));
             fs.writeFileSync(process.argv[2], JSON.stringify(assets, null, 2) + "\n");
           ' "$jsonl" "$records_dir/assets-${RUNNER_OS}.json"
+
+          # Updater manifest (latest.json). tauri-action signed the .app.tar.gz
+          # with the Ed25519 updater key and left the detached .sig on disk; point
+          # the darwin platforms at the canonical CDN payload. A universal build
+          # is one bundle, so both arches share the signature. tauri.conf.json's
+          # updater endpoint is desktop/latest/latest.json, so THIS is what makes
+          # auto-update actually work — the CI never emitted it before.
+          sig_file="$(find src-tauri/target -type f -name '*.app.tar.gz.sig' | head -1 || true)"
+          if [ -n "$sig_file" ]; then
+            sig="$(cat "$sig_file")"
+            node -e '
+              const fs = require("fs");
+              const [version, sig, url, tag, repo] = process.argv.slice(1);
+              const platform = { signature: sig, url };
+              fs.writeFileSync("latest.json", JSON.stringify({
+                version,
+                notes: `See the release notes at https://github.com/${repo}/releases/tag/${tag}`,
+                pub_date: new Date().toISOString(),
+                platforms: { "darwin-aarch64": platform, "darwin-x86_64": platform },
+              }, null, 2) + "\n");
+            ' "$version" "$sig" "$base_url/latest/ClarkCode.app.tar.gz" "$tag" "$GITHUB_REPOSITORY"
+            aws s3 cp latest.json "s3://$bucket/desktop/latest/latest.json" \
+              --content-type "application/json" --cache-control "public, max-age=60"
+            aws s3 cp latest.json "s3://$bucket/desktop/releases/$tag/latest.json" \
+              --content-type "application/json" --cache-control "$IMM"
+          else
+            echo "note: no .app.tar.gz.sig found (non-macOS leg?) — skipping latest.json" >&2
+          fi
 
       - name: Upload public download asset records
         uses: actions/upload-artifact@v4

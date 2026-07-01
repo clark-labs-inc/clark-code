@@ -15,8 +15,9 @@
 #
 # Then: scripts/publish-exec-server.sh v0.1.4
 #
-# Manual publish (clark_root AWS creds) until the downloads bucket has a working
-# GitHub OIDC provider; the release workflow runs the same steps in CI.
+# The release workflow runs this in CI (the account's GitHub OIDC provider was
+# created 2026-07-01, so CI's AWS auth works). Run it by hand with clark_root
+# creds only for a local/out-of-band publish.
 set -euo pipefail
 
 VERSION="${1:?usage: publish-exec-server.sh <vX.Y.Z>}"
