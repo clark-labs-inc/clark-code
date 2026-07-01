@@ -1,5 +1,4 @@
 import { useEffect, useRef, type ReactNode } from "react";
-import { AnimatePresence, motion } from "motion/react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { NotebookText, X, RefreshCw, Sparkles, FolderGit2, FileText } from "lucide-react";
@@ -61,7 +60,8 @@ export function MemoryButton() {
       >
         <NotebookText className="size-4" />
       </button>
-      <AnimatePresence>{open && <MemoryPopover key="memory-popover" />}</AnimatePresence>
+      {/* Instant show/hide — no fade (avoids WKWebView half-opacity flicker). */}
+      {open && <MemoryPopover />}
     </div>
   );
 }
@@ -76,11 +76,7 @@ function MemoryPopover() {
   const isEmpty = !loading && overview && !overview.exists && overview.facts.length === 0;
 
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      transition={{ duration: 0.1 }}
+    <div
       className="popover-surface absolute right-0 top-10 z-50 flex max-h-[70vh] w-[26rem] flex-col overflow-hidden rounded-xl border border-border bg-bg-elevated shadow-xl"
     >
       <header className="flex items-center gap-2 border-b border-border-subtle px-3 py-2.5">
@@ -160,7 +156,7 @@ function MemoryPopover() {
       </div>
 
       <ExtractFooter />
-    </motion.div>
+    </div>
   );
 }
 

@@ -95,21 +95,17 @@ function PermissionPill() {
         <ChevronDown className="size-3 opacity-70" />
       </button>
 
-      <AnimatePresence>
-        {open && (
-          <motion.div
-            key="menu"
-            role="menu"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.1 }}
-            className="popover-surface absolute bottom-full left-0 z-30 mb-2 w-72 rounded-xl bg-bg-elevated p-1 shadow-lg ring-1 ring-border-subtle"
-          >
-            <div className="px-2.5 py-1.5 text-[0.7rem] font-medium uppercase tracking-wide text-ink-faint">
-              How should Clark act?
-            </div>
-            {PERMISSION_MODES.map((m) => {
+      {/* Instant show/hide — no fade. A fading anchored popover renders
+          half-opacity frames that read as flicker in WKWebView on rapid toggle. */}
+      {open && (
+        <div
+          role="menu"
+          className="popover-surface absolute bottom-full left-0 z-30 mb-2 w-72 rounded-xl bg-bg-elevated p-1 shadow-lg ring-1 ring-border-subtle"
+        >
+          <div className="px-2.5 py-1.5 text-[0.7rem] font-medium uppercase tracking-wide text-ink-faint">
+            How should Clark act?
+          </div>
+          {PERMISSION_MODES.map((m) => {
               const I = MODE_ICON[m.id];
               return (
                 <button
@@ -132,9 +128,8 @@ function PermissionPill() {
                 </button>
               );
             })}
-          </motion.div>
-        )}
-      </AnimatePresence>
+        </div>
+      )}
     </div>
   );
 }

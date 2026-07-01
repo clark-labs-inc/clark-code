@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import { AnimatePresence, motion } from "motion/react";
 import { CreditCard, ExternalLink, LogOut, Loader2 } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
 import { clarkBillingUrl, openExternal } from "../lib/account";
@@ -81,16 +80,11 @@ export function ProfileMenu() {
         )}
       </button>
 
-      <AnimatePresence>
-        {open && (
-          <motion.div
-            key="profile"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.1 }}
-            className="popover-surface absolute right-0 top-full z-30 mt-2 w-72 rounded-xl bg-bg-elevated p-1 shadow-lg ring-1 ring-border-subtle"
-          >
+      {/* Instant show/hide — no fade (avoids WKWebView half-opacity flicker). */}
+      {open && (
+        <div
+          className="popover-surface absolute right-0 top-full z-30 mt-2 w-72 rounded-xl bg-bg-elevated p-1 shadow-lg ring-1 ring-border-subtle"
+        >
             <div className="px-3 py-2.5">
               <div className="truncate text-sm font-medium text-ink">{user.name}</div>
               {user.email && <div className="truncate text-xs text-ink-muted">{user.email}</div>}
@@ -149,9 +143,8 @@ export function ProfileMenu() {
               <LogOut className="size-4" />
               Sign out
             </button>
-          </motion.div>
-        )}
-      </AnimatePresence>
+        </div>
+      )}
     </div>
   );
 }
