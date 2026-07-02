@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { lazy, Suspense, useEffect, useRef } from "react";
 import { useSessionStore } from "./store/sessionStore";
 import { useTheme } from "./lib/useTheme";
 import { useHotkeys } from "./lib/hotkeys";
@@ -7,20 +7,40 @@ import { Sidebar } from "./surfaces/Sidebar";
 import { StartCard } from "./surfaces/StartCard";
 import { Conversation } from "./surfaces/Conversation";
 import { Composer } from "./surfaces/Composer";
-import { TerminalPanel } from "./surfaces/TerminalPanel";
 import { CreditBanner } from "./surfaces/CreditBanner";
 import { OfflineBanner } from "./surfaces/OfflineBanner";
-import { McpSettings } from "./surfaces/McpSettings";
-import { SshSettings } from "./surfaces/SshSettings";
-import { Settings } from "./surfaces/Settings";
 import { CommandPalette } from "./surfaces/CommandPalette";
 import { SignInScreen } from "./surfaces/SignInScreen";
 import { MobileRemoteAgent } from "./surfaces/MobileRemoteAgent";
+
+// Heavy, on-demand surfaces stay OUT of the startup bundle (xterm alone is
+// ~350KB): the terminal loads on first open (then stays mounted so the PTY
+// survives hide/show), and the settings modals load when opened.
+const TerminalPanel = lazy(() =>
+  import("./surfaces/TerminalPanel").then((m) => ({ default: m.TerminalPanel })),
+);
+const McpSettings = lazy(() =>
+  import("./surfaces/McpSettings").then((m) => ({ default: m.McpSettings })),
+);
+const SshSettings = lazy(() =>
+  import("./surfaces/SshSettings").then((m) => ({ default: m.SshSettings })),
+);
+const Settings = lazy(() =>
+  import("./surfaces/Settings").then((m) => ({ default: m.Settings })),
+);
 
 export default function App() {
   const init = useSessionStore((s) => s.init);
   const auth = useSessionStore((s) => s.auth);
   const session = useSessionStore((s) => s.session);
+  const terminalOpen = useSessionStore((s) => s.terminalOpen);
+  const mcpOpen = useSessionStore((s) => s.mcpOpen);
+  const sshOpen = useSessionStore((s) => s.sshOpen);
+  const settingsOpen = useSessionStore((s) => s.settingsOpen);
+  // Latch: once the terminal has been opened, keep it mounted so its PTY
+  // sessions survive hide/show (the panel gates its own visibility).
+  const terminalTouched = useRef(false);
+  if (terminalOpen) terminalTouched.current = true;
   const { dark, toggle } = useTheme();
 
   useEffect(() => {
@@ -58,15 +78,31 @@ export default function App() {
           <>
             <Conversation />
             <Composer />
-            <TerminalPanel />
+            {terminalTouched.current && (
+              <Suspense fallback={null}>
+                <TerminalPanel />
+              </Suspense>
+            )}
           </>
         ) : (
           <StartCard />
         )}
       </div>
-      <McpSettings />
-      <SshSettings />
-      <Settings dark={dark} onToggleTheme={toggle} />
+      {mcpOpen && (
+        <Suspense fallback={null}>
+          <McpSettings />
+        </Suspense>
+      )}
+      {sshOpen && (
+        <Suspense fallback={null}>
+          <SshSettings />
+        </Suspense>
+      )}
+      {settingsOpen && (
+        <Suspense fallback={null}>
+          <Settings dark={dark} onToggleTheme={toggle} />
+        </Suspense>
+      )}
       <CommandPalette dark={dark} onToggleTheme={toggle} />
     </div>
   );

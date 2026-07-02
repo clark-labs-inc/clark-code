@@ -337,14 +337,22 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         typeof requestAnimationFrame !== "undefined"
           ? (cb) => requestAnimationFrame(() => cb())
           : (cb) => void setTimeout(cb, 16);
+      // Buffer the RAW live snapshot and merge with the CURRENT history prefix
+      // at flush time. Merging at enqueue time raced conversation switches: a
+      // session-reset (empty) emission could flush AFTER openConversation set
+      // the restored snapshot and blank it. Fresh-at-flush state can't go stale,
+      // and it moves merge work from per-event to per-frame.
       let pending: Snapshot | null = null;
       let rafScheduled = false;
       const flushRender = () => {
         rafScheduled = false;
-        if (pending) {
-          set({ snapshot: pending });
-          pending = null;
-        }
+        if (!pending) return;
+        const live = pending;
+        pending = null;
+        // No session (user just ended it) → nothing to render into.
+        if (!get().session) return;
+        const prefix = get().historyPrefix;
+        set({ snapshot: prefix ? mergeHistory(prefix, live) : live });
       };
       let lastPersist = 0;
       let lastBilling = 0;
@@ -355,8 +363,9 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         const { historyPrefix, session } = get();
         const snapshot = historyPrefix ? mergeHistory(historyPrefix, live) : live;
 
-        // Render: coalesce to the next animation frame.
-        pending = snapshot;
+        // Render: coalesce to the next animation frame (raw live buffered;
+        // flushRender merges against the then-current prefix).
+        pending = live;
         if (!rafScheduled) {
           rafScheduled = true;
           raf(flushRender);
@@ -365,46 +374,64 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         const busyNow = isBusy(snapshot);
 
         // Persist + sidebar meta: throttled while streaming, immediate when idle.
+        // While busy the interval is long (2s) and the work runs in a macrotask
+        // AFTER the frame commits — JSON.stringify of a long transcript +
+        // synchronous localStorage writes were the source of 100ms+ hitches on
+        // slow machines. The final idle save is immediate so nothing is lost.
         if (session && hasContent(snapshot)) {
           const now = Date.now();
-          if (!busyNow || now - lastPersist >= 450) {
+          if (!busyNow || now - lastPersist >= 2000) {
             lastPersist = now;
-            saveSnapshot(session.id, snapshot);
-            const prev = get().conversations.find((c) => c.id === session.id);
-            const remoteHost = get().activeRemoteHost;
-            // Project folder is the remote root for a remote session, else local.
-            const project =
-              session.provider === "local"
-                ? (remoteHost ? get().activeRemote?.cwd : get().localSettings.cwd.trim()) ||
-                  undefined
-                : undefined;
-            // Only advance updatedAt when the timeline actually grew past the
-            // restored prefix — i.e. real new activity. Merely opening/resuming a
-            // conversation replays its transcript without adding turns, so its
-            // order (and its whole project group's) must stay put in the sidebar.
-            const baselineLen = historyPrefix ? historyPrefix.timeline.length : 0;
-            const grew = snapshot.timeline.length > baselineLen;
-            const meta: ConversationMeta = {
-              id: session.id,
-              // A manual rename wins over the auto-derived title forever.
-              title: prev?.titleLocked && prev.title ? prev.title : deriveTitle(snapshot),
-              provider: session.provider,
-              mode: session.mode,
-              project: project ?? prev?.project,
-              remoteHost: remoteHost ?? prev?.remoteHost,
-              titleLocked: prev?.titleLocked,
-              createdAt: prev?.createdAt ?? Date.now(),
-              updatedAt: grew ? Date.now() : (prev?.updatedAt ?? Date.now()),
-              archived: prev?.archived,
+            const persistSession = session;
+            const persistPrefixLen = historyPrefix ? historyPrefix.timeline.length : 0;
+            const persist = () => {
+              saveSnapshot(persistSession.id, snapshot);
+              const prev = get().conversations.find((c) => c.id === persistSession.id);
+              const remoteHost = get().activeRemoteHost;
+              // Project folder is the remote root for a remote session, else local.
+              const project =
+                persistSession.provider === "local"
+                  ? (remoteHost ? get().activeRemote?.cwd : get().localSettings.cwd.trim()) ||
+                    undefined
+                  : undefined;
+              // Only advance updatedAt when the timeline actually grew past the
+              // restored prefix — i.e. real new activity. Merely opening/resuming a
+              // conversation replays its transcript without adding turns, so its
+              // order (and its whole project group's) must stay put in the sidebar.
+              const grew = snapshot.timeline.length > persistPrefixLen;
+              const meta: ConversationMeta = {
+                id: persistSession.id,
+                // A manual rename wins over the auto-derived title forever.
+                title: prev?.titleLocked && prev.title ? prev.title : deriveTitle(snapshot),
+                provider: persistSession.provider,
+                mode: persistSession.mode,
+                project: project ?? prev?.project,
+                remoteHost: remoteHost ?? prev?.remoteHost,
+                titleLocked: prev?.titleLocked,
+                createdAt: prev?.createdAt ?? Date.now(),
+                updatedAt: grew ? Date.now() : (prev?.updatedAt ?? Date.now()),
+                archived: prev?.archived,
+              };
+              upsertMeta(meta);
+              // Refresh the sidebar only when the visible bits actually changed —
+              // re-parsing the index and re-rendering per save is wasted work.
+              if (
+                !prev ||
+                prev.title !== meta.title ||
+                prev.updatedAt !== meta.updatedAt ||
+                prev.project !== meta.project
+              ) {
+                set({ conversations: loadIndex() });
+              }
+              // Mirror the turn to Clark once it settles — not every streamed
+              // frame. Coalesced + single-flight + idempotent (see cloudHistory).
+              if (!busyNow) {
+                const creds = cloudCreds(get().auth);
+                if (creds) scheduleCloudPut(creds, meta, snapshot);
+              }
             };
-            upsertMeta(meta);
-            set({ conversations: loadIndex() });
-            // Mirror the turn to Clark once it settles — not every streamed frame.
-            // Coalesced + single-flight + idempotent (see cloudHistory).
-            if (!busyNow) {
-              const creds = cloudCreds(get().auth);
-              if (creds) scheduleCloudPut(creds, meta, snapshot);
-            }
+            if (busyNow) setTimeout(persist, 0);
+            else persist();
           }
         }
 

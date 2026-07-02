@@ -55,7 +55,7 @@ export function currentActivity(snapshot: Snapshot): Activity {
       // Prefer the latest streamed sub-step (e.g. a subagent summary) so a long
       // tool call shows live progress rather than a frozen title.
       label: lastProgressLine(tool) ?? tool.title,
-      detail: tool.locations[0]?.path,
+      detail: tool.locations?.[0]?.path,
       progress,
       steps,
     };

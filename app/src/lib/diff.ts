@@ -43,7 +43,7 @@ export function summarizeEdits(calls: ToolCall[]): EditSummary | null {
   for (const call of calls) {
     const stat = callDiffStat(call);
     if (!stat) continue;
-    const path = call.locations[0]?.path ?? call.id;
+    const path = call.locations?.[0]?.path ?? call.id;
     const prev = byFile.get(path) ?? { adds: 0, dels: 0 };
     byFile.set(path, { adds: prev.adds + stat.adds, dels: prev.dels + stat.dels });
   }

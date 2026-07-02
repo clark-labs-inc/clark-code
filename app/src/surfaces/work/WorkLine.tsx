@@ -197,8 +197,8 @@ function WorkLineImpl({ call, active }: { call: ToolCall; active: boolean }) {
   const [open, setOpen] = useState(false);
   const reduce = useReducedMotion();
   const Icon = KIND_ICON[call.kind] ?? Wrench;
-  const target = call.locations[0]?.path;
-  const line = call.locations[0]?.line;
+  const target = call.locations?.[0]?.path;
+  const line = call.locations?.[0]?.line;
   const hasDetail = call.content.length > 0;
   const progressLine = active ? lastProgressLine(call) : undefined;
   const stat = callDiffStat(call);

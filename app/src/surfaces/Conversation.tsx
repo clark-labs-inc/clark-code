@@ -86,6 +86,10 @@ const TRANSIENT = {
 const DANGER_BANNER =
   "rounded-lg border border-danger/40 bg-danger/8 px-3.5 py-2.5 text-sm text-danger";
 
+/** How many timeline blocks render before older history collapses behind a
+ *  "Show earlier" control. Generous enough that normal sessions never notice. */
+const TIMELINE_WINDOW = 80;
+
 export function Conversation() {
   // While peeking at another conversation mid-run, render its restored
   // transcript; the live snapshot keeps streaming (and saving) underneath.
@@ -98,6 +102,9 @@ export function Conversation() {
   const openConversation = useSessionStore((s) => s.openConversation);
   const error = useSessionStore((s) => s.error);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [showAll, setShowAll] = useState(false);
+  // Collapse history again when switching conversations.
+  useEffect(() => setShowAll(false), [session?.id]);
   // Pin to the bottom only when the user is already there — never yank them up
   // while they're reading scrollback. Instant (not smooth) keeps streaming stable.
   const stuck = useRef(true);
@@ -124,7 +131,13 @@ export function Conversation() {
   if (!session) return null;
 
   const visible = timeline.filter((t) => t.item !== "plan");
-  const blocks = group(visible);
+  const allBlocks = group(visible);
+  // Long transcripts: render only the recent window. A 400-item DOM makes every
+  // style/layout pass (and each streamed frame) pay for history the user isn't
+  // reading — the dominant cost on slower machines. "Show earlier" reveals all.
+  const windowed = !showAll && allBlocks.length > TIMELINE_WINDOW;
+  const blocks = windowed ? allBlocks.slice(allBlocks.length - TIMELINE_WINDOW) : allBlocks;
+  const hiddenCount = allBlocks.length - blocks.length;
   const lastBlockKey = blocks[blocks.length - 1]?.key;
 
   const activity = currentActivity(snapshot);
@@ -169,6 +182,15 @@ export function Conversation() {
           <p className="py-10 text-center text-sm text-ink-faint">
             Ask Clark anything — file work, web research, and computer use show up here as it works.
           </p>
+        )}
+
+        {windowed && (
+          <button
+            onClick={() => setShowAll(true)}
+            className="mx-auto rounded-full border border-border-subtle bg-bg-elevated px-3.5 py-1.5 text-xs font-medium text-ink-muted transition hover:bg-bg-hover hover:text-ink-secondary"
+          >
+            Show {hiddenCount} earlier item{hiddenCount === 1 ? "" : "s"}
+          </button>
         )}
 
         {blocks.map((block) => {
