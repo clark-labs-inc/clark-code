@@ -223,7 +223,8 @@ function ModelPill() {
             ))}
           </div>
           <p className="px-2.5 pb-1.5 text-[0.7rem] leading-snug text-ink-faint">
-            Applies from the next message — the conversation keeps its context.
+            Auto uses the model's default (GLM: Max · Kimi: High). Applies from
+            the next message — the conversation keeps its context.
           </p>
         </div>
       )}

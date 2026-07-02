@@ -38,11 +38,12 @@ export const CODING_MODELS = [
   { id: "clark-code:kimi_k27_code", label: "Kimi K2.7 Code", hint: "Fast agentic coding" },
 ] as const;
 
-/** Reasoning-effort choices ("" lets the model's server default apply). */
+/** Reasoning-effort choices ("" lets the model's server default apply).
+ *  Both coding models support exactly two thinking budgets — High and Max
+ *  (GLM 5.2 defaults to Max and treats anything else as Max; Kimi K2.7's
+ *  thinking can't go lower) — so no Low/Medium: they'd silently run at Max. */
 export const REASONING_EFFORTS = [
   { id: "", label: "Auto" },
-  { id: "low", label: "Low" },
-  { id: "medium", label: "Medium" },
   { id: "high", label: "High" },
   { id: "xhigh", label: "Max" },
 ] as const;
@@ -72,9 +73,12 @@ export function loadLocalSettings(): LocalAgentSettings {
 // Older installs saved a raw OpenRouter model id (e.g. "z-ai/glm-5.2"). The
 // production Clark API only accepts Clark tier ids, which never contain "/", so
 // coerce any such stale value to the coding default — otherwise the request 400s
-// with "Unknown Clark model tier".
+// with "Unknown Clark model tier". Same for a stale reasoning effort the models
+// don't actually support (e.g. "low"/"medium" from an early build) → Auto.
 function migrate(s: LocalAgentSettings): LocalAgentSettings {
-  return s.model.includes("/") ? { ...s, model: DEFAULT_LOCAL_SETTINGS.model } : s;
+  const model = s.model.includes("/") ? DEFAULT_LOCAL_SETTINGS.model : s.model;
+  const effortValid = REASONING_EFFORTS.some((e) => e.id === s.reasoningEffort);
+  return { ...s, model, reasoningEffort: effortValid ? s.reasoningEffort : "" };
 }
 
 export function saveLocalSettings(settings: LocalAgentSettings): void {
