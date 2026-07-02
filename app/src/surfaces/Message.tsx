@@ -2,7 +2,8 @@ import { memo, useRef, useState, type ReactNode } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { Brain, ChevronRight, Copy, Check } from "lucide-react";
+import { Brain, ChevronRight, Copy, Check, Pencil } from "lucide-react";
+import { useSessionStore } from "../store/sessionStore";
 import { cn } from "../lib/cn";
 import { useCopy } from "../lib/clipboard";
 import { parseNarration } from "../lib/narration";
@@ -143,8 +144,8 @@ function ThinkingBlock({ text }: { text: string }) {
             transition={{ duration: 0.18 }}
             className="overflow-hidden border-t border-border-subtle"
           >
-            <div className="max-h-52 overflow-auto whitespace-pre-wrap px-2.5 py-2 text-xs leading-relaxed text-ink-muted">
-              {text}
+            <div className={cn("max-h-52 overflow-auto px-2.5 py-2 text-xs leading-relaxed text-ink-muted", MD_CLASSES)}>
+              <Md>{text}</Md>
             </div>
           </motion.div>
         )}
@@ -170,8 +171,21 @@ function MessageImpl({
   const inner = (() => {
     if (role === "user") {
       // Codex form: a quiet right-aligned pill, not a loud accent bubble.
+      // Hover reveals copy + "edit & resend" (stages the text in the composer).
       return (
-        <div className="flex justify-end">
+        <div className="group/user flex items-center justify-end gap-1.5">
+          <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition group-hover/user:opacity-100">
+            <button
+              type="button"
+              onClick={() => useSessionStore.getState().setComposerPrefill(body)}
+              aria-label="Edit and resend"
+              title="Edit & resend"
+              className="grid size-7 place-items-center rounded-md text-ink-faint transition hover:bg-bg-hover hover:text-ink-secondary"
+            >
+              <Pencil className="size-3.5" />
+            </button>
+            <CopyButton text={body} label="Copy message" className="size-7" />
+          </div>
           <div className="max-w-[80%] whitespace-pre-wrap [overflow-wrap:anywhere] rounded-2xl rounded-br-md border border-border-subtle bg-bg-tertiary px-3.5 py-2 text-sm text-ink">
             {body}
           </div>

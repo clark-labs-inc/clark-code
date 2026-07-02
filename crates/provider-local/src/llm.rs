@@ -152,17 +152,22 @@ pub struct LlmClient {
     api_key: Option<String>,
     headers: Vec<(String, String)>,
     temperature: Option<f32>,
+    /// Reasoning-effort override forwarded to the passthrough ("low" … "xhigh").
+    /// `None` → the server applies the model's default.
+    reasoning_effort: Option<String>,
 }
 
 impl LlmClient {
     pub fn new(config: &LocalConfig) -> Result<Self, String> {
-        Self::from_parts(
+        let mut client = Self::from_parts(
             &config.base_url,
             &config.model,
             config.api_key.clone(),
             config.headers.clone().into_iter().collect(),
             config.temperature,
-        )
+        )?;
+        client.reasoning_effort = config.reasoning_effort.clone();
+        Ok(client)
     }
 
     /// Build a client bound to an explicit endpoint/model (used for the agentic
@@ -184,6 +189,7 @@ impl LlmClient {
             api_key,
             headers,
             temperature,
+            reasoning_effort: None,
         })
     }
 
@@ -216,6 +222,9 @@ impl LlmClient {
         }
         if let Some(t) = self.temperature {
             body["temperature"] = json!(t);
+        }
+        if let Some(effort) = &self.reasoning_effort {
+            body["reasoning_effort"] = json!(effort);
         }
         body
     }

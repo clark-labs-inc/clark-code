@@ -125,6 +125,12 @@ interface SessionState {
   conversations: ConversationMeta[];
   /** Restored transcript when a past conversation is reopened (prefix to live). */
   historyPrefix: Snapshot | null;
+  /** Read-only view of ANOTHER conversation while a run streams in the live one.
+   *  Opening a conversation mid-run must not tear the run down, so it becomes a
+   *  peek; when the run settles the peek silently promotes to a full open. */
+  peek: { id: string; snapshot: Snapshot } | null;
+  /** Text staged into the composer by "Edit & resend" on a sent message. */
+  composerPrefill: string | null;
   /** Config for the "Local coding" provider (persisted to localStorage). */
   localSettings: LocalAgentSettings;
   /** Where the next session runs: this machine, or a remote host over SSH. */
@@ -200,6 +206,14 @@ interface SessionState {
   archiveConversation: (id: string) => void;
   /** Bring an archived conversation back into the active list. */
   restoreConversation: (id: string) => void;
+  /** Rename a conversation; the manual title stops auto-derivation clobbering it. */
+  renameConversation: (id: string, title: string) => void;
+  /** Change the coding model / reasoning effort. Persists, and when a session is
+   *  live, hot-swaps the provider's LLM (the transcript is kept — the next turn
+   *  continues with full context on the new model). */
+  updateModelSettings: (patch: { model?: string; reasoningEffort?: string }) => Promise<void>;
+  /** Stage text in the composer ("Edit & resend" on a sent message). */
+  setComposerPrefill: (text: string | null) => void;
   addFiles: (files: File[]) => Promise<void>;
   removeAttachment: (id: string) => void;
   send: (text: string) => Promise<void>;
@@ -244,6 +258,8 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   attachments: [],
   conversations: loadIndex(),
   historyPrefix: null,
+  peek: null,
+  composerPrefill: null,
   localSettings: loadLocalSettings(),
   projectMode: "local",
   selectedHostId: loadSshHosts()[0]?.id ?? null,
@@ -364,11 +380,13 @@ export const useSessionStore = create<SessionState>((set, get) => ({
             const grew = snapshot.timeline.length > baselineLen;
             const meta: ConversationMeta = {
               id: session.id,
-              title: deriveTitle(snapshot),
+              // A manual rename wins over the auto-derived title forever.
+              title: prev?.titleLocked && prev.title ? prev.title : deriveTitle(snapshot),
               provider: session.provider,
               mode: session.mode,
               project: project ?? prev?.project,
               remoteHost: remoteHost ?? prev?.remoteHost,
+              titleLocked: prev?.titleLocked,
               createdAt: prev?.createdAt ?? Date.now(),
               updatedAt: grew ? Date.now() : (prev?.updatedAt ?? Date.now()),
               archived: prev?.archived,
@@ -395,6 +413,18 @@ export const useSessionStore = create<SessionState>((set, get) => ({
             void notify("Run failed", title ? `“${title}” ended with an error.` : "The agent ended unexpectedly.");
           } else {
             void notify("Clark finished", title ? `“${title}” is ready for review.` : "Your task is ready for review.");
+          }
+          // The user was peeking at another conversation while this run streamed;
+          // now that it settled (and its transcript just persisted above), promote
+          // the peek to a real open so they can keep working there.
+          const peeked = get().peek;
+          if (peeked) {
+            // Flush the idle snapshot synchronously — the raf-coalesced render
+            // hasn't run yet, and openConversation's busy check must see the run
+            // as settled or it would just re-peek.
+            pending = null;
+            set({ snapshot, peek: null });
+            void get().openConversation(peeked.id);
           }
         }
         prevBusy = busyNow;
@@ -624,6 +654,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         session,
         connecting: false,
         historyPrefix: null,
+        peek: null,
         queued: [],
         activeRemote: remote,
         activeRemoteHost: remoteHost,
@@ -645,6 +676,8 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       error: null,
       attachments: [],
       historyPrefix: null,
+      peek: null,
+      composerPrefill: null,
       queued: [],
       terminalOpen: false,
       activeRemote: null,
@@ -656,10 +689,37 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   openConversation: async (id) => {
     const { bridge, activeProvider, auth, session, providers, localSettings, activeRemote: prevRemote } = get();
     if (!bridge || !activeProvider) return;
-    if (session?.id === id) return; // already open
+    if (session?.id === id) {
+      // Returning to the live conversation just drops the peek — the stream was
+      // running underneath the whole time.
+      set({ peek: null });
+      return;
+    }
+    // A run is streaming in the live conversation: don't tear it down — show the
+    // other conversation read-only (peek). It promotes to a full open when the
+    // run settles (see the busy→idle edge in init's subscribe handler).
+    if (session && isBusy(get().snapshot)) {
+      let restored = loadSnapshot(id);
+      if (!restored) {
+        const creds = cloudCreds(get().auth);
+        if (creds) {
+          try {
+            const cloud = await cloudGet(creds, id);
+            if (cloud) {
+              restored = cloud;
+              saveSnapshot(id, cloud);
+            }
+          } catch {
+            /* offline — show what we have */
+          }
+        }
+      }
+      set({ peek: { id, snapshot: restored ?? emptySnapshot() } });
+      return;
+    }
     if (prevRemote) void sshDisconnect(prevRemote.id);
     let restored = loadSnapshot(id);
-    set({ connecting: true, error: null, activeRemote: null, activeRemoteHost: null });
+    set({ connecting: true, error: null, peek: null, activeRemote: null, activeRemoteHost: null });
     // Not cached locally (e.g. opened on another machine)? Pull it from Clark.
     if (!restored) {
       const creds = cloudCreds(get().auth);
@@ -764,6 +824,44 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     set({ conversations: loadIndex() });
   },
 
+  renameConversation: (id, title) => {
+    const clean = title.trim();
+    const prev = get().conversations.find((c) => c.id === id);
+    if (!prev || !clean || clean === prev.title) return;
+    upsertMeta({ ...prev, title: clean, titleLocked: true });
+    set({ conversations: loadIndex() });
+    // Push the new title to the cloud copy alongside the cached snapshot.
+    const creds = cloudCreds(get().auth);
+    const snap = loadSnapshot(id);
+    if (creds && snap) scheduleCloudPut(creds, { ...prev, title: clean, titleLocked: true }, snap);
+  },
+
+  updateModelSettings: async ({ model, reasoningEffort }) => {
+    const s = get().localSettings;
+    const next = {
+      ...s,
+      ...(model !== undefined ? { model } : {}),
+      ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
+    };
+    saveLocalSettings(next);
+    set({ localSettings: next });
+    // Hot-swap the live provider's LLM. `reconfigure` re-runs connect on the
+    // EXISTING instance, so the model-visible transcript survives and the next
+    // turn continues with full context on the new model.
+    const { bridge, session, activeRemote } = get();
+    if (!bridge?.reconfigure || !session || session.provider !== "local") return;
+    try {
+      const config = activeRemote
+        ? localConnectConfig(next, remoteTarget(activeRemote))
+        : localConnectConfig(next);
+      await bridge.reconfigure(config);
+    } catch (e) {
+      set({ error: `Model switch failed: ${String(e)}` });
+    }
+  },
+
+  setComposerPrefill: (text) => set({ composerPrefill: text }),
+
   addFiles: async (files) => {
     const incoming = files.filter((f) => f.size <= MAX_ATTACHMENT_BYTES);
     const tooBig = files.length - incoming.length;
@@ -781,8 +879,11 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   },
 
   send: async (text) => {
-    const { bridge, session, attachments, snapshot } = get();
+    const { bridge, session, attachments, snapshot, peek } = get();
     if (!bridge || !session) return;
+    // Peeking at another conversation while a run streams: messages belong to the
+    // live conversation only — the composer is disabled, this is a backstop.
+    if (peek) return;
     if (!text.trim() && attachments.length === 0) return;
     const uploads = attachments.map(toUpload);
     for (const a of attachments) if (a.previewUrl) URL.revokeObjectURL(a.previewUrl);

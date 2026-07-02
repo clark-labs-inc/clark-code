@@ -10,6 +10,7 @@ import { useSessionStore } from "../store/sessionStore";
 import type { QueuedMessage } from "../store/sessionStore";
 import { useFileDrop, usePaste } from "../lib/attachmentSources";
 import { prettySize } from "../lib/attachments";
+import { CODING_MODELS, REASONING_EFFORTS, modelLabel } from "../lib/localAgent";
 import { PERMISSION_MODES, type PermissionMode } from "../lib/permissions";
 import { projectFiles } from "../lib/projectFiles";
 import { slashCommands, type SlashCommand } from "../lib/slashCommands";
@@ -45,9 +46,9 @@ type Suggestion =
   | { kind: "file"; path: string }
   | { kind: "slash"; cmd: SlashCommand };
 
-/** Close a popover when the user clicks outside of it. The listener is
- *  registered once (not re-bound every render) and always calls the latest
- *  `onClose` via a ref. */
+/** Close a popover when the user clicks outside of it or presses Escape. The
+ *  listeners are registered once (not re-bound every render) and always call
+ *  the latest `onClose` via a ref. */
 function useOutsideClose(ref: RefObject<HTMLElement | null>, onClose: () => void) {
   const cb = useRef(onClose);
   cb.current = onClose;
@@ -55,8 +56,15 @@ function useOutsideClose(ref: RefObject<HTMLElement | null>, onClose: () => void
     const handler = (e: Event) => {
       if (ref.current && !ref.current.contains(e.target as Node)) cb.current();
     };
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key === "Escape") cb.current();
+    };
     document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", handler);
+      document.removeEventListener("keydown", onKey);
+    };
   }, [ref]);
 }
 
@@ -128,6 +136,95 @@ function PermissionPill() {
                 </button>
               );
             })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Model + reasoning-effort picker. Mirrors the PermissionPill's form; a change
+ *  mid-conversation hot-swaps the provider's LLM and keeps the transcript. */
+function ModelPill() {
+  const model = useSessionStore((s) => s.localSettings.model);
+  const effort = useSessionStore((s) => s.localSettings.reasoningEffort);
+  const update = useSessionStore((s) => s.updateModelSettings);
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useOutsideClose(ref, () => setOpen(false));
+
+  const effortLabel = REASONING_EFFORTS.find((e) => e.id === effort)?.label;
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title="Model & reasoning effort"
+        className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-medium text-ink-secondary transition hover:bg-bg-hover"
+      >
+        {modelLabel(model)}
+        {effort && effortLabel && <span className="text-ink-faint">· {effortLabel}</span>}
+        <ChevronDown className="size-3 opacity-70" />
+      </button>
+
+      {/* Instant show/hide — no fade (avoids WKWebView half-opacity flicker). */}
+      {open && (
+        <div
+          role="menu"
+          className="popover-surface absolute bottom-full right-0 z-30 mb-2 w-72 rounded-xl bg-bg-elevated p-1 shadow-lg ring-1 ring-border-subtle"
+        >
+          <div className="px-2.5 py-1.5 text-[0.7rem] font-medium uppercase tracking-wide text-ink-faint">
+            Model
+          </div>
+          {CODING_MODELS.map((m) => (
+            <button
+              key={m.id}
+              type="button"
+              role="menuitemradio"
+              aria-checked={m.id === model}
+              onClick={() => {
+                void update({ model: m.id });
+                setOpen(false);
+              }}
+              className="flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 text-left transition hover:bg-bg-hover"
+            >
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm text-ink">{m.label}</span>
+                <span className="block text-xs leading-snug text-ink-muted">{m.hint}</span>
+              </span>
+              {m.id === model && <Check className="mt-0.5 size-4 shrink-0 text-accent" />}
+            </button>
+          ))}
+
+          <div className="mx-1.5 my-1 border-t border-border-subtle" />
+
+          <div className="px-2.5 py-1.5 text-[0.7rem] font-medium uppercase tracking-wide text-ink-faint">
+            Reasoning effort
+          </div>
+          <div className="flex gap-1 px-2.5 pb-2">
+            {REASONING_EFFORTS.map((e) => (
+              <button
+                key={e.id}
+                type="button"
+                role="menuitemradio"
+                aria-checked={e.id === effort}
+                onClick={() => void update({ reasoningEffort: e.id })}
+                className={cn(
+                  "flex-1 rounded-md px-1 py-1 text-xs font-medium transition",
+                  e.id === effort
+                    ? "bg-accent text-on-accent"
+                    : "bg-bg-tertiary text-ink-secondary hover:bg-bg-hover",
+                )}
+              >
+                {e.label}
+              </button>
+            ))}
+          </div>
+          <p className="px-2.5 pb-1.5 text-[0.7rem] leading-snug text-ink-faint">
+            Applies from the next message — the conversation keeps its context.
+          </p>
         </div>
       )}
     </div>
@@ -303,7 +400,9 @@ export function Composer() {
   );
   const attachments = useSessionStore((s) => s.attachments);
   const addFiles = useSessionStore((s) => s.addFiles);
-  const model = useSessionStore((s) => s.localSettings.model);
+  const peeking = useSessionStore((s) => s.peek !== null);
+  const prefill = useSessionStore((s) => s.composerPrefill);
+  const setPrefill = useSessionStore((s) => s.setComposerPrefill);
 
   const { dragging, handlers } = useFileDrop((files) => void addFiles(files));
   usePaste((files) => void addFiles(files), !!session);
@@ -315,8 +414,22 @@ export function Composer() {
     ta.style.height = Math.min(ta.scrollHeight, 200) + "px";
   }, [value]);
 
+  // "Edit & resend" staged text from a sent message: load it and focus.
+  useEffect(() => {
+    if (prefill === null) return;
+    setValue(prefill);
+    setPrefill(null);
+    requestAnimationFrame(() => {
+      const ta = taRef.current;
+      if (ta) {
+        ta.focus();
+        ta.setSelectionRange(ta.value.length, ta.value.length);
+      }
+    });
+  }, [prefill, setPrefill]);
+
   const hasContent = value.trim().length > 0 || attachments.length > 0;
-  const canSend = !!session && hasContent;
+  const canSend = !!session && hasContent && !peeking;
 
   // --- @-file / slash autocomplete ----------------------------------------
   const trigger = useMemo(() => detectTrigger(value, caret), [value, caret]);
@@ -415,6 +528,11 @@ export function Composer() {
       e.preventDefault();
       void submit();
     }
+    // Esc with an empty composer stops the active run (matches ⌘.).
+    if (e.key === "Escape" && busy && !value.trim() && !peeking) {
+      e.preventDefault();
+      void cancelActive();
+    }
   };
 
   return (
@@ -474,11 +592,13 @@ export function Composer() {
           placeholder={
             !session
               ? "Start a session to begin"
-              : busy
-                ? "Queue a follow-up…"
-                : "Ask Clark to make a change…"
+              : peeking
+                ? "Viewing another chat — Clark is still working…"
+                : busy
+                  ? "Queue a follow-up…"
+                  : "Ask Clark to make a change…"
           }
-          disabled={!session}
+          disabled={!session || peeking}
           className="composer-input max-h-52 w-full resize-none bg-transparent px-0.5 py-1 text-sm leading-relaxed text-ink outline-none placeholder:text-ink-muted disabled:opacity-50"
         />
 
@@ -497,10 +617,8 @@ export function Composer() {
           </div>
 
           <div className="flex min-w-0 items-center gap-2.5">
-            <span className="hidden truncate font-mono text-xs text-ink-faint sm:inline">
-              {model || "clark-code"}
-            </span>
-            {busy && !hasContent ? (
+            <ModelPill />
+            {busy && !hasContent && !peeking ? (
               <button
                 onClick={() => void cancelActive()}
                 aria-label="Stop"

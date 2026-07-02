@@ -49,6 +49,22 @@ pub async fn provider_connect(
     Ok(())
 }
 
+/// Re-run `connect` on the EXISTING provider instance — unlike
+/// [`provider_connect`], this keeps the live session (the model-visible
+/// transcript lives in the provider), so the composer's model / reasoning-effort
+/// picker can swap the LLM mid-conversation and the next turn continues with
+/// full context on the new model.
+#[tauri::command]
+pub async fn provider_reconfigure(
+    config: ProviderConfig,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    tracing::info!("reconfiguring live provider");
+    let mut s = state.session.lock().await;
+    let provider = s.provider.as_mut().ok_or("connect a provider first")?;
+    provider.connect(config).await.map_err(|e| e.to_string())
+}
+
 /// What the frontend gets back after a remote project connects. The `remote`
 /// block is spread verbatim into the local provider's connect `extra` (see
 /// `LocalConfig`'s `RemoteTarget`), and `id` is used to disconnect later.
@@ -550,7 +566,7 @@ pub async fn clark_exchange_google_idtoken(
 // is the WS endpoint with an http(s) scheme and the `/ws` suffix dropped.
 
 /// Derive the HTTPS REST base from the gateway WS endpoint.
-fn clark_rest_base(endpoint: &str) -> String {
+pub(crate) fn clark_rest_base(endpoint: &str) -> String {
     let mut base = endpoint.trim().to_string();
     if let Some(rest) = base.strip_prefix("wss://") {
         base = format!("https://{rest}");
@@ -572,11 +588,14 @@ static CLOUD_HTTP: std::sync::LazyLock<reqwest::Client> = std::sync::LazyLock::n
         .expect("build cloud http client")
 });
 
-fn clark_http_client() -> Result<reqwest::Client, String> {
+pub(crate) fn clark_http_client() -> Result<reqwest::Client, String> {
     Ok(CLOUD_HTTP.clone())
 }
 
-async fn read_json_or_err(resp: reqwest::Response, what: &str) -> Result<Value, String> {
+pub(crate) async fn read_json_or_err(
+    resp: reqwest::Response,
+    what: &str,
+) -> Result<Value, String> {
     let status = resp.status();
     let text = resp.text().await.unwrap_or_default();
     if !status.is_success() {
@@ -631,6 +650,7 @@ pub async fn desktop_conv_put(
     title: String,
     provider: String,
     project: Option<String>,
+    rev: i64,
     snapshot: Value,
 ) -> Result<Value, String> {
     let url = format!(
@@ -645,6 +665,7 @@ pub async fn desktop_conv_put(
             "title": title,
             "provider": provider,
             "project": project,
+            "rev": rev,
             "snapshot": snapshot,
         }))
         .send()

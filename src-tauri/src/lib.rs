@@ -11,6 +11,7 @@ use tauri::Manager;
 use tauri_plugin_deep_link::DeepLinkExt;
 
 mod commands;
+mod mobile_remote;
 // Public so the gated `tests/remote_e2e.rs` harness can drive the real
 // orchestration against a live host; otherwise host-internal.
 pub mod ssh;
@@ -87,6 +88,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::provider_list,
             commands::provider_connect,
+            commands::provider_reconfigure,
             commands::ssh_connect,
             commands::ssh_disconnect,
             commands::ssh_probe,
@@ -110,6 +112,9 @@ pub fn run() {
             commands::desktop_conv_get,
             commands::desktop_conv_put,
             commands::desktop_conv_delete,
+            mobile_remote::desktop_code_host_upsert,
+            mobile_remote::desktop_code_command_poll,
+            mobile_remote::desktop_code_command_ack,
             terminal::terminal_open,
             terminal::terminal_write,
             terminal::terminal_resize,

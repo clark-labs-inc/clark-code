@@ -21,6 +21,8 @@ export interface ConversationMeta {
   /** When set, this conversation ran on a remote host (the SSH destination);
    *  reopening it re-establishes the tunnel. Distinguishes remote in the list. */
   remoteHost?: string;
+  /** True once the user renamed it — auto-derived titles stop overwriting. */
+  titleLocked?: boolean;
   createdAt: number;
   updatedAt: number;
   /** Soft-delete flag. Archived conversations are hidden from the main list

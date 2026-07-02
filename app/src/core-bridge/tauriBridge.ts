@@ -25,6 +25,10 @@ export class TauriBridge implements CoreBridge {
     return invoke("provider_connect", { providerId, config });
   }
 
+  reconfigure(config: ConnectConfig): Promise<void> {
+    return invoke("provider_reconfigure", { config });
+  }
+
   newSession(providerId: string, options: SessionOptions): Promise<Session> {
     return invoke<Session>("session_new", { providerId, options });
   }

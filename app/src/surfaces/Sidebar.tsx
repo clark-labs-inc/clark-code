@@ -84,9 +84,27 @@ function GroupHeader({ group }: { group: ProjectGroup }) {
   );
 }
 
-function ConversationRow({ c, active }: { c: ConversationMeta; active: boolean }) {
+function ConversationRow({
+  c,
+  active,
+  streaming,
+}: {
+  c: ConversationMeta;
+  active: boolean;
+  /** A run is currently streaming in this conversation. */
+  streaming: boolean;
+}) {
   const open = useSessionStore((s) => s.openConversation);
   const archive = useSessionStore((s) => s.archiveConversation);
+  const rename = useSessionStore((s) => s.renameConversation);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(c.title);
+
+  const commit = () => {
+    setEditing(false);
+    rename(c.id, draft);
+  };
+
   return (
     <div
       className={`group relative flex items-center gap-2 rounded-lg px-2.5 py-2 text-sm transition ${
@@ -95,25 +113,61 @@ function ConversationRow({ c, active }: { c: ConversationMeta; active: boolean }
           : "text-ink-secondary hover:bg-bg-hover"
       }`}
     >
-      <button
-        onClick={() => void open(c.id)}
-        className="flex min-w-0 flex-1 items-center gap-2 text-left"
-        title={c.title}
-      >
-        <MessageSquare className="size-3.5 shrink-0 text-ink-faint" />
-        <span className="flex min-w-0 flex-col">
-          <span className="truncate leading-tight">{c.title}</span>
-          <span className="truncate text-xs text-ink-muted">{relativeTime(c.updatedAt)}</span>
-        </span>
-      </button>
-      <button
-        onClick={() => archive(c.id)}
-        title="Archive conversation"
-        aria-label="Archive conversation"
-        className="shrink-0 rounded-md p-1 text-ink-faint opacity-0 transition hover:bg-bg-sunken hover:text-ink group-hover:opacity-100"
-      >
-        <Archive className="size-3.5" />
-      </button>
+      {editing ? (
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <MessageSquare className="size-3.5 shrink-0 text-ink-faint" />
+          <input
+            autoFocus
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commit}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") commit();
+              if (e.key === "Escape") {
+                setDraft(c.title);
+                setEditing(false);
+              }
+            }}
+            aria-label="Rename conversation"
+            className="composer-input min-w-0 flex-1 rounded-md bg-bg-sunken px-1.5 py-0.5 text-sm text-ink outline-none ring-1 ring-border-subtle"
+          />
+        </div>
+      ) : (
+        <button
+          onClick={() => void open(c.id)}
+          onDoubleClick={() => {
+            setDraft(c.title);
+            setEditing(true);
+          }}
+          className="flex min-w-0 flex-1 items-center gap-2 text-left"
+          title={`${c.title} — double-click to rename`}
+        >
+          {streaming ? (
+            <span className="relative grid size-3.5 shrink-0 place-items-center" aria-label="Running">
+              <span className="absolute size-2 animate-ping rounded-full bg-accent/40" />
+              <span className="size-1.5 rounded-full bg-accent" />
+            </span>
+          ) : (
+            <MessageSquare className="size-3.5 shrink-0 text-ink-faint" />
+          )}
+          <span className="flex min-w-0 flex-col">
+            <span className="truncate leading-tight">{c.title}</span>
+            <span className="truncate text-xs text-ink-muted">
+              {streaming ? "Working…" : relativeTime(c.updatedAt)}
+            </span>
+          </span>
+        </button>
+      )}
+      {!editing && (
+        <button
+          onClick={() => archive(c.id)}
+          title="Archive conversation"
+          aria-label="Archive conversation"
+          className="shrink-0 rounded-md p-1 text-ink-faint opacity-0 transition hover:bg-bg-sunken hover:text-ink group-hover:opacity-100"
+        >
+          <Archive className="size-3.5" />
+        </button>
+      )}
     </div>
   );
 }
@@ -142,6 +196,12 @@ export function Sidebar() {
   const setCollapsed = useSessionStore((s) => s.setSidebarCollapsed);
   const conversations = useSessionStore((s) => s.conversations);
   const session = useSessionStore((s) => s.session);
+  // Selection follows what's on screen (a peek shows another conversation while
+  // the live one keeps streaming — that one gets the pulsing "working" dot).
+  const peekId = useSessionStore((s) => s.peek?.id ?? null);
+  const liveBusy = useSessionStore((s) =>
+    Object.values(s.snapshot.runs).some((r) => r.status === "running" || r.status === "queued"),
+  );
   const newConversation = useSessionStore((s) => s.endSession);
   const [filter, setFilter] = useState("");
   const [archivedOpen, setArchivedOpen] = useState(false);
@@ -255,7 +315,12 @@ export function Sidebar() {
                 <GroupHeader group={g} />
                 <div className="flex flex-col gap-0.5">
                   {g.convos.map((c) => (
-                    <ConversationRow key={c.id} c={c} active={session?.id === c.id} />
+                    <ConversationRow
+                      key={c.id}
+                      c={c}
+                      active={(peekId ?? session?.id) === c.id}
+                      streaming={liveBusy && session?.id === c.id}
+                    />
                   ))}
                 </div>
               </section>

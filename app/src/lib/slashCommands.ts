@@ -4,6 +4,7 @@
 // backs the command palette, so it lives here once.
 
 import { useSessionStore } from "../store/sessionStore";
+import { conversationMarkdown } from "./transcript";
 
 export interface SlashCommand {
   /** Command word, without the leading slash. */
@@ -25,6 +26,16 @@ export function slashCommands(): SlashCommand[] {
       run: () => s().toggleTerminal(),
     },
     { name: "mcp", hint: "Manage MCP servers", run: () => s().setMcpOpen(true) },
+    {
+      name: "copy",
+      hint: "Copy the conversation as Markdown",
+      needsSession: true,
+      run: () => {
+        const { peek, snapshot } = s();
+        const md = conversationMarkdown(peek ? peek.snapshot : snapshot);
+        if (md) void navigator.clipboard?.writeText(md);
+      },
+    },
     {
       name: "memory",
       hint: "View project memory",

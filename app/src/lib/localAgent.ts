@@ -12,12 +12,15 @@ import { loadMcpServers, enabledMcpConfigs } from "./mcpServers";
 import type { RemoteTargetConfig } from "./ssh";
 
 const KEY = "clark-desktop:local-agent";
+const env = import.meta.env as Record<string, string | undefined>;
 
 export interface LocalAgentSettings {
   /** Absolute path to the project the agent edits. */
   cwd: string;
   /** Clark model id (see `GET /v1/models`). */
   model: string;
+  /** Reasoning effort sent with each request ("" = the model's default). */
+  reasoningEffort: string;
   /** Clark Platform API key (`ck_live_…`). The only credential. */
   apiKey: string;
 }
@@ -25,15 +28,41 @@ export interface LocalAgentSettings {
 export const DEFAULT_LOCAL_SETTINGS: LocalAgentSettings = {
   cwd: "",
   model: "clark-code",
+  reasoningEffort: "",
   apiKey: "",
 };
+
+/** The coding models the composer picker offers (clark-code tier options). */
+export const CODING_MODELS = [
+  { id: "clark-code", label: "GLM 5.2", hint: "Deep reasoning · default" },
+  { id: "clark-code:kimi_k27_code", label: "Kimi K2.7 Code", hint: "Fast agentic coding" },
+] as const;
+
+/** Reasoning-effort choices ("" lets the model's server default apply). */
+export const REASONING_EFFORTS = [
+  { id: "", label: "Auto" },
+  { id: "low", label: "Low" },
+  { id: "medium", label: "Medium" },
+  { id: "high", label: "High" },
+  { id: "xhigh", label: "Max" },
+] as const;
+
+/** Short display label for the current model id. */
+export function modelLabel(id: string): string {
+  return CODING_MODELS.find((m) => m.id === id)?.label ?? id;
+}
 
 export function loadLocalSettings(): LocalAgentSettings {
   try {
     const raw = localStorage.getItem(KEY);
+    const devCwd = import.meta.env.DEV ? env.VITE_CLARK_DEV_CWD?.trim() || "" : "";
     const merged = raw
-      ? { ...DEFAULT_LOCAL_SETTINGS, ...(JSON.parse(raw) as Partial<LocalAgentSettings>) }
-      : { ...DEFAULT_LOCAL_SETTINGS };
+      ? {
+          ...DEFAULT_LOCAL_SETTINGS,
+          ...(JSON.parse(raw) as Partial<LocalAgentSettings>),
+          ...(devCwd ? { cwd: devCwd } : {}),
+        }
+      : { ...DEFAULT_LOCAL_SETTINGS, cwd: devCwd };
     return migrate(merged);
   } catch {
     return { ...DEFAULT_LOCAL_SETTINGS };
@@ -95,6 +124,8 @@ export function localConnectConfig(
     auth_token: s.apiKey.trim() || undefined,
     extra: {
       model: s.model.trim() || "clark-code",
+      // "" = let the model's server-side default apply.
+      ...(s.reasoningEffort.trim() ? { reasoning_effort: s.reasoningEffort.trim() } : {}),
       // Per-project shell-command policy the engine consults to skip / block the gate.
       command_allowlist: loadAllowlist(project),
       command_denylist: loadDenylist(project),

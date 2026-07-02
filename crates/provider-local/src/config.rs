@@ -45,6 +45,9 @@ pub struct LocalConfig {
     pub headers: HashMap<String, String>,
     /// Sampling temperature, if pinned.
     pub temperature: Option<f32>,
+    /// Reasoning-effort override sent with each coding request ("low" …
+    /// "xhigh"). `None` → the model's server-side default.
+    pub reasoning_effort: Option<String>,
     /// Hard cap on model<->tool iterations per turn.
     pub max_iterations: u32,
     /// Default permission mode per (mutating) tool name.
@@ -150,6 +153,7 @@ impl LocalConfig {
             .get("temperature")
             .and_then(Value::as_f64)
             .map(|t| t as f32);
+        let reasoning_effort = str_field(extra, "reasoning_effort");
         let max_iterations = extra
             .get("max_iterations")
             .and_then(Value::as_u64)
@@ -230,6 +234,7 @@ impl LocalConfig {
             api_key,
             headers: config.headers.clone(),
             temperature,
+            reasoning_effort,
             max_iterations,
             permissions,
             command_allowlist: str_vec(extra, "command_allowlist"),

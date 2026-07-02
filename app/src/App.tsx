@@ -15,6 +15,7 @@ import { SshSettings } from "./surfaces/SshSettings";
 import { Settings } from "./surfaces/Settings";
 import { CommandPalette } from "./surfaces/CommandPalette";
 import { SignInScreen } from "./surfaces/SignInScreen";
+import { MobileRemoteAgent } from "./surfaces/MobileRemoteAgent";
 
 export default function App() {
   const init = useSessionStore((s) => s.init);
@@ -47,6 +48,7 @@ export default function App() {
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-bg text-ink">
+      <MobileRemoteAgent />
       <Sidebar />
       <div className="flex min-w-0 flex-1 flex-col">
         <TopBar dark={dark} onToggleTheme={toggle} />

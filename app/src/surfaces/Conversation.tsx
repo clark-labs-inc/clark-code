@@ -87,8 +87,15 @@ const DANGER_BANNER =
   "rounded-lg border border-danger/40 bg-danger/8 px-3.5 py-2.5 text-sm text-danger";
 
 export function Conversation() {
-  const snapshot = useSessionStore((s) => s.snapshot);
+  // While peeking at another conversation mid-run, render its restored
+  // transcript; the live snapshot keeps streaming (and saving) underneath.
+  const snapshot = useSessionStore((s) => (s.peek ? s.peek.snapshot : s.snapshot));
+  const peeking = useSessionStore((s) => s.peek !== null);
   const session = useSessionStore((s) => s.session);
+  const liveTitle = useSessionStore((s) =>
+    s.peek && s.session ? s.conversations.find((c) => c.id === s.session!.id)?.title : undefined,
+  );
+  const openConversation = useSessionStore((s) => s.openConversation);
   const error = useSessionStore((s) => s.error);
   const scrollRef = useRef<HTMLDivElement>(null);
   // Pin to the bottom only when the user is already there — never yank them up
@@ -144,6 +151,20 @@ export function Conversation() {
   return (
     <div ref={scrollRef} onScroll={onScroll} className="flex-1 overflow-y-auto">
       <div className="mx-auto flex max-w-3xl flex-col gap-3.5 px-5 py-6">
+        {peeking && (
+          <div className="flex items-center gap-2.5 rounded-lg border border-border-subtle bg-bg-elevated/70 px-3.5 py-2 text-xs text-ink-muted">
+            <Dots />
+            <span className="min-w-0 flex-1 truncate">
+              Clark is still working{liveTitle ? <> in <span className="font-medium text-ink-secondary">“{liveTitle}”</span></> : " in another chat"} — you're viewing history.
+            </span>
+            <button
+              onClick={() => session && void openConversation(session.id)}
+              className="shrink-0 rounded-md px-2 py-1 font-medium text-ink-secondary transition hover:bg-bg-hover hover:text-ink"
+            >
+              Return
+            </button>
+          </div>
+        )}
         {visible.length === 0 && !showPending && (
           <p className="py-10 text-center text-sm text-ink-faint">
             Ask Clark anything — file work, web research, and computer use show up here as it works.

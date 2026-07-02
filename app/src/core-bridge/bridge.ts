@@ -33,6 +33,10 @@ export interface SessionOptions {
 export interface CoreBridge {
   listProviders(): Promise<ProviderInfo[]>;
   connect(providerId: string, config: ConnectConfig): Promise<void>;
+  /** Re-run connect on the EXISTING provider instance (keeps the live session +
+   *  transcript) — used to hot-swap model / reasoning effort mid-conversation.
+   *  Native bridge only. */
+  reconfigure?(config: ConnectConfig): Promise<void>;
   newSession(providerId: string, options: SessionOptions): Promise<Session>;
   /** Resume a prior session by id (capability-gated: `load_session`). */
   loadSession(providerId: string, id: string): Promise<Session>;

@@ -19,7 +19,7 @@
 //
 // Swapping in a different identity provider only touches this file.
 
-export type AuthMethod = "google";
+export type AuthMethod = "google" | "local";
 
 export interface AuthUser {
   name: string;
@@ -49,7 +49,7 @@ const config = {
   // Local dev gateway fallback (override with VITE_CLARK_ENDPOINT); the token is
   // never defaulted/committed.
   clarkEndpoint: env.VITE_CLARK_ENDPOINT ?? (import.meta.env.DEV ? "ws://localhost:8400/ws" : ""),
-  clarkToken: env.VITE_CLARK_TOKEN,
+  devAuth: import.meta.env.DEV && env.VITE_CLARK_DEV_AUTH === "1",
 };
 
 function isTauri(): boolean {
@@ -75,8 +75,20 @@ export function isGoogleConfigured(): boolean {
 
 export function loadAuthSession(): AuthSession | null {
   try {
+    const devToken = import.meta.env.DEV ? env.VITE_CLARK_TOKEN : undefined;
+    if (config.devAuth && config.clarkEndpoint && devToken) {
+      return persist({
+        user: {
+          name: "Local Dev",
+          email: "local-playwright@clark.local",
+          method: "local",
+        },
+        clark: { endpoint: config.clarkEndpoint, token: devToken },
+      });
+    }
     const raw = localStorage.getItem(SESSION_KEY);
-    return raw ? (JSON.parse(raw) as AuthSession) : null;
+    if (raw) return JSON.parse(raw) as AuthSession;
+    return null;
   } catch {
     return null;
   }
