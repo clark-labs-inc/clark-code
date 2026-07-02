@@ -97,6 +97,20 @@ jobs:
           # with it and emits the .sig that goes into latest.json.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # Native (Tauri) Google sign-in — the "Desktop app" OAuth client.
+          # `beforeBuildCommand` (pnpm --dir ../app build) runs as a child of
+          # this step, and Vite bakes VITE_-prefixed env vars into the
+          # frontend bundle at build time. Without these, every packaged
+          # release showed "Set VITE_GOOGLE_DESKTOP_CLIENT_ID to enable
+          # Google sign-in" instead of a working button — real customers
+          # were completely locked out (Google is the only sign-in method).
+          # The secret is a non-confidential installed-app secret per
+          # Google's own OAuth-for-native-apps model (it ships inside the
+          # distributed binary either way); the Clark backend separately
+          # trusts this exact client id's audience via its own
+          # GOOGLE_DESKTOP_CLIENT_ID server config.
+          VITE_GOOGLE_DESKTOP_CLIENT_ID: ${{ secrets.VITE_GOOGLE_DESKTOP_CLIENT_ID }}
+          VITE_GOOGLE_DESKTOP_CLIENT_SECRET: ${{ secrets.VITE_GOOGLE_DESKTOP_CLIENT_SECRET }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "Clark Code ${{ github.ref_name }}"
