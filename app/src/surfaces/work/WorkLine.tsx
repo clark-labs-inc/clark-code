@@ -208,7 +208,13 @@ function WorkLineImpl({ call, active }: { call: ToolCall; active: boolean }) {
       initial={reduce ? false : { opacity: 0, y: 4 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.2, ease: [0.4, 0, 0.2, 1] }}
-      className={cn("transition-colors", active && "bg-bg-hover/40")}
+      className={cn(
+        "transition-colors",
+        active && "bg-bg-hover/40",
+        // Research is a superpower moment, not a plain file line: give it a subtle
+        // callout treatment (left accent + tint) so it stands out in the work log.
+        call.kind === "research" && "my-0.5 rounded-lg border-l-2 border-ink/25 bg-bg-secondary/50",
+      )}
     >
       <button
         type="button"

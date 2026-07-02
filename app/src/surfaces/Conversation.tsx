@@ -9,6 +9,7 @@ import { ArtifactCard } from "./work/ArtifactCard";
 import { PermissionGate } from "./PermissionGate";
 import { UpgradePrompt } from "./UpgradePrompt";
 import { UndoBar } from "./UndoBar";
+import { FanOutPanel } from "./FanOutPanel";
 import type { TimelineItem, ToolCall } from "../core-bridge/types";
 
 /** A row of pulsing dots — the model is generating. Memoized so its animation
@@ -217,6 +218,8 @@ export function Conversation() {
           }
           return null;
         })}
+
+        <FanOutPanel />
 
         {undoSha && <UndoBar key={undoSha} sha={undoSha} />}
 

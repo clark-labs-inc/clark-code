@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { motion } from "motion/react";
-import { ArrowRight, FolderOpen, Folder, Server, Settings2 } from "lucide-react";
+import { ArrowRight, FolderOpen, Folder, Server, Settings2, Telescope, Globe, Network } from "lucide-react";
 import { ClarkMark } from "./ClarkMark";
 import { useSessionStore } from "../store/sessionStore";
 import { localSettingsReady, projectName, type LocalAgentSettings } from "../lib/localAgent";
@@ -18,6 +18,29 @@ const LOCAL_SAMPLES = [
   "Summarize what this project does from its README and top-level files.",
   "Find every TODO in the codebase and list them by file.",
   "Add a unit test for the function in the file I'm about to mention.",
+];
+
+/** The three things Clark Code does that a plain editor can't. Each launches a
+ *  demo task so the differentiator is discovered, not buried in the work log. */
+const SUPERPOWERS: { icon: typeof Telescope; title: string; blurb: string; prompt: string }[] = [
+  {
+    icon: Telescope,
+    title: "Research is built in",
+    blurb: "It looks up errors and the best tools, live, then keeps coding with current answers.",
+    prompt: "Research the best way to add authentication to this project, then implement it.",
+  },
+  {
+    icon: Globe,
+    title: "Tests in a real browser",
+    blurb: "It opens your site, clicks through it, and checks your code against the real thing.",
+    prompt: "Build a login page, open it in a browser, and fix anything that breaks.",
+  },
+  {
+    icon: Network,
+    title: "Fans out to many agents",
+    blurb: "It runs big jobs in parallel across cloud agents, then merges the results.",
+    prompt: "Find every file in this project and give me a one-line summary of each.",
+  },
 ];
 
 export function StartCard() {
@@ -120,6 +143,34 @@ export function StartCard() {
         {error && <p className="mt-2 text-center text-xs text-danger">{error}</p>}
 
         <div className="mt-6">
+          <p className="mb-2 px-1 text-[11px] font-medium uppercase tracking-wider text-ink-faint">
+            What Clark Code can do
+          </p>
+          <div className="flex flex-col gap-0.5">
+            {SUPERPOWERS.map((sp) => {
+              const Icon = sp.icon;
+              return (
+                <button
+                  key={sp.title}
+                  onClick={() => void startWith(sp.prompt)}
+                  disabled={connecting || !!blocked}
+                  className="group flex items-start gap-2.5 rounded-lg px-2 py-2 text-left transition hover:bg-bg-hover disabled:opacity-50"
+                >
+                  <span className="mt-px grid size-7 shrink-0 place-items-center rounded-lg bg-bg-sunken text-ink-secondary transition group-hover:text-ink">
+                    <Icon className="size-4" />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm font-medium text-ink">{sp.title}</span>
+                    <span className="block text-xs leading-snug text-ink-muted">{sp.blurb}</span>
+                  </span>
+                  <ArrowRight className="mt-1 size-3.5 shrink-0 text-ink-faint opacity-0 transition group-hover:translate-x-0.5 group-hover:opacity-100" />
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="mt-5">
           <p className="mb-1 px-1 text-[11px] font-medium uppercase tracking-wider text-ink-faint">
             Try
           </p>

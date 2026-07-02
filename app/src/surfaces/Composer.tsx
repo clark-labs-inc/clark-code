@@ -4,7 +4,7 @@ import {
 import { AnimatePresence, motion } from "motion/react";
 import {
   ArrowUp, Square, Plus, X, FileText, CornerDownRight, Pencil, Slash,
-  Shield, ShieldCheck, ShieldAlert, ChevronDown, Check,
+  Shield, ShieldCheck, ShieldAlert, ChevronDown, Check, Telescope, Globe, Network,
 } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
 import type { QueuedMessage } from "../store/sessionStore";
@@ -16,6 +16,16 @@ import { projectFiles } from "../lib/projectFiles";
 import { slashCommands, type SlashCommand } from "../lib/slashCommands";
 import { fuzzyFilter, fuzzyFilterFiles } from "../lib/fuzzy";
 import { cn } from "../lib/cn";
+
+/** Quick-insert directives that nudge a Clark Code superpower on. They prepend a
+ *  short instruction to the message — discovery of research / browser-test /
+ *  fan-out at the point of typing, without a settings screen. Shown only on an
+ *  empty composer so they stay out of the way once the user starts writing. */
+const CAPABILITIES: { label: string; icon: typeof Telescope; insert: string }[] = [
+  { label: "Research", icon: Telescope, insert: "Research the best approach first, then " },
+  { label: "Browser test", icon: Globe, insert: "When it's built, open it in a browser and verify it works. " },
+  { label: "Parallel agents", icon: Network, insert: "Fan this out across many agents to run in parallel. " },
+];
 
 /** What the user is mid-typing at the caret: an `@file` mention (anywhere) or a
  *  `/command` (only at the very start of the message). */
@@ -644,6 +654,33 @@ export function Composer() {
             e.target.value = "";
           }}
         />
+
+        {session && !peeking && !busy && !value.trim() && attachments.length === 0 && (
+          <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
+            {CAPABILITIES.map((c) => {
+              const Icon = c.icon;
+              return (
+                <button
+                  key={c.label}
+                  type="button"
+                  onClick={() => {
+                    setValue((v) => c.insert + v);
+                    requestAnimationFrame(() => {
+                      const ta = taRef.current;
+                      if (ta) {
+                        ta.focus();
+                        ta.setSelectionRange(ta.value.length, ta.value.length);
+                      }
+                    });
+                  }}
+                  className="flex items-center gap-1.5 rounded-full border border-border-subtle px-2.5 py-1 text-xs font-medium text-ink-secondary transition hover:bg-bg-hover hover:text-ink"
+                >
+                  <Icon className="size-3" /> {c.label}
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         <textarea
           ref={taRef}
