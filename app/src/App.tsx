@@ -63,6 +63,7 @@ export default function App() {
     },
     { key: ".", mod: true, allowInInput: true, run: () => void useSessionStore.getState().cancelActive() },
     { key: ",", mod: true, allowInInput: true, run: () => useSessionStore.getState().setSettingsOpen(true) },
+    { key: "Tab", shift: true, allowInInput: true, run: () => useSessionStore.getState().cyclePermissionMode() },
   ]);
 
   if (!auth)

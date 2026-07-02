@@ -28,7 +28,10 @@ pub fn session_workspace(session_id: &str) -> Option<PathBuf> {
 /// True for a path that names a Markdown document.
 pub fn is_markdown(path: &Path) -> bool {
     matches!(
-        path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).as_deref(),
+        path.extension()
+            .and_then(|e| e.to_str())
+            .map(str::to_ascii_lowercase)
+            .as_deref(),
         Some("md") | Some("markdown")
     )
 }

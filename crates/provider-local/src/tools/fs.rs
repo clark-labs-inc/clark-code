@@ -454,6 +454,10 @@ mod tests {
             executor: Arc::new(crate::exec::LocalExecutor),
             reads: Arc::new(Mutex::new(ReadTracker::default())),
             cancel: CancellationToken::new(),
+            background: Arc::new(crate::background::BackgroundTasks::default()),
+            session: Arc::new(tokio::sync::Mutex::new(
+                crate::loop_state::SessionState::default(),
+            )),
         }
     }
 

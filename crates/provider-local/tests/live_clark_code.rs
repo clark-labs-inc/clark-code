@@ -218,6 +218,7 @@ fn event_name(ev: &AgentEvent) -> &'static str {
         AgentEvent::PermissionRequest { .. } => "PermissionRequest",
         AgentEvent::Artifact { .. } => "Artifact",
         AgentEvent::Surface { .. } => "Surface",
+        AgentEvent::FanOut { .. } => "FanOut",
         AgentEvent::ModeChanged { .. } => "ModeChanged",
         AgentEvent::RunFinished { .. } => "RunFinished",
         AgentEvent::Error { .. } => "Error",

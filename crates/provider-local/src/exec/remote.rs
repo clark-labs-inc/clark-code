@@ -179,6 +179,10 @@ fn route(conn: &Conn, text: &str) {
 
 #[async_trait]
 impl Executor for RemoteExecutor {
+    fn is_local(&self) -> bool {
+        false
+    }
+
     async fn read(&self, path: &Path) -> ExecResult<Vec<u8>> {
         let v = self
             .conn

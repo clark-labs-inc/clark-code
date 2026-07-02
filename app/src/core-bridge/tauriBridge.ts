@@ -49,6 +49,14 @@ export class TauriBridge implements CoreBridge {
     return invoke("respond", { sessionId, response });
   }
 
+  setMode(sessionId: string, mode: string): Promise<void> {
+    return invoke("set_mode", { sessionId, mode });
+  }
+
+  setOutputStyle(sessionId: string, style: string): Promise<void> {
+    return invoke("set_output_style", { sessionId, style });
+  }
+
   subscribe(handler: (snapshot: Snapshot) => void): () => void {
     const unlisten = listen<Snapshot>("snapshot", (event) => {
       handler(event.payload);

@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { motion, useReducedMotion } from "motion/react";
 import {
   Globe, Film, FileText, Image as ImageIcon, Presentation, ExternalLink, FileBox,
 } from "lucide-react";
 import type { Artifact, ArtifactKind } from "../../core-bridge/types";
 import { MarkdownDoc, isMarkdownDoc } from "./MarkdownDoc";
+import { isLocalDocUri, readImageDataUrl } from "../../lib/docs";
 
 const KIND_ICON: Record<ArtifactKind, typeof Globe> = {
   website: Globe, video: Film, media: Film, image: ImageIcon,
@@ -20,6 +21,40 @@ const KIND_LABEL: Record<ArtifactKind, string> = {
 
 function isVideo(a: Artifact): boolean {
   return a.kind === "video" || (a.kind === "media" && /video|\.(mp4|webm|mov)/i.test(a.uri ?? a.mime_type ?? ""));
+}
+
+/** Renders an artifact image `uri`, which may be a remote `http(s)` URL
+ *  (Clark cloud — usable directly) or a local absolute path (a local-agent
+ *  screenshot — no `assetProtocol` scope is configured, so it's fetched as a
+ *  `data:` URL on demand, mirroring `MarkdownDoc`'s async-fetch idiom for
+ *  `read_doc_text`). */
+function LocalImage({
+  uri, alt, className, onError,
+}: {
+  uri: string; alt: string; className: string; onError: () => void;
+}) {
+  const [src, setSrc] = useState<string | null>(isLocalDocUri(uri) ? null : uri);
+
+  useEffect(() => {
+    if (!isLocalDocUri(uri)) {
+      setSrc(uri);
+      return;
+    }
+    let alive = true;
+    setSrc(null);
+    readImageDataUrl(uri).then((data) => {
+      if (!alive) return;
+      if (data == null) onError();
+      else setSrc(data);
+    });
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uri]);
+
+  if (!src) return null;
+  return <img src={src} alt={alt} className={className} onError={onError} />;
 }
 
 /** Renders a produced artifact inline in the conversation. */
@@ -42,8 +77,8 @@ export function ArtifactCard({ artifact }: { artifact: Artifact }) {
     if (broke) return null;
     if (artifact.kind === "image" && uri) {
       return (
-        <img
-          src={uri}
+        <LocalImage
+          uri={uri}
           alt={artifact.title}
           className="max-h-80 w-full object-contain bg-bg-sunken"
           onError={() => setBroke(true)}

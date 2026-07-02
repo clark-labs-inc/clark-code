@@ -43,6 +43,12 @@ export interface CoreBridge {
   prompt(sessionId: string, blocks: ContentBlock[], attachments?: Upload[]): Promise<void>;
   cancel(sessionId: string, runId: string): Promise<void>;
   respond(sessionId: string, response: ClientResponse): Promise<void>;
+  /** Best-effort: ask the provider to switch the session's named mode (e.g.
+   *  "plan"). Not every bridge/provider supports this — callers should treat
+   *  a rejected promise as a silent no-op. */
+  setMode?(sessionId: string, mode: string): Promise<void>;
+  /** Best-effort: switch the session's output style (see `lib/outputStyle.ts`). */
+  setOutputStyle?(sessionId: string, style: string): Promise<void>;
   /** Subscribe to snapshot updates. Returns an unsubscribe fn. */
   subscribe(handler: (snapshot: Snapshot) => void): () => void;
   /**

@@ -241,3 +241,65 @@ async fn full_turn_with_permission_round_trip() {
     let run = snap.runs.values().next().expect("a run");
     assert_eq!(run.status, RunStatus::Done);
 }
+
+#[tokio::test]
+async fn set_mode_sends_session_set_mode_request() {
+    let (client, server) = tokio::io::duplex(64 * 1024);
+    let (cr, cw) = tokio::io::split(client);
+
+    tokio::spawn(async move {
+        let (r, mut w) = tokio::io::split(server);
+        let mut lines = BufReader::new(r).lines();
+
+        let init = read_msg(&mut lines).await;
+        write_msg(
+            &mut w,
+            &RpcMessage::response_ok(
+                init.id.unwrap(),
+                json!({ "protocolVersion": 1, "agentCapabilities": {} }),
+            ),
+        )
+        .await;
+
+        let sn = read_msg(&mut lines).await;
+        write_msg(
+            &mut w,
+            &RpcMessage::response_ok(sn.id.unwrap(), json!({ "sessionId": "sess-1" })),
+        )
+        .await;
+
+        let sm = read_msg(&mut lines).await;
+        assert_eq!(sm.method.as_deref(), Some("session/set_mode"));
+        assert_eq!(
+            sm.params,
+            Some(json!({ "sessionId": "sess-1", "modeId": "plan" }))
+        );
+        write_msg(&mut w, &RpcMessage::response_ok(sm.id.unwrap(), json!({}))).await;
+    });
+
+    let mut provider = AcpProvider::new();
+    provider
+        .setup(Box::new(cr), Box::new(cw))
+        .await
+        .expect("setup/initialize");
+
+    let session = provider
+        .new_session(SessionOptions::default())
+        .await
+        .expect("session/new");
+
+    provider
+        .set_mode(&session.id, "plan".to_string())
+        .await
+        .expect("set_mode never errors");
+}
+
+#[tokio::test]
+async fn set_mode_before_connect_is_a_harmless_no_op() {
+    let mut provider = AcpProvider::new();
+    let session = agent_core::ids::SessionId::new("s1");
+    provider
+        .set_mode(&session, "plan".to_string())
+        .await
+        .expect("set_mode never errors even when not connected");
+}

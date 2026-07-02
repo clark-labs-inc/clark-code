@@ -1,8 +1,12 @@
-//! `grep` — regex search across project files. Uses `walkdir` to recurse and the
-//! `regex` crate for matching; skips the same noisy directories as `glob`.
+//! `grep` — regex search across project files. Uses `walkdir` (via the executor)
+//! to recurse and the `grep-searcher`/`grep-regex` crates — the same matching
+//! library ripgrep itself is built on — for matching; skips the same noisy
+//! directories as `glob`.
 
 use agent_core::domain::ToolKind;
 use async_trait::async_trait;
+use grep_regex::RegexMatcher;
+use grep_searcher::{sinks, BinaryDetection, SearcherBuilder};
 use serde_json::{json, Value};
 
 use super::{arg_str, arg_str_opt, ToolCtx, ToolExecutor, ToolOutcome};
@@ -10,6 +14,9 @@ use super::{arg_str, arg_str_opt, ToolCtx, ToolExecutor, ToolOutcome};
 const MAX_MATCHES: usize = 200;
 /// Skip files larger than this when scanning (likely binaries/assets).
 const MAX_FILE_BYTES: u64 = 2_000_000;
+/// How many leading bytes to sniff for a NUL byte (ripgrep's own binary-file
+/// heuristic) before deciding a file is binary and skipping it whole.
+const BINARY_SNIFF_BYTES: usize = 8_000;
 
 pub struct Grep;
 
@@ -41,10 +48,14 @@ impl ToolExecutor for Grep {
             Ok(p) => p,
             Err(e) => return ToolOutcome::error(e),
         };
-        let re = match regex::Regex::new(&pattern) {
-            Ok(re) => re,
+        let matcher = match RegexMatcher::new(&pattern) {
+            Ok(m) => m,
             Err(e) => return ToolOutcome::error(format!("invalid regex `{pattern}`: {e}")),
         };
+        let mut searcher = SearcherBuilder::new()
+            .line_number(true)
+            .binary_detection(BinaryDetection::quit(0))
+            .build();
         let scope = arg_str_opt(&args, "path").unwrap_or_else(|| ".".to_string());
         let base = match ctx.sandbox.resolve_existing(&scope) {
             Ok(p) => p,
@@ -87,39 +98,51 @@ impl ToolExecutor for Grep {
             if entry.len > MAX_FILE_BYTES {
                 continue;
             }
-            let Ok(text) = ctx
-                .executor
-                .read(path)
-                .await
-                .and_then(|b| String::from_utf8(b).map_err(|_| "non-utf8".to_string()))
-            else {
-                continue; // skip non-UTF-8 / binary / unreadable
+            let Ok(bytes) = ctx.executor.read(path).await else {
+                continue; // unreadable
             };
+            // Ripgrep's own binary-file heuristic: a NUL byte in the first few
+            // KB means binary — skip the whole file rather than searching it.
+            // This is the authoritative skip decision; `binary_detection`
+            // above is defense in depth for a NUL byte appearing later in a
+            // file that passed this upfront sniff.
+            if bytes[..bytes.len().min(BINARY_SNIFF_BYTES)].contains(&0) {
+                continue;
+            }
+
             let mut file_count = 0usize;
-            for (i, line) in text.lines().enumerate() {
-                if re.is_match(line) {
+            let mut file_lines: Vec<String> = Vec::new();
+            let search_result = searcher.search_slice(
+                &matcher,
+                &bytes,
+                sinks::Lossy(|line_number: u64, line: &str| {
                     file_count += 1;
                     total += 1;
                     if mode == "content" {
-                        content_lines.push(format!(
+                        file_lines.push(format!(
                             "{}:{}: {}",
                             rel(path),
-                            i + 1,
+                            line_number,
                             line.trim_end().chars().take(400).collect::<String>()
                         ));
                     }
-                    if total >= MAX_MATCHES {
-                        truncated = true;
-                        if file_count > 0 && !files_with_matches.contains(&rel(path)) {
-                            files_with_matches.push(rel(path));
-                        }
-                        break 'walk;
-                    }
-                }
+                    // `false` stops the search for THIS file only; the outer
+                    // 'walk loop is broken separately below once we know
+                    // whether this file pushed us over MAX_MATCHES.
+                    Ok(total < MAX_MATCHES)
+                }),
+            );
+            if search_result.is_err() {
+                continue; // treat a stream error like today's "skip unreadable"
             }
+            content_lines.extend(file_lines);
             if file_count > 0 {
                 files_with_matches.push(rel(path));
                 counts.push((rel(path), file_count));
+            }
+            if total >= MAX_MATCHES {
+                truncated = true;
+                break 'walk;
             }
         }
 
@@ -156,6 +179,10 @@ mod tests {
             reads: Arc::new(Mutex::new(ReadTracker::default())),
             cancel: CancellationToken::new(),
             executor: Arc::new(crate::exec::LocalExecutor),
+            background: Arc::new(crate::background::BackgroundTasks::default()),
+            session: Arc::new(tokio::sync::Mutex::new(
+                crate::loop_state::SessionState::default(),
+            )),
         }
     }
 
@@ -201,5 +228,55 @@ mod tests {
             .await;
         assert!(out.content.contains("a.rs"));
         assert!(!out.content.contains("a.md"));
+    }
+
+    #[tokio::test]
+    async fn skips_binary_files() {
+        let dir = tempfile::tempdir().unwrap();
+        // A NUL byte in the first few KB marks this as binary — ripgrep's own
+        // heuristic — even though "needle" appears in it as plain bytes.
+        let mut binary = b"needle".to_vec();
+        binary.push(0);
+        binary.extend_from_slice(b"more needle bytes");
+        std::fs::write(dir.path().join("blob.bin"), &binary).unwrap();
+        std::fs::write(dir.path().join("text.txt"), "needle").unwrap();
+        let out = Grep
+            .invoke(json!({"pattern": "needle"}), &ctx(dir.path()))
+            .await;
+        assert!(out.content.contains("text.txt"));
+        assert!(!out.content.contains("blob.bin"));
+    }
+
+    #[tokio::test]
+    async fn lossily_decodes_non_utf8_matches_instead_of_skipping_the_file() {
+        let dir = tempfile::tempdir().unwrap();
+        // A stray invalid UTF-8 byte (no NUL) inside an otherwise-text file:
+        // today's strict `String::from_utf8` would skip this file entirely,
+        // losing the "needle" match. The lossy decoder should still find it,
+        // with the bad byte replaced rather than causing an error.
+        let mut text = b"needle before ".to_vec();
+        text.push(0xFF); // invalid UTF-8 continuation byte, not a NUL
+        text.extend_from_slice(b" after\n");
+        std::fs::write(dir.path().join("mostly_text.rs"), &text).unwrap();
+        let out = Grep
+            .invoke(json!({"pattern": "needle"}), &ctx(dir.path()))
+            .await;
+        assert!(out.content.contains("mostly_text.rs:1:"));
+        assert!(out.content.contains("needle before"));
+    }
+
+    #[tokio::test]
+    async fn count_mode_counts_every_match_not_just_first_per_file() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.txt"), "needle\nneedle\nneedle\n").unwrap();
+        std::fs::write(dir.path().join("b.txt"), "needle\n").unwrap();
+        let out = Grep
+            .invoke(
+                json!({"pattern": "needle", "output_mode": "count"}),
+                &ctx(dir.path()),
+            )
+            .await;
+        assert!(out.content.contains("a.txt: 3"));
+        assert!(out.content.contains("b.txt: 1"));
     }
 }

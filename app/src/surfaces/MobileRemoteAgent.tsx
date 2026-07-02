@@ -11,6 +11,7 @@ import {
 import { loadSshHosts, hostLabel, hostReady } from "../lib/sshHosts";
 import { pickAllowOption } from "../lib/permissions";
 import { notify } from "../lib/notify";
+import { isAuthExpiredError, refreshAuthSession } from "../lib/auth";
 
 const HOST_ID_KEY = "clark-desktop:code-remote-host-id";
 const POLL_INTERVAL_MS = 4_000;
@@ -254,7 +255,17 @@ export function MobileRemoteAgent() {
           if (stopped) break;
           await runCommand(creds, hostId, command);
         }
-      } catch {
+      } catch (error) {
+        if (isAuthExpiredError(error)) {
+          const currentAuth = useSessionStore.getState().auth;
+          const refreshed = currentAuth ? await refreshAuthSession(currentAuth) : null;
+          if (refreshed) {
+            useSessionStore.setState({ auth: refreshed });
+          } else {
+            useSessionStore.getState().signOutAuth();
+            void notify("Clark sign-in expired", "Sign in again to keep Clark Code remote control online.");
+          }
+        }
         /* Remote control is a background affordance; normal desktop use continues. */
       } finally {
         busyRef.current = false;

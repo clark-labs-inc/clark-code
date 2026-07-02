@@ -128,4 +128,19 @@ pub trait Provider: Send + Sync {
 
     /// Resolve a host-side request the agent made.
     async fn respond(&mut self, session: &SessionId, response: ClientResponse) -> Result<()>;
+
+    /// Switch the session's named operating mode (e.g. `"plan"`). Best-effort:
+    /// providers that don't support server-side modes leave this a no-op.
+    async fn set_mode(&mut self, _session: &SessionId, _mode: String) -> Result<()> {
+        Ok(())
+    }
+
+    /// Switch the session's output style/persona (e.g. `"terse"`). A separate
+    /// axis from `set_mode` — kept as its own method rather than overloading
+    /// mode, since plan-mode (a boolean-ish gate) and output style (a
+    /// prompt-tone choice) are independent and shouldn't be conflated.
+    /// Best-effort: providers with no notion of output style leave this a no-op.
+    async fn set_output_style(&mut self, _session: &SessionId, _style: String) -> Result<()> {
+        Ok(())
+    }
 }

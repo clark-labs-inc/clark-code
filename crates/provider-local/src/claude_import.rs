@@ -14,38 +14,14 @@
 //! progressive-disclosure approach Claude Code and Codex use.
 
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::path::Path;
 
 use serde::Serialize;
 use serde_json::Value;
-use tokio_util::sync::CancellationToken;
 
 use crate::exec::Executor;
+use crate::markdown_frontmatter::{fm_field, frontmatter, read_json, read_text, resolve_home};
 use crate::mcp::McpServerConfig;
-
-async fn read_text(exec: &dyn Executor, path: &Path) -> Option<String> {
-    String::from_utf8(exec.read(path).await.ok()?).ok()
-}
-
-async fn read_json(exec: &dyn Executor, path: &Path) -> Option<Value> {
-    serde_json::from_str(&read_text(exec, path).await?).ok()
-}
-
-/// `$HOME` on the executor's target machine (local or remote).
-async fn resolve_home(exec: &dyn Executor, cwd: &Path) -> Option<PathBuf> {
-    let out = exec
-        .exec(
-            "printf %s \"$HOME\"",
-            cwd,
-            Duration::from_secs(10),
-            &CancellationToken::new(),
-        )
-        .await
-        .ok()?;
-    let home = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    (!home.is_empty()).then(|| PathBuf::from(home))
-}
 
 // ---- MCP servers -----------------------------------------------------------
 
@@ -148,25 +124,6 @@ pub struct ClaudeSkill {
     pub path: String,
     /// `project` or `personal`.
     pub scope: &'static str,
-}
-
-/// The YAML-ish frontmatter between the leading `---` fences.
-fn frontmatter(text: &str) -> Option<&str> {
-    let rest = text.trim_start().strip_prefix("---")?;
-    let end = rest.find("\n---")?;
-    Some(&rest[..end])
-}
-
-fn fm_field(fm: &str, key: &str) -> Option<String> {
-    for line in fm.lines() {
-        if let Some(v) = line.trim().strip_prefix(&format!("{key}:")) {
-            let v = v.trim().trim_matches(['"', '\'']).trim();
-            if !v.is_empty() {
-                return Some(v.to_string());
-            }
-        }
-    }
-    None
 }
 
 fn parse_skill(text: &str, skill_md: &Path, scope: &'static str) -> Option<ClaudeSkill> {

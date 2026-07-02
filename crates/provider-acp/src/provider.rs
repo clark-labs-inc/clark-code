@@ -368,4 +368,21 @@ impl Provider for AcpProvider {
             }
         }
     }
+
+    /// Best-effort: ask the remote agent to switch its own session mode (e.g.
+    /// Plan mode), when it supports `session/set_mode`. No confirmed shipping
+    /// ACP agent advertises modes yet, so any failure (unsupported method, no
+    /// connection) is swallowed rather than surfaced — this must never block
+    /// or error the UI.
+    async fn set_mode(&mut self, session: &SessionId, mode: String) -> Result<()> {
+        if let Ok(peer) = self.peer() {
+            let _ = peer
+                .request(
+                    rpc::SESSION_SET_MODE,
+                    json!({ "sessionId": session.as_str(), "modeId": mode }),
+                )
+                .await;
+        }
+        Ok(())
+    }
 }

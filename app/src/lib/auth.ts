@@ -31,6 +31,11 @@ export interface AuthUser {
 export interface AuthSession {
   user: AuthUser;
   clark: { endpoint: string; token?: string };
+  google?: {
+    accessToken?: string;
+    refreshToken?: string;
+    expiresAt?: number;
+  };
 }
 
 const SESSION_KEY = "clark.auth.session";
@@ -121,6 +126,12 @@ interface ExchangeResult {
   image?: string;
 }
 
+interface GoogleTokenState {
+  accessToken?: string;
+  refreshToken?: string;
+  expiresAt?: number;
+}
+
 function userFrom(p: { email?: string; name?: string; image?: string }): AuthUser {
   return {
     name: p.name || p.email || "Google user",
@@ -128,6 +139,15 @@ function userFrom(p: { email?: string; name?: string; image?: string }): AuthUse
     avatar: p.image || undefined,
     method: "google",
   };
+}
+
+async function exchangeGoogleIdToken(idToken: string): Promise<{ user: AuthUser; token: string }> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  const out = await invoke<ExchangeResult>("clark_exchange_google_idtoken", {
+    authOrigin: config.clarkAuthOrigin,
+    idToken,
+  });
+  return { user: userFrom(out), token: out.token };
 }
 
 // Branded page the loopback server returns after Google redirects back. Two
@@ -201,14 +221,15 @@ async function focusAppWindow(): Promise<void> {
 }
 
 /** Native: plugin OAuth → Google ID token → host exchanges for a Clark JWT. */
-async function googleSignInNative(): Promise<{ user: AuthUser; token: string }> {
+async function googleSignInNative(): Promise<{
+  user: AuthUser;
+  token: string;
+  google?: GoogleTokenState;
+}> {
   if (!config.googleDesktopClientId) {
     throw new Error("Set VITE_GOOGLE_DESKTOP_CLIENT_ID to enable Google sign-in.");
   }
-  const [{ signIn }, { invoke }] = await Promise.all([
-    import("@choochmeque/tauri-plugin-google-auth-api"),
-    import("@tauri-apps/api/core"),
-  ]);
+  const { signIn } = await import("@choochmeque/tauri-plugin-google-auth-api");
   const res = await signIn({
     clientId: config.googleDesktopClientId,
     clientSecret: config.googleDesktopClientSecret,
@@ -223,16 +244,24 @@ async function googleSignInNative(): Promise<{ user: AuthUser; token: string }> 
   });
   const idToken = res.idToken;
   if (!idToken) throw new Error("Google did not return an ID token.");
-  const out = await invoke<ExchangeResult>("clark_exchange_google_idtoken", {
-    authOrigin: config.clarkAuthOrigin,
-    idToken,
-  });
+  const out = await exchangeGoogleIdToken(idToken);
   await focusAppWindow();
-  return { user: userFrom(out), token: out.token };
+  return {
+    ...out,
+    google: {
+      accessToken: res.accessToken,
+      refreshToken: res.refreshToken,
+      expiresAt: res.expiresAt,
+    },
+  };
 }
 
 /** Web/dev: popup the Clark /desktop-auth handoff page; it postMessages the JWT. */
-async function googleSignInWeb(): Promise<{ user: AuthUser; token: string }> {
+async function googleSignInWeb(): Promise<{
+  user: AuthUser;
+  token: string;
+  google?: GoogleTokenState;
+}> {
   const origin = config.clarkAuthOrigin;
   const popup = window.open(
     `${origin}/desktop-auth`,
@@ -282,9 +311,51 @@ export async function signInWithGoogle(): Promise<AuthSession> {
   if (!config.clarkAuthOrigin) {
     throw new Error("Google sign-in isn't configured. Set VITE_CLARK_AUTH_ORIGIN.");
   }
-  const { user, token } = isTauri() ? await googleSignInNative() : await googleSignInWeb();
+  const { user, token, google } = isTauri() ? await googleSignInNative() : await googleSignInWeb();
   return persist({
     user,
     clark: { endpoint: wsEndpointForGoogle(), token },
+    google,
   });
+}
+
+export function isAuthExpiredError(error: unknown): boolean {
+  const message = String(error);
+  return (
+    /\b401\b/.test(message) ||
+    /Unauthorized/i.test(message) ||
+    /ExpiredSignature/i.test(message) ||
+    /JWT validation failed/i.test(message)
+  );
+}
+
+export async function refreshAuthSession(session: AuthSession): Promise<AuthSession | null> {
+  if (!isTauri() || session.user.method !== "google") return null;
+  if (!config.googleDesktopClientId) return null;
+  const refresh = session.google?.refreshToken;
+  if (!refresh) return null;
+  try {
+    const { refreshToken: refreshGoogleToken } = await import(
+      "@choochmeque/tauri-plugin-google-auth-api"
+    );
+    const refreshed = await refreshGoogleToken({
+      refreshToken: refresh,
+      clientId: config.googleDesktopClientId,
+      clientSecret: config.googleDesktopClientSecret,
+      scopes: ["openid", "email", "profile"],
+    });
+    if (!refreshed.idToken) return null;
+    const exchanged = await exchangeGoogleIdToken(refreshed.idToken);
+    return persist({
+      user: exchanged.user,
+      clark: { endpoint: session.clark.endpoint || wsEndpointForGoogle(), token: exchanged.token },
+      google: {
+        accessToken: refreshed.accessToken,
+        refreshToken: refreshed.refreshToken || refresh,
+        expiresAt: refreshed.expiresAt,
+      },
+    });
+  } catch {
+    return null;
+  }
 }

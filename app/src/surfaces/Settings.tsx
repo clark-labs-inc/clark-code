@@ -8,6 +8,7 @@ import {
 import { useSessionStore, type SettingsSection } from "../store/sessionStore";
 import { cn } from "../lib/cn";
 import { PERMISSION_MODES } from "../lib/permissions";
+import { OUTPUT_STYLES } from "../lib/outputStyle";
 import { projectName, loadRecentProjects } from "../lib/localAgent";
 import { loadMcpServers } from "../lib/mcpServers";
 import { loadSshHosts } from "../lib/sshHosts";
@@ -87,7 +88,11 @@ function Toggle({ on, onClick, label }: { on: boolean; onClick: () => void; labe
 function GeneralSection({ dark, onToggleTheme }: { dark: boolean; onToggleTheme: () => void }) {
   const permissionMode = useSessionStore((s) => s.permissionMode);
   const setPermissionMode = useSessionStore((s) => s.setPermissionMode);
+  const outputStyle = useSessionStore((s) => s.outputStyle);
+  const setOutputStyle = useSessionStore((s) => s.setOutputStyle);
   const memoriesEnabled = useSessionStore((s) => s.memoriesEnabled);
+  const browserEnabled = useSessionStore((s) => s.browserEnabled);
+  const setBrowserEnabled = useSessionStore((s) => s.setBrowserEnabled);
   const setMemoriesEnabled = useSessionStore((s) => s.setMemoriesEnabled);
 
   const themeBtn = (isDark: boolean, Icon: typeof Sun, text: string) => (
@@ -152,6 +157,38 @@ function GeneralSection({ dark, onToggleTheme }: { dark: boolean; onToggleTheme:
       </div>
 
       <div>
+        <GroupLabel>Output style</GroupLabel>
+        <Card>
+          {OUTPUT_STYLES.map((style) => {
+            const active = outputStyle === style.id;
+            return (
+              <button
+                key={style.id}
+                onClick={() => setOutputStyle(style.id)}
+                className={cn(
+                  "flex w-full items-start gap-3 px-3.5 py-3 text-left transition",
+                  active ? "bg-bg-hover/60" : "hover:bg-bg-hover/30",
+                )}
+              >
+                <span
+                  className={cn(
+                    "mt-0.5 grid size-4 shrink-0 place-items-center rounded-full border",
+                    active ? "border-accent" : "border-ink-faint",
+                  )}
+                >
+                  {active && <span className="size-2 rounded-full bg-accent" />}
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-sm text-ink">{style.label}</span>
+                  <span className="mt-0.5 block text-xs text-ink-faint">{style.description}</span>
+                </span>
+              </button>
+            );
+          })}
+        </Card>
+      </div>
+
+      <div>
         <GroupLabel>Memory</GroupLabel>
         <Card>
           <Row
@@ -163,6 +200,22 @@ function GeneralSection({ dark, onToggleTheme }: { dark: boolean; onToggleTheme:
             sub="Remember facts across chats — per project and globally"
           >
             <Toggle on={memoriesEnabled} onClick={() => setMemoriesEnabled(!memoriesEnabled)} label="Enable memories" />
+          </Row>
+        </Card>
+      </div>
+
+      <div>
+        <GroupLabel>Experimental</GroupLabel>
+        <Card>
+          <Row
+            name={
+              <span className="flex items-center gap-2">
+                <AlertTriangle className="size-4 text-warning" /> Enable browser tool
+              </span>
+            }
+            sub="Downloads a ~150-300MB browser (clark-browser) on first use. Every action needs your approval."
+          >
+            <Toggle on={browserEnabled} onClick={() => setBrowserEnabled(!browserEnabled)} label="Enable browser tool" />
           </Row>
         </Card>
       </div>

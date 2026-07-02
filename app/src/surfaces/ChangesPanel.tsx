@@ -3,12 +3,13 @@
 // diffs, and per-file revert. Local git sessions only (the baseline is a
 // checkpoint commit; see provider-local/src/changes.rs).
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
   GitCompareArrows, X, RefreshCw, ChevronRight, Undo2, FilePlus2, FileMinus2, FilePen,
 } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
+import type { RunView } from "../core-bridge/types";
 import { DiffBody } from "./work/WorkLine";
 import { cn } from "../lib/cn";
 
@@ -23,16 +24,25 @@ function isTauri(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
 
-/** The conversation's baseline: its FIRST run checkpoint (runs merge in
- *  timeline order, so restored history comes first). */
-function useBaseline(): string | null {
-  return useSessionStore((s) => {
-    const snap = s.peek ? s.peek.snapshot : s.snapshot;
-    for (const run of Object.values(snap.runs)) {
-      if (run.checkpoint) return run.checkpoint;
-    }
-    return null;
-  });
+/** Every run's checkpoint, in chronological order (runs merge in timeline
+ *  order, so restored history comes first). The default baseline is the
+ *  FIRST one (the conversation's start — unchanged default), but the popover
+ *  lets the user pick any later one to see what changed since a specific turn.
+ *
+ *  The store selector returns the store's own `runs` object reference as-is
+ *  (stable unless the underlying data actually changes); deriving the
+ *  filtered array happens in a separate `useMemo`, not inside the selector —
+ *  a selector that returns a freshly-built array on every call breaks
+ *  `useSyncExternalStore`'s reference check and causes an infinite render loop. */
+function useCheckpointedRuns(): string[] {
+  const runsObj = useSessionStore((s) => (s.peek ? s.peek.snapshot.runs : s.snapshot.runs));
+  return useMemo(
+    () =>
+      Object.values(runsObj as Record<string, RunView>)
+        .map((run) => run.checkpoint)
+        .filter((c): c is string => !!c),
+    [runsObj],
+  );
 }
 
 const STATUS_ICON: Record<string, typeof FilePen> = {
@@ -46,7 +56,7 @@ const STATUS_ICON: Record<string, typeof FilePen> = {
 export function ChangesButton() {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
-  const base = useBaseline();
+  const runs = useCheckpointedRuns();
 
   useEffect(() => {
     if (!open) return;
@@ -62,7 +72,7 @@ export function ChangesButton() {
     };
   }, [open]);
 
-  if (!base || !isTauri()) return null;
+  if (runs.length === 0 || !isTauri()) return null;
   return (
     <div ref={wrapRef} className="relative">
       <button
@@ -77,14 +87,17 @@ export function ChangesButton() {
         <GitCompareArrows className="size-4" />
       </button>
       {/* Instant show/hide — no fade (avoids WKWebView half-opacity flicker). */}
-      {open && <ChangesPopover base={base} onClose={() => setOpen(false)} />}
+      {open && <ChangesPopover runs={runs} onClose={() => setOpen(false)} />}
     </div>
   );
 }
 
-function ChangesPopover({ base, onClose }: { base: string; onClose: () => void }) {
+function ChangesPopover({ runs, onClose }: { runs: string[]; onClose: () => void }) {
   const cwd = useSessionStore((s) => s.activeRemote?.cwd ?? s.localSettings.cwd.trim());
   const remote = useSessionStore((s) => s.activeRemote !== null);
+  // Default baseline: the conversation's first checkpoint (unchanged default
+  // behavior) — the picker below lets the user diff against any later turn.
+  const [base, setBase] = useState(runs[0]);
   const [files, setFiles] = useState<ChangedFile[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -119,26 +132,41 @@ function ChangesPopover({ base, onClose }: { base: string; onClose: () => void }
               <>
                 {files.length} file{files.length === 1 ? "" : "s"} ·{" "}
                 <span className="text-success">+{totalAdd}</span>{" "}
-                <span className="text-danger">−{totalDel}</span> since this conversation started
+                <span className="text-danger">−{totalDel}</span> since the selected point
               </>
             ) : (
-              "Everything this conversation changed, reviewable per file"
+              "Everything changed since the selected point, reviewable per file"
             )}
           </p>
         </div>
+        {runs.length > 1 && (
+          <select
+            value={base}
+            onChange={(e) => setBase(e.target.value)}
+            disabled={remote}
+            title="Diff against a different point in this conversation"
+            className="shrink-0 rounded-md border border-border bg-bg px-1.5 py-1 text-[0.7rem] text-ink-secondary outline-none disabled:opacity-50"
+          >
+            {runs.map((sha, i) => (
+              <option key={sha} value={sha}>
+                {i === 0 ? "Since start" : `Since turn ${i + 1}`}
+              </option>
+            ))}
+          </select>
+        )}
         <button
           onClick={() => void load()}
           disabled={loading || remote}
           title="Refresh"
           aria-label="Refresh changes"
-          className="ml-auto grid size-7 place-items-center rounded-md text-ink-muted transition hover:bg-bg-hover hover:text-ink disabled:opacity-50"
+          className="grid size-7 shrink-0 place-items-center rounded-md text-ink-muted transition hover:bg-bg-hover hover:text-ink disabled:opacity-50"
         >
           <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />
         </button>
         <button
           onClick={onClose}
           aria-label="Close"
-          className="grid size-7 place-items-center rounded-md text-ink-muted transition hover:bg-bg-hover hover:text-ink"
+          className="grid size-7 shrink-0 place-items-center rounded-md text-ink-muted transition hover:bg-bg-hover hover:text-ink"
         >
           <X className="size-3.5" />
         </button>

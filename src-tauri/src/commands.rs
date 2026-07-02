@@ -197,6 +197,23 @@ pub async fn claude_discover(
     })
 }
 
+/// List custom user-authored slash commands (`.claude/commands/*.md`,
+/// project + personal) for the composer's `/` picker. Frontend-only concern
+/// (unlike skills, which fold into the system prompt) — queried fresh on
+/// `cwd` change rather than cached in session state.
+#[tauri::command]
+pub async fn list_commands(
+    cwd: String,
+    remote: Option<RemoteArg>,
+) -> Result<Vec<provider_local::CustomCommand>, String> {
+    let root = std::path::PathBuf::from(cwd);
+    let exec: Box<dyn provider_local::Executor> = match remote {
+        Some(r) => Box::new(provider_local::RemoteExecutor::connect(&r.ws_url, &r.token).await?),
+        None => Box::new(provider_local::LocalExecutor),
+    };
+    Ok(provider_local::discover_commands(exec.as_ref(), &root).await)
+}
+
 #[tauri::command]
 pub async fn session_new(
     provider_id: String,
@@ -324,6 +341,34 @@ pub async fn respond(
         .map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+pub async fn set_mode(
+    session_id: String,
+    mode: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let mut s = state.session.lock().await;
+    let provider = s.provider.as_mut().ok_or("connect a provider first")?;
+    provider
+        .set_mode(&SessionId::new(session_id), mode)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn set_output_style(
+    session_id: String,
+    style: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let mut s = state.session.lock().await;
+    let provider = s.provider.as_mut().ok_or("connect a provider first")?;
+    provider
+        .set_output_style(&SessionId::new(session_id), style)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 /// One per-fact memory file, flattened for the UI.
 #[derive(serde::Serialize)]
 pub struct MemoryFactView {
@@ -430,6 +475,52 @@ pub async fn read_doc_text(path: String) -> Result<String, String> {
     tokio::task::spawn_blocking(move || std::fs::read_to_string(&canon).map_err(|e| e.to_string()))
         .await
         .map_err(|e| format!("read failed: {e}"))?
+}
+
+/// Read a locally-captured screenshot (or other small image) from the
+/// app-managed workspace and return it as a `data:` URL for inline `<img>`
+/// rendering. Confined to `~/.clark/workspace`, same root and containment
+/// check as `read_doc_text`.
+#[tauri::command]
+pub async fn read_image_data_url(path: String) -> Result<String, String> {
+    use base64::Engine as _;
+
+    const MAX_IMAGE_BYTES: u64 = 10 * 1024 * 1024;
+    let root = provider_local::workspace_root()
+        .ok_or_else(|| "no workspace directory".to_string())?
+        .canonicalize()
+        .map_err(|e| format!("workspace: {e}"))?;
+    let canon = PathBuf::from(&path)
+        .canonicalize()
+        .map_err(|e| format!("{path}: {e}"))?;
+    if !canon.starts_with(&root) {
+        return Err("path is outside the document workspace".into());
+    }
+    let meta = std::fs::metadata(&canon).map_err(|e| e.to_string())?;
+    if !meta.is_file() {
+        return Err("not a file".into());
+    }
+    if meta.len() > MAX_IMAGE_BYTES {
+        return Err("image too large to preview".into());
+    }
+    let mime = match canon
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("jpg") | Some("jpeg") => "image/jpeg",
+        Some("png") => "image/png",
+        _ => return Err("not a supported image type".into()),
+    };
+    let bytes =
+        tokio::task::spawn_blocking(move || std::fs::read(&canon).map_err(|e| e.to_string()))
+            .await
+            .map_err(|e| format!("read failed: {e}"))??;
+    Ok(format!(
+        "data:{mime};base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(bytes)
+    ))
 }
 
 /// Open a file (or folder) with the OS default handler — for a source file on a
@@ -627,10 +718,7 @@ pub(crate) fn clark_http_client() -> Result<reqwest::Client, String> {
     Ok(CLOUD_HTTP.clone())
 }
 
-pub(crate) async fn read_json_or_err(
-    resp: reqwest::Response,
-    what: &str,
-) -> Result<Value, String> {
+pub(crate) async fn read_json_or_err(resp: reqwest::Response, what: &str) -> Result<Value, String> {
     let status = resp.status();
     let text = resp.text().await.unwrap_or_default();
     if !status.is_success() {

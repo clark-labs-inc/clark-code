@@ -8,6 +8,55 @@ use std::path::Path;
 
 use crate::sandbox::Sandbox;
 
+/// One selectable output style/persona.
+pub struct OutputStyle {
+    pub id: &'static str,
+    pub label: &'static str,
+    pub description: &'static str,
+    /// Per-turn instruction block; empty for `default` (no change from the
+    /// base system prompt's own voice).
+    pub instructions: &'static str,
+}
+
+/// Fixed set of built-in output styles (mirrors `REASONING_EFFORTS`'s shape
+/// on the frontend — a small fixed enum, not a markdown-file convention, for
+/// this first version). Selected via `Provider::set_output_style`, applied
+/// per-turn in `LocalAgentProvider::prompt()` — never baked into the cached
+/// system-prompt prefix.
+pub const OUTPUT_STYLES: &[OutputStyle] = &[
+    OutputStyle {
+        id: "default",
+        label: "Default",
+        description: "Clark's normal voice.",
+        instructions: "",
+    },
+    OutputStyle {
+        id: "terse",
+        label: "Terse",
+        description: "Minimal narration — just the work and the result.",
+        instructions: "Output style: Terse. Skip preamble and restating what you're about to do. \
+No summaries unless asked. One-line status updates at most.",
+    },
+    OutputStyle {
+        id: "teaching",
+        label: "Teaching",
+        description: "Explains reasoning and trade-offs as it works.",
+        instructions:
+            "Output style: Teaching. Briefly explain *why* behind non-obvious choices as \
+you make them — the trade-off you weighed, not just what you did. Keep it to a sentence or two per \
+choice, woven into the normal flow, not a lecture.",
+    },
+];
+
+/// The instruction block for `style_id`, or empty for `default`/unknown ids.
+pub fn output_style_instructions(style_id: &str) -> &'static str {
+    OUTPUT_STYLES
+        .iter()
+        .find(|s| s.id == style_id)
+        .map(|s| s.instructions)
+        .unwrap_or("")
+}
+
 /// Build the one system message for a session rooted at `sandbox`.
 pub fn system_prompt(sandbox: &Sandbox, research_available: bool) -> String {
     let root = sandbox.root().display();
@@ -27,13 +76,24 @@ You write and modify real files and run real commands on their computer.\n\n",
         "- Don't add comments or documentation unless asked. Don't commit or push unless asked.\n",
     );
     p.push_str("- After making changes, verify them (build/tests) with `bash` when appropriate.\n");
+    p.push_str(
+        "- Never fetch URLs with `bash` (`curl`/`wget`). For a single page/doc lookup, use \
+`web_fetch` — it's local, fast, and returns markdown.",
+    );
     if research_available {
         p.push_str(
-            "- For anything requiring up-to-date external information — latest API/library docs, \
-web search, browsing, or broader multi-step research — call `clark_research`. It runs remotely \
-in Clark's sandbox; never try to reach the network with `bash`.\n",
+            " For anything needing search, JS-rendered pages, or broader multi-step research, \
+call `clark_research` instead — it runs remotely in Clark's sandbox.",
         );
     }
+    p.push('\n');
+    p.push('\n');
+
+    p.push_str("# Planning\n");
+    p.push_str("- You have an `update_plan` tool that shows the user a live checklist of steps. Use it for non-trivial multi-step work — not for simple or single-step requests you can just do.\n");
+    p.push_str("- Keep at most one step `in_progress` at a time; move a step to `in_progress` before marking it `completed` (don't jump straight to completed).\n");
+    p.push_str("- Don't restate the plan in your reply after calling `update_plan` — the checklist is already shown to the user; just summarize what changed.\n");
+    p.push_str("- If the project has a check_command configured (.clark/settings.json), call `check_diagnostics` after non-trivial changes — it reports only new problems since your last call.\n");
     p.push('\n');
 
     p.push_str("# Environment\n");
@@ -95,6 +155,21 @@ mod tests {
         let sb = Sandbox::new(dir.path()).unwrap();
         let p = system_prompt(&sb, false);
         assert!(!p.contains("clark_research"));
+    }
+
+    #[test]
+    fn includes_planning_guidance() {
+        let dir = tempfile::tempdir().unwrap();
+        let sb = Sandbox::new(dir.path()).unwrap();
+        let p = system_prompt(&sb, false);
+        assert!(p.contains("update_plan"));
+    }
+
+    #[test]
+    fn output_style_instructions_are_empty_for_default_and_unknown() {
+        assert_eq!(output_style_instructions("default"), "");
+        assert_eq!(output_style_instructions("nonexistent"), "");
+        assert!(output_style_instructions("terse").contains("Terse"));
     }
 
     #[test]

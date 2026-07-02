@@ -41,6 +41,8 @@ import {
   addRecentProject,
   loadMemoriesEnabled,
   saveMemoriesEnabled,
+  loadBrowserEnabled,
+  saveBrowserEnabled,
   type LocalAgentSettings,
 } from "../lib/localAgent";
 import { pickFolder } from "../lib/pickFolder";
@@ -51,8 +53,10 @@ import {
   savePermissionMode,
   pickAllowOption,
   wouldAutoApprove,
+  nextPermissionMode,
   type PermissionMode,
 } from "../lib/permissions";
+import { loadOutputStyle, saveOutputStyle } from "../lib/outputStyle";
 import {
   cloudCreds,
   cloudList,
@@ -154,6 +158,9 @@ interface SessionState {
   /** Whether durable memory is enabled (global user preference; the agent gets
    *  the `memory` tool and its saved facts are injected into the prompt). */
   memoriesEnabled: boolean;
+  /** Whether the experimental `browser` tool is enabled (off by default —
+   *  downloads clark-browser, ~150-300MB, on first use). */
+  browserEnabled: boolean;
   /** Last memory status message (e.g. a load error). */
   memoryStatus: string | null;
   /** Whether the memory viewer popover is open. */
@@ -170,6 +177,8 @@ interface SessionState {
   queued: QueuedMessage[];
   /** How agent permission requests are approved (Codex-style). */
   permissionMode: PermissionMode;
+  /** The agent's reply tone/persona for this session — see `lib/outputStyle.ts`. */
+  outputStyle: string;
   /** Whether the in-chat terminal drawer is open. */
   terminalOpen: boolean;
   /** Whether the MCP servers settings modal is open. */
@@ -204,6 +213,7 @@ interface SessionState {
   setProjectFolder: (path: string) => void;
   pickProjectFolder: () => Promise<void>;
   setMemoriesEnabled: (on: boolean) => void;
+  setBrowserEnabled: (on: boolean) => void;
   loadMemory: () => Promise<void>;
   toggleMemoryViewer: () => void;
   setMemoryViewerOpen: (open: boolean) => void;
@@ -238,6 +248,9 @@ interface SessionState {
   send: (text: string) => Promise<void>;
   removeQueued: (id: string) => void;
   setPermissionMode: (mode: PermissionMode) => void;
+  /** Shift+Tab: advance to the next permission mode in the cycle. */
+  cyclePermissionMode: () => void;
+  setOutputStyle: (style: string) => void;
   toggleTerminal: () => void;
   setTerminalOpen: (open: boolean) => void;
   setMcpOpen: (open: boolean) => void;
@@ -287,6 +300,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   activeRemote: null,
   activeRemoteHost: null,
   memoriesEnabled: loadMemoriesEnabled(),
+  browserEnabled: loadBrowserEnabled(),
   memoryStatus: null,
   memoryViewerOpen: false,
   loadingMemory: false,
@@ -295,6 +309,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   recentProjects: loadRecentProjects(),
   queued: [],
   permissionMode: loadPermissionMode(),
+  outputStyle: loadOutputStyle(),
   terminalOpen: false,
   mcpOpen: false,
   sshOpen: false,
@@ -626,6 +641,11 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   setMemoriesEnabled: (on) => {
     saveMemoriesEnabled(on);
     set({ memoriesEnabled: on });
+  },
+
+  setBrowserEnabled: (on) => {
+    saveBrowserEnabled(on);
+    set({ browserEnabled: on });
   },
 
   loadMemory: async () => {
@@ -1013,6 +1033,27 @@ export const useSessionStore = create<SessionState>((set, get) => ({
           .respond(session.id, { kind: "permission", request: pend.id, option: opt.id })
           .catch((e) => set({ error: String(e) }));
       }
+    }
+  },
+
+  cyclePermissionMode: () => {
+    const { permissionMode, setPermissionMode, bridge, session } = get();
+    const next = nextPermissionMode(permissionMode);
+    setPermissionMode(next);
+    // Best-effort: not every provider supports server-side mode switching
+    // (e.g. an ACP agent that doesn't advertise modes) — enforcement for the
+    // local agent lives in setPermissionMode's own gate-driven flow either way.
+    if (bridge?.setMode && session) {
+      void bridge.setMode(session.id, next).catch(() => {});
+    }
+  },
+
+  setOutputStyle: (style) => {
+    saveOutputStyle(style);
+    set({ outputStyle: style });
+    const { bridge, session } = get();
+    if (bridge?.setOutputStyle && session) {
+      void bridge.setOutputStyle(session.id, style).catch(() => {});
     }
   },
 

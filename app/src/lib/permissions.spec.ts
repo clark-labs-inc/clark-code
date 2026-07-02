@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { wouldAutoApprove } from "./permissions";
+import { nextPermissionMode, wouldAutoApprove } from "./permissions";
 import type { PermissionRequest } from "../core-bridge/types";
 
 function req(risk?: string): PermissionRequest {
@@ -42,5 +42,20 @@ describe("wouldAutoApprove", () => {
       options: [{ id: "reject_once", label: "Reject", kind: "reject_once" }],
     };
     expect(wouldAutoApprove("full", noAllow)).toBe(false);
+  });
+
+  it("a plan approval is never auto-approved, in any mode", () => {
+    for (const mode of ["ask", "auto", "full", "plan"] as const) {
+      expect(wouldAutoApprove(mode, req("plan"))).toBe(false);
+    }
+  });
+});
+
+describe("nextPermissionMode", () => {
+  it("cycles ask -> auto -> full -> plan -> ask", () => {
+    expect(nextPermissionMode("ask")).toBe("auto");
+    expect(nextPermissionMode("auto")).toBe("full");
+    expect(nextPermissionMode("full")).toBe("plan");
+    expect(nextPermissionMode("plan")).toBe("ask");
   });
 });

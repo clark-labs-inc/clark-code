@@ -21,11 +21,41 @@ use crate::config::LocalConfig;
 pub struct ChatMessage {
     pub role: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub content: Option<String>,
+    pub content: Option<ChatContent>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tool_calls: Vec<WireToolCall>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_call_id: Option<String>,
+}
+
+/// `content` on the OpenAI-compatible wire format is either a plain string or
+/// a multimodal content-parts array — never both. `Text` serializes as a bare
+/// JSON string, identical to every message before multimodal support existed;
+/// `Parts` is only used where an image actually needs to ride along (and only
+/// on `role: "user"` — the spec doesn't allow parts arrays on `role: "tool"`).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ChatContent {
+    Text(String),
+    Parts(Vec<ContentPart>),
+}
+
+impl ChatContent {
+    pub fn text(text: impl Into<String>) -> Self {
+        Self::Text(text.into())
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ContentPart {
+    Text { text: String },
+    ImageUrl { image_url: ImageUrlRef },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ImageUrlRef {
+    pub url: String,
 }
 
 impl ChatMessage {
@@ -35,10 +65,25 @@ impl ChatMessage {
     pub fn user(text: impl Into<String>) -> Self {
         Self::simple("user", text)
     }
+    /// A user-role message carrying text plus one or more images — the only
+    /// role the OpenAI-compatible wire format allows a content-parts array
+    /// on. `image_urls` may be `data:` URLs or external URLs.
+    pub fn user_with_images(text: impl Into<String>, image_urls: Vec<String>) -> Self {
+        let mut parts = vec![ContentPart::Text { text: text.into() }];
+        parts.extend(image_urls.into_iter().map(|url| ContentPart::ImageUrl {
+            image_url: ImageUrlRef { url },
+        }));
+        Self {
+            role: "user".into(),
+            content: Some(ChatContent::Parts(parts)),
+            tool_calls: Vec::new(),
+            tool_call_id: None,
+        }
+    }
     pub fn tool(tool_call_id: impl Into<String>, content: impl Into<String>) -> Self {
         Self {
             role: "tool".into(),
-            content: Some(content.into()),
+            content: Some(ChatContent::text(content)),
             tool_calls: Vec::new(),
             tool_call_id: Some(tool_call_id.into()),
         }
@@ -46,7 +91,7 @@ impl ChatMessage {
     fn simple(role: &str, text: impl Into<String>) -> Self {
         Self {
             role: role.into(),
-            content: Some(text.into()),
+            content: Some(ChatContent::text(text)),
             tool_calls: Vec::new(),
             tool_call_id: None,
         }
@@ -357,7 +402,10 @@ impl Accumulator {
         // providers ship usage in a chunk with no/empty choices.
         if let Some(usage) = chunk.get("usage").filter(|u| u.is_object()) {
             self.usage = Some(TokenUsage {
-                prompt_tokens: usage.get("prompt_tokens").and_then(Value::as_u64).unwrap_or(0),
+                prompt_tokens: usage
+                    .get("prompt_tokens")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0),
                 completion_tokens: usage
                     .get("completion_tokens")
                     .and_then(Value::as_u64)
@@ -527,5 +575,37 @@ mod tests {
         buf.extend_from_slice(b"data: [DONE]\n");
         assert!(drain_lines(&mut buf, &mut acc, &mut sink));
         assert_eq!(acc.finish().text, "hi");
+    }
+
+    #[test]
+    fn text_content_serializes_as_a_bare_string_like_before_multimodal_support() {
+        let msg = ChatMessage::user("hello");
+        let v = serde_json::to_value(&msg).unwrap();
+        assert_eq!(v["content"], json!("hello"));
+    }
+
+    #[test]
+    fn tool_message_content_is_always_a_bare_string() {
+        let msg = ChatMessage::tool("call_1", "done");
+        let v = serde_json::to_value(&msg).unwrap();
+        assert_eq!(v["role"], json!("tool"));
+        assert_eq!(v["content"], json!("done"));
+    }
+
+    #[test]
+    fn user_with_images_serializes_as_a_content_parts_array() {
+        let msg = ChatMessage::user_with_images(
+            "look at this",
+            vec!["data:image/png;base64,QUJD".to_string()],
+        );
+        let v = serde_json::to_value(&msg).unwrap();
+        assert_eq!(v["role"], json!("user"));
+        assert_eq!(
+            v["content"],
+            json!([
+                {"type": "text", "text": "look at this"},
+                {"type": "image_url", "image_url": {"url": "data:image/png;base64,QUJD"}},
+            ])
+        );
     }
 }

@@ -190,7 +190,10 @@ mod tests {
 
         // Revert the edit → original content; revert the creation → file gone.
         changes_revert(root, &base, "keep.txt").expect("revert edit");
-        assert_eq!(std::fs::read_to_string(root.join("keep.txt")).unwrap(), "one\ntwo\n");
+        assert_eq!(
+            std::fs::read_to_string(root.join("keep.txt")).unwrap(),
+            "one\ntwo\n"
+        );
         changes_revert(root, &base, "new.txt").expect("revert creation");
         assert!(!root.join("new.txt").exists());
 

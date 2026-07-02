@@ -74,6 +74,10 @@ pub struct LocalConfig {
     pub memories_enabled: bool,
     /// Checkpoint compaction for the model-visible transcript.
     pub compaction: CompactionConfig,
+    /// Experimental: register the `browser` tool (clark-browser, lazily
+    /// downloaded on first use). Off by default — the user opts in from
+    /// Settings (`extra.browser_enabled = true`).
+    pub browser_enabled: bool,
 }
 
 /// A remote project target. The agent's file/shell tools run against `cwd` on a
@@ -191,6 +195,12 @@ impl LocalConfig {
             .and_then(Value::as_bool)
             .unwrap_or(true);
 
+        // Off by default — the user opts in from Settings.
+        let browser_enabled = extra
+            .get("browser_enabled")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+
         let compaction = if extra
             .get("auto_compact")
             .and_then(Value::as_bool)
@@ -248,6 +258,7 @@ impl LocalConfig {
             remote,
             memories_enabled,
             compaction,
+            browser_enabled,
         }
     }
 

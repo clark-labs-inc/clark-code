@@ -1,8 +1,9 @@
-import { ShieldQuestion, ShieldAlert } from "lucide-react";
+import { ShieldQuestion, ShieldAlert, ListChecks } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
 import { wouldAutoApprove } from "../lib/permissions";
 import { allowCommand } from "../lib/commandPolicy";
 import { cn } from "../lib/cn";
+import { Md, MD_CLASSES } from "./Message";
 import type { PermissionOption, PermissionOptionKind, PermissionRequest } from "../core-bridge/types";
 
 // One bright action (Allow); everything else stays quiet — Codex restraint.
@@ -23,6 +24,8 @@ function riskTone(risk?: string): { ring: string; chip: string; label: string } 
       return { ring: "bg-warning/10", chip: "bg-warning/15 text-warning", label: "Caution" };
     case "safe":
       return { ring: "bg-bg-secondary", chip: "bg-bg-tertiary text-ink-muted", label: "Safe" };
+    case "plan":
+      return { ring: "bg-accent/10", chip: "bg-accent/15 text-accent", label: "Plan" };
     default:
       return null;
   }
@@ -115,6 +118,8 @@ export function PermissionGate({ req }: { req: PermissionRequest }) {
       <div className="mb-2 flex items-center gap-2 text-sm font-medium text-ink">
         {danger ? (
           <ShieldAlert className="size-4 text-danger" />
+        ) : req.risk === "plan" ? (
+          <ListChecks className="size-4 text-accent" />
         ) : (
           <ShieldQuestion className="size-4 text-warning" />
         )}
@@ -131,7 +136,18 @@ export function PermissionGate({ req }: { req: PermissionRequest }) {
         )}
       </div>
 
-      {req.detail && <DetailView text={req.detail} />}
+      {req.detail && req.risk === "plan" ? (
+        <div
+          className={cn(
+            MD_CLASSES,
+            "mb-3 max-h-72 overflow-auto rounded-md border border-border-subtle bg-bg-sunken px-3 py-2",
+          )}
+        >
+          <Md>{req.detail}</Md>
+        </div>
+      ) : (
+        req.detail && <DetailView text={req.detail} />
+      )}
       {req.reason && (
         <p className="mb-3 text-xs text-ink-muted">
           Flagged: <span className={cn(danger && "text-danger")}>{req.reason}</span>

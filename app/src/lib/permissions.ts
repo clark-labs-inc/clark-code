@@ -5,7 +5,7 @@
 
 import type { PermissionOption, PermissionRequest } from "../core-bridge/types";
 
-export type PermissionMode = "ask" | "auto" | "full";
+export type PermissionMode = "ask" | "auto" | "full" | "plan";
 
 export interface PermissionModeInfo {
   id: PermissionMode;
@@ -18,7 +18,16 @@ export const PERMISSION_MODES: PermissionModeInfo[] = [
   { id: "ask", label: "Ask for approval", description: "Review every edit and command before it runs" },
   { id: "auto", label: "Approve for me", description: "Auto-run safe edits & commands; ask before anything destructive" },
   { id: "full", label: "Full access", description: "Run everything without asking (catastrophic commands are still blocked)" },
+  { id: "plan", label: "Plan first", description: "Research read-only, then propose a plan before any edits" },
 ];
+
+/** Shift+Tab cycle order — mirrors Claude Code's mode-cycling shortcut. */
+const MODE_CYCLE: PermissionMode[] = ["ask", "auto", "full", "plan"];
+
+export function nextPermissionMode(mode: PermissionMode): PermissionMode {
+  const i = MODE_CYCLE.indexOf(mode);
+  return MODE_CYCLE[(i + 1) % MODE_CYCLE.length];
+}
 
 /** Safe by default: auto-run safe work, prompt on anything the engine classifies
  *  destructive. (Catastrophic commands are refused engine-side regardless.) */
@@ -38,6 +47,9 @@ export function pickAllowOption(req: PermissionRequest): PermissionOption | unde
  *  refused anything catastrophic, so nothing here can run a blocked command. */
 export function wouldAutoApprove(mode: PermissionMode, req: PermissionRequest): boolean {
   if (!pickAllowOption(req)) return false; // nothing to grant — must prompt
+  // A plan approval always needs an explicit human decision, in every mode —
+  // the engine forces `ask` for it server-side regardless of session policy.
+  if (req.risk === "plan") return false;
   if (mode === "full") return true;
   // Ask only for destructive shell commands and external (MCP) tools on first
   // use; everything else (reads, sandboxed edits, safe/caution shell) auto-runs.
@@ -50,7 +62,7 @@ const KEY = "clark-desktop:permission-mode";
 export function loadPermissionMode(): PermissionMode {
   try {
     const v = localStorage.getItem(KEY);
-    if (v === "ask" || v === "auto" || v === "full") return v;
+    if (v === "ask" || v === "auto" || v === "full" || v === "plan") return v;
   } catch {
     /* ignore */
   }

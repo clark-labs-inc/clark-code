@@ -4,7 +4,7 @@ import {
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
   ArrowUp, Square, Plus, X, FileText, CornerDownRight, Pencil, Slash,
-  Shield, ShieldCheck, ShieldAlert, ChevronDown, Check, Telescope, Globe, Network,
+  Shield, ShieldCheck, ShieldAlert, ChevronDown, Check, Telescope, Globe, Network, ListChecks,
 } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
 import type { QueuedMessage } from "../store/sessionStore";
@@ -14,6 +14,7 @@ import { CODING_MODELS, REASONING_EFFORTS, modelLabel } from "../lib/localAgent"
 import { PERMISSION_MODES, type PermissionMode } from "../lib/permissions";
 import { projectFiles } from "../lib/projectFiles";
 import { slashCommands, type SlashCommand } from "../lib/slashCommands";
+import { listCustomCommands } from "../lib/customCommands";
 import { fuzzyFilter, fuzzyFilterFiles } from "../lib/fuzzy";
 import { cn } from "../lib/cn";
 
@@ -82,6 +83,7 @@ const MODE_ICON: Record<PermissionMode, typeof Shield> = {
   ask: Shield,
   auto: ShieldCheck,
   full: ShieldAlert,
+  plan: ListChecks,
 };
 
 /** Codex-style approval policy selector. Full access is the default. */
@@ -102,10 +104,10 @@ function PermissionPill() {
         onClick={() => setOpen((o) => !o)}
         aria-haspopup="menu"
         aria-expanded={open}
-        title="How Clark's actions are approved"
+        title="How Clark's actions are approved (Shift+Tab to cycle)"
         className={cn(
           "flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-medium transition hover:bg-bg-hover",
-          mode === "full" ? "text-warning" : "text-ink-secondary",
+          mode === "full" ? "text-warning" : mode === "plan" ? "text-accent" : "text-ink-secondary",
         )}
       >
         <Icon className="size-3.5" />
@@ -137,7 +139,7 @@ function PermissionPill() {
                   }}
                   className="flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 text-left transition hover:bg-bg-hover"
                 >
-                  <I className={cn("mt-0.5 size-4 shrink-0", m.id === "full" ? "text-warning" : "text-ink-muted")} />
+                  <I className={cn("mt-0.5 size-4 shrink-0", m.id === "full" ? "text-warning" : m.id === "plan" ? "text-accent" : "text-ink-muted")} />
                   <span className="min-w-0 flex-1">
                     <span className="block text-sm text-ink">{m.label}</span>
                     <span className="block text-xs leading-snug text-ink-muted">{m.description}</span>
@@ -460,6 +462,7 @@ export function Composer() {
   const [value, setValue] = useState("");
   const [caret, setCaret] = useState(0);
   const [projFiles, setProjFiles] = useState<string[]>([]);
+  const [customCommands, setCustomCommands] = useState<SlashCommand[]>([]);
   const [sel, setSel] = useState(0);
   const [dismissed, setDismissed] = useState(false);
   const taRef = useRef<HTMLTextAreaElement>(null);
@@ -520,6 +523,20 @@ export function Composer() {
     }
   }, [trigger, cwd, projFiles.length]);
 
+  // Custom user-authored commands (`.claude/commands/*.md`) — reloaded once
+  // per project so newly-added command files show up without a restart.
+  useEffect(() => {
+    if (!cwd.trim()) {
+      setCustomCommands([]);
+      return;
+    }
+    void listCustomCommands(cwd).then((cmds) =>
+      setCustomCommands(
+        cmds.map((c) => ({ name: c.name, hint: c.description || "Custom command", body: c.body })),
+      ),
+    );
+  }, [cwd]);
+
   const suggestions = useMemo<Suggestion[]>(() => {
     if (!trigger || dismissed) return [];
     if (trigger.type === "@") {
@@ -528,12 +545,16 @@ export function Composer() {
         path,
       }));
     }
-    const cmds = slashCommands().filter((c) => !c.needsSession || session);
+    const builtins = slashCommands().filter((c) => !c.needsSession || session);
+    const builtinNames = new Set(builtins.map((c) => c.name));
+    // Built-ins win name collisions.
+    const custom = customCommands.filter((c) => !builtinNames.has(c.name));
+    const cmds = [...builtins, ...custom];
     return fuzzyFilter(cmds, trigger.query, (c) => `${c.name} ${c.hint}`, 8).map((m) => ({
       kind: "slash" as const,
       cmd: m.item,
     }));
-  }, [trigger, dismissed, projFiles, session]);
+  }, [trigger, dismissed, projFiles, session, customCommands]);
 
   // Keep the highlighted row in range as results change; clear the Escape
   // dismissal once the user edits the trigger again.
@@ -545,8 +566,26 @@ export function Composer() {
   const accept = (s: Suggestion) => {
     if (!trigger) return;
     if (s.kind === "slash") {
+      // A custom command (has a body) inserts its text for the user to review
+      // and send; a built-in runs its action and clears the composer.
+      if (s.cmd.body !== undefined) {
+        const before = value.slice(0, trigger.start);
+        const after = value.slice(caret).trimStart();
+        const insert = after ? `${s.cmd.body} ${after}` : s.cmd.body;
+        const next = before + insert;
+        setValue(next);
+        requestAnimationFrame(() => {
+          const ta = taRef.current;
+          if (ta) {
+            ta.focus();
+            ta.setSelectionRange(next.length, next.length);
+            setCaret(next.length);
+          }
+        });
+        return;
+      }
       setValue("");
-      s.cmd.run();
+      s.cmd.run?.();
       return;
     }
     const insert = `@${s.path} `;
@@ -594,6 +633,9 @@ export function Composer() {
       }
       if (e.key === "Enter" || e.key === "Tab") {
         e.preventDefault();
+        // Stop Shift+Tab from also reaching the global mode-cycle hotkey
+        // while the autocomplete popover is driving Tab/Enter itself.
+        e.stopPropagation();
         accept(suggestions[sel] ?? suggestions[0]);
         return;
       }

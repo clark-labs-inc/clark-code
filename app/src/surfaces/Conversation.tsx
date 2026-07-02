@@ -9,7 +9,9 @@ import { ArtifactCard } from "./work/ArtifactCard";
 import { PermissionGate } from "./PermissionGate";
 import { UpgradePrompt } from "./UpgradePrompt";
 import { UndoBar } from "./UndoBar";
+import { RewindPicker } from "./RewindPicker";
 import { FanOutPanel } from "./FanOutPanel";
+import { PlanChecklist } from "./PlanChecklist";
 import type { TimelineItem, ToolCall } from "../core-bridge/types";
 
 /** A row of pulsing dots — the model is generating. Memoized so its animation
@@ -122,7 +124,7 @@ export function Conversation() {
     if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
   };
 
-  const { timeline, tool_calls: toolCalls, artifacts, runs, pending_permission } = snapshot;
+  const { timeline, tool_calls: toolCalls, artifacts, runs, pending_permission, plan } = snapshot;
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -219,9 +221,15 @@ export function Conversation() {
           return null;
         })}
 
+        <PlanChecklist plan={plan} />
         <FanOutPanel />
 
-        {undoSha && <UndoBar key={undoSha} sha={undoSha} />}
+        {undoSha && (
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+            <UndoBar key={undoSha} sha={undoSha} />
+            <RewindPicker excludeSha={undoSha} />
+          </div>
+        )}
 
         <AnimatePresence initial={false}>
           {showPending && (

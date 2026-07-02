@@ -4,6 +4,7 @@ use agent_core::ids::PermissionRequestId;
 use clark_agent::AgentMessage;
 use tokio::sync::oneshot;
 
+use crate::project_settings::HooksConfig;
 use crate::tools::PermissionMode;
 
 /// Per-session conversation state that persists across turns.
@@ -15,10 +16,28 @@ pub(crate) struct SessionState {
     pub policy: HashMap<String, PermissionMode>,
     /// Shell-command prefixes the user always allows (skip the gate). Honored
     /// only for Safe/Caution commands, so a trusted prefix can't carry a
-    /// destructive suffix past the gate.
+    /// destructive suffix past the gate. Union of the global (UI-driven)
+    /// allowlist and the project's `.clark/settings.json` `permissions.allow`.
     pub allow_commands: Vec<String>,
-    /// Shell-command prefixes that are always refused.
+    /// Shell-command prefixes that are always refused. Union of the global
+    /// denylist and the project's `.clark/settings.json` `permissions.deny`.
     pub deny_commands: Vec<String>,
+    /// Plan Mode: while true, every mutating tool except `propose_plan` is
+    /// denied by the [`crate::permissions::PermissionGate`].
+    pub plan_mode: bool,
+    /// Output style: a key into `crate::prompt::OUTPUT_STYLES`, prepended to
+    /// each turn's text like the plan-mode reminder. Empty string = default.
+    pub output_style: String,
+    /// `PreToolUse`/`PostToolUse` hooks from the project's
+    /// `.clark/settings.json`, read once at `new_session`.
+    pub hooks: HooksConfig,
+    /// The project's configured check/lint/typecheck command (§7
+    /// `check_diagnostics`), from `.clark/settings.json` or a per-project
+    /// Settings override.
+    pub check_command: Option<String>,
+    /// First `check_diagnostics` call's output lines this session — later
+    /// calls diff against this and report only new lines.
+    pub diagnostics_baseline: Option<Vec<String>>,
 }
 
 /// Live control surface for the current run, reachable from respond/cancel.

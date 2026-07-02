@@ -30,11 +30,19 @@ tokio-util = { version = "0.7", default-features = false }
 # RemoteExecutor's transport to clark-exec-server (plaintext ws over the SSH tunnel).
 tokio-tungstenite = "0.29"
 glob = "0.3"
-regex = "1"
 walkdir = "2"
+grep-searcher = "0.1"
+grep-regex = "0.1"
+base64 = "0.22"
 # Unified diffs for `edit_file`/`write_file` results — the model sees what
 # changed and the UI renders a red/green diff (Codex/Claude-Code style).
 similar = "2"
+# HTML->Markdown conversion for the local `web_fetch` tool.
+htmd = "0.1"
+# Archive extraction for the opt-in `browser` tool's clark-browser download.
+tar = "0.4"
+flate2 = "1"
+zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util", "net"] }

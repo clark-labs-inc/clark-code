@@ -100,6 +100,14 @@ pub trait Executor: Send + Sync {
         timeout: Duration,
         cancel: &CancellationToken,
     ) -> ExecResult<ExecOutput>;
+
+    /// Whether this executor runs on the same machine as the caller. Local
+    /// tools that need to spawn a process directly (not through `exec()`) —
+    /// e.g. a backgrounded shell task — check this first, since only a local
+    /// process is reachable to poll/kill afterward.
+    fn is_local(&self) -> bool {
+        true
+    }
 }
 
 /// Runs every primitive on the local machine — today's behavior, behind the

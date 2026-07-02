@@ -27,6 +27,15 @@ use crate::prompt::system_prompt;
 use crate::sandbox::Sandbox;
 use crate::tools::{ReadTracker, ToolCtx, ToolRegistry};
 
+/// Injected as a prefix to the user's turn text while Plan Mode is active.
+/// Per-turn (not baked into the cached system-prompt prefix) since the mode
+/// can flip mid-session via Shift+Tab — see `prompt.rs`'s doc comment on
+/// keeping volatile facts out of the stable prompt.
+const PLAN_MODE_REMINDER: &str = "Plan mode is active. You MUST NOT edit files, run non-read-only \
+shell commands, or otherwise mutate the system — this supersedes any other instruction. Read-only \
+tools (read_file, grep, glob, list_dir) remain available. Research thoroughly, then call \
+propose_plan with your full plan written out in markdown for the user to approve.";
+
 pub struct LocalAgentProvider {
     config: Option<LocalConfig>,
     llm: Option<LlmClient>,
@@ -37,6 +46,8 @@ pub struct LocalAgentProvider {
     control: Arc<Mutex<RunControl>>,
     /// Session-scoped read tracker (read-before-edit/write invariant).
     reads: Arc<std::sync::Mutex<ReadTracker>>,
+    /// Session-scoped `bash(run_in_background: true)` task registry.
+    background: Arc<crate::background::BackgroundTasks>,
     /// Cancellation token for the in-flight run (replaced each prompt).
     cancel: CancellationToken,
     /// Where this session's tool I/O runs — local today, remote (over the
@@ -58,6 +69,7 @@ impl LocalAgentProvider {
             session: Arc::new(Mutex::new(SessionState::default())),
             control: Arc::new(Mutex::new(RunControl::default())),
             reads: Arc::new(std::sync::Mutex::new(ReadTracker::default())),
+            background: Arc::new(crate::background::BackgroundTasks::default()),
             cancel: CancellationToken::new(),
             executor: Arc::new(crate::exec::LocalExecutor),
             run_counter: AtomicU64::new(0),
@@ -113,6 +125,9 @@ impl Provider for LocalAgentProvider {
                 }),
             });
         let mut registry = ToolRegistry::new(local.clark.clone(), memory);
+        if local.browser_enabled {
+            registry.enable_browser();
+        }
         // Connect MCP servers and register their tools (failures are non-fatal).
         self.mcp_status = registry.connect_mcp(&local.mcp_servers).await;
         self.llm = Some(llm);
@@ -126,20 +141,20 @@ impl Provider for LocalAgentProvider {
 
         // A remote project runs its tools on a remote host over the exec-server;
         // a local project runs them here. Pick the sandbox + executor to match.
-        let (sandbox, executor): (Sandbox, Arc<dyn Executor>) =
-            if let Some(remote) = &config.remote {
-                let sandbox = Sandbox::new_remote(&remote.cwd).map_err(Error::Other)?;
-                let exec = RemoteExecutor::connect(&remote.ws_url, &remote.token)
-                    .await
-                    .map_err(Error::Other)?;
-                (sandbox, Arc::new(exec))
-            } else {
-                let cwd = options.cwd.or(config.cwd.clone()).ok_or_else(|| {
-                    Error::Unsupported("local provider requires a project `cwd`".into())
-                })?;
-                let sandbox = Sandbox::new(&cwd).map_err(Error::Io)?;
-                (sandbox, Arc::new(LocalExecutor))
-            };
+        let (sandbox, executor): (Sandbox, Arc<dyn Executor>) = if let Some(remote) = &config.remote
+        {
+            let sandbox = Sandbox::new_remote(&remote.cwd).map_err(Error::Other)?;
+            let exec = RemoteExecutor::connect(&remote.ws_url, &remote.token)
+                .await
+                .map_err(Error::Other)?;
+            (sandbox, Arc::new(exec))
+        } else {
+            let cwd = options.cwd.or(config.cwd.clone()).ok_or_else(|| {
+                Error::Unsupported("local provider requires a project `cwd`".into())
+            })?;
+            let sandbox = Sandbox::new(&cwd).map_err(Error::Io)?;
+            (sandbox, Arc::new(LocalExecutor))
+        };
         self.executor = executor;
 
         let id = SessionId::new(uuid::Uuid::new_v4().to_string());
@@ -212,19 +227,38 @@ impl Provider for LocalAgentProvider {
                 prompt.push_str(&mem);
             }
         }
+        // Project-scoped config (`.clark/settings.json`): permission arrays
+        // union with the global (UI-driven) ones; deny always wins because
+        // `PermissionGate::hard_refusal` checks `deny_commands` before
+        // `command_preapproved` checks `allow_commands`.
+        let project = crate::project_settings::load(self.executor.as_ref(), sandbox.root()).await;
         {
             let mut s = self.session.lock().await;
             s.system_prompt = prompt;
             s.transcript.clear();
             s.policy = config.permissions.clone();
-            s.allow_commands = config.command_allowlist.clone();
-            s.deny_commands = config.command_denylist.clone();
+            s.allow_commands = crate::project_settings::union_unique(
+                config.command_allowlist.clone(),
+                project.permissions.allow.clone(),
+            );
+            s.deny_commands = crate::project_settings::union_unique(
+                config.command_denylist.clone(),
+                project.permissions.deny.clone(),
+            );
+            s.output_style = String::new();
+            s.hooks = project.hooks;
+            s.check_command = project.check_command;
+            s.diagnostics_baseline = None;
         }
         self.control.lock().await.clear();
         // A new session starts with no files "read".
         if let Ok(mut reads) = self.reads.lock() {
             *reads = ReadTracker::default();
         }
+        // Kill any background tasks from a prior session on this same
+        // provider instance (new_session reuses it across "new chat"/project
+        // switches) — otherwise they'd leak past this point.
+        self.background.clear_all().await;
 
         self.sandbox = Some(sandbox);
         self.session_id = Some(id.clone());
@@ -251,6 +285,18 @@ impl Provider for LocalAgentProvider {
         let max_iterations = config.max_iterations;
 
         let text = prompt_text(&input);
+        let text = {
+            let s = self.session.lock().await;
+            let mut text = text;
+            let style = crate::prompt::output_style_instructions(&s.output_style);
+            if !style.is_empty() {
+                text = format!("{style}\n\n{text}");
+            }
+            if s.plan_mode {
+                text = format!("{PLAN_MODE_REMINDER}\n\n{text}");
+            }
+            text
+        };
         // Fresh cancellation scope for this run.
         let cancel = CancellationToken::new();
         self.cancel = cancel.clone();
@@ -269,6 +315,8 @@ impl Provider for LocalAgentProvider {
                 reads: self.reads.clone(),
                 cancel,
                 executor: self.executor.clone(),
+                background: self.background.clone(),
+                session: self.session.clone(),
             },
             session: self.session.clone(),
             control: self.control.clone(),
@@ -297,6 +345,16 @@ impl Provider for LocalAgentProvider {
                 Ok(())
             }
         }
+    }
+
+    async fn set_mode(&mut self, _session: &SessionId, mode: String) -> Result<()> {
+        self.session.lock().await.plan_mode = mode == "plan";
+        Ok(())
+    }
+
+    async fn set_output_style(&mut self, _session: &SessionId, style: String) -> Result<()> {
+        self.session.lock().await.output_style = style;
+        Ok(())
     }
 }
 
@@ -403,6 +461,31 @@ mod tests {
         p.connect(ProviderConfig::default()).await.unwrap();
         let err = p.new_session(SessionOptions::default()).await.unwrap_err();
         assert!(matches!(err, Error::Unsupported(_)));
+    }
+
+    #[tokio::test]
+    async fn set_mode_flips_plan_mode_flag() {
+        let mut p = LocalAgentProvider::new();
+        let session_id = SessionId::new("s1");
+        assert!(!p.session.lock().await.plan_mode);
+
+        p.set_mode(&session_id, "plan".to_string()).await.unwrap();
+        assert!(p.session.lock().await.plan_mode);
+
+        p.set_mode(&session_id, "ask".to_string()).await.unwrap();
+        assert!(!p.session.lock().await.plan_mode);
+    }
+
+    #[tokio::test]
+    async fn set_output_style_persists_on_session_state() {
+        let mut p = LocalAgentProvider::new();
+        let session_id = SessionId::new("s1");
+        assert_eq!(p.session.lock().await.output_style, "");
+
+        p.set_output_style(&session_id, "terse".to_string())
+            .await
+            .unwrap();
+        assert_eq!(p.session.lock().await.output_style, "terse");
     }
 
     #[tokio::test]

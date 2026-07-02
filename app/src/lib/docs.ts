@@ -18,7 +18,7 @@ export function isLocalDocUri(uri?: string): boolean {
 }
 
 /** Turn an artifact `uri` into a filesystem path (strips a `file://` scheme). */
-function toPath(uri: string): string {
+export function toPath(uri: string): string {
   return uri.startsWith("file://") ? decodeURIComponent(uri.slice("file://".length)) : uri;
 }
 
@@ -29,6 +29,19 @@ export async function readDocText(uri?: string): Promise<string | null> {
   if (!uri || !isTauri() || !isLocalDocUri(uri)) return null;
   try {
     return await invoke<string>("read_doc_text", { path: toPath(uri) });
+  } catch {
+    return null;
+  }
+}
+
+/** Read a produced image's bytes from disk as a `data:` URL. Returns null when
+ *  it can't be read inline (browser preview, a remote URL, or an
+ *  unreadable/oversized/unsupported file) — the caller falls back to an "Open"
+ *  link or leaves the image unrendered. */
+export async function readImageDataUrl(uri?: string): Promise<string | null> {
+  if (!uri || !isTauri() || !isLocalDocUri(uri)) return null;
+  try {
+    return await invoke<string>("read_image_data_url", { path: toPath(uri) });
   } catch {
     return null;
   }

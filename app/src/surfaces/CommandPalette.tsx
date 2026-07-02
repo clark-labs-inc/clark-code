@@ -60,7 +60,9 @@ export function CommandPalette({
         hint: c.hint,
         icon: ICON[c.name] ?? Plus,
         group: "Actions",
-        run: c.run,
+        // All built-ins from `slashCommands()` set `run`; `body`-only entries
+        // (user-authored commands) never reach the palette.
+        run: c.run ?? (() => {}),
       }));
     actions.push({
       id: "action:theme",

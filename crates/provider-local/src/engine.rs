@@ -62,6 +62,7 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
         tc.session.clone(),
         tc.control.clone(),
         tc.session_id.clone(),
+        run.clone(),
         tx.clone(),
     );
     // Documents the agent writes into this workspace become inline artifacts.
@@ -103,7 +104,15 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
                     run: Some(run.clone()),
                 })
                 .await;
-            finish(&tx, &run, RunStatus::Failed, None, Some(message), usage.snapshot()).await;
+            finish(
+                &tx,
+                &run,
+                RunStatus::Failed,
+                None,
+                Some(message),
+                usage.snapshot(),
+            )
+            .await;
             return;
         }
     };
@@ -159,7 +168,15 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
                     })
                     .await;
             }
-            finish(&tx, &run, mapped.status, None, mapped.run_error, usage.snapshot()).await;
+            finish(
+                &tx,
+                &run,
+                mapped.status,
+                None,
+                mapped.run_error,
+                usage.snapshot(),
+            )
+            .await;
         }
     }
 }

@@ -110,6 +110,26 @@ export function saveMemoriesEnabled(on: boolean): void {
   }
 }
 
+// Experimental `browser` tool (clark-browser, downloaded on first use). Off
+// by default — Alpha-status, ~150-300MB, not bundled in the app.
+const BROWSER_KEY = "clark-desktop:browser-enabled";
+
+export function loadBrowserEnabled(): boolean {
+  try {
+    return localStorage.getItem(BROWSER_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+export function saveBrowserEnabled(on: boolean): void {
+  try {
+    localStorage.setItem(BROWSER_KEY, String(on));
+  } catch {
+    // Non-fatal.
+  }
+}
+
 /**
  * Build the `connect` config the native coding provider expects. Everything
  * routes through the production Clark Platform API; the only inputs are the
@@ -137,6 +157,8 @@ export function localConnectConfig(
       mcp_servers: enabledMcpConfigs(loadMcpServers()),
       // Durable memory: exposes the `memory` tool + injects saved facts.
       memories: loadMemoriesEnabled(),
+      // Experimental `browser` tool — off unless the user opted in.
+      browser_enabled: loadBrowserEnabled(),
       // When present, the provider runs this session's tools on the remote host.
       ...(remote ? { remote } : {}),
     },

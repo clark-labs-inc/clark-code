@@ -12,7 +12,11 @@ export interface SlashCommand {
   hint: string;
   /** Only applicable once a session is open (e.g. terminal, memory). */
   needsSession?: boolean;
-  run: () => void;
+  /** Built-in commands run an action and clear the composer. */
+  run?: () => void;
+  /** User-authored commands (`.claude/commands/*.md`) insert this into the
+   *  composer instead of running an action — the user reviews before sending. */
+  body?: string;
 }
 
 export function slashCommands(): SlashCommand[] {

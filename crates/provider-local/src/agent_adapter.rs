@@ -10,7 +10,10 @@ use serde_json::{json, Value};
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
-use crate::llm::{AssistantTurn, ChatMessage, LlmClient, LlmError, ToolSchema, WireToolCall};
+use crate::llm::{
+    AssistantTurn, ChatContent, ChatMessage, ContentPart, ImageUrlRef, LlmClient, LlmError,
+    ToolSchema, WireToolCall,
+};
 use crate::loop_state::{RunControl, SessionState};
 use crate::permissions::{PermissionGate, PermissionOutcome};
 use crate::tools::{ToolCtx, ToolExecutor, ToolRegistry};
@@ -126,15 +129,18 @@ pub(crate) fn desktop_tool_registry(
     session: Arc<Mutex<SessionState>>,
     control: Arc<Mutex<RunControl>>,
     session_id: SessionId,
+    run: RunId,
     events: Sender<desktop::AgentEvent>,
 ) -> ca::ToolRegistry {
     let mut registry = ca::ToolRegistry::new();
-    let gate = PermissionGate::new(session, control, session_id, events);
+    let gate = PermissionGate::new(session, control, session_id, events.clone());
     for exec in source.executors() {
         registry.register(Arc::new(DesktopToolAdapter {
             exec,
             ctx: ctx.clone(),
             gate: gate.clone(),
+            run: run.clone(),
+            events: events.clone(),
         }));
     }
     registry
@@ -144,6 +150,11 @@ struct DesktopToolAdapter {
     exec: Arc<dyn ToolExecutor>,
     ctx: ToolCtx,
     gate: PermissionGate,
+    /// Needed so `update_plan` calls can emit a synthetic `AgentEvent::Plan`
+    /// (that tool isn't part of `ca::AgentEvent`, so it can't ride the normal
+    /// `DesktopEventSink` translation path).
+    run: RunId,
+    events: Sender<desktop::AgentEvent>,
 }
 
 #[async_trait]
@@ -172,6 +183,43 @@ impl ca::AgentTool for DesktopToolAdapter {
         _update: ca::ToolUpdateSink,
     ) -> Result<ca::ToolResult, ca::ToolError> {
         let tool_id = ToolCallId::new(call_id.to_string());
+
+        // `update_plan` is an execution-progress checklist; Plan Mode is a
+        // separate read-only research phase. It's non-mutating so it never
+        // reaches the gate below, hence this dedicated check.
+        if self.exec.name() == "update_plan" && self.gate.plan_mode_active().await {
+            return Ok(ca::ToolResult::error(
+                "update_plan is a checklist tool for the implementation phase — you're in Plan \
+                mode; write your plan and call propose_plan instead.",
+            ));
+        }
+
+        let mut args = match args {
+            Value::Null => json!({}),
+            other => other,
+        };
+
+        let hooks = { self.ctx.session.lock().await.hooks.clone() };
+        if !hooks.pre_tool_use.is_empty() {
+            match crate::hooks::run_pre_tool_use(
+                self.ctx.executor.as_ref(),
+                self.ctx.sandbox.root(),
+                &hooks.pre_tool_use,
+                self.exec.name(),
+                args.clone(),
+                &signal,
+            )
+            .await
+            {
+                crate::hooks::PreToolUseResult::Deny { reason } => {
+                    return Ok(ca::ToolResult::error(format!(
+                        "Blocked by a PreToolUse hook: {reason}"
+                    )));
+                }
+                crate::hooks::PreToolUseResult::Allow { args: updated } => args = updated,
+            }
+        }
+
         match self
             .gate
             .check(
@@ -193,21 +241,86 @@ impl ca::AgentTool for DesktopToolAdapter {
             return Err(ca::ToolError::Aborted);
         }
 
-        let args = match args {
-            Value::Null => json!({}),
-            other => other,
-        };
-        let outcome = self.exec.invoke(args, &self.ctx).await;
+        let update_plan_args = (self.exec.name() == "update_plan").then(|| args.clone());
+        let mut outcome = self.exec.invoke(args.clone(), &self.ctx).await;
+        if !outcome.is_error {
+            if let Some(raw) = update_plan_args {
+                if let Some(plan) = parse_update_plan(&raw) {
+                    let _ = self
+                        .events
+                        .send(desktop::AgentEvent::Plan {
+                            run: self.run.clone(),
+                            plan,
+                        })
+                        .await;
+                }
+            }
+        }
+
+        if !hooks.post_tool_use.is_empty() {
+            let extra = crate::hooks::run_post_tool_use(
+                self.ctx.executor.as_ref(),
+                self.ctx.sandbox.root(),
+                &hooks.post_tool_use,
+                self.exec.name(),
+                &args,
+                &outcome.content,
+                &signal,
+            )
+            .await;
+            if !extra.is_empty() {
+                outcome.content = format!(
+                    "{}\n\n[hook context]\n{}",
+                    outcome.content,
+                    extra.join("\n")
+                );
+            }
+        }
+
         let mut result = if outcome.is_error {
             ca::ToolResult::error(outcome.content)
         } else {
             ca::ToolResult::text(outcome.content)
         };
+        for image in &outcome.images {
+            result
+                .content
+                .push(ca::ToolResultBlock::Image(ca::ImageContent {
+                    source: format!("data:{};base64,{}", image.mime_type, image.data_base64),
+                    media_type: Some(image.mime_type.clone()),
+                    alt: image.alt.clone(),
+                }));
+        }
         if !outcome.locations.is_empty() {
             result.details = json!({ "locations": outcome.locations });
         }
         Ok(result)
     }
+}
+
+/// Parse an `update_plan` call's `{plan: [{step, status}]}` args into the
+/// normalized `desktop::Plan` the projection layer already understands (it's
+/// the same shape ACP's `plan` session/update and Clark's execution-plan
+/// events already produce — see `provider-acp`/`provider-clark` translate.rs).
+fn parse_update_plan(args: &Value) -> Option<desktop::Plan> {
+    let items = args.get("plan")?.as_array()?;
+    let phases = items
+        .iter()
+        .filter_map(|item| {
+            let title = item.get("step")?.as_str()?.to_string();
+            let status = match item.get("status").and_then(Value::as_str).unwrap_or("") {
+                "in_progress" => desktop::PlanPhaseStatus::InProgress,
+                "completed" => desktop::PlanPhaseStatus::Completed,
+                _ => desktop::PlanPhaseStatus::Pending,
+            };
+            Some(desktop::PlanPhase {
+                title,
+                status,
+                priority: None,
+            })
+        })
+        .collect();
+    Some(desktop::Plan { phases })
 }
 
 pub(crate) struct DesktopEventSink {
@@ -305,15 +418,19 @@ impl ca::EventSink for DesktopEventSink {
                 ..
             } => {
                 let locations = locations_from_details(&result.details);
-                // A Markdown file written into the document workspace becomes an
-                // inline artifact (a rendered doc / slide viewer). Emitted before
-                // the tool update so ordering is deterministic; the projection
-                // dedupes by uri, so a rewrite updates the same card.
+                // A Markdown file (or mobile-tool screenshot) written into the
+                // document workspace becomes an inline artifact (a rendered
+                // doc/slide viewer, or an image card). Emitted before the tool
+                // update so ordering is deterministic; the projection dedupes
+                // by uri, so a rewrite updates the same card.
                 if !is_error {
                     if let Some(docs) = &self.docs_dir {
                         for loc in &locations {
-                            if let Some(artifact) = markdown_artifact(&loc.path, &tool_call_id, docs)
-                            {
+                            let artifact = markdown_artifact(&loc.path, &tool_call_id, docs)
+                                .or_else(|| {
+                                    mobile_screenshot_artifact(&loc.path, &tool_call_id, docs)
+                                });
+                            if let Some(artifact) = artifact {
                                 let _ = self
                                     .events
                                     .send(desktop::AgentEvent::Artifact {
@@ -359,12 +476,13 @@ fn to_wire_messages(system_prompt: &str, messages: &[ca::AgentMessage]) -> Vec<C
                 out.push(ChatMessage::system(content.clone()));
             }
             ca::AgentMessage::User { content, .. } => {
-                out.push(ChatMessage::user(user_content_text(content)));
+                out.push(user_chat_message(content));
             }
             ca::AgentMessage::Assistant { content, .. } => {
+                let text = content.plain_text();
                 out.push(ChatMessage {
                     role: "assistant".into(),
-                    content: Some(content.plain_text()).filter(|text| !text.is_empty()),
+                    content: (!text.is_empty()).then(|| ChatContent::text(text)),
                     tool_calls: content
                         .tool_calls()
                         .into_iter()
@@ -377,10 +495,34 @@ fn to_wire_messages(system_prompt: &str, messages: &[ca::AgentMessage]) -> Vec<C
                 tool_call_id,
                 content,
                 ..
-            } => out.push(ChatMessage::tool(
-                tool_call_id.clone(),
-                content.plain_text(),
-            )),
+            } => {
+                out.push(ChatMessage::tool(
+                    tool_call_id.clone(),
+                    content.plain_text(),
+                ));
+                // `role: "tool"` can't carry a content-parts array on the
+                // OpenAI-compatible wire format, so an image result rides in
+                // as a synthetic follow-up user turn instead — the standard
+                // workaround for tool-result images on this wire format.
+                // Purely a wire-time construct: it's re-derived fresh from
+                // `content.blocks` on every turn, never written back into
+                // `ca::AgentMessage` history, so nothing is duplicated across
+                // resume/replay.
+                let image_urls: Vec<String> = content
+                    .blocks
+                    .iter()
+                    .filter_map(|block| match block {
+                        ca::ToolResultBlock::Image(image) => Some(image.source.clone()),
+                        _ => None,
+                    })
+                    .collect();
+                if !image_urls.is_empty() {
+                    out.push(ChatMessage::user_with_images(
+                        format!("Image result from tool call {tool_call_id}:"),
+                        image_urls,
+                    ));
+                }
+            }
             ca::AgentMessage::Custom { kind, payload, .. } => {
                 out.push(ChatMessage::system(format!(
                     "[runtime context: {kind}]\n{}",
@@ -390,6 +532,51 @@ fn to_wire_messages(system_prompt: &str, messages: &[ca::AgentMessage]) -> Vec<C
         }
     }
     out
+}
+
+/// Build the wire `user` message for a turn, forwarding any attached images
+/// as content-parts (the OpenAI-compatible wire format allows parts arrays
+/// on `role: "user"`, unlike `role: "tool"`). Falls back to a plain string
+/// when there are no images, so the wire payload is byte-identical to before
+/// multimodal support existed.
+fn user_chat_message(content: &ca::UserContent) -> ChatMessage {
+    let blocks: &[ca::UserBlock] = match content {
+        ca::UserContent::Text(text) => return ChatMessage::user(text.clone()),
+        ca::UserContent::Blocks(blocks) => blocks,
+    };
+    let has_image = blocks
+        .iter()
+        .any(|block| matches!(block, ca::UserBlock::Image(_)));
+    if !has_image {
+        let text = blocks
+            .iter()
+            .filter_map(|block| match block {
+                ca::UserBlock::Text(text) => Some(text.text.clone()),
+                ca::UserBlock::Image(_) => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        return ChatMessage::user(text);
+    }
+    let mut parts = Vec::with_capacity(blocks.len());
+    for block in blocks {
+        match block {
+            ca::UserBlock::Text(text) => parts.push(ContentPart::Text {
+                text: text.text.clone(),
+            }),
+            ca::UserBlock::Image(image) => parts.push(ContentPart::ImageUrl {
+                image_url: ImageUrlRef {
+                    url: image.source.clone(),
+                },
+            }),
+        }
+    }
+    ChatMessage {
+        role: "user".into(),
+        content: Some(ChatContent::Parts(parts)),
+        tool_calls: Vec::new(),
+        tool_call_id: None,
+    }
 }
 
 fn to_wire_tool_schema(tool: &ca::stream::ToolSchema) -> ToolSchema {
@@ -481,36 +668,37 @@ fn stream_error(error: LlmError) -> (ca::stream::StreamErrorKind, String) {
     }
 }
 
-fn user_content_text(content: &ca::UserContent) -> String {
-    match content {
-        ca::UserContent::Text(text) => text.clone(),
-        ca::UserContent::Blocks(blocks) => blocks
-            .iter()
-            .map(|block| match block {
-                ca::UserBlock::Text(text) => text.text.clone(),
-                ca::UserBlock::Image(image) => {
-                    format!(
-                        "[image: {}]",
-                        image.alt.as_deref().unwrap_or("attached image")
-                    )
-                }
-            })
-            .collect::<Vec<_>>()
-            .join("\n"),
-    }
-}
-
 fn tool_result_blocks_to_content(blocks: &[ca::ToolResultBlock]) -> Vec<desktop::ContentBlock> {
     blocks
         .iter()
         .map(|block| match block {
             ca::ToolResultBlock::Text(text) => desktop::ContentBlock::text(text.text.clone()),
-            ca::ToolResultBlock::Image(image) => desktop::ContentBlock::ResourceLink {
-                uri: image.source.clone(),
-                name: image.alt.clone(),
+            ca::ToolResultBlock::Image(image) => match parse_data_url(&image.source) {
+                Some((mime_type, data)) => desktop::ContentBlock::Image {
+                    mime_type,
+                    data,
+                    uri: None,
+                },
+                None => desktop::ContentBlock::Image {
+                    mime_type: image
+                        .media_type
+                        .clone()
+                        .unwrap_or_else(|| "application/octet-stream".to_string()),
+                    data: String::new(),
+                    uri: Some(image.source.clone()),
+                },
             },
         })
         .collect()
+}
+
+/// Split a `data:{mime};base64,{data}` URL into its `(mime_type, data)` parts.
+/// Returns `None` for anything else (e.g. an external `https://` URL), which
+/// callers treat as a URI-only image reference instead.
+fn parse_data_url(s: &str) -> Option<(String, String)> {
+    let rest = s.strip_prefix("data:")?;
+    let (mime, data) = rest.split_once(";base64,")?;
+    Some((mime.to_string(), data.to_string()))
 }
 
 fn locations_from_details(details: &Value) -> Vec<desktop::FsLocation> {
@@ -553,7 +741,53 @@ fn markdown_artifact(
     })
 }
 
+/// Build an inline image artifact for a screenshot a mobile-control tool
+/// wrote into the document workspace. Same shape as `markdown_artifact`,
+/// gated on image extension instead of `is_markdown`.
+fn mobile_screenshot_artifact(
+    written: &str,
+    tool_call_id: &str,
+    docs: &std::path::Path,
+) -> Option<desktop::Artifact> {
+    let path = std::path::Path::new(written);
+    if !path.is_absolute() {
+        return None;
+    }
+    let canon = path.canonicalize().ok()?;
+    if !canon.starts_with(docs) {
+        return None;
+    }
+    let ext = canon
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())?;
+    let mime_type = match ext.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        _ => return None,
+    };
+    let title = canon
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("screenshot")
+        .to_string();
+    let uri = canon.to_string_lossy().to_string();
+    Some(desktop::Artifact {
+        id: format!("shot:{uri}"),
+        title,
+        kind: desktop::ArtifactKind::Image,
+        mime_type: Some(mime_type.to_string()),
+        uri: Some(uri),
+        tool_call: Some(ToolCallId::new(tool_call_id.to_string())),
+    })
+}
+
 fn tool_title(name: &str, args: &Value) -> String {
+    match name {
+        "propose_plan" => return "Proposed a plan".to_string(),
+        "update_plan" => return "Updated the plan".to_string(),
+        _ => {}
+    }
     let salient = ["path", "pattern", "command", "query", "old_string"]
         .iter()
         .find_map(|key| args.get(*key).and_then(Value::as_str));
@@ -591,6 +825,32 @@ mod tests {
     }
 
     #[test]
+    fn tool_title_special_cases_plan_tools() {
+        assert_eq!(tool_title("propose_plan", &json!({})), "Proposed a plan");
+        assert_eq!(tool_title("update_plan", &json!({})), "Updated the plan");
+    }
+
+    #[test]
+    fn parse_update_plan_maps_steps_and_statuses() {
+        let args = json!({"plan": [
+            {"step": "read the code", "status": "completed"},
+            {"step": "write the fix", "status": "in_progress"},
+            {"step": "test it", "status": "pending"},
+        ]});
+        let plan = parse_update_plan(&args).expect("valid plan");
+        assert_eq!(plan.phases.len(), 3);
+        assert_eq!(plan.phases[0].title, "read the code");
+        assert_eq!(plan.phases[0].status, desktop::PlanPhaseStatus::Completed);
+        assert_eq!(plan.phases[1].status, desktop::PlanPhaseStatus::InProgress);
+        assert_eq!(plan.phases[2].status, desktop::PlanPhaseStatus::Pending);
+    }
+
+    #[test]
+    fn parse_update_plan_rejects_missing_plan_array() {
+        assert!(parse_update_plan(&json!({})).is_none());
+    }
+
+    #[test]
     fn markdown_artifact_only_for_md_inside_the_workspace() {
         let docs = tempfile::tempdir().unwrap();
         let docs_canon = docs.path().canonicalize().unwrap();
@@ -614,5 +874,163 @@ mod tests {
         let out_md = outside.path().canonicalize().unwrap().join("x.md");
         std::fs::write(&out_md, "x").unwrap();
         assert!(markdown_artifact(out_md.to_str().unwrap(), "c", &docs_canon).is_none());
+    }
+
+    #[test]
+    fn mobile_screenshot_artifact_only_for_images_inside_the_workspace() {
+        let docs = tempfile::tempdir().unwrap();
+        let docs_canon = docs.path().canonicalize().unwrap();
+
+        let png = docs_canon.join("sim.png");
+        std::fs::write(&png, [0u8; 4]).unwrap();
+        let art = mobile_screenshot_artifact(png.to_str().unwrap(), "call-1", &docs_canon)
+            .expect("png screenshot");
+        assert_eq!(art.kind, desktop::ArtifactKind::Image);
+        assert_eq!(art.mime_type.as_deref(), Some("image/png"));
+        assert_eq!(art.uri.as_deref(), Some(png.to_str().unwrap()));
+
+        let jpg = docs_canon.join("sim.jpg");
+        std::fs::write(&jpg, [0u8; 4]).unwrap();
+        let art = mobile_screenshot_artifact(jpg.to_str().unwrap(), "call-1", &docs_canon)
+            .expect("jpg screenshot");
+        assert_eq!(art.mime_type.as_deref(), Some("image/jpeg"));
+
+        // A non-image file in the workspace → no artifact.
+        let txt = docs_canon.join("notes.txt");
+        std::fs::write(&txt, "x").unwrap();
+        assert!(mobile_screenshot_artifact(txt.to_str().unwrap(), "c", &docs_canon).is_none());
+
+        // A PNG outside the workspace → no artifact.
+        let outside = tempfile::tempdir().unwrap();
+        let out_png = outside.path().canonicalize().unwrap().join("x.png");
+        std::fs::write(&out_png, [0u8; 4]).unwrap();
+        assert!(mobile_screenshot_artifact(out_png.to_str().unwrap(), "c", &docs_canon).is_none());
+    }
+
+    #[test]
+    fn user_chat_message_stays_plain_text_with_no_images() {
+        let content = ca::UserContent::Blocks(vec![ca::UserBlock::Text(ca::types::TextContent {
+            text: "hello".into(),
+        })]);
+        let msg = user_chat_message(&content);
+        assert_eq!(msg.role, "user");
+        match msg.content {
+            Some(ChatContent::Text(t)) => assert_eq!(t, "hello"),
+            other => panic!("expected plain text content, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn user_chat_message_forwards_images_as_content_parts() {
+        let content = ca::UserContent::Blocks(vec![
+            ca::UserBlock::Text(ca::types::TextContent {
+                text: "check this out".into(),
+            }),
+            ca::UserBlock::Image(ca::ImageContent {
+                source: "data:image/png;base64,QUJD".into(),
+                media_type: Some("image/png".into()),
+                alt: None,
+            }),
+        ]);
+        let msg = user_chat_message(&content);
+        assert_eq!(msg.role, "user");
+        match msg.content {
+            Some(ChatContent::Parts(parts)) => {
+                assert_eq!(parts.len(), 2);
+                assert!(
+                    matches!(&parts[0], ContentPart::Text { text } if text == "check this out")
+                );
+                assert!(matches!(
+                    &parts[1],
+                    ContentPart::ImageUrl { image_url } if image_url.url == "data:image/png;base64,QUJD"
+                ));
+            }
+            other => panic!("expected content-parts, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn to_wire_messages_injects_synthetic_user_turn_for_tool_result_images() {
+        let messages = vec![ca::AgentMessage::ToolResult {
+            tool_call_id: "call-1".into(),
+            tool_name: "ios_screenshot".into(),
+            content: ca::ToolResultContent {
+                blocks: vec![
+                    ca::ToolResultBlock::Text(ca::types::TextContent {
+                        text: "Screenshot captured.".into(),
+                    }),
+                    ca::ToolResultBlock::Image(ca::ImageContent {
+                        source: "data:image/png;base64,QUJD".into(),
+                        media_type: Some("image/png".into()),
+                        alt: None,
+                    }),
+                ],
+            },
+            is_error: false,
+            narration: None,
+            details: None,
+            timestamp: None,
+        }];
+        let wire = to_wire_messages("", &messages);
+
+        // The tool-role message itself stays plain text — the OpenAI-compatible
+        // wire format doesn't allow a content-parts array on role: "tool".
+        assert_eq!(wire[0].role, "tool");
+        match &wire[0].content {
+            Some(ChatContent::Text(t)) => assert_eq!(t, "Screenshot captured."),
+            other => panic!("expected plain text tool content, got {other:?}"),
+        }
+
+        // The image rides in as a synthetic follow-up user turn.
+        assert_eq!(wire[1].role, "user");
+        match &wire[1].content {
+            Some(ChatContent::Parts(parts)) => {
+                assert!(parts.iter().any(|p| matches!(
+                    p,
+                    ContentPart::ImageUrl { image_url } if image_url.url == "data:image/png;base64,QUJD"
+                )));
+            }
+            other => panic!("expected content-parts with the image, got {other:?}"),
+        }
+        assert_eq!(wire.len(), 2);
+    }
+
+    #[test]
+    fn to_wire_messages_skips_synthetic_turn_when_no_images() {
+        let messages = vec![ca::AgentMessage::ToolResult {
+            tool_call_id: "call-1".into(),
+            tool_name: "grep".into(),
+            content: ca::ToolResultContent::text("no matches"),
+            is_error: false,
+            narration: None,
+            details: None,
+            timestamp: None,
+        }];
+        let wire = to_wire_messages("", &messages);
+        assert_eq!(wire.len(), 1);
+        assert_eq!(wire[0].role, "tool");
+    }
+
+    #[test]
+    fn tool_result_blocks_to_content_maps_image_data_url_to_image_block() {
+        let blocks = vec![ca::ToolResultBlock::Image(ca::ImageContent {
+            source: "data:image/png;base64,QUJD".into(),
+            media_type: Some("image/png".into()),
+            alt: Some("a screenshot".into()),
+        })];
+        let content = tool_result_blocks_to_content(&blocks);
+        assert_eq!(content.len(), 1);
+        match &content[0] {
+            desktop::ContentBlock::Image {
+                mime_type,
+                data,
+                uri,
+            } => {
+                assert_eq!(mime_type, "image/png");
+                assert_eq!(data, "QUJD");
+                assert!(uri.is_none());
+            }
+            other => panic!("expected an Image content block, got {other:?}"),
+        }
     }
 }
