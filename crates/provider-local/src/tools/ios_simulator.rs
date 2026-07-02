@@ -126,9 +126,11 @@ fn idb_button(button: &str) -> Result<&'static str, String> {
         "side_button" => "SIDE_BUTTON",
         "siri" => "SIRI",
         "apple_pay" => "APPLE_PAY",
-        other => return Err(format!(
+        other => {
+            return Err(format!(
             "unknown button `{other}` (expected one of: home, lock, side_button, siri, apple_pay)"
-        )),
+        ))
+        }
     })
 }
 

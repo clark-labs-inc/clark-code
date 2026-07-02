@@ -67,3 +67,4 @@ tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 # The gated remote_e2e harness drives RemoteExecutor, whose exec() takes a
 # tokio_util CancellationToken.
 tokio-util = { version = "0.7", default-features = false }
+tempfile = "3"
