@@ -244,6 +244,7 @@ async fn engine(mut rx: UnboundedReceiver<Value>, shared: Shared) {
                                 status: RunStatus::Failed,
                                 stop_reason: None,
                                 error: Some(message),
+                                usage: None,
                             },
                         },
                     )

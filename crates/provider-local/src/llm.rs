@@ -114,12 +114,25 @@ impl ToolSchema {
     }
 }
 
+/// Token/cost accounting from the final streamed chunk (OpenRouter shape,
+/// forwarded verbatim by the Clark passthrough).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct TokenUsage {
+    /// Prompt size of this call — the live context footprint.
+    pub prompt_tokens: u64,
+    pub completion_tokens: u64,
+    /// Upstream USD cost when the provider reports it.
+    pub cost_usd: Option<f64>,
+}
+
 /// The fully-assembled result of one model turn.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AssistantTurn {
     pub text: String,
     pub tool_calls: Vec<WireToolCall>,
     pub finish_reason: Option<String>,
+    /// Usage reported by the stream's final chunk, when present.
+    pub usage: Option<TokenUsage>,
 }
 
 /// Why a model call ended without producing a turn.
@@ -327,6 +340,7 @@ struct Accumulator {
     text: String,
     tool_calls: BTreeMap<u64, PartialToolCall>,
     finish_reason: Option<String>,
+    usage: Option<TokenUsage>,
 }
 
 #[derive(Default)]
@@ -338,6 +352,19 @@ struct PartialToolCall {
 
 impl Accumulator {
     fn push_chunk(&mut self, chunk: &Value, on_text: &mut impl FnMut(&str)) {
+        // The final chunk carries the whole call's usage (include_usage is set
+        // upstream by the passthrough). Read it before the choices guard — some
+        // providers ship usage in a chunk with no/empty choices.
+        if let Some(usage) = chunk.get("usage").filter(|u| u.is_object()) {
+            self.usage = Some(TokenUsage {
+                prompt_tokens: usage.get("prompt_tokens").and_then(Value::as_u64).unwrap_or(0),
+                completion_tokens: usage
+                    .get("completion_tokens")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0),
+                cost_usd: usage.get("cost").and_then(Value::as_f64),
+            });
+        }
         let Some(choices) = chunk.get("choices").and_then(Value::as_array) else {
             return;
         };
@@ -395,6 +422,7 @@ impl Accumulator {
             text: self.text,
             tool_calls,
             finish_reason: self.finish_reason,
+            usage: self.usage,
         }
     }
 }
@@ -425,6 +453,28 @@ mod tests {
         assert_eq!(turn.text, "Hello world");
         assert_eq!(collected, "Hello world");
         assert!(turn.tool_calls.is_empty());
+    }
+
+    #[test]
+    fn captures_usage_from_the_final_chunk() {
+        // Real shape: last chunk carries usage (choices present but empty delta).
+        let turn = feed(&[
+            r#"{"choices":[{"delta":{"content":"hi"}}]}"#,
+            r#"{"choices":[{"delta":{"content":""},"finish_reason":"stop"}],"usage":{"prompt_tokens":14,"completion_tokens":181,"total_tokens":195,"cost":0.00055602}}"#,
+        ]);
+        let usage = turn.usage.expect("usage captured");
+        assert_eq!(usage.prompt_tokens, 14);
+        assert_eq!(usage.completion_tokens, 181);
+        assert!((usage.cost_usd.unwrap() - 0.00055602).abs() < 1e-9);
+
+        // Usage-only trailer chunk (no/empty choices) is also honored.
+        let turn = feed(&[
+            r#"{"choices":[{"delta":{"content":"x"},"finish_reason":"stop"}]}"#,
+            r#"{"choices":[],"usage":{"prompt_tokens":7,"completion_tokens":3}}"#,
+        ]);
+        let usage = turn.usage.expect("trailer usage captured");
+        assert_eq!(usage.prompt_tokens, 7);
+        assert_eq!(usage.cost_usd, None);
     }
 
     #[test]

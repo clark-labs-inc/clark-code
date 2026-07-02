@@ -359,6 +359,7 @@ mod tests {
                     status: RunStatus::Done,
                     stop_reason: Some("end_turn".into()),
                     error: None,
+                    usage: None,
                 },
             },
         );
@@ -581,6 +582,7 @@ mod tests {
                     status: RunStatus::Done,
                     stop_reason: Some("end_turn".into()),
                     error: None,
+                    usage: None,
                 },
             },
         ];

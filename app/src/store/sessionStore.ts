@@ -56,6 +56,8 @@ import {
   cloudCreds,
   cloudList,
   cloudGet,
+  cloudShare,
+  cloudUnshare,
   scheduleCloudPut,
 } from "../lib/cloudHistory";
 import { provisionCodeKey, billingMe, type BillingSummary } from "../lib/account";
@@ -214,6 +216,10 @@ interface SessionState {
   updateModelSettings: (patch: { model?: string; reasoningEffort?: string }) => Promise<void>;
   /** Stage text in the composer ("Edit & resend" on a sent message). */
   setComposerPrefill: (text: string | null) => void;
+  /** Create a public read-only link for the viewed conversation + copy it. */
+  shareConversation: () => Promise<void>;
+  /** Revoke the viewed conversation's public link. */
+  unshareConversation: () => Promise<void>;
   addFiles: (files: File[]) => Promise<void>;
   removeAttachment: (id: string) => void;
   send: (text: string) => Promise<void>;
@@ -861,6 +867,37 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   },
 
   setComposerPrefill: (text) => set({ composerPrefill: text }),
+
+  shareConversation: async () => {
+    const { session, peek, auth } = get();
+    const id = peek?.id ?? session?.id;
+    const creds = cloudCreds(auth);
+    if (!id) return;
+    if (!creds) {
+      set({ error: "Sign in to share — links serve the cloud copy of the conversation." });
+      return;
+    }
+    try {
+      const url = await cloudShare(creds, id);
+      await navigator.clipboard?.writeText(url);
+      void notify("Share link copied", "Anyone with the link can view this conversation.");
+    } catch (e) {
+      set({ error: `Sharing failed: ${String(e)}` });
+    }
+  },
+
+  unshareConversation: async () => {
+    const { session, peek, auth } = get();
+    const id = peek?.id ?? session?.id;
+    const creds = cloudCreds(auth);
+    if (!id || !creds) return;
+    try {
+      await cloudUnshare(creds, id);
+      void notify("Sharing stopped", "The public link no longer works.");
+    } catch (e) {
+      set({ error: `Stopping the share failed: ${String(e)}` });
+    }
+  },
 
   addFiles: async (files) => {
     const incoming = files.filter((f) => f.size <= MAX_ATTACHMENT_BYTES);

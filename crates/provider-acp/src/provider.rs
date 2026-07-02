@@ -319,12 +319,14 @@ impl Provider for AcpProvider {
                         status,
                         stop_reason: Some(stop),
                         error: None,
+                        usage: None,
                     }
                 }
                 Err(e) => RunOutcome {
                     status: RunStatus::Failed,
                     stop_reason: None,
                     error: Some(e.to_string()),
+                    usage: None,
                 },
             };
             let _ = tx

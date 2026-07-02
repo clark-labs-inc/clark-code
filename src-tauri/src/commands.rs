@@ -49,6 +49,41 @@ pub async fn provider_connect(
     Ok(())
 }
 
+/// Files changed since a session baseline checkpoint (the Changes panel).
+/// Read-only; runs git against a throwaway index off the UI thread.
+#[tauri::command]
+pub async fn changes_summary(
+    cwd: String,
+    base: String,
+) -> Result<Vec<provider_local::ChangedFile>, String> {
+    tokio::task::spawn_blocking(move || {
+        provider_local::changes_summary(std::path::Path::new(&cwd), &base)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Unified diff of one file against the session baseline.
+#[tauri::command]
+pub async fn changes_diff(cwd: String, base: String, path: String) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        provider_local::changes_diff(std::path::Path::new(&cwd), &base, &path)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Restore one file to its baseline state (worktree only; created files are
+/// removed). The user confirms in the panel before this fires.
+#[tauri::command]
+pub async fn changes_revert(cwd: String, base: String, path: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        provider_local::changes_revert(std::path::Path::new(&cwd), &base, &path)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Re-run `connect` on the EXISTING provider instance — unlike
 /// [`provider_connect`], this keeps the live session (the model-visible
 /// transcript lives in the provider), so the composer's model / reasoning-effort
@@ -729,7 +764,54 @@ pub async fn clark_billing_me(endpoint: String, token: String) -> Result<Value, 
     read_json_or_err(resp, "billing").await
 }
 
-/// Delete a desktop conversation from the cloud.
+/// Create (or fetch the existing) public share for a synced conversation.
+/// Returns `{ share_token, share_url }`.
+#[tauri::command]
+pub async fn desktop_conv_share(
+    endpoint: String,
+    token: String,
+    id: String,
+) -> Result<Value, String> {
+    let url = format!(
+        "{}/api/desktop/conversations/{}/share",
+        clark_rest_base(&endpoint),
+        urlencoding::encode(&id)
+    );
+    let resp = clark_http_client()?
+        .post(url)
+        .header("Authorization", format!("Bearer {token}"))
+        .send()
+        .await
+        .map_err(|e| format!("share request failed: {e}"))?;
+    read_json_or_err(resp, "share conversation").await
+}
+
+/// Revoke the public share for a conversation (idempotent).
+#[tauri::command]
+pub async fn desktop_conv_unshare(
+    endpoint: String,
+    token: String,
+    id: String,
+) -> Result<(), String> {
+    let url = format!(
+        "{}/api/desktop/conversations/{}/share",
+        clark_rest_base(&endpoint),
+        urlencoding::encode(&id)
+    );
+    let resp = clark_http_client()?
+        .delete(url)
+        .header("Authorization", format!("Bearer {token}"))
+        .send()
+        .await
+        .map_err(|e| format!("unshare request failed: {e}"))?;
+    let status = resp.status();
+    if !status.is_success() {
+        let text = resp.text().await.unwrap_or_default();
+        return Err(format!("unshare failed ({status}): {text}"));
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn desktop_conv_delete(
     endpoint: String,

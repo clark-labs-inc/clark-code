@@ -37,6 +37,18 @@ export function slashCommands(): SlashCommand[] {
       },
     },
     {
+      name: "share",
+      hint: "Copy a public read-only link to this conversation",
+      needsSession: true,
+      run: () => void s().shareConversation(),
+    },
+    {
+      name: "unshare",
+      hint: "Stop sharing this conversation",
+      needsSession: true,
+      run: () => void s().unshareConversation(),
+    },
+    {
       name: "memory",
       hint: "View project memory",
       needsSession: true,

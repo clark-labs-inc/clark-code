@@ -1,7 +1,8 @@
-import { Sun, Moon, FolderGit2, SquareTerminal, Settings as SettingsIcon, RefreshCw } from "lucide-react";
+import { Sun, Moon, FolderGit2, SquareTerminal, Settings as SettingsIcon, RefreshCw, Share2 } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
 import { projectName } from "../lib/localAgent";
 import { cn } from "../lib/cn";
+import { ChangesButton } from "./ChangesPanel";
 import { MemoryButton } from "./MemoryPanel";
 import { ProfileMenu } from "./ProfileMenu";
 
@@ -29,6 +30,8 @@ export function TopBar({ dark, onToggleTheme }: { dark: boolean; onToggleTheme: 
   const terminalOpen = useSessionStore((s) => s.terminalOpen);
   const toggleTerminal = useSessionStore((s) => s.toggleTerminal);
   const setSettingsOpen = useSessionStore((s) => s.setSettingsOpen);
+  const shareConversation = useSessionStore((s) => s.shareConversation);
+  const signedIn = useSessionStore((s) => s.auth !== null);
   const title = useSessionStore((s) =>
     session ? s.conversations.find((c) => c.id === session.id)?.title : null,
   );
@@ -61,6 +64,17 @@ export function TopBar({ dark, onToggleTheme }: { dark: boolean; onToggleTheme: 
 
       <div className="ml-auto flex items-center gap-1">
         <UpdatePill />
+        {session && signedIn && (
+          <button
+            onClick={() => void shareConversation()}
+            aria-label="Share conversation"
+            title="Copy a public read-only link (/unshare stops sharing)"
+            className="grid size-8 place-items-center rounded-lg text-ink-muted transition hover:bg-bg-hover hover:text-ink-secondary"
+          >
+            <Share2 className="size-4" />
+          </button>
+        )}
+        {session && isLocal && <ChangesButton />}
         {session && isLocal && projectCwd && <MemoryButton />}
         <button
           onClick={() => setSettingsOpen(true)}

@@ -72,6 +72,7 @@ struct TurnSummary {
     finished: bool,
     status: Option<RunStatus>,
     run_error: Option<String>,
+    usage: Option<agent_core::domain::RunUsage>,
     text: String,
     tools: Vec<String>,
     errors: Vec<String>,
@@ -190,6 +191,7 @@ async fn drive_turn(
                     summary.finished = true;
                     summary.status = Some(outcome.status);
                     summary.run_error = outcome.error;
+                    summary.usage = outcome.usage;
                     break;
                 }
                 AgentEvent::Error { code, message, .. } => {

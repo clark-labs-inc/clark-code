@@ -15,14 +15,53 @@ use crate::loop_state::{RunControl, SessionState};
 use crate::permissions::{PermissionGate, PermissionOutcome};
 use crate::tools::{ToolCtx, ToolExecutor, ToolRegistry};
 
+/// Running token/cost totals across a run's model calls, shared between the
+/// stream adapter (writer) and the engine (reads them into the run outcome).
+#[derive(Default)]
+pub(crate) struct UsageTotals {
+    inner: std::sync::Mutex<agent_core::domain::RunUsage>,
+    seen: std::sync::atomic::AtomicBool,
+}
+
+impl UsageTotals {
+    fn add(&self, usage: crate::llm::TokenUsage) {
+        let mut t = self.inner.lock().expect("usage totals lock");
+        t.input_tokens += usage.prompt_tokens;
+        t.output_tokens += usage.completion_tokens;
+        // The latest call's prompt is the conversation's live context footprint.
+        t.context_tokens = usage.prompt_tokens;
+        if let Some(cost) = usage.cost_usd {
+            t.cost_usd = Some(t.cost_usd.unwrap_or(0.0) + cost);
+        }
+        self.seen.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// The accumulated usage, or `None` if no call reported any.
+    pub fn snapshot(&self) -> Option<agent_core::domain::RunUsage> {
+        if !self.seen.load(std::sync::atomic::Ordering::Relaxed) {
+            return None;
+        }
+        Some(*self.inner.lock().expect("usage totals lock"))
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct ClarkAgentStream {
     llm: LlmClient,
+    totals: Arc<UsageTotals>,
 }
 
 impl ClarkAgentStream {
     pub fn new(llm: LlmClient) -> Self {
-        Self { llm }
+        Self {
+            llm,
+            totals: Arc::new(UsageTotals::default()),
+        }
+    }
+
+    /// Handle the engine holds to fold totals into the run outcome.
+    pub fn usage(&self) -> Arc<UsageTotals> {
+        self.totals.clone()
     }
 }
 
@@ -34,6 +73,7 @@ impl ca::StreamFn for ClarkAgentStream {
         signal: CancellationToken,
     ) -> BoxStream<'static, ca::StreamEvent> {
         let llm = self.llm.clone();
+        let totals = self.totals.clone();
         let messages = to_wire_messages(&request.system_prompt, &request.messages);
         let tools = request
             .tools
@@ -57,6 +97,9 @@ impl ca::StreamFn for ClarkAgentStream {
 
             match turn {
                 Ok(turn) => {
+                    if let Some(usage) = turn.usage {
+                        totals.add(usage);
+                    }
                     let message = assistant_message(turn);
                     let _ = tx.send(ca::StreamEvent::Done { message });
                 }
@@ -378,7 +421,12 @@ fn assistant_message(turn: AssistantTurn) -> ca::AgentMessage {
         stop_reason,
         error_message: None,
         timestamp: None,
-        usage: None,
+        usage: turn.usage.map(|u| ca::types::Usage {
+            input_tokens: u.prompt_tokens as i64,
+            output_tokens: u.completion_tokens as i64,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 0,
+        }),
     }
 }
 

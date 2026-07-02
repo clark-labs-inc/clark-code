@@ -47,7 +47,7 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
     }
 
     if cancel.is_cancelled() {
-        finish(&tx, &run, RunStatus::Cancelled, None, None).await;
+        finish(&tx, &run, RunStatus::Cancelled, None, None, None).await;
         return;
     }
 
@@ -73,8 +73,12 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
         docs_dir,
     ));
 
+    // The stream adapter accumulates token/cost usage across the run's model
+    // calls; the handle folds those totals into the run outcome at finish.
+    let stream = ClarkAgentStream::new(tc.llm.clone());
+    let usage = stream.usage();
     let mut builder = clark_agent::AgentBuilder::new()
-        .stream(Arc::new(ClarkAgentStream::new(tc.llm.clone())))
+        .stream(Arc::new(stream))
         .tools(tools)
         .event_sink(sink)
         .default_execution_mode(clark_agent::ExecutionMode::Sequential)
@@ -99,7 +103,7 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
                     run: Some(run.clone()),
                 })
                 .await;
-            finish(&tx, &run, RunStatus::Failed, None, Some(message)).await;
+            finish(&tx, &run, RunStatus::Failed, None, Some(message), usage.snapshot()).await;
             return;
         }
     };
@@ -126,6 +130,7 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
                     RunStatus::Done,
                     Some(outcome.label().to_string()),
                     None,
+                    usage.snapshot(),
                 )
                 .await;
             } else {
@@ -138,6 +143,7 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
                         "stopped after {} model iterations",
                         tc.max_iterations
                     )),
+                    usage.snapshot(),
                 )
                 .await;
             }
@@ -153,7 +159,7 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
                     })
                     .await;
             }
-            finish(&tx, &run, mapped.status, None, mapped.run_error).await;
+            finish(&tx, &run, mapped.status, None, mapped.run_error, usage.snapshot()).await;
         }
     }
 }
@@ -228,6 +234,7 @@ async fn finish(
     status: RunStatus,
     stop_reason: Option<String>,
     error: Option<String>,
+    usage: Option<agent_core::domain::RunUsage>,
 ) {
     let _ = tx
         .send(AgentEvent::RunFinished {
@@ -236,6 +243,7 @@ async fn finish(
                 status,
                 stop_reason,
                 error,
+                usage,
             },
         })
         .await;

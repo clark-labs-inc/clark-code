@@ -55,7 +55,7 @@ function DiffStatBadge({ stat }: { stat: DiffStat }) {
   );
 }
 
-function DiffBody({ text }: { text: string }) {
+export function DiffBody({ text }: { text: string }) {
   const lines = text.replace(/^diff .*\n/, "").split("\n");
   return (
     <pre className="overflow-x-auto px-3 py-2 font-mono text-xs leading-[1.5]">

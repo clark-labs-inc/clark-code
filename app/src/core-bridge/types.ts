@@ -92,10 +92,20 @@ export interface Artifact {
 export type RunStatus =
   | "queued" | "running" | "awaiting_input" | "done" | "cancelled" | "failed";
 
+/** Aggregated model usage for one run (the local coding loop surfaces it). */
+export interface RunUsage {
+  input_tokens: number;
+  output_tokens: number;
+  /** Prompt size of the last model call — the live context footprint. */
+  context_tokens: number;
+  cost_usd?: number;
+}
+
 export interface RunOutcome {
   status: RunStatus;
   stop_reason?: string;
   error?: string;
+  usage?: RunUsage;
 }
 
 export interface RunView {

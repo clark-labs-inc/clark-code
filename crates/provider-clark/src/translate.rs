@@ -506,6 +506,7 @@ pub fn event_to_agent(event: &Value, run: &RunId) -> Option<AgentEvent> {
                     status: RunStatus::Done,
                     stop_reason: Some(outcome.to_string()),
                     error: None,
+                    usage: None,
                 },
             })
         }
@@ -521,6 +522,7 @@ pub fn event_to_agent(event: &Value, run: &RunId) -> Option<AgentEvent> {
                     status: RunStatus::Failed,
                     stop_reason: None,
                     error: Some(message.to_string()),
+                    usage: None,
                 },
             })
         }

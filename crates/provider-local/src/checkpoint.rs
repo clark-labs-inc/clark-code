@@ -12,7 +12,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-fn git(root: &Path, args: &[&str]) -> Result<std::process::Output, String> {
+pub(crate) fn git(root: &Path, args: &[&str]) -> Result<std::process::Output, String> {
     Command::new("git")
         .arg("-C")
         .arg(root)
@@ -21,7 +21,7 @@ fn git(root: &Path, args: &[&str]) -> Result<std::process::Output, String> {
         .map_err(|e| format!("git unavailable: {e}"))
 }
 
-fn git_ok(root: &Path, args: &[&str]) -> Result<String, String> {
+pub(crate) fn git_ok(root: &Path, args: &[&str]) -> Result<String, String> {
     let out = git(root, args)?;
     if !out.status.success() {
         return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
@@ -35,7 +35,7 @@ pub fn is_git_repo(root: &Path) -> bool {
         .unwrap_or(false)
 }
 
-fn temp_index() -> PathBuf {
+pub(crate) fn temp_index() -> PathBuf {
     std::env::temp_dir().join(format!("clark-ckpt-{}.idx", uuid::Uuid::new_v4()))
 }
 

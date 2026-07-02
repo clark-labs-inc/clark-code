@@ -260,6 +260,25 @@ pub struct RunOutcome {
     pub stop_reason: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// Token/cost accounting summed over the run's model calls, when the
+    /// provider surfaces it (the local coding loop does).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<RunUsage>,
+}
+
+/// Aggregated model usage for one run.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct RunUsage {
+    /// Total prompt tokens across the run's model calls.
+    pub input_tokens: u64,
+    /// Total completion tokens across the run's model calls.
+    pub output_tokens: u64,
+    /// Prompt size of the LAST model call — the conversation's live context
+    /// footprint (roughly what the next turn starts from).
+    pub context_tokens: u64,
+    /// Upstream USD cost summed across calls, when reported.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost_usd: Option<f64>,
 }
 
 /// A file the user attached but a provider hasn't ingested yet. The bytes ride

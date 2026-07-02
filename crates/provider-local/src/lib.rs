@@ -14,6 +14,7 @@
 //! so the UI and projection layer are unchanged.
 
 mod agent_adapter;
+mod changes;
 mod checkpoint;
 mod claude_import;
 mod compaction;
@@ -34,6 +35,7 @@ mod sandbox;
 mod tools;
 mod workspace;
 
+pub use changes::{changes_diff, changes_revert, changes_summary, ChangedFile};
 pub use checkpoint::{is_git_repo, restore_checkpoint};
 // Migrate an existing Claude Code setup: discover its MCP servers + skills.
 pub use claude_import::{discover_mcp_servers, discover_skills, ClaudeSkill};

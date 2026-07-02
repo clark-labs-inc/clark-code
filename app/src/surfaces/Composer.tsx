@@ -142,6 +142,73 @@ function PermissionPill() {
   );
 }
 
+/** Approximate auto-compact threshold the local loop checkpoints at (see
+ *  provider-local DEFAULT_AUTO_COMPACT_TOKEN_LIMIT). The meter shows progress
+ *  toward this, which is the number that actually matters day-to-day. */
+const CONTEXT_BUDGET = 80_000;
+
+function fmtTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 10_000) return `${Math.round(n / 1000)}k`;
+  if (n >= 1_000) return `${(n / 1000).toFixed(1)}k`;
+  return String(n);
+}
+
+function fmtCost(usd: number): string {
+  if (usd > 0 && usd < 0.01) return "<$0.01";
+  return `$${usd.toFixed(2)}`;
+}
+
+/** Quiet context-size + cost meter for the viewed conversation. Selectors return
+ *  primitives so token-streaming snapshot clones don't re-render this. */
+function UsageChip() {
+  const contextTokens = useSessionStore((s) => {
+    const runs = Object.values((s.peek ? s.peek.snapshot : s.snapshot).runs);
+    for (let i = runs.length - 1; i >= 0; i--) {
+      const u = runs[i].outcome?.usage;
+      if (u) return u.context_tokens;
+    }
+    return 0;
+  });
+  const totalIn = useSessionStore((s) =>
+    Object.values((s.peek ? s.peek.snapshot : s.snapshot).runs).reduce(
+      (n, r) => n + (r.outcome?.usage?.input_tokens ?? 0), 0),
+  );
+  const totalOut = useSessionStore((s) =>
+    Object.values((s.peek ? s.peek.snapshot : s.snapshot).runs).reduce(
+      (n, r) => n + (r.outcome?.usage?.output_tokens ?? 0), 0),
+  );
+  const cost = useSessionStore((s) =>
+    Object.values((s.peek ? s.peek.snapshot : s.snapshot).runs).reduce(
+      (n, r) => n + (r.outcome?.usage?.cost_usd ?? 0), 0),
+  );
+
+  if (totalIn === 0 && totalOut === 0) return null;
+  const pct = Math.min(100, Math.round((contextTokens / CONTEXT_BUDGET) * 100));
+  const high = pct >= 75;
+
+  return (
+    <span
+      title={`Context: ${contextTokens.toLocaleString()} tokens — ${pct}% of the ~${fmtTokens(CONTEXT_BUDGET)} auto-compact threshold\nThis conversation: ${totalIn.toLocaleString()} in · ${totalOut.toLocaleString()} out${cost > 0 ? ` · ${fmtCost(cost)}` : ""}`}
+      className="hidden items-center gap-1.5 font-mono text-[0.7rem] tabular-nums text-ink-faint sm:flex"
+    >
+      {contextTokens > 0 && (
+        <span className="flex items-center gap-1">
+          {/* Tiny context gauge — fills toward the compaction threshold. */}
+          <span className="relative h-1 w-7 overflow-hidden rounded-full bg-bg-tertiary">
+            <span
+              className={cn("absolute inset-y-0 left-0 rounded-full", high ? "bg-warning" : "bg-ink-faint")}
+              style={{ width: `${Math.max(6, pct)}%` }}
+            />
+          </span>
+          {fmtTokens(contextTokens)}
+        </span>
+      )}
+      {cost > 0 && <span>{fmtCost(cost)}</span>}
+    </span>
+  );
+}
+
 /** Model + reasoning-effort picker. Mirrors the PermissionPill's form; a change
  *  mid-conversation hot-swaps the provider's LLM and keeps the transcript. */
 function ModelPill() {
@@ -618,6 +685,7 @@ export function Composer() {
           </div>
 
           <div className="flex min-w-0 items-center gap-2.5">
+            <UsageChip />
             <ModelPill />
             {busy && !hasContent && !peeking ? (
               <button
