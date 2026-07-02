@@ -63,7 +63,13 @@ import {
 } from "../lib/cloudHistory";
 import { provisionCodeKey, billingMe, type BillingSummary } from "../lib/account";
 import { notify } from "../lib/notify";
-import { checkAndStageUpdate, relaunchApp, type StagedUpdate } from "../lib/updater";
+import {
+  checkAndStageUpdate,
+  relaunchApp,
+  consumeJustUpdated,
+  type StagedUpdate,
+  type DownloadProgress,
+} from "../lib/updater";
 
 /** A follow-up message the user sent while a run was active. It sends
  *  automatically when the run finishes — Codex-style, never interrupting. */
@@ -182,6 +188,12 @@ interface SessionState {
   loadingBilling: boolean;
   /** A downloaded + staged app update awaiting a relaunch to apply. */
   update: StagedUpdate | null;
+  /** Live byte progress while an update downloads in the background; null when idle. */
+  updateProgress: DownloadProgress | null;
+  /** True from "Restart to update" being clicked until the relaunch takes. */
+  updateApplying: boolean;
+  /** Set once on the first launch after an update applied — the version we're now on. */
+  justUpdatedTo: string | null;
 
   init: () => Promise<void>;
   loadBilling: () => Promise<void>;
@@ -238,6 +250,8 @@ interface SessionState {
   checkForUpdate: () => Promise<void>;
   /** Relaunch into the staged update. */
   applyUpdate: () => Promise<void>;
+  /** Dismiss the "updated to vX" confirmation. */
+  dismissJustUpdated: () => void;
   toggleSidebar: () => void;
   setSidebarCollapsed: (collapsed: boolean) => void;
   cancelActive: () => Promise<void>;
@@ -291,15 +305,23 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   billing: null,
   loadingBilling: false,
   update: null,
+  updateProgress: null,
+  updateApplying: false,
+  justUpdatedTo: null,
 
   checkForUpdate: async () => {
-    if (get().update) return; // already staged
-    const staged = await checkAndStageUpdate();
-    if (staged) set({ update: staged });
+    if (get().update || get().updateProgress) return; // already staged or in flight
+    const staged = await checkAndStageUpdate((p) => set({ updateProgress: p }));
+    set({ updateProgress: null, ...(staged ? { update: staged } : {}) });
   },
   applyUpdate: async () => {
+    set({ updateApplying: true });
     await relaunchApp();
+    // Still running means the relaunch didn't take — release the overlay so the
+    // user isn't trapped behind it.
+    set({ updateApplying: false });
   },
+  dismissJustUpdated: () => set({ justUpdatedTo: null }),
 
   loadBilling: async () => {
     const creds = cloudCreds(get().auth);
@@ -533,6 +555,10 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       // verifies + stages in the background; the UI surfaces "Restart to update".
       setTimeout(() => void get().checkForUpdate(), 4000);
       setInterval(() => void get().checkForUpdate(), 6 * 60 * 60 * 1000);
+      // If we just relaunched into a freshly-applied update, confirm it once.
+      void consumeJustUpdated().then((v) => {
+        if (v) set({ justUpdatedTo: v });
+      });
     } catch (e) {
       set({ error: String(e) });
     }

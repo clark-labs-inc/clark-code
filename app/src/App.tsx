@@ -12,6 +12,7 @@ import { OfflineBanner } from "./surfaces/OfflineBanner";
 import { CommandPalette } from "./surfaces/CommandPalette";
 import { SignInScreen } from "./surfaces/SignInScreen";
 import { MobileRemoteAgent } from "./surfaces/MobileRemoteAgent";
+import { UpdateStatus } from "./surfaces/UpdateStatus";
 
 // Heavy, on-demand surfaces stay OUT of the startup bundle (xterm alone is
 // ~350KB): the terminal loads on first open (then stays mounted so the PTY
@@ -64,7 +65,13 @@ export default function App() {
     { key: ",", mod: true, allowInInput: true, run: () => useSessionStore.getState().setSettingsOpen(true) },
   ]);
 
-  if (!auth) return <SignInScreen />;
+  if (!auth)
+    return (
+      <>
+        <SignInScreen />
+        <UpdateStatus />
+      </>
+    );
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-bg text-ink">
@@ -104,6 +111,7 @@ export default function App() {
         </Suspense>
       )}
       <CommandPalette dark={dark} onToggleTheme={toggle} />
+      <UpdateStatus />
     </div>
   );
 }

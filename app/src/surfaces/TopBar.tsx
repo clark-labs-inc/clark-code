@@ -1,4 +1,5 @@
 import { Sun, Moon, FolderGit2, SquareTerminal, Settings as SettingsIcon, RefreshCw, Share2 } from "lucide-react";
+import { AnimatePresence, motion } from "motion/react";
 import { useSessionStore } from "../store/sessionStore";
 import { projectName } from "../lib/localAgent";
 import { cn } from "../lib/cn";
@@ -6,14 +7,19 @@ import { ChangesButton } from "./ChangesPanel";
 import { MemoryButton } from "./MemoryPanel";
 import { ProfileMenu } from "./ProfileMenu";
 
-/** Non-blocking "an update is downloaded — restart to apply" affordance. Shows
- *  only when a newer version has been staged; clicking relaunches into it. */
+/** Update affordance in the top bar. While a new version downloads in the
+ *  background it shows live progress; once staged it becomes a non-blocking
+ *  "Restart to update" button that relaunches into the new binary. */
 function UpdatePill() {
   const update = useSessionStore((s) => s.update);
+  const progress = useSessionStore((s) => s.updateProgress);
   const apply = useSessionStore((s) => s.applyUpdate);
-  if (!update) return null;
-  return (
+
+  const content = progress ? (
+    <DownloadingPill progress={progress} />
+  ) : update ? (
     <button
+      key="restart"
       onClick={() => void apply()}
       title={`Clark Code ${update.version} is ready — relaunch to update`}
       className="flex items-center gap-1.5 rounded-lg bg-accent/15 px-2.5 py-1 text-xs font-medium text-accent transition hover:bg-accent/25"
@@ -21,6 +27,49 @@ function UpdatePill() {
       <RefreshCw className="size-3.5" />
       Restart to update
     </button>
+  ) : null;
+
+  return (
+    <AnimatePresence mode="wait" initial={false}>
+      {content && (
+        <motion.div
+          key={progress ? "downloading" : "restart"}
+          initial={{ opacity: 0, y: -3 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -3 }}
+          transition={{ duration: 0.18, ease: [0.4, 0, 0.2, 1] }}
+        >
+          {content}
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+}
+
+function DownloadingPill({ progress }: { progress: { downloaded: number; total: number | null } }) {
+  const pct =
+    progress.total && progress.total > 0
+      ? Math.min(100, Math.round((progress.downloaded / progress.total) * 100))
+      : null;
+  return (
+    <div
+      className="flex items-center gap-2 rounded-lg bg-accent/10 px-2.5 py-1 text-xs font-medium text-accent"
+      title="Downloading the latest Clark Code…"
+    >
+      <RefreshCw className="size-3.5 animate-[spin_1.4s_linear_infinite]" />
+      <span className="tabular-nums">
+        {pct !== null ? `Downloading update ${pct}%` : "Downloading update…"}
+      </span>
+      <span className="h-1 w-12 overflow-hidden rounded-full bg-accent/20">
+        <span
+          className={cn(
+            "block h-full rounded-full bg-accent",
+            pct !== null ? "transition-[width] duration-300" : "w-1/3 animate-pulse",
+          )}
+          style={pct !== null ? { width: `${Math.max(4, pct)}%` } : undefined}
+        />
+      </span>
+    </div>
   );
 }
 
