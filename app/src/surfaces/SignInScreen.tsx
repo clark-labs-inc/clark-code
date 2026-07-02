@@ -1,9 +1,93 @@
 import { useState } from "react";
 import { motion } from "motion/react";
-import { Loader2 } from "lucide-react";
+import { Loader2, Download, RotateCw, Check } from "lucide-react";
 import { ClarkMark } from "./ClarkMark";
 import { useSessionStore } from "../store/sessionStore";
 import { isGoogleConfigured } from "../lib/auth";
+
+function inTauri(): boolean {
+  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+}
+
+/** Update affordance shown on the sign-in screen itself, so a user stuck on a
+ *  broken build (e.g. one where sign-in was misconfigured) can pull the fix
+ *  without first getting past sign-in. Reuses the store's existing
+ *  check/stage/apply state machine — the same one that auto-checks on launch. */
+function UpdateControl() {
+  const update = useSessionStore((s) => s.update);
+  const progress = useSessionStore((s) => s.updateProgress);
+  const applying = useSessionStore((s) => s.updateApplying);
+  const checkForUpdate = useSessionStore((s) => s.checkForUpdate);
+  const applyUpdate = useSessionStore((s) => s.applyUpdate);
+  const [checking, setChecking] = useState(false);
+  const [upToDate, setUpToDate] = useState(false);
+
+  // A verified update is downloaded and staged — offer to restart into it.
+  if (update) {
+    return (
+      <button
+        onClick={() => void applyUpdate()}
+        disabled={applying}
+        className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl border border-accent px-4 py-2.5 text-sm font-semibold text-accent transition hover:bg-accent hover:text-on-accent disabled:opacity-60"
+      >
+        {applying ? (
+          <Loader2 className="size-4 animate-[spin_1s_linear_infinite]" />
+        ) : (
+          <Download className="size-4" />
+        )}
+        Restart to update to {update.version}
+      </button>
+    );
+  }
+
+  // Downloading + verifying in the background.
+  if (progress) {
+    const pct =
+      progress.total && progress.total > 0
+        ? Math.round((progress.downloaded / progress.total) * 100)
+        : null;
+    return (
+      <p className="mt-6 flex items-center justify-center gap-2 text-xs text-ink-muted">
+        <Loader2 className="size-3.5 animate-[spin_1s_linear_infinite]" />
+        Downloading update{pct != null ? ` — ${pct}%` : "…"}
+      </p>
+    );
+  }
+
+  // Nothing staged: outside the desktop app there's nothing to update.
+  if (!inTauri()) return null;
+
+  const check = async () => {
+    setChecking(true);
+    setUpToDate(false);
+    await checkForUpdate();
+    setChecking(false);
+    // If the check didn't stage anything, we're already current.
+    if (!useSessionStore.getState().update) setUpToDate(true);
+  };
+
+  return (
+    <div className="mt-6 flex flex-col items-center gap-1">
+      <button
+        onClick={() => void check()}
+        disabled={checking}
+        className="flex items-center justify-center gap-1.5 text-xs font-medium text-ink-muted transition hover:text-ink disabled:opacity-60"
+      >
+        {checking ? (
+          <Loader2 className="size-3.5 animate-[spin_1s_linear_infinite]" />
+        ) : (
+          <RotateCw className="size-3.5" />
+        )}
+        {checking ? "Checking for updates…" : "Check for updates"}
+      </button>
+      {upToDate && (
+        <span className="flex items-center gap-1 text-xs text-ink-faint">
+          <Check className="size-3" /> You’re on the latest version.
+        </span>
+      )}
+    </div>
+  );
+}
 
 function GoogleG({ className }: { className?: string }) {
   return (
@@ -71,6 +155,8 @@ export function SignInScreen() {
           </p>
         )}
         {error && <p className="mt-3 text-xs text-danger">{error}</p>}
+
+        <UpdateControl />
 
         <p className="mt-8 text-xs text-ink-faint">Private beta · Clark Code</p>
       </motion.div>
