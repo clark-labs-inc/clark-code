@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { motion } from "motion/react";
+import { motion, useReducedMotion } from "motion/react";
 import { ArrowRight, FolderOpen, Folder, Server, Settings2, Telescope, Globe, Network } from "lucide-react";
 import { ClarkMark } from "./ClarkMark";
 import { useSessionStore } from "../store/sessionStore";
@@ -56,6 +56,7 @@ export function StartCard() {
   const selectedHostId = useSessionStore((s) => s.selectedHostId);
   const sshOpen = useSessionStore((s) => s.sshOpen);
   const version = useAppVersion();
+  const reduce = useReducedMotion();
 
   const isLocal = activeProvider === "local";
   const isRemote = isLocal && projectMode === "remote";
@@ -147,14 +148,21 @@ export function StartCard() {
             What Clark Code can do
           </p>
           <div className="flex flex-col gap-0.5">
-            {SUPERPOWERS.map((sp) => {
+            {SUPERPOWERS.map((sp, i) => {
               const Icon = sp.icon;
               return (
-                <button
+                <motion.button
                   key={sp.title}
+                  initial={reduce ? false : { opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{
+                    duration: 0.25,
+                    delay: reduce ? 0 : 0.15 + i * 0.07,
+                    ease: [0.4, 0, 0.2, 1],
+                  }}
                   onClick={() => void startWith(sp.prompt)}
                   disabled={connecting || !!blocked}
-                  className="group flex items-start gap-2.5 rounded-lg px-2 py-2 text-left transition hover:bg-bg-hover disabled:opacity-50"
+                  className="group flex items-start gap-2.5 rounded-lg px-2 py-2 text-left transition-colors hover:bg-bg-hover disabled:opacity-50"
                 >
                   <span className="mt-px grid size-7 shrink-0 place-items-center rounded-lg bg-bg-sunken text-ink-secondary transition group-hover:text-ink">
                     <Icon className="size-4" />
@@ -164,7 +172,7 @@ export function StartCard() {
                     <span className="block text-xs leading-snug text-ink-muted">{sp.blurb}</span>
                   </span>
                   <ArrowRight className="mt-1 size-3.5 shrink-0 text-ink-faint opacity-0 transition group-hover:translate-x-0.5 group-hover:opacity-100" />
-                </button>
+                </motion.button>
               );
             })}
           </div>

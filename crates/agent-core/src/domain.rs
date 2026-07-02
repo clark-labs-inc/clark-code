@@ -305,6 +305,35 @@ impl PendingUpload {
     }
 }
 
+/// Lifecycle of one child agent in a parallel `subagent_map` fan-out.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FanOutStatus {
+    Queued,
+    Running,
+    Done,
+    Failed,
+}
+
+/// A single agent tile in the fan-out surface.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FanOutAgent {
+    pub id: String,
+    pub label: String,
+    pub status: FanOutStatus,
+}
+
+/// Aggregate state of a live parallel fan-out (one `subagent_map` split across
+/// many child agents), projected from per-child `subagent_event` telemetry.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FanOut {
+    pub title: String,
+    pub total: usize,
+    pub done: usize,
+    pub running: usize,
+    pub agents: Vec<FanOutAgent>,
+}
+
 /// The single normalized event every provider emits. Projection consumes these.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "event", rename_all = "snake_case")]
@@ -345,6 +374,13 @@ pub enum AgentEvent {
     },
     Surface {
         focus: WorkspaceFocus,
+    },
+    /// A live parallel fan-out update: one child agent of a `subagent_map`
+    /// reported progress. Projection accumulates these into `Snapshot::fan_out`.
+    FanOut {
+        run: RunId,
+        parent: ToolCallId,
+        agent: FanOutAgent,
     },
     ModeChanged {
         session: SessionId,

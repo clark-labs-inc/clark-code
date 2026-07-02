@@ -76,6 +76,23 @@ export interface WorkspaceFocus {
   tool_call?: string;
 }
 
+export type FanOutStatus = "queued" | "running" | "done" | "failed";
+
+export interface FanOutAgent {
+  id: string;
+  label: string;
+  status: FanOutStatus;
+}
+
+/** Live parallel fan-out (a `subagent_map` spread across child agents). */
+export interface FanOut {
+  title: string;
+  total: number;
+  done: number;
+  running: number;
+  agents: FanOutAgent[];
+}
+
 export type ArtifactKind =
   | "file" | "image" | "pdf" | "office"
   | "slides" | "media" | "video" | "website" | "diff" | "search_results" | "other";
@@ -131,6 +148,7 @@ export interface Snapshot {
   pending_permission?: PermissionRequest;
   artifacts: Artifact[];
   focus?: WorkspaceFocus;
+  fan_out?: FanOut;
 }
 
 export function emptySnapshot(): Snapshot {

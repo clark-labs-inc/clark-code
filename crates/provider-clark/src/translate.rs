@@ -134,6 +134,17 @@ fn plan_status(status: Option<&str>) -> PlanPhaseStatus {
     }
 }
 
+/// Map one child's `subagent_event` phase to a fan-out tile status.
+fn fan_out_status(phase: &str) -> FanOutStatus {
+    match phase.trim() {
+        "run_completed" | "completed" | "done" | "finished" => FanOutStatus::Done,
+        "run_failed" | "failed" | "error" | "cancelled" => FanOutStatus::Failed,
+        "queued" | "pending" => FanOutStatus::Queued,
+        // "started", "running", "in_progress", per-step tool_call/tool_result, …
+        _ => FanOutStatus::Running,
+    }
+}
+
 fn workspace_surface(name: Option<&str>) -> WorkspaceSurfaceKind {
     match name.unwrap_or("") {
         "browser" => WorkspaceSurfaceKind::Browser,
@@ -459,9 +470,40 @@ pub fn event_to_agent(event: &Value, run: &RunId) -> Option<AgentEvent> {
         // text; the internal tool name is never shown.
         "subagent_event" => {
             let d = data?;
+            let scope = d.get("scope");
+
+            // Parallel fan-out (`subagent_map`): aggregate per-child telemetry
+            // into the fan-out surface rather than appending to one tool call.
+            if scope.and_then(|sc| s(sc, "spawning_tool")) == Some("subagent_map") {
+                let parent = scope
+                    .and_then(|sc| s(sc, "parent_tool_call_id"))
+                    .filter(|p| !p.trim().is_empty())?;
+                let row = scope
+                    .and_then(|sc| sc.get("row_index"))
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0);
+                let phase = first_s(d, &["phase", "event_type"]).unwrap_or("");
+                let label = first_s(d, &["summary"])
+                    .or_else(|| scope.and_then(|sc| non_empty(s(sc, "input_label"))))
+                    .map(str::to_string)
+                    .unwrap_or_else(|| format!("Task {}", row + 1));
+                return Some(AgentEvent::FanOut {
+                    run: run.clone(),
+                    parent: ToolCallId::new(parent),
+                    agent: FanOutAgent {
+                        id: row.to_string(),
+                        label,
+                        status: fan_out_status(phase),
+                    },
+                });
+            }
+
+            // A single spawned subagent (e.g. the website builder) reporting a
+            // step: attach its natural-language summary to the parent tool call
+            // so a long create_artifact isn't a silent spinner. `summary` is
+            // display text; the internal tool name is never shown.
             let summary = s(d, "summary").filter(|t| !t.trim().is_empty())?;
-            let parent = d
-                .get("scope")
+            let parent = scope
                 .and_then(|sc| s(sc, "child_storage_id"))
                 .and_then(|c| c.split_once(':').map(|x| x.1))
                 .filter(|p| !p.is_empty())?;
@@ -750,5 +792,42 @@ mod tests {
             AgentEvent::ToolCall { call, .. } => assert_eq!(call.title, "Building the homepage"),
             other => panic!("got {other:?}"),
         }
+    }
+
+    #[test]
+    fn subagent_map_event_becomes_fanout_tile() {
+        let ev = json!({
+            "type":"subagent_event",
+            "data":{
+                "scope":{"spawning_tool":"subagent_map","row_index":2,"parent_tool_call_id":"map-1"},
+                "phase":"run_completed",
+                "summary":"Summarized auth.rs"
+            }
+        });
+        match event_to_agent(&ev, &run()).unwrap() {
+            AgentEvent::FanOut { parent, agent, .. } => {
+                assert_eq!(parent.as_str(), "map-1");
+                assert_eq!(agent.id, "2");
+                assert_eq!(agent.status, FanOutStatus::Done);
+                assert_eq!(agent.label, "Summarized auth.rs");
+            }
+            other => panic!("got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn single_subagent_event_still_appends_summary() {
+        // Non-map subagent (e.g. website builder) keeps the tool-call summary path.
+        let ev = json!({
+            "type":"subagent_event",
+            "data":{
+                "scope":{"spawning_tool":"create_website","child_storage_id":"conv:call-1"},
+                "summary":"Wrote index.html"
+            }
+        });
+        assert!(matches!(
+            event_to_agent(&ev, &run()),
+            Some(AgentEvent::ToolCallUpdate { id, .. }) if id.as_str() == "call-1"
+        ));
     }
 }

@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { getBridge, type CoreBridge } from "../core-bridge/bridge";
+import { syncFanOut } from "./fanOutStore";
 import {
   emptySnapshot,
   type ClientResponse,
@@ -362,6 +363,9 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       bridge.subscribe((live) => {
         const { historyPrefix, session } = get();
         const snapshot = historyPrefix ? mergeHistory(historyPrefix, live) : live;
+        // Push fan-out state into its own store (deduped) so the fan-out surface
+        // updates without re-rendering the whole conversation on every snapshot.
+        syncFanOut(snapshot.fan_out);
 
         // Render: coalesce to the next animation frame (raw live buffered;
         // flushRender merges against the then-current prefix).

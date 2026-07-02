@@ -1,21 +1,7 @@
 import { create } from "zustand";
+import type { FanOut, FanOutAgent } from "../core-bridge/types";
 
-/** One agent in a parallel fan-out run. */
-export interface FanOutAgent {
-  id: string;
-  label: string;
-  status: "queued" | "running" | "done" | "failed";
-}
-
-/** A live parallel fan-out: one job split across many cloud agents. `agents` is a
- *  render sample of the swarm (the first N tiles), not necessarily all `total`. */
-export interface FanOut {
-  title: string;
-  total: number;
-  done: number;
-  running: number;
-  agents: FanOutAgent[];
-}
+export type { FanOut, FanOutAgent };
 
 interface FanOutState {
   fanOut: FanOut | null;
@@ -24,18 +10,35 @@ interface FanOutState {
 }
 
 /** Kept as its own tiny store (not folded into sessionStore) so the fan-out
- *  surface is fully self-contained and cheap to subscribe to. */
+ *  surface is fully self-contained and cheap to subscribe to. Fed by
+ *  `syncFanOut` from the session snapshot, which is the projection of
+ *  per-child `subagent_event` telemetry (see agent-core `Snapshot::fan_out`). */
 export const useFanOutStore = create<FanOutState>((set) => ({
   fanOut: null,
   setFanOut: (f) => set({ fanOut: f }),
   clearFanOut: () => set({ fanOut: null }),
 }));
 
-// INTEGRATION TODO: the parallel-agent fan-out has no event source yet. When
-// provider-clark (or the runtime) emits fan-out progress, call
-// `useFanOutStore.getState().setFanOut(...)` on each update and `clearFanOut()`
-// when it finishes. Until then this stays null in production and <FanOutPanel/>
-// renders nothing. `previewFanOut()` (exposed on window in dev) shows the surface.
+/** A cheap content signature so we only push (and re-render the panel) when the
+ *  fan-out actually changed, not on every re-cloned snapshot during streaming. */
+function signature(f: FanOut | null | undefined): string {
+  if (!f) return "";
+  return `${f.total}:${f.done}:${f.running}:${f.agents.map((a) => a.id + a.status).join(",")}`;
+}
+
+let lastSignature = "";
+
+/** Push the snapshot's fan-out into the store, deduped by content. Call this
+ *  wherever the session snapshot is applied. */
+export function syncFanOut(f: FanOut | null | undefined): void {
+  const sig = signature(f);
+  if (sig === lastSignature) return;
+  lastSignature = sig;
+  useFanOutStore.getState().setFanOut(f ?? null);
+}
+
+/** Dev-only: preview the fan-out surface without a live run. `previewFanOut()`
+ *  in the console. */
 export function previewFanOut(): void {
   const files = [
     "Button", "Card", "Modal", "Sidebar", "Input", "Table", "Toast", "Badge",
@@ -46,6 +49,7 @@ export function previewFanOut(): void {
     label: `${f}.tsx`,
     status: i < 5 ? "done" : i < 13 ? "running" : "queued",
   }));
+  lastSignature = "preview";
   useFanOutStore.getState().setFanOut({
     title: "Refactoring every component in src/ to the new design tokens",
     total: 240,

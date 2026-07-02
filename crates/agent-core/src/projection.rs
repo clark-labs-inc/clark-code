@@ -57,6 +57,10 @@ pub struct Snapshot {
     pub artifacts: Vec<Artifact>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub focus: Option<WorkspaceFocus>,
+    /// Live parallel fan-out (a `subagent_map` spread across child agents), or
+    /// `None` when nothing is fanning out. Rendered by the fan-out surface.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fan_out: Option<FanOut>,
 }
 
 impl Snapshot {
@@ -193,6 +197,39 @@ pub fn apply(snapshot: &mut Snapshot, event: &AgentEvent) {
 
         AgentEvent::ModeChanged { .. } => {}
 
+        AgentEvent::FanOut { parent, agent, .. } => {
+            // Prefer the map tool call's title as the subtitle once it's known.
+            let title = snapshot
+                .tool_calls
+                .get(parent)
+                .map(|c| c.title.clone())
+                .unwrap_or_default();
+            let fo = snapshot.fan_out.get_or_insert_with(FanOut::default);
+            if title.len() > fo.title.len() {
+                fo.title = title;
+            }
+            match fo.agents.iter_mut().find(|a| a.id == agent.id) {
+                Some(existing) => {
+                    existing.status = agent.status;
+                    if !agent.label.is_empty() {
+                        existing.label = agent.label.clone();
+                    }
+                }
+                None => fo.agents.push(agent.clone()),
+            }
+            fo.total = fo.agents.len();
+            fo.done = fo
+                .agents
+                .iter()
+                .filter(|a| a.status == FanOutStatus::Done)
+                .count();
+            fo.running = fo
+                .agents
+                .iter()
+                .filter(|a| a.status == FanOutStatus::Running)
+                .count();
+        }
+
         AgentEvent::RunFinished { run, outcome } => {
             let view = snapshot.runs.entry(run.clone()).or_insert_with(|| RunView {
                 id: run.clone(),
@@ -204,6 +241,9 @@ pub fn apply(snapshot: &mut Snapshot, event: &AgentEvent) {
             view.outcome = Some(outcome.clone());
             // A finished run clears any permission gate tied to it.
             snapshot.pending_permission = None;
+            // The fan-out surface is a live-run affordance; retire it when the
+            // run ends so it fades out rather than lingering.
+            snapshot.fan_out = None;
         }
 
         AgentEvent::Error { run, .. } => {
