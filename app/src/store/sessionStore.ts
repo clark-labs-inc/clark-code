@@ -130,6 +130,8 @@ interface SessionState {
   snapshot: Snapshot;
   connecting: boolean;
   error: string | null;
+  /** Run ids whose "Run failed" banner the user has dismissed this session. */
+  dismissedFailedRuns: string[];
   /** Authenticated user + the Clark connection config it carries. */
   auth: AuthSession | null;
   /** Files staged to send with the next message. */
@@ -265,6 +267,10 @@ interface SessionState {
   applyUpdate: () => Promise<void>;
   /** Dismiss the "updated to vX" confirmation. */
   dismissJustUpdated: () => void;
+  /** Clear the transient error banner. */
+  dismissError: () => void;
+  /** Hide the "Run failed" banner for a specific run. */
+  dismissFailedRun: (runId: string) => void;
   toggleSidebar: () => void;
   setSidebarCollapsed: (collapsed: boolean) => void;
   cancelActive: () => Promise<void>;
@@ -288,6 +294,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   snapshot: emptySnapshot(),
   connecting: false,
   error: null,
+  dismissedFailedRuns: [],
   auth: loadAuthSession(),
   attachments: [],
   conversations: loadIndex(),
@@ -337,6 +344,13 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     set({ updateApplying: false });
   },
   dismissJustUpdated: () => set({ justUpdatedTo: null }),
+  dismissError: () => set({ error: null }),
+  dismissFailedRun: (runId) =>
+    set((s) =>
+      s.dismissedFailedRuns.includes(runId)
+        ? s
+        : { dismissedFailedRuns: [...s.dismissedFailedRuns, runId] },
+    ),
 
   loadBilling: async () => {
     const creds = cloudCreds(get().auth);
@@ -805,7 +819,14 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     }
     if (prevRemote) void sshDisconnect(prevRemote.id);
     let restored = loadSnapshot(id);
-    set({ connecting: true, error: null, peek: null, activeRemote: null, activeRemoteHost: null });
+    set({
+      connecting: true,
+      error: null,
+      dismissedFailedRuns: [],
+      peek: null,
+      activeRemote: null,
+      activeRemoteHost: null,
+    });
     // Not cached locally (e.g. opened on another machine)? Pull it from Clark.
     if (!restored) {
       const creds = cloudCreds(get().auth);

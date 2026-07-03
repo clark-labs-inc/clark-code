@@ -1,9 +1,10 @@
 import { memo, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { ArrowDown } from "lucide-react";
+import { ArrowDown, X } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
 import { currentActivity } from "../lib/activity";
 import { humanizeError } from "../lib/errors";
+import { cn } from "../lib/cn";
 import { Message } from "./Message";
 import { WorkBlock } from "./work/WorkBlock";
 import { ArtifactCard } from "./work/ArtifactCard";
@@ -95,6 +96,19 @@ const TRANSIENT = {
 const DANGER_BANNER =
   "min-w-0 whitespace-pre-wrap break-words rounded-lg border border-danger/40 bg-danger/8 px-3.5 py-2.5 text-sm text-danger";
 
+/** Small dismiss (×) affordance for the error banners. */
+function DismissButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      aria-label="Dismiss"
+      className="-mr-1 -mt-0.5 grid size-6 shrink-0 place-items-center rounded-md text-danger/70 transition hover:bg-danger/10 hover:text-danger"
+    >
+      <X className="size-3.5" />
+    </button>
+  );
+}
+
 /** How many timeline blocks render before older history collapses behind a
  *  "Show earlier" control. Generous enough that normal sessions never notice. */
 const TIMELINE_WINDOW = 80;
@@ -110,6 +124,9 @@ export function Conversation() {
   );
   const openConversation = useSessionStore((s) => s.openConversation);
   const error = useSessionStore((s) => s.error);
+  const dismissError = useSessionStore((s) => s.dismissError);
+  const dismissFailedRun = useSessionStore((s) => s.dismissFailedRun);
+  const dismissedFailedRuns = useSessionStore((s) => s.dismissedFailedRuns);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [showAll, setShowAll] = useState(false);
   // Collapse history again when switching conversations.
@@ -158,7 +175,15 @@ export function Conversation() {
   // otherwise flicker in and out as each tool starts.
   const lastIsMessage = !last || last.item === "message";
   const showPending = activity.busy && !toolActive && lastIsMessage;
-  const failed = Object.values(runs).find((r) => r.status === "failed");
+  // The "Run failed" banner reflects only the MOST RECENT run — so it clears
+  // on its own once the next turn starts, instead of every past failure
+  // lingering below the messages forever. It can also be dismissed outright.
+  const runList = Object.values(runs);
+  const latestRun = runList[runList.length - 1];
+  const failed =
+    latestRun?.status === "failed" && !dismissedFailedRuns.includes(latestRun.id)
+      ? latestRun
+      : undefined;
   const outOfCredits = !!failed?.outcome?.error?.includes("insufficient_credits");
   // Offer "undo" for the most recent finished run that snapshotted the tree, but
   // only if the agent actually changed files this session.
@@ -257,18 +282,27 @@ export function Conversation() {
             <motion.div
               key="failed"
               {...TRANSIENT}
-              className={DANGER_BANNER}
+              className={cn(DANGER_BANNER, "flex items-start gap-2")}
               title={failed.outcome?.error || undefined}
             >
-              <span className="font-medium">Run failed.</span>{" "}
-              {failed.outcome?.error
-                ? humanizeError(failed.outcome.error)
-                : "The agent ended unexpectedly."}
+              <div className="min-w-0 flex-1">
+                <span className="font-medium">Run failed.</span>{" "}
+                {failed.outcome?.error
+                  ? humanizeError(failed.outcome.error)
+                  : "The agent ended unexpectedly."}
+              </div>
+              <DismissButton onClick={() => dismissFailedRun(failed.id)} />
             </motion.div>
           )}
           {error && (
-            <motion.div key="error" {...TRANSIENT} className={DANGER_BANNER} title={error}>
-              {humanizeError(error)}
+            <motion.div
+              key="error"
+              {...TRANSIENT}
+              className={cn(DANGER_BANNER, "flex items-start gap-2")}
+              title={error}
+            >
+              <div className="min-w-0 flex-1">{humanizeError(error)}</div>
+              <DismissButton onClick={dismissError} />
             </motion.div>
           )}
         </AnimatePresence>
