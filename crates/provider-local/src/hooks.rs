@@ -201,7 +201,8 @@ mod tests {
     #[tokio::test]
     async fn exit_code_2_denies_with_stderr_as_reason() {
         let dir = tempfile::tempdir().unwrap();
-        let hooks = vec![hook("*", "cat >&2 <<< 'nope, not that'; exit 2")];
+        // POSIX `sh` (dash on CI) has no `<<<` here-string; use plain redirect.
+        let hooks = vec![hook("*", "echo 'nope, not that' >&2; exit 2")];
         let result = run_pre_tool_use(
             &LocalExecutor,
             dir.path(),

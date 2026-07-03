@@ -12,6 +12,7 @@ use std::path::Path;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
@@ -72,10 +73,23 @@ impl BackgroundTasks {
             if let Some(s) = stderr {
                 readers.push(tokio::spawn(read_into(s, out_for_readers.clone())));
             }
-            for r in readers {
-                let _ = r.await;
-            }
+            // Wait for the process itself first. The readers drain stdout/stderr
+            // in their own tasks, so we don't need them to finish before we can
+            // observe the exit — and we must not: a killed shell can orphan a
+            // grandchild that keeps the output pipe open, so a readers-first wait
+            // would wedge here forever and the task would never register as
+            // finished (it'd show "running" in the UI after a kill). Give the
+            // readers a brief grace to flush buffered output on a normal exit,
+            // then abort any still blocked on an orphan-held pipe.
             let status = child.wait().await.ok();
+            for mut r in readers {
+                if tokio::time::timeout(Duration::from_millis(200), &mut r)
+                    .await
+                    .is_err()
+                {
+                    r.abort();
+                }
+            }
             *exit_for_waiter.lock().unwrap() = Some(status.and_then(|s| s.code()));
         });
 
