@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { Server, Trash2, X, Loader2, CheckCircle2, AlertCircle, Plus } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
 import { loadSshHosts, saveSshHosts, blankHost, type SshHost } from "../lib/sshHosts";
@@ -119,6 +119,8 @@ function HostCard({
 export function SshSettings() {
   const open = useSessionStore((s) => s.sshOpen);
   const setOpen = useSessionStore((s) => s.setSshOpen);
+  // Instant, no opacity fade under Reduced Motion — see Settings for why.
+  const reduce = useReducedMotion();
   const [hosts, setHosts] = useState<SshHost[]>([]);
   const [tests, setTests] = useState<Record<string, TestState>>({});
 
@@ -148,18 +150,18 @@ export function SshSettings() {
     <AnimatePresence>
       {open && (
         <motion.div
-          initial={{ opacity: 0 }}
+          initial={reduce ? false : { opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          transition={{ duration: 0.15 }}
+          transition={{ duration: reduce ? 0 : 0.15 }}
           className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-6"
           onClick={() => setOpen(false)}
         >
           <motion.div
-            initial={{ opacity: 0 }}
+            initial={reduce ? false : { opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            transition={{ duration: 0.12 }}
+            transition={{ duration: reduce ? 0 : 0.12 }}
             onClick={(e) => e.stopPropagation()}
             className="popover-surface flex max-h-[80vh] w-full max-w-2xl flex-col rounded-2xl border border-border bg-bg-elevated shadow-2xl"
           >

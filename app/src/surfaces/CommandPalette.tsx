@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
   Plus, SquareTerminal, Blocks, BookText, Sun, Moon, MessageSquare, CornerDownLeft,
 } from "lucide-react";
@@ -35,6 +35,8 @@ export function CommandPalette({
 }) {
   const open = useSessionStore((s) => s.paletteOpen);
   const setOpen = useSessionStore((s) => s.setPaletteOpen);
+  // Instant, no opacity fade under Reduced Motion — see Settings for why.
+  const reduce = useReducedMotion();
   const session = useSessionStore((s) => s.session);
   const conversations = useSessionStore((s) => s.conversations);
   const openConversation = useSessionStore((s) => s.openConversation);
@@ -133,20 +135,20 @@ export function CommandPalette({
     <AnimatePresence>
       <motion.div
         className="fixed inset-0 z-50 flex items-start justify-center bg-black/55 px-4 pt-[12vh]"
-        initial={{ opacity: 0 }}
+        initial={reduce ? false : { opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
-        transition={{ duration: 0.12 }}
+        transition={{ duration: reduce ? 0 : 0.12 }}
         onMouseDown={(e) => e.target === e.currentTarget && setOpen(false)}
       >
         <motion.div
           role="dialog"
           aria-modal="true"
           aria-label="Command palette"
-          initial={{ opacity: 0 }}
+          initial={reduce ? false : { opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          transition={{ duration: 0.12 }}
+          transition={{ duration: reduce ? 0 : 0.12 }}
           className="popover-surface flex max-h-[70vh] w-full max-w-xl flex-col overflow-hidden rounded-2xl bg-bg-elevated shadow-2xl ring-1 ring-border-subtle"
         >
           <input

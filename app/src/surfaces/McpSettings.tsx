@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { Blocks, Plus, Trash2, X, Loader2, CheckCircle2, AlertCircle, DownloadCloud } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
 import {
@@ -180,6 +180,8 @@ function Catalog({ onAdd, addBlank }: { onAdd: (make: (cwd: string) => McpServer
 export function McpSettings() {
   const open = useSessionStore((s) => s.mcpOpen);
   const setOpen = useSessionStore((s) => s.setMcpOpen);
+  // Instant, no opacity fade under Reduced Motion — see Settings for why.
+  const reduce = useReducedMotion();
   const localCwd = useSessionStore((s) => s.localSettings.cwd);
   const activeRemote = useSessionStore((s) => s.activeRemote);
   // For a remote project, read its remote `.claude` over the tunnel.
@@ -263,18 +265,18 @@ export function McpSettings() {
     <AnimatePresence>
       {open && (
         <motion.div
-          initial={{ opacity: 0 }}
+          initial={reduce ? false : { opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          transition={{ duration: 0.15 }}
+          transition={{ duration: reduce ? 0 : 0.15 }}
           className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-6"
           onClick={() => setOpen(false)}
         >
           <motion.div
-            initial={{ opacity: 0 }}
+            initial={reduce ? false : { opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            transition={{ duration: 0.12 }}
+            transition={{ duration: reduce ? 0 : 0.12 }}
             onClick={(e) => e.stopPropagation()}
             className="popover-surface flex max-h-[80vh] w-full max-w-2xl flex-col rounded-2xl border border-border bg-bg-elevated shadow-2xl"
           >

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
   X, SlidersHorizontal, FolderGit2, Blocks, SquareTerminal, CircleUser, Info,
   Sun, Moon, Eye, EyeOff, AlertTriangle, ExternalLink, CreditCard, LogOut,
@@ -669,6 +669,11 @@ export function Settings({ dark, onToggleTheme }: { dark: boolean; onToggleTheme
   const open = useSessionStore((s) => s.settingsOpen);
   const section = useSessionStore((s) => s.settingsSection);
   const setOpen = useSessionStore((s) => s.setSettingsOpen);
+  // Reduced Motion (or WKWebView's opacity-fade flicker in general) → appear
+  // instantly, no fade. The opacity animation is exactly the "half-opacity
+  // flicker" the ProfileMenu popover was fixed for; the modal dialogs never
+  // got the same treatment and re-animated regardless of the OS preference.
+  const reduce = useReducedMotion();
 
   useEffect(() => {
     if (!open) return;
@@ -683,18 +688,18 @@ export function Settings({ dark, onToggleTheme }: { dark: boolean; onToggleTheme
     <AnimatePresence>
       {open && (
         <motion.div
-          initial={{ opacity: 0 }}
+          initial={reduce ? false : { opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          transition={{ duration: 0.15 }}
+          transition={{ duration: reduce ? 0 : 0.15 }}
           className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-6"
           onClick={() => setOpen(false)}
         >
           <motion.div
-            initial={{ opacity: 0 }}
+            initial={reduce ? false : { opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            transition={{ duration: 0.12 }}
+            transition={{ duration: reduce ? 0 : 0.12 }}
             onClick={(e) => e.stopPropagation()}
             className="popover-surface flex h-[80vh] max-h-[640px] w-full max-w-3xl overflow-hidden rounded-2xl border border-border bg-bg-elevated shadow-2xl"
           >
