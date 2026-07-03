@@ -14,8 +14,8 @@ function text(blocks: ContentBlock[]): string {
 }
 
 export const MD_CLASSES =
-  "text-ink [&_p]:my-2 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 " +
-  "[&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ul]:marker:text-ink-faint [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_ol]:marker:text-ink-faint [&_li]:my-1 " +
+  "text-ink [&_p]:my-3 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 " +
+  "[&_ul]:my-3 [&_ul]:list-disc [&_ul]:pl-5 [&_ul]:marker:text-ink-faint [&_ol]:my-3 [&_ol]:list-decimal [&_ol]:pl-5 [&_ol]:marker:text-ink-faint [&_li]:my-2 " +
   "[&_h1]:mb-1.5 [&_h1]:mt-3 [&_h1]:text-lg [&_h1]:font-semibold [&_h1]:tracking-tight [&_h2]:mb-1.5 [&_h2]:mt-3 [&_h2]:font-semibold [&_h2]:tracking-tight [&_h3]:mb-1 [&_h3]:mt-2.5 [&_h3]:font-semibold " +
   "[&_a]:text-ink [&_a]:underline [&_a]:decoration-ink-faint [&_a]:underline-offset-2 hover:[&_a]:decoration-ink [&_strong]:font-semibold [&_strong]:text-ink " +
   "[&_pre]:my-2.5 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:border [&_pre]:border-border-subtle [&_pre]:bg-bg-sunken [&_pre]:p-3 [&_pre]:font-mono [&_pre]:text-xs [&_pre]:leading-relaxed [&_pre>code]:bg-transparent [&_pre>code]:p-0 [&_pre>code]:border-0 " +
@@ -208,7 +208,7 @@ function MessageImpl({
             <div
               key={i}
               className={cn(
-                "text-[0.9375rem] leading-relaxed [overflow-wrap:anywhere]",
+                "text-[0.9375rem] leading-[1.8] [overflow-wrap:anywhere]",
                 MD_CLASSES,
                 span.kind === "narrate" && "text-ink-secondary",
               )}

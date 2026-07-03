@@ -86,8 +86,13 @@ const TRANSIENT = {
   transition: { duration: 0.2, ease: [0.4, 0, 0.2, 1] as const },
 };
 
+// `min-w-0` lets this flex child shrink to the column width (flex items default
+// to min-width:auto, so an unbreakable token — a long URL or a raw provider JSON
+// blob — would otherwise grow the box past the column); `break-words` +
+// `whitespace-pre-wrap` then wrap that token inside the border instead of
+// spilling past its right edge.
 const DANGER_BANNER =
-  "rounded-lg border border-danger/40 bg-danger/8 px-3.5 py-2.5 text-sm text-danger";
+  "min-w-0 whitespace-pre-wrap break-words rounded-lg border border-danger/40 bg-danger/8 px-3.5 py-2.5 text-sm text-danger";
 
 /** How many timeline blocks render before older history collapses behind a
  *  "Show earlier" control. Generous enough that normal sessions never notice. */
