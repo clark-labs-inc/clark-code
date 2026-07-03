@@ -29,20 +29,21 @@ function isTauri(): boolean {
  *  FIRST one (the conversation's start — unchanged default), but the popover
  *  lets the user pick any later one to see what changed since a specific turn.
  *
- *  The store selector returns the store's own `runs` object reference as-is
- *  (stable unless the underlying data actually changes); deriving the
- *  filtered array happens in a separate `useMemo`, not inside the selector —
- *  a selector that returns a freshly-built array on every call breaks
- *  `useSyncExternalStore`'s reference check and causes an infinite render loop. */
+ *  The selector returns a stable STRING signature of the checkpoints (a
+ *  primitive, value-compared) — NOT the `runs` object, whose reference changes
+ *  on every streamed snapshot and would re-render this always-mounted top-bar
+ *  control on every token. Deriving the array happens in a `useMemo` keyed off
+ *  that signature; a selector that returned a freshly-built array each call
+ *  would break `useSyncExternalStore`'s reference check (infinite render loop). */
 function useCheckpointedRuns(): string[] {
-  const runsObj = useSessionStore((s) => (s.peek ? s.peek.snapshot.runs : s.snapshot.runs));
-  return useMemo(
-    () =>
-      Object.values(runsObj as Record<string, RunView>)
-        .map((run) => run.checkpoint)
-        .filter((c): c is string => !!c),
-    [runsObj],
-  );
+  const signature = useSessionStore((s) => {
+    const runs = (s.peek ? s.peek.snapshot.runs : s.snapshot.runs) as Record<string, RunView>;
+    return Object.values(runs)
+      .map((run) => run.checkpoint)
+      .filter((c): c is string => !!c)
+      .join("\n");
+  });
+  return useMemo(() => (signature ? signature.split("\n") : []), [signature]);
 }
 
 const STATUS_ICON: Record<string, typeof FilePen> = {

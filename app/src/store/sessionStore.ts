@@ -390,7 +390,13 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         // No session (user just ended it) → nothing to render into.
         if (!get().session) return;
         const prefix = get().historyPrefix;
-        set({ snapshot: prefix ? mergeHistory(prefix, live) : live });
+        const merged = prefix ? mergeHistory(prefix, live) : live;
+        // Push fan-out state into its own (deduped) store on the SAME coalesced
+        // frame as the render — not per raw event — so an active swarm's tiles
+        // update at most once per animation frame instead of on every telemetry
+        // event (the compositing/opacity churn behind the fan-out flicker).
+        syncFanOut(merged.fan_out);
+        set({ snapshot: merged });
       };
       let lastPersist = 0;
       let lastBilling = 0;
@@ -400,12 +406,9 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       bridge.subscribe((live) => {
         const { historyPrefix, session } = get();
         const snapshot = historyPrefix ? mergeHistory(historyPrefix, live) : live;
-        // Push fan-out state into its own store (deduped) so the fan-out surface
-        // updates without re-rendering the whole conversation on every snapshot.
-        syncFanOut(snapshot.fan_out);
 
-        // Render: coalesce to the next animation frame (raw live buffered;
-        // flushRender merges against the then-current prefix).
+        // Render (and fan-out sync) are coalesced to the next animation frame in
+        // flushRender; the raw live snapshot is buffered here.
         pending = live;
         if (!rafScheduled) {
           rafScheduled = true;

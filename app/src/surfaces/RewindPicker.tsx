@@ -20,11 +20,13 @@ type State =
  *  explicit picker with a confirmation, not a one-click button. */
 export function RewindPicker({ excludeSha }: { excludeSha?: string }) {
   const cwd = useSessionStore((s) => s.localSettings.cwd);
-  const snapshot = useSessionStore((s) => s.snapshot);
+  // Narrow to `runs` only — this picker doesn't need to re-render on unrelated
+  // snapshot churn (it's only mounted when idle, but keep the discipline).
+  const runsMap = useSessionStore((s) => s.snapshot.runs);
   const [open, setOpen] = useState(false);
   const [state, setState] = useState<State>({ kind: "idle" });
 
-  const runs = Object.values(snapshot.runs).filter(
+  const runs = Object.values(runsMap).filter(
     (r) =>
       r.checkpoint &&
       r.status !== "running" &&

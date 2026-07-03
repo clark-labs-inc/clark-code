@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { motion, useReducedMotion } from "motion/react";
 import { Circle, CircleDot, CircleCheck } from "lucide-react";
 import { cn } from "../lib/cn";
@@ -19,9 +20,14 @@ const EASE = [0.4, 0, 0.2, 1] as const;
 
 /** Live checklist for the current plan — the render surface for the local
  *  agent's `update_plan` tool (and, for ACP/Clark providers, their own
- *  plan/execution-plan updates). A full snapshot re-render per update, not a
- *  diff, matching how Codex's TUI renders `update_plan`. */
-export function PlanChecklist({ plan }: { plan?: Plan }) {
+ *  plan/execution-plan updates).
+ *
+ *  Wrapped in `memo` with a phase-content comparator: the parent (`Conversation`)
+ *  re-renders on every streamed token and hands us a fresh `plan` object each
+ *  frame, but the plan itself only changes on an `update_plan` tick — without
+ *  this guard the animated card re-rendered ~60×/s during any run with an
+ *  active plan (the streaming-flicker class this project has fought before). */
+function PlanChecklistImpl({ plan }: { plan?: Plan }) {
   const reduce = useReducedMotion();
   if (!plan || plan.phases.length === 0) return null;
 
@@ -55,3 +61,14 @@ export function PlanChecklist({ plan }: { plan?: Plan }) {
     </motion.div>
   );
 }
+
+/** Skip re-render unless the plan's phases actually changed (count, order,
+ *  titles, or statuses) — a new `plan` object reference with identical content
+ *  arrives every streamed frame. */
+export const PlanChecklist = memo(PlanChecklistImpl, (a, b) => {
+  const pa = a.plan?.phases;
+  const pb = b.plan?.phases;
+  if (pa === pb) return true;
+  if (!pa || !pb || pa.length !== pb.length) return false;
+  return pa.every((p, i) => p.title === pb[i].title && p.status === pb[i].status);
+});
