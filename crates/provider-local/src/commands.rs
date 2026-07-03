@@ -91,7 +91,7 @@ pub async fn discover_commands(exec: &dyn Executor, project_root: &Path) -> Vec<
     }
     let mut seen = HashSet::new();
     all.retain(|c| seen.insert(c.name.clone()));
-    all.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    all.sort_by_key(|c| c.name.to_lowercase());
     all
 }
 

@@ -119,8 +119,10 @@ mod tests {
     use tokio_util::sync::CancellationToken;
 
     fn ctx(dir: &std::path::Path, check_command: Option<&str>) -> ToolCtx {
-        let mut session = SessionState::default();
-        session.check_command = check_command.map(String::from);
+        let session = SessionState {
+            check_command: check_command.map(String::from),
+            ..Default::default()
+        };
         ToolCtx {
             sandbox: Arc::new(Sandbox::new(dir).unwrap()),
             executor: Arc::new(crate::exec::LocalExecutor),

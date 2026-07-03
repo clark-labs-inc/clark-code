@@ -49,13 +49,13 @@
 use std::collections::HashMap;
 
 use async_trait::async_trait;
-use clark_agent as ca;
 use ca::plugin::{
     AfterToolCall, AfterToolCallContext, AfterToolDecision, BeforeToolCall, BeforeToolCallContext,
     BeforeToolDecision, Plugin, PluginCapabilities,
 };
 use ca::tool::ToolResult;
 use ca::types::{AgentMessage, TextContent, ToolResultBlock};
+use clark_agent as ca;
 use serde_json::Value;
 
 /// Same tool+args+result seen this many times ⇒ start nudging (soft). Set
@@ -303,7 +303,13 @@ mod tests {
     /// Build an (assistant tool-call, tool-result) message pair for a call
     /// with the given name/args/output, so tests can assemble transcripts
     /// the way the loop stores them.
-    fn call_pair(id: &str, name: &str, args: Value, output: &str, is_error: bool) -> Vec<AgentMessage> {
+    fn call_pair(
+        id: &str,
+        name: &str,
+        args: Value,
+        output: &str,
+        is_error: bool,
+    ) -> Vec<AgentMessage> {
         let assistant = AgentMessage::Assistant {
             content: AssistantContent::with_tool_calls(
                 None,
@@ -355,7 +361,11 @@ mod tests {
         let breaker = LoopBreaker::new();
         let messages: Vec<AgentMessage> = Vec::new();
         let args = json!({"cmd": "ls"});
-        let call = ToolCall { id: "x".into(), name: "shell".into(), arguments: args.clone() };
+        let call = ToolCall {
+            id: "x".into(),
+            name: "shell".into(),
+            arguments: args.clone(),
+        };
         let assistant = AgentMessage::Assistant {
             content: AssistantContent::text(""),
             stop_reason: StopReason::ToolUse,
@@ -363,7 +373,9 @@ mod tests {
             timestamp: None,
             usage: None,
         };
-        let AgentMessage::Assistant { content, .. } = &assistant else { unreachable!() };
+        let AgentMessage::Assistant { content, .. } = &assistant else {
+            unreachable!()
+        };
         let decision = breaker
             .on_before_tool_call(before_ctx(&messages, &call, &args, &assistant, content))
             .await;
@@ -378,7 +390,11 @@ mod tests {
         let messages = history(
             (0..8).map(|i| call_pair(&format!("c{i}"), "shell", args.clone(), "total 0\n", false)),
         );
-        let call = ToolCall { id: "c8".into(), name: "shell".into(), arguments: args.clone() };
+        let call = ToolCall {
+            id: "c8".into(),
+            name: "shell".into(),
+            arguments: args.clone(),
+        };
         let assistant = AgentMessage::Assistant {
             content: AssistantContent::text(""),
             stop_reason: StopReason::ToolUse,
@@ -386,7 +402,9 @@ mod tests {
             timestamp: None,
             usage: None,
         };
-        let AgentMessage::Assistant { content, .. } = &assistant else { unreachable!() };
+        let AgentMessage::Assistant { content, .. } = &assistant else {
+            unreachable!()
+        };
         let decision = breaker
             .on_before_tool_call(before_ctx(&messages, &call, &args, &assistant, content))
             .await;
@@ -400,10 +418,20 @@ mod tests {
         let args = json!({"cmd": "cargo test"});
         // Same command, but each run reports a different result — real
         // progress, must never be blocked (the cargo-test-after-edit case).
-        let messages = history(
-            (0..10).map(|i| call_pair(&format!("c{i}"), "shell", args.clone(), &format!("{i} failed\n"), false)),
-        );
-        let call = ToolCall { id: "cN".into(), name: "shell".into(), arguments: args.clone() };
+        let messages = history((0..10).map(|i| {
+            call_pair(
+                &format!("c{i}"),
+                "shell",
+                args.clone(),
+                &format!("{i} failed\n"),
+                false,
+            )
+        }));
+        let call = ToolCall {
+            id: "cN".into(),
+            name: "shell".into(),
+            arguments: args.clone(),
+        };
         let assistant = AgentMessage::Assistant {
             content: AssistantContent::text(""),
             stop_reason: StopReason::ToolUse,
@@ -411,11 +439,16 @@ mod tests {
             timestamp: None,
             usage: None,
         };
-        let AgentMessage::Assistant { content, .. } = &assistant else { unreachable!() };
+        let AgentMessage::Assistant { content, .. } = &assistant else {
+            unreachable!()
+        };
         let decision = breaker
             .on_before_tool_call(before_ctx(&messages, &call, &args, &assistant, content))
             .await;
-        assert!(!decision.block, "changing results are progress, never a loop");
+        assert!(
+            !decision.block,
+            "changing results are progress, never a loop"
+        );
     }
 
     #[tokio::test]
@@ -429,14 +462,30 @@ mod tests {
         let seed = json!({"cmd": "re-seed"});
         let mut pairs: Vec<Vec<AgentMessage>> = Vec::new();
         for i in 0..8 {
-            pairs.push(call_pair(&format!("l{i}"), "shell", ls.clone(), "empty\n", false));
-            pairs.push(call_pair(&format!("s{i}"), "shell", seed.clone(), &format!("seeded {i}\n"), false));
+            pairs.push(call_pair(
+                &format!("l{i}"),
+                "shell",
+                ls.clone(),
+                "empty\n",
+                false,
+            ));
+            pairs.push(call_pair(
+                &format!("s{i}"),
+                "shell",
+                seed.clone(),
+                &format!("seeded {i}\n"),
+                false,
+            ));
         }
         let messages = history(pairs);
         // The `ls` fingerprint has 8 identical "empty" results interleaved
         // with the varying re-seed output.
         let ls_args = ls.clone();
-        let call = ToolCall { id: "lN".into(), name: "shell".into(), arguments: ls.clone() };
+        let call = ToolCall {
+            id: "lN".into(),
+            name: "shell".into(),
+            arguments: ls.clone(),
+        };
         let assistant = AgentMessage::Assistant {
             content: AssistantContent::text(""),
             stop_reason: StopReason::ToolUse,
@@ -444,11 +493,16 @@ mod tests {
             timestamp: None,
             usage: None,
         };
-        let AgentMessage::Assistant { content, .. } = &assistant else { unreachable!() };
+        let AgentMessage::Assistant { content, .. } = &assistant else {
+            unreachable!()
+        };
         let decision = breaker
             .on_before_tool_call(before_ctx(&messages, &call, &ls_args, &assistant, content))
             .await;
-        assert!(decision.block, "the repeated leg of the cycle must be blocked");
+        assert!(
+            decision.block,
+            "the repeated leg of the cycle must be blocked"
+        );
     }
 
     #[tokio::test]
@@ -459,7 +513,11 @@ mod tests {
         let messages = history(
             (0..2).map(|i| call_pair(&format!("c{i}"), "shell", args.clone(), "same\n", false)),
         );
-        let call = ToolCall { id: "c2".into(), name: "shell".into(), arguments: args.clone() };
+        let call = ToolCall {
+            id: "c2".into(),
+            name: "shell".into(),
+            arguments: args.clone(),
+        };
         let result = ToolResult::text("same\n");
         let assistant = AgentMessage::Assistant {
             content: AssistantContent::text(""),
@@ -477,7 +535,9 @@ mod tests {
             messages: &messages,
         };
         let decision = breaker.on_after_tool_call(ctx).await;
-        let overridden = decision.result.expect("3rd identical result should be annotated");
+        let overridden = decision
+            .result
+            .expect("3rd identical result should be annotated");
         let text = result_plain_text(&overridden);
         assert!(text.starts_with("same\n"), "real output preserved");
         assert!(text.contains(GUARD_MARK), "nudge appended");
@@ -491,7 +551,11 @@ mod tests {
         let breaker = LoopBreaker::new();
         let args = json!({"cmd": "ls"});
         let messages: Vec<AgentMessage> = Vec::new(); // first call ever
-        let call = ToolCall { id: "c0".into(), name: "shell".into(), arguments: args.clone() };
+        let call = ToolCall {
+            id: "c0".into(),
+            name: "shell".into(),
+            arguments: args.clone(),
+        };
         let result = ToolResult::text("hello\n");
         let assistant = AgentMessage::Assistant {
             content: AssistantContent::text(""),
@@ -509,7 +573,10 @@ mod tests {
             messages: &messages,
         };
         let decision = breaker.on_after_tool_call(ctx).await;
-        assert!(decision.result.is_none(), "first result must pass through untouched");
+        assert!(
+            decision.result.is_none(),
+            "first result must pass through untouched"
+        );
     }
 
     #[test]
