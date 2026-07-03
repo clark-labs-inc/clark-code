@@ -29,6 +29,8 @@ import {
   saveSnapshot,
   upsertMeta,
   setArchived,
+  setHistoryScope,
+  deleteConversation as removeLocalConversation,
   deriveTitle,
   hasContent,
   type ConversationMeta,
@@ -61,6 +63,7 @@ import {
   cloudCreds,
   cloudList,
   cloudGet,
+  cloudDelete,
   cloudShare,
   cloudUnshare,
   scheduleCloudPut,
@@ -233,6 +236,8 @@ interface SessionState {
   archiveConversation: (id: string) => void;
   /** Bring an archived conversation back into the active list. */
   restoreConversation: (id: string) => void;
+  /** Permanently delete a conversation — local cache AND the cloud copy. */
+  deleteConversation: (id: string) => void;
   /** Rename a conversation; the manual title stops auto-derivation clobbering it. */
   renameConversation: (id: string, title: string) => void;
   /** Change the coding model / reasoning effort. Persists, and when a session is
@@ -286,6 +291,12 @@ async function openRemote(host: SshHost): Promise<RemoteInfo> {
   return sshConnect(host.host.trim(), host.remoteRoot.trim(), host.binaryPath.trim());
 }
 
+// Scope history storage to the persisted account BEFORE the store first reads
+// it, so the initial `conversations: loadIndex()` returns only this account's
+// chats (never a previously signed-in account's).
+const bootAuth = loadAuthSession();
+setHistoryScope(bootAuth?.user.email);
+
 export const useSessionStore = create<SessionState>((set, get) => ({
   bridge: null,
   providers: [],
@@ -295,7 +306,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   connecting: false,
   error: null,
   dismissedFailedRuns: [],
-  auth: loadAuthSession(),
+  auth: bootAuth,
   attachments: [],
   conversations: loadIndex(),
   historyPrefix: null,
@@ -695,7 +706,12 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
   signIn: async () => {
     const auth = await signInWithGoogle();
-    set({ auth });
+    // Point history at THIS account before anything reads it, so the sidebar
+    // never shows a previously signed-in account's chats. loadIndex() now
+    // returns this account's local cache (empty for a brand-new account);
+    // syncCloudIndex then fills it in from the account's cloud history.
+    setHistoryScope(auth.user.email);
+    set({ auth, conversations: loadIndex() });
     // Provision the Clark Code key + pull cloud history so the user never has to
     // paste a key.
     void get().ensureCodeKey();
@@ -704,6 +720,9 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
   signOutAuth: () => {
     authSignOut();
+    // Detach history from the signed-out account first, so endSession reloads
+    // an empty (anon-scoped) list rather than the previous account's cache.
+    setHistoryScope(null);
     get().endSession();
     set({ auth: null, billing: null });
   },
@@ -929,6 +948,36 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   restoreConversation: (id) => {
     setArchived(id, false);
     set({ conversations: loadIndex() });
+  },
+
+  deleteConversation: (id) => {
+    // Hard delete: drop the local snapshot + index entry, and delete the cloud
+    // copy (best-effort — the local removal is what the user sees; the cloud
+    // DELETE retries are not worth blocking the UI on).
+    removeLocalConversation(id);
+    const cleared = get().session?.id === id;
+    if (cleared) {
+      const r = get().activeRemote;
+      if (r) void sshDisconnect(r.id);
+    }
+    set({
+      conversations: loadIndex(),
+      ...(cleared
+        ? {
+            session: null,
+            snapshot: emptySnapshot(),
+            error: null,
+            attachments: [],
+            historyPrefix: null,
+            queued: [],
+            terminalOpen: false,
+            activeRemote: null,
+            activeRemoteHost: null,
+          }
+        : {}),
+    });
+    const creds = cloudCreds(get().auth);
+    if (creds) void cloudDelete(creds, id).catch(() => {});
   },
 
   renameConversation: (id, title) => {

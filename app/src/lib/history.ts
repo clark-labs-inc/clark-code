@@ -32,10 +32,34 @@ export interface ConversationMeta {
   archived?: boolean;
 }
 
-const INDEX_KEY = "clark.history.index.v1";
-const SNAP_PREFIX = "clark.history.snap.v1.";
+const INDEX_KEY_BASE = "clark.history.index.v1";
+const SNAP_PREFIX_BASE = "clark.history.snap.v1.";
 /** Cap the index so a long-lived install can't grow unbounded. */
 const MAX_CONVERSATIONS = 100;
+
+// History is cached PER SIGNED-IN ACCOUNT so a second account on the same
+// machine never sees the first account's chats (the WebView shares one
+// localStorage origin across accounts). `scope` is set from the account email
+// on init and on every auth change via `setHistoryScope`.
+let scope = "anon";
+
+/** Point history storage at a specific account (its email). Call on init and
+ *  whenever the signed-in account changes. Unscoped keys written before this
+ *  change are migrated into the first account that signs in, so upgrading
+ *  users keep their existing chats. */
+export function setHistoryScope(accountKey: string | null | undefined): void {
+  const next = accountKey && accountKey.trim() ? accountKey.trim().toLowerCase() : "anon";
+  if (next === scope) return;
+  scope = next;
+  migrateLegacyGlobal();
+}
+
+function indexKey(): string {
+  return `${INDEX_KEY_BASE}.${scope}`;
+}
+function snapKey(id: string): string {
+  return `${SNAP_PREFIX_BASE}${scope}.${id}`;
+}
 
 function safeStore(): Storage | null {
   try {
@@ -45,12 +69,35 @@ function safeStore(): Storage | null {
   }
 }
 
+/** One-time move of history saved under the old global (unscoped) keys into the
+ *  current account scope. Runs when a real scope is first selected and no
+ *  scoped index exists yet; leaves the legacy keys in place on any failure. */
+function migrateLegacyGlobal(): void {
+  const store = safeStore();
+  if (!store || scope === "anon") return;
+  if (store.getItem(indexKey())) return; // already have data for this account
+  const legacy = store.getItem(INDEX_KEY_BASE);
+  if (!legacy) return;
+  try {
+    const list = JSON.parse(legacy) as ConversationMeta[];
+    store.setItem(indexKey(), legacy);
+    for (const c of list) {
+      const snap = store.getItem(SNAP_PREFIX_BASE + c.id);
+      if (snap != null) store.setItem(snapKey(c.id), snap);
+    }
+    store.removeItem(INDEX_KEY_BASE);
+    for (const c of list) store.removeItem(SNAP_PREFIX_BASE + c.id);
+  } catch {
+    /* best-effort — leave legacy keys untouched */
+  }
+}
+
 /** All saved conversations, newest first. */
 export function loadIndex(): ConversationMeta[] {
   const store = safeStore();
   if (!store) return [];
   try {
-    const raw = store.getItem(INDEX_KEY);
+    const raw = store.getItem(indexKey());
     const list = raw ? (JSON.parse(raw) as ConversationMeta[]) : [];
     return list.sort((a, b) => b.updatedAt - a.updatedAt);
   } catch {
@@ -64,9 +111,9 @@ function writeIndex(list: ConversationMeta[]): void {
   const trimmed = list.sort((a, b) => b.updatedAt - a.updatedAt).slice(0, MAX_CONVERSATIONS);
   // Drop snapshots for any conversations evicted by the cap.
   const kept = new Set(trimmed.map((c) => c.id));
-  for (const c of list) if (!kept.has(c.id)) store.removeItem(SNAP_PREFIX + c.id);
+  for (const c of list) if (!kept.has(c.id)) store.removeItem(snapKey(c.id));
   try {
-    store.setItem(INDEX_KEY, JSON.stringify(trimmed));
+    store.setItem(indexKey(), JSON.stringify(trimmed));
   } catch {
     /* quota — ignore; history is best-effort */
   }
@@ -111,7 +158,7 @@ export function loadSnapshot(id: string): Snapshot | null {
   const store = safeStore();
   if (!store) return null;
   try {
-    const raw = store.getItem(SNAP_PREFIX + id);
+    const raw = store.getItem(snapKey(id));
     return raw ? settleRuns(JSON.parse(raw) as Snapshot) : null;
   } catch {
     return null;
@@ -122,7 +169,7 @@ export function saveSnapshot(id: string, snapshot: Snapshot): void {
   const store = safeStore();
   if (!store) return;
   try {
-    store.setItem(SNAP_PREFIX + id, JSON.stringify(snapshot));
+    store.setItem(snapKey(id), JSON.stringify(snapshot));
   } catch {
     /* quota — ignore */
   }
@@ -131,7 +178,7 @@ export function saveSnapshot(id: string, snapshot: Snapshot): void {
 export function deleteConversation(id: string): void {
   const store = safeStore();
   if (!store) return;
-  store.removeItem(SNAP_PREFIX + id);
+  store.removeItem(snapKey(id));
   writeIndex(loadIndex().filter((c) => c.id !== id));
 }
 

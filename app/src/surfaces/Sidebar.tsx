@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import {
   Plus, MessageSquare, Archive, ArchiveRestore, ChevronRight, PanelLeftClose, PanelLeft,
-  FolderGit2, Server, Search, X,
+  FolderGit2, Server, Search, X, Trash2,
 } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
 import { projectName } from "../lib/localAgent";
@@ -172,22 +172,54 @@ function ConversationRow({
   );
 }
 
-/** A dimmed, minimal row inside the collapsed "Archived" section. Clicking it
- *  restores the conversation (it never re-connects or opens — it just returns to
- *  the active list, where it can be opened normally). */
+/** A dimmed, minimal row inside the collapsed "Archived" section. Clicking the
+ *  row restores the conversation (returns it to the active list); the trash
+ *  button permanently deletes it (local cache + cloud) behind an inline confirm,
+ *  since that can't be undone. */
 function ArchivedRow({ c }: { c: ConversationMeta }) {
   const restore = useSessionStore((s) => s.restoreConversation);
+  const del = useSessionStore((s) => s.deleteConversation);
+  const [confirming, setConfirming] = useState(false);
   return (
-    <button
-      onClick={() => restore(c.id)}
-      title={`Restore “${c.title}”`}
-      aria-label={`Restore ${c.title}`}
-      className="group flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-ink-faint transition hover:bg-bg-hover hover:text-ink-secondary"
-    >
-      <MessageSquare className="size-3.5 shrink-0 text-ink-faint" />
-      <span className="min-w-0 flex-1 truncate leading-tight">{c.title}</span>
-      <ArchiveRestore className="size-3.5 shrink-0 opacity-0 transition group-hover:opacity-100" />
-    </button>
+    <div className="group flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-sm text-ink-faint transition hover:bg-bg-hover">
+      <button
+        onClick={() => restore(c.id)}
+        title={`Restore “${c.title}”`}
+        aria-label={`Restore ${c.title}`}
+        className="flex min-w-0 flex-1 items-center gap-2 text-left transition hover:text-ink-secondary"
+      >
+        <MessageSquare className="size-3.5 shrink-0 text-ink-faint" />
+        <span className="min-w-0 flex-1 truncate leading-tight">{c.title}</span>
+        <ArchiveRestore className="size-3.5 shrink-0 opacity-0 transition group-hover:opacity-100" />
+      </button>
+      {confirming ? (
+        <span className="flex shrink-0 items-center gap-1">
+          <button
+            onClick={() => del(c.id)}
+            aria-label={`Permanently delete ${c.title}`}
+            className="rounded px-1.5 py-0.5 text-[11px] font-medium text-danger transition hover:bg-danger/10"
+          >
+            Delete
+          </button>
+          <button
+            onClick={() => setConfirming(false)}
+            aria-label="Cancel delete"
+            className="rounded px-1 py-0.5 text-[11px] text-ink-muted transition hover:text-ink"
+          >
+            Cancel
+          </button>
+        </span>
+      ) : (
+        <button
+          onClick={() => setConfirming(true)}
+          title="Delete permanently"
+          aria-label={`Delete ${c.title} permanently`}
+          className="grid size-6 shrink-0 place-items-center rounded-md text-ink-faint opacity-0 transition hover:bg-danger/10 hover:text-danger group-hover:opacity-100"
+        >
+          <Trash2 className="size-3.5" />
+        </button>
+      )}
+    </div>
   );
 }
 
