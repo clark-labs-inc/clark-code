@@ -1,0 +1,121 @@
+// Turn a raw model/run error — which can be a transport string, an HTTP status
+// dump, or a provider's giant JSON blob — into one short, friendly sentence for
+// the UI. The original text is kept by the caller (e.g. as a hover `title`) for
+// debugging; this is only about what the user reads at a glance.
+
+/** Map a raw error string to a concise, human-readable message. */
+export function humanizeError(raw?: string | null): string {
+  const s = (raw ?? "").trim();
+  if (!s) return "Something went wrong. Please try again.";
+  const lower = s.toLowerCase();
+
+  // Rate limited — the most common one, and what the screenshot showed.
+  if (
+    lower.includes("429") ||
+    lower.includes("too many requests") ||
+    lower.includes("rate-limited") ||
+    lower.includes("rate limited") ||
+    lower.includes("rate limit")
+  ) {
+    return "The model is busy right now (rate-limited). Give it a moment and try again.";
+  }
+
+  // Out of credits (normally handled by the upgrade prompt, but just in case).
+  if (lower.includes("insufficient_credits") || lower.includes("out of credit")) {
+    return "You’re out of Clark credits.";
+  }
+
+  // Auth — 401, or a 403 that isn’t about credits.
+  if (
+    lower.includes("401") ||
+    lower.includes("unauthorized") ||
+    (lower.includes("403") && !lower.includes("credit")) ||
+    lower.includes("invalid api key") ||
+    lower.includes("authentication")
+  ) {
+    return "Sign-in expired or the key was rejected. Try signing out and back in.";
+  }
+
+  // Context window exceeded.
+  if (
+    lower.includes("context length") ||
+    lower.includes("context_length") ||
+    lower.includes("maximum context") ||
+    lower.includes("too long") ||
+    lower.includes("context window")
+  ) {
+    return "This conversation is too long for the model’s context window. Start a new session.";
+  }
+
+  // Cancelled by the user.
+  if (lower.includes("cancel")) {
+    return "The request was cancelled.";
+  }
+
+  // Network / timeout.
+  if (
+    lower.includes("timed out") ||
+    lower.includes("timeout") ||
+    lower.includes("connection") ||
+    lower.includes("dns") ||
+    lower.includes("network") ||
+    lower.includes("request failed") ||
+    lower.includes("failed to fetch")
+  ) {
+    return "Couldn’t reach the model. Check your connection and try again.";
+  }
+
+  // Any 5xx / generic provider error.
+  if (
+    /\b5\d\d\b/.test(s) ||
+    lower.includes("provider returned error") ||
+    lower.includes("internal server error") ||
+    lower.includes("bad gateway") ||
+    lower.includes("service unavailable") ||
+    lower.includes("overloaded")
+  ) {
+    return "The model provider hit a temporary error. Please try again in a moment.";
+  }
+
+  // Unknown — pull a human sentence out of the noise (JSON blobs, status dumps)
+  // rather than showing the raw payload.
+  return cleanFallback(s);
+}
+
+/** Best-effort: extract a readable message from an arbitrary error string,
+ *  preferring a human field inside any embedded JSON, then stripping JSON and
+ *  truncating to a single short sentence. */
+function cleanFallback(s: string): string {
+  const fromJson = extractJsonMessage(s);
+  let out = (fromJson ?? s).replace(/\{[\s\S]*\}/g, " ").replace(/\s+/g, " ").trim();
+  // Drop a leading "model endpoint returned 500 Internal Server Error:" style prefix.
+  out = out.replace(/^model (?:endpoint returned|request failed|stream error)[:\s-]*/i, "").trim();
+  if (!out) return "Something went wrong. Please try again.";
+  const firstSentence = out.split(/(?<=[.!?])\s/)[0];
+  if (firstSentence.length >= 15) out = firstSentence;
+  return out.length > 160 ? out.slice(0, 157).trimEnd() + "…" : out;
+}
+
+/** Find the most human-readable string field in any JSON embedded in `s`
+ *  (a provider’s `metadata.raw`, `error.message`, or top-level `message`). */
+function extractJsonMessage(s: string): string | null {
+  const start = s.indexOf("{");
+  const end = s.lastIndexOf("}");
+  if (start === -1 || end <= start) return null;
+  try {
+    const obj = JSON.parse(s.slice(start, end + 1));
+    const candidates = [
+      obj?.error?.metadata?.raw,
+      obj?.error?.message,
+      obj?.message,
+      obj?.error,
+      obj?.detail,
+    ];
+    for (const c of candidates) {
+      if (typeof c === "string" && c.trim()) return c.trim();
+    }
+  } catch {
+    /* not valid JSON — fall through */
+  }
+  return null;
+}

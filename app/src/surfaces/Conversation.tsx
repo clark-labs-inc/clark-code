@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { ArrowDown } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
 import { currentActivity } from "../lib/activity";
+import { humanizeError } from "../lib/errors";
 import { Message } from "./Message";
 import { WorkBlock } from "./work/WorkBlock";
 import { ArtifactCard } from "./work/ArtifactCard";
@@ -253,14 +254,21 @@ export function Conversation() {
             </motion.div>
           )}
           {failed && !outOfCredits && (
-            <motion.div key="failed" {...TRANSIENT} className={DANGER_BANNER}>
+            <motion.div
+              key="failed"
+              {...TRANSIENT}
+              className={DANGER_BANNER}
+              title={failed.outcome?.error || undefined}
+            >
               <span className="font-medium">Run failed.</span>{" "}
-              {failed.outcome?.error ?? "The agent ended unexpectedly."}
+              {failed.outcome?.error
+                ? humanizeError(failed.outcome.error)
+                : "The agent ended unexpectedly."}
             </motion.div>
           )}
           {error && (
-            <motion.div key="error" {...TRANSIENT} className={DANGER_BANNER}>
-              {error}
+            <motion.div key="error" {...TRANSIENT} className={DANGER_BANNER} title={error}>
+              {humanizeError(error)}
             </motion.div>
           )}
         </AnimatePresence>
