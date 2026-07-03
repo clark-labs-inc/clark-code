@@ -141,9 +141,21 @@ impl ToolExecutor for BrowserTool {
 async fn start_browser(_ctx: &ToolCtx) -> Result<(Child, BrowserSession), String> {
     // Downloads (and caches) the binary if this is the first use — can take a
     // while for a ~150-300MB archive; the tool call blocks on it rather than
-    // streaming progress in v1 (no existing "long download" tool-call UI
-    // pattern to hook into yet — see browser_binary.rs's doc comment).
-    let binary = ensure_binary(|_progress: DownloadProgress| {}).await?;
+    // streaming progress into the tool-call UI in v1 (no "long download" UI
+    // pattern to hook into yet — see browser_binary.rs's doc comment). We do
+    // log progress at debug so a slow first-run download is diagnosable.
+    let binary = ensure_binary(|progress: DownloadProgress| match progress.total {
+        Some(total) => tracing::debug!(
+            downloaded = progress.downloaded,
+            total,
+            "clark-browser download progress"
+        ),
+        None => tracing::debug!(
+            downloaded = progress.downloaded,
+            "clark-browser download progress"
+        ),
+    })
+    .await?;
 
     let port = free_local_port()?;
     // Spawned directly (not through `ctx.executor`) — clark-browser is a

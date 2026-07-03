@@ -32,6 +32,8 @@ pub struct HooksConfig {
 }
 
 impl HooksConfig {
+    // Exercised by the settings-parsing tests; kept as a public helper.
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.pre_tool_use.is_empty() && self.post_tool_use.is_empty()
     }

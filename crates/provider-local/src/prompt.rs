@@ -11,7 +11,11 @@ use crate::sandbox::Sandbox;
 /// One selectable output style/persona.
 pub struct OutputStyle {
     pub id: &'static str,
+    // `label`/`description` mirror the frontend's own style list for parity
+    // and documentation; only `id` and `instructions` are read Rust-side.
+    #[allow(dead_code)]
     pub label: &'static str,
+    #[allow(dead_code)]
     pub description: &'static str,
     /// Per-turn instruction block; empty for `default` (no change from the
     /// base system prompt's own voice).
