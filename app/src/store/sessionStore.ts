@@ -24,13 +24,8 @@ import {
   type AuthSession,
 } from "../lib/auth";
 import {
-  loadIndex,
-  loadSnapshot,
-  saveSnapshot,
-  upsertMeta,
-  setArchived,
-  setHistoryScope,
-  deleteConversation as removeLocalConversation,
+  drainLocalHistory,
+  settleRuns,
   deriveTitle,
   hasContent,
   type ConversationMeta,
@@ -64,6 +59,7 @@ import {
   cloudList,
   cloudGet,
   cloudDelete,
+  cloudSetArchived,
   cloudShare,
   cloudUnshare,
   scheduleCloudPut,
@@ -139,8 +135,10 @@ interface SessionState {
   auth: AuthSession | null;
   /** Files staged to send with the next message. */
   attachments: PendingAttachment[];
-  /** Saved conversations, newest first. */
+  /** Saved conversations, newest first — the cloud is the source of truth. */
   conversations: ConversationMeta[];
+  /** True while the first cloud conversation-list fetch is in flight. */
+  conversationsLoading: boolean;
   /** Restored transcript when a past conversation is reopened (prefix to live). */
   historyPrefix: Snapshot | null;
   /** Read-only view of ANOTHER conversation while a run streams in the live one.
@@ -226,8 +224,11 @@ interface SessionState {
   signOutAuth: () => void;
   /** Mint + store a Clark Code API key for the signed-in user if none yet. */
   ensureCodeKey: () => Promise<void>;
-  /** Pull the cloud conversation list (Clark) and merge into the local index. */
+  /** Fetch the account's conversation list from the cloud (the source of truth). */
   syncCloudIndex: () => Promise<void>;
+  /** One-time: lift any chats left in localStorage by prior local-first versions
+   *  into the cloud, then forget them locally. No-op once drained. */
+  migrateLocalToCloud: () => void;
   startSession: () => Promise<void>;
   endSession: () => void;
   openConversation: (id: string) => Promise<void>;
@@ -291,11 +292,47 @@ async function openRemote(host: SshHost): Promise<RemoteInfo> {
   return sshConnect(host.host.trim(), host.remoteRoot.trim(), host.binaryPath.trim());
 }
 
-// Scope history storage to the persisted account BEFORE the store first reads
-// it, so the initial `conversations: loadIndex()` returns only this account's
-// chats (never a previously signed-in account's).
+// Chat history is cloud-only. Snapshots are cached in memory for the app's
+// lifetime (never persisted to disk) so re-opening a conversation within a
+// session is instant; a cold start re-fetches from the cloud. The conversation
+// LIST lives in the store's `conversations` and is populated from the cloud on
+// init/sign-in (see `syncCloudIndex`).
+const snapshotCache = new Map<string, Snapshot>();
+
+/** Cloud-first snapshot lookup: the in-memory cache, else a `cloudGet` (settled
+ *  so a persisted mid-run transcript never reopens "Thinking…"), else null. */
+async function fetchSnapshot(id: string, auth: AuthSession | null): Promise<Snapshot | null> {
+  const cached = snapshotCache.get(id);
+  if (cached) return cached;
+  const creds = cloudCreds(auth);
+  if (!creds) return null;
+  try {
+    const cloud = await cloudGet(creds, id);
+    if (cloud) {
+      const settled = settleRuns(cloud);
+      snapshotCache.set(id, settled);
+      return settled;
+    }
+  } catch {
+    /* offline / backend down — caller falls back to a fresh session */
+  }
+  return null;
+}
+
+/** Merge a cloud conversation list over the in-memory one: cloud entries win,
+ *  but any in-memory-only entries (e.g. just migrated, push not yet landed) are
+ *  preserved so they don't flash out of the sidebar. */
+function mergeConversations(
+  cloud: ConversationMeta[],
+  local: ConversationMeta[],
+): ConversationMeta[] {
+  const byId = new Map<string, ConversationMeta>();
+  for (const c of local) byId.set(c.id, c);
+  for (const c of cloud) byId.set(c.id, c);
+  return [...byId.values()];
+}
+
 const bootAuth = loadAuthSession();
-setHistoryScope(bootAuth?.user.email);
 
 export const useSessionStore = create<SessionState>((set, get) => ({
   bridge: null,
@@ -308,7 +345,8 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   dismissedFailedRuns: [],
   auth: bootAuth,
   attachments: [],
-  conversations: loadIndex(),
+  conversations: [],
+  conversationsLoading: !!bootAuth,
   historyPrefix: null,
   peek: null,
   composerPrefill: null,
@@ -454,7 +492,9 @@ export const useSessionStore = create<SessionState>((set, get) => ({
             const persistSession = session;
             const persistPrefixLen = historyPrefix ? historyPrefix.timeline.length : 0;
             const persist = () => {
-              saveSnapshot(persistSession.id, snapshot);
+              // Cache the latest snapshot in memory (never to disk); the cloud
+              // push below is the durable copy.
+              snapshotCache.set(persistSession.id, snapshot);
               const prev = get().conversations.find((c) => c.id === persistSession.id);
               const remoteHost = get().activeRemoteHost;
               // Project folder is the remote root for a remote session, else local.
@@ -481,16 +521,15 @@ export const useSessionStore = create<SessionState>((set, get) => ({
                 updatedAt: grew ? Date.now() : (prev?.updatedAt ?? Date.now()),
                 archived: prev?.archived,
               };
-              upsertMeta(meta);
-              // Refresh the sidebar only when the visible bits actually changed —
-              // re-parsing the index and re-rendering per save is wasted work.
+              // Update the in-memory sidebar list only when visible bits changed
+              // (avoids a re-render per streamed save). Newest-first.
               if (
                 !prev ||
                 prev.title !== meta.title ||
                 prev.updatedAt !== meta.updatedAt ||
                 prev.project !== meta.project
               ) {
-                set({ conversations: loadIndex() });
+                set({ conversations: [meta, ...get().conversations.filter((c) => c.id !== meta.id)] });
               }
               // Mirror the turn to Clark once it settles — not every streamed
               // frame. Coalesced + single-flight + idempotent (see cloudHistory).
@@ -589,9 +628,11 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         providers,
         activeProvider: providers[0]?.id ?? null,
       });
-      // Best-effort: ensure a Clark Code key exists, pull cloud history, and load
-      // the credit balance for the banner. All no-op offline / signed out.
+      // Best-effort: ensure a Clark Code key exists, migrate any residual local
+      // chats into the cloud (one-time), pull cloud history, and load the credit
+      // balance. All no-op offline / signed out.
       void get().ensureCodeKey();
+      get().migrateLocalToCloud();
       void get().syncCloudIndex();
       void get().loadBilling();
       // Auto-update: check shortly after launch, then every 6h. Downloads +
@@ -623,22 +664,39 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
   syncCloudIndex: async () => {
     const creds = cloudCreds(get().auth);
-    if (!creds) return;
+    if (!creds) {
+      set({ conversationsLoading: false });
+      return;
+    }
     try {
       const remote = await cloudList(creds);
-      for (const meta of remote) {
-        const prev = get().conversations.find((c) => c.id === meta.id);
-        // Cloud wins for metadata unless the local copy is strictly newer. The
-        // archived flag is local-only (not carried in the cloud summary), so
-        // preserve it across the merge rather than letting cloud clear it.
-        if (!prev || meta.updatedAt >= prev.updatedAt) {
-          upsertMeta({ ...meta, archived: prev?.archived });
-        }
-      }
-      set({ conversations: loadIndex() });
+      // Cloud is authoritative; keep only in-memory-only entries (a just-migrated
+      // chat whose push hasn't landed yet) so they don't flash out of the list.
+      set({
+        conversations: mergeConversations(remote, get().conversations),
+        conversationsLoading: false,
+      });
     } catch {
-      /* offline or backend not deployed — local cache still serves history */
+      // Offline / backend down — leave whatever's in memory, stop the spinner.
+      set({ conversationsLoading: false });
     }
+  },
+
+  migrateLocalToCloud: () => {
+    const creds = cloudCreds(get().auth);
+    if (!creds) return; // no cloud target yet — keep local data for a later sign-in
+    const drained = drainLocalHistory();
+    if (drained.length === 0) return;
+    for (const d of drained) {
+      // Seed the cache so migrated chats open instantly, then upload snapshot +
+      // archived state (idempotent; the server's rev guard won't clobber newer).
+      snapshotCache.set(d.meta.id, d.snapshot);
+      scheduleCloudPut(creds, d.meta, d.snapshot);
+      if (d.archived) void cloudSetArchived(creds, d.meta.id, true).catch(() => {});
+    }
+    const existing = new Set(get().conversations.map((c) => c.id));
+    const add = drained.map((d) => d.meta).filter((m) => !existing.has(m.id));
+    if (add.length) set({ conversations: [...add, ...get().conversations] });
   },
 
   selectProvider: (id) => set({ activeProvider: id }),
@@ -706,25 +764,23 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
   signIn: async () => {
     const auth = await signInWithGoogle();
-    // Point history at THIS account before anything reads it, so the sidebar
-    // never shows a previously signed-in account's chats. loadIndex() now
-    // returns this account's local cache (empty for a brand-new account);
-    // syncCloudIndex then fills it in from the account's cloud history.
-    setHistoryScope(auth.user.email);
-    set({ auth, conversations: loadIndex() });
-    // Provision the Clark Code key + pull cloud history so the user never has to
-    // paste a key.
+    // Start from an empty list for the new account; the cloud fetch below is the
+    // authoritative source (a different account never inherits the prior list).
+    set({ auth, conversations: [], conversationsLoading: true });
+    // Provision the Clark Code key; migrate any residual local chats into this
+    // account's cloud (one-time — self-cleaning); then pull the cloud list.
     void get().ensureCodeKey();
+    get().migrateLocalToCloud();
     void get().syncCloudIndex();
   },
 
   signOutAuth: () => {
     authSignOut();
-    // Detach history from the signed-out account first, so endSession reloads
-    // an empty (anon-scoped) list rather than the previous account's cache.
-    setHistoryScope(null);
     get().endSession();
-    set({ auth: null, billing: null });
+    // Drop the in-memory history entirely so the signed-out (and any next)
+    // account starts clean.
+    snapshotCache.clear();
+    set({ auth: null, billing: null, conversations: [], conversationsLoading: false });
   },
 
   startSession: async () => {
@@ -801,7 +857,6 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       terminalOpen: false,
       activeRemote: null,
       activeRemoteHost: null,
-      conversations: loadIndex(),
     });
   },
 
@@ -818,26 +873,13 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     // other conversation read-only (peek). It promotes to a full open when the
     // run settles (see the busy→idle edge in init's subscribe handler).
     if (session && isBusy(get().snapshot)) {
-      let restored = loadSnapshot(id);
-      if (!restored) {
-        const creds = cloudCreds(get().auth);
-        if (creds) {
-          try {
-            const cloud = await cloudGet(creds, id);
-            if (cloud) {
-              restored = cloud;
-              saveSnapshot(id, cloud);
-            }
-          } catch {
-            /* offline — show what we have */
-          }
-        }
-      }
+      // Read-only peek while the live run streams: fetch the transcript from the
+      // cloud (or the in-memory cache).
+      const restored = await fetchSnapshot(id, get().auth);
       set({ peek: { id, snapshot: restored ?? emptySnapshot() } });
       return;
     }
     if (prevRemote) void sshDisconnect(prevRemote.id);
-    let restored = loadSnapshot(id);
     set({
       connecting: true,
       error: null,
@@ -846,21 +888,8 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       activeRemote: null,
       activeRemoteHost: null,
     });
-    // Not cached locally (e.g. opened on another machine)? Pull it from Clark.
-    if (!restored) {
-      const creds = cloudCreds(get().auth);
-      if (creds) {
-        try {
-          const cloud = await cloudGet(creds, id);
-          if (cloud) {
-            restored = cloud;
-            saveSnapshot(id, cloud); // cache for next time
-          }
-        } catch {
-          /* offline — fall back to a fresh session */
-        }
-      }
-    }
+    // Cloud-first: the transcript comes from the in-memory cache or a `cloudGet`.
+    const restored = await fetchSnapshot(id, get().auth);
     let remote: RemoteInfo | null = null;
     try {
       const isLocal = activeProvider === "local";
@@ -918,17 +947,15 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   },
 
   archiveConversation: (id) => {
-    // Soft-delete only: flag it archived, but keep the local snapshot and the
-    // cloud copy so it (and its artifacts) can be restored in full. No cloud
-    // delete is issued.
-    setArchived(id, true);
+    // Soft-delete: flag it archived in the cloud (the transcript stays, so it
+    // can be restored in full). Optimistic in-memory flag; PATCH to the cloud.
     const cleared = get().session?.id === id;
     if (cleared) {
       const r = get().activeRemote;
       if (r) void sshDisconnect(r.id);
     }
     set({
-      conversations: loadIndex(),
+      conversations: get().conversations.map((c) => (c.id === id ? { ...c, archived: true } : c)),
       ...(cleared
         ? {
             session: null,
@@ -943,25 +970,29 @@ export const useSessionStore = create<SessionState>((set, get) => ({
           }
         : {}),
     });
+    const creds = cloudCreds(get().auth);
+    if (creds) void cloudSetArchived(creds, id, true).catch(() => {});
   },
 
   restoreConversation: (id) => {
-    setArchived(id, false);
-    set({ conversations: loadIndex() });
+    set({
+      conversations: get().conversations.map((c) => (c.id === id ? { ...c, archived: false } : c)),
+    });
+    const creds = cloudCreds(get().auth);
+    if (creds) void cloudSetArchived(creds, id, false).catch(() => {});
   },
 
   deleteConversation: (id) => {
-    // Hard delete: drop the local snapshot + index entry, and delete the cloud
-    // copy (best-effort — the local removal is what the user sees; the cloud
-    // DELETE retries are not worth blocking the UI on).
-    removeLocalConversation(id);
+    // Hard delete: remove from the in-memory list + snapshot cache and delete the
+    // cloud copy (best-effort — the list removal is what the user sees).
+    snapshotCache.delete(id);
     const cleared = get().session?.id === id;
     if (cleared) {
       const r = get().activeRemote;
       if (r) void sshDisconnect(r.id);
     }
     set({
-      conversations: loadIndex(),
+      conversations: get().conversations.filter((c) => c.id !== id),
       ...(cleared
         ? {
             session: null,
@@ -980,16 +1011,19 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     if (creds) void cloudDelete(creds, id).catch(() => {});
   },
 
-  renameConversation: (id, title) => {
+  renameConversation: async (id, title) => {
     const clean = title.trim();
     const prev = get().conversations.find((c) => c.id === id);
     if (!prev || !clean || clean === prev.title) return;
-    upsertMeta({ ...prev, title: clean, titleLocked: true });
-    set({ conversations: loadIndex() });
-    // Push the new title to the cloud copy alongside the cached snapshot.
+    const updated = { ...prev, title: clean, titleLocked: true };
+    set({ conversations: get().conversations.map((c) => (c.id === id ? updated : c)) });
+    // Persist the title to the cloud. A `put` carries the whole snapshot, so
+    // fetch it (cache or cloud) first — this also covers renaming a chat that
+    // wasn't opened this session.
     const creds = cloudCreds(get().auth);
-    const snap = loadSnapshot(id);
-    if (creds && snap) scheduleCloudPut(creds, { ...prev, title: clean, titleLocked: true }, snap);
+    if (!creds) return;
+    const snap = await fetchSnapshot(id, get().auth);
+    if (snap) scheduleCloudPut(creds, updated, snap);
   },
 
   updateModelSettings: async ({ model, reasoningEffort }) => {

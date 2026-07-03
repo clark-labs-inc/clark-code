@@ -1,10 +1,10 @@
-// Cloud sync for conversation history — Clark's desktop-conversation API.
+// Cloud storage for conversation history — Clark's desktop-conversation API.
 //
-// localStorage (lib/history.ts) stays the synchronous, offline-first cache; this
-// layer mirrors it to Clark so a user's coding history is durable and follows
-// them across machines. Every call is best-effort: it's only available in the
-// desktop app for a signed-in user with a Clark token, and callers swallow
-// failures so the app degrades to local-only.
+// This is the SOURCE OF TRUTH for chats (no local persistence): the list comes
+// from `cloudList`, transcripts from `cloudGet`, writes via `cloudPut` /
+// `cloudSetArchived` / `cloudDelete`. Scoped to the signed-in user by the Clark
+// JWT, so a second account on the same machine only ever sees its own chats.
+// Only available in the desktop app for a signed-in user with a Clark token.
 
 import { invoke } from "@tauri-apps/api/core";
 import type { Snapshot } from "../core-bridge/types";
@@ -35,6 +35,10 @@ interface CloudSummary {
   title: string;
   provider: string;
   project?: string;
+  remoteHost?: string;
+  mode?: string;
+  titleLocked?: boolean;
+  archived?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -45,6 +49,10 @@ function metaFromSummary(r: CloudSummary): ConversationMeta {
     title: r.title,
     provider: r.provider,
     project: r.project || undefined,
+    remoteHost: r.remoteHost || undefined,
+    mode: r.mode || undefined,
+    titleLocked: r.titleLocked || undefined,
+    archived: r.archived || undefined,
     createdAt: Date.parse(r.createdAt) || Date.now(),
     updatedAt: Date.parse(r.updatedAt) || Date.now(),
   };
@@ -84,6 +92,9 @@ export async function cloudPut(
     title: meta.title,
     provider: meta.provider,
     project: meta.project ?? null,
+    remoteHost: meta.remoteHost ?? null,
+    mode: meta.mode ?? null,
+    titleLocked: meta.titleLocked ?? false,
     rev,
     snapshot,
   });
@@ -150,6 +161,17 @@ async function drainPush(id: string): Promise<void> {
 /** Delete a conversation from the cloud. */
 export async function cloudDelete(c: CloudCreds, id: string): Promise<void> {
   await invoke("desktop_conv_delete", { endpoint: c.endpoint, token: c.token, id });
+}
+
+/** Toggle a conversation's archived flag in the cloud (independent of snapshot
+ *  sync, so archiving never re-uploads the transcript or gets clobbered by it). */
+export async function cloudSetArchived(c: CloudCreds, id: string, archived: boolean): Promise<void> {
+  await invoke("desktop_conv_set_archived", {
+    endpoint: c.endpoint,
+    token: c.token,
+    id,
+    archived,
+  });
 }
 
 /** Create (or fetch) the public share link for a synced conversation. */

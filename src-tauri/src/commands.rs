@@ -766,6 +766,7 @@ pub async fn desktop_conv_get(
 
 /// Insert or replace a desktop conversation snapshot.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn desktop_conv_put(
     endpoint: String,
     token: String,
@@ -773,6 +774,9 @@ pub async fn desktop_conv_put(
     title: String,
     provider: String,
     project: Option<String>,
+    remote_host: Option<String>,
+    mode: Option<String>,
+    title_locked: bool,
     rev: i64,
     snapshot: Value,
 ) -> Result<Value, String> {
@@ -788,6 +792,9 @@ pub async fn desktop_conv_put(
             "title": title,
             "provider": provider,
             "project": project,
+            "remoteHost": remote_host,
+            "mode": mode,
+            "titleLocked": title_locked,
             "rev": rev,
             "snapshot": snapshot,
         }))
@@ -923,6 +930,31 @@ pub async fn desktop_conv_delete(
         return Err(format!("desktop delete failed ({status}): {text}"));
     }
     Ok(())
+}
+
+/// Toggle a desktop conversation's archived flag in the cloud (a snapshot `put`
+/// never changes it, so this is the only path that does). Returns the updated
+/// summary.
+#[tauri::command]
+pub async fn desktop_conv_set_archived(
+    endpoint: String,
+    token: String,
+    id: String,
+    archived: bool,
+) -> Result<Value, String> {
+    let url = format!(
+        "{}/api/desktop/conversations/{}",
+        clark_rest_base(&endpoint),
+        urlencoding::encode(&id)
+    );
+    let resp = clark_http_client()?
+        .patch(url)
+        .header("Authorization", format!("Bearer {token}"))
+        .json(&serde_json::json!({ "archived": archived }))
+        .send()
+        .await
+        .map_err(|e| format!("desktop archive request failed: {e}"))?;
+    read_json_or_err(resp, "desktop archive").await
 }
 
 /// Real-backend coverage for the Tauri commands that have no `State<AppState>`

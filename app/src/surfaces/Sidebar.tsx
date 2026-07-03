@@ -227,6 +227,7 @@ export function Sidebar() {
   const collapsed = useSessionStore((s) => s.sidebarCollapsed);
   const setCollapsed = useSessionStore((s) => s.setSidebarCollapsed);
   const conversations = useSessionStore((s) => s.conversations);
+  const conversationsLoading = useSessionStore((s) => s.conversationsLoading);
   const session = useSessionStore((s) => s.session);
   // Selection follows what's on screen (a peek shows another conversation while
   // the live one keeps streaming — that one gets the pulsing "working" dot).
@@ -334,7 +335,7 @@ export function Sidebar() {
       <div className="min-h-0 flex-1 overflow-y-auto px-2.5 pb-3">
         {conversations.length === 0 ? (
           <p className="px-1 py-6 text-center text-xs text-ink-faint">
-            Your conversations will show up here.
+            {conversationsLoading ? "Loading conversations…" : "Your conversations will show up here."}
           </p>
         ) : visible.length === 0 ? (
           <p className="px-1 py-6 text-center text-xs text-ink-faint">

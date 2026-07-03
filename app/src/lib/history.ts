@@ -1,10 +1,13 @@
-// Local conversation history.
+// Conversation history is CLOUD-ONLY (see lib/cloudHistory.ts — the source of
+// truth). The desktop app no longer persists chats to localStorage, so a second
+// account on the same machine can never see the first's chats and history
+// follows the user across devices.
 //
-// Persists a small index of past conversations plus each one's last Snapshot, so
-// the UI can list prior chats and reopen them. Storage is intentionally behind a
-// thin seam: today it uses `localStorage` (which the Tauri WebView persists
-// per-origin, and which works in browser preview too); a future swap to the
-// Tauri fs/app-data dir is a one-file change that keeps this module's API.
+// This module keeps the small pure helpers the rest of the app still uses
+// (ConversationMeta shape, title derivation, content check, run-settling of a
+// persisted snapshot) plus `drainLocalHistory` — a one-time reader that lifts
+// any chats left behind by prior local-first versions into memory so the store
+// can upload them to the cloud, then deletes the local keys.
 
 import type { Snapshot } from "../core-bridge/types";
 
@@ -26,39 +29,10 @@ export interface ConversationMeta {
   createdAt: number;
   updatedAt: number;
   /** Soft-delete flag. Archived conversations are hidden from the main list
-   *  (shown under a collapsed "Archived" section) but never removed locally or
-   *  from the cloud, so they can be restored with the full transcript + artifacts.
-   *  Local-only for now; not round-tripped through the cloud summary. */
+   *  (shown under a collapsed "Archived" section) but kept in the cloud so they
+   *  can be restored with the full transcript. Now round-tripped through the
+   *  cloud (desktop_conversation.archived), not local-only. */
   archived?: boolean;
-}
-
-const INDEX_KEY_BASE = "clark.history.index.v1";
-const SNAP_PREFIX_BASE = "clark.history.snap.v1.";
-/** Cap the index so a long-lived install can't grow unbounded. */
-const MAX_CONVERSATIONS = 100;
-
-// History is cached PER SIGNED-IN ACCOUNT so a second account on the same
-// machine never sees the first account's chats (the WebView shares one
-// localStorage origin across accounts). `scope` is set from the account email
-// on init and on every auth change via `setHistoryScope`.
-let scope = "anon";
-
-/** Point history storage at a specific account (its email). Call on init and
- *  whenever the signed-in account changes. Unscoped keys written before this
- *  change are migrated into the first account that signs in, so upgrading
- *  users keep their existing chats. */
-export function setHistoryScope(accountKey: string | null | undefined): void {
-  const next = accountKey && accountKey.trim() ? accountKey.trim().toLowerCase() : "anon";
-  if (next === scope) return;
-  scope = next;
-  migrateLegacyGlobal();
-}
-
-function indexKey(): string {
-  return `${INDEX_KEY_BASE}.${scope}`;
-}
-function snapKey(id: string): string {
-  return `${SNAP_PREFIX_BASE}${scope}.${id}`;
 }
 
 function safeStore(): Storage | null {
@@ -69,77 +43,10 @@ function safeStore(): Storage | null {
   }
 }
 
-/** One-time move of history saved under the old global (unscoped) keys into the
- *  current account scope. Runs when a real scope is first selected and no
- *  scoped index exists yet; leaves the legacy keys in place on any failure. */
-function migrateLegacyGlobal(): void {
-  const store = safeStore();
-  if (!store || scope === "anon") return;
-  if (store.getItem(indexKey())) return; // already have data for this account
-  const legacy = store.getItem(INDEX_KEY_BASE);
-  if (!legacy) return;
-  try {
-    const list = JSON.parse(legacy) as ConversationMeta[];
-    store.setItem(indexKey(), legacy);
-    for (const c of list) {
-      const snap = store.getItem(SNAP_PREFIX_BASE + c.id);
-      if (snap != null) store.setItem(snapKey(c.id), snap);
-    }
-    store.removeItem(INDEX_KEY_BASE);
-    for (const c of list) store.removeItem(SNAP_PREFIX_BASE + c.id);
-  } catch {
-    /* best-effort — leave legacy keys untouched */
-  }
-}
-
-/** All saved conversations, newest first. */
-export function loadIndex(): ConversationMeta[] {
-  const store = safeStore();
-  if (!store) return [];
-  try {
-    const raw = store.getItem(indexKey());
-    const list = raw ? (JSON.parse(raw) as ConversationMeta[]) : [];
-    return list.sort((a, b) => b.updatedAt - a.updatedAt);
-  } catch {
-    return [];
-  }
-}
-
-function writeIndex(list: ConversationMeta[]): void {
-  const store = safeStore();
-  if (!store) return;
-  const trimmed = list.sort((a, b) => b.updatedAt - a.updatedAt).slice(0, MAX_CONVERSATIONS);
-  // Drop snapshots for any conversations evicted by the cap.
-  const kept = new Set(trimmed.map((c) => c.id));
-  for (const c of list) if (!kept.has(c.id)) store.removeItem(snapKey(c.id));
-  try {
-    store.setItem(indexKey(), JSON.stringify(trimmed));
-  } catch {
-    /* quota — ignore; history is best-effort */
-  }
-}
-
-/** Insert or update one conversation's metadata. */
-export function upsertMeta(meta: ConversationMeta): void {
-  const list = loadIndex().filter((c) => c.id !== meta.id);
-  list.push(meta);
-  writeIndex(list);
-}
-
-/** Toggle a conversation's soft-delete (archived) flag. Leaves the snapshot and
- *  index entry intact so it can be restored with its full transcript. */
-export function setArchived(id: string, archived: boolean): void {
-  const list = loadIndex();
-  const found = list.find((c) => c.id === id);
-  if (!found || !!found.archived === archived) return;
-  found.archived = archived;
-  writeIndex(list);
-}
-
 /** A persisted transcript is never live: coerce any non-terminal run to a
  *  settled status, and drop a stale permission prompt, so a reopened (or
  *  reloaded) conversation never shows a stuck "Thinking…" or a dead prompt. */
-function settleRuns(snapshot: Snapshot): Snapshot {
+export function settleRuns(snapshot: Snapshot): Snapshot {
   let changed = false;
   const runs: Snapshot["runs"] = {};
   for (const [id, r] of Object.entries(snapshot.runs)) {
@@ -152,34 +59,6 @@ function settleRuns(snapshot: Snapshot): Snapshot {
   }
   if (!changed && !snapshot.pending_permission) return snapshot;
   return { ...snapshot, runs, pending_permission: undefined };
-}
-
-export function loadSnapshot(id: string): Snapshot | null {
-  const store = safeStore();
-  if (!store) return null;
-  try {
-    const raw = store.getItem(snapKey(id));
-    return raw ? settleRuns(JSON.parse(raw) as Snapshot) : null;
-  } catch {
-    return null;
-  }
-}
-
-export function saveSnapshot(id: string, snapshot: Snapshot): void {
-  const store = safeStore();
-  if (!store) return;
-  try {
-    store.setItem(snapKey(id), JSON.stringify(snapshot));
-  } catch {
-    /* quota — ignore */
-  }
-}
-
-export function deleteConversation(id: string): void {
-  const store = safeStore();
-  if (!store) return;
-  store.removeItem(snapKey(id));
-  writeIndex(loadIndex().filter((c) => c.id !== id));
 }
 
 /** First user message → a compact title; falls back to a generic label. */
@@ -200,4 +79,60 @@ export function deriveTitle(snapshot: Snapshot): string {
 /** True once a conversation has any user/agent message worth persisting. */
 export function hasContent(snapshot: Snapshot): boolean {
   return snapshot.timeline.some((t) => t.item === "message");
+}
+
+// --- One-time migration off localStorage ---------------------------------
+
+export interface DrainedConversation {
+  meta: ConversationMeta;
+  snapshot: Snapshot;
+  archived: boolean;
+}
+
+/** Read every conversation left in localStorage by prior (local-first) versions
+ *  — the old global `clark.history.*` keys AND the per-account scoped keys from
+ *  v0.1.19 — return them so the store can upload them to the cloud, and delete
+ *  every one of those keys. Self-cleaning: once drained, a later launch finds
+ *  nothing to migrate. Preferences and the auth session use different keys and
+ *  are untouched. */
+export function drainLocalHistory(): DrainedConversation[] {
+  const store = safeStore();
+  if (!store) return [];
+
+  // Index keys: "clark.history.index.v1" (legacy global) or
+  // "clark.history.index.v1.<scope>" (per-account, v0.1.19).
+  const INDEX_RE = /^clark\.history\.index\.v1(?:\.(.+))?$/;
+  const indexKeys: string[] = [];
+  for (let i = 0; i < store.length; i++) {
+    const k = store.key(i);
+    if (k && INDEX_RE.test(k)) indexKeys.push(k);
+  }
+
+  const out: DrainedConversation[] = [];
+  const remove: string[] = [];
+
+  for (const idxKey of indexKeys) {
+    remove.push(idxKey);
+    const scopeSuffix = idxKey.match(INDEX_RE)?.[1] ? `${idxKey.match(INDEX_RE)![1]}.` : "";
+    let list: ConversationMeta[] = [];
+    try {
+      list = JSON.parse(store.getItem(idxKey) || "[]") as ConversationMeta[];
+    } catch {
+      list = [];
+    }
+    for (const meta of list) {
+      const snapKey = `clark.history.snap.v1.${scopeSuffix}${meta.id}`;
+      remove.push(snapKey);
+      const raw = store.getItem(snapKey);
+      if (!raw) continue;
+      try {
+        out.push({ meta, snapshot: JSON.parse(raw) as Snapshot, archived: !!meta.archived });
+      } catch {
+        /* skip a corrupt snapshot; its key is still removed */
+      }
+    }
+  }
+
+  for (const k of remove) store.removeItem(k);
+  return out;
 }

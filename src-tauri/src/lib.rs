@@ -121,6 +121,7 @@ pub fn run() {
             commands::desktop_conv_share,
             commands::desktop_conv_unshare,
             commands::desktop_conv_delete,
+            commands::desktop_conv_set_archived,
             mobile_remote::desktop_code_host_upsert,
             mobile_remote::desktop_code_command_poll,
             mobile_remote::desktop_code_command_ack,
