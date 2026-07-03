@@ -28,6 +28,7 @@ mod exec;
 mod files;
 mod hooks;
 mod llm;
+mod loop_breaker;
 mod loop_state;
 mod markdown_frontmatter;
 mod mcp;

@@ -10,8 +10,17 @@ use tokio::sync::Mutex;
 use crate::agent_adapter::{desktop_tool_registry, ClarkAgentStream, DesktopEventSink};
 use crate::compaction::{CheckpointCompactor, CompactionConfig};
 use crate::llm::LlmClient;
+use crate::loop_breaker::LoopBreaker;
 use crate::loop_state::{RunControl, SessionState};
 use crate::tools::{ToolCtx, ToolRegistry};
+
+/// Turns of head-room before the hard `max_iterations` cap at which the
+/// built-in graceful wrap-up fires. When crossed, the loop injects a
+/// one-shot "stop and deliver your final result" steer, so a run that would
+/// otherwise slam into the cap instead ends with a summary of what it did
+/// and what's left (reported as a clean finish, not a failure). Sized
+/// against the 1000-turn cap in [`crate::config`].
+const GRACE_ITERATIONS: usize = 40;
 
 /// Everything `run_turn` needs, bundled to keep the spawned task signature sane.
 pub(crate) struct TurnContext {
@@ -78,13 +87,19 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
     // calls; the handle folds those totals into the run outcome at finish.
     let stream = ClarkAgentStream::new(tc.llm.clone());
     let usage = stream.usage();
+    // Breaks stuck same-action/same-result loops early (nudge → hard block)
+    // so the raised iteration cap can't be burned on a spinning agent. One
+    // instance, shared across the before- and after-tool-call hook lists.
+    let loop_breaker = Arc::new(LoopBreaker::new());
     let mut builder = clark_agent::AgentBuilder::new()
         .stream(Arc::new(stream))
         .tools(tools)
         .event_sink(sink)
         .default_execution_mode(clark_agent::ExecutionMode::Sequential)
         .max_iterations(tc.max_iterations as usize)
-        .grace_iterations(0)
+        .grace_iterations(GRACE_ITERATIONS)
+        .before_tool_call_arc(loop_breaker.clone())
+        .after_tool_call_arc(loop_breaker.clone())
         .model_id(tc.model.clone())
         .context_transform(CheckpointCompactor::new(
             tc.llm.clone(),
@@ -143,13 +158,21 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
                 )
                 .await;
             } else {
+                // Only `HitMaxIterations` lands here — a natural finish and
+                // the graceful wrap-up both count as complete above. So this
+                // is specifically "ran out of steps without wrapping up",
+                // which almost always means a stuck approach. Say that, and
+                // point at the saved transcript, instead of a bare count.
                 finish(
                     &tx,
                     &run,
                     RunStatus::Failed,
                     Some(outcome.label().to_string()),
                     Some(format!(
-                        "stopped after {} model iterations",
+                        "I hit my safety limit of {} steps before finishing — usually a sign I \
+                         got stuck repeating an approach that wasn't working. Everything so far is \
+                         saved above; send a follow-up to continue, or nudge me toward a different \
+                         approach.",
                         tc.max_iterations
                     )),
                     usage.snapshot(),

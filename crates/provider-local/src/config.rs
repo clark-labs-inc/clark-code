@@ -21,8 +21,14 @@ pub const DEFAULT_BASE_URL: &str = "https://api.clarkslabs.com/v1";
 pub const DEFAULT_MODEL: &str = "clark-code";
 /// Agentic Clark model used for research / memory extraction (no client tools).
 pub const DEFAULT_RESEARCH_MODEL: &str = "clark";
-/// Safety cap on tool-call ping-pong within a single turn.
-pub const DEFAULT_MAX_ITERATIONS: u32 = 50;
+/// Hard ceiling on model turns in one run — a last-resort circuit breaker,
+/// not the primary loop control. Raised from 50 so genuinely long, healthy
+/// tasks (large refactors, multi-file investigations) aren't cut off
+/// mid-flight. What keeps a *stuck* run from wasting this larger budget is
+/// the [`crate::loop_breaker::LoopBreaker`] plugin (breaks same-action/
+/// same-result loops early) plus the graceful wrap-up turn the engine now
+/// injects before the cap; see [`crate::engine`].
+pub const DEFAULT_MAX_ITERATIONS: u32 = 1000;
 /// Approximate transcript-token threshold where the local loop checkpoints old
 /// context before the next model request. GLM 5.2 gives us a 1M-token window, so
 /// leave plenty of room for the next turn instead of compacting early.
