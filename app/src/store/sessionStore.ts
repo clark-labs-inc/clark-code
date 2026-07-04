@@ -531,12 +531,13 @@ export const useSessionStore = create<SessionState>((set, get) => ({
               ) {
                 set({ conversations: [meta, ...get().conversations.filter((c) => c.id !== meta.id)] });
               }
-              // Mirror the turn to Clark once it settles — not every streamed
-              // frame. Coalesced + single-flight + idempotent (see cloudHistory).
-              if (!busyNow) {
-                const creds = cloudCreds(get().auth);
-                if (creds) scheduleCloudPut(creds, meta, snapshot);
-              }
+              // Mirror to Clark on the same throttle as local persistence:
+              // ~every 2s while streaming (so mobile/web can watch the run
+              // live and show a running indicator), and immediately when the
+              // turn settles. Coalesced + single-flight + idempotent (see
+              // cloudHistory), so the streaming pushes stay cheap and ordered.
+              const creds = cloudCreds(get().auth);
+              if (creds) scheduleCloudPut(creds, meta, snapshot, busyNow ? "running" : "idle");
             };
             if (busyNow) setTimeout(persist, 0);
             else persist();

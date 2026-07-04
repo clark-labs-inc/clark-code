@@ -779,6 +779,7 @@ pub async fn desktop_conv_put(
     title_locked: bool,
     rev: i64,
     snapshot: Value,
+    status: Option<String>,
 ) -> Result<Value, String> {
     let url = format!(
         "{}/api/desktop/conversations/{}",
@@ -797,6 +798,7 @@ pub async fn desktop_conv_put(
             "titleLocked": title_locked,
             "rev": rev,
             "snapshot": snapshot,
+            "status": status,
         }))
         .send()
         .await

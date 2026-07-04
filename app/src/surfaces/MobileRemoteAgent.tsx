@@ -145,7 +145,13 @@ async function submitPrompt(command: CodeRemoteCommand): Promise<void> {
     command.command_type === "send_message" &&
     useSessionStore.getState().session?.id !== command.desktop_id
   ) {
-    throw new Error("Clark Code follow-up could not open the target desktop conversation.");
+    // openConversation degrades to a read-only peek while another
+    // conversation is mid-run, so the session never bound to the target.
+    // (Follow-ups to the RUNNING conversation itself don't hit this — they
+    // bind fine and send() queues them until the run settles.)
+    throw new Error(
+      "The desktop is busy with a different conversation. Wait for it to finish, then try again.",
+    );
   }
   await useSessionStore.getState().send(text);
 }

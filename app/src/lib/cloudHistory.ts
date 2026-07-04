@@ -84,6 +84,7 @@ export async function cloudPut(
   meta: ConversationMeta,
   snapshot: Snapshot,
   rev: number,
+  status: "running" | "idle",
 ): Promise<void> {
   await invoke("desktop_conv_put", {
     endpoint: c.endpoint,
@@ -97,6 +98,7 @@ export async function cloudPut(
     titleLocked: meta.titleLocked ?? false,
     rev,
     snapshot,
+    status,
   });
 }
 
@@ -113,6 +115,7 @@ interface PendingPush {
   meta: ConversationMeta;
   snapshot: Snapshot;
   rev: number;
+  status: "running" | "idle";
 }
 
 /** Skip cloud sync for absurdly large snapshots (keep them local only) so one
@@ -127,11 +130,16 @@ export function scheduleCloudPut(
   creds: CloudCreds,
   meta: ConversationMeta,
   snapshot: Snapshot,
+  status: "running" | "idle" = "idle",
 ): void {
-  // Monotonic rev: we only push on turn completion, and each turn appends to the
-  // timeline, so its length strictly increases per push.
-  const rev = snapshot.timeline.length;
-  pending.set(meta.id, { creds, meta, snapshot, rev });
+  // Monotonic rev: pushes now also happen mid-run (throttled), where the
+  // timeline length is stable while message text grows — so a length-based
+  // rev would make the server drop streamed updates as stale. A millisecond
+  // timestamp is strictly increasing across pushes (the 2s throttle + the
+  // single-flight queue guarantee spacing), survives restarts, and nothing
+  // reads the rev back as a length — it is purely an ordering token.
+  const rev = Date.now();
+  pending.set(meta.id, { creds, meta, snapshot, rev, status });
   void drainPush(meta.id);
 }
 
@@ -144,7 +152,7 @@ async function drainPush(id: string): Promise<void> {
   let ok = false;
   try {
     if (JSON.stringify(job.snapshot).length <= MAX_SNAPSHOT_BYTES) {
-      await cloudPut(job.creds, job.meta, job.snapshot, job.rev);
+      await cloudPut(job.creds, job.meta, job.snapshot, job.rev, job.status);
     }
     ok = true;
   } catch {
