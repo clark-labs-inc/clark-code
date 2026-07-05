@@ -103,8 +103,27 @@ impl ca::StreamFn for ClarkAgentStream {
                     if let Some(usage) = turn.usage {
                         totals.add(usage);
                     }
-                    let message = assistant_message(turn);
-                    let _ = tx.send(ca::StreamEvent::Done { message });
+                    // GLM 5.2 over the Clark passthrough often ends a turn with
+                    // its whole output in the OpenRouter `reasoning` field —
+                    // empty `content`, no `tool_calls`, `finish_reason: stop`.
+                    // Our accumulator reads only `content`/`tool_calls`, so that
+                    // lands here as a genuinely empty turn. Reporting it as a
+                    // normal `Done` ends the run with nothing ("second message
+                    // did nothing"). Surface it as a zero-output transport so
+                    // clark-agent replays the turn with its built-in recovery
+                    // rather than succeeding on emptiness. This is a purely
+                    // structural check (no output at all) — it never inspects
+                    // what the text says.
+                    if turn.text.is_empty() && turn.tool_calls.is_empty() {
+                        let _ = tx.send(ca::StreamEvent::Error {
+                            partial: empty_assistant(ca::StopReason::Error, None),
+                            kind: ca::stream::StreamErrorKind::ZeroOutputTransport,
+                            message: "provider returned no content and no tool call".to_string(),
+                        });
+                    } else {
+                        let message = assistant_message(turn);
+                        let _ = tx.send(ca::StreamEvent::Done { message });
+                    }
                 }
                 Err(error) => {
                     let (kind, message) = stream_error(error);

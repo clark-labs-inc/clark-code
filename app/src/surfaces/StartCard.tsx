@@ -54,6 +54,7 @@ export function StartCard() {
   const projectMode = useSessionStore((s) => s.projectMode);
   const setProjectMode = useSessionStore((s) => s.setProjectMode);
   const selectedHostId = useSessionStore((s) => s.selectedHostId);
+  const setSelectedHostId = useSessionStore((s) => s.setSelectedHostId);
   const sshOpen = useSessionStore((s) => s.sshOpen);
   const version = useAppVersion();
   const reduce = useReducedMotion();
@@ -67,6 +68,19 @@ export function StartCard() {
     if (!sshOpen) setHosts(loadSshHosts());
   }, [sshOpen]);
   const selectedHost = hosts.find((h) => h.id === selectedHostId) ?? null;
+
+  // `selectedHostId` is seeded once at store creation, so it goes stale the
+  // moment hosts are added/removed after launch (most commonly: adding your
+  // very first host, when it was initialized to `null`). With only one host
+  // to show, the <select> can't be "reselected" to fix this — the dropdown
+  // renders the lone option regardless while the app still thinks nothing is
+  // chosen. Re-point it at a valid host whenever the current selection isn't
+  // one of the hosts we actually have.
+  useEffect(() => {
+    if (hosts.length > 0 && !hosts.some((h) => h.id === selectedHostId)) {
+      setSelectedHostId(hosts[0].id);
+    }
+  }, [hosts, selectedHostId, setSelectedHostId]);
 
   const remoteBlocked = !selectedHost
     ? "Add a remote host."
