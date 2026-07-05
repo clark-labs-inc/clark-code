@@ -15,8 +15,9 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use agent_core::domain::{AgentEvent, ContentBlock, RunStatus, ToolStatus};
+use agent_core::domain::{AgentEvent, ContentBlock, PendingUpload, RunStatus, ToolStatus};
 use agent_core::provider::{ClientResponse, PromptInput, Provider, ProviderConfig, SessionOptions};
+use base64::Engine as _;
 use futures::StreamExt;
 use provider_local::LocalAgentProvider;
 use serde_json::json;
@@ -148,10 +149,15 @@ async fn drive_turn(
     session_id: &agent_core::ids::SessionId,
     prompt: &str,
 ) -> TurnSummary {
-    let mut stream = provider
-        .prompt(session_id, PromptInput::text(prompt))
-        .await
-        .expect("prompt");
+    drive_prompt(provider, session_id, PromptInput::text(prompt)).await
+}
+
+async fn drive_prompt(
+    provider: &mut LocalAgentProvider,
+    session_id: &agent_core::ids::SessionId,
+    input: PromptInput,
+) -> TurnSummary {
+    let mut stream = provider.prompt(session_id, input).await.expect("prompt");
     let mut summary = TurnSummary::default();
     let collect = async {
         while let Some(ev) = stream.next().await {
@@ -411,6 +417,124 @@ async fn live_clark_code_research_tool() {
         research.text.contains("rust-lang.org"),
         "research: expected rust-lang.org in answer: {:?}",
         research.text
+    );
+}
+
+/// Build a tiny, valid, solid-color PNG (`size`x`size`) with no external
+/// image-encoding crate: one uncompressed ("stored") deflate block, so every
+/// byte is exact and independently checksummed (Adler-32 for zlib, CRC-32 per
+/// PNG chunk) rather than a hand-typed/memorized base64 blob that might not
+/// decode.
+fn solid_color_png(size: u32, rgb: [u8; 3]) -> Vec<u8> {
+    fn crc32(bytes: &[u8]) -> u32 {
+        let mut crc: u32 = 0xFFFF_FFFF;
+        for &b in bytes {
+            crc ^= b as u32;
+            for _ in 0..8 {
+                crc = if crc & 1 != 0 {
+                    (crc >> 1) ^ 0xEDB8_8320
+                } else {
+                    crc >> 1
+                };
+            }
+        }
+        crc ^ 0xFFFF_FFFF
+    }
+
+    fn chunk(kind: &[u8; 4], data: &[u8]) -> Vec<u8> {
+        let mut body = kind.to_vec();
+        body.extend_from_slice(data);
+        let mut out = Vec::with_capacity(4 + body.len() + 4);
+        out.extend_from_slice(&(data.len() as u32).to_be_bytes());
+        out.extend_from_slice(&body);
+        out.extend_from_slice(&crc32(&body).to_be_bytes());
+        out
+    }
+
+    // One scanline: a leading filter-type byte (0 = None) + `size` RGB pixels.
+    // Every row is identical for a solid color, so build it once and repeat.
+    let mut row = vec![0u8];
+    for _ in 0..size {
+        row.extend_from_slice(&rgb);
+    }
+    let mut raw = Vec::with_capacity(row.len() * size as usize);
+    for _ in 0..size {
+        raw.extend_from_slice(&row);
+    }
+
+    // zlib-wrap `raw` in a single uncompressed ("stored") deflate block —
+    // avoids needing a real compressor for a handful of solid-color bytes.
+    // Safe up to a 65,535-byte scanline buffer (a single stored block's
+    // limit); `size` here is tiny, so this always fits in one block.
+    let mut zlib = vec![0x78, 0x01]; // zlib header (deflate, 32K window, fastest level)
+    zlib.push(0x01); // BFINAL=1, BTYPE=00 (stored), byte-aligned
+    let len = raw.len() as u16;
+    zlib.extend_from_slice(&len.to_le_bytes());
+    zlib.extend_from_slice(&(!len).to_le_bytes());
+    zlib.extend_from_slice(&raw);
+    let (mut a, mut b) = (1u32, 0u32);
+    for &byte in &raw {
+        a = (a + byte as u32) % 65521;
+        b = (b + a) % 65521;
+    }
+    zlib.extend_from_slice(&((b << 16) | a).to_be_bytes());
+
+    let mut ihdr = Vec::new();
+    ihdr.extend_from_slice(&size.to_be_bytes());
+    ihdr.extend_from_slice(&size.to_be_bytes());
+    ihdr.extend_from_slice(&[8, 2, 0, 0, 0]); // depth 8, color type 2 (RGB), default comp/filter/interlace
+
+    let mut png = vec![0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+    png.extend(chunk(b"IHDR", &ihdr));
+    png.extend(chunk(b"IDAT", &zlib));
+    png.extend(chunk(b"IEND", &[]));
+    png
+}
+
+#[tokio::test]
+#[ignore = "requires explicit live clark-code env plus CLARK_CODE_LIVE_VISION=1"]
+async fn live_clark_code_vision_fallback_describes_an_attached_image() {
+    if std::env::var("CLARK_CODE_LIVE_VISION").ok().as_deref() != Some("1") {
+        eprintln!("skipping: set CLARK_CODE_LIVE_VISION=1 to permit vision-fallback spend");
+        return;
+    }
+    let Some(cfg) = live_config() else {
+        return;
+    };
+    let dir = tempfile::tempdir().unwrap();
+    write_project_fixture(dir.path());
+    let (mut provider, session) = new_live_provider(
+        &cfg,
+        dir.path(),
+        json!({ "research": false, "memories": false }),
+    )
+    .await;
+
+    let png = solid_color_png(8, [255, 0, 0]);
+    let input = PromptInput {
+        blocks: vec![ContentBlock::text(
+            "What color is the attached image? Answer with exactly one word for the color, \
+             then the sentinel CLARK_VISION_SENTINEL_6210.",
+        )],
+        attachments: vec![PendingUpload {
+            filename: "swatch.png".into(),
+            content_type: "image/png".into(),
+            data_base64: base64::engine::general_purpose::STANDARD.encode(&png),
+        }],
+    };
+    let vision = drive_prompt(&mut provider, &session.id, input).await;
+    println!("[vision] {vision:?}");
+    vision.require_done("vision");
+    assert!(
+        vision.text.contains("CLARK_VISION_SENTINEL_6210"),
+        "vision: expected sentinel in assistant text: {:?}",
+        vision.text
+    );
+    assert!(
+        vision.text.to_lowercase().contains("red"),
+        "vision: expected the coding model to relay the vision model's color \
+         description (red) despite neither being vision-capable itself: {:?}",
+        vision.text
     );
 }
 

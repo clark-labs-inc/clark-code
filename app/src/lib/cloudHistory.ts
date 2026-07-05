@@ -10,6 +10,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { Snapshot } from "../core-bridge/types";
 import type { ConversationMeta } from "./history";
 import type { AuthSession } from "./auth";
+import { prepareSnapshotForUpload } from "./snapshotUpload";
 
 function isTauri(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -118,12 +119,42 @@ interface PendingPush {
   status: "running" | "idle";
 }
 
-/** Skip cloud sync for absurdly large snapshots (keep them local only) so one
- *  pathological transcript can't hammer the network. */
+/** Absolute backstop: even after trimming old tool outputs, skip cloud sync
+ *  for a snapshot this large (keep it local only) so one pathological
+ *  transcript can't hammer the network. Must stay ≤ the server's desktop
+ *  snapshot body limit (`DESKTOP_SNAPSHOT_BODY_LIMIT_BYTES`, currently 10 MiB)
+ *  so anything we do send is always accepted rather than silently 413'd. */
 const MAX_SNAPSHOT_BYTES = 8 * 1024 * 1024;
 
 const inflight = new Set<string>();
 const pending = new Map<string, PendingPush>();
+// Fingerprint of the last successfully-PUT payload per conversation. Skipping
+// byte-identical re-sends matters twice over: it saves the upload itself, and
+// because rev is a timestamp (always "newer"), a no-op PUT would also make
+// every mobile/web poller re-download the full snapshot it already has.
+const lastSent = new Map<string, string>();
+
+/** Tiny FNV-1a content hash — collision odds are negligible here, and the
+ *  worst case is one skipped upload that the next real change re-syncs. */
+function fingerprint(job: PendingPush, snapshotJson: string): string {
+  const m = job.meta;
+  const payload = [
+    m.title,
+    m.provider,
+    m.project ?? "",
+    m.remoteHost ?? "",
+    m.mode ?? "",
+    m.titleLocked ? "1" : "0",
+    job.status,
+    snapshotJson,
+  ].join(" ");
+  let h = 0x811c9dc5;
+  for (let i = 0; i < payload.length; i++) {
+    h ^= payload.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return `${(h >>> 0).toString(16)}:${payload.length}`;
+}
 
 /** Queue a conversation snapshot for cloud sync (coalesced + single-flight). */
 export function scheduleCloudPut(
@@ -151,8 +182,13 @@ async function drainPush(id: string): Promise<void> {
   inflight.add(id);
   let ok = false;
   try {
-    if (JSON.stringify(job.snapshot).length <= MAX_SNAPSHOT_BYTES) {
-      await cloudPut(job.creds, job.meta, job.snapshot, job.rev, job.status);
+    // Trim old tool outputs if the snapshot is oversized (no-op for normal
+    // conversations), then fingerprint and size-check what we'll actually send.
+    const prepared = prepareSnapshotForUpload(job.snapshot);
+    const mark = fingerprint(job, prepared.json);
+    if (prepared.json.length <= MAX_SNAPSHOT_BYTES && lastSent.get(id) !== mark) {
+      await cloudPut(job.creds, job.meta, prepared.snapshot, job.rev, job.status);
+      lastSent.set(id, mark);
     }
     ok = true;
   } catch {
@@ -169,6 +205,8 @@ async function drainPush(id: string): Promise<void> {
 /** Delete a conversation from the cloud. */
 export async function cloudDelete(c: CloudCreds, id: string): Promise<void> {
   await invoke("desktop_conv_delete", { endpoint: c.endpoint, token: c.token, id });
+  // A re-created conversation with the same id must upload fresh.
+  lastSent.delete(id);
 }
 
 /** Toggle a conversation's archived flag in the cloud (independent of snapshot

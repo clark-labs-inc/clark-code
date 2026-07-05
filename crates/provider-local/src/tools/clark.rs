@@ -13,7 +13,7 @@ use serde_json::{json, Value};
 
 use super::{arg_str, arg_str_opt, ToolCtx, ToolExecutor, ToolOutcome};
 
-use crate::config::ClarkResearchConfig;
+use crate::config::AgenticClarkConfig;
 use crate::llm::LlmClient;
 
 const RESEARCH_SYSTEM: &str = "You are Clark's research agent. Investigate the user's request thoroughly using your web search, browsing, and reasoning, and return a concise, well-organized findings report. Cite sources where relevant.";
@@ -23,7 +23,7 @@ pub struct ClarkResearchTool {
 }
 
 impl ClarkResearchTool {
-    pub fn new(config: ClarkResearchConfig) -> Self {
+    pub fn new(config: AgenticClarkConfig) -> Self {
         let client = LlmClient::from_parts(
             &config.base_url,
             &config.model,
@@ -86,7 +86,7 @@ mod tests {
 
     #[test]
     fn tool_advertises_research_schema() {
-        let t = ClarkResearchTool::new(ClarkResearchConfig {
+        let t = ClarkResearchTool::new(AgenticClarkConfig {
             base_url: "https://api.clarkslabs.com/v1".into(),
             api_key: Some("ck_live_x".into()),
             model: "clark".into(),

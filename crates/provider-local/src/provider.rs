@@ -284,7 +284,21 @@ impl Provider for LocalAgentProvider {
         let config = self.config()?.clone();
         let max_iterations = config.max_iterations;
 
-        let text = prompt_text(&input);
+        // Fresh cancellation scope for this run — created early so it can also
+        // gate the attachment pre-processing below (vision call / doc parsing).
+        let cancel = CancellationToken::new();
+        self.cancel = cancel.clone();
+
+        let mut text = prompt_text(&input);
+        text.push_str(
+            &crate::attachments::process_attachments(
+                &input.attachments,
+                &text,
+                config.vision.as_ref(),
+                &cancel,
+            )
+            .await,
+        );
         let text = {
             let s = self.session.lock().await;
             let mut text = text;
@@ -297,9 +311,6 @@ impl Provider for LocalAgentProvider {
             }
             text
         };
-        // Fresh cancellation scope for this run.
-        let cancel = CancellationToken::new();
-        self.cancel = cancel.clone();
 
         let run = RunId::new(format!(
             "run-{}",
@@ -359,7 +370,9 @@ impl Provider for LocalAgentProvider {
 }
 
 /// Flatten a prompt's text blocks (and inline any text attachments) into one
-/// user message. Non-text attachments are noted by name.
+/// user message. Non-text attachments (images, PDFs, DOCX, anything else) are
+/// handled separately by [`crate::attachments::process_attachments`], which
+/// needs an async context this sync helper doesn't have.
 fn prompt_text(input: &PromptInput) -> String {
     let mut text: String = input
         .blocks
@@ -379,8 +392,6 @@ fn prompt_text(input: &PromptInput) -> String {
                     att.filename
                 ));
             }
-        } else {
-            text.push_str(&format!("\n\n[attached file: {}]", att.filename));
         }
     }
     let _ = Role::User; // role is fixed for user prompts
@@ -445,6 +456,25 @@ mod tests {
         assert!(text.contains("see file"));
         assert!(text.contains("attached file: note.txt"));
         assert!(text.contains("hello"));
+    }
+
+    #[test]
+    fn prompt_text_does_not_note_non_text_attachments() {
+        // A non-text attachment (e.g. an image) must never get a bare
+        // filename note here — that's exactly what previously sent the model
+        // hunting the filesystem for a file that only existed as inline
+        // base64. Non-text handling now lives in `crate::attachments`.
+        let input = PromptInput {
+            blocks: vec![ContentBlock::text("look at this")],
+            attachments: vec![PendingUpload {
+                filename: "image.webp".into(),
+                content_type: "image/webp".into(),
+                data_base64: "aGVsbG8=".into(),
+            }],
+        };
+        let text = prompt_text(&input);
+        assert!(!text.contains("attached file:"));
+        assert!(!text.contains("image.webp"));
     }
 
     #[test]

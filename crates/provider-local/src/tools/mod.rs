@@ -17,7 +17,7 @@ use async_trait::async_trait;
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
-use crate::config::ClarkResearchConfig;
+use crate::config::AgenticClarkConfig;
 use crate::sandbox::Sandbox;
 
 pub mod android_emulator;
@@ -250,7 +250,7 @@ impl ToolRegistry {
     /// research endpoint is configured, plus the `memory` tool when memories are
     /// enabled (`memory` is `Some` with the local global dir + optional Clark
     /// personal-recall config).
-    pub fn new(clark: Option<ClarkResearchConfig>, memory: Option<memory::MemoryConfig>) -> Self {
+    pub fn new(clark: Option<AgenticClarkConfig>, memory: Option<memory::MemoryConfig>) -> Self {
         let mut tools: Vec<Arc<dyn ToolExecutor>> = vec![
             Arc::new(fs::ReadFile),
             Arc::new(fs::ListDir),
@@ -444,7 +444,7 @@ mod tests {
         assert!(local.get("nope").is_none());
 
         let with_clark = ToolRegistry::new(
-            Some(ClarkResearchConfig {
+            Some(AgenticClarkConfig {
                 base_url: "https://api.clarkslabs.com/v1".into(),
                 api_key: Some("ck_live_x".into()),
                 model: "clark".into(),

@@ -19,7 +19,7 @@ use serde_json::{json, Value};
 use tokio_util::sync::CancellationToken;
 
 use super::{arg_str, ToolCtx, ToolExecutor, ToolOutcome};
-use crate::config::ClarkResearchConfig;
+use crate::config::AgenticClarkConfig;
 use crate::llm::LlmClient;
 
 /// Hard cap on the fetched page body.
@@ -41,7 +41,7 @@ pub struct WebFetchTool {
 }
 
 impl WebFetchTool {
-    pub fn new(clark: Option<ClarkResearchConfig>) -> Self {
+    pub fn new(clark: Option<AgenticClarkConfig>) -> Self {
         let condense = clark.and_then(|c| {
             LlmClient::from_parts(&c.base_url, &c.model, c.api_key, Vec::new(), None).ok()
         });

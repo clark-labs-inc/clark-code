@@ -21,6 +21,10 @@ pub const DEFAULT_BASE_URL: &str = "https://api.clarkslabs.com/v1";
 pub const DEFAULT_MODEL: &str = "clark-code";
 /// Agentic Clark model used for research / memory extraction (no client tools).
 pub const DEFAULT_RESEARCH_MODEL: &str = "clark";
+/// Agentic Clark model used to describe image attachments neither coding
+/// model can see (vision fallback). Independent of `research`/`clark` above
+/// — this is core functionality, not an opt-out-able feature.
+pub const DEFAULT_VISION_MODEL: &str = "clark";
 /// Hard ceiling on model turns in one run — a last-resort circuit breaker,
 /// not the primary loop control. Raised from 50 so genuinely long, healthy
 /// tasks (large refactors, multi-file investigations) aren't cut off
@@ -67,7 +71,11 @@ pub struct LocalConfig {
     /// MCP servers to connect and expose as tools.
     pub mcp_servers: Vec<crate::mcp::McpServerConfig>,
     /// Clark research config (same Platform API + key), when research is enabled.
-    pub clark: Option<ClarkResearchConfig>,
+    pub clark: Option<AgenticClarkConfig>,
+    /// Vision-fallback Clark config (same Platform API + key as `clark`).
+    /// Independent of the `research` toggle — gated only on a key being
+    /// present, since neither local coding model can see images at all.
+    pub vision: Option<AgenticClarkConfig>,
     /// Project root, when set at connect time. A session's `cwd` option wins.
     pub cwd: Option<String>,
     /// When set, this session's tool I/O runs on a **remote** host (over the
@@ -99,15 +107,17 @@ pub struct RemoteTarget {
     pub cwd: String,
 }
 
-/// How the `clark_research` tool reaches Clark: the same Platform API + key, with
-/// an agentic model. Clark runs web search / planning / browsing server-side and
-/// returns the final answer — no client tools involved, so the `ck_live_` key
-/// suffices.
+/// Config for calling one of Clark's agentic model tiers (e.g. `clark`,
+/// `clark_max`) as an auxiliary, non-coding call over the same Platform API +
+/// key as the coding model — used by `clark_research`, the `web_fetch`
+/// long-page condenser, and the image-description vision fallback. Clark runs
+/// web search / planning / browsing / vision server-side and returns the
+/// final answer — no client tools involved, so the `ck_live_` key suffices.
 #[derive(Clone, Debug)]
-pub struct ClarkResearchConfig {
+pub struct AgenticClarkConfig {
     pub base_url: String,
     pub api_key: Option<String>,
-    /// Agentic model the research run uses (e.g. `clark`, `clark_max`).
+    /// Agentic model tier this call uses (e.g. `clark`, `clark_max`).
     pub model: String,
 }
 
@@ -145,7 +155,7 @@ impl LocalConfig {
     ///
     /// Recognized `extra` keys: `model`, `temperature`, `max_iterations`,
     /// `permissions` (map of tool→`allow|ask|deny`), `research` (bool, default
-    /// true), `research_model`, `auto_compact` (bool),
+    /// true), `research_model`, `vision_model`, `auto_compact` (bool),
     /// `auto_compact_token_limit`, `compact_request_token_limit`,
     /// `compact_recent_user_token_budget`, and `base_url` (tests only). The key
     /// rides on `auth_token`.
@@ -186,11 +196,20 @@ impl LocalConfig {
             .get("research")
             .and_then(Value::as_bool)
             .unwrap_or(true);
-        let clark = (research_enabled && api_key.is_some()).then(|| ClarkResearchConfig {
+        let clark = (research_enabled && api_key.is_some()).then(|| AgenticClarkConfig {
             base_url: base_url.clone(),
             api_key: api_key.clone(),
             model: str_field(extra, "research_model")
                 .unwrap_or_else(|| DEFAULT_RESEARCH_MODEL.to_string()),
+        });
+
+        // Vision fallback is core functionality (neither coding model can see
+        // images), not the opt-out-able research feature — gated only on a key.
+        let vision = api_key.is_some().then(|| AgenticClarkConfig {
+            base_url: base_url.clone(),
+            api_key: api_key.clone(),
+            model: str_field(extra, "vision_model")
+                .unwrap_or_else(|| DEFAULT_VISION_MODEL.to_string()),
         });
 
         let cwd = config.cwd.clone().or_else(|| str_field(extra, "cwd"));
@@ -260,6 +279,7 @@ impl LocalConfig {
                 .and_then(|v| serde_json::from_value(v.clone()).ok())
                 .unwrap_or_default(),
             clark,
+            vision,
             cwd,
             remote,
             memories_enabled,
@@ -312,6 +332,8 @@ mod tests {
         assert_eq!(cfg.mode_for("bash"), PermissionMode::Ask);
         // No key → research can't run, so it's disabled.
         assert!(cfg.clark.is_none());
+        // No key → vision fallback can't run either.
+        assert!(cfg.vision.is_none());
     }
 
     #[test]
@@ -326,6 +348,51 @@ mod tests {
         assert_eq!(clark.base_url, DEFAULT_BASE_URL);
         assert_eq!(clark.api_key.as_deref(), Some("ck_live_abc"));
         assert_eq!(clark.model, DEFAULT_RESEARCH_MODEL);
+    }
+
+    #[test]
+    fn a_key_enables_the_vision_fallback_through_the_same_api() {
+        let pc = ProviderConfig {
+            auth_token: Some("ck_live_abc".into()),
+            ..Default::default()
+        };
+        let cfg = LocalConfig::from_provider_config(&pc);
+        let vision = cfg
+            .vision
+            .expect("vision fallback enabled when a key is present");
+        assert_eq!(vision.base_url, DEFAULT_BASE_URL);
+        assert_eq!(vision.api_key.as_deref(), Some("ck_live_abc"));
+        assert_eq!(vision.model, DEFAULT_VISION_MODEL);
+    }
+
+    #[test]
+    fn vision_stays_enabled_when_research_is_disabled() {
+        let pc = ProviderConfig {
+            auth_token: Some("ck_live_abc".into()),
+            extra: json!({ "research": false }),
+            ..Default::default()
+        };
+        let cfg = LocalConfig::from_provider_config(&pc);
+        assert!(
+            cfg.clark.is_none(),
+            "research:false disables the research config"
+        );
+        assert!(
+            cfg.vision.is_some(),
+            "vision fallback is core functionality, not gated by the research toggle"
+        );
+    }
+
+    #[test]
+    fn vision_model_override_uses_its_own_extra_key() {
+        let pc = ProviderConfig {
+            auth_token: Some("ck_live_abc".into()),
+            extra: json!({ "vision_model": "clark_max", "research_model": "clark" }),
+            ..Default::default()
+        };
+        let cfg = LocalConfig::from_provider_config(&pc);
+        assert_eq!(cfg.vision.expect("vision enabled").model, "clark_max");
+        assert_eq!(cfg.clark.expect("research enabled").model, "clark");
     }
 
     #[test]

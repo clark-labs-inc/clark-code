@@ -268,6 +268,25 @@ impl LlmClient {
         Ok(turn.text)
     }
 
+    /// One-shot completion with image(s) attached — mirrors [`Self::complete`],
+    /// swapping [`ChatMessage::user`] for [`ChatMessage::user_with_images`].
+    /// Used by the vision-fallback path: a separate call to a vision-capable
+    /// Clark model, not part of the coding model's own turn.
+    pub async fn describe_images(
+        &self,
+        system: &str,
+        prompt: &str,
+        image_urls: Vec<String>,
+        cancel: &CancellationToken,
+    ) -> Result<String, LlmError> {
+        let messages = vec![
+            ChatMessage::system(system),
+            ChatMessage::user_with_images(prompt, image_urls),
+        ];
+        let turn = self.stream_chat(&messages, &[], cancel, |_| {}).await?;
+        Ok(turn.text)
+    }
+
     fn body(&self, messages: &[ChatMessage], tools: &[ToolSchema]) -> Value {
         let mut body = json!({
             "model": self.model,

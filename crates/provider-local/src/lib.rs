@@ -14,6 +14,7 @@
 //! so the UI and projection layer are unchanged.
 
 mod agent_adapter;
+mod attachments;
 mod background;
 mod browser_binary;
 mod browser_cdp;
