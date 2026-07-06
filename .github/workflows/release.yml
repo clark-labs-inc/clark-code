@@ -296,7 +296,12 @@ jobs:
   # Publish the draft once all platform builds have uploaded their installers,
   # so no public manifest points at an incomplete platform set.
   publish:
-    needs: build
+    # Also wait for exec-server: publishing flips the GH release public AND
+    # writes the aggregated latest.json (the auto-update trigger), so it must
+    # not run until the per-arch clark-exec-server prebuilts are on the CDN.
+    # Otherwise a freshly-updated app can hit "not on the CDN for v<version>"
+    # when connecting to a remote host before those binaries finish uploading.
+    needs: [build, exec-server]
     runs-on: ubuntu-latest
     steps:
       - name: Publish the release
