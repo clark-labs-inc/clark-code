@@ -31,14 +31,15 @@ pub enum TimelineItem {
         blocks: Vec<ContentBlock>,
     },
     /// Reference into [`Snapshot::tool_calls`] (kept by id so updates are O(1)).
-    ToolCall {
-        id: ToolCallId,
-    },
+    ToolCall { id: ToolCallId },
     /// Reference into [`Snapshot::artifacts`] — rendered inline where produced.
-    Artifact {
-        id: String,
+    Artifact { id: String },
+    Plan {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        run: Option<RunId>,
+        #[serde(default)]
+        plan: Plan,
     },
-    Plan,
 }
 
 /// Everything the UI renders for a session. Pushed to the frontend (whole or
@@ -164,9 +165,19 @@ pub fn apply(snapshot: &mut Snapshot, event: &AgentEvent) {
             }
         }
 
-        AgentEvent::Plan { plan, .. } => {
-            if snapshot.plan.is_none() {
-                snapshot.timeline.push(TimelineItem::Plan);
+        AgentEvent::Plan { run, plan } => {
+            if let Some(TimelineItem::Plan {
+                plan: existing_plan,
+                ..
+            }) = snapshot.timeline.iter_mut().rev().find(|item| {
+                matches!(item, TimelineItem::Plan { run: Some(plan_run), .. } if plan_run == run)
+            }) {
+                *existing_plan = plan.clone();
+            } else {
+                snapshot.timeline.push(TimelineItem::Plan {
+                    run: Some(run.clone()),
+                    plan: plan.clone(),
+                });
             }
             snapshot.plan = Some(plan.clone());
         }
@@ -453,7 +464,7 @@ mod tests {
     }
 
     #[test]
-    fn plan_pushes_one_timeline_marker_and_updates_in_place() {
+    fn plan_pushes_one_timeline_marker_per_run_and_updates_in_place() {
         let mk = |s: PlanPhaseStatus| AgentEvent::Plan {
             run: run(),
             plan: Plan {
@@ -468,13 +479,54 @@ mod tests {
         assert_eq!(
             snap.timeline
                 .iter()
-                .filter(|i| matches!(i, TimelineItem::Plan))
+                .filter(|i| matches!(i, TimelineItem::Plan { .. }))
                 .count(),
             1
         );
+        match &snap.timeline[0] {
+            TimelineItem::Plan {
+                run: plan_run,
+                plan,
+            } => {
+                assert_eq!(plan_run.as_ref(), Some(&run()));
+                assert_eq!(plan.phases[0].status, PlanPhaseStatus::Completed);
+            }
+            other => panic!("expected plan, got {other:?}"),
+        }
         assert_eq!(
             snap.plan.unwrap().phases[0].status,
             PlanPhaseStatus::Completed
+        );
+
+        let run_two = RunId::new("run-2");
+        let snap = reduce_all(&[
+            AgentEvent::Plan {
+                run: run(),
+                plan: Plan {
+                    phases: vec![PlanPhase {
+                        title: "first".into(),
+                        status: PlanPhaseStatus::Completed,
+                        priority: None,
+                    }],
+                },
+            },
+            AgentEvent::Plan {
+                run: run_two,
+                plan: Plan {
+                    phases: vec![PlanPhase {
+                        title: "second".into(),
+                        status: PlanPhaseStatus::InProgress,
+                        priority: None,
+                    }],
+                },
+            },
+        ]);
+        assert_eq!(
+            snap.timeline
+                .iter()
+                .filter(|i| matches!(i, TimelineItem::Plan { .. }))
+                .count(),
+            2
         );
     }
 
@@ -529,6 +581,21 @@ mod tests {
         let json = serde_json::to_string(&snap).unwrap();
         let back: Snapshot = serde_json::from_str(&json).unwrap();
         assert_eq!(snap, back);
+    }
+
+    #[test]
+    fn legacy_plan_timeline_item_deserializes() {
+        let item: TimelineItem = serde_json::from_value(serde_json::json!({
+            "item": "plan"
+        }))
+        .unwrap();
+        match item {
+            TimelineItem::Plan { run, plan } => {
+                assert!(run.is_none());
+                assert!(plan.phases.is_empty());
+            }
+            other => panic!("expected legacy plan item, got {other:?}"),
+        }
     }
 
     /// Conformance: applying every event variant must never panic and must

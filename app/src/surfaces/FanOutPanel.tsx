@@ -1,16 +1,25 @@
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { Network } from "lucide-react";
+import { CheckCircle2, Circle, Loader2, Network, XCircle } from "lucide-react";
 import { cn } from "../lib/cn";
 import { useFanOutStore, type FanOut, type FanOutAgent } from "../store/fanOutStore";
 
-const STATUS_DOT: Record<FanOutAgent["status"], string> = {
-  done: "bg-success",
-  running: "bg-info",
-  queued: "bg-ink-faint",
-  failed: "bg-danger",
+const STATUS_COPY: Record<FanOutAgent["status"], string> = {
+  done: "Done",
+  running: "Researching",
+  queued: "Queued",
+  failed: "Failed",
 };
 
 const EASE = [0.4, 0, 0.2, 1] as const;
+
+function StatusIcon({ status }: { status: FanOutAgent["status"] }) {
+  if (status === "done") return <CheckCircle2 className="size-3.5 text-success" />;
+  if (status === "failed") return <XCircle className="size-3.5 text-danger" />;
+  if (status === "running") {
+    return <Loader2 className="size-3.5 animate-[spin_1s_linear_infinite] text-accent" />;
+  }
+  return <Circle className="size-3.5 text-ink-faint" strokeDasharray="3 3" />;
+}
 
 function FanOutCard({ fanOut, reduce }: { fanOut: FanOut; reduce: boolean | null }) {
   const pct = fanOut.total > 0 ? Math.round((fanOut.done / fanOut.total) * 100) : 0;
@@ -49,45 +58,48 @@ function FanOutCard({ fanOut, reduce }: { fanOut: FanOut; reduce: boolean | null
         {fanOut.done} done · {fanOut.running} running · merging as they finish
       </div>
 
-      <div className="mt-3 grid grid-cols-4 gap-1.5 sm:grid-cols-8">
+      <div className="mt-3 space-y-1.5">
         <AnimatePresence initial={false}>
           {shown.map((a, i) => (
             <motion.div
               key={a.id}
               layout
-              initial={reduce ? false : { opacity: 0, scale: 0.85 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.85 }}
+              initial={reduce ? false : { opacity: 0, y: 4 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -4 }}
               transition={{
                 duration: 0.2,
                 delay: reduce ? 0 : Math.min(i * 0.015, 0.2),
                 ease: EASE,
               }}
               className={cn(
-                "flex aspect-[1.35/1] flex-col justify-between rounded-md border border-border-subtle bg-bg-secondary px-1.5 py-1",
+                "flex min-w-0 items-start gap-2 rounded-md border border-border-subtle bg-bg-secondary px-2.5 py-2",
                 a.status === "queued" && "opacity-50",
+                a.status === "running" && "border-accent/30 bg-accent/8",
               )}
             >
-              <motion.span
-                className={cn("size-1.5 rounded-full", STATUS_DOT[a.status])}
-                animate={
-                  a.status === "running" && !reduce ? { opacity: [1, 0.35, 1] } : { opacity: 1 }
-                }
-                transition={
-                  a.status === "running"
-                    ? { duration: 1.4, repeat: Infinity, ease: "easeInOut" }
-                    : { duration: 0.2 }
-                }
-              />
-              <span className="truncate font-mono text-[0.55rem] leading-tight text-ink-faint">
-                {a.label}
+              <span className="mt-0.5 grid size-5 shrink-0 place-items-center rounded-full bg-bg-elevated">
+                <StatusIcon status={a.status} />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
+                  <span className="font-mono text-[0.65rem] text-ink-faint">
+                    #{i + 1}
+                  </span>
+                  <span className="text-[0.7rem] font-medium text-ink-muted">
+                    {STATUS_COPY[a.status]}
+                  </span>
+                </span>
+                <span className="mt-0.5 block truncate text-sm text-ink-secondary">
+                  {a.label}
+                </span>
               </span>
             </motion.div>
           ))}
         </AnimatePresence>
         {more > 0 && (
-          <div className="grid aspect-[1.35/1] place-items-center rounded-md bg-bg-sunken font-mono text-[0.65rem] text-ink-muted">
-            +{more}
+          <div className="rounded-md bg-bg-sunken px-2.5 py-2 font-mono text-[0.65rem] text-ink-muted">
+            +{more} more
           </div>
         )}
       </div>

@@ -156,7 +156,7 @@ export function Conversation() {
 
   if (!session) return null;
 
-  const visible = timeline.filter((t) => t.item !== "plan");
+  const visible = timeline;
   const allBlocks = group(visible);
   // Long transcripts: render only the recent window. A 400-item DOM makes every
   // style/layout pass (and each streamed frame) pay for history the user isn't
@@ -249,10 +249,12 @@ export function Conversation() {
             const a = artifacts.find((x) => x.id === item.id);
             return a ? <ArtifactCard key={block.key} artifact={a} /> : null;
           }
+          if (item.item === "plan") {
+            return <PlanChecklist key={block.key} plan={item.plan ?? plan} />;
+          }
           return null;
         })}
 
-        <PlanChecklist plan={plan} />
         <FanOutPanel />
 
         {undoSha && (

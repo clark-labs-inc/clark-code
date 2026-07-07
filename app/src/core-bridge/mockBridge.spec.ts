@@ -53,7 +53,9 @@ describe("MockBridge", () => {
     expect(Object.keys(done.tool_calls).length).toBeGreaterThan(0);
 
     // Plan markers are de-duplicated to a single timeline entry.
-    expect(done.timeline.filter((t) => t.item === "plan").length).toBe(1);
+    const plans = done.timeline.filter((t) => t.item === "plan");
+    expect(plans.length).toBe(1);
+    expect(plans[0].item === "plan" ? plans[0].plan?.phases.length : 0).toBe(2);
   });
 
   it("clears the permission gate when resolved", async () => {

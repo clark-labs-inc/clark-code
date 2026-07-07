@@ -137,6 +137,32 @@ function ResearchDetail({ call }: { call: ToolCall }) {
   );
 }
 
+function ResearchProgress({ call, reduce }: { call: ToolCall; reduce: boolean | null }) {
+  const query = researchQuery(call);
+  return (
+    <div className="space-y-2 px-3 py-2.5">
+      <div className="min-w-0 rounded-md bg-bg-sunken px-2.5 py-2">
+        <div className="text-[0.7rem] font-medium uppercase tracking-wide text-ink-faint">
+          Clark Research
+        </div>
+        <div className="mt-0.5 truncate text-sm text-ink-secondary">{query}</div>
+      </div>
+      <div className="space-y-1.5 text-xs text-ink-muted">
+        {["Sending the research task", "Searching and reading sources", "Preparing findings"].map((step, i) => (
+          <div key={step} className="flex items-center gap-2">
+            <motion.span
+              className="size-1.5 rounded-full bg-accent"
+              animate={reduce ? { opacity: 1 } : { opacity: [0.35, 1, 0.35] }}
+              transition={reduce ? { duration: 0.2 } : { duration: 1.2, repeat: Infinity, delay: i * 0.16 }}
+            />
+            <span>{step}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function Detail({ call }: { call: ToolCall }) {
   const raw = blocksText(call.content);
   if (call.kind === "research") {
@@ -199,7 +225,8 @@ function WorkLineImpl({ call, active }: { call: ToolCall; active: boolean }) {
   const Icon = KIND_ICON[call.kind] ?? Wrench;
   const target = call.locations?.[0]?.path;
   const line = call.locations?.[0]?.line;
-  const hasDetail = call.content.length > 0;
+  const researchActive = call.kind === "research" && active;
+  const hasDetail = call.content.length > 0 || researchActive;
   const progressLine = active ? lastProgressLine(call) : undefined;
   const stat = callDiffStat(call);
 
@@ -267,9 +294,13 @@ function WorkLineImpl({ call, active }: { call: ToolCall; active: boolean }) {
         </span>
       </button>
 
-      {active && !open && progressLine && (
+      {researchActive && !open ? (
+        <div className="ml-[0.55rem] border-l border-border-subtle">
+          <ResearchProgress call={call} reduce={reduce} />
+        </div>
+      ) : active && !open && progressLine ? (
         <div className="truncate pb-0.5 pl-[1.4rem] pr-2 text-xs text-ink-faint">{progressLine}</div>
-      )}
+      ) : null}
 
       <AnimatePresence initial={false}>
         {open && hasDetail && (
@@ -282,7 +313,11 @@ function WorkLineImpl({ call, active }: { call: ToolCall; active: boolean }) {
           >
             {target && call.kind !== "research" && <FileActions path={target} />}
             <div className="max-h-56 overflow-auto">
-              <Detail call={call} />
+              {researchActive && call.content.length === 0 ? (
+                <ResearchProgress call={call} reduce={reduce} />
+              ) : (
+                <Detail call={call} />
+              )}
             </div>
           </motion.div>
         )}

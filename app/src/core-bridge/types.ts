@@ -137,7 +137,7 @@ export type TimelineItem =
   | { item: "message"; run: string; role: Role; blocks: ContentBlock[] }
   | { item: "tool_call"; id: string }
   | { item: "artifact"; id: string }
-  | { item: "plan" };
+  | { item: "plan"; run?: string; plan?: Plan };
 
 export interface Snapshot {
   session?: string;

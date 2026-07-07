@@ -1,6 +1,13 @@
-import { memo } from "react";
+import { memo, useState } from "react";
 import { motion, useReducedMotion } from "motion/react";
-import { Circle, CircleDot, CircleCheck } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronRight,
+  Circle,
+  CircleCheck,
+  CircleDot,
+  ListChecks,
+} from "lucide-react";
 import { cn } from "../lib/cn";
 import type { Plan, PlanPhaseStatus } from "../core-bridge/types";
 
@@ -29,35 +36,66 @@ const EASE = [0.4, 0, 0.2, 1] as const;
  *  active plan (the streaming-flicker class this project has fought before). */
 function PlanChecklistImpl({ plan }: { plan?: Plan }) {
   const reduce = useReducedMotion();
+  const [manualExpansion, setManualExpansion] = useState<null | boolean>(null);
   if (!plan || plan.phases.length === 0) return null;
 
   const total = plan.phases.length;
   const done = plan.phases.filter((p) => p.status === "completed").length;
+  const complete = done === total;
+  const expanded = complete ? manualExpansion === true : true;
+  const ToggleIcon = expanded ? ChevronDown : ChevronRight;
 
   return (
     <motion.div
       initial={reduce ? { opacity: 0 } : { opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.24, ease: EASE }}
-      className="rounded-xl border border-border-subtle bg-bg-elevated px-4 py-3"
+      className="rounded-lg border border-border-subtle bg-bg-elevated px-3 py-2.5"
     >
-      <div className="mb-2 flex items-center justify-between text-xs font-medium text-ink-muted">
-        <span>Plan</span>
-        <span className="font-mono tabular-nums text-ink-faint">
-          {done}/{total}
+      <button
+        type="button"
+        disabled={!complete}
+        aria-expanded={expanded}
+        onClick={() => complete && setManualExpansion((v) => !(v === true))}
+        className={cn(
+          "flex w-full min-w-0 items-center justify-between gap-3 text-left",
+          complete && "rounded-md transition hover:bg-bg-hover/60",
+        )}
+      >
+        <span className="flex min-w-0 items-center gap-2">
+          <span className="grid size-7 shrink-0 place-items-center rounded-md bg-bg-secondary text-ink-muted">
+            <ListChecks className="size-3.5" />
+          </span>
+          <span className="min-w-0">
+            <span className="block text-sm font-semibold text-ink">
+              {complete ? "Plan complete" : "Plan"}
+            </span>
+            <span className="block truncate font-mono text-[0.7rem] tabular-nums text-ink-faint">
+              {done}/{total}
+            </span>
+          </span>
         </span>
-      </div>
-      <ul className="space-y-1.5">
-        {plan.phases.map((phase, i) => {
-          const Icon = STATUS_ICON[phase.status];
-          return (
-            <li key={i} className={cn("flex items-start gap-2 text-sm", STATUS_CLASS[phase.status])}>
-              <Icon className="mt-0.5 size-3.5 shrink-0" />
-              <span className="min-w-0 flex-1">{phase.title}</span>
-            </li>
-          );
-        })}
-      </ul>
+        {complete && (
+          <span className="flex shrink-0 items-center gap-1 text-xs font-medium text-ink-muted">
+            {expanded ? "Hide" : "Show"}
+            <ToggleIcon className="size-3.5" />
+          </span>
+        )}
+      </button>
+
+      {expanded && (
+        <ul className="mt-2 space-y-1.5">
+          {plan.phases.map((phase, i) => {
+            const Icon = STATUS_ICON[phase.status];
+            return (
+              <li key={i} className={cn("flex items-start gap-2 text-sm", STATUS_CLASS[phase.status])}>
+                <Icon className="mt-0.5 size-3.5 shrink-0" />
+                <span className="min-w-0 flex-1">{phase.title}</span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </motion.div>
   );
 }

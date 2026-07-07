@@ -163,8 +163,15 @@ export class MockBridge implements CoreBridge {
         { title: "Apply the change", status: "pending" },
       ],
     };
-    if (!this.snapshot.timeline.some((t) => t.item === "plan")) {
-      this.snapshot.timeline.push({ item: "plan" });
+    const planItem = this.snapshot.timeline.find((t) => t.item === "plan" && t.run === run);
+    if (planItem?.item === "plan") {
+      planItem.plan = structuredClone(this.snapshot.plan);
+    } else {
+      this.snapshot.timeline.push({
+        item: "plan",
+        run,
+        plan: structuredClone(this.snapshot.plan),
+      });
     }
     this.emit();
     await sleep(300);
@@ -275,6 +282,10 @@ export class MockBridge implements CoreBridge {
         { title: "Apply the change", status: "pending" },
       ],
     };
+    const finalPlanItem = this.snapshot.timeline.find((t) => t.item === "plan" && t.run === run);
+    if (finalPlanItem?.item === "plan") {
+      finalPlanItem.plan = structuredClone(this.snapshot.plan);
+    }
     this.snapshot.runs[run] = {
       id: run,
       status: "done",
