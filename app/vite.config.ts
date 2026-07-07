@@ -4,6 +4,7 @@ import tailwindcss from "@tailwindcss/vite";
 
 // Tauri expects a fixed port and no auto-clearing of the console.
 const host = process.env.TAURI_DEV_HOST;
+const productionSourcemaps = process.env.VITE_BUILD_SOURCEMAP === "1";
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
@@ -24,6 +25,6 @@ export default defineConfig({
   // Produce a relative-path build that the Tauri webview can load from disk.
   build: {
     target: "es2022",
-    sourcemap: true,
+    sourcemap: productionSourcemaps,
   },
 });
