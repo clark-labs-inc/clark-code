@@ -47,15 +47,19 @@ pub async fn desktop_code_command_poll(
     token: String,
     host_id: String,
     limit: Option<i64>,
+    wait_ms: Option<i64>,
 ) -> Result<Value, String> {
     let mut url = format!(
         "{}/api/desktop/code/hosts/{}/commands",
         clark_rest_base(&endpoint),
         urlencoding::encode(&host_id)
     );
-    if let Some(limit) = limit {
-        url.push_str(&format!("?limit={}", limit.clamp(1, 100)));
+    let limit = limit.unwrap_or(20).clamp(1, 100);
+    let mut params = vec![format!("limit={limit}")];
+    if let Some(wait_ms) = wait_ms {
+        params.push(format!("wait_ms={}", wait_ms.clamp(0, 25_000)));
     }
+    url.push_str(&format!("?{}", params.join("&")));
     let resp = clark_http_client()?
         .get(url)
         .header("Authorization", format!("Bearer {token}"))

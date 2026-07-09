@@ -74,12 +74,14 @@ export async function pollCodeRemoteCommands(
   creds: CloudCreds,
   hostId: string,
   limit = 20,
+  waitMs = 0,
 ): Promise<PollCodeRemoteCommandsResponse> {
   return invoke<PollCodeRemoteCommandsResponse>("desktop_code_command_poll", {
     endpoint: creds.endpoint,
     token: creds.token,
     hostId,
     limit,
+    waitMs,
   });
 }
 
@@ -99,4 +101,3 @@ export async function ackCodeRemoteCommand(
     response,
   });
 }
-

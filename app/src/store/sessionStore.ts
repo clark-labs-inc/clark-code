@@ -65,6 +65,7 @@ import {
   scheduleCloudPut,
 } from "../lib/cloudHistory";
 import { provisionCodeKey, billingMe, type BillingSummary } from "../lib/account";
+import { copyText } from "../lib/clipboard";
 import { notify } from "../lib/notify";
 import {
   checkAndStageUpdate,
@@ -129,6 +130,8 @@ interface SessionState {
   snapshot: Snapshot;
   connecting: boolean;
   error: string | null;
+  /** Transient success/info toast (e.g. "Share link copied"). Auto-dismisses. */
+  notice: string | null;
   /** Run ids whose "Run failed" banner the user has dismissed this session. */
   dismissedFailedRuns: string[];
   /** Authenticated user + the Clark connection config it carries. */
@@ -275,6 +278,10 @@ interface SessionState {
   dismissJustUpdated: () => void;
   /** Clear the transient error banner. */
   dismissError: () => void;
+  /** Show a transient success/info toast that auto-dismisses. */
+  flashNotice: (message: string) => void;
+  /** Clear the transient notice toast. */
+  dismissNotice: () => void;
   /** Hide the "Run failed" banner for a specific run. */
   dismissFailedRun: (runId: string) => void;
   toggleSidebar: () => void;
@@ -342,6 +349,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   snapshot: emptySnapshot(),
   connecting: false,
   error: null,
+  notice: null,
   dismissedFailedRuns: [],
   auth: bootAuth,
   attachments: [],
@@ -394,6 +402,8 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   },
   dismissJustUpdated: () => set({ justUpdatedTo: null }),
   dismissError: () => set({ error: null }),
+  flashNotice: (message) => set({ notice: message }),
+  dismissNotice: () => set({ notice: null }),
   dismissFailedRun: (runId) =>
     set((s) =>
       s.dismissedFailedRuns.includes(runId)
@@ -1064,7 +1074,10 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     }
     try {
       const url = await cloudShare(creds, id);
-      await navigator.clipboard?.writeText(url);
+      const copied = await copyText(url);
+      get().flashNotice(
+        copied ? "Share link copied — anyone with it can view this chat." : "Sharing on — link ready to copy.",
+      );
       void notify("Share link copied", "Anyone with the link can view this conversation.");
     } catch (e) {
       set({ error: `Sharing failed: ${String(e)}` });
@@ -1078,6 +1091,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     if (!id || !creds) return;
     try {
       await cloudUnshare(creds, id);
+      get().flashNotice("Sharing stopped — the public link no longer works.");
       void notify("Sharing stopped", "The public link no longer works.");
     } catch (e) {
       set({ error: `Stopping the share failed: ${String(e)}` });

@@ -14,7 +14,9 @@ import { notify } from "../lib/notify";
 import { isAuthExpiredError, refreshAuthSession } from "../lib/auth";
 
 const HOST_ID_KEY = "clark-desktop:code-remote-host-id";
-const POLL_INTERVAL_MS = 4_000;
+const LOOP_INTERVAL_MS = 500;
+const HOST_HEARTBEAT_INTERVAL_MS = 30_000;
+const COMMAND_POLL_WAIT_MS = 25_000;
 
 function getHostId(): string {
   try {
@@ -236,11 +238,13 @@ export function MobileRemoteAgent() {
   const auth = useSessionStore((state) => state.auth);
   const cwd = useSessionStore((state) => state.localSettings.cwd);
   const busyRef = useRef(false);
+  const lastHeartbeatRef = useRef(0);
 
   useEffect(() => {
     if (!auth) return;
     const hostId = getHostId();
     let stopped = false;
+    lastHeartbeatRef.current = 0;
 
     const tick = async () => {
       if (stopped || busyRef.current) return;
@@ -248,15 +252,19 @@ export function MobileRemoteAgent() {
       if (!creds) return;
       busyRef.current = true;
       try {
-        await registerCodeRemoteHost(creds, {
-          hostId,
-          displayName: `${auth.user.name || "Clark"} desktop`,
-          os: navigator.platform || "desktop",
-          arch: "",
-          appVersion: "desktop",
-          projects: currentProjects(),
-        });
-        const response = await pollCodeRemoteCommands(creds, hostId, 20);
+        const now = Date.now();
+        if (lastHeartbeatRef.current === 0 || now - lastHeartbeatRef.current >= HOST_HEARTBEAT_INTERVAL_MS) {
+          await registerCodeRemoteHost(creds, {
+            hostId,
+            displayName: `${auth.user.name || "Clark"} desktop`,
+            os: navigator.platform || "desktop",
+            arch: "",
+            appVersion: "desktop",
+            projects: currentProjects(),
+          });
+          lastHeartbeatRef.current = Date.now();
+        }
+        const response = await pollCodeRemoteCommands(creds, hostId, 20, COMMAND_POLL_WAIT_MS);
         for (const command of response.commands) {
           if (stopped) break;
           await runCommand(creds, hostId, command);
@@ -279,7 +287,7 @@ export function MobileRemoteAgent() {
     };
 
     void tick();
-    const timer = window.setInterval(() => void tick(), POLL_INTERVAL_MS);
+    const timer = window.setInterval(() => void tick(), LOOP_INTERVAL_MS);
     return () => {
       stopped = true;
       window.clearInterval(timer);

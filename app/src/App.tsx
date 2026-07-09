@@ -13,6 +13,7 @@ import { CommandPalette } from "./surfaces/CommandPalette";
 import { SignInScreen } from "./surfaces/SignInScreen";
 import { MobileRemoteAgent } from "./surfaces/MobileRemoteAgent";
 import { UpdateStatus } from "./surfaces/UpdateStatus";
+import { NoticeToast } from "./surfaces/Toast";
 
 // Heavy, on-demand surfaces stay OUT of the startup bundle (xterm alone is
 // ~350KB): the terminal loads on first open (then stays mounted so the PTY
@@ -71,6 +72,7 @@ export default function App() {
       <>
         <SignInScreen />
         <UpdateStatus />
+        <NoticeToast />
       </>
     );
 
@@ -113,6 +115,7 @@ export default function App() {
       )}
       <CommandPalette dark={dark} onToggleTheme={toggle} />
       <UpdateStatus />
+      <NoticeToast />
     </div>
   );
 }
