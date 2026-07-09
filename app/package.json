@@ -12,7 +12,6 @@
   },
   "dependencies": {
     "@choochmeque/tauri-plugin-google-auth-api": "^0.5.0",
-    "@clark-labs/design-system": "file:../../clark/clark-design-system",
     "@tauri-apps/api": "^2.9.0",
     "@tauri-apps/plugin-dialog": "^2.7.1",
     "@tauri-apps/plugin-notification": "^2.3.3",
