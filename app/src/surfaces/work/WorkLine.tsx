@@ -9,6 +9,7 @@ import { lastProgressLine } from "../../lib/activity";
 import { callDiffStat, langFromPath, parseDiff, type DiffStat } from "../../lib/diff";
 import { extractSources } from "../../lib/sources";
 import { highlightLines } from "../../lib/highlight";
+import { ansiToHtml } from "../../lib/ansi";
 import { openExternal } from "../../lib/account";
 import { openProjectPath } from "../../lib/openPath";
 import { useSessionStore } from "../../store/sessionStore";
@@ -246,7 +247,10 @@ function Detail({ call }: { call: ToolCall }) {
     return (
       <div className="px-3 py-2 font-mono text-xs leading-[1.5]">
         <div className="text-success">$ {call.title}</div>
-        <div className="whitespace-pre-wrap text-ink-secondary">{text}</div>
+        <div
+          className="whitespace-pre-wrap text-ink-secondary ansi-out"
+          dangerouslySetInnerHTML={{ __html: ansiToHtml(text) }}
+        />
       </div>
     );
   }

@@ -284,6 +284,33 @@ html.dark .shiki-inline span {
   white-space: pre;
 }
 
+/* ANSI-colored shell output (ansi_up with use_classes). The 16 ANSI colors emit
+   `ansi-<color>-fg` / `-bg` classes; we map them onto the design tokens so
+   command output (cargo, pytest, rg, …) reads like a terminal in both themes.
+   Bright variants lean on the same tokens a touch lighter. */
+.ansi-out .ansi-red-fg { color: var(--color-danger); }
+.ansi-green-fg { color: var(--color-success); }
+.ansi-yellow-fg { color: var(--color-warning); }
+.ansi-blue-fg { color: var(--color-info); }
+.ansi-magenta-fg { color: var(--color-accent); }
+.ansi-cyan-fg { color: var(--color-info); }
+.ansi-black-fg { color: var(--color-ink); }
+.ansi-white-fg { color: var(--color-ink-secondary); }
+.ansi-bright-red-fg { color: var(--color-danger); }
+.ansi-bright-green-fg { color: var(--color-success); }
+.ansi-bright-yellow-fg { color: var(--color-warning); }
+.ansi-bright-blue-fg { color: var(--color-info); }
+.ansi-bright-magenta-fg { color: var(--color-accent); }
+.ansi-bright-cyan-fg { color: var(--color-info); }
+.ansi-bright-black-fg { color: var(--color-ink-faint); }
+.ansi-bright-white-fg { color: var(--color-ink); }
+.ansi-red-bg { background-color: color-mix(in oklab, var(--color-danger) 22%, transparent); }
+.ansi-green-bg { background-color: color-mix(in oklab, var(--color-success) 22%, transparent); }
+.ansi-yellow-bg { background-color: color-mix(in oklab, var(--color-warning) 22%, transparent); }
+.ansi-blue-bg { background-color: color-mix(in oklab, var(--color-info) 22%, transparent); }
+.ansi-magenta-bg { background-color: color-mix(in oklab, var(--color-accent) 22%, transparent); }
+.ansi-cyan-bg { background-color: color-mix(in oklab, var(--color-info) 22%, transparent); }
+
 /* Refined icon strokes: lucide defaults to 2, which reads heavy at the 14–16px
    sizes used throughout. 1.75 is crisper and more precise. */
 svg.lucide {
