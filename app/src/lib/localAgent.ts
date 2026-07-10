@@ -10,6 +10,7 @@ import type { ConnectConfig } from "../core-bridge/bridge";
 import { loadAllowlist, loadDenylist } from "./commandPolicy";
 import { loadMcpServers, enabledMcpConfigs } from "./mcpServers";
 import type { RemoteTargetConfig } from "./ssh";
+import { projectKnowledgeEnabled } from "./repositoryKnowledge";
 
 const KEY = "clark-desktop:local-agent";
 const env = import.meta.env as Record<string, string | undefined>;
@@ -157,6 +158,8 @@ export function localConnectConfig(
       mcp_servers: enabledMcpConfigs(loadMcpServers()),
       // Durable memory: exposes the `memory` tool + injects saved facts.
       memories: loadMemoriesEnabled(),
+      // Private Git evidence sync and per-turn repository context recall.
+      project_knowledge: projectKnowledgeEnabled(),
       // Experimental `browser` tool — off unless the user opted in.
       browser_enabled: loadBrowserEnabled(),
       // When present, the provider runs this session's tools on the remote host.

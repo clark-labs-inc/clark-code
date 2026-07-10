@@ -95,7 +95,10 @@ export default function App() {
             )}
           </>
         ) : (
-          <StartCard />
+          <>
+            <StartCard />
+            <Composer />
+          </>
         )}
       </div>
       {mcpOpen && (

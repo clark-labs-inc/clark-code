@@ -17,6 +17,7 @@ export interface CodeRemoteProjectRegistration {
   root: string;
   ssh_alias?: string | null;
   trusted: boolean;
+  repository_fingerprint?: string | null;
 }
 
 export interface CodeRemoteHostRegistration {

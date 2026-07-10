@@ -47,7 +47,7 @@ function StatusGlyph({ status }: { status: ToolStatus }) {
 /** Git-style added/removed counts, e.g. `+42 −3`. */
 function DiffStatBadge({ stat }: { stat: DiffStat }) {
   return (
-    <span className="shrink-0 font-mono text-[0.7rem] tabular-nums">
+    <span className="shrink-0 font-mono text-xs tabular-nums">
       {stat.adds > 0 && <span className="text-success">+{stat.adds}</span>}
       {stat.adds > 0 && stat.dels > 0 && <span className="text-ink-faint"> </span>}
       {stat.dels > 0 && <span className="text-danger">−{stat.dels}</span>}
@@ -110,12 +110,12 @@ function ResearchDetail({ call }: { call: ToolCall }) {
   }
   return (
     <div className="px-3 py-2.5">
-      <div className={cn("text-[0.85rem] leading-relaxed", MD_CLASSES)}>
+      <div className={cn("text-sm leading-relaxed", MD_CLASSES)}>
         <Md>{findings}</Md>
       </div>
       {sources.length > 0 && (
         <div className="mt-3 border-t border-border-subtle pt-2.5">
-          <div className="mb-1.5 flex items-center gap-1.5 text-[0.7rem] font-medium uppercase tracking-wide text-ink-faint">
+          <div className="mb-1.5 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-ink-faint">
             <Globe className="size-3" /> Sources
           </div>
           <div className="flex flex-wrap gap-1.5">
@@ -142,7 +142,7 @@ function ResearchProgress({ call, reduce }: { call: ToolCall; reduce: boolean | 
   return (
     <div className="space-y-2 px-3 py-2.5">
       <div className="min-w-0 rounded-md bg-bg-sunken px-2.5 py-2">
-        <div className="text-[0.7rem] font-medium uppercase tracking-wide text-ink-faint">
+        <div className="text-xs font-medium uppercase tracking-wide text-ink-faint">
           Clark Research
         </div>
         <div className="mt-0.5 truncate text-sm text-ink-secondary">{query}</div>
@@ -249,7 +249,7 @@ function WorkLineImpl({ call, active }: { call: ToolCall; active: boolean }) {
         aria-expanded={open}
         disabled={!hasDetail}
         className={cn(
-          "group flex w-full items-center gap-1.5 rounded-md px-1 py-0.5 text-left text-[0.8125rem] leading-5 text-ink-muted",
+          "group flex w-full items-center gap-1.5 rounded-md px-1 py-0.5 text-left text-sm leading-5 text-ink-muted",
           hasDetail && "cursor-pointer hover:bg-bg-hover/50 hover:text-ink-secondary",
         )}
       >

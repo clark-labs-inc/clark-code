@@ -17,6 +17,7 @@ import { slashCommands, type SlashCommand } from "../lib/slashCommands";
 import { listCustomCommands } from "../lib/customCommands";
 import { fuzzyFilter, fuzzyFilterFiles } from "../lib/fuzzy";
 import { cn } from "../lib/cn";
+import { EnvironmentPicker } from "./EnvironmentPicker";
 
 /** Quick-insert directives that nudge a Clark Code superpower on. They prepend a
  *  short instruction to the message — discovery of research / browser-test /
@@ -122,7 +123,7 @@ function PermissionPill() {
           role="menu"
           className="popover-surface absolute bottom-full left-0 z-30 mb-2 w-72 rounded-xl bg-bg-elevated p-1 shadow-lg ring-1 ring-border-subtle"
         >
-          <div className="px-2.5 py-1.5 text-[0.7rem] font-medium uppercase tracking-wide text-ink-faint">
+          <div className="px-2.5 py-1.5 text-xs font-medium uppercase tracking-wide text-ink-faint">
             How should Clark act?
           </div>
           {PERMISSION_MODES.map((m) => {
@@ -202,7 +203,7 @@ function UsageChip() {
   return (
     <span
       title={`Context: ${contextTokens.toLocaleString()} tokens — ${pct}% of the ~${fmtTokens(CONTEXT_BUDGET)} auto-compact threshold\nThis conversation: ${totalIn.toLocaleString()} in · ${totalOut.toLocaleString()} out${cost > 0 ? ` · ${fmtCost(cost)}` : ""}`}
-      className="hidden items-center gap-1.5 font-mono text-[0.7rem] tabular-nums text-ink-faint sm:flex"
+      className="hidden items-center gap-1.5 font-mono text-xs tabular-nums text-ink-faint sm:flex"
     >
       {contextTokens > 0 && (
         <span className="flex items-center gap-1">
@@ -254,7 +255,7 @@ function ModelPill() {
           role="menu"
           className="popover-surface absolute bottom-full right-0 z-30 mb-2 w-72 rounded-xl bg-bg-elevated p-1 shadow-lg ring-1 ring-border-subtle"
         >
-          <div className="px-2.5 py-1.5 text-[0.7rem] font-medium uppercase tracking-wide text-ink-faint">
+          <div className="px-2.5 py-1.5 text-xs font-medium uppercase tracking-wide text-ink-faint">
             Model
           </div>
           {CODING_MODELS.map((m) => (
@@ -279,7 +280,7 @@ function ModelPill() {
 
           <div className="mx-1.5 my-1 border-t border-border-subtle" />
 
-          <div className="px-2.5 py-1.5 text-[0.7rem] font-medium uppercase tracking-wide text-ink-faint">
+          <div className="px-2.5 py-1.5 text-xs font-medium uppercase tracking-wide text-ink-faint">
             Reasoning effort
           </div>
           <div className="flex gap-1 px-2.5 pb-2">
@@ -301,7 +302,7 @@ function ModelPill() {
               </button>
             ))}
           </div>
-          <p className="px-2.5 pb-1.5 text-[0.7rem] leading-snug text-ink-faint">
+          <p className="px-2.5 pb-1.5 text-xs leading-snug text-ink-faint">
             Auto uses the model's default (GLM: Max · Kimi: High). Applies from
             the next message — the conversation keeps its context.
           </p>
@@ -336,7 +337,7 @@ function AttachmentChips() {
               </span>
             )}
             <span className="max-w-40 truncate text-xs text-ink-secondary">{a.filename}</span>
-            <span className="text-[0.7rem] text-ink-faint">{prettySize(a.size)}</span>
+            <span className="text-xs text-ink-faint">{prettySize(a.size)}</span>
             <button
               onClick={() => remove(a.id)}
               aria-label={`Remove ${a.filename}`}
@@ -359,7 +360,7 @@ function QueuedMessages({ onEdit }: { onEdit: (q: QueuedMessage) => void }) {
   if (queued.length === 0) return null;
   return (
     <div className="mx-auto mb-2 max-w-3xl">
-      <div className="mb-1 px-1 text-[0.7rem] font-medium uppercase tracking-wide text-ink-faint">
+      <div className="mb-1 px-1 text-xs font-medium uppercase tracking-wide text-ink-faint">
         Queued · sends when Clark finishes
       </div>
       <div className="space-y-1">
@@ -485,6 +486,11 @@ export function Composer() {
   const peeking = useSessionStore((s) => s.peek !== null);
   const prefill = useSessionStore((s) => s.composerPrefill);
   const setPrefill = useSessionStore((s) => s.setComposerPrefill);
+  // Start-screen mode: with no active session the composer starts one on submit
+  // (type a task → session begins), gated by the environment's readiness.
+  const start = useSessionStore((s) => s.startSession);
+  const connecting = useSessionStore((s) => s.connecting);
+  const startBlocked = useSessionStore((s) => (s.session ? null : s.startBlockedReason()));
 
   const { dragging, handlers } = useFileDrop((files) => void addFiles(files));
   usePaste((files) => void addFiles(files), !!session);
@@ -492,8 +498,16 @@ export function Composer() {
   useEffect(() => {
     const ta = taRef.current;
     if (!ta) return;
-    ta.style.height = "0px";
-    ta.style.height = Math.min(ta.scrollHeight, 200) + "px";
+    const resize = () => {
+      ta.style.height = "0px";
+      ta.style.height = Math.min(ta.scrollHeight, 200) + "px";
+    };
+    resize();
+    // Re-measure after layout settles: on first mount (the start screen mounts
+    // the composer before the flex layout is final) the initial scrollHeight can
+    // be stale and over-tall, so a post-layout pass snaps it to the real height.
+    const raf = requestAnimationFrame(resize);
+    return () => cancelAnimationFrame(raf);
   }, [value]);
 
   // "Edit & resend" staged text from a sent message: load it and focus.
@@ -511,7 +525,8 @@ export function Composer() {
   }, [prefill, setPrefill]);
 
   const hasContent = value.trim().length > 0 || attachments.length > 0;
-  const canSend = !!session && hasContent && !peeking;
+  const canSend =
+    hasContent && !peeking && (!!session || (!startBlocked && !connecting));
 
   // --- @-file / slash autocomplete ----------------------------------------
   const trigger = useMemo(() => detectTrigger(value, caret), [value, caret]);
@@ -608,6 +623,8 @@ export function Composer() {
     if (!canSend) return;
     const t = value;
     setValue("");
+    // No session yet → start one on the selected environment, then send.
+    if (!session) await start();
     await send(t.trim());
   };
 
@@ -659,6 +676,11 @@ export function Composer() {
   return (
     <div className="bg-bg px-5 py-3.5" {...handlers}>
       <QueuedMessages onEdit={editQueued} />
+      {!session && (
+        <div className="mx-auto mb-2 max-w-3xl">
+          <EnvironmentPicker />
+        </div>
+      )}
       <div
         className={cn(
           "relative mx-auto max-w-3xl rounded-2xl bg-bg-elevated px-3 py-2.5 shadow-sm transition",
@@ -699,7 +721,7 @@ export function Composer() {
         />
 
         <AnimatePresence initial={false}>
-          {session && !peeking && !busy && !value.trim() && attachments.length === 0 && (
+          {!peeking && !busy && !connecting && !value.trim() && attachments.length === 0 && (
             <motion.div
               key="capabilities"
               initial={reduce ? { opacity: 0 } : { opacity: 0, height: 0 }}
@@ -757,15 +779,15 @@ export function Composer() {
           aria-label="Message Clark"
           placeholder={
             !session
-              ? "Start a session to begin"
+              ? "Describe a task or ask a question"
               : peeking
                 ? "Viewing another chat — Clark is still working…"
                 : busy
                   ? "Queue a follow-up…"
                   : "Ask Clark to make a change…"
           }
-          disabled={!session || peeking}
-          className="composer-input max-h-52 w-full resize-none bg-transparent px-0.5 py-1 text-sm leading-relaxed text-ink outline-none placeholder:text-ink-muted disabled:opacity-50"
+          disabled={peeking || connecting}
+          className="composer-input max-h-52 w-full resize-none bg-transparent px-0.5 py-1 text-base leading-relaxed text-ink outline-none placeholder:text-ink-muted disabled:opacity-50"
         />
 
         <div className="mt-1.5 flex items-center justify-between gap-2">
@@ -807,6 +829,11 @@ export function Composer() {
           </div>
         </div>
       </div>
+      {!session && (startBlocked || connecting) && (
+        <p className="mx-auto mt-2 max-w-3xl px-1 text-xs text-ink-faint">
+          {connecting ? "Connecting…" : startBlocked}
+        </p>
+      )}
     </div>
   );
 }

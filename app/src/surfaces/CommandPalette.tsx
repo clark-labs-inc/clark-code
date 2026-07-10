@@ -171,7 +171,7 @@ export function CommandPalette({
                 return (
                   <div key={item.id}>
                     {showGroup && (
-                      <div className="px-2.5 pb-1 pt-2 text-[0.7rem] font-medium uppercase tracking-wide text-ink-faint">
+                      <div className="px-2.5 pb-1 pt-2 text-xs font-medium uppercase tracking-wide text-ink-faint">
                         {item.group}
                       </div>
                     )}

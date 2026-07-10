@@ -12,6 +12,13 @@ import { loadSshHosts, hostLabel, hostReady } from "../lib/sshHosts";
 import { pickAllowOption } from "../lib/permissions";
 import { notify } from "../lib/notify";
 import { isAuthExpiredError, refreshAuthSession } from "../lib/auth";
+import {
+  discoverRepositories,
+  projectKnowledgeEnabled,
+  repositoryIdentityForRoot,
+  repositoriesUnderRoot,
+  syncRepositoriesUnderRoot,
+} from "../lib/repositoryKnowledge";
 
 const HOST_ID_KEY = "clark-desktop:code-remote-host-id";
 const LOOP_INTERVAL_MS = 500;
@@ -47,13 +54,29 @@ function currentProjects(): CodeRemoteProjectRegistration[] {
   const projects: CodeRemoteProjectRegistration[] = [];
   const cwd = state.localSettings.cwd.trim();
   if (cwd) {
-    projects.push({
-      id: localProjectId(cwd),
-      kind: "local",
-      display_name: leaf(cwd),
-      root: cwd,
-      trusted: true,
-    });
+    const repositories = repositoriesUnderRoot(cwd);
+    if (repositories.length > 0) {
+      for (const repository of repositories) {
+        projects.push({
+          id: localProjectId(repository.root),
+          kind: "local",
+          display_name: leaf(repository.root),
+          root: repository.root,
+          trusted: true,
+          repository_fingerprint: repository.fingerprint,
+        });
+      }
+    } else {
+      const repository = repositoryIdentityForRoot(cwd);
+      projects.push({
+        id: localProjectId(cwd),
+        kind: "local",
+        display_name: leaf(cwd),
+        root: cwd,
+        trusted: true,
+        repository_fingerprint: repository?.fingerprint ?? null,
+      });
+    }
   }
   for (const host of loadSshHosts().filter(hostReady)) {
     projects.push({
@@ -254,6 +277,10 @@ export function MobileRemoteAgent() {
       try {
         const now = Date.now();
         if (lastHeartbeatRef.current === 0 || now - lastHeartbeatRef.current >= HOST_HEARTBEAT_INTERVAL_MS) {
+          const root = useSessionStore.getState().localSettings.cwd.trim();
+          if (root && projectKnowledgeEnabled()) {
+            await discoverRepositories(root);
+          }
           await registerCodeRemoteHost(creds, {
             hostId,
             displayName: `${auth.user.name || "Clark"} desktop`,
@@ -263,6 +290,9 @@ export function MobileRemoteAgent() {
             projects: currentProjects(),
           });
           lastHeartbeatRef.current = Date.now();
+          if (root && projectKnowledgeEnabled()) {
+            void syncRepositoriesUnderRoot(creds, root).catch(() => undefined);
+          }
         }
         const response = await pollCodeRemoteCommands(creds, hostId, 20, COMMAND_POLL_WAIT_MS);
         for (const command of response.commands) {

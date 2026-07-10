@@ -56,6 +56,9 @@ pub struct LocalAgentProvider {
     run_counter: AtomicU64,
     /// Last MCP connection result, surfaced to the settings UI.
     mcp_status: Vec<crate::mcp::McpStatus>,
+    /// Stable identity for the active project, when private project knowledge
+    /// is enabled and the selected root is a Git repository.
+    repository_fingerprint: Option<String>,
 }
 
 impl LocalAgentProvider {
@@ -74,6 +77,7 @@ impl LocalAgentProvider {
             executor: Arc::new(crate::exec::LocalExecutor),
             run_counter: AtomicU64::new(0),
             mcp_status: Vec::new(),
+            repository_fingerprint: None,
         }
     }
 
@@ -173,6 +177,16 @@ impl Provider for LocalAgentProvider {
         }
         let sandbox = Arc::new(sandbox);
 
+        self.repository_fingerprint = if config.project_knowledge_enabled {
+            crate::repository::inspect_repository(self.executor.as_ref(), sandbox.root())
+                .await
+                .ok()
+                .flatten()
+                .map(|repository| repository.fingerprint)
+        } else {
+            None
+        };
+
         let mut prompt = system_prompt(&sandbox, config.clark.is_some());
         if let Some(docs) = sandbox.docs_root() {
             prompt.push_str(&crate::workspace::prompt_section(docs));
@@ -214,6 +228,10 @@ impl Provider for LocalAgentProvider {
                 if let Ok(mems) =
                     crate::platform::recall_personal_memories(&config.base_url, key).await
                 {
+                    let mems = crate::platform::scope_personal_memories(
+                        mems,
+                        self.repository_fingerprint.as_deref(),
+                    );
                     if let Some(sec) = crate::platform::personal_memory_section(&mems) {
                         mem.push_str(&sec);
                         mem.push('\n');
@@ -290,6 +308,7 @@ impl Provider for LocalAgentProvider {
         self.cancel = cancel.clone();
 
         let mut text = prompt_text(&input);
+        let knowledge_query = text.clone();
         text.push_str(
             &crate::attachments::process_attachments(
                 &input.attachments,
@@ -299,6 +318,25 @@ impl Provider for LocalAgentProvider {
             )
             .await,
         );
+        if config.project_knowledge_enabled {
+            if let (Some(api_key), Some(fingerprint)) = (
+                config.api_key.as_deref(),
+                self.repository_fingerprint.as_deref(),
+            ) {
+                if let Ok(context) = crate::platform::recall_repository_context(
+                    &config.base_url,
+                    api_key,
+                    fingerprint,
+                    &knowledge_query,
+                )
+                .await
+                {
+                    if let Some(section) = crate::platform::repository_context_section(&context) {
+                        text = format!("{section}\n\nUser request:\n{text}");
+                    }
+                }
+            }
+        }
         let text = {
             let s = self.session.lock().await;
             let mut text = text;

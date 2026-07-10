@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { CreditCard, ExternalLink, LogOut, Loader2, Brain, SlidersHorizontal } from "lucide-react";
+import {
+  CreditCard, ExternalLink, LogOut, Loader2, Brain, SlidersHorizontal, ChevronsUpDown,
+} from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
 import { clarkBillingUrl, openExternal } from "../lib/account";
 import { cn } from "../lib/cn";
@@ -34,9 +36,11 @@ const ROW = "flex items-center justify-between";
 const ACTION =
   "flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-ink-secondary transition hover:bg-bg-hover";
 
-/** Avatar button → account/subscription popover. Subscription + credit state is
- *  read from Clark; "Manage" opens clarkchat.com (same account → same wallet). */
-export function ProfileMenu() {
+/** Account trigger → subscription popover. Subscription + credit state is read
+ *  from Clark; "Manage" opens clarkchat.com (same account → same wallet).
+ *  `topbar` = a compact avatar button (opens down-right); `sidebar` = a
+ *  full-width account row in the sidebar footer (opens up). */
+export function ProfileMenu({ variant = "topbar" }: { variant?: "topbar" | "sidebar" }) {
   const auth = useSessionStore((s) => s.auth);
   const billing = useSessionStore((s) => s.billing);
   const loading = useSessionStore((s) => s.loadingBilling);
@@ -47,6 +51,11 @@ export function ProfileMenu() {
   const setSettingsOpen = useSessionStore((s) => s.setSettingsOpen);
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+
+  // The sidebar row shows the plan inline, so it needs billing before opening.
+  useEffect(() => {
+    if (variant === "sidebar") void loadBilling();
+  }, [variant, loadBilling]);
 
   useEffect(() => {
     if (!open) return;
@@ -70,28 +79,56 @@ export function ProfileMenu() {
   const credits = billing?.credits;
   const renews = formatDate(sub?.current_period_end);
   const firstLoad = loading && !billing;
+  const planLabel = sub?.plan_key ? titleCase(sub.plan_key) : billing ? "Free" : null;
 
   return (
-    <div ref={ref} className="relative">
-      <button
-        onClick={() => setOpen((o) => !o)}
-        aria-label="Account"
-        title={user.email ?? user.name}
-        className="flex items-center"
-      >
-        {user.avatar ? (
-          <img src={user.avatar} alt="" className="size-7 rounded-full" />
-        ) : (
-          <span className="grid size-7 place-items-center rounded-full bg-bg-tertiary text-xs font-semibold text-ink-secondary transition hover:bg-bg-hover">
-            {user.name.charAt(0).toUpperCase()}
+    <div ref={ref} className={cn("relative", variant === "sidebar" && "w-full")}>
+      {variant === "sidebar" ? (
+        <button
+          onClick={() => setOpen((o) => !o)}
+          aria-label="Account"
+          title={user.email ?? user.name}
+          className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left transition hover:bg-bg-hover"
+        >
+          {user.avatar ? (
+            <img src={user.avatar} alt="" className="size-8 shrink-0 rounded-full" />
+          ) : (
+            <span className="grid size-8 shrink-0 place-items-center rounded-full bg-bg-tertiary text-sm font-semibold text-ink-secondary">
+              {user.name.charAt(0).toUpperCase()}
+            </span>
+          )}
+          <span className="min-w-0 flex-1 leading-tight">
+            <span className="block truncate text-sm font-semibold text-ink">{user.name}</span>
+            <span className="block truncate text-xs text-ink-muted">
+              {planLabel ? `${planLabel} plan` : user.email}
+            </span>
           </span>
-        )}
-      </button>
+          <ChevronsUpDown className="size-4 shrink-0 text-ink-faint" />
+        </button>
+      ) : (
+        <button
+          onClick={() => setOpen((o) => !o)}
+          aria-label="Account"
+          title={user.email ?? user.name}
+          className="flex items-center"
+        >
+          {user.avatar ? (
+            <img src={user.avatar} alt="" className="size-7 rounded-full" />
+          ) : (
+            <span className="grid size-7 place-items-center rounded-full bg-bg-tertiary text-xs font-semibold text-ink-secondary transition hover:bg-bg-hover">
+              {user.name.charAt(0).toUpperCase()}
+            </span>
+          )}
+        </button>
+      )}
 
       {/* Instant show/hide — no fade (avoids WKWebView half-opacity flicker). */}
       {open && (
         <div
-          className="popover-surface absolute right-0 top-full z-30 mt-2 w-72 rounded-xl bg-bg-elevated p-1 shadow-lg ring-1 ring-border-subtle"
+          className={cn(
+            "popover-surface absolute z-30 w-72 rounded-xl bg-bg-elevated p-1 shadow-lg ring-1 ring-border-subtle",
+            variant === "sidebar" ? "bottom-full left-0 mb-2" : "right-0 top-full mt-2",
+          )}
         >
             <div className="px-3 py-2.5">
               <div className="truncate text-sm font-medium text-ink">{user.name}</div>
@@ -148,7 +185,7 @@ export function ProfileMenu() {
                   <Brain className="size-4 shrink-0 text-ink-muted" />
                   <span className="leading-tight">
                     <span className="block text-sm text-ink-secondary">Enable memories</span>
-                    <span className="block text-[11px] text-ink-faint">
+                    <span className="block text-xs text-ink-faint">
                       Remember facts across chats — per project and globally
                     </span>
                   </span>

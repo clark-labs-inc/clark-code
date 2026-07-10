@@ -11,6 +11,10 @@ import type { Snapshot } from "../core-bridge/types";
 import type { ConversationMeta } from "./history";
 import type { AuthSession } from "./auth";
 import { prepareSnapshotForUpload } from "./snapshotUpload";
+import {
+  repositoryFingerprintForRoot,
+  repositoryIdentityForRoot,
+} from "./repositoryKnowledge";
 
 function isTauri(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -87,6 +91,9 @@ export async function cloudPut(
   rev: number,
   status: "running" | "idle",
 ): Promise<void> {
+  const repositoryFingerprint = meta.project
+    ? await repositoryFingerprintForRoot(meta.project)
+    : null;
   await invoke("desktop_conv_put", {
     endpoint: c.endpoint,
     token: c.token,
@@ -94,6 +101,7 @@ export async function cloudPut(
     title: meta.title,
     provider: meta.provider,
     project: meta.project ?? null,
+    repositoryFingerprint,
     remoteHost: meta.remoteHost ?? null,
     mode: meta.mode ?? null,
     titleLocked: meta.titleLocked ?? false,
@@ -142,6 +150,7 @@ function fingerprint(job: PendingPush, snapshotJson: string): string {
     m.title,
     m.provider,
     m.project ?? "",
+    m.project ? repositoryIdentityForRoot(m.project)?.fingerprint ?? "" : "",
     m.remoteHost ?? "",
     m.mode ?? "",
     m.titleLocked ? "1" : "0",

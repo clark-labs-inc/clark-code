@@ -86,6 +86,9 @@ pub struct LocalConfig {
     /// the project + global memory into the system prompt. On by default; the
     /// user turns it off from the profile menu (`extra.memories = false`).
     pub memories_enabled: bool,
+    /// Whether this opted-in session may retrieve private repository evidence
+    /// previously synced to the user's Clark account.
+    pub project_knowledge_enabled: bool,
     /// Checkpoint compaction for the model-visible transcript.
     pub compaction: CompactionConfig,
     /// Experimental: register the `browser` tool (clark-browser, lazily
@@ -219,6 +222,10 @@ impl LocalConfig {
             .get("memories")
             .and_then(Value::as_bool)
             .unwrap_or(true);
+        let project_knowledge_enabled = extra
+            .get("project_knowledge")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
 
         // Off by default — the user opts in from Settings.
         let browser_enabled = extra
@@ -283,6 +290,7 @@ impl LocalConfig {
             cwd,
             remote,
             memories_enabled,
+            project_knowledge_enabled,
             compaction,
             browser_enabled,
         }

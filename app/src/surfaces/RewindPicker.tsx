@@ -72,7 +72,7 @@ export function RewindPicker({ excludeSha }: { excludeSha?: string }) {
           role="menu"
           className="popover-surface absolute bottom-full left-[1.4rem] z-30 mb-2 w-64 rounded-xl bg-bg-elevated p-1 shadow-lg ring-1 ring-border-subtle"
         >
-          <div className="px-2.5 py-1.5 text-[0.7rem] font-medium uppercase tracking-wide text-ink-faint">
+          <div className="px-2.5 py-1.5 text-xs font-medium uppercase tracking-wide text-ink-faint">
             Jump to before…
           </div>
           {runs.map((r, i) => (

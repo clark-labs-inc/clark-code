@@ -54,7 +54,7 @@ function FanOutCard({ fanOut, reduce }: { fanOut: FanOut; reduce: boolean | null
           transition={{ duration: 0.5, ease: EASE }}
         />
       </div>
-      <div className="mt-1.5 font-mono text-[0.7rem] tabular-nums text-ink-faint">
+      <div className="mt-1.5 font-mono text-xs tabular-nums text-ink-faint">
         {fanOut.done} done · {fanOut.running} running · merging as they finish
       </div>
 
@@ -83,10 +83,10 @@ function FanOutCard({ fanOut, reduce }: { fanOut: FanOut; reduce: boolean | null
               </span>
               <span className="min-w-0 flex-1">
                 <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
-                  <span className="font-mono text-[0.65rem] text-ink-faint">
+                  <span className="font-mono text-xs text-ink-faint">
                     #{i + 1}
                   </span>
-                  <span className="text-[0.7rem] font-medium text-ink-muted">
+                  <span className="text-xs font-medium text-ink-muted">
                     {STATUS_COPY[a.status]}
                   </span>
                 </span>
@@ -98,7 +98,7 @@ function FanOutCard({ fanOut, reduce }: { fanOut: FanOut; reduce: boolean | null
           ))}
         </AnimatePresence>
         {more > 0 && (
-          <div className="rounded-md bg-bg-sunken px-2.5 py-2 font-mono text-[0.65rem] text-ink-muted">
+          <div className="rounded-md bg-bg-sunken px-2.5 py-2 font-mono text-xs text-ink-muted">
             +{more} more
           </div>
         )}

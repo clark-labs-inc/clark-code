@@ -133,7 +133,7 @@ function CatalogCard({ preset, onAdd }: { preset: (typeof MCP_PRESETS)[number]; 
       <div className="min-w-0 flex-1">
         <div className="text-sm font-medium text-ink">{preset.label}</div>
         <div className="truncate text-xs text-ink-muted">{preset.description}</div>
-        {preset.needs && <div className="mt-0.5 text-[0.7rem] text-warning">needs {preset.needs}</div>}
+        {preset.needs && <div className="mt-0.5 text-xs text-warning">needs {preset.needs}</div>}
       </div>
       <button
         onClick={onAdd}
@@ -151,7 +151,7 @@ function Catalog({ onAdd, addBlank }: { onAdd: (make: (cwd: string) => McpServer
   return (
     <div>
       <div className="mb-2 flex items-center justify-between">
-        <p className="text-[0.7rem] font-medium uppercase tracking-wide text-ink-faint">Add a server</p>
+        <p className="text-xs font-medium uppercase tracking-wide text-ink-faint">Add a server</p>
         <button
           onClick={addBlank}
           className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-medium text-ink-muted transition hover:bg-bg-hover hover:text-ink"
@@ -164,7 +164,7 @@ function Catalog({ onAdd, addBlank }: { onAdd: (make: (cwd: string) => McpServer
         if (!items.length) return null;
         return (
           <div key={cat} className="mb-3 last:mb-0">
-            <p className="mb-1.5 text-[0.7rem] text-ink-faint">{cat}</p>
+            <p className="mb-1.5 text-xs text-ink-faint">{cat}</p>
             <div className="grid grid-cols-2 gap-2">
               {items.map((p) => (
                 <CatalogCard key={p.id} preset={p} onAdd={() => onAdd(p.make)} />

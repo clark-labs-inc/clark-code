@@ -98,3 +98,23 @@ pub async fn desktop_code_command_ack(
         .map_err(|e| format!("Clark Code command ack request failed: {e}"))?;
     read_json_or_err(resp, "Clark Code command ack").await
 }
+
+#[tauri::command]
+pub async fn desktop_code_repository_sync(
+    endpoint: String,
+    token: String,
+    batch: Value,
+) -> Result<Value, String> {
+    let url = format!(
+        "{}/api/desktop/code/repositories",
+        clark_rest_base(&endpoint)
+    );
+    let resp = clark_http_client()?
+        .post(url)
+        .header("Authorization", format!("Bearer {token}"))
+        .json(&batch)
+        .send()
+        .await
+        .map_err(|e| format!("Clark Code repository sync request failed: {e}"))?;
+    read_json_or_err(resp, "Clark Code repository sync").await
+}

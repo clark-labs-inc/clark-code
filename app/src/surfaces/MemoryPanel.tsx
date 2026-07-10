@@ -9,10 +9,10 @@ import type { MemoryFactView, MemoryOverview } from "../core-bridge/types";
 
 // Compact markdown styling for the small memory cards.
 const MD =
-  "text-[12.5px] leading-relaxed text-ink-secondary " +
+  "text-sm leading-relaxed text-ink-secondary " +
   "[&_p]:my-1.5 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 " +
   "[&_ul]:my-1.5 [&_ul]:list-disc [&_ul]:pl-4 [&_ul]:marker:text-ink-faint [&_li]:my-0.5 " +
-  "[&_h1]:mb-1 [&_h1]:mt-2 [&_h1]:text-sm [&_h1]:font-semibold [&_h2]:mb-1 [&_h2]:mt-2 [&_h2]:text-[13px] [&_h2]:font-semibold [&_h3]:mb-0.5 [&_h3]:mt-1.5 [&_h3]:font-semibold " +
+  "[&_h1]:mb-1 [&_h1]:mt-2 [&_h1]:text-sm [&_h1]:font-semibold [&_h2]:mb-1 [&_h2]:mt-2 [&_h2]:text-sm [&_h2]:font-semibold [&_h3]:mb-0.5 [&_h3]:mt-1.5 [&_h3]:font-semibold " +
   "[&_a]:text-ink [&_a]:underline [&_a]:decoration-ink-faint [&_strong]:font-semibold [&_strong]:text-ink " +
   "[&_code]:rounded [&_code]:border [&_code]:border-border-subtle [&_code]:bg-chip [&_code]:px-1 [&_code]:py-px [&_code]:font-mono [&_code]:text-[0.85em]";
 
@@ -79,7 +79,7 @@ function MemoryPopover() {
         <NotebookText className="size-4 shrink-0 text-ink-muted" />
         <div className="min-w-0">
           <p className="text-sm font-medium text-ink">Memory</p>
-          <p className="text-[11px] text-ink-faint">
+          <p className="text-xs text-ink-faint">
             {enabled ? "What the agent remembers, per project and globally" : "Currently off"}
           </p>
         </div>
@@ -130,7 +130,7 @@ function MemoryPopover() {
         )}
       </div>
 
-      <footer className="border-t border-border-subtle px-3 py-2 text-[11px] text-ink-faint">
+      <footer className="border-t border-border-subtle px-3 py-2 text-xs text-ink-faint">
         The agent curates memory itself with its <code className="rounded bg-chip px-1 py-px font-mono">memory</code> tool.
       </footer>
     </div>
@@ -177,7 +177,7 @@ function Scope({
 
 function SectionLabel({ icon, label }: { icon: ReactNode; label: string }) {
   return (
-    <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-ink-faint">
+    <div className="mb-1.5 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider text-ink-faint">
       {icon}
       {label}
     </div>
@@ -195,21 +195,21 @@ function FactCard({ fact }: { fact: MemoryFactView }) {
         </span>
         {fact.kind && (
           <span
-            className={cn("shrink-0 rounded-full border px-1.5 py-px text-[10px] font-medium", tone)}
+            className={cn("shrink-0 rounded-full border px-1.5 py-px text-xs font-medium", tone)}
           >
             {fact.kind}
           </span>
         )}
       </summary>
       {fact.description && fact.name && (
-        <p className="mt-1 text-[11px] text-ink-muted">{fact.description}</p>
+        <p className="mt-1 text-xs text-ink-muted">{fact.description}</p>
       )}
       {fact.body && (
         <div className={cn(MD, "mt-1.5 border-t border-border-subtle pt-1.5")}>
           <Markdown remarkPlugins={[remarkGfm]}>{fact.body}</Markdown>
         </div>
       )}
-      <p className="mt-1.5 font-mono text-[10px] text-ink-faint">{fact.file}</p>
+      <p className="mt-1.5 font-mono text-xs text-ink-faint">{fact.file}</p>
     </details>
   );
 }

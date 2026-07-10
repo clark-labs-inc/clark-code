@@ -23,6 +23,8 @@ tracing.workspace = true
 tokio.workspace = true
 async-channel.workspace = true
 uuid = { version = "1", features = ["v4"] }
+sha2 = "0.10"
+url = "2"
 # OpenAI-compatible streaming chat client (mirrors provider-clark's reqwest setup
 # so `https://` works without a system OpenSSL/cert dependency).
 reqwest = { version = "0.12", default-features = false, features = ["stream", "json", "rustls-tls"] }

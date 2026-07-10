@@ -40,6 +40,7 @@ import {
   saveMemoriesEnabled,
   loadBrowserEnabled,
   saveBrowserEnabled,
+  localSettingsReady,
   type LocalAgentSettings,
 } from "../lib/localAgent";
 import { pickFolder } from "../lib/pickFolder";
@@ -232,6 +233,10 @@ interface SessionState {
   /** One-time: lift any chats left in localStorage by prior local-first versions
    *  into the cloud, then forget them locally. No-op once drained. */
   migrateLocalToCloud: () => void;
+  /** Why the active environment can't start a session yet (folder unset, remote
+   *  host not ready…), or null when ready. Lets the composer gate a pre-session
+   *  submit with the same logic the start screen uses. */
+  startBlockedReason: () => string | null;
   startSession: () => Promise<void>;
   endSession: () => void;
   openConversation: (id: string) => Promise<void>;
@@ -792,6 +797,19 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     // account starts clean.
     snapshotCache.clear();
     set({ auth: null, billing: null, conversations: [], conversationsLoading: false });
+  },
+
+  startBlockedReason: () => {
+    const { activeProvider, projectMode, localSettings, selectedHostId } = get();
+    // Non-local providers (cloud) need no local folder/host — always ready.
+    if (activeProvider !== "local") return null;
+    if (projectMode === "remote") {
+      const host = loadSshHosts().find((h) => h.id === selectedHostId);
+      if (!host) return "Add a remote host.";
+      if (!hostReady(host)) return "This host needs a folder and exec-server binary.";
+      return null;
+    }
+    return localSettingsReady(localSettings);
   },
 
   startSession: async () => {

@@ -73,7 +73,7 @@ export function MarkdownDoc({ artifact }: { artifact: Artifact }) {
         <FileText className="size-4 shrink-0 text-accent" />
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-medium text-ink">{artifact.title}</div>
-          <div className="text-[0.7rem] uppercase tracking-wider text-ink-faint">
+          <div className="text-xs uppercase tracking-wider text-ink-faint">
             {present && multi ? `Slide ${at + 1} / ${slides.length}` : "Markdown"}
           </div>
         </div>
@@ -117,7 +117,7 @@ export function MarkdownDoc({ artifact }: { artifact: Artifact }) {
         </div>
       ) : present && multi ? (
         <div className="border-t border-border-subtle">
-          <div className={cn("min-h-[8rem] px-4 py-4 text-[0.9375rem] leading-relaxed", MD_CLASSES)}>
+          <div className={cn("min-h-[8rem] px-4 py-4 text-base leading-relaxed", MD_CLASSES)}>
             <Md>{slides[at]}</Md>
           </div>
           <div className="flex items-center justify-between border-t border-border-subtle px-3 py-1.5">
@@ -147,7 +147,7 @@ export function MarkdownDoc({ artifact }: { artifact: Artifact }) {
       ) : (
         <div
           className={cn(
-            "max-h-[30rem] overflow-y-auto border-t border-border-subtle px-4 py-3 text-[0.9375rem] leading-relaxed",
+            "max-h-[30rem] overflow-y-auto border-t border-border-subtle px-4 py-3 text-base leading-relaxed",
             MD_CLASSES,
           )}
         >

@@ -8,6 +8,7 @@ import { projectName } from "../lib/localAgent";
 import { useIsNarrow } from "../lib/responsive";
 import { fuzzyFilter } from "../lib/fuzzy";
 import { ClarkMark } from "./ClarkMark";
+import { ProfileMenu } from "./ProfileMenu";
 import type { ConversationMeta } from "../lib/history";
 
 function relativeTime(ts: number): string {
@@ -73,11 +74,11 @@ function GroupHeader({ group }: { group: ProjectGroup }) {
   return (
     <div
       title={group.title}
-      className="mt-3 mb-1 flex items-center gap-1.5 px-1.5 text-[0.68rem] font-semibold uppercase tracking-wider text-ink-faint first:mt-0.5"
+      className="mt-3 mb-1 flex items-center gap-1.5 px-1.5 text-xs font-semibold uppercase tracking-wider text-ink-faint first:mt-0.5"
     >
       <Icon className={`size-3 shrink-0 ${group.kind === "remote" ? "text-accent" : ""}`} />
       <span className="truncate">{group.label}</span>
-      <span className="ml-auto shrink-0 font-mono text-[0.62rem] font-normal tracking-normal text-ink-faint/70">
+      <span className="ml-auto shrink-0 font-mono text-xs font-normal tracking-normal text-ink-faint/70">
         {group.convos.length}
       </span>
     </div>
@@ -197,14 +198,14 @@ function ArchivedRow({ c }: { c: ConversationMeta }) {
           <button
             onClick={() => del(c.id)}
             aria-label={`Permanently delete ${c.title}`}
-            className="rounded px-1.5 py-0.5 text-[11px] font-medium text-danger transition hover:bg-danger/10"
+            className="rounded px-1.5 py-0.5 text-xs font-medium text-danger transition hover:bg-danger/10"
           >
             Delete
           </button>
           <button
             onClick={() => setConfirming(false)}
             aria-label="Cancel delete"
-            className="rounded px-1 py-0.5 text-[11px] text-ink-muted transition hover:text-ink"
+            className="rounded px-1 py-0.5 text-xs text-ink-muted transition hover:text-ink"
           >
             Cancel
           </button>
@@ -275,12 +276,15 @@ export function Sidebar() {
         )}
         <button
           onClick={() => newConversation()}
-          aria-label="New conversation"
-          title="New conversation"
+          aria-label="New session"
+          title="New session"
           className="grid size-8 place-items-center rounded-lg text-ink-muted transition hover:bg-bg-hover"
         >
           <Plus className="size-4" />
         </button>
+        <div className="mt-auto">
+          <ProfileMenu />
+        </div>
       </div>
     );
   }
@@ -302,9 +306,9 @@ export function Sidebar() {
       <div className="px-2.5 pb-2">
         <button
           onClick={() => newConversation()}
-          className="flex w-full items-center gap-2 rounded-lg border border-border-subtle bg-bg-elevated/70 px-2.5 py-2 text-sm font-medium text-ink-secondary transition hover:bg-bg-hover"
+          className="flex w-full items-center gap-2 rounded-lg bg-bg-tertiary px-2.5 py-2.5 text-sm font-semibold text-ink transition hover:bg-bg-hover"
         >
-          <Plus className="size-4" /> New conversation
+          <Plus className="size-4" /> New session
         </button>
       </div>
 
@@ -370,14 +374,14 @@ export function Sidebar() {
                 <button
                   onClick={() => setArchivedOpen((o) => !o)}
                   aria-expanded={archivedOpen}
-                  className="mt-3 mb-1 flex w-full items-center gap-1.5 px-1.5 text-[0.68rem] font-semibold uppercase tracking-wider text-ink-faint transition hover:text-ink-muted first:mt-0.5"
+                  className="mt-3 mb-1 flex w-full items-center gap-1.5 px-1.5 text-xs font-semibold uppercase tracking-wider text-ink-faint transition hover:text-ink-muted first:mt-0.5"
                 >
                   <ChevronRight
                     className={`size-3 shrink-0 transition-transform ${archivedOpen ? "rotate-90" : ""}`}
                   />
                   <Archive className="size-3 shrink-0" />
                   <span>Archived</span>
-                  <span className="ml-auto shrink-0 font-mono text-[0.62rem] font-normal tracking-normal text-ink-faint/70">
+                  <span className="ml-auto shrink-0 font-mono text-xs font-normal tracking-normal text-ink-faint/70">
                     {archivedConvos.length}
                   </span>
                 </button>
@@ -392,6 +396,10 @@ export function Sidebar() {
             )}
           </div>
         )}
+      </div>
+
+      <div className="shrink-0 border-t border-border-subtle p-2">
+        <ProfileMenu variant="sidebar" />
       </div>
     </aside>
   );

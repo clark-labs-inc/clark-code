@@ -127,7 +127,7 @@ export function PermissionGate({ req }: { req: PermissionRequest }) {
         {tone && (
           <span
             className={cn(
-              "shrink-0 rounded-md px-1.5 py-0.5 text-[0.7rem] font-medium",
+              "shrink-0 rounded-md px-1.5 py-0.5 text-xs font-medium",
               tone.chip,
             )}
           >

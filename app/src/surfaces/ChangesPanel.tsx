@@ -128,7 +128,7 @@ function ChangesPopover({ runs, onClose }: { runs: string[]; onClose: () => void
         <GitCompareArrows className="size-4 shrink-0 text-ink-muted" />
         <div className="min-w-0">
           <p className="text-sm font-medium text-ink">Changes</p>
-          <p className="text-[11px] text-ink-faint">
+          <p className="text-xs text-ink-faint">
             {files && files.length > 0 ? (
               <>
                 {files.length} file{files.length === 1 ? "" : "s"} ·{" "}
@@ -146,7 +146,7 @@ function ChangesPopover({ runs, onClose }: { runs: string[]; onClose: () => void
             onChange={(e) => setBase(e.target.value)}
             disabled={remote}
             title="Diff against a different point in this conversation"
-            className="shrink-0 rounded-md border border-border bg-bg px-1.5 py-1 text-[0.7rem] text-ink-secondary outline-none disabled:opacity-50"
+            className="shrink-0 rounded-md border border-border bg-bg px-1.5 py-1 text-xs text-ink-secondary outline-none disabled:opacity-50"
           >
             {runs.map((sha, i) => (
               <option key={sha} value={sha}>
@@ -262,7 +262,7 @@ function FileRow({
             {file.path}
           </span>
         </button>
-        <span className="shrink-0 font-mono text-[0.7rem] tabular-nums">
+        <span className="shrink-0 font-mono text-xs tabular-nums">
           {file.additions > 0 && <span className="text-success">+{file.additions}</span>}{" "}
           {file.deletions > 0 && <span className="text-danger">−{file.deletions}</span>}
         </span>
@@ -271,14 +271,14 @@ function FileRow({
             <button
               onClick={() => void revert()}
               disabled={busy}
-              className="rounded-md bg-danger/12 px-2 py-0.5 text-[0.7rem] font-medium text-danger transition hover:bg-danger/20 disabled:opacity-50"
+              className="rounded-md bg-danger/12 px-2 py-0.5 text-xs font-medium text-danger transition hover:bg-danger/20 disabled:opacity-50"
             >
               {busy ? "Reverting…" : "Revert file"}
             </button>
             <button
               onClick={() => setConfirming(false)}
               disabled={busy}
-              className="rounded-md px-1.5 py-0.5 text-[0.7rem] text-ink-muted transition hover:bg-bg-hover"
+              className="rounded-md px-1.5 py-0.5 text-xs text-ink-muted transition hover:bg-bg-hover"
             >
               Keep
             </button>

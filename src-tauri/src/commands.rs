@@ -774,6 +774,7 @@ pub async fn desktop_conv_put(
     title: String,
     provider: String,
     project: Option<String>,
+    repository_fingerprint: Option<String>,
     remote_host: Option<String>,
     mode: Option<String>,
     title_locked: bool,
@@ -793,6 +794,7 @@ pub async fn desktop_conv_put(
             "title": title,
             "provider": provider,
             "project": project,
+            "repositoryFingerprint": repository_fingerprint,
             "remoteHost": remote_host,
             "mode": mode,
             "titleLocked": title_locked,
@@ -824,6 +826,40 @@ pub async fn clark_checkpoint_restore(cwd: String, sha: String) -> Result<(), St
     })
     .await
     .map_err(|e| format!("restore task failed: {e}"))?
+}
+
+#[tauri::command]
+pub async fn clark_repository_inspect(
+    cwd: String,
+) -> Result<Option<provider_local::RepositoryIdentity>, String> {
+    provider_local::inspect_repository(&provider_local::LocalExecutor, std::path::Path::new(&cwd))
+        .await
+}
+
+#[tauri::command]
+pub async fn clark_repository_discover(
+    cwd: String,
+) -> Result<Vec<provider_local::RepositoryIdentity>, String> {
+    provider_local::discover_repositories(
+        &provider_local::LocalExecutor,
+        std::path::Path::new(&cwd),
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn clark_repository_history(
+    cwd: String,
+    offset: usize,
+    limit: usize,
+) -> Result<Option<provider_local::GitHistoryBatch>, String> {
+    provider_local::load_git_history(
+        &provider_local::LocalExecutor,
+        std::path::Path::new(&cwd),
+        offset,
+        limit,
+    )
+    .await
 }
 
 /// Provision (mint) a "Clark Code" platform API key for the signed-in user, so

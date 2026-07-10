@@ -208,7 +208,7 @@ function MessageImpl({
             <div
               key={i}
               className={cn(
-                "text-[0.9375rem] leading-[1.8] [overflow-wrap:anywhere]",
+                "text-base leading-[1.8] [overflow-wrap:anywhere]",
                 MD_CLASSES,
                 span.kind === "narrate" && "text-ink-secondary",
               )}

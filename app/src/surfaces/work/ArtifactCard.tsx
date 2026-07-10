@@ -110,7 +110,7 @@ export function ArtifactCard({ artifact }: { artifact: Artifact }) {
         <Icon className="size-4 shrink-0 text-accent" />
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-medium text-ink">{artifact.title}</div>
-          <div className="text-[0.7rem] uppercase tracking-wider text-ink-faint">
+          <div className="text-xs uppercase tracking-wider text-ink-faint">
             {KIND_LABEL[artifact.kind]}
           </div>
         </div>

@@ -70,7 +70,7 @@ function PlanChecklistImpl({ plan }: { plan?: Plan }) {
             <span className="block text-sm font-semibold text-ink">
               {complete ? "Plan complete" : "Plan"}
             </span>
-            <span className="block truncate font-mono text-[0.7rem] tabular-nums text-ink-faint">
+            <span className="block truncate font-mono text-xs tabular-nums text-ink-faint">
               {done}/{total}
             </span>
           </span>

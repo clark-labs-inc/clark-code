@@ -39,6 +39,7 @@ mod platform;
 mod project_settings;
 mod prompt;
 mod provider;
+mod repository;
 mod safety;
 mod sandbox;
 mod tools;
@@ -58,7 +59,15 @@ pub use mcp::{probe_mcp_servers, McpServerConfig, McpStatus};
 pub use memory::{
     global_memory_dir, load_facts, load_index, memory_dir, MemoryFact, MemoryHeader, MemoryType,
 };
-pub use platform::{personal_memory_section, recall_personal_memories, PersonalMemory};
+pub use platform::{
+    personal_memory_section, recall_personal_memories, recall_repository_context,
+    repository_context_section, scope_personal_memories, PersonalMemory,
+    RepositoryCommitContext, RepositoryContext,
+};
 pub use provider::LocalAgentProvider;
+pub use repository::{
+    discover_repositories, inspect_repository, load_git_history, GitCommitEvidence,
+    GitHistoryBatch, RepositoryIdentity, RepositoryRemote,
+};
 // The app-managed document workspace root, so the host can confine `read_doc_text`.
 pub use workspace::workspace_root;

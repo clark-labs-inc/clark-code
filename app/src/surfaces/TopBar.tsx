@@ -5,7 +5,6 @@ import { projectName } from "../lib/localAgent";
 import { cn } from "../lib/cn";
 import { ChangesButton } from "./ChangesPanel";
 import { MemoryButton } from "./MemoryPanel";
-import { ProfileMenu } from "./ProfileMenu";
 
 /** Update affordance in the top bar. While a new version downloads in the
  *  background it shows live progress; once staged it becomes a non-blocking
@@ -75,7 +74,6 @@ function DownloadingPill({ progress }: { progress: { downloaded: number; total: 
 
 export function TopBar({ dark, onToggleTheme }: { dark: boolean; onToggleTheme: () => void }) {
   const session = useSessionStore((s) => s.session);
-  const auth = useSessionStore((s) => s.auth);
   const terminalOpen = useSessionStore((s) => s.terminalOpen);
   const toggleTerminal = useSessionStore((s) => s.toggleTerminal);
   const setSettingsOpen = useSessionStore((s) => s.setSettingsOpen);
@@ -155,11 +153,6 @@ export function TopBar({ dark, onToggleTheme }: { dark: boolean; onToggleTheme: 
         >
           {dark ? <Sun className="size-4" /> : <Moon className="size-4" />}
         </button>
-        {auth && (
-          <div className="ml-1">
-            <ProfileMenu />
-          </div>
-        )}
       </div>
     </header>
   );
