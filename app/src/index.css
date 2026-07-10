@@ -204,6 +204,31 @@ samp,
   letter-spacing: normal; /* monospace shouldn't inherit the body's tracking */
 }
 
+/* Syntax-highlighted code (Shiki, JS regex engine — no WASM). Shiki emits a
+   <pre class="shiki …"> with inline light colors and --shiki-dark variables on
+   every token. We override its inline background (the MD_CLASSES pre surface is
+   the source of truth for the block's chrome) and, under dark, swap each token
+   to its --shiki-dark value so the theme switches instantly with no
+   re-highlight. */
+.shiki-host pre.shiki {
+  /* Override Shiki's inline light background with the canonical code surface
+     (the same one MD_CLASSES paints on a plain <pre>), and its base text color
+     with ink. Token colors still come from Shiki's inline styles (light) or
+     --shiki-dark (dark, below). */
+  background: var(--color-bg-sunken) !important;
+  color: var(--color-ink) !important;
+  margin: 0;
+}
+html.dark .shiki-host pre.shiki,
+html.dark .shiki-host pre.shiki span {
+  color: var(--shiki-dark, currentColor) !important;
+}
+/* Diff/line-decoration backgrounds (e.g. added/removed lines) follow the dark
+   variant too — only on spans, never the block itself. */
+html.dark .shiki-host pre.shiki span {
+  background-color: var(--shiki-dark-bg, transparent) !important;
+}
+
 /* Refined icon strokes: lucide defaults to 2, which reads heavy at the 14–16px
    sizes used throughout. 1.75 is crisper and more precise. */
 svg.lucide {

@@ -1,4 +1,4 @@
-import { memo, useRef, useState, type ReactNode } from "react";
+import { memo, useEffect, useState, type ReactNode } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
@@ -8,6 +8,7 @@ import { cn } from "../lib/cn";
 import { useCopy } from "../lib/clipboard";
 import { parseNarration } from "../lib/narration";
 import { useSmoothText } from "../lib/useSmoothText";
+import { highlight, resolveLang } from "../lib/highlight";
 import type { ContentBlock, Role } from "../core-bridge/types";
 
 function text(blocks: ContentBlock[]): string {
@@ -51,17 +52,62 @@ function CopyButton({
   );
 }
 
-/** A fenced code block with a hover-reveal copy button. Reads the rendered text
- *  off the DOM so it captures exactly what the user sees. */
-function CodeBlock({ children }: { children?: ReactNode }) {
-  const ref = useRef<HTMLPreElement>(null);
+/** Extract the language id and raw text from the `<code>` react-markdown hands
+ *  to `pre`. Returns `null` when there's no fenced code child (e.g. indented
+ *  code, or an unexpected structure) so the caller can fall back to plain. */
+function codeFromPreChild(child: ReactNode): { lang?: string; code: string } | null {
+  // react-markdown passes <pre> a single <code> child (or an array containing
+  // one); unwrap to that element.
+  const el = Array.isArray(child) ? child.find((c) => typeof c === "object" && c !== null && "props" in c) : child;
+  if (typeof el !== "object" || el === null || !("props" in el)) return null;
+  const props = (el as { props: { className?: string; children?: ReactNode } }).props;
+  const className = props.className ?? "";
+  const lang = /language-(\S+)/.exec(className)?.[1];
+  const inner = props.children;
+  const code = typeof inner === "string" ? inner : Array.isArray(inner) ? inner.join("") : "";
+  return { lang, code };
+}
+
+/** A fenced code block with syntax highlighting, a language label, and a
+ *  hover-reveal copy button. Highlights via the Shiki core singleton (JS regex
+ *  engine — no WASM); renders plain monospace while it warms or for an unknown
+ *  language, then upgrades in place once the result is ready. */
+function CodeBlock({ lang, code }: { lang?: string; code: string }) {
   const [copied, copy] = useCopy();
+  const resolved = resolveLang(lang);
+  const [html, setHtml] = useState<string | null>(null);
+  useEffect(() => {
+    if (!resolved) return;
+    let alive = true;
+    highlight(code, lang).then((r) => {
+      if (alive && r.html) setHtml(r.html);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [code, lang, resolved]);
+
   return (
     <div className="group/code relative">
-      <pre ref={ref}>{children}</pre>
+      {html ? (
+        <div
+          className="shiki-host"
+          // Shiki emits its own <pre class="shiki …"> with line spans + dual-theme
+          // CSS variables. index.css overrides its inline bg with the canonical
+          // code surface and switches tokens to --shiki-dark under dark.
+          dangerouslySetInnerHTML={{ __html: html }}
+        />
+      ) : (
+        <pre>{code}</pre>
+      )}
+      {resolved && (
+        <span className="pointer-events-none absolute left-2.5 top-2 font-mono text-[10px] uppercase tracking-wider text-ink-faint/70">
+          {resolved}
+        </span>
+      )}
       <button
         type="button"
-        onClick={() => copy(ref.current?.textContent ?? "")}
+        onClick={() => copy(code)}
         aria-label={copied ? "Copied" : "Copy code"}
         title={copied ? "Copied" : "Copy code"}
         className="absolute right-2 top-2 grid size-7 place-items-center rounded-md bg-bg-elevated text-ink-faint opacity-0 ring-1 ring-border-subtle transition hover:text-ink group-hover/code:opacity-100"
@@ -78,7 +124,12 @@ export function Md({ children }: { children: string }) {
       remarkPlugins={[remarkGfm]}
       components={{
         a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noreferrer noopener" />,
-        pre: ({ node: _node, children }) => <CodeBlock>{children}</CodeBlock>,
+        pre: ({ node: _node, children }) => {
+          const parsed = codeFromPreChild(children);
+          if (parsed) return <CodeBlock lang={parsed.lang} code={parsed.code} />;
+          // Indented or non-fenced code — render plainly without highlighting.
+          return <pre>{children}</pre>;
+        },
       }}
     >
       {children}
