@@ -1,6 +1,8 @@
 import { memo, useEffect, useState, type ReactNode } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { Brain, ChevronRight, Copy, Check, Pencil } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
@@ -118,10 +120,13 @@ function CodeBlock({ lang, code }: { lang?: string; code: string }) {
   );
 }
 
-export function Md({ children }: { children: string }) {
+export function Md({ children, math = false }: { children: string; math?: boolean }) {
+  const remark = math ? [remarkGfm, remarkMath] : [remarkGfm];
+  const rehype = math ? [rehypeKatex] : [];
   return (
     <Markdown
-      remarkPlugins={[remarkGfm]}
+      remarkPlugins={remark}
+      rehypePlugins={rehype}
       components={{
         a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noreferrer noopener" />,
         pre: ({ node: _node, children }) => {

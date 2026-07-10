@@ -1,5 +1,6 @@
 @import "@fontsource-variable/dm-sans/wght.css";
 @import "@fontsource-variable/newsreader/wght.css";
+@import "katex/dist/katex.min.css";
 @import "tailwindcss";
 
 @font-face {
@@ -310,6 +311,12 @@ html.dark .shiki-inline span {
 .ansi-blue-bg { background-color: color-mix(in oklab, var(--color-info) 22%, transparent); }
 .ansi-magenta-bg { background-color: color-mix(in oklab, var(--color-accent) 22%, transparent); }
 .ansi-cyan-bg { background-color: color-mix(in oklab, var(--color-info) 22%, transparent); }
+
+/* Math (KaTeX via remark-math + rehype-katex). Inherit the surface's ink color
+   (KaTeX defaults to near-black, which is wrong on the dark canvas) and let
+   display math breathe. Scoped to where Md renders with `math`. */
+.katex { color: inherit; }
+.katex-display { margin: 0.5em 0; overflow-x: auto; overflow-y: hidden; padding: 0.5em 0; }
 
 /* Refined icon strokes: lucide defaults to 2, which reads heavy at the 14–16px
    sizes used throughout. 1.75 is crisper and more precise. */
