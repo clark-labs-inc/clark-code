@@ -136,6 +136,24 @@ html.dark {
   --shadow-lifted: 0 18px 56px rgba(0, 0, 0, 0.34);
 }
 
+/* Colorblind-friendly (daltonized) variant — layered on top of either light or
+   dark. The common red/green confusion (deuteranopia/protanopia) makes the
+   default success(green)/danger(red) pair indistinguishable; swap them for the
+   Okabe-Ito blue/orange pair, which stays distinct. Info (blue) shifts to a
+   bluish-green so it doesn't collide with the new success-blue. */
+html.colorblind {
+  --color-success: #0072b2; /* blue */
+  --color-danger: #e69f00;  /* orange */
+  --color-info: #56b4e9;    /* sky blue */
+  --color-warning: #d55e00; /* vermilion — distinct from orange danger */
+}
+html.colorblind.dark {
+  --color-success: #56b4e9; /* lighter blue on graphite */
+  --color-danger: #f0b86e;  /* lighter orange */
+  --color-info: #7fcfff;    /* lighter sky */
+  --color-warning: #e8a86a; /* lighter vermilion */
+}
+
 html,
 body,
 #root {

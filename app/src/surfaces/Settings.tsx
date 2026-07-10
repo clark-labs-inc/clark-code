@@ -89,7 +89,17 @@ function Toggle({ on, onClick, label }: { on: boolean; onClick: () => void; labe
 
 // --- General ---------------------------------------------------------------
 
-function GeneralSection({ dark, onToggleTheme }: { dark: boolean; onToggleTheme: () => void }) {
+function GeneralSection({
+  dark,
+  onToggleTheme,
+  colorblind,
+  onToggleColorblind,
+}: {
+  dark: boolean;
+  onToggleTheme: () => void;
+  colorblind: boolean;
+  onToggleColorblind: () => void;
+}) {
   const permissionMode = useSessionStore((s) => s.permissionMode);
   const setPermissionMode = useSessionStore((s) => s.setPermissionMode);
   const outputStyle = useSessionStore((s) => s.outputStyle);
@@ -122,6 +132,9 @@ function GeneralSection({ dark, onToggleTheme }: { dark: boolean; onToggleTheme:
               {themeBtn(false, Sun, "Light")}
               {themeBtn(true, Moon, "Dark")}
             </div>
+          </Row>
+          <Row name="Colorblind-friendly colors" sub="Blue/orange status instead of red/green">
+            <Toggle on={colorblind} onClick={onToggleColorblind} label="Toggle colorblind-friendly colors" />
           </Row>
         </Card>
       </div>
@@ -688,7 +701,17 @@ function AboutSection() {
 
 // --- Shell -----------------------------------------------------------------
 
-export function Settings({ dark, onToggleTheme }: { dark: boolean; onToggleTheme: () => void }) {
+export function Settings({
+  dark,
+  onToggleTheme,
+  colorblind,
+  onToggleColorblind,
+}: {
+  dark: boolean;
+  onToggleTheme: () => void;
+  colorblind: boolean;
+  onToggleColorblind: () => void;
+}) {
   const open = useSessionStore((s) => s.settingsOpen);
   const section = useSessionStore((s) => s.settingsSection);
   const setOpen = useSessionStore((s) => s.setSettingsOpen);
@@ -756,7 +779,14 @@ export function Settings({ dark, onToggleTheme }: { dark: boolean; onToggleTheme
               <h3 className="mb-4 text-sm font-semibold text-ink">
                 {SECTIONS.find((s) => s.id === section)?.label}
               </h3>
-              {section === "general" && <GeneralSection dark={dark} onToggleTheme={onToggleTheme} />}
+              {section === "general" && (
+                <GeneralSection
+                  dark={dark}
+                  onToggleTheme={onToggleTheme}
+                  colorblind={colorblind}
+                  onToggleColorblind={onToggleColorblind}
+                />
+              )}
               {section === "project" && <ProjectSection />}
               {section === "integrations" && <IntegrationsSection />}
               {section === "commands" && <CommandsSection />}

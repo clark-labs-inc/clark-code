@@ -1,10 +1,20 @@
 import { useCallback, useEffect, useState } from "react";
 
-/** Light (warm papyrus, default) ↔ dark (clarkDark), persisted. */
+/** Light (warm papyrus, default) ↔ dark (clarkDark), persisted. A colorblind
+ *  (daltonized) variant can be layered on top of either theme — it swaps the
+ *  red/green success/danger tokens for blue/orange so status is legible to
+ *  red-green colorblind users. */
 export function useTheme() {
   const [dark, setDark] = useState<boolean>(() => {
     try {
       return localStorage.getItem("clark.theme") === "dark";
+    } catch {
+      return false;
+    }
+  });
+  const [colorblind, setColorblind] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem("clark.colorblind") === "1";
     } catch {
       return false;
     }
@@ -22,6 +32,16 @@ export function useTheme() {
     }
   }, [dark]);
 
+  useEffect(() => {
+    document.documentElement.classList.toggle("colorblind", colorblind);
+    try {
+      localStorage.setItem("clark.colorblind", colorblind ? "1" : "0");
+    } catch {
+      /* ignore */
+    }
+  }, [colorblind]);
+
   const toggle = useCallback(() => setDark((d) => !d), []);
-  return { dark, toggle };
+  const toggleColorblind = useCallback(() => setColorblind((c) => !c), []);
+  return { dark, toggle, colorblind, toggleColorblind };
 }
