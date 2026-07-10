@@ -10,7 +10,7 @@
 use agent_core::domain::PendingUpload;
 use base64::Engine as _;
 use docx_rs::{DocumentChild, ParagraphChild, RunChild};
-use futures::{StreamExt, stream};
+use futures::{stream, StreamExt};
 use tokio_util::sync::CancellationToken;
 
 use crate::config::AgenticClarkConfig;
@@ -59,28 +59,24 @@ pub(crate) async fn process_attachments(
         }
         match sniff_doc_kind(att) {
             Some(kind) => documents.push((index, att.clone(), kind)),
-            None => ordered_blocks.push((
-                index,
-                unavailable_note(&att.filename, "binary attachment"),
-            )),
+            None => {
+                ordered_blocks.push((index, unavailable_note(&att.filename, "binary attachment")))
+            }
         }
     }
 
     // Document parsing is CPU-bound and image description is a network call.
     // Start every independent unit together so a turn with several documents
     // or mixed document/image input pays the slowest cost, not their sum.
-    let extract_documents = async {
-        stream::iter(
-            documents
-                .into_iter()
-                .map(|(index, att, kind)| async move {
-                    (index, extract_doc_text(att, kind).await)
-                }),
-        )
-        .buffer_unordered(MAX_CONCURRENT_DOC_EXTRACTIONS)
-        .collect::<Vec<_>>()
-        .await
-    };
+    let extract_documents =
+        async {
+            stream::iter(documents.into_iter().map(|(index, att, kind)| async move {
+                (index, extract_doc_text(att, kind).await)
+            }))
+            .buffer_unordered(MAX_CONCURRENT_DOC_EXTRACTIONS)
+            .collect::<Vec<_>>()
+            .await
+        };
     let describe_images = async {
         if images.is_empty() {
             String::new()
@@ -147,10 +143,7 @@ async fn extract_doc_text(att: PendingUpload, kind: DocKind) -> String {
         };
         match extract_bytes(&bytes, kind) {
             Ok(text) => inline_doc_block(&filename, label, &text),
-            Err(error) => unavailable_note(
-                &filename,
-                &format!("could not extract text ({error})"),
-            ),
+            Err(error) => unavailable_note(&filename, &format!("could not extract text ({error})")),
         }
     })
     .await

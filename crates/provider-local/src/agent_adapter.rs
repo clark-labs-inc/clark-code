@@ -199,7 +199,7 @@ impl ca::AgentTool for DesktopToolAdapter {
         call_id: &str,
         args: Value,
         signal: CancellationToken,
-        _update: ca::ToolUpdateSink,
+        update: ca::ToolUpdateSink,
     ) -> Result<ca::ToolResult, ca::ToolError> {
         let tool_id = ToolCallId::new(call_id.to_string());
 
@@ -261,7 +261,14 @@ impl ca::AgentTool for DesktopToolAdapter {
         }
 
         let update_plan_args = (self.exec.name() == "update_plan").then(|| args.clone());
-        let mut outcome = self.exec.invoke(args.clone(), &self.ctx).await;
+        // Hand the tool a live-progress sink: each reported delta rides the
+        // engine's update channel out as `ToolExecutionUpdate`, which the UI
+        // shows on the in-flight tool row (streamed shell output, grep progress).
+        let mut call_ctx = self.ctx.clone();
+        call_ctx.progress = Some(Arc::new(move |delta: String| {
+            let _ = update.send(ca::ToolResult::text(delta));
+        }));
+        let mut outcome = self.exec.invoke(args.clone(), &call_ctx).await;
         if !outcome.is_error {
             if let Some(raw) = update_plan_args {
                 if let Some(plan) = parse_update_plan(&raw) {
@@ -473,7 +480,10 @@ impl ca::EventSink for DesktopEventSink {
                                 desktop::ToolStatus::Completed
                             }),
                             locations: (!locations.is_empty()).then_some(locations),
-                            append_content: tool_result_blocks_to_content(&result.content),
+                            // Replace (not append): the final result supersedes
+                            // any streamed partials so progress lines don't
+                            // linger or duplicate the output.
+                            replace_content: Some(tool_result_blocks_to_content(&result.content)),
                             ..Default::default()
                         },
                     })

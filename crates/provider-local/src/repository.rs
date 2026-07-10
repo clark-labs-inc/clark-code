@@ -89,9 +89,13 @@ pub async fn inspect_repository(
     let shallow = git_optional(exec, &repo_root, "git rev-parse --is-shallow-repository")
         .await?
         .is_some_and(|value| value == "true");
-    let dirty = git_optional(exec, &repo_root, "git status --porcelain=v1 --untracked-files=no")
-        .await?
-        .is_some_and(|value| !value.is_empty());
+    let dirty = git_optional(
+        exec,
+        &repo_root,
+        "git status --porcelain=v1 --untracked-files=no",
+    )
+    .await?
+    .is_some_and(|value| !value.is_empty());
     let refs = git_optional(exec, &repo_root, "git show-ref --head")
         .await?
         .unwrap_or_default();
@@ -162,7 +166,7 @@ pub async fn discover_repositories(
             if let Some(repository_root) = git_path.parent() {
                 candidates.push(repository_root.to_path_buf());
             }
-            if candidates.len() >= MAX_DISCOVERED_REPOSITORIES + 1 {
+            if candidates.len() > MAX_DISCOVERED_REPOSITORIES {
                 break;
             }
         }
@@ -189,9 +193,12 @@ pub async fn discover_repositories(
 }
 
 async fn default_branch(exec: &dyn Executor, root: &Path) -> Result<Option<String>, String> {
-    if let Some(remote_head) =
-        git_optional(exec, root, "git symbolic-ref --quiet --short refs/remotes/origin/HEAD")
-            .await?
+    if let Some(remote_head) = git_optional(
+        exec,
+        root,
+        "git symbolic-ref --quiet --short refs/remotes/origin/HEAD",
+    )
+    .await?
     {
         return Ok(remote_head
             .strip_prefix("origin/")
@@ -235,7 +242,11 @@ async fn repository_remotes(
             canonical,
         });
     }
-    out.sort_by(|left, right| left.name.cmp(&right.name).then(left.canonical.cmp(&right.canonical)));
+    out.sort_by(|left, right| {
+        left.name
+            .cmp(&right.name)
+            .then(left.canonical.cmp(&right.canonical))
+    });
     out.dedup_by(|left, right| left.name == right.name && left.canonical == right.canonical);
     Ok(out)
 }
@@ -314,7 +325,9 @@ async fn git_optional(
     if output.code != Some(0) {
         return Ok(None);
     }
-    Ok(Some(String::from_utf8_lossy(&output.stdout).trim().to_string()))
+    Ok(Some(
+        String::from_utf8_lossy(&output.stdout).trim().to_string(),
+    ))
 }
 
 async fn git_required(exec: &dyn Executor, root: &Path, command: &str) -> Result<String, String> {
@@ -371,7 +384,11 @@ mod tests {
             .output()
             .await
             .unwrap();
-        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 
     #[tokio::test]
@@ -380,16 +397,25 @@ mod tests {
         git(dir.path(), "init").await;
         git(dir.path(), "config user.name Clark").await;
         git(dir.path(), "config user.email clark@example.com").await;
-        tokio::fs::write(dir.path().join("README.md"), "hello").await.unwrap();
+        tokio::fs::write(dir.path().join("README.md"), "hello")
+            .await
+            .unwrap();
         git(dir.path(), "add README.md").await;
         git(dir.path(), "commit -m initial").await;
-        git(dir.path(), "remote add origin git@github.com:Clark-Labs-Inc/Clark.git").await;
+        git(
+            dir.path(),
+            "remote add origin git@github.com:Clark-Labs-Inc/Clark.git",
+        )
+        .await;
 
         let identity = inspect_repository(&LocalExecutor, dir.path())
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(identity.canonical_remote.as_deref(), Some("github.com/clark-labs-inc/clark"));
+        assert_eq!(
+            identity.canonical_remote.as_deref(),
+            Some("github.com/clark-labs-inc/clark")
+        );
         assert!(identity.fingerprint.starts_with("git:"));
         assert_eq!(identity.commit_count, 1);
     }
@@ -433,7 +459,9 @@ mod tests {
             git(&root, "init").await;
             git(&root, "config user.name Clark").await;
             git(&root, "config user.email clark@example.com").await;
-            tokio::fs::write(root.join("README.md"), name).await.unwrap();
+            tokio::fs::write(root.join("README.md"), name)
+                .await
+                .unwrap();
             git(&root, "add README.md").await;
             git(&root, "commit -m initial").await;
         }

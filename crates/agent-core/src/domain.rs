@@ -122,6 +122,11 @@ pub struct ToolCallPatch {
     /// Content blocks to append (streaming tool output).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub append_content: Vec<ContentBlock>,
+    /// Replace the call's content wholesale — the final result superseding any
+    /// streamed partials, so progress lines don't linger (or duplicate the
+    /// result) once the call completes. Applied before `append_content`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replace_content: Option<Vec<ContentBlock>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

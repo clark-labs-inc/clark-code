@@ -5,6 +5,7 @@
 
 use agent_core::domain::ToolKind;
 use async_trait::async_trait;
+use futures::StreamExt;
 use grep_regex::RegexMatcher;
 use grep_searcher::{sinks, BinaryDetection, SearcherBuilder};
 use serde_json::{json, Value};
@@ -78,27 +79,58 @@ impl ToolExecutor for Grep {
         let mut truncated = false;
 
         // The executor yields files only, already skipping ignored dirs — on the
-        // local machine today, on the remote host once `RemoteExecutor` lands.
+        // local machine, or on the remote host for a remote project.
         let entries = match ctx.executor.walk(&base).await {
             Ok(e) => e,
             Err(e) => return ToolOutcome::error(e),
         };
 
-        'walk: for entry in &entries {
+        // Pre-filter by name/size so the read stage touches only candidates.
+        let candidates: Vec<_> = entries
+            .iter()
+            .filter(|entry| {
+                if entry.len > MAX_FILE_BYTES {
+                    return false;
+                }
+                match &name_filter {
+                    Some(filter) => entry
+                        .path
+                        .file_name()
+                        .map(|n| filter.matches(&n.to_string_lossy()))
+                        .unwrap_or(false),
+                    None => true,
+                }
+            })
+            .collect();
+        let candidate_count = candidates.len();
+
+        // Read files concurrently. For a remote project each read is a network
+        // round-trip over the SSH tunnel — awaiting them one at a time made a
+        // big search take N × RTT with zero UI progress ("working… then burst").
+        // In-flight reads overlap; results are still processed in walk order.
+        let read_concurrency = if ctx.executor.is_local() { 8 } else { 32 };
+        let read_futures: Vec<_> = candidates
+            .into_iter()
+            .map(|entry| {
+                let executor = ctx.executor.clone();
+                async move { (entry, executor.read(&entry.path).await) }
+            })
+            .collect();
+        let mut reads = futures::stream::iter(read_futures).buffered(read_concurrency);
+
+        let mut scanned = 0usize;
+        'walk: while let Some((entry, read)) = reads.next().await {
             if ctx.cancel.is_cancelled() {
                 break;
             }
+            scanned += 1;
+            if scanned % 64 == 0 {
+                ctx.report(format!(
+                    "searched {scanned}/{candidate_count} files · {total} matches\n"
+                ));
+            }
             let path = entry.path.as_path();
-            if let Some(filter) = &name_filter {
-                let name = path.file_name().map(|n| n.to_string_lossy().to_string());
-                if !name.map(|n| filter.matches(&n)).unwrap_or(false) {
-                    continue;
-                }
-            }
-            if entry.len > MAX_FILE_BYTES {
-                continue;
-            }
-            let Ok(bytes) = ctx.executor.read(path).await else {
+            let Ok(bytes) = read else {
                 continue; // unreadable
             };
             // Ripgrep's own binary-file heuristic: a NUL byte in the first few
@@ -183,6 +215,7 @@ mod tests {
             session: Arc::new(tokio::sync::Mutex::new(
                 crate::loop_state::SessionState::default(),
             )),
+            progress: None,
         }
     }
 

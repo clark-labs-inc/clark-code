@@ -56,6 +56,10 @@ pub struct ExecOutput {
     pub code: Option<i32>,
 }
 
+/// Incremental output callback for [`Executor::exec_streaming`]:
+/// `(is_stderr, chunk_bytes)`, invoked as the process writes.
+pub type OnOutput<'a> = &'a (dyn Fn(bool, &[u8]) + Send + Sync);
+
 /// Directories never worth walking — keeps `glob`/`grep`/file-listing fast and
 /// out of build artifacts and vendored deps. Shared by every walk so local and
 /// remote agree on what's in scope.
@@ -100,6 +104,21 @@ pub trait Executor: Send + Sync {
         timeout: Duration,
         cancel: &CancellationToken,
     ) -> ExecResult<ExecOutput>;
+
+    /// Like [`exec`](Executor::exec), but also surfaces stdout/stderr chunks
+    /// through `on_output` as the process produces them, so long commands can
+    /// show live progress. The default just runs `exec` (correct, not live);
+    /// executors that can stream override it.
+    async fn exec_streaming(
+        &self,
+        command: &str,
+        cwd: &Path,
+        timeout: Duration,
+        cancel: &CancellationToken,
+        _on_output: OnOutput<'_>,
+    ) -> ExecResult<ExecOutput> {
+        self.exec(command, cwd, timeout, cancel).await
+    }
 
     /// Whether this executor runs on the same machine as the caller. Local
     /// tools that need to spawn a process directly (not through `exec()`) —
@@ -195,6 +214,20 @@ impl Executor for LocalExecutor {
         timeout: Duration,
         cancel: &CancellationToken,
     ) -> ExecResult<ExecOutput> {
+        self.exec_streaming(command, cwd, timeout, cancel, &|_, _| {})
+            .await
+    }
+
+    async fn exec_streaming(
+        &self,
+        command: &str,
+        cwd: &Path,
+        timeout: Duration,
+        cancel: &CancellationToken,
+        on_output: OnOutput<'_>,
+    ) -> ExecResult<ExecOutput> {
+        use tokio::io::AsyncReadExt;
+
         let mut cmd = tokio::process::Command::new("/bin/sh");
         cmd.arg("-c")
             .arg(command)
@@ -202,26 +235,71 @@ impl Executor for LocalExecutor {
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        let child = cmd
+        let mut child = cmd
             .spawn()
             .map_err(|e| format!("failed to spawn shell: {e}"))?;
 
-        let wait = child.wait_with_output();
-        let output = tokio::select! {
-            _ = cancel.cancelled() => return Err("command cancelled".into()),
-            res = tokio::time::timeout(timeout, wait) => res,
-        };
-        match output {
-            Ok(Ok(out)) => Ok(ExecOutput {
-                stdout: out.stdout,
-                stderr: out.stderr,
-                code: out.status.code(),
-            }),
-            Ok(Err(e)) => Err(format!("command failed: {e}")),
-            Err(_) => Err(format!(
-                "command timed out after {} ms",
-                timeout.as_millis()
-            )),
+        // Pipe readers run as tasks feeding one channel, so both pipes drain
+        // concurrently (no deadlock on a full pipe) while this future observes
+        // every chunk in arrival order.
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(bool, Vec<u8>)>();
+        if let Some(mut pipe) = child.stdout.take() {
+            let tx = tx.clone();
+            tokio::spawn(async move {
+                let mut buf = [0u8; 8192];
+                while let Ok(n) = pipe.read(&mut buf).await {
+                    if n == 0 || tx.send((false, buf[..n].to_vec())).is_err() {
+                        break;
+                    }
+                }
+            });
+        }
+        if let Some(mut pipe) = child.stderr.take() {
+            let tx = tx.clone();
+            tokio::spawn(async move {
+                let mut buf = [0u8; 8192];
+                while let Ok(n) = pipe.read(&mut buf).await {
+                    if n == 0 || tx.send((true, buf[..n].to_vec())).is_err() {
+                        break;
+                    }
+                }
+            });
+        }
+        drop(tx);
+
+        let deadline = tokio::time::sleep(timeout);
+        tokio::pin!(deadline);
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let mut pipes_open = true;
+        loop {
+            tokio::select! {
+                _ = cancel.cancelled() => {
+                    let _ = child.kill().await;
+                    return Err("command cancelled".into());
+                }
+                _ = &mut deadline => {
+                    let _ = child.kill().await;
+                    return Err(format!("command timed out after {} ms", timeout.as_millis()));
+                }
+                chunk = rx.recv(), if pipes_open => match chunk {
+                    Some((is_stderr, bytes)) => {
+                        on_output(is_stderr, &bytes);
+                        if is_stderr {
+                            stderr.extend_from_slice(&bytes);
+                        } else {
+                            stdout.extend_from_slice(&bytes);
+                        }
+                    }
+                    None => pipes_open = false,
+                },
+                status = child.wait(), if !pipes_open => {
+                    return match status {
+                        Ok(status) => Ok(ExecOutput { stdout, stderr, code: status.code() }),
+                        Err(e) => Err(format!("command failed: {e}")),
+                    };
+                }
+            }
         }
     }
 }
@@ -229,6 +307,71 @@ impl Executor for LocalExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn exec_streaming_surfaces_chunks_and_captures_output() {
+        let dir = tempfile::tempdir().unwrap();
+        let exec = LocalExecutor;
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::<(bool, Vec<u8>)>::new()));
+        let sink = seen.clone();
+        let out = exec
+            .exec_streaming(
+                "printf out; printf err 1>&2",
+                dir.path(),
+                Duration::from_secs(10),
+                &CancellationToken::new(),
+                &move |is_stderr, chunk| sink.lock().unwrap().push((is_stderr, chunk.to_vec())),
+            )
+            .await
+            .unwrap();
+        assert_eq!(out.stdout, b"out");
+        assert_eq!(out.stderr, b"err");
+        assert_eq!(out.code, Some(0));
+        let seen = seen.lock().unwrap();
+        let stdout_stream: Vec<u8> = seen
+            .iter()
+            .filter(|(e, _)| !*e)
+            .flat_map(|(_, c)| c.clone())
+            .collect();
+        let stderr_stream: Vec<u8> = seen
+            .iter()
+            .filter(|(e, _)| *e)
+            .flat_map(|(_, c)| c.clone())
+            .collect();
+        assert_eq!(stdout_stream, b"out");
+        assert_eq!(stderr_stream, b"err");
+    }
+
+    #[tokio::test]
+    async fn exec_streaming_still_honors_timeout_and_cancel() {
+        let dir = tempfile::tempdir().unwrap();
+        let exec = LocalExecutor;
+        let err = exec
+            .exec_streaming(
+                "sleep 5",
+                dir.path(),
+                Duration::from_millis(50),
+                &CancellationToken::new(),
+                &|_, _| {},
+            )
+            .await
+            .unwrap_err();
+        assert!(err.contains("timed out"), "{err}");
+
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+        let err = exec
+            .exec_streaming(
+                "sleep 5",
+                dir.path(),
+                Duration::from_secs(10),
+                &cancel,
+                &|_, _| {},
+            )
+            .await
+            .unwrap_err();
+        assert!(err.contains("cancelled"), "{err}");
+    }
 
     #[tokio::test]
     async fn local_read_write_roundtrip() {

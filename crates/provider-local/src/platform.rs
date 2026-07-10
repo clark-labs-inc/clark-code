@@ -105,7 +105,7 @@ pub fn scope_personal_memories(
             repository_tags.is_empty()
                 || expected
                     .as_ref()
-                    .is_some_and(|tag| repository_tags.iter().any(|candidate| *candidate == tag))
+                    .is_some_and(|tag| repository_tags.contains(&tag))
         })
         .collect()
 }
@@ -120,7 +120,9 @@ pub async fn recall_repository_context(
     url.path_segments_mut()
         .map_err(|_| "Clark Platform URL cannot be a base URL".to_string())?
         .extend(["code", "repositories", fingerprint, "context"]);
-    url.query_pairs_mut().append_pair("q", query).append_pair("limit", "8");
+    url.query_pairs_mut()
+        .append_pair("q", query)
+        .append_pair("limit", "8");
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(4))
         .build()
@@ -132,7 +134,10 @@ pub async fn recall_repository_context(
         .await
         .map_err(|error| error.to_string())?;
     if !response.status().is_success() {
-        return Err(format!("repository context request returned {}", response.status()));
+        return Err(format!(
+            "repository context request returned {}",
+            response.status()
+        ));
     }
     response.json().await.map_err(|error| error.to_string())
 }
@@ -226,7 +231,10 @@ mod tests {
         );
 
         assert_eq!(
-            scoped.iter().map(|item| item.content.as_str()).collect::<Vec<_>>(),
+            scoped
+                .iter()
+                .map(|item| item.content.as_str())
+                .collect::<Vec<_>>(),
             vec!["global", "current"]
         );
     }

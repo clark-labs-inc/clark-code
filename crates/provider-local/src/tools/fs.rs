@@ -458,6 +458,7 @@ mod tests {
             session: Arc::new(tokio::sync::Mutex::new(
                 crate::loop_state::SessionState::default(),
             )),
+            progress: None,
         }
     }
 

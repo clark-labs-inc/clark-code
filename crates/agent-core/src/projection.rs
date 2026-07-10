@@ -151,6 +151,9 @@ pub fn apply(snapshot: &mut Snapshot, event: &AgentEvent) {
                 if let Some(loc) = &patch.locations {
                     tc.locations = loc.clone();
                 }
+                if let Some(content) = &patch.replace_content {
+                    tc.content = content.clone();
+                }
                 tc.content.extend(patch.append_content.iter().cloned());
             }
             // A status change on a gated tool means its permission prompt was
@@ -381,6 +384,49 @@ mod tests {
         let tc = &snap.tool_calls[&id];
         assert_eq!(tc.status, ToolStatus::Completed);
         assert_eq!(tc.content, vec![ContentBlock::text("file contents")]);
+    }
+
+    #[test]
+    fn replace_content_supersedes_streamed_partials() {
+        let id = ToolCallId::new("t1");
+        let events = vec![
+            AgentEvent::ToolCall {
+                run: run(),
+                call: ToolCall {
+                    id: id.clone(),
+                    title: "bash: make build".into(),
+                    kind: ToolKind::Execute,
+                    status: ToolStatus::Pending,
+                    locations: vec![],
+                    content: vec![],
+                    raw_input: None,
+                },
+            },
+            // Live output streamed while the command runs…
+            AgentEvent::ToolCallUpdate {
+                run: run(),
+                id: id.clone(),
+                patch: ToolCallPatch {
+                    status: Some(ToolStatus::InProgress),
+                    append_content: vec![ContentBlock::text("compiling…\n")],
+                    ..Default::default()
+                },
+            },
+            // …then the final result replaces the partials wholesale.
+            AgentEvent::ToolCallUpdate {
+                run: run(),
+                id: id.clone(),
+                patch: ToolCallPatch {
+                    status: Some(ToolStatus::Completed),
+                    replace_content: Some(vec![ContentBlock::text("exit_code: 0")]),
+                    ..Default::default()
+                },
+            },
+        ];
+        let snap = reduce_all(&events);
+        let tc = &snap.tool_calls[&id];
+        assert_eq!(tc.status, ToolStatus::Completed);
+        assert_eq!(tc.content, vec![ContentBlock::text("exit_code: 0")]);
     }
 
     #[test]

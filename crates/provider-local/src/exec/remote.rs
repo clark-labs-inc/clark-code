@@ -288,6 +288,21 @@ impl Executor for RemoteExecutor {
         timeout: Duration,
         cancel: &CancellationToken,
     ) -> ExecResult<ExecOutput> {
+        self.exec_streaming(command, cwd, timeout, cancel, &|_, _| {})
+            .await
+    }
+
+    /// The server already streams `process/output` notifications as the command
+    /// runs — forward each chunk to `on_output` instead of only accumulating,
+    /// so the UI can show live output over the tunnel.
+    async fn exec_streaming(
+        &self,
+        command: &str,
+        cwd: &Path,
+        timeout: Duration,
+        cancel: &CancellationToken,
+        on_output: exec_core::OnOutput<'_>,
+    ) -> ExecResult<ExecOutput> {
         let process_id = uuid::Uuid::new_v4().to_string();
         let (etx, mut erx) = mpsc::unbounded_channel::<ProcEvent>();
         self.conn
@@ -332,8 +347,14 @@ impl Executor for RemoteExecutor {
                     Some(ProcEvent::Output(p)) => {
                         let bytes = b64_decode(&p.data).unwrap_or_default();
                         match p.stream {
-                            Stream::Stdout => stdout.extend_from_slice(&bytes),
-                            Stream::Stderr => stderr.extend_from_slice(&bytes),
+                            Stream::Stdout => {
+                                on_output(false, &bytes);
+                                stdout.extend_from_slice(&bytes);
+                            }
+                            Stream::Stderr => {
+                                on_output(true, &bytes);
+                                stderr.extend_from_slice(&bytes);
+                            }
                         }
                     }
                     Some(ProcEvent::Exit(p)) => {

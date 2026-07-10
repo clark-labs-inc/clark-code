@@ -61,8 +61,8 @@ pub use memory::{
 };
 pub use platform::{
     personal_memory_section, recall_personal_memories, recall_repository_context,
-    repository_context_section, scope_personal_memories, PersonalMemory,
-    RepositoryCommitContext, RepositoryContext,
+    repository_context_section, scope_personal_memories, PersonalMemory, RepositoryCommitContext,
+    RepositoryContext,
 };
 pub use provider::LocalAgentProvider;
 pub use repository::{

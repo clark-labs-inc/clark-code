@@ -370,6 +370,9 @@ impl Provider for LocalAgentProvider {
                 executor: self.executor.clone(),
                 background: self.background.clone(),
                 session: self.session.clone(),
+                // Filled in per tool call by `DesktopToolAdapter::execute`,
+                // which owns the call's update sink.
+                progress: None,
             },
             session: self.session.clone(),
             control: self.control.clone(),

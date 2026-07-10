@@ -112,9 +112,24 @@ pub struct ToolCtx {
     /// stored baseline from here. `tokio::sync::Mutex` (not the `std` one
     /// aliased above for `ReadTracker`) since it's held across `.await` points.
     pub session: Arc<tokio::sync::Mutex<crate::loop_state::SessionState>>,
+    /// Per-call live-progress sink: long tools (shell, grep) push text deltas
+    /// here and they stream to the UI's tool row while the call runs. `None`
+    /// outside a run (tests, session-setup helpers).
+    pub progress: Option<ProgressFn>,
 }
 
+/// A tool's live-progress callback — each call appends a text delta to the
+/// in-flight tool call in the UI.
+pub type ProgressFn = Arc<dyn Fn(String) + Send + Sync>;
+
 impl ToolCtx {
+    /// Stream a live-progress text delta to the UI for the in-flight call.
+    pub(crate) fn report(&self, delta: impl Into<String>) {
+        if let Some(progress) = &self.progress {
+            progress(delta.into());
+        }
+    }
+
     /// Record a successful read of `path` (canonical) at its current mtime.
     /// mtime comes from the executor, so the invariant holds for remote files too.
     pub(crate) async fn note_read(&self, path: &Path) {

@@ -73,14 +73,16 @@ impl ToolExecutor for Bash {
             .min(MAX_TIMEOUT_MS);
 
         // Runs on the local machine, or on the remote host for a remote project —
-        // the executor decides. `cwd` is the project root either way.
+        // the executor decides. `cwd` is the project root either way. Output
+        // chunks stream to the UI's tool row as the command produces them.
         let output = match ctx
             .executor
-            .exec(
+            .exec_streaming(
                 &command,
                 ctx.sandbox.root(),
                 Duration::from_millis(timeout_ms),
                 &ctx.cancel,
+                &|_is_stderr, chunk| ctx.report(String::from_utf8_lossy(chunk).into_owned()),
             )
             .await
         {
@@ -232,7 +234,29 @@ mod tests {
             session: Arc::new(tokio::sync::Mutex::new(
                 crate::loop_state::SessionState::default(),
             )),
+            progress: None,
         }
+    }
+
+    #[tokio::test]
+    async fn streams_progress_deltas_while_running() {
+        let dir = tempfile::tempdir().unwrap();
+        let deltas = Arc::new(Mutex::new(Vec::<String>::new()));
+        let sink = deltas.clone();
+        let mut ctx = ctx(dir.path());
+        ctx.progress = Some(Arc::new(move |d: String| sink.lock().unwrap().push(d)));
+        let out = Bash
+            .invoke(
+                json!({"command": "printf first; sleep 0.05; printf second"}),
+                &ctx,
+            )
+            .await;
+        assert!(!out.is_error, "{}", out.content);
+        let streamed = deltas.lock().unwrap().join("");
+        assert!(streamed.contains("first"), "streamed: {streamed:?}");
+        assert!(streamed.contains("second"), "streamed: {streamed:?}");
+        // The sleep between writes forces at least two separate chunks.
+        assert!(deltas.lock().unwrap().len() >= 2);
     }
 
     #[tokio::test]

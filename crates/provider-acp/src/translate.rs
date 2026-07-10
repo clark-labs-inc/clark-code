@@ -189,6 +189,7 @@ fn tool_call_patch(v: &Value) -> ToolCallPatch {
         status: v.get("status").map(|st| tool_status(st.as_str())),
         locations: v.get("locations").map(|l| locations(Some(l))),
         append_content: tool_content(v.get("content")),
+        replace_content: None,
     }
 }
 
