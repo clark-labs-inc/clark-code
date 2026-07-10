@@ -40,7 +40,7 @@ export function CreditBanner() {
       </span>
       <button
         onClick={() => void openExternal(clarkBillingUrl())}
-        className="flex shrink-0 items-center gap-1 rounded-md bg-ink px-2.5 py-1 text-xs font-semibold text-bg transition hover:bg-accent-hover"
+        className="flex min-h-8 shrink-0 items-center gap-1 rounded-lg bg-accent px-2.5 py-1 text-xs font-semibold text-on-accent transition duration-200 ease-clark hover:bg-accent-hover"
       >
         Add credits
         <ArrowUpRight className="size-3.5" />

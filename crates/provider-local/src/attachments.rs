@@ -10,6 +10,7 @@
 use agent_core::domain::PendingUpload;
 use base64::Engine as _;
 use docx_rs::{DocumentChild, ParagraphChild, RunChild};
+use futures::{StreamExt, stream};
 use tokio_util::sync::CancellationToken;
 
 use crate::config::AgenticClarkConfig;
@@ -20,6 +21,7 @@ use crate::llm::LlmClient;
 /// `DEFAULT_COMPACT_RECENT_USER_TOKEN_BUDGET` — generous for a long spec/report
 /// while staying a small fraction of the auto-compact token budgets.
 const MAX_EXTRACTED_DOC_CHARS: usize = 80_000;
+const MAX_CONCURRENT_DOC_EXTRACTIONS: usize = 4;
 
 const VISION_SYSTEM_PROMPT: &str = "You are helping a coding agent that cannot see images itself. \
 Describe each attached image thoroughly and precisely: transcribe ALL visible text verbatim \
@@ -27,6 +29,7 @@ Describe each attached image thoroughly and precisely: transcribe ALL visible te
 layout and relevant colors/icons, and note anything actionable. If there are multiple images, \
 address them in order (Image 1, Image 2, ...). Do not speculate about content outside the image.";
 
+#[derive(Clone, Copy)]
 enum DocKind {
     Pdf,
     Docx,
@@ -42,10 +45,11 @@ pub(crate) async fn process_attachments(
     vision: Option<&AgenticClarkConfig>,
     cancel: &CancellationToken,
 ) -> String {
-    let mut out = String::new();
+    let mut ordered_blocks = Vec::new();
+    let mut documents = Vec::new();
     let mut images = Vec::new();
 
-    for att in attachments {
+    for (index, att) in attachments.iter().enumerate() {
         if att.is_text() {
             continue; // already inlined by `prompt_text`.
         }
@@ -54,14 +58,46 @@ pub(crate) async fn process_attachments(
             continue;
         }
         match sniff_doc_kind(att) {
-            Some(kind) => out.push_str(&extract_doc_text(att, kind).await),
-            None => out.push_str(&unavailable_note(&att.filename, "binary attachment")),
+            Some(kind) => documents.push((index, att.clone(), kind)),
+            None => ordered_blocks.push((
+                index,
+                unavailable_note(&att.filename, "binary attachment"),
+            )),
         }
     }
 
-    if !images.is_empty() {
-        out.push_str(&describe_images_block(&images, user_text, vision, cancel).await);
+    // Document parsing is CPU-bound and image description is a network call.
+    // Start every independent unit together so a turn with several documents
+    // or mixed document/image input pays the slowest cost, not their sum.
+    let extract_documents = async {
+        stream::iter(
+            documents
+                .into_iter()
+                .map(|(index, att, kind)| async move {
+                    (index, extract_doc_text(att, kind).await)
+                }),
+        )
+        .buffer_unordered(MAX_CONCURRENT_DOC_EXTRACTIONS)
+        .collect::<Vec<_>>()
+        .await
+    };
+    let describe_images = async {
+        if images.is_empty() {
+            String::new()
+        } else {
+            describe_images_block(&images, user_text, vision, cancel).await
+        }
+    };
+    let (document_blocks, image_block) = tokio::join!(extract_documents, describe_images);
+
+    ordered_blocks.extend(document_blocks);
+    ordered_blocks.sort_by_key(|(index, _)| *index);
+
+    let mut out = String::new();
+    for (_, block) in ordered_blocks {
+        out.push_str(&block);
     }
+    out.push_str(&image_block);
 
     out
 }
@@ -93,19 +129,34 @@ fn sniff_doc_kind(att: &PendingUpload) -> Option<DocKind> {
 /// 12MB attachment cap — matches the `spawn_blocking` precedent at
 /// `engine.rs`'s git-checkpoint step; a panicking parse surfaces as a
 /// `JoinError` here instead of taking down the run).
-async fn extract_doc_text(att: &PendingUpload, kind: DocKind) -> String {
+async fn extract_doc_text(att: PendingUpload, kind: DocKind) -> String {
     let label = match kind {
         DocKind::Pdf => "PDF",
         DocKind::Docx => "DOCX",
     };
-    let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(&att.data_base64) else {
-        return unavailable_note(&att.filename, "corrupt attachment data");
-    };
+    let filename = att.filename;
+    let failure_filename = filename.clone();
+    let data_base64 = att.data_base64;
 
-    match tokio::task::spawn_blocking(move || extract_bytes(&bytes, kind)).await {
-        Ok(Ok(text)) => inline_doc_block(&att.filename, label, &text),
-        Ok(Err(e)) => unavailable_note(&att.filename, &format!("could not extract text ({e})")),
-        Err(_) => unavailable_note(&att.filename, "text extraction crashed"),
+    // Base64 decoding is also proportional to attachment size, so keep it in
+    // the same blocking task as the synchronous PDF/DOCX parser rather than
+    // stalling an async runtime thread before `spawn_blocking` begins.
+    match tokio::task::spawn_blocking(move || {
+        let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(data_base64) else {
+            return unavailable_note(&filename, "corrupt attachment data");
+        };
+        match extract_bytes(&bytes, kind) {
+            Ok(text) => inline_doc_block(&filename, label, &text),
+            Err(error) => unavailable_note(
+                &filename,
+                &format!("could not extract text ({error})"),
+            ),
+        }
+    })
+    .await
+    {
+        Ok(block) => block,
+        Err(_) => unavailable_note(&failure_filename, "text extraction crashed"),
     }
 }
 
@@ -304,5 +355,27 @@ mod tests {
 
         let text = extract_docx_text(cursor.get_ref()).expect("extract docx text");
         assert!(text.contains("hello from docx"));
+    }
+
+    #[tokio::test]
+    async fn concurrent_document_processing_preserves_attachment_order() {
+        let attachments = vec![
+            upload("first.pdf", "application/pdf", "not-base64"),
+            upload("second.bin", "application/octet-stream", ""),
+            upload("third.docx", "application/zip", "also-not-base64"),
+        ];
+
+        let output = process_attachments(
+            &attachments,
+            "summarize these",
+            None,
+            &CancellationToken::new(),
+        )
+        .await;
+
+        let first = output.find("first.pdf").expect("first attachment");
+        let second = output.find("second.bin").expect("second attachment");
+        let third = output.find("third.docx").expect("third attachment");
+        assert!(first < second && second < third);
     }
 }

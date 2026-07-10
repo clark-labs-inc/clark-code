@@ -83,7 +83,7 @@ function JustUpdatedToast() {
           <button
             onClick={dismiss}
             aria-label="Dismiss"
-            className="grid size-6 place-items-center rounded-md text-ink-faint transition hover:bg-bg-hover hover:text-ink"
+            className="grid size-8 place-items-center rounded-md text-ink-faint transition hover:bg-bg-hover hover:text-ink"
           >
             <X className="size-3.5" />
           </button>

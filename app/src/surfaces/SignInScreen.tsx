@@ -137,7 +137,7 @@ export function SignInScreen() {
           <button
             onClick={() => void go()}
             disabled={busy}
-            className="flex w-full items-center justify-center gap-3 rounded-xl bg-ink px-4 py-3 text-sm font-semibold text-bg transition hover:bg-accent-hover disabled:opacity-60"
+            className="flex min-h-11 w-full items-center justify-center gap-3 rounded-xl bg-accent px-4 py-3 text-sm font-semibold text-on-accent shadow-soft transition duration-200 ease-clark hover:-translate-y-0.5 hover:bg-accent-hover active:translate-y-0 disabled:translate-y-0 disabled:opacity-60"
           >
             {busy ? (
               <Loader2 className="size-4 animate-[spin_1s_linear_infinite]" />

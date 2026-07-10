@@ -225,7 +225,8 @@ function MessageImpl({
     <motion.div
       initial={reduce ? false : { opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.2, ease: [0.4, 0, 0.2, 1] }}
+      transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+      className={streaming ? undefined : "[content-visibility:auto] [contain-intrinsic-size:auto_6rem]"}
     >
       {role === "agent" && !streaming && body.trim() ? (
         <div className="group/msg relative">

@@ -18,7 +18,6 @@ import { listCustomCommands } from "../lib/customCommands";
 import { fuzzyFilter, fuzzyFilterFiles } from "../lib/fuzzy";
 import { cn } from "../lib/cn";
 import { EnvironmentPicker } from "./EnvironmentPicker";
-
 /** What the user is mid-typing at the caret: an `@file` mention (anywhere) or a
  *  `/command` (only at the very start of the message). */
 interface Trigger {
@@ -97,8 +96,9 @@ function PermissionPill() {
         aria-expanded={open}
         title="How Clark's actions are approved (Shift+Tab to cycle)"
         className={cn(
-          "flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-medium transition hover:bg-bg-hover",
-          mode === "full" ? "text-warning" : mode === "plan" ? "text-accent" : "text-ink-secondary",
+          "flex min-h-8 items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-medium transition duration-200 ease-clark hover:bg-accent-subtle",
+          mode === "full" ? "text-warning" :
+            mode === "plan" ? "bg-accent-subtle text-accent" : "text-ink-secondary",
         )}
       >
         <Icon className="size-3.5" />
@@ -111,7 +111,7 @@ function PermissionPill() {
       {open && (
         <div
           role="menu"
-          className="popover-surface absolute bottom-full left-0 z-30 mb-2 w-72 rounded-xl bg-bg-elevated p-1 shadow-lg ring-1 ring-border-subtle"
+          className="popover-surface absolute bottom-full left-0 z-30 mb-2 w-72 rounded-2xl bg-bg-elevated p-1.5 shadow-lifted ring-1 ring-border-subtle"
         >
           <div className="px-2.5 py-1.5 text-xs font-medium uppercase tracking-wide text-ink-faint">
             How should Clark act?
@@ -128,7 +128,7 @@ function PermissionPill() {
                     setMode(m.id);
                     setOpen(false);
                   }}
-                  className="flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 text-left transition hover:bg-bg-hover"
+                  className={cn("flex w-full items-start gap-2.5 rounded-xl px-2.5 py-2.5 text-left transition duration-200 ease-clark hover:bg-accent-subtle", m.id === mode && "bg-accent-subtle")}
                 >
                   <I className={cn("mt-0.5 size-4 shrink-0", m.id === "full" ? "text-warning" : m.id === "plan" ? "text-accent" : "text-ink-muted")} />
                   <span className="min-w-0 flex-1">
@@ -232,7 +232,7 @@ function ModelPill() {
         aria-haspopup="menu"
         aria-expanded={open}
         title="Model & reasoning effort"
-        className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-medium text-ink-secondary transition hover:bg-bg-hover"
+        className="flex min-h-8 items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-medium text-ink-secondary transition duration-200 ease-clark hover:bg-accent-subtle hover:text-accent"
       >
         {modelLabel(model)}
         {effort && effortLabel && <span className="text-ink-faint">· {effortLabel}</span>}
@@ -243,7 +243,7 @@ function ModelPill() {
       {open && (
         <div
           role="menu"
-          className="popover-surface absolute bottom-full right-0 z-30 mb-2 w-72 rounded-xl bg-bg-elevated p-1 shadow-lg ring-1 ring-border-subtle"
+          className="popover-surface absolute bottom-full right-0 z-30 mb-2 w-72 rounded-2xl bg-bg-elevated p-1.5 shadow-lifted ring-1 ring-border-subtle"
         >
           <div className="px-2.5 py-1.5 text-xs font-medium uppercase tracking-wide text-ink-faint">
             Model
@@ -258,7 +258,7 @@ function ModelPill() {
                 void update({ model: m.id });
                 setOpen(false);
               }}
-              className="flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 text-left transition hover:bg-bg-hover"
+              className={cn("flex w-full items-start gap-2.5 rounded-xl px-2.5 py-2.5 text-left transition duration-200 ease-clark hover:bg-accent-subtle", m.id === model && "bg-accent-subtle")}
             >
               <span className="min-w-0 flex-1">
                 <span className="block text-sm text-ink">{m.label}</span>
@@ -282,7 +282,7 @@ function ModelPill() {
                 aria-checked={e.id === effort}
                 onClick={() => void update({ reasoningEffort: e.id })}
                 className={cn(
-                  "flex-1 rounded-md px-1 py-1 text-xs font-medium transition",
+                  "min-h-8 flex-1 rounded-lg px-1 py-1 text-xs font-medium transition duration-200 ease-clark",
                   e.id === effort
                     ? "bg-accent text-on-accent"
                     : "bg-bg-tertiary text-ink-secondary hover:bg-bg-hover",
@@ -313,11 +313,11 @@ function AttachmentChips() {
           <motion.div
             key={a.id}
             layout
-            initial={{ opacity: 0, scale: 0.9 }}
+            initial={{ opacity: 0, scale: 0.96, y: 3 }}
             animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.9 }}
-            transition={{ duration: 0.15 }}
-            className="group relative flex items-center gap-2 rounded-lg bg-bg-tertiary py-1 pl-1 pr-2"
+            exit={{ opacity: 0, scale: 0.96, y: 2 }}
+            transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+            className="group relative flex items-center gap-2 rounded-xl bg-bg-tertiary py-1 pl-1 pr-2"
           >
             {a.previewUrl ? (
               <img src={a.previewUrl} alt="" className="size-8 rounded-md object-cover" />
@@ -362,8 +362,8 @@ function QueuedMessages({ onEdit }: { onEdit: (q: QueuedMessage) => void }) {
               initial={{ opacity: 0, height: 0 }}
               animate={{ opacity: 1, height: "auto" }}
               exit={{ opacity: 0, height: 0 }}
-              transition={{ duration: 0.16, ease: [0.4, 0, 0.2, 1] }}
-              className="group flex items-center gap-2 overflow-hidden rounded-lg bg-bg-secondary py-1.5 pl-2.5 pr-1.5"
+              transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+              className="group flex items-center gap-2 overflow-hidden rounded-xl bg-accent-subtle py-2 pl-3 pr-2"
             >
               <CornerDownRight className="size-3.5 shrink-0 text-ink-faint" />
               <span className="min-w-0 flex-1 truncate text-xs text-ink-secondary">
@@ -410,8 +410,8 @@ function AutocompletePopover({
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      transition={{ duration: 0.1 }}
-      className="popover-surface absolute bottom-full left-0 z-30 mb-2 max-h-64 w-80 overflow-y-auto rounded-xl bg-bg-elevated p-1 shadow-lg ring-1 ring-border-subtle"
+      transition={{ duration: 0.12 }}
+      className="popover-surface absolute bottom-full left-0 z-30 mb-2 max-h-64 w-80 overflow-y-auto rounded-2xl bg-bg-elevated p-1.5 shadow-lifted ring-1 ring-border-subtle"
     >
       {suggestions.map((s, i) => {
         const key = s.kind === "file" ? s.path : `/${s.cmd.name}`;
@@ -426,8 +426,8 @@ function AutocompletePopover({
             }}
             onMouseMove={() => onHover(i)}
             className={cn(
-              "flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-sm transition",
-              i === sel ? "bg-bg-hover text-ink" : "text-ink-secondary",
+              "flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-sm transition duration-200 ease-clark",
+              i === sel ? "bg-accent-subtle text-ink" : "text-ink-secondary",
             )}
           >
             {s.kind === "file" ? (
@@ -672,7 +672,7 @@ export function Composer() {
   };
 
   return (
-    <div className="bg-bg px-5 py-3.5" {...handlers}>
+    <div className="bg-bg px-6 pb-5 pt-3.5" {...handlers}>
       <QueuedMessages onEdit={editQueued} />
       {!session && (
         <div className="mx-auto mb-2 max-w-3xl">
@@ -681,14 +681,14 @@ export function Composer() {
       )}
       <div
         className={cn(
-          "relative mx-auto max-w-3xl rounded-2xl bg-bg-elevated px-3 py-2.5 shadow-sm transition",
+          "relative mx-auto max-w-3xl rounded-[22px] border border-border-subtle bg-bg-elevated px-4 py-3 shadow-soft transition duration-200 ease-clark",
           dragging
             ? "ring-2 ring-accent/40"
-            : "ring-1 ring-transparent focus-within:ring-border-subtle",
+            : "ring-4 ring-transparent focus-within:border-accent/30 focus-within:ring-accent-subtle",
         )}
       >
         {dragging && (
-          <div className="pointer-events-none absolute inset-0 z-10 grid place-items-center rounded-2xl bg-bg-elevated/90 text-sm font-medium text-ink">
+          <div className="pointer-events-none absolute inset-0 z-10 grid place-items-center rounded-[22px] bg-bg-elevated/90 text-sm font-medium text-accent">
             Drop files to attach
           </div>
         )}
@@ -732,25 +732,25 @@ export function Composer() {
           aria-label="Message Clark"
           placeholder={
             !session
-              ? "Describe a task or ask a question"
+              ? "Describe what you want Clark to do…"
               : peeking
                 ? "Viewing another chat — Clark is still working…"
                 : busy
                   ? "Queue a follow-up…"
-                  : "Ask Clark to make a change…"
+                  : "Ask Clark anything about this project…"
           }
           disabled={peeking || connecting}
-          className="composer-input max-h-52 w-full resize-none bg-transparent px-0.5 py-1 text-base leading-relaxed text-ink outline-none placeholder:text-ink-muted disabled:opacity-50"
+          className="composer-input max-h-52 w-full resize-none bg-transparent px-0.5 py-1.5 text-base leading-relaxed text-ink outline-none placeholder:text-ink-muted disabled:opacity-50"
         />
 
-        <div className="mt-1.5 flex items-center justify-between gap-2">
+        <div className="mt-2 flex items-center justify-between gap-2">
           <div className="flex items-center gap-1">
             <button
               onClick={() => fileRef.current?.click()}
               disabled={!session}
               aria-label="Attach files"
               title="Attach files"
-              className="grid size-7 shrink-0 place-items-center rounded-full bg-bg-tertiary text-ink-muted transition hover:bg-bg-hover hover:text-ink disabled:opacity-40"
+              className="grid size-8 shrink-0 place-items-center rounded-full bg-bg-tertiary text-ink-muted transition duration-200 ease-clark hover:bg-accent-subtle hover:text-accent disabled:opacity-40"
             >
               <Plus className="size-4" />
             </button>
@@ -764,7 +764,7 @@ export function Composer() {
               <button
                 onClick={() => void cancelActive()}
                 aria-label="Stop"
-                className="grid size-8 shrink-0 place-items-center rounded-full bg-danger/12 text-danger transition hover:bg-danger/20"
+                className="grid size-10 shrink-0 place-items-center rounded-full bg-danger/12 text-danger transition duration-200 ease-clark hover:bg-danger/20"
               >
                 <Square className="size-3 fill-current" />
               </button>
@@ -774,7 +774,7 @@ export function Composer() {
                 disabled={!canSend}
                 aria-label={busy ? "Queue message" : "Send"}
                 title={busy ? "Queue message (sends when Clark finishes)" : "Send · ⇧↵ newline"}
-                className="grid size-8 shrink-0 place-items-center rounded-full bg-accent text-on-accent transition hover:bg-accent-hover disabled:bg-bg-tertiary disabled:text-ink-muted"
+                className="grid size-10 shrink-0 place-items-center rounded-full bg-accent text-on-accent shadow-soft transition duration-200 ease-clark hover:-translate-y-0.5 hover:bg-accent-hover active:translate-y-0 disabled:translate-y-0 disabled:bg-bg-tertiary disabled:text-ink-muted disabled:shadow-none"
               >
                 {busy ? <CornerDownRight className="size-4" /> : <ArrowUp className="size-4" />}
               </button>

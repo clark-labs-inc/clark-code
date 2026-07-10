@@ -137,7 +137,7 @@ function CatalogCard({ preset, onAdd }: { preset: (typeof MCP_PRESETS)[number]; 
       </div>
       <button
         onClick={onAdd}
-        className="shrink-0 rounded-md bg-bg-tertiary px-2.5 py-1 text-xs font-medium text-ink-secondary transition hover:bg-ink hover:text-bg"
+        className="min-h-8 shrink-0 rounded-lg bg-accent px-2.5 py-1 text-xs font-medium text-on-accent transition duration-200 ease-clark hover:bg-accent-hover"
       >
         Add
       </button>
@@ -351,7 +351,7 @@ export function McpSettings() {
                 onClick={() => void test()}
                 disabled={testing || enabledCount === 0}
                 title={enabledCount === 0 ? "Add and enable a server first" : "Connect each server and list its tools"}
-                className="ml-auto flex items-center gap-1.5 rounded-lg bg-ink px-3 py-1.5 text-sm font-semibold text-bg transition hover:bg-accent-hover disabled:bg-bg-tertiary disabled:text-ink-muted"
+                className="ml-auto flex min-h-8 items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-sm font-semibold text-on-accent transition duration-200 ease-clark hover:bg-accent-hover disabled:bg-bg-tertiary disabled:text-ink-muted"
               >
                 {testing && <Loader2 className="size-3.5 animate-[spin_1s_linear_infinite]" />}
                 Test connections

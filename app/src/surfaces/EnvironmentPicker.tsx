@@ -9,7 +9,7 @@ import { inTauri } from "../lib/pickFolder";
 import { cn } from "../lib/cn";
 
 const CHIP =
-  "flex items-center gap-1.5 rounded-lg border border-border-subtle bg-bg-elevated px-2.5 py-1.5 text-sm font-medium text-ink-secondary transition hover:bg-bg-hover hover:text-ink";
+  "flex min-h-8 items-center gap-1.5 rounded-xl border border-accent/10 bg-accent-subtle px-2.5 py-1.5 text-sm font-medium text-ink-secondary transition duration-200 ease-clark hover:bg-accent-soft hover:text-ink";
 
 /** The "Local · Select folder…" control that sits above the start-screen
  *  composer. It maps the target machine (Local / a Cloud provider / an SSH host)
@@ -172,7 +172,7 @@ function FolderChip({ cwd }: { cwd: string }) {
                 void pick();
                 close();
               }}
-              className="mb-1 flex w-full items-center gap-2 rounded-lg bg-accent px-2.5 py-2 text-sm font-medium text-on-accent transition hover:bg-accent-hover"
+              className="mb-1 flex min-h-10 w-full items-center gap-2 rounded-xl bg-accent px-2.5 py-2 text-sm font-medium text-on-accent transition duration-200 ease-clark hover:bg-accent-hover"
             >
               <FolderOpen className="size-4" /> Choose folder…
             </button>
@@ -233,14 +233,17 @@ function OptionRow({
   return (
     <button
       onClick={onClick}
-      className="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition hover:bg-bg-hover"
+      className={cn(
+        "flex min-h-9 w-full items-center gap-2.5 rounded-xl px-2 py-1.5 text-left transition duration-200 ease-clark hover:bg-accent-subtle",
+        active && "bg-accent-subtle",
+      )}
     >
-      <span className="shrink-0 text-ink-muted">{icon}</span>
+      <span className={cn("shrink-0", active ? "text-accent" : "text-ink-muted")}>{icon}</span>
       <span className="min-w-0 flex-1 leading-tight">
         <span className="block truncate text-sm text-ink">{label}</span>
         {hint && <span className="block truncate text-xs text-ink-faint">{hint}</span>}
       </span>
-      {active && <Check className="size-4 shrink-0 text-ink" />}
+      {active && <Check className="size-4 shrink-0 text-accent" />}
     </button>
   );
 }
@@ -276,7 +279,7 @@ function Popover({
         {trigger}
       </button>
       {open && (
-        <div className="popover-surface absolute bottom-full left-0 z-30 mb-2 rounded-xl bg-bg-elevated p-1 shadow-lg ring-1 ring-border-subtle">
+        <div className="popover-surface absolute bottom-full left-0 z-30 mb-2 rounded-[22px] bg-bg-elevated p-1.5 shadow-lifted ring-1 ring-border-subtle">
           {children(() => setOpen(false))}
         </div>
       )}

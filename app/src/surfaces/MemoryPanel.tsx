@@ -53,7 +53,7 @@ export function MemoryButton() {
         title="Memory (what the agent remembers)"
         className={cn(
           "grid size-8 place-items-center rounded-lg transition",
-          open ? "bg-bg-hover text-ink" : "text-ink-muted hover:bg-bg-hover hover:text-ink-secondary",
+          open ? "bg-accent-soft text-accent" : "text-ink-muted hover:bg-accent-subtle hover:text-accent",
         )}
       >
         <NotebookText className="size-4" />

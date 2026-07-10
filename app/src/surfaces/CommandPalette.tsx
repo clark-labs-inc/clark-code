@@ -153,7 +153,7 @@ export function CommandPalette({
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: reduce ? 0 : 0.12 }}
-          className="popover-surface flex max-h-[70vh] w-full max-w-xl flex-col overflow-hidden rounded-2xl bg-bg-elevated shadow-2xl ring-1 ring-border-subtle"
+          className="popover-surface flex max-h-[70vh] w-full max-w-xl flex-col overflow-hidden rounded-[22px] bg-bg-elevated shadow-lifted ring-1 ring-border-subtle"
         >
           <input
             ref={inputRef}
@@ -184,8 +184,8 @@ export function CommandPalette({
                       onMouseMove={() => setActive(i)}
                       onClick={() => run(item)}
                       className={cn(
-                        "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm transition",
-                        i === active ? "bg-bg-hover text-ink" : "text-ink-secondary",
+                        "flex min-h-9 w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left text-sm transition duration-200 ease-clark",
+                        i === active ? "bg-accent-subtle text-ink" : "text-ink-secondary",
                       )}
                     >
                       <Icon className="size-4 shrink-0 text-ink-muted" />

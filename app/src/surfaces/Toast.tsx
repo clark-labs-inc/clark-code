@@ -37,7 +37,7 @@ export function NoticeToast() {
           <button
             onClick={dismiss}
             aria-label="Dismiss"
-            className="grid size-6 shrink-0 place-items-center rounded-md text-ink-faint transition hover:bg-bg-hover hover:text-ink"
+            className="grid size-8 shrink-0 place-items-center rounded-md text-ink-faint transition hover:bg-bg-hover hover:text-ink"
           >
             <X className="size-3.5" />
           </button>

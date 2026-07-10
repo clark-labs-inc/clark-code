@@ -182,8 +182,8 @@ export function TerminalPanel() {
                 className={cn(
                   "group/tab flex shrink-0 cursor-pointer items-center gap-1.5 rounded-md py-1 pl-2 pr-1 transition",
                   t.id === active
-                    ? "bg-bg-hover text-ink"
-                    : "text-ink-muted hover:bg-bg-hover/50 hover:text-ink-secondary",
+                    ? "bg-accent-soft text-accent"
+                    : "text-ink-muted hover:bg-accent-subtle hover:text-accent",
                 )}
               >
                 <span className="font-medium">Terminal {t.n}</span>

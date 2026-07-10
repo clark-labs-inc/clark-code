@@ -213,7 +213,7 @@ export function SshSettings() {
               </span>
               <button
                 onClick={() => setOpen(false)}
-                className="ml-auto rounded-lg bg-ink px-3 py-1.5 text-sm font-semibold text-bg transition hover:bg-accent-hover"
+                className="ml-auto min-h-8 rounded-lg bg-accent px-3 py-1.5 text-sm font-semibold text-on-accent transition duration-200 ease-clark hover:bg-accent-hover"
               >
                 Done
               </button>

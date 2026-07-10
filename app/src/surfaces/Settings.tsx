@@ -117,7 +117,7 @@ function GeneralSection({ dark, onToggleTheme }: { dark: boolean; onToggleTheme:
       <div>
         <GroupLabel>Appearance</GroupLabel>
         <Card>
-          <Row name="Theme" sub="Warm papyrus light · Clark dark">
+          <Row name="Theme" sub="Violet Paper light · warm graphite dark">
             <div className="inline-flex shrink-0 rounded-lg border border-border-subtle bg-bg-sunken p-0.5 text-xs">
               {themeBtn(false, Sun, "Light")}
               {themeBtn(true, Moon, "Dark")}
@@ -137,7 +137,7 @@ function GeneralSection({ dark, onToggleTheme }: { dark: boolean; onToggleTheme:
                 onClick={() => setPermissionMode(m.id)}
                 className={cn(
                   "flex w-full items-start gap-3 px-3.5 py-3 text-left transition",
-                  active ? "bg-bg-hover/60" : "hover:bg-bg-hover/30",
+                  active ? "bg-accent-subtle" : "hover:bg-bg-hover/30",
                 )}
               >
                 <span
@@ -172,7 +172,7 @@ function GeneralSection({ dark, onToggleTheme }: { dark: boolean; onToggleTheme:
                 onClick={() => setOutputStyle(style.id)}
                 className={cn(
                   "flex w-full items-start gap-3 px-3.5 py-3 text-left transition",
-                  active ? "bg-bg-hover/60" : "hover:bg-bg-hover/30",
+                  active ? "bg-accent-subtle" : "hover:bg-bg-hover/30",
                 )}
               >
                 <span
@@ -724,21 +724,21 @@ export function Settings({ dark, onToggleTheme }: { dark: boolean; onToggleTheme
             exit={{ opacity: 0 }}
             transition={{ duration: reduce ? 0 : 0.12 }}
             onClick={(e) => e.stopPropagation()}
-            className="popover-surface flex h-[80vh] max-h-[640px] w-full max-w-3xl overflow-hidden rounded-2xl border border-border bg-bg-elevated shadow-2xl"
+            className="popover-surface flex h-[80vh] max-h-[640px] w-full max-w-3xl overflow-hidden rounded-[22px] border border-border-subtle bg-bg-elevated shadow-lifted"
           >
             {/* Left rail */}
-            <nav className="flex w-52 shrink-0 flex-col border-r border-border-subtle p-2">
+            <nav className="flex w-52 shrink-0 flex-col border-r border-border-subtle bg-bg-secondary/50 p-3">
               <h2 className="px-2 py-2 text-sm font-semibold text-ink">Settings</h2>
               {SECTIONS.map((s) => (
                 <button
                   key={s.id}
                   onClick={() => setOpen(true, s.id)}
                   className={cn(
-                    "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-sm transition",
-                    section === s.id ? "bg-bg-hover text-ink" : "text-ink-secondary hover:bg-bg-hover/50",
+                    "flex min-h-9 w-full items-center gap-2.5 rounded-xl px-2.5 py-1.5 text-left text-sm transition duration-200 ease-clark",
+                    section === s.id ? "bg-accent-soft text-ink" : "text-ink-secondary hover:bg-accent-subtle",
                   )}
                 >
-                  <s.icon className={cn("size-4 shrink-0", section === s.id ? "text-ink-secondary" : "text-ink-muted")} />
+                  <s.icon className={cn("size-4 shrink-0", section === s.id ? "text-accent" : "text-ink-muted")} />
                   {s.label}
                 </button>
               ))}

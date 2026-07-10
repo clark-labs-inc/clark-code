@@ -8,8 +8,11 @@ import type { ToolCall } from "../../core-bridge/types";
  *  token of a *later* message — only when these calls themselves change. */
 function WorkBlockImpl({ calls }: { calls: ToolCall[] }) {
   const edits = summarizeEdits(calls);
+  const active = calls.some((call) => call.status === "in_progress");
   return (
-    <div className="-my-1 flex flex-col">
+    <div
+      className={`-my-1 flex flex-col ${active ? "" : "[content-visibility:auto] [contain-intrinsic-size:auto_3rem]"}`}
+    >
       {calls.map((call) => (
         <WorkLine key={call.id} call={call} active={call.status === "in_progress"} />
       ))}

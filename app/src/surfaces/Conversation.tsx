@@ -1,5 +1,5 @@
 import { memo, useEffect, useRef, useState } from "react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { ArrowDown, X } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
 import { currentActivity } from "../lib/activity";
@@ -85,7 +85,7 @@ const TRANSIENT = {
   initial: { opacity: 0, y: 4 },
   animate: { opacity: 1, y: 0 },
   exit: { opacity: 0, transition: { duration: 0.15 } },
-  transition: { duration: 0.2, ease: [0.4, 0, 0.2, 1] as const },
+  transition: { duration: 0.2, ease: [0.22, 1, 0.36, 1] as const },
 };
 
 // `min-w-0` lets this flex child shrink to the column width (flex items default
@@ -114,6 +114,7 @@ function DismissButton({ onClick }: { onClick: () => void }) {
 const TIMELINE_WINDOW = 80;
 
 export function Conversation() {
+  const reduce = useReducedMotion();
   // While peeking at another conversation mid-run, render its restored
   // transcript; the live snapshot keeps streaming (and saving) underneath.
   const snapshot = useSessionStore((s) => (s.peek ? s.peek.snapshot : s.snapshot));
@@ -144,7 +145,7 @@ export function Conversation() {
   };
   const scrollToBottom = () => {
     const el = scrollRef.current;
-    if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: reduce ? "auto" : "smooth" });
   };
 
   const { timeline, tool_calls: toolCalls, artifacts, runs, pending_permission, plan } = snapshot;

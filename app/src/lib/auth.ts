@@ -167,27 +167,33 @@ const AUTH_SUCCESS_HTML = `<!doctype html>
   * { box-sizing: border-box; }
   body {
     margin: 0; min-height: 100vh; display: grid; place-items: center;
-    font-family: "Inter", -apple-system, system-ui, "Segoe UI", sans-serif;
-    background: #ffffff; color: #14141a;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: #f7f5f1; color: #211f1c;
   }
-  .card { text-align: center; padding: 40px 44px; max-width: 380px; }
+  .card {
+    width: min(380px, calc(100vw - 32px)); text-align: center; padding: 40px 44px;
+    border: 1px solid rgba(40, 36, 32, 0.08); border-radius: 22px;
+    background: #fdfcfa; box-shadow: 0 18px 46px rgba(33, 31, 28, 0.09);
+  }
   .mark {
-    width: 44px; height: 44px; margin: 0 auto 20px; border-radius: 12px;
+    width: 48px; height: 48px; margin: 0 auto 20px; border-radius: 16px;
     display: grid; place-items: center;
-    background: #14141a; color: #ffffff; font-weight: 600; font-size: 20px;
+    background: #6657d9; color: #fdfcfa;
+    font-family: Georgia, serif; font-weight: 600; font-size: 22px;
   }
-  h1 { font-size: 1.0625rem; font-weight: 600; margin: 0 0 8px; }
-  p { font-size: 0.875rem; line-height: 1.5; color: #52525a; margin: 0 0 24px; }
+  h1 { font-family: Georgia, serif; font-size: 1.5rem; font-weight: 600; margin: 0 0 8px; }
+  p { font-size: 0.9375rem; line-height: 1.55; color: #6b645d; margin: 0 0 24px; }
   a.btn {
     display: inline-block; text-decoration: none;
-    background: #14141a; color: #ffffff;
-    padding: 10px 20px; border-radius: 7px; font-size: 0.875rem; font-weight: 500;
+    background: #6657d9; color: #fdfcfa;
+    padding: 12px 20px; border-radius: 16px; font-size: 0.9375rem; font-weight: 600;
   }
   @media (prefers-color-scheme: dark) {
-    body { background: #0a0a0a; color: #f4f4f3; }
-    .mark { background: #f4f4f3; color: #0a0a0a; }
-    p { color: #a0a09d; }
-    a.btn { background: #f4f4f3; color: #0a0a0a; }
+    body { background: #0d0d0d; color: #f5f5f4; }
+    .card { background: #161616; border-color: rgba(255,255,255,0.09); box-shadow: 0 18px 56px rgba(0,0,0,0.34); }
+    .mark { background: #9b8cff; color: #17131f; }
+    a.btn { background: #9b8cff; color: #17131f; }
+    p { color: #a8a5a0; }
   }
 </style>
 </head>

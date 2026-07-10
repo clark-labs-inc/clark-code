@@ -54,7 +54,16 @@ function LocalImage({
   }, [uri]);
 
   if (!src) return null;
-  return <img src={src} alt={alt} className={className} onError={onError} />;
+  return (
+    <img
+      src={src}
+      alt={alt}
+      loading="lazy"
+      decoding="async"
+      className={className}
+      onError={onError}
+    />
+  );
 }
 
 /** Renders a produced artifact inline in the conversation. */
@@ -91,6 +100,7 @@ export function ArtifactCard({ artifact }: { artifact: Artifact }) {
         <video
           src={uri}
           controls
+          preload="metadata"
           className="max-h-80 w-full bg-black"
           onError={() => setBroke(true)}
         />
@@ -104,7 +114,7 @@ export function ArtifactCard({ artifact }: { artifact: Artifact }) {
       initial={reduce ? false : { opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.2 }}
-      className="overflow-hidden rounded-lg border border-border bg-bg-elevated"
+      className="overflow-hidden rounded-lg border border-border bg-bg-elevated [content-visibility:auto] [contain-intrinsic-size:auto_14rem]"
     >
       <header className="flex items-center gap-2 px-3 py-2">
         <Icon className="size-4 shrink-0 text-accent" />

@@ -1,46 +1,80 @@
+@import "@fontsource-variable/dm-sans/wght.css";
+@import "@fontsource-variable/newsreader/wght.css";
 @import "tailwindcss";
 
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400;
+  src: url("@fontsource/jetbrains-mono/files/jetbrains-mono-latin-400-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 500;
+  src: url("@fontsource/jetbrains-mono/files/jetbrains-mono-latin-500-normal.woff2") format("woff2");
+}
+
 /* ----------------------------------------------------------------------------
-   Clark Code design language — Codex-grade monochrome.
-   Near-black canvas, no chromatic accent (color is semantic only), a single
-   light primary action, and the "quiet-chip" vernacular: code, values, and tool
-   tokens render as soft monospace chips on a barely-there fill (--color-chip).
-   DM Sans (variable, 450) + native mono. 16px base, calm density, AA contrast.
+   Clark editorial workspace — warm paper, graphite type, violet interaction.
+   Violet is reserved for primary actions, focus, selection, and live state;
+   code and tool values retain the quiet monospace-chip vernacular.
 ---------------------------------------------------------------------------- */
 @theme {
-  /* Light (neutral) — secondary; dark is the canonical look. Every text token
-     meets WCAG AA (≥4.5:1) on its background; borders are firm, not hairline. */
-  /* Unified Graphite — values from @clark-labs/design-system (warm papyrus +
-     charcoal ink). Retheme by swapping these; the app reads them via bg-bg,
-     text-ink, etc. so no component changes are needed. */
-  --color-bg: #f7f5f1;
+  --color-bg-primary: #f7f5f1;
   --color-bg-secondary: #efece6;
   --color-bg-tertiary: #e6e2da;
   --color-bg-elevated: #fdfcfa;
   --color-bg-hover: #ece8e0;
   --color-bg-sunken: #e4e0d6;
 
-  --color-ink: #211f1c;
-  --color-ink-secondary: #4a453f;
-  --color-ink-muted: #5c554e; /* darkened for firmer contrast on papyrus */
-  --color-ink-faint: #675f57; /* WCAG AA ≥4.5:1 on papyrus */
+  --color-text-primary: #211f1c;
+  --color-text-secondary: #544f49;
+  --color-text-muted: #6b645d;
+  --color-text-faint: #736d66;
 
-  --color-accent: #2b2926;
-  --color-accent-hover: #16140f;
-  --color-on-accent: #f7f5f1;
+  --color-accent: #6657d9;
+  --color-accent-hover: #5748c7;
+  --color-accent-gradient-start: #5748c7;
+  --color-accent-gradient-end: #7060df;
+  --color-accent-muted: rgba(102, 87, 217, 0.16);
+  --color-accent-subtle: rgba(102, 87, 217, 0.07);
+  --color-on-accent: #fdfcfa;
+
+  /* Compatibility aliases keep existing desktop utilities on the canonical
+     cross-platform token contract while surfaces migrate incrementally. */
+  --color-bg: var(--color-bg-primary);
+  --color-ink: var(--color-text-primary);
+  --color-ink-secondary: var(--color-text-secondary);
+  --color-ink-muted: var(--color-text-muted);
+  --color-ink-faint: var(--color-text-faint);
+  --color-accent-soft: var(--color-accent-muted);
+  --color-accent-focus: rgba(102, 87, 217, 0.34);
+  --color-canvas: var(--color-bg-primary);
+  --color-surface: var(--color-bg-elevated);
+  --color-surface-muted: var(--color-bg-secondary);
+  --color-primary: var(--color-accent);
+  --color-primary-hover: var(--color-accent-hover);
+  --color-primary-soft: var(--color-accent-soft);
+  --color-focus: var(--color-accent-focus);
+  --color-on-primary: var(--color-on-accent);
 
   --color-success: #5a6f55;
   --color-warning: #84621f;
   --color-danger: #8c4a45;
   --color-info: #356f83;
 
-  --color-chip: rgba(43, 41, 38, 0.06);
-  --color-border: rgba(40, 36, 32, 0.14);
-  --color-border-subtle: rgba(40, 36, 32, 0.09);
-  --color-border-strong: rgba(40, 36, 32, 0.3);
+  --color-chip: rgba(40, 36, 32, 0.065);
+  --color-border: rgba(40, 36, 32, 0.12);
+  --color-border-subtle: rgba(40, 36, 32, 0.06);
+  --color-border-strong: rgba(40, 36, 32, 0.24);
 
-  --font-sans: "DM Sans", -apple-system, system-ui, "Segoe UI", sans-serif;
-  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", "Menlo", monospace;
+  --font-sans: "DM Sans Variable", -apple-system, system-ui, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", "SF Mono", ui-monospace, "Menlo", monospace;
+  --font-display: "Newsreader Variable", Newsreader, Georgia, serif;
 
   /* Type scale — enlarged for legibility. Body sits at 16px; the two smallest
      steps (13/14px) are still comfortable and heavier now that the UI font is a
@@ -52,40 +86,53 @@
   --text-xl: 1.375rem;    /* 22px */
   --text-2xl: 1.75rem;    /* 28px */
 
-  --radius-sm: 5px;
-  --radius-md: 7px;
-  --radius-lg: 10px;
-  --radius-xl: 14px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 22px;
+  --radius-2xl: 22px;
+
+  --shadow-soft: 0 12px 34px rgba(55, 48, 42, 0.08);
+  --shadow-lifted: 0 18px 56px rgba(48, 40, 35, 0.14);
+  --ease-clark: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-/* Dark — the canonical Clark Code look (Codex near-black monochrome). Every text
-   token meets WCAG AA on the near-black canvas; borders are clearly visible. */
+/* Dark keeps the same violet interaction contract on a warm graphite canvas. */
 html.dark {
-  --color-bg: #0d0d0d;
+  color-scheme: dark;
+  --color-bg-primary: #0d0d0d;
   --color-bg-secondary: #161616;
   --color-bg-tertiary: #1f1f1f;
   --color-bg-elevated: #161616;
-  --color-bg-hover: #222222;
+  --color-bg-hover: #24222b;
   --color-bg-sunken: #0a0a0a;
 
-  --color-ink: #f5f5f4;
-  --color-ink-secondary: #c6c4bf; /* ~11:1 */
-  --color-ink-muted: #a8a5a0;     /* ~7:1 — was #8c8a85 (borderline) */
-  --color-ink-faint: #8f8c87;     /* ~5:1 — was #6f6d68 (FAILED AA) */
+  --color-text-primary: #f5f5f4;
+  --color-text-secondary: #c6c4bf;
+  --color-text-muted: #a8a5a0;
+  --color-text-faint: #918e99;
 
-  --color-accent: #f5f5f4;
-  --color-accent-hover: #e2e0db;
-  --color-on-accent: #0d0d0d;
+  --color-accent: #9b8cff;
+  --color-accent-hover: #ad9fff;
+  --color-accent-gradient-start: #8c7bfa;
+  --color-accent-gradient-end: #ad9fff;
+  --color-accent-muted: rgba(155, 140, 255, 0.22);
+  --color-accent-subtle: rgba(155, 140, 255, 0.1);
+  --color-accent-focus: rgba(155, 140, 255, 0.38);
+  --color-on-accent: #17131f;
 
   --color-success: #7faf75;
   --color-warning: #d0a24a;
   --color-danger: #d98a83;
   --color-info: #6fa8bd;
 
-  --color-chip: rgba(245, 245, 244, 0.08);
-  --color-border: rgba(255, 255, 255, 0.14);
-  --color-border-subtle: rgba(255, 255, 255, 0.1);
-  --color-border-strong: rgba(255, 255, 255, 0.26);
+  --color-chip: rgba(255, 255, 255, 0.08);
+  --color-border: rgba(255, 255, 255, 0.12);
+  --color-border-subtle: rgba(255, 255, 255, 0.07);
+  --color-border-strong: rgba(255, 255, 255, 0.24);
+
+  --shadow-soft: 0 12px 34px rgba(0, 0, 0, 0.22);
+  --shadow-lifted: 0 18px 56px rgba(0, 0, 0, 0.34);
 }
 
 html,
@@ -105,17 +152,44 @@ body {
   font-weight: 450;
   line-height: 1.6;
   letter-spacing: -0.002em; /* was -0.006em; tight tracking exaggerated thinness */
-  /* Real weights only (no synthesized bold/italic); proper kerning + contextual
-     alternates. Smoothing is left at the system default — grayscale antialiasing
-     thins stems, and modern macOS ignores subpixel anyway. */
-  -webkit-font-smoothing: auto;
-  -moz-osx-font-smoothing: auto;
+  /* Real weights only, with stable grayscale rasterization across the macOS and
+     Windows webviews. The 450 body weight keeps antialiased stems substantial. */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
   font-synthesis: none;
   font-feature-settings: "kern" 1, "calt" 1;
   font-optical-sizing: auto;
   -webkit-text-size-adjust: 100%;
   overflow: hidden;
+}
+
+.font-display {
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  text-wrap: balance;
+}
+
+.clark-bootstrap-shell {
+  display: grid;
+  height: 100vh;
+  place-items: center;
+  background: var(--color-bg);
+}
+
+.clark-bootstrap-mark {
+  display: grid;
+  width: 3rem;
+  height: 3rem;
+  place-items: center;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-xl);
+  background: var(--color-bg-elevated);
+  color: var(--color-ink);
+  font-size: 1.125rem;
+  font-weight: 600;
+  animation: breathe 1.6s ease-in-out infinite;
 }
 
 /* Code / mono: literal, sharp, evenly-spaced — no programming ligatures, and
@@ -137,8 +211,8 @@ svg.lucide {
 }
 
 ::selection {
-  background: var(--color-ink);
-  color: var(--color-bg);
+  background: var(--color-accent-soft);
+  color: var(--color-ink);
 }
 
 /* Minimal scrollbars — present only on hover-over, never decorative. */
@@ -162,8 +236,8 @@ svg.lucide {
    `outline-*` utilities (cascade layers lose to unlayered rules). To opt an
    element out, add an equally-unlayered override below. */
 :focus-visible {
-  outline: 2px solid var(--color-ink-secondary);
-  outline-offset: 2px;
+  outline: 2px solid var(--color-accent-focus);
+  outline-offset: 3px;
   border-radius: var(--radius-sm);
 }
 
@@ -241,5 +315,17 @@ svg.lucide {
   *, *::before, *::after {
     transition-duration: 0.001ms !important;
     scroll-behavior: auto !important;
+  }
+
+  .breathe,
+  .fade-in,
+  .appear-delayed,
+  .skeleton {
+    animation: none !important;
+  }
+
+  [class*="hover:-translate"],
+  [class*="group-hover:translate"] {
+    transform: none !important;
   }
 }

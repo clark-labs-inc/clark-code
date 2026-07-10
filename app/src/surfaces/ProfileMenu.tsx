@@ -34,7 +34,7 @@ function formatDate(iso?: string | null): string | null {
 
 const ROW = "flex items-center justify-between";
 const ACTION =
-  "flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-ink-secondary transition hover:bg-bg-hover";
+  "flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-sm text-ink-secondary transition duration-200 ease-clark hover:bg-accent-subtle hover:text-ink";
 
 /** Account trigger → subscription popover. Subscription + credit state is read
  *  from Clark; "Manage" opens clarkchat.com (same account → same wallet).
@@ -88,7 +88,7 @@ export function ProfileMenu({ variant = "topbar" }: { variant?: "topbar" | "side
           onClick={() => setOpen((o) => !o)}
           aria-label="Account"
           title={user.email ?? user.name}
-          className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left transition hover:bg-bg-hover"
+          className="flex min-h-11 w-full items-center gap-2.5 rounded-xl px-2 py-2 text-left transition duration-200 ease-clark hover:bg-accent-subtle"
         >
           {user.avatar ? (
             <img src={user.avatar} alt="" className="size-8 shrink-0 rounded-full" />
@@ -99,7 +99,7 @@ export function ProfileMenu({ variant = "topbar" }: { variant?: "topbar" | "side
           )}
           <span className="min-w-0 flex-1 leading-tight">
             <span className="block truncate text-sm font-semibold text-ink">{user.name}</span>
-            <span className="block truncate text-xs text-ink-muted">
+            <span className={cn("block truncate text-xs", planLabel ? "text-accent" : "text-ink-muted")}>
               {planLabel ? `${planLabel} plan` : user.email}
             </span>
           </span>
@@ -126,7 +126,7 @@ export function ProfileMenu({ variant = "topbar" }: { variant?: "topbar" | "side
       {open && (
         <div
           className={cn(
-            "popover-surface absolute z-30 w-72 rounded-xl bg-bg-elevated p-1 shadow-lg ring-1 ring-border-subtle",
+            "popover-surface absolute z-30 w-72 rounded-[22px] bg-bg-elevated p-1.5 shadow-lifted ring-1 ring-border-subtle",
             variant === "sidebar" ? "bottom-full left-0 mb-2" : "right-0 top-full mt-2",
           )}
         >

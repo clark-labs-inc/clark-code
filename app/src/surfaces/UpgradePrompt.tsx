@@ -17,7 +17,7 @@ export function UpgradePrompt() {
         </div>
         <button
           onClick={() => void openExternal(clarkBillingUrl())}
-          className="flex shrink-0 items-center gap-1.5 rounded-lg bg-ink px-3 py-1.5 text-xs font-semibold text-bg transition hover:bg-accent-hover"
+          className="flex min-h-8 shrink-0 items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-on-accent transition duration-200 ease-clark hover:bg-accent-hover"
         >
           Add credits
           <ArrowUpRight className="size-3.5" />

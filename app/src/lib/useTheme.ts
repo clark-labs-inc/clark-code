@@ -4,15 +4,17 @@ import { useCallback, useEffect, useState } from "react";
 export function useTheme() {
   const [dark, setDark] = useState<boolean>(() => {
     try {
-      // Default to the dark Clark brand; light (warm papyrus) is opt-in.
-      return localStorage.getItem("clark.theme") !== "light";
+      return localStorage.getItem("clark.theme") === "dark";
     } catch {
-      return true;
+      return false;
     }
   });
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", dark);
+    document
+      .querySelector('meta[name="theme-color"]')
+      ?.setAttribute("content", dark ? "#0D0D0D" : "#F7F5F1");
     try {
       localStorage.setItem("clark.theme", dark ? "dark" : "light");
     } catch {

@@ -67,7 +67,7 @@ export function MarkdownDoc({ artifact }: { artifact: Artifact }) {
       initial={reduce ? false : { opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.2 }}
-      className="overflow-hidden rounded-lg border border-border bg-bg-elevated"
+      className="overflow-hidden rounded-lg border border-border bg-bg-elevated [content-visibility:auto] [contain-intrinsic-size:auto_18rem]"
     >
       <header className="flex items-center gap-2 px-3 py-2">
         <FileText className="size-4 shrink-0 text-accent" />

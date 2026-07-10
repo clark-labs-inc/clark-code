@@ -1,7 +1,6 @@
 import { useMemo, useState } from "react";
 import { motion, useReducedMotion } from "motion/react";
 import { ChevronRight, MessageSquare, FolderGit2, Server } from "lucide-react";
-import { ClarkMark } from "./ClarkMark";
 import { useSessionStore } from "../store/sessionStore";
 import { projectName } from "../lib/localAgent";
 import type { ConversationMeta } from "../lib/history";
@@ -18,7 +17,14 @@ function relativeTime(ts: number): string {
   return new Date(ts).toLocaleDateString();
 }
 
-/** The start screen — deliberately quiet: a "Welcome back" line and your recent
+function daypart(): string {
+  const hour = new Date().getHours();
+  if (hour < 12) return "Good morning";
+  if (hour < 18) return "Good afternoon";
+  return "Good evening";
+}
+
+/** The start screen — deliberately quiet: an editorial greeting and recent
  *  sessions, nothing else. The composer + environment picker live below it
  *  (rendered by App), so a new session begins by simply typing a task. */
 export function StartCard() {
@@ -42,20 +48,27 @@ export function StartCard() {
       <motion.div
         initial={reduce ? false : { opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.25 }}
-        className="mx-auto w-full max-w-2xl px-5 pb-6 pt-16"
+        transition={{ duration: reduce ? 0 : 0.3, ease: [0.22, 1, 0.36, 1] }}
+        className="mx-auto w-full max-w-3xl px-6 pb-8 pt-14"
       >
-        <div className="mb-10 flex items-center gap-3">
-          <ClarkMark size={28} className="shrink-0 rounded-xl" />
-          <h1 className="text-2xl font-semibold tracking-tight text-ink">
-            Welcome back, {firstName}
+        <div className="mb-10">
+          <div className="mb-3 text-xs font-semibold uppercase tracking-[0.16em] text-accent">
+            Clark Code
+          </div>
+          <h1 className="font-display max-w-xl text-4xl leading-[1.08] text-ink">
+            {daypart()}, {firstName}.
           </h1>
+          <p className="mt-3 max-w-lg text-base text-ink-muted">
+            What should we build, investigate, or improve today?
+          </p>
         </div>
 
         {recent.length > 0 ? (
           <div>
-            <div className="mb-2.5 flex items-center justify-between">
-              <h2 className="text-sm font-semibold text-ink-muted">Recent</h2>
+            <div className="mb-3 flex items-center justify-between px-1">
+              <h2 className="text-xs font-semibold uppercase tracking-[0.12em] text-ink-muted">
+                Recent work
+              </h2>
               {hiddenCount > 0 && !showAll && (
                 <button
                   onClick={() => setShowAll(true)}
@@ -73,7 +86,7 @@ export function StartCard() {
                 </button>
               )}
             </div>
-            <div className="flex flex-col">
+            <div className="flex flex-col divide-y divide-border-subtle overflow-hidden rounded-2xl border border-border-subtle bg-bg-elevated shadow-soft">
               {shown.map((c) => (
                 <SessionRow key={c.id} c={c} />
               ))}
@@ -99,7 +112,7 @@ function SessionRow({ c }: { c: ConversationMeta }) {
   return (
     <button
       onClick={() => void open(c.id)}
-      className="group -mx-2 flex items-center gap-3 rounded-lg px-2 py-2 text-left transition hover:bg-bg-hover"
+      className="group flex min-h-12 items-center gap-3 px-4 py-3 text-left transition duration-200 ease-clark hover:bg-accent-subtle"
     >
       <Icon className="size-4 shrink-0 text-ink-faint" />
       <span className="min-w-0 flex-1 truncate text-sm text-ink">{c.title}</span>
@@ -107,7 +120,7 @@ function SessionRow({ c }: { c: ConversationMeta }) {
         <span className="hidden shrink-0 truncate text-xs text-ink-faint sm:block">{context}</span>
       )}
       <span className="shrink-0 text-xs tabular-nums text-ink-faint">{relativeTime(c.updatedAt)}</span>
-      <ChevronRight className="size-4 shrink-0 text-ink-faint opacity-0 transition group-hover:opacity-100" />
+      <ChevronRight className="size-4 shrink-0 text-ink-faint opacity-0 transition duration-200 group-hover:translate-x-0.5 group-hover:text-accent group-hover:opacity-100" />
     </button>
   );
 }

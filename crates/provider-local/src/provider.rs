@@ -309,33 +309,37 @@ impl Provider for LocalAgentProvider {
 
         let mut text = prompt_text(&input);
         let knowledge_query = text.clone();
-        text.push_str(
-            &crate::attachments::process_attachments(
-                &input.attachments,
-                &text,
-                config.vision.as_ref(),
-                &cancel,
-            )
-            .await,
+        let attachment_context = crate::attachments::process_attachments(
+            &input.attachments,
+            &text,
+            config.vision.as_ref(),
+            &cancel,
         );
-        if config.project_knowledge_enabled {
-            if let (Some(api_key), Some(fingerprint)) = (
-                config.api_key.as_deref(),
-                self.repository_fingerprint.as_deref(),
-            ) {
-                if let Ok(context) = crate::platform::recall_repository_context(
-                    &config.base_url,
-                    api_key,
-                    fingerprint,
-                    &knowledge_query,
-                )
-                .await
-                {
-                    if let Some(section) = crate::platform::repository_context_section(&context) {
-                        text = format!("{section}\n\nUser request:\n{text}");
-                    }
-                }
+        let repository_context = async {
+            if !config.project_knowledge_enabled {
+                return None;
             }
+            let api_key = config.api_key.as_deref()?;
+            let fingerprint = self.repository_fingerprint.as_deref()?;
+            let context = crate::platform::recall_repository_context(
+                &config.base_url,
+                api_key,
+                fingerprint,
+                &knowledge_query,
+            )
+            .await
+            .ok()?;
+            crate::platform::repository_context_section(&context)
+        };
+
+        // Attachment extraction/vision and repository recall are independent
+        // preflight work. Overlap them so first-token latency is bounded by
+        // the slower branch instead of adding both durations together.
+        let (attachment_context, repository_context) =
+            tokio::join!(attachment_context, repository_context);
+        text.push_str(&attachment_context);
+        if let Some(section) = repository_context {
+            text = format!("{section}\n\nUser request:\n{text}");
         }
         let text = {
             let s = self.session.lock().await;

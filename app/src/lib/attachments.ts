@@ -28,14 +28,42 @@ export function toUpload(a: PendingAttachment): Upload {
   return { filename: a.filename, content_type: a.content_type, data_base64: a.data_base64 };
 }
 
-function arrayBufferToBase64(buf: ArrayBuffer): string {
-  const bytes = new Uint8Array(buf);
-  let binary = "";
-  const chunk = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunk) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+function blobToBase64(blob: Blob): Promise<string> {
+  if (typeof FileReader === "undefined") {
+    // Non-browser test/dev runtimes do not expose FileReader. Keep a bounded
+    // compatibility path there; the Tauri WebView uses the native reader
+    // below and avoids this extra binary string allocation.
+    return blob.arrayBuffer().then((buffer) => {
+      const bytes = new Uint8Array(buffer);
+      let binary = "";
+      const chunk = 0x8000;
+      for (let index = 0; index < bytes.length; index += chunk) {
+        binary += String.fromCharCode(...bytes.subarray(index, index + chunk));
+      }
+      return btoa(binary);
+    });
   }
-  return btoa(binary);
+
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error ?? new Error("Could not read attachment"));
+    reader.onload = () => {
+      if (typeof reader.result !== "string") {
+        reject(new Error("Could not encode attachment"));
+        return;
+      }
+      const separator = reader.result.indexOf(",");
+      if (separator < 0) {
+        reject(new Error("Attachment encoding was malformed"));
+        return;
+      }
+      resolve(reader.result.slice(separator + 1));
+    };
+    // Let the WebView's native file reader encode the blob. The previous JS
+    // path built a second byte-sized binary string before calling `btoa`,
+    // which could block the composer and briefly triple memory for a 12 MB PDF.
+    reader.readAsDataURL(blob);
+  });
 }
 
 function loadImage(url: string): Promise<HTMLImageElement> {
@@ -55,8 +83,7 @@ async function processImage(file: File): Promise<PendingAttachment | null> {
     const img = await loadImage(srcUrl);
     const big = Math.max(img.width, img.height) > MAX_IMAGE_DIM;
     if (!big && file.size <= IMAGE_PASSTHROUGH_BYTES) {
-      const buf = await file.arrayBuffer();
-      return attach(file.name, file.type, arrayBufferToBase64(buf), file.size, srcUrl);
+      return attach(file.name, file.type, await blobToBase64(file), file.size, srcUrl);
     }
     const scale = Math.min(1, MAX_IMAGE_DIM / Math.max(img.width, img.height));
     const w = Math.round(img.width * scale);
@@ -68,11 +95,10 @@ async function processImage(file: File): Promise<PendingAttachment | null> {
     const blob = await new Promise<Blob | null>((res) => canvas.toBlob(res, "image/webp", 0.85));
     URL.revokeObjectURL(srcUrl);
     if (!blob) return null;
-    const buf = await blob.arrayBuffer();
     return attach(
       file.name.replace(/\.\w+$/, ".webp"),
       "image/webp",
-      arrayBufferToBase64(buf),
+      await blobToBase64(blob),
       blob.size,
       URL.createObjectURL(blob),
     );
@@ -108,8 +134,7 @@ export async function fileToAttachment(file: File): Promise<PendingAttachment> {
     const processed = await processImage(file);
     if (processed) return processed;
   }
-  const buf = await file.arrayBuffer();
-  return attach(file.name, file.type, arrayBufferToBase64(buf), file.size);
+  return attach(file.name, file.type, await blobToBase64(file), file.size);
 }
 
 export function prettySize(bytes: number): string {

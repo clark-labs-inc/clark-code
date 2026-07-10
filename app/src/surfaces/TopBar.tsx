@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Sun, Moon, FolderGit2, SquareTerminal, Settings as SettingsIcon, RefreshCw, Share2 } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useSessionStore } from "../store/sessionStore";
 import { projectName } from "../lib/localAgent";
 import { cn } from "../lib/cn";
@@ -14,6 +14,7 @@ function UpdatePill() {
   const update = useSessionStore((s) => s.update);
   const progress = useSessionStore((s) => s.updateProgress);
   const apply = useSessionStore((s) => s.applyUpdate);
+  const reduce = useReducedMotion();
 
   const content = progress ? (
     <DownloadingPill progress={progress} />
@@ -22,7 +23,7 @@ function UpdatePill() {
       key="restart"
       onClick={() => void apply()}
       title={`Clark Code ${update.version} is ready — relaunch to update`}
-      className="flex items-center gap-1.5 rounded-lg bg-accent/15 px-2.5 py-1 text-xs font-medium text-accent transition hover:bg-accent/25"
+      className="flex items-center gap-1.5 rounded-xl bg-accent-soft px-3 py-1.5 text-xs font-semibold text-accent transition duration-200 ease-clark hover:bg-accent/20"
     >
       <RefreshCw className="size-3.5" />
       Restart to update
@@ -34,10 +35,10 @@ function UpdatePill() {
       {content && (
         <motion.div
           key={progress ? "downloading" : "restart"}
-          initial={{ opacity: 0, y: -3 }}
+          initial={reduce ? false : { opacity: 0, y: -3 }}
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: -3 }}
-          transition={{ duration: 0.18, ease: [0.4, 0, 0.2, 1] }}
+          transition={{ duration: reduce ? 0 : 0.18, ease: [0.22, 1, 0.36, 1] }}
         >
           {content}
         </motion.div>
@@ -53,7 +54,7 @@ function DownloadingPill({ progress }: { progress: { downloaded: number; total: 
       : null;
   return (
     <div
-      className="flex items-center gap-2 rounded-lg bg-accent/10 px-2.5 py-1 text-xs font-medium text-accent"
+      className="flex items-center gap-2 rounded-xl bg-accent-soft px-3 py-1.5 text-xs font-semibold text-accent"
       title="Downloading the latest Clark Code…"
     >
       <RefreshCw className="size-3.5 animate-[spin_1.4s_linear_infinite]" />
@@ -86,7 +87,7 @@ function ShareButton({ onShare }: { onShare: () => Promise<void> }) {
       disabled={sharing}
       aria-label="Share conversation"
       title="Copy a public read-only link (/unshare stops sharing)"
-      className="grid size-8 place-items-center rounded-lg text-ink-muted transition hover:bg-bg-hover hover:text-ink-secondary disabled:opacity-60"
+      className="grid size-9 place-items-center rounded-xl text-ink-muted transition duration-200 ease-clark hover:bg-accent-subtle hover:text-accent disabled:opacity-60"
     >
       {sharing ? (
         <RefreshCw className="size-4 animate-[spin_1s_linear_infinite]" />
@@ -111,7 +112,7 @@ export function TopBar({ dark, onToggleTheme }: { dark: boolean; onToggleTheme: 
   const isLocal = session?.provider === "local";
 
   return (
-    <header className="flex h-12 shrink-0 items-center gap-2.5 border-b border-border bg-bg-elevated px-4">
+    <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border-subtle bg-bg px-5">
       {session && (
         <div className="flex min-w-0 items-center gap-2">
           <span
@@ -122,13 +123,13 @@ export function TopBar({ dark, onToggleTheme }: { dark: boolean; onToggleTheme: 
           {isLocal && projectCwd && (
             <span
               title={projectCwd}
-              className="hidden shrink-0 items-center gap-1 rounded-md border border-border-subtle bg-bg-elevated px-1.5 py-0.5 text-xs font-medium text-ink-secondary md:flex"
+              className="hidden shrink-0 items-center gap-1.5 rounded-lg bg-bg-secondary px-2.5 py-1 text-xs font-medium text-ink-secondary md:flex"
             >
               <FolderGit2 className="size-3" />
               {projectName(projectCwd)}
             </span>
           )}
-          <span className="truncate text-sm font-medium text-ink-secondary">
+          <span className="truncate text-sm font-semibold text-ink-secondary">
             {title ?? "New conversation"}
           </span>
         </div>
@@ -143,7 +144,7 @@ export function TopBar({ dark, onToggleTheme }: { dark: boolean; onToggleTheme: 
           onClick={() => setSettingsOpen(true)}
           aria-label="Settings"
           title="Settings (⌘,)"
-          className="grid size-8 place-items-center rounded-lg text-ink-muted transition hover:bg-bg-hover hover:text-ink-secondary"
+          className="grid size-9 place-items-center rounded-xl text-ink-muted transition duration-200 ease-clark hover:bg-accent-subtle hover:text-accent"
         >
           <SettingsIcon className="size-4" />
         </button>
@@ -153,10 +154,10 @@ export function TopBar({ dark, onToggleTheme }: { dark: boolean; onToggleTheme: 
             aria-label={terminalOpen ? "Hide terminal" : "Show terminal"}
             title="Terminal (run commands in your project)"
             className={cn(
-              "grid size-8 place-items-center rounded-lg transition",
+              "grid size-9 place-items-center rounded-xl transition duration-200 ease-clark",
               terminalOpen
-                ? "bg-bg-hover text-ink"
-                : "text-ink-muted hover:bg-bg-hover hover:text-ink-secondary",
+                ? "bg-accent-soft text-accent"
+                : "text-ink-muted hover:bg-accent-subtle hover:text-accent",
             )}
           >
             <SquareTerminal className="size-4" />
@@ -165,7 +166,7 @@ export function TopBar({ dark, onToggleTheme }: { dark: boolean; onToggleTheme: 
         <button
           onClick={onToggleTheme}
           aria-label={dark ? "Switch to light theme" : "Switch to dark theme"}
-          className="grid size-8 place-items-center rounded-lg text-ink-muted transition hover:bg-bg-hover"
+          className="grid size-9 place-items-center rounded-xl text-ink-muted transition duration-200 ease-clark hover:bg-accent-subtle hover:text-accent"
         >
           {dark ? <Sun className="size-4" /> : <Moon className="size-4" />}
         </button>
