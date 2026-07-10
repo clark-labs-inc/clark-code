@@ -229,6 +229,10 @@ svg.lucide {
   to { opacity: 1; transform: none; }
 }
 .fade-in { animation: fade-in 0.22s ease both; }
+/* Like .fade-in, but invisible for the first 150ms — loading screens use this
+   so a fast (local) connect resolves before the spinner ever paints, while a
+   slow (SSH) connect fades it in smoothly. */
+.appear-delayed { animation: fade-in 0.2s ease 0.15s both; }
 
 /* Respect reduced-motion for layout transitions, but keep essential progress
    feedback (spinners, the "working" dots) gently animating — a frozen spinner

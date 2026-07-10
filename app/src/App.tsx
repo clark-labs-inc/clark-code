@@ -36,7 +36,8 @@ export default function App() {
   const init = useSessionStore((s) => s.init);
   const auth = useSessionStore((s) => s.auth);
   const session = useSessionStore((s) => s.session);
-  const opening = useSessionStore((s) => s.opening);
+  // Peek fetches only mark the sidebar row; they never take over the main pane.
+  const openingScreen = useSessionStore((s) => s.opening !== null && s.opening.kind !== "peek");
   const terminalOpen = useSessionStore((s) => s.terminalOpen);
   const mcpOpen = useSessionStore((s) => s.mcpOpen);
   const sshOpen = useSessionStore((s) => s.sshOpen);
@@ -91,12 +92,23 @@ export default function App() {
             <Conversation />
             <Composer />
             {terminalTouched.current && (
-              <Suspense fallback={null}>
+              // The terminal chunk is ~350KB (xterm) — show a slim dock
+              // placeholder on first load so ⌘J doesn't feel like a dead key.
+              <Suspense
+                fallback={
+                  terminalOpen ? (
+                    <div className="flex h-10 shrink-0 items-center gap-2 border-t border-border px-4 text-xs text-ink-muted">
+                      <span className="size-3 animate-[spin_1s_linear_infinite] rounded-full border border-ink-faint border-t-transparent" />
+                      Loading terminal…
+                    </div>
+                  ) : null
+                }
+              >
                 <TerminalPanel />
               </Suspense>
             )}
           </>
-        ) : opening ? (
+        ) : openingScreen ? (
           <OpeningScreen />
         ) : (
           <>

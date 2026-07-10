@@ -25,6 +25,14 @@ const ICON: Record<string, typeof Plus> = {
   memory: BookText,
 };
 
+/** Short palette labels; commands not listed here use their hint as the label. */
+const LABELS: Record<string, string> = {
+  new: "New session",
+  terminal: "Toggle terminal",
+  mcp: "Manage MCP servers",
+  memory: "View project memory",
+};
+
 /** ⌘K command palette: fuzzy-search actions and conversations, keyboard-first. */
 export function CommandPalette({
   dark,
@@ -51,15 +59,11 @@ export function CommandPalette({
       .filter((c) => !c.needsSession || session)
       .map((c) => ({
         id: `action:${c.name}`,
-        label:
-          c.name === "new"
-            ? "New conversation"
-            : c.name === "terminal"
-              ? "Toggle terminal"
-              : c.name === "mcp"
-                ? "Manage MCP servers"
-                : "View project memory",
-        hint: c.hint,
+        // Each command's hint already reads as an action ("Copy the conversation
+        // as Markdown"); LABELS only overrides the ones that read better short.
+        // Skip the hint when it would just repeat the label.
+        label: LABELS[c.name] ?? c.hint,
+        hint: LABELS[c.name] && LABELS[c.name] !== c.hint ? c.hint : undefined,
         icon: ICON[c.name] ?? Plus,
         group: "Actions",
         // All built-ins from `slashCommands()` set `run`; `body`-only entries

@@ -149,10 +149,18 @@ interface SessionState {
    *  Opening a conversation mid-run must not tear the run down, so it becomes a
    *  peek; when the run settles the peek silently promotes to a full open. */
   peek: { id: string; snapshot: Snapshot } | null;
-  /** A conversation is being (re)opened — drives the "Opening…" loading screen so
-   *  the UI never looks frozen during the connect (remote reopens re-establish the
-   *  SSH tunnel, which can take 10–20s). Cleared once the session is live. */
-  opening: { id: string; title: string; remoteHost: string | null } | null;
+  /** A session connect is in flight — drives the "Opening…" loading screen (and
+   *  the sidebar row spinner) so the UI never looks frozen: remote connects
+   *  bring up an SSH tunnel, which can take 10–20s. `kind` picks the copy
+   *  ("Connecting" for a new session, "Reconnecting"/"Opening" for a reopen,
+   *  row-spinner only for a peek fetch). Cleared when the session is live,
+   *  the connect fails, or the user cancels (endSession). */
+  opening: {
+    id: string | null;
+    kind: "start" | "open" | "peek";
+    title: string;
+    remoteHost: string | null;
+  } | null;
   /** Text staged into the composer by "Edit & resend" on a sent message. */
   composerPrefill: string | null;
   /** Config for the "Local coding" provider (persisted to localStorage). */
@@ -298,6 +306,15 @@ interface SessionState {
   cancelActive: () => Promise<void>;
   resolvePermission: (option: string) => Promise<void>;
 }
+
+// Session transitions (start / open / end) are async and can take 10–20s over
+// SSH. Every transition bumps this epoch; a continuation that awakes to find a
+// newer epoch was superseded (user cancelled, hit ⌘N, or clicked another
+// conversation) and must abandon — cleaning up any tunnel it opened — instead
+// of clobbering the newer state.
+let sessionEpoch = 0;
+const nextSessionEpoch = () => ++sessionEpoch;
+const epochStale = (epoch: number) => epoch !== sessionEpoch;
 
 /** Bring up the exec-server + tunnel for `host`. Throws a readable error if the
  *  host is incomplete or the connection fails (unreachable, arch mismatch, …). */
@@ -769,7 +786,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         cwd ? bridge.listMemory(cwd) : Promise.resolve(null),
         bridge.listGlobalMemory?.() ?? Promise.resolve(null),
       ]);
-      set({ loadingMemory: false, memoryOverview, globalMemoryOverview });
+      set({ loadingMemory: false, memoryOverview, globalMemoryOverview, memoryStatus: null });
     } catch (e) {
       set({ loadingMemory: false, memoryStatus: `Could not read memory: ${String(e)}` });
     }
@@ -820,18 +837,28 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   startSession: async () => {
     const { bridge, activeProvider, auth, activeRemote: prevRemote } = get();
     if (!bridge || !activeProvider) return;
+    const epoch = nextSessionEpoch();
     // Replacing any prior remote connection; tear it down (best-effort).
     if (prevRemote) void sshDisconnect(prevRemote.id);
-    set({ connecting: true, error: null, activeRemote: null, activeRemoteHost: null });
+    const isLocal = activeProvider === "local";
+    const isRemote = isLocal && get().projectMode === "remote";
+    const startHost = isRemote
+      ? (loadSshHosts().find((h) => h.id === get().selectedHostId)?.host.trim() ?? null)
+      : null;
+    set({
+      connecting: true,
+      error: null,
+      opening: { id: null, kind: "start", title: "New session", remoteHost: startHost },
+      activeRemote: null,
+      activeRemoteHost: null,
+    });
     let remote: RemoteInfo | null = null;
     try {
-      const isLocal = activeProvider === "local";
       // Make sure a Clark Code key has been minted before the local provider
       // needs it (covers the case where sign-in's background provision is still
       // in flight or failed).
       if (isLocal) await get().ensureCodeKey();
       const localSettings = get().localSettings;
-      const isRemote = isLocal && get().projectMode === "remote";
 
       // Remote: bring up the exec-server + tunnel, then connect the provider to
       // run its tools there. Local: run the loop on this machine. Other
@@ -854,14 +881,25 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         options = {};
       }
 
+      // Superseded (cancel / another open) while connecting → abandon quietly.
+      if (epochStale(epoch)) {
+        if (remote) void sshDisconnect(remote.id);
+        return;
+      }
+
       await bridge.connect(activeProvider, config);
       const session = await bridge.newSession(activeProvider, options);
+      if (epochStale(epoch)) {
+        if (remote) void sshDisconnect(remote.id);
+        return;
+      }
       if (isLocal && !isRemote && localSettings.cwd.trim()) {
         set({ recentProjects: addRecentProject(localSettings.cwd.trim()) });
       }
       set({
         session,
         connecting: false,
+        opening: null,
         historyPrefix: null,
         peek: null,
         queued: [],
@@ -871,11 +909,16 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     } catch (e) {
       // Brought up a tunnel but failed afterward → tear it back down.
       if (remote) void sshDisconnect(remote.id);
-      set({ error: String(e), connecting: false });
+      if (epochStale(epoch)) return;
+      set({ error: String(e), connecting: false, opening: null });
     }
   },
 
   endSession: () => {
+    // Invalidates any in-flight start/open — their continuations see a newer
+    // epoch and abandon (tearing down whatever tunnel they brought up). This is
+    // also the "Cancel" action for the opening screen.
+    nextSessionEpoch();
     for (const a of get().attachments) if (a.previewUrl) URL.revokeObjectURL(a.previewUrl);
     const r = get().activeRemote;
     if (r) void sshDisconnect(r.id);
@@ -883,6 +926,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       session: null,
       snapshot: emptySnapshot(),
       error: null,
+      connecting: false,
       attachments: [],
       historyPrefix: null,
       peek: null,
@@ -898,24 +942,38 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   openConversation: async (id) => {
     const { bridge, activeProvider, auth, session, providers, localSettings, activeRemote: prevRemote } = get();
     if (!bridge || !activeProvider) return;
+    // Already opening this one (double-click, impatient re-click) → no-op; the
+    // in-flight open keeps its spinner.
+    if (get().opening?.id === id) return;
     if (session?.id === id) {
       // Returning to the live conversation just drops the peek — the stream was
       // running underneath the whole time.
       set({ peek: null });
       return;
     }
+    const epoch = nextSessionEpoch();
+    const openingMeta = get().conversations.find((c) => c.id === id);
     // A run is streaming in the live conversation: don't tear it down — show the
     // other conversation read-only (peek). It promotes to a full open when the
     // run settles (see the busy→idle edge in init's subscribe handler).
     if (session && isBusy(get().snapshot)) {
       // Read-only peek while the live run streams: fetch the transcript from the
-      // cloud (or the in-memory cache).
+      // cloud (or the in-memory cache). `opening` gives the clicked row a
+      // spinner while the fetch is in flight (the live conversation stays up).
+      set({
+        opening: {
+          id,
+          kind: "peek",
+          title: openingMeta?.title || "Conversation",
+          remoteHost: openingMeta?.remoteHost ?? null,
+        },
+      });
       const restored = await fetchSnapshot(id, get().auth);
-      set({ peek: { id, snapshot: restored ?? emptySnapshot() } });
+      if (epochStale(epoch)) return;
+      set({ peek: { id, snapshot: restored ?? emptySnapshot() }, opening: null });
       return;
     }
     if (prevRemote) void sshDisconnect(prevRemote.id);
-    const openingMeta = get().conversations.find((c) => c.id === id);
     set({
       connecting: true,
       error: null,
@@ -923,6 +981,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       peek: null,
       opening: {
         id,
+        kind: "open",
         title: openingMeta?.title || "Conversation",
         remoteHost: openingMeta?.remoteHost ?? null,
       },
@@ -939,15 +998,14 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
       // A remote conversation reconnects its host (matched by SSH destination);
       // the saved host must still exist on this device.
-      const meta = get().conversations.find((c) => c.id === id);
-      const wantRemote = isLocal && !!meta?.remoteHost;
+      const wantRemote = isLocal && !!openingMeta?.remoteHost;
       let config;
       let options;
       let remoteHost: string | null = null;
       if (wantRemote) {
-        const host = loadSshHosts().find((h) => h.host.trim() === meta!.remoteHost);
+        const host = loadSshHosts().find((h) => h.host.trim() === openingMeta!.remoteHost);
         if (!host) {
-          throw new Error(`Add the SSH host "${meta!.remoteHost}" to reopen this remote conversation.`);
+          throw new Error(`Add the SSH host "${openingMeta!.remoteHost}" to reopen this remote conversation.`);
         }
         remote = await openRemote(host);
         remoteHost = host.host.trim();
@@ -961,6 +1019,12 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         options = {};
       }
 
+      // Superseded (cancel / another open) while connecting → abandon quietly.
+      if (epochStale(epoch)) {
+        if (remote) void sshDisconnect(remote.id);
+        return;
+      }
+
       await bridge.connect(activeProvider, config);
       // Providers that can't resume (the local agent has no server-side session)
       // reopen as a fresh session bound to the project; the saved transcript shows
@@ -971,6 +1035,10 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       const opened = canResume
         ? await bridge.loadSession(activeProvider, id)
         : { ...(await bridge.newSession(activeProvider, options)), id };
+      if (epochStale(epoch)) {
+        if (remote) void sshDisconnect(remote.id);
+        return;
+      }
       set({
         session: opened,
         historyPrefix: restored,
@@ -984,6 +1052,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       });
     } catch (e) {
       if (remote) void sshDisconnect(remote.id);
+      if (epochStale(epoch)) return;
       set({ error: String(e), connecting: false, opening: null });
     }
   },
@@ -1238,7 +1307,14 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       request: snapshot.pending_permission.id,
       option,
     };
-    await bridge.respond(session.id, response);
+    try {
+      await bridge.respond(session.id, response);
+    } catch (e) {
+      // Without this the click silently does nothing and the gate just sits
+      // there — surface it like every other failed action.
+      set({ error: String(e) });
+      throw e; // let the gate re-enable its buttons
+    }
   },
 }));
 

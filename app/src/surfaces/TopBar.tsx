@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Sun, Moon, FolderGit2, SquareTerminal, Settings as SettingsIcon, RefreshCw, Share2 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useSessionStore } from "../store/sessionStore";
@@ -72,6 +73,30 @@ function DownloadingPill({ progress }: { progress: { downloaded: number; total: 
   );
 }
 
+/** Share = a network roundtrip (mint link + copy). Spinner + disabled while it
+ *  runs so the click is acknowledged and can't double-fire. */
+function ShareButton({ onShare }: { onShare: () => Promise<void> }) {
+  const [sharing, setSharing] = useState(false);
+  return (
+    <button
+      onClick={() => {
+        setSharing(true);
+        void onShare().finally(() => setSharing(false));
+      }}
+      disabled={sharing}
+      aria-label="Share conversation"
+      title="Copy a public read-only link (/unshare stops sharing)"
+      className="grid size-8 place-items-center rounded-lg text-ink-muted transition hover:bg-bg-hover hover:text-ink-secondary disabled:opacity-60"
+    >
+      {sharing ? (
+        <RefreshCw className="size-4 animate-[spin_1s_linear_infinite]" />
+      ) : (
+        <Share2 className="size-4" />
+      )}
+    </button>
+  );
+}
+
 export function TopBar({ dark, onToggleTheme }: { dark: boolean; onToggleTheme: () => void }) {
   const session = useSessionStore((s) => s.session);
   const terminalOpen = useSessionStore((s) => s.terminalOpen);
@@ -111,16 +136,7 @@ export function TopBar({ dark, onToggleTheme }: { dark: boolean; onToggleTheme: 
 
       <div className="ml-auto flex items-center gap-1">
         <UpdatePill />
-        {session && signedIn && (
-          <button
-            onClick={() => void shareConversation()}
-            aria-label="Share conversation"
-            title="Copy a public read-only link (/unshare stops sharing)"
-            className="grid size-8 place-items-center rounded-lg text-ink-muted transition hover:bg-bg-hover hover:text-ink-secondary"
-          >
-            <Share2 className="size-4" />
-          </button>
-        )}
+        {session && signedIn && <ShareButton onShare={shareConversation} />}
         {session && isLocal && <ChangesButton />}
         {session && isLocal && projectCwd && <MemoryButton />}
         <button

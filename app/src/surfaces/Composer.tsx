@@ -480,6 +480,7 @@ export function Composer() {
   const start = useSessionStore((s) => s.startSession);
   const connecting = useSessionStore((s) => s.connecting);
   const startBlocked = useSessionStore((s) => (s.session ? null : s.startBlockedReason()));
+  const startError = useSessionStore((s) => (s.session ? null : s.error));
 
   const { dragging, handlers } = useFileDrop((files) => void addFiles(files));
   usePaste((files) => void addFiles(files), !!session);
@@ -612,8 +613,16 @@ export function Composer() {
     if (!canSend) return;
     const t = value;
     setValue("");
-    // No session yet → start one on the selected environment, then send.
-    if (!session) await start();
+    // No session yet → start one on the selected environment, then send. If the
+    // connect fails (SSH down, bad folder…) the composer has remounted by then —
+    // stage the text as a prefill so the user's task is never lost.
+    if (!session) {
+      await start();
+      if (!useSessionStore.getState().session) {
+        useSessionStore.getState().setComposerPrefill(t);
+        return;
+      }
+    }
     await send(t.trim());
   };
 
@@ -773,9 +782,17 @@ export function Composer() {
           </div>
         </div>
       </div>
-      {!session && (startBlocked || connecting) && (
-        <p className="mx-auto mt-2 max-w-3xl px-1 text-xs text-ink-faint">
-          {connecting ? "Connecting…" : startBlocked}
+      {/* One quiet status line: a connect failure (in red) wins over the
+          "what's missing" readiness hint. Connecting itself never shows here —
+          the OpeningScreen owns that state. */}
+      {!session && (startError || startBlocked) && (
+        <p
+          className={cn(
+            "mx-auto mt-2 max-w-3xl px-1 text-xs",
+            startError ? "text-danger" : "text-ink-faint",
+          )}
+        >
+          {startError ?? startBlocked}
         </p>
       )}
     </div>

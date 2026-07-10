@@ -72,6 +72,7 @@ function MemoryPopover() {
   const reload = useSessionStore((s) => s.loadMemory);
   const enabled = useSessionStore((s) => s.memoriesEnabled);
   const cwd = useSessionStore((s) => s.localSettings.cwd);
+  const status = useSessionStore((s) => s.memoryStatus);
 
   return (
     <div className="popover-surface absolute right-0 top-10 z-50 flex max-h-[70vh] w-[26rem] flex-col overflow-hidden rounded-xl border border-border bg-bg-elevated shadow-xl">
@@ -112,6 +113,9 @@ function MemoryPopover() {
           </div>
         ) : loading && !project && !global ? (
           <p className="py-6 text-center text-xs text-ink-faint">Reading memory…</p>
+        ) : status && !project && !global ? (
+          // A failed read is not the same as "no memories yet" — say so.
+          <p className="py-6 text-center text-xs text-danger">{status}</p>
         ) : (
           <div className="space-y-4">
             <Scope

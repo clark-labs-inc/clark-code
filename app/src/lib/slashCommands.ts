@@ -37,7 +37,11 @@ export function slashCommands(): SlashCommand[] {
       run: () => {
         const { peek, snapshot } = s();
         const md = conversationMarkdown(peek ? peek.snapshot : snapshot);
-        if (md) void navigator.clipboard?.writeText(md);
+        if (!md) return;
+        navigator.clipboard
+          ?.writeText(md)
+          .then(() => s().flashNotice("Conversation copied as Markdown"))
+          .catch(() => s().flashNotice("Couldn't copy — clipboard unavailable"));
       },
     },
     {

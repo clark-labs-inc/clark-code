@@ -1,4 +1,5 @@
-import { ShieldQuestion, ShieldAlert, ListChecks } from "lucide-react";
+import { useEffect, useState } from "react";
+import { ShieldQuestion, ShieldAlert, ListChecks, Loader2 } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
 import { wouldAutoApprove } from "../lib/permissions";
 import { allowCommand } from "../lib/commandPolicy";
@@ -91,6 +92,11 @@ export function PermissionGate({ req }: { req: PermissionRequest }) {
   const resolve = useSessionStore((s) => s.resolvePermission);
   const mode = useSessionStore((s) => s.permissionMode);
   const project = useSessionStore((s) => s.localSettings.cwd);
+  // Which option was clicked; disables the row until the engine consumes the
+  // response (the gate unmounts on the next snapshot) or the send fails.
+  const [picked, setPicked] = useState<string | null>(null);
+  // A different request can reuse this mounted gate — reset the pending pick.
+  useEffect(() => setPicked(null), [req.id]);
   if (wouldAutoApprove(mode, req)) return null;
 
   const tone = riskTone(req.risk);
@@ -100,13 +106,16 @@ export function PermissionGate({ req }: { req: PermissionRequest }) {
     req.risk === "safe" || req.risk === "caution" || req.risk === "danger";
 
   const onPick = (opt: PermissionOption) => {
+    if (picked) return; // a response is already in flight
     // "Always allow this command" persists to the project's allowlist so the
     // engine skips the gate next time (only ever for Safe/Caution commands; MCP
     // "always allow" is handled per-tool by the engine policy instead).
     if (opt.kind === "allow_always" && isShellCommand && req.detail) {
       allowCommand(project, req.detail);
     }
-    void resolve(opt.id);
+    setPicked(opt.id);
+    // On failure the store surfaces the error; re-enable so the user can retry.
+    resolve(opt.id).catch(() => setPicked(null));
   };
 
   return (
@@ -159,12 +168,21 @@ export function PermissionGate({ req }: { req: PermissionRequest }) {
           <button
             key={opt.id}
             onClick={() => onPick(opt)}
+            disabled={picked !== null}
             className={cn(
-              "rounded-lg px-3 py-1.5 text-sm font-medium transition",
+              "rounded-lg px-3 py-1.5 text-sm font-medium transition disabled:opacity-50",
               OPTION_STYLE[opt.kind],
+              picked === opt.id && "opacity-100",
             )}
           >
-            {opt.label}
+            {picked === opt.id ? (
+              <span className="flex items-center gap-1.5">
+                <Loader2 className="size-3.5 animate-[spin_1s_linear_infinite]" />
+                {opt.label}
+              </span>
+            ) : (
+              opt.label
+            )}
           </button>
         ))}
       </div>
