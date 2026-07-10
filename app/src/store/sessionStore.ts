@@ -149,6 +149,10 @@ interface SessionState {
    *  Opening a conversation mid-run must not tear the run down, so it becomes a
    *  peek; when the run settles the peek silently promotes to a full open. */
   peek: { id: string; snapshot: Snapshot } | null;
+  /** A conversation is being (re)opened — drives the "Opening…" loading screen so
+   *  the UI never looks frozen during the connect (remote reopens re-establish the
+   *  SSH tunnel, which can take 10–20s). Cleared once the session is live. */
+  opening: { id: string; title: string; remoteHost: string | null } | null;
   /** Text staged into the composer by "Edit & resend" on a sent message. */
   composerPrefill: string | null;
   /** Config for the "Local coding" provider (persisted to localStorage). */
@@ -362,6 +366,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   conversationsLoading: !!bootAuth,
   historyPrefix: null,
   peek: null,
+  opening: null,
   composerPrefill: null,
   localSettings: loadLocalSettings(),
   projectMode: "local",
@@ -881,6 +886,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       attachments: [],
       historyPrefix: null,
       peek: null,
+      opening: null,
       composerPrefill: null,
       queued: [],
       terminalOpen: false,
@@ -909,11 +915,17 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       return;
     }
     if (prevRemote) void sshDisconnect(prevRemote.id);
+    const openingMeta = get().conversations.find((c) => c.id === id);
     set({
       connecting: true,
       error: null,
       dismissedFailedRuns: [],
       peek: null,
+      opening: {
+        id,
+        title: openingMeta?.title || "Conversation",
+        remoteHost: openingMeta?.remoteHost ?? null,
+      },
       activeRemote: null,
       activeRemoteHost: null,
     });
@@ -964,6 +976,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         historyPrefix: restored,
         snapshot: restored ?? emptySnapshot(),
         connecting: false,
+        opening: null,
         attachments: [],
         queued: [],
         activeRemote: remote,
@@ -971,7 +984,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       });
     } catch (e) {
       if (remote) void sshDisconnect(remote.id);
-      set({ error: String(e), connecting: false });
+      set({ error: String(e), connecting: false, opening: null });
     }
   },
 

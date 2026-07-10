@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import {
   Plus, MessageSquare, Archive, ArchiveRestore, ChevronRight, PanelLeftClose, PanelLeft,
-  FolderGit2, Server, Search, X, Trash2,
+  FolderGit2, Server, Search, X, Trash2, Loader2,
 } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
 import { projectName } from "../lib/localAgent";
@@ -89,11 +89,14 @@ function ConversationRow({
   c,
   active,
   streaming,
+  opening,
 }: {
   c: ConversationMeta;
   active: boolean;
   /** A run is currently streaming in this conversation. */
   streaming: boolean;
+  /** This conversation is currently being (re)opened. */
+  opening: boolean;
 }) {
   const open = useSessionStore((s) => s.openConversation);
   const archive = useSessionStore((s) => s.archiveConversation);
@@ -109,7 +112,7 @@ function ConversationRow({
   return (
     <div
       className={`group relative flex items-center gap-2 rounded-lg px-2.5 py-2 text-sm transition ${
-        active
+        active || opening
           ? "bg-bg-hover text-ink before:absolute before:left-0 before:top-1/2 before:h-5 before:w-0.5 before:-translate-y-1/2 before:rounded-full before:bg-accent before:content-['']"
           : "text-ink-secondary hover:bg-bg-hover"
       }`}
@@ -143,7 +146,9 @@ function ConversationRow({
           className="flex min-w-0 flex-1 items-center gap-2 text-left"
           title={`${c.title} — double-click to rename`}
         >
-          {streaming ? (
+          {opening ? (
+            <Loader2 className="size-3.5 shrink-0 animate-[spin_1s_linear_infinite] text-ink-muted" />
+          ) : streaming ? (
             <span className="relative grid size-3.5 shrink-0 place-items-center" aria-label="Running">
               <span className="absolute size-2 animate-ping rounded-full bg-accent/40" />
               <span className="size-1.5 rounded-full bg-accent" />
@@ -154,7 +159,7 @@ function ConversationRow({
           <span className="flex min-w-0 flex-col">
             <span className="truncate leading-tight">{c.title}</span>
             <span className="truncate text-xs text-ink-muted">
-              {streaming ? "Working…" : relativeTime(c.updatedAt)}
+              {opening ? "Opening…" : streaming ? "Working…" : relativeTime(c.updatedAt)}
             </span>
           </span>
         </button>
@@ -233,6 +238,7 @@ export function Sidebar() {
   // Selection follows what's on screen (a peek shows another conversation while
   // the live one keeps streaming — that one gets the pulsing "working" dot).
   const peekId = useSessionStore((s) => s.peek?.id ?? null);
+  const openingId = useSessionStore((s) => s.opening?.id ?? null);
   const liveBusy = useSessionStore((s) =>
     Object.values(s.snapshot.runs).some((r) => r.status === "running" || r.status === "queued"),
   );
@@ -357,6 +363,7 @@ export function Sidebar() {
                       c={c}
                       active={(peekId ?? session?.id) === c.id}
                       streaming={liveBusy && session?.id === c.id}
+                      opening={openingId === c.id}
                     />
                   ))}
                 </div>

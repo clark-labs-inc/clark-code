@@ -5,6 +5,7 @@ import { useHotkeys } from "./lib/hotkeys";
 import { TopBar } from "./surfaces/TopBar";
 import { Sidebar } from "./surfaces/Sidebar";
 import { StartCard } from "./surfaces/StartCard";
+import { OpeningScreen } from "./surfaces/OpeningScreen";
 import { Conversation } from "./surfaces/Conversation";
 import { Composer } from "./surfaces/Composer";
 import { CreditBanner } from "./surfaces/CreditBanner";
@@ -35,6 +36,7 @@ export default function App() {
   const init = useSessionStore((s) => s.init);
   const auth = useSessionStore((s) => s.auth);
   const session = useSessionStore((s) => s.session);
+  const opening = useSessionStore((s) => s.opening);
   const terminalOpen = useSessionStore((s) => s.terminalOpen);
   const mcpOpen = useSessionStore((s) => s.mcpOpen);
   const sshOpen = useSessionStore((s) => s.sshOpen);
@@ -94,6 +96,8 @@ export default function App() {
               </Suspense>
             )}
           </>
+        ) : opening ? (
+          <OpeningScreen />
         ) : (
           <>
             <StartCard />
