@@ -721,7 +721,7 @@ export function Composer() {
         />
 
         <AnimatePresence initial={false}>
-          {!peeking && !busy && !connecting && !value.trim() && attachments.length === 0 && (
+          {session && !peeking && !busy && !value.trim() && attachments.length === 0 && (
             <motion.div
               key="capabilities"
               initial={reduce ? { opacity: 0 } : { opacity: 0, height: 0 }}
