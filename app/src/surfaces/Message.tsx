@@ -7,6 +7,7 @@ import { useSessionStore } from "../store/sessionStore";
 import { cn } from "../lib/cn";
 import { useCopy } from "../lib/clipboard";
 import { parseNarration } from "../lib/narration";
+import { useSmoothText } from "../lib/useSmoothText";
 import type { ContentBlock, Role } from "../core-bridge/types";
 
 function text(blocks: ContentBlock[]): string {
@@ -167,6 +168,10 @@ function MessageImpl({
 }) {
   const reduce = useReducedMotion();
   const body = text(blocks);
+  // Streamed tokens arrive in uneven bursts; reveal them at a steady
+  // left-to-right pace so the reply reads as continuous typing. Honors
+  // reduced-motion by showing text as it arrives.
+  const smoothed = useSmoothText(body, streaming && role === "agent" && !reduce);
 
   const inner = (() => {
     if (role === "user") {
@@ -199,7 +204,7 @@ function MessageImpl({
     }
     // Assistant: full-width text (no avatar), split into answer / narration /
     // thinking spans.
-    const spans = parseNarration(body);
+    const spans = parseNarration(streaming ? smoothed : body);
     return (
       <div className="min-w-0 space-y-2">
         {spans.map((span, i) => {
