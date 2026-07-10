@@ -63,7 +63,15 @@ export default function AuthenticatedWorkspace() {
         <TopBar dark={dark} onToggleTheme={toggle} />
         <OfflineBanner />
         <CreditBanner />
-        {session ? (
+        {/* The opening screen takes priority over a still-mounted previous
+            session: switching conversations (especially local ↔ remote, which
+            reconnects SSH) keeps the old `session` set until the new one is
+            live, and leaving the old chat interactive during that window
+            looked frozen — and invited input into a session being replaced.
+            Peeks are excluded: the live conversation stays up while they load. */}
+        {openingScreen ? (
+          <OpeningScreen />
+        ) : session ? (
           <>
             <Conversation />
             <Composer />
@@ -82,8 +90,6 @@ export default function AuthenticatedWorkspace() {
               </Suspense>
             )}
           </>
-        ) : openingScreen ? (
-          <OpeningScreen />
         ) : (
           <>
             <StartCard />

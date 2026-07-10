@@ -250,7 +250,10 @@ interface SessionState {
    *  submit with the same logic the start screen uses. */
   startBlockedReason: () => string | null;
   startSession: () => Promise<void>;
-  endSession: () => void;
+  /** Leave the current conversation (→ welcome screen). Refused while a run is
+   *  streaming — tearing the session down would cancel it — unless `force`
+   *  (sign-out) or the session is still just connecting (OpeningScreen cancel). */
+  endSession: (opts?: { force?: boolean }) => void;
   openConversation: (id: string) => Promise<void>;
   /** Soft-delete: hide from the main list but keep the transcript locally and in
    *  the cloud so it can be restored. Clears the view if it's the open chat. */
@@ -315,6 +318,12 @@ interface SessionState {
 let sessionEpoch = 0;
 const nextSessionEpoch = () => ++sessionEpoch;
 const epochStale = (epoch: number) => epoch !== sessionEpoch;
+
+/** Shown when an action would tear down a conversation whose run is still
+ *  streaming. Switching via the sidebar is safe (it peeks); everything else
+ *  must wait or stop the run explicitly. */
+const BUSY_SESSION_MESSAGE =
+  "Clark is still working in this chat. Switching chats from the sidebar keeps it running — to start fresh, stop the run first (⌘.).";
 
 /** Bring up the exec-server + tunnel for `host`. Throws a readable error if the
  *  host is incomplete or the connection fails (unreachable, arch mismatch, …). */
@@ -814,7 +823,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
   signOutAuth: () => {
     authSignOut();
-    get().endSession();
+    get().endSession({ force: true });
     // Drop the in-memory history entirely so the signed-out (and any next)
     // account starts clean.
     snapshotCache.clear();
@@ -837,6 +846,14 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   startSession: async () => {
     const { bridge, activeProvider, auth, activeRemote: prevRemote } = get();
     if (!bridge || !activeProvider) return;
+    // The host runs one live session at a time: starting a new one replaces the
+    // current session (and tears down its tunnel), which would cancel a
+    // streaming run. Normally unreachable (endSession guards first), but kept
+    // for direct callers like the mobile-remote takeover.
+    if (get().session && isBusy(get().snapshot)) {
+      get().flashNotice(BUSY_SESSION_MESSAGE);
+      return;
+    }
     const epoch = nextSessionEpoch();
     // Replacing any prior remote connection; tear it down (best-effort).
     if (prevRemote) void sshDisconnect(prevRemote.id);
@@ -914,7 +931,16 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     }
   },
 
-  endSession: () => {
+  endSession: (opts) => {
+    // A run is streaming in this conversation: ending the session would kill it
+    // (and any SSH tunnel under it) — chats are supposed to keep working while
+    // the user moves around. Refuse with guidance instead of silently
+    // cancelling. Cancelling an in-flight connect (`opening` set) is always
+    // fine — nothing is running yet — as is a forced teardown (sign-out).
+    if (!opts?.force && !get().opening && get().session && isBusy(get().snapshot)) {
+      get().flashNotice(BUSY_SESSION_MESSAGE);
+      return;
+    }
     // Invalidates any in-flight start/open — their continuations see a newer
     // epoch and abandon (tearing down whatever tunnel they brought up). This is
     // also the "Cancel" action for the opening screen.
@@ -1061,6 +1087,12 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     // Soft-delete: flag it archived in the cloud (the transcript stays, so it
     // can be restored in full). Optimistic in-memory flag; PATCH to the cloud.
     const cleared = get().session?.id === id;
+    // Archiving the live conversation mid-run would kill the run (and its
+    // tunnel) out from under it — refuse, same as endSession.
+    if (cleared && isBusy(get().snapshot)) {
+      get().flashNotice(BUSY_SESSION_MESSAGE);
+      return;
+    }
     if (cleared) {
       const r = get().activeRemote;
       if (r) void sshDisconnect(r.id);
