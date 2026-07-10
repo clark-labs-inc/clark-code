@@ -228,6 +228,61 @@ html.dark .shiki-host pre.shiki span {
 html.dark .shiki-host pre.shiki span {
   background-color: var(--shiki-dark-bg, transparent) !important;
 }
+/* Per-line highlighted HTML injected into diff rows (same token vars, no <pre>). */
+html.dark .shiki-inline,
+html.dark .shiki-inline span {
+  color: var(--shiki-dark, currentColor) !important;
+}
+html.dark .shiki-inline span {
+  background-color: var(--shiki-dark-bg, transparent) !important;
+}
+
+/* Structured diff body (DiffBody) — a file header, hunk rows, and per-line
+   tinted code with an old/new line-number gutter. Tints use the semantic
+   success/danger tokens so they read in both themes; the gutter is faint. */
+.diff-body .diff-row {
+  display: grid;
+  grid-template-columns: 3ch 3ch 1ch 1fr;
+  white-space: pre;
+}
+.diff-body .diff-gutter-old,
+.diff-body .diff-gutter-new {
+  text-align: right;
+  padding-right: 0.5ch;
+  color: var(--color-ink-faint);
+  opacity: 0.6;
+  user-select: none;
+}
+.diff-body .diff-sign {
+  text-align: center;
+  user-select: none;
+}
+.diff-body .diff-code {
+  min-width: 0;
+  padding-left: 0.5ch;
+}
+.diff-body .diff-add {
+  background: color-mix(in oklab, var(--color-success) 10%, transparent);
+}
+.diff-body .diff-del {
+  background: color-mix(in oklab, var(--color-danger) 10%, transparent);
+}
+.diff-body .diff-add .diff-code { color: var(--color-success); }
+.diff-body .diff-del .diff-code { color: var(--color-danger); }
+.diff-body .diff-ctx .diff-code { color: var(--color-ink-secondary); }
+/* Highlighted tokens carry their own color; only override on plain fallback. */
+.diff-body .diff-add .diff-code .shiki-inline,
+.diff-body .diff-del .diff-code .shiki-inline,
+.diff-body .diff-ctx .diff-code .shiki-inline { color: inherit; }
+.diff-body .diff-hunk {
+  background: color-mix(in oklab, var(--color-info) 8%, transparent);
+  padding-top: 0.25rem;
+  padding-bottom: 0.25rem;
+  margin-top: 0.25rem;
+}
+.diff-body .diff-meta {
+  white-space: pre;
+}
 
 /* Refined icon strokes: lucide defaults to 2, which reads heavy at the 14–16px
    sizes used throughout. 1.75 is crisper and more precise. */

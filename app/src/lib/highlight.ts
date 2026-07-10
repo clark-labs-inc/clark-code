@@ -108,30 +108,70 @@ export function resolveLang(raw: string | undefined): string | null {
   return LANG_ALIASES[id] ?? id;
 }
 
+/** Resolve + load a grammar on the warm core, returning the core (or null if
+ *  the lang is absent / unknown / the grammar can't load). Shared by the block
+ *  and per-line highlighters. */
+async function coreForLang(rawLang: string | undefined): Promise<{ core: HighlighterCore; lang: string } | null> {
+  const lang = resolveLang(rawLang);
+  if (!lang) return null;
+  const c = await getCore();
+  if (!c.getLoadedLanguages().includes(lang)) {
+    const loader = bundledLanguages[lang as keyof typeof bundledLanguages];
+    if (!loader) return null;
+    try {
+      await c.loadLanguage(loader);
+    } catch {
+      return null;
+    }
+  }
+  return { core: c, lang };
+}
+
 /** Highlight `code` for `lang` with both themes (CSS-variable dual theme).
  *  Loads the grammar on demand if it isn't preloaded. Returns `{ html: null }`
  *  while the highlighter warms, or for an absent/plain language — callers render
  *  plain monospace in that case. */
 export async function highlight(code: string, rawLang: string | undefined): Promise<HighlightResult> {
-  const lang = resolveLang(rawLang);
-  if (!lang) return { html: null, lang: null };
-  const c = await getCore();
-  if (!c.getLoadedLanguages().includes(lang)) {
-    const loader = bundledLanguages[lang as keyof typeof bundledLanguages];
-    if (!loader) return { html: null, lang: null };
-    try {
-      await c.loadLanguage(loader);
-    } catch {
-      return { html: null, lang: null };
-    }
-  }
+  const got = await coreForLang(rawLang);
+  if (!got) return { html: null, lang: null };
   try {
-    const html = await c.codeToHtml(code, {
-      lang,
+    const html = await got.core.codeToHtml(code, {
+      lang: got.lang,
       themes: { light: LIGHT_THEME, dark: DARK_THEME },
     });
-    return { html, lang };
+    return { html, lang: got.lang };
   } catch {
     return { html: null, lang: null };
   }
+}
+
+/** Highlight `code` and return one HTML string per source line — the inner
+ *  content of each Shiki `<span class="line">`, in arrival order. Used by the
+ *  diff renderer to color a file's code within per-row tinted lines. Returns
+ *  null while warming or for an unknown lang; callers fall back to plain text. */
+export async function highlightLines(code: string, rawLang: string | undefined): Promise<string[] | null> {
+  const got = await coreForLang(rawLang);
+  if (!got) return null;
+  let html: string;
+  try {
+    html = await got.core.codeToHtml(code, {
+      lang: got.lang,
+      themes: { light: LIGHT_THEME, dark: DARK_THEME },
+    });
+  } catch {
+    return null;
+  }
+  return splitShikiLineSpans(html, code);
+}
+
+/** Split Shiki's `<pre><code><span class="line">…</span>…</code></pre>` into one
+ *  inner-HTML string per source line. Returns null on a structure mismatch so
+ *  the caller can fall back to plain (unhighlighted) text. */
+function splitShikiLineSpans(html: string, code: string): string[] | null {
+  const lines = code.split("\n");
+  // Capture the inner HTML of each <span class="line">…</span>.
+  const re = /<span class="line">(.*?)<\/span>/gs;
+  const matches = [...html.matchAll(re)];
+  if (matches.length === lines.length) return matches.map((m) => m[1] ?? "");
+  return null;
 }

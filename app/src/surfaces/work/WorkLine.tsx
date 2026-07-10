@@ -1,4 +1,4 @@
-import { memo, useState } from "react";
+import { memo, useEffect, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
   FileText, FilePen, SquareTerminal, Search, Globe, Trash2, FolderInput,
@@ -6,8 +6,9 @@ import {
 } from "lucide-react";
 import { cn } from "../../lib/cn";
 import { lastProgressLine } from "../../lib/activity";
-import { callDiffStat, type DiffStat } from "../../lib/diff";
+import { callDiffStat, langFromPath, parseDiff, type DiffStat } from "../../lib/diff";
 import { extractSources } from "../../lib/sources";
+import { highlightLines } from "../../lib/highlight";
 import { openExternal } from "../../lib/account";
 import { openProjectPath } from "../../lib/openPath";
 import { useSessionStore } from "../../store/sessionStore";
@@ -56,27 +57,93 @@ function DiffStatBadge({ stat }: { stat: DiffStat }) {
 }
 
 export function DiffBody({ text }: { text: string }) {
-  const lines = text.replace(/^diff .*\n/, "").split("\n");
+  const parsed = parseDiff(text);
+  // Not a structured diff — render the old plain-monospace view.
+  if (!parsed) {
+    const lines = text.split("\n");
+    return (
+      <pre className="overflow-x-auto px-3 py-2 font-mono text-xs leading-[1.5]">
+        {lines.map((line, i) => (
+          <div key={i}>{line || " "}</div>
+        ))}
+      </pre>
+    );
+  }
+
+  const lang = langFromPath(parsed.path);
+  // Collect the in-hunk code lines (prefixes stripped) as one block to highlight
+  // in the file's language, so a diff of a Rust file shows colored Rust — not
+  // just flat red/green text. lineCodeIdx maps each parsed line → code-block row.
+  const codeLines: string[] = [];
+  const lineCodeIdx: number[] = [];
+  for (const l of parsed.lines) {
+    if (l.kind === "context" || l.kind === "add" || l.kind === "del") {
+      lineCodeIdx.push(codeLines.length);
+      codeLines.push(l.text);
+    } else {
+      lineCodeIdx.push(-1);
+    }
+  }
+  const [hl, setHl] = useState<string[] | null>(null);
+  useEffect(() => {
+    if (!lang) return;
+    let alive = true;
+    highlightLines(codeLines.join("\n"), lang).then((rows) => {
+      if (alive && rows) setHl(rows);
+    });
+    return () => {
+      alive = false;
+    };
+    // codeLines/lang derive from `text`; re-highlight when it changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [text, lang]);
+
   return (
-    <pre className="overflow-x-auto px-3 py-2 font-mono text-xs leading-[1.5]">
-      {lines.map((line, i) => {
-        const add = line.startsWith("+");
-        const del = line.startsWith("-");
-        return (
-          <div
-            key={i}
-            className={cn(
-              "-mx-1 px-1",
-              add && "bg-success/12 text-success",
-              del && "bg-danger/12 text-danger",
-              !add && !del && "text-ink-muted",
-            )}
-          >
-            {line || " "}
-          </div>
-        );
-      })}
-    </pre>
+    <div className="diff-body font-mono text-xs leading-[1.55]">
+      <div className="flex items-center gap-2 border-b border-border-subtle px-3 py-1.5">
+        <FileText className="size-3.5 shrink-0 text-ink-faint" />
+        <span className="min-w-0 flex-1 truncate text-ink-secondary">{parsed.path}</span>
+        <span className="shrink-0 tabular-nums text-success">{parsed.stats.adds > 0 && `+${parsed.stats.adds}`}</span>
+        <span className="shrink-0 tabular-nums text-danger">{parsed.stats.dels > 0 && `−${parsed.stats.dels}`}</span>
+      </div>
+      <div className="overflow-x-auto py-1">
+        {parsed.lines.map((line, i) => {
+          if (line.kind === "meta") {
+            if (/^(index |similarity |rename |new file|deleted file|old mode|new mode|copy (from|to))/.test(line.text)) {
+              return null;
+            }
+            return <div key={i} className="diff-meta px-3 text-ink-faint">{line.text}</div>;
+          }
+          if (line.kind === "hunk") {
+            return <div key={i} className="diff-hunk px-3 text-info">{line.text}</div>;
+          }
+          if (line.kind === "plain") {
+            return <div key={i} className="px-3 text-ink-faint">{line.text || " "}</div>;
+          }
+          const add = line.kind === "add";
+          const del = line.kind === "del";
+          const oldNo = line.kind === "del" ? line.oldNo : line.kind === "context" ? line.oldNo : null;
+          const newNo = line.kind === "add" ? line.newNo : line.kind === "context" ? line.newNo : null;
+          const inner = hl && lineCodeIdx[i] >= 0 ? hl[lineCodeIdx[i]] : null;
+          return (
+            <div key={i} className={cn("diff-row", add && "diff-add", del && "diff-del", !add && !del && "diff-ctx")}>
+              <span className="diff-gutter-old">{oldNo ?? ""}</span>
+              <span className="diff-gutter-new">{newNo ?? ""}</span>
+              <span className={cn("diff-sign", add && "text-success", del && "text-danger")}>
+                {add ? "+" : del ? "−" : " "}
+              </span>
+              <span className="diff-code">
+                {inner ? (
+                  <span className="shiki-inline" dangerouslySetInnerHTML={{ __html: inner }} />
+                ) : (
+                  line.text || " "
+                )}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
