@@ -11,6 +11,7 @@ import { useCopy } from "../lib/clipboard";
 import { parseNarration } from "../lib/narration";
 import { useSmoothText } from "../lib/useSmoothText";
 import { highlight, resolveLang } from "../lib/highlight";
+import { Mermaid } from "./work/Mermaid";
 import type { ContentBlock, Role } from "../core-bridge/types";
 
 function text(blocks: ContentBlock[]): string {
@@ -120,7 +121,11 @@ function CodeBlock({ lang, code }: { lang?: string; code: string }) {
   );
 }
 
-export function Md({ children, math = false }: { children: string; math?: boolean }) {
+export function Md({ children, math = false, diagrams = false }: {
+  children: string;
+  math?: boolean;
+  diagrams?: boolean;
+}) {
   const remark = math ? [remarkGfm, remarkMath] : [remarkGfm];
   const rehype = math ? [rehypeKatex] : [];
   return (
@@ -131,7 +136,14 @@ export function Md({ children, math = false }: { children: string; math?: boolea
         a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noreferrer noopener" />,
         pre: ({ node: _node, children }) => {
           const parsed = codeFromPreChild(children);
-          if (parsed) return <CodeBlock lang={parsed.lang} code={parsed.code} />;
+          if (parsed) {
+            // A ```mermaid fence in a diagrams-enabled surface renders as a
+            // diagram (lazy-loaded), not a code block.
+            if (diagrams && parsed.lang && /mermaid/i.test(parsed.lang)) {
+              return <Mermaid code={parsed.code} />;
+            }
+            return <CodeBlock lang={parsed.lang} code={parsed.code} />;
+          }
           // Indented or non-fenced code — render plainly without highlighting.
           return <pre>{children}</pre>;
         },

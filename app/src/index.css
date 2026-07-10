@@ -318,6 +318,10 @@ html.dark .shiki-inline span {
 .katex { color: inherit; }
 .katex-display { margin: 0.5em 0; overflow-x: auto; overflow-y: hidden; padding: 0.5em 0; }
 
+/* Mermaid diagrams (lazy-loaded, MarkdownDoc only). Center and let wide graphs
+   scroll horizontally instead of overflowing the artifact surface. */
+.mermaid-host svg { max-width: 100%; height: auto; }
+
 /* Refined icon strokes: lucide defaults to 2, which reads heavy at the 14–16px
    sizes used throughout. 1.75 is crisper and more precise. */
 svg.lucide {

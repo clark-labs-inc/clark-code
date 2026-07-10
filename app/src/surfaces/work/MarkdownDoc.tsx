@@ -118,7 +118,7 @@ export function MarkdownDoc({ artifact }: { artifact: Artifact }) {
       ) : present && multi ? (
         <div className="border-t border-border-subtle">
           <div className={cn("min-h-[8rem] px-4 py-4 text-base leading-relaxed", MD_CLASSES)}>
-            <Md math>{slides[at]}</Md>
+            <Md math diagrams>{slides[at]}</Md>
           </div>
           <div className="flex items-center justify-between border-t border-border-subtle px-3 py-1.5">
             <button
@@ -151,7 +151,7 @@ export function MarkdownDoc({ artifact }: { artifact: Artifact }) {
             MD_CLASSES,
           )}
         >
-          <Md math>{text}</Md>
+          <Md math diagrams>{text}</Md>
         </div>
       )}
     </motion.div>
