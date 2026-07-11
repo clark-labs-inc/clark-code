@@ -108,8 +108,11 @@ impl RemoteArch {
 
 /// Bring up the remote server + tunnel and return a ready connection.
 pub async fn connect(spec: &RemoteSpec) -> Result<RemoteConn, String> {
-    let arch = detect_arch(&spec.host).await?;
-    let home = remote_home(&spec.host).await?;
+    // One SSH round-trip for both arch + home — each `ssh_capture` is a fresh
+    // connection with its own ConnectTimeout, so folding them removes a full
+    // handshake (the dominant latency, especially over ProxyJump) from every
+    // remote session start/reopen.
+    let (arch, home) = detect_arch_and_home(&spec.host).await?;
     let remote_bin = format!(
         "{home}/.clark/bin/clark-exec-server-v{}-{}",
         env!("CARGO_PKG_VERSION"),
@@ -148,25 +151,34 @@ pub struct Probe {
 /// the settings "Test connection" button; surfaces the exact failures that bite
 /// at connect time (unreachable host, unsupported arch).
 pub async fn probe(host: &str) -> Result<Probe, String> {
-    let arch = detect_arch(host).await?;
-    let home = remote_home(host).await?;
+    let (arch, home) = detect_arch_and_home(host).await?;
     Ok(Probe {
         arch: arch.slug().to_string(),
         home,
     })
 }
 
-async fn detect_arch(host: &str) -> Result<RemoteArch, String> {
-    RemoteArch::from_uname(&ssh_capture(host, "uname -sm").await?)
+/// Detect the remote arch + `$HOME` in a single SSH round-trip. Output is two
+/// lines: `uname -sm`, then `$HOME` (no trailing newline). Portable `/bin/sh`.
+async fn detect_arch_and_home(host: &str) -> Result<(RemoteArch, String), String> {
+    let out = ssh_capture(
+        host,
+        "printf '%s\\n' \"$(uname -sm)\"; printf '%s' \"$HOME\"",
+    )
+    .await?;
+    parse_arch_and_home(&out)
 }
 
-async fn remote_home(host: &str) -> Result<String, String> {
-    let home = ssh_capture(host, "printf %s \"$HOME\"").await?;
-    let home = home.trim().to_string();
+/// Parse the combined `uname -sm` + `$HOME` output from
+/// [`detect_arch_and_home`]. First line → arch; remainder (trimmed) → home.
+fn parse_arch_and_home(out: &str) -> Result<(RemoteArch, String), String> {
+    let mut lines = out.split('\n');
+    let arch = RemoteArch::from_uname(lines.next().unwrap_or(""))?;
+    let home = lines.collect::<Vec<_>>().join("\n").trim().to_string();
     if home.is_empty() {
         return Err("could not resolve remote $HOME".into());
     }
-    Ok(home)
+    Ok((arch, home))
 }
 
 /// Make sure this exact version+arch server is on the remote. The version is in
@@ -449,6 +461,32 @@ mod tests {
             RemoteArch::DarwinArm64
         );
         assert!(RemoteArch::from_uname("Plan9 mips").is_err());
+    }
+
+    #[test]
+    fn parse_arch_and_home_splits_first_line_and_remainder() {
+        // Typical output: `uname -sm` line, then `$HOME` (no trailing newline).
+        let (arch, home) = parse_arch_and_home("Linux x86_64\n/home/stan").unwrap();
+        assert_eq!(arch, RemoteArch::LinuxX86_64);
+        assert_eq!(home, "/home/stan");
+    }
+
+    #[test]
+    fn parse_arch_and_home_trims_home_whitespace() {
+        let (arch, home) = parse_arch_and_home("Darwin arm64\n/Users/stan\n").unwrap();
+        assert_eq!(arch, RemoteArch::DarwinArm64);
+        assert_eq!(home, "/Users/stan");
+    }
+
+    #[test]
+    fn parse_arch_and_home_errors_on_empty_home() {
+        assert!(parse_arch_and_home("Linux x86_64\n").is_err());
+        assert!(parse_arch_and_home("Linux x86_64\n   ").is_err());
+    }
+
+    #[test]
+    fn parse_arch_and_home_propagates_bad_arch() {
+        assert!(parse_arch_and_home("Plan9 mips\n/home/x").is_err());
     }
 
     #[test]

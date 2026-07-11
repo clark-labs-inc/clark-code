@@ -166,7 +166,7 @@ function fmtCost(usd: number): string {
  *  primitives so token-streaming snapshot clones don't re-render this. */
 function UsageChip() {
   const contextTokens = useSessionStore((s) => {
-    const runs = Object.values((s.peek ? s.peek.snapshot : s.snapshot).runs);
+    const runs = Object.values(s.snapshot.runs);
     for (let i = runs.length - 1; i >= 0; i--) {
       const u = runs[i].outcome?.usage;
       if (u) return u.context_tokens;
@@ -174,15 +174,15 @@ function UsageChip() {
     return 0;
   });
   const totalIn = useSessionStore((s) =>
-    Object.values((s.peek ? s.peek.snapshot : s.snapshot).runs).reduce(
+    Object.values(s.snapshot.runs).reduce(
       (n, r) => n + (r.outcome?.usage?.input_tokens ?? 0), 0),
   );
   const totalOut = useSessionStore((s) =>
-    Object.values((s.peek ? s.peek.snapshot : s.snapshot).runs).reduce(
+    Object.values(s.snapshot.runs).reduce(
       (n, r) => n + (r.outcome?.usage?.output_tokens ?? 0), 0),
   );
   const cost = useSessionStore((s) =>
-    Object.values((s.peek ? s.peek.snapshot : s.snapshot).runs).reduce(
+    Object.values(s.snapshot.runs).reduce(
       (n, r) => n + (r.outcome?.usage?.cost_usd ?? 0), 0),
   );
 
@@ -472,7 +472,6 @@ export function Composer() {
   );
   const attachments = useSessionStore((s) => s.attachments);
   const addFiles = useSessionStore((s) => s.addFiles);
-  const peeking = useSessionStore((s) => s.peek !== null);
   const prefill = useSessionStore((s) => s.composerPrefill);
   const setPrefill = useSessionStore((s) => s.setComposerPrefill);
   // Start-screen mode: with no active session the composer starts one on submit
@@ -516,7 +515,7 @@ export function Composer() {
 
   const hasContent = value.trim().length > 0 || attachments.length > 0;
   const canSend =
-    hasContent && !peeking && (!!session || (!startBlocked && !connecting));
+    hasContent && (!!session || (!startBlocked && !connecting));
 
   // --- @-file / slash autocomplete ----------------------------------------
   const trigger = useMemo(() => detectTrigger(value, caret), [value, caret]);
@@ -665,7 +664,7 @@ export function Composer() {
       void submit();
     }
     // Esc with an empty composer stops the active run (matches ⌘.).
-    if (e.key === "Escape" && busy && !value.trim() && !peeking) {
+    if (e.key === "Escape" && busy && !value.trim()) {
       e.preventDefault();
       void cancelActive();
     }
@@ -733,13 +732,11 @@ export function Composer() {
           placeholder={
             !session
               ? "Describe what you want Clark to do…"
-              : peeking
-                ? "Viewing another chat — Clark is still working…"
-                : busy
-                  ? "Queue a follow-up…"
-                  : "Ask Clark anything about this project…"
+              : busy
+                ? "Queue a follow-up…"
+                : "Ask Clark anything about this project…"
           }
-          disabled={peeking || connecting}
+          disabled={connecting}
           className="composer-input max-h-52 w-full resize-none bg-transparent px-0.5 py-1.5 text-base leading-relaxed text-ink outline-none placeholder:text-ink-muted disabled:opacity-50"
         />
 
@@ -760,7 +757,7 @@ export function Composer() {
           <div className="flex min-w-0 items-center gap-2.5">
             <UsageChip />
             <ModelPill />
-            {busy && !hasContent && !peeking ? (
+            {busy && !hasContent ? (
               <button
                 onClick={() => void cancelActive()}
                 aria-label="Stop"

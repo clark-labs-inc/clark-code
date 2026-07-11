@@ -178,6 +178,10 @@ pub struct AssistantTurn {
     pub finish_reason: Option<String>,
     /// Usage reported by the stream's final chunk, when present.
     pub usage: Option<TokenUsage>,
+    /// Hidden reasoning the model streamed in `delta.reasoning` (GLM/OpenRouter)
+    /// or `delta.reasoning_content` (some providers) — separate from `text`.
+    /// Display-only; never sent back to the model on the next turn.
+    pub reasoning: String,
 }
 
 /// Why a model call ended without producing a turn.
@@ -264,7 +268,9 @@ impl LlmClient {
             messages.push(ChatMessage::system(s));
         }
         messages.push(ChatMessage::user(user));
-        let turn = self.stream_chat(&messages, &[], cancel, |_| {}).await?;
+        let turn = self
+            .stream_chat(&messages, &[], cancel, |_| {}, |_| {})
+            .await?;
         Ok(turn.text)
     }
 
@@ -283,7 +289,9 @@ impl LlmClient {
             ChatMessage::system(system),
             ChatMessage::user_with_images(prompt, image_urls),
         ];
-        let turn = self.stream_chat(&messages, &[], cancel, |_| {}).await?;
+        let turn = self
+            .stream_chat(&messages, &[], cancel, |_| {}, |_| {})
+            .await?;
         Ok(turn.text)
     }
 
@@ -307,14 +315,18 @@ impl LlmClient {
     }
 
     /// Stream one chat completion. `on_text` receives assistant text deltas as
-    /// they arrive; the assembled turn (text + tool calls) is returned at the
-    /// end. Honors `cancel` both before and during the stream.
+    /// they arrive; `on_reasoning` receives hidden reasoning deltas (GLM's
+    /// `delta.reasoning` / the `reasoning_content` alias) so the UI can surface
+    /// a live Thinking block instead of silence. The assembled turn (text +
+    /// tool calls + reasoning) is returned at the end. Honors `cancel` both
+    /// before and during the stream.
     pub async fn stream_chat(
         &self,
         messages: &[ChatMessage],
         tools: &[ToolSchema],
         cancel: &CancellationToken,
         mut on_text: impl FnMut(&str),
+        mut on_reasoning: impl FnMut(&str),
     ) -> Result<AssistantTurn, LlmError> {
         if cancel.is_cancelled() {
             return Err(LlmError::Cancelled);
@@ -360,7 +372,7 @@ impl LlmClient {
                 }
                 Some(Ok(bytes)) => {
                     buf.extend_from_slice(&bytes);
-                    if drain_lines(&mut buf, &mut acc, &mut on_text) {
+                    if drain_lines(&mut buf, &mut acc, &mut on_text, &mut on_reasoning) {
                         break; // saw [DONE]
                     }
                 }
@@ -372,7 +384,12 @@ impl LlmClient {
 
 /// Extract complete `\n`-terminated lines from `buf`, feeding each SSE `data:`
 /// frame to the accumulator. Returns `true` once a `[DONE]` sentinel is seen.
-fn drain_lines(buf: &mut Vec<u8>, acc: &mut Accumulator, on_text: &mut impl FnMut(&str)) -> bool {
+fn drain_lines(
+    buf: &mut Vec<u8>,
+    acc: &mut Accumulator,
+    on_text: &mut impl FnMut(&str),
+    on_reasoning: &mut impl FnMut(&str),
+) -> bool {
     let mut done = false;
     while let Some(pos) = buf.iter().position(|&b| b == b'\n') {
         let line: Vec<u8> = buf.drain(..=pos).collect();
@@ -390,7 +407,7 @@ fn drain_lines(buf: &mut Vec<u8>, acc: &mut Accumulator, on_text: &mut impl FnMu
             break;
         }
         if let Ok(chunk) = serde_json::from_str::<Value>(payload) {
-            acc.push_chunk(&chunk, on_text);
+            acc.push_chunk(&chunk, on_text, on_reasoning);
         }
     }
     done
@@ -402,6 +419,7 @@ fn drain_lines(buf: &mut Vec<u8>, acc: &mut Accumulator, on_text: &mut impl FnMu
 #[derive(Default)]
 struct Accumulator {
     text: String,
+    reasoning: String,
     tool_calls: BTreeMap<u64, PartialToolCall>,
     finish_reason: Option<String>,
     usage: Option<TokenUsage>,
@@ -415,7 +433,12 @@ struct PartialToolCall {
 }
 
 impl Accumulator {
-    fn push_chunk(&mut self, chunk: &Value, on_text: &mut impl FnMut(&str)) {
+    fn push_chunk(
+        &mut self,
+        chunk: &Value,
+        on_text: &mut impl FnMut(&str),
+        on_reasoning: &mut impl FnMut(&str),
+    ) {
         // The final chunk carries the whole call's usage (include_usage is set
         // upstream by the passthrough). Read it before the choices guard — some
         // providers ship usage in a chunk with no/empty choices.
@@ -441,6 +464,20 @@ impl Accumulator {
                 if !content.is_empty() {
                     self.text.push_str(content);
                     on_text(content);
+                }
+            }
+            // Hidden reasoning: GLM/OpenRouter streams it as `delta.reasoning`;
+            // some providers use `delta.reasoning_content`. Forward each delta
+            // live so the UI can render a Thinking block instead of silence.
+            // Prefer `reasoning`, fall back to the `reasoning_content` alias.
+            let reasoning = delta
+                .get("reasoning")
+                .and_then(Value::as_str)
+                .or_else(|| delta.get("reasoning_content").and_then(Value::as_str));
+            if let Some(reasoning) = reasoning {
+                if !reasoning.is_empty() {
+                    self.reasoning.push_str(reasoning);
+                    on_reasoning(reasoning);
                 }
             }
             if let Some(calls) = delta.get("tool_calls").and_then(Value::as_array) {
@@ -490,6 +527,7 @@ impl Accumulator {
             tool_calls,
             finish_reason: self.finish_reason,
             usage: self.usage,
+            reasoning: self.reasoning,
         }
     }
 }
@@ -501,9 +539,10 @@ mod tests {
     fn feed(frames: &[&str]) -> AssistantTurn {
         let mut acc = Accumulator::default();
         let mut sink = |_: &str| {};
+        let mut rsink = |_: &str| {};
         for f in frames {
             let v: Value = serde_json::from_str(f).unwrap();
-            acc.push_chunk(&v, &mut sink);
+            acc.push_chunk(&v, &mut sink, &mut rsink);
         }
         acc.finish()
     }
@@ -514,12 +553,56 @@ mod tests {
         let mut acc = Accumulator::default();
         for c in ["Hel", "lo ", "world"] {
             let v = json!({"choices":[{"delta":{"content": c}}]});
-            acc.push_chunk(&v, &mut |s: &str| collected.push_str(s));
+            acc.push_chunk(&v, &mut |s: &str| collected.push_str(s), &mut |_| {});
         }
         let turn = acc.finish();
         assert_eq!(turn.text, "Hello world");
         assert_eq!(collected, "Hello world");
         assert!(turn.tool_calls.is_empty());
+    }
+
+    #[test]
+    fn accumulates_streamed_reasoning_and_forwards_it_live() {
+        let mut collected = String::new();
+        let mut acc = Accumulator::default();
+        // GLM/OpenRouter shape: reasoning rides in `delta.reasoning`, separate
+        // from `content`. Stream two reasoning deltas, then visible text.
+        for (r, c) in [("Think", ""), ("ing…", ""), ("", "Answer")] {
+            let mut delta = json!({});
+            if !r.is_empty() {
+                delta["reasoning"] = json!(r);
+            }
+            if !c.is_empty() {
+                delta["content"] = json!(c);
+            }
+            let v = json!({"choices":[{"delta":delta}]});
+            acc.push_chunk(&v, &mut |_| {}, &mut |s: &str| collected.push_str(s));
+        }
+        let turn = acc.finish();
+        assert_eq!(turn.reasoning, "Thinking…");
+        assert_eq!(turn.text, "Answer");
+        assert_eq!(
+            collected, "Thinking…",
+            "reasoning deltas fire the callback live"
+        );
+    }
+
+    #[test]
+    fn reasoning_content_alias_is_also_read() {
+        let mut acc = Accumulator::default();
+        // Some providers stream reasoning as `delta.reasoning_content`.
+        let v = json!({"choices":[{"delta":{"reasoning_content":"alt"}}]});
+        acc.push_chunk(&v, &mut |_| {}, &mut |_| {});
+        assert_eq!(acc.finish().reasoning, "alt");
+    }
+
+    #[test]
+    fn reasoning_is_preferred_over_reasoning_content_when_both_present() {
+        let mut acc = Accumulator::default();
+        let v =
+            json!({"choices":[{"delta":{"reasoning":"primary","reasoning_content":"secondary"}}]});
+        acc.push_chunk(&v, &mut |_| {}, &mut |_| {});
+        assert_eq!(acc.finish().reasoning, "primary");
     }
 
     #[test]
@@ -585,14 +668,15 @@ mod tests {
     fn drain_lines_handles_split_frames_and_done() {
         let mut acc = Accumulator::default();
         let mut sink = |_: &str| {};
+        let mut rsink = |_: &str| {};
         // A frame split across two network chunks, then [DONE].
         let mut buf = Vec::new();
         buf.extend_from_slice(b"data: {\"choices\":[{\"delta\":{\"content\":\"hi");
-        assert!(!drain_lines(&mut buf, &mut acc, &mut sink));
+        assert!(!drain_lines(&mut buf, &mut acc, &mut sink, &mut rsink));
         buf.extend_from_slice(b"\"}}]}\n");
-        assert!(!drain_lines(&mut buf, &mut acc, &mut sink));
+        assert!(!drain_lines(&mut buf, &mut acc, &mut sink, &mut rsink));
         buf.extend_from_slice(b"data: [DONE]\n");
-        assert!(drain_lines(&mut buf, &mut acc, &mut sink));
+        assert!(drain_lines(&mut buf, &mut acc, &mut sink, &mut rsink));
         assert_eq!(acc.finish().text, "hi");
     }
 

@@ -1,5 +1,9 @@
 import { create } from "zustand";
-import { getBridge, type CoreBridge } from "../core-bridge/bridge";
+import {
+  getBridge,
+  type CloudTrajectoryConfig,
+  type CoreBridge,
+} from "../core-bridge/bridge";
 import { syncFanOut } from "./fanOutStore";
 import {
   emptySnapshot,
@@ -68,6 +72,7 @@ import {
 import { provisionCodeKey, billingMe, type BillingSummary } from "../lib/account";
 import { copyText } from "../lib/clipboard";
 import { notify } from "../lib/notify";
+import { repositoryFingerprintForRoot } from "../lib/repositoryKnowledge";
 import {
   checkAndStageUpdate,
   relaunchApp,
@@ -145,19 +150,23 @@ interface SessionState {
   conversationsLoading: boolean;
   /** Restored transcript when a past conversation is reopened (prefix to live). */
   historyPrefix: Snapshot | null;
-  /** Read-only view of ANOTHER conversation while a run streams in the live one.
-   *  Opening a conversation mid-run must not tear the run down, so it becomes a
-   *  peek; when the run settles the peek silently promotes to a full open. */
-  peek: { id: string; snapshot: Snapshot } | null;
+  /** Conversation ids whose live session currently has a running run — drives
+   *  the per-row "Working…" indicator in the sidebar. Any number of sessions
+   *  can stream at once; switching between them never cancels a run. */
+  runningIds: string[];
+  /** Conversation ids selected in the sidebar (Shift-click). Drives the
+   *  right-click bulk actions (archive / delete all selected). A fresh Set
+   *  on every mutation so zustand re-renders. */
+  selectedConversationIds: Set<string>;
   /** A session connect is in flight — drives the "Opening…" loading screen (and
    *  the sidebar row spinner) so the UI never looks frozen: remote connects
    *  bring up an SSH tunnel, which can take 10–20s. `kind` picks the copy
-   *  ("Connecting" for a new session, "Reconnecting"/"Opening" for a reopen,
-   *  row-spinner only for a peek fetch). Cleared when the session is live,
-   *  the connect fails, or the user cancels (endSession). */
+   *  ("Connecting" for a new session, "Reconnecting"/"Opening" for a reopen).
+   *  Cleared when the session is live, the connect fails, or the user cancels
+   *  (endSession). */
   opening: {
     id: string | null;
-    kind: "start" | "open" | "peek";
+    kind: "start" | "open";
     title: string;
     remoteHost: string | null;
   } | null;
@@ -250,9 +259,9 @@ interface SessionState {
    *  submit with the same logic the start screen uses. */
   startBlockedReason: () => string | null;
   startSession: () => Promise<void>;
-  /** Leave the current conversation (→ welcome screen). Refused while a run is
-   *  streaming — tearing the session down would cancel it — unless `force`
-   *  (sign-out) or the session is still just connecting (OpeningScreen cancel). */
+  /** Detach from the current conversation (→ welcome screen). Its live session
+   *  keeps running in the background pool — reopening reattaches instantly.
+   *  `force` (sign-out) tears down every live session instead. */
   endSession: (opts?: { force?: boolean }) => void;
   openConversation: (id: string) => Promise<void>;
   /** Soft-delete: hide from the main list but keep the transcript locally and in
@@ -264,6 +273,17 @@ interface SessionState {
   deleteConversation: (id: string) => void;
   /** Rename a conversation; the manual title stops auto-derivation clobbering it. */
   renameConversation: (id: string, title: string) => void;
+  /** Toggle one conversation in the sidebar's Shift-click selection. */
+  toggleConversationSelection: (id: string) => void;
+  /** Set the sidebar selection (replace). Pass an empty Set to clear. */
+  setConversationSelection: (ids: Set<string>) => void;
+  /** Archive every selected conversation at once. Busy ones are skipped (a
+   *  notice is flashed); the rest are closed + flagged archived in the cloud. */
+  archiveSelectedConversations: () => void;
+  /** Permanently delete every selected conversation at once. Busy ones are
+   *  skipped (a notice is flashed); the rest are closed + deleted from the
+   *  cloud. Selection is cleared afterwards. */
+  deleteSelectedConversations: () => void;
   /** Change the coding model / reasoning effort. Persists, and when a session is
    *  live, hot-swaps the provider's LLM (the transcript is kept — the next turn
    *  continues with full context on the new model). */
@@ -319,11 +339,74 @@ let sessionEpoch = 0;
 const nextSessionEpoch = () => ++sessionEpoch;
 const epochStale = (epoch: number) => epoch !== sessionEpoch;
 
-/** Shown when an action would tear down a conversation whose run is still
- *  streaming. Switching via the sidebar is safe (it peeks); everything else
- *  must wait or stop the run explicitly. */
+/** Shown when archive/delete would destroy a conversation whose run is still
+ *  streaming. Switching chats is always safe — sessions keep running in the
+ *  background — but archive/delete tears the session down for real. */
 const BUSY_SESSION_MESSAGE =
-  "Clark is still working in this chat. Switching chats from the sidebar keeps it running — to start fresh, stop the run first (⌘.).";
+  "Clark is still working in this chat — stop the run first (⌘.), then archive or delete it.";
+
+/** One live session in the pool. Every opened conversation gets an entry that
+ *  keeps its provider session (and any streaming run) alive independently of
+ *  which conversation is displayed — there is no limit on how many run at
+ *  once. Non-reactive on purpose: the UI renders only the ACTIVE session's
+ *  snapshot (mirrored into the store) plus the lightweight `runningIds` list. */
+interface LiveEntry {
+  session: Session;
+  /** Latest raw engine snapshot for this session (no history prefix). */
+  live: Snapshot;
+  /** Restored transcript this session was reopened on top of, if any. */
+  historyPrefix: Snapshot | null;
+  /** The SSH tunnel backing this session (remote projects) — torn down only
+   *  when the session closes, never on a switch. */
+  remote: RemoteInfo | null;
+  remoteHost: string | null;
+  /** Project folder captured at open time (local sessions), so background
+   *  persistence doesn't misattribute the project when settings change. */
+  projectCwd: string | null;
+  /** Follow-ups typed while this conversation's run was streaming. */
+  queued: QueuedMessage[];
+  // Per-session bookkeeping for the shared snapshot handler.
+  lastPersist: number;
+  prevBusy: boolean;
+  dispatching: boolean;
+  autoResolvedId: string | null;
+  notifiedPermId: string | null;
+}
+
+/** The pool of live sessions, keyed by conversation id. */
+const liveSessions = new Map<string, LiveEntry>();
+
+function newLiveEntry(
+  session: Session,
+  init: Pick<LiveEntry, "historyPrefix" | "remote" | "remoteHost" | "projectCwd">,
+): LiveEntry {
+  return {
+    session,
+    live: { ...emptySnapshot(), session: session.id },
+    queued: [],
+    lastPersist: 0,
+    prevBusy: false,
+    dispatching: false,
+    autoResolvedId: null,
+    notifiedPermId: null,
+    ...init,
+  };
+}
+
+/** The entry's displayable snapshot: restored history + live turns. */
+function mergedOf(entry: LiveEntry): Snapshot {
+  return entry.historyPrefix ? mergeHistory(entry.historyPrefix, entry.live) : entry.live;
+}
+
+/** Close one live session for real: drop the host-side provider (killing any
+ *  agent loop) and its SSH tunnel. Only archive/delete/sign-out do this. */
+function closeLiveSession(bridge: CoreBridge | null, id: string): void {
+  const entry = liveSessions.get(id);
+  if (!entry) return;
+  liveSessions.delete(id);
+  void bridge?.closeSession?.(id);
+  if (entry.remote) void sshDisconnect(entry.remote.id);
+}
 
 /** Bring up the exec-server + tunnel for `host`. Throws a readable error if the
  *  host is incomplete or the connection fails (unreachable, arch mismatch, …). */
@@ -340,6 +423,37 @@ async function openRemote(host: SshHost): Promise<RemoteInfo> {
 // LIST lives in the store's `conversations` and is populated from the cloud on
 // init/sign-in (see `syncCloudIndex`).
 const snapshotCache = new Map<string, Snapshot>();
+
+async function bindCloudTrajectory(
+  bridge: CoreBridge,
+  session: Session,
+  meta: ConversationMeta,
+  auth: AuthSession | null,
+  metadata: Record<string, unknown>,
+): Promise<void> {
+  // Browser preview/dev bridges have no native cloud sink. Production Tauri
+  // always implements it and requires authenticated Clark cloud credentials.
+  if (!bridge.configureCloudTrajectory) return;
+  const creds = cloudCreds(auth);
+  if (!creds) {
+    throw new Error("Clark cloud is required to start or resume a coding session.");
+  }
+  const repositoryFingerprint = meta.project
+    ? await repositoryFingerprintForRoot(meta.project)
+    : null;
+  const config: CloudTrajectoryConfig = {
+    endpoint: creds.endpoint,
+    token: creds.token,
+    title: meta.title,
+    provider: meta.provider,
+    project: meta.project,
+    repositoryFingerprint: repositoryFingerprint ?? undefined,
+    remoteHost: meta.remoteHost,
+    mode: meta.mode,
+    metadata,
+  };
+  await bridge.configureCloudTrajectory(session.id, config);
+}
 
 /** Cloud-first snapshot lookup: the in-memory cache, else a `cloudGet` (settled
  *  so a persisted mid-run transcript never reopens "Thinking…"), else null. */
@@ -391,7 +505,8 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   conversations: [],
   conversationsLoading: !!bootAuth,
   historyPrefix: null,
-  peek: null,
+  runningIds: [],
+  selectedConversationIds: new Set<string>(),
   opening: null,
   composerPrefill: null,
   localSettings: loadLocalSettings(),
@@ -466,29 +581,20 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     try {
       const bridge = await getBridge();
       const providers = await bridge.listProviders();
-      // Guards for the snapshot handler: `autoResolvedId` stops us re-answering
-      // the same permission prompt; `dispatching` stops a second queued message
-      // firing before the one we just dispatched registers as a running run.
-      let autoResolvedId: string | null = null;
-      let dispatching = false;
-      // Native-notification edges: ping when a run finishes (busy→idle) or when a
-      // gate actually blocks for the user. Tracked across snapshots.
-      let prevBusy = false;
-      let notifiedPermId: string | null = null;
       // The host re-emits a fully cloned snapshot on every streamed token (tens
-      // per second). Two throttles keep that from melting the UI:
-      //   • render — coalesce to at most one React update per animation frame;
-      //   • persist — write the transcript to localStorage at most ~2×/sec while
-      //     a run streams, and always once it goes idle so nothing is lost.
+      // per second), for EVERY live session concurrently. Two throttles keep
+      // that from melting the UI:
+      //   • render — only the ACTIVE session renders, coalesced to at most one
+      //     React update per animation frame;
+      //   • persist — each session writes its transcript at most ~2×/sec while
+      //     streaming, and always once it goes idle so nothing is lost.
       const raf: (cb: () => void) => void =
         typeof requestAnimationFrame !== "undefined"
           ? (cb) => requestAnimationFrame(() => cb())
           : (cb) => void setTimeout(cb, 16);
-      // Buffer the RAW live snapshot and merge with the CURRENT history prefix
-      // at flush time. Merging at enqueue time raced conversation switches: a
-      // session-reset (empty) emission could flush AFTER openConversation set
-      // the restored snapshot and blank it. Fresh-at-flush state can't go stale,
-      // and it moves merge work from per-event to per-frame.
+      // Buffer the RAW live snapshot and merge with the entry's history prefix
+      // at flush time; a switch mid-frame drops the stale flush (the snapshot's
+      // session tag no longer matches the active conversation).
       let pending: Snapshot | null = null;
       let rafScheduled = false;
       const flushRender = () => {
@@ -496,9 +602,10 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         if (!pending) return;
         const live = pending;
         pending = null;
-        // No session (user just ended it) → nothing to render into.
-        if (!get().session) return;
-        const prefix = get().historyPrefix;
+        const active = get().session;
+        if (!active || live.session !== active.id) return;
+        const entry = liveSessions.get(active.id);
+        const prefix = entry?.historyPrefix ?? null;
         const merged = prefix ? mergeHistory(prefix, live) : live;
         // Push fan-out state into its own (deduped) store on the SAME coalesced
         // frame as the render — not per raw event — so an active swarm's tiles
@@ -507,47 +614,47 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         syncFanOut(merged.fan_out);
         set({ snapshot: merged });
       };
-      let lastPersist = 0;
       let lastBilling = 0;
-      // Fold each engine snapshot into the active conversation: merge with any
-      // restored history prefix, show it, and persist it so the chat survives a
-      // restart and can be reopened later.
+      // Route each engine snapshot to its live-session entry (any number can
+      // stream at once): render if active, persist, notify, auto-approve, and
+      // drain queued follow-ups — all per session.
       bridge.subscribe((live) => {
-        const { historyPrefix, session } = get();
-        const snapshot = historyPrefix ? mergeHistory(historyPrefix, live) : live;
+        const id = live.session;
+        const entry = id ? liveSessions.get(id) : undefined;
+        // No entry: the clean announce emitted before the store registers the
+        // session, or a trailing event after a close — nothing to route to.
+        if (!id || !entry) return;
+        entry.live = live;
+        const snapshot = entry.historyPrefix ? mergeHistory(entry.historyPrefix, live) : live;
+        const busyNow = isBusy(live);
+        const isActive = get().session?.id === id;
 
-        // Render (and fan-out sync) are coalesced to the next animation frame in
-        // flushRender; the raw live snapshot is buffered here.
-        pending = live;
-        if (!rafScheduled) {
-          rafScheduled = true;
-          raf(flushRender);
+        if (isActive) {
+          pending = live;
+          if (!rafScheduled) {
+            rafScheduled = true;
+            raf(flushRender);
+          }
         }
 
-        const busyNow = isBusy(snapshot);
-
-        // Persist + sidebar meta: throttled while streaming, immediate when idle.
-        // While busy the interval is long (2s) and the work runs in a macrotask
-        // AFTER the frame commits — JSON.stringify of a long transcript +
-        // synchronous localStorage writes were the source of 100ms+ hitches on
-        // slow machines. The final idle save is immediate so nothing is lost.
-        if (session && hasContent(snapshot)) {
+        // Persist + sidebar meta: throttled while streaming, immediate when
+        // idle. While busy the work runs in a macrotask AFTER the frame commits
+        // — JSON.stringify of a long transcript was a source of 100ms+ hitches.
+        if (hasContent(snapshot)) {
           const now = Date.now();
-          if (!busyNow || now - lastPersist >= 2000) {
-            lastPersist = now;
-            const persistSession = session;
-            const persistPrefixLen = historyPrefix ? historyPrefix.timeline.length : 0;
+          if (!busyNow || now - entry.lastPersist >= 2000) {
+            entry.lastPersist = now;
+            const persistPrefixLen = entry.historyPrefix?.timeline.length ?? 0;
             const persist = () => {
               // Cache the latest snapshot in memory (never to disk); the cloud
               // push below is the durable copy.
-              snapshotCache.set(persistSession.id, snapshot);
-              const prev = get().conversations.find((c) => c.id === persistSession.id);
-              const remoteHost = get().activeRemoteHost;
-              // Project folder is the remote root for a remote session, else local.
+              snapshotCache.set(id, snapshot);
+              const prev = get().conversations.find((c) => c.id === id);
+              // Project folder is the remote root for a remote session, else the
+              // folder captured when this session opened.
               const project =
-                persistSession.provider === "local"
-                  ? (remoteHost ? get().activeRemote?.cwd : get().localSettings.cwd.trim()) ||
-                    undefined
+                entry.session.provider === "local"
+                  ? (entry.remoteHost ? entry.remote?.cwd : entry.projectCwd) || undefined
                   : undefined;
               // Only advance updatedAt when the timeline actually grew past the
               // restored prefix — i.e. real new activity. Merely opening/resuming a
@@ -555,13 +662,13 @@ export const useSessionStore = create<SessionState>((set, get) => ({
               // order (and its whole project group's) must stay put in the sidebar.
               const grew = snapshot.timeline.length > persistPrefixLen;
               const meta: ConversationMeta = {
-                id: persistSession.id,
+                id,
                 // A manual rename wins over the auto-derived title forever.
                 title: prev?.titleLocked && prev.title ? prev.title : deriveTitle(snapshot),
-                provider: persistSession.provider,
-                mode: persistSession.mode,
+                provider: entry.session.provider,
+                mode: entry.session.mode,
                 project: project ?? prev?.project,
-                remoteHost: remoteHost ?? prev?.remoteHost,
+                remoteHost: entry.remoteHost ?? prev?.remoteHost,
                 titleLocked: prev?.titleLocked,
                 createdAt: prev?.createdAt ?? Date.now(),
                 updatedAt: grew ? Date.now() : (prev?.updatedAt ?? Date.now()),
@@ -590,36 +697,30 @@ export const useSessionStore = create<SessionState>((set, get) => ({
           }
         }
 
-        if (busyNow) dispatching = false; // a run is active again — clear the drain guard
+        if (busyNow) entry.dispatching = false; // a run is active again — clear the drain guard
+
+        // Per-conversation "Working…" indicator for the sidebar.
+        if (busyNow !== entry.prevBusy) {
+          const ids = get().runningIds;
+          set({ runningIds: busyNow ? [...ids, id] : ids.filter((r) => r !== id) });
+        }
 
         // Native notification on the busy→idle edge (desktop only, and only when
         // the window is unfocused — see notify()).
-        if (prevBusy && !busyNow && session) {
-          const failedRun = Object.values(snapshot.runs).some((r) => r.status === "failed");
-          const title = get().conversations.find((c) => c.id === session.id)?.title;
+        if (entry.prevBusy && !busyNow) {
+          const failedRun = Object.values(live.runs).some((r) => r.status === "failed");
+          const title = get().conversations.find((c) => c.id === id)?.title;
           if (failedRun) {
             void notify("Run failed", title ? `“${title}” ended with an error.` : "The agent ended unexpectedly.");
           } else {
             void notify("Clark finished", title ? `“${title}” is ready for review.` : "Your task is ready for review.");
           }
-          // The user was peeking at another conversation while this run streamed;
-          // now that it settled (and its transcript just persisted above), promote
-          // the peek to a real open so they can keep working there.
-          const peeked = get().peek;
-          if (peeked) {
-            // Flush the idle snapshot synchronously — the raf-coalesced render
-            // hasn't run yet, and openConversation's busy check must see the run
-            // as settled or it would just re-peek.
-            pending = null;
-            set({ snapshot, peek: null });
-            void get().openConversation(peeked.id);
-          }
         }
-        prevBusy = busyNow;
+        entry.prevBusy = busyNow;
 
         // Refresh the credit balance shortly after a turn settles so the credit
         // banner reflects spend (throttled — billing is a network call).
-        if (!busyNow && session) {
+        if (!busyNow) {
           const now = Date.now();
           if (now - lastBilling > 15000) {
             lastBilling = now;
@@ -629,45 +730,45 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
         // Auto-approve the pending permission per the current policy (Full access
         // grants everything; "Approve for me" grants all but destructive-looking
-        // actions). Guarded so each request is answered exactly once.
-        const pend = snapshot.pending_permission;
+        // actions). Guarded so each request is answered exactly once — works for
+        // background sessions too, so a run never stalls just because its
+        // conversation isn't on screen.
+        const pend = live.pending_permission;
         if (pend) {
-          if (pend.id !== autoResolvedId && wouldAutoApprove(get().permissionMode, pend)) {
+          if (pend.id !== entry.autoResolvedId && wouldAutoApprove(get().permissionMode, pend)) {
             const opt = pickAllowOption(pend);
-            const sess = get().session;
-            if (opt && sess) {
-              autoResolvedId = pend.id;
+            if (opt) {
+              entry.autoResolvedId = pend.id;
               bridge
-                .respond(sess.id, { kind: "permission", request: pend.id, option: opt.id })
+                .respond(id, { kind: "permission", request: pend.id, option: opt.id })
                 .catch((e) => set({ error: String(e) }));
             }
-          } else if (pend.id !== notifiedPermId && !wouldAutoApprove(get().permissionMode, pend)) {
+          } else if (pend.id !== entry.notifiedPermId && !wouldAutoApprove(get().permissionMode, pend)) {
             // The gate will actually block for the user — ping them.
-            notifiedPermId = pend.id;
+            entry.notifiedPermId = pend.id;
             void notify("Approval needed", pend.title || "Clark is waiting for your approval.");
           }
         } else {
-          autoResolvedId = null;
-          notifiedPermId = null;
+          entry.autoResolvedId = null;
+          entry.notifiedPermId = null;
         }
 
-        // Drain the next queued message whenever idle and unblocked. Draining on
-        // every idle snapshot (not just the busy→idle edge) means a permission
-        // prompt open at the finish moment never strands the queue; `dispatching`
-        // prevents a double-send before the new run shows up as busy.
-        if (!busyNow && !snapshot.pending_permission && !dispatching) {
-          const { queued, session: sess } = get();
-          if (sess && queued.length > 0) {
-            const [next, ...rest] = queued;
-            dispatching = true;
-            set({ queued: rest });
-            bridge
-              .prompt(sess.id, [{ type: "text", text: next.text }], next.uploads)
-              .catch((e) => {
-                set({ error: String(e) });
-                dispatching = false;
-              });
-          }
+        // Drain this conversation's next queued message whenever idle and
+        // unblocked. Draining on every idle snapshot (not just the busy→idle
+        // edge) means a permission prompt open at the finish moment never
+        // strands the queue; `dispatching` prevents a double-send before the
+        // new run shows up as busy.
+        if (!busyNow && !live.pending_permission && !entry.dispatching && entry.queued.length > 0) {
+          const [next, ...rest] = entry.queued;
+          entry.dispatching = true;
+          entry.queued = rest;
+          if (isActive) set({ queued: rest });
+          bridge
+            .prompt(id, [{ type: "text", text: next.text }], next.uploads)
+            .catch((e) => {
+              set({ error: String(e) });
+              entry.dispatching = false;
+            });
         }
       });
       set({
@@ -844,19 +945,9 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   },
 
   startSession: async () => {
-    const { bridge, activeProvider, auth, activeRemote: prevRemote } = get();
+    const { bridge, activeProvider, auth } = get();
     if (!bridge || !activeProvider) return;
-    // The host runs one live session at a time: starting a new one replaces the
-    // current session (and tears down its tunnel), which would cancel a
-    // streaming run. Normally unreachable (endSession guards first), but kept
-    // for direct callers like the mobile-remote takeover.
-    if (get().session && isBusy(get().snapshot)) {
-      get().flashNotice(BUSY_SESSION_MESSAGE);
-      return;
-    }
     const epoch = nextSessionEpoch();
-    // Replacing any prior remote connection; tear it down (best-effort).
-    if (prevRemote) void sshDisconnect(prevRemote.id);
     const isLocal = activeProvider === "local";
     const isRemote = isLocal && get().projectMode === "remote";
     const startHost = isRemote
@@ -866,10 +957,9 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       connecting: true,
       error: null,
       opening: { id: null, kind: "start", title: "New session", remoteHost: startHost },
-      activeRemote: null,
-      activeRemoteHost: null,
     });
     let remote: RemoteInfo | null = null;
+    let nativeSession: Session | null = null;
     try {
       // Make sure a Clark Code key has been minted before the local provider
       // needs it (covers the case where sign-in's background provision is still
@@ -906,25 +996,67 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
       await bridge.connect(activeProvider, config);
       const session = await bridge.newSession(activeProvider, options);
+      nativeSession = session;
       if (epochStale(epoch)) {
+        void bridge.closeSession?.(session.id);
         if (remote) void sshDisconnect(remote.id);
         return;
       }
+      const project = isLocal
+        ? (isRemote ? remote?.cwd : localSettings.cwd.trim()) || undefined
+        : undefined;
+      await bindCloudTrajectory(
+        bridge,
+        session,
+        {
+          id: session.id,
+          title: "New conversation",
+          provider: activeProvider,
+          project,
+          remoteHost: remoteHost ?? undefined,
+          mode: session.mode,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        },
+        get().auth,
+        {
+          projectMode: get().projectMode,
+          model: isLocal ? localSettings.model : undefined,
+          reasoningEffort: isLocal ? localSettings.reasoningEffort : undefined,
+          permissionMode: get().permissionMode,
+          outputStyle: get().outputStyle,
+          memoriesEnabled: get().memoriesEnabled,
+          browserEnabled: get().browserEnabled,
+        },
+      );
       if (isLocal && !isRemote && localSettings.cwd.trim()) {
         set({ recentProjects: addRecentProject(localSettings.cwd.trim()) });
       }
+      // Register in the live-session pool — other sessions keep running
+      // untouched; this one joins them and becomes the displayed conversation.
+      liveSessions.set(
+        session.id,
+        newLiveEntry(session, {
+          historyPrefix: null,
+          remote,
+          remoteHost,
+          projectCwd: isLocal && !isRemote ? localSettings.cwd.trim() || null : null,
+        }),
+      );
+      nativeSession = null;
       set({
         session,
+        snapshot: emptySnapshot(),
         connecting: false,
         opening: null,
         historyPrefix: null,
-        peek: null,
         queued: [],
         activeRemote: remote,
         activeRemoteHost: remoteHost,
       });
     } catch (e) {
       // Brought up a tunnel but failed afterward → tear it back down.
+      if (nativeSession) void bridge.closeSession?.(nativeSession.id);
       if (remote) void sshDisconnect(remote.id);
       if (epochStale(epoch)) return;
       set({ error: String(e), connecting: false, opening: null });
@@ -932,22 +1064,19 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   },
 
   endSession: (opts) => {
-    // A run is streaming in this conversation: ending the session would kill it
-    // (and any SSH tunnel under it) — chats are supposed to keep working while
-    // the user moves around. Refuse with guidance instead of silently
-    // cancelling. Cancelling an in-flight connect (`opening` set) is always
-    // fine — nothing is running yet — as is a forced teardown (sign-out).
-    if (!opts?.force && !get().opening && get().session && isBusy(get().snapshot)) {
-      get().flashNotice(BUSY_SESSION_MESSAGE);
-      return;
-    }
-    // Invalidates any in-flight start/open — their continuations see a newer
-    // epoch and abandon (tearing down whatever tunnel they brought up). This is
-    // also the "Cancel" action for the opening screen.
+    // Detach, don't destroy: the conversation's live session (and any streaming
+    // run) stays in the pool, so ⌘N/"New chat" never cancels work — reopening
+    // from the sidebar reattaches instantly. Bumping the epoch also cancels any
+    // in-flight start/open (the OpeningScreen's Cancel): its continuation sees
+    // a newer epoch and abandons, tearing down whatever tunnel it brought up.
     nextSessionEpoch();
     for (const a of get().attachments) if (a.previewUrl) URL.revokeObjectURL(a.previewUrl);
-    const r = get().activeRemote;
-    if (r) void sshDisconnect(r.id);
+    if (opts?.force) {
+      // Sign-out: tear down every live session for real.
+      const bridge = get().bridge;
+      for (const id of [...liveSessions.keys()]) closeLiveSession(bridge, id);
+      set({ runningIds: [] });
+    }
     set({
       session: null,
       snapshot: emptySnapshot(),
@@ -955,68 +1084,64 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       connecting: false,
       attachments: [],
       historyPrefix: null,
-      peek: null,
       opening: null,
       composerPrefill: null,
       queued: [],
       terminalOpen: false,
       activeRemote: null,
       activeRemoteHost: null,
+      selectedConversationIds: new Set(),
     });
   },
 
   openConversation: async (id) => {
-    const { bridge, activeProvider, auth, session, providers, localSettings, activeRemote: prevRemote } = get();
+    const { bridge, activeProvider, auth, session, providers, localSettings } = get();
     if (!bridge || !activeProvider) return;
     // Already opening this one (double-click, impatient re-click) → no-op; the
     // in-flight open keeps its spinner.
     if (get().opening?.id === id) return;
-    if (session?.id === id) {
-      // Returning to the live conversation just drops the peek — the stream was
-      // running underneath the whole time.
-      set({ peek: null });
-      return;
-    }
+    if (session?.id === id) return;
+    // Supersede any in-flight open; live sessions are untouched by the epoch.
     const epoch = nextSessionEpoch();
-    const openingMeta = get().conversations.find((c) => c.id === id);
-    // A run is streaming in the live conversation: don't tear it down — show the
-    // other conversation read-only (peek). It promotes to a full open when the
-    // run settles (see the busy→idle edge in init's subscribe handler).
-    if (session && isBusy(get().snapshot)) {
-      // Read-only peek while the live run streams: fetch the transcript from the
-      // cloud (or the in-memory cache). `opening` gives the clicked row a
-      // spinner while the fetch is in flight (the live conversation stays up).
+
+    // Already live in the pool (streaming or idle) → instant reattach. No
+    // reconnect, no loading screen, and absolutely nothing is torn down — the
+    // conversation we're leaving keeps running in the background.
+    const entry = liveSessions.get(id);
+    if (entry) {
+      for (const a of get().attachments) if (a.previewUrl) URL.revokeObjectURL(a.previewUrl);
       set({
-        opening: {
-          id,
-          kind: "peek",
-          title: openingMeta?.title || "Conversation",
-          remoteHost: openingMeta?.remoteHost ?? null,
-        },
+        session: entry.session,
+        snapshot: mergedOf(entry),
+        historyPrefix: entry.historyPrefix,
+        activeRemote: entry.remote,
+        activeRemoteHost: entry.remoteHost,
+        queued: entry.queued,
+        attachments: [],
+        connecting: false,
+        opening: null,
+        error: null,
+        dismissedFailedRuns: [],
       });
-      const restored = await fetchSnapshot(id, get().auth);
-      if (epochStale(epoch)) return;
-      set({ peek: { id, snapshot: restored ?? emptySnapshot() }, opening: null });
       return;
     }
-    if (prevRemote) void sshDisconnect(prevRemote.id);
+
+    const openingMeta = get().conversations.find((c) => c.id === id);
     set({
       connecting: true,
       error: null,
       dismissedFailedRuns: [],
-      peek: null,
       opening: {
         id,
         kind: "open",
         title: openingMeta?.title || "Conversation",
         remoteHost: openingMeta?.remoteHost ?? null,
       },
-      activeRemote: null,
-      activeRemoteHost: null,
     });
     // Cloud-first: the transcript comes from the in-memory cache or a `cloudGet`.
     const restored = await fetchSnapshot(id, get().auth);
     let remote: RemoteInfo | null = null;
+    let nativeSession: Session | null = null;
     try {
       const isLocal = activeProvider === "local";
       const canResume =
@@ -1053,18 +1178,49 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
       await bridge.connect(activeProvider, config);
       // Providers that can't resume (the local agent has no server-side session)
-      // reopen as a fresh session bound to the project; the saved transcript shows
-      // as read-only history and new turns continue from there. Crucially, keep
-      // the conversation's original id so it doesn't fork into a duplicate — the
-      // local provider ignores the passed session id and uses its own internal
-      // one, so the displayed id can stay stable.
+      // reopen as a fresh session BOUND to the conversation id (the host keys
+      // the session and tags its snapshots by it), so it doesn't fork into a
+      // duplicate and events route back to this conversation.
       const opened = canResume
         ? await bridge.loadSession(activeProvider, id)
-        : { ...(await bridge.newSession(activeProvider, options)), id };
+        : await bridge.newSession(activeProvider, options, id);
+      nativeSession = opened;
       if (epochStale(epoch)) {
+        void bridge.closeSession?.(opened.id);
         if (remote) void sshDisconnect(remote.id);
         return;
       }
+      const trajectoryMeta: ConversationMeta = openingMeta ?? {
+        id,
+        title: "Conversation",
+        provider: activeProvider,
+        project: isLocal
+          ? (wantRemote ? remote?.cwd : localSettings.cwd.trim()) || undefined
+          : undefined,
+        remoteHost: remoteHost ?? undefined,
+        mode: opened.mode,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+      await bindCloudTrajectory(bridge, opened, trajectoryMeta, get().auth, {
+        resumed: true,
+        restoredSnapshot: restored !== null,
+        projectMode: wantRemote ? "remote" : "local",
+        model: isLocal ? localSettings.model : undefined,
+        reasoningEffort: isLocal ? localSettings.reasoningEffort : undefined,
+        permissionMode: get().permissionMode,
+        outputStyle: get().outputStyle,
+      });
+      liveSessions.set(
+        id,
+        newLiveEntry(opened, {
+          historyPrefix: restored,
+          remote,
+          remoteHost,
+          projectCwd: isLocal && !wantRemote ? localSettings.cwd.trim() || null : null,
+        }),
+      );
+      nativeSession = null;
       set({
         session: opened,
         historyPrefix: restored,
@@ -1077,6 +1233,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         activeRemoteHost: remoteHost,
       });
     } catch (e) {
+      if (nativeSession) void bridge.closeSession?.(nativeSession.id);
       if (remote) void sshDisconnect(remote.id);
       if (epochStale(epoch)) return;
       set({ error: String(e), connecting: false, opening: null });
@@ -1086,19 +1243,17 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   archiveConversation: (id) => {
     // Soft-delete: flag it archived in the cloud (the transcript stays, so it
     // can be restored in full). Optimistic in-memory flag; PATCH to the cloud.
-    const cleared = get().session?.id === id;
-    // Archiving the live conversation mid-run would kill the run (and its
-    // tunnel) out from under it — refuse, same as endSession.
-    if (cleared && isBusy(get().snapshot)) {
+    // Archiving CLOSES the live session (unlike switching) — refuse mid-run.
+    const entry = liveSessions.get(id);
+    if (entry && isBusy(entry.live)) {
       get().flashNotice(BUSY_SESSION_MESSAGE);
       return;
     }
-    if (cleared) {
-      const r = get().activeRemote;
-      if (r) void sshDisconnect(r.id);
-    }
+    closeLiveSession(get().bridge, id);
+    const cleared = get().session?.id === id;
     set({
       conversations: get().conversations.map((c) => (c.id === id ? { ...c, archived: true } : c)),
+      runningIds: get().runningIds.filter((r) => r !== id),
       ...(cleared
         ? {
             session: null,
@@ -1128,14 +1283,18 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   deleteConversation: (id) => {
     // Hard delete: remove from the in-memory list + snapshot cache and delete the
     // cloud copy (best-effort — the list removal is what the user sees).
+    // Deleting CLOSES the live session (unlike switching) — refuse mid-run.
+    const entry = liveSessions.get(id);
+    if (entry && isBusy(entry.live)) {
+      get().flashNotice(BUSY_SESSION_MESSAGE);
+      return;
+    }
+    closeLiveSession(get().bridge, id);
     snapshotCache.delete(id);
     const cleared = get().session?.id === id;
-    if (cleared) {
-      const r = get().activeRemote;
-      if (r) void sshDisconnect(r.id);
-    }
     set({
       conversations: get().conversations.filter((c) => c.id !== id),
+      runningIds: get().runningIds.filter((r) => r !== id),
       ...(cleared
         ? {
             session: null,
@@ -1169,6 +1328,90 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     if (snap) scheduleCloudPut(creds, updated, snap);
   },
 
+  toggleConversationSelection: (id) =>
+    set((s) => {
+      const next = new Set(s.selectedConversationIds);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return { selectedConversationIds: next };
+    }),
+
+  setConversationSelection: (ids) => set({ selectedConversationIds: new Set(ids) }),
+
+  archiveSelectedConversations: () => {
+    const ids = [...get().selectedConversationIds];
+    if (ids.length === 0) return;
+    // Skip any that are mid-run — archiving tears down the live session.
+    const busy = ids.filter((id) => {
+      const entry = liveSessions.get(id);
+      return entry && isBusy(entry.live);
+    });
+    if (busy.length > 0) get().flashNotice(BUSY_SESSION_MESSAGE);
+    const targets = ids.filter((id) => !busy.includes(id));
+    if (targets.length === 0) return;
+    for (const id of targets) closeLiveSession(get().bridge, id);
+    const activeCleared = targets.includes(get().session?.id ?? "");
+    set((s) => ({
+      conversations: s.conversations.map((c) =>
+        targets.includes(c.id) ? { ...c, archived: true } : c,
+      ),
+      runningIds: s.runningIds.filter((r) => !targets.includes(r)),
+      selectedConversationIds: new Set(),
+      ...(activeCleared
+        ? {
+            session: null,
+            snapshot: emptySnapshot(),
+            error: null,
+            attachments: [],
+            historyPrefix: null,
+            queued: [],
+            terminalOpen: false,
+            activeRemote: null,
+            activeRemoteHost: null,
+          }
+        : {}),
+    }));
+    const creds = cloudCreds(get().auth);
+    if (creds) for (const id of targets) void cloudSetArchived(creds, id, true).catch(() => {});
+  },
+
+  deleteSelectedConversations: () => {
+    const ids = [...get().selectedConversationIds];
+    if (ids.length === 0) return;
+    const busy = ids.filter((id) => {
+      const entry = liveSessions.get(id);
+      return entry && isBusy(entry.live);
+    });
+    if (busy.length > 0) get().flashNotice(BUSY_SESSION_MESSAGE);
+    const targets = ids.filter((id) => !busy.includes(id));
+    if (targets.length === 0) return;
+    for (const id of targets) {
+      closeLiveSession(get().bridge, id);
+      snapshotCache.delete(id);
+    }
+    const activeCleared = targets.includes(get().session?.id ?? "");
+    set((s) => ({
+      conversations: s.conversations.filter((c) => !targets.includes(c.id)),
+      runningIds: s.runningIds.filter((r) => !targets.includes(r)),
+      selectedConversationIds: new Set(),
+      ...(activeCleared
+        ? {
+            session: null,
+            snapshot: emptySnapshot(),
+            error: null,
+            attachments: [],
+            historyPrefix: null,
+            queued: [],
+            terminalOpen: false,
+            activeRemote: null,
+            activeRemoteHost: null,
+          }
+        : {}),
+    }));
+    const creds = cloudCreds(get().auth);
+    if (creds) for (const id of targets) void cloudDelete(creds, id).catch(() => {});
+  },
+
   updateModelSettings: async ({ model, reasoningEffort }) => {
     const s = get().localSettings;
     const next = {
@@ -1187,7 +1430,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       const config = activeRemote
         ? localConnectConfig(next, remoteTarget(activeRemote))
         : localConnectConfig(next);
-      await bridge.reconfigure(config);
+      await bridge.reconfigure(session.id, config);
     } catch (e) {
       set({ error: `Model switch failed: ${String(e)}` });
     }
@@ -1196,8 +1439,8 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   setComposerPrefill: (text) => set({ composerPrefill: text }),
 
   shareConversation: async () => {
-    const { session, peek, auth } = get();
-    const id = peek?.id ?? session?.id;
+    const { session, auth } = get();
+    const id = session?.id;
     const creds = cloudCreds(auth);
     if (!id) return;
     if (!creds) {
@@ -1217,8 +1460,8 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   },
 
   unshareConversation: async () => {
-    const { session, peek, auth } = get();
-    const id = peek?.id ?? session?.id;
+    const { session, auth } = get();
+    const id = session?.id;
     const creds = cloudCreds(auth);
     if (!id || !creds) return;
     try {
@@ -1247,21 +1490,20 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   },
 
   send: async (text) => {
-    const { bridge, session, attachments, snapshot, peek } = get();
+    const { bridge, session, attachments, snapshot } = get();
     if (!bridge || !session) return;
-    // Peeking at another conversation while a run streams: messages belong to the
-    // live conversation only — the composer is disabled, this is a backstop.
-    if (peek) return;
     if (!text.trim() && attachments.length === 0) return;
     const uploads = attachments.map(toUpload);
     for (const a of attachments) if (a.previewUrl) URL.revokeObjectURL(a.previewUrl);
     set({ attachments: [], error: null });
-    // A run is active: queue this message instead of interrupting. It sends
-    // automatically once the run finishes (drained in the subscribe handler).
+    // A run is active in THIS conversation: queue instead of interrupting. It
+    // sends automatically once the run finishes (drained in the subscribe
+    // handler) — even if the user has switched to another conversation.
     if (isBusy(snapshot)) {
-      set((s) => ({
-        queued: [...s.queued, { id: crypto.randomUUID(), text, uploads }],
-      }));
+      const queuedMessage = { id: crypto.randomUUID(), text, uploads };
+      const entry = liveSessions.get(session.id);
+      if (entry) entry.queued = [...entry.queued, queuedMessage];
+      set((s) => ({ queued: [...s.queued, queuedMessage] }));
       return;
     }
     try {
@@ -1272,7 +1514,12 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     }
   },
 
-  removeQueued: (id) => set((s) => ({ queued: s.queued.filter((q) => q.id !== id) })),
+  removeQueued: (id) => {
+    const session = get().session;
+    const entry = session ? liveSessions.get(session.id) : undefined;
+    if (entry) entry.queued = entry.queued.filter((q) => q.id !== id);
+    set((s) => ({ queued: s.queued.filter((q) => q.id !== id) }));
+  },
 
   setPermissionMode: (mode) => {
     savePermissionMode(mode);

@@ -209,7 +209,7 @@ pub fn apply(snapshot: &mut Snapshot, event: &AgentEvent) {
             snapshot.focus = Some(focus.clone());
         }
 
-        AgentEvent::ModeChanged { .. } => {}
+        AgentEvent::ModeChanged { .. } | AgentEvent::Trace { .. } => {}
 
         AgentEvent::FanOut { parent, agent, .. } => {
             // Prefer the map tool call's title as the subtitle once it's known.
@@ -283,14 +283,17 @@ where
     snap
 }
 
-/// Append `delta` to `blocks`, concatenating adjacent text for smooth streaming.
+/// Append `delta` to `blocks`, concatenating adjacent same-kind text/thinking
+/// blocks for smooth streaming.
 fn merge_block(blocks: &mut Vec<ContentBlock>, delta: &ContentBlock) {
-    if let (Some(ContentBlock::Text { text: last }), ContentBlock::Text { text: add }) =
-        (blocks.last_mut(), delta)
-    {
-        last.push_str(add);
-    } else {
-        blocks.push(delta.clone());
+    match (blocks.last_mut(), delta) {
+        (Some(ContentBlock::Text { text: last }), ContentBlock::Text { text: add }) => {
+            last.push_str(add);
+        }
+        (Some(ContentBlock::Thinking { text: last }), ContentBlock::Thinking { text: add }) => {
+            last.push_str(add);
+        }
+        _ => blocks.push(delta.clone()),
     }
 }
 
@@ -323,6 +326,48 @@ mod tests {
             TimelineItem::Message { blocks, role, .. } => {
                 assert_eq!(*role, Role::Agent);
                 assert_eq!(blocks, &vec![ContentBlock::text("Hello")]);
+            }
+            other => panic!("expected message, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn thinking_chunks_coalesce_and_keep_order_with_text() {
+        let events = vec![
+            AgentEvent::RunStarted { run: run() },
+            AgentEvent::MessageChunk {
+                run: run(),
+                role: Role::Agent,
+                delta: ContentBlock::text("Answer: "),
+            },
+            AgentEvent::MessageChunk {
+                run: run(),
+                role: Role::Agent,
+                delta: ContentBlock::thinking("Think"),
+            },
+            AgentEvent::MessageChunk {
+                run: run(),
+                role: Role::Agent,
+                delta: ContentBlock::thinking("ing…"),
+            },
+            AgentEvent::MessageChunk {
+                run: run(),
+                role: Role::Agent,
+                delta: ContentBlock::text("done"),
+            },
+        ];
+        let snap = reduce_all(&events);
+        assert_eq!(snap.timeline.len(), 1);
+        match &snap.timeline[0] {
+            TimelineItem::Message { blocks, .. } => {
+                assert_eq!(
+                    blocks,
+                    &vec![
+                        ContentBlock::text("Answer: "),
+                        ContentBlock::thinking("Thinking…"),
+                        ContentBlock::text("done"),
+                    ]
+                );
             }
             other => panic!("expected message, got {other:?}"),
         }

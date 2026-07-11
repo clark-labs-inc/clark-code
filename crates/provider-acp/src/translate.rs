@@ -49,6 +49,9 @@ pub fn content_block(v: &Value) -> Option<ContentBlock> {
 pub fn content_block_to_acp(b: &ContentBlock) -> Value {
     match b {
         ContentBlock::Text { text } => serde_json::json!({ "type": "text", "text": text }),
+        // Reasoning is model-produced, never user input, so it never legitimately
+        // reaches this user-prompt path — map it to text if it ever does.
+        ContentBlock::Thinking { text } => serde_json::json!({ "type": "text", "text": text }),
         ContentBlock::Image {
             mime_type,
             data,

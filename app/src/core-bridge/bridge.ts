@@ -30,16 +30,41 @@ export interface SessionOptions {
   mode?: string;
 }
 
+export interface CloudTrajectoryConfig {
+  endpoint: string;
+  token: string;
+  title: string;
+  provider: string;
+  project?: string;
+  repositoryFingerprint?: string;
+  remoteHost?: string;
+  mode?: string;
+  metadata: Record<string, unknown>;
+}
+
 export interface CoreBridge {
   listProviders(): Promise<ProviderInfo[]>;
   connect(providerId: string, config: ConnectConfig): Promise<void>;
-  /** Re-run connect on the EXISTING provider instance (keeps the live session +
-   *  transcript) — used to hot-swap model / reasoning effort mid-conversation.
-   *  Native bridge only. */
-  reconfigure?(config: ConnectConfig): Promise<void>;
-  newSession(providerId: string, options: SessionOptions): Promise<Session>;
+  /** Re-run connect on a live session's EXISTING provider instance (keeps the
+   *  session + transcript) — used to hot-swap model / reasoning effort
+   *  mid-conversation. Native bridge only. */
+  reconfigure?(sessionId: string, config: ConnectConfig): Promise<void>;
+  /** Create a session on the just-connected provider. `bindId` — when reopening
+   *  an existing conversation on a provider that can't resume — keys the new
+   *  session (and its snapshot events) by that conversation id. */
+  newSession(providerId: string, options: SessionOptions, bindId?: string): Promise<Session>;
   /** Resume a prior session by id (capability-gated: `load_session`). */
   loadSession(providerId: string, id: string): Promise<Session>;
+  /** Drop a live session — destroys its provider and any running agent loop.
+   *  Only called on archive/delete/sign-out; switching never closes. */
+  closeSession?(sessionId: string): Promise<void>;
+  /** Bind the native event stream to Clark's append-only trajectory store.
+   * Native prompts are rejected until this succeeds, making the cloud the
+   * durable source before local projection begins. */
+  configureCloudTrajectory?(
+    sessionId: string,
+    config: CloudTrajectoryConfig,
+  ): Promise<void>;
   prompt(sessionId: string, blocks: ContentBlock[], attachments?: Upload[]): Promise<void>;
   cancel(sessionId: string, runId: string): Promise<void>;
   respond(sessionId: string, response: ClientResponse): Promise<void>;
@@ -49,7 +74,9 @@ export interface CoreBridge {
   setMode?(sessionId: string, mode: string): Promise<void>;
   /** Best-effort: switch the session's output style (see `lib/outputStyle.ts`). */
   setOutputStyle?(sessionId: string, style: string): Promise<void>;
-  /** Subscribe to snapshot updates. Returns an unsubscribe fn. */
+  /** Subscribe to snapshot updates for ALL live sessions. Each snapshot is
+   *  tagged with its session id (`snapshot.session`); the handler routes it.
+   *  Returns an unsubscribe fn. */
   subscribe(handler: (snapshot: Snapshot) => void): () => void;
   /**
    * List the project-scoped memory (the `MEMORY.md` index plus any per-fact

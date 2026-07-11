@@ -5,6 +5,7 @@ export type Role = "user" | "agent" | "system";
 
 export type ContentBlock =
   | { type: "text"; text: string }
+  | { type: "thinking"; text: string }
   | { type: "image"; mime_type: string; data: string; uri?: string }
   | { type: "audio"; mime_type: string; data: string }
   | { type: "resource"; uri: string; mime_type?: string; text?: string }

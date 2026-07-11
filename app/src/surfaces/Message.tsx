@@ -15,7 +15,15 @@ import { Mermaid } from "./work/Mermaid";
 import type { ContentBlock, Role } from "../core-bridge/types";
 
 function text(blocks: ContentBlock[]): string {
-  return blocks.map((b) => (b.type === "text" ? b.text : `\`[${b.type}]\``)).join("");
+  return blocks
+    .map((b) => {
+      if (b.type === "text") return b.text;
+      // A native reasoning block (GLM `delta.reasoning`) → wrap in the inline
+      // `<thinking>` tag parseNarration splits into a collapsible Thinking row.
+      if (b.type === "thinking") return `<thinking>${b.text}</thinking>`;
+      return `\`[${b.type}]\``;
+    })
+    .join("");
 }
 
 export const MD_CLASSES =
@@ -26,7 +34,9 @@ export const MD_CLASSES =
   "[&_pre]:my-2.5 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:border [&_pre]:border-border-subtle [&_pre]:bg-bg-sunken [&_pre]:p-3 [&_pre]:font-mono [&_pre]:text-xs [&_pre]:leading-relaxed [&_pre>code]:bg-transparent [&_pre>code]:p-0 [&_pre>code]:border-0 " +
   "[&_:not(pre)>code]:rounded-[5px] [&_:not(pre)>code]:border [&_:not(pre)>code]:border-border-subtle [&_:not(pre)>code]:bg-chip [&_:not(pre)>code]:px-[0.32em] [&_:not(pre)>code]:py-[0.12em] [&_:not(pre)>code]:font-mono [&_:not(pre)>code]:text-[0.85em] [&_:not(pre)>code]:text-ink " +
   "[&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-3 [&_blockquote]:text-ink-muted " +
-  "[&_table]:my-2 [&_table]:w-full [&_table]:border-collapse [&_th]:border [&_th]:border-border-subtle [&_th]:px-2.5 [&_th]:py-1 [&_th]:text-left [&_th]:font-medium [&_th]:text-ink-secondary [&_td]:border [&_td]:border-border-subtle [&_td]:px-2.5 [&_td]:py-1";
+  "[&_table]:my-2 [&_table]:w-full [&_table]:border-collapse [&_table]:table-fixed [&_table]:text-xs " +
+  "[&_th]:border [&_th]:border-border-subtle [&_th]:px-2 [&_th]:py-1.5 [&_th]:text-left [&_th]:align-top [&_th]:font-medium [&_th]:text-ink-secondary [&_th]:break-words " +
+  "[&_td]:border [&_td]:border-border-subtle [&_td]:px-2 [&_td]:py-1.5 [&_td]:align-top [&_td]:break-words [&_td]:overflow-wrap-anywhere";
 
 /** A small icon button that copies and briefly confirms. */
 function CopyButton({
@@ -147,6 +157,14 @@ export function Md({ children, math = false, diagrams = false }: {
           // Indented or non-fenced code — render plainly without highlighting.
           return <pre>{children}</pre>;
         },
+        // Wrap tables in a horizontal-scroll container so a wide table scrolls
+        // instead of overflowing the message column (fixed layout + wrapping
+        // handles most cases, but a many-column table can still exceed the width).
+        table: ({ node: _node, ...props }) => (
+          <div className="overflow-x-auto">
+            <table {...props} />
+          </div>
+        ),
       }}
     >
       {children}
@@ -325,7 +343,8 @@ function sameBlocks(a: ContentBlock[], b: ContentBlock[]): boolean {
   return a.every((blk, i) => {
     const other = b[i];
     if (blk.type !== other.type) return false;
-    if (blk.type === "text") return blk.text === (other as { text: string }).text;
+    if (blk.type === "text" || blk.type === "thinking")
+      return blk.text === (other as { text: string }).text;
     return JSON.stringify(blk) === JSON.stringify(other);
   });
 }

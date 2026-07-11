@@ -5,6 +5,7 @@
 //! `session/update` variants and Clark's envelope `kind`s.
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::ids::{PermissionRequestId, RunId, SessionId, ToolCallId};
 
@@ -22,6 +23,12 @@ pub enum Role {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ContentBlock {
     Text {
+        text: String,
+    },
+    /// Hidden model reasoning (GLM `delta.reasoning` / a `<thinking>` block),
+    /// surfaced as a collapsible Thinking row. Display-only — never sent back
+    /// to the model on the next turn.
+    Thinking {
         text: String,
     },
     Image {
@@ -52,6 +59,9 @@ pub enum ContentBlock {
 impl ContentBlock {
     pub fn text(s: impl Into<String>) -> Self {
         ContentBlock::Text { text: s.into() }
+    }
+    pub fn thinking(s: impl Into<String>) -> Self {
+        ContentBlock::Thinking { text: s.into() }
     }
 }
 
@@ -390,6 +400,16 @@ pub enum AgentEvent {
     ModeChanged {
         session: SessionId,
         mode: String,
+    },
+    /// Provider-native trajectory detail that does not participate in the
+    /// presentation projection. Hosts persist this verbatim for replay and
+    /// debugging (for example the full model-visible request and compaction
+    /// before/after transcript emitted by the local clark-agent loop).
+    Trace {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        run: Option<RunId>,
+        source: String,
+        payload: Value,
     },
     RunFinished {
         run: RunId,

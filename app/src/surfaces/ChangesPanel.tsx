@@ -37,7 +37,7 @@ function isTauri(): boolean {
  *  would break `useSyncExternalStore`'s reference check (infinite render loop). */
 function useCheckpointedRuns(): string[] {
   const signature = useSessionStore((s) => {
-    const runs = (s.peek ? s.peek.snapshot.runs : s.snapshot.runs) as Record<string, RunView>;
+    const runs = s.snapshot.runs as Record<string, RunView>;
     return Object.values(runs)
       .map((run) => run.checkpoint)
       .filter((c): c is string => !!c)

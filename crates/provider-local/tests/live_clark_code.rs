@@ -226,6 +226,7 @@ fn event_name(ev: &AgentEvent) -> &'static str {
         AgentEvent::Surface { .. } => "Surface",
         AgentEvent::FanOut { .. } => "FanOut",
         AgentEvent::ModeChanged { .. } => "ModeChanged",
+        AgentEvent::Trace { .. } => "Trace",
         AgentEvent::RunFinished { .. } => "RunFinished",
         AgentEvent::Error { .. } => "Error",
     }

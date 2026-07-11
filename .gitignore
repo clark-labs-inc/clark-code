@@ -30,3 +30,7 @@ src-tauri/icon-source.png
 
 # Demo recordings (local only)
 videos/
+
+# Agent local state (memory, scratch screenshots) — never committed
+.claude/
+.clark/

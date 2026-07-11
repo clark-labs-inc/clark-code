@@ -42,12 +42,17 @@ export class MockBridge implements CoreBridge {
 
   async connect(_providerId: string, _config: ConnectConfig): Promise<void> {}
 
-  async newSession(providerId: string, _options: SessionOptions): Promise<Session> {
+  async newSession(
+    providerId: string,
+    _options: SessionOptions,
+    bindId?: string,
+  ): Promise<Session> {
     const provider = PROVIDERS.find((p) => p.id === providerId) ?? PROVIDERS[0];
-    this.snapshot = { ...emptySnapshot(), session: "mock-session" };
+    const id = bindId ?? "mock-session";
+    this.snapshot = { ...emptySnapshot(), session: id };
     this.emit();
     return {
-      id: "mock-session",
+      id,
       provider: provider.id,
       capabilities: provider.capabilities,
       mode: provider.capabilities.modes[0],

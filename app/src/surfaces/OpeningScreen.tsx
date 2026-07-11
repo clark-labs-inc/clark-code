@@ -9,7 +9,7 @@ import { useSessionStore } from "../store/sessionStore";
 export function OpeningScreen() {
   const opening = useSessionStore((s) => s.opening);
   const cancel = useSessionStore((s) => s.endSession);
-  if (!opening || opening.kind === "peek") return null;
+  if (!opening) return null;
 
   const isStart = opening.kind === "start";
   const Icon = opening.remoteHost ? Server : isStart ? Laptop : MessageSquare;

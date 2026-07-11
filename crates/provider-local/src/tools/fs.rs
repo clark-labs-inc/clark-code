@@ -52,7 +52,14 @@ impl ToolExecutor for ReadFile {
         };
         let truncated = bytes.len() > MAX_READ_BYTES;
         let slice = &bytes[..bytes.len().min(MAX_READ_BYTES)];
-        let text = String::from_utf8_lossy(slice);
+        let text = match std::str::from_utf8(slice) {
+            Ok(text) if !text.contains('\0') => text,
+            _ => {
+                return ToolOutcome::error(format!(
+                    "{path} is binary, not a UTF-8 text file; use an image or binary-aware tool"
+                ));
+            }
+        };
 
         let offset = args
             .get("offset")
@@ -493,6 +500,18 @@ mod tests {
         assert!(out.content.contains("     3\tl3"));
         assert!(!out.content.contains("l1"));
         assert!(!out.content.contains("l4"));
+    }
+
+    #[tokio::test]
+    async fn read_file_rejects_binary_without_emitting_nul() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("image.png"), b"\x89PNG\r\n\x1a\n\0binary").unwrap();
+        let out = ReadFile
+            .invoke(json!({"path": "image.png"}), &ctx(dir.path()))
+            .await;
+        assert!(out.is_error);
+        assert!(out.content.contains("is binary"));
+        assert!(!out.content.contains('\0'));
     }
 
     #[tokio::test]

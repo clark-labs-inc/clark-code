@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Plus, MessageSquare, Archive, ArchiveRestore, ChevronRight, PanelLeftClose, PanelLeft,
   FolderGit2, Server, Search, X, Trash2, Loader2,
@@ -7,6 +7,7 @@ import { useSessionStore } from "../store/sessionStore";
 import { projectName } from "../lib/localAgent";
 import { useIsNarrow } from "../lib/responsive";
 import { fuzzyFilter } from "../lib/fuzzy";
+import { cn } from "../lib/cn";
 import { ProfileMenu } from "./ProfileMenu";
 import type { ConversationMeta } from "../lib/history";
 
@@ -73,7 +74,7 @@ function GroupHeader({ group }: { group: ProjectGroup }) {
   return (
     <div
       title={group.title}
-      className="mb-1 mt-4 flex items-center gap-1.5 px-2 text-xs font-semibold uppercase tracking-[0.12em] text-ink-faint first:mt-1"
+      className="mb-1 mt-3 flex items-center gap-1.5 px-2 text-xs font-semibold uppercase tracking-[0.12em] text-ink-faint first:mt-0.5"
     >
       <Icon className={`size-3 shrink-0 ${group.kind === "remote" ? "text-accent" : ""}`} />
       <span className="truncate">{group.label}</span>
@@ -89,6 +90,8 @@ function ConversationRow({
   active,
   streaming,
   opening,
+  selected,
+  onContextMenu,
 }: {
   c: ConversationMeta;
   active: boolean;
@@ -96,10 +99,15 @@ function ConversationRow({
   streaming: boolean;
   /** This conversation is currently being (re)opened. */
   opening: boolean;
+  /** In the sidebar's Shift-click selection. */
+  selected: boolean;
+  onContextMenu: (e: React.MouseEvent, id: string) => void;
 }) {
   const open = useSessionStore((s) => s.openConversation);
   const archive = useSessionStore((s) => s.archiveConversation);
   const rename = useSessionStore((s) => s.renameConversation);
+  const toggleSelection = useSessionStore((s) => s.toggleConversationSelection);
+  const setSelection = useSessionStore((s) => s.setConversationSelection);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(c.title);
 
@@ -110,11 +118,15 @@ function ConversationRow({
 
   return (
     <div
-      className={`group relative flex items-center gap-2 rounded-xl px-3 py-2.5 text-sm transition duration-200 ease-clark ${
-        active || opening
-          ? "bg-accent-soft text-ink ring-1 ring-accent/10"
-          : "text-ink-secondary hover:bg-accent-subtle hover:text-ink"
-      }`}
+      onContextMenu={(e) => onContextMenu(e, c.id)}
+      className={cn(
+        "group relative flex items-center gap-2 rounded-xl px-3 py-1.5 text-sm transition duration-200 ease-clark",
+        selected
+          ? "bg-accent-soft text-ink ring-1 ring-accent/40"
+          : active || opening
+            ? "bg-accent-soft text-ink ring-1 ring-accent/10"
+            : "text-ink-secondary hover:bg-accent-subtle hover:text-ink",
+      )}
     >
       {editing ? (
         <div className="flex min-w-0 flex-1 items-center gap-2">
@@ -137,13 +149,22 @@ function ConversationRow({
         </div>
       ) : (
         <button
-          onClick={() => void open(c.id)}
+          onClick={(e) => {
+            // Shift-click toggles multi-select instead of opening; a plain
+            // click clears any selection and opens (the normal action).
+            if (e.shiftKey) {
+              toggleSelection(c.id);
+            } else {
+              setSelection(new Set());
+              void open(c.id);
+            }
+          }}
           onDoubleClick={() => {
             setDraft(c.title);
             setEditing(true);
           }}
           className="flex min-w-0 flex-1 items-center gap-2 text-left"
-          title={`${c.title} — double-click to rename`}
+          title={`${c.title} — double-click to rename · shift-click to select`}
         >
           {opening ? (
             <Loader2 className="size-3.5 shrink-0 animate-[spin_1s_linear_infinite] text-ink-muted" />
@@ -151,6 +172,10 @@ function ConversationRow({
             <span className="relative grid size-3.5 shrink-0 place-items-center" aria-label="Running">
               <span className="absolute size-2 animate-ping rounded-full bg-accent/40" />
               <span className="size-1.5 rounded-full bg-accent" />
+            </span>
+          ) : selected ? (
+            <span className="grid size-3.5 shrink-0 place-items-center" aria-label="Selected">
+              <span className="size-2 rounded-sm bg-accent" />
             </span>
           ) : (
             <MessageSquare
@@ -230,22 +255,119 @@ function ArchivedRow({ c }: { c: ConversationMeta }) {
   );
 }
 
+/** Right-click menu for one-or-many conversations. Acts on the whole sidebar
+ *  selection when the right-clicked row is part of it, otherwise just the
+ *  right-clicked row. "Archive" soft-deletes; "Delete" hard-deletes (with an
+ *  inline confirm — it can't be undone). */
+function ConversationContextMenu({
+  menu,
+  count,
+  onClose,
+  onArchive,
+  onDelete,
+}: {
+  menu: { x: number; y: number };
+  count: number;
+  onClose: () => void;
+  onArchive: () => void;
+  onDelete: () => void;
+}) {
+  const [confirming, setConfirming] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    };
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [onClose]);
+
+  const label = count > 1 ? `${count} conversations` : "conversation";
+  return (
+    <div
+      ref={ref}
+      role="menu"
+      style={{ left: menu.x, top: menu.y }}
+      className="popover-surface fixed z-50 w-52 rounded-xl bg-bg-elevated p-1.5 shadow-lifted ring-1 ring-border-subtle"
+    >
+      {confirming ? (
+        <div className="px-1.5 py-1">
+          <div className="mb-2 px-1 text-xs text-ink-muted">
+            Permanently delete {count > 1 ? `these ${count} conversations` : "this conversation"}? This can't be undone.
+          </div>
+          <div className="flex items-center gap-1.5">
+            <button
+              role="menuitem"
+              onClick={() => {
+                onDelete();
+                onClose();
+              }}
+              className="flex-1 rounded-lg bg-danger/10 px-2 py-1.5 text-xs font-medium text-danger transition hover:bg-danger/20"
+            >
+              Delete
+            </button>
+            <button
+              role="menuitem"
+              onClick={() => setConfirming(false)}
+              className="flex-1 rounded-lg px-2 py-1.5 text-xs text-ink-muted transition hover:bg-bg-hover hover:text-ink"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <>
+          <button
+            role="menuitem"
+            onClick={() => {
+              onArchive();
+              onClose();
+            }}
+            className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-sm text-ink-secondary transition hover:bg-accent-subtle hover:text-ink"
+          >
+            <Archive className="size-4" />
+            Archive {label}
+          </button>
+          <button
+            role="menuitem"
+            onClick={() => setConfirming(true)}
+            className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-sm text-ink-secondary transition hover:bg-danger/10 hover:text-danger"
+          >
+            <Trash2 className="size-4" />
+            Delete {label}
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
 export function Sidebar() {
   const collapsed = useSessionStore((s) => s.sidebarCollapsed);
   const setCollapsed = useSessionStore((s) => s.setSidebarCollapsed);
   const conversations = useSessionStore((s) => s.conversations);
   const conversationsLoading = useSessionStore((s) => s.conversationsLoading);
   const session = useSessionStore((s) => s.session);
-  // Selection follows what's on screen (a peek shows another conversation while
-  // the live one keeps streaming — that one gets the pulsing "working" dot).
-  const peekId = useSessionStore((s) => s.peek?.id ?? null);
   const openingId = useSessionStore((s) => s.opening?.id ?? null);
-  const liveBusy = useSessionStore((s) =>
-    Object.values(s.snapshot.runs).some((r) => r.status === "running" || r.status === "queued"),
-  );
+  // Any number of conversations can be streaming at once — each busy one gets
+  // its own pulsing "Working…" dot, whether or not it's on screen.
+  const runningIds = useSessionStore((s) => s.runningIds);
   const newConversation = useSessionStore((s) => s.endSession);
+  const selectedIds = useSessionStore((s) => s.selectedConversationIds);
+  const setSelection = useSessionStore((s) => s.setConversationSelection);
+  const archiveSelected = useSessionStore((s) => s.archiveSelectedConversations);
+  const deleteSelected = useSessionStore((s) => s.deleteSelectedConversations);
   const [filter, setFilter] = useState("");
   const [archivedOpen, setArchivedOpen] = useState(false);
+  // The right-click menu: positioned at the cursor; acts on the selection when
+  // the right-clicked row is in it, else just that row.
+  const [menu, setMenu] = useState<{ x: number; y: number; ids: string[] } | null>(null);
   // Below this width the full sidebar would crowd out the conversation, so it
   // auto-collapses to the icon rail (and can't be expanded until there's room).
   const narrow = useIsNarrow(768);
@@ -268,6 +390,19 @@ export function Sidebar() {
     [visible],
   );
   const groups = useMemo(() => groupByProject(activeConvos), [activeConvos]);
+
+  const openContextMenu = (e: React.MouseEvent, id: string) => {
+    e.preventDefault();
+    // Act on the whole selection when the right-clicked row is part of it;
+    // otherwise the action targets just this row (and the selection becomes it,
+    // so the visual matches what the menu will act on).
+    if (selectedIds.has(id)) {
+      setMenu({ x: e.clientX, y: e.clientY, ids: [...selectedIds] });
+    } else {
+      setSelection(new Set([id]));
+      setMenu({ x: e.clientX, y: e.clientY, ids: [id] });
+    }
+  };
 
   if (collapsed || narrow) {
     return (
@@ -298,7 +433,7 @@ export function Sidebar() {
 
   return (
     <aside className="flex w-[17.5rem] shrink-0 flex-col border-r border-border-subtle bg-bg-elevated shadow-[10px_0_30px_rgba(55,48,42,0.025)]">
-      <div className="flex h-16 shrink-0 items-center gap-2 px-4">
+      <div className="flex h-14 shrink-0 items-center gap-2 px-4">
         <span className="font-display text-[1.65rem] leading-none text-ink">clark</span>
         <span className="rounded-full bg-accent-soft px-2 py-0.5 text-[0.6875rem] font-semibold uppercase tracking-[0.12em] text-accent">
           Code
@@ -312,17 +447,17 @@ export function Sidebar() {
         </button>
       </div>
 
-      <div className="px-3 pb-3">
+      <div className="px-3 pb-2">
         <button
           onClick={() => newConversation()}
-          className="flex w-full items-center gap-2.5 rounded-xl bg-[linear-gradient(135deg,var(--color-accent-gradient-start),var(--color-accent-gradient-end))] px-3.5 py-3 text-sm font-semibold text-on-accent shadow-soft transition duration-200 ease-clark hover:-translate-y-0.5 hover:brightness-[0.96] hover:shadow-lifted active:translate-y-0"
+          className="flex w-full items-center gap-2.5 rounded-xl bg-[linear-gradient(135deg,var(--color-accent-gradient-start),var(--color-accent-gradient-end))] px-3.5 py-2.5 text-sm font-semibold text-on-accent shadow-soft transition duration-200 ease-clark hover:-translate-y-0.5 hover:brightness-[0.96] hover:shadow-lifted active:translate-y-0"
         >
           <Plus className="size-4" /> New session
         </button>
       </div>
 
-      <div className="px-3 pb-3">
-        <div className="flex items-center gap-2.5 rounded-xl bg-bg-secondary px-3 py-2.5 ring-1 ring-transparent transition duration-200 focus-within:bg-bg-elevated focus-within:ring-accent/25">
+      <div className="px-3 pb-2.5">
+        <div className="flex items-center gap-2.5 rounded-xl bg-bg-secondary px-3 py-2 ring-1 ring-transparent transition duration-200 focus-within:bg-bg-elevated focus-within:ring-accent/25">
           <Search className="size-3.5 shrink-0 text-ink-faint" />
           <input
             value={filter}
@@ -343,7 +478,14 @@ export function Sidebar() {
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-4">
+      <div
+        className="min-h-0 flex-1 overflow-y-auto px-3 pb-4"
+        onClick={(e) => {
+          // A plain click on empty list space (not on a row) clears the
+          // Shift-click selection.
+          if (e.target === e.currentTarget && selectedIds.size > 0) setSelection(new Set());
+        }}
+      >
         {conversations.length === 0 ? (
           <p className="px-1 py-6 text-center text-xs text-ink-faint">
             {conversationsLoading ? "Loading conversations…" : "Your conversations will show up here."}
@@ -362,9 +504,11 @@ export function Sidebar() {
                     <ConversationRow
                       key={c.id}
                       c={c}
-                      active={(peekId ?? session?.id) === c.id}
-                      streaming={liveBusy && session?.id === c.id}
+                      active={session?.id === c.id}
+                      streaming={runningIds.includes(c.id)}
                       opening={openingId === c.id}
+                      selected={selectedIds.has(c.id)}
+                      onContextMenu={openContextMenu}
                     />
                   ))}
                 </div>
@@ -406,9 +550,53 @@ export function Sidebar() {
         )}
       </div>
 
+      {selectedIds.size > 0 && (
+        <div className="flex shrink-0 items-center gap-1.5 border-t border-border-subtle px-3 py-2 text-xs text-ink-muted">
+          <span className="tabular-nums">{selectedIds.size} selected</span>
+          <button
+            onClick={() => archiveSelected()}
+            className="ml-auto flex items-center gap-1.5 rounded-lg px-2 py-1.5 transition hover:bg-accent-subtle hover:text-ink"
+            title="Archive selected"
+          >
+            <Archive className="size-3.5" /> Archive
+          </button>
+          <button
+            onClick={() => deleteSelected()}
+            className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 transition hover:bg-danger/10 hover:text-danger"
+            title="Delete selected"
+          >
+            <Trash2 className="size-3.5" /> Delete
+          </button>
+          <button
+            onClick={() => setSelection(new Set())}
+            aria-label="Clear selection"
+            title="Clear selection"
+            className="grid size-7 place-items-center rounded-lg text-ink-faint transition hover:bg-bg-hover hover:text-ink"
+          >
+            <X className="size-3.5" />
+          </button>
+        </div>
+      )}
+
       <div className="shrink-0 border-t border-border-subtle p-2">
         <ProfileMenu variant="sidebar" />
       </div>
+
+      {menu && (
+        <ConversationContextMenu
+          menu={{ x: menu.x, y: menu.y }}
+          count={menu.ids.length}
+          onClose={() => setMenu(null)}
+          onArchive={() => {
+            setSelection(new Set(menu.ids));
+            archiveSelected();
+          }}
+          onDelete={() => {
+            setSelection(new Set(menu.ids));
+            deleteSelected();
+          }}
+        />
+      )}
     </aside>
   );
 }

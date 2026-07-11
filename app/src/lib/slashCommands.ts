@@ -35,8 +35,7 @@ export function slashCommands(): SlashCommand[] {
       hint: "Copy the conversation as Markdown",
       needsSession: true,
       run: () => {
-        const { peek, snapshot } = s();
-        const md = conversationMarkdown(peek ? peek.snapshot : snapshot);
+        const md = conversationMarkdown(s().snapshot);
         if (!md) return;
         navigator.clipboard
           ?.writeText(md)

@@ -170,13 +170,9 @@ async function submitPrompt(command: CodeRemoteCommand): Promise<void> {
     command.command_type === "send_message" &&
     useSessionStore.getState().session?.id !== command.desktop_id
   ) {
-    // openConversation degrades to a read-only peek while another
-    // conversation is mid-run, so the session never bound to the target.
-    // (Follow-ups to the RUNNING conversation itself don't hit this — they
-    // bind fine and send() queues them until the run settles.)
-    throw new Error(
-      "The desktop is busy with a different conversation. Wait for it to finish, then try again.",
-    );
+    // Sessions run in parallel now, so an open should always bind; reaching
+    // here means the open itself failed (e.g. its SSH host is gone).
+    throw new Error("Could not open the target conversation on the desktop.");
   }
   await useSessionStore.getState().send(text);
 }

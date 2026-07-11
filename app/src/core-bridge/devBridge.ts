@@ -21,6 +21,10 @@ export class DevBridge implements CoreBridge {
   private nextId = 1;
   private handlers = new Set<(s: Snapshot) => void>();
   private snapshot: Snapshot = emptySnapshot();
+  /** devbridge is single-session and tags snapshots with the provider's own
+   *  session id; when `newSession` rebinds to a conversation id, rewrite the
+   *  tag so the store can route by it. */
+  private alias: { from: string; to: string } | null = null;
 
   constructor(url = "ws://localhost:7878") {
     this.ws = new WebSocket(url);
@@ -31,7 +35,9 @@ export class DevBridge implements CoreBridge {
     this.ws.onmessage = (event) => {
       const msg = JSON.parse(event.data as string) as Record<string, unknown>;
       if (msg.type === "snapshot") {
-        this.snapshot = msg.snapshot as Snapshot;
+        const snap = msg.snapshot as Snapshot;
+        if (this.alias && snap.session === this.alias.from) snap.session = this.alias.to;
+        this.snapshot = snap;
         for (const h of this.handlers) h(this.snapshot);
         return;
       }
@@ -67,10 +73,17 @@ export class DevBridge implements CoreBridge {
     if (r.type === "error") throw new Error(String(r.message));
   }
 
-  async newSession(providerId: string, options: SessionOptions): Promise<Session> {
+  async newSession(
+    providerId: string,
+    options: SessionOptions,
+    bindId?: string,
+  ): Promise<Session> {
     const r = await this.call({ cmd: "new_session", provider: providerId, options });
     if (r.type === "error") throw new Error(String(r.message));
-    return r.session as Session;
+    const session = r.session as Session;
+    if (!bindId) return session;
+    this.alias = { from: session.id, to: bindId };
+    return { ...session, id: bindId };
   }
 
   async loadSession(providerId: string, id: string): Promise<Session> {

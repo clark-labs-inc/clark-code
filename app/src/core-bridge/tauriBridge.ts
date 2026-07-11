@@ -5,7 +5,12 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { CoreBridge, ConnectConfig, SessionOptions } from "./bridge";
+import type {
+  CloudTrajectoryConfig,
+  CoreBridge,
+  ConnectConfig,
+  SessionOptions,
+} from "./bridge";
 import type { Upload } from "../lib/attachments";
 import type {
   ClientResponse,
@@ -25,16 +30,24 @@ export class TauriBridge implements CoreBridge {
     return invoke("provider_connect", { providerId, config });
   }
 
-  reconfigure(config: ConnectConfig): Promise<void> {
-    return invoke("provider_reconfigure", { config });
+  reconfigure(sessionId: string, config: ConnectConfig): Promise<void> {
+    return invoke("provider_reconfigure", { sessionId, config });
   }
 
-  newSession(providerId: string, options: SessionOptions): Promise<Session> {
-    return invoke<Session>("session_new", { providerId, options });
+  newSession(providerId: string, options: SessionOptions, bindId?: string): Promise<Session> {
+    return invoke<Session>("session_new", { providerId, options, bindId: bindId ?? null });
   }
 
   loadSession(providerId: string, id: string): Promise<Session> {
     return invoke<Session>("session_load", { providerId, id });
+  }
+
+  closeSession(sessionId: string): Promise<void> {
+    return invoke("session_close", { sessionId });
+  }
+
+  configureCloudTrajectory(sessionId: string, config: CloudTrajectoryConfig): Promise<void> {
+    return invoke("session_configure_cloud", { sessionId, config });
   }
 
   prompt(sessionId: string, blocks: ContentBlock[], attachments: Upload[] = []): Promise<void> {

@@ -31,4 +31,16 @@ describe("parseNarration", () => {
     const spans = parseNarration("<narration>a</narration><narrate>b</narrate>");
     expect(spans).toEqual([{ kind: "narrate", text: "ab" }]);
   });
+
+  it("renders a native reasoning block as a thinking span", () => {
+    // A GLM `delta.reasoning` content block is flattened (Message.text) to an
+    // inline <thinking> tag; parseNarration must split it into a thinking span
+    // so it renders as the collapsible Thinking row, not as plain answer text.
+    const spans = parseNarration("Sure. <thinking>weighing options…</thinking> Done.");
+    expect(spans).toEqual([
+      { kind: "text", text: "Sure." },
+      { kind: "thinking", text: "weighing options…" },
+      { kind: "text", text: "Done." },
+    ]);
+  });
 });

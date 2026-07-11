@@ -46,3 +46,45 @@ export async function readImageDataUrl(uri?: string): Promise<string | null> {
     return null;
   }
 }
+
+/** A sensible `.md` filename derived from a document title (falls back to
+ *  "document"). Strips path separators and collapses runs of whitespace. */
+export function mdFileName(title?: string): string {
+  const base = (title ?? "").trim() || "document";
+  const cleaned = base.replace(/[/\\]+/g, " ").replace(/\s+/g, " ").trim();
+  return `${cleaned || "document"}.md`;
+}
+
+/** Save document text to disk. In the desktop app, opens the OS save dialog and
+ *  writes the chosen path through the `save_doc_text` command (native download).
+ *  Outside the app (browser preview), falls back to a Blob download. Returns
+ *  whether the user actually saved (false if they cancelled the dialog). */
+export async function saveDocText(text: string, title?: string): Promise<boolean> {
+  const name = mdFileName(title);
+  if (!isTauri()) {
+    downloadBlob(text, name);
+    return true;
+  }
+  const { save } = await import("@tauri-apps/plugin-dialog");
+  const path = await save({
+    title: "Save document",
+    defaultPath: name,
+    filters: [{ name: "Markdown", extensions: ["md", "markdown"] }],
+  });
+  if (!path) return false;
+  await invoke("save_doc_text", { path, text });
+  return true;
+}
+
+function downloadBlob(text: string, name: string): void {
+  const blob = new Blob([text], { type: "text/markdown;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  a.rel = "noopener";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}

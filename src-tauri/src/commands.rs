@@ -3,7 +3,7 @@
 
 use agent_core::{
     apply, ClientResponse, ContentBlock, PendingUpload, PromptInput, Provider, ProviderConfig,
-    RunId, SessionId, SessionOptions, Snapshot,
+    RunId, Session, SessionId, SessionOptions, Snapshot,
 };
 use agent_core::{AgentEvent, Role};
 use futures::StreamExt;
@@ -13,9 +13,13 @@ use provider_local::LocalAgentProvider;
 use serde::Serialize;
 use serde_json::Value;
 use std::path::PathBuf;
+use std::sync::Arc;
 use tauri::{AppHandle, Emitter, State};
+use tokio::sync::Mutex;
 
 use crate::ssh::{self, RemoteSpec};
+use crate::state::HostSession;
+use crate::trajectory::{CloudTrajectoryClient, CloudTrajectoryConfig};
 use crate::{builtin_providers, AppState, ProviderInfo};
 
 /// Synthetic run id used to attribute the user's own message in the timeline.
@@ -45,7 +49,9 @@ pub async fn provider_connect(
     tracing::info!(provider = %provider_id, "connecting");
     let mut provider = make_provider(&provider_id)?;
     provider.connect(config).await.map_err(|e| e.to_string())?;
-    state.session.lock().await.provider = Some(provider);
+    // Parked until `session_new`/`session_load` binds it to a session. Each
+    // session gets its own provider instance, so any number can stream at once.
+    state.pending_provider.lock().await.replace(provider);
     Ok(())
 }
 
@@ -91,13 +97,17 @@ pub async fn changes_revert(cwd: String, base: String, path: String) -> Result<(
 /// full context on the new model.
 #[tauri::command]
 pub async fn provider_reconfigure(
+    session_id: String,
     config: ProviderConfig,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    tracing::info!("reconfiguring live provider");
-    let mut s = state.session.lock().await;
-    let provider = s.provider.as_mut().ok_or("connect a provider first")?;
-    provider.connect(config).await.map_err(|e| e.to_string())
+    tracing::info!(session = %session_id, "reconfiguring live provider");
+    let entry = state
+        .session_entry(&session_id)
+        .await
+        .ok_or("no such session")?;
+    let mut s = entry.lock().await;
+    s.provider.connect(config).await.map_err(|e| e.to_string())
 }
 
 /// What the frontend gets back after a remote project connects. The `remote`
@@ -214,26 +224,36 @@ pub async fn list_commands(
     Ok(provider_local::discover_commands(exec.as_ref(), &root).await)
 }
 
+/// Bind the pending (just-connected) provider to a fresh session and register
+/// it in the live-session pool. `bind_id` — when the frontend reopens an
+/// existing conversation on a provider that can't resume — is the conversation
+/// id the frontend will address this session with; the session is keyed (and
+/// its snapshot tagged) by it so events route to the right conversation.
 #[tauri::command]
 pub async fn session_new(
     provider_id: String,
     options: SessionOptions,
+    bind_id: Option<String>,
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<Value, String> {
-    tracing::info!(provider = %provider_id, "session_new");
-    let mut s = state.session.lock().await;
-    let provider = s.provider.as_mut().ok_or("connect a provider first")?;
-    let session = provider
+    tracing::info!(provider = %provider_id, bind = bind_id.as_deref().unwrap_or(""), "session_new");
+    let mut provider = state
+        .pending_provider
+        .lock()
+        .await
+        .take()
+        .ok_or("connect a provider first")?;
+    let mut session = provider
         .new_session(options)
         .await
         .map_err(|e| e.to_string())?;
-    let mut snapshot = Snapshot::new();
-    snapshot.session = Some(session.id.clone());
-    s.snapshot = snapshot;
-    s.session = Some(session.clone());
-    let _ = app.emit("snapshot", &s.snapshot);
-    serde_json::to_value(&session).map_err(|e| e.to_string())
+    if let Some(bind) = bind_id {
+        // The provider ignores the wire session id (it is single-session); the
+        // pool key and everything the frontend sees use the conversation id.
+        session.id = SessionId::new(bind);
+    }
+    register_session(&app, &state, provider, session).await
 }
 
 #[tauri::command]
@@ -243,20 +263,76 @@ pub async fn session_load(
     state: State<'_, AppState>,
 ) -> Result<Value, String> {
     tracing::info!(session = %id, "session_load");
-    let mut s = state.session.lock().await;
-    let provider = s.provider.as_mut().ok_or("connect a provider first")?;
+    let mut provider = state
+        .pending_provider
+        .lock()
+        .await
+        .take()
+        .ok_or("connect a provider first")?;
     let session = provider
         .load_session(SessionId::new(id))
         .await
         .map_err(|e| e.to_string())?;
-    // The client restores the persisted transcript; start from a clean snapshot
-    // bound to the resumed session so new turns append correctly.
+    register_session(&app, &state, provider, session).await
+}
+
+/// Insert a bound session into the pool (replacing any prior entry with the
+/// same id — reopening a conversation supersedes its old, settled session) and
+/// announce its clean snapshot. The client restores the persisted transcript;
+/// starting clean means new turns append correctly.
+async fn register_session(
+    app: &AppHandle,
+    state: &AppState,
+    provider: Box<dyn Provider>,
+    session: Session,
+) -> Result<Value, String> {
     let mut snapshot = Snapshot::new();
     snapshot.session = Some(session.id.clone());
-    s.snapshot = snapshot;
-    s.session = Some(session.clone());
-    let _ = app.emit("snapshot", &s.snapshot);
+    let entry = HostSession {
+        provider,
+        session: session.clone(),
+        snapshot: snapshot.clone(),
+        trajectory: None,
+    };
+    state
+        .sessions
+        .lock()
+        .await
+        .insert(session.id.to_string(), Arc::new(Mutex::new(entry)));
+    let _ = app.emit("snapshot", &snapshot);
     serde_json::to_value(&session).map_err(|e| e.to_string())
+}
+
+/// Drop a live session: its provider (and any agent loop inside it) is
+/// destroyed. Called when a conversation is archived/deleted or on sign-out —
+/// never on a mere switch, so background sessions keep streaming.
+#[tauri::command]
+pub async fn session_close(session_id: String, state: State<'_, AppState>) -> Result<(), String> {
+    tracing::info!(session = %session_id, "session_close");
+    state.sessions.lock().await.remove(&session_id);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn session_configure_cloud(
+    session_id: String,
+    config: CloudTrajectoryConfig,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let entry = state
+        .session_entry(&session_id)
+        .await
+        .ok_or("no such session")?;
+    let trajectory = CloudTrajectoryClient::new(session_id, config);
+    trajectory
+        .append(&[AgentEvent::Trace {
+            run: None,
+            source: "clark_desktop_session".into(),
+            payload: serde_json::json!({"type": "session_configured"}),
+        }])
+        .await?;
+    entry.lock().await.trajectory = Some(trajectory);
+    Ok(())
 }
 
 #[tauri::command]
@@ -267,12 +343,42 @@ pub async fn prompt(
     attachments: Vec<PendingUpload>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
+    let entry = state
+        .session_entry(&session_id)
+        .await
+        .ok_or("no such session")?;
     let sid = SessionId::new(session_id);
 
+    let trajectory = entry
+        .lock()
+        .await
+        .trajectory
+        .clone()
+        .ok_or("Clark cloud trajectory is not configured for this session")?;
+    let mut durable_prompt = vec![AgentEvent::Trace {
+        run: None,
+        source: "clark_desktop_prompt".into(),
+        payload: serde_json::json!({
+            "blocks": blocks.clone(),
+            "attachments": attachments.clone(),
+        }),
+    }];
+    durable_prompt.extend(
+        blocks
+            .iter()
+            .cloned()
+            .map(|delta| AgentEvent::MessageChunk {
+                run: RunId::new(USER_RUN),
+                role: Role::User,
+                delta,
+            }),
+    );
+    trajectory.append(&durable_prompt).await?;
+
     // Show the user's message immediately (providers don't reliably echo it),
-    // then lock the provider to obtain the run's event stream and release.
-    let mut stream = {
-        let mut s = state.session.lock().await;
+    // then lock the session to obtain the run's event stream and release.
+    let stream = {
+        let mut s = entry.lock().await;
         for block in &blocks {
             apply(
                 &mut s.snapshot,
@@ -285,8 +391,7 @@ pub async fn prompt(
         }
         let _ = app.emit("snapshot", &s.snapshot);
 
-        let provider = s.provider.as_mut().ok_or("connect a provider first")?;
-        provider
+        s.provider
             .prompt(
                 &sid,
                 PromptInput {
@@ -298,13 +403,54 @@ pub async fn prompt(
             .map_err(|e| e.to_string())?
     };
 
-    // Fold events into the shared snapshot and push each update to the webview.
-    let host = state.session.clone();
+    // Fold events into this session's snapshot and push each update to the
+    // webview (tagged by `snapshot.session`, so the UI routes it to the right
+    // conversation). Each session folds independently — parallel runs never
+    // contend or interleave.
     tokio::spawn(async move {
-        while let Some(ev) = stream.next().await {
+        let mut batches = stream.ready_chunks(64);
+        while let Some(events) = batches.next().await {
+            let trajectory = entry.lock().await.trajectory.clone();
+            if let Some(trajectory) = trajectory {
+                if let Err(error) = trajectory.append(&events).await {
+                    let run = events.iter().find_map(event_run_id);
+                    let snapshot = {
+                        let mut s = entry.lock().await;
+                        if let Some(run) = &run {
+                            let session = s.session.id.clone();
+                            let _ = s.provider.cancel(&session, run).await;
+                        }
+                        let failure = AgentEvent::Error {
+                            code: "cloud_trajectory_write_failed".into(),
+                            message: format!("Clark cloud could not save this run: {error}"),
+                            run: run.clone(),
+                        };
+                        apply(&mut s.snapshot, &failure);
+                        if let Some(run) = run {
+                            apply(
+                                &mut s.snapshot,
+                                &AgentEvent::RunFinished {
+                                    run,
+                                    outcome: agent_core::RunOutcome {
+                                        status: agent_core::RunStatus::Failed,
+                                        stop_reason: Some("cloud_trajectory_write_failed".into()),
+                                        error: Some(error),
+                                        usage: None,
+                                    },
+                                },
+                            );
+                        }
+                        s.snapshot.clone()
+                    };
+                    let _ = app.emit("snapshot", &snapshot);
+                    return;
+                }
+            }
             let snapshot = {
-                let mut s = host.lock().await;
-                apply(&mut s.snapshot, &ev);
+                let mut s = entry.lock().await;
+                for event in &events {
+                    apply(&mut s.snapshot, event);
+                }
                 s.snapshot.clone()
             };
             let _ = app.emit("snapshot", &snapshot);
@@ -313,15 +459,26 @@ pub async fn prompt(
     Ok(())
 }
 
+fn event_run_id(event: &AgentEvent) -> Option<RunId> {
+    serde_json::to_value(event)
+        .ok()?
+        .get("run")?
+        .as_str()
+        .map(|run| RunId::new(run.to_string()))
+}
+
 #[tauri::command]
 pub async fn cancel(
     session_id: String,
     run_id: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let mut s = state.session.lock().await;
-    let provider = s.provider.as_mut().ok_or("connect a provider first")?;
-    provider
+    let entry = state
+        .session_entry(&session_id)
+        .await
+        .ok_or("no such session")?;
+    let mut s = entry.lock().await;
+    s.provider
         .cancel(&SessionId::new(session_id), &RunId::new(run_id))
         .await
         .map_err(|e| e.to_string())
@@ -333,9 +490,12 @@ pub async fn respond(
     response: ClientResponse,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let mut s = state.session.lock().await;
-    let provider = s.provider.as_mut().ok_or("connect a provider first")?;
-    provider
+    let entry = state
+        .session_entry(&session_id)
+        .await
+        .ok_or("no such session")?;
+    let mut s = entry.lock().await;
+    s.provider
         .respond(&SessionId::new(session_id), response)
         .await
         .map_err(|e| e.to_string())
@@ -347,9 +507,12 @@ pub async fn set_mode(
     mode: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let mut s = state.session.lock().await;
-    let provider = s.provider.as_mut().ok_or("connect a provider first")?;
-    provider
+    let entry = state
+        .session_entry(&session_id)
+        .await
+        .ok_or("no such session")?;
+    let mut s = entry.lock().await;
+    s.provider
         .set_mode(&SessionId::new(session_id), mode)
         .await
         .map_err(|e| e.to_string())
@@ -361,9 +524,12 @@ pub async fn set_output_style(
     style: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let mut s = state.session.lock().await;
-    let provider = s.provider.as_mut().ok_or("connect a provider first")?;
-    provider
+    let entry = state
+        .session_entry(&session_id)
+        .await
+        .ok_or("no such session")?;
+    let mut s = entry.lock().await;
+    s.provider
         .set_output_style(&SessionId::new(session_id), style)
         .await
         .map_err(|e| e.to_string())
@@ -521,6 +687,28 @@ pub async fn read_image_data_url(path: String) -> Result<String, String> {
         "data:{mime};base64,{}",
         base64::engine::general_purpose::STANDARD.encode(bytes)
     ))
+}
+
+/// Write an agent-authored document's text to a user-chosen path (the OS save
+/// dialog returns an absolute path). The content itself is the in-memory text
+/// the UI already rendered — the workspace file is only the source of truth for
+/// reading — so the destination is unconstrained (a real download). Capped so a
+/// pathological payload can't stream gigabytes to disk in one call.
+#[tauri::command]
+pub async fn save_doc_text(path: String, text: String) -> Result<(), String> {
+    const MAX_DOC_BYTES: usize = 8 * 1024 * 1024;
+    if text.len() > MAX_DOC_BYTES {
+        return Err("document too large to save".into());
+    }
+    let p = PathBuf::from(&path);
+    tokio::task::spawn_blocking(move || {
+        if let Some(parent) = p.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| format!("create dir: {e}"))?;
+        }
+        std::fs::write(&p, text).map_err(|e| format!("write failed: {e}"))
+    })
+    .await
+    .map_err(|e| format!("save failed: {e}"))?
 }
 
 /// Open a file (or folder) with the OS default handler — for a source file on a

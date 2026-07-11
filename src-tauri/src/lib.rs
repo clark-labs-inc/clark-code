@@ -17,6 +17,7 @@ mod mobile_remote;
 pub mod ssh;
 mod state;
 mod terminal;
+mod trajectory;
 
 pub use state::AppState;
 
@@ -96,6 +97,8 @@ pub fn run() {
             commands::list_commands,
             commands::session_new,
             commands::session_load,
+            commands::session_close,
+            commands::session_configure_cloud,
             commands::prompt,
             commands::cancel,
             commands::respond,
@@ -106,6 +109,7 @@ pub fn run() {
             commands::local_list_files,
             commands::read_doc_text,
             commands::read_image_data_url,
+            commands::save_doc_text,
             commands::open_path,
             commands::clark_exchange_google_idtoken,
             commands::clark_provision_code_key,

@@ -90,12 +90,30 @@ impl ca::StreamFn for ClarkAgentStream {
                 partial: empty_assistant(ca::StopReason::EndTurn, None),
             });
             let chunk_tx = tx.clone();
+            let reasoning_tx = tx.clone();
             let turn = llm
-                .stream_chat(&messages, &tools, &signal, move |delta| {
-                    let _ = chunk_tx.send(ca::StreamEvent::Chunk(ca::AssistantStreamChunk::Text {
-                        delta: delta.to_string(),
-                    }));
-                })
+                .stream_chat(
+                    &messages,
+                    &tools,
+                    &signal,
+                    move |delta| {
+                        let _ =
+                            chunk_tx.send(ca::StreamEvent::Chunk(ca::AssistantStreamChunk::Text {
+                                delta: delta.to_string(),
+                            }));
+                    },
+                    move |delta| {
+                        // GLM/OpenRouter streams hidden reasoning in
+                        // `delta.reasoning`; forward it as a Reasoning chunk so
+                        // the UI can render a live Thinking block instead of
+                        // silence while the model thinks.
+                        let _ = reasoning_tx.send(ca::StreamEvent::Chunk(
+                            ca::AssistantStreamChunk::Reasoning {
+                                delta: delta.to_string(),
+                            },
+                        ));
+                    },
+                )
                 .await;
 
             match turn {
@@ -377,6 +395,16 @@ impl DesktopEventSink {
 #[async_trait]
 impl ca::EventSink for DesktopEventSink {
     async fn emit(&self, event: ca::AgentEvent) {
+        if let Ok(payload) = serde_json::to_value(&event) {
+            let _ = self
+                .events
+                .send(desktop::AgentEvent::Trace {
+                    run: Some(self.run.clone()),
+                    source: "clark_agent".to_string(),
+                    payload,
+                })
+                .await;
+        }
         match event {
             ca::AgentEvent::MessageUpdate {
                 chunk: ca::AssistantStreamChunk::Text { delta },
@@ -388,6 +416,25 @@ impl ca::EventSink for DesktopEventSink {
                         run: self.run.clone(),
                         role: desktop::Role::Agent,
                         delta: desktop::ContentBlock::text(delta),
+                    })
+                    .await;
+            }
+            ca::AgentEvent::MessageUpdate {
+                chunk:
+                    ca::AssistantStreamChunk::Reasoning { delta }
+                    | ca::AssistantStreamChunk::Thinking { delta },
+                ..
+            } => {
+                // Hidden reasoning → a Thinking content block. The frontend
+                // renders it as the collapsible Thinking row (the same UI the
+                // inline `<thinking>` tag path uses), and projection coalesces
+                // adjacent blocks so streaming deltas merge into one.
+                let _ = self
+                    .events
+                    .send(desktop::AgentEvent::MessageChunk {
+                        run: self.run.clone(),
+                        role: desktop::Role::Agent,
+                        delta: desktop::ContentBlock::thinking(delta),
                     })
                     .await;
             }
@@ -843,6 +890,39 @@ mod tests {
     fn malformed_tool_args_use_core_parse_error_marker() {
         let value = parse_tool_args("{bad");
         assert!(ca::detect_arg_parse_error(&value).is_some());
+    }
+
+    #[tokio::test]
+    async fn desktop_sink_preserves_stream_lifecycle_events_as_trace() {
+        let (send, receive) = async_channel::bounded(2);
+        let sink = DesktopEventSink::new(
+            send,
+            RunId::new("run-1"),
+            Arc::new(ToolRegistry::new(None, None)),
+            None,
+        );
+        ca::EventSink::emit(
+            &sink,
+            ca::AgentEvent::MessageStart {
+                message: ca::AgentMessage::User {
+                    content: ca::UserContent::Text("hello".into()),
+                    timestamp: None,
+                },
+            },
+        )
+        .await;
+
+        let event = receive.recv().await.expect("trace event");
+        match event {
+            desktop::AgentEvent::Trace {
+                source, payload, ..
+            } => {
+                assert_eq!(source, "clark_agent");
+                assert_eq!(payload["type"], "message_start");
+                assert_eq!(payload["message"]["content"], "hello");
+            }
+            other => panic!("expected trace event, got {other:?}"),
+        }
     }
 
     #[test]

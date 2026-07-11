@@ -2,11 +2,12 @@ import { useEffect, useMemo, useState } from "react";
 import { motion, useReducedMotion } from "motion/react";
 import {
   FileText, ExternalLink, Copy, Check, Presentation, AlignLeft, ChevronLeft, ChevronRight,
+  Download, Loader2,
 } from "lucide-react";
 import type { Artifact } from "../../core-bridge/types";
 import { cn } from "../../lib/cn";
 import { useCopy } from "../../lib/clipboard";
-import { readDocText, isLocalDocUri } from "../../lib/docs";
+import { readDocText, isLocalDocUri, saveDocText } from "../../lib/docs";
 import { Md, MD_CLASSES } from "../Message";
 
 /** True for an artifact we render as an inline markdown document. */
@@ -37,6 +38,8 @@ export function MarkdownDoc({ artifact }: { artifact: Artifact }) {
   const [present, setPresent] = useState(false);
   const [slide, setSlide] = useState(0);
   const [copied, copy] = useCopy();
+  const [downloading, setDownloading] = useState(false);
+  const [saved, setSaved] = useState(false);
   const uri = artifact.uri;
 
   useEffect(() => {
@@ -44,6 +47,7 @@ export function MarkdownDoc({ artifact }: { artifact: Artifact }) {
     setText(null);
     setFailed(false);
     setSlide(0);
+    setSaved(false);
     readDocText(uri).then(
       (t) => {
         if (!alive) return;
@@ -61,6 +65,20 @@ export function MarkdownDoc({ artifact }: { artifact: Artifact }) {
   const multi = slides.length > 1;
   const at = Math.min(slide, slides.length - 1);
   const external = !!uri && !isLocalDocUri(uri);
+
+  const download = () => {
+    if (downloading || text == null) return;
+    setDownloading(true);
+    void saveDocText(text, artifact.title)
+      .then((ok) => {
+        if (ok) {
+          setSaved(true);
+          setTimeout(() => setSaved(false), 1800);
+        }
+      })
+      .catch(() => {})
+      .finally(() => setDownloading(false));
+  };
 
   return (
     <motion.div
@@ -86,6 +104,24 @@ export function MarkdownDoc({ artifact }: { artifact: Artifact }) {
             className="grid size-7 shrink-0 place-items-center rounded-md text-ink-faint transition hover:bg-bg-hover hover:text-ink-secondary"
           >
             {copied ? <Check className="size-3.5 text-success" /> : <Copy className="size-3.5" />}
+          </button>
+        )}
+        {text != null && (
+          <button
+            type="button"
+            onClick={download}
+            disabled={downloading}
+            aria-label={saved ? "Saved" : "Download as Markdown"}
+            title={saved ? "Saved" : "Download as Markdown"}
+            className="grid size-7 shrink-0 place-items-center rounded-md text-ink-faint transition hover:bg-bg-hover hover:text-ink-secondary disabled:opacity-50"
+          >
+            {downloading ? (
+              <Loader2 className="size-3.5 animate-[spin_1s_linear_infinite]" />
+            ) : saved ? (
+              <Check className="size-3.5 text-success" />
+            ) : (
+              <Download className="size-3.5" />
+            )}
           </button>
         )}
         {text != null && multi && (
