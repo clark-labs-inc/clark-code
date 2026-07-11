@@ -56,13 +56,10 @@ struct EngineState {
 
 /// `ws://host/ws` → `http://host`, `wss://host/...` → `https://host`.
 fn http_base_from_ws(endpoint: &str) -> Option<String> {
-    let (scheme, rest) = if let Some(r) = endpoint.strip_prefix("wss://") {
-        ("https", r)
-    } else if let Some(r) = endpoint.strip_prefix("ws://") {
-        ("http", r)
-    } else {
-        return None;
-    };
+    let (scheme, rest) = endpoint
+        .strip_prefix("wss://")
+        .map(|r| ("https", r))
+        .or_else(|| endpoint.strip_prefix("ws://").map(|r| ("http", r)))?;
     let host = rest.split('/').next().unwrap_or(rest);
     Some(format!("{scheme}://{host}"))
 }
