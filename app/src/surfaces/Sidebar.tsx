@@ -120,7 +120,7 @@ function ConversationRow({
     <div
       onContextMenu={(e) => onContextMenu(e, c.id)}
       className={cn(
-        "group relative flex items-center gap-2 rounded-xl px-3 py-1.5 text-sm transition duration-200 ease-clark",
+        "group relative flex items-center gap-2 rounded-xl px-3 py-1 text-sm transition duration-200 ease-clark",
         selected
           ? "bg-accent-soft text-ink ring-1 ring-accent/40"
           : active || opening
@@ -182,9 +182,9 @@ function ConversationRow({
               className={`size-3.5 shrink-0 ${active || opening ? "text-accent" : "text-ink-faint"}`}
             />
           )}
-          <span className="flex min-w-0 flex-col">
-            <span className="truncate leading-tight">{c.title}</span>
-            <span className="truncate text-xs text-ink-muted">
+          <span className="flex min-w-0 flex-1 items-baseline gap-2 text-left">
+            <span className="min-w-0 truncate leading-tight">{c.title}</span>
+            <span className="shrink-0 truncate text-[0.6875rem] tabular-nums text-ink-muted/80">
               {opening ? "Opening…" : streaming ? "Working…" : relativeTime(c.updatedAt)}
             </span>
           </span>
