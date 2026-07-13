@@ -112,7 +112,7 @@ export function TopBar({ dark, onToggleTheme }: { dark: boolean; onToggleTheme: 
   const isLocal = session?.provider === "local";
 
   return (
-    <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border-subtle bg-bg px-5">
+    <header className="flex h-12 shrink-0 items-center gap-3 border-b border-border-subtle bg-bg px-5">
       {session && (
         <div className="flex min-w-0 items-center gap-2">
           <span

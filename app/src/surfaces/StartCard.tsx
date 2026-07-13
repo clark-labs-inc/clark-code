@@ -49,16 +49,16 @@ export function StartCard() {
         initial={reduce ? false : { opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: reduce ? 0 : 0.3, ease: [0.22, 1, 0.36, 1] }}
-        className="mx-auto w-full max-w-3xl px-6 pb-8 pt-14"
+        className="mx-auto w-full max-w-3xl px-6 pb-6 pt-10"
       >
-        <div className="mb-10">
-          <div className="mb-3 text-xs font-semibold uppercase tracking-[0.16em] text-accent">
+        <div className="mb-6">
+          <div className="mb-2.5 text-xs font-semibold uppercase tracking-[0.16em] text-accent">
             Clark Code
           </div>
           <h1 className="font-display max-w-xl text-4xl leading-[1.08] text-ink">
             {daypart()}, {firstName}.
           </h1>
-          <p className="mt-3 max-w-lg text-base text-ink-muted">
+          <p className="mt-2 max-w-lg text-base text-ink-muted">
             What should we build, investigate, or improve today?
           </p>
         </div>

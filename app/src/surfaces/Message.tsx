@@ -27,11 +27,11 @@ function text(blocks: ContentBlock[]): string {
 }
 
 export const MD_CLASSES =
-  "text-ink [&_p]:my-3 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 " +
-  "[&_ul]:my-3 [&_ul]:list-disc [&_ul]:pl-5 [&_ul]:marker:text-ink-faint [&_ol]:my-3 [&_ol]:list-decimal [&_ol]:pl-5 [&_ol]:marker:text-ink-faint [&_li]:my-2 " +
-  "[&_h1]:mb-1.5 [&_h1]:mt-3 [&_h1]:text-lg [&_h1]:font-semibold [&_h1]:tracking-tight [&_h2]:mb-1.5 [&_h2]:mt-3 [&_h2]:font-semibold [&_h2]:tracking-tight [&_h3]:mb-1 [&_h3]:mt-2.5 [&_h3]:font-semibold " +
+  "text-ink [&_p]:my-2 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 " +
+  "[&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ul]:marker:text-ink-faint [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_ol]:marker:text-ink-faint [&_li]:my-1 " +
+  "[&_h1]:mb-1 [&_h1]:mt-3 [&_h1]:text-lg [&_h1]:font-semibold [&_h1]:tracking-tight [&_h2]:mb-1 [&_h2]:mt-2.5 [&_h2]:font-semibold [&_h2]:tracking-tight [&_h3]:mb-1 [&_h3]:mt-2 [&_h3]:font-semibold " +
   "[&_a]:text-ink [&_a]:underline [&_a]:decoration-ink-faint [&_a]:underline-offset-2 hover:[&_a]:decoration-ink [&_strong]:font-semibold [&_strong]:text-ink " +
-  "[&_pre]:my-2.5 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:border [&_pre]:border-border-subtle [&_pre]:bg-bg-sunken [&_pre]:p-3 [&_pre]:font-mono [&_pre]:text-xs [&_pre]:leading-relaxed [&_pre>code]:bg-transparent [&_pre>code]:p-0 [&_pre>code]:border-0 " +
+  "[&_pre]:my-2 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:border [&_pre]:border-border-subtle [&_pre]:bg-bg-sunken [&_pre]:p-3 [&_pre]:font-mono [&_pre]:text-xs [&_pre]:leading-relaxed [&_pre>code]:bg-transparent [&_pre>code]:p-0 [&_pre>code]:border-0 " +
   "[&_:not(pre)>code]:rounded-[5px] [&_:not(pre)>code]:border [&_:not(pre)>code]:border-border-subtle [&_:not(pre)>code]:bg-chip [&_:not(pre)>code]:px-[0.32em] [&_:not(pre)>code]:py-[0.12em] [&_:not(pre)>code]:font-mono [&_:not(pre)>code]:text-[0.85em] [&_:not(pre)>code]:text-ink " +
   "[&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-3 [&_blockquote]:text-ink-muted " +
   "[&_table]:my-2 [&_table]:w-full [&_table]:border-collapse [&_table]:table-fixed [&_table]:text-xs " +
@@ -292,14 +292,14 @@ function MessageImpl({
     // thinking spans.
     const spans = parseNarration(streaming ? smoothed : body);
     return (
-      <div className="min-w-0 space-y-2">
+      <div className="min-w-0 space-y-1.5">
         {spans.map((span, i) => {
           if (span.kind === "thinking") return <ThinkingBlock key={i} text={span.text} />;
           return (
             <div
               key={i}
               className={cn(
-                "text-base leading-[1.8] [overflow-wrap:anywhere]",
+                "text-base leading-[1.65] [overflow-wrap:anywhere]",
                 MD_CLASSES,
                 span.kind === "narrate" && "text-ink-secondary",
               )}

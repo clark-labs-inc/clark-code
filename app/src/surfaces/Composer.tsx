@@ -671,7 +671,7 @@ export function Composer() {
   };
 
   return (
-    <div className="bg-bg px-6 pb-5 pt-3.5" {...handlers}>
+    <div className="bg-bg px-6 pb-4 pt-2.5" {...handlers}>
       <QueuedMessages onEdit={editQueued} />
       {!session && (
         <div className="mx-auto mb-2 max-w-3xl">
@@ -680,7 +680,7 @@ export function Composer() {
       )}
       <div
         className={cn(
-          "relative mx-auto max-w-3xl rounded-[22px] border border-border-subtle bg-bg-elevated px-4 py-3 shadow-soft transition duration-200 ease-clark",
+          "relative mx-auto max-w-3xl rounded-[22px] border border-border-subtle bg-bg-elevated px-4 py-2.5 shadow-soft transition duration-200 ease-clark",
           dragging
             ? "ring-2 ring-accent/40"
             : "ring-4 ring-transparent focus-within:border-accent/30 focus-within:ring-accent-subtle",
@@ -740,7 +740,7 @@ export function Composer() {
           className="composer-input max-h-52 w-full resize-none bg-transparent px-0.5 py-1.5 text-base leading-relaxed text-ink outline-none placeholder:text-ink-muted disabled:opacity-50"
         />
 
-        <div className="mt-2 flex items-center justify-between gap-2">
+        <div className="mt-1.5 flex items-center justify-between gap-2">
           <div className="flex items-center gap-1">
             <button
               onClick={() => fileRef.current?.click()}
