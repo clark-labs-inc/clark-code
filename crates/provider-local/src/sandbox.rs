@@ -136,6 +136,15 @@ impl Sandbox {
                     None => return Err(format!("{path}: no existing parent directory")),
                 }
             }
+            // The leaf itself must not be a symlink. The executor's write follows
+            // symlinks, so writing through one — even a *dangling* link to an
+            // absolute path outside the root — would escape containment that the
+            // ancestor check (which only stats the parent) can't catch.
+            if let Ok(meta) = std::fs::symlink_metadata(&normalized) {
+                if meta.file_type().is_symlink() {
+                    return Err(format!("{path}: refusing to write through a symlink"));
+                }
+            }
         }
         self.ensure_contained_lexical(&normalized)?;
         Ok(normalized)
@@ -247,6 +256,20 @@ mod tests {
         let sb = Sandbox::new(dir.path()).unwrap();
         let p = sb.resolve_for_write("src/new_mod.rs").unwrap();
         assert!(p.ends_with("src/new_mod.rs"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_write_through_a_dangling_symlink_leaf() {
+        let dir = temp_root();
+        let sb = Sandbox::new(dir.path()).unwrap();
+        // A symlink inside the root pointing at an absolute path outside it, with
+        // a non-existent target — the executor's write would follow it and plant
+        // a file at /tmp/…, escaping the root. resolve_for_write must refuse.
+        let link = dir.path().join("evil");
+        std::os::unix::fs::symlink("/tmp/clark-sandbox-escape-test", &link).unwrap();
+        let err = sb.resolve_for_write("evil").unwrap_err();
+        assert!(err.contains("symlink"), "{err}");
     }
 
     #[test]

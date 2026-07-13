@@ -124,6 +124,9 @@ impl BackgroundTasks {
         let pid = {
             let tasks = self.tasks.lock().unwrap();
             match tasks.get(id) {
+                // Skip a task that already finished: the OS may have recycled its
+                // PID, so signalling it now could kill an unrelated process.
+                Some(entry) if entry.exit_code.lock().unwrap().is_some() => None,
                 Some(entry) => entry.pid,
                 None => return Err(format!("no background task `{id}`")),
             }
@@ -140,7 +143,13 @@ impl BackgroundTasks {
     pub async fn clear_all(&self) {
         let pids: Vec<u32> = {
             let tasks = self.tasks.lock().unwrap();
-            tasks.values().filter_map(|e| e.pid).collect()
+            // Only signal still-running tasks; a finished task's PID may have been
+            // recycled by the OS (see `kill`).
+            tasks
+                .values()
+                .filter(|e| e.exit_code.lock().unwrap().is_none())
+                .filter_map(|e| e.pid)
+                .collect()
         };
         for pid in pids {
             kill_pid(pid).await;

