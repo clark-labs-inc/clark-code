@@ -32,7 +32,7 @@ export const MD_CLASSES =
   "[&_h1]:mb-1 [&_h1]:mt-3 [&_h1]:text-lg [&_h1]:font-semibold [&_h1]:tracking-tight [&_h2]:mb-1 [&_h2]:mt-2.5 [&_h2]:font-semibold [&_h2]:tracking-tight [&_h3]:mb-1 [&_h3]:mt-2 [&_h3]:font-semibold " +
   "[&_a]:text-ink [&_a]:underline [&_a]:decoration-ink-faint [&_a]:underline-offset-2 hover:[&_a]:decoration-ink [&_strong]:font-semibold [&_strong]:text-ink " +
   "[&_pre]:my-2 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:border [&_pre]:border-border-subtle [&_pre]:bg-bg-sunken [&_pre]:p-3 [&_pre]:font-mono [&_pre]:text-xs [&_pre]:leading-relaxed [&_pre>code]:bg-transparent [&_pre>code]:p-0 [&_pre>code]:border-0 " +
-  "[&_:not(pre)>code]:rounded-[5px] [&_:not(pre)>code]:border [&_:not(pre)>code]:border-border-subtle [&_:not(pre)>code]:bg-chip [&_:not(pre)>code]:px-[0.32em] [&_:not(pre)>code]:py-[0.12em] [&_:not(pre)>code]:font-mono [&_:not(pre)>code]:text-[0.85em] [&_:not(pre)>code]:text-ink " +
+  "[&_:not(pre)>code]:rounded-[4px] [&_:not(pre)>code]:bg-chip [&_:not(pre)>code]:px-[0.3em] [&_:not(pre)>code]:py-[0.08em] [&_:not(pre)>code]:font-mono [&_:not(pre)>code]:text-[0.84em] [&_:not(pre)>code]:text-ink-secondary " +
   "[&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-3 [&_blockquote]:text-ink-muted " +
   "[&_table]:my-2 [&_table]:w-full [&_table]:border-collapse [&_table]:table-fixed [&_table]:text-xs " +
   "[&_th]:border [&_th]:border-border-subtle [&_th]:px-2 [&_th]:py-1.5 [&_th]:text-left [&_th]:align-top [&_th]:font-medium [&_th]:text-ink-secondary [&_th]:break-words " +
@@ -211,16 +211,16 @@ function ThinkingBlock({ text }: { text: string }) {
   const [open, setOpen] = useState(false);
   const reduce = useReducedMotion();
   return (
-    <div className="overflow-hidden rounded-md border border-border-subtle bg-bg-secondary/50">
+    <div>
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="flex w-full items-center gap-1.5 px-2.5 py-1 text-xs text-ink-muted hover:bg-bg-hover/50"
+        className="group/think flex items-center gap-1.5 rounded-md py-0.5 text-xs text-ink-faint transition hover:text-ink-muted"
       >
         <Brain className="size-3.5" />
         <span className="font-medium">Thinking</span>
-        <ChevronRight className={cn("ml-auto size-3.5 transition-transform", open && "rotate-90")} />
+        <ChevronRight className={cn("size-3 opacity-60 transition-transform group-hover/think:opacity-100", open && "rotate-90")} />
       </button>
       <AnimatePresence initial={false}>
         {open && (
@@ -229,9 +229,9 @@ function ThinkingBlock({ text }: { text: string }) {
             animate={{ height: "auto", opacity: 1 }}
             exit={reduce ? { opacity: 0 } : { height: 0, opacity: 0 }}
             transition={{ duration: 0.18 }}
-            className="overflow-hidden border-t border-border-subtle"
+            className="overflow-hidden"
           >
-            <div className={cn("max-h-52 overflow-auto px-2.5 py-2 text-xs leading-relaxed text-ink-muted", MD_CLASSES)}>
+            <div className={cn("mt-1 max-h-52 overflow-auto border-l border-border-subtle pl-3 text-xs leading-relaxed text-ink-muted", MD_CLASSES)}>
               <Md>{text}</Md>
             </div>
           </motion.div>
