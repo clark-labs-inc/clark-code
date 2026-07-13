@@ -99,6 +99,7 @@ pub fn run() {
             commands::session_load,
             commands::session_close,
             commands::session_configure_cloud,
+            commands::update_cloud_token,
             commands::prompt,
             commands::cancel,
             commands::respond,

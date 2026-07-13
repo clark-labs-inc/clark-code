@@ -50,6 +50,24 @@ export class TauriBridge implements CoreBridge {
     return invoke("session_configure_cloud", { sessionId, config });
   }
 
+  updateCloudToken(token: string): Promise<void> {
+    return invoke("update_cloud_token", { token });
+  }
+
+  onCloudAuthExpired(handler: () => void): () => void {
+    const unlisten = listen("cloud-auth-expired", () => handler());
+    return () => {
+      void unlisten.then((fn) => fn());
+    };
+  }
+
+  onCloudSyncWarning(handler: (message: string) => void): () => void {
+    const unlisten = listen<string>("cloud-sync-warning", (event) => handler(event.payload));
+    return () => {
+      void unlisten.then((fn) => fn());
+    };
+  }
+
   prompt(sessionId: string, blocks: ContentBlock[], attachments: Upload[] = []): Promise<void> {
     return invoke("prompt", { sessionId, blocks, attachments });
   }

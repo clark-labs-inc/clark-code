@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use agent_core::{Provider, Session, Snapshot};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
 
 use crate::ssh::RemoteConn;
 use crate::trajectory::CloudTrajectoryClient;
@@ -42,6 +42,9 @@ pub struct AppState {
     /// Holding a [`RemoteConn`] keeps its SSH channels (and the remote server +
     /// tunnel) alive; removing it tears them down.
     pub remotes: Arc<Mutex<HashMap<String, RemoteConn>>>,
+    /// The app-wide Clark cloud JWT, shared by every trajectory client so a
+    /// frontend refresh (via `update_cloud_token`) reaches in-flight retries.
+    pub cloud_token: Arc<RwLock<Option<String>>>,
 }
 
 impl AppState {
@@ -50,6 +53,7 @@ impl AppState {
             pending_provider: Arc::new(Mutex::new(None)),
             sessions: Arc::new(Mutex::new(HashMap::new())),
             remotes: Arc::new(Mutex::new(HashMap::new())),
+            cloud_token: Arc::new(RwLock::new(None)),
         }
     }
 

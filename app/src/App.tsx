@@ -2,7 +2,7 @@ import { lazy, Suspense, useEffect } from "react";
 import { useSessionStore } from "./store/sessionStore";
 import { SignInScreen } from "./surfaces/SignInScreen";
 import { UpdateStatus } from "./surfaces/UpdateStatus";
-import { NoticeToast } from "./surfaces/Toast";
+import { NoticeToast, WarningToast } from "./surfaces/Toast";
 
 const AuthenticatedWorkspace = lazy(() => import("./AuthenticatedWorkspace"));
 
@@ -40,6 +40,7 @@ export default function App() {
       </Suspense>
       <UpdateStatus />
       <NoticeToast />
+      <WarningToast />
     </>
   );
 }

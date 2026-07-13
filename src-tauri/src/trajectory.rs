@@ -1,9 +1,12 @@
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use agent_core::AgentEvent;
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use tauri::{AppHandle, Emitter};
+use tokio::sync::RwLock;
 
 use crate::commands::clark_rest_base;
 
@@ -26,6 +29,10 @@ pub struct CloudTrajectoryConfig {
 pub struct CloudTrajectoryClient {
     conversation_id: String,
     config: CloudTrajectoryConfig,
+    /// App-wide Clark JWT (see `AppState::cloud_token`), read per attempt so a
+    /// token refreshed mid-session reaches every subsequent request.
+    token: Arc<RwLock<Option<String>>>,
+    app: AppHandle,
     http: reqwest::Client,
 }
 
@@ -57,10 +64,17 @@ struct AppendRequest<'a> {
 }
 
 impl CloudTrajectoryClient {
-    pub fn new(conversation_id: String, config: CloudTrajectoryConfig) -> Self {
+    pub fn new(
+        conversation_id: String,
+        config: CloudTrajectoryConfig,
+        token: Arc<RwLock<Option<String>>>,
+        app: AppHandle,
+    ) -> Self {
         Self {
             conversation_id,
             config,
+            token,
+            app,
             http: reqwest::Client::new(),
         }
     }
@@ -118,15 +132,23 @@ impl CloudTrajectoryClient {
             urlencoding::encode(&self.conversation_id)
         );
 
+        // Transient failures use only the short prefix of this schedule; a 401
+        // unlocks the longer tail so the frontend has time to refresh the JWT
+        // (asked for via `cloud-auth-expired`) before the token is re-read.
         let mut last_error = String::new();
-        for (attempt, delay) in [0_u64, 250, 1_000].into_iter().enumerate() {
+        let mut auth_retry = false;
+        for (attempt, delay) in [0_u64, 250, 1_000, 2_000, 3_000, 4_000]
+            .into_iter()
+            .enumerate()
+        {
             if delay > 0 {
                 tokio::time::sleep(Duration::from_millis(delay)).await;
             }
+            let token = self.token.read().await.clone().unwrap_or_default();
             match self
                 .http
                 .post(&url)
-                .bearer_auth(&self.config.token)
+                .bearer_auth(&token)
                 .json(&request)
                 .send()
                 .await
@@ -139,7 +161,12 @@ impl CloudTrajectoryClient {
                         "trajectory endpoint returned {status}: {}",
                         detail.chars().take(300).collect::<String>()
                     );
-                    if status.is_client_error()
+                    if status == StatusCode::UNAUTHORIZED {
+                        if !auth_retry {
+                            auth_retry = true;
+                            let _ = self.app.emit("cloud-auth-expired", ());
+                        }
+                    } else if status.is_client_error()
                         && status != StatusCode::TOO_MANY_REQUESTS
                         && status != StatusCode::REQUEST_TIMEOUT
                     {
@@ -148,7 +175,7 @@ impl CloudTrajectoryClient {
                 }
                 Err(error) => last_error = format!("trajectory request failed: {error}"),
             }
-            if attempt == 2 {
+            if !auth_retry && attempt == 2 {
                 break;
             }
         }

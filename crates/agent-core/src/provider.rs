@@ -61,6 +61,11 @@ pub struct SessionOptions {
     pub cwd: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mode: Option<String>,
+    /// Rendered transcript of the conversation being reopened. Providers that
+    /// can't resume server-side (`load_session: false`) seed it into the model
+    /// context so the agent remembers the prior turns, not just the UI.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resume_context: Option<String>,
 }
 
 /// A connected conversation with one provider.

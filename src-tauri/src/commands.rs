@@ -315,6 +315,7 @@ pub async fn session_close(session_id: String, state: State<'_, AppState>) -> Re
 
 #[tauri::command]
 pub async fn session_configure_cloud(
+    app: AppHandle,
     session_id: String,
     config: CloudTrajectoryConfig,
     state: State<'_, AppState>,
@@ -323,7 +324,9 @@ pub async fn session_configure_cloud(
         .session_entry(&session_id)
         .await
         .ok_or("no such session")?;
-    let trajectory = CloudTrajectoryClient::new(session_id, config);
+    *state.cloud_token.write().await = Some(config.token.clone());
+    let trajectory =
+        CloudTrajectoryClient::new(session_id, config, state.cloud_token.clone(), app);
     trajectory
         .append(&[AgentEvent::Trace {
             run: None,
@@ -332,6 +335,15 @@ pub async fn session_configure_cloud(
         }])
         .await?;
     entry.lock().await.trajectory = Some(trajectory);
+    Ok(())
+}
+
+/// Replace the app-wide Clark cloud JWT. Called by the frontend after it
+/// refreshes the sign-in (see the `cloud-auth-expired` event); every trajectory
+/// client reads this cell per request, so in-flight retries pick it up.
+#[tauri::command]
+pub async fn update_cloud_token(token: String, state: State<'_, AppState>) -> Result<(), String> {
+    *state.cloud_token.write().await = Some(token);
     Ok(())
 }
 
@@ -407,43 +419,38 @@ pub async fn prompt(
     // webview (tagged by `snapshot.session`, so the UI routes it to the right
     // conversation). Each session folds independently — parallel runs never
     // contend or interleave.
+    let state = state.inner().clone();
+    let session_key = sid.as_str().to_string();
     tokio::spawn(async move {
         let mut batches = stream.ready_chunks(64);
+        // Cloud trajectory sync is best-effort bookkeeping: a failed append
+        // must never kill the live run. Warn once per run (a persistent outage
+        // would otherwise toast on every batch) and keep folding events.
+        let mut sync_warned = false;
         while let Some(events) = batches.next().await {
+            // Stop if this session was closed or superseded by a reopen: the
+            // entry we captured is no longer the live one for this id. Without
+            // this, a closed conversation's provider stays alive (this task
+            // holds an Arc to it) and keeps folding + emitting snapshots tagged
+            // with the same session id, clobbering the reopened conversation.
+            let still_current = state
+                .session_entry(&session_key)
+                .await
+                .is_some_and(|live| Arc::ptr_eq(&live, &entry));
+            if !still_current {
+                break;
+            }
             let trajectory = entry.lock().await.trajectory.clone();
             if let Some(trajectory) = trajectory {
                 if let Err(error) = trajectory.append(&events).await {
-                    let run = events.iter().find_map(event_run_id);
-                    let snapshot = {
-                        let mut s = entry.lock().await;
-                        if let Some(run) = &run {
-                            let session = s.session.id.clone();
-                            let _ = s.provider.cancel(&session, run).await;
-                        }
-                        let failure = AgentEvent::Error {
-                            code: "cloud_trajectory_write_failed".into(),
-                            message: format!("Clark cloud could not save this run: {error}"),
-                            run: run.clone(),
-                        };
-                        apply(&mut s.snapshot, &failure);
-                        if let Some(run) = run {
-                            apply(
-                                &mut s.snapshot,
-                                &AgentEvent::RunFinished {
-                                    run,
-                                    outcome: agent_core::RunOutcome {
-                                        status: agent_core::RunStatus::Failed,
-                                        stop_reason: Some("cloud_trajectory_write_failed".into()),
-                                        error: Some(error),
-                                        usage: None,
-                                    },
-                                },
-                            );
-                        }
-                        s.snapshot.clone()
-                    };
-                    let _ = app.emit("snapshot", &snapshot);
-                    return;
+                    tracing::warn!(%error, "cloud trajectory append failed; run continues");
+                    if !sync_warned {
+                        sync_warned = true;
+                        let _ = app.emit(
+                            "cloud-sync-warning",
+                            format!("Clark cloud could not save part of this run: {error}"),
+                        );
+                    }
                 }
             }
             let snapshot = {
@@ -457,14 +464,6 @@ pub async fn prompt(
         }
     });
     Ok(())
-}
-
-fn event_run_id(event: &AgentEvent) -> Option<RunId> {
-    serde_json::to_value(event)
-        .ok()?
-        .get("run")?
-        .as_str()
-        .map(|run| RunId::new(run.to_string()))
 }
 
 #[tauri::command]

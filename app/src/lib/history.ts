@@ -44,8 +44,9 @@ function safeStore(): Storage | null {
 }
 
 /** A persisted transcript is never live: coerce any non-terminal run to a
- *  settled status, and drop a stale permission prompt, so a reopened (or
- *  reloaded) conversation never shows a stuck "Thinking…" or a dead prompt. */
+ *  settled status, settle tool calls the same way, and drop a stale permission
+ *  prompt, so a reopened (or reloaded) conversation never shows a stuck
+ *  "Thinking…", a spinning tool chip, or a dead prompt. */
 export function settleRuns(snapshot: Snapshot): Snapshot {
   let changed = false;
   const runs: Snapshot["runs"] = {};
@@ -57,8 +58,52 @@ export function settleRuns(snapshot: Snapshot): Snapshot {
       runs[id] = r;
     }
   }
+  // Interrupted tool calls settle to "completed", not "failed": their chip
+  // renders quietly (completion shows no glyph), whereas a red ✗ on every tool
+  // that happened to be in flight when the session ended reads as an error the
+  // user should act on. The run row above already says the run was cancelled.
+  const tool_calls: Snapshot["tool_calls"] = {};
+  for (const [id, t] of Object.entries(snapshot.tool_calls)) {
+    if (t.status === "pending" || t.status === "in_progress") {
+      tool_calls[id] = { ...t, status: "completed" };
+      changed = true;
+    } else {
+      tool_calls[id] = t;
+    }
+  }
   if (!changed && !snapshot.pending_permission) return snapshot;
-  return { ...snapshot, runs, pending_permission: undefined };
+  return { ...snapshot, runs, tool_calls, pending_permission: undefined };
+}
+
+/** Render a persisted transcript as plain text for the model. Providers that
+ *  can't resume server-side (the local agent) get this as `resume_context` so
+ *  a reopened conversation continues instead of starting from scratch. Keeps
+ *  the TAIL under `budget` chars — the recent turns are what "continue" needs. */
+export function renderResumeContext(snapshot: Snapshot, budget = 24000): string | null {
+  const lines: string[] = [];
+  for (const item of snapshot.timeline) {
+    if (item.item === "message") {
+      const text = item.blocks
+        .map((b) => (b.type === "text" ? b.text : `[${b.type}]`))
+        .join("")
+        // Thinking spans are narration, not conversation — drop them so the
+        // budget goes to real turns.
+        .replace(/<thinking>[\s\S]*?(<\/thinking>|$)/g, "")
+        .trim();
+      if (text) lines.push(`${item.role === "user" ? "User" : "Assistant"}: ${text}`);
+    } else if (item.item === "tool_call") {
+      const t = snapshot.tool_calls[item.id];
+      if (!t) continue;
+      const loc = t.locations?.[0]?.path;
+      lines.push(`[${t.kind}] ${t.title}${loc ? ` — ${loc}` : ""} (${t.status})`);
+    }
+  }
+  if (lines.length === 0) return null;
+  let out = lines.join("\n\n");
+  if (out.length > budget) {
+    out = "(earlier history truncated)\n\n…" + out.slice(out.length - budget);
+  }
+  return out;
 }
 
 /** First user message → a compact title; falls back to a generic label. */

@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { CheckCircle2, X } from "lucide-react";
+import { AlertTriangle, CheckCircle2, X } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
 
 const EASE = [0.4, 0, 0.2, 1] as const;
@@ -34,6 +34,47 @@ export function NoticeToast() {
         >
           <CheckCircle2 className="size-4 shrink-0 text-success" />
           <span className="min-w-0 text-sm text-ink">{notice}</span>
+          <button
+            onClick={dismiss}
+            aria-label="Dismiss"
+            className="grid size-8 shrink-0 place-items-center rounded-md text-ink-faint transition hover:bg-bg-hover hover:text-ink"
+          >
+            <X className="size-3.5" />
+          </button>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+}
+
+/** Non-fatal warning sibling of `NoticeToast`, backing the store's `warning`
+ *  channel — e.g. a cloud-sync hiccup mid-run. Deliberately NOT the red error
+ *  banner: the run it reports on is still alive. */
+export function WarningToast() {
+  const warning = useSessionStore((s) => s.warning);
+  const dismiss = useSessionStore((s) => s.dismissWarning);
+  const reduce = useReducedMotion();
+
+  useEffect(() => {
+    if (!warning) return;
+    const t = setTimeout(dismiss, 8000);
+    return () => clearTimeout(t);
+  }, [warning, dismiss]);
+
+  return (
+    <AnimatePresence>
+      {warning && (
+        <motion.div
+          key="warning"
+          initial={reduce ? { opacity: 0 } : { opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={reduce ? { opacity: 0 } : { opacity: 0, y: 12 }}
+          transition={{ duration: 0.25, ease: EASE }}
+          role="status"
+          className="fixed bottom-4 left-1/2 z-[90] flex max-w-[calc(100vw-2rem)] -translate-x-1/2 items-center gap-2.5 rounded-xl border border-border-subtle bg-bg-elevated px-3.5 py-2.5 shadow-lg"
+        >
+          <AlertTriangle className="size-4 shrink-0 text-warning" />
+          <span className="min-w-0 text-sm text-ink">{warning}</span>
           <button
             onClick={dismiss}
             aria-label="Dismiss"

@@ -98,7 +98,14 @@ pub fn terminal_open(
         let _ = app.emit("terminal://exit", stream_id);
     });
 
-    terminals.0.lock().unwrap().insert(
+    let mut map = terminals.0.lock().unwrap();
+    // An id collision (double-open, or a reused id) would otherwise drop the old
+    // Session silently — and portable_pty's Child isn't killed on drop — orphaning
+    // the previous shell whose reader thread keeps emitting for this same id.
+    if let Some(mut old) = map.remove(&id) {
+        let _ = old.child.kill();
+    }
+    map.insert(
         id,
         Session {
             writer,

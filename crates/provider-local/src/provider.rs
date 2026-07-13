@@ -245,6 +245,29 @@ impl Provider for LocalAgentProvider {
                 prompt.push_str(&mem);
             }
         }
+        // A reopened conversation has no server-side session to resume, so the
+        // host hands us a rendered transcript of the prior turns; seed it into
+        // the system prompt so the model remembers the conversation the user is
+        // looking at instead of greeting them with a fresh session.
+        if let Some(history) = options
+            .resume_context
+            .as_deref()
+            .map(str::trim)
+            .filter(|h| !h.is_empty())
+        {
+            prompt.push_str(
+                "\n# Resumed conversation\n\n\
+                 This session continues an earlier conversation with this user in this \
+                 project. The transcript below is a condensed record of it (tool output \
+                 omitted; it may be truncated at the start). Treat it as your own \
+                 conversation history: don't re-introduce yourself or redo completed \
+                 work. Any processes it mentions were started in a previous app session \
+                 and are likely gone — verify current state with tools before assuming \
+                 files, branches, or long-running commands are still as described.\n\n",
+            );
+            prompt.push_str(history);
+            prompt.push('\n');
+        }
         // Project-scoped config (`.clark/settings.json`): permission arrays
         // union with the global (UI-driven) ones; deny always wins because
         // `PermissionGate::hard_refusal` checks `deny_commands` before
@@ -571,11 +594,31 @@ mod tests {
         let opts = SessionOptions {
             cwd: Some(dir.path().to_string_lossy().to_string()),
             mode: None,
+            resume_context: None,
         };
         let session = p.new_session(opts).await.unwrap();
         assert_eq!(session.provider, ProviderId::new("local"));
         let s = p.session.lock().await;
         assert!(!s.system_prompt.is_empty());
+        assert!(s.transcript.is_empty());
+        assert!(!s.system_prompt.contains("# Resumed conversation"));
+    }
+
+    #[tokio::test]
+    async fn new_session_seeds_resume_context_into_system_prompt() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut p = LocalAgentProvider::new();
+        p.connect(ProviderConfig::default()).await.unwrap();
+        let opts = SessionOptions {
+            cwd: Some(dir.path().to_string_lossy().to_string()),
+            mode: None,
+            resume_context: Some("User: install node\n\nAssistant: running brew install".into()),
+        };
+        p.new_session(opts).await.unwrap();
+        let s = p.session.lock().await;
+        assert!(s.system_prompt.contains("# Resumed conversation"));
+        assert!(s.system_prompt.contains("running brew install"));
+        // History seeds the prompt, not the transcript — turns stay clean.
         assert!(s.transcript.is_empty());
     }
 }

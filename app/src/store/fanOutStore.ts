@@ -37,6 +37,14 @@ export function syncFanOut(f: FanOut | null | undefined): void {
   useFanOutStore.getState().setFanOut(f ?? null);
 }
 
+/** Clear the fan-out AND reset the dedup signature, so the next `syncFanOut`
+ *  for a different conversation always re-pushes (a switch to an idle session
+ *  emits no snapshot frame, so nothing else would clear a prior swarm). */
+export function resetFanOut(): void {
+  lastSignature = "";
+  useFanOutStore.getState().clearFanOut();
+}
+
 /** Dev-only: preview the fan-out surface without a live run. `previewFanOut()`
  *  in the console. */
 export function previewFanOut(): void {

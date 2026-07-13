@@ -3,8 +3,9 @@ import {
   getBridge,
   type CloudTrajectoryConfig,
   type CoreBridge,
+  type SessionOptions,
 } from "../core-bridge/bridge";
-import { syncFanOut } from "./fanOutStore";
+import { syncFanOut, resetFanOut } from "./fanOutStore";
 import {
   emptySnapshot,
   type ClientResponse,
@@ -22,6 +23,7 @@ import {
 } from "../lib/attachments";
 import {
   loadAuthSession,
+  refreshAuthSession,
   signInWithGoogle,
   signOut as authSignOut,
   type AuthMethod,
@@ -29,6 +31,7 @@ import {
 } from "../lib/auth";
 import {
   drainLocalHistory,
+  renderResumeContext,
   settleRuns,
   deriveTitle,
   hasContent,
@@ -125,6 +128,10 @@ function mergeHistory(prefix: Snapshot, live: Snapshot): Snapshot {
     pending_permission: live.pending_permission,
     artifacts,
     focus: live.focus ?? prefix.focus,
+    // Without this the fan-out is stripped from every reopened conversation
+    // (its snapshot always has a history prefix), so the swarm panel never
+    // renders — it only worked for brand-new sessions.
+    fan_out: live.fan_out ?? prefix.fan_out,
   };
 }
 
@@ -138,6 +145,8 @@ interface SessionState {
   error: string | null;
   /** Transient success/info toast (e.g. "Share link copied"). Auto-dismisses. */
   notice: string | null;
+  /** Transient non-fatal warning toast (e.g. cloud sync hiccup mid-run). */
+  warning: string | null;
   /** Run ids whose "Run failed" banner the user has dismissed this session. */
   dismissedFailedRuns: string[];
   /** Authenticated user + the Clark connection config it carries. */
@@ -322,6 +331,8 @@ interface SessionState {
   flashNotice: (message: string) => void;
   /** Clear the transient notice toast. */
   dismissNotice: () => void;
+  /** Clear the transient warning toast. */
+  dismissWarning: () => void;
   /** Hide the "Run failed" banner for a specific run. */
   dismissFailedRun: (runId: string) => void;
   toggleSidebar: () => void;
@@ -499,6 +510,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   connecting: false,
   error: null,
   notice: null,
+  warning: null,
   dismissedFailedRuns: [],
   auth: bootAuth,
   attachments: [],
@@ -555,6 +567,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   dismissError: () => set({ error: null }),
   flashNotice: (message) => set({ notice: message }),
   dismissNotice: () => set({ notice: null }),
+  dismissWarning: () => set({ warning: null }),
   dismissFailedRun: (runId) =>
     set((s) =>
       s.dismissedFailedRuns.includes(runId)
@@ -581,6 +594,34 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     try {
       const bridge = await getBridge();
       const providers = await bridge.listProviders();
+      // Native trajectory sync hit a 401 mid-retry: re-mint the Clark JWT from
+      // the Google refresh token and push it back down — the retry loop reads
+      // the token per attempt, so the run self-heals without any UI. Single-
+      // flight: retries can raise the event repeatedly during one refresh.
+      // A failed refresh mid-run must NOT sign the user out; the append just
+      // exhausts its retries and surfaces as a soft cloud-sync warning.
+      let refreshingCloudToken = false;
+      bridge.onCloudAuthExpired?.(() => {
+        if (refreshingCloudToken) return;
+        refreshingCloudToken = true;
+        void (async () => {
+          try {
+            const auth = get().auth;
+            const refreshed = auth ? await refreshAuthSession(auth) : null;
+            if (refreshed) {
+              set({ auth: refreshed });
+              if (refreshed.clark.token) {
+                await bridge.updateCloudToken?.(refreshed.clark.token);
+              }
+            }
+          } finally {
+            refreshingCloudToken = false;
+          }
+        })();
+      });
+      // Best-effort cloud sync failed for part of a run — the run keeps going;
+      // show a non-blocking warning instead of the fatal error banner.
+      bridge.onCloudSyncWarning?.((message) => set({ warning: message }));
       // The host re-emits a fully cloned snapshot on every streamed token (tens
       // per second), for EVERY live session concurrently. Two throttles keep
       // that from melting the UI:
@@ -836,9 +877,10 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     const drained = drainLocalHistory();
     if (drained.length === 0) return;
     for (const d of drained) {
-      // Seed the cache so migrated chats open instantly, then upload snapshot +
+      // Seed the cache so migrated chats open instantly (settled — a drained
+      // transcript may have been persisted mid-run), then upload snapshot +
       // archived state (idempotent; the server's rev guard won't clobber newer).
-      snapshotCache.set(d.meta.id, d.snapshot);
+      snapshotCache.set(d.meta.id, settleRuns(d.snapshot));
       scheduleCloudPut(creds, d.meta, d.snapshot);
       if (d.archived) void cloudSetArchived(creds, d.meta.id, true).catch(() => {});
     }
@@ -1070,6 +1112,9 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     // in-flight start/open (the OpeningScreen's Cancel): its continuation sees
     // a newer epoch and abandons, tearing down whatever tunnel it brought up.
     nextSessionEpoch();
+    // Leaving the active conversation: drop any swarm panel so it doesn't linger
+    // on the start screen or the next conversation opened.
+    resetFanOut();
     for (const a of get().attachments) if (a.previewUrl) URL.revokeObjectURL(a.previewUrl);
     if (opts?.force) {
       // Sign-out: tear down every live session for real.
@@ -1101,6 +1146,10 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     // in-flight open keeps its spinner.
     if (get().opening?.id === id) return;
     if (session?.id === id) return;
+    // Leaving the current conversation: clear any swarm panel now. The reattach
+    // branch re-syncs from the target's snapshot; a cold open stays cleared
+    // until the resumed session streams its own fan-out.
+    resetFanOut();
     // Supersede any in-flight open; live sessions are untouched by the epoch.
     const epoch = nextSessionEpoch();
 
@@ -1110,9 +1159,15 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     const entry = liveSessions.get(id);
     if (entry) {
       for (const a of get().attachments) if (a.previewUrl) URL.revokeObjectURL(a.previewUrl);
+      const merged = mergedOf(entry);
+      // Switching to an idle session emits no snapshot frame, so re-sync the
+      // fan-out from the reattached snapshot instead of leaving the prior
+      // conversation's swarm on screen.
+      resetFanOut();
+      syncFanOut(merged.fan_out);
       set({
         session: entry.session,
-        snapshot: mergedOf(entry),
+        snapshot: merged,
         historyPrefix: entry.historyPrefix,
         activeRemote: entry.remote,
         activeRemoteHost: entry.remoteHost,
@@ -1168,6 +1223,14 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       } else {
         config = { endpoint: auth?.clark.endpoint, auth_token: auth?.clark.token };
         options = {};
+      }
+
+      // Providers that can't resume have no server-side context either: hand
+      // the new session a rendered transcript so the MODEL remembers the prior
+      // turns, not just the UI (which restores them via `historyPrefix`).
+      if (!canResume && restored) {
+        const resumeContext = renderResumeContext(restored);
+        if (resumeContext) (options as SessionOptions).resume_context = resumeContext;
       }
 
       // Superseded (cancel / another open) while connecting → abandon quietly.

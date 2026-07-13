@@ -28,6 +28,10 @@ export interface ConnectConfig {
 export interface SessionOptions {
   cwd?: string;
   mode?: string;
+  /** Rendered transcript of the conversation being reopened — providers that
+   *  can't resume server-side seed it into the model context so the agent
+   *  remembers the prior turns, not just the UI (snake_case: serde field). */
+  resume_context?: string;
 }
 
 export interface CloudTrajectoryConfig {
@@ -65,6 +69,15 @@ export interface CoreBridge {
     sessionId: string,
     config: CloudTrajectoryConfig,
   ): Promise<void>;
+  /** Replace the app-wide Clark cloud JWT after a sign-in refresh — in-flight
+   *  trajectory retries read it per request (see `onCloudAuthExpired`). */
+  updateCloudToken?(token: string): Promise<void>;
+  /** The native trajectory sync hit a 401: refresh the sign-in and push the
+   *  new token via `updateCloudToken`. Returns an unsubscribe fn. */
+  onCloudAuthExpired?(handler: () => void): () => void;
+  /** Best-effort cloud sync failed for part of a run (the run itself keeps
+   *  going) — surface a non-blocking warning. Returns an unsubscribe fn. */
+  onCloudSyncWarning?(handler: (message: string) => void): () => void;
   prompt(sessionId: string, blocks: ContentBlock[], attachments?: Upload[]): Promise<void>;
   cancel(sessionId: string, runId: string): Promise<void>;
   respond(sessionId: string, response: ClientResponse): Promise<void>;
