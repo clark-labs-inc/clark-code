@@ -256,6 +256,58 @@ export class MockBridge implements CoreBridge {
     this.emit();
     await sleep(250);
 
+    if (userText.toLowerCase().includes("artifact")) {
+      const markdown = [
+        "# Artifact UX recommendations",
+        "",
+        "This document proposes improvements to how artifacts are surfaced, viewed, and connected to their generating context in Clark Code.",
+        "",
+        "## What changed",
+        "",
+        "- First-class artifact tabs for focused reading and comparison",
+        "- Persistent source linkage to the generating conversation turn",
+        "- A context rail for details, versions, comments, and provenance",
+        "",
+        "## Why this model",
+        "",
+        "Artifacts are first-class outputs. Keeping them visible alongside their source helps users maintain trust, trace decisions, and iterate without losing context.",
+        "",
+        "| Approach | Focus | Benefit |",
+        "| --- | --- | --- |",
+        "| Inline only | Quick glance | Low friction |",
+        "| Inspector | Side panel | Easy discovery |",
+        "| Library | Dedicated workspace | Focused reading and comparison |",
+      ].join("\n");
+      const artifacts = [
+        {
+          id: "artifact-recommendations",
+          title: "Artifact UX recommendations.md",
+          kind: "file" as const,
+          mime_type: "text/markdown",
+          uri: `data:text/markdown;charset=utf-8,${encodeURIComponent(markdown)}`,
+          tool_call: research,
+        },
+        {
+          id: "artifact-sidebar",
+          title: "artifact-sidebar.png",
+          kind: "image" as const,
+          mime_type: "image/png",
+          tool_call: research,
+        },
+        {
+          id: "artifact-summary",
+          title: "Research summary.pdf",
+          kind: "pdf" as const,
+          mime_type: "application/pdf",
+          tool_call: research,
+        },
+      ];
+      this.snapshot.artifacts.push(...artifacts);
+      this.snapshot.timeline.push(...artifacts.map((artifact) => ({ item: "artifact" as const, id: artifact.id })));
+      this.emit();
+      await sleep(150);
+    }
+
     this.snapshot.pending_permission = {
       id: "perm-1",
       session: "mock-session",

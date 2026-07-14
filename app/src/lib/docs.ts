@@ -14,7 +14,8 @@ function isTauri(): boolean {
 /** True for a local filesystem path/URI we can read (not an http(s) URL). */
 export function isLocalDocUri(uri?: string): boolean {
   if (!uri) return false;
-  return !/^[a-z][a-z0-9+.-]*:\/\//i.test(uri) || uri.startsWith("file://");
+  if (/^[a-z]:[\\/]/i.test(uri)) return true;
+  return !/^[a-z][a-z0-9+.-]*:/i.test(uri) || uri.startsWith("file://");
 }
 
 /** Turn an artifact `uri` into a filesystem path (strips a `file://` scheme). */
@@ -26,7 +27,20 @@ export function toPath(uri: string): string {
  *  inline (browser preview, a remote URL, or an unreadable/oversized file) — the
  *  caller falls back to an "Open" link. */
 export async function readDocText(uri?: string): Promise<string | null> {
-  if (!uri || !isTauri() || !isLocalDocUri(uri)) return null;
+  if (!uri) return null;
+  if (!isLocalDocUri(uri)) {
+    try {
+      const response = await fetch(uri);
+      if (!response.ok) return null;
+      const declared = Number(response.headers.get("content-length") ?? 0);
+      if (declared > 2 * 1024 * 1024) return null;
+      const text = await response.text();
+      return new TextEncoder().encode(text).byteLength <= 2 * 1024 * 1024 ? text : null;
+    } catch {
+      return null;
+    }
+  }
+  if (!isTauri()) return null;
   try {
     return await invoke<string>("read_doc_text", { path: toPath(uri) });
   } catch {
@@ -52,7 +66,8 @@ export async function readImageDataUrl(uri?: string): Promise<string | null> {
 export function mdFileName(title?: string): string {
   const base = (title ?? "").trim() || "document";
   const cleaned = base.replace(/[/\\]+/g, " ").replace(/\s+/g, " ").trim();
-  return `${cleaned || "document"}.md`;
+  const name = cleaned || "document";
+  return /\.(?:md|markdown|mdx)$/i.test(name) ? name : `${name}.md`;
 }
 
 /** Save document text to disk. In the desktop app, opens the OS save dialog and

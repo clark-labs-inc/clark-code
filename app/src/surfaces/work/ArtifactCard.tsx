@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { motion, useReducedMotion } from "motion/react";
 import {
   Globe, Film, FileText, Image as ImageIcon, Presentation, ExternalLink, FileBox,
+  ArrowUpRight,
 } from "lucide-react";
 import type { Artifact, ArtifactKind } from "../../core-bridge/types";
 import { MarkdownDoc, isMarkdownDoc } from "./MarkdownDoc";
@@ -28,7 +29,7 @@ function isVideo(a: Artifact): boolean {
  *  screenshot — no `assetProtocol` scope is configured, so it's fetched as a
  *  `data:` URL on demand, mirroring `MarkdownDoc`'s async-fetch idiom for
  *  `read_doc_text`). */
-function LocalImage({
+export function LocalArtifactImage({
   uri, alt, className, onError,
 }: {
   uri: string; alt: string; className: string; onError: () => void;
@@ -67,26 +68,37 @@ function LocalImage({
 }
 
 /** Renders a produced artifact inline in the conversation. */
-export function ArtifactCard({ artifact }: { artifact: Artifact }) {
+export function ArtifactCard({
+  artifact,
+  active = false,
+  onOpen,
+}: {
+  artifact: Artifact;
+  active?: boolean;
+  onOpen?: (artifact: Artifact) => void;
+}) {
   const reduce = useReducedMotion();
   const [broke, setBroke] = useState(false);
+  const uri = artifact.uri;
 
-  // Markdown documents render as a rich inline viewer (scrollable doc + a slide
-  // "present" mode) rather than a bare "Open" card.
-  if (isMarkdownDoc(artifact)) return <MarkdownDoc artifact={artifact} />;
+  useEffect(() => setBroke(false), [artifact.id, uri]);
+
+  // Markdown stays compact in chat; its full reader lives in the workspace.
+  if (isMarkdownDoc(artifact)) {
+    return <MarkdownDoc artifact={artifact} active={active} onOpen={onOpen} />;
+  }
 
   const Icon = KIND_ICON[artifact.kind] ?? FileBox;
-  const uri = artifact.uri;
 
   // Only embed media we can actually render inline (images, video). Websites are
   // never iframed — local/preview URLs and X-Frame-Options make that an unreliable
-  // broken box; we show a compact card with an "Open" link instead. Any media that
+  // broken box; we show a compact card with a workspace action instead. Any media that
   // fails to load collapses to the same compact card.
   const body = (() => {
     if (broke) return null;
     if (artifact.kind === "image" && uri) {
       return (
-        <LocalImage
+        <LocalArtifactImage
           uri={uri}
           alt={artifact.title}
           className="max-h-80 w-full object-contain bg-bg-sunken"
@@ -114,7 +126,9 @@ export function ArtifactCard({ artifact }: { artifact: Artifact }) {
       initial={reduce ? false : { opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.2 }}
-      className="overflow-hidden rounded-lg border border-border bg-bg-elevated [content-visibility:auto] [contain-intrinsic-size:auto_14rem]"
+      className={`overflow-hidden rounded-lg border bg-bg-elevated [content-visibility:auto] [contain-intrinsic-size:auto_14rem] ${
+        active ? "border-accent shadow-[inset_3px_0_0_var(--color-accent)]" : "border-border"
+      }`}
     >
       <header className="flex items-center gap-2 px-3 py-2">
         <Icon className="size-4 shrink-0 text-accent" />
@@ -124,14 +138,24 @@ export function ArtifactCard({ artifact }: { artifact: Artifact }) {
             {KIND_LABEL[artifact.kind]}
           </div>
         </div>
-        {uri && (
+        {onOpen && (
+          <button
+            type="button"
+            onClick={() => onOpen(artifact)}
+            aria-label={`View ${artifact.title}`}
+            className="flex shrink-0 items-center gap-1.5 rounded-lg bg-bg-secondary px-2.5 py-1.5 text-xs font-medium text-ink-secondary ring-1 ring-border-subtle transition hover:bg-bg-hover hover:text-ink"
+          >
+            View <ArrowUpRight className="size-3" />
+          </button>
+        )}
+        {uri && !onOpen && (
           <a
             href={uri}
             target="_blank"
             rel="noreferrer noopener"
-            className="flex shrink-0 items-center gap-1 rounded-lg bg-accent px-2.5 py-1.5 text-xs font-medium text-on-accent transition hover:bg-accent-hover"
+            className="flex shrink-0 items-center gap-1 rounded-lg bg-bg-secondary px-2.5 py-1.5 text-xs font-medium text-ink-secondary ring-1 ring-border-subtle transition hover:bg-bg-hover hover:text-ink"
           >
-            Open <ExternalLink className="size-3" />
+            View {artifact.title} <ExternalLink className="size-3" />
           </a>
         )}
       </header>

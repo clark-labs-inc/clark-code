@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Plus, MessageSquare, Archive, ArchiveRestore, ChevronRight, PanelLeftClose, PanelLeft,
-  FolderGit2, Server, Search, X, Trash2, Loader2,
+  FolderGit2, Server, Search, X, Trash2, Loader2, Library,
 } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
 import { projectName } from "../lib/localAgent";
@@ -10,18 +10,6 @@ import { fuzzyFilter } from "../lib/fuzzy";
 import { cn } from "../lib/cn";
 import { ProfileMenu } from "./ProfileMenu";
 import type { ConversationMeta } from "../lib/history";
-
-function relativeTime(ts: number): string {
-  const s = Math.max(0, (Date.now() - ts) / 1000);
-  if (s < 60) return "just now";
-  const m = s / 60;
-  if (m < 60) return `${Math.floor(m)}m ago`;
-  const h = m / 60;
-  if (h < 24) return `${Math.floor(h)}h ago`;
-  const d = h / 24;
-  if (d < 7) return `${Math.floor(d)}d ago`;
-  return new Date(ts).toLocaleDateString();
-}
 
 type GroupKind = "remote" | "local" | "none";
 interface ProjectGroup {
@@ -74,13 +62,10 @@ function GroupHeader({ group }: { group: ProjectGroup }) {
   return (
     <div
       title={group.title}
-      className="mb-1 mt-3 flex items-center gap-1.5 px-2 text-xs font-semibold uppercase tracking-[0.12em] text-ink-faint first:mt-0.5"
+      className="mb-0.5 mt-2 flex h-7 items-center gap-2 px-2 text-sm font-medium text-ink-secondary first:mt-0"
     >
-      <Icon className={`size-3 shrink-0 ${group.kind === "remote" ? "text-accent" : ""}`} />
+      <Icon className="size-3.5 shrink-0 text-ink-muted" />
       <span className="truncate">{group.label}</span>
-      <span className="ml-auto shrink-0 font-mono text-xs font-normal tracking-normal text-ink-faint/70">
-        {group.convos.length}
-      </span>
     </div>
   );
 }
@@ -120,12 +105,12 @@ function ConversationRow({
     <div
       onContextMenu={(e) => onContextMenu(e, c.id)}
       className={cn(
-        "group relative flex items-center gap-2 rounded-xl px-3 py-1 text-sm transition duration-200 ease-clark",
+        "group relative flex h-7 items-center gap-1 rounded-lg px-2 text-sm transition duration-150 ease-clark",
         selected
-          ? "bg-accent-soft text-ink ring-1 ring-accent/40"
+          ? "bg-bg-tertiary text-ink ring-1 ring-border"
           : active || opening
-            ? "bg-accent-soft text-ink ring-1 ring-accent/10"
-            : "text-ink-secondary hover:bg-accent-subtle hover:text-ink",
+            ? "bg-bg-tertiary text-ink"
+            : "text-ink-secondary hover:bg-bg-hover hover:text-ink",
       )}
     >
       {editing ? (
@@ -163,7 +148,7 @@ function ConversationRow({
             setDraft(c.title);
             setEditing(true);
           }}
-          className="flex min-w-0 flex-1 items-center gap-2 text-left"
+          className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
           title={`${c.title} — double-click to rename · shift-click to select`}
         >
           {opening ? (
@@ -174,20 +159,13 @@ function ConversationRow({
               <span className="size-1.5 rounded-full bg-accent" />
             </span>
           ) : selected ? (
-            <span className="grid size-3.5 shrink-0 place-items-center" aria-label="Selected">
+            <span className="grid size-3 shrink-0 place-items-center" aria-label="Selected">
               <span className="size-2 rounded-sm bg-accent" />
             </span>
           ) : (
-            <MessageSquare
-              className={`size-3.5 shrink-0 ${active || opening ? "text-accent" : "text-ink-faint"}`}
-            />
+            <span className="size-3 shrink-0" aria-hidden="true" />
           )}
-          <span className="flex min-w-0 flex-1 items-baseline gap-2 text-left">
-            <span className="min-w-0 truncate leading-tight">{c.title}</span>
-            <span className="shrink-0 truncate text-[0.6875rem] tabular-nums text-ink-muted/80">
-              {opening ? "Opening…" : streaming ? "Working…" : relativeTime(c.updatedAt)}
-            </span>
-          </span>
+          <span className="min-w-0 flex-1 truncate leading-5">{c.title}</span>
         </button>
       )}
       {!editing && (
@@ -195,7 +173,7 @@ function ConversationRow({
           onClick={() => archive(c.id)}
           title="Archive conversation"
           aria-label="Archive conversation"
-          className="shrink-0 rounded-md p-1 text-ink-faint opacity-0 transition hover:bg-bg-sunken hover:text-ink group-hover:opacity-100"
+          className="shrink-0 rounded-md p-1 text-ink-faint opacity-0 transition hover:bg-bg-sunken hover:text-ink group-hover:opacity-100 group-focus-within:opacity-100"
         >
           <Archive className="size-3.5" />
         </button>
@@ -348,7 +326,13 @@ function ConversationContextMenu({
   );
 }
 
-export function Sidebar() {
+export function Sidebar({
+  artifactCount = 0,
+  onOpenArtifacts,
+}: {
+  artifactCount?: number;
+  onOpenArtifacts?: () => void;
+}) {
   const collapsed = useSessionStore((s) => s.sidebarCollapsed);
   const setCollapsed = useSessionStore((s) => s.setSidebarCollapsed);
   const conversations = useSessionStore((s) => s.conversations);
@@ -364,6 +348,7 @@ export function Sidebar() {
   const archiveSelected = useSessionStore((s) => s.archiveSelectedConversations);
   const deleteSelected = useSessionStore((s) => s.deleteSelectedConversations);
   const [filter, setFilter] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
   const [archivedOpen, setArchivedOpen] = useState(false);
   // The right-click menu: positioned at the cursor; acts on the selection when
   // the right-clicked row is in it, else just that row.
@@ -406,12 +391,12 @@ export function Sidebar() {
 
   if (collapsed || narrow) {
     return (
-      <div className="flex w-14 shrink-0 flex-col items-center gap-2 border-r border-border-subtle bg-bg-elevated py-3">
+      <div className="flex w-12 shrink-0 flex-col items-center gap-1 border-r border-border-subtle bg-bg-secondary py-2">
         {!narrow && (
           <button
             onClick={() => setCollapsed(false)}
             aria-label="Expand sidebar"
-            className="grid size-9 place-items-center rounded-xl text-ink-muted transition duration-200 ease-clark hover:bg-accent-subtle hover:text-accent"
+            className="grid size-8 place-items-center rounded-lg text-ink-muted transition hover:bg-bg-hover hover:text-ink"
           >
             <PanelLeft className="size-4" />
           </button>
@@ -420,10 +405,20 @@ export function Sidebar() {
           onClick={() => newConversation()}
           aria-label="New session"
           title="New session"
-          className="grid size-9 place-items-center rounded-xl bg-accent text-on-accent shadow-soft transition duration-200 ease-clark hover:-translate-y-0.5 hover:bg-accent-hover"
+          className="grid size-8 place-items-center rounded-lg text-ink-secondary transition hover:bg-bg-hover hover:text-ink"
         >
           <Plus className="size-4" />
         </button>
+        {artifactCount > 0 && onOpenArtifacts && (
+          <button
+            onClick={onOpenArtifacts}
+            aria-label={`Artifacts, ${artifactCount}`}
+            title={`Artifacts (${artifactCount})`}
+            className="grid size-8 place-items-center rounded-lg text-ink-secondary transition hover:bg-bg-hover hover:text-ink"
+          >
+            <Library className="size-4" />
+          </button>
+        )}
         <div className="mt-auto">
           <ProfileMenu />
         </div>
@@ -432,54 +427,81 @@ export function Sidebar() {
   }
 
   return (
-    <aside className="flex w-[17.5rem] shrink-0 flex-col border-r border-border-subtle bg-bg-elevated shadow-[10px_0_30px_rgba(55,48,42,0.025)]">
-      <div className="flex h-14 shrink-0 items-center gap-2 px-4">
-        <span className="font-display text-[1.65rem] leading-none text-ink">clark</span>
-        <span className="rounded-full bg-accent-soft px-2 py-0.5 text-[0.6875rem] font-semibold uppercase tracking-[0.12em] text-accent">
-          Code
-        </span>
+    <aside className="flex w-[17rem] shrink-0 flex-col border-r border-border-subtle bg-bg-secondary text-[13px] leading-5">
+      <div className="flex h-12 shrink-0 items-center gap-1 px-3">
+        <span className="truncate text-[15px] font-semibold tracking-[-0.01em] text-ink">Clark Code</span>
+        <button
+          onClick={() => setSearchOpen((open) => !open)}
+          aria-label="Search conversations"
+          title="Search conversations"
+          className="ml-auto grid size-8 place-items-center rounded-lg text-ink-muted transition hover:bg-bg-hover hover:text-ink"
+        >
+          <Search className="size-4" />
+        </button>
         <button
           onClick={() => setCollapsed(true)}
           aria-label="Collapse sidebar"
-          className="ml-auto grid size-8 place-items-center rounded-xl text-ink-faint transition duration-200 ease-clark hover:bg-accent-subtle hover:text-accent"
+          className="grid size-8 place-items-center rounded-lg text-ink-muted transition hover:bg-bg-hover hover:text-ink"
         >
           <PanelLeftClose className="size-4" />
         </button>
       </div>
 
-      <div className="px-3 pb-2">
+      <div className="px-2 pb-2">
         <button
           onClick={() => newConversation()}
-          className="flex w-full items-center gap-2.5 rounded-xl bg-[linear-gradient(135deg,var(--color-accent-gradient-start),var(--color-accent-gradient-end))] px-3.5 py-2.5 text-sm font-semibold text-on-accent shadow-soft transition duration-200 ease-clark hover:-translate-y-0.5 hover:brightness-[0.96] hover:shadow-lifted active:translate-y-0"
+          className="flex h-8 w-full items-center gap-2.5 rounded-lg px-2 text-sm font-medium text-ink-secondary transition hover:bg-bg-hover hover:text-ink"
         >
           <Plus className="size-4" /> New session
         </button>
+        {artifactCount > 0 && onOpenArtifacts && (
+          <button
+            type="button"
+            onClick={onOpenArtifacts}
+            className="mt-1 flex h-8 w-full items-center gap-2.5 rounded-lg px-2 text-sm font-medium text-ink-secondary transition hover:bg-bg-hover hover:text-ink"
+          >
+            <Library className="size-4" />
+            <span>Artifacts</span>
+            <span className="ml-auto min-w-5 rounded-full bg-chip px-1.5 text-center text-xs tabular-nums text-ink-faint">
+              {artifactCount}
+            </span>
+          </button>
+        )}
       </div>
 
-      <div className="px-3 pb-2.5">
-        <div className="flex items-center gap-2.5 rounded-xl bg-bg-secondary px-3 py-2 ring-1 ring-transparent transition duration-200 focus-within:bg-bg-elevated focus-within:ring-accent/25">
-          <Search className="size-3.5 shrink-0 text-ink-faint" />
-          <input
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            placeholder="Search conversations…"
-            aria-label="Search conversations"
-            className="composer-input min-w-0 flex-1 bg-transparent text-xs text-ink outline-none placeholder:text-ink-faint"
-          />
-          {filter && (
-            <button
-              onClick={() => setFilter("")}
-              aria-label="Clear search"
-              className="grid size-8 shrink-0 place-items-center rounded-full text-ink-faint transition hover:bg-accent-soft hover:text-accent"
-            >
-              <X className="size-3" />
-            </button>
-          )}
+      {(searchOpen || filter) && (
+        <div className="px-2 pb-2">
+          <div className="flex h-8 items-center gap-2 rounded-lg bg-bg-primary px-2.5 ring-1 ring-border-subtle transition focus-within:ring-border-strong">
+            <Search className="size-3.5 shrink-0 text-ink-faint" />
+            <input
+              autoFocus
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              placeholder="Search conversations…"
+              aria-label="Search conversations"
+              onKeyDown={(e) => {
+                if (e.key === "Escape") {
+                  setFilter("");
+                  setSearchOpen(false);
+                }
+              }}
+              className="composer-input min-w-0 flex-1 bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-faint"
+            />
+            {filter && (
+              <button
+                onClick={() => setFilter("")}
+                aria-label="Clear search"
+                className="grid size-6 shrink-0 place-items-center rounded-md text-ink-faint transition hover:bg-bg-hover hover:text-ink"
+              >
+                <X className="size-3" />
+              </button>
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
       <div
-        className="min-h-0 flex-1 overflow-y-auto px-3 pb-4"
+        className="min-h-0 flex-1 overflow-y-auto px-2 pb-4"
         onClick={(e) => {
           // A plain click on empty list space (not on a row) clears the
           // Shift-click selection.
@@ -496,10 +518,13 @@ export function Sidebar() {
           </p>
         ) : (
           <div className="flex flex-col">
+            {groups.length > 0 && (
+              <div className="px-2 pb-1 pt-2 text-xs font-medium text-ink-faint">Projects</div>
+            )}
             {groups.map((g) => (
               <section key={g.key}>
                 <GroupHeader group={g} />
-                <div className="flex flex-col gap-0.5">
+                <div className="flex flex-col">
                   {g.convos.map((c) => (
                     <ConversationRow
                       key={c.id}
@@ -526,14 +551,13 @@ export function Sidebar() {
                 <button
                   onClick={() => setArchivedOpen((o) => !o)}
                   aria-expanded={archivedOpen}
-                  className="mt-3 mb-1 flex w-full items-center gap-1.5 px-1.5 text-xs font-semibold uppercase tracking-wider text-ink-faint transition hover:text-ink-muted first:mt-0.5"
+                  className="mt-3 mb-1 flex h-7 w-full items-center gap-2 px-2 text-sm font-medium text-ink-muted transition hover:text-ink first:mt-0"
                 >
                   <ChevronRight
                     className={`size-3 shrink-0 transition-transform ${archivedOpen ? "rotate-90" : ""}`}
                   />
-                  <Archive className="size-3 shrink-0" />
                   <span>Archived</span>
-                  <span className="ml-auto shrink-0 font-mono text-xs font-normal tracking-normal text-ink-faint/70">
+                  <span className="ml-auto shrink-0 text-xs font-normal tabular-nums text-ink-faint">
                     {archivedConvos.length}
                   </span>
                 </button>
@@ -578,7 +602,7 @@ export function Sidebar() {
         </div>
       )}
 
-      <div className="shrink-0 border-t border-border-subtle p-2">
+      <div className="shrink-0 border-t border-border-subtle p-1.5">
         <ProfileMenu variant="sidebar" />
       </div>
 

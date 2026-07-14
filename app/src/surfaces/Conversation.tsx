@@ -14,7 +14,7 @@ import { UndoBar } from "./UndoBar";
 import { RewindPicker } from "./RewindPicker";
 import { FanOutPanel } from "./FanOutPanel";
 import { PlanChecklist } from "./PlanChecklist";
-import type { TimelineItem, ToolCall } from "../core-bridge/types";
+import type { Artifact, TimelineItem, ToolCall } from "../core-bridge/types";
 
 /** A row of pulsing dots — the model is generating. Memoized so its animation
  *  isn't re-evaluated on every streamed-token re-render of the parent. */
@@ -113,7 +113,13 @@ function DismissButton({ onClick }: { onClick: () => void }) {
  *  "Show earlier" control. Generous enough that normal sessions never notice. */
 const TIMELINE_WINDOW = 80;
 
-export function Conversation() {
+export function Conversation({
+  activeArtifactId,
+  onOpenArtifact,
+}: {
+  activeArtifactId?: string | null;
+  onOpenArtifact?: (artifact: Artifact) => void;
+}) {
   const reduce = useReducedMotion();
   const snapshot = useSessionStore((s) => s.snapshot);
   const session = useSessionStore((s) => s.session);
@@ -227,7 +233,23 @@ export function Conversation() {
             );
           if (item.item === "artifact") {
             const a = artifacts.find((x) => x.id === item.id);
-            return a ? <ArtifactCard key={block.key} artifact={a} /> : null;
+            return a ? (
+              <div
+                id={`artifact-${a.id}`}
+                key={block.key}
+                className={cn(
+                  "relative",
+                  a.id === activeArtifactId &&
+                    "after:absolute after:left-full after:top-1/2 after:h-px after:w-5 after:bg-accent after:content-['']",
+                )}
+              >
+                <ArtifactCard
+                  artifact={a}
+                  active={a.id === activeArtifactId}
+                  onOpen={onOpenArtifact}
+                />
+              </div>
+            ) : null;
           }
           if (item.item === "plan") {
             return <PlanChecklist key={block.key} plan={item.plan ?? plan} />;

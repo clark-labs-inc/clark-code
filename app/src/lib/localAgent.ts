@@ -1,6 +1,6 @@
 // Settings for the "Local coding" provider — the OpenCode-style mode where the
 // agent loop runs on this machine, the model is reached over an
-// OpenAI-compatible API (GLM-5.2 via OpenRouter by default), and research is
+// OpenAI-compatible API (GLM 5.2 via Clark by default), and research is
 // delegated to Clark's sandbox.
 //
 // Persisted in localStorage; the model API key is the only secret and never
@@ -37,12 +37,16 @@ export const DEFAULT_LOCAL_SETTINGS: LocalAgentSettings = {
 export const CODING_MODELS = [
   { id: "clark-code", label: "GLM 5.2", hint: "Deep reasoning · default" },
   { id: "clark-code:kimi_k27_code", label: "Kimi K2.7 Code", hint: "Fast agentic coding" },
+  { id: "clark-code:grok45", label: "Grok 4.5", hint: "Frontier coding · 500K context" },
+  {
+    id: "clark-code:deepseek_v4_pro",
+    label: "DeepSeek V4 Pro",
+    hint: "Long-horizon coding · 1M context",
+  },
 ] as const;
 
 /** Reasoning-effort choices ("" lets the model's server default apply).
- *  Both coding models support exactly two thinking budgets — High and Max
- *  (GLM 5.2 defaults to Max and treats anything else as Max; Kimi K2.7's
- *  thinking can't go lower) — so no Low/Medium: they'd silently run at Max. */
+ *  Clark Code models share High and Max as their portable reasoning budgets. */
 export const REASONING_EFFORTS = [
   { id: "", label: "Auto" },
   { id: "high", label: "High" },

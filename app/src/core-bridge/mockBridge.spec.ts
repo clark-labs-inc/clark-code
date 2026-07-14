@@ -74,4 +74,15 @@ describe("MockBridge", () => {
     const cleared = await waitFor((s) => !s.pending_permission, b);
     expect(cleared.pending_permission).toBeUndefined();
   });
+
+  it("emits linked artifacts for the browser artifact demo", async () => {
+    const b = new MockBridge();
+    await b.newSession("local", {});
+    await b.prompt("mock-session", [{ type: "text", text: "review artifact presentation" }]);
+
+    const snapshot = await waitFor((s) => s.artifacts.length === 3, b);
+    expect(snapshot.artifacts.map((artifact) => artifact.kind)).toEqual(["file", "image", "pdf"]);
+    expect(snapshot.artifacts[0].tool_call).toBeTruthy();
+    expect(snapshot.timeline.filter((item) => item.item === "artifact")).toHaveLength(3);
+  });
 });

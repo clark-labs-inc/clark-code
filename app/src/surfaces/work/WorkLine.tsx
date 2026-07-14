@@ -303,6 +303,8 @@ function WorkLineImpl({ call, active }: { call: ToolCall; active: boolean }) {
 
   return (
     <motion.div
+      id={`tool-call-${call.id}`}
+      data-tool-call-id={call.id}
       initial={reduce ? false : { opacity: 0, y: 4 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.2, ease: [0.4, 0, 0.2, 1] }}

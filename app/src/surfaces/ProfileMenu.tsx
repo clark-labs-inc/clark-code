@@ -52,11 +52,6 @@ export function ProfileMenu({ variant = "topbar" }: { variant?: "topbar" | "side
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
-  // The sidebar row shows the plan inline, so it needs billing before opening.
-  useEffect(() => {
-    if (variant === "sidebar") void loadBilling();
-  }, [variant, loadBilling]);
-
   useEffect(() => {
     if (!open) return;
     void loadBilling();
@@ -79,8 +74,6 @@ export function ProfileMenu({ variant = "topbar" }: { variant?: "topbar" | "side
   const credits = billing?.credits;
   const renews = formatDate(sub?.current_period_end);
   const firstLoad = loading && !billing;
-  const planLabel = sub?.plan_key ? titleCase(sub.plan_key) : billing ? "Free" : null;
-
   return (
     <div ref={ref} className={cn("relative", variant === "sidebar" && "w-full")}>
       {variant === "sidebar" ? (
@@ -88,22 +81,17 @@ export function ProfileMenu({ variant = "topbar" }: { variant?: "topbar" | "side
           onClick={() => setOpen((o) => !o)}
           aria-label="Account"
           title={user.email ?? user.name}
-          className="flex min-h-11 w-full items-center gap-2.5 rounded-xl px-2 py-2 text-left transition duration-200 ease-clark hover:bg-accent-subtle"
+          className="flex h-8 w-full items-center gap-2 rounded-lg px-1.5 text-left transition hover:bg-bg-hover"
         >
           {user.avatar ? (
-            <img src={user.avatar} alt="" className="size-8 shrink-0 rounded-full" />
+            <img src={user.avatar} alt="" className="size-5 shrink-0 rounded-full" />
           ) : (
-            <span className="grid size-8 shrink-0 place-items-center rounded-full bg-bg-tertiary text-sm font-semibold text-ink-secondary">
+            <span className="grid size-5 shrink-0 place-items-center rounded-full bg-bg-tertiary text-[10px] font-medium text-ink-secondary">
               {user.name.charAt(0).toUpperCase()}
             </span>
           )}
-          <span className="min-w-0 flex-1 leading-tight">
-            <span className="block truncate text-sm font-semibold text-ink">{user.name}</span>
-            <span className={cn("block truncate text-xs", planLabel ? "text-accent" : "text-ink-muted")}>
-              {planLabel ? `${planLabel} plan` : user.email}
-            </span>
-          </span>
-          <ChevronsUpDown className="size-4 shrink-0 text-ink-faint" />
+          <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-ink">{user.name}</span>
+          <ChevronsUpDown className="size-3.5 shrink-0 text-ink-faint" />
         </button>
       ) : (
         <button
