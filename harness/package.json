@@ -1,1 +1,11 @@
-{ "name": "clark-desktop-harness", "private": true, "type": "module", "dependencies": { "playwright": "^1.49.0" } }
+{
+  "name": "clark-desktop-harness",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:webkit": "node webkit-smoke.mjs"
+  },
+  "dependencies": {
+    "playwright": "^1.49.0"
+  }
+}

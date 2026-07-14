@@ -76,6 +76,18 @@ jobs:
           cache-dependency-path: app/pnpm-lock.yaml
       - run: pnpm --dir app install --frozen-lockfile
 
+      - name: Install WebKit smoke dependencies
+        if: matrix.platform == 'macos-latest'
+        run: |
+          pnpm --dir harness install --frozen-lockfile
+          pnpm --dir harness exec playwright install webkit
+
+      - name: Smoke production frontend in WebKit
+        if: matrix.platform == 'macos-latest'
+        run: |
+          pnpm --dir app build
+          pnpm --dir harness test:webkit
+
       - name: Build + publish (tauri-action)
         uses: tauri-apps/tauri-action@v0
         env:
