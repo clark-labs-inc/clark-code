@@ -18,7 +18,8 @@ export interface McpStatus {
 
 /** Probe servers; returns [] in the browser preview (desktop-only). */
 export async function probeMcp(servers: McpServerConfig[]): Promise<McpStatus[]> {
-  if (!isTauri() || servers.length === 0) return [];
+  if (servers.length === 0) return [];
+  if (!isTauri()) throw new Error("Connection testing is available in the desktop app.");
   return invoke<McpStatus[]>("clark_mcp_probe", { servers });
 }
 

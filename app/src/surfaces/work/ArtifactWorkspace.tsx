@@ -350,8 +350,6 @@ export function ArtifactWorkspace({
   activeArtifactId,
   conversationTitle,
   toolCalls,
-  pickerRequest = 0,
-  onPickerRequestHandled,
   onSelect,
   onClose,
   onJumpToSource,
@@ -360,13 +358,13 @@ export function ArtifactWorkspace({
   activeArtifactId: string;
   conversationTitle: string;
   toolCalls: Record<string, ToolCall>;
-  pickerRequest?: number;
-  onPickerRequestHandled?: () => void;
   onSelect: (id: string) => void;
   onClose: () => void;
   onJumpToSource: (artifact: Artifact) => void;
 }) {
-  const [closed, setClosed] = useState<Set<string>>(() => new Set());
+  const [openArtifactIds, setOpenArtifactIds] = useState<Set<string>>(
+    () => new Set([activeArtifactId]),
+  );
   const [pickerOpen, setPickerOpen] = useState(false);
   const [contextPanel, setContextPanel] = useState<ContextPanel | null>(null);
   const [text, setText] = useState<string | null>(null);
@@ -379,7 +377,10 @@ export function ArtifactWorkspace({
   const pickerMenuRef = useRef<HTMLDivElement>(null);
   const pickerTriggerRef = useRef<HTMLButtonElement>(null);
 
-  const openArtifacts = useMemo(() => artifacts.filter((artifact) => !closed.has(artifact.id)), [artifacts, closed]);
+  const openArtifacts = useMemo(
+    () => artifacts.filter((artifact) => openArtifactIds.has(artifact.id)),
+    [artifacts, openArtifactIds],
+  );
   const active = openArtifacts.find((artifact) => artifact.id === activeArtifactId) ?? openArtifacts[0];
   const activeId = active?.id;
   const activeUri = active?.uri;
@@ -388,8 +389,13 @@ export function ArtifactWorkspace({
   const byteSize = text == null ? null : new TextEncoder().encode(text).byteLength;
 
   useEffect(() => {
-    if (activeId && activeId !== activeArtifactId) onSelect(activeId);
-  }, [activeArtifactId, activeId, onSelect]);
+    setOpenArtifactIds((current) => {
+      if (current.has(activeArtifactId)) return current;
+      const next = new Set(current);
+      next.add(activeArtifactId);
+      return next;
+    });
+  }, [activeArtifactId]);
 
   useEffect(() => {
     setText(null);
@@ -410,12 +416,6 @@ export function ArtifactWorkspace({
       alive = false;
     };
   }, [activeId, activeIsMarkdown, activeUri]);
-
-  useEffect(() => {
-    if (pickerRequest <= 0) return;
-    setPickerOpen(true);
-    onPickerRequestHandled?.();
-  }, [onPickerRequestHandled, pickerRequest]);
 
   useEffect(() => {
     if (!pickerOpen) return;
@@ -468,7 +468,11 @@ export function ArtifactWorkspace({
       onClose();
       return;
     }
-    setClosed((current) => new Set(current).add(artifact.id));
+    setOpenArtifactIds((current) => {
+      const updated = new Set(current);
+      updated.delete(artifact.id);
+      return updated;
+    });
     if (artifact.id === active.id) onSelect(next[Math.max(0, openArtifacts.indexOf(artifact) - 1)]?.id ?? next[0].id);
   };
 
@@ -556,9 +560,9 @@ export function ArtifactWorkspace({
                     type="button"
                     role="menuitem"
                     onClick={() => {
-                      setClosed((current) => {
+                      setOpenArtifactIds((current) => {
                         const next = new Set(current);
-                        next.delete(artifact.id);
+                        next.add(artifact.id);
                         return next;
                       });
                       onSelect(artifact.id);

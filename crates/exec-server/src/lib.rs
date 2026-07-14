@@ -25,7 +25,7 @@ use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use exec_core::{Executor, LocalExecutor};
+use exec_core::{isolate_process_group, terminate_process_tree, Executor, LocalExecutor};
 use exec_protocol::{
     b64_decode, b64_encode, error_code, method, AuthParams, AuthResult, MetaResult, Notification,
     PathParams, ProcessExitParams, ProcessIdParams, ProcessOutputParams, ProcessResumeParams,
@@ -387,6 +387,7 @@ fn handle_start(
         p.command,
         cwd,
         Duration::from_millis(p.timeout_ms),
+        p.pty,
     ));
     spawn_streamer(proc, tx.clone(), 0, conn_token.clone());
 }
@@ -492,7 +493,23 @@ async fn run_process(
     command: String,
     cwd: PathBuf,
     timeout: Duration,
+    pty: bool,
 ) {
+    if pty {
+        let fs = LocalExecutor;
+        let result = fs
+            .exec_streaming_pty(&command, &cwd, timeout, &proc.cancel, &|_, data| {
+                append_output(&proc, Stream::Stdout, data.to_vec());
+            })
+            .await;
+        match result {
+            Ok(output) => append_exit(&proc, output.code, None),
+            Err(error) => append_exit(&proc, None, Some(error)),
+        }
+        schedule_gc(shared, proc.process_id.clone());
+        return;
+    }
+
     let mut cmd = tokio::process::Command::new("/bin/sh");
     cmd.arg("-c")
         .arg(&command)
@@ -500,6 +517,7 @@ async fn run_process(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    isolate_process_group(&mut cmd);
     let child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) => {
@@ -541,29 +559,51 @@ async fn pump(
     let stderr = child.stderr.take();
     let r1 = tokio::spawn(read_stream(stdout, Stream::Stdout, otx.clone()));
     let r2 = tokio::spawn(read_stream(stderr, Stream::Stderr, otx));
+    let root_pid = child.id();
+    let mut r1 = r1;
+    let mut r2 = r2;
 
-    // `wait_fut` borrows `child`; confine it to this block so we can kill below.
-    let interrupted = {
+    enum WaitResult {
+        Exited(std::io::Result<std::process::ExitStatus>),
+        Interrupted(String),
+    }
+
+    let result = {
         let wait_fut = std::pin::pin!(child.wait());
         tokio::select! {
-            status = wait_fut => {
-                let _ = r1.await;
-                let _ = r2.await;
-                return match status {
-                    Ok(s) => Outcome::Exited(s.code()),
-                    Err(e) => Outcome::Error(format!("command failed: {e}")),
-                };
-            }
-            _ = cancel.cancelled() => "command cancelled".to_string(),
+            status = wait_fut => WaitResult::Exited(status),
+            _ = cancel.cancelled() => WaitResult::Interrupted("command cancelled".to_string()),
             _ = tokio::time::sleep(timeout) =>
-                format!("command timed out after {} ms", timeout.as_millis()),
+                WaitResult::Interrupted(format!("command timed out after {} ms", timeout.as_millis())),
         }
     };
-    let _ = child.start_kill();
-    let _ = child.wait().await;
-    let _ = r1.await;
-    let _ = r2.await;
-    Outcome::Error(interrupted)
+
+    let outcome = match result {
+        WaitResult::Exited(Ok(status)) => Outcome::Exited(status.code()),
+        WaitResult::Exited(Err(e)) => Outcome::Error(format!("command failed: {e}")),
+        WaitResult::Interrupted(message) => {
+            terminate_process_tree(&mut child, root_pid).await;
+            Outcome::Error(message)
+        }
+    };
+    if !drain_readers(&mut r1, &mut r2).await {
+        terminate_process_tree(&mut child, root_pid).await;
+        r1.abort();
+        r2.abort();
+    }
+    outcome
+}
+
+async fn drain_readers(
+    r1: &mut tokio::task::JoinHandle<()>,
+    r2: &mut tokio::task::JoinHandle<()>,
+) -> bool {
+    tokio::time::timeout(Duration::from_millis(500), async {
+        let _ = r1.await;
+        let _ = r2.await;
+    })
+    .await
+    .is_ok()
 }
 
 async fn read_stream<R>(reader: Option<R>, stream: Stream, otx: mpsc::Sender<(Stream, Vec<u8>)>)

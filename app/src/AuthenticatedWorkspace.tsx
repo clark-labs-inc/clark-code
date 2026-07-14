@@ -6,15 +6,19 @@ import { TopBar } from "./surfaces/TopBar";
 import { Sidebar } from "./surfaces/Sidebar";
 import { StartCard } from "./surfaces/StartCard";
 import { OpeningScreen } from "./surfaces/OpeningScreen";
-import { Conversation } from "./surfaces/Conversation";
 import { Composer } from "./surfaces/Composer";
 import { CreditBanner } from "./surfaces/CreditBanner";
 import { OfflineBanner } from "./surfaces/OfflineBanner";
 import { CommandPalette } from "./surfaces/CommandPalette";
 import { MobileRemoteAgent } from "./surfaces/MobileRemoteAgent";
-import { ArtifactWorkspace } from "./surfaces/work/ArtifactWorkspace";
 import type { Artifact } from "./core-bridge/types";
 
+const Conversation = lazy(() =>
+  import("./surfaces/Conversation").then((module) => ({ default: module.Conversation })),
+);
+const ArtifactWorkspace = lazy(() =>
+  import("./surfaces/work/ArtifactWorkspace").then((module) => ({ default: module.ArtifactWorkspace })),
+);
 const TerminalPanel = lazy(() =>
   import("./surfaces/TerminalPanel").then((module) => ({ default: module.TerminalPanel })),
 );
@@ -40,14 +44,12 @@ export default function AuthenticatedWorkspace() {
     state.session ? state.conversations.find((conversation) => conversation.id === state.session?.id)?.title : null,
   );
   const [activeArtifactId, setActiveArtifactId] = useState<string | null>(null);
-  const [artifactPickerRequest, setArtifactPickerRequest] = useState(0);
   const terminalTouched = useRef(false);
   if (terminalOpen) terminalTouched.current = true;
   const { dark, toggle, colorblind, toggleColorblind } = useTheme();
 
   useEffect(() => {
     setActiveArtifactId(null);
-    setArtifactPickerRequest(0);
   }, [session?.id]);
   useEffect(() => {
     if (activeArtifactId && !snapshot.artifacts.some((artifact) => artifact.id === activeArtifactId)) {
@@ -62,13 +64,14 @@ export default function AuthenticatedWorkspace() {
     setActiveArtifactId((current) =>
       current && snapshot.artifacts.some((artifact) => artifact.id === current) ? current : latest.id,
     );
-    setArtifactPickerRequest((request) => request + 1);
   };
   const jumpToSource = (artifact: Artifact) => {
     const targetId = artifact.tool_call ? `tool-call-${artifact.tool_call}` : `artifact-${artifact.id}`;
-    if (window.matchMedia("(max-width: 1279px)").matches) setActiveArtifactId(null);
+    setActiveArtifactId(null);
     requestAnimationFrame(() => {
-      document.getElementById(targetId)?.scrollIntoView({ behavior: "smooth", block: "center" });
+      const target = document.getElementById(targetId);
+      target?.scrollIntoView({ behavior: "smooth", block: "center" });
+      target?.focus({ preventScroll: true });
     });
   };
 
@@ -113,7 +116,9 @@ export default function AuthenticatedWorkspace() {
                   : "flex min-w-0 flex-1 flex-col"
               }
             >
-              <Conversation activeArtifactId={activeArtifactId} onOpenArtifact={openArtifact} />
+              <Suspense fallback={<div className="min-h-0 flex-1" />}>
+                <Conversation activeArtifactId={activeArtifactId} onOpenArtifact={openArtifact} />
+              </Suspense>
               <Composer />
               {terminalTouched.current && (
                 <Suspense
@@ -131,17 +136,17 @@ export default function AuthenticatedWorkspace() {
               )}
             </div>
             {activeArtifactId && (
-              <ArtifactWorkspace
-                artifacts={snapshot.artifacts}
-                activeArtifactId={activeArtifactId}
-                conversationTitle={conversationTitle ?? "Current conversation"}
-                toolCalls={snapshot.tool_calls}
-                pickerRequest={artifactPickerRequest}
-                onPickerRequestHandled={() => setArtifactPickerRequest(0)}
-                onSelect={setActiveArtifactId}
-                onClose={() => setActiveArtifactId(null)}
-                onJumpToSource={jumpToSource}
-              />
+              <Suspense fallback={<div className="min-w-0 flex-1 bg-bg-elevated" />}>
+                <ArtifactWorkspace
+                  artifacts={snapshot.artifacts}
+                  activeArtifactId={activeArtifactId}
+                  conversationTitle={conversationTitle ?? "Current conversation"}
+                  toolCalls={snapshot.tool_calls}
+                  onSelect={setActiveArtifactId}
+                  onClose={() => setActiveArtifactId(null)}
+                  onJumpToSource={jumpToSource}
+                />
+              </Suspense>
             )}
           </div>
         ) : (

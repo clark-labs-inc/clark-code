@@ -30,7 +30,7 @@ dependencies = [
 
 [[package]]
 name = "agent-core"
-version = "0.1.47"
+version = "0.1.48"
 dependencies = [
  "async-channel",
  "async-trait",
@@ -607,7 +607,7 @@ source = "git+https://github.com/clark-labs-inc/clark-agent-compaction?rev=860f3
 
 [[package]]
 name = "clark-desktop"
-version = "0.1.47"
+version = "0.1.48"
 dependencies = [
  "agent-core",
  "base64 0.22.1",
@@ -938,7 +938,7 @@ dependencies = [
 
 [[package]]
 name = "devbridge"
-version = "0.1.47"
+version = "0.1.48"
 dependencies = [
  "agent-core",
  "futures",
@@ -1266,9 +1266,11 @@ dependencies = [
 
 [[package]]
 name = "exec-core"
-version = "0.1.47"
+version = "0.1.48"
 dependencies = [
  "async-trait",
+ "libc",
+ "portable-pty",
  "tempfile",
  "tokio",
  "tokio-util",
@@ -1277,7 +1279,7 @@ dependencies = [
 
 [[package]]
 name = "exec-protocol"
-version = "0.1.47"
+version = "0.1.48"
 dependencies = [
  "base64 0.22.1",
  "serde",
@@ -1286,7 +1288,7 @@ dependencies = [
 
 [[package]]
 name = "exec-server"
-version = "0.1.47"
+version = "0.1.48"
 dependencies = [
  "exec-core",
  "exec-protocol",
@@ -3498,7 +3500,7 @@ dependencies = [
 
 [[package]]
 name = "provider-acp"
-version = "0.1.47"
+version = "0.1.48"
 dependencies = [
  "agent-core",
  "async-channel",
@@ -3513,7 +3515,7 @@ dependencies = [
 
 [[package]]
 name = "provider-clark"
-version = "0.1.47"
+version = "0.1.48"
 dependencies = [
  "agent-core",
  "async-channel",
@@ -3531,7 +3533,7 @@ dependencies = [
 
 [[package]]
 name = "provider-local"
-version = "0.1.47"
+version = "0.1.48"
 dependencies = [
  "agent-core",
  "async-channel",

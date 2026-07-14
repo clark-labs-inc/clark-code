@@ -122,19 +122,28 @@ export function SshSettings() {
   // Instant, no opacity fade under Reduced Motion — see Settings for why.
   const reduce = useReducedMotion();
   const [hosts, setHosts] = useState<SshHost[]>([]);
+  const [savedHosts, setSavedHosts] = useState<SshHost[]>([]);
   const [tests, setTests] = useState<Record<string, TestState>>({});
 
   useEffect(() => {
-    if (open) setHosts(loadSshHosts());
+    if (open) {
+      const loaded = loadSshHosts();
+      setHosts(loaded);
+      setSavedHosts(loaded);
+    }
   }, [open]);
 
-  const persist = (next: SshHost[]) => {
-    setHosts(next);
-    saveSshHosts(next);
+  const update = (id: string, h: SshHost) =>
+    setHosts((current) => current.map((x) => (x.id === id ? h : x)));
+  const remove = (id: string) => setHosts((current) => current.filter((x) => x.id !== id));
+  const add = () => setHosts((current) => [...current, blankHost()]);
+  const dirty = JSON.stringify(hosts) !== JSON.stringify(savedHosts);
+  const close = () => setOpen(false);
+  const save = () => {
+    saveSshHosts(hosts);
+    setSavedHosts(hosts);
+    setOpen(false);
   };
-  const update = (id: string, h: SshHost) => persist(hosts.map((x) => (x.id === id ? h : x)));
-  const remove = (id: string) => persist(hosts.filter((x) => x.id !== id));
-  const add = () => persist([...hosts, blankHost()]);
 
   const test = async (h: SshHost) => {
     setTests((t) => ({ ...t, [h.id]: { loading: true } }));
@@ -155,9 +164,12 @@ export function SshSettings() {
           exit={{ opacity: 0 }}
           transition={{ duration: reduce ? 0 : 0.15 }}
           className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-6"
-          onClick={() => setOpen(false)}
+          onClick={close}
         >
           <motion.div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="ssh-settings-title"
             initial={reduce ? false : { opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -167,10 +179,12 @@ export function SshSettings() {
           >
             <div className="flex items-center gap-2 border-b border-border-subtle px-4 py-3">
               <Server className="size-4 text-ink-secondary" />
-              <h2 className="text-sm font-semibold text-ink">Remote hosts</h2>
+              <h2 id="ssh-settings-title" className="text-sm font-semibold text-ink">
+                Remote hosts
+              </h2>
               <span className="text-xs text-ink-muted">Run Clark Code on a machine over SSH</span>
               <button
-                onClick={() => setOpen(false)}
+                onClick={close}
                 aria-label="Close"
                 className="ml-auto grid size-7 place-items-center rounded-md text-ink-muted transition hover:bg-bg-hover hover:text-ink"
               >
@@ -208,14 +222,22 @@ export function SshSettings() {
             <div className="flex items-center gap-2 border-t border-border-subtle px-4 py-3">
               <span className="text-xs text-ink-faint">
                 {hosts.length > 0
-                  ? `${hosts.length} host${hosts.length === 1 ? "" : "s"} · saved on this device`
+                  ? `${hosts.length} host${hosts.length === 1 ? "" : "s"}${dirty ? " · unsaved changes" : " · saved on this device"}`
                   : "Saved on this device · no credentials stored"}
               </span>
               <button
-                onClick={() => setOpen(false)}
-                className="ml-auto min-h-8 rounded-lg bg-accent px-3 py-1.5 text-sm font-semibold text-on-accent transition duration-200 ease-clark hover:bg-accent-hover"
+                type="button"
+                onClick={close}
+                className="ml-auto min-h-8 rounded-lg px-3 py-1.5 text-sm font-medium text-ink-muted transition hover:bg-bg-hover hover:text-ink"
               >
-                Done
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={save}
+                className="min-h-8 rounded-lg bg-accent px-3 py-1.5 text-sm font-semibold text-on-accent transition duration-200 ease-clark hover:bg-accent-hover"
+              >
+                Save
               </button>
             </div>
           </motion.div>

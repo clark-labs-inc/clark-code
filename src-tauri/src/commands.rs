@@ -325,8 +325,7 @@ pub async fn session_configure_cloud(
         .await
         .ok_or("no such session")?;
     *state.cloud_token.write().await = Some(config.token.clone());
-    let trajectory =
-        CloudTrajectoryClient::new(session_id, config, state.cloud_token.clone(), app);
+    let trajectory = CloudTrajectoryClient::new(session_id, config, state.cloud_token.clone(), app);
     trajectory
         .append(&[AgentEvent::Trace {
             run: None,

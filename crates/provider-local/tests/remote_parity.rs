@@ -116,6 +116,19 @@ async fn remote_matches_local_for_every_primitive() {
     assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "out");
     assert_eq!(String::from_utf8_lossy(&out.stderr).trim(), "err");
     assert_eq!(out.code, Some(7));
+
+    let terminal = remote
+        .exec_streaming_pty(
+            "test -t 0 && test -t 1 && printf terminal",
+            dir.path(),
+            Duration::from_secs(10),
+            &cancel,
+            &|_, _| {},
+        )
+        .await
+        .unwrap();
+    assert_eq!(terminal.code, Some(0));
+    assert!(String::from_utf8_lossy(&terminal.stdout).contains("terminal"));
 }
 
 #[tokio::test]
@@ -131,6 +144,68 @@ async fn exec_honors_cancel() {
         .await
         .unwrap_err();
     assert!(err.contains("cancel"), "{err}");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn exec_timeout_kills_remote_descendants_and_returns_terminal_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let url = start_server(None).await;
+    let remote = RemoteExecutor::connect(&url, TOKEN).await.unwrap();
+
+    let err = tokio::time::timeout(
+        Duration::from_secs(2),
+        remote.exec(
+            "sleep 30 & echo $! > descendant.pid; wait",
+            dir.path(),
+            Duration::from_millis(150),
+            &CancellationToken::new(),
+        ),
+    )
+    .await
+    .expect("remote executor must return after its own timeout")
+    .unwrap_err();
+    assert!(err.contains("timed out"), "{err}");
+
+    let pid: u32 = std::fs::read_to_string(dir.path().join("descendant.pid"))
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    for _ in 0..20 {
+        let exists = std::process::Command::new("/bin/kill")
+            .args(["-0", &pid.to_string()])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success());
+        if !exists {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    panic!("remote descendant process {pid} survived command timeout");
+}
+
+#[tokio::test]
+async fn remote_terminal_timeout_returns_a_terminal_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let url = start_server(None).await;
+    let remote = RemoteExecutor::connect(&url, TOKEN).await.unwrap();
+    let err = tokio::time::timeout(
+        Duration::from_secs(2),
+        remote.exec_streaming_pty(
+            "sleep 30",
+            dir.path(),
+            Duration::from_millis(150),
+            &CancellationToken::new(),
+            &|_, _| {},
+        ),
+    )
+    .await
+    .expect("remote terminal must return after its own timeout")
+    .unwrap_err();
+    assert!(err.contains("timed out"), "{err}");
 }
 
 #[tokio::test]
@@ -199,6 +274,7 @@ async fn output_survives_reconnect_via_resume() {
                 command: command.to_string(),
                 cwd: dir.path().to_string_lossy().to_string(),
                 timeout_ms: 10_000,
+                pty: false,
             })
             .unwrap(),
         );

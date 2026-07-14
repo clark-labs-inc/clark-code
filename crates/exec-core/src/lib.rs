@@ -20,6 +20,37 @@ use std::time::{Duration, SystemTime};
 use async_trait::async_trait;
 use tokio_util::sync::CancellationToken;
 
+pub fn isolate_process_group(command: &mut tokio::process::Command) {
+    #[cfg(unix)]
+    command.process_group(0);
+}
+
+pub async fn terminate_pid_tree(root_pid: Option<u32>) {
+    #[cfg(unix)]
+    if let Some(pid) = root_pid.and_then(|pid| i32::try_from(pid).ok()) {
+        unsafe {
+            libc::kill(-pid, libc::SIGKILL);
+        }
+    }
+
+    #[cfg(windows)]
+    if let Some(pid) = root_pid {
+        let _ = tokio::process::Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/T", "/F"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .await;
+    }
+}
+
+pub async fn terminate_process_tree(child: &mut tokio::process::Child, root_pid: Option<u32>) {
+    terminate_pid_tree(root_pid).await;
+    let _ = child.start_kill();
+    let _ = child.wait().await;
+}
+
 /// Tool-facing result: the error is already a model-readable message.
 pub type ExecResult<T> = Result<T, String>;
 
@@ -118,6 +149,18 @@ pub trait Executor: Send + Sync {
         _on_output: OnOutput<'_>,
     ) -> ExecResult<ExecOutput> {
         self.exec(command, cwd, timeout, cancel).await
+    }
+
+    async fn exec_streaming_pty(
+        &self,
+        command: &str,
+        cwd: &Path,
+        timeout: Duration,
+        cancel: &CancellationToken,
+        on_output: OnOutput<'_>,
+    ) -> ExecResult<ExecOutput> {
+        self.exec_streaming(command, cwd, timeout, cancel, on_output)
+            .await
     }
 
     /// Whether this executor runs on the same machine as the caller. Local
@@ -235,9 +278,11 @@ impl Executor for LocalExecutor {
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        isolate_process_group(&mut cmd);
         let mut child = cmd
             .spawn()
             .map_err(|e| format!("failed to spawn shell: {e}"))?;
+        let root_pid = child.id();
 
         // Pipe readers run as tasks feeding one channel, so both pipes drain
         // concurrently (no deadlock on a full pipe) while this future observes
@@ -275,11 +320,11 @@ impl Executor for LocalExecutor {
         loop {
             tokio::select! {
                 _ = cancel.cancelled() => {
-                    let _ = child.kill().await;
+                    terminate_process_tree(&mut child, root_pid).await;
                     return Err("command cancelled".into());
                 }
                 _ = &mut deadline => {
-                    let _ = child.kill().await;
+                    terminate_process_tree(&mut child, root_pid).await;
                     return Err(format!("command timed out after {} ms", timeout.as_millis()));
                 }
                 chunk = rx.recv(), if pipes_open => match chunk {
@@ -298,6 +343,116 @@ impl Executor for LocalExecutor {
                         Ok(status) => Ok(ExecOutput { stdout, stderr, code: status.code() }),
                         Err(e) => Err(format!("command failed: {e}")),
                     };
+                }
+            }
+        }
+    }
+
+    async fn exec_streaming_pty(
+        &self,
+        command: &str,
+        cwd: &Path,
+        timeout: Duration,
+        cancel: &CancellationToken,
+        on_output: OnOutput<'_>,
+    ) -> ExecResult<ExecOutput> {
+        use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+        use std::io::Read;
+
+        let pair = native_pty_system()
+            .openpty(PtySize {
+                rows: 24,
+                cols: 120,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .map_err(|e| format!("failed to open terminal: {e}"))?;
+
+        #[cfg(unix)]
+        let mut cmd = {
+            let mut cmd = CommandBuilder::new("/bin/sh");
+            cmd.args(["-c", command]);
+            cmd
+        };
+        #[cfg(windows)]
+        let mut cmd = {
+            let mut cmd = CommandBuilder::new("cmd.exe");
+            cmd.args(["/C", command]);
+            cmd
+        };
+        cmd.cwd(cwd);
+        cmd.env("TERM", "dumb");
+
+        let mut child = pair
+            .slave
+            .spawn_command(cmd)
+            .map_err(|e| format!("failed to spawn terminal command: {e}"))?;
+        drop(pair.slave);
+        let root_pid = child.process_id();
+        let mut killer = child.clone_killer();
+        let mut reader = pair
+            .master
+            .try_clone_reader()
+            .map_err(|e| format!("failed to read terminal output: {e}"))?;
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
+        std::thread::spawn(move || {
+            let mut buf = [0u8; 8192];
+            loop {
+                match reader.read(&mut buf) {
+                    Ok(0) | Err(_) => return,
+                    Ok(n) if tx.send(buf[..n].to_vec()).is_err() => return,
+                    Ok(_) => {}
+                }
+            }
+        });
+
+        let mut wait = tokio::task::spawn_blocking(move || child.wait());
+        let deadline = tokio::time::sleep(timeout);
+        tokio::pin!(deadline);
+        let mut stdout = Vec::new();
+        let mut output_open = true;
+        loop {
+            tokio::select! {
+                _ = cancel.cancelled() => {
+                    terminate_pid_tree(root_pid).await;
+                    let _ = tokio::task::spawn_blocking(move || killer.kill()).await;
+                    let _ = tokio::time::timeout(Duration::from_millis(500), &mut wait).await;
+                    return Err("command cancelled".into());
+                }
+                _ = &mut deadline => {
+                    terminate_pid_tree(root_pid).await;
+                    let _ = tokio::task::spawn_blocking(move || killer.kill()).await;
+                    let _ = tokio::time::timeout(Duration::from_millis(500), &mut wait).await;
+                    return Err(format!("command timed out after {} ms", timeout.as_millis()));
+                }
+                chunk = rx.recv(), if output_open => match chunk {
+                    Some(bytes) => {
+                        on_output(false, &bytes);
+                        stdout.extend_from_slice(&bytes);
+                    }
+                    None => output_open = false,
+                },
+                status = &mut wait => {
+                    let status = status
+                        .map_err(|e| format!("command task failed: {e}"))?
+                        .map_err(|e| format!("command failed: {e}"))?;
+                    let drained = !output_open || tokio::time::timeout(Duration::from_millis(500), async {
+                            while let Some(bytes) = rx.recv().await {
+                                on_output(false, &bytes);
+                                stdout.extend_from_slice(&bytes);
+                            }
+                        })
+                        .await
+                        .is_ok();
+                    if !drained {
+                        terminate_pid_tree(root_pid).await;
+                    }
+                    let code = status
+                        .signal()
+                        .is_none()
+                        .then(|| i32::try_from(status.exit_code()).ok())
+                        .flatten();
+                    return Ok(ExecOutput { stdout, stderr: Vec::new(), code });
                 }
             }
         }
@@ -371,6 +526,95 @@ mod tests {
             .await
             .unwrap_err();
         assert!(err.contains("cancelled"), "{err}");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn timeout_kills_descendants_that_hold_output_pipes_open() {
+        let dir = tempfile::tempdir().unwrap();
+        let exec = LocalExecutor;
+        let err = tokio::time::timeout(
+            Duration::from_secs(2),
+            exec.exec_streaming(
+                "sleep 30 & echo $! > descendant.pid; wait",
+                dir.path(),
+                Duration::from_millis(150),
+                &CancellationToken::new(),
+                &|_, _| {},
+            ),
+        )
+        .await
+        .expect("executor must return after its own timeout")
+        .unwrap_err();
+        assert!(err.contains("timed out"), "{err}");
+
+        let pid: i32 = std::fs::read_to_string(dir.path().join("descendant.pid"))
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        for _ in 0..20 {
+            if unsafe { libc::kill(pid, 0) } == -1 {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        panic!("descendant process {pid} survived command timeout");
+    }
+
+    #[tokio::test]
+    async fn pty_execution_exposes_a_terminal_and_streams_output() {
+        let dir = tempfile::tempdir().unwrap();
+        let exec = LocalExecutor;
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = seen.clone();
+        let out = exec
+            .exec_streaming_pty(
+                "test -t 0 && test -t 1 && printf terminal",
+                dir.path(),
+                Duration::from_secs(10),
+                &CancellationToken::new(),
+                &move |_, chunk| sink.lock().unwrap().extend_from_slice(chunk),
+            )
+            .await
+            .unwrap();
+        assert_eq!(out.code, Some(0));
+        assert!(String::from_utf8_lossy(&out.stdout).contains("terminal"));
+        assert!(String::from_utf8_lossy(&seen.lock().unwrap()).contains("terminal"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn pty_timeout_kills_the_terminal_process_tree() {
+        let dir = tempfile::tempdir().unwrap();
+        let exec = LocalExecutor;
+        let err = tokio::time::timeout(
+            Duration::from_secs(2),
+            exec.exec_streaming_pty(
+                "sleep 30 & echo $! > pty-descendant.pid; wait",
+                dir.path(),
+                Duration::from_millis(150),
+                &CancellationToken::new(),
+                &|_, _| {},
+            ),
+        )
+        .await
+        .expect("terminal executor must return after its own timeout")
+        .unwrap_err();
+        assert!(err.contains("timed out"), "{err}");
+
+        let pid: i32 = std::fs::read_to_string(dir.path().join("pty-descendant.pid"))
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        for _ in 0..20 {
+            if unsafe { libc::kill(pid, 0) } == -1 {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        panic!("terminal descendant process {pid} survived command timeout");
     }
 
     #[tokio::test]

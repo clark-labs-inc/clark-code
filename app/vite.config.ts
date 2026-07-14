@@ -26,5 +26,31 @@ export default defineConfig({
   build: {
     target: "es2022",
     sourcemap: productionSourcemaps,
+    chunkSizeWarningLimit: 800,
+    rolldownOptions: {
+      output: {
+        codeSplitting: {
+          minSize: 20_000,
+          groups: [
+            {
+              name: "react",
+              test: /node_modules[\\/](react|react-dom|scheduler)[\\/]/,
+              priority: 3,
+            },
+            {
+              name: "markdown",
+              test: /node_modules[\\/](react-markdown|(?:remark|rehype|micromark|mdast|hast)[^\\/]*|unified|katex)[\\/]/,
+              priority: 2,
+              maxSize: 350_000,
+            },
+            {
+              name: "motion",
+              test: /node_modules[\\/](motion|framer-motion)[\\/]/,
+              priority: 2,
+            },
+          ],
+        },
+      },
+    },
   },
 });

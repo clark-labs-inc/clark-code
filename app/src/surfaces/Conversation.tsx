@@ -237,8 +237,9 @@ export function Conversation({
               <div
                 id={`artifact-${a.id}`}
                 key={block.key}
+                tabIndex={-1}
                 className={cn(
-                  "relative",
+                  "relative outline-none focus-visible:ring-2 focus-visible:ring-accent",
                   a.id === activeArtifactId &&
                     "after:absolute after:left-full after:top-1/2 after:h-px after:w-5 after:bg-accent after:content-['']",
                 )}

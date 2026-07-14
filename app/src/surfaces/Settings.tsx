@@ -742,6 +742,9 @@ export function Settings({
           onClick={() => setOpen(false)}
         >
           <motion.div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="settings-title"
             initial={reduce ? false : { opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -751,7 +754,9 @@ export function Settings({
           >
             {/* Left rail */}
             <nav className="flex w-52 shrink-0 flex-col border-r border-border-subtle bg-bg-secondary/50 p-3">
-              <h2 className="px-2 py-2 text-sm font-semibold text-ink">Settings</h2>
+              <h2 id="settings-title" className="px-2 py-2 text-sm font-semibold text-ink">
+                Settings
+              </h2>
               {SECTIONS.map((s) => (
                 <button
                   key={s.id}

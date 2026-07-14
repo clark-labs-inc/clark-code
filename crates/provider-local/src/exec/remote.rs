@@ -144,6 +144,80 @@ impl RemoteExecutor {
     fn path(p: &Path) -> String {
         p.to_string_lossy().to_string()
     }
+
+    async fn exec_streaming_mode(
+        &self,
+        command: &str,
+        cwd: &Path,
+        timeout: Duration,
+        cancel: &CancellationToken,
+        on_output: exec_core::OnOutput<'_>,
+        pty: bool,
+    ) -> ExecResult<ExecOutput> {
+        let process_id = uuid::Uuid::new_v4().to_string();
+        let (etx, mut erx) = mpsc::unbounded_channel::<ProcEvent>();
+        self.conn
+            .procs
+            .lock()
+            .unwrap()
+            .insert(process_id.clone(), etx);
+        let _guard = ProcGuard {
+            conn: self.conn.clone(),
+            process_id: process_id.clone(),
+        };
+
+        self.conn
+            .call(
+                method::PROCESS_START,
+                to_value(&ProcessStartParams {
+                    process_id: process_id.clone(),
+                    command: command.to_string(),
+                    cwd: Self::path(cwd),
+                    timeout_ms: timeout.as_millis() as u64,
+                    pty,
+                }),
+            )
+            .await?;
+
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        loop {
+            tokio::select! {
+                _ = cancel.cancelled() => {
+                    let _ = self
+                        .conn
+                        .call(
+                            method::PROCESS_CANCEL,
+                            to_value(&ProcessIdParams { process_id: process_id.clone() }),
+                        )
+                        .await;
+                    return Err("command cancelled".into());
+                }
+                ev = erx.recv() => match ev {
+                    Some(ProcEvent::Output(p)) => {
+                        let bytes = b64_decode(&p.data).unwrap_or_default();
+                        match p.stream {
+                            Stream::Stdout => {
+                                on_output(false, &bytes);
+                                stdout.extend_from_slice(&bytes);
+                            }
+                            Stream::Stderr => {
+                                on_output(true, &bytes);
+                                stderr.extend_from_slice(&bytes);
+                            }
+                        }
+                    }
+                    Some(ProcEvent::Exit(p)) => {
+                        return match p.error {
+                            Some(err) => Err(err),
+                            None => Ok(ExecOutput { stdout, stderr, code: p.code }),
+                        };
+                    }
+                    None => return Err("exec-server connection closed".into()),
+                }
+            }
+        }
+    }
 }
 
 /// Demultiplex an incoming frame: a response resolves its pending call; a
@@ -303,70 +377,20 @@ impl Executor for RemoteExecutor {
         cancel: &CancellationToken,
         on_output: exec_core::OnOutput<'_>,
     ) -> ExecResult<ExecOutput> {
-        let process_id = uuid::Uuid::new_v4().to_string();
-        let (etx, mut erx) = mpsc::unbounded_channel::<ProcEvent>();
-        self.conn
-            .procs
-            .lock()
-            .unwrap()
-            .insert(process_id.clone(), etx);
-        // Removes the listener no matter how this call returns.
-        let _guard = ProcGuard {
-            conn: self.conn.clone(),
-            process_id: process_id.clone(),
-        };
+        self.exec_streaming_mode(command, cwd, timeout, cancel, on_output, false)
+            .await
+    }
 
-        self.conn
-            .call(
-                method::PROCESS_START,
-                to_value(&ProcessStartParams {
-                    process_id: process_id.clone(),
-                    command: command.to_string(),
-                    cwd: Self::path(cwd),
-                    timeout_ms: timeout.as_millis() as u64,
-                }),
-            )
-            .await?;
-
-        let mut stdout = Vec::new();
-        let mut stderr = Vec::new();
-        loop {
-            tokio::select! {
-                _ = cancel.cancelled() => {
-                    // Best-effort kill on the remote; mirror LocalExecutor's message.
-                    let _ = self
-                        .conn
-                        .call(
-                            method::PROCESS_CANCEL,
-                            to_value(&ProcessIdParams { process_id: process_id.clone() }),
-                        )
-                        .await;
-                    return Err("command cancelled".into());
-                }
-                ev = erx.recv() => match ev {
-                    Some(ProcEvent::Output(p)) => {
-                        let bytes = b64_decode(&p.data).unwrap_or_default();
-                        match p.stream {
-                            Stream::Stdout => {
-                                on_output(false, &bytes);
-                                stdout.extend_from_slice(&bytes);
-                            }
-                            Stream::Stderr => {
-                                on_output(true, &bytes);
-                                stderr.extend_from_slice(&bytes);
-                            }
-                        }
-                    }
-                    Some(ProcEvent::Exit(p)) => {
-                        return match p.error {
-                            Some(err) => Err(err),
-                            None => Ok(ExecOutput { stdout, stderr, code: p.code }),
-                        };
-                    }
-                    None => return Err("exec-server connection closed".into()),
-                }
-            }
-        }
+    async fn exec_streaming_pty(
+        &self,
+        command: &str,
+        cwd: &Path,
+        timeout: Duration,
+        cancel: &CancellationToken,
+        on_output: exec_core::OnOutput<'_>,
+    ) -> ExecResult<ExecOutput> {
+        self.exec_streaming_mode(command, cwd, timeout, cancel, on_output, true)
+            .await
     }
 }
 

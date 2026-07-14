@@ -305,11 +305,12 @@ function WorkLineImpl({ call, active }: { call: ToolCall; active: boolean }) {
     <motion.div
       id={`tool-call-${call.id}`}
       data-tool-call-id={call.id}
+      tabIndex={-1}
       initial={reduce ? false : { opacity: 0, y: 4 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.2, ease: [0.4, 0, 0.2, 1] }}
       className={cn(
-        "transition-colors",
+        "outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent",
         active && "bg-bg-hover/40",
         // Research is a superpower moment, not a plain file line: give it a subtle
         // callout treatment (left accent + tint) so it stands out in the work log.

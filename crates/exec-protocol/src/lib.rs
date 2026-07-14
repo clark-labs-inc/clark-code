@@ -228,6 +228,8 @@ pub struct ProcessStartParams {
     pub command: String,
     pub cwd: String,
     pub timeout_ms: u64,
+    #[serde(default)]
+    pub pty: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -330,5 +332,17 @@ mod tests {
             serde_json::to_string(&Stream::Stdout).unwrap(),
             "\"stdout\""
         );
+    }
+
+    #[test]
+    fn process_start_without_pty_field_defaults_to_pipes() {
+        let params: ProcessStartParams = serde_json::from_value(serde_json::json!({
+            "process_id": "p1",
+            "command": "echo hi",
+            "cwd": "/tmp",
+            "timeout_ms": 1000
+        }))
+        .unwrap();
+        assert!(!params.pty);
     }
 }

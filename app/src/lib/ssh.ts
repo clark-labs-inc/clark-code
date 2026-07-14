@@ -71,5 +71,6 @@ export interface SshProbe {
 /** Reach a host and report arch + home (no deploy/tunnel). Throws on failure
  *  (unreachable, unsupported arch) with a readable message. */
 export function probeSsh(host: string): Promise<SshProbe> {
+  if (!isTauri()) return Promise.reject(new Error("SSH testing is available in the desktop app."));
   return invoke<SshProbe>("ssh_probe", { host });
 }

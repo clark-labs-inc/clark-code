@@ -187,6 +187,7 @@ export function McpSettings() {
   // For a remote project, read its remote `.claude` over the tunnel.
   const cwd = activeRemote?.cwd ?? localCwd;
   const [servers, setServers] = useState<McpServer[]>([]);
+  const [savedServers, setSavedServers] = useState<McpServer[]>([]);
   const [statuses, setStatuses] = useState<Record<string, McpStatus>>({});
   const [testing, setTesting] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -194,28 +195,43 @@ export function McpSettings() {
 
   useEffect(() => {
     if (open) {
-      setServers(loadMcpServers());
+      const loaded = loadMcpServers();
+      setServers(loaded);
+      setSavedServers(loaded);
       setImportNote(null);
     }
   }, [open]);
 
-  const persist = (next: McpServer[]) => {
-    setServers(next);
-    saveMcpServers(next);
-  };
-  const update = (id: string, s: McpServer) => persist(servers.map((x) => (x.id === id ? s : x)));
-  const remove = (id: string) => persist(servers.filter((x) => x.id !== id));
-  const add = () => persist([...servers, blankServer()]);
-  const addPreset = (make: (cwd: string) => McpServer) => persist([...servers, make(cwd)]);
+  const update = (id: string, s: McpServer) =>
+    setServers((current) => current.map((x) => (x.id === id ? s : x)));
+  const remove = (id: string) => setServers((current) => current.filter((x) => x.id !== id));
+  const add = () => setServers((current) => [...current, blankServer()]);
+  const addPreset = (make: (cwd: string) => McpServer) =>
+    setServers((current) => [...current, make(cwd)]);
   const enabledCount = servers.filter((s) => s.enabled && s.command.trim()).length;
+  const dirty = JSON.stringify(servers) !== JSON.stringify(savedServers);
+  const close = () => setOpen(false);
+  const save = () => {
+    saveMcpServers(servers);
+    setSavedServers(servers);
+    setOpen(false);
+  };
 
   const test = async () => {
     setTesting(true);
     try {
       const results = await probeMcp(enabledMcpConfigs(servers));
       setStatuses(Object.fromEntries(results.map((r) => [r.server, r])));
-    } catch {
-      /* probe is best-effort */
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setStatuses(
+        Object.fromEntries(
+          enabledMcpConfigs(servers).map((server) => [
+            server.name,
+            { server: server.name, connected: false, tool_count: 0, tools: [], error: message },
+          ]),
+        ),
+      );
     } finally {
       setTesting(false);
     }
@@ -242,7 +258,7 @@ export function McpSettings() {
           env: m.env ?? {},
           enabled: true,
         }));
-      if (added.length) persist([...servers, ...added]);
+      if (added.length) setServers([...servers, ...added]);
       const parts: string[] = [];
       parts.push(
         added.length
@@ -270,9 +286,12 @@ export function McpSettings() {
           exit={{ opacity: 0 }}
           transition={{ duration: reduce ? 0 : 0.15 }}
           className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-6"
-          onClick={() => setOpen(false)}
+          onClick={close}
         >
           <motion.div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="mcp-settings-title"
             initial={reduce ? false : { opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -282,12 +301,14 @@ export function McpSettings() {
           >
             <div className="flex items-center gap-2 border-b border-border-subtle px-4 py-3">
               <Blocks className="size-4 text-ink-secondary" />
-              <h2 className="text-sm font-semibold text-ink">MCP servers</h2>
+              <h2 id="mcp-settings-title" className="text-sm font-semibold text-ink">
+                MCP servers
+              </h2>
               <span className="text-xs text-ink-muted">
                 Extend Clark Code with external tools
               </span>
               <button
-                onClick={() => setOpen(false)}
+                onClick={close}
                 aria-label="Close"
                 className="ml-auto grid size-7 place-items-center rounded-md text-ink-muted transition hover:bg-bg-hover hover:text-ink"
               >
@@ -344,17 +365,31 @@ export function McpSettings() {
             <div className="flex items-center gap-2 border-t border-border-subtle px-4 py-3">
               <span className="text-xs text-ink-faint">
                 {servers.length > 0
-                  ? `${enabledCount} enabled · ${servers.length} total`
+                  ? `${enabledCount} enabled · ${servers.length} total${dirty ? " · unsaved changes" : ""}`
                   : "Configured per app · spawned when a session starts"}
               </span>
               <button
                 onClick={() => void test()}
                 disabled={testing || enabledCount === 0}
                 title={enabledCount === 0 ? "Add and enable a server first" : "Connect each server and list its tools"}
-                className="ml-auto flex min-h-8 items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-sm font-semibold text-on-accent transition duration-200 ease-clark hover:bg-accent-hover disabled:bg-bg-tertiary disabled:text-ink-muted"
+                className="ml-auto flex min-h-8 items-center gap-1.5 rounded-lg bg-bg-tertiary px-3 py-1.5 text-sm font-medium text-ink-secondary transition duration-200 ease-clark hover:bg-bg-hover disabled:text-ink-muted disabled:opacity-50"
               >
                 {testing && <Loader2 className="size-3.5 animate-[spin_1s_linear_infinite]" />}
                 Test connections
+              </button>
+              <button
+                type="button"
+                onClick={close}
+                className="min-h-8 rounded-lg px-3 py-1.5 text-sm font-medium text-ink-muted transition hover:bg-bg-hover hover:text-ink"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={save}
+                className="min-h-8 rounded-lg bg-accent px-3 py-1.5 text-sm font-semibold text-on-accent transition duration-200 ease-clark hover:bg-accent-hover"
+              >
+                Save
               </button>
             </div>
           </motion.div>

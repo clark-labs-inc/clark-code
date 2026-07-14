@@ -550,7 +550,10 @@ mod tests {
         let gate = PermissionGate::new(session, control, SessionId::new("s1"), tx);
 
         // The exact allowlisted command and safe extensions/pipes preapprove.
-        assert!(gate.command_preapproved("bash", &bash_gate("cargo test")).await);
+        assert!(
+            gate.command_preapproved("bash", &bash_gate("cargo test"))
+                .await
+        );
         assert!(
             gate.command_preapproved("bash", &bash_gate("cargo test --workspace"))
                 .await

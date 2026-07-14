@@ -22,7 +22,7 @@ impl ToolExecutor for Bash {
         "bash"
     }
     fn description(&self) -> &str {
-        "Run a shell command in the project root and return its stdout, stderr, and exit code. Use it for builds, tests, git, and other tooling. Avoid using it to search or read files: prefer grep over `grep`/`rg`, glob over `find`/`ls`, read_file over `cat`/`head`/`tail`, and edit_file/write_file over `sed`/`echo >`. The shell does not persist state (cwd, env) between calls; each command starts fresh in the project root."
+        "Run a shell command in the project root and return its output and exit code. Use it for builds, tests, git, and other tooling. Avoid using it to search or read files: prefer grep over `grep`/`rg`, glob over `find`/`ls`, read_file over `cat`/`head`/`tail`, and edit_file/write_file over `sed`/`echo >`. Output is already bounded. The shell does not persist state (cwd, env) between calls; each command starts fresh in the project root."
     }
     fn parameters(&self) -> Value {
         json!({
@@ -77,7 +77,7 @@ impl ToolExecutor for Bash {
         // chunks stream to the UI's tool row as the command produces them.
         let output = match ctx
             .executor
-            .exec_streaming(
+            .exec_streaming_pty(
                 &command,
                 ctx.sandbox.root(),
                 Duration::from_millis(timeout_ms),
