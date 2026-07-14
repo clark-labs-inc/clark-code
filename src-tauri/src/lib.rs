@@ -18,6 +18,8 @@ pub mod ssh;
 mod state;
 mod terminal;
 mod trajectory;
+#[cfg(desktop)]
+mod updater_menu;
 
 pub use state::AppState;
 
@@ -67,13 +69,16 @@ pub fn run() {
     // running instance natively, so this is a belt-and-suspenders no-op there.
     #[cfg(desktop)]
     {
-        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.unminimize();
-                let _ = window.show();
-                let _ = window.set_focus();
-            }
-        }));
+        builder = builder
+            .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.unminimize();
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+            }))
+            .menu(updater_menu::build_menu)
+            .on_menu_event(updater_menu::handle_menu_event);
     }
 
     builder
