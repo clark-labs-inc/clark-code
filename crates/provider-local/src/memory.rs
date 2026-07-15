@@ -316,13 +316,16 @@ fn slugify(title: &str) -> String {
 
 /// Maintenance instructions for the system prompt (present whenever memory is on).
 pub fn memory_guidance() -> &'static str {
-    "You have a durable memory via the `memory` tool. Call it with action \"recall\" to \
-load saved facts before relying on them, and action \"remember\" to save a lasting fact — \
-scope \"project\" for things specific to this codebase (architecture, conventions, \
-build/test commands, gotchas, decisions), scope \"global\" for things true across all of \
-the user's projects (their preferences, environment, how they like you to work). Save \
-sparingly: durable, reusable facts only — never transient task details. Treat saved notes \
-as point-in-time and verify against the current code before relying on them.\n"
+    "You have a durable memory via the `memory` tool. Use it proactively, not only when asked:\n\
+- In a project with no saved notes yet, save the basics early: the stack/framework, the \
+build and test commands, and where the entrypoint lives.\n\
+- When you learn something lasting about the user — their technical comfort level, how \
+they like things explained, what their product is and who it's for, a correction they had \
+to give you twice — save it: scope \"global\" if it holds across their projects, scope \
+\"project\" if it's specific to this codebase.\n\
+- Call action \"recall\" to load saved facts before starting sizable work, and treat notes \
+as point-in-time: verify against the current code before relying on them.\n\
+Keep each note a durable, reusable fact — never transient task state.\n"
 }
 
 fn truncate_chars(s: &str, max: usize) -> String {

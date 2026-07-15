@@ -169,21 +169,18 @@ const DEV_TOOLS: &[&str] = &[
     "cmake",
 ];
 
-/// Read-only git subcommands.
+/// Read-only git subcommands. (`branch`/`tag`/`config`/`stash` are NOT here —
+/// they have mutating forms and are classified per-form in `classify_git`.)
 const GIT_READONLY: &[&str] = &[
     "status",
     "diff",
     "log",
     "show",
-    "branch",
     "remote",
     "rev-parse",
     "ls-files",
     "blame",
-    "config",
     "describe",
-    "tag",
-    "stash",
     "fetch",
     "rev-list",
     "shortlog",
@@ -193,7 +190,9 @@ const GIT_READONLY: &[&str] = &[
 ];
 
 /// git subcommands that can destroy local work.
-const GIT_DESTRUCTIVE: &[&str] = &["reset", "clean", "checkout", "restore", "rebase", "push"];
+const GIT_DESTRUCTIVE: &[&str] = &[
+    "reset", "clean", "checkout", "switch", "restore", "rebase", "push",
+];
 
 /// Package-install / network programs (mutate deps or reach the network).
 const INSTALLERS: &[&str] = &[
@@ -328,6 +327,42 @@ fn classify_segment(segment: &str) -> Classification {
 fn classify_git(tokens: &[&str]) -> Classification {
     let sub = tokens.get(1).map(|s| program(s)).unwrap_or("");
     let rest = tokens.join(" ").to_lowercase();
+    // Non-flag args after the subcommand distinguish listing forms
+    // (`git branch`, `git tag -l`) from mutating ones (`git branch x`).
+    let has_positional = tokens.iter().skip(2).any(|t| !t.starts_with('-'));
+    if sub == "stash" {
+        // Everything except list/show moves or drops working-tree changes —
+        // in a shared tree that can hide another agent's in-progress work.
+        // A bare `git stash` defaults to push, so the default is the risky arm.
+        return match tokens.get(2).copied().unwrap_or("push") {
+            "list" | "show" => Classification::safe(),
+            _ => Classification::new(
+                CommandRisk::Danger,
+                "moves or discards working-tree changes (git stash)",
+            ),
+        };
+    }
+    if sub == "branch" {
+        return if has_positional {
+            Classification::new(CommandRisk::Caution, "creates or deletes a branch")
+        } else {
+            Classification::safe()
+        };
+    }
+    if sub == "tag" {
+        return if has_positional && !rest.contains(" -l") && !rest.contains("--list") {
+            Classification::new(CommandRisk::Caution, "creates or deletes a tag")
+        } else {
+            Classification::safe()
+        };
+    }
+    if sub == "config" {
+        return if rest.contains("--get") || rest.contains("--list") || rest.contains(" -l") {
+            Classification::safe()
+        } else {
+            Classification::new(CommandRisk::Caution, "writes git config")
+        };
+    }
     if sub == "push" && (rest.contains("--force") || rest.contains(" -f")) {
         return Classification::new(CommandRisk::Danger, "force-pushes to a remote");
     }
@@ -349,7 +384,7 @@ fn classify_git(tokens: &[&str]) -> Classification {
     if GIT_DESTRUCTIVE.contains(&sub) {
         return Classification::new(CommandRisk::Caution, "rewrites git state");
     }
-    if sub == "commit" || sub == "add" || sub == "merge" || sub == "tag" || sub == "init" {
+    if sub == "commit" || sub == "add" || sub == "merge" || sub == "init" {
         return Classification::new(CommandRisk::Caution, "modifies the repository");
     }
     Classification::new(CommandRisk::Caution, "git command")
@@ -506,6 +541,59 @@ mod tests {
             "dd if=/dev/zero of=/dev/sda",
         ] {
             assert_eq!(risk(c), CommandRisk::Blocked, "{c}");
+        }
+    }
+
+    #[test]
+    fn git_stash_mutating_forms_are_danger() {
+        // `stash` can silently hide another agent's in-progress work; every
+        // mutating form must hard-prompt even in auto mode.
+        for c in [
+            "git stash",
+            "git stash pop",
+            "git stash drop",
+            "git stash clear",
+            "git stash apply",
+            "git stash push -m wip",
+            "git stash branch topic",
+        ] {
+            assert_eq!(risk(c), CommandRisk::Danger, "{c}");
+        }
+    }
+
+    #[test]
+    fn git_stash_readonly_forms_stay_safe() {
+        for c in ["git stash list", "git stash show -p"] {
+            assert_eq!(risk(c), CommandRisk::Safe, "{c}");
+        }
+    }
+
+    #[test]
+    fn git_listing_forms_stay_safe() {
+        for c in [
+            "git branch",
+            "git branch -a",
+            "git branch --show-current",
+            "git tag",
+            "git tag -l",
+            "git tag --list",
+            "git config --get user.email",
+            "git config --list",
+        ] {
+            assert_eq!(risk(c), CommandRisk::Safe, "{c}");
+        }
+    }
+
+    #[test]
+    fn git_mutating_forms_prompt() {
+        for c in [
+            "git branch feature-x",
+            "git branch -D old-branch",
+            "git tag v1.0",
+            "git config user.email a@b.c",
+            "git switch main",
+        ] {
+            assert_eq!(risk(c), CommandRisk::Caution, "{c}");
         }
     }
 

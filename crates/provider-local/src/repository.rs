@@ -116,6 +116,49 @@ pub async fn inspect_repository(
     }))
 }
 
+/// Maximum status entries listed in a working-tree snapshot before truncating.
+const SNAPSHOT_MAX_ENTRIES: usize = 40;
+
+/// A compact, per-turn `git status` snapshot for the model — the tree may be
+/// shared with other agents, so a session-start view goes stale; this is
+/// re-taken every message. `None` outside a git repo or on any git failure
+/// (non-git projects just get no section).
+pub async fn working_tree_snapshot(exec: &dyn Executor, root: &Path) -> Option<String> {
+    let raw = git_optional(exec, root, "git status --porcelain=v1 --branch")
+        .await
+        .ok()??;
+    let mut lines = raw.lines();
+    let branch = lines
+        .next()
+        .unwrap_or("")
+        .trim_start_matches("## ")
+        .to_string();
+    let entries: Vec<&str> = lines.filter(|l| !l.trim().is_empty()).collect();
+
+    let mut s = format!(
+        "[Working tree snapshot — fresh `git status` taken for this message]\nBranch: {branch}\n"
+    );
+    if entries.is_empty() {
+        s.push_str("No uncommitted changes.\n");
+    } else {
+        s.push_str(
+            "Uncommitted changes (entries you didn't make are someone else's in-progress \
+work — leave them alone):\n",
+        );
+        for entry in entries.iter().take(SNAPSHOT_MAX_ENTRIES) {
+            s.push_str(entry);
+            s.push('\n');
+        }
+        if entries.len() > SNAPSHOT_MAX_ENTRIES {
+            s.push_str(&format!(
+                "… and {} more\n",
+                entries.len() - SNAPSHOT_MAX_ENTRIES
+            ));
+        }
+    }
+    Some(s)
+}
+
 pub async fn load_git_history(
     exec: &dyn Executor,
     root: &Path,
@@ -448,6 +491,48 @@ mod tests {
             .unwrap();
         assert_eq!(second.commits.len(), 1);
         assert!(second.complete);
+    }
+
+    #[tokio::test]
+    async fn working_tree_snapshot_lists_dirty_and_untracked() {
+        let dir = tempfile::tempdir().unwrap();
+        git(dir.path(), "init").await;
+        git(dir.path(), "config user.name Clark").await;
+        git(dir.path(), "config user.email clark@example.com").await;
+        tokio::fs::write(dir.path().join("a.txt"), "one")
+            .await
+            .unwrap();
+        git(dir.path(), "add a.txt").await;
+        git(dir.path(), "commit -m initial").await;
+
+        // Clean tree says so explicitly (so the model doesn't guess).
+        let clean = working_tree_snapshot(&LocalExecutor, dir.path())
+            .await
+            .unwrap();
+        assert!(clean.contains("Branch: "));
+        assert!(clean.contains("No uncommitted changes."));
+
+        // A modified and an untracked file both show up as entries.
+        tokio::fs::write(dir.path().join("a.txt"), "two")
+            .await
+            .unwrap();
+        tokio::fs::write(dir.path().join("b.txt"), "new")
+            .await
+            .unwrap();
+        let dirty = working_tree_snapshot(&LocalExecutor, dir.path())
+            .await
+            .unwrap();
+        assert!(dirty.contains("a.txt"), "{dirty}");
+        assert!(dirty.contains("b.txt"), "{dirty}");
+        assert!(dirty.contains("leave them alone"), "{dirty}");
+    }
+
+    #[tokio::test]
+    async fn working_tree_snapshot_is_none_outside_git() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(working_tree_snapshot(&LocalExecutor, dir.path())
+            .await
+            .is_none());
     }
 
     #[tokio::test]

@@ -17,10 +17,7 @@ import {
 } from "../lib/commandPolicy";
 import { clarkBillingUrl, openExternal } from "../lib/account";
 import { useAppVersion } from "../lib/appInfo";
-import {
-  projectKnowledgeEnabled,
-  setProjectKnowledgeEnabled,
-} from "../lib/repositoryKnowledge";
+import { OrganizationKnowledgeSettings } from "./OrganizationKnowledgeSettings";
 
 const input =
   "w-full rounded-lg border border-border bg-bg px-2.5 py-1.5 text-sm text-ink outline-none transition focus:border-accent placeholder:text-ink-muted";
@@ -108,7 +105,6 @@ function GeneralSection({
   const browserEnabled = useSessionStore((s) => s.browserEnabled);
   const setBrowserEnabled = useSessionStore((s) => s.setBrowserEnabled);
   const setMemoriesEnabled = useSessionStore((s) => s.setMemoriesEnabled);
-  const [projectKnowledge, setProjectKnowledge] = useState(projectKnowledgeEnabled);
 
   const themeBtn = (isDark: boolean, Icon: typeof Sun, text: string) => (
     <button
@@ -219,24 +215,6 @@ function GeneralSection({
           >
             <Toggle on={memoriesEnabled} onClick={() => setMemoriesEnabled(!memoriesEnabled)} label="Enable memories" />
           </Row>
-          <Row
-            name={
-              <span className="flex items-center gap-2">
-                <FolderGit2 className="size-4 text-ink-muted" /> Project knowledge
-              </span>
-            }
-            sub="Sync Git identity and history for repositories inside your selected folder"
-          >
-            <Toggle
-              on={projectKnowledge}
-              onClick={() => {
-                const next = !projectKnowledge;
-                setProjectKnowledgeEnabled(next);
-                setProjectKnowledge(next);
-              }}
-              label="Sync project knowledge"
-            />
-          </Row>
         </Card>
       </div>
 
@@ -315,6 +293,8 @@ function ProjectSection() {
         />
         <p className="mt-1.5 text-xs text-ink-faint">Clark tier id (see GET /v1/models).</p>
       </div>
+
+      <OrganizationKnowledgeSettings />
 
       <div>
         <GroupLabel>API key</GroupLabel>

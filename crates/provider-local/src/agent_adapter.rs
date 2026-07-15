@@ -862,6 +862,7 @@ fn tool_title(name: &str, args: &Value) -> String {
     match name {
         "propose_plan" => return "Proposed a plan".to_string(),
         "update_plan" => return "Updated the plan".to_string(),
+        "organization_knowledge" => return "Searched organization knowledge".to_string(),
         _ => {}
     }
     let salient = ["path", "pattern", "command", "query", "old_string"]

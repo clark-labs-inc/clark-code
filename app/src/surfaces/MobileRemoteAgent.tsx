@@ -19,23 +19,11 @@ import {
   repositoriesUnderRoot,
   syncRepositoriesUnderRoot,
 } from "../lib/repositoryKnowledge";
+import { desktopHostId } from "../lib/desktopHost";
 
-const HOST_ID_KEY = "clark-desktop:code-remote-host-id";
 const LOOP_INTERVAL_MS = 500;
 const HOST_HEARTBEAT_INTERVAL_MS = 30_000;
 const COMMAND_POLL_WAIT_MS = 25_000;
-
-function getHostId(): string {
-  try {
-    const existing = localStorage.getItem(HOST_ID_KEY);
-    if (existing) return existing;
-    const next = crypto.randomUUID();
-    localStorage.setItem(HOST_ID_KEY, next);
-    return next;
-  } catch {
-    return "desktop";
-  }
-}
 
 function leaf(path: string): string {
   return path.split(/[\\/]/).filter(Boolean).pop() || path || "Project";
@@ -261,7 +249,7 @@ export function MobileRemoteAgent() {
 
   useEffect(() => {
     if (!auth) return;
-    const hostId = getHostId();
+    const hostId = desktopHostId();
     let stopped = false;
     lastHeartbeatRef.current = 0;
 

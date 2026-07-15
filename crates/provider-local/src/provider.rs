@@ -129,6 +129,14 @@ impl Provider for LocalAgentProvider {
                 }),
             });
         let mut registry = ToolRegistry::new(local.clark.clone(), memory);
+        if let Some(api_key) = local.api_key.clone() {
+            registry.enable_organization_knowledge(
+                crate::tools::organization_knowledge::OrganizationKnowledgeConfig {
+                    base_url: local.base_url.clone(),
+                    api_key,
+                },
+            );
+        }
         if local.browser_enabled {
             registry.enable_browser();
         }
@@ -355,14 +363,24 @@ impl Provider for LocalAgentProvider {
             crate::platform::repository_context_section(&context)
         };
 
-        // Attachment extraction/vision and repository recall are independent
-        // preflight work. Overlap them so first-token latency is bounded by
-        // the slower branch instead of adding both durations together.
-        let (attachment_context, repository_context) =
-            tokio::join!(attachment_context, repository_context);
+        // The tree may be shared with other agents, so git state is re-taken
+        // per turn (a session-start snapshot would go stale) and lands in the
+        // turn message, keeping the cached system-prompt prefix stable.
+        let git_snapshot =
+            crate::repository::working_tree_snapshot(self.executor.as_ref(), sandbox.root());
+
+        // Attachment extraction/vision, repository recall, and the git
+        // snapshot are independent preflight work. Overlap them so
+        // first-token latency is bounded by the slowest branch instead of
+        // adding the durations together.
+        let (attachment_context, repository_context, git_snapshot) =
+            tokio::join!(attachment_context, repository_context, git_snapshot);
         text.push_str(&attachment_context);
         if let Some(section) = repository_context {
             text = format!("{section}\n\nUser request:\n{text}");
+        }
+        if let Some(git) = git_snapshot {
+            text = format!("{git}\n{text}");
         }
         let text = {
             let s = self.session.lock().await;

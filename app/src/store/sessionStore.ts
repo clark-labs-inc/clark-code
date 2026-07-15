@@ -1047,19 +1047,21 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       const project = isLocal
         ? (isRemote ? remote?.cwd : localSettings.cwd.trim()) || undefined
         : undefined;
+      const now = Date.now();
+      const conversationMeta: ConversationMeta = {
+        id: session.id,
+        title: "New conversation",
+        provider: activeProvider,
+        project,
+        remoteHost: remoteHost ?? undefined,
+        mode: session.mode,
+        createdAt: now,
+        updatedAt: now,
+      };
       await bindCloudTrajectory(
         bridge,
         session,
-        {
-          id: session.id,
-          title: "New conversation",
-          provider: activeProvider,
-          project,
-          remoteHost: remoteHost ?? undefined,
-          mode: session.mode,
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
-        },
+        conversationMeta,
         get().auth,
         {
           projectMode: get().projectMode,
@@ -1093,6 +1095,10 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         opening: null,
         historyPrefix: null,
         queued: [],
+        conversations: [
+          conversationMeta,
+          ...get().conversations.filter((c) => c.id !== session.id),
+        ],
         activeRemote: remote,
         activeRemoteHost: remoteHost,
       });

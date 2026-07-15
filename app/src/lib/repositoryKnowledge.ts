@@ -1,5 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { CloudCreds } from "./cloudHistory";
+import {
+  organizationForRepository,
+  uploadOrganizationRepositoryBatch,
+} from "./organizationKnowledge";
 
 const ENABLED_KEY = "clark-desktop:project-knowledge-enabled";
 const CURSOR_PREFIX = "clark-desktop:project-knowledge-cursor:";
@@ -205,6 +209,10 @@ export async function syncRepositoriesUnderRoot(
 }
 
 function upload(creds: CloudCreds, batch: GitHistoryBatch): Promise<SyncResponse> {
+  const organizationId = organizationForRepository(batch.repository.fingerprint);
+  if (organizationId) {
+    return uploadOrganizationRepositoryBatch<SyncResponse>(creds, organizationId, batch);
+  }
   return invoke<SyncResponse>("desktop_code_repository_sync", {
     endpoint: creds.endpoint,
     token: creds.token,

@@ -30,6 +30,7 @@ pub mod grep;
 pub mod ios_simulator;
 pub mod memory;
 pub mod mobile;
+pub mod organization_knowledge;
 pub mod plan;
 pub mod shell;
 pub mod web_fetch;
@@ -329,6 +330,19 @@ impl ToolRegistry {
         self.tools.push(Arc::new(browser::BrowserTool::new()));
     }
 
+    /// Register organization recall independently of the optional research
+    /// agent. A Platform key is sufficient; authorization is rechecked by the
+    /// service for every read.
+    pub fn enable_organization_knowledge(
+        &mut self,
+        config: organization_knowledge::OrganizationKnowledgeConfig,
+    ) {
+        self.tools
+            .push(Arc::new(organization_knowledge::OrganizationKnowledgeTool::new(
+                config,
+            )));
+    }
+
     /// Connect the configured MCP servers and register their tools. A server
     /// that fails to start is skipped (not fatal); the returned statuses let the
     /// UI show what connected. Tool-name collisions are dropped (first wins).
@@ -482,6 +496,21 @@ mod tests {
         assert!(on.get("memory").is_some());
         // Memory writes are curated + path-constrained, so they don't gate.
         assert!(!on.get("memory").unwrap().mutating());
+    }
+
+    #[test]
+    fn organization_knowledge_is_an_explicit_read_only_registry_plugin() {
+        let mut registry = ToolRegistry::new(None, None);
+        assert!(registry.get("organization_knowledge").is_none());
+        registry.enable_organization_knowledge(
+            organization_knowledge::OrganizationKnowledgeConfig {
+                base_url: "https://api.clarkslabs.com/v1".into(),
+                api_key: "ck_live_test".into(),
+            },
+        );
+        let tool = registry.get("organization_knowledge").unwrap();
+        assert!(!tool.mutating());
+        assert_eq!(tool.kind(), ToolKind::Research);
     }
 
     #[test]

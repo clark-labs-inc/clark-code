@@ -139,6 +139,8 @@ pub fn run() {
             mobile_remote::desktop_code_command_poll,
             mobile_remote::desktop_code_command_ack,
             mobile_remote::desktop_code_repository_sync,
+            mobile_remote::desktop_organization_knowledge_status,
+            mobile_remote::desktop_organization_repository_sync,
             terminal::terminal_open,
             terminal::terminal_write,
             terminal::terminal_resize,

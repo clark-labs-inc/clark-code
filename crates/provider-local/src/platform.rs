@@ -9,7 +9,7 @@
 
 use std::time::Duration;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use url::Url;
 
 /// One personal memory returned by `GET /v1/memories`.
@@ -45,6 +45,39 @@ pub struct RepositoryContext {
     pub default_branch: Option<String>,
     #[serde(default)]
     pub commits: Vec<RepositoryCommitContext>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct OrganizationKnowledgeHit {
+    pub claim_id: String,
+    pub subject: String,
+    pub predicate: String,
+    pub object: String,
+    pub fact_kind: String,
+    pub confidence: f32,
+    pub status: String,
+    pub valid_from: Option<String>,
+    pub valid_to: Option<String>,
+    pub observed_at: String,
+    pub source_kind: String,
+    pub source_display_name: String,
+    pub evidence_locator: Option<String>,
+    pub evidence_excerpt: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct OrganizationKnowledgePacket {
+    pub organization_id: String,
+    pub query: String,
+    #[serde(default)]
+    pub hits: Vec<OrganizationKnowledgeHit>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct OrganizationKnowledgeResponse {
+    pub query: String,
+    #[serde(default)]
+    pub organizations: Vec<OrganizationKnowledgePacket>,
 }
 
 /// Fetch the signed-in user's personal memories from Clark. Best-effort: a short
@@ -142,6 +175,43 @@ pub async fn recall_repository_context(
     response.json().await.map_err(|error| error.to_string())
 }
 
+pub async fn recall_organization_knowledge(
+    base_url: &str,
+    api_key: &str,
+    query: &str,
+    organization_id: Option<&str>,
+    limit: i64,
+) -> Result<OrganizationKnowledgeResponse, String> {
+    let mut url = Url::parse(base_url).map_err(|error| error.to_string())?;
+    url.path_segments_mut()
+        .map_err(|_| "Clark Platform URL cannot be a base URL".to_string())?
+        .extend(["organization-knowledge", "search"]);
+    url.query_pairs_mut()
+        .append_pair("query", query)
+        .append_pair("limit", &limit.clamp(1, 50).to_string());
+    if let Some(organization_id) = organization_id.filter(|value| !value.trim().is_empty()) {
+        url.query_pairs_mut()
+            .append_pair("organization_id", organization_id);
+    }
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .map_err(|error| error.to_string())?;
+    let response = client
+        .get(url)
+        .bearer_auth(api_key)
+        .send()
+        .await
+        .map_err(|error| error.to_string())?;
+    if !response.status().is_success() {
+        return Err(format!(
+            "organization knowledge request returned {}",
+            response.status()
+        ));
+    }
+    response.json().await.map_err(|error| error.to_string())
+}
+
 pub fn repository_context_section(context: &RepositoryContext) -> Option<String> {
     if context.commits.is_empty() {
         return None;
@@ -191,6 +261,7 @@ fn single_line(value: &str, max_chars: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     #[test]
     fn repository_context_is_bounded_and_provenanced() {
@@ -237,5 +308,41 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["global", "current"]
         );
+    }
+
+    #[tokio::test]
+    async fn organization_recall_uses_scoped_authenticated_platform_route() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut buffer = vec![0_u8; 8192];
+            let read = stream.read(&mut buffer).await.unwrap();
+            let request = String::from_utf8_lossy(&buffer[..read]);
+            assert!(request.starts_with(
+                "GET /v1/organization-knowledge/search?query=checkout+decision&limit=50&organization_id=org-1 HTTP/1.1"
+            ));
+            assert!(request.to_ascii_lowercase().contains("authorization: bearer ck_test"));
+            let body = r#"{"query":"checkout decision","organizations":[{"organization_id":"org-1","query":"checkout decision","hits":[]}]}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                body.len(), body
+            );
+            stream.write_all(response.as_bytes()).await.unwrap();
+        });
+
+        let response = recall_organization_knowledge(
+            &format!("http://{address}/v1"),
+            "ck_test",
+            "checkout decision",
+            Some("org-1"),
+            500,
+        )
+        .await
+        .unwrap();
+        server.await.unwrap();
+
+        assert_eq!(response.organizations.len(), 1);
+        assert_eq!(response.organizations[0].organization_id, "org-1");
     }
 }

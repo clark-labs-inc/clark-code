@@ -118,3 +118,53 @@ pub async fn desktop_code_repository_sync(
         .map_err(|e| format!("Clark Code repository sync request failed: {e}"))?;
     read_json_or_err(resp, "Clark Code repository sync").await
 }
+
+/// Return only organizations where organizational memory is both enabled and
+/// accessible to the signed-in user. The desktop still requires a separate,
+/// per-repository local opt-in before contributing anything.
+#[tauri::command]
+pub async fn desktop_organization_knowledge_status(
+    endpoint: String,
+    token: String,
+) -> Result<Value, String> {
+    let url = format!(
+        "{}/api/desktop/organization-knowledge",
+        clark_rest_base(&endpoint)
+    );
+    let resp = clark_http_client()?
+        .get(url)
+        .header("Authorization", format!("Bearer {token}"))
+        .send()
+        .await
+        .map_err(|e| format!("Organization knowledge status request failed: {e}"))?;
+    read_json_or_err(resp, "Organization knowledge status").await
+}
+
+/// Contribute one already-bounded repository-history batch to an explicitly
+/// selected organization. The backend also performs the user's personal
+/// repository sync so the client never has to upload the same batch twice.
+#[tauri::command]
+pub async fn desktop_organization_repository_sync(
+    endpoint: String,
+    token: String,
+    organization_id: String,
+    host_id: String,
+    batch: Value,
+) -> Result<Value, String> {
+    let url = format!(
+        "{}/api/desktop/organization-knowledge/repositories",
+        clark_rest_base(&endpoint)
+    );
+    let resp = clark_http_client()?
+        .post(url)
+        .header("Authorization", format!("Bearer {token}"))
+        .json(&serde_json::json!({
+            "organization_id": organization_id,
+            "host_id": host_id,
+            "batch": batch,
+        }))
+        .send()
+        .await
+        .map_err(|e| format!("Organization repository sync request failed: {e}"))?;
+    read_json_or_err(resp, "Organization repository sync").await
+}
