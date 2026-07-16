@@ -1,6 +1,6 @@
 //! Full-stack live test: the **real agent loop + real Clark model** driving the
 //! coding tools on a **remote host** over SSH. This is the end-to-end path a user
-//! takes — `ssh.rs` brings up the exec-server (fetched from the CDN), the
+//! takes — `ssh.rs` uploads the requested development exec-server, the
 //! `LocalAgentProvider` connects its `RemoteExecutor` through the tunnel, and the
 //! model is asked to write a file + run a command **on the remote**.
 //!
@@ -10,13 +10,18 @@
 //! CLARK_SSH_TEST_HOST=scl \
 //! CLARK_SSH_TEST_ROOT=/home/ubuntu/clark-remote-test \
 //! CLARK_API_KEY=ck_live_… \
-//! cargo test -p clark-desktop --test remote_agent_e2e -- --ignored --nocapture
+//! CLARK_CODE_BASE_URL=https://api.clarkslabs.com/v1 \
+//! CLARK_CODE_MODEL=clark-code \
+//! CLARK_SSH_TEST_BIN=target/x86_64-unknown-linux-musl/release/clark-exec-server \
+//! CLARK_REMOTE_LIVE=1 \
+//! cargo test -p clark-desktop --test remote_agent_e2e -- --ignored --nocapture --test-threads=1
 //! ```
 
+use std::path::PathBuf;
 use std::process::Command;
 use std::time::Duration;
 
-use agent_core::domain::AgentEvent;
+use agent_core::domain::{AgentEvent, RunOutcome, RunStatus};
 use agent_core::provider::{ClientResponse, PromptInput, Provider, ProviderConfig, SessionOptions};
 use clark_desktop_lib::ssh::{self, RemoteSpec};
 use futures::StreamExt;
@@ -25,33 +30,62 @@ use serde_json::json;
 const MARKER: &str = "agent_remote_proof.txt";
 const CONTENT: &str = "clark-code-remote-ok";
 
+struct LiveEnv {
+    host: String,
+    root: String,
+    key: String,
+    base_url: String,
+    model: String,
+    binary: PathBuf,
+}
+
+fn live_env() -> Option<LiveEnv> {
+    if std::env::var("CLARK_REMOTE_LIVE").as_deref() != Ok("1") {
+        eprintln!("skipping: set CLARK_REMOTE_LIVE=1 to authorize a paid live run");
+        return None;
+    }
+    let required = |name: &str| -> String {
+        std::env::var(name)
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| panic!("{name} is required when CLARK_REMOTE_LIVE=1"))
+    };
+    Some(LiveEnv {
+        host: required("CLARK_SSH_TEST_HOST"),
+        root: required("CLARK_SSH_TEST_ROOT"),
+        key: required("CLARK_API_KEY"),
+        base_url: required("CLARK_CODE_BASE_URL"),
+        model: required("CLARK_CODE_MODEL"),
+        binary: PathBuf::from(required("CLARK_SSH_TEST_BIN")),
+    })
+}
+
+fn assert_done(outcome: Option<RunOutcome>, tools: &[String], text: &str) {
+    let outcome = outcome.expect("the run stream ended without a terminal outcome");
+    eprintln!("usage: {:?}", outcome.usage);
+    assert_eq!(outcome.status, RunStatus::Done, "tools: {tools:?}; text: {text}");
+}
+
 #[tokio::test]
 #[ignore = "needs a live SSH host + a real ck_live_ key; see file header"]
 async fn agent_writes_a_file_and_runs_a_command_on_the_remote() {
-    let (Ok(host), Ok(root), Ok(key)) = (
-        std::env::var("CLARK_SSH_TEST_HOST"),
-        std::env::var("CLARK_SSH_TEST_ROOT"),
-        std::env::var("CLARK_API_KEY"),
-    ) else {
-        eprintln!("skipping: set CLARK_SSH_TEST_HOST / _ROOT and CLARK_API_KEY");
-        return;
-    };
+    let Some(env) = live_env() else { return };
 
     // Clean slate on the remote.
     let _ = Command::new("ssh")
         .args([
             "-o",
             "ConnectTimeout=10",
-            &host,
-            &format!("mkdir -p {root}; rm -f {root}/{MARKER}"),
+            &env.host,
+            &format!("mkdir -p {root}; rm -f {root}/{MARKER}", root = env.root),
         ])
         .status();
 
-    // 1) Bring up the remote server + tunnel (binary fetched from the CDN).
+    // 1) Bring up the remote server + tunnel using this working tree's binary.
     let conn = ssh::connect(&RemoteSpec {
-        host: host.clone(),
-        remote_root: root.clone(),
-        local_binary: None,
+        host: env.host.clone(),
+        remote_root: env.root.clone(),
+        local_binary: Some(env.binary.clone()),
     })
     .await
     .expect("ssh::connect");
@@ -61,12 +95,14 @@ async fn agent_writes_a_file_and_runs_a_command_on_the_remote() {
     let mut provider = provider_local::LocalAgentProvider::new();
     provider
         .connect(ProviderConfig {
-            auth_token: Some(key),
+            auth_token: Some(env.key.clone()),
             extra: json!({
+                "model": env.model.clone(),
+                "base_url": env.base_url.clone(),
                 "research": false,
                 // Auto-allow the mutating tools so the loop runs unattended.
-                "permissions": { "write_file": "allow", "edit_file": "allow", "bash": "allow" },
-                "remote": { "ws_url": conn.ws_url, "token": conn.token, "cwd": root },
+                "permissions": { "write_file": "allow", "edit_file": "allow", "apply_patch": "allow", "bash": "allow" },
+                "remote": { "ws_url": conn.ws_url, "token": conn.token, "cwd": env.root.clone() },
             }),
             ..Default::default()
         })
@@ -81,7 +117,7 @@ async fn agent_writes_a_file_and_runs_a_command_on_the_remote() {
     // 3) Ask the model to do real work on the remote.
     let prompt = format!(
         "You are working in a remote project. Do exactly these two things, then stop:\n\
-         1. Create a file named `{MARKER}` in the project root whose entire contents are this one line: {CONTENT}\n\
+         1. Create a file named `{MARKER}` in the project root with exactly `{CONTENT}` followed by one newline and no other bytes.\n\
          2. Run the shell command `hostname` and tell me its output.\n\
          Use your tools. Do not ask for confirmation."
     );
@@ -92,11 +128,13 @@ async fn agent_writes_a_file_and_runs_a_command_on_the_remote() {
 
     // 4) Drive the loop to completion (auto-approve any gate, just in case).
     let mut text = String::new();
-    let mut tool_titles = Vec::new();
-    let finished = tokio::time::timeout(Duration::from_secs(180), async {
+    let mut tools = Vec::new();
+    let status = tokio::time::timeout(Duration::from_secs(180), async {
         while let Some(ev) = stream.next().await {
             match ev {
-                AgentEvent::ToolCall { call, .. } => tool_titles.push(call.title),
+                AgentEvent::ToolCall { call, .. } => {
+                    tools.push(call.tool_name.unwrap_or(call.title));
+                }
                 AgentEvent::MessageChunk {
                     delta: agent_core::domain::ContentBlock::Text { text: t },
                     ..
@@ -112,18 +150,23 @@ async fn agent_writes_a_file_and_runs_a_command_on_the_remote() {
                         )
                         .await;
                 }
-                AgentEvent::RunFinished { .. } => return true,
+                AgentEvent::RunFinished { outcome, .. } => return Some(outcome),
                 _ => {}
             }
         }
-        false
+        None
     })
     .await
     .expect("agent run timed out");
 
-    eprintln!("tools: {tool_titles:?}");
+    eprintln!("tools: {tools:?}");
     eprintln!("final text: {text}");
-    assert!(finished, "the run did not finish cleanly");
+    assert_done(status, &tools, &text);
+    assert!(
+        tools.iter().any(|tool| tool == "write_file" || tool == "apply_patch"),
+        "expected a file mutation tool: {tools:?}"
+    );
+    assert!(tools.iter().any(|tool| tool == "bash"), "expected bash: {tools:?}");
 
     // 5) The real proof: the file the *model* asked to create exists **on the
     //    remote**, with the content it was told to write.
@@ -131,16 +174,17 @@ async fn agent_writes_a_file_and_runs_a_command_on_the_remote() {
         .args([
             "-o",
             "ConnectTimeout=10",
-            &host,
-            &format!("cat {root}/{MARKER}"),
+            &env.host,
+            &format!("cat {root}/{MARKER}", root = env.root),
         ])
         .output()
         .expect("ssh cat");
     let on_remote = String::from_utf8_lossy(&out.stdout);
     eprintln!("remote file contents: {on_remote:?}");
-    assert!(
-        on_remote.contains(CONTENT),
-        "the agent's file did not land on the remote with the expected content; got {on_remote:?}"
+    assert_eq!(
+        on_remote,
+        format!("{CONTENT}\n"),
+        "the agent's file did not land on the remote with exact contents"
     );
 
     // Cleanup.
@@ -148,8 +192,8 @@ async fn agent_writes_a_file_and_runs_a_command_on_the_remote() {
         .args([
             "-o",
             "ConnectTimeout=10",
-            &host,
-            &format!("rm -f {root}/{MARKER}"),
+            &env.host,
+            &format!("rm -f {root}/{MARKER}", root = env.root),
         ])
         .status();
     drop(conn);
@@ -163,20 +207,13 @@ async fn agent_writes_a_file_and_runs_a_command_on_the_remote() {
 #[tokio::test]
 #[ignore = "needs a live SSH host + a real ck_live_ key; see file header"]
 async fn remote_agent_selects_and_follows_a_claude_skill() {
-    let (Ok(host), Ok(root), Ok(key)) = (
-        std::env::var("CLARK_SSH_TEST_HOST"),
-        std::env::var("CLARK_SSH_TEST_ROOT"),
-        std::env::var("CLARK_API_KEY"),
-    ) else {
-        eprintln!("skipping: set CLARK_SSH_TEST_HOST / _ROOT and CLARK_API_KEY");
-        return;
-    };
+    let Some(env) = live_env() else { return };
 
     // Seed three skills on the remote; only `release-notes` is asked for. The
     // marker lines exist ONLY inside the SKILL.md, so producing them proves the
     // agent read + followed the skill.
     let seed = format!(
-        "rm -rf {root}/.claude {root}/RELEASE_NOTES.md {root}/CHANGELOG.md {root}/GREETING.txt; \
+         "rm -rf {root}/.claude {root}/RELEASE_NOTES.md {root}/CHANGELOG.md {root}/GREETING.txt; \
          mkdir -p {root}/.claude/skills/release-notes {root}/.claude/skills/changelog {root}/.claude/skills/greeter && \
          printf '%s\\n' '---' 'name: release-notes' 'description: Generate release notes for this project when the user asks for release notes.' '---' \
            'When asked for release notes, create RELEASE_NOTES.md in the project root. Its FIRST line must be exactly:' \
@@ -185,11 +222,12 @@ async fn remote_agent_selects_and_follows_a_claude_skill() {
          printf '%s\\n' '---' 'name: changelog' 'description: Maintain a CHANGELOG.md.' '---' 'Create CHANGELOG.md.' \
            > {root}/.claude/skills/changelog/SKILL.md && \
          printf '%s\\n' '---' 'name: greeter' 'description: Say hello in GREETING.txt.' '---' 'Create GREETING.txt.' \
-           > {root}/.claude/skills/greeter/SKILL.md"
+           > {root}/.claude/skills/greeter/SKILL.md",
+        root = env.root
     );
     assert!(
         Command::new("ssh")
-            .args(["-o", "ConnectTimeout=10", &host, &seed])
+            .args(["-o", "ConnectTimeout=10", &env.host, &seed])
             .status()
             .expect("seed")
             .success(),
@@ -197,9 +235,9 @@ async fn remote_agent_selects_and_follows_a_claude_skill() {
     );
 
     let conn = ssh::connect(&RemoteSpec {
-        host: host.clone(),
-        remote_root: root.clone(),
-        local_binary: None,
+        host: env.host.clone(),
+        remote_root: env.root.clone(),
+        local_binary: Some(env.binary.clone()),
     })
     .await
     .expect("ssh::connect");
@@ -208,11 +246,13 @@ async fn remote_agent_selects_and_follows_a_claude_skill() {
     let mut provider = provider_local::LocalAgentProvider::new();
     provider
         .connect(ProviderConfig {
-            auth_token: Some(key),
+            auth_token: Some(env.key.clone()),
             extra: json!({
+                "model": env.model.clone(),
+                "base_url": env.base_url.clone(),
                 "research": false,
-                "permissions": { "write_file": "allow", "edit_file": "allow", "bash": "allow" },
-                "remote": { "ws_url": conn.ws_url, "token": conn.token, "cwd": root },
+                "permissions": { "write_file": "allow", "edit_file": "allow", "apply_patch": "allow", "bash": "allow" },
+                "remote": { "ws_url": conn.ws_url, "token": conn.token, "cwd": env.root.clone() },
             }),
             ..Default::default()
         })
@@ -235,7 +275,7 @@ async fn remote_agent_selects_and_follows_a_claude_skill() {
 
     let mut tools = Vec::new();
     let mut text = String::new();
-    let finished = tokio::time::timeout(Duration::from_secs(180), async {
+    let status = tokio::time::timeout(Duration::from_secs(180), async {
         while let Some(ev) = stream.next().await {
             match ev {
                 AgentEvent::ToolCall { call, .. } => tools.push(call.title),
@@ -254,17 +294,17 @@ async fn remote_agent_selects_and_follows_a_claude_skill() {
                         )
                         .await;
                 }
-                AgentEvent::RunFinished { .. } => return true,
+                AgentEvent::RunFinished { outcome, .. } => return Some(outcome),
                 _ => {}
             }
         }
-        false
+        None
     })
     .await
     .expect("timed out");
     eprintln!("tools: {tools:?}");
     eprintln!("final: {text}");
-    assert!(finished, "run did not finish");
+    assert_done(status, &tools, &text);
 
     // The agent must have consulted the skill file.
     assert!(
@@ -280,8 +320,11 @@ async fn remote_agent_selects_and_follows_a_claude_skill() {
         .args([
             "-o",
             "ConnectTimeout=10",
-            &host,
-            &format!("cat {root}/RELEASE_NOTES.md 2>/dev/null; echo '<<<'; ls {root}"),
+            &env.host,
+            &format!(
+                "cat {root}/RELEASE_NOTES.md 2>/dev/null; echo '<<<'; ls {root}",
+                root = env.root
+            ),
         ])
         .output()
         .expect("cat");
@@ -300,8 +343,12 @@ async fn remote_agent_selects_and_follows_a_claude_skill() {
         "the greeter skill should not have run: {out}"
     );
 
+    let cleanup = format!(
+        "rm -rf {root}/.claude {root}/RELEASE_NOTES.md {root}/CHANGELOG.md {root}/GREETING.txt",
+        root = env.root
+    );
     let _ = Command::new("ssh")
-        .args(["-o", "ConnectTimeout=10", &host, &format!("rm -rf {root}/.claude {root}/RELEASE_NOTES.md {root}/CHANGELOG.md {root}/GREETING.txt")])
+        .args(["-o", "ConnectTimeout=10", &env.host, &cleanup])
         .status();
     drop(conn);
     tokio::time::sleep(Duration::from_millis(200)).await;

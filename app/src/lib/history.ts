@@ -9,7 +9,12 @@
 // any chats left behind by prior local-first versions into memory so the store
 // can upload them to the cloud, then deletes the local keys.
 
-import type { Snapshot } from "../core-bridge/types";
+import type {
+  ContentBlock,
+  ResumeItem,
+  ResumeTranscript,
+  Snapshot,
+} from "../core-bridge/types";
 
 export interface ConversationMeta {
   /** Provider session/conversation id — the key used to resume. */
@@ -75,35 +80,74 @@ export function settleRuns(snapshot: Snapshot): Snapshot {
   return { ...snapshot, runs, tool_calls, pending_permission: undefined };
 }
 
-/** Render a persisted transcript as plain text for the model. Providers that
- *  can't resume server-side (the local agent) get this as `resume_context` so
- *  a reopened conversation continues instead of starting from scratch. Keeps
- *  the TAIL under `budget` chars — the recent turns are what "continue" needs. */
-export function renderResumeContext(snapshot: Snapshot, budget = 24000): string | null {
-  const lines: string[] = [];
+function replayBlocks(blocks: ContentBlock[]): ContentBlock[] {
+  return blocks.filter((block) => block.type !== "thinking");
+}
+
+function trimItemToBudget(item: ResumeItem, budget: number): ResumeItem {
+  const suffix = (blocks: ContentBlock[]) => {
+    const text = blocks
+      .map((block) => (block.type === "text" ? block.text : `[${block.type}]`))
+      .join("");
+    return [{ type: "text" as const, text: `…${text.slice(-Math.max(0, budget - 200))}` }];
+  };
+  if (item.item === "message") return { ...item, blocks: suffix(item.blocks) };
+  return { ...item, arguments: undefined, content: suffix(item.content) };
+}
+
+/** Build typed provider history for a reopened conversation. Recent items are
+ * retained under a bounded serialized budget; tool arguments/results stay
+ * structured instead of being flattened into ambiguous system-prompt prose. */
+export function buildResumeTranscript(
+  snapshot: Snapshot,
+  budget = 24000,
+): ResumeTranscript | null {
+  const items: ResumeItem[] = [];
   for (const item of snapshot.timeline) {
     if (item.item === "message") {
-      const text = item.blocks
-        .map((b) => (b.type === "text" ? b.text : `[${b.type}]`))
-        .join("")
-        // Thinking spans are narration, not conversation — drop them so the
-        // budget goes to real turns.
-        .replace(/<thinking>[\s\S]*?(<\/thinking>|$)/g, "")
-        .trim();
-      if (text) lines.push(`${item.role === "user" ? "User" : "Assistant"}: ${text}`);
+      const blocks = replayBlocks(item.blocks).map((block) =>
+        block.type === "text"
+          ? { ...block, text: block.text.replace(/<thinking>[\s\S]*?(<\/thinking>|$)/g, "") }
+          : block,
+      );
+      if (blocks.length > 0) items.push({ item: "message", role: item.role, blocks });
     } else if (item.item === "tool_call") {
-      const t = snapshot.tool_calls[item.id];
-      if (!t) continue;
-      const loc = t.locations?.[0]?.path;
-      lines.push(`[${t.kind}] ${t.title}${loc ? ` — ${loc}` : ""} (${t.status})`);
+      const tool = snapshot.tool_calls[item.id];
+      if (!tool) continue;
+      items.push({
+        item: "tool_call",
+        id: tool.id,
+        tool_name: tool.tool_name,
+        title: tool.title,
+        kind: tool.kind,
+        status: tool.status,
+        locations: tool.locations,
+        arguments: tool.raw_input,
+        content: replayBlocks(tool.content),
+      });
     }
   }
-  if (lines.length === 0) return null;
-  let out = lines.join("\n\n");
-  if (out.length > budget) {
-    out = "(earlier history truncated)\n\n…" + out.slice(out.length - budget);
+  if (items.length === 0) return null;
+
+  const kept: ResumeItem[] = [];
+  let remaining = budget;
+  let truncated = false;
+  for (let index = items.length - 1; index >= 0; index--) {
+    const item = items[index];
+    const cost = JSON.stringify(item).length;
+    if (cost <= remaining) {
+      kept.push(item);
+      remaining -= cost;
+      continue;
+    }
+    truncated = true;
+    if (kept.length === 0 && remaining > 256) {
+      kept.push(trimItemToBudget(item, remaining));
+    }
+    break;
   }
-  return out;
+  kept.reverse();
+  return { items: kept, truncated: truncated || kept.length < items.length };
 }
 
 /** First user message → a compact title; falls back to a generic label. */

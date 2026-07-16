@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 
 /// Bumped on any breaking change to the methods/params below. The server
 /// refuses to serve a client advertising a different major value.
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
 
 /// Method names. String constants (not an enum) so unknown methods round-trip to
 /// a clean "method not found" error instead of a deserialize failure.
@@ -32,11 +32,15 @@ pub mod method {
     pub const FS_READ: &str = "fs/read";
     pub const FS_WRITE: &str = "fs/write";
     pub const FS_CREATE_DIR: &str = "fs/createDir";
+    pub const FS_REMOVE_FILE: &str = "fs/removeFile";
+    pub const FS_REMOVE_DIR: &str = "fs/removeDir";
     pub const FS_READ_DIR: &str = "fs/readDir";
     pub const FS_METADATA: &str = "fs/metadata";
     pub const FS_WALK: &str = "fs/walk";
     pub const PROCESS_START: &str = "process/start";
     pub const PROCESS_RESUME: &str = "process/resume";
+    pub const PROCESS_STATUS: &str = "process/status";
+    pub const PROCESS_INPUT: &str = "process/input";
     pub const PROCESS_CANCEL: &str = "process/cancel";
     /// Notification: a chunk of process output.
     pub const PROCESS_OUTPUT: &str = "process/output";
@@ -206,6 +210,7 @@ pub struct MetaResult {
     pub modified_ms: Option<u64>,
     pub len: u64,
     pub is_dir: bool,
+    pub is_symlink: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -242,6 +247,27 @@ pub struct ProcessResumeParams {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ProcessIdParams {
     pub process_id: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ProcessStatusParams {
+    pub process_id: String,
+    pub after_seq: u64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ProcessStatusResult {
+    pub output: Vec<ProcessOutputParams>,
+    pub exit: Option<ProcessExitParams>,
+    pub truncated_before_seq: Option<u64>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ProcessInputParams {
+    pub process_id: String,
+    pub data: String,
+    #[serde(default)]
+    pub close: bool,
 }
 
 /// Which stream a [`method::PROCESS_OUTPUT`] chunk came from.

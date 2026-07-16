@@ -30,7 +30,8 @@ impl ToolExecutor for Bash {
             "properties": {
                 "command": {"type": "string", "description": "The shell command to run."},
                 "timeout_ms": {"type": "integer", "description": "Timeout in milliseconds (default 120000, max 600000). Ignored when run_in_background is true."},
-                "run_in_background": {"type": "boolean", "description": "Start a long-lived command (e.g. a dev server) without blocking; returns a task id immediately. Poll it with bash_output and stop it with bash_kill. Local projects only."}
+                "workdir": {"type": "string", "description": "Optional working directory inside the project, relative to the project root."},
+                "run_in_background": {"type": "boolean", "description": "Start a long-lived command (e.g. a dev server) without blocking; returns a task id immediately. Poll with bash_output, send input with bash_input, and stop with bash_kill."}
             },
             "required": ["command"]
         })
@@ -46,18 +47,30 @@ impl ToolExecutor for Bash {
             Ok(c) => c,
             Err(e) => return ToolOutcome::error(e),
         };
+        let workdir = args
+            .get("workdir")
+            .and_then(Value::as_str)
+            .unwrap_or(".");
+        let cwd = match ctx.sandbox.resolve_existing(workdir) {
+            Ok(path) => path,
+            Err(error) => return ToolOutcome::error(error),
+        };
+        match ctx.executor.metadata(&cwd).await {
+            Ok(meta) if meta.is_dir => {}
+            Ok(_) => return ToolOutcome::error(format!("{workdir} is not a directory")),
+            Err(error) => return ToolOutcome::error(error),
+        }
 
         if args
             .get("run_in_background")
             .and_then(Value::as_bool)
             .unwrap_or(false)
         {
-            if !ctx.executor.is_local() {
-                return ToolOutcome::error(
-                    "run_in_background isn't supported for remote projects yet — run without it.",
-                );
-            }
-            return match ctx.background.spawn(command, ctx.sandbox.root()) {
+            return match ctx
+                .background
+                .spawn(ctx.executor.clone(), command, &cwd)
+                .await
+            {
                 Ok(id) => ToolOutcome::ok(format!(
                     "Started background task `{id}`. Poll its output with \
                     bash_output(task_id=\"{id}\"); stop it with bash_kill(task_id=\"{id}\")."
@@ -79,7 +92,7 @@ impl ToolExecutor for Bash {
             .executor
             .exec_streaming_pty(
                 &command,
-                ctx.sandbox.root(),
+                &cwd,
                 Duration::from_millis(timeout_ms),
                 &ctx.cancel,
                 &|_is_stderr, chunk| ctx.report(String::from_utf8_lossy(chunk).into_owned()),
@@ -147,9 +160,11 @@ impl ToolExecutor for BashOutput {
             Ok(c) => c,
             Err(e) => return ToolOutcome::error(e),
         };
-        let Some(status) = ctx.background.status(&task_id) else {
+        let Some(status) = ctx.background.status(&task_id).await else {
             return ToolOutcome::error(format!("no background task `{task_id}`"));
         };
+        let is_error = status.error.is_some()
+            || matches!(status.exit_code, Some(code) if code != Some(0));
         let mut body = format!("command: {}\n", status.command);
         match status.exit_code {
             None => body.push_str("status: running\n"),
@@ -159,13 +174,59 @@ impl ToolExecutor for BashOutput {
                     .unwrap_or_else(|| "signal".into())
             )),
         }
+        if let Some(error) = status.error {
+            body.push_str(&format!("error: {error}\n"));
+        }
         body.push_str("--- output ---\n");
         if status.output.trim().is_empty() {
             body.push_str("(no output yet)");
         } else {
             body.push_str(&clamp(&status.output));
         }
-        ToolOutcome::ok(body)
+        let mut outcome = ToolOutcome::ok(body);
+        outcome.is_error = is_error;
+        outcome
+    }
+}
+
+pub struct BashInput;
+
+#[async_trait]
+impl ToolExecutor for BashInput {
+    fn name(&self) -> &str {
+        "bash_input"
+    }
+    fn description(&self) -> &str {
+        "Send text to a running background task's stdin. Set close=true when the process should receive EOF."
+    }
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "task_id": {"type": "string", "description": "The id returned by bash(run_in_background: true)."},
+                "text": {"type": "string", "description": "Text to write to stdin."},
+                "close": {"type": "boolean", "description": "Close stdin after writing (default false)."}
+            },
+            "required": ["task_id"]
+        })
+    }
+    fn kind(&self) -> ToolKind {
+        ToolKind::Execute
+    }
+    fn mutating(&self) -> bool {
+        true
+    }
+    async fn invoke(&self, args: Value, ctx: &ToolCtx) -> ToolOutcome {
+        let task_id = match arg_str(&args, "task_id") {
+            Ok(id) => id,
+            Err(error) => return ToolOutcome::error(error),
+        };
+        let text = args.get("text").and_then(Value::as_str).unwrap_or("");
+        let close = args.get("close").and_then(Value::as_bool).unwrap_or(false);
+        match ctx.background.write(&task_id, text.as_bytes(), close).await {
+            Ok(()) => ToolOutcome::ok(format!("Sent input to `{task_id}`.")),
+            Err(error) => ToolOutcome::error(error),
+        }
     }
 }
 
@@ -217,207 +278,5 @@ fn clamp(s: &str) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::sandbox::Sandbox;
-    use crate::tools::ReadTracker;
-    use std::sync::{Arc, Mutex};
-    use tokio_util::sync::CancellationToken;
-
-    fn ctx(dir: &std::path::Path) -> ToolCtx {
-        ToolCtx {
-            sandbox: Arc::new(Sandbox::new(dir).unwrap()),
-            reads: Arc::new(Mutex::new(ReadTracker::default())),
-            cancel: CancellationToken::new(),
-            executor: Arc::new(crate::exec::LocalExecutor),
-            background: Arc::new(crate::background::BackgroundTasks::default()),
-            session: Arc::new(tokio::sync::Mutex::new(
-                crate::loop_state::SessionState::default(),
-            )),
-            progress: None,
-        }
-    }
-
-    #[tokio::test]
-    async fn streams_progress_deltas_while_running() {
-        let dir = tempfile::tempdir().unwrap();
-        let deltas = Arc::new(Mutex::new(Vec::<String>::new()));
-        let sink = deltas.clone();
-        let mut ctx = ctx(dir.path());
-        ctx.progress = Some(Arc::new(move |d: String| sink.lock().unwrap().push(d)));
-        let out = Bash
-            .invoke(
-                json!({"command": "printf first; sleep 0.05; printf second"}),
-                &ctx,
-            )
-            .await;
-        assert!(!out.is_error, "{}", out.content);
-        let streamed = deltas.lock().unwrap().join("");
-        assert!(streamed.contains("first"), "streamed: {streamed:?}");
-        assert!(streamed.contains("second"), "streamed: {streamed:?}");
-        // The sleep between writes forces at least two separate chunks.
-        assert!(deltas.lock().unwrap().len() >= 2);
-    }
-
-    #[tokio::test]
-    async fn runs_command_and_captures_stdout() {
-        let dir = tempfile::tempdir().unwrap();
-        let out = Bash
-            .invoke(json!({"command": "echo hello"}), &ctx(dir.path()))
-            .await;
-        assert!(!out.is_error, "{}", out.content);
-        assert!(out.content.contains("exit_code: 0"));
-        assert!(out.content.contains("hello"));
-    }
-
-    #[tokio::test]
-    async fn nonzero_exit_is_flagged_error() {
-        let dir = tempfile::tempdir().unwrap();
-        let out = Bash
-            .invoke(json!({"command": "exit 3"}), &ctx(dir.path()))
-            .await;
-        assert!(out.is_error);
-        assert!(out.content.contains("exit_code: 3"));
-    }
-
-    #[tokio::test]
-    async fn runs_in_project_root() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("marker.txt"), "").unwrap();
-        let out = Bash
-            .invoke(json!({"command": "ls"}), &ctx(dir.path()))
-            .await;
-        assert!(out.content.contains("marker.txt"));
-    }
-
-    #[tokio::test]
-    async fn cancelled_command_reports_error() {
-        let dir = tempfile::tempdir().unwrap();
-        let c = ctx(dir.path());
-        c.cancel.cancel();
-        let out = Bash.invoke(json!({"command": "sleep 5"}), &c).await;
-        assert!(out.is_error);
-        assert!(out.content.contains("cancel"));
-    }
-
-    #[tokio::test]
-    async fn run_in_background_returns_immediately_and_bash_output_polls_it() {
-        let dir = tempfile::tempdir().unwrap();
-        let c = ctx(dir.path());
-        let started = Bash
-            .invoke(
-                json!({"command": "echo bg-hi", "run_in_background": true}),
-                &c,
-            )
-            .await;
-        assert!(!started.is_error, "{}", started.content);
-        assert!(started.content.contains("bg-"));
-
-        let task_id = started
-            .content
-            .split('`')
-            .nth(1)
-            .expect("task id in backticks")
-            .to_string();
-
-        // Poll until finished (background task races the assertion).
-        let mut output = String::new();
-        for _ in 0..100 {
-            let out = BashOutput.invoke(json!({"task_id": task_id}), &c).await;
-            output = out.content;
-            if output.contains("finished") {
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        }
-        assert!(output.contains("bg-hi"), "{output}");
-        assert!(output.contains("finished"), "{output}");
-    }
-
-    #[tokio::test]
-    async fn bash_kill_stops_a_background_task() {
-        let dir = tempfile::tempdir().unwrap();
-        let c = ctx(dir.path());
-        let started = Bash
-            .invoke(
-                json!({"command": "sleep 30", "run_in_background": true}),
-                &c,
-            )
-            .await;
-        let task_id = started
-            .content
-            .split('`')
-            .nth(1)
-            .expect("task id in backticks")
-            .to_string();
-        let killed = BashKill.invoke(json!({"task_id": task_id}), &c).await;
-        assert!(!killed.is_error, "{}", killed.content);
-    }
-
-    #[tokio::test]
-    async fn bash_output_reports_unknown_task() {
-        let dir = tempfile::tempdir().unwrap();
-        let out = BashOutput
-            .invoke(json!({"task_id": "bg-nope"}), &ctx(dir.path()))
-            .await;
-        assert!(out.is_error);
-    }
-
-    struct RemoteLikeExecutor;
-    #[async_trait::async_trait]
-    impl crate::exec::Executor for RemoteLikeExecutor {
-        fn is_local(&self) -> bool {
-            false
-        }
-        async fn read(&self, path: &std::path::Path) -> exec_core::ExecResult<Vec<u8>> {
-            crate::exec::LocalExecutor.read(path).await
-        }
-        async fn write(&self, path: &std::path::Path, data: &[u8]) -> exec_core::ExecResult<()> {
-            crate::exec::LocalExecutor.write(path, data).await
-        }
-        async fn create_dir_all(&self, path: &std::path::Path) -> exec_core::ExecResult<()> {
-            crate::exec::LocalExecutor.create_dir_all(path).await
-        }
-        async fn read_dir(
-            &self,
-            path: &std::path::Path,
-        ) -> exec_core::ExecResult<Vec<exec_core::DirEntry>> {
-            crate::exec::LocalExecutor.read_dir(path).await
-        }
-        async fn metadata(
-            &self,
-            path: &std::path::Path,
-        ) -> exec_core::ExecResult<exec_core::FileMeta> {
-            crate::exec::LocalExecutor.metadata(path).await
-        }
-        async fn walk(
-            &self,
-            root: &std::path::Path,
-        ) -> exec_core::ExecResult<Vec<exec_core::WalkEntry>> {
-            crate::exec::LocalExecutor.walk(root).await
-        }
-        async fn exec(
-            &self,
-            command: &str,
-            cwd: &std::path::Path,
-            timeout: std::time::Duration,
-            cancel: &CancellationToken,
-        ) -> exec_core::ExecResult<exec_core::ExecOutput> {
-            crate::exec::LocalExecutor
-                .exec(command, cwd, timeout, cancel)
-                .await
-        }
-    }
-
-    #[tokio::test]
-    async fn run_in_background_is_rejected_for_non_local_executors() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut c = ctx(dir.path());
-        c.executor = Arc::new(RemoteLikeExecutor);
-        let out = Bash
-            .invoke(json!({"command": "echo hi", "run_in_background": true}), &c)
-            .await;
-        assert!(out.is_error);
-        assert!(out.content.contains("remote"), "{}", out.content);
-    }
-}
+#[path = "shell_tests.rs"]
+mod tests;

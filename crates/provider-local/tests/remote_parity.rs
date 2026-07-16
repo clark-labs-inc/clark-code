@@ -50,6 +50,7 @@ async fn remote_matches_local_for_every_primitive() {
     let lm = local.metadata(&file).await.unwrap();
     assert_eq!(rm.len, lm.len);
     assert_eq!(rm.is_dir, lm.is_dir);
+    assert_eq!(rm.is_symlink, lm.is_symlink);
     assert_eq!(rm.len, bytes.len() as u64);
 
     // create_dir_all + read_dir parity.
@@ -67,6 +68,20 @@ async fn remote_matches_local_for_every_primitive() {
     rd.sort();
     assert!(rd.contains(&("nested".to_string(), true)));
     assert!(rd.contains(&("sub".to_string(), true)));
+
+    let removed_file = dir.path().join("remove/file.txt");
+    remote.write(&removed_file, b"remove me").await.unwrap();
+    remote.remove_file(&removed_file).await.unwrap();
+    assert!(!removed_file.exists());
+    remote
+        .create_dir_all(&dir.path().join("remove/tree/nested"))
+        .await
+        .unwrap();
+    remote
+        .remove_dir_all(&dir.path().join("remove/tree"))
+        .await
+        .unwrap();
+    assert!(!dir.path().join("remove/tree").exists());
 
     // walk parity — same file set, ignored dirs skipped.
     std::fs::create_dir_all(dir.path().join("node_modules/x")).unwrap();
@@ -129,6 +144,61 @@ async fn remote_matches_local_for_every_primitive() {
         .unwrap();
     assert_eq!(terminal.code, Some(0));
     assert!(String::from_utf8_lossy(&terminal.stdout).contains("terminal"));
+}
+
+#[tokio::test]
+async fn remote_background_process_accepts_input_and_reports_exit() {
+    let dir = tempfile::tempdir().unwrap();
+    let url = start_server(Some(dir.path().to_path_buf())).await;
+    let remote = RemoteExecutor::connect(&url, TOKEN).await.unwrap();
+    let process = remote
+        .background_start("read value; printf 'remote:%s' \"$value\"", dir.path())
+        .await
+        .unwrap();
+    remote
+        .background_write(&process, b"hello\n", true)
+        .await
+        .unwrap();
+
+    let mut cursor = 0;
+    let mut output = Vec::new();
+    let mut exit = None;
+    for _ in 0..100 {
+        let status = remote.background_status(&process, cursor).await.unwrap();
+        cursor = status.cursor;
+        for chunk in status.output {
+            output.extend_from_slice(&chunk.data);
+        }
+        if status.exit_code.is_some() {
+            exit = status.exit_code;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!(exit, Some(Some(0)));
+    assert_eq!(String::from_utf8_lossy(&output), "remote:hello");
+}
+
+#[tokio::test]
+async fn remote_background_output_is_bounded_and_reports_truncation() {
+    let dir = tempfile::tempdir().unwrap();
+    let url = start_server(Some(dir.path().to_path_buf())).await;
+    let remote = RemoteExecutor::connect(&url, TOKEN).await.unwrap();
+    let process = remote
+        .background_start("yes x | head -c 1100000", dir.path())
+        .await
+        .unwrap();
+    for _ in 0..100 {
+        let status = remote.background_status(&process, 0).await.unwrap();
+        if status.exit_code.is_some() {
+            let bytes = status.output.iter().map(|chunk| chunk.data.len()).sum::<usize>();
+            assert!(status.truncated);
+            assert!(bytes <= 1_048_576, "retained {bytes} bytes");
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    panic!("large remote background process never finished");
 }
 
 #[tokio::test]

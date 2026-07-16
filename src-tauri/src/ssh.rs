@@ -47,8 +47,9 @@ pub struct RemoteSpec {
     pub host: String,
     /// Absolute project root **on the remote host**.
     pub remote_root: String,
-    /// Optional **dev override**: a locally-built `clark-exec-server` to upload if
-    /// the version-pinned prebuilt isn't on the CDN. `None` in normal use.
+    /// Optional **dev override**: a locally-built `clark-exec-server` to upload
+    /// unconditionally, even when the same version exists remotely or on the
+    /// CDN. `None` in normal use.
     pub local_binary: Option<PathBuf>,
 }
 
@@ -181,16 +182,34 @@ fn parse_arch_and_home(out: &str) -> Result<(RemoteArch, String), String> {
     Ok((arch, home))
 }
 
-/// Make sure this exact version+arch server is on the remote. The version is in
-/// the filename, so a desktop upgrade naturally re-deploys. We prefer the
-/// version-pinned prebuilt from the CDN; if it isn't there (or there's no
-/// network), we fall back to uploading a locally-built binary when one is given.
+/// Make sure this exact version+arch server is on the remote. An explicit local
+/// development build always wins; otherwise the versioned installed binary or
+/// version-pinned CDN artifact is used.
 async fn ensure_binary(
     host: &str,
     remote_bin: &str,
     arch: RemoteArch,
     local_binary: &Option<PathBuf>,
 ) -> Result<(), String> {
+    // An explicit development build must win even when this package version is
+    // already installed remotely or published on the CDN. Working-tree tests
+    // routinely share a release version with the last published binary; using
+    // that stale executable would produce a convincing but invalid green run.
+    if let Some(local) = local_binary {
+        if !local.is_file() {
+            return Err(format!("local clark-exec-server {} doesn't exist", local.display()));
+        }
+        let dir = remote_bin.rsplit_once('/').map(|(d, _)| d).unwrap_or(".");
+        if !ssh_ok(host, &format!("mkdir -p {}", shq(dir))).await {
+            return Err(format!("could not create {dir} on {host}"));
+        }
+        scp(local, &format!("{host}:{remote_bin}")).await?;
+        if !ssh_ok(host, &format!("chmod +x {}", shq(remote_bin))).await {
+            return Err(format!("could not chmod the uploaded server on {host}"));
+        }
+        return Ok(());
+    }
+
     if ssh_ok(host, &format!("test -x {}", shq(remote_bin))).await {
         return Ok(()); // already deployed
     }
@@ -201,23 +220,6 @@ async fn ensure_binary(
 
     // 1) Version-pinned prebuilt from the CDN (the normal path).
     if fetch_from_cdn(host, remote_bin, arch).await.is_ok() {
-        return Ok(());
-    }
-
-    // 2) Dev fallback: upload a locally-built binary if one was supplied.
-    if let Some(local) = local_binary {
-        if !local.is_file() {
-            return Err(format!(
-                "clark-exec-server isn't on the CDN for v{} ({}), and the local binary {} doesn't exist",
-                env!("CARGO_PKG_VERSION"),
-                arch.slug(),
-                local.display()
-            ));
-        }
-        scp(local, &format!("{host}:{remote_bin}")).await?;
-        if !ssh_ok(host, &format!("chmod +x {}", shq(remote_bin))).await {
-            return Err(format!("could not chmod the uploaded server on {host}"));
-        }
         return Ok(());
     }
 
@@ -443,87 +445,4 @@ fn parse_server_port(line: &str) -> Option<u16> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parses_uname_to_arch() {
-        assert_eq!(
-            RemoteArch::from_uname("Linux x86_64\n").unwrap(),
-            RemoteArch::LinuxX86_64
-        );
-        assert_eq!(
-            RemoteArch::from_uname("Linux aarch64").unwrap(),
-            RemoteArch::LinuxAarch64
-        );
-        assert_eq!(
-            RemoteArch::from_uname("Darwin arm64").unwrap(),
-            RemoteArch::DarwinArm64
-        );
-        assert!(RemoteArch::from_uname("Plan9 mips").is_err());
-    }
-
-    #[test]
-    fn parse_arch_and_home_splits_first_line_and_remainder() {
-        // Typical output: `uname -sm` line, then `$HOME` (no trailing newline).
-        let (arch, home) = parse_arch_and_home("Linux x86_64\n/home/stan").unwrap();
-        assert_eq!(arch, RemoteArch::LinuxX86_64);
-        assert_eq!(home, "/home/stan");
-    }
-
-    #[test]
-    fn parse_arch_and_home_trims_home_whitespace() {
-        let (arch, home) = parse_arch_and_home("Darwin arm64\n/Users/stan\n").unwrap();
-        assert_eq!(arch, RemoteArch::DarwinArm64);
-        assert_eq!(home, "/Users/stan");
-    }
-
-    #[test]
-    fn parse_arch_and_home_errors_on_empty_home() {
-        assert!(parse_arch_and_home("Linux x86_64\n").is_err());
-        assert!(parse_arch_and_home("Linux x86_64\n   ").is_err());
-    }
-
-    #[test]
-    fn parse_arch_and_home_propagates_bad_arch() {
-        assert!(parse_arch_and_home("Plan9 mips\n/home/x").is_err());
-    }
-
-    #[test]
-    fn arch_slugs_are_stable() {
-        assert_eq!(RemoteArch::LinuxX86_64.slug(), "linux-x86_64");
-        assert_eq!(RemoteArch::LinuxAarch64.slug(), "linux-aarch64");
-        assert_eq!(RemoteArch::DarwinArm64.slug(), "darwin-aarch64");
-    }
-
-    #[test]
-    fn parses_server_url_line() {
-        assert_eq!(
-            parse_server_port("CLARK_EXEC_SERVER_URL=ws://127.0.0.1:54321"),
-            Some(54321)
-        );
-        assert_eq!(
-            parse_server_port("CLARK_EXEC_SERVER_URL=ws://127.0.0.1:54321\n"),
-            Some(54321)
-        );
-        assert_eq!(parse_server_port("some other log line"), None);
-        assert_eq!(
-            parse_server_port("CLARK_EXEC_SERVER_URL=ws://127.0.0.1:notaport"),
-            None
-        );
-    }
-
-    #[test]
-    fn shell_quoting_escapes_single_quotes() {
-        assert_eq!(shq("/home/me/proj"), "'/home/me/proj'");
-        assert_eq!(shq("a'b"), "'a'\\''b'");
-    }
-
-    #[test]
-    fn tokens_are_long_and_unique() {
-        let a = new_token();
-        let b = new_token();
-        assert_ne!(a, b);
-        assert_eq!(a.len(), 64); // two 32-hex-char simple UUIDs
-    }
-}
+mod tests;

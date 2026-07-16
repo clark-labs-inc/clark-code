@@ -167,7 +167,7 @@ async fn local_loop_reads_file_and_answers() {
         .new_session(SessionOptions {
             cwd: Some(dir.path().to_string_lossy().to_string()),
             mode: None,
-            resume_context: None,
+            resume: None,
         })
         .await
         .unwrap();
@@ -258,7 +258,7 @@ async fn local_loop_auto_compacts_large_transcript_before_sampling() {
         .new_session(SessionOptions {
             cwd: Some(dir.path().to_string_lossy().to_string()),
             mode: None,
-            resume_context: None,
+            resume: None,
         })
         .await
         .unwrap();
@@ -325,7 +325,7 @@ async fn mutating_tool_waits_for_permission_then_writes() {
         .new_session(SessionOptions {
             cwd: Some(dir.path().to_string_lossy().to_string()),
             mode: None,
-            resume_context: None,
+            resume: None,
         })
         .await
         .unwrap();
@@ -413,7 +413,7 @@ async fn image_attachments_are_described_by_vision_fallback_before_the_coding_ca
         .new_session(SessionOptions {
             cwd: Some(dir.path().to_string_lossy().to_string()),
             mode: None,
-            resume_context: None,
+            resume: None,
         })
         .await
         .unwrap();

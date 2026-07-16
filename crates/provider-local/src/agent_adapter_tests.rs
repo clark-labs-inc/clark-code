@@ -1,0 +1,257 @@
+    use super::*;
+
+    #[test]
+    fn malformed_tool_args_use_core_parse_error_marker() {
+        let value = parse_tool_args("{bad");
+        assert!(ca::detect_arg_parse_error(&value).is_some());
+    }
+    #[tokio::test]
+    async fn desktop_sink_preserves_stream_lifecycle_events_as_trace() {
+        let (send, receive) = async_channel::bounded(2);
+        let sink = DesktopEventSink::new(
+            send,
+            RunId::new("run-1"),
+            Arc::new(ToolRegistry::new(None, None)),
+            None,
+        );
+        ca::EventSink::emit(
+            &sink,
+            ca::AgentEvent::MessageStart {
+                message: ca::AgentMessage::User {
+                    content: ca::UserContent::Text("hello".into()),
+                    timestamp: None,
+                },
+            },
+        )
+        .await;
+
+        let event = receive.recv().await.expect("trace event");
+        match event {
+            desktop::AgentEvent::Trace {
+                source, payload, ..
+            } => {
+                assert_eq!(source, "clark_agent");
+                assert_eq!(payload["type"], "message_start");
+                assert_eq!(payload["message"]["content"], "hello");
+            }
+            other => panic!("expected trace event, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn tool_title_uses_salient_argument() {
+        assert_eq!(
+            tool_title("read_file", &json!({"path":"src/main.rs"})),
+            "read_file: src/main.rs"
+        );
+    }
+
+    #[test]
+    fn tool_title_special_cases_plan_tools() {
+        assert_eq!(tool_title("propose_plan", &json!({})), "Proposed a plan");
+        assert_eq!(tool_title("update_plan", &json!({})), "Updated the plan");
+    }
+
+    #[test]
+    fn parse_update_plan_maps_steps_and_statuses() {
+        let args = json!({"plan": [
+            {"step": "read the code", "status": "completed"},
+            {"step": "write the fix", "status": "in_progress"},
+            {"step": "test it", "status": "pending"},
+        ]});
+        let plan = parse_update_plan(&args).expect("valid plan");
+        assert_eq!(plan.phases.len(), 3);
+        assert_eq!(plan.phases[0].title, "read the code");
+        assert_eq!(plan.phases[0].status, desktop::PlanPhaseStatus::Completed);
+        assert_eq!(plan.phases[1].status, desktop::PlanPhaseStatus::InProgress);
+        assert_eq!(plan.phases[2].status, desktop::PlanPhaseStatus::Pending);
+    }
+
+    #[test]
+    fn parse_update_plan_rejects_missing_plan_array() {
+        assert!(parse_update_plan(&json!({})).is_none());
+    }
+
+    #[test]
+    fn markdown_artifact_only_for_md_inside_the_workspace() {
+        let docs = tempfile::tempdir().unwrap();
+        let docs_canon = docs.path().canonicalize().unwrap();
+
+        // A .md written into the workspace → an inline markdown artifact.
+        let md = docs_canon.join("report.md");
+        std::fs::write(&md, "# Hi").unwrap();
+        let art = markdown_artifact(md.to_str().unwrap(), "call-1", &docs_canon).expect("md doc");
+        assert_eq!(art.kind, desktop::ArtifactKind::File);
+        assert_eq!(art.mime_type.as_deref(), Some("text/markdown"));
+        assert_eq!(art.uri.as_deref(), Some(md.to_str().unwrap()));
+        assert_eq!(art.title, "report.md");
+
+        // A non-markdown file in the workspace → no artifact.
+        let txt = docs_canon.join("notes.txt");
+        std::fs::write(&txt, "x").unwrap();
+        assert!(markdown_artifact(txt.to_str().unwrap(), "c", &docs_canon).is_none());
+
+        // A markdown file outside the workspace → no artifact.
+        let outside = tempfile::tempdir().unwrap();
+        let out_md = outside.path().canonicalize().unwrap().join("x.md");
+        std::fs::write(&out_md, "x").unwrap();
+        assert!(markdown_artifact(out_md.to_str().unwrap(), "c", &docs_canon).is_none());
+    }
+
+    #[test]
+    fn mobile_screenshot_artifact_only_for_images_inside_the_workspace() {
+        let docs = tempfile::tempdir().unwrap();
+        let docs_canon = docs.path().canonicalize().unwrap();
+
+        let png = docs_canon.join("sim.png");
+        std::fs::write(&png, [0u8; 4]).unwrap();
+        let art = mobile_screenshot_artifact(png.to_str().unwrap(), "call-1", &docs_canon)
+            .expect("png screenshot");
+        assert_eq!(art.kind, desktop::ArtifactKind::Image);
+        assert_eq!(art.mime_type.as_deref(), Some("image/png"));
+        assert_eq!(art.uri.as_deref(), Some(png.to_str().unwrap()));
+
+        let jpg = docs_canon.join("sim.jpg");
+        std::fs::write(&jpg, [0u8; 4]).unwrap();
+        let art = mobile_screenshot_artifact(jpg.to_str().unwrap(), "call-1", &docs_canon)
+            .expect("jpg screenshot");
+        assert_eq!(art.mime_type.as_deref(), Some("image/jpeg"));
+
+        // A non-image file in the workspace → no artifact.
+        let txt = docs_canon.join("notes.txt");
+        std::fs::write(&txt, "x").unwrap();
+        assert!(mobile_screenshot_artifact(txt.to_str().unwrap(), "c", &docs_canon).is_none());
+
+        // A PNG outside the workspace → no artifact.
+        let outside = tempfile::tempdir().unwrap();
+        let out_png = outside.path().canonicalize().unwrap().join("x.png");
+        std::fs::write(&out_png, [0u8; 4]).unwrap();
+        assert!(mobile_screenshot_artifact(out_png.to_str().unwrap(), "c", &docs_canon).is_none());
+    }
+
+    #[test]
+    fn user_chat_message_stays_plain_text_with_no_images() {
+        let content = ca::UserContent::Blocks(vec![ca::UserBlock::Text(ca::types::TextContent {
+            text: "hello".into(),
+        })]);
+        let msg = user_chat_message(&content);
+        assert_eq!(msg.role, "user");
+        match msg.content {
+            Some(ChatContent::Text(t)) => assert_eq!(t, "hello"),
+            other => panic!("expected plain text content, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn user_chat_message_forwards_images_as_content_parts() {
+        let content = ca::UserContent::Blocks(vec![
+            ca::UserBlock::Text(ca::types::TextContent {
+                text: "check this out".into(),
+            }),
+            ca::UserBlock::Image(ca::ImageContent {
+                source: "data:image/png;base64,QUJD".into(),
+                media_type: Some("image/png".into()),
+                alt: None,
+            }),
+        ]);
+        let msg = user_chat_message(&content);
+        assert_eq!(msg.role, "user");
+        match msg.content {
+            Some(ChatContent::Parts(parts)) => {
+                assert_eq!(parts.len(), 2);
+                assert!(
+                    matches!(&parts[0], ContentPart::Text { text } if text == "check this out")
+                );
+                assert!(matches!(
+                    &parts[1],
+                    ContentPart::ImageUrl { image_url } if image_url.url == "data:image/png;base64,QUJD"
+                ));
+            }
+            other => panic!("expected content-parts, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn to_wire_messages_injects_synthetic_user_turn_for_tool_result_images() {
+        let messages = vec![ca::AgentMessage::ToolResult {
+            tool_call_id: "call-1".into(),
+            tool_name: "ios_screenshot".into(),
+            content: ca::ToolResultContent {
+                blocks: vec![
+                    ca::ToolResultBlock::Text(ca::types::TextContent {
+                        text: "Screenshot captured.".into(),
+                    }),
+                    ca::ToolResultBlock::Image(ca::ImageContent {
+                        source: "data:image/png;base64,QUJD".into(),
+                        media_type: Some("image/png".into()),
+                        alt: None,
+                    }),
+                ],
+            },
+            is_error: false,
+            narration: None,
+            details: None,
+            timestamp: None,
+        }];
+        let wire = to_wire_messages("", &messages);
+
+        // The tool-role message itself stays plain text — the OpenAI-compatible
+        // wire format doesn't allow a content-parts array on role: "tool".
+        assert_eq!(wire[0].role, "tool");
+        match &wire[0].content {
+            Some(ChatContent::Text(t)) => assert_eq!(t, "Screenshot captured."),
+            other => panic!("expected plain text tool content, got {other:?}"),
+        }
+
+        // The image rides in as a synthetic follow-up user turn.
+        assert_eq!(wire[1].role, "user");
+        match &wire[1].content {
+            Some(ChatContent::Parts(parts)) => {
+                assert!(parts.iter().any(|p| matches!(
+                    p,
+                    ContentPart::ImageUrl { image_url } if image_url.url == "data:image/png;base64,QUJD"
+                )));
+            }
+            other => panic!("expected content-parts with the image, got {other:?}"),
+        }
+        assert_eq!(wire.len(), 2);
+    }
+
+    #[test]
+    fn to_wire_messages_skips_synthetic_turn_when_no_images() {
+        let messages = vec![ca::AgentMessage::ToolResult {
+            tool_call_id: "call-1".into(),
+            tool_name: "grep".into(),
+            content: ca::ToolResultContent::text("no matches"),
+            is_error: false,
+            narration: None,
+            details: None,
+            timestamp: None,
+        }];
+        let wire = to_wire_messages("", &messages);
+        assert_eq!(wire.len(), 1);
+        assert_eq!(wire[0].role, "tool");
+    }
+
+    #[test]
+    fn tool_result_blocks_to_content_maps_image_data_url_to_image_block() {
+        let blocks = vec![ca::ToolResultBlock::Image(ca::ImageContent {
+            source: "data:image/png;base64,QUJD".into(),
+            media_type: Some("image/png".into()),
+            alt: Some("a screenshot".into()),
+        })];
+        let content = tool_result_blocks_to_content(&blocks);
+        assert_eq!(content.len(), 1);
+        match &content[0] {
+            desktop::ContentBlock::Image {
+                mime_type,
+                data,
+                uri,
+            } => {
+                assert_eq!(mime_type, "image/png");
+                assert_eq!(data, "QUJD");
+                assert!(uri.is_none());
+            }
+            other => panic!("expected an Image content block, got {other:?}"),
+        }
+    }

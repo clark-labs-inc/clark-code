@@ -137,7 +137,8 @@ function TerminalInstance({ id, cwd, active }: { id: string; cwd?: string; activ
 export function TerminalPanel() {
   const open = useSessionStore((s) => s.terminalOpen);
   const setOpen = useSessionStore((s) => s.setTerminalOpen);
-  const cwd = useSessionStore((s) => s.localSettings.cwd);
+  const cwd = useSessionStore((s) => s.activeProjectRoot ?? "");
+  const remote = useSessionStore((s) => s.activeRemote !== null);
 
   // Monotonic label counter so tab names stay stable as tabs open/close.
   const counter = useRef(0);
@@ -164,7 +165,7 @@ export function TerminalPanel() {
     if (id === active) setActiveId(next[Math.min(idx, next.length - 1)].id);
   };
 
-  if (!open) return null;
+  if (!open || remote) return null;
 
   return (
     <div className="flex h-72 shrink-0 flex-col border-t border-border bg-bg-sunken">

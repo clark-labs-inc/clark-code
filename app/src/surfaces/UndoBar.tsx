@@ -9,13 +9,14 @@ type State = { kind: "idle" } | { kind: "busy" } | { kind: "done" } | { kind: "e
 /** One-click revert of the working tree to the snapshot taken before this run's
  *  edits landed. Shown after a completed run that has a checkpoint + made edits. */
 export function UndoBar({ sha }: { sha: string }) {
-  const cwd = useSessionStore((s) => s.localSettings.cwd);
+  const cwd = useSessionStore((s) => s.activeProjectRoot ?? "");
+  const remote = useSessionStore((s) => s.activeRemote);
   const [state, setState] = useState<State>({ kind: "idle" });
 
   const undo = async () => {
     setState({ kind: "busy" });
     try {
-      await restoreCheckpoint(cwd, sha);
+      await restoreCheckpoint(cwd, sha, remote);
       setState({ kind: "done" });
     } catch (e) {
       setState({ kind: "error", msg: e instanceof Error ? e.message : String(e) });

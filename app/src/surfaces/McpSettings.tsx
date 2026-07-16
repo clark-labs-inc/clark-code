@@ -183,9 +183,10 @@ export function McpSettings() {
   // Instant, no opacity fade under Reduced Motion — see Settings for why.
   const reduce = useReducedMotion();
   const localCwd = useSessionStore((s) => s.localSettings.cwd);
+  const activeProjectRoot = useSessionStore((s) => s.activeProjectRoot);
   const activeRemote = useSessionStore((s) => s.activeRemote);
   // For a remote project, read its remote `.claude` over the tunnel.
-  const cwd = activeRemote?.cwd ?? localCwd;
+  const cwd = activeRemote?.cwd ?? activeProjectRoot ?? localCwd;
   const [servers, setServers] = useState<McpServer[]>([]);
   const [savedServers, setSavedServers] = useState<McpServer[]>([]);
   const [statuses, setStatuses] = useState<Record<string, McpStatus>>({});

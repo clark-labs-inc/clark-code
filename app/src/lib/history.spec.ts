@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { drainLocalHistory, renderResumeContext, settleRuns } from "./history";
+import { buildResumeTranscript, drainLocalHistory, settleRuns } from "./history";
 import type { Snapshot, ToolCall } from "../core-bridge/types";
 
 // The Node test env has no localStorage; back it with a tiny in-memory mock.
@@ -121,8 +121,8 @@ describe("settleRuns", () => {
   });
 });
 
-describe("renderResumeContext", () => {
-  it("renders messages and tool lines, stripping thinking spans", () => {
+describe("buildResumeTranscript", () => {
+  it("preserves typed messages and tools while stripping thinking spans", () => {
     const snapshot: Snapshot = {
       runs: {},
       timeline: [
@@ -138,16 +138,22 @@ describe("renderResumeContext", () => {
       tool_calls: { t1: { ...tool("t1", "completed"), title: "brew install node", locations: [{ path: "/tmp" }] } },
       artifacts: [],
     };
-    const out = renderResumeContext(snapshot)!;
-    expect(out).toContain("User: install node");
-    expect(out).toContain("[execute] brew install node — /tmp (completed)");
-    expect(out).toContain("Assistant: Waiting for brew to finish.");
-    expect(out).not.toContain("hmm");
+    const out = buildResumeTranscript(snapshot)!;
+    expect(out.items[0]).toMatchObject({ item: "message", role: "user" });
+    expect(out.items[1]).toMatchObject({
+      item: "tool_call",
+      title: "brew install node",
+      kind: "execute",
+      status: "completed",
+      locations: [{ path: "/tmp" }],
+    });
+    expect(JSON.stringify(out)).toContain("Waiting for brew to finish.");
+    expect(JSON.stringify(out)).not.toContain("hmm");
   });
 
   it("returns null for an empty transcript and keeps the tail when over budget", () => {
     expect(
-      renderResumeContext({ runs: {}, timeline: [], tool_calls: {}, artifacts: [] }),
+      buildResumeTranscript({ runs: {}, timeline: [], tool_calls: {}, artifacts: [] }),
     ).toBeNull();
 
     const long: Snapshot = {
@@ -161,10 +167,10 @@ describe("renderResumeContext", () => {
       tool_calls: {},
       artifacts: [],
     };
-    const out = renderResumeContext(long, 500)!;
-    expect(out.length).toBeLessThan(600);
-    expect(out).toContain("(earlier history truncated)");
-    expect(out).toContain("turn 49");
-    expect(out).not.toContain("turn 0 ");
+    const out = buildResumeTranscript(long, 500)!;
+    expect(JSON.stringify(out).length).toBeLessThan(700);
+    expect(out.truncated).toBe(true);
+    expect(JSON.stringify(out)).toContain("turn 49");
+    expect(JSON.stringify(out)).not.toContain("turn 0 ");
   });
 });

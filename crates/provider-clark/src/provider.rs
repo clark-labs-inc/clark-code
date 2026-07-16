@@ -345,6 +345,7 @@ impl Provider for ClarkProvider {
             provider: self.id(),
             capabilities: self.capabilities(),
             mode: Some(self.tier_id.clone()),
+            environment: None,
         })
     }
 
@@ -370,6 +371,7 @@ impl Provider for ClarkProvider {
             provider: self.id(),
             capabilities: self.capabilities(),
             mode: Some(self.tier_id.clone()),
+            environment: None,
         })
     }
 

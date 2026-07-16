@@ -46,6 +46,7 @@ export function CommandPalette({
   // Instant, no opacity fade under Reduced Motion — see Settings for why.
   const reduce = useReducedMotion();
   const session = useSessionStore((s) => s.session);
+  const activeRemote = useSessionStore((s) => s.activeRemote);
   const conversations = useSessionStore((s) => s.conversations);
   const openConversation = useSessionStore((s) => s.openConversation);
 
@@ -56,7 +57,7 @@ export function CommandPalette({
 
   const items = useMemo<PaletteItem[]>(() => {
     const actions: PaletteItem[] = slashCommands()
-      .filter((c) => !c.needsSession || session)
+      .filter((c) => (!c.needsSession || session) && (c.name !== "terminal" || !activeRemote))
       .map((c) => ({
         id: `action:${c.name}`,
         // Each command's hint already reads as an action ("Copy the conversation
@@ -86,7 +87,7 @@ export function CommandPalette({
       run: () => void openConversation(c.id),
     }));
     return [...actions, ...convos];
-  }, [session, conversations, dark, onToggleTheme, openConversation]);
+  }, [session, activeRemote, conversations, dark, onToggleTheme, openConversation]);
 
   const matches = useMemo(
     () => fuzzyFilter(items, query, (i) => `${i.label} ${i.hint ?? ""}`, 40).map((m) => m.item),

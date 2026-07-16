@@ -1,7 +1,8 @@
 // The Changes panel — a PR-style review of everything that changed since the
 // conversation's first checkpoint: per-file +/- stats, expandable unified
 // diffs, and per-file revert. Local git sessions only (the baseline is a
-// checkpoint commit; see provider-local/src/changes.rs).
+// checkpoint commit; local and remote sessions share the executor-backed path
+// in provider-local/src/changes.rs.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
@@ -10,6 +11,7 @@ import {
 } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
 import type { RunView } from "../core-bridge/types";
+import type { RemoteInfo } from "../lib/ssh";
 import { DiffBody } from "./work/WorkLine";
 import { cn } from "../lib/cn";
 
@@ -53,6 +55,12 @@ const STATUS_ICON: Record<string, typeof FilePen> = {
   renamed: FilePen,
 };
 
+type RemoteExecutorArg = Pick<RemoteInfo, "ws_url" | "token">;
+
+function remoteExecutorArg(remote: RemoteInfo | null): RemoteExecutorArg | null {
+  return remote ? { ws_url: remote.ws_url, token: remote.token } : null;
+}
+
 /** Top-bar control: opens the session-changes review popover. */
 export function ChangesButton() {
   const [open, setOpen] = useState(false);
@@ -94,8 +102,9 @@ export function ChangesButton() {
 }
 
 function ChangesPopover({ runs, onClose }: { runs: string[]; onClose: () => void }) {
-  const cwd = useSessionStore((s) => s.activeRemote?.cwd ?? s.localSettings.cwd.trim());
-  const remote = useSessionStore((s) => s.activeRemote !== null);
+  const cwd = useSessionStore((s) => s.activeProjectRoot ?? "");
+  const activeRemote = useSessionStore((s) => s.activeRemote);
+  const remote = useMemo(() => remoteExecutorArg(activeRemote), [activeRemote]);
   // Default baseline: the conversation's first checkpoint (unchanged default
   // behavior) — the picker below lets the user diff against any later turn.
   const [base, setBase] = useState(runs[0]);
@@ -107,17 +116,17 @@ function ChangesPopover({ runs, onClose }: { runs: string[]; onClose: () => void
     setLoading(true);
     setError(null);
     try {
-      setFiles(await invoke<ChangedFile[]>("changes_summary", { cwd, base }));
+      setFiles(await invoke<ChangedFile[]>("changes_summary", { cwd, base, remote }));
     } catch (e) {
       setError(String(e));
     } finally {
       setLoading(false);
     }
-  }, [cwd, base]);
+  }, [cwd, base, remote]);
 
   useEffect(() => {
-    if (!remote) void load();
-  }, [load, remote]);
+    void load();
+  }, [load]);
 
   const totalAdd = (files ?? []).reduce((n, f) => n + f.additions, 0);
   const totalDel = (files ?? []).reduce((n, f) => n + f.deletions, 0);
@@ -144,7 +153,6 @@ function ChangesPopover({ runs, onClose }: { runs: string[]; onClose: () => void
           <select
             value={base}
             onChange={(e) => setBase(e.target.value)}
-            disabled={remote}
             title="Diff against a different point in this conversation"
             className="shrink-0 rounded-md border border-border bg-bg px-1.5 py-1 text-xs text-ink-secondary outline-none disabled:opacity-50"
           >
@@ -157,7 +165,7 @@ function ChangesPopover({ runs, onClose }: { runs: string[]; onClose: () => void
         )}
         <button
           onClick={() => void load()}
-          disabled={loading || remote}
+          disabled={loading}
           title="Refresh"
           aria-label="Refresh changes"
           className="grid size-7 shrink-0 place-items-center rounded-md text-ink-muted transition hover:bg-bg-hover hover:text-ink disabled:opacity-50"
@@ -174,11 +182,7 @@ function ChangesPopover({ runs, onClose }: { runs: string[]; onClose: () => void
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto p-2">
-        {remote ? (
-          <p className="px-2 py-6 text-center text-xs text-ink-faint">
-            Change review isn't available for remote sessions yet.
-          </p>
-        ) : error ? (
+        {error ? (
           <p className="px-2 py-6 text-center text-xs text-danger">{error}</p>
         ) : files === null ? (
           <p className="px-2 py-6 text-center text-xs text-ink-faint">Comparing…</p>
@@ -189,7 +193,14 @@ function ChangesPopover({ runs, onClose }: { runs: string[]; onClose: () => void
         ) : (
           <div className="flex flex-col gap-1">
             {files.map((f) => (
-              <FileRow key={f.path} file={f} cwd={cwd} base={base} onReverted={() => void load()} />
+              <FileRow
+                key={f.path}
+                file={f}
+                cwd={cwd}
+                base={base}
+                remote={remote}
+                onReverted={() => void load()}
+              />
             ))}
           </div>
         )}
@@ -202,11 +213,13 @@ function FileRow({
   file,
   cwd,
   base,
+  remote,
   onReverted,
 }: {
   file: ChangedFile;
   cwd: string;
   base: string;
+  remote: RemoteExecutorArg | null;
   onReverted: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -220,7 +233,7 @@ function FileRow({
     setOpen(next);
     if (next && diff === null) {
       try {
-        setDiff(await invoke<string>("changes_diff", { cwd, base, path: file.path }));
+        setDiff(await invoke<string>("changes_diff", { cwd, base, path: file.path, remote }));
       } catch (e) {
         setDiff(`(diff unavailable: ${String(e)})`);
       }
@@ -230,7 +243,7 @@ function FileRow({
   const revert = async () => {
     setBusy(true);
     try {
-      await invoke("changes_revert", { cwd, base, path: file.path });
+      await invoke("changes_revert", { cwd, base, path: file.path, remote });
       onReverted();
     } catch (e) {
       setDiff(`(revert failed: ${String(e)})`);

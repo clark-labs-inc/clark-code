@@ -1,11 +1,8 @@
-//! Backgrounded shell tasks: `bash(run_in_background: true)` starts a process
-//! and returns immediately; `bash_output`/`bash_kill` poll/stop it later.
+//! Session-owned long-lived shell processes.
 //!
-//! Spawned directly via `tokio::process::Command` (not through the `Executor`
-//! trait, which only has a blocking `exec()` — see `Executor::is_local`, which
-//! gates this feature to local sessions only). Each task's `Child` is owned by
-//! its own reader/waiter task; killing goes by PID rather than needing a
-//! shared `&mut Child`, since the owning task is otherwise unreachable.
+//! Local tasks own an isolated process group on this machine. Remote tasks are
+//! owned by the exec server and polled through the same executor abstraction.
+//! Both paths share bounded head/tail output, stdin, kill, and registry limits.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -14,19 +11,74 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use tokio::io::AsyncReadExt;
-use tokio::process::Command;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::process::{ChildStdin, Command};
 
-/// Cap on a single task's buffered combined stdout+stderr.
+use crate::exec::Executor;
+
+const MAX_TASKS: usize = 32;
 const MAX_OUTPUT_BYTES: usize = 512_000;
+const HEAD_BYTES: usize = 64_000;
+const TAIL_BYTES: usize = MAX_OUTPUT_BYTES - HEAD_BYTES;
+
+#[derive(Default)]
+struct OutputBuffer {
+    head: Vec<u8>,
+    tail: Vec<u8>,
+    total_bytes: usize,
+    upstream_truncated: bool,
+}
+
+impl OutputBuffer {
+    fn append(&mut self, bytes: &[u8]) {
+        self.total_bytes = self.total_bytes.saturating_add(bytes.len());
+        let head_room = HEAD_BYTES.saturating_sub(self.head.len());
+        let head_take = head_room.min(bytes.len());
+        self.head.extend_from_slice(&bytes[..head_take]);
+        self.tail.extend_from_slice(&bytes[head_take..]);
+        if self.tail.len() > TAIL_BYTES {
+            self.tail.drain(..self.tail.len() - TAIL_BYTES);
+        }
+    }
+
+    fn render(&self) -> String {
+        let omitted = self
+            .total_bytes
+            .saturating_sub(self.head.len().saturating_add(self.tail.len()));
+        let mut bytes = self.head.clone();
+        if omitted > 0 || self.upstream_truncated {
+            let detail = if omitted > 0 {
+                format!("\n… [{omitted} middle bytes truncated] …\n")
+            } else {
+                "\n… [earlier remote output truncated] …\n".to_string()
+            };
+            bytes.extend_from_slice(detail.as_bytes());
+        }
+        bytes.extend_from_slice(&self.tail);
+        String::from_utf8_lossy(&bytes).into_owned()
+    }
+}
+
+enum Backend {
+    Local {
+        pid: Option<u32>,
+        stdin: Arc<tokio::sync::Mutex<Option<ChildStdin>>>,
+    },
+    Remote {
+        executor: Arc<dyn Executor>,
+        process_id: String,
+        cursor: Arc<AtomicU64>,
+    },
+}
 
 struct Entry {
+    ordinal: u64,
     command: String,
-    pid: Option<u32>,
-    output: Arc<Mutex<Vec<u8>>>,
-    /// `None` while running; `Some(exit_code)` once finished (`exit_code` is
-    /// `None` if the process was killed by a signal rather than exiting).
+    backend: Backend,
+    output: Arc<Mutex<OutputBuffer>>,
+    /// `None` while running; `Some(exit_code)` after completion.
     exit_code: Arc<Mutex<Option<Option<i32>>>>,
+    error: Arc<Mutex<Option<String>>>,
 }
 
 #[derive(Default)]
@@ -38,219 +90,355 @@ pub struct BackgroundTasks {
 pub struct TaskStatus {
     pub command: String,
     pub output: String,
-    /// `None` while running.
     pub exit_code: Option<Option<i32>>,
+    pub error: Option<String>,
 }
 
 impl BackgroundTasks {
-    /// Start `command` in `cwd`, returning its task id immediately.
-    pub fn spawn(&self, command: String, cwd: &Path) -> Result<String, String> {
-        let mut child = Command::new("sh")
-            .arg("-c")
-            .arg(&command)
-            .current_dir(cwd)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .kill_on_drop(true)
-            .spawn()
-            .map_err(|e| format!("failed to start background task: {e}"))?;
-
-        let id = format!("bg-{}", self.next_id.fetch_add(1, Ordering::SeqCst) + 1);
-        let pid = child.id();
-        let output = Arc::new(Mutex::new(Vec::new()));
+    pub async fn spawn(
+        &self,
+        executor: Arc<dyn Executor>,
+        command: String,
+        cwd: &Path,
+    ) -> Result<String, String> {
+        self.make_room()?;
+        let ordinal = self.next_id.fetch_add(1, Ordering::SeqCst) + 1;
+        let id = format!("bg-{ordinal}");
+        let output = Arc::new(Mutex::new(OutputBuffer::default()));
         let exit_code = Arc::new(Mutex::new(None));
+        let error = Arc::new(Mutex::new(None));
 
-        let stdout = child.stdout.take();
-        let stderr = child.stderr.take();
-        let out_for_readers = output.clone();
-        let exit_for_waiter = exit_code.clone();
-        tokio::spawn(async move {
-            let mut readers = Vec::new();
-            if let Some(s) = stdout {
-                readers.push(tokio::spawn(read_into(s, out_for_readers.clone())));
-            }
-            if let Some(s) = stderr {
-                readers.push(tokio::spawn(read_into(s, out_for_readers.clone())));
-            }
-            // Wait for the process itself first. The readers drain stdout/stderr
-            // in their own tasks, so we don't need them to finish before we can
-            // observe the exit — and we must not: a killed shell can orphan a
-            // grandchild that keeps the output pipe open, so a readers-first wait
-            // would wedge here forever and the task would never register as
-            // finished (it'd show "running" in the UI after a kill). Give the
-            // readers a brief grace to flush buffered output on a normal exit,
-            // then abort any still blocked on an orphan-held pipe.
-            let status = child.wait().await.ok();
-            for mut r in readers {
-                if tokio::time::timeout(Duration::from_millis(200), &mut r)
-                    .await
-                    .is_err()
-                {
-                    r.abort();
+        let backend = if executor.is_local() {
+            let mut process = Command::new("sh");
+            process
+                .arg("-c")
+                .arg(&command)
+                .current_dir(cwd)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .kill_on_drop(true);
+            exec_core::configure_noninteractive(&mut process);
+            exec_core::isolate_process_group(&mut process);
+            let mut child = process
+                .spawn()
+                .map_err(|e| format!("failed to start background task: {e}"))?;
+            let pid = child.id();
+            let stdin = Arc::new(tokio::sync::Mutex::new(child.stdin.take()));
+            let stdout = child.stdout.take();
+            let stderr = child.stderr.take();
+            let reader_output = output.clone();
+            let waiter_exit = exit_code.clone();
+            let waiter_error = error.clone();
+            tokio::spawn(async move {
+                let mut readers = Vec::new();
+                if let Some(stream) = stdout {
+                    readers.push(tokio::spawn(read_into(stream, reader_output.clone())));
                 }
+                if let Some(stream) = stderr {
+                    readers.push(tokio::spawn(read_into(stream, reader_output.clone())));
+                }
+                let outcome = child.wait().await;
+                for mut reader in readers {
+                    if tokio::time::timeout(Duration::from_millis(200), &mut reader)
+                        .await
+                        .is_err()
+                    {
+                        reader.abort();
+                    }
+                }
+                match outcome {
+                    Ok(status) => *waiter_exit.lock().unwrap() = Some(status.code()),
+                    Err(failure) => {
+                        *waiter_error.lock().unwrap() = Some(failure.to_string());
+                        *waiter_exit.lock().unwrap() = Some(None);
+                    }
+                }
+            });
+            Backend::Local { pid, stdin }
+        } else {
+            let process_id = executor.background_start(&command, cwd).await?;
+            Backend::Remote {
+                executor,
+                process_id,
+                cursor: Arc::new(AtomicU64::new(0)),
             }
-            *exit_for_waiter.lock().unwrap() = Some(status.and_then(|s| s.code()));
-        });
+        };
 
         self.tasks.lock().unwrap().insert(
             id.clone(),
             Entry {
+                ordinal,
                 command,
-                pid,
+                backend,
                 output,
                 exit_code,
+                error,
             },
         );
         Ok(id)
     }
 
-    pub fn status(&self, id: &str) -> Option<TaskStatus> {
+    fn make_room(&self) -> Result<(), String> {
+        let mut tasks = self.tasks.lock().unwrap();
+        if tasks.len() < MAX_TASKS {
+            return Ok(());
+        }
+        let oldest_finished = tasks
+            .iter()
+            .filter(|(_, entry)| entry.exit_code.lock().unwrap().is_some())
+            .min_by_key(|(_, entry)| entry.ordinal)
+            .map(|(id, _)| id.clone());
+        if let Some(id) = oldest_finished {
+            tasks.remove(&id);
+            Ok(())
+        } else {
+            Err(format!(
+                "too many running background tasks (maximum {MAX_TASKS})"
+            ))
+        }
+    }
+
+    pub async fn status(&self, id: &str) -> Option<TaskStatus> {
+        let remote = {
+            let tasks = self.tasks.lock().unwrap();
+            let entry = tasks.get(id)?;
+            match &entry.backend {
+                Backend::Remote {
+                    executor,
+                    process_id,
+                    cursor,
+                } if entry.exit_code.lock().unwrap().is_none() => Some((
+                    executor.clone(),
+                    process_id.clone(),
+                    cursor.clone(),
+                    entry.output.clone(),
+                    entry.exit_code.clone(),
+                    entry.error.clone(),
+                )),
+                _ => None,
+            }
+        };
+        if let Some((executor, process_id, cursor, output, exit_code, error)) = remote {
+            let after = cursor.load(Ordering::SeqCst);
+            match executor.background_status(&process_id, after).await {
+                Ok(status) => {
+                    {
+                        let mut buffer = output.lock().unwrap();
+                        for chunk in status.output {
+                            buffer.append(&chunk.data);
+                        }
+                        buffer.upstream_truncated |= status.truncated;
+                    }
+                    cursor.store(status.cursor, Ordering::SeqCst);
+                    if let Some(code) = status.exit_code {
+                        *exit_code.lock().unwrap() = Some(code);
+                    }
+                    if status.error.is_some() {
+                        *error.lock().unwrap() = status.error;
+                    }
+                }
+                Err(failure) => {
+                    *error.lock().unwrap() = Some(failure);
+                    *exit_code.lock().unwrap() = Some(None);
+                }
+            }
+        }
+
         let tasks = self.tasks.lock().unwrap();
         let entry = tasks.get(id)?;
-        let output = entry.output.lock().unwrap();
-        let output = String::from_utf8_lossy(&output).to_string();
+        let command = entry.command.clone();
+        let output = entry.output.lock().unwrap().render();
         let exit_code = *entry.exit_code.lock().unwrap();
+        let error = entry.error.lock().unwrap().clone();
         Some(TaskStatus {
-            command: entry.command.clone(),
+            command,
             output,
             exit_code,
+            error,
         })
     }
 
-    /// Kill a running task by sending it a termination signal. Idempotent —
-    /// killing an already-finished or unknown task is not an error.
-    pub async fn kill(&self, id: &str) -> Result<(), String> {
-        let pid = {
+    pub async fn write(&self, id: &str, data: &[u8], close: bool) -> Result<(), String> {
+        enum Target {
+            Local(Arc<tokio::sync::Mutex<Option<ChildStdin>>>),
+            Remote(Arc<dyn Executor>, String),
+        }
+        let target = {
             let tasks = self.tasks.lock().unwrap();
-            match tasks.get(id) {
-                // Skip a task that already finished: the OS may have recycled its
-                // PID, so signalling it now could kill an unrelated process.
-                Some(entry) if entry.exit_code.lock().unwrap().is_some() => None,
-                Some(entry) => entry.pid,
-                None => return Err(format!("no background task `{id}`")),
+            let entry = tasks
+                .get(id)
+                .ok_or_else(|| format!("no background task `{id}`"))?;
+            if entry.exit_code.lock().unwrap().is_some() {
+                return Err(format!("background task `{id}` has already finished"));
+            }
+            match &entry.backend {
+                Backend::Local { stdin, .. } => Target::Local(stdin.clone()),
+                Backend::Remote {
+                    executor,
+                    process_id,
+                    ..
+                } => Target::Remote(executor.clone(), process_id.clone()),
             }
         };
-        if let Some(pid) = pid {
-            kill_pid(pid).await;
+        match target {
+            Target::Local(stdin) => {
+                let mut stdin = stdin.lock().await;
+                if !data.is_empty() {
+                    stdin
+                        .as_mut()
+                        .ok_or("background task stdin is closed")?
+                        .write_all(data)
+                        .await
+                        .map_err(|error| error.to_string())?;
+                }
+                if close {
+                    stdin.take();
+                }
+                Ok(())
+            }
+            Target::Remote(executor, process_id) => {
+                executor.background_write(&process_id, data, close).await
+            }
+        }
+    }
+
+    pub async fn kill(&self, id: &str) -> Result<(), String> {
+        enum Target {
+            Local(Option<u32>),
+            Remote(Arc<dyn Executor>, String),
+            Finished,
+        }
+        let target = {
+            let tasks = self.tasks.lock().unwrap();
+            let entry = tasks
+                .get(id)
+                .ok_or_else(|| format!("no background task `{id}`"))?;
+            if entry.exit_code.lock().unwrap().is_some() {
+                Target::Finished
+            } else {
+                match &entry.backend {
+                    Backend::Local { pid, .. } => Target::Local(*pid),
+                    Backend::Remote {
+                        executor,
+                        process_id,
+                        ..
+                    } => Target::Remote(executor.clone(), process_id.clone()),
+                }
+            }
+        };
+        match target {
+            Target::Local(pid) => exec_core::terminate_pid_tree(pid).await,
+            Target::Remote(executor, process_id) => executor.background_kill(&process_id).await?,
+            Target::Finished => {}
         }
         Ok(())
     }
 
-    /// Kill every still-tracked task and clear the registry — called when a
-    /// session resets (`new_session`), so tasks don't leak across "new
-    /// chat"/project switches within one running app.
     pub async fn clear_all(&self) {
-        let pids: Vec<u32> = {
-            let tasks = self.tasks.lock().unwrap();
-            // Only signal still-running tasks; a finished task's PID may have been
-            // recycled by the OS (see `kill`).
-            tasks
-                .values()
-                .filter(|e| e.exit_code.lock().unwrap().is_none())
-                .filter_map(|e| e.pid)
-                .collect()
-        };
-        for pid in pids {
-            kill_pid(pid).await;
+        let ids = self.tasks.lock().unwrap().keys().cloned().collect::<Vec<_>>();
+        for id in ids {
+            let _ = self.kill(&id).await;
         }
         self.tasks.lock().unwrap().clear();
     }
 }
 
-async fn read_into<R: tokio::io::AsyncRead + Unpin>(mut reader: R, buf: Arc<Mutex<Vec<u8>>>) {
+async fn read_into<R: tokio::io::AsyncRead + Unpin>(mut reader: R, output: Arc<Mutex<OutputBuffer>>) {
     let mut chunk = [0u8; 4096];
     loop {
         match reader.read(&mut chunk).await {
             Ok(0) | Err(_) => break,
-            Ok(n) => {
-                let mut b = buf.lock().unwrap();
-                if b.len() < MAX_OUTPUT_BYTES {
-                    let room = MAX_OUTPUT_BYTES - b.len();
-                    b.extend_from_slice(&chunk[..n.min(room)]);
-                }
-            }
+            Ok(count) => output.lock().unwrap().append(&chunk[..count]),
         }
     }
-}
-
-#[cfg(target_family = "unix")]
-async fn kill_pid(pid: u32) {
-    let _ = Command::new("kill")
-        .args(["-9", &pid.to_string()])
-        .output()
-        .await;
-}
-
-#[cfg(target_family = "windows")]
-async fn kill_pid(pid: u32) {
-    let _ = Command::new("taskkill")
-        .args(["/F", "/PID", &pid.to_string()])
-        .output()
-        .await;
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::exec::LocalExecutor;
 
     async fn wait_for_finish(tasks: &BackgroundTasks, id: &str) -> TaskStatus {
         for _ in 0..100 {
-            let status = tasks.status(id).unwrap();
+            let status = tasks.status(id).await.unwrap();
             if status.exit_code.is_some() {
                 return status;
             }
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            tokio::time::sleep(Duration::from_millis(20)).await;
         }
         panic!("task {id} never finished");
     }
 
     #[tokio::test]
-    async fn spawns_and_captures_output() {
+    async fn spawns_accepts_input_and_captures_output() {
         let tasks = BackgroundTasks::default();
         let dir = tempfile::tempdir().unwrap();
         let id = tasks
-            .spawn("echo hello-bg".to_string(), dir.path())
+            .spawn(
+                Arc::new(LocalExecutor),
+                "read value; echo got:$value".to_string(),
+                dir.path(),
+            )
+            .await
             .unwrap();
+        tasks.write(&id, b"hello\n", true).await.unwrap();
         let status = wait_for_finish(&tasks, &id).await;
         assert_eq!(status.exit_code, Some(Some(0)));
-        assert!(status.output.contains("hello-bg"), "{}", status.output);
+        assert!(status.output.contains("got:hello"), "{}", status.output);
     }
 
     #[tokio::test]
-    async fn poll_before_finish_reports_no_exit_code() {
-        let tasks = BackgroundTasks::default();
-        let dir = tempfile::tempdir().unwrap();
-        let id = tasks.spawn("sleep 5".to_string(), dir.path()).unwrap();
-        let status = tasks.status(&id).unwrap();
-        assert_eq!(status.exit_code, None);
-        tasks.kill(&id).await.unwrap();
+    async fn keeps_head_and_tail_when_output_is_large() {
+        let mut output = OutputBuffer::default();
+        output.append(b"HEAD");
+        output.append(&vec![b'x'; MAX_OUTPUT_BYTES]);
+        output.append(b"TAIL");
+        let rendered = output.render();
+        assert!(rendered.starts_with("HEAD"));
+        assert!(rendered.ends_with("TAIL"));
+        assert!(rendered.contains("middle bytes truncated"));
     }
 
     #[tokio::test]
-    async fn kill_stops_a_running_task() {
+    async fn finished_status_contains_the_drained_output_tail() {
         let tasks = BackgroundTasks::default();
         let dir = tempfile::tempdir().unwrap();
-        let id = tasks.spawn("sleep 30".to_string(), dir.path()).unwrap();
+        let id = tasks
+            .spawn(
+                Arc::new(LocalExecutor),
+                "i=0; while [ $i -lt 2000 ]; do echo line-$i; i=$((i+1)); done; echo FINAL"
+                    .to_string(),
+                dir.path(),
+            )
+            .await
+            .unwrap();
+        let status = wait_for_finish(&tasks, &id).await;
+        assert!(status.output.contains("FINAL"), "{}", status.output);
+    }
+
+    #[tokio::test]
+    async fn kill_stops_a_process_group() {
+        let tasks = BackgroundTasks::default();
+        let dir = tempfile::tempdir().unwrap();
+        let id = tasks
+            .spawn(Arc::new(LocalExecutor), "sleep 30".to_string(), dir.path())
+            .await
+            .unwrap();
         tasks.kill(&id).await.unwrap();
-        // Killed processes exit (by signal, so `exit_code` may be `None`), the
-        // waiter task should still observe and record completion.
         let status = wait_for_finish(&tasks, &id).await;
         assert!(status.exit_code.is_some());
     }
 
     #[tokio::test]
-    async fn unknown_task_id_returns_none() {
-        let tasks = BackgroundTasks::default();
-        assert!(tasks.status("bg-999").is_none());
-    }
-
-    #[tokio::test]
-    async fn clear_all_kills_running_tasks_and_empties_registry() {
+    async fn clear_all_kills_and_forgets_tasks() {
         let tasks = BackgroundTasks::default();
         let dir = tempfile::tempdir().unwrap();
-        let id = tasks.spawn("sleep 30".to_string(), dir.path()).unwrap();
+        let id = tasks
+            .spawn(Arc::new(LocalExecutor), "sleep 30".to_string(), dir.path())
+            .await
+            .unwrap();
         tasks.clear_all().await;
-        assert!(tasks.status(&id).is_none());
+        assert!(tasks.status(&id).await.is_none());
     }
 }

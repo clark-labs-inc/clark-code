@@ -59,10 +59,12 @@ impl ToolExecutor for MemoryTool {
     }
 
     fn description(&self) -> &str {
-        "Recall or save durable memories. action \"recall\" returns your saved facts (project + \
-global) plus personal memory Clark has learned about the user across their work; action \
-\"remember\" saves one. scope \"project\" = facts about this codebase; scope \"global\" = facts \
-about the user across all their projects. Save durable, reusable facts only."
+        "Recall, save, or retire durable memories. action \"recall\" returns your saved facts \
+(project + global) plus personal memory Clark has learned about the user across their work; \
+action \"remember\" saves one; action \"forget\" removes a note whose fact was superseded or \
+turned out wrong (when the user reverses a decision, save the new fact AND forget the old \
+note in the same turn). scope \"project\" = facts about this codebase; scope \"global\" = \
+facts about the user across all their projects. Save durable, reusable facts only."
     }
 
     fn parameters(&self) -> Value {
@@ -71,21 +73,26 @@ about the user across all their projects. Save durable, reusable facts only."
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["recall", "remember"],
-                    "description": "\"recall\" to read saved memories, \"remember\" to save one."
+                    "enum": ["recall", "remember", "forget"],
+                    "description": "\"recall\" to read saved memories, \"remember\" to save one, \"forget\" to remove a superseded or wrong note."
                 },
                 "scope": {
                     "type": "string",
                     "enum": ["project", "global"],
-                    "description": "For remember: \"project\" (this codebase) or \"global\" (across all your projects). Defaults to project."
+                    "description": "For remember/forget: \"project\" (this codebase) or \"global\" (across all your projects). Defaults to project."
+                },
+                "source": {
+                    "type": "string",
+                    "enum": ["user-stated", "inferred"],
+                    "description": "For remember: did the user actually say this (\"user-stated\"), or did you conclude it yourself (\"inferred\")? Required for remember."
                 },
                 "title": {
                     "type": "string",
-                    "description": "Short title for the fact (becomes its filename). Required for remember."
+                    "description": "Short title for the fact (becomes its filename). Required for remember and forget."
                 },
                 "content": {
                     "type": "string",
-                    "description": "The fact to remember, in markdown. Required for remember."
+                    "description": "The fact to remember, in markdown. Quote the user's own words for decisions and preferences. Required for remember."
                 },
                 "type": {
                     "type": "string",
@@ -110,14 +117,21 @@ about the user across all their projects. Save durable, reusable facts only."
             "recall" => {
                 let mut out = String::new();
                 let proj_dir = memory::memory_dir(ctx.sandbox.root());
-                if let Some(s) =
-                    memory::recall_scope(ctx.executor.as_ref(), &proj_dir, "Project").await
+                if let Some(s) = memory::recall_scope(
+                    ctx.executor.as_ref(),
+                    &proj_dir,
+                    "Project",
+                    Some(ctx.sandbox.root()),
+                )
+                .await
                 {
                     out.push_str(&s);
                     out.push_str("\n\n");
                 }
                 if let Some(gdir) = &self.global_dir {
-                    if let Some(s) = memory::recall_scope(&LocalExecutor, gdir, "Global").await {
+                    if let Some(s) =
+                        memory::recall_scope(&LocalExecutor, gdir, "Global", None).await
+                    {
                         out.push_str(&s);
                         out.push_str("\n\n");
                     }
@@ -149,6 +163,7 @@ about the user across all their projects. Save durable, reusable facts only."
                 };
                 let kind = arg_str_opt(&args, "type").and_then(|s| MemoryType::parse(&s));
                 let scope = arg_str_opt(&args, "scope").unwrap_or_else(|| "project".into());
+                let source = arg_str_opt(&args, "source");
                 let (result, label) = if scope == "global" {
                     let Some(gdir) = &self.global_dir else {
                         return ToolOutcome::error(
@@ -156,14 +171,29 @@ about the user across all their projects. Save durable, reusable facts only."
                         );
                     };
                     (
-                        memory::save_memory(&LocalExecutor, gdir, &title, &content, kind).await,
+                        memory::save_memory(
+                            &LocalExecutor,
+                            gdir,
+                            &title,
+                            &content,
+                            kind,
+                            source.as_deref(),
+                        )
+                        .await,
                         "global",
                     )
                 } else {
                     let dir = memory::memory_dir(ctx.sandbox.root());
                     (
-                        memory::save_memory(ctx.executor.as_ref(), &dir, &title, &content, kind)
-                            .await,
+                        memory::save_memory(
+                            ctx.executor.as_ref(),
+                            &dir,
+                            &title,
+                            &content,
+                            kind,
+                            source.as_deref(),
+                        )
+                        .await,
                         "project",
                     )
                 };
@@ -172,8 +202,35 @@ about the user across all their projects. Save durable, reusable facts only."
                     Err(e) => ToolOutcome::error(e),
                 }
             }
+            "forget" => {
+                let title = match arg_str(&args, "title") {
+                    Ok(t) => t,
+                    Err(e) => return ToolOutcome::error(e),
+                };
+                let scope = arg_str_opt(&args, "scope").unwrap_or_else(|| "project".into());
+                let result = if scope == "global" {
+                    let Some(gdir) = &self.global_dir else {
+                        return ToolOutcome::error(
+                            "global memory is unavailable (no home directory)",
+                        );
+                    };
+                    memory::delete_memory(&LocalExecutor, gdir, &title).await
+                } else {
+                    let dir = memory::memory_dir(ctx.sandbox.root());
+                    memory::delete_memory(ctx.executor.as_ref(), &dir, &title).await
+                };
+                match result {
+                    Ok(Some(file)) => {
+                        ToolOutcome::ok(format!("Forgot {scope} note: {file} (removed)"))
+                    }
+                    Ok(None) => ToolOutcome::error(format!(
+                        "no {scope} note matches {title:?} — recall first to see exact titles"
+                    )),
+                    Err(e) => ToolOutcome::error(e),
+                }
+            }
             other => ToolOutcome::error(format!(
-                "unknown action `{other}` — use \"recall\" or \"remember\""
+                "unknown action `{other}` — use \"recall\", \"remember\", or \"forget\""
             )),
         }
     }

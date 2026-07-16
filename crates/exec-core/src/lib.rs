@@ -20,6 +20,28 @@ use std::time::{Duration, SystemTime};
 use async_trait::async_trait;
 use tokio_util::sync::CancellationToken;
 
+mod local;
+pub use local::LocalExecutor;
+
+pub const NONINTERACTIVE_ENV: &[(&str, &str)] = &[
+    ("PAGER", "cat"),
+    ("GIT_PAGER", "cat"),
+    ("GIT_OPTIONAL_LOCKS", "0"),
+    ("GIT_TERMINAL_PROMPT", "0"),
+    // Repository-selected fsmonitor executables can hang every innocent Git
+    // command. Apply the same safe override to model-issued shell commands as
+    // Clark's internal Git probes, including commands run on remote executors.
+    ("GIT_CONFIG_COUNT", "1"),
+    ("GIT_CONFIG_KEY_0", "core.fsmonitor"),
+    ("GIT_CONFIG_VALUE_0", "false"),
+    ("TERM", "dumb"),
+    ("NO_COLOR", "1"),
+];
+
+pub fn configure_noninteractive(command: &mut tokio::process::Command) {
+    command.envs(NONINTERACTIVE_ENV.iter().copied());
+}
+
 pub fn isolate_process_group(command: &mut tokio::process::Command) {
     #[cfg(unix)]
     command.process_group(0);
@@ -67,6 +89,7 @@ pub struct FileMeta {
     pub modified: Option<SystemTime>,
     pub len: u64,
     pub is_dir: bool,
+    pub is_symlink: bool,
 }
 
 /// A file discovered by [`Executor::walk`] (files only; ignored dirs skipped).
@@ -85,6 +108,25 @@ pub struct ExecOutput {
     pub stderr: Vec<u8>,
     /// Process exit code, or `None` if it was terminated by a signal.
     pub code: Option<i32>,
+}
+
+/// One ordered output chunk from a long-lived process.
+#[derive(Clone, Debug)]
+pub struct BackgroundOutput {
+    pub seq: u64,
+    pub is_stderr: bool,
+    pub data: Vec<u8>,
+}
+
+/// Incremental status for a long-lived process. Callers pass their last cursor
+/// and receive only newer chunks.
+#[derive(Clone, Debug)]
+pub struct BackgroundStatus {
+    pub output: Vec<BackgroundOutput>,
+    pub exit_code: Option<Option<i32>>,
+    pub error: Option<String>,
+    pub cursor: u64,
+    pub truncated: bool,
 }
 
 /// Incremental output callback for [`Executor::exec_streaming`]:
@@ -113,6 +155,10 @@ pub trait Executor: Send + Sync {
     async fn write(&self, path: &Path, data: &[u8]) -> ExecResult<()>;
     /// Create a directory and all missing parents.
     async fn create_dir_all(&self, path: &Path) -> ExecResult<()>;
+    /// Remove one file or symlink. Missing paths are treated as success.
+    async fn remove_file(&self, path: &Path) -> ExecResult<()>;
+    /// Remove one directory tree. Missing paths are treated as success.
+    async fn remove_dir_all(&self, path: &Path) -> ExecResult<()>;
     /// List a directory's immediate entries.
     async fn read_dir(&self, path: &Path) -> ExecResult<Vec<DirEntry>>;
     /// Metadata for a path; `Err` if it doesn't exist / can't be stat'd.
@@ -163,299 +209,41 @@ pub trait Executor: Send + Sync {
             .await
     }
 
+    /// Start a target-owned long-lived process and return its opaque id.
+    async fn background_start(&self, _command: &str, _cwd: &Path) -> ExecResult<String> {
+        Err("background processes are not supported by this executor".into())
+    }
+
+    /// Poll output and terminal state after `after_seq`.
+    async fn background_status(
+        &self,
+        _process_id: &str,
+        _after_seq: u64,
+    ) -> ExecResult<BackgroundStatus> {
+        Err("background processes are not supported by this executor".into())
+    }
+
+    /// Write bytes to a long-lived process, or close its stdin.
+    async fn background_write(
+        &self,
+        _process_id: &str,
+        _data: &[u8],
+        _close: bool,
+    ) -> ExecResult<()> {
+        Err("background process input is not supported by this executor".into())
+    }
+
+    /// Stop a target-owned long-lived process.
+    async fn background_kill(&self, _process_id: &str) -> ExecResult<()> {
+        Err("background processes are not supported by this executor".into())
+    }
+
     /// Whether this executor runs on the same machine as the caller. Local
     /// tools that need to spawn a process directly (not through `exec()`) —
     /// e.g. a backgrounded shell task — check this first, since only a local
     /// process is reachable to poll/kill afterward.
     fn is_local(&self) -> bool {
         true
-    }
-}
-
-/// Runs every primitive on the local machine — today's behavior, behind the
-/// [`Executor`] trait. The remote `exec-server` delegates to this same impl.
-pub struct LocalExecutor;
-
-#[async_trait]
-impl Executor for LocalExecutor {
-    async fn read(&self, path: &Path) -> ExecResult<Vec<u8>> {
-        tokio::fs::read(path).await.map_err(|e| e.to_string())
-    }
-
-    async fn write(&self, path: &Path, data: &[u8]) -> ExecResult<()> {
-        if let Some(parent) = path.parent() {
-            tokio::fs::create_dir_all(parent)
-                .await
-                .map_err(|e| e.to_string())?;
-        }
-        tokio::fs::write(path, data)
-            .await
-            .map_err(|e| e.to_string())
-    }
-
-    async fn create_dir_all(&self, path: &Path) -> ExecResult<()> {
-        tokio::fs::create_dir_all(path)
-            .await
-            .map_err(|e| e.to_string())
-    }
-
-    async fn read_dir(&self, path: &Path) -> ExecResult<Vec<DirEntry>> {
-        let mut rd = tokio::fs::read_dir(path).await.map_err(|e| e.to_string())?;
-        let mut out = Vec::new();
-        while let Some(entry) = rd.next_entry().await.map_err(|e| e.to_string())? {
-            let is_dir = entry.file_type().await.map(|t| t.is_dir()).unwrap_or(false);
-            out.push(DirEntry {
-                name: entry.file_name().to_string_lossy().to_string(),
-                is_dir,
-            });
-        }
-        Ok(out)
-    }
-
-    async fn metadata(&self, path: &Path) -> ExecResult<FileMeta> {
-        let m = tokio::fs::metadata(path).await.map_err(|e| e.to_string())?;
-        Ok(FileMeta {
-            modified: m.modified().ok(),
-            len: m.len(),
-            is_dir: m.is_dir(),
-        })
-    }
-
-    async fn walk(&self, root: &Path) -> ExecResult<Vec<WalkEntry>> {
-        let root = root.to_path_buf();
-        tokio::task::spawn_blocking(move || {
-            let mut out = Vec::new();
-            for entry in walkdir::WalkDir::new(&root)
-                .follow_links(false)
-                .into_iter()
-                .filter_entry(|e| !is_ignored(e.path()))
-            {
-                let Ok(entry) = entry else { continue };
-                if !entry.file_type().is_file() {
-                    continue;
-                }
-                let (modified, len) = entry
-                    .metadata()
-                    .map(|m| (m.modified().ok(), m.len()))
-                    .unwrap_or((None, 0));
-                out.push(WalkEntry {
-                    path: entry.path().to_path_buf(),
-                    modified,
-                    len,
-                });
-            }
-            out
-        })
-        .await
-        .map_err(|e| format!("walk failed: {e}"))
-    }
-
-    async fn exec(
-        &self,
-        command: &str,
-        cwd: &Path,
-        timeout: Duration,
-        cancel: &CancellationToken,
-    ) -> ExecResult<ExecOutput> {
-        self.exec_streaming(command, cwd, timeout, cancel, &|_, _| {})
-            .await
-    }
-
-    async fn exec_streaming(
-        &self,
-        command: &str,
-        cwd: &Path,
-        timeout: Duration,
-        cancel: &CancellationToken,
-        on_output: OnOutput<'_>,
-    ) -> ExecResult<ExecOutput> {
-        use tokio::io::AsyncReadExt;
-
-        let mut cmd = tokio::process::Command::new("/bin/sh");
-        cmd.arg("-c")
-            .arg(command)
-            .current_dir(cwd)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        isolate_process_group(&mut cmd);
-        let mut child = cmd
-            .spawn()
-            .map_err(|e| format!("failed to spawn shell: {e}"))?;
-        let root_pid = child.id();
-
-        // Pipe readers run as tasks feeding one channel, so both pipes drain
-        // concurrently (no deadlock on a full pipe) while this future observes
-        // every chunk in arrival order.
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(bool, Vec<u8>)>();
-        if let Some(mut pipe) = child.stdout.take() {
-            let tx = tx.clone();
-            tokio::spawn(async move {
-                let mut buf = [0u8; 8192];
-                while let Ok(n) = pipe.read(&mut buf).await {
-                    if n == 0 || tx.send((false, buf[..n].to_vec())).is_err() {
-                        break;
-                    }
-                }
-            });
-        }
-        if let Some(mut pipe) = child.stderr.take() {
-            let tx = tx.clone();
-            tokio::spawn(async move {
-                let mut buf = [0u8; 8192];
-                while let Ok(n) = pipe.read(&mut buf).await {
-                    if n == 0 || tx.send((true, buf[..n].to_vec())).is_err() {
-                        break;
-                    }
-                }
-            });
-        }
-        drop(tx);
-
-        let deadline = tokio::time::sleep(timeout);
-        tokio::pin!(deadline);
-        let mut stdout = Vec::new();
-        let mut stderr = Vec::new();
-        let mut pipes_open = true;
-        loop {
-            tokio::select! {
-                _ = cancel.cancelled() => {
-                    terminate_process_tree(&mut child, root_pid).await;
-                    return Err("command cancelled".into());
-                }
-                _ = &mut deadline => {
-                    terminate_process_tree(&mut child, root_pid).await;
-                    return Err(format!("command timed out after {} ms", timeout.as_millis()));
-                }
-                chunk = rx.recv(), if pipes_open => match chunk {
-                    Some((is_stderr, bytes)) => {
-                        on_output(is_stderr, &bytes);
-                        if is_stderr {
-                            stderr.extend_from_slice(&bytes);
-                        } else {
-                            stdout.extend_from_slice(&bytes);
-                        }
-                    }
-                    None => pipes_open = false,
-                },
-                status = child.wait(), if !pipes_open => {
-                    return match status {
-                        Ok(status) => Ok(ExecOutput { stdout, stderr, code: status.code() }),
-                        Err(e) => Err(format!("command failed: {e}")),
-                    };
-                }
-            }
-        }
-    }
-
-    async fn exec_streaming_pty(
-        &self,
-        command: &str,
-        cwd: &Path,
-        timeout: Duration,
-        cancel: &CancellationToken,
-        on_output: OnOutput<'_>,
-    ) -> ExecResult<ExecOutput> {
-        use portable_pty::{native_pty_system, CommandBuilder, PtySize};
-        use std::io::Read;
-
-        let pair = native_pty_system()
-            .openpty(PtySize {
-                rows: 24,
-                cols: 120,
-                pixel_width: 0,
-                pixel_height: 0,
-            })
-            .map_err(|e| format!("failed to open terminal: {e}"))?;
-
-        #[cfg(unix)]
-        let mut cmd = {
-            let mut cmd = CommandBuilder::new("/bin/sh");
-            cmd.args(["-c", command]);
-            cmd
-        };
-        #[cfg(windows)]
-        let mut cmd = {
-            let mut cmd = CommandBuilder::new("cmd.exe");
-            cmd.args(["/C", command]);
-            cmd
-        };
-        cmd.cwd(cwd);
-        cmd.env("TERM", "dumb");
-
-        let mut child = pair
-            .slave
-            .spawn_command(cmd)
-            .map_err(|e| format!("failed to spawn terminal command: {e}"))?;
-        drop(pair.slave);
-        let root_pid = child.process_id();
-        let mut killer = child.clone_killer();
-        let mut reader = pair
-            .master
-            .try_clone_reader()
-            .map_err(|e| format!("failed to read terminal output: {e}"))?;
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
-        std::thread::spawn(move || {
-            let mut buf = [0u8; 8192];
-            loop {
-                match reader.read(&mut buf) {
-                    Ok(0) | Err(_) => return,
-                    Ok(n) if tx.send(buf[..n].to_vec()).is_err() => return,
-                    Ok(_) => {}
-                }
-            }
-        });
-
-        let mut wait = tokio::task::spawn_blocking(move || child.wait());
-        let deadline = tokio::time::sleep(timeout);
-        tokio::pin!(deadline);
-        let mut stdout = Vec::new();
-        let mut output_open = true;
-        loop {
-            tokio::select! {
-                _ = cancel.cancelled() => {
-                    terminate_pid_tree(root_pid).await;
-                    let _ = tokio::task::spawn_blocking(move || killer.kill()).await;
-                    let _ = tokio::time::timeout(Duration::from_millis(500), &mut wait).await;
-                    return Err("command cancelled".into());
-                }
-                _ = &mut deadline => {
-                    terminate_pid_tree(root_pid).await;
-                    let _ = tokio::task::spawn_blocking(move || killer.kill()).await;
-                    let _ = tokio::time::timeout(Duration::from_millis(500), &mut wait).await;
-                    return Err(format!("command timed out after {} ms", timeout.as_millis()));
-                }
-                chunk = rx.recv(), if output_open => match chunk {
-                    Some(bytes) => {
-                        on_output(false, &bytes);
-                        stdout.extend_from_slice(&bytes);
-                    }
-                    None => output_open = false,
-                },
-                status = &mut wait => {
-                    let status = status
-                        .map_err(|e| format!("command task failed: {e}"))?
-                        .map_err(|e| format!("command failed: {e}"))?;
-                    let drained = !output_open || tokio::time::timeout(Duration::from_millis(500), async {
-                            while let Some(bytes) = rx.recv().await {
-                                on_output(false, &bytes);
-                                stdout.extend_from_slice(&bytes);
-                            }
-                        })
-                        .await
-                        .is_ok();
-                    if !drained {
-                        terminate_pid_tree(root_pid).await;
-                    }
-                    let code = status
-                        .signal()
-                        .is_none()
-                        .then(|| i32::try_from(status.exit_code()).ok())
-                        .flatten();
-                    return Ok(ExecOutput { stdout, stderr: Vec::new(), code });
-                }
-            }
-        }
     }
 }
 

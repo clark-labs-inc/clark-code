@@ -61,33 +61,35 @@ pub async fn provider_connect(
 pub async fn changes_summary(
     cwd: String,
     base: String,
+    remote: Option<RemoteArg>,
 ) -> Result<Vec<provider_local::ChangedFile>, String> {
-    tokio::task::spawn_blocking(move || {
-        provider_local::changes_summary(std::path::Path::new(&cwd), &base)
-    })
-    .await
-    .map_err(|e| e.to_string())?
+    let exec = project_executor(remote).await?;
+    provider_local::changes_summary(exec.as_ref(), std::path::Path::new(&cwd), &base).await
 }
 
 /// Unified diff of one file against the session baseline.
 #[tauri::command]
-pub async fn changes_diff(cwd: String, base: String, path: String) -> Result<String, String> {
-    tokio::task::spawn_blocking(move || {
-        provider_local::changes_diff(std::path::Path::new(&cwd), &base, &path)
-    })
-    .await
-    .map_err(|e| e.to_string())?
+pub async fn changes_diff(
+    cwd: String,
+    base: String,
+    path: String,
+    remote: Option<RemoteArg>,
+) -> Result<String, String> {
+    let exec = project_executor(remote).await?;
+    provider_local::changes_diff(exec.as_ref(), std::path::Path::new(&cwd), &base, &path).await
 }
 
 /// Restore one file to its baseline state (worktree only; created files are
 /// removed). The user confirms in the panel before this fires.
 #[tauri::command]
-pub async fn changes_revert(cwd: String, base: String, path: String) -> Result<(), String> {
-    tokio::task::spawn_blocking(move || {
-        provider_local::changes_revert(std::path::Path::new(&cwd), &base, &path)
-    })
-    .await
-    .map_err(|e| e.to_string())?
+pub async fn changes_revert(
+    cwd: String,
+    base: String,
+    path: String,
+    remote: Option<RemoteArg>,
+) -> Result<(), String> {
+    let exec = project_executor(remote).await?;
+    provider_local::changes_revert(exec.as_ref(), std::path::Path::new(&cwd), &base, &path).await
 }
 
 /// Re-run `connect` on the EXISTING provider instance — unlike
@@ -187,6 +189,17 @@ pub struct RemoteArg {
     pub token: String,
 }
 
+async fn project_executor(
+    remote: Option<RemoteArg>,
+) -> Result<Box<dyn provider_local::Executor>, String> {
+    match remote {
+        Some(remote) => Ok(Box::new(
+            provider_local::RemoteExecutor::connect(&remote.ws_url, &remote.token).await?,
+        )),
+        None => Ok(Box::new(provider_local::LocalExecutor)),
+    }
+}
+
 /// Discover the MCP servers + skills a user already configured in Claude Code,
 /// so they can be imported with one click (skills are picked up automatically).
 /// Reads through an executor: local disk, or — when `remote` is given — the
@@ -197,10 +210,7 @@ pub async fn claude_discover(
     remote: Option<RemoteArg>,
 ) -> Result<ClaudeDiscovery, String> {
     let root = std::path::PathBuf::from(cwd);
-    let exec: Box<dyn provider_local::Executor> = match remote {
-        Some(r) => Box::new(provider_local::RemoteExecutor::connect(&r.ws_url, &r.token).await?),
-        None => Box::new(provider_local::LocalExecutor),
-    };
+    let exec = project_executor(remote).await?;
     Ok(ClaudeDiscovery {
         mcp: provider_local::discover_mcp_servers(exec.as_ref(), &root).await,
         skills: provider_local::discover_skills(exec.as_ref(), &root).await,
@@ -217,10 +227,7 @@ pub async fn list_commands(
     remote: Option<RemoteArg>,
 ) -> Result<Vec<provider_local::CustomCommand>, String> {
     let root = std::path::PathBuf::from(cwd);
-    let exec: Box<dyn provider_local::Executor> = match remote {
-        Some(r) => Box::new(provider_local::RemoteExecutor::connect(&r.ws_url, &r.token).await?),
-        None => Box::new(provider_local::LocalExecutor),
-    };
+    let exec = project_executor(remote).await?;
     Ok(provider_local::discover_commands(exec.as_ref(), &root).await)
 }
 
@@ -309,7 +316,16 @@ async fn register_session(
 #[tauri::command]
 pub async fn session_close(session_id: String, state: State<'_, AppState>) -> Result<(), String> {
     tracing::info!(session = %session_id, "session_close");
-    state.sessions.lock().await.remove(&session_id);
+    let entry = state.sessions.lock().await.remove(&session_id);
+    if let Some(entry) = entry {
+        let mut entry = entry.lock().await;
+        let id = entry.session.id.clone();
+        entry
+            .provider
+            .close_session(&id)
+            .await
+            .map_err(|error| error.to_string())?;
+    }
     Ok(())
 }
 
@@ -558,10 +574,12 @@ pub struct MemoryOverview {
 
 /// Read one scope's `.clark/memory` directory into a viewer overview. The
 /// directory is always local here (the desktop machine), so `LocalExecutor`.
-async fn memory_overview(mem_dir: &std::path::Path) -> MemoryOverview {
-    use provider_local::LocalExecutor;
-    let facts_raw = provider_local::load_facts(&LocalExecutor, mem_dir).await;
-    let index = provider_local::load_index(&LocalExecutor, mem_dir).await;
+async fn memory_overview(
+    exec: &dyn provider_local::Executor,
+    mem_dir: &std::path::Path,
+) -> MemoryOverview {
+    let facts_raw = provider_local::load_facts(exec, mem_dir).await;
+    let index = provider_local::load_index(exec, mem_dir).await;
     let exists = index.is_some() || !facts_raw.is_empty();
     let facts = facts_raw
         .into_iter()
@@ -583,12 +601,16 @@ async fn memory_overview(mem_dir: &std::path::Path) -> MemoryOverview {
 
 /// List the project-scoped memory for `cwd` (`<cwd>/.clark/memory/`). Read-only.
 #[tauri::command]
-pub async fn local_list_memory(cwd: String) -> Result<MemoryOverview, String> {
+pub async fn local_list_memory(
+    cwd: String,
+    remote: Option<RemoteArg>,
+) -> Result<MemoryOverview, String> {
     if cwd.trim().is_empty() {
         return Err("choose a project folder first".into());
     }
     let mem_dir = provider_local::memory_dir(std::path::Path::new(&cwd));
-    Ok(memory_overview(&mem_dir).await)
+    let exec = project_executor(remote).await?;
+    Ok(memory_overview(exec.as_ref(), &mem_dir).await)
 }
 
 /// List the user's global memory (`~/.clark/memory/`). Read-only.
@@ -597,20 +619,22 @@ pub async fn local_list_global_memory() -> Result<MemoryOverview, String> {
     let Some(mem_dir) = provider_local::global_memory_dir() else {
         return Err("could not resolve your home directory".into());
     };
-    Ok(memory_overview(&mem_dir).await)
+    Ok(memory_overview(&provider_local::LocalExecutor, &mem_dir).await)
 }
 
 /// List project-relative file paths under `cwd` for the `@`-mention picker.
 /// Read-only; skips ignored directories. Runs the walk off the UI thread.
 #[tauri::command]
-pub async fn local_list_files(cwd: String) -> Result<Vec<String>, String> {
+pub async fn local_list_files(
+    cwd: String,
+    remote: Option<RemoteArg>,
+) -> Result<Vec<String>, String> {
     if cwd.trim().is_empty() {
         return Ok(Vec::new());
     }
     let root = std::path::PathBuf::from(cwd);
-    tokio::task::spawn_blocking(move || provider_local::list_project_files(&root))
-        .await
-        .map_err(|e| format!("list files failed: {e}"))
+    let exec = project_executor(remote).await?;
+    Ok(provider_local::list_project_files(exec.as_ref(), &root).await)
 }
 
 /// Read an agent-authored document (Markdown) so the UI can render it inline.
@@ -1006,12 +1030,13 @@ pub async fn clark_mcp_probe(
 /// Restore the project's working tree to a pre-run checkpoint (one-click undo).
 /// `sha` is the run's `checkpoint` handle. Runs git off the UI thread.
 #[tauri::command]
-pub async fn clark_checkpoint_restore(cwd: String, sha: String) -> Result<(), String> {
-    tokio::task::spawn_blocking(move || {
-        provider_local::restore_checkpoint(std::path::Path::new(&cwd), &sha)
-    })
-    .await
-    .map_err(|e| format!("restore task failed: {e}"))?
+pub async fn clark_checkpoint_restore(
+    cwd: String,
+    sha: String,
+    remote: Option<RemoteArg>,
+) -> Result<(), String> {
+    let exec = project_executor(remote).await?;
+    provider_local::restore_checkpoint(exec.as_ref(), std::path::Path::new(&cwd), &sha).await
 }
 
 #[tauri::command]
@@ -1251,7 +1276,9 @@ mod real_backend_tests {
 
         // A real checkpoint, via the exact function `engine.rs` calls at the
         // start of every turn.
-        let base = provider_local::create_checkpoint(dir.path())
+        let base = provider_local::create_checkpoint(&provider_local::LocalExecutor, dir.path())
+            .await
+            .expect("checkpoint command succeeds")
             .expect("real git repo checkpoints successfully");
 
         // A real, independent edit after the checkpoint.
@@ -1263,7 +1290,7 @@ mod real_backend_tests {
         std::fs::write(dir.path().join("new_file.rs"), "// new\n").unwrap();
 
         let cwd = dir.path().to_string_lossy().to_string();
-        let summary = changes_summary(cwd.clone(), base.clone())
+        let summary = changes_summary(cwd.clone(), base.clone(), None)
             .await
             .expect("changes_summary succeeds against a real checkpoint");
         assert!(summary
@@ -1273,7 +1300,7 @@ mod real_backend_tests {
             .iter()
             .any(|f| f.path == "new_file.rs" && f.status == "added"));
 
-        let diff = changes_diff(cwd.clone(), base.clone(), "main.rs".to_string())
+        let diff = changes_diff(cwd.clone(), base.clone(), "main.rs".to_string(), None)
             .await
             .expect("changes_diff succeeds");
         assert!(
@@ -1283,7 +1310,7 @@ mod real_backend_tests {
 
         // Revert just the one file — the real filesystem should show the
         // original content again, and the new file should be untouched.
-        changes_revert(cwd.clone(), base.clone(), "main.rs".to_string())
+        changes_revert(cwd.clone(), base.clone(), "main.rs".to_string(), None)
             .await
             .expect("changes_revert succeeds");
         let restored = std::fs::read_to_string(dir.path().join("main.rs")).unwrap();
@@ -1295,7 +1322,10 @@ mod real_backend_tests {
     async fn clark_checkpoint_restore_reverts_the_whole_real_tree() {
         let dir = tempfile::tempdir().unwrap();
         init_repo(dir.path());
-        let base = provider_local::create_checkpoint(dir.path()).unwrap();
+        let base = provider_local::create_checkpoint(&provider_local::LocalExecutor, dir.path())
+            .await
+            .unwrap()
+            .unwrap();
 
         std::fs::write(dir.path().join("main.rs"), "fn main() { /* changed */ }\n").unwrap();
         std::fs::write(
@@ -1305,7 +1335,7 @@ mod real_backend_tests {
         .unwrap();
 
         let cwd = dir.path().to_string_lossy().to_string();
-        clark_checkpoint_restore(cwd, base)
+        clark_checkpoint_restore(cwd, base, None)
             .await
             .expect("clark_checkpoint_restore succeeds against a real checkpoint");
 

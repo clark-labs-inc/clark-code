@@ -66,6 +66,13 @@ impl ca::ContextTransform for CheckpointCompactor {
                 omitted = prepared.request.omitted_messages
             ));
         }
+        // The summary is a point-in-time snapshot that outlives the files it
+        // describes — other agents share this tree, so beliefs formed from it
+        // go stale. Stamp it the way resume-context already is.
+        summary.push_str(
+            "\n\n[Point-in-time summary: files and code described above may have changed since \
+this was written — re-read a file before relying on its described contents.]",
+        );
 
         let compacted = core::finalize_compaction(&prepared.plan, &summary);
         let mut next = vec![user_message(compacted.summary_message)];

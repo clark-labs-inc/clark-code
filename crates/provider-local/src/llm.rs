@@ -220,6 +220,13 @@ pub struct LlmClient {
 }
 
 impl LlmClient {
+    /// Same endpoint/auth, different model — for background side-calls (e.g.
+    /// memory extraction) that shouldn't inherit a weaker session model.
+    pub fn with_model(mut self, model: &str) -> Self {
+        self.model = model.to_string();
+        self
+    }
+
     pub fn new(config: &LocalConfig) -> Result<Self, String> {
         let mut client = Self::from_parts(
             &config.base_url,

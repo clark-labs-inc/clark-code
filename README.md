@@ -34,6 +34,26 @@ React (Tauri WebView)  ──invoke/emit──►  agent-core (Rust, native + WA
                   local CLI agents via sidecar     remote Clark runtime
 ```
 
+## Autoregressive prompt & schema design
+
+LLMs generate left-to-right, so *order is part of the prompt*. The local coding
+agent (`crates/provider-local`) is designed around that:
+
+- **Tool schemas are ordered prompts.** The model emits tool-call arguments in
+  the property order the schema advertises, so every schema is authored
+  locate-before-payload (`edit_file`: `path → old_string → new_string`),
+  decide-before-write (`memory`: `action → scope → title → content`), and
+  rationale-first (`update_plan`: `explanation → plan`). The workspace enables
+  serde_json's `preserve_order` feature so authored order actually reaches the
+  wire — stock serde_json alphabetizes `json!{}` maps, which had silently
+  reversed `edit_file` into `new_string → old_string → path`. A regression
+  test pins the wire order of the sensitive schemas.
+- **The system prompt is position-aware.** Hard rules (the shared-worktree git
+  rules) sit in the primacy slot directly after the identity line; volatile
+  per-turn facts (a fresh `git status` snapshot, output style) are injected at
+  the recency end of each turn message — which also keeps the cached system
+  prompt prefix stable for prompt caching.
+
 ## Layout
 
 | Path | What |

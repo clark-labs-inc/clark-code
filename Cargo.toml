@@ -21,7 +21,11 @@ rust-version = "1.82"
 
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+# preserve_order: tool-call schemas are autoregressive prompts — the model
+# generates arguments in the property order it sees, so authored order
+# (path -> old_string -> new_string, action -> scope -> title -> content)
+# must survive serialization instead of being alphabetized.
+serde_json = { version = "1", features = ["preserve_order"] }
 thiserror = "2"
 indexmap = { version = "2", features = ["serde"] }
 futures = "0.3"

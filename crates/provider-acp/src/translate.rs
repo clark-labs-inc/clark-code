@@ -176,6 +176,7 @@ fn tool_content(v: Option<&Value>) -> Vec<ContentBlock> {
 fn tool_call(v: &Value) -> ToolCall {
     ToolCall {
         id: ToolCallId::new(s(v, "toolCallId").unwrap_or_default()),
+        tool_name: s(v, "toolName").map(String::from),
         title: s(v, "title").unwrap_or("Tool call").to_string(),
         kind: tool_kind(s(v, "kind")),
         status: tool_status(s(v, "status")),

@@ -3,15 +3,20 @@
 //! session is bound to a project root; each prompt drives a local tool-calling
 //! loop ([`crate::engine`]) whose normalized events stream back to the UI.
 
+mod prompt_input;
+mod state;
+
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use agent_core::domain::{AgentEvent, ContentBlock, Role};
+use agent_core::domain::AgentEvent;
+#[cfg(test)]
+use agent_core::domain::{ContentBlock, Role};
 use agent_core::error::{Error, Result};
 use agent_core::ids::{ProviderId, RunId, SessionId};
 use agent_core::provider::{
     ClientResponse, EventStream, PromptInput, Provider, ProviderCapabilities, ProviderConfig,
-    Session, SessionOptions,
+    Session, SessionEnvironment, SessionOptions,
 };
 use async_trait::async_trait;
 use futures::StreamExt;
@@ -26,6 +31,8 @@ use crate::loop_state::{Decision, RunControl, SessionState};
 use crate::prompt::system_prompt;
 use crate::sandbox::Sandbox;
 use crate::tools::{ReadTracker, ToolCtx, ToolRegistry};
+
+use prompt_input::*;
 
 /// Injected as a prefix to the user's turn text while Plan Mode is active.
 /// Per-turn (not baked into the cached system-prompt prefix) since the mode
@@ -59,42 +66,7 @@ pub struct LocalAgentProvider {
     /// Stable identity for the active project, when private project knowledge
     /// is enabled and the selected root is a Git repository.
     repository_fingerprint: Option<String>,
-}
-
-impl LocalAgentProvider {
-    pub fn new() -> Self {
-        Self {
-            config: None,
-            llm: None,
-            registry: None,
-            sandbox: None,
-            session_id: None,
-            session: Arc::new(Mutex::new(SessionState::default())),
-            control: Arc::new(Mutex::new(RunControl::default())),
-            reads: Arc::new(std::sync::Mutex::new(ReadTracker::default())),
-            background: Arc::new(crate::background::BackgroundTasks::default()),
-            cancel: CancellationToken::new(),
-            executor: Arc::new(crate::exec::LocalExecutor),
-            run_counter: AtomicU64::new(0),
-            mcp_status: Vec::new(),
-            repository_fingerprint: None,
-        }
-    }
-
-    /// MCP connection statuses from the last `connect`, for the settings UI.
-    pub fn mcp_status(&self) -> &[crate::mcp::McpStatus] {
-        &self.mcp_status
-    }
-
-    fn config(&self) -> Result<&LocalConfig> {
-        self.config.as_ref().ok_or(Error::NotConnected)
-    }
-}
-
-impl Default for LocalAgentProvider {
-    fn default() -> Self {
-        Self::new()
-    }
+    instruction_snapshot: Option<crate::instructions::ProjectInstructions>,
 }
 
 #[async_trait]
@@ -196,6 +168,18 @@ impl Provider for LocalAgentProvider {
         };
 
         let mut prompt = system_prompt(&sandbox, config.clark.is_some());
+        self.instruction_snapshot = crate::instructions::load(
+            self.executor.as_ref(),
+            sandbox.root(),
+        )
+        .await
+        .ok()
+        .flatten();
+        if let Some(instructions) = self.instruction_snapshot.as_ref() {
+            prompt.push('\n');
+            prompt.push_str(&instructions.render());
+            prompt.push('\n');
+        }
         if let Some(docs) = sandbox.docs_root() {
             prompt.push_str(&crate::workspace::prompt_section(docs));
         }
@@ -216,6 +200,7 @@ impl Provider for LocalAgentProvider {
                 self.executor.as_ref(),
                 &crate::memory::memory_dir(sandbox.root()),
                 "Project",
+                Some(sandbox.root()),
             )
             .await
             {
@@ -223,8 +208,13 @@ impl Provider for LocalAgentProvider {
                 mem.push('\n');
             }
             if let Some(gdir) = crate::memory::global_memory_dir() {
-                if let Some(glob) =
-                    crate::memory::scope_listing(&crate::exec::LocalExecutor, &gdir, "Global").await
+                if let Some(glob) = crate::memory::scope_listing(
+                    &crate::exec::LocalExecutor,
+                    &gdir,
+                    "Global",
+                    None,
+                )
+                .await
                 {
                     mem.push_str(&glob);
                     mem.push('\n');
@@ -253,29 +243,7 @@ impl Provider for LocalAgentProvider {
                 prompt.push_str(&mem);
             }
         }
-        // A reopened conversation has no server-side session to resume, so the
-        // host hands us a rendered transcript of the prior turns; seed it into
-        // the system prompt so the model remembers the conversation the user is
-        // looking at instead of greeting them with a fresh session.
-        if let Some(history) = options
-            .resume_context
-            .as_deref()
-            .map(str::trim)
-            .filter(|h| !h.is_empty())
-        {
-            prompt.push_str(
-                "\n# Resumed conversation\n\n\
-                 This session continues an earlier conversation with this user in this \
-                 project. The transcript below is a condensed record of it (tool output \
-                 omitted; it may be truncated at the start). Treat it as your own \
-                 conversation history: don't re-introduce yourself or redo completed \
-                 work. Any processes it mentions were started in a previous app session \
-                 and are likely gone — verify current state with tools before assuming \
-                 files, branches, or long-running commands are still as described.\n\n",
-            );
-            prompt.push_str(history);
-            prompt.push('\n');
-        }
+        let resumed_transcript = crate::resume::to_agent_messages(options.resume.as_ref());
         // Project-scoped config (`.clark/settings.json`): permission arrays
         // union with the global (UI-driven) ones; deny always wins because
         // `PermissionGate::hard_refusal` checks `deny_commands` before
@@ -284,7 +252,7 @@ impl Provider for LocalAgentProvider {
         {
             let mut s = self.session.lock().await;
             s.system_prompt = prompt;
-            s.transcript.clear();
+            s.transcript = resumed_transcript;
             s.policy = config.permissions.clone();
             s.allow_commands = crate::project_settings::union_unique(
                 config.command_allowlist.clone(),
@@ -311,11 +279,35 @@ impl Provider for LocalAgentProvider {
 
         self.sandbox = Some(sandbox);
         self.session_id = Some(id.clone());
+        let sandbox = self.sandbox.as_ref().expect("sandbox was just installed");
+        let checkout_root = sandbox.root().to_string_lossy().into_owned();
+        let docs_root = sandbox
+            .docs_root()
+            .map(|root| root.to_string_lossy().into_owned());
+        let mut workspace_roots = vec![checkout_root.clone()];
+        if let Some(docs_root) = docs_root.as_ref() {
+            workspace_roots.push(docs_root.clone());
+        }
+        let repository_root = crate::git_metadata::common_repository_root(
+            self.executor.as_ref(),
+            sandbox.root(),
+        )
+        .await
+        .ok()
+        .flatten()
+        .map(|root| root.to_string_lossy().into_owned());
         Ok(Session {
             id,
             provider: self.id(),
             capabilities: self.capabilities(),
             mode: None,
+            environment: Some(SessionEnvironment {
+                checkout_root: Some(checkout_root),
+                repository_root,
+                workspace_roots,
+                docs_root,
+                remote: config.remote.is_some(),
+            }),
         })
     }
 
@@ -339,6 +331,18 @@ impl Provider for LocalAgentProvider {
         self.cancel = cancel.clone();
 
         let mut text = prompt_text(&input);
+        if let Ok(current_instructions) =
+            crate::instructions::load(self.executor.as_ref(), sandbox.root()).await
+        {
+            if let Some(refresh) = crate::instructions::refresh_context(
+                self.instruction_snapshot.as_ref(),
+                current_instructions.as_ref(),
+            ) {
+                text = format!("{refresh}\n\n{text}");
+            }
+            self.instruction_snapshot = current_instructions;
+        }
+        text = format!("{}\n\n{text}", environment_context(&sandbox, config.remote.is_some()));
         let knowledge_query = text.clone();
         let attachment_context = crate::attachments::process_attachments(
             &input.attachments,
@@ -401,6 +405,24 @@ impl Provider for LocalAgentProvider {
         ));
         let (tx, rx) = async_channel::unbounded::<AgentEvent>();
 
+        // Post-turn durable-fact extraction (structural memory proactivity):
+        // only when memories are on, and always off the turn's latency path.
+        // Extraction quality shouldn't inherit a weaker session model — on the
+        // Clark platform, pin it to the default clark-code tier.
+        let memory_extraction = config.memories_enabled.then(|| {
+            let extraction_llm = if config.model.starts_with("clark-code") {
+                llm.clone().with_model("clark-code")
+            } else {
+                llm.clone()
+            };
+            crate::memory_extraction::ExtractionCtx {
+                llm: extraction_llm,
+                executor: self.executor.clone(),
+                project_root: sandbox.root().to_path_buf(),
+                global_dir: crate::memory::global_memory_dir(),
+            }
+        });
+
         let tc = TurnContext {
             llm,
             registry,
@@ -423,6 +445,7 @@ impl Provider for LocalAgentProvider {
             model: config.model,
             temperature: config.temperature,
             user_text: text,
+            memory_extraction,
         };
         tokio::spawn(run_turn(tc, tx, run));
         Ok(rx.boxed())
@@ -431,6 +454,13 @@ impl Provider for LocalAgentProvider {
     async fn cancel(&mut self, _session: &SessionId, _run: &RunId) -> Result<()> {
         self.cancel.cancel();
         self.control.lock().await.clear();
+        Ok(())
+    }
+
+    async fn close_session(&mut self, _session: &SessionId) -> Result<()> {
+        self.cancel.cancel();
+        self.control.lock().await.clear();
+        self.background.clear_all().await;
         Ok(())
     }
 
@@ -455,188 +485,6 @@ impl Provider for LocalAgentProvider {
     }
 }
 
-/// Flatten a prompt's text blocks (and inline any text attachments) into one
-/// user message. Non-text attachments (images, PDFs, DOCX, anything else) are
-/// handled separately by [`crate::attachments::process_attachments`], which
-/// needs an async context this sync helper doesn't have.
-fn prompt_text(input: &PromptInput) -> String {
-    let mut text: String = input
-        .blocks
-        .iter()
-        .filter_map(|b| match b {
-            ContentBlock::Text { text } => Some(text.as_str()),
-            _ => None,
-        })
-        .collect::<Vec<_>>()
-        .join("");
-
-    for att in &input.attachments {
-        if att.is_text() {
-            if let Ok(decoded) = decode_base64_text(&att.data_base64) {
-                text.push_str(&format!(
-                    "\n\n--- attached file: {} ---\n{decoded}\n",
-                    att.filename
-                ));
-            }
-        }
-    }
-    let _ = Role::User; // role is fixed for user prompts
-    text
-}
-
-/// Minimal standard-base64 decoder (no external dep) for inlining text files.
-fn decode_base64_text(data: &str) -> std::result::Result<String, ()> {
-    fn val(c: u8) -> Option<u8> {
-        match c {
-            b'A'..=b'Z' => Some(c - b'A'),
-            b'a'..=b'z' => Some(c - b'a' + 26),
-            b'0'..=b'9' => Some(c - b'0' + 52),
-            b'+' => Some(62),
-            b'/' => Some(63),
-            _ => None,
-        }
-    }
-    let mut out = Vec::new();
-    let mut buf = 0u32;
-    let mut bits = 0u32;
-    for &c in data.as_bytes() {
-        if c == b'=' || c.is_ascii_whitespace() {
-            continue;
-        }
-        let v = val(c).ok_or(())? as u32;
-        buf = (buf << 6) | v;
-        bits += 6;
-        if bits >= 8 {
-            bits -= 8;
-            out.push((buf >> bits) as u8);
-        }
-    }
-    String::from_utf8(out).map_err(|_| ())
-}
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use agent_core::domain::PendingUpload;
-
-    #[test]
-    fn prompt_text_joins_blocks() {
-        let input = PromptInput {
-            blocks: vec![ContentBlock::text("hello "), ContentBlock::text("world")],
-            attachments: Vec::new(),
-        };
-        assert_eq!(prompt_text(&input), "hello world");
-    }
-
-    #[test]
-    fn prompt_text_inlines_text_attachment() {
-        let input = PromptInput {
-            blocks: vec![ContentBlock::text("see file")],
-            attachments: vec![PendingUpload {
-                filename: "note.txt".into(),
-                content_type: "text/plain".into(),
-                data_base64: "aGVsbG8=".into(), // "hello"
-            }],
-        };
-        let text = prompt_text(&input);
-        assert!(text.contains("see file"));
-        assert!(text.contains("attached file: note.txt"));
-        assert!(text.contains("hello"));
-    }
-
-    #[test]
-    fn prompt_text_does_not_note_non_text_attachments() {
-        // A non-text attachment (e.g. an image) must never get a bare
-        // filename note here — that's exactly what previously sent the model
-        // hunting the filesystem for a file that only existed as inline
-        // base64. Non-text handling now lives in `crate::attachments`.
-        let input = PromptInput {
-            blocks: vec![ContentBlock::text("look at this")],
-            attachments: vec![PendingUpload {
-                filename: "image.webp".into(),
-                content_type: "image/webp".into(),
-                data_base64: "aGVsbG8=".into(),
-            }],
-        };
-        let text = prompt_text(&input);
-        assert!(!text.contains("attached file:"));
-        assert!(!text.contains("image.webp"));
-    }
-
-    #[test]
-    fn base64_decodes_text() {
-        assert_eq!(
-            decode_base64_text("aGVsbG8gd29ybGQ=").unwrap(),
-            "hello world"
-        );
-    }
-
-    #[tokio::test]
-    async fn new_session_requires_cwd() {
-        let mut p = LocalAgentProvider::new();
-        p.connect(ProviderConfig::default()).await.unwrap();
-        let err = p.new_session(SessionOptions::default()).await.unwrap_err();
-        assert!(matches!(err, Error::Unsupported(_)));
-    }
-
-    #[tokio::test]
-    async fn set_mode_flips_plan_mode_flag() {
-        let mut p = LocalAgentProvider::new();
-        let session_id = SessionId::new("s1");
-        assert!(!p.session.lock().await.plan_mode);
-
-        p.set_mode(&session_id, "plan".to_string()).await.unwrap();
-        assert!(p.session.lock().await.plan_mode);
-
-        p.set_mode(&session_id, "ask".to_string()).await.unwrap();
-        assert!(!p.session.lock().await.plan_mode);
-    }
-
-    #[tokio::test]
-    async fn set_output_style_persists_on_session_state() {
-        let mut p = LocalAgentProvider::new();
-        let session_id = SessionId::new("s1");
-        assert_eq!(p.session.lock().await.output_style, "");
-
-        p.set_output_style(&session_id, "terse".to_string())
-            .await
-            .unwrap();
-        assert_eq!(p.session.lock().await.output_style, "terse");
-    }
-
-    #[tokio::test]
-    async fn new_session_seeds_system_prompt_without_history() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut p = LocalAgentProvider::new();
-        p.connect(ProviderConfig::default()).await.unwrap();
-        let opts = SessionOptions {
-            cwd: Some(dir.path().to_string_lossy().to_string()),
-            mode: None,
-            resume_context: None,
-        };
-        let session = p.new_session(opts).await.unwrap();
-        assert_eq!(session.provider, ProviderId::new("local"));
-        let s = p.session.lock().await;
-        assert!(!s.system_prompt.is_empty());
-        assert!(s.transcript.is_empty());
-        assert!(!s.system_prompt.contains("# Resumed conversation"));
-    }
-
-    #[tokio::test]
-    async fn new_session_seeds_resume_context_into_system_prompt() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut p = LocalAgentProvider::new();
-        p.connect(ProviderConfig::default()).await.unwrap();
-        let opts = SessionOptions {
-            cwd: Some(dir.path().to_string_lossy().to_string()),
-            mode: None,
-            resume_context: Some("User: install node\n\nAssistant: running brew install".into()),
-        };
-        p.new_session(opts).await.unwrap();
-        let s = p.session.lock().await;
-        assert!(s.system_prompt.contains("# Resumed conversation"));
-        assert!(s.system_prompt.contains("running brew install"));
-        // History seeds the prompt, not the transcript — turns stay clean.
-        assert!(s.transcript.is_empty());
-    }
-}
+#[path = "provider_tests.rs"]
+mod tests;

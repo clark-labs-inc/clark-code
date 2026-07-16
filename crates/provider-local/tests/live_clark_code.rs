@@ -126,7 +126,7 @@ async fn new_live_provider(
         .new_session(SessionOptions {
             cwd: Some(cwd.to_string_lossy().to_string()),
             mode: None,
-            resume_context: None,
+            resume: None,
         })
         .await
         .expect("new local session");

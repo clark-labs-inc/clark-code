@@ -9,9 +9,13 @@ const inflight = new Map<string, Promise<string[]>>();
 
 /** Project-relative file paths under `cwd`, cached. Empty if the bridge can't
  *  list files (e.g. browser preview / no folder). */
-export async function projectFiles(cwd: string): Promise<string[]> {
-  const key = cwd.trim();
-  if (!key) return [];
+export async function projectFiles(
+  cwd: string,
+  remote?: { ws_url: string; token: string } | null,
+): Promise<string[]> {
+  const root = cwd.trim();
+  if (!root) return [];
+  const key = remote ? `${remote.ws_url}\0${root}` : root;
   const cached = cache.get(key);
   if (cached) return cached;
   const pending = inflight.get(key);
@@ -20,7 +24,7 @@ export async function projectFiles(cwd: string): Promise<string[]> {
   const load = (async () => {
     try {
       const bridge = await getBridge();
-      const files = (await bridge.listFiles?.(key)) ?? [];
+      const files = (await bridge.listFiles?.(root, remote)) ?? [];
       cache.set(key, files);
       return files;
     } catch {

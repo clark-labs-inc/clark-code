@@ -18,26 +18,25 @@
 //! The crate is intentionally dependency-light (no HTTP client, no `agent-core`)
 //! so the cross-compiled remote binary stays small.
 
+mod process;
+
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::{Component, Path, PathBuf};
-use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use exec_core::{isolate_process_group, terminate_process_tree, Executor, LocalExecutor};
+use exec_core::{Executor, LocalExecutor};
 use exec_protocol::{
-    b64_decode, b64_encode, error_code, method, AuthParams, AuthResult, MetaResult, Notification,
-    PathParams, ProcessExitParams, ProcessIdParams, ProcessOutputParams, ProcessResumeParams,
-    ProcessStartParams, ReadDirResult, ReadResult, Request, Response, Stream, WalkResult,
-    WireDirEntry, WireWalkEntry, WriteParams, PROTOCOL_VERSION,
+    b64_decode, b64_encode, error_code, method, AuthParams, AuthResult, MetaResult,
+    PathParams, ReadDirResult, ReadResult, Request, Response, WalkResult, WireDirEntry,
+    WireWalkEntry, WriteParams, PROTOCOL_VERSION,
 };
 use futures::{SinkExt, StreamExt};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
-use tokio::io::AsyncReadExt;
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::WebSocketStream;
 use tokio_util::sync::CancellationToken;
@@ -63,7 +62,7 @@ pub struct Config {
 /// started them, so the registry lives here, not per-connection).
 struct Shared {
     config: Config,
-    procs: Mutex<HashMap<String, Arc<ProcShared>>>,
+    procs: Mutex<HashMap<String, Arc<process::ProcShared>>>,
 }
 
 /// A bound, not-yet-serving server. Call [`Server::local_addr`] to learn the
@@ -226,6 +225,8 @@ async fn handle_request(
         method::FS_READ
         | method::FS_WRITE
         | method::FS_CREATE_DIR
+        | method::FS_REMOVE_FILE
+        | method::FS_REMOVE_DIR
         | method::FS_READ_DIR
         | method::FS_METADATA
         | method::FS_WALK => {
@@ -235,9 +236,11 @@ async fn handle_request(
             };
             let _ = tx.send(text_msg(&resp));
         }
-        method::PROCESS_START => handle_start(id, req.params, shared, tx, conn_token),
-        method::PROCESS_RESUME => handle_resume(id, req.params, shared, tx, conn_token),
-        method::PROCESS_CANCEL => handle_cancel(id, req.params, shared, tx),
+        method::PROCESS_START => process::handle_start(id, req.params, shared, tx, conn_token),
+        method::PROCESS_RESUME => process::handle_resume(id, req.params, shared, tx, conn_token),
+        method::PROCESS_STATUS => process::handle_status(id, req.params, shared, tx),
+        method::PROCESS_INPUT => process::handle_input(id, req.params, shared, tx),
+        method::PROCESS_CANCEL => process::handle_cancel(id, req.params, shared, tx),
         other => {
             let _ = tx.send(text_msg(&Response::err(
                 id,
@@ -276,6 +279,18 @@ async fn fs_dispatch(
             fs.create_dir_all(&path).await.map_err(exec_err)?;
             Ok(serde_json::json!({}))
         }
+        method::FS_REMOVE_FILE => {
+            let p: PathParams = parse(params)?;
+            let path = checked_path(&p.path, root)?;
+            fs.remove_file(&path).await.map_err(exec_err)?;
+            Ok(serde_json::json!({}))
+        }
+        method::FS_REMOVE_DIR => {
+            let p: PathParams = parse(params)?;
+            let path = checked_path(&p.path, root)?;
+            fs.remove_dir_all(&path).await.map_err(exec_err)?;
+            Ok(serde_json::json!({}))
+        }
         method::FS_READ_DIR => {
             let p: PathParams = parse(params)?;
             let path = checked_path(&p.path, root)?;
@@ -298,6 +313,7 @@ async fn fs_dispatch(
                 modified_ms: m.modified.and_then(to_ms),
                 len: m.len,
                 is_dir: m.is_dir,
+                is_symlink: m.is_symlink,
             }))
         }
         method::FS_WALK => {
@@ -317,349 +333,6 @@ async fn fs_dispatch(
         }
         _ => Err((error_code::METHOD_NOT_FOUND, "unknown fs method".into())),
     }
-}
-
-// ---- process registry + streaming ------------------------------------------
-
-struct ProcShared {
-    process_id: String,
-    state: Mutex<ProcState>,
-    /// Wakes streamers when output is appended or the process exits.
-    tick: broadcast::Sender<()>,
-    /// Cancels the running process (`process/cancel`).
-    cancel: CancellationToken,
-}
-
-#[derive(Default)]
-struct ProcState {
-    output: Vec<ProcessOutputParams>,
-    exit: Option<ProcessExitParams>,
-}
-
-fn handle_start(
-    id: u64,
-    params: serde_json::Value,
-    shared: &Arc<Shared>,
-    tx: &Outbound,
-    conn_token: &CancellationToken,
-) {
-    let p: ProcessStartParams = match parse(params) {
-        Ok(p) => p,
-        Err((code, msg)) => {
-            let _ = tx.send(text_msg(&Response::err(id, code, msg)));
-            return;
-        }
-    };
-    let cwd = match checked_path(&p.cwd, &shared.config.root) {
-        Ok(c) => c,
-        Err((code, msg)) => {
-            let _ = tx.send(text_msg(&Response::err(id, code, msg)));
-            return;
-        }
-    };
-
-    let (tick, _) = broadcast::channel(16);
-    let proc = Arc::new(ProcShared {
-        process_id: p.process_id.clone(),
-        state: Mutex::new(ProcState::default()),
-        tick,
-        cancel: CancellationToken::new(),
-    });
-
-    {
-        let mut procs = shared.procs.lock().unwrap();
-        if procs.contains_key(&p.process_id) {
-            let _ = tx.send(text_msg(&Response::err(
-                id,
-                error_code::EXEC_FAILED,
-                "process_id already in use",
-            )));
-            return;
-        }
-        procs.insert(p.process_id.clone(), proc.clone());
-    }
-
-    let _ = tx.send(text_msg(&Response::ok(id, serde_json::json!({}))));
-
-    tokio::spawn(run_process(
-        proc.clone(),
-        shared.clone(),
-        p.command,
-        cwd,
-        Duration::from_millis(p.timeout_ms),
-        p.pty,
-    ));
-    spawn_streamer(proc, tx.clone(), 0, conn_token.clone());
-}
-
-fn handle_resume(
-    id: u64,
-    params: serde_json::Value,
-    shared: &Arc<Shared>,
-    tx: &Outbound,
-    conn_token: &CancellationToken,
-) {
-    let p: ProcessResumeParams = match parse(params) {
-        Ok(p) => p,
-        Err((code, msg)) => {
-            let _ = tx.send(text_msg(&Response::err(id, code, msg)));
-            return;
-        }
-    };
-    let proc = shared.procs.lock().unwrap().get(&p.process_id).cloned();
-    match proc {
-        Some(proc) => {
-            let _ = tx.send(text_msg(&Response::ok(id, serde_json::json!({}))));
-            spawn_streamer(proc, tx.clone(), p.after_seq, conn_token.clone());
-        }
-        None => {
-            let _ = tx.send(text_msg(&Response::err(
-                id,
-                error_code::UNKNOWN_PROCESS,
-                "unknown or expired process",
-            )));
-        }
-    }
-}
-
-fn handle_cancel(id: u64, params: serde_json::Value, shared: &Arc<Shared>, tx: &Outbound) {
-    let p: ProcessIdParams = match parse(params) {
-        Ok(p) => p,
-        Err((code, msg)) => {
-            let _ = tx.send(text_msg(&Response::err(id, code, msg)));
-            return;
-        }
-    };
-    if let Some(proc) = shared.procs.lock().unwrap().get(&p.process_id).cloned() {
-        proc.cancel.cancel();
-    }
-    let _ = tx.send(text_msg(&Response::ok(id, serde_json::json!({}))));
-}
-
-/// Replays buffered output past `after_seq` to one connection, then follows the
-/// process live until it exits. Scoped to the connection via `conn_token`.
-fn spawn_streamer(
-    proc: Arc<ProcShared>,
-    tx: Outbound,
-    after_seq: u64,
-    conn_token: CancellationToken,
-) {
-    tokio::spawn(async move {
-        let mut rx = proc.tick.subscribe();
-        let mut cursor = after_seq;
-        loop {
-            let (chunks, exit) = {
-                let st = proc.state.lock().unwrap();
-                let chunks: Vec<ProcessOutputParams> = st
-                    .output
-                    .iter()
-                    .filter(|c| c.seq > cursor)
-                    .cloned()
-                    .collect();
-                (chunks, st.exit.clone())
-            };
-            for c in chunks {
-                cursor = c.seq;
-                if tx
-                    .send(text_msg(&Notification::new(
-                        method::PROCESS_OUTPUT,
-                        to_value(&c),
-                    )))
-                    .is_err()
-                {
-                    return;
-                }
-            }
-            if let Some(ex) = exit {
-                if ex.seq > cursor {
-                    let _ = tx.send(text_msg(&Notification::new(
-                        method::PROCESS_EXIT,
-                        to_value(&ex),
-                    )));
-                }
-                return;
-            }
-            tokio::select! {
-                _ = conn_token.cancelled() => return,
-                _ = rx.recv() => {} // tick or lag: re-drain from cursor either way
-            }
-        }
-    });
-}
-
-async fn run_process(
-    proc: Arc<ProcShared>,
-    shared: Arc<Shared>,
-    command: String,
-    cwd: PathBuf,
-    timeout: Duration,
-    pty: bool,
-) {
-    if pty {
-        let fs = LocalExecutor;
-        let result = fs
-            .exec_streaming_pty(&command, &cwd, timeout, &proc.cancel, &|_, data| {
-                append_output(&proc, Stream::Stdout, data.to_vec());
-            })
-            .await;
-        match result {
-            Ok(output) => append_exit(&proc, output.code, None),
-            Err(error) => append_exit(&proc, None, Some(error)),
-        }
-        schedule_gc(shared, proc.process_id.clone());
-        return;
-    }
-
-    let mut cmd = tokio::process::Command::new("/bin/sh");
-    cmd.arg("-c")
-        .arg(&command)
-        .current_dir(&cwd)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    isolate_process_group(&mut cmd);
-    let child = match cmd.spawn() {
-        Ok(c) => c,
-        Err(e) => {
-            append_exit(&proc, None, Some(format!("failed to spawn shell: {e}")));
-            schedule_gc(shared, proc.process_id.clone());
-            return;
-        }
-    };
-
-    let (otx, mut orx) = mpsc::channel::<(Stream, Vec<u8>)>(64);
-    let outcome = tokio::spawn(pump(child, otx, proc.cancel.clone(), timeout));
-
-    // Append output as it streams; the channel closes once both readers hit EOF.
-    while let Some((stream, data)) = orx.recv().await {
-        append_output(&proc, stream, data);
-    }
-    match outcome.await {
-        Ok(Outcome::Exited(code)) => append_exit(&proc, code, None),
-        Ok(Outcome::Error(msg)) => append_exit(&proc, None, Some(msg)),
-        Err(_) => append_exit(&proc, None, Some("process task panicked".into())),
-    }
-    schedule_gc(shared, proc.process_id.clone());
-}
-
-enum Outcome {
-    Exited(Option<i32>),
-    Error(String),
-}
-
-/// Owns the child: streams its pipes to `otx`, and races completion against
-/// cancel/timeout. Returns once the child is reaped.
-async fn pump(
-    mut child: tokio::process::Child,
-    otx: mpsc::Sender<(Stream, Vec<u8>)>,
-    cancel: CancellationToken,
-    timeout: Duration,
-) -> Outcome {
-    let stdout = child.stdout.take();
-    let stderr = child.stderr.take();
-    let r1 = tokio::spawn(read_stream(stdout, Stream::Stdout, otx.clone()));
-    let r2 = tokio::spawn(read_stream(stderr, Stream::Stderr, otx));
-    let root_pid = child.id();
-    let mut r1 = r1;
-    let mut r2 = r2;
-
-    enum WaitResult {
-        Exited(std::io::Result<std::process::ExitStatus>),
-        Interrupted(String),
-    }
-
-    let result = {
-        let wait_fut = std::pin::pin!(child.wait());
-        tokio::select! {
-            status = wait_fut => WaitResult::Exited(status),
-            _ = cancel.cancelled() => WaitResult::Interrupted("command cancelled".to_string()),
-            _ = tokio::time::sleep(timeout) =>
-                WaitResult::Interrupted(format!("command timed out after {} ms", timeout.as_millis())),
-        }
-    };
-
-    let outcome = match result {
-        WaitResult::Exited(Ok(status)) => Outcome::Exited(status.code()),
-        WaitResult::Exited(Err(e)) => Outcome::Error(format!("command failed: {e}")),
-        WaitResult::Interrupted(message) => {
-            terminate_process_tree(&mut child, root_pid).await;
-            Outcome::Error(message)
-        }
-    };
-    if !drain_readers(&mut r1, &mut r2).await {
-        terminate_process_tree(&mut child, root_pid).await;
-        r1.abort();
-        r2.abort();
-    }
-    outcome
-}
-
-async fn drain_readers(
-    r1: &mut tokio::task::JoinHandle<()>,
-    r2: &mut tokio::task::JoinHandle<()>,
-) -> bool {
-    tokio::time::timeout(Duration::from_millis(500), async {
-        let _ = r1.await;
-        let _ = r2.await;
-    })
-    .await
-    .is_ok()
-}
-
-async fn read_stream<R>(reader: Option<R>, stream: Stream, otx: mpsc::Sender<(Stream, Vec<u8>)>)
-where
-    R: AsyncReadExt + Unpin,
-{
-    let Some(mut reader) = reader else { return };
-    let mut buf = [0u8; 8192];
-    loop {
-        match reader.read(&mut buf).await {
-            Ok(0) | Err(_) => return,
-            Ok(n) => {
-                if otx.send((stream, buf[..n].to_vec())).await.is_err() {
-                    return;
-                }
-            }
-        }
-    }
-}
-
-fn append_output(proc: &ProcShared, stream: Stream, data: Vec<u8>) {
-    {
-        let mut st = proc.state.lock().unwrap();
-        let seq = st.output.len() as u64 + 1;
-        st.output.push(ProcessOutputParams {
-            process_id: proc.process_id.clone(),
-            seq,
-            stream,
-            data: b64_encode(&data),
-        });
-    }
-    let _ = proc.tick.send(());
-}
-
-fn append_exit(proc: &ProcShared, code: Option<i32>, error: Option<String>) {
-    {
-        let mut st = proc.state.lock().unwrap();
-        // One past the last output seq: the terminal cursor value.
-        let seq = st.output.len() as u64 + 1;
-        st.exit = Some(ProcessExitParams {
-            process_id: proc.process_id.clone(),
-            seq,
-            code,
-            error,
-        });
-    }
-    let _ = proc.tick.send(());
-}
-
-/// Keep a finished process around briefly so a reconnecting client can still
-/// `process/resume` and collect its tail + exit, then free the buffer.
-fn schedule_gc(shared: Arc<Shared>, process_id: String) {
-    tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_secs(60)).await;
-        shared.procs.lock().unwrap().remove(&process_id);
-    });
 }
 
 // ---- small helpers ----------------------------------------------------------

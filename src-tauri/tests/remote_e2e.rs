@@ -140,6 +140,160 @@ async fn remote_project_round_trips_against_a_live_host() {
     eprintln!("remote e2e: OK");
 }
 
+/// Exercise the stateful process protocol on the real SSH transport: output
+/// resumes after a client reconnect, stdin remains writable, retained output is
+/// bounded, cancellation kills descendants, and the server root is enforced.
+#[tokio::test]
+#[ignore = "needs a live SSH host; set CLARK_SSH_TEST_{HOST,ROOT,BIN}"]
+async fn remote_processes_survive_reconnect_and_remain_contained() {
+    let Some(env) = env() else {
+        eprintln!("skipping: set CLARK_SSH_TEST_HOST / _ROOT / _BIN to run this");
+        return;
+    };
+    assert!(
+        Command::new("ssh")
+            .args([
+                "-o",
+                "ConnectTimeout=10",
+                &env.host,
+                &format!("mkdir -p {}", env.root),
+            ])
+            .status()
+            .expect("spawn ssh mkdir")
+            .success()
+    );
+
+    let conn = ssh::connect(&RemoteSpec {
+        host: env.host.clone(),
+        remote_root: env.root.clone(),
+        local_binary: env.binary.clone(),
+    })
+    .await
+    .expect("ssh::connect");
+    let first = RemoteExecutor::connect(&conn.ws_url, &conn.token)
+        .await
+        .expect("first RemoteExecutor");
+
+    let process = first
+        .background_start(
+            "printf 'before\\n'; sleep 1; printf 'after\\n'; read value; printf 'input:%s\\n' \"$value\"",
+            std::path::Path::new(&env.root),
+        )
+        .await
+        .expect("start resumable process");
+    let mut cursor = 0;
+    let mut prefix = String::new();
+    for _ in 0..50 {
+        let status = first
+            .background_status(&process, cursor)
+            .await
+            .expect("initial process status");
+        cursor = status.cursor;
+        for chunk in status.output {
+            prefix.push_str(&String::from_utf8_lossy(&chunk.data));
+        }
+        if prefix.contains("before") {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(prefix.contains("before"), "initial output: {prefix:?}");
+    drop(first);
+
+    let second = RemoteExecutor::connect(&conn.ws_url, &conn.token)
+        .await
+        .expect("reconnected RemoteExecutor");
+    second
+        .background_write(&process, b"hello-from-reconnect\n", true)
+        .await
+        .expect("write stdin after reconnect");
+    let mut tail = String::new();
+    let mut exit = None;
+    for _ in 0..100 {
+        let status = second
+            .background_status(&process, cursor)
+            .await
+            .expect("resumed process status");
+        cursor = status.cursor;
+        for chunk in status.output {
+            tail.push_str(&String::from_utf8_lossy(&chunk.data));
+        }
+        if status.exit_code.is_some() {
+            exit = status.exit_code;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!(exit, Some(Some(0)));
+    assert!(tail.contains("after"), "resumed output: {tail:?}");
+    assert!(
+        tail.contains("input:hello-from-reconnect"),
+        "resumed output: {tail:?}"
+    );
+    assert!(!tail.contains("before"), "output was replayed: {tail:?}");
+
+    let noisy = second
+        .background_start("yes x | head -c 1100000", std::path::Path::new(&env.root))
+        .await
+        .expect("start bounded-output process");
+    let mut bounded = None;
+    for _ in 0..100 {
+        let status = second
+            .background_status(&noisy, 0)
+            .await
+            .expect("bounded output status");
+        if status.exit_code.is_some() {
+            bounded = Some(status);
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let bounded = bounded.expect("noisy process did not finish");
+    let retained = bounded
+        .output
+        .iter()
+        .map(|chunk| chunk.data.len())
+        .sum::<usize>();
+    assert!(bounded.truncated);
+    assert!(retained <= 1_048_576, "retained {retained} bytes");
+
+    let child_pid = format!("{}/remote-child.pid", env.root);
+    let tree = second
+        .background_start(
+            &format!("sleep 30 & echo $! > {child_pid}; wait"),
+            std::path::Path::new(&env.root),
+        )
+        .await
+        .expect("start process tree");
+    for _ in 0..50 {
+        if second.metadata(std::path::Path::new(&child_pid)).await.is_ok() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    second.background_kill(&tree).await.expect("kill process tree");
+    let killed = second
+        .exec(
+            &format!("pid=$(cat {child_pid}); ! kill -0 \"$pid\" 2>/dev/null"),
+            std::path::Path::new(&env.root),
+            Duration::from_secs(10),
+            &CancellationToken::new(),
+        )
+        .await
+        .expect("check descendant");
+    assert_eq!(killed.code, Some(0), "background descendant survived kill");
+
+    let escape = std::path::Path::new(&env.root).join("../clark-escape.txt");
+    let err = second.write(&escape, b"must not escape").await.unwrap_err();
+    assert!(err.contains("escapes project root"), "{err}");
+
+    let _ = second.remove_file(std::path::Path::new(&child_pid)).await;
+    drop(second);
+    drop(conn);
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    eprintln!("remote process/reconnect e2e: OK");
+}
+
 /// Claude-migration discovery must read the *remote* `.claude` over the tunnel.
 #[tokio::test]
 #[ignore = "needs a live SSH host; set CLARK_SSH_TEST_{HOST,ROOT}"]

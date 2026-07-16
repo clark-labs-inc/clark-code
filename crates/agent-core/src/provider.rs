@@ -8,7 +8,9 @@ use async_trait::async_trait;
 use futures::stream::BoxStream;
 use serde::{Deserialize, Serialize};
 
-use crate::domain::{AgentEvent, ContentBlock, PendingUpload};
+use crate::domain::{
+    AgentEvent, ContentBlock, FsLocation, PendingUpload, Role, ToolKind, ToolStatus,
+};
 use crate::error::Result;
 use crate::ids::{PermissionRequestId, ProviderId, RunId, SessionId};
 
@@ -61,11 +63,59 @@ pub struct SessionOptions {
     pub cwd: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mode: Option<String>,
-    /// Rendered transcript of the conversation being reopened. Providers that
-    /// can't resume server-side (`load_session: false`) seed it into the model
-    /// context so the agent remembers the prior turns, not just the UI.
+    /// Typed transcript of the conversation being reopened. Providers that
+    /// cannot resume server-side replay this into their canonical history.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub resume_context: Option<String>,
+    pub resume: Option<ResumeTranscript>,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct ResumeTranscript {
+    pub items: Vec<ResumeItem>,
+    #[serde(default)]
+    pub truncated: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "item", rename_all = "snake_case")]
+pub enum ResumeItem {
+    Message {
+        role: Role,
+        blocks: Vec<ContentBlock>,
+    },
+    ToolCall {
+        id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tool_name: Option<String>,
+        title: String,
+        kind: ToolKind,
+        status: ToolStatus,
+        #[serde(default)]
+        locations: Vec<FsLocation>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        arguments: Option<serde_json::Value>,
+        #[serde(default)]
+        content: Vec<ContentBlock>,
+    },
+}
+
+/// A connected conversation with one provider.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct SessionEnvironment {
+    /// The checkout whose files and commands this session operates on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checkout_root: Option<String>,
+    /// The root of the main Git repository shared by linked worktrees.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repository_root: Option<String>,
+    /// Every root the session may intentionally access.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub workspace_roots: Vec<String>,
+    /// App-managed output root, when one is attached to the session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub docs_root: Option<String>,
+    #[serde(default)]
+    pub remote: bool,
 }
 
 /// A connected conversation with one provider.
@@ -76,6 +126,10 @@ pub struct Session {
     pub capabilities: ProviderCapabilities,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mode: Option<String>,
+    /// Authoritative filesystem binding for this conversation. UI actions must
+    /// use this instead of a global project-folder preference.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub environment: Option<SessionEnvironment>,
 }
 
 /// A user turn to send to the agent: text/content plus any attached files. Each
@@ -130,6 +184,12 @@ pub trait Provider: Send + Sync {
     async fn prompt(&mut self, session: &SessionId, input: PromptInput) -> Result<EventStream>;
 
     async fn cancel(&mut self, session: &SessionId, run: &RunId) -> Result<()>;
+
+    /// Release session-owned resources before the host drops the provider.
+    /// Providers without long-lived resources may keep the default no-op.
+    async fn close_session(&mut self, _session: &SessionId) -> Result<()> {
+        Ok(())
+    }
 
     /// Resolve a host-side request the agent made.
     async fn respond(&mut self, session: &SessionId, response: ClientResponse) -> Result<()>;

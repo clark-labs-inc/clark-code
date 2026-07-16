@@ -398,6 +398,7 @@ mod tests {
             AgentEvent::ToolCall {
                 run: run(),
                 call: ToolCall {
+                    tool_name: None,
                     id: id.clone(),
                     title: "Reading file".into(),
                     kind: ToolKind::Read,
@@ -438,6 +439,7 @@ mod tests {
             AgentEvent::ToolCall {
                 run: run(),
                 call: ToolCall {
+                    tool_name: None,
                     id: id.clone(),
                     title: "bash: make build".into(),
                     kind: ToolKind::Execute,
@@ -516,6 +518,7 @@ mod tests {
             AgentEvent::ToolCall {
                 run: run(),
                 call: ToolCall {
+                    tool_name: None,
                     id: tc.clone(),
                     title: "bash".into(),
                     kind: ToolKind::Execute,
@@ -705,6 +708,7 @@ mod tests {
             AgentEvent::ToolCall {
                 run: run(),
                 call: ToolCall {
+                    tool_name: None,
                     id: tc.clone(),
                     title: "t".into(),
                     kind: ToolKind::Execute,

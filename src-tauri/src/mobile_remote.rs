@@ -1,8 +1,12 @@
 //! Clark Code mobile remote-control IPC bridge.
 
 use serde_json::Value;
+use std::time::Duration;
 
 use crate::commands::{clark_http_client, clark_rest_base, read_json_or_err};
+
+const HOST_REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
+const COMMAND_POLL_TIMEOUT_SLACK_MS: u64 = 10_000;
 
 /// Register or heartbeat this Clark Code host and publish the projects mobile
 /// is allowed to start. Projects are server-validated before any command can
@@ -25,6 +29,7 @@ pub async fn desktop_code_host_upsert(
     );
     let resp = clark_http_client()?
         .put(url)
+        .timeout(HOST_REQUEST_TIMEOUT)
         .header("Authorization", format!("Bearer {token}"))
         .json(&serde_json::json!({
             "display_name": display_name,
@@ -56,12 +61,16 @@ pub async fn desktop_code_command_poll(
     );
     let limit = limit.unwrap_or(20).clamp(1, 100);
     let mut params = vec![format!("limit={limit}")];
+    let wait_ms = wait_ms.map(|value| value.clamp(0, 25_000));
     if let Some(wait_ms) = wait_ms {
-        params.push(format!("wait_ms={}", wait_ms.clamp(0, 25_000)));
+        params.push(format!("wait_ms={wait_ms}"));
     }
     url.push_str(&format!("?{}", params.join("&")));
     let resp = clark_http_client()?
         .get(url)
+        .timeout(Duration::from_millis(
+            wait_ms.unwrap_or(0) as u64 + COMMAND_POLL_TIMEOUT_SLACK_MS,
+        ))
         .header("Authorization", format!("Bearer {token}"))
         .send()
         .await
@@ -167,4 +176,59 @@ pub async fn desktop_organization_repository_sync(
         .await
         .map_err(|e| format!("Organization repository sync request failed: {e}"))?;
     read_json_or_err(resp, "Organization repository sync").await
+}
+
+#[cfg(test)]
+mod tests {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    use super::desktop_code_host_upsert;
+
+    #[tokio::test]
+    async fn host_upsert_reconnects_after_a_broken_connection() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("http://{}/ws", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (first, _) = listener.accept().await.unwrap();
+            drop(first);
+
+            let (mut second, _) = listener.accept().await.unwrap();
+            let mut request = vec![0; 8_192];
+            let _ = second.read(&mut request).await.unwrap();
+            second
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: 2\r\nconnection: close\r\n\r\n{}",
+                )
+                .await
+                .unwrap();
+        });
+
+        let first = desktop_code_host_upsert(
+            endpoint.clone(),
+            "token".into(),
+            "host".into(),
+            "Desktop".into(),
+            "macOS".into(),
+            "arm64".into(),
+            "test".into(),
+            serde_json::json!([]),
+        )
+        .await;
+        assert!(first.is_err());
+
+        let second = desktop_code_host_upsert(
+            endpoint,
+            "token".into(),
+            "host".into(),
+            "Desktop".into(),
+            "macOS".into(),
+            "arm64".into(),
+            "test".into(),
+            serde_json::json!([]),
+        )
+        .await;
+        assert_eq!(second.unwrap(), serde_json::json!({}));
+        server.await.unwrap();
+    }
 }

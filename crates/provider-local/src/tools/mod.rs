@@ -21,6 +21,7 @@ use crate::config::AgenticClarkConfig;
 use crate::sandbox::Sandbox;
 
 pub mod android_emulator;
+pub mod apply_patch;
 pub mod browser;
 pub mod clark;
 pub mod diagnostics;
@@ -180,6 +181,7 @@ pub struct ToolOutcome {
     pub is_error: bool,
     pub locations: Vec<FsLocation>,
     pub images: Vec<ImageAttachment>,
+    pub details: Value,
 }
 
 /// An image a tool wants to attach to its result — both shown to the model
@@ -200,6 +202,7 @@ impl ToolOutcome {
             is_error: false,
             locations: Vec::new(),
             images: Vec::new(),
+            details: Value::Null,
         }
     }
     pub fn error(message: impl Into<String>) -> Self {
@@ -208,6 +211,7 @@ impl ToolOutcome {
             is_error: true,
             locations: Vec::new(),
             images: Vec::new(),
+            details: Value::Null,
         }
     }
     pub fn with_location(mut self, path: impl Into<String>, line: Option<u32>) -> Self {
@@ -228,6 +232,10 @@ impl ToolOutcome {
             data_base64: data_base64.into(),
             alt,
         });
+        self
+    }
+    pub fn with_details(mut self, details: Value) -> Self {
+        self.details = details;
         self
     }
 }
@@ -274,8 +282,10 @@ impl ToolRegistry {
             Arc::new(grep::Grep),
             Arc::new(fs::WriteFile),
             Arc::new(fs::EditFile),
+            Arc::new(apply_patch::ApplyPatch),
             Arc::new(shell::Bash),
             Arc::new(shell::BashOutput),
+            Arc::new(shell::BashInput),
             Arc::new(shell::BashKill),
             Arc::new(plan::ProposePlan),
             Arc::new(plan::UpdatePlan),
@@ -454,6 +464,49 @@ mod tests {
         assert_eq!(PermissionMode::parse("ASK"), Some(PermissionMode::Ask));
         assert_eq!(PermissionMode::parse(" deny "), Some(PermissionMode::Deny));
         assert_eq!(PermissionMode::parse("maybe"), None);
+    }
+
+    #[test]
+    fn schema_property_order_survives_serialization() {
+        // Tool schemas are autoregressive prompts: the model emits arguments
+        // in the property order it sees, so authored order must reach the
+        // wire. Without serde_json's `preserve_order` feature the json!{}
+        // maps alphabetize (new_string before path) — this test pins the
+        // feature and the intended orders.
+        fn wire_order(registry: &ToolRegistry, tool: &str, props: &[&str]) {
+            let schema = registry
+                .schemas()
+                .into_iter()
+                .find(|s| s.function.name == tool)
+                .unwrap_or_else(|| panic!("{tool} not registered"));
+            let wire = serde_json::to_string(&schema.function.parameters).unwrap();
+            let positions: Vec<usize> = props
+                .iter()
+                .map(|p| {
+                    wire.find(&format!("\"{p}\""))
+                        .unwrap_or_else(|| panic!("{tool}: {p} missing from schema"))
+                })
+                .collect();
+            assert!(
+                positions.windows(2).all(|w| w[0] < w[1]),
+                "{tool}: properties out of order on the wire: {wire}"
+            );
+        }
+        let reg = ToolRegistry::new(None, Some(memory::MemoryConfig::default()));
+        // Locate before payload: the model must commit to where/what it is
+        // replacing before it generates the replacement.
+        wire_order(&reg, "edit_file", &["path", "old_string", "new_string"]);
+        wire_order(&reg, "write_file", &["path", "content"]);
+        wire_order(&reg, "read_file", &["path", "offset", "limit"]);
+        // Decide the action, scope, and provenance before the fact being saved.
+        wire_order(
+            &reg,
+            "memory",
+            &["action", "scope", "source", "title", "content"],
+        );
+        // Rationale first: explanation tokens condition the plan steps.
+        wire_order(&reg, "update_plan", &["explanation", "plan"]);
+        wire_order(&reg, "grep", &["pattern", "path"]);
     }
 
     #[test]

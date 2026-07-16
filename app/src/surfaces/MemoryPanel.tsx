@@ -71,7 +71,7 @@ function MemoryPopover() {
   const global = useSessionStore((s) => s.globalMemoryOverview);
   const reload = useSessionStore((s) => s.loadMemory);
   const enabled = useSessionStore((s) => s.memoriesEnabled);
-  const cwd = useSessionStore((s) => s.localSettings.cwd);
+  const cwd = useSessionStore((s) => s.activeProjectRoot ?? s.localSettings.cwd);
   const status = useSessionStore((s) => s.memoryStatus);
 
   return (

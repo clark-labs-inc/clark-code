@@ -9,7 +9,7 @@ use agent_core::error::{Error, Result};
 use agent_core::ids::{ProviderId, RunId, SessionId};
 use agent_core::provider::{
     ClientResponse, EventStream, PromptInput, Provider, ProviderCapabilities, ProviderConfig,
-    Session, SessionOptions,
+    Session, SessionEnvironment, SessionOptions,
 };
 use async_channel::Sender;
 use async_trait::async_trait;
@@ -240,7 +240,7 @@ impl Provider for AcpProvider {
             })
             .unwrap_or_else(|| ".".into());
         let res = peer
-            .request(rpc::SESSION_NEW, json!({ "cwd": cwd, "mcpServers": [] }))
+            .request(rpc::SESSION_NEW, json!({ "cwd": cwd.clone(), "mcpServers": [] }))
             .await?;
         let sid = res
             .get("sessionId")
@@ -253,6 +253,13 @@ impl Provider for AcpProvider {
             provider: self.id(),
             capabilities: self.capabilities(),
             mode: options.mode,
+            environment: Some(SessionEnvironment {
+                checkout_root: Some(cwd.clone()),
+                repository_root: None,
+                workspace_roots: vec![cwd],
+                docs_root: None,
+                remote: false,
+            }),
         })
     }
 
@@ -264,7 +271,7 @@ impl Provider for AcpProvider {
             .unwrap_or_else(|| ".".into());
         peer.request(
             rpc::SESSION_LOAD,
-            json!({ "sessionId": id.as_str(), "cwd": cwd, "mcpServers": [] }),
+            json!({ "sessionId": id.as_str(), "cwd": cwd.clone(), "mcpServers": [] }),
         )
         .await?;
         self.session_id = Some(id.0.clone());
@@ -273,6 +280,13 @@ impl Provider for AcpProvider {
             provider: self.id(),
             capabilities: self.capabilities(),
             mode: None,
+            environment: Some(SessionEnvironment {
+                checkout_root: Some(cwd.clone()),
+                repository_root: None,
+                workspace_roots: vec![cwd],
+                docs_root: None,
+                remote: false,
+            }),
         })
     }
 

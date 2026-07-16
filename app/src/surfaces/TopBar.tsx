@@ -108,7 +108,8 @@ export function TopBar({ dark, onToggleTheme }: { dark: boolean; onToggleTheme: 
   const title = useSessionStore((s) =>
     session ? s.conversations.find((c) => c.id === session.id)?.title : null,
   );
-  const projectCwd = useSessionStore((s) => s.localSettings.cwd);
+  const projectCwd = useSessionStore((s) => s.activeProjectRoot ?? s.localSettings.cwd);
+  const activeRemote = useSessionStore((s) => s.activeRemote);
   const isLocal = session?.provider === "local";
 
   return (
@@ -148,7 +149,7 @@ export function TopBar({ dark, onToggleTheme }: { dark: boolean; onToggleTheme: 
         >
           <SettingsIcon className="size-4" />
         </button>
-        {session && (
+        {session && !activeRemote && (
           <button
             onClick={toggleTerminal}
             aria-label={terminalOpen ? "Hide terminal" : "Show terminal"}

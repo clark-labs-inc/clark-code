@@ -91,7 +91,7 @@ function withChips(text: string) {
 export function PermissionGate({ req }: { req: PermissionRequest }) {
   const resolve = useSessionStore((s) => s.resolvePermission);
   const mode = useSessionStore((s) => s.permissionMode);
-  const project = useSessionStore((s) => s.localSettings.cwd);
+  const project = useSessionStore((s) => s.activeProjectRoot ?? "");
   // Which option was clicked; disables the row until the engine consumes the
   // response (the gate unmounts on the next snapshot) or the send fails.
   const [picked, setPicked] = useState<string | null>(null);

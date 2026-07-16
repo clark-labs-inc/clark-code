@@ -97,16 +97,16 @@ export class TauriBridge implements CoreBridge {
     };
   }
 
-  listMemory(cwd: string): Promise<MemoryOverview> {
-    return invoke<MemoryOverview>("local_list_memory", { cwd });
+  listMemory(cwd: string, remote?: { ws_url: string; token: string } | null): Promise<MemoryOverview> {
+    return invoke<MemoryOverview>("local_list_memory", { cwd, remote: remote ?? null });
   }
 
   listGlobalMemory(): Promise<MemoryOverview> {
     return invoke<MemoryOverview>("local_list_global_memory");
   }
 
-  listFiles(cwd: string): Promise<string[]> {
-    return invoke<string[]>("local_list_files", { cwd });
+  listFiles(cwd: string, remote?: { ws_url: string; token: string } | null): Promise<string[]> {
+    return invoke<string[]>("local_list_files", { cwd, remote: remote ?? null });
   }
 
   openPath(path: string, reveal = false): Promise<void> {

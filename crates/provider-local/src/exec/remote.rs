@@ -9,6 +9,8 @@
 //! reconnect can `process/resume` — that resilience layer lands with the SSH
 //! tunnel (Phase 3); here the connection is single-shot.
 
+mod background;
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -16,7 +18,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
-use exec_core::{DirEntry, ExecOutput, ExecResult, Executor, FileMeta, WalkEntry};
+use exec_core::{BackgroundStatus, DirEntry, ExecOutput, ExecResult, Executor, FileMeta, WalkEntry};
 use exec_protocol::{
     b64_decode, b64_encode, method, AuthParams, AuthResult, MetaResult, Notification, PathParams,
     ProcessExitParams, ProcessIdParams, ProcessOutputParams, ProcessStartParams, ReadDirResult,
@@ -296,6 +298,30 @@ impl Executor for RemoteExecutor {
         Ok(())
     }
 
+    async fn remove_file(&self, path: &Path) -> ExecResult<()> {
+        self.conn
+            .call(
+                method::FS_REMOVE_FILE,
+                to_value(&PathParams {
+                    path: Self::path(path),
+                }),
+            )
+            .await?;
+        Ok(())
+    }
+
+    async fn remove_dir_all(&self, path: &Path) -> ExecResult<()> {
+        self.conn
+            .call(
+                method::FS_REMOVE_DIR,
+                to_value(&PathParams {
+                    path: Self::path(path),
+                }),
+            )
+            .await?;
+        Ok(())
+    }
+
     async fn read_dir(&self, path: &Path) -> ExecResult<Vec<DirEntry>> {
         let v = self
             .conn
@@ -331,6 +357,7 @@ impl Executor for RemoteExecutor {
             modified: m.modified_ms.map(ms_to_time),
             len: m.len,
             is_dir: m.is_dir,
+            is_symlink: m.is_symlink,
         })
     }
 
@@ -391,6 +418,31 @@ impl Executor for RemoteExecutor {
     ) -> ExecResult<ExecOutput> {
         self.exec_streaming_mode(command, cwd, timeout, cancel, on_output, true)
             .await
+    }
+
+    async fn background_start(&self, command: &str, cwd: &Path) -> ExecResult<String> {
+        background::start(&self.conn, command, cwd).await
+    }
+
+    async fn background_status(
+        &self,
+        process_id: &str,
+        after_seq: u64,
+    ) -> ExecResult<BackgroundStatus> {
+        background::status(&self.conn, process_id, after_seq).await
+    }
+
+    async fn background_write(
+        &self,
+        process_id: &str,
+        data: &[u8],
+        close: bool,
+    ) -> ExecResult<()> {
+        background::write(&self.conn, process_id, data, close).await
+    }
+
+    async fn background_kill(&self, process_id: &str) -> ExecResult<()> {
+        background::kill(&self.conn, process_id).await
     }
 }
 

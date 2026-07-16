@@ -8,11 +8,10 @@
 //! creations, edits, and deletions uniformly, without touching the user's index.
 
 use std::path::Path;
-use std::process::Command;
 
 use serde::Serialize;
 
-use crate::checkpoint::{git, git_ok, is_git_repo, temp_index};
+use crate::exec::Executor;
 
 /// One changed file relative to the baseline.
 #[derive(Clone, Debug, Serialize)]
@@ -27,37 +26,6 @@ pub struct ChangedFile {
 
 /// Write the current working tree (untracked included) to a throwaway tree
 /// object — same trick as checkpointing, minus the commit + ref.
-fn working_tree(root: &Path) -> Result<String, String> {
-    let idx = temp_index();
-    let staged = Command::new("git")
-        .arg("-C")
-        .arg(root)
-        .args(["add", "-A"])
-        .env("GIT_INDEX_FILE", &idx)
-        .output()
-        .map_err(|e| format!("git add failed: {e}"))?;
-    if !staged.status.success() {
-        let _ = std::fs::remove_file(&idx);
-        return Err("git add -A (throwaway index) failed".into());
-    }
-    let out = Command::new("git")
-        .arg("-C")
-        .arg(root)
-        .args(["write-tree"])
-        .env("GIT_INDEX_FILE", &idx)
-        .output()
-        .map_err(|e| format!("git write-tree failed: {e}"))?;
-    let _ = std::fs::remove_file(&idx);
-    if !out.status.success() {
-        return Err("git write-tree failed".into());
-    }
-    let tree = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    if tree.is_empty() {
-        return Err("empty tree".into());
-    }
-    Ok(tree)
-}
-
 fn status_label(letter: &str) -> &'static str {
     match letter.chars().next() {
         Some('A') => "added",
@@ -69,13 +37,23 @@ fn status_label(letter: &str) -> &'static str {
 
 /// Every file that differs between the baseline checkpoint and the current
 /// working tree, with per-file +/- line counts.
-pub fn changes_summary(root: &Path, base: &str) -> Result<Vec<ChangedFile>, String> {
-    if !is_git_repo(root) {
+pub async fn changes_summary(
+    exec: &dyn Executor,
+    root: &Path,
+    base: &str,
+) -> Result<Vec<ChangedFile>, String> {
+    if !crate::checkpoint::is_git_repo(exec, root).await {
         return Err("not a git repository".into());
     }
-    let tree = working_tree(root)?;
-    let numstat = git_ok(root, &["diff", "--numstat", base, &tree])?;
-    let name_status = git_ok(root, &["diff", "--name-status", base, &tree])?;
+    let tree = crate::checkpoint::working_tree(exec, root).await?;
+    let numstat_args = ["diff", "--numstat", base, tree.as_str()];
+    let name_status_args = ["diff", "--name-status", base, tree.as_str()];
+    let (numstat, name_status) = tokio::join!(
+        crate::git_metadata::required(exec, root, &numstat_args),
+        crate::git_metadata::required(exec, root, &name_status_args),
+    );
+    let numstat = numstat?;
+    let name_status = name_status?;
 
     let mut status_by_path = std::collections::HashMap::new();
     for line in name_status.lines() {
@@ -109,31 +87,52 @@ pub fn changes_summary(root: &Path, base: &str) -> Result<Vec<ChangedFile>, Stri
 }
 
 /// Unified diff of one file against the baseline.
-pub fn changes_diff(root: &Path, base: &str, path: &str) -> Result<String, String> {
-    let tree = working_tree(root)?;
-    git_ok(root, &["diff", base, &tree, "--", path])
+pub async fn changes_diff(
+    exec: &dyn Executor,
+    root: &Path,
+    base: &str,
+    path: &str,
+) -> Result<String, String> {
+    let tree = crate::checkpoint::working_tree(exec, root).await?;
+    crate::git_metadata::required(exec, root, &["diff", base, &tree, "--", path]).await
 }
 
 /// Restore one file to its baseline state: files that existed at the baseline
 /// come back to that content (worktree only — the user's index is untouched);
 /// files the session created are removed.
-pub fn changes_revert(root: &Path, base: &str, path: &str) -> Result<(), String> {
+pub async fn changes_revert(
+    exec: &dyn Executor,
+    root: &Path,
+    base: &str,
+    path: &str,
+) -> Result<(), String> {
     // Containment: the path must stay inside the repo root.
     let joined = root.join(path);
     if !joined.starts_with(root) || path.contains("..") {
         return Err("path escapes the project root".into());
     }
-    let existed = git(root, &["cat-file", "-e", &format!("{base}:{path}")])
-        .map(|o| o.status.success())
-        .unwrap_or(false);
+    let existed = crate::git_metadata::succeeds(
+        exec,
+        root,
+        &["cat-file", "-e", &format!("{base}:{path}")],
+    )
+    .await
+    .unwrap_or(false);
     if existed {
-        git_ok(
+        crate::git_metadata::required(
+            exec,
             root,
             &["restore", "--source", base, "--worktree", "--", path],
-        )?;
+        )
+        .await?;
         Ok(())
     } else {
-        std::fs::remove_file(&joined).map_err(|e| format!("removing {path}: {e}"))
+        match exec.metadata(&joined).await {
+            Ok(meta) if meta.is_dir && !meta.is_symlink => exec.remove_dir_all(&joined).await,
+            Ok(_) => exec.remove_file(&joined).await,
+            Err(_) => Ok(()),
+        }
+        .map_err(|error| format!("removing {path}: {error}"))
     }
 }
 
@@ -141,6 +140,8 @@ pub fn changes_revert(root: &Path, base: &str, path: &str) -> Result<(), String>
 mod tests {
     use super::*;
     use crate::checkpoint::create_checkpoint;
+    use crate::exec::LocalExecutor;
+    use std::process::Command;
 
     fn init_repo(dir: &Path) {
         let run = |args: &[&str]| {
@@ -163,19 +164,22 @@ mod tests {
         run(&["commit", "-q", "-m", "init"]);
     }
 
-    #[test]
-    fn summary_diff_and_revert_round_trip() {
+    #[tokio::test]
+    async fn summary_diff_and_revert_round_trip() {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
         init_repo(root);
-        let base = create_checkpoint(root).expect("checkpoint");
+        let base = create_checkpoint(&LocalExecutor, root)
+            .await
+            .unwrap()
+            .expect("checkpoint");
 
         // Session activity: edit a tracked file, create a new (untracked) one,
         // delete another.
         std::fs::write(root.join("keep.txt"), "one\nCHANGED\n").unwrap();
         std::fs::write(root.join("new.txt"), "fresh\n").unwrap();
 
-        let summary = changes_summary(root, &base).expect("summary");
+        let summary = changes_summary(&LocalExecutor, root, &base).await.expect("summary");
         let paths: Vec<_> = summary.iter().map(|c| c.path.as_str()).collect();
         assert!(paths.contains(&"keep.txt"), "{paths:?}");
         assert!(paths.contains(&"new.txt"), "{paths:?}");
@@ -184,29 +188,42 @@ mod tests {
         assert_eq!(new.additions, 1);
 
         // Per-file diff renders a unified diff.
-        let diff = changes_diff(root, &base, "keep.txt").expect("diff");
+        let diff = changes_diff(&LocalExecutor, root, &base, "keep.txt")
+            .await
+            .expect("diff");
         assert!(diff.contains("-two"), "{diff}");
         assert!(diff.contains("+CHANGED"), "{diff}");
 
         // Revert the edit → original content; revert the creation → file gone.
-        changes_revert(root, &base, "keep.txt").expect("revert edit");
+        changes_revert(&LocalExecutor, root, &base, "keep.txt")
+            .await
+            .expect("revert edit");
         assert_eq!(
             std::fs::read_to_string(root.join("keep.txt")).unwrap(),
             "one\ntwo\n"
         );
-        changes_revert(root, &base, "new.txt").expect("revert creation");
+        changes_revert(&LocalExecutor, root, &base, "new.txt")
+            .await
+            .expect("revert creation");
         assert!(!root.join("new.txt").exists());
 
         // Everything reverted → empty summary.
-        let after = changes_summary(root, &base).expect("summary after");
+        let after = changes_summary(&LocalExecutor, root, &base)
+            .await
+            .expect("summary after");
         assert!(after.is_empty(), "{after:?}");
     }
 
-    #[test]
-    fn revert_rejects_escaping_paths() {
+    #[tokio::test]
+    async fn revert_rejects_escaping_paths() {
         let tmp = tempfile::tempdir().unwrap();
         init_repo(tmp.path());
-        let base = create_checkpoint(tmp.path()).unwrap();
-        assert!(changes_revert(tmp.path(), &base, "../evil").is_err());
+        let base = create_checkpoint(&LocalExecutor, tmp.path())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(changes_revert(&LocalExecutor, tmp.path(), &base, "../evil")
+            .await
+            .is_err());
     }
 }

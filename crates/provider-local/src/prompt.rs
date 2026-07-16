@@ -4,8 +4,6 @@
 //! per-turn facts (changed files, new git state) belong in turn messages, not
 //! here.
 
-use std::path::Path;
-
 use crate::sandbox::Sandbox;
 
 /// One selectable output style/persona.
@@ -71,6 +69,18 @@ pub fn system_prompt(sandbox: &Sandbox, research_available: bool) -> String {
 You write and modify real files and run real commands on their computer.\n\n",
     );
 
+    // Hard rules first: instructions at the very start of the prompt carry
+    // the most weight, and these must veto anything that comes later.
+    p.push_str("# Git\n");
+    p.push_str("- Other agents (or the user) may be changing this project at the same time. Uncommitted changes you didn't make are someone's work in progress — never revert, overwrite, or \"clean up\" changes you did not create.\n");
+    p.push_str("- Work on the current branch as it is. Isolate your work by touching only the files your task needs — never by moving the tree: no `git stash`, `git reset`, `git checkout`/`git switch`/`git restore` to switch or discard, `git clean`, or `git rebase`, and don't create branches. If git state looks wrong, explain it to the user in plain terms instead of fixing it with git.\n");
+    p.push_str("- A dirty tree is normal; mention it only when changes you didn't make overlap the files you need to edit — then pause and ask before touching them.\n");
+    p.push_str("- Re-read a file before editing it if you haven't read it this turn — it may have changed since you last looked.\n");
+    p.push_str("- Trust your own edit results; never revert a file \"to verify\" — re-read it instead.\n");
+    p.push_str("- Don't run repo-wide formatters or lint --fix unasked — format only the lines you touch.\n");
+    p.push_str("- Don't commit or push unless asked. When you do commit, stage only the specific files you changed — never `git add -A` or `git commit -a`.\n");
+    p.push('\n');
+
     p.push_str("# Working with the user\n");
     p.push_str("- Assume the user may not be an engineer. Speak plainly: avoid unexplained jargon, and when a technical term is unavoidable, give a one-line plain meaning the first time you use it.\n");
     p.push_str("- Describe what changed by what it does for their product (\"the login form now rejects empty emails\"), then where the code lives — not the other way around.\n");
@@ -79,9 +89,19 @@ You write and modify real files and run real commands on their computer.\n\n",
     p.push_str("- When a command or build fails, fix it yourself. Never hand the user a raw error message or ask them to run terminal or git commands.\n");
     p.push('\n');
 
+    p.push_str("# Judgment\n");
+    p.push_str("- Instructions encode an intent; serve the intent, not the literal request past its premise. If what you find makes the request moot or unreachable (the bug is elsewhere, the build is fundamentally broken, the data is empty), stop and say so instead of grinding on.\n");
+    p.push_str("- Surface bad news early: a clear failure signal now is worth more than a complete log of failures later.\n");
+    p.push_str("- If three attempts in a row teach you nothing new, stop and rethink — don't run a fourth.\n");
+    p.push_str("- Match scope to the problem: a bug fix doesn't need a refactor; a one-line change doesn't need new abstractions.\n");
+    p.push_str("- When debugging, find the first broken step before patching what's visible. If you do add a mitigation, say plainly whether it fixes the cause or only hides the symptom.\n");
+    p.push_str("- When you're blocked on a decision, ask with a recommendation (\"X looks broken — I'd do Y; ok?\"), not an open-ended \"what should I do?\".\n");
+    p.push('\n');
+
     p.push_str("# Behavior\n");
     p.push_str("- Be concise in how much you write, but never at the cost of being understood. Prefer acting with tools over describing what you would do.\n");
     p.push_str("- Read a file before you edit it. Make minimal, targeted changes that match the surrounding code style.\n");
+    p.push_str("- Change only what the task needs. When you change a shared function's signature, update every caller in the same change — don't add wrapper shims to avoid it. Delete dead code instead of commenting it out.\n");
     p.push_str("- For `edit_file`, choose an `old_string` with enough surrounding context to match exactly once.\n");
     p.push_str("- Use `grep`/`glob`/`list_dir` to locate code instead of reading entire trees.\n");
     p.push_str("- Don't add comments or documentation unless asked.\n");
@@ -96,14 +116,6 @@ call `clark_research` instead — it runs remotely in Clark's sandbox.",
         );
     }
     p.push('\n');
-    p.push('\n');
-
-    p.push_str("# Git\n");
-    p.push_str("- Other agents (or the user) may be changing this project at the same time. Uncommitted changes you didn't make are someone's work in progress — never revert, overwrite, or \"clean up\" changes you did not create.\n");
-    p.push_str("- Work on the current branch as it is. Isolate your work by touching only the files your task needs — never by moving the tree: no `git stash`, `git reset`, `git checkout`/`git switch`/`git restore` to switch or discard, `git clean`, or `git rebase`, and don't create branches. If git state looks wrong, explain it to the user in plain terms instead of fixing it with git.\n");
-    p.push_str("- A dirty tree is normal; mention it only when changes you didn't make overlap the files you need to edit — then pause and ask before touching them.\n");
-    p.push_str("- Re-read a file before editing it if you haven't read it this turn — it may have changed since you last looked.\n");
-    p.push_str("- Don't commit or push unless asked. When you do commit, stage only the specific files you changed — never `git add -A` or `git commit -a`.\n");
     p.push('\n');
 
     p.push_str("# Testing\n");
@@ -129,35 +141,11 @@ call `clark_research` instead — it runs remotely in Clark's sandbox.",
     // Note: durable memory (project + global) is injected in `new_session`,
     // gated by the memories setting and read through the session executor.
 
-    if let Some(ctx) = project_context(sandbox.root()) {
-        p.push_str("\n# Project context\n");
-        p.push_str(&ctx);
-    }
-
     // Note: the `# Skills` section (from the user's Claude setup) is appended in
     // `new_session`, which has the session's `Executor` to read `.claude` — local
     // or remote — asynchronously.
 
     p
-}
-
-/// Concatenate short excerpts of well-known guidance files if present.
-fn project_context(root: &Path) -> Option<String> {
-    const FILES: &[&str] = &["AGENTS.md", "CLAUDE.md", "README.md"];
-    const MAX_PER_FILE: usize = 4_000;
-    let mut out = String::new();
-    for name in FILES {
-        let path = root.join(name);
-        if let Ok(text) = std::fs::read_to_string(&path) {
-            let excerpt: String = text.chars().take(MAX_PER_FILE).collect();
-            out.push_str(&format!("\n## {name}\n{excerpt}\n"));
-        }
-    }
-    if out.is_empty() {
-        None
-    } else {
-        Some(out)
-    }
 }
 
 #[cfg(test)]
@@ -204,6 +192,15 @@ mod tests {
         // Test-quality bar: at least one would-fail case.
         assert!(p.contains("# Testing"));
         assert!(p.contains("would fail if your change were broken"));
+        // Judgment: serve intent, stop on dead premises, cause vs. symptom.
+        assert!(p.contains("# Judgment"));
+        assert!(p.contains("serve the intent"));
+        assert!(p.contains("fixes the cause or only hides the symptom"));
+        // Hard rules keep the primacy slot: # Git before every other section.
+        let git = p.find("# Git").unwrap();
+        assert!(git < p.find("# Working with the user").unwrap());
+        assert!(git < p.find("# Judgment").unwrap());
+        assert!(git < p.find("# Behavior").unwrap());
     }
 
     #[test]
@@ -213,12 +210,4 @@ mod tests {
         assert!(output_style_instructions("terse").contains("Terse"));
     }
 
-    #[test]
-    fn pulls_in_agents_md() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join("AGENTS.md"), "Special rule: be terse.").unwrap();
-        let sb = Sandbox::new(dir.path()).unwrap();
-        let p = system_prompt(&sb, false);
-        assert!(p.contains("Special rule: be terse."));
-    }
 }

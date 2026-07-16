@@ -31,7 +31,7 @@ import {
 } from "../lib/auth";
 import {
   drainLocalHistory,
-  renderResumeContext,
+  buildResumeTranscript,
   settleRuns,
   deriveTitle,
   hasContent,
@@ -76,6 +76,7 @@ import { provisionCodeKey, billingMe, type BillingSummary } from "../lib/account
 import { copyText } from "../lib/clipboard";
 import { notify } from "../lib/notify";
 import { repositoryFingerprintForRoot } from "../lib/repositoryKnowledge";
+import { conversationProjectRoot, liveProjectRoot } from "../lib/sessionEnvironment";
 import {
   checkAndStageUpdate,
   relaunchApp,
@@ -192,6 +193,9 @@ interface SessionState {
   activeRemote: RemoteInfo | null;
   /** The SSH destination of the active remote session, for the history badge. */
   activeRemoteHost: string | null;
+  /** Authoritative project root for the active conversation. Unlike
+   * `localSettings.cwd`, this does not change when the new-session picker does. */
+  activeProjectRoot: string | null;
   /** Whether durable memory is enabled (global user preference; the agent gets
    *  the `memory` tool and its saved facts are injected into the prompt). */
   memoriesEnabled: boolean;
@@ -371,9 +375,9 @@ interface LiveEntry {
    *  when the session closes, never on a switch. */
   remote: RemoteInfo | null;
   remoteHost: string | null;
-  /** Project folder captured at open time (local sessions), so background
-   *  persistence doesn't misattribute the project when settings change. */
-  projectCwd: string | null;
+  /** Project folder captured at open time, so background persistence and UI
+   *  actions cannot drift when the new-session folder setting changes. */
+  projectRoot: string | null;
   /** Follow-ups typed while this conversation's run was streaming. */
   queued: QueuedMessage[];
   // Per-session bookkeeping for the shared snapshot handler.
@@ -389,7 +393,7 @@ const liveSessions = new Map<string, LiveEntry>();
 
 function newLiveEntry(
   session: Session,
-  init: Pick<LiveEntry, "historyPrefix" | "remote" | "remoteHost" | "projectCwd">,
+  init: Pick<LiveEntry, "historyPrefix" | "remote" | "remoteHost" | "projectRoot">,
 ): LiveEntry {
   return {
     session,
@@ -421,11 +425,11 @@ function closeLiveSession(bridge: CoreBridge | null, id: string): void {
 
 /** Bring up the exec-server + tunnel for `host`. Throws a readable error if the
  *  host is incomplete or the connection fails (unreachable, arch mismatch, …). */
-async function openRemote(host: SshHost): Promise<RemoteInfo> {
+async function openRemote(host: SshHost, projectRoot = host.remoteRoot): Promise<RemoteInfo> {
   if (!hostReady(host)) {
     throw new Error("This host needs a remote folder and an exec-server binary path.");
   }
-  return sshConnect(host.host.trim(), host.remoteRoot.trim(), host.binaryPath.trim());
+  return sshConnect(host.host.trim(), projectRoot.trim(), host.binaryPath.trim());
 }
 
 // Chat history is cloud-only. Snapshots are cached in memory for the app's
@@ -526,6 +530,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   selectedHostId: loadSshHosts()[0]?.id ?? null,
   activeRemote: null,
   activeRemoteHost: null,
+  activeProjectRoot: null,
   memoriesEnabled: loadMemoriesEnabled(),
   browserEnabled: loadBrowserEnabled(),
   memoryStatus: null,
@@ -695,7 +700,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
               // folder captured when this session opened.
               const project =
                 entry.session.provider === "local"
-                  ? (entry.remoteHost ? entry.remote?.cwd : entry.projectCwd) || undefined
+                  ? entry.projectRoot || undefined
                   : undefined;
               // Only advance updatedAt when the timeline actually grew past the
               // restored prefix — i.e. real new activity. Merely opening/resuming a
@@ -925,8 +930,11 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   },
 
   loadMemory: async () => {
-    const { bridge, localSettings: s } = get();
-    const cwd = s.cwd.trim();
+    const { bridge, localSettings: s, activeProjectRoot, activeRemote } = get();
+    const cwd = activeProjectRoot?.trim() || s.cwd.trim();
+    const remote = activeRemote
+      ? { ws_url: activeRemote.ws_url, token: activeRemote.token }
+      : null;
     if (!bridge?.listMemory) {
       set({ memoryOverview: null, globalMemoryOverview: null });
       return;
@@ -935,7 +943,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     try {
       // Project scope needs a folder; global scope is per-user (always available).
       const [memoryOverview, globalMemoryOverview] = await Promise.all([
-        cwd ? bridge.listMemory(cwd) : Promise.resolve(null),
+        cwd ? bridge.listMemory(cwd, remote) : Promise.resolve(null),
         bridge.listGlobalMemory?.() ?? Promise.resolve(null),
       ]);
       set({ loadingMemory: false, memoryOverview, globalMemoryOverview, memoryStatus: null });
@@ -1047,12 +1055,13 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       const project = isLocal
         ? (isRemote ? remote?.cwd : localSettings.cwd.trim()) || undefined
         : undefined;
+      const projectRoot = liveProjectRoot(session, project ?? null);
       const now = Date.now();
       const conversationMeta: ConversationMeta = {
         id: session.id,
         title: "New conversation",
         provider: activeProvider,
-        project,
+        project: projectRoot ?? project,
         remoteHost: remoteHost ?? undefined,
         mode: session.mode,
         createdAt: now,
@@ -1084,7 +1093,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
           historyPrefix: null,
           remote,
           remoteHost,
-          projectCwd: isLocal && !isRemote ? localSettings.cwd.trim() || null : null,
+          projectRoot,
         }),
       );
       nativeSession = null;
@@ -1101,6 +1110,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         ],
         activeRemote: remote,
         activeRemoteHost: remoteHost,
+        activeProjectRoot: projectRoot,
       });
     } catch (e) {
       // Brought up a tunnel but failed afterward → tear it back down.
@@ -1141,6 +1151,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       terminalOpen: false,
       activeRemote: null,
       activeRemoteHost: null,
+      activeProjectRoot: null,
       selectedConversationIds: new Set(),
     });
   },
@@ -1177,6 +1188,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         historyPrefix: entry.historyPrefix,
         activeRemote: entry.remote,
         activeRemoteHost: entry.remoteHost,
+        activeProjectRoot: liveProjectRoot(entry.session, entry.projectRoot),
         queued: entry.queued,
         attachments: [],
         connecting: false,
@@ -1211,6 +1223,10 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       // A remote conversation reconnects its host (matched by SSH destination);
       // the saved host must still exist on this device.
       const wantRemote = isLocal && !!openingMeta?.remoteHost;
+      const requestedProjectRoot = conversationProjectRoot(
+        openingMeta?.project,
+        localSettings.cwd,
+      );
       let config;
       let options;
       let remoteHost: string | null = null;
@@ -1219,24 +1235,29 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         if (!host) {
           throw new Error(`Add the SSH host "${openingMeta!.remoteHost}" to reopen this remote conversation.`);
         }
-        remote = await openRemote(host);
+        remote = await openRemote(
+          host,
+          conversationProjectRoot(openingMeta?.project, host.remoteRoot),
+        );
         remoteHost = host.host.trim();
         config = localConnectConfig(localSettings, remoteTarget(remote));
         options = { cwd: remote.cwd };
       } else if (isLocal) {
-        config = localConnectConfig(localSettings);
-        options = { cwd: localSettings.cwd.trim() };
+        if (!requestedProjectRoot) {
+          throw new Error("This conversation has no project folder. Choose one before reopening it.");
+        }
+        config = localConnectConfig({ ...localSettings, cwd: requestedProjectRoot });
+        options = { cwd: requestedProjectRoot };
       } else {
         config = { endpoint: auth?.clark.endpoint, auth_token: auth?.clark.token };
         options = {};
       }
 
-      // Providers that can't resume have no server-side context either: hand
-      // the new session a rendered transcript so the MODEL remembers the prior
-      // turns, not just the UI (which restores them via `historyPrefix`).
+      // Providers that can't resume have no server-side context either: replay
+      // the typed transcript so model history and the restored UI agree.
       if (!canResume && restored) {
-        const resumeContext = renderResumeContext(restored);
-        if (resumeContext) (options as SessionOptions).resume_context = resumeContext;
+        const resume = buildResumeTranscript(restored);
+        if (resume) (options as SessionOptions).resume = resume;
       }
 
       // Superseded (cancel / another open) while connecting → abandon quietly.
@@ -1264,7 +1285,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         title: "Conversation",
         provider: activeProvider,
         project: isLocal
-          ? (wantRemote ? remote?.cwd : localSettings.cwd.trim()) || undefined
+          ? (wantRemote ? remote?.cwd : requestedProjectRoot) || undefined
           : undefined,
         remoteHost: remoteHost ?? undefined,
         mode: opened.mode,
@@ -1280,13 +1301,17 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         permissionMode: get().permissionMode,
         outputStyle: get().outputStyle,
       });
+      const projectRoot = liveProjectRoot(
+        opened,
+        (wantRemote ? remote?.cwd : requestedProjectRoot) || null,
+      );
       liveSessions.set(
         id,
         newLiveEntry(opened, {
           historyPrefix: restored,
           remote,
           remoteHost,
-          projectCwd: isLocal && !wantRemote ? localSettings.cwd.trim() || null : null,
+          projectRoot,
         }),
       );
       nativeSession = null;
@@ -1300,6 +1325,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         queued: [],
         activeRemote: remote,
         activeRemoteHost: remoteHost,
+        activeProjectRoot: projectRoot,
       });
     } catch (e) {
       if (nativeSession) void bridge.closeSession?.(nativeSession.id);
@@ -1334,6 +1360,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
             terminalOpen: false,
             activeRemote: null,
             activeRemoteHost: null,
+            activeProjectRoot: null,
           }
         : {}),
     });
@@ -1375,6 +1402,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
             terminalOpen: false,
             activeRemote: null,
             activeRemoteHost: null,
+            activeProjectRoot: null,
           }
         : {}),
     });
@@ -1437,6 +1465,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
             terminalOpen: false,
             activeRemote: null,
             activeRemoteHost: null,
+            activeProjectRoot: null,
           }
         : {}),
     }));
@@ -1474,6 +1503,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
             terminalOpen: false,
             activeRemote: null,
             activeRemoteHost: null,
+            activeProjectRoot: null,
           }
         : {}),
     }));
@@ -1627,7 +1657,9 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     }
   },
 
-  toggleTerminal: () => set((s) => ({ terminalOpen: !s.terminalOpen })),
+  toggleTerminal: () => set((s) => ({
+    terminalOpen: s.activeRemote ? false : !s.terminalOpen,
+  })),
   setTerminalOpen: (open) => set({ terminalOpen: open }),
   setMcpOpen: (open) => set({ mcpOpen: open }),
   setSshOpen: (open) => set({ sshOpen: open }),

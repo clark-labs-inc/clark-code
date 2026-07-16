@@ -26,5 +26,5 @@ pub use ids::*;
 pub use projection::{apply, reduce_all, Snapshot, TimelineItem};
 pub use provider::{
     ClientResponse, PromptInput, Provider, ProviderCapabilities, ProviderConfig, Session,
-    SessionOptions,
+    ResumeItem, ResumeTranscript, SessionOptions,
 };

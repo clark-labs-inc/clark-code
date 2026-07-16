@@ -20,6 +20,7 @@ import {
   syncRepositoriesUnderRoot,
 } from "../lib/repositoryKnowledge";
 import { desktopHostId } from "../lib/desktopHost";
+import { mobileRemoteRetryDelayMs } from "../lib/mobileRemoteRetry";
 
 const LOOP_INTERVAL_MS = 500;
 const HOST_HEARTBEAT_INTERVAL_MS = 30_000;
@@ -246,15 +247,20 @@ export function MobileRemoteAgent() {
   const cwd = useSessionStore((state) => state.localSettings.cwd);
   const busyRef = useRef(false);
   const lastHeartbeatRef = useRef(0);
+  const consecutiveFailuresRef = useRef(0);
+  const retryAtRef = useRef(0);
 
   useEffect(() => {
     if (!auth) return;
     const hostId = desktopHostId();
     let stopped = false;
     lastHeartbeatRef.current = 0;
+    consecutiveFailuresRef.current = 0;
+    retryAtRef.current = 0;
 
     const tick = async () => {
       if (stopped || busyRef.current) return;
+      if (navigator.onLine === false || Date.now() < retryAtRef.current) return;
       const creds = cloudCreds(useSessionStore.getState().auth);
       if (!creds) return;
       busyRef.current = true;
@@ -283,6 +289,8 @@ export function MobileRemoteAgent() {
           if (stopped) break;
           await runCommand(creds, hostId, command);
         }
+        consecutiveFailuresRef.current = 0;
+        retryAtRef.current = 0;
       } catch (error) {
         if (isAuthExpiredError(error)) {
           const currentAuth = useSessionStore.getState().auth;
@@ -293,6 +301,9 @@ export function MobileRemoteAgent() {
             useSessionStore.getState().signOutAuth();
             void notify("Clark sign-in expired", "Sign in again to keep Clark Code remote control online.");
           }
+        } else {
+          consecutiveFailuresRef.current += 1;
+          retryAtRef.current = Date.now() + mobileRemoteRetryDelayMs(consecutiveFailuresRef.current);
         }
         /* Remote control is a background affordance; normal desktop use continues. */
       } finally {
@@ -302,9 +313,16 @@ export function MobileRemoteAgent() {
 
     void tick();
     const timer = window.setInterval(() => void tick(), LOOP_INTERVAL_MS);
+    const resumeAfterOutage = () => {
+      consecutiveFailuresRef.current = 0;
+      retryAtRef.current = 0;
+      void tick();
+    };
+    window.addEventListener("online", resumeAfterOutage);
     return () => {
       stopped = true;
       window.clearInterval(timer);
+      window.removeEventListener("online", resumeAfterOutage);
     };
   }, [auth, cwd]);
 

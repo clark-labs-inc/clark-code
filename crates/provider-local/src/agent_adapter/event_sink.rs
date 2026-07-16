@@ -1,0 +1,190 @@
+//! Projection of typed agent-loop events into desktop events.
+
+use std::sync::Arc;
+
+use agent_core::domain as desktop;
+use agent_core::ids::{RunId, ToolCallId};
+use async_channel::Sender;
+use async_trait::async_trait;
+use clark_agent as ca;
+
+use crate::tools::ToolRegistry;
+
+use super::{
+    locations_from_details, markdown_artifact, mobile_screenshot_artifact, tool_result_blocks_to_content,
+    tool_title,
+};
+
+pub(crate) struct DesktopEventSink {
+    events: Sender<desktop::AgentEvent>,
+    run: RunId,
+    registry: Arc<ToolRegistry>,
+    /// The app-managed document workspace (canonical), when this is a local
+    /// session. Markdown files written here are surfaced as inline artifacts.
+    docs_dir: Option<std::path::PathBuf>,
+}
+impl DesktopEventSink {
+    pub fn new(
+        events: Sender<desktop::AgentEvent>,
+        run: RunId,
+        registry: Arc<ToolRegistry>,
+        docs_dir: Option<std::path::PathBuf>,
+    ) -> Self {
+        Self {
+            events,
+            run,
+            registry,
+            docs_dir,
+        }
+    }
+}
+
+#[async_trait]
+impl ca::EventSink for DesktopEventSink {
+    async fn emit(&self, event: ca::AgentEvent) {
+        if let Ok(payload) = serde_json::to_value(&event) {
+            let _ = self
+                .events
+                .send(desktop::AgentEvent::Trace {
+                    run: Some(self.run.clone()),
+                    source: "clark_agent".to_string(),
+                    payload,
+                })
+                .await;
+        }
+        match event {
+            ca::AgentEvent::MessageUpdate {
+                chunk: ca::AssistantStreamChunk::Text { delta },
+                ..
+            } => {
+                let _ = self
+                    .events
+                    .send(desktop::AgentEvent::MessageChunk {
+                        run: self.run.clone(),
+                        role: desktop::Role::Agent,
+                        delta: desktop::ContentBlock::text(delta),
+                    })
+                    .await;
+            }
+            ca::AgentEvent::MessageUpdate {
+                chunk:
+                    ca::AssistantStreamChunk::Reasoning { delta }
+                    | ca::AssistantStreamChunk::Thinking { delta },
+                ..
+            } => {
+                // Hidden reasoning → a Thinking content block. The frontend
+                // renders it as the collapsible Thinking row (the same UI the
+                // inline `<thinking>` tag path uses), and projection coalesces
+                // adjacent blocks so streaming deltas merge into one.
+                let _ = self
+                    .events
+                    .send(desktop::AgentEvent::MessageChunk {
+                        run: self.run.clone(),
+                        role: desktop::Role::Agent,
+                        delta: desktop::ContentBlock::thinking(delta),
+                    })
+                    .await;
+            }
+            ca::AgentEvent::ToolExecutionStart {
+                tool_call_id,
+                tool_name,
+                args,
+            } => {
+                let kind = self
+                    .registry
+                    .get(&tool_name)
+                    .map(|tool| tool.kind())
+                    .unwrap_or_default();
+                let id = ToolCallId::new(tool_call_id);
+                let _ = self
+                    .events
+                    .send(desktop::AgentEvent::ToolCall {
+                        run: self.run.clone(),
+                        call: desktop::ToolCall {
+                            id,
+                            tool_name: Some(tool_name.clone()),
+                            title: tool_title(&tool_name, &args),
+                            kind,
+                            status: desktop::ToolStatus::Pending,
+                            locations: Vec::new(),
+                            content: Vec::new(),
+                            raw_input: Some(args),
+                        },
+                    })
+                    .await;
+            }
+            ca::AgentEvent::ToolExecutionUpdate {
+                tool_call_id,
+                partial,
+                ..
+            } => {
+                let blocks = tool_result_blocks_to_content(&partial.content);
+                let _ = self
+                    .events
+                    .send(desktop::AgentEvent::ToolCallUpdate {
+                        run: self.run.clone(),
+                        id: ToolCallId::new(tool_call_id),
+                        patch: desktop::ToolCallPatch {
+                            status: Some(desktop::ToolStatus::InProgress),
+                            append_content: blocks,
+                            ..Default::default()
+                        },
+                    })
+                    .await;
+            }
+            ca::AgentEvent::ToolExecutionEnd {
+                tool_call_id,
+                result,
+                is_error,
+                ..
+            } => {
+                let locations = locations_from_details(&result.details);
+                // A Markdown file (or mobile-tool screenshot) written into the
+                // document workspace becomes an inline artifact (a rendered
+                // doc/slide viewer, or an image card). Emitted before the tool
+                // update so ordering is deterministic; the projection dedupes
+                // by uri, so a rewrite updates the same card.
+                if !is_error {
+                    if let Some(docs) = &self.docs_dir {
+                        for loc in &locations {
+                            let artifact = markdown_artifact(&loc.path, &tool_call_id, docs)
+                                .or_else(|| {
+                                    mobile_screenshot_artifact(&loc.path, &tool_call_id, docs)
+                                });
+                            if let Some(artifact) = artifact {
+                                let _ = self
+                                    .events
+                                    .send(desktop::AgentEvent::Artifact {
+                                        run: self.run.clone(),
+                                        artifact,
+                                    })
+                                    .await;
+                            }
+                        }
+                    }
+                }
+                let _ = self
+                    .events
+                    .send(desktop::AgentEvent::ToolCallUpdate {
+                        run: self.run.clone(),
+                        id: ToolCallId::new(tool_call_id),
+                        patch: desktop::ToolCallPatch {
+                            status: Some(if is_error {
+                                desktop::ToolStatus::Failed
+                            } else {
+                                desktop::ToolStatus::Completed
+                            }),
+                            locations: (!locations.is_empty()).then_some(locations),
+                            // Replace (not append): the final result supersedes
+                            // any streamed partials so progress lines don't
+                            // linger or duplicate the output.
+                            replace_content: Some(tool_result_blocks_to_content(&result.content)),
+                            ..Default::default()
+                        },
+                    })
+                    .await;
+            }
+            _ => {}
+        }
+    }
+}

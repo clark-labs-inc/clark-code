@@ -111,7 +111,11 @@ pub fn personal_memory_section(memories: &[PersonalMemory]) -> Option<String> {
     if memories.is_empty() {
         return None;
     }
-    let mut s = String::from("## Personal memory (learned by Clark across your work)\n");
+    let mut s = String::from(
+        "## Personal memory (Clark's cloud profile, extracted from the user's other work — \
+may lag or reflect a different context; in-conversation statements and local saved notes \
+take precedence, and cite these as \"Clark's profile\" when you use them)\n",
+    );
     for m in memories {
         let line = m.content.trim().replace('\n', " ");
         if line.is_empty() {

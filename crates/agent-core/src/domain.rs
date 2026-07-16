@@ -105,6 +105,10 @@ pub struct FsLocation {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ToolCall {
     pub id: ToolCallId,
+    /// Provider/tool-registry identifier. Kept out of user-facing labels but
+    /// preserved for typed transcript replay.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_name: Option<String>,
     pub title: String,
     #[serde(default)]
     pub kind: ToolKind,

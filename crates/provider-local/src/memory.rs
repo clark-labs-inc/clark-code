@@ -61,6 +61,10 @@ pub struct MemoryHeader {
     pub name: Option<String>,
     pub description: Option<String>,
     pub kind: Option<MemoryType>,
+    /// ISO date the note was saved (`saved:` frontmatter), when present.
+    pub saved: Option<String>,
+    /// Provenance: "user-stated" or "inferred" (`source:` frontmatter).
+    pub source: Option<String>,
 }
 
 /// One per-fact memory file: its parsed header plus the body (frontmatter
@@ -69,6 +73,8 @@ pub struct MemoryHeader {
 pub struct MemoryFact {
     pub header: MemoryHeader,
     pub body: String,
+    /// Filesystem mtime — the age fallback when `saved:` is absent.
+    pub mtime: Option<std::time::SystemTime>,
 }
 
 /// The memory directory for a scope root (`<root>/.clark/memory`).
@@ -85,30 +91,40 @@ pub fn global_memory_dir() -> Option<PathBuf> {
         .map(|home| PathBuf::from(home).join(MEMORY_SUBDIR))
 }
 
+/// Parsed frontmatter fields of one memory file.
+#[derive(Default)]
+pub struct Frontmatter {
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub kind: Option<MemoryType>,
+    pub saved: Option<String>,
+    pub source: Option<String>,
+}
+
 /// Parse the leading `--- ... ---` YAML-ish frontmatter for the fields we use.
-pub fn parse_frontmatter(text: &str) -> (Option<String>, Option<String>, Option<MemoryType>) {
-    let mut name = None;
-    let mut description = None;
-    let mut kind = None;
+pub fn parse_frontmatter(text: &str) -> Frontmatter {
+    let mut fm = Frontmatter::default();
     let trimmed = text.trim_start();
     let Some(rest) = trimmed.strip_prefix("---") else {
-        return (name, description, kind);
+        return fm;
     };
     let Some(end) = rest.find("\n---") else {
-        return (name, description, kind);
+        return fm;
     };
     for line in rest[..end].lines() {
         if let Some((key, value)) = line.split_once(':') {
             let value = value.trim().trim_matches(['"', '\'']).to_string();
             match key.trim() {
-                "name" => name = Some(value),
-                "description" => description = Some(value),
-                "type" => kind = MemoryType::parse(&value),
+                "name" => fm.name = Some(value),
+                "description" => fm.description = Some(value),
+                "type" => fm.kind = MemoryType::parse(&value),
+                "saved" => fm.saved = Some(value),
+                "source" => fm.source = Some(value),
                 _ => {}
             }
         }
     }
-    (name, description, kind)
+    fm
 }
 
 /// Return the text after the leading `--- … ---` frontmatter block (or the whole
@@ -154,7 +170,7 @@ pub async fn load_facts(exec: &dyn Executor, mem_dir: &Path) -> Vec<MemoryFact> 
         let Some(text) = read_text(exec, &path).await else {
             continue;
         };
-        let (n, d, k) = parse_frontmatter(&text);
+        let fm = parse_frontmatter(&text);
         let body = truncate_chars(strip_frontmatter(&text).trim(), MAX_FACT_BODY_BYTES);
         let mtime = exec
             .metadata(&path)
@@ -167,11 +183,14 @@ pub async fn load_facts(exec: &dyn Executor, mem_dir: &Path) -> Vec<MemoryFact> 
             MemoryFact {
                 header: MemoryHeader {
                     file: e.name,
-                    name: n,
-                    description: d,
-                    kind: k,
+                    name: fm.name,
+                    description: fm.description,
+                    kind: fm.kind,
+                    saved: fm.saved,
+                    source: fm.source,
                 },
                 body,
+                mtime: Some(mtime),
             },
         ));
     }
@@ -179,9 +198,50 @@ pub async fn load_facts(exec: &dyn Executor, mem_dir: &Path) -> Vec<MemoryFact> 
     out.into_iter().map(|(_, f)| f).collect()
 }
 
+/// Human age label for a note: prefers the `saved:` frontmatter date, falls
+/// back to the file mtime, admits ignorance otherwise.
+fn age_label(fact: &MemoryFact) -> String {
+    let days = fact
+        .header
+        .saved
+        .as_deref()
+        .and_then(days_since_iso_date)
+        .or_else(|| {
+            fact.mtime.and_then(|m| {
+                std::time::SystemTime::now()
+                    .duration_since(m)
+                    .ok()
+                    .map(|d| (d.as_secs() / 86_400) as i64)
+            })
+        });
+    match days {
+        None => "age unknown".to_string(),
+        Some(0) => "saved today".to_string(),
+        Some(d) if d < 0 => "age unknown".to_string(),
+        Some(1) => "saved yesterday".to_string(),
+        Some(d) if d < 60 => format!("saved {d} days ago"),
+        Some(d) => format!("saved ~{} months ago", d / 30),
+    }
+}
+
+/// `[inferred]` marker for facts the agent concluded rather than was told.
+fn source_marker(fact: &MemoryFact) -> &'static str {
+    match fact.header.source.as_deref() {
+        Some("inferred") => " [inferred — verify before relying]",
+        _ => "",
+    }
+}
+
 /// A compact listing of one scope for the system prompt: the index plus a
-/// one-line-per-fact catalog (no bodies). `None` when the scope is empty.
-pub async fn scope_listing(exec: &dyn Executor, mem_dir: &Path, label: &str) -> Option<String> {
+/// one-line-per-fact catalog (no bodies) with age and provenance. When
+/// `verify_root` is set (project scope), facts referencing missing paths or
+/// unknown npm scripts get a ⚠ annotation. `None` when the scope is empty.
+pub async fn scope_listing(
+    exec: &dyn Executor,
+    mem_dir: &Path,
+    label: &str,
+    verify_root: Option<&Path>,
+) -> Option<String> {
     let index = load_index(exec, mem_dir).await;
     let facts = load_facts(exec, mem_dir).await;
     if index.is_none() && facts.is_empty() {
@@ -193,7 +253,7 @@ pub async fn scope_listing(exec: &dyn Executor, mem_dir: &Path, label: &str) -> 
         s.push('\n');
     }
     if !facts.is_empty() {
-        s.push_str("\nSaved notes (use `memory` → recall for full text):\n");
+        s.push_str("\nSaved notes (use `memory` → recall for full text; re-verify CODE facts against the repo — the user's own decisions and preferences stay binding until they change them):\n");
         for f in &facts {
             let kind = f
                 .header
@@ -206,15 +266,63 @@ pub async fn scope_listing(exec: &dyn Executor, mem_dir: &Path, label: &str) -> 
                 .clone()
                 .unwrap_or_else(|| f.header.file.clone());
             let desc = f.header.description.clone().unwrap_or_default();
-            s.push_str(&format!("- {kind}{name} — {desc}\n"));
+            s.push_str(&format!(
+                "- {kind}{name} — {desc} ({}){}\n",
+                age_label(f),
+                source_marker(f)
+            ));
+            if let Some(root) = verify_root {
+                for warn in verify_fact(exec, root, &f.body).await {
+                    s.push_str(&format!("  {warn}\n"));
+                }
+            }
+        }
+        // Decisions and standing rules get restated imperatively at the end
+        // of the section (recency + command framing): models reliably *recall*
+        // notes but under-*apply* them when producing content.
+        let decisions: Vec<&MemoryFact> = facts.iter().filter(|f| is_decision(f)).collect();
+        if !decisions.is_empty() {
+            s.push_str(
+                "\nStanding decisions — apply these as written in everything you produce:\n",
+            );
+            for f in &decisions {
+                let line = f
+                    .body
+                    .lines()
+                    .find(|l| !l.trim().is_empty())
+                    .unwrap_or_default()
+                    .trim();
+                s.push_str(&format!("- {}\n", single_line_ellipsis(line, 200)));
+            }
         }
     }
     Some(s)
 }
 
+/// Whether a fact reads as a standing decision/rule rather than a code fact:
+/// typed as user/feedback, or carrying rule-shaped wording.
+fn is_decision(fact: &MemoryFact) -> bool {
+    if matches!(
+        fact.header.kind,
+        Some(MemoryType::User) | Some(MemoryType::Feedback)
+    ) {
+        return true;
+    }
+    let body = fact.body.to_lowercase();
+    ["always ", "never ", " must ", "are called", "is called", "call them", "rule:"]
+        .iter()
+        .any(|cue| body.contains(cue))
+}
+
 /// Full recall of one scope for the `memory` tool: the index plus every fact's
-/// body. `None` when the scope is empty.
-pub async fn recall_scope(exec: &dyn Executor, mem_dir: &Path, label: &str) -> Option<String> {
+/// body, stamped with age/provenance and (for the project scope) ⚠ staleness
+/// annotations. `None` when the scope is empty.
+pub async fn recall_scope(
+    exec: &dyn Executor,
+    mem_dir: &Path,
+    label: &str,
+    verify_root: Option<&Path>,
+) -> Option<String> {
     let index = load_index(exec, mem_dir).await;
     let facts = load_facts(exec, mem_dir).await;
     if index.is_none() && facts.is_empty() {
@@ -236,9 +344,132 @@ pub async fn recall_scope(exec: &dyn Executor, mem_dir: &Path, label: &str) -> O
             .kind
             .map(|k| format!(" [{}]", k.label()))
             .unwrap_or_default();
-        s.push_str(&format!("### {name}{kind}\n{}\n\n", f.body));
+        s.push_str(&format!(
+            "### {name}{kind} ({}){}\n",
+            age_label(f),
+            source_marker(f)
+        ));
+        if let Some(root) = verify_root {
+            for warn in verify_fact(exec, root, &f.body).await {
+                s.push_str(&warn);
+                s.push('\n');
+            }
+        }
+        s.push_str(&format!("{}\n\n", f.body));
     }
     Some(s.trim_end().to_string())
+}
+
+/// Deterministic staleness probes for one fact body: file paths that no longer
+/// exist and `npm run <script>` commands package.json doesn't define. Cheap,
+/// conservative, capped.
+async fn verify_fact(exec: &dyn Executor, root: &Path, body: &str) -> Vec<String> {
+    const MAX_CANDIDATES: usize = 8;
+    const MAX_WARNINGS: usize = 3;
+    let mut warnings = Vec::new();
+
+    // Path-shaped tokens: contain '/' or end in a common source extension.
+    let mut checked = 0usize;
+    let mut seen = std::collections::HashSet::new();
+    for raw in body.split(|c: char| c.is_whitespace() || matches!(c, '`' | '(' | ')' | ',' | ';'))
+    {
+        let tok = raw.trim_matches(|c: char| matches!(c, '.' | ':' | '"' | '\'' | '*'));
+        let looks_pathy = (tok.contains('/') && tok.contains('.'))
+            || [".js", ".ts", ".py", ".rs", ".md", ".json", ".toml", ".yaml"]
+                .iter()
+                .any(|ext| tok.ends_with(ext));
+        if tok.is_empty()
+            || tok.len() > 120
+            || tok.starts_with("http")
+            || tok.contains("://")
+            || !looks_pathy
+            || !seen.insert(tok.to_string())
+        {
+            continue;
+        }
+        if checked >= MAX_CANDIDATES || warnings.len() >= MAX_WARNINGS {
+            break;
+        }
+        checked += 1;
+        let rel = tok.trim_start_matches("./");
+        if exec.metadata(&root.join(rel)).await.is_err() {
+            warnings.push(format!(
+                "⚠ this note references `{tok}`, which does not exist in the repo — the note may be stale"
+            ));
+        }
+    }
+
+    // `npm run <script>` claims vs. package.json scripts.
+    if let Some(pkg) = read_text(exec, &root.join("package.json")).await {
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&pkg) {
+            let scripts = &json["scripts"];
+            let mut rest = body;
+            while let Some(pos) = rest.find("npm run ") {
+                rest = &rest[pos + "npm run ".len()..];
+                let script: String = rest
+                    .chars()
+                    .take_while(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | ':'))
+                    .collect();
+                if !script.is_empty()
+                    && scripts.get(&script).is_none()
+                    && warnings.len() < MAX_WARNINGS
+                {
+                    warnings.push(format!(
+                        "⚠ this note mentions `npm run {script}`, but package.json defines no such script — the note may be stale"
+                    ));
+                }
+            }
+        }
+    }
+    warnings
+}
+
+/// Days elapsed since an ISO `YYYY-MM-DD` date (negative if in the future).
+fn days_since_iso_date(iso: &str) -> Option<i64> {
+    let mut parts = iso.trim().splitn(3, '-');
+    let y: i64 = parts.next()?.parse().ok()?;
+    let m: i64 = parts.next()?.parse().ok()?;
+    let d: i64 = parts.next()?.parse().ok()?;
+    let saved = days_from_civil(y, m, d)?;
+    let now_days = (std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_secs()
+        / 86_400) as i64;
+    Some(now_days - saved)
+}
+
+/// Days since 1970-01-01 for a civil date (Howard Hinnant's algorithm).
+fn days_from_civil(y: i64, m: i64, d: i64) -> Option<i64> {
+    if !(1..=12).contains(&m) || !(1..=31).contains(&d) {
+        return None;
+    }
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = y - era * 400;
+    let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    Some(era * 146_097 + doe - 719_468)
+}
+
+/// Today as ISO `YYYY-MM-DD` (UTC), for `saved:` stamps.
+pub fn iso_date_today() -> String {
+    let days = (std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() / 86_400)
+        .unwrap_or(0)) as i64;
+    // Inverse of days_from_civil.
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    format!("{y:04}-{m:02}-{d:02}")
 }
 
 /// Save one durable fact into a scope: write `<slug>.md` with frontmatter and add
@@ -250,6 +481,7 @@ pub async fn save_memory(
     title: &str,
     content: &str,
     kind: Option<MemoryType>,
+    source: Option<&str>,
 ) -> Result<String, String> {
     let slug = slugify(title);
     if slug.is_empty() {
@@ -262,14 +494,23 @@ pub async fn save_memory(
         .unwrap_or(title)
         .trim()
         .replace(['\n', '\r'], " ");
-    let desc = truncate_chars(&desc, 200);
+    // Single-line cap: `truncate_chars` appends a "… [truncated]" line, which
+    // inside a frontmatter field would split it across lines and corrupt the
+    // header — so cap with an inline ellipsis instead.
+    let desc = single_line_ellipsis(&desc, 160);
     let kind_line = kind
         .map(|k| format!("type: {}\n", k.label()))
         .unwrap_or_default();
+    let source_line = source
+        .filter(|s| !s.trim().is_empty())
+        .map(|s| format!("source: {}\n", s.trim()))
+        .unwrap_or_default();
     let body = format!(
-        "---\nname: {}\ndescription: {}\n{}---\n\n{}\n",
+        "---\nname: {}\ndescription: {}\nsaved: {}\n{}{}---\n\n{}\n",
         title.trim(),
         desc,
+        iso_date_today(),
+        source_line,
         kind_line,
         content.trim(),
     );
@@ -297,6 +538,63 @@ pub async fn save_memory(
     Ok(file)
 }
 
+/// Delete one note by title/slug/filename match: remove the file and its
+/// index line. Returns the removed file name, or `None` if nothing matched.
+pub async fn delete_memory(
+    exec: &dyn Executor,
+    mem_dir: &Path,
+    query: &str,
+) -> Result<Option<String>, String> {
+    let want = slugify(query);
+    if want.is_empty() {
+        return Err("give the title of the note to forget".into());
+    }
+    let facts = load_facts(exec, mem_dir).await;
+    let matched = facts.into_iter().find(|f| {
+        let stem = f.header.file.trim_end_matches(".md");
+        stem == want
+            || stem.contains(&want)
+            || f.header
+                .name
+                .as_deref()
+                .map(|n| slugify(n) == want || slugify(n).contains(&want))
+                .unwrap_or(false)
+    });
+    let Some(fact) = matched else {
+        return Ok(None);
+    };
+    let file = fact.header.file.clone();
+    // The Executor has no remove primitive; empty the file via `rm` through
+    // the exec channel (slugs are shell-safe by construction).
+    let out = exec
+        .exec(
+            &format!("rm -f -- '{file}'"),
+            mem_dir,
+            std::time::Duration::from_secs(10),
+            &tokio_util::sync::CancellationToken::new(),
+        )
+        .await
+        .map_err(|e| format!("removing note: {e}"))?;
+    if out.code != Some(0) {
+        return Err(format!(
+            "removing note failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        ));
+    }
+    // Drop the index line pointing at the removed file.
+    let index_path = mem_dir.join(INDEX_FILE);
+    if let Some(index) = read_text(exec, &index_path).await {
+        let kept: Vec<&str> = index
+            .lines()
+            .filter(|l| !l.contains(&format!("]({file})")))
+            .collect();
+        let _ = exec
+            .write(&index_path, (kept.join("\n") + "\n").as_bytes())
+            .await;
+    }
+    Ok(Some(file))
+}
+
 /// Kebab-case a title into a safe file stem.
 fn slugify(title: &str) -> String {
     let mut out = String::new();
@@ -317,15 +615,45 @@ fn slugify(title: &str) -> String {
 /// Maintenance instructions for the system prompt (present whenever memory is on).
 pub fn memory_guidance() -> &'static str {
     "You have a durable memory via the `memory` tool. Use it proactively, not only when asked:\n\
+- When the user tells you who they are, what they're building, who it's for, how they \
+like to work, or vocabulary they want used, save it with `memory` IN THAT SAME TURN — \
+before you finish the coding task — or it is lost when the session ends. Scope \
+\"global\" if it holds across their projects, scope \"project\" if it's specific to \
+this codebase.\n\
 - In a project with no saved notes yet, save the basics early: the stack/framework, the \
 build and test commands, and where the entrypoint lives.\n\
-- When you learn something lasting about the user — their technical comfort level, how \
-they like things explained, what their product is and who it's for, a correction they had \
-to give you twice — save it: scope \"global\" if it holds across their projects, scope \
-\"project\" if it's specific to this codebase.\n\
-- Call action \"recall\" to load saved facts before starting sizable work, and treat notes \
-as point-in-time: verify against the current code before relying on them.\n\
+- When the user changes or reverses an earlier decision, fix the memory IN THAT SAME \
+TURN: save the new fact and use action \"forget\" on the superseded note (or rewrite it). \
+Never leave both versions standing — a stale decision that keeps getting recalled is \
+worse than no note at all.\n\
+- Set source \"user-stated\" for things the user actually said, \"inferred\" for \
+conclusions you drew yourself. Never record an inference, a maybe, or someone else's \
+opinion as a flat fact — keep attribution and open questions in the note's wording.\n\
+- Call action \"recall\" to load saved facts before starting sizable work. Notes carry \
+their age and ⚠ markers flag references the current repo no longer has. Apply that \
+skepticism to CODE facts only (paths, commands, stack — verify against the repo before \
+relying on them). The user's own decisions and preferences — vocabulary, tone, rules, \
+who their product is for — are not verifiable in code and stay binding until the user \
+changes them: apply them as written.\n\
+- Notes record what THIS user said HERE. Never blend in facts from Clark's cloud \
+profile, other projects, or your own guesses — a note that mixes sources becomes \
+impossible to trust or correct.\n\
+- Precedence: what the user says in this conversation outranks local saved notes, which \
+outrank Clark's cloud profile (\"Personal memory\"). Cloud-profile facts were extracted \
+from the user's other work — when you cite them, attribute them to Clark's profile, and \
+never let them override what the user tells you here. Never use cloud-profile facts to \
+fill gaps in THIS project either — its product, audience, and copy come from this repo \
+and this user's own words; if that context is missing, ask instead of borrowing.\n\
 Keep each note a durable, reusable fact — never transient task state.\n"
+}
+
+/// Cap `s` at `max` chars on one line, ending with an ellipsis when cut.
+fn single_line_ellipsis(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        return s.to_string();
+    }
+    let cut: String = s.chars().take(max.saturating_sub(1)).collect();
+    format!("{}…", cut.trim_end())
 }
 
 fn truncate_chars(s: &str, max: usize) -> String {
@@ -352,12 +680,22 @@ mod tests {
 
     #[test]
     fn parses_frontmatter_fields() {
-        let text =
-            "---\nname: build-cmd\ndescription: how to build\ntype: project\n---\n\nUse cargo.";
-        let (n, d, k) = parse_frontmatter(text);
-        assert_eq!(n.as_deref(), Some("build-cmd"));
-        assert_eq!(d.as_deref(), Some("how to build"));
-        assert_eq!(k, Some(MemoryType::Project));
+        let text = "---\nname: build-cmd\ndescription: how to build\nsaved: 2026-07-01\nsource: user-stated\ntype: project\n---\n\nUse cargo.";
+        let fm = parse_frontmatter(text);
+        assert_eq!(fm.name.as_deref(), Some("build-cmd"));
+        assert_eq!(fm.description.as_deref(), Some("how to build"));
+        assert_eq!(fm.kind, Some(MemoryType::Project));
+        assert_eq!(fm.saved.as_deref(), Some("2026-07-01"));
+        assert_eq!(fm.source.as_deref(), Some("user-stated"));
+    }
+
+    #[test]
+    fn civil_date_math_round_trips() {
+        // days_from_civil and iso_date_today are inverses around known dates.
+        assert_eq!(days_from_civil(1970, 1, 1), Some(0));
+        assert_eq!(days_from_civil(2026, 7, 15), Some(20_649));
+        let today = iso_date_today();
+        assert_eq!(days_since_iso_date(&today), Some(0));
     }
 
     #[test]
@@ -365,6 +703,30 @@ mod tests {
         assert_eq!(slugify("Build & Test commands!"), "build-test-commands");
         assert_eq!(slugify("  Hello   World  "), "hello-world");
         assert_eq!(slugify("***"), "");
+    }
+
+    #[tokio::test]
+    async fn long_single_line_content_keeps_frontmatter_on_one_line() {
+        let dir = tempfile::tempdir().unwrap();
+        let mem = memory_dir(dir.path());
+        let exec = LocalExecutor;
+        // A single 400-char line used to blow past the description cap and get
+        // a "\n… [truncated]" suffix injected INSIDE the frontmatter block.
+        let long = "PawPal waitlist project details ".repeat(13);
+        let file = save_memory(&exec, &mem, "Long note", &long, Some(MemoryType::Project), None)
+            .await
+            .unwrap();
+        let text = std::fs::read_to_string(mem.join(&file)).unwrap();
+        let desc_line = text
+            .lines()
+            .find(|l| l.starts_with("description: "))
+            .expect("description line");
+        assert!(desc_line.chars().count() <= 160 + "description: ".len());
+        assert!(!text.contains("[truncated]"), "{text}");
+        // The type line must survive as parseable frontmatter.
+        let fm = parse_frontmatter(&text);
+        assert!(fm.description.is_some());
+        assert_eq!(fm.kind, Some(MemoryType::Project));
     }
 
     #[tokio::test]
@@ -378,6 +740,7 @@ mod tests {
             "Build command",
             "Run `cargo build` from the repo root.",
             Some(MemoryType::Project),
+            Some("user-stated"),
         )
         .await
         .unwrap();
@@ -387,28 +750,123 @@ mod tests {
         let index = load_index(&exec, &mem).await.unwrap();
         assert!(index.contains("build-command.md"));
 
-        // Fact readable, frontmatter stripped from the body.
+        // Fact readable, frontmatter stripped from the body; saved/source stamped.
         let facts = load_facts(&exec, &mem).await;
         assert_eq!(facts.len(), 1);
         assert_eq!(facts[0].header.name.as_deref(), Some("Build command"));
         assert_eq!(facts[0].header.kind, Some(MemoryType::Project));
+        assert_eq!(facts[0].header.saved.as_deref(), Some(&*iso_date_today()));
+        assert_eq!(facts[0].header.source.as_deref(), Some("user-stated"));
         assert!(facts[0].body.contains("cargo build"));
         assert!(!facts[0].body.contains("description:"));
 
-        // Recall bundles index + bodies; listing is index + catalog.
-        let recall = recall_scope(&exec, &mem, "Project").await.unwrap();
+        // Recall bundles index + bodies with an age stamp; listing likewise.
+        let recall = recall_scope(&exec, &mem, "Project", None).await.unwrap();
         assert!(recall.contains("cargo build"));
-        let listing = scope_listing(&exec, &mem, "Project").await.unwrap();
+        assert!(recall.contains("saved today"));
+        let listing = scope_listing(&exec, &mem, "Project", None).await.unwrap();
         assert!(listing.contains("Build command"));
+        assert!(listing.contains("saved today"));
     }
 
     #[tokio::test]
     async fn empty_scope_yields_none() {
         let dir = tempfile::tempdir().unwrap();
         let exec = LocalExecutor;
-        assert!(scope_listing(&exec, &memory_dir(dir.path()), "Project")
-            .await
-            .is_none());
+        assert!(
+            scope_listing(&exec, &memory_dir(dir.path()), "Project", None)
+                .await
+                .is_none()
+        );
         assert!(load_index(&exec, &memory_dir(dir.path())).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn listing_restates_decisions_imperatively() {
+        let dir = tempfile::tempdir().unwrap();
+        let mem = memory_dir(dir.path());
+        let exec = LocalExecutor;
+        save_memory(
+            &exec,
+            &mem,
+            "Brand vocabulary",
+            "Customers are called 'members'. Never write 'customers'.",
+            Some(MemoryType::Project),
+            None,
+        )
+        .await
+        .unwrap();
+        save_memory(&exec, &mem, "Build command", "Run `cargo build`.", None, None)
+            .await
+            .unwrap();
+
+        let listing = scope_listing(&exec, &mem, "Project", None).await.unwrap();
+        assert!(listing.contains("Standing decisions"), "{listing}");
+        // The rule-shaped note is restated; the plain code fact isn't.
+        let decisions = listing.split("Standing decisions").nth(1).unwrap();
+        assert!(decisions.contains("members"), "{listing}");
+        assert!(!decisions.contains("cargo build"), "{listing}");
+    }
+
+    #[tokio::test]
+    async fn forget_removes_note_and_index_line() {
+        let dir = tempfile::tempdir().unwrap();
+        let mem = memory_dir(dir.path());
+        let exec = LocalExecutor;
+        save_memory(&exec, &mem, "Brand vocabulary", "Customers are 'owners'.", None, None)
+            .await
+            .unwrap();
+        save_memory(&exec, &mem, "Deploy command", "Use ship.sh.", None, None)
+            .await
+            .unwrap();
+
+        let removed = delete_memory(&exec, &mem, "brand vocabulary")
+            .await
+            .unwrap();
+        assert_eq!(removed.as_deref(), Some("brand-vocabulary.md"));
+        assert!(!mem.join("brand-vocabulary.md").exists());
+        // Index keeps the surviving note, drops the removed one.
+        let index = load_index(&exec, &mem).await.unwrap();
+        assert!(!index.contains("brand-vocabulary.md"));
+        assert!(index.contains("deploy-command.md"));
+        // No match → Ok(None), not an error.
+        assert!(delete_memory(&exec, &mem, "nonexistent thing")
+            .await
+            .unwrap()
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn recall_flags_missing_paths_and_scripts() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("lib")).unwrap();
+        std::fs::write(root.join("lib/app.js"), "export {};\n").unwrap();
+        std::fs::write(
+            root.join("package.json"),
+            "{\"scripts\":{\"test\":\"node --test\"}}",
+        )
+        .unwrap();
+        let mem = memory_dir(root);
+        let exec = LocalExecutor;
+        save_memory(
+            &exec,
+            &mem,
+            "Entrypoint",
+            "The entrypoint is `src/main.js`; run `npm run unit` to test. See lib/app.js too.",
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+
+        let recall = recall_scope(&exec, &mem, "Project", Some(root))
+            .await
+            .unwrap();
+        // Missing path and unknown script get flagged; existing path doesn't.
+        assert!(recall.contains("⚠"), "{recall}");
+        assert!(recall.contains("src/main.js"), "{recall}");
+        assert!(recall.contains("npm run unit"), "{recall}");
+        assert!(!recall.contains("`lib/app.js`, which does not exist"), "{recall}");
     }
 }

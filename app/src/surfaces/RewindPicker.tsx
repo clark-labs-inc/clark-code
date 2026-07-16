@@ -19,7 +19,8 @@ type State =
  *  deletes files created by every turn since), so it's tucked behind an
  *  explicit picker with a confirmation, not a one-click button. */
 export function RewindPicker({ excludeSha }: { excludeSha?: string }) {
-  const cwd = useSessionStore((s) => s.localSettings.cwd);
+  const cwd = useSessionStore((s) => s.activeProjectRoot ?? "");
+  const remote = useSessionStore((s) => s.activeRemote);
   // Narrow to `runs` only — this picker doesn't need to re-render on unrelated
   // snapshot churn (it's only mounted when idle, but keep the discipline).
   const runsMap = useSessionStore((s) => s.snapshot.runs);
@@ -38,7 +39,7 @@ export function RewindPicker({ excludeSha }: { excludeSha?: string }) {
   const restore = async (run: RunView) => {
     setState({ kind: "busy" });
     try {
-      await restoreCheckpoint(cwd, run.checkpoint!);
+      await restoreCheckpoint(cwd, run.checkpoint!, remote);
       setState({ kind: "done" });
     } catch (e) {
       setState({ kind: "error", msg: e instanceof Error ? e.message : String(e) });

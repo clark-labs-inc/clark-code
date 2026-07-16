@@ -24,12 +24,32 @@ export interface FsLocation {
 
 export interface ToolCall {
   id: string;
+  tool_name?: string;
   title: string;
   kind: ToolKind;
   status: ToolStatus;
   locations: FsLocation[];
   content: ContentBlock[];
   raw_input?: unknown;
+}
+
+export type ResumeItem =
+  | { item: "message"; role: Role; blocks: ContentBlock[] }
+  | {
+      item: "tool_call";
+      id: string;
+      tool_name?: string;
+      title: string;
+      kind: ToolKind;
+      status: ToolStatus;
+      locations: FsLocation[];
+      arguments?: unknown;
+      content: ContentBlock[];
+    };
+
+export interface ResumeTranscript {
+  items: ResumeItem[];
+  truncated: boolean;
 }
 
 export type PlanPhaseStatus = "pending" | "in_progress" | "completed";
@@ -171,11 +191,20 @@ export interface ProviderInfo {
   capabilities: ProviderCapabilities;
 }
 
+export interface SessionEnvironment {
+  checkout_root?: string;
+  repository_root?: string;
+  workspace_roots: string[];
+  docs_root?: string;
+  remote: boolean;
+}
+
 export interface Session {
   id: string;
   provider: string;
   capabilities: ProviderCapabilities;
   mode?: string;
+  environment?: SessionEnvironment;
 }
 
 export type ClientResponse = {

@@ -385,6 +385,7 @@ pub fn event_to_agent(event: &Value, run: &RunId) -> Option<AgentEvent> {
                 run: run.clone(),
                 call: ToolCall {
                     id: ToolCallId::new(id),
+                    tool_name: Some(name.to_string()),
                     title,
                     kind,
                     status: ToolStatus::InProgress,

@@ -35,6 +35,8 @@ pub(crate) struct TurnContext {
     pub model: String,
     pub temperature: Option<f32>,
     pub user_text: String,
+    /// When memories are enabled: post-turn durable-fact extraction context.
+    pub memory_extraction: Option<crate::memory_extraction::ExtractionCtx>,
 }
 
 /// Drive one user turn to completion, emitting normalized Desktop events into
@@ -43,16 +45,18 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
     let cancel = tc.ctx.cancel.clone();
     let _ = tx.send(AgentEvent::RunStarted { run: run.clone() }).await;
 
-    let root = tc.ctx.sandbox.root().to_path_buf();
-    if let Ok(Some(id)) =
-        tokio::task::spawn_blocking(move || crate::checkpoint::create_checkpoint(&root)).await
+    match crate::checkpoint::create_checkpoint(tc.ctx.executor.as_ref(), tc.ctx.sandbox.root()).await
     {
-        let _ = tx
-            .send(AgentEvent::Checkpoint {
-                run: run.clone(),
-                id,
-            })
-            .await;
+        Ok(Some(id)) => {
+            let _ = tx
+                .send(AgentEvent::Checkpoint {
+                    run: run.clone(),
+                    id,
+                })
+                .await;
+        }
+        Ok(None) => {}
+        Err(error) => tracing::warn!(%error, "working-tree checkpoint unavailable"),
     }
 
     if cancel.is_cancelled() {
@@ -138,6 +142,10 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
     let context = clark_agent::AgentContext::new(system_prompt)
         .with_messages(transcript)
         .with_identity(identity);
+    // The turn consumes user_text; extraction needs its own copy afterwards.
+    let extraction = tc
+        .memory_extraction
+        .map(|ctx| (ctx, tc.user_text.clone()));
     let prompt = clark_agent::AgentMessage::User {
         content: clark_agent::UserContent::Text(tc.user_text),
         timestamp: None,
@@ -147,6 +155,13 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
         Ok(result) => {
             let outcome = result.outcome;
             tc.session.lock().await.transcript.extend(result.messages);
+            // Post-turn, off the latency path: extract durable facts the model
+            // may not have saved itself. Detached — the turn never waits on it.
+            if let Some((ctx, user_text)) = extraction {
+                tokio::spawn(async move {
+                    crate::memory_extraction::extract_and_store(ctx, &user_text).await;
+                });
+            }
             if outcome.is_complete() {
                 finish(
                     &tx,

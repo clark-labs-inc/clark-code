@@ -11,6 +11,7 @@ import type {
   Session,
   Snapshot,
   ContentBlock,
+  ResumeTranscript,
   MemoryOverview,
 } from "./types";
 import type { Upload } from "../lib/attachments";
@@ -28,10 +29,8 @@ export interface ConnectConfig {
 export interface SessionOptions {
   cwd?: string;
   mode?: string;
-  /** Rendered transcript of the conversation being reopened — providers that
-   *  can't resume server-side seed it into the model context so the agent
-   *  remembers the prior turns, not just the UI (snake_case: serde field). */
-  resume_context?: string;
+  /** Typed transcript replay for providers without server-side resume. */
+  resume?: ResumeTranscript;
 }
 
 export interface CloudTrajectoryConfig {
@@ -95,13 +94,18 @@ export interface CoreBridge {
    * List the project-scoped memory (the `MEMORY.md` index plus any per-fact
    * files) under `<cwd>/.clark/memory/`. Read-only. Native bridge only.
    */
-  listMemory?(cwd: string): Promise<MemoryOverview>;
+  listMemory?(cwd: string, remote?: RemoteExecutorTarget | null): Promise<MemoryOverview>;
   /** List the user's global memory under `~/.clark/memory/`. Native bridge only. */
   listGlobalMemory?(): Promise<MemoryOverview>;
   /** Project-relative file paths under `cwd`, for the `@`-mention picker. */
-  listFiles?(cwd: string): Promise<string[]>;
+  listFiles?(cwd: string, remote?: RemoteExecutorTarget | null): Promise<string[]>;
   /** Open a path in the OS default app, or reveal it in the file manager. */
   openPath?(path: string, reveal?: boolean): Promise<void>;
+}
+
+export interface RemoteExecutorTarget {
+  ws_url: string;
+  token: string;
 }
 
 let cached: CoreBridge | null = null;

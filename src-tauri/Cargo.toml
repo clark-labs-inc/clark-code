@@ -61,6 +61,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # feature re-emits the URL to the running instance so `on_open_url` still fires.
 # macOS delivers deep links to the running app natively, so this is desktop-only.
 [target."cfg(any(target_os = \"macos\", windows, target_os = \"linux\"))".dependencies]
+tauri-plugin-autostart = "2"
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 
 [dev-dependencies]

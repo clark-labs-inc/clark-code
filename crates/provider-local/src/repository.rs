@@ -1,14 +1,17 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use futures::{stream, StreamExt, TryStreamExt};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio_util::sync::CancellationToken;
 use url::Url;
 
 use crate::exec::Executor;
+use crate::git_metadata::{
+    optional as git_optional, required as git_required, succeeds as git_succeeds,
+};
 
-const GIT_TIMEOUT: Duration = Duration::from_secs(15);
 const DISCOVERY_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_HISTORY_BATCH: usize = 250;
 const MAX_DISCOVERED_REPOSITORIES: usize = 100;
@@ -61,44 +64,48 @@ pub async fn inspect_repository(
     exec: &dyn Executor,
     root: &Path,
 ) -> Result<Option<RepositoryIdentity>, String> {
-    let Some(top_level) = git_optional(exec, root, "git rev-parse --show-toplevel").await? else {
+    let Some(top_level) = git_optional(exec, root, &["rev-parse", "--show-toplevel"]).await? else {
         return Ok(None);
     };
     let repo_root = PathBuf::from(top_level.trim());
-    let head_oid = git_optional(exec, &repo_root, "git rev-parse --verify HEAD")
-        .await?
-        .filter(|value| is_oid(value));
-    let current_branch = git_optional(exec, &repo_root, "git symbolic-ref --quiet --short HEAD")
-        .await?
-        .filter(|value| !value.is_empty());
-    let default_branch = default_branch(exec, &repo_root).await?;
-    let remotes = repository_remotes(exec, &repo_root).await?;
+    let head_args = ["rev-parse", "--verify", "HEAD"];
+    let branch_args = ["symbolic-ref", "--quiet", "--short", "HEAD"];
+    let roots_args = ["rev-list", "--max-parents=0", "--all"];
+    let count_args = ["rev-list", "--count", "--all"];
+    let shallow_args = ["rev-parse", "--is-shallow-repository"];
+    let dirty_args = ["status", "--porcelain=v1", "--untracked-files=no"];
+    let refs_args = ["show-ref", "--head"];
+    let (head_oid, current_branch, default_branch, remotes, roots, commit_count, shallow, dirty, refs) =
+        tokio::join!(
+            git_optional(exec, &repo_root, &head_args),
+            git_optional(exec, &repo_root, &branch_args),
+            default_branch(exec, &repo_root),
+            repository_remotes(exec, &repo_root),
+            git_optional(exec, &repo_root, &roots_args),
+            git_optional(exec, &repo_root, &count_args),
+            git_optional(exec, &repo_root, &shallow_args),
+            git_optional(exec, &repo_root, &dirty_args),
+            git_optional(exec, &repo_root, &refs_args),
+        );
+    let head_oid = head_oid?.filter(|value| is_oid(value));
+    let current_branch = current_branch?.filter(|value| !value.is_empty());
+    let default_branch = default_branch?;
+    let remotes = remotes?;
     let canonical_remote = preferred_remote(&remotes).map(|remote| remote.canonical.clone());
-    let roots = git_optional(exec, &repo_root, "git rev-list --max-parents=0 --all")
-        .await?
-        .unwrap_or_default();
+    let roots = roots?.unwrap_or_default();
     let identity_seed = canonical_remote
         .as_ref()
         .map(|remote| format!("remote:{remote}"))
         .unwrap_or_else(|| format!("roots:{}", sorted_lines(&roots).join(",")));
     let fingerprint = format!("git:{}", sha256_hex(identity_seed.as_bytes()));
-    let commit_count = git_optional(exec, &repo_root, "git rev-list --count --all")
-        .await?
+    let commit_count = commit_count?
         .and_then(|value| value.parse::<u64>().ok())
         .unwrap_or(0);
-    let shallow = git_optional(exec, &repo_root, "git rev-parse --is-shallow-repository")
-        .await?
+    let shallow = shallow?
         .is_some_and(|value| value == "true");
-    let dirty = git_optional(
-        exec,
-        &repo_root,
-        "git status --porcelain=v1 --untracked-files=no",
-    )
-    .await?
+    let dirty = dirty?
     .is_some_and(|value| !value.is_empty());
-    let refs = git_optional(exec, &repo_root, "git show-ref --head")
-        .await?
-        .unwrap_or_default();
+    let refs = refs?.unwrap_or_default();
 
     Ok(Some(RepositoryIdentity {
         fingerprint,
@@ -124,7 +131,7 @@ const SNAPSHOT_MAX_ENTRIES: usize = 40;
 /// re-taken every message. `None` outside a git repo or on any git failure
 /// (non-git projects just get no section).
 pub async fn working_tree_snapshot(exec: &dyn Executor, root: &Path) -> Option<String> {
-    let raw = git_optional(exec, root, "git status --porcelain=v1 --branch")
+    let raw = git_optional(exec, root, &["status", "--porcelain=v1", "--branch"])
         .await
         .ok()??;
     let mut lines = raw.lines();
@@ -170,11 +177,22 @@ pub async fn load_git_history(
     };
     let limit = limit.clamp(1, MAX_HISTORY_BATCH);
     let requested = limit + 1;
-    let command = format!(
-        "git log --all --topo-order --date-order --skip={offset} --max-count={requested} \
-         --format='%H%x00%P%x00%an%x00%ae%x00%aI%x00%cI%x00%s%x00%b%x1e'"
-    );
-    let raw = git_required(exec, Path::new(&repository.root), &command).await?;
+    let skip = format!("--skip={offset}");
+    let max_count = format!("--max-count={requested}");
+    let raw = git_required(
+        exec,
+        Path::new(&repository.root),
+        &[
+            "log",
+            "--all",
+            "--topo-order",
+            "--date-order",
+            &skip,
+            &max_count,
+            "--format=%H%x00%P%x00%an%x00%ae%x00%aI%x00%cI%x00%s%x00%b%x1e",
+        ],
+    )
+    .await?;
     let mut commits = parse_history(&raw);
     let complete = commits.len() <= limit;
     commits.truncate(limit);
@@ -214,24 +232,34 @@ pub async fn discover_repositories(
             }
         }
     }
-    candidates.sort();
-    candidates.dedup();
-
-    let mut repositories = Vec::new();
-    for candidate in candidates {
-        if let Some(repository) = inspect_repository(exec, &candidate).await? {
-            if !repositories
-                .iter()
-                .any(|known: &RepositoryIdentity| known.root == repository.root)
-            {
-                repositories.push(repository);
-            }
-        }
-        if repositories.len() == MAX_DISCOVERED_REPOSITORIES {
+    let linked = stream::iter(candidates.clone())
+        .map(|candidate| async move {
+            crate::git_metadata::linked_worktree_roots(exec, &candidate).await
+        })
+        .buffer_unordered(8)
+        .try_collect::<Vec<_>>()
+        .await?;
+    for worktrees in linked.into_iter().flatten() {
+            let remaining = MAX_DISCOVERED_REPOSITORIES.saturating_sub(candidates.len());
+            candidates.extend(worktrees.into_iter().take(remaining));
+        if candidates.len() >= MAX_DISCOVERED_REPOSITORIES {
             break;
         }
     }
+    candidates.sort();
+    candidates.dedup();
+
+    let mut repositories = stream::iter(candidates)
+        .map(|candidate| async move { inspect_repository(exec, &candidate).await })
+        .buffer_unordered(8)
+        .try_collect::<Vec<_>>()
+        .await?
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
     repositories.sort_by(|left, right| left.root.cmp(&right.root));
+    repositories.dedup_by(|left, right| left.root == right.root);
+    repositories.truncate(MAX_DISCOVERED_REPOSITORIES);
     Ok(repositories)
 }
 
@@ -239,7 +267,12 @@ async fn default_branch(exec: &dyn Executor, root: &Path) -> Result<Option<Strin
     if let Some(remote_head) = git_optional(
         exec,
         root,
-        "git symbolic-ref --quiet --short refs/remotes/origin/HEAD",
+        &[
+            "symbolic-ref",
+            "--quiet",
+            "--short",
+            "refs/remotes/origin/HEAD",
+        ],
     )
     .await?
     {
@@ -250,8 +283,8 @@ async fn default_branch(exec: &dyn Executor, root: &Path) -> Result<Option<Strin
             .into());
     }
     for candidate in ["main", "master"] {
-        let command = format!("git show-ref --verify --quiet refs/heads/{candidate}");
-        if git_succeeds(exec, root, &command).await? {
+        let reference = format!("refs/heads/{candidate}");
+        if git_succeeds(exec, root, &["show-ref", "--verify", "--quiet", &reference]).await? {
             return Ok(Some(candidate.to_string()));
         }
     }
@@ -262,7 +295,11 @@ async fn repository_remotes(
     exec: &dyn Executor,
     root: &Path,
 ) -> Result<Vec<RepositoryRemote>, String> {
-    let raw = git_optional(exec, root, "git config --get-regexp '^remote\\..*\\.url$'")
+    let raw = git_optional(
+        exec,
+        root,
+        &["config", "--get-regexp", "^remote\\..*\\.url$"],
+    )
         .await?
         .unwrap_or_default();
     let mut out = Vec::new();
@@ -359,41 +396,6 @@ fn parse_history(raw: &str) -> Vec<GitCommitEvidence> {
         .collect()
 }
 
-async fn git_optional(
-    exec: &dyn Executor,
-    root: &Path,
-    command: &str,
-) -> Result<Option<String>, String> {
-    let output = run(exec, root, command).await?;
-    if output.code != Some(0) {
-        return Ok(None);
-    }
-    Ok(Some(
-        String::from_utf8_lossy(&output.stdout).trim().to_string(),
-    ))
-}
-
-async fn git_required(exec: &dyn Executor, root: &Path, command: &str) -> Result<String, String> {
-    let output = run(exec, root, command).await?;
-    if output.code != Some(0) {
-        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).to_string())
-}
-
-async fn git_succeeds(exec: &dyn Executor, root: &Path, command: &str) -> Result<bool, String> {
-    Ok(run(exec, root, command).await?.code == Some(0))
-}
-
-async fn run(
-    exec: &dyn Executor,
-    root: &Path,
-    command: &str,
-) -> Result<exec_core::ExecOutput, String> {
-    exec.exec(command, root, GIT_TIMEOUT, &CancellationToken::new())
-        .await
-}
-
 fn sorted_lines(raw: &str) -> Vec<&str> {
     let mut values = raw
         .lines()
@@ -416,151 +418,5 @@ fn sha256_hex(bytes: &[u8]) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::exec::LocalExecutor;
-
-    async fn git(root: &Path, command: &str) {
-        let output = tokio::process::Command::new("git")
-            .args(command.split_whitespace())
-            .current_dir(root)
-            .output()
-            .await
-            .unwrap();
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-
-    #[tokio::test]
-    async fn identifies_clone_equivalent_repository_by_remote() {
-        let dir = tempfile::tempdir().unwrap();
-        git(dir.path(), "init").await;
-        git(dir.path(), "config user.name Clark").await;
-        git(dir.path(), "config user.email clark@example.com").await;
-        tokio::fs::write(dir.path().join("README.md"), "hello")
-            .await
-            .unwrap();
-        git(dir.path(), "add README.md").await;
-        git(dir.path(), "commit -m initial").await;
-        git(
-            dir.path(),
-            "remote add origin git@github.com:Clark-Labs-Inc/Clark.git",
-        )
-        .await;
-
-        let identity = inspect_repository(&LocalExecutor, dir.path())
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(
-            identity.canonical_remote.as_deref(),
-            Some("github.com/clark-labs-inc/clark")
-        );
-        assert!(identity.fingerprint.starts_with("git:"));
-        assert_eq!(identity.commit_count, 1);
-    }
-
-    #[tokio::test]
-    async fn history_is_paged_and_preserves_commit_metadata() {
-        let dir = tempfile::tempdir().unwrap();
-        git(dir.path(), "init").await;
-        git(dir.path(), "config user.name Clark").await;
-        git(dir.path(), "config user.email clark@example.com").await;
-        for index in 0..3 {
-            tokio::fs::write(dir.path().join("value.txt"), index.to_string())
-                .await
-                .unwrap();
-            git(dir.path(), "add value.txt").await;
-            git(dir.path(), &format!("commit -m commit-{index}")).await;
-        }
-
-        let first = load_git_history(&LocalExecutor, dir.path(), 0, 2)
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(first.commits.len(), 2);
-        assert!(!first.complete);
-        assert_eq!(first.next_offset, 2);
-        assert_eq!(first.commits[0].author_name, "Clark");
-        let second = load_git_history(&LocalExecutor, dir.path(), first.next_offset, 2)
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(second.commits.len(), 1);
-        assert!(second.complete);
-    }
-
-    #[tokio::test]
-    async fn working_tree_snapshot_lists_dirty_and_untracked() {
-        let dir = tempfile::tempdir().unwrap();
-        git(dir.path(), "init").await;
-        git(dir.path(), "config user.name Clark").await;
-        git(dir.path(), "config user.email clark@example.com").await;
-        tokio::fs::write(dir.path().join("a.txt"), "one")
-            .await
-            .unwrap();
-        git(dir.path(), "add a.txt").await;
-        git(dir.path(), "commit -m initial").await;
-
-        // Clean tree says so explicitly (so the model doesn't guess).
-        let clean = working_tree_snapshot(&LocalExecutor, dir.path())
-            .await
-            .unwrap();
-        assert!(clean.contains("Branch: "));
-        assert!(clean.contains("No uncommitted changes."));
-
-        // A modified and an untracked file both show up as entries.
-        tokio::fs::write(dir.path().join("a.txt"), "two")
-            .await
-            .unwrap();
-        tokio::fs::write(dir.path().join("b.txt"), "new")
-            .await
-            .unwrap();
-        let dirty = working_tree_snapshot(&LocalExecutor, dir.path())
-            .await
-            .unwrap();
-        assert!(dirty.contains("a.txt"), "{dirty}");
-        assert!(dirty.contains("b.txt"), "{dirty}");
-        assert!(dirty.contains("leave them alone"), "{dirty}");
-    }
-
-    #[tokio::test]
-    async fn working_tree_snapshot_is_none_outside_git() {
-        let dir = tempfile::tempdir().unwrap();
-        assert!(working_tree_snapshot(&LocalExecutor, dir.path())
-            .await
-            .is_none());
-    }
-
-    #[tokio::test]
-    async fn discovers_nested_git_repositories() {
-        let parent = tempfile::tempdir().unwrap();
-        for name in ["one", "two"] {
-            let root = parent.path().join(name);
-            tokio::fs::create_dir_all(&root).await.unwrap();
-            git(&root, "init").await;
-            git(&root, "config user.name Clark").await;
-            git(&root, "config user.email clark@example.com").await;
-            tokio::fs::write(root.join("README.md"), name)
-                .await
-                .unwrap();
-            git(&root, "add README.md").await;
-            git(&root, "commit -m initial").await;
-        }
-
-        let repositories = discover_repositories(&LocalExecutor, parent.path())
-            .await
-            .unwrap();
-        assert_eq!(repositories.len(), 2);
-    }
-
-    #[test]
-    fn remote_sanitization_removes_credentials_and_normalizes_identity() {
-        let (url, canonical) = sanitize_remote("https://token@example.com/Org/Repo.git").unwrap();
-        assert!(!url.contains("token"));
-        assert_eq!(canonical, "example.com/org/repo");
-    }
-}
+#[path = "repository_tests.rs"]
+mod tests;

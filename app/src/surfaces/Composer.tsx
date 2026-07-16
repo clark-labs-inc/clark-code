@@ -462,7 +462,12 @@ export function Composer() {
   const send = useSessionStore((s) => s.send);
   const removeQueued = useSessionStore((s) => s.removeQueued);
   const cancelActive = useSessionStore((s) => s.cancelActive);
-  const cwd = useSessionStore((s) => s.localSettings.cwd);
+  const cwd = useSessionStore((s) => s.activeProjectRoot ?? s.localSettings.cwd);
+  const activeRemote = useSessionStore((s) => s.activeRemote);
+  const remote = useMemo(
+    () => activeRemote ? { ws_url: activeRemote.ws_url, token: activeRemote.token } : null,
+    [activeRemote],
+  );
   // Select the derived boolean, NOT the whole `runs` object: the snapshot is
   // re-cloned on every streamed token, so subscribing to `runs` would re-render
   // the composer (and any open popover) dozens of times a second — the flicker.
@@ -523,9 +528,9 @@ export function Composer() {
   // Lazily fetch the project file list the first time an @ is typed.
   useEffect(() => {
     if (trigger?.type === "@" && projFiles.length === 0) {
-      void projectFiles(cwd).then(setProjFiles);
+      void projectFiles(cwd, remote).then(setProjFiles);
     }
-  }, [trigger, cwd, projFiles.length]);
+  }, [trigger, cwd, projFiles.length, remote]);
 
   // Custom user-authored commands (`.claude/commands/*.md`) — reloaded once
   // per project so newly-added command files show up without a restart.
@@ -534,12 +539,12 @@ export function Composer() {
       setCustomCommands([]);
       return;
     }
-    void listCustomCommands(cwd).then((cmds) =>
+    void listCustomCommands(cwd, remote ?? undefined).then((cmds) =>
       setCustomCommands(
         cmds.map((c) => ({ name: c.name, hint: c.description || "Custom command", body: c.body })),
       ),
     );
-  }, [cwd]);
+  }, [cwd, remote]);
 
   const suggestions = useMemo<Suggestion[]>(() => {
     if (!trigger || dismissed) return [];

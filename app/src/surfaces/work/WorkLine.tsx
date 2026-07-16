@@ -263,28 +263,31 @@ function Detail({ call }: { call: ToolCall }) {
 
 /** A header above an expanded file detail with open / reveal affordances. */
 function FileActions({ path }: { path: string }) {
-  const cwd = useSessionStore((s) => s.localSettings.cwd);
+  const cwd = useSessionStore((s) => s.activeProjectRoot ?? "");
+  const remote = useSessionStore((s) => s.activeRemote !== null);
   return (
     <div className="flex items-center justify-between gap-2 border-b border-border-subtle px-3 py-1.5">
       <span className="min-w-0 flex-1 truncate font-mono text-xs text-ink-muted">{path}</span>
-      <span className="flex shrink-0 items-center gap-0.5">
-        <button
-          onClick={() => void openProjectPath(cwd, path, false)}
-          title="Open file"
-          aria-label="Open file"
-          className="grid size-6 place-items-center rounded-md text-ink-faint transition hover:bg-bg-hover hover:text-ink"
-        >
-          <ExternalLink className="size-3.5" />
-        </button>
-        <button
-          onClick={() => void openProjectPath(cwd, path, true)}
-          title="Reveal in file manager"
-          aria-label="Reveal in file manager"
-          className="grid size-6 place-items-center rounded-md text-ink-faint transition hover:bg-bg-hover hover:text-ink"
-        >
-          <FolderOpen className="size-3.5" />
-        </button>
-      </span>
+      {!remote && (
+        <span className="flex shrink-0 items-center gap-0.5">
+          <button
+            onClick={() => void openProjectPath(cwd, path, false)}
+            title="Open file"
+            aria-label="Open file"
+            className="grid size-6 place-items-center rounded-md text-ink-faint transition hover:bg-bg-hover hover:text-ink"
+          >
+            <ExternalLink className="size-3.5" />
+          </button>
+          <button
+            onClick={() => void openProjectPath(cwd, path, true)}
+            title="Reveal in file manager"
+            aria-label="Reveal in file manager"
+            className="grid size-6 place-items-center rounded-md text-ink-faint transition hover:bg-bg-hover hover:text-ink"
+          >
+            <FolderOpen className="size-3.5" />
+          </button>
+        </span>
+      )}
     </div>
   );
 }

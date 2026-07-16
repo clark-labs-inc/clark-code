@@ -70,6 +70,10 @@ pub fn run() {
     #[cfg(desktop)]
     {
         builder = builder
+            .plugin(tauri_plugin_autostart::init(
+                tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+                None,
+            ))
             .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.unminimize();
@@ -147,6 +151,15 @@ pub fn run() {
             terminal::terminal_close,
         ])
         .setup(|app| {
+            #[cfg(all(desktop, not(debug_assertions)))]
+            {
+                use tauri_plugin_autostart::ManagerExt;
+
+                if let Err(error) = app.autolaunch().enable() {
+                    tracing::warn!(%error, "failed to enable launch at login");
+                }
+            }
+
             // The Google sign-in success page (served by the loopback) redirects
             // to `clark://auth-complete`; the OS routes that URL here so we can
             // pull the window back to the foreground instead of leaving the user
@@ -162,7 +175,8 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            // Closing the window minimizes it instead of quitting, so the local
+            // Closing the window minimizes it instead of quitting. The main
+            // webview disables background throttling so remote control, the local
             // agent loop, any in-flight run, and background sync keep running.
             // The app still quits via Cmd+Q or the app menu.
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
