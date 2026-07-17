@@ -1,0 +1,10 @@
+[package]
+name = "clark-install-context"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Runtime discovery for tools shipped beside Clark Code."
+
+[dev-dependencies]
+tempfile = "3"

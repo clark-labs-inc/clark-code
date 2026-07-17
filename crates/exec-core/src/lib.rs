@@ -133,9 +133,9 @@ pub struct BackgroundStatus {
 /// `(is_stderr, chunk_bytes)`, invoked as the process writes.
 pub type OnOutput<'a> = &'a (dyn Fn(bool, &[u8]) + Send + Sync);
 
-/// Directories never worth walking — keeps `glob`/`grep`/file-listing fast and
-/// out of build artifacts and vendored deps. Shared by every walk so local and
-/// remote agree on what's in scope.
+/// Directories never worth walking in addition to repository ignore files —
+/// keeps `glob`/`grep`/file-listing out of build artifacts and vendored deps.
+/// Shared by every walk so local and remote agree on what's in scope.
 pub fn is_ignored(path: &Path) -> bool {
     path.components().any(|c| {
         matches!(
@@ -168,8 +168,8 @@ pub trait Executor: Send + Sync {
     async fn mtime(&self, path: &Path) -> Option<SystemTime> {
         self.metadata(path).await.ok().and_then(|m| m.modified)
     }
-    /// Recursively list files under `root`, skipping ignored directories
-    /// (`.git`, `node_modules`, `target`, …). Files only.
+    /// Recursively list files under `root`, honoring repository ignore files
+    /// and skipping fixed noisy directories (`.git`, `node_modules`, …).
     async fn walk(&self, root: &Path) -> ExecResult<Vec<WalkEntry>>;
     /// Run `command` through `/bin/sh -c` at `cwd`, capturing stdout/stderr/code.
     /// Honors `cancel` (kills the process) and `timeout`. `Err` for spawn
@@ -426,6 +426,9 @@ mod tests {
         std::fs::write(dir.path().join("src/main.rs"), "").unwrap();
         std::fs::create_dir_all(dir.path().join("node_modules/x")).unwrap();
         std::fs::write(dir.path().join("node_modules/x/y.js"), "").unwrap();
+        std::fs::write(dir.path().join(".gitignore"), "vendor/\n").unwrap();
+        std::fs::create_dir_all(dir.path().join("vendor/generated")).unwrap();
+        std::fs::write(dir.path().join("vendor/generated/decoy.rs"), "").unwrap();
 
         let entries = exec.read_dir(dir.path()).await.unwrap();
         assert!(entries.iter().any(|e| e.name == "src" && e.is_dir));
@@ -441,6 +444,7 @@ mod tests {
         assert!(files.iter().any(|f| f.ends_with("src/main.rs")));
         assert!(files.iter().any(|f| f.ends_with("top.rs")));
         assert!(!files.iter().any(|f| f.contains("node_modules")));
+        assert!(!files.iter().any(|f| f.contains("vendor")));
     }
 
     #[tokio::test]

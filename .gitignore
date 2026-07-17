@@ -11,10 +11,13 @@ node_modules
 app/dist
 app/node_modules
 *.tsbuildinfo
+__pycache__/
 
 # Tauri generated
 src-tauri/gen
 src-tauri/icon-source.png
+# Release-only sidecars are fetched from the pinned manifest in CI.
+src-tauri/binaries/
 
 # Env / secrets — never commit
 .env

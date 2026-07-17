@@ -428,7 +428,7 @@ export function Sidebar({
         >
           <Plus className="size-4" />
         </button>
-        {artifactCount > 0 && onOpenArtifacts && (
+        {onOpenArtifacts && (
           <button
             onClick={onOpenArtifacts}
             aria-label={`Artifacts, ${artifactCount}`}
@@ -473,7 +473,11 @@ export function Sidebar({
         >
           <Plus className="size-4" /> New session
         </button>
-        {artifactCount > 0 && onOpenArtifacts && (
+        {/* Always rendered (even at 0) so the row's height never pops in/out
+            when switching conversations — a conditional row made the whole
+            list below jump up/down as artifact counts differed per chat. The
+            badge keeps a fixed slot; at 0 it's dimmed to match the icon. */}
+        {onOpenArtifacts && (
           <button
             type="button"
             onClick={onOpenArtifacts}
@@ -481,7 +485,12 @@ export function Sidebar({
           >
             <Library className="size-4" />
             <span>Artifacts</span>
-            <span className="ml-auto min-w-5 rounded-full bg-chip px-1.5 text-center text-xs tabular-nums text-ink-faint">
+            <span
+              className={cn(
+                "ml-auto min-w-5 rounded-full px-1.5 text-center text-xs tabular-nums",
+                artifactCount > 0 ? "bg-chip text-ink-faint" : "text-ink-faint/50",
+              )}
+            >
               {artifactCount}
             </span>
           </button>

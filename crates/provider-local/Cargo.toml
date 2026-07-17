@@ -14,6 +14,7 @@ clark-agent-compaction = { git = "https://github.com/clark-labs-inc/clark-agent-
 # exec-protocol is the wire contract RemoteExecutor speaks to it.
 exec-core = { path = "../exec-core" }
 exec-protocol = { path = "../exec-protocol" }
+clark-install-context = { path = "../install-context" }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

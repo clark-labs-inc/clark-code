@@ -72,13 +72,15 @@ impl Executor for LocalExecutor {
         let root = root.to_path_buf();
         tokio::task::spawn_blocking(move || {
             let mut out = Vec::new();
-            for entry in walkdir::WalkDir::new(&root)
+            let mut builder = ignore::WalkBuilder::new(&root);
+            builder
                 .follow_links(false)
-                .into_iter()
-                .filter_entry(|e| !is_ignored(e.path()))
-            {
+                .hidden(false)
+                .require_git(false)
+                .filter_entry(|entry| !is_ignored(entry.path()));
+            for entry in builder.build() {
                 let Ok(entry) = entry else { continue };
-                if !entry.file_type().is_file() {
+                if !entry.file_type().is_some_and(|kind| kind.is_file()) {
                     continue;
                 }
                 let (modified, len) = entry

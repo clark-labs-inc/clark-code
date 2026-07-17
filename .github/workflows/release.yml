@@ -32,13 +32,16 @@ jobs:
         # updater latest.json is macOS-only (keyed on the .app.tar.gz.sig).
         include:
           - platform: macos-latest
-            args: "--target universal-apple-darwin"
+            args: "--target universal-apple-darwin --config src-tauri/tauri.release.conf.json"
+            bundle-target: "universal-apple-darwin"
             rust-targets: "aarch64-apple-darwin,x86_64-apple-darwin"
           - platform: ubuntu-22.04
-            args: ""
+            args: "--config src-tauri/tauri.release.conf.json"
+            bundle-target: "x86_64-unknown-linux-gnu"
             rust-targets: ""
           - platform: windows-latest
-            args: ""
+            args: "--config src-tauri/tauri.release.conf.json"
+            bundle-target: "x86_64-pc-windows-msvc"
             rust-targets: ""
     runs-on: ${{ matrix.platform }}
     steps:
@@ -75,6 +78,14 @@ jobs:
           cache: pnpm
           cache-dependency-path: app/pnpm-lock.yaml
       - run: pnpm --dir app install --frozen-lockfile
+
+      - name: Stage verified bundled tools
+        shell: bash
+        run: |
+          python3 scripts/stage-bundled-tools.py --target "${{ matrix.bundle-target }}"
+          suffix=""
+          if [ "${{ runner.os }}" = "Windows" ]; then suffix=".exe"; fi
+          "src-tauri/binaries/rg-${{ matrix.bundle-target }}${suffix}" --version
 
       - name: Install WebKit smoke dependencies
         if: matrix.platform == 'macos-latest'

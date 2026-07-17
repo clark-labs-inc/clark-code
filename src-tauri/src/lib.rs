@@ -51,6 +51,14 @@ pub fn builtin_providers() -> Vec<ProviderInfo> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Tauri sidecars live beside the main executable. Activate PATH-visible
+    // helpers before tracing/Tauri/Tokio create worker threads so every child
+    // surface (agent shell, background jobs, MCP, terminal) inherits one
+    // deterministic toolchain.
+    if let Err(error) = clark_install_context::activate_bundled_path() {
+        eprintln!("failed to activate bundled tool PATH: {error}");
+    }
+
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()

@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "tools": {
+    "ripgrep": {
+      "command": "rg",
+      "exposure": "path",
+      "version": "15.1.0",
+      "license": "MIT OR Unlicense",
+      "notices": ["LICENSE-MIT", "UNLICENSE"],
+      "targets": {
+        "aarch64-apple-darwin": {
+          "url": "https://github.com/BurntSushi/ripgrep/releases/download/15.1.0/ripgrep-15.1.0-aarch64-apple-darwin.tar.gz",
+          "size": 1777930,
+          "sha256": "378e973289176ca0c6054054ee7f631a065874a352bf43f0fa60ef079b6ba715",
+          "format": "tar.gz",
+          "member": "ripgrep-15.1.0-aarch64-apple-darwin/rg"
+        },
+        "x86_64-apple-darwin": {
+          "url": "https://github.com/BurntSushi/ripgrep/releases/download/15.1.0/ripgrep-15.1.0-x86_64-apple-darwin.tar.gz",
+          "size": 1894127,
+          "sha256": "64811cb24e77cac3057d6c40b63ac9becf9082eedd54ca411b475b755d334882",
+          "format": "tar.gz",
+          "member": "ripgrep-15.1.0-x86_64-apple-darwin/rg"
+        },
+        "universal-apple-darwin": {
+          "merge": ["aarch64-apple-darwin", "x86_64-apple-darwin"],
+          "strategy": "macho-universal"
+        },
+        "x86_64-unknown-linux-gnu": {
+          "url": "https://github.com/BurntSushi/ripgrep/releases/download/15.1.0/ripgrep-15.1.0-x86_64-unknown-linux-musl.tar.gz",
+          "size": 2263077,
+          "sha256": "1c9297be4a084eea7ecaedf93eb03d058d6faae29bbc57ecdaf5063921491599",
+          "format": "tar.gz",
+          "member": "ripgrep-15.1.0-x86_64-unknown-linux-musl/rg"
+        },
+        "x86_64-pc-windows-msvc": {
+          "url": "https://github.com/BurntSushi/ripgrep/releases/download/15.1.0/ripgrep-15.1.0-x86_64-pc-windows-msvc.zip",
+          "size": 1810687,
+          "sha256": "124510b94b6baa3380d051fdf4650eaa80a302c876d611e9dba0b2e18d87493a",
+          "format": "zip",
+          "member": "ripgrep-15.1.0-x86_64-pc-windows-msvc/rg.exe"
+        }
+      }
+    }
+  }
+}

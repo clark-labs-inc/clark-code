@@ -12,6 +12,8 @@ use serde_json::{json, Value};
 
 use super::{arg_str, arg_str_opt, ToolCtx, ToolExecutor, ToolOutcome};
 
+mod ripgrep;
+
 const MAX_MATCHES: usize = 200;
 /// Skip files larger than this when scanning (likely binaries/assets).
 const MAX_FILE_BYTES: u64 = 2_000_000;
@@ -65,6 +67,15 @@ impl ToolExecutor for Grep {
         let name_filter = arg_str_opt(&args, "glob").and_then(|g| glob::Pattern::new(&g).ok());
         let mode = arg_str_opt(&args, "output_mode").unwrap_or_else(|| "content".to_string());
         let root = ctx.sandbox.root().to_path_buf();
+
+        // Packaged local sessions use the pinned ripgrep sidecar. The existing
+        // library implementation remains the remote executor and source-build
+        // fallback, preserving the same tool contract everywhere.
+        if let Some(outcome) =
+            ripgrep::search(&pattern, &base, name_filter.as_ref(), &mode, ctx).await
+        {
+            return outcome;
+        }
 
         let rel = |p: &std::path::Path| -> String {
             p.strip_prefix(&root)
@@ -278,6 +289,21 @@ mod tests {
             .await;
         assert!(out.content.contains("text.txt"));
         assert!(!out.content.contains("blob.bin"));
+    }
+
+    #[tokio::test]
+    async fn honors_repository_ignore_files() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(".gitignore"), "generated/\n").unwrap();
+        std::fs::create_dir_all(dir.path().join("generated")).unwrap();
+        std::fs::write(dir.path().join("generated/decoy.rs"), "needle").unwrap();
+        std::fs::write(dir.path().join("source.rs"), "needle").unwrap();
+
+        let out = Grep
+            .invoke(json!({"pattern": "needle"}), &ctx(dir.path()))
+            .await;
+        assert!(out.content.contains("source.rs"));
+        assert!(!out.content.contains("decoy.rs"));
     }
 
     #[tokio::test]

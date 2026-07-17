@@ -21,6 +21,7 @@ agent-core = { path = "../crates/agent-core", features = ["native"] }
 provider-acp = { path = "../crates/provider-acp" }
 provider-clark = { path = "../crates/provider-clark" }
 provider-local = { path = "../crates/provider-local" }
+clark-install-context = { path = "../crates/install-context" }
 
 tauri = { version = "2", features = [] }
 tauri-plugin-shell = "2"
