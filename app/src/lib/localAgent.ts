@@ -36,6 +36,7 @@ export const DEFAULT_LOCAL_SETTINGS: LocalAgentSettings = {
 /** The coding models the composer picker offers (clark-code tier options). */
 export const CODING_MODELS = [
   { id: "clark-code", label: "GLM 5.2", hint: "Deep reasoning · default" },
+  { id: "clark-code:kimi_k3", label: "Kimi K3", hint: "Long-horizon coding · 1M context" },
   { id: "clark-code:kimi_k27_code", label: "Kimi K2.7 Code", hint: "Fast agentic coding" },
   { id: "clark-code:grok45", label: "Grok 4.5", hint: "Frontier coding · 500K context" },
   {

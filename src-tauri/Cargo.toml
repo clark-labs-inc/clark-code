@@ -9,7 +9,9 @@ default-run = "clark-desktop"
 
 [lib]
 name = "clark_desktop_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+# staticlib/cdylib are only needed for iOS/Android embeddings; desktop builds
+# link the rlib into the binary, so skip the two extra codegen passes.
+crate-type = ["rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

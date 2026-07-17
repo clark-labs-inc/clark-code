@@ -92,6 +92,33 @@ impl Sandbox {
         self.docs.as_deref()
     }
 
+    /// Whether a write target resolves through the attached document workspace.
+    ///
+    /// This resolves the nearest existing ancestor before classifying the path,
+    /// so a symlink inside the document workspace that points back into the
+    /// project cannot make a project edit look like a trusted document write.
+    pub(crate) fn is_docs_write(&self, path: &str) -> bool {
+        let Some(docs) = self.docs.as_deref() else {
+            return false;
+        };
+        let Ok(resolved) = self.resolve_for_write(path) else {
+            return false;
+        };
+
+        let mut ancestor = resolved.as_path();
+        loop {
+            if ancestor.exists() {
+                return ancestor
+                    .canonicalize()
+                    .is_ok_and(|canonical| canonical.starts_with(docs));
+            }
+            let Some(parent) = ancestor.parent() else {
+                return false;
+            };
+            ancestor = parent;
+        }
+    }
+
     /// Resolve a (possibly relative) path for **reading**. Local: the target must
     /// exist and, after symlink resolution, lie within the root. Remote: the
     /// lexically-normalized path must lie within the root.
@@ -330,6 +357,35 @@ mod tests {
         // The project root still works, and escapes are still refused.
         assert!(sb.resolve_for_write("src/new.rs").is_ok());
         assert!(sb.resolve_for_write("/etc/evil.md").is_err());
+    }
+
+    #[test]
+    fn identifies_only_writes_resolving_through_docs_root() {
+        let proj = temp_root();
+        let docs = tempfile::tempdir().unwrap();
+        let sb = Sandbox::new(proj.path())
+            .unwrap()
+            .with_docs(docs.path().to_path_buf());
+        let docs_file = sb.docs_root().unwrap().join("nested/report.md");
+
+        assert!(sb.is_docs_write(docs_file.to_str().unwrap()));
+        assert!(!sb.is_docs_write("src/main.rs"));
+        assert!(!sb.is_docs_write("/etc/evil.md"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn docs_symlink_into_project_is_not_a_docs_write() {
+        let proj = temp_root();
+        let docs = tempfile::tempdir().unwrap();
+        std::os::unix::fs::symlink(proj.path().join("src"), docs.path().join("project-src"))
+            .unwrap();
+        let sb = Sandbox::new(proj.path())
+            .unwrap()
+            .with_docs(docs.path().to_path_buf());
+        let disguised_project_file = sb.docs_root().unwrap().join("project-src/new.rs");
+
+        assert!(!sb.is_docs_write(disguised_project_file.to_str().unwrap()));
     }
 
     #[test]
