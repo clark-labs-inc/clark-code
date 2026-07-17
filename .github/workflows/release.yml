@@ -82,6 +82,12 @@ jobs:
       - name: Stage verified bundled tools
         shell: bash
         run: |
+          if [ "${{ matrix.bundle-target }}" = "universal-apple-darwin" ]; then
+            # Tauri's universal build compiles each architecture separately
+            # before merging, so each inner build needs its own sidecar.
+            python3 scripts/stage-bundled-tools.py --target aarch64-apple-darwin
+            python3 scripts/stage-bundled-tools.py --target x86_64-apple-darwin
+          fi
           python3 scripts/stage-bundled-tools.py --target "${{ matrix.bundle-target }}"
           suffix=""
           if [ "${{ runner.os }}" = "Windows" ]; then suffix=".exe"; fi
