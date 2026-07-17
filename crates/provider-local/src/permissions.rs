@@ -741,6 +741,7 @@ mod tests {
         gate_info("bash", &serde_json::json!({ "command": cmd }))
     }
 
+    #[allow(clippy::type_complexity)] // test fixture tuple, destructured at every call site
     fn plan_mode_gate(
         state: SessionState,
     ) -> (

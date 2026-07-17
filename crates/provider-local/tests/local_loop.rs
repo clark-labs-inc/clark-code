@@ -655,8 +655,7 @@ async fn plan_mode_journey_denies_edits_threads_feedback_and_builds_after_approv
             .as_array()
             .unwrap()
             .iter()
-            .filter(|m| m["role"] == "user")
-            .next_back()
+            .rfind(|m| m["role"] == "user")
             .expect("request has a user message")["content"]
             .as_str()
             .expect("user content is a plain string")
