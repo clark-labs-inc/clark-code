@@ -252,8 +252,7 @@ impl JudgeClient {
             // Tolerate code fences or prose around the JSON object.
             if let Some(start) = content.find('{') {
                 if let Some(end) = content.rfind('}') {
-                    if let Ok(v) =
-                        serde_json::from_str::<serde_json::Value>(&content[start..=end])
+                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(&content[start..=end])
                     {
                         let pass = v["pass"].as_bool().unwrap_or(false);
                         let why = v["why"].as_str().unwrap_or("").to_string();

@@ -210,8 +210,16 @@ async fn run_scenario(
         })
         .await;
     if let Err(e) = connected {
-        return outcome(scenario, model, &record, dir.path(), judge, Some(e.to_string()), started)
-            .await;
+        return outcome(
+            scenario,
+            model,
+            &record,
+            dir.path(),
+            judge,
+            Some(e.to_string()),
+            started,
+        )
+        .await;
     }
     let session = match provider
         .new_session(SessionOptions {
@@ -237,10 +245,7 @@ async fn run_scenario(
     };
 
     'turns: for turn in &scenario.turns {
-        let mut stream = match provider
-            .prompt(&session.id, PromptInput::text(turn))
-            .await
-        {
+        let mut stream = match provider.prompt(&session.id, PromptInput::text(turn)).await {
             Ok(s) => s,
             Err(e) => {
                 error = Some(e.to_string());
@@ -369,8 +374,7 @@ async fn outcome(
 #[tokio::main]
 async fn main() {
     let args = parse_args();
-    let base_url =
-        std::env::var("CLARK_CODE_BASE_URL").expect("set CLARK_CODE_BASE_URL");
+    let base_url = std::env::var("CLARK_CODE_BASE_URL").expect("set CLARK_CODE_BASE_URL");
     let api_key = std::env::var("CLARK_CODE_API_KEY").expect("set CLARK_CODE_API_KEY");
 
     // Sandbox the global memory scope for the whole process, before any

@@ -45,7 +45,8 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
     let cancel = tc.ctx.cancel.clone();
     let _ = tx.send(AgentEvent::RunStarted { run: run.clone() }).await;
 
-    match crate::checkpoint::create_checkpoint(tc.ctx.executor.as_ref(), tc.ctx.sandbox.root()).await
+    match crate::checkpoint::create_checkpoint(tc.ctx.executor.as_ref(), tc.ctx.sandbox.root())
+        .await
     {
         Ok(Some(id)) => {
             let _ = tx
@@ -143,9 +144,7 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
         .with_messages(transcript)
         .with_identity(identity);
     // The turn consumes user_text; extraction needs its own copy afterwards.
-    let extraction = tc
-        .memory_extraction
-        .map(|ctx| (ctx, tc.user_text.clone()));
+    let extraction = tc.memory_extraction.map(|ctx| (ctx, tc.user_text.clone()));
     let prompt = clark_agent::AgentMessage::User {
         content: clark_agent::UserContent::Text(tc.user_text),
         timestamp: None,

@@ -1,14 +1,18 @@
 //! Long-lived process registry and resumable output streaming.
 
 use std::{
-    collections::VecDeque, path::PathBuf, process::Stdio, sync::{Arc, Mutex}, time::Duration,
+    collections::VecDeque,
+    path::PathBuf,
+    process::Stdio,
+    sync::{Arc, Mutex},
+    time::Duration,
 };
 
 use exec_core::{isolate_process_group, terminate_process_tree, Executor, LocalExecutor};
 use exec_protocol::{
-    b64_decode, b64_encode, error_code, method, Notification, ProcessExitParams,
-    ProcessIdParams, ProcessInputParams, ProcessOutputParams, ProcessResumeParams,
-    ProcessStartParams, ProcessStatusParams, ProcessStatusResult, Response, Stream,
+    b64_decode, b64_encode, error_code, method, Notification, ProcessExitParams, ProcessIdParams,
+    ProcessInputParams, ProcessOutputParams, ProcessResumeParams, ProcessStartParams,
+    ProcessStatusParams, ProcessStatusResult, Response, Stream,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::{broadcast, mpsc};
@@ -18,7 +22,6 @@ use super::{checked_path, parse, text_msg, to_value, Outbound, Shared};
 
 const MAX_PROCESSES: usize = 64;
 const MAX_PROCESS_OUTPUT_BYTES: usize = 1_048_576;
-
 
 pub(super) struct ProcShared {
     process_id: String,
@@ -112,7 +115,12 @@ pub(super) fn handle_start(
     spawn_streamer(proc, tx.clone(), 0, conn_token.clone());
 }
 
-pub(super) fn handle_status(id: u64, params: serde_json::Value, shared: &Arc<Shared>, tx: &Outbound) {
+pub(super) fn handle_status(
+    id: u64,
+    params: serde_json::Value,
+    shared: &Arc<Shared>,
+    tx: &Outbound,
+) {
     let p: ProcessStatusParams = match parse(params) {
         Ok(p) => p,
         Err((code, msg)) => {
@@ -155,7 +163,12 @@ pub(super) fn handle_status(id: u64, params: serde_json::Value, shared: &Arc<Sha
     let _ = tx.send(text_msg(&Response::ok(id, to_value(&result))));
 }
 
-pub(super) fn handle_input(id: u64, params: serde_json::Value, shared: &Arc<Shared>, tx: &Outbound) {
+pub(super) fn handle_input(
+    id: u64,
+    params: serde_json::Value,
+    shared: &Arc<Shared>,
+    tx: &Outbound,
+) {
     let p: ProcessInputParams = match parse(params) {
         Ok(p) => p,
         Err((code, msg)) => {
@@ -175,7 +188,11 @@ pub(super) fn handle_input(id: u64, params: serde_json::Value, shared: &Arc<Shar
     let data = match b64_decode(&p.data) {
         Ok(data) => data,
         Err(error) => {
-            let _ = tx.send(text_msg(&Response::err(id, error_code::INVALID_PARAMS, error)));
+            let _ = tx.send(text_msg(&Response::err(
+                id,
+                error_code::INVALID_PARAMS,
+                error,
+            )));
             return;
         }
     };
@@ -219,7 +236,12 @@ pub(super) fn handle_resume(
     }
 }
 
-pub(super) fn handle_cancel(id: u64, params: serde_json::Value, shared: &Arc<Shared>, tx: &Outbound) {
+pub(super) fn handle_cancel(
+    id: u64,
+    params: serde_json::Value,
+    shared: &Arc<Shared>,
+    tx: &Outbound,
+) {
     let p: ProcessIdParams = match parse(params) {
         Ok(p) => p,
         Err((code, msg)) => {
@@ -326,13 +348,7 @@ async fn run_process(
     };
 
     let (otx, mut orx) = mpsc::channel::<(Stream, Vec<u8>)>(64);
-    let outcome = tokio::spawn(pump(
-        child,
-        otx,
-        proc.cancel.clone(),
-        timeout,
-        input_rx,
-    ));
+    let outcome = tokio::spawn(pump(child, otx, proc.cancel.clone(), timeout, input_rx));
 
     while let Some((stream, data)) = orx.recv().await {
         append_output(&proc, stream, data);
@@ -464,10 +480,14 @@ fn append_output(proc: &ProcShared, stream: Stream, data: Vec<u8>) {
             st.dropped_through_seq = Some(seq.saturating_sub(1));
         }
         while st.output_bytes > MAX_PROCESS_OUTPUT_BYTES {
-            let Some(removed) = st.output.pop_front() else { break };
-            st.output_bytes = st
-                .output_bytes
-                .saturating_sub(b64_decode(&removed.data).map(|bytes| bytes.len()).unwrap_or(0));
+            let Some(removed) = st.output.pop_front() else {
+                break;
+            };
+            st.output_bytes = st.output_bytes.saturating_sub(
+                b64_decode(&removed.data)
+                    .map(|bytes| bytes.len())
+                    .unwrap_or(0),
+            );
             st.dropped_through_seq = Some(removed.seq);
         }
     }

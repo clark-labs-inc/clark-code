@@ -71,7 +71,10 @@ async fn remote_checkpoint_review_and_restore_round_trip() {
     assert!(!walkdir::WalkDir::new(main.join(".git"))
         .into_iter()
         .filter_map(Result::ok)
-        .any(|entry| entry.file_name().to_string_lossy().starts_with("clark-checkpoint-")));
+        .any(|entry| entry
+            .file_name()
+            .to_string_lossy()
+            .starts_with("clark-checkpoint-")));
 
     std::fs::write(root.join("tracked.txt"), "remote edit\n").unwrap();
     std::fs::write(root.join("created.txt"), "remote new\n").unwrap();
@@ -79,8 +82,16 @@ async fn remote_checkpoint_review_and_restore_round_trip() {
     assert!(changes.iter().any(|change| change.path == "tracked.txt"));
     assert!(changes.iter().any(|change| change.path == "created.txt"));
 
-    restore_checkpoint(&remote, &root, &checkpoint).await.unwrap();
-    assert_eq!(std::fs::read_to_string(root.join("tracked.txt")).unwrap(), "main\n");
+    restore_checkpoint(&remote, &root, &checkpoint)
+        .await
+        .unwrap();
+    assert_eq!(
+        std::fs::read_to_string(root.join("tracked.txt")).unwrap(),
+        "main\n"
+    );
     assert!(!root.join("created.txt").exists());
-    assert_eq!(std::fs::read_to_string(main.join("tracked.txt")).unwrap(), "main\n");
+    assert_eq!(
+        std::fs::read_to_string(main.join("tracked.txt")).unwrap(),
+        "main\n"
+    );
 }

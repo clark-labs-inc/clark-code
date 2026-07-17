@@ -106,15 +106,18 @@ impl GitFixture {
     pub fn make_detached_dirty(&self) {
         std::fs::write(self.detached.join("tracked.txt"), "worktree edit\n")
             .expect("edit tracked file");
-        std::fs::write(self.detached.join("untracked.txt"), "new\n")
-            .expect("write untracked file");
+        std::fs::write(self.detached.join("untracked.txt"), "new\n").expect("write untracked file");
     }
 
     #[cfg(unix)]
     pub fn install_hostile_helpers(&self) -> HostileHelpers {
         use std::os::unix::fs::PermissionsExt;
 
-        let marker_dir = self.main.parent().expect("fixture parent").join("helper-markers");
+        let marker_dir = self
+            .main
+            .parent()
+            .expect("fixture parent")
+            .join("helper-markers");
         std::fs::create_dir_all(&marker_dir).expect("create helper marker directory");
         let fsmonitor_marker = marker_dir.join("fsmonitor-ran");
         let credential_marker = marker_dir.join("credential-ran");

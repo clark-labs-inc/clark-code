@@ -111,13 +111,10 @@ pub async fn changes_revert(
     if !joined.starts_with(root) || path.contains("..") {
         return Err("path escapes the project root".into());
     }
-    let existed = crate::git_metadata::succeeds(
-        exec,
-        root,
-        &["cat-file", "-e", &format!("{base}:{path}")],
-    )
-    .await
-    .unwrap_or(false);
+    let existed =
+        crate::git_metadata::succeeds(exec, root, &["cat-file", "-e", &format!("{base}:{path}")])
+            .await
+            .unwrap_or(false);
     if existed {
         crate::git_metadata::required(
             exec,
@@ -179,7 +176,9 @@ mod tests {
         std::fs::write(root.join("keep.txt"), "one\nCHANGED\n").unwrap();
         std::fs::write(root.join("new.txt"), "fresh\n").unwrap();
 
-        let summary = changes_summary(&LocalExecutor, root, &base).await.expect("summary");
+        let summary = changes_summary(&LocalExecutor, root, &base)
+            .await
+            .expect("summary");
         let paths: Vec<_> = summary.iter().map(|c| c.path.as_str()).collect();
         assert!(paths.contains(&"keep.txt"), "{paths:?}");
         assert!(paths.contains(&"new.txt"), "{paths:?}");

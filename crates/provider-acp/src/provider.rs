@@ -240,7 +240,10 @@ impl Provider for AcpProvider {
             })
             .unwrap_or_else(|| ".".into());
         let res = peer
-            .request(rpc::SESSION_NEW, json!({ "cwd": cwd.clone(), "mcpServers": [] }))
+            .request(
+                rpc::SESSION_NEW,
+                json!({ "cwd": cwd.clone(), "mcpServers": [] }),
+            )
             .await?;
         let sid = res
             .get("sessionId")

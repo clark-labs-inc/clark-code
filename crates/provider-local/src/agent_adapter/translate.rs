@@ -10,7 +10,10 @@ use crate::llm::{
     WireToolCall,
 };
 
-pub(super) fn to_wire_messages(system_prompt: &str, messages: &[ca::AgentMessage]) -> Vec<ChatMessage> {
+pub(super) fn to_wire_messages(
+    system_prompt: &str,
+    messages: &[ca::AgentMessage],
+) -> Vec<ChatMessage> {
     let mut out = Vec::new();
     if !system_prompt.trim().is_empty() {
         out.push(ChatMessage::system(system_prompt));
@@ -187,7 +190,10 @@ pub(super) fn stop_reason_from_finish(reason: Option<&str>) -> ca::StopReason {
     }
 }
 
-pub(super) fn empty_assistant(stop_reason: ca::StopReason, error_message: Option<String>) -> ca::AgentMessage {
+pub(super) fn empty_assistant(
+    stop_reason: ca::StopReason,
+    error_message: Option<String>,
+) -> ca::AgentMessage {
     ca::AgentMessage::Assistant {
         content: ca::AssistantContent { blocks: Vec::new() },
         stop_reason,
@@ -212,7 +218,9 @@ pub(super) fn stream_error(error: LlmError) -> (ca::stream::StreamErrorKind, Str
     }
 }
 
-pub(super) fn tool_result_blocks_to_content(blocks: &[ca::ToolResultBlock]) -> Vec<desktop::ContentBlock> {
+pub(super) fn tool_result_blocks_to_content(
+    blocks: &[ca::ToolResultBlock],
+) -> Vec<desktop::ContentBlock> {
     blocks
         .iter()
         .map(|block| match block {

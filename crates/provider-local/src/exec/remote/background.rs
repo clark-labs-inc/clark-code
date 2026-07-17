@@ -12,11 +12,7 @@ use exec_protocol::{
 
 use super::{from_value, to_value, Conn, RemoteExecutor};
 
-pub(super) async fn start(
-    conn: &Arc<Conn>,
-    command: &str,
-    cwd: &Path,
-) -> ExecResult<String> {
+pub(super) async fn start(conn: &Arc<Conn>, command: &str, cwd: &Path) -> ExecResult<String> {
     let process_id = uuid::Uuid::new_v4().to_string();
     conn.call(
         method::PROCESS_START,

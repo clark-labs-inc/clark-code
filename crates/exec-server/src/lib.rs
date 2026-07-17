@@ -28,9 +28,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use exec_core::{Executor, LocalExecutor};
 use exec_protocol::{
-    b64_decode, b64_encode, error_code, method, AuthParams, AuthResult, MetaResult,
-    PathParams, ReadDirResult, ReadResult, Request, Response, WalkResult, WireDirEntry,
-    WireWalkEntry, WriteParams, PROTOCOL_VERSION,
+    b64_decode, b64_encode, error_code, method, AuthParams, AuthResult, MetaResult, PathParams,
+    ReadDirResult, ReadResult, Request, Response, WalkResult, WireDirEntry, WireWalkEntry,
+    WriteParams, PROTOCOL_VERSION,
 };
 use futures::{SinkExt, StreamExt};
 use serde::de::DeserializeOwned;

@@ -47,10 +47,7 @@ impl ToolExecutor for Bash {
             Ok(c) => c,
             Err(e) => return ToolOutcome::error(e),
         };
-        let workdir = args
-            .get("workdir")
-            .and_then(Value::as_str)
-            .unwrap_or(".");
+        let workdir = args.get("workdir").and_then(Value::as_str).unwrap_or(".");
         let cwd = match ctx.sandbox.resolve_existing(workdir) {
             Ok(path) => path,
             Err(error) => return ToolOutcome::error(error),
@@ -163,8 +160,8 @@ impl ToolExecutor for BashOutput {
         let Some(status) = ctx.background.status(&task_id).await else {
             return ToolOutcome::error(format!("no background task `{task_id}`"));
         };
-        let is_error = status.error.is_some()
-            || matches!(status.exit_code, Some(code) if code != Some(0));
+        let is_error =
+            status.error.is_some() || matches!(status.exit_code, Some(code) if code != Some(0));
         let mut body = format!("command: {}\n", status.command);
         match status.exit_code {
             None => body.push_str("status: running\n"),

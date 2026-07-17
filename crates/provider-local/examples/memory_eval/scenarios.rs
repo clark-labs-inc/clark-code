@@ -158,10 +158,7 @@ fn stale() -> Vec<Scenario> {
         out.push(Scenario {
             id: format!("stale-entrypoint-{}", i + 1),
             dimension: Dimension::Stale,
-            initial_files: vec![
-                f(new_path, &content),
-                f("README.md", "# fixture\n"),
-            ],
+            initial_files: vec![f(new_path, &content), f("README.md", "# fixture\n")],
             commits: vec![],
             memories: vec![mem(
                 "Entrypoint",
@@ -406,7 +403,11 @@ fn hallucination() -> Vec<Scenario> {
         ("chef", "Mise", "a kitchen prep planner"),
         ("nurse", "ShiftSwap", "a shift-trading board for nurses"),
         ("musician", "Loopcrate", "a sample organizer"),
-        ("florist", "Petalworks", "an order tracker for my flower shop"),
+        (
+            "florist",
+            "Petalworks",
+            "an order tracker for my flower shop",
+        ),
     ];
     for (i, (role, product, oneliner)) in t1.iter().enumerate() {
         out.push(Scenario {
@@ -494,9 +495,24 @@ fn proactivity() -> Vec<Scenario> {
         ("product manager", "PawPal", "dog owners", "plain English"),
         ("dentist", "BiteRight", "my patients", "short answers"),
         ("landlord", "RentReady", "my tenants", "no jargon"),
-        ("yoga instructor", "FlowBook", "studio members", "simple words"),
-        ("barista", "BeanCount", "cafe regulars", "step-by-step explanations"),
-        ("photographer", "ShootList", "wedding clients", "plain language"),
+        (
+            "yoga instructor",
+            "FlowBook",
+            "studio members",
+            "simple words",
+        ),
+        (
+            "barista",
+            "BeanCount",
+            "cafe regulars",
+            "step-by-step explanations",
+        ),
+        (
+            "photographer",
+            "ShootList",
+            "wedding clients",
+            "plain language",
+        ),
     ];
     for (i, (role, product, audience, pref)) in t1.iter().enumerate() {
         out.push(Scenario {
@@ -528,10 +544,19 @@ fn proactivity() -> Vec<Scenario> {
 
     // T2: a durable convention dropped mid-task.
     let t2: [(&str, &str); 6] = [
-        ("all user-facing text must be sentence case", "sentence case"),
-        ("every public function needs a one-line comment", "one-line comment"),
+        (
+            "all user-facing text must be sentence case",
+            "sentence case",
+        ),
+        (
+            "every public function needs a one-line comment",
+            "one-line comment",
+        ),
         ("we never abbreviate words in UI copy", "never abbreviate"),
-        ("all colors must come from tokens.js, never hex", "tokens.js"),
+        (
+            "all colors must come from tokens.js, never hex",
+            "tokens.js",
+        ),
         ("user-facing errors must suggest a next step", "next step"),
         ("all timestamps shown to users are local time", "local time"),
     ];
@@ -558,11 +583,17 @@ fn proactivity() -> Vec<Scenario> {
     // T3: exasperated repeat — the strongest possible save signal.
     let t3: [(&str, &str); 6] = [
         ("keep explanations under five sentences", "five sentences"),
-        ("always run the tests before telling me you're done", "run the tests"),
+        (
+            "always run the tests before telling me you're done",
+            "run the tests",
+        ),
         ("never touch the legacy/ folder", "legacy"),
         ("write commit-ready code, no TODOs left behind", "no TODOs"),
         ("ask before adding any new dependency", "new dependency"),
-        ("show me what changed in plain English at the end", "plain English"),
+        (
+            "show me what changed in plain English at the end",
+            "plain English",
+        ),
     ];
     for (i, (pref, keyword)) in t3.iter().enumerate() {
         out.push(Scenario {
@@ -598,12 +629,32 @@ fn recall() -> Vec<Scenario> {
     // the note's vocabulary must override it in user-facing text — and the
     // task is answerable without clarifying questions or borrowed context.
     let t1: [(&str, &str, &str); 6] = [
-        ("members", "customers", "Clubhouse — a loyalty program for coffee shops"),
+        (
+            "members",
+            "customers",
+            "Clubhouse — a loyalty program for coffee shops",
+        ),
         ("travelers", "guests", "Wayfare — a trip-planning journal"),
-        ("makers", "users", "Benchtop — a project tracker for woodworkers"),
-        ("readers", "subscribers", "Foliome — a monthly book-box service"),
-        ("players", "accounts", "Rallyday — a rec-league scheduling app"),
-        ("hosts", "vendors", "Stallfront — a farmers-market booking tool"),
+        (
+            "makers",
+            "users",
+            "Benchtop — a project tracker for woodworkers",
+        ),
+        (
+            "readers",
+            "subscribers",
+            "Foliome — a monthly book-box service",
+        ),
+        (
+            "players",
+            "accounts",
+            "Rallyday — a rec-league scheduling app",
+        ),
+        (
+            "hosts",
+            "vendors",
+            "Stallfront — a farmers-market booking tool",
+        ),
     ];
     for (i, (term, generic, product)) in t1.iter().enumerate() {
         out.push(Scenario {

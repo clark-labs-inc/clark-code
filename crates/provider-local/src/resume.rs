@@ -6,7 +6,9 @@ use clark_agent as ca;
 
 pub(crate) fn to_agent_messages(resume: Option<&ResumeTranscript>) -> Vec<ca::AgentMessage> {
     let mut messages = Vec::new();
-    let Some(resume) = resume else { return messages };
+    let Some(resume) = resume else {
+        return messages;
+    };
     if resume.truncated {
         messages.push(ca::AgentMessage::Custom {
             kind: "resume_boundary".into(),
@@ -48,7 +50,9 @@ pub(crate) fn to_agent_messages(resume: Option<&ResumeTranscript>) -> Vec<ca::Ag
                 arguments,
                 content,
             } => {
-                let name = tool_name.clone().unwrap_or_else(|| "historical_tool".into());
+                let name = tool_name
+                    .clone()
+                    .unwrap_or_else(|| "historical_tool".into());
                 messages.push(ca::AgentMessage::Assistant {
                     content: ca::AssistantContent::with_tool_calls(
                         None,
@@ -94,7 +98,9 @@ fn visible_text(blocks: &[ContentBlock]) -> String {
         .iter()
         .filter_map(|block| match block {
             ContentBlock::Text { text } => Some(text.clone()),
-            ContentBlock::Resource { text: Some(text), .. } => Some(text.clone()),
+            ContentBlock::Resource {
+                text: Some(text), ..
+            } => Some(text.clone()),
             ContentBlock::ResourceLink { uri, name } => {
                 Some(name.as_deref().unwrap_or(uri).to_string())
             }
@@ -126,7 +132,10 @@ mod tests {
                 },
                 ResumeItem::Message {
                     role: Role::Agent,
-                    blocks: vec![ContentBlock::thinking("private"), ContentBlock::text("working")],
+                    blocks: vec![
+                        ContentBlock::thinking("private"),
+                        ContentBlock::text("working"),
+                    ],
                 },
                 ResumeItem::ToolCall {
                     id: "call-1".into(),

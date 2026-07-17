@@ -24,7 +24,10 @@ async fn discovers_linked_worktrees_outside_the_selected_checkout() {
         .map(|repository| canonical(repository.root.as_ref()))
         .collect::<Vec<_>>();
 
-    assert!(roots.contains(&fixture.main), "missing main checkout: {roots:?}");
+    assert!(
+        roots.contains(&fixture.main),
+        "missing main checkout: {roots:?}"
+    );
     assert!(
         roots.contains(&fixture.detached),
         "missing detached sibling worktree: {roots:?}"
@@ -166,14 +169,21 @@ async fn clark_code_runs_real_git_and_edits_only_the_selected_worktree() {
         .expect("start Clark Code in detached worktree");
     let environment = session.environment.as_ref().expect("session environment");
     assert_eq!(
-        canonical(std::path::Path::new(environment.checkout_root.as_deref().unwrap())),
+        canonical(std::path::Path::new(
+            environment.checkout_root.as_deref().unwrap()
+        )),
         fixture.detached
     );
     assert_eq!(
-        canonical(std::path::Path::new(environment.repository_root.as_deref().unwrap())),
+        canonical(std::path::Path::new(
+            environment.repository_root.as_deref().unwrap()
+        )),
         fixture.main
     );
-    assert_eq!(environment.workspace_roots[0], fixture.detached.to_string_lossy());
+    assert_eq!(
+        environment.workspace_roots[0],
+        fixture.detached.to_string_lossy()
+    );
     assert!(!environment.remote);
     let mut events = provider
         .prompt(

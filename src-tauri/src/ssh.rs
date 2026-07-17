@@ -197,7 +197,10 @@ async fn ensure_binary(
     // that stale executable would produce a convincing but invalid green run.
     if let Some(local) = local_binary {
         if !local.is_file() {
-            return Err(format!("local clark-exec-server {} doesn't exist", local.display()));
+            return Err(format!(
+                "local clark-exec-server {} doesn't exist",
+                local.display()
+            ));
         }
         let dir = remote_bin.rsplit_once('/').map(|(d, _)| d).unwrap_or(".");
         if !ssh_ok(host, &format!("mkdir -p {}", shq(dir))).await {

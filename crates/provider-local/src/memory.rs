@@ -309,9 +309,17 @@ fn is_decision(fact: &MemoryFact) -> bool {
         return true;
     }
     let body = fact.body.to_lowercase();
-    ["always ", "never ", " must ", "are called", "is called", "call them", "rule:"]
-        .iter()
-        .any(|cue| body.contains(cue))
+    [
+        "always ",
+        "never ",
+        " must ",
+        "are called",
+        "is called",
+        "call them",
+        "rule:",
+    ]
+    .iter()
+    .any(|cue| body.contains(cue))
 }
 
 /// Full recall of one scope for the `memory` tool: the index plus every fact's
@@ -371,8 +379,7 @@ async fn verify_fact(exec: &dyn Executor, root: &Path, body: &str) -> Vec<String
     // Path-shaped tokens: contain '/' or end in a common source extension.
     let mut checked = 0usize;
     let mut seen = std::collections::HashSet::new();
-    for raw in body.split(|c: char| c.is_whitespace() || matches!(c, '`' | '(' | ')' | ',' | ';'))
-    {
+    for raw in body.split(|c: char| c.is_whitespace() || matches!(c, '`' | '(' | ')' | ',' | ';')) {
         let tok = raw.trim_matches(|c: char| matches!(c, '.' | ':' | '"' | '\'' | '*'));
         let looks_pathy = (tok.contains('/') && tok.contains('.'))
             || [".js", ".ts", ".py", ".rs", ".md", ".json", ".toml", ".yaml"]
@@ -713,9 +720,16 @@ mod tests {
         // A single 400-char line used to blow past the description cap and get
         // a "\n… [truncated]" suffix injected INSIDE the frontmatter block.
         let long = "PawPal waitlist project details ".repeat(13);
-        let file = save_memory(&exec, &mem, "Long note", &long, Some(MemoryType::Project), None)
-            .await
-            .unwrap();
+        let file = save_memory(
+            &exec,
+            &mem,
+            "Long note",
+            &long,
+            Some(MemoryType::Project),
+            None,
+        )
+        .await
+        .unwrap();
         let text = std::fs::read_to_string(mem.join(&file)).unwrap();
         let desc_line = text
             .lines()
@@ -796,9 +810,16 @@ mod tests {
         )
         .await
         .unwrap();
-        save_memory(&exec, &mem, "Build command", "Run `cargo build`.", None, None)
-            .await
-            .unwrap();
+        save_memory(
+            &exec,
+            &mem,
+            "Build command",
+            "Run `cargo build`.",
+            None,
+            None,
+        )
+        .await
+        .unwrap();
 
         let listing = scope_listing(&exec, &mem, "Project", None).await.unwrap();
         assert!(listing.contains("Standing decisions"), "{listing}");
@@ -813,9 +834,16 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mem = memory_dir(dir.path());
         let exec = LocalExecutor;
-        save_memory(&exec, &mem, "Brand vocabulary", "Customers are 'owners'.", None, None)
-            .await
-            .unwrap();
+        save_memory(
+            &exec,
+            &mem,
+            "Brand vocabulary",
+            "Customers are 'owners'.",
+            None,
+            None,
+        )
+        .await
+        .unwrap();
         save_memory(&exec, &mem, "Deploy command", "Use ship.sh.", None, None)
             .await
             .unwrap();
@@ -867,6 +895,9 @@ mod tests {
         assert!(recall.contains("⚠"), "{recall}");
         assert!(recall.contains("src/main.js"), "{recall}");
         assert!(recall.contains("npm run unit"), "{recall}");
-        assert!(!recall.contains("`lib/app.js`, which does not exist"), "{recall}");
+        assert!(
+            !recall.contains("`lib/app.js`, which does not exist"),
+            "{recall}"
+        );
     }
 }

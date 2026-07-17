@@ -63,7 +63,11 @@ fn live_env() -> Option<LiveEnv> {
 fn assert_done(outcome: Option<RunOutcome>, tools: &[String], text: &str) {
     let outcome = outcome.expect("the run stream ended without a terminal outcome");
     eprintln!("usage: {:?}", outcome.usage);
-    assert_eq!(outcome.status, RunStatus::Done, "tools: {tools:?}; text: {text}");
+    assert_eq!(
+        outcome.status,
+        RunStatus::Done,
+        "tools: {tools:?}; text: {text}"
+    );
 }
 
 #[tokio::test]
@@ -163,10 +167,15 @@ async fn agent_writes_a_file_and_runs_a_command_on_the_remote() {
     eprintln!("final text: {text}");
     assert_done(status, &tools, &text);
     assert!(
-        tools.iter().any(|tool| tool == "write_file" || tool == "apply_patch"),
+        tools
+            .iter()
+            .any(|tool| tool == "write_file" || tool == "apply_patch"),
         "expected a file mutation tool: {tools:?}"
     );
-    assert!(tools.iter().any(|tool| tool == "bash"), "expected bash: {tools:?}");
+    assert!(
+        tools.iter().any(|tool| tool == "bash"),
+        "expected bash: {tools:?}"
+    );
 
     // 5) The real proof: the file the *model* asked to create exists **on the
     //    remote**, with the content it was told to write.

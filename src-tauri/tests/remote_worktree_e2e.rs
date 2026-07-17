@@ -199,7 +199,13 @@ async fn remote_model_respects_worktree_instructions_and_refresh() {
         .checkpoint
         .as_deref()
         .expect("worktree turn must create a checkpoint");
-    assert_eq!(remote.read(Path::new(&format!("{cwd}/target.txt"))).await.unwrap(), TARGET_CONTENT);
+    assert_eq!(
+        remote
+            .read(Path::new(&format!("{cwd}/target.txt")))
+            .await
+            .unwrap(),
+        TARGET_CONTENT
+    );
     assert_eq!(
         remote
             .read(Path::new(&format!("{cwd}/instruction-proof.txt")))
@@ -207,18 +213,24 @@ async fn remote_model_respects_worktree_instructions_and_refresh() {
             .unwrap(),
         INSTRUCTION_CONTENT
     );
-    assert_eq!(read_remote(&env.host, &format!("{main}/nested/target.txt")), b"main\n");
-    assert!(!remote_exists(&env.host, &format!("{main}/nested/instruction-proof.txt")));
+    assert_eq!(
+        read_remote(&env.host, &format!("{main}/nested/target.txt")),
+        b"main\n"
+    );
+    assert!(!remote_exists(
+        &env.host,
+        &format!("{main}/nested/instruction-proof.txt")
+    ));
     assert_helpers_did_not_run(&env, &lab);
     let changes = changes_summary(&remote, Path::new(&cwd), checkpoint)
         .await
         .expect("remote changes summary");
-    assert!(changes.iter().any(|change| change.path == "nested/target.txt"));
-    assert!(
-        changes
-            .iter()
-            .any(|change| change.path == "nested/instruction-proof.txt")
-    );
+    assert!(changes
+        .iter()
+        .any(|change| change.path == "nested/target.txt"));
+    assert!(changes
+        .iter()
+        .any(|change| change.path == "nested/instruction-proof.txt"));
 
     remote
         .write(
@@ -244,7 +256,10 @@ async fn remote_model_respects_worktree_instructions_and_refresh() {
             .unwrap(),
         REFRESH_CONTENT
     );
-    assert_eq!(read_remote(&env.host, &format!("{main}/nested/target.txt")), b"main\n");
+    assert_eq!(
+        read_remote(&env.host, &format!("{main}/nested/target.txt")),
+        b"main\n"
+    );
     assert_helpers_did_not_run(&env, &lab);
 
     drop(provider);
@@ -279,26 +294,50 @@ git config core.fsmonitor "$lab/helper-markers/fsmonitor.sh"
 git config credential.helper "$lab/helper-markers/credential.sh"
 "#;
     let out = ssh_script(&env.host, SCRIPT, &[&env.base]);
-    assert!(out.status.success(), "seed failed: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "seed failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 }
 
 fn assert_helpers_did_not_run(env: &LiveEnv, lab: &str) {
-    assert!(!remote_exists(&env.host, &format!("{lab}/helper-markers/fsmonitor-ran")));
-    assert!(!remote_exists(&env.host, &format!("{lab}/helper-markers/credential-ran")));
+    assert!(!remote_exists(
+        &env.host,
+        &format!("{lab}/helper-markers/fsmonitor-ran")
+    ));
+    assert!(!remote_exists(
+        &env.host,
+        &format!("{lab}/helper-markers/credential-ran")
+    ));
 }
 
 fn read_remote(host: &str, path: &str) -> Vec<u8> {
     let output = Command::new("ssh")
-        .args(["-o", "ConnectTimeout=10", host, &format!("cat -- {}", quote(path))])
+        .args([
+            "-o",
+            "ConnectTimeout=10",
+            host,
+            &format!("cat -- {}", quote(path)),
+        ])
         .output()
         .expect("read remote file");
-    assert!(output.status.success(), "remote read failed: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "remote read failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     output.stdout
 }
 
 fn remote_exists(host: &str, path: &str) -> bool {
     Command::new("ssh")
-        .args(["-o", "ConnectTimeout=10", host, &format!("test -e {}", quote(path))])
+        .args([
+            "-o",
+            "ConnectTimeout=10",
+            host,
+            &format!("test -e {}", quote(path)),
+        ])
         .status()
         .expect("remote existence probe")
         .success()
@@ -306,7 +345,12 @@ fn remote_exists(host: &str, path: &str) -> bool {
 
 fn cleanup_fixture(env: &LiveEnv, lab: &str) {
     let _ = Command::new("ssh")
-        .args(["-o", "ConnectTimeout=10", &env.host, &format!("rm -rf -- {}", quote(lab))])
+        .args([
+            "-o",
+            "ConnectTimeout=10",
+            &env.host,
+            &format!("rm -rf -- {}", quote(lab)),
+        ])
         .status();
 }
 
@@ -326,7 +370,9 @@ fn ssh_script(host: &str, script: &str, args: &[&str]) -> Output {
         .expect("script stdin")
         .write_all(script.as_bytes())
         .expect("write remote fixture script");
-    child.wait_with_output().expect("wait for remote fixture script")
+    child
+        .wait_with_output()
+        .expect("wait for remote fixture script")
 }
 
 fn quote(value: &str) -> String {

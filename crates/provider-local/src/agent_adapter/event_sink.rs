@@ -11,8 +11,8 @@ use clark_agent as ca;
 use crate::tools::ToolRegistry;
 
 use super::{
-    locations_from_details, markdown_artifact, mobile_screenshot_artifact, tool_result_blocks_to_content,
-    tool_title,
+    locations_from_details, markdown_artifact, mobile_screenshot_artifact,
+    tool_result_blocks_to_content, tool_title,
 };
 
 pub(crate) struct DesktopEventSink {

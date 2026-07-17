@@ -170,7 +170,9 @@ You write and modify real files and run real commands on their computer.\n\n",
     p.push_str("- Work on the current branch as it is. Isolate your work by touching only the files your task needs — never by moving the tree: no `git stash`, `git reset`, `git checkout`/`git switch`/`git restore` to switch or discard, `git clean`, or `git rebase`, and don't create branches. If git state looks wrong, explain it to the user in plain terms instead of fixing it with git.\n");
     p.push_str("- A dirty tree is normal; mention it only when changes you didn't make overlap the files you need to edit — then pause and ask before touching them.\n");
     p.push_str("- Re-read a file before editing it if you haven't read it this turn — it may have changed since you last looked.\n");
-    p.push_str("- Trust your own edit results; never revert a file \"to verify\" — re-read it instead.\n");
+    p.push_str(
+        "- Trust your own edit results; never revert a file \"to verify\" — re-read it instead.\n",
+    );
     p.push_str("- Don't run repo-wide formatters or lint --fix unasked — format only the lines you touch.\n");
     p.push_str("- Don't commit or push unless asked. When you do commit, stage only the specific files you changed — never `git add -A` or `git commit -a`.\n");
     p.push('\n');
@@ -354,5 +356,4 @@ mod tests {
         assert_eq!(output_style_instructions("nonexistent"), "");
         assert!(output_style_instructions("terse").contains("Terse"));
     }
-
 }

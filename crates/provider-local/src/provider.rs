@@ -169,13 +169,11 @@ impl Provider for LocalAgentProvider {
         };
 
         let mut prompt = system_prompt(&sandbox, config.clark.is_some());
-        self.instruction_snapshot = crate::instructions::load(
-            self.executor.as_ref(),
-            sandbox.root(),
-        )
-        .await
-        .ok()
-        .flatten();
+        self.instruction_snapshot =
+            crate::instructions::load(self.executor.as_ref(), sandbox.root())
+                .await
+                .ok()
+                .flatten();
         if let Some(instructions) = self.instruction_snapshot.as_ref() {
             prompt.push('\n');
             prompt.push_str(&instructions.render());
@@ -209,13 +207,9 @@ impl Provider for LocalAgentProvider {
                 mem.push('\n');
             }
             if let Some(gdir) = crate::memory::global_memory_dir() {
-                if let Some(glob) = crate::memory::scope_listing(
-                    &crate::exec::LocalExecutor,
-                    &gdir,
-                    "Global",
-                    None,
-                )
-                .await
+                if let Some(glob) =
+                    crate::memory::scope_listing(&crate::exec::LocalExecutor, &gdir, "Global", None)
+                        .await
                 {
                     mem.push_str(&glob);
                     mem.push('\n');
@@ -294,14 +288,12 @@ impl Provider for LocalAgentProvider {
         if let Some(docs_root) = docs_root.as_ref() {
             workspace_roots.push(docs_root.clone());
         }
-        let repository_root = crate::git_metadata::common_repository_root(
-            self.executor.as_ref(),
-            sandbox.root(),
-        )
-        .await
-        .ok()
-        .flatten()
-        .map(|root| root.to_string_lossy().into_owned());
+        let repository_root =
+            crate::git_metadata::common_repository_root(self.executor.as_ref(), sandbox.root())
+                .await
+                .ok()
+                .flatten()
+                .map(|root| root.to_string_lossy().into_owned());
         Ok(Session {
             id,
             provider: self.id(),
@@ -348,7 +340,10 @@ impl Provider for LocalAgentProvider {
             }
             self.instruction_snapshot = current_instructions;
         }
-        text = format!("{}\n\n{text}", environment_context(&sandbox, config.remote.is_some()));
+        text = format!(
+            "{}\n\n{text}",
+            environment_context(&sandbox, config.remote.is_some())
+        );
         let knowledge_query = text.clone();
         let attachment_context = crate::attachments::process_attachments(
             &input.attachments,

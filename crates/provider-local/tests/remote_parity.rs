@@ -191,7 +191,11 @@ async fn remote_background_output_is_bounded_and_reports_truncation() {
     for _ in 0..100 {
         let status = remote.background_status(&process, 0).await.unwrap();
         if status.exit_code.is_some() {
-            let bytes = status.output.iter().map(|chunk| chunk.data.len()).sum::<usize>();
+            let bytes = status
+                .output
+                .iter()
+                .map(|chunk| chunk.data.len())
+                .sum::<usize>();
             assert!(status.truncated);
             assert!(bytes <= 1_048_576, "retained {bytes} bytes");
             return;

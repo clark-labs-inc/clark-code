@@ -150,18 +150,16 @@ async fn remote_processes_survive_reconnect_and_remain_contained() {
         eprintln!("skipping: set CLARK_SSH_TEST_HOST / _ROOT / _BIN to run this");
         return;
     };
-    assert!(
-        Command::new("ssh")
-            .args([
-                "-o",
-                "ConnectTimeout=10",
-                &env.host,
-                &format!("mkdir -p {}", env.root),
-            ])
-            .status()
-            .expect("spawn ssh mkdir")
-            .success()
-    );
+    assert!(Command::new("ssh")
+        .args([
+            "-o",
+            "ConnectTimeout=10",
+            &env.host,
+            &format!("mkdir -p {}", env.root),
+        ])
+        .status()
+        .expect("spawn ssh mkdir")
+        .success());
 
     let conn = ssh::connect(&RemoteSpec {
         host: env.host.clone(),
@@ -266,12 +264,19 @@ async fn remote_processes_survive_reconnect_and_remain_contained() {
         .await
         .expect("start process tree");
     for _ in 0..50 {
-        if second.metadata(std::path::Path::new(&child_pid)).await.is_ok() {
+        if second
+            .metadata(std::path::Path::new(&child_pid))
+            .await
+            .is_ok()
+        {
             break;
         }
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
-    second.background_kill(&tree).await.expect("kill process tree");
+    second
+        .background_kill(&tree)
+        .await
+        .expect("kill process tree");
     let killed = second
         .exec(
             &format!("pid=$(cat {child_pid}); ! kill -0 \"$pid\" 2>/dev/null"),

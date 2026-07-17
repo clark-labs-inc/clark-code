@@ -18,7 +18,9 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
-use exec_core::{BackgroundStatus, DirEntry, ExecOutput, ExecResult, Executor, FileMeta, WalkEntry};
+use exec_core::{
+    BackgroundStatus, DirEntry, ExecOutput, ExecResult, Executor, FileMeta, WalkEntry,
+};
 use exec_protocol::{
     b64_decode, b64_encode, method, AuthParams, AuthResult, MetaResult, Notification, PathParams,
     ProcessExitParams, ProcessIdParams, ProcessOutputParams, ProcessStartParams, ReadDirResult,
@@ -432,12 +434,7 @@ impl Executor for RemoteExecutor {
         background::status(&self.conn, process_id, after_seq).await
     }
 
-    async fn background_write(
-        &self,
-        process_id: &str,
-        data: &[u8],
-        close: bool,
-    ) -> ExecResult<()> {
+    async fn background_write(&self, process_id: &str, data: &[u8], close: bool) -> ExecResult<()> {
         background::write(&self.conn, process_id, data, close).await
     }
 

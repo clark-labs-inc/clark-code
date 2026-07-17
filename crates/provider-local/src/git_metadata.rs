@@ -60,8 +60,7 @@ pub(crate) async fn linked_worktree_roots(
     exec: &dyn Executor,
     root: &Path,
 ) -> Result<Option<Vec<PathBuf>>, String> {
-    let Some(raw) = optional(exec, root, &["worktree", "list", "--porcelain", "-z"]).await?
-    else {
+    let Some(raw) = optional(exec, root, &["worktree", "list", "--porcelain", "-z"]).await? else {
         return Ok(None);
     };
     Ok(Some(parse_linked_worktree_roots(&raw)))
@@ -200,7 +199,11 @@ mod tests {
                 .current_dir(cwd)
                 .output()
                 .unwrap();
-            assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
         };
         run(&main, &["init", "-q", "--initial-branch=main"]);
         run(&main, &["config", "user.name", "Clark Test"]);
@@ -210,7 +213,14 @@ mod tests {
         run(&main, &["commit", "-qm", "initial"]);
         run(
             &main,
-            &["worktree", "add", "--detach", "-q", linked.to_str().unwrap(), "HEAD"],
+            &[
+                "worktree",
+                "add",
+                "--detach",
+                "-q",
+                linked.to_str().unwrap(),
+                "HEAD",
+            ],
         );
 
         let expected = main.canonicalize().unwrap();

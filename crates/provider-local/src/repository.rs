@@ -75,18 +75,27 @@ pub async fn inspect_repository(
     let shallow_args = ["rev-parse", "--is-shallow-repository"];
     let dirty_args = ["status", "--porcelain=v1", "--untracked-files=no"];
     let refs_args = ["show-ref", "--head"];
-    let (head_oid, current_branch, default_branch, remotes, roots, commit_count, shallow, dirty, refs) =
-        tokio::join!(
-            git_optional(exec, &repo_root, &head_args),
-            git_optional(exec, &repo_root, &branch_args),
-            default_branch(exec, &repo_root),
-            repository_remotes(exec, &repo_root),
-            git_optional(exec, &repo_root, &roots_args),
-            git_optional(exec, &repo_root, &count_args),
-            git_optional(exec, &repo_root, &shallow_args),
-            git_optional(exec, &repo_root, &dirty_args),
-            git_optional(exec, &repo_root, &refs_args),
-        );
+    let (
+        head_oid,
+        current_branch,
+        default_branch,
+        remotes,
+        roots,
+        commit_count,
+        shallow,
+        dirty,
+        refs,
+    ) = tokio::join!(
+        git_optional(exec, &repo_root, &head_args),
+        git_optional(exec, &repo_root, &branch_args),
+        default_branch(exec, &repo_root),
+        repository_remotes(exec, &repo_root),
+        git_optional(exec, &repo_root, &roots_args),
+        git_optional(exec, &repo_root, &count_args),
+        git_optional(exec, &repo_root, &shallow_args),
+        git_optional(exec, &repo_root, &dirty_args),
+        git_optional(exec, &repo_root, &refs_args),
+    );
     let head_oid = head_oid?.filter(|value| is_oid(value));
     let current_branch = current_branch?.filter(|value| !value.is_empty());
     let default_branch = default_branch?;
@@ -101,10 +110,8 @@ pub async fn inspect_repository(
     let commit_count = commit_count?
         .and_then(|value| value.parse::<u64>().ok())
         .unwrap_or(0);
-    let shallow = shallow?
-        .is_some_and(|value| value == "true");
-    let dirty = dirty?
-    .is_some_and(|value| !value.is_empty());
+    let shallow = shallow?.is_some_and(|value| value == "true");
+    let dirty = dirty?.is_some_and(|value| !value.is_empty());
     let refs = refs?.unwrap_or_default();
 
     Ok(Some(RepositoryIdentity {
@@ -240,8 +247,8 @@ pub async fn discover_repositories(
         .try_collect::<Vec<_>>()
         .await?;
     for worktrees in linked.into_iter().flatten() {
-            let remaining = MAX_DISCOVERED_REPOSITORIES.saturating_sub(candidates.len());
-            candidates.extend(worktrees.into_iter().take(remaining));
+        let remaining = MAX_DISCOVERED_REPOSITORIES.saturating_sub(candidates.len());
+        candidates.extend(worktrees.into_iter().take(remaining));
         if candidates.len() >= MAX_DISCOVERED_REPOSITORIES {
             break;
         }
@@ -300,8 +307,8 @@ async fn repository_remotes(
         root,
         &["config", "--get-regexp", "^remote\\..*\\.url$"],
     )
-        .await?
-        .unwrap_or_default();
+    .await?
+    .unwrap_or_default();
     let mut out = Vec::new();
     for line in raw.lines() {
         let Some((key, raw_url)) = line.split_once(char::is_whitespace) else {

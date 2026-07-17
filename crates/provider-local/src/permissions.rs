@@ -150,7 +150,8 @@ impl PermissionGate {
                         // Plan gates never write policy: "always allow plans"
                         // is not a grant the options offer or the gate honors.
                         if !is_plan_gate {
-                            self.apply_policy(tool_name, &info, resolution.decision).await;
+                            self.apply_policy(tool_name, &info, resolution.decision)
+                                .await;
                         }
                         (resolution.decision.approved(), resolution.feedback)
                     }

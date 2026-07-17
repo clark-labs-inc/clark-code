@@ -2,9 +2,9 @@
 
 use agent_core::domain::ToolKind;
 use async_trait::async_trait;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
-use super::{ToolCtx, ToolExecutor, ToolOutcome, arg_str, arg_str_opt};
+use super::{arg_str, arg_str_opt, ToolCtx, ToolExecutor, ToolOutcome};
 
 #[derive(Clone)]
 pub struct OrganizationKnowledgeConfig {

@@ -326,7 +326,9 @@ mod tests {
             assert!(request.starts_with(
                 "GET /v1/organization-knowledge/search?query=checkout+decision&limit=50&organization_id=org-1 HTTP/1.1"
             ));
-            assert!(request.to_ascii_lowercase().contains("authorization: bearer ck_test"));
+            assert!(request
+                .to_ascii_lowercase()
+                .contains("authorization: bearer ck_test"));
             let body = r#"{"query":"checkout decision","organizations":[{"organization_id":"org-1","query":"checkout decision","hits":[]}]}"#;
             let response = format!(
                 "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",

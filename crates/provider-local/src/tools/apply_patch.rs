@@ -67,9 +67,18 @@ impl ToolExecutor for ApplyPatch {
 
 #[derive(Debug, Clone)]
 enum Operation {
-    Add { path: String, content: String },
-    Delete { path: String },
-    Update { path: String, move_to: Option<String>, chunks: Vec<Chunk> },
+    Add {
+        path: String,
+        content: String,
+    },
+    Delete {
+        path: String,
+    },
+    Update {
+        path: String,
+        move_to: Option<String>,
+        chunks: Vec<Chunk>,
+    },
 }
 
 #[derive(Debug, Clone, Default)]
@@ -105,7 +114,9 @@ fn parse_patch(patch: &str) -> Result<Vec<Operation>, String> {
             }
             operations.push(Operation::Add { path, content });
         } else if let Some(path) = line.strip_prefix("*** Delete File: ") {
-            operations.push(Operation::Delete { path: safe_path(path)? });
+            operations.push(Operation::Delete {
+                path: safe_path(path)?,
+            });
             index += 1;
         } else if let Some(path) = line.strip_prefix("*** Update File: ") {
             let path = safe_path(path)?;
@@ -143,9 +154,16 @@ fn parse_patch(patch: &str) -> Result<Vec<Operation>, String> {
             if chunks.is_empty() && move_to.is_none() {
                 return Err(format!("update for {path} is empty"));
             }
-            operations.push(Operation::Update { path, move_to, chunks });
+            operations.push(Operation::Update {
+                path,
+                move_to,
+                chunks,
+            });
         } else {
-            return Err(format!("invalid patch header at line {}: {line}", index + 1));
+            return Err(format!(
+                "invalid patch header at line {}: {line}",
+                index + 1
+            ));
         }
     }
     if operations.is_empty() {
@@ -212,7 +230,10 @@ async fn prepare(ctx: &ToolCtx, operations: Vec<Operation>) -> Result<Vec<Prepar
         }
         let source = ctx.sandbox.resolve_for_write(&path)?;
         let metadata = ctx.executor.metadata(&source).await.ok();
-        if metadata.as_ref().is_some_and(|meta| meta.is_dir && !meta.is_symlink) {
+        if metadata
+            .as_ref()
+            .is_some_and(|meta| meta.is_dir && !meta.is_symlink)
+        {
             return Err(format!("{path} is a directory"));
         }
         match operation {
@@ -273,7 +294,11 @@ async fn prepare(ctx: &ToolCtx, operations: Vec<Operation>) -> Result<Vec<Prepar
 
 async fn read_existing(ctx: &ToolCtx, path: &Path, display: &str) -> Result<String, String> {
     ctx.guard_mutation(path, true).await?;
-    let bytes = ctx.executor.read(path).await.map_err(|error| format!("{display}: {error}"))?;
+    let bytes = ctx
+        .executor
+        .read(path)
+        .await
+        .map_err(|error| format!("{display}: {error}"))?;
     String::from_utf8(bytes).map_err(|_| format!("{display} is not UTF-8 text"))
 }
 
@@ -297,11 +322,16 @@ fn apply_chunks(original: &str, chunks: &[Chunk], path: &str) -> Result<String, 
                 .map(|offset| search_from + offset + 1)
                 .unwrap_or(text.len())
         } else {
-            let exact = text[search_from..].find(&old).map(|offset| search_from + offset);
-            let without_final_newline = old
-                .strip_suffix('\n')
-                .and_then(|old| text[search_from..].find(old).map(|offset| search_from + offset));
-            exact.or(without_final_newline)
+            let exact = text[search_from..]
+                .find(&old)
+                .map(|offset| search_from + offset);
+            let without_final_newline = old.strip_suffix('\n').and_then(|old| {
+                text[search_from..]
+                    .find(old)
+                    .map(|offset| search_from + offset)
+            });
+            exact
+                .or(without_final_newline)
                 .ok_or_else(|| format!("expected lines not found in {path}"))?
         };
         let matched = if old.is_empty() || text[position..].starts_with(&old) {
@@ -331,7 +361,9 @@ async fn commit(ctx: &ToolCtx, prepared: Vec<Prepared>) -> Result<ToolOutcome, S
             if let Some(parent) = change.destination.parent() {
                 ctx.executor.create_dir_all(parent).await?;
             }
-            ctx.executor.write(&change.destination, content.as_bytes()).await?;
+            ctx.executor
+                .write(&change.destination, content.as_bytes())
+                .await?;
             ctx.note_read(&change.destination).await;
         }
         if change.remove_source {
@@ -341,7 +373,10 @@ async fn commit(ctx: &ToolCtx, prepared: Vec<Prepared>) -> Result<ToolOutcome, S
         let new = change.new.as_deref().unwrap_or("");
         let diff = similar::TextDiff::from_lines(old, new)
             .unified_diff()
-            .header(&format!("a/{}", change.display), &format!("b/{}", change.display))
+            .header(
+                &format!("a/{}", change.display),
+                &format!("b/{}", change.display),
+            )
             .to_string();
         if receipt.len() < MAX_RECEIPT_BYTES {
             receipt.push_str(&format!("diff {}\n{}\n", change.display, diff));
@@ -381,7 +416,9 @@ mod tests {
             reads: Arc::new(Mutex::new(ReadTracker::default())),
             cancel: CancellationToken::new(),
             background: Arc::new(crate::background::BackgroundTasks::default()),
-            session: Arc::new(tokio::sync::Mutex::new(crate::loop_state::SessionState::default())),
+            session: Arc::new(tokio::sync::Mutex::new(
+                crate::loop_state::SessionState::default(),
+            )),
             progress: None,
         }
     }
@@ -398,8 +435,14 @@ mod tests {
         let patch = "*** Begin Patch\n*** Update File: edit.txt\n@@\n one\n-two\n+changed\n*** Add File: nested/new.txt\n+new\n*** Delete File: delete.txt\n*** End Patch";
         let outcome = ApplyPatch.invoke(json!({"patch": patch}), &ctx).await;
         assert!(!outcome.is_error, "{}", outcome.content);
-        assert_eq!(std::fs::read_to_string(dir.path().join("edit.txt")).unwrap(), "one\nchanged\n");
-        assert_eq!(std::fs::read_to_string(dir.path().join("nested/new.txt")).unwrap(), "new\n");
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("edit.txt")).unwrap(),
+            "one\nchanged\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("nested/new.txt")).unwrap(),
+            "new\n"
+        );
         assert!(!dir.path().join("delete.txt").exists());
         assert_eq!(outcome.locations.len(), 3);
         assert_eq!(outcome.details["changes"].as_array().unwrap().len(), 3);
@@ -410,7 +453,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("edit.txt"), "one\n").unwrap();
         let patch = "*** Begin Patch\n*** Add File: added.txt\n+new\n*** Update File: edit.txt\n@@\n-one\n+changed\n*** End Patch";
-        let outcome = ApplyPatch.invoke(json!({"patch": patch}), &ctx(dir.path())).await;
+        let outcome = ApplyPatch
+            .invoke(json!({"patch": patch}), &ctx(dir.path()))
+            .await;
         assert!(outcome.is_error);
         assert!(!dir.path().join("added.txt").exists());
     }

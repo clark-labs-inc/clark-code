@@ -336,7 +336,13 @@ impl BackgroundTasks {
     }
 
     pub async fn clear_all(&self) {
-        let ids = self.tasks.lock().unwrap().keys().cloned().collect::<Vec<_>>();
+        let ids = self
+            .tasks
+            .lock()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
         for id in ids {
             let _ = self.kill(&id).await;
         }
@@ -344,7 +350,10 @@ impl BackgroundTasks {
     }
 }
 
-async fn read_into<R: tokio::io::AsyncRead + Unpin>(mut reader: R, output: Arc<Mutex<OutputBuffer>>) {
+async fn read_into<R: tokio::io::AsyncRead + Unpin>(
+    mut reader: R,
+    output: Arc<Mutex<OutputBuffer>>,
+) {
     let mut chunk = [0u8; 4096];
     loop {
         match reader.read(&mut chunk).await {

@@ -143,9 +143,7 @@ otherwise \"project\".\n\
 title in supersedes.\n\
 - If the message contains no durable facts, return {\"facts\":[]}.";
 
-    let prompt = format!(
-        "Existing note titles:\n{existing_block}\n\nUser message:\n{user_text}"
-    );
+    let prompt = format!("Existing note titles:\n{existing_block}\n\nUser message:\n{user_text}");
     let cancel = CancellationToken::new();
     let Ok(reply) = ctx.llm.complete(Some(system), &prompt, &cancel).await else {
         return;
@@ -267,7 +265,9 @@ mod tests {
             "Heads up — we rebranded, customers are called 'members' now."
         ));
         assert!(worth_extracting("Team rule going forward: ISO dates."));
-        assert!(!worth_extracting("Fix the failing unit test in src/util.js"));
+        assert!(!worth_extracting(
+            "Fix the failing unit test in src/util.js"
+        ));
         assert!(!worth_extracting("Add a GET /health endpoint"));
     }
 
@@ -279,6 +279,9 @@ mod tests {
         assert_eq!(parsed.facts[0].title, "T");
         // Empty / junk replies degrade to None, not a panic.
         assert!(parse_extraction("no json here").is_none());
-        assert!(parse_extraction("{\"facts\": []}").unwrap().facts.is_empty());
+        assert!(parse_extraction("{\"facts\": []}")
+            .unwrap()
+            .facts
+            .is_empty());
     }
 }

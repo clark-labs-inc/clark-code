@@ -477,11 +477,56 @@ pub(crate) fn split_segments(command: &str) -> Vec<&str> {
 /// `system()`), archivers, `env` (`env CMD` executes CMD), `find`/`fd`
 /// (handled per-flag below).
 const READONLY_INSPECT: &[&str] = &[
-    "ls", "cat", "head", "tail", "pwd", "echo", "printf", "which", "type", "whoami", "id", "date",
-    "printenv", "grep", "egrep", "fgrep", "rg", "ag", "wc", "sort", "uniq", "cut", "tr", "diff",
-    "tree", "file", "stat", "du", "df", "basename", "dirname", "realpath", "readlink", "uname",
-    "hostname", "ps", "top", "true", "false", "test", "column", "jq", "yq", "base64", "md5",
-    "shasum", "sha256sum", "nproc", "sleep", "clear",
+    "ls",
+    "cat",
+    "head",
+    "tail",
+    "pwd",
+    "echo",
+    "printf",
+    "which",
+    "type",
+    "whoami",
+    "id",
+    "date",
+    "printenv",
+    "grep",
+    "egrep",
+    "fgrep",
+    "rg",
+    "ag",
+    "wc",
+    "sort",
+    "uniq",
+    "cut",
+    "tr",
+    "diff",
+    "tree",
+    "file",
+    "stat",
+    "du",
+    "df",
+    "basename",
+    "dirname",
+    "realpath",
+    "readlink",
+    "uname",
+    "hostname",
+    "ps",
+    "top",
+    "true",
+    "false",
+    "test",
+    "column",
+    "jq",
+    "yq",
+    "base64",
+    "md5",
+    "shasum",
+    "sha256sum",
+    "nproc",
+    "sleep",
+    "clear",
 ];
 
 /// Whether a whole command line is strictly read-only — safe to run while Plan
@@ -530,7 +575,13 @@ fn is_read_only_segment(segment: &str) -> bool {
         "find" => !tokens.iter().any(|t| {
             matches!(
                 *t,
-                "-delete" | "-exec" | "-execdir" | "-ok" | "-okdir" | "-fprint" | "-fprintf"
+                "-delete"
+                    | "-exec"
+                    | "-execdir"
+                    | "-ok"
+                    | "-okdir"
+                    | "-fprint"
+                    | "-fprintf"
                     | "-fls"
             )
         }),

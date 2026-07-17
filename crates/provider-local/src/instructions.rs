@@ -34,13 +34,9 @@ pub(crate) async fn load(
     exec: &dyn Executor,
     cwd: &Path,
 ) -> Result<Option<ProjectInstructions>, String> {
-    let git_root = crate::git_metadata::optional(
-        exec,
-        cwd,
-        &["rev-parse", "--show-toplevel"],
-    )
-    .await?
-    .map(PathBuf::from);
+    let git_root = crate::git_metadata::optional(exec, cwd, &["rev-parse", "--show-toplevel"])
+        .await?
+        .map(PathBuf::from);
     let git_prefix = if git_root.is_some() {
         crate::git_metadata::optional(exec, cwd, &["rev-parse", "--show-prefix"]).await?
     } else {
@@ -164,7 +160,11 @@ mod tests {
             .current_dir(cwd)
             .output()
             .unwrap();
-        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 
     #[tokio::test]
@@ -197,7 +197,9 @@ mod tests {
 
         std::fs::write(&path, "second").unwrap();
         let second = load(&LocalExecutor, temp.path()).await.unwrap().unwrap();
-        assert!(refresh_context(Some(&first), Some(&second)).unwrap().contains("second"));
+        assert!(refresh_context(Some(&first), Some(&second))
+            .unwrap()
+            .contains("second"));
         assert!(refresh_context(Some(&second), None)
             .unwrap()
             .contains("no longer apply"));

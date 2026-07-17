@@ -348,10 +348,9 @@ impl ToolRegistry {
         &mut self,
         config: organization_knowledge::OrganizationKnowledgeConfig,
     ) {
-        self.tools
-            .push(Arc::new(organization_knowledge::OrganizationKnowledgeTool::new(
-                config,
-            )));
+        self.tools.push(Arc::new(
+            organization_knowledge::OrganizationKnowledgeTool::new(config),
+        ));
     }
 
     /// Connect the configured MCP servers and register their tools. A server

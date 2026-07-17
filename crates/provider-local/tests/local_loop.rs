@@ -537,7 +537,11 @@ async fn plan_mode_journey_denies_edits_threads_feedback_and_builds_after_approv
                 json!({"path": "out.txt", "content": "written"}),
             ),
             // — then proposes a plan; the user sends it back with feedback —
-            tool_call_sse("c2", "propose_plan", json!({"plan": "Plan v1: add out.txt"})),
+            tool_call_sse(
+                "c2",
+                "propose_plan",
+                json!({"plan": "Plan v1: add out.txt"}),
+            ),
             // — then proposes the revised plan; the user approves.
             tool_call_sse(
                 "c3",
@@ -590,7 +594,11 @@ async fn plan_mode_journey_denies_edits_threads_feedback_and_builds_after_approv
                 plan_prompts += 1;
                 let (option, feedback) = if plan_prompts == 1 {
                     assert_eq!(
-                        request.options.iter().map(|o| o.id.as_str()).collect::<Vec<_>>(),
+                        request
+                            .options
+                            .iter()
+                            .map(|o| o.id.as_str())
+                            .collect::<Vec<_>>(),
                         vec!["approve_auto", "approve_review", "reject_once"]
                     );
                     ("reject_once", Some("make it two files".to_string()))
