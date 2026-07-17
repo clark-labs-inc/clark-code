@@ -315,7 +315,17 @@ impl LlmClient {
         if let Some(t) = self.temperature {
             body["temperature"] = json!(t);
         }
-        if let Some(effort) = &self.reasoning_effort {
+        // Kimi K3's reasoning is mandatory and its live OpenRouter contract
+        // accepts only the literal `max`. The shared product picker calls its
+        // maximum level `xhigh`, while an omitted override would inherit the
+        // Clark alias's stale `high` default. Normalize at the wire seam so
+        // desktop, remote, and direct provider-local harnesses all agree.
+        let reasoning_effort = if self.model == "clark-code:kimi_k3" {
+            Some("max")
+        } else {
+            self.reasoning_effort.as_deref()
+        };
+        if let Some(effort) = reasoning_effort {
             body["reasoning_effort"] = json!(effort);
         }
         body
@@ -385,6 +395,9 @@ impl LlmClient {
                 }
             }
         }
+        if let Some(error) = acc.stream_error.take() {
+            return Err(LlmError::Message(error));
+        }
         Ok(acc.finish())
     }
 }
@@ -430,6 +443,7 @@ struct Accumulator {
     tool_calls: BTreeMap<u64, PartialToolCall>,
     finish_reason: Option<String>,
     usage: Option<TokenUsage>,
+    stream_error: Option<String>,
 }
 
 #[derive(Default)]
@@ -446,6 +460,36 @@ impl Accumulator {
         on_text: &mut impl FnMut(&str),
         on_reasoning: &mut impl FnMut(&str),
     ) {
+        // OpenRouter cannot change the HTTP status after committing an SSE
+        // response, so provider failures arrive in-band as a top-level `error`
+        // object (usually alongside `finish_reason: "error"`). Preserve that
+        // contract instead of silently discarding the only event and later
+        // misreporting it as an empty assistant turn.
+        if let Some(error) = chunk.get("error").and_then(Value::as_object) {
+            let code = error.get("code").map(|value| match value {
+                Value::String(value) => value.clone(),
+                other => other.to_string(),
+            });
+            let error_type = error
+                .get("metadata")
+                .and_then(Value::as_object)
+                .and_then(|metadata| metadata.get("error_type"))
+                .and_then(Value::as_str);
+            let message = error
+                .get("message")
+                .and_then(Value::as_str)
+                .unwrap_or("provider stream failed");
+            let label = [code.as_deref(), error_type]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+                .join(" ");
+            self.stream_error = Some(if label.is_empty() {
+                format!("model stream error: {message}")
+            } else {
+                format!("model stream error ({label}): {message}")
+            });
+        }
         // The final chunk carries the whole call's usage (include_usage is set
         // upstream by the passthrough). Read it before the choices guard — some
         // providers ship usage in a chunk with no/empty choices.
@@ -632,6 +676,57 @@ mod tests {
         let usage = turn.usage.expect("trailer usage captured");
         assert_eq!(usage.prompt_tokens, 7);
         assert_eq!(usage.cost_usd, None);
+    }
+
+    #[test]
+    fn captures_in_band_openrouter_stream_error() {
+        let mut acc = Accumulator::default();
+        let v = json!({
+            "error": {
+                "code": 502,
+                "message": "Provider disconnected unexpectedly",
+                "metadata": {"error_type": "provider_unavailable"}
+            },
+            "choices": [{"delta": {"content": ""}, "finish_reason": "error"}]
+        });
+        acc.push_chunk(&v, &mut |_| {}, &mut |_| {});
+        assert_eq!(
+            acc.stream_error.as_deref(),
+            Some(
+                "model stream error (502 provider_unavailable): Provider disconnected unexpectedly"
+            )
+        );
+        assert_eq!(acc.finish_reason.as_deref(), Some("error"));
+    }
+
+    #[test]
+    fn kimi_k3_always_uses_its_mandatory_max_reasoning_contract() {
+        let mut client = LlmClient::from_parts(
+            "https://api.example.test/v1",
+            "clark-code:kimi_k3",
+            None,
+            Vec::new(),
+            None,
+        )
+        .unwrap();
+        for configured in [None, Some("high"), Some("xhigh")] {
+            client.reasoning_effort = configured.map(str::to_string);
+            assert_eq!(client.body(&[], &[])["reasoning_effort"], json!("max"));
+        }
+    }
+
+    #[test]
+    fn other_models_preserve_the_configured_reasoning_effort() {
+        let mut client = LlmClient::from_parts(
+            "https://api.example.test/v1",
+            "clark-code",
+            None,
+            Vec::new(),
+            None,
+        )
+        .unwrap();
+        client.reasoning_effort = Some("xhigh".to_string());
+        assert_eq!(client.body(&[], &[])["reasoning_effort"], json!("xhigh"));
     }
 
     #[test]
