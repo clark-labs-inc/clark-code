@@ -139,14 +139,16 @@ def main() -> int:
         notice_artifact = tool["targets"][args.target]
         if "merge" in notice_artifact:
             notice_artifact = tool["targets"][notice_artifact["merge"][0]]
-        archive_root = Path(notice_artifact["member"]).parent
+        # Archive member names always use POSIX separators, even when this
+        # staging script runs on Windows.
+        archive_root = notice_artifact["member"].rsplit("/", 1)[0]
         for notice in tool.get("notices", []):
             notice_destination = OUTPUT_DIR / f"{tool['command']}-{notice}"
             notice_destination.unlink(missing_ok=True)
             extract_member(
                 notice_artifact,
                 notice_destination,
-                str(archive_root / notice),
+                f"{archive_root}/{notice}",
             )
         print(
             f"staged {tool['command']} {tool['version']} for {args.target}: {destination}",
