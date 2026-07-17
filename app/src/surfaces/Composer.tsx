@@ -10,7 +10,7 @@ import { useSessionStore } from "../store/sessionStore";
 import type { QueuedMessage } from "../store/sessionStore";
 import { useFileDrop, usePaste } from "../lib/attachmentSources";
 import { prettySize } from "../lib/attachments";
-import { CODING_MODELS, REASONING_EFFORTS, modelLabel } from "../lib/localAgent";
+import { CODING_MODELS, REASONING_EFFORTS, modelLabel, effectiveModelSettings } from "../lib/localAgent";
 import { PERMISSION_MODES, type PermissionMode } from "../lib/permissions";
 import { projectFiles } from "../lib/projectFiles";
 import { slashCommands, type SlashCommand } from "../lib/slashCommands";
@@ -152,10 +152,10 @@ function PermissionPill() {
   );
 }
 
-/** Approximate auto-compact threshold the local loop checkpoints at (see
- *  provider-local DEFAULT_AUTO_COMPACT_TOKEN_LIMIT). The meter shows progress
- *  toward this, which is the number that actually matters day-to-day. */
-const CONTEXT_BUDGET = 80_000;
+/** Fallback auto-compact threshold when the engine hasn't reported one yet —
+ *  mirrors provider-local DEFAULT_AUTO_COMPACT_TOKEN_LIMIT. Runs stamp the
+ *  real per-model limit into `usage.context_limit`, which always wins. */
+const CONTEXT_BUDGET_FALLBACK = 300_000;
 
 function fmtTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -180,6 +180,16 @@ function UsageChip() {
     }
     return 0;
   });
+  // The threshold the engine actually compacts at (per-model), reported with
+  // each run's usage — so the meter measures against the real number.
+  const contextLimit = useSessionStore((s) => {
+    const runs = Object.values(s.snapshot.runs);
+    for (let i = runs.length - 1; i >= 0; i--) {
+      const limit = runs[i].outcome?.usage?.context_limit;
+      if (limit) return limit;
+    }
+    return CONTEXT_BUDGET_FALLBACK;
+  });
   const totalIn = useSessionStore((s) =>
     Object.values(s.snapshot.runs).reduce(
       (n, r) => n + (r.outcome?.usage?.input_tokens ?? 0), 0),
@@ -194,12 +204,12 @@ function UsageChip() {
   );
 
   if (totalIn === 0 && totalOut === 0) return null;
-  const pct = Math.min(100, Math.round((contextTokens / CONTEXT_BUDGET) * 100));
+  const pct = Math.min(100, Math.round((contextTokens / contextLimit) * 100));
   const high = pct >= 75;
 
   return (
     <span
-      title={`Context: ${contextTokens.toLocaleString()} tokens — ${pct}% of the ~${fmtTokens(CONTEXT_BUDGET)} auto-compact threshold\nThis conversation: ${totalIn.toLocaleString()} in · ${totalOut.toLocaleString()} out${cost > 0 ? ` · ${fmtCost(cost)}` : ""}`}
+      title={`Context: ${contextTokens.toLocaleString()} tokens — ${pct}% of the ${fmtTokens(contextLimit)} auto-compact threshold\nThis conversation: ${totalIn.toLocaleString()} in · ${totalOut.toLocaleString()} out${cost > 0 ? ` · ${fmtCost(cost)}` : ""}`}
       className="hidden items-center gap-1.5 font-mono text-xs tabular-nums text-ink-faint sm:flex"
     >
       {contextTokens > 0 && (
@@ -220,10 +230,22 @@ function UsageChip() {
 }
 
 /** Model + reasoning-effort picker. Mirrors the PermissionPill's form; a change
- *  mid-conversation hot-swaps the provider's LLM and keeps the transcript. */
+ *  mid-conversation hot-swaps the provider's LLM and keeps the transcript.
+ *  The displayed model is the ACTIVE chat's effective choice (its per-chat
+ *  override, else the global default), so switching models here never leaks
+ *  into other chats — each conversation keeps its own. */
 function ModelPill() {
-  const model = useSessionStore((s) => s.localSettings.model);
-  const effort = useSessionStore((s) => s.localSettings.reasoningEffort);
+  // With a chat open, show + edit THAT chat's model; with none (the start
+  // screen) show + edit the global default, which new chats seed from.
+  // Select primitives (not a derived object) so token-stream snapshot clones
+  // don't re-render the pill — only an actual model/effort change does.
+  const sessionId = useSessionStore((s) => s.session?.id ?? null);
+  const model = useSessionStore((s) =>
+    effectiveModelSettings(s.localSettings, s.chatModels, sessionId).model,
+  );
+  const effort = useSessionStore((s) =>
+    effectiveModelSettings(s.localSettings, s.chatModels, sessionId).reasoningEffort,
+  );
   const update = useSessionStore((s) => s.updateModelSettings);
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -741,6 +763,9 @@ export function Composer() {
           onClick={syncCaret}
           rows={1}
           aria-label="Message Clark"
+          autoCorrect="off"
+          autoCapitalize="off"
+          spellCheck={false}
           placeholder={
             !session
               ? "Describe what you want Clark to do…"

@@ -327,6 +327,16 @@ impl ca::AgentTool for DesktopToolAdapter {
             }
         }
 
+        // Cap what one tool result may occupy in the model's context. Without
+        // this, a single huge read/grep/shell dump rides the transcript in
+        // full until compaction. Middle-out: the head and tail survive, the
+        // cut is labeled with the original size.
+        if let Some(truncated) = crate::truncation::truncate_middle(
+            &outcome.content,
+            crate::truncation::DEFAULT_TOOL_RESULT_MAX_CHARS,
+        ) {
+            outcome.content = truncated;
+        }
         let mut result = if outcome.is_error {
             ca::ToolResult::error(outcome.content)
         } else {

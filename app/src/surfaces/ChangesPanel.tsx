@@ -14,6 +14,7 @@ import type { RunView } from "../core-bridge/types";
 import type { RemoteInfo } from "../lib/ssh";
 import { DiffBody } from "./work/WorkLine";
 import { cn } from "../lib/cn";
+import { minLoadDuration } from "../lib/minLoadDuration";
 
 export interface ChangedFile {
   path: string;
@@ -116,7 +117,11 @@ function ChangesPopover({ runs, onClose }: { runs: string[]; onClose: () => void
     setLoading(true);
     setError(null);
     try {
-      setFiles(await invoke<ChangedFile[]>("changes_summary", { cwd, base, remote }));
+      // minLoadDuration holds the spinner for one spin — `git diff --stat` over
+      // a small tree resolves in a single frame and React never paints the
+      // spinning state, so the refresh click looks frozen.
+      const files = await minLoadDuration(invoke<ChangedFile[]>("changes_summary", { cwd, base, remote }));
+      setFiles(files);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -170,7 +175,7 @@ function ChangesPopover({ runs, onClose }: { runs: string[]; onClose: () => void
           aria-label="Refresh changes"
           className="grid size-7 shrink-0 place-items-center rounded-md text-ink-muted transition hover:bg-bg-hover hover:text-ink disabled:opacity-50"
         >
-          <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />
+          <RefreshCw className={cn("size-3.5", loading && "animate-[spin_1s_linear_infinite]")} />
         </button>
         <button
           onClick={onClose}

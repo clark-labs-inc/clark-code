@@ -1,0 +1,269 @@
+//! Continuation regressions for runs that stop after completing useful work.
+
+use agent_core::domain::{AgentEvent, RunStatus};
+use agent_core::ids::RunId;
+use agent_core::provider::{PromptInput, Provider, ProviderConfig, Session, SessionOptions};
+use futures::StreamExt;
+use serde_json::{json, Value};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::oneshot;
+
+fn tool_call_body() -> String {
+    [
+        r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"read_file","arguments":"{\"path\":\"hello.txt\"}"}}]}}]}"#,
+        r#"data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}"#,
+        "data: [DONE]",
+        "",
+    ]
+    .join("\n\n")
+}
+
+fn final_body() -> String {
+    [
+        r#"data: {"choices":[{"delta":{"content":"continued"}}]}"#,
+        r#"data: {"choices":[{"delta":{},"finish_reason":"stop"}]}"#,
+        "data: [DONE]",
+        "",
+    ]
+    .join("\n\n")
+}
+
+fn http_response(body: &str) -> Vec<u8> {
+    format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
+        body.len(),
+        body
+    )
+    .into_bytes()
+}
+
+fn http_error_response() -> Vec<u8> {
+    let body = "transient upstream failure";
+    format!(
+        "HTTP/1.1 502 Bad Gateway\r\nContent-Type: text/plain\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{body}",
+        body.len()
+    )
+    .into_bytes()
+}
+
+async fn read_request(sock: &mut TcpStream) -> Vec<u8> {
+    let mut buf = Vec::new();
+    let mut tmp = [0u8; 4096];
+    let mut content_length = None;
+    loop {
+        let Ok(n) = sock.read(&mut tmp).await else {
+            return buf;
+        };
+        if n == 0 {
+            return buf;
+        }
+        buf.extend_from_slice(&tmp[..n]);
+        if content_length.is_none() {
+            if let Some(headers_end) = find_headers_end(&buf) {
+                let headers = String::from_utf8_lossy(&buf[..headers_end]);
+                content_length = headers.lines().find_map(|line| {
+                    let (name, value) = line.split_once(':')?;
+                    name.eq_ignore_ascii_case("content-length")
+                        .then(|| value.trim().parse::<usize>().ok())
+                        .flatten()
+                });
+            }
+        }
+        if let (Some(headers_end), Some(len)) = (find_headers_end(&buf), content_length) {
+            if buf.len() >= headers_end + 4 + len {
+                return buf;
+            }
+        }
+    }
+}
+
+fn find_headers_end(buf: &[u8]) -> Option<usize> {
+    buf.windows(4).position(|window| window == b"\r\n\r\n")
+}
+
+fn request_json(raw: &[u8]) -> Value {
+    let headers_end = find_headers_end(raw).expect("captured request has headers");
+    serde_json::from_slice(&raw[headers_end + 4..]).expect("request body is valid JSON")
+}
+
+async fn new_provider(
+    addr: std::net::SocketAddr,
+    root: &std::path::Path,
+) -> (provider_local::LocalAgentProvider, Session) {
+    let mut provider = provider_local::LocalAgentProvider::new();
+    provider
+        .connect(ProviderConfig {
+            auth_token: Some("test-key".into()),
+            extra: json!({
+                "base_url": format!("http://{addr}/v1"),
+                "model": "fake-model",
+                "memories": false
+            }),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let session = provider
+        .new_session(SessionOptions {
+            cwd: Some(root.to_string_lossy().to_string()),
+            mode: None,
+            resume: None,
+        })
+        .await
+        .unwrap();
+    (provider, session)
+}
+
+async fn run_status(stream: agent_core::provider::EventStream) -> RunStatus {
+    futures::pin_mut!(stream);
+    while let Some(event) = stream.next().await {
+        if let AgentEvent::RunFinished { outcome, .. } = event {
+            return outcome.status;
+        }
+    }
+    panic!("run ended without RunFinished");
+}
+
+fn assert_continuation_context(raw: &[u8]) {
+    let request = request_json(raw);
+    let messages = request["messages"]
+        .as_array()
+        .expect("follow-up request has messages");
+    assert!(
+        messages.iter().any(|message| {
+            message["role"] == "user"
+                && message["content"]
+                    .as_str()
+                    .is_some_and(|content| content.contains("CONTEXT_SENTINEL_2048"))
+        }),
+        "follow-up lost the original request: {messages:?}"
+    );
+    assert!(
+        messages.iter().any(|message| {
+            message["role"] == "assistant"
+                && message["tool_calls"].as_array().is_some_and(|calls| {
+                    calls
+                        .iter()
+                        .any(|call| call["function"]["name"] == "read_file")
+                })
+        }) && messages.iter().any(|message| {
+            message["role"] == "tool"
+                && message["content"]
+                    .as_str()
+                    .is_some_and(|content| content.contains("hi"))
+        }),
+        "follow-up lost the completed assistant/tool pair: {messages:?}"
+    );
+    assert!(
+        messages.last().is_some_and(|message| {
+            message["role"] == "user"
+                && message["content"]
+                    .as_str()
+                    .is_some_and(|content| content.ends_with("continue"))
+        }),
+        "follow-up lost the new prompt: {messages:?}"
+    );
+}
+
+#[tokio::test]
+async fn failed_turn_preserves_completed_context_for_follow_up() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("hello.txt"), "hi").unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let responses = [
+            http_response(&tool_call_body()),
+            http_error_response(),
+            http_response(&final_body()),
+        ];
+        let mut requests = Vec::new();
+        for response in responses {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            requests.push(read_request(&mut socket).await);
+            socket.write_all(&response).await.unwrap();
+        }
+        requests
+    });
+    let (mut provider, session) = new_provider(addr, dir.path()).await;
+
+    let first = provider
+        .prompt(
+            &session.id,
+            PromptInput::text("Read hello.txt. CONTEXT_SENTINEL_2048"),
+        )
+        .await
+        .unwrap();
+    assert_eq!(run_status(first).await, RunStatus::Failed);
+
+    let follow_up = provider
+        .prompt(&session.id, PromptInput::text("continue"))
+        .await
+        .unwrap();
+    assert_eq!(run_status(follow_up).await, RunStatus::Done);
+
+    let requests = server.await.unwrap();
+    assert_eq!(requests.len(), 3);
+    assert_continuation_context(&requests[2]);
+}
+
+#[tokio::test]
+async fn cancelled_turn_preserves_completed_context_for_follow_up() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("hello.txt"), "hi").unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (waiting_tx, waiting_rx) = oneshot::channel();
+    let (release_tx, release_rx) = oneshot::channel();
+    let server = tokio::spawn(async move {
+        let mut requests = Vec::new();
+
+        let (mut first, _) = listener.accept().await.unwrap();
+        requests.push(read_request(&mut first).await);
+        first
+            .write_all(&http_response(&tool_call_body()))
+            .await
+            .unwrap();
+
+        let (mut hanging, _) = listener.accept().await.unwrap();
+        requests.push(read_request(&mut hanging).await);
+        let _ = waiting_tx.send(());
+        let _ = release_rx.await;
+        drop(hanging);
+
+        let (mut follow_up, _) = listener.accept().await.unwrap();
+        requests.push(read_request(&mut follow_up).await);
+        follow_up
+            .write_all(&http_response(&final_body()))
+            .await
+            .unwrap();
+        requests
+    });
+    let (mut provider, session) = new_provider(addr, dir.path()).await;
+
+    let first = provider
+        .prompt(
+            &session.id,
+            PromptInput::text("Read hello.txt. CONTEXT_SENTINEL_2048"),
+        )
+        .await
+        .unwrap();
+    waiting_rx.await.unwrap();
+    provider
+        .cancel(&session.id, &RunId::new("run-1"))
+        .await
+        .unwrap();
+    let _ = release_tx.send(());
+    assert_eq!(run_status(first).await, RunStatus::Cancelled);
+
+    let follow_up = provider
+        .prompt(&session.id, PromptInput::text("continue"))
+        .await
+        .unwrap();
+    assert_eq!(run_status(follow_up).await, RunStatus::Done);
+
+    let requests = server.await.unwrap();
+    assert_eq!(requests.len(), 3);
+    assert_continuation_context(&requests[2]);
+}

@@ -39,6 +39,8 @@ function ServerCard({
           onChange={(e) => onChange({ ...server, name: e.target.value })}
           placeholder="name (e.g. github)"
           className={cn(input, "flex-1 font-medium")}
+          autoCorrect="off"
+          autoCapitalize="off"
           spellCheck={false}
         />
         <button
@@ -69,6 +71,8 @@ function ServerCard({
             onChange={(e) => onChange({ ...server, command: e.target.value })}
             placeholder="npx"
             className={input}
+            autoCorrect="off"
+            autoCapitalize="off"
             spellCheck={false}
           />
         </div>
@@ -80,6 +84,8 @@ function ServerCard({
             placeholder={"-y\n@modelcontextprotocol/server-filesystem\n."}
             rows={3}
             className={cn(input, "resize-none font-mono text-xs")}
+            autoCorrect="off"
+            autoCapitalize="off"
             spellCheck={false}
           />
         </div>
@@ -93,6 +99,8 @@ function ServerCard({
           placeholder="GITHUB_TOKEN=ghp_…"
           rows={2}
           className={cn(input, "resize-none font-mono text-xs")}
+          autoCorrect="off"
+          autoCapitalize="off"
           spellCheck={false}
         />
       </div>
@@ -151,7 +159,7 @@ function Catalog({ onAdd, addBlank }: { onAdd: (make: (cwd: string) => McpServer
   return (
     <div>
       <div className="mb-2 flex items-center justify-between">
-        <p className="text-xs font-medium uppercase tracking-wide text-ink-faint">Add a server</p>
+        <span className="text-xs font-semibold uppercase tracking-wider text-ink-faint">Add a server</span>
         <button
           onClick={addBlank}
           className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-medium text-ink-muted transition hover:bg-bg-hover hover:text-ink"

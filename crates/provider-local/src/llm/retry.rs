@@ -1,0 +1,390 @@
+use std::time::Duration;
+
+use futures::StreamExt;
+use reqwest::header::RETRY_AFTER;
+use serde_json::Value;
+use tokio_util::sync::CancellationToken;
+
+use super::{
+    drain_lines, retry_after_from_metadata, Accumulator, AssistantTurn, ChatMessage, LlmClient,
+    LlmError, ToolSchema,
+};
+
+const MAX_RATE_LIMIT_RETRIES: usize = 12;
+const MAX_RATE_LIMIT_DELAY: Duration = Duration::from_secs(30);
+
+struct RateLimitFailure {
+    message: String,
+    retry_after: Option<Duration>,
+    retry_safe: bool,
+}
+
+enum AttemptError {
+    Terminal(LlmError),
+    RateLimited(RateLimitFailure),
+}
+
+impl From<LlmError> for AttemptError {
+    fn from(error: LlmError) -> Self {
+        Self::Terminal(error)
+    }
+}
+
+impl LlmClient {
+    /// Stream one chat completion, transparently replaying rate-limited calls
+    /// only while the attempt has emitted no user-visible output.
+    pub async fn stream_chat(
+        &self,
+        messages: &[ChatMessage],
+        tools: &[ToolSchema],
+        cancel: &CancellationToken,
+        mut on_text: impl FnMut(&str),
+        mut on_reasoning: impl FnMut(&str),
+    ) -> Result<AssistantTurn, LlmError> {
+        let mut retries = 0;
+        loop {
+            if cancel.is_cancelled() {
+                return Err(LlmError::Cancelled);
+            }
+            match self
+                .stream_chat_once(messages, tools, cancel, &mut on_text, &mut on_reasoning)
+                .await
+            {
+                Ok(turn) => return Ok(turn),
+                Err(AttemptError::Terminal(error)) => return Err(error),
+                Err(AttemptError::RateLimited(failure))
+                    if failure.retry_safe && retries < MAX_RATE_LIMIT_RETRIES =>
+                {
+                    let delay = rate_limit_delay(failure.retry_after, retries);
+                    retries += 1;
+                    tracing::warn!(
+                        model = self.model,
+                        retry = retries,
+                        max_retries = MAX_RATE_LIMIT_RETRIES,
+                        delay_ms = delay.as_millis() as u64,
+                        "model rate limited before output; retrying the same turn",
+                    );
+                    if !delay.is_zero() {
+                        tokio::select! {
+                            _ = cancel.cancelled() => return Err(LlmError::Cancelled),
+                            _ = tokio::time::sleep(delay) => {}
+                        }
+                    }
+                }
+                Err(AttemptError::RateLimited(failure)) => {
+                    return Err(LlmError::Message(failure.message));
+                }
+            }
+        }
+    }
+
+    async fn stream_chat_once(
+        &self,
+        messages: &[ChatMessage],
+        tools: &[ToolSchema],
+        cancel: &CancellationToken,
+        on_text: &mut impl FnMut(&str),
+        on_reasoning: &mut impl FnMut(&str),
+    ) -> Result<AssistantTurn, AttemptError> {
+        let url = format!("{}/chat/completions", self.base_url);
+        let mut request = self.http.post(&url).json(&self.body(messages, tools));
+        if let Some(key) = &self.api_key {
+            request = request.bearer_auth(key);
+        }
+        for (name, value) in &self.headers {
+            request = request.header(name.as_str(), value.as_str());
+        }
+
+        let response = tokio::select! {
+            _ = cancel.cancelled() => return Err(LlmError::Cancelled.into()),
+            response = request.send() => response.map_err(|error| {
+                LlmError::Message(format!("model request failed: {error}"))
+            })?,
+        };
+        let status = response.status();
+        if !status.is_success() {
+            let retry_after = retry_after_header(response.headers());
+            let body = tokio::select! {
+                _ = cancel.cancelled() => return Err(LlmError::Cancelled.into()),
+                body = response.text() => body.unwrap_or_default(),
+            };
+            if status.as_u16() == 403 && body.to_lowercase().contains("credit") {
+                return Err(LlmError::InsufficientCredits.into());
+            }
+            let message = format!(
+                "model endpoint returned {status}: {}",
+                body.chars().take(500).collect::<String>()
+            );
+            if status.as_u16() == 429 {
+                return Err(AttemptError::RateLimited(RateLimitFailure {
+                    message,
+                    retry_after: retry_after.or_else(|| retry_after_body(&body)),
+                    retry_safe: true,
+                }));
+            }
+            return Err(LlmError::Message(message).into());
+        }
+
+        let mut stream = response.bytes_stream();
+        let mut buffer = Vec::new();
+        let mut accumulator = Accumulator::default();
+        loop {
+            let next = tokio::select! {
+                _ = cancel.cancelled() => return Err(LlmError::Cancelled.into()),
+                next = stream.next() => next,
+            };
+            match next {
+                None => break,
+                Some(Err(error)) => {
+                    return Err(LlmError::Message(format!("model stream error: {error}")).into());
+                }
+                Some(Ok(bytes)) => {
+                    buffer.extend_from_slice(&bytes);
+                    if drain_lines(&mut buffer, &mut accumulator, on_text, on_reasoning) {
+                        break;
+                    }
+                }
+            }
+        }
+        if let Some(error) = accumulator.stream_error.take() {
+            if error.is_rate_limited() {
+                return Err(AttemptError::RateLimited(RateLimitFailure {
+                    message: error.message,
+                    retry_after: error.retry_after,
+                    retry_safe: !accumulator.emitted_output(),
+                }));
+            }
+            return Err(LlmError::Message(error.message).into());
+        }
+        Ok(accumulator.finish())
+    }
+}
+
+fn retry_after_header(headers: &reqwest::header::HeaderMap) -> Option<Duration> {
+    headers
+        .get(RETRY_AFTER)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<u64>().ok())
+        .map(Duration::from_secs)
+}
+
+fn retry_after_body(body: &str) -> Option<Duration> {
+    serde_json::from_str::<Value>(body)
+        .ok()?
+        .get("error")?
+        .get("metadata")?
+        .as_object()
+        .and_then(retry_after_from_metadata)
+}
+
+fn rate_limit_delay(server_hint: Option<Duration>, retry: usize) -> Duration {
+    server_hint
+        .unwrap_or_else(|| Duration::from_secs(2_u64 << retry.min(4)))
+        .min(MAX_RATE_LIMIT_DELAY)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::{TcpListener, TcpStream};
+
+    use super::*;
+
+    fn sse_response(body: &str) -> Vec<u8> {
+        format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len()
+        )
+        .into_bytes()
+    }
+
+    fn http_rate_limit(retry_after: u64) -> Vec<u8> {
+        let body = r#"{"error":{"code":429,"message":"Provider returned error","metadata":{"retry_after_seconds":0}}}"#;
+        format!(
+            "HTTP/1.1 429 Too Many Requests\r\nContent-Type: application/json\r\nRetry-After: {retry_after}\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len(),
+        )
+        .into_bytes()
+    }
+
+    fn in_band_rate_limit(prefix: &str) -> Vec<u8> {
+        let body = [
+            prefix,
+            r#"data: {"error":{"code":429,"message":"Provider returned error","metadata":{"error_type":"rate_limit_exceeded","retry_after_seconds":0}},"choices":[{"delta":{"content":""},"finish_reason":"error"}]}"#,
+            "data: [DONE]",
+            "",
+        ]
+        .join("\n\n");
+        sse_response(&body)
+    }
+
+    fn success() -> Vec<u8> {
+        let body = [
+            r#"data: {"choices":[{"delta":{"content":"done"}}]}"#,
+            r#"data: {"choices":[{"delta":{},"finish_reason":"stop"}]}"#,
+            "data: [DONE]",
+            "",
+        ]
+        .join("\n\n");
+        sse_response(&body)
+    }
+
+    async fn read_request(stream: &mut TcpStream) {
+        let mut bytes = Vec::new();
+        let mut chunk = [0_u8; 4096];
+        let mut body_len = None;
+        loop {
+            let count = stream.read(&mut chunk).await.unwrap();
+            if count == 0 {
+                return;
+            }
+            bytes.extend_from_slice(&chunk[..count]);
+            let Some(headers_end) = bytes.windows(4).position(|value| value == b"\r\n\r\n") else {
+                continue;
+            };
+            if body_len.is_none() {
+                let headers = String::from_utf8_lossy(&bytes[..headers_end]);
+                body_len = headers.lines().find_map(|line| {
+                    let (name, value) = line.split_once(':')?;
+                    name.eq_ignore_ascii_case("content-length")
+                        .then(|| value.trim().parse::<usize>().ok())
+                        .flatten()
+                });
+            }
+            if body_len.is_some_and(|length| bytes.len() >= headers_end + 4 + length) {
+                return;
+            }
+        }
+    }
+
+    async fn endpoint(responses: Vec<Vec<u8>>) -> (String, Arc<AtomicUsize>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let server_calls = calls.clone();
+        tokio::spawn(async move {
+            for response in responses {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                read_request(&mut stream).await;
+                server_calls.fetch_add(1, Ordering::SeqCst);
+                stream.write_all(&response).await.unwrap();
+                stream.flush().await.unwrap();
+            }
+        });
+        (format!("http://{address}/v1"), calls)
+    }
+
+    async fn run(base_url: &str, output: &mut String) -> Result<AssistantTurn, LlmError> {
+        let client = LlmClient::from_parts(base_url, "fake-model", None, Vec::new(), None).unwrap();
+        client
+            .stream_chat(
+                &[ChatMessage::user("hello")],
+                &[],
+                &CancellationToken::new(),
+                |text| output.push_str(text),
+                |_| {},
+            )
+            .await
+    }
+
+    #[test]
+    fn fallback_delay_is_exponential_and_capped() {
+        let delays = (0..8)
+            .map(|retry| rate_limit_delay(None, retry))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            delays,
+            vec![
+                Duration::from_secs(2),
+                Duration::from_secs(4),
+                Duration::from_secs(8),
+                Duration::from_secs(16),
+                Duration::from_secs(30),
+                Duration::from_secs(30),
+                Duration::from_secs(30),
+                Duration::from_secs(30),
+            ]
+        );
+        assert_eq!(
+            rate_limit_delay(Some(Duration::from_secs(7)), 0),
+            Duration::from_secs(7)
+        );
+        assert_eq!(
+            rate_limit_delay(Some(Duration::from_secs(45)), 0),
+            MAX_RATE_LIMIT_DELAY
+        );
+    }
+
+    #[tokio::test]
+    async fn retries_in_band_rate_limit_before_output() {
+        let (base_url, calls) = endpoint(vec![in_band_rate_limit(""), success()]).await;
+        let mut output = String::new();
+        let turn = run(&base_url, &mut output).await.unwrap();
+        assert_eq!(turn.text, "done");
+        assert_eq!(output, "done");
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn retries_http_rate_limit_before_output() {
+        let (base_url, calls) = endpoint(vec![http_rate_limit(0), success()]).await;
+        let mut output = String::new();
+        let turn = run(&base_url, &mut output).await.unwrap();
+        assert_eq!(turn.text, "done");
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn cancellation_interrupts_rate_limit_backoff() {
+        let (base_url, calls) = endpoint(vec![http_rate_limit(30)]).await;
+        let client =
+            LlmClient::from_parts(&base_url, "fake-model", None, Vec::new(), None).unwrap();
+        let cancel = CancellationToken::new();
+        let task_cancel = cancel.clone();
+        let task = tokio::spawn(async move {
+            client
+                .stream_chat(
+                    &[ChatMessage::user("hello")],
+                    &[],
+                    &task_cancel,
+                    |_| {},
+                    |_| {},
+                )
+                .await
+        });
+        while calls.load(Ordering::SeqCst) == 0 {
+            tokio::task::yield_now().await;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        cancel.cancel();
+        assert!(matches!(task.await.unwrap(), Err(LlmError::Cancelled)));
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn stops_after_bounded_rate_limit_retries() {
+        let responses = (0..=MAX_RATE_LIMIT_RETRIES)
+            .map(|_| in_band_rate_limit(""))
+            .collect();
+        let (base_url, calls) = endpoint(responses).await;
+        let error = run(&base_url, &mut String::new()).await.unwrap_err();
+        assert!(error.to_string().contains("429 rate_limit_exceeded"));
+        assert_eq!(calls.load(Ordering::SeqCst), MAX_RATE_LIMIT_RETRIES + 1);
+    }
+
+    #[tokio::test]
+    async fn does_not_retry_after_partial_output() {
+        let partial = r#"data: {"choices":[{"delta":{"content":"partial"}}]}"#;
+        let (base_url, calls) = endpoint(vec![in_band_rate_limit(partial)]).await;
+        let mut output = String::new();
+        let error = run(&base_url, &mut output).await.unwrap_err();
+        assert!(error.to_string().contains("429 rate_limit_exceeded"));
+        assert_eq!(output, "partial");
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+}

@@ -21,6 +21,7 @@ import {
   type PendingAttachment,
   type Upload,
 } from "../lib/attachments";
+import { minLoadDuration } from "../lib/minLoadDuration";
 import {
   loadAuthSession,
   refreshAuthSession,
@@ -48,7 +49,11 @@ import {
   loadBrowserEnabled,
   saveBrowserEnabled,
   localSettingsReady,
+  loadChatModels,
+  saveChatModels,
+  effectiveModelSettings,
   type LocalAgentSettings,
+  type ChatModelOverride,
 } from "../lib/localAgent";
 import { pickFolder } from "../lib/pickFolder";
 import { sshConnect, sshDisconnect, remoteTarget, type RemoteInfo } from "../lib/ssh";
@@ -184,6 +189,12 @@ interface SessionState {
   composerPrefill: string | null;
   /** Config for the "Local coding" provider (persisted to localStorage). */
   localSettings: LocalAgentSettings;
+  /** Per-conversation model + reasoning-effort overrides, keyed by conversation
+   *  id. The active chat's `effectiveModel` / `effectiveReasoningEffort` fall
+   *  back to `localSettings` when no override is set, so a chat only diverges
+   *  from the default once the model is changed inside it. Persisted to
+   *  localStorage (the cloud stores transcripts, not model prefs). */
+  chatModels: Record<string, ChatModelOverride>;
   /** Where the next session runs: this machine, or a remote host over SSH. */
   projectMode: "local" | "remote";
   /** The saved SSH host selected for a remote session (id into sshHosts). */
@@ -297,9 +308,11 @@ interface SessionState {
    *  skipped (a notice is flashed); the rest are closed + deleted from the
    *  cloud. Selection is cleared afterwards. */
   deleteSelectedConversations: () => void;
-  /** Change the coding model / reasoning effort. Persists, and when a session is
-   *  live, hot-swaps the provider's LLM (the transcript is kept — the next turn
-   *  continues with full context on the new model). */
+  /** Change the coding model / reasoning effort for the ACTIVE conversation.
+   *  Writes a per-chat override (so other chats keep their own model), persists
+   *  it, and — when a local session is live — hot-swaps that session's provider
+   *  LLM (the transcript is kept; the next turn continues with full context on
+   *  the new model). With no active chat, edits the global default instead. */
   updateModelSettings: (patch: { model?: string; reasoningEffort?: string }) => Promise<void>;
   /** Stage text in the composer ("Edit & resend" on a sent message). */
   setComposerPrefill: (text: string | null) => void;
@@ -529,6 +542,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   opening: null,
   composerPrefill: null,
   localSettings: loadLocalSettings(),
+  chatModels: loadChatModels(),
   projectMode: "local",
   selectedHostId: loadSshHosts()[0]?.id ?? null,
   activeRemote: null,
@@ -945,12 +959,18 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     set({ loadingMemory: true });
     try {
       // Project scope needs a folder; global scope is per-user (always available).
-      const [memoryOverview, globalMemoryOverview] = await Promise.all([
-        cwd ? bridge.listMemory(cwd, remote) : Promise.resolve(null),
-        bridge.listGlobalMemory?.() ?? Promise.resolve(null),
-      ]);
+      // minLoadDuration holds the loading flag for one spin so the refresh icon
+      // animates — a local disk read settles in a single frame and React never
+      // paints the spinner, so the click looks frozen. Slower reads already spin.
+      const [memoryOverview, globalMemoryOverview] = await minLoadDuration(
+        Promise.all([
+          cwd ? bridge.listMemory(cwd, remote) : Promise.resolve(null),
+          bridge.listGlobalMemory?.() ?? Promise.resolve(null),
+        ]),
+      );
       set({ loadingMemory: false, memoryOverview, globalMemoryOverview, memoryStatus: null });
     } catch (e) {
+      await minLoadDuration(Promise.reject(e));
       set({ loadingMemory: false, memoryStatus: `Could not read memory: ${String(e)}` });
     }
   },
@@ -1243,7 +1263,11 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       // new ones — the engine rebuilds from scratch and would otherwise default
       // to plan_mode off even while the pill says "Plan first". (Local-only:
       // for the cloud provider `mode` means the tier, not a permission mode.)
+      // The model comes from the conversation's per-chat override when one was
+      // set, else the global default — so reopening a chat that ran a different
+      // model starts it on that model again, not the current default.
       const mode = get().permissionMode;
+      const effSettings = effectiveModelSettings(localSettings, get().chatModels, id);
       if (wantRemote) {
         const host = loadSshHosts().find((h) => h.host.trim() === openingMeta!.remoteHost);
         if (!host) {
@@ -1254,13 +1278,13 @@ export const useSessionStore = create<SessionState>((set, get) => ({
           conversationProjectRoot(openingMeta?.project, host.remoteRoot),
         );
         remoteHost = host.host.trim();
-        config = localConnectConfig(localSettings, remoteTarget(remote));
+        config = localConnectConfig(effSettings, remoteTarget(remote));
         options = { cwd: remote.cwd, mode };
       } else if (isLocal) {
         if (!requestedProjectRoot) {
           throw new Error("This conversation has no project folder. Choose one before reopening it.");
         }
-        config = localConnectConfig({ ...localSettings, cwd: requestedProjectRoot });
+        config = localConnectConfig({ ...effSettings, cwd: requestedProjectRoot });
         options = { cwd: requestedProjectRoot, mode };
       } else {
         config = { endpoint: auth?.clark.endpoint, auth_token: auth?.clark.token };
@@ -1310,8 +1334,8 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         resumed: true,
         restoredSnapshot: restored !== null,
         projectMode: wantRemote ? "remote" : "local",
-        model: isLocal ? localSettings.model : undefined,
-        reasoningEffort: isLocal ? localSettings.reasoningEffort : undefined,
+        model: isLocal ? effSettings.model : undefined,
+        reasoningEffort: isLocal ? effSettings.reasoningEffort : undefined,
         permissionMode: get().permissionMode,
         outputStyle: get().outputStyle,
       });
@@ -1526,23 +1550,55 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   },
 
   updateModelSettings: async ({ model, reasoningEffort }) => {
-    const s = get().localSettings;
-    const next = {
-      ...s,
-      ...(model !== undefined ? { model } : {}),
-      ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
-    };
-    saveLocalSettings(next);
-    set({ localSettings: next });
+    const { session, chatModels, localSettings } = get();
+    const id = session?.id;
+
+    // Resolve the new effective values for the target. When a chat is open,
+    // the change scopes to THAT chat: start from its current effective values
+    // (or the global default) and apply the patch. Other chats are untouched.
+    // With no open chat (the start screen), edit the global default instead.
+    let nextChatModels = chatModels;
+    let effectiveModel: string;
+    let effectiveEffort: string;
+    let nextLocal = localSettings;
+
+    if (id) {
+      const ov = chatModels[id] ?? {
+        model: localSettings.model,
+        reasoningEffort: localSettings.reasoningEffort,
+      };
+      effectiveModel = model !== undefined ? model : ov.model;
+      effectiveEffort = reasoningEffort !== undefined ? reasoningEffort : ov.reasoningEffort;
+      nextChatModels = {
+        ...chatModels,
+        [id]: { model: effectiveModel, reasoningEffort: effectiveEffort },
+      };
+      saveChatModels(nextChatModels);
+      set({ chatModels: nextChatModels });
+    } else {
+      nextLocal = {
+        ...localSettings,
+        ...(model !== undefined ? { model } : {}),
+        ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
+      };
+      effectiveModel = nextLocal.model;
+      effectiveEffort = nextLocal.reasoningEffort;
+      saveLocalSettings(nextLocal);
+      set({ localSettings: nextLocal });
+    }
+
     // Hot-swap the live provider's LLM. `reconfigure` re-runs connect on the
     // EXISTING instance, so the model-visible transcript survives and the next
     // turn continues with full context on the new model.
-    const { bridge, session, activeRemote } = get();
+    const { bridge, activeRemote } = get();
     if (!bridge?.reconfigure || !session || session.provider !== "local") return;
+    // Build the connect config from the chat's EFFECTIVE settings so a remote
+    // root + per-chat model both survive the hot-swap.
+    const effSettings = { ...nextLocal, model: effectiveModel, reasoningEffort: effectiveEffort };
     try {
       const config = activeRemote
-        ? localConnectConfig(next, remoteTarget(activeRemote))
-        : localConnectConfig(next);
+        ? localConnectConfig(effSettings, remoteTarget(activeRemote))
+        : localConnectConfig(effSettings);
       await bridge.reconfigure(session.id, config);
     } catch (e) {
       set({ error: `Model switch failed: ${String(e)}` });
@@ -1609,10 +1665,20 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     const uploads = attachments.map(toUpload);
     for (const a of attachments) if (a.previewUrl) URL.revokeObjectURL(a.previewUrl);
     set({ attachments: [], error: null });
-    // A run is active in THIS conversation: queue instead of interrupting. It
-    // sends automatically once the run finishes (drained in the subscribe
-    // handler) — even if the user has switched to another conversation.
+    // A run is active in THIS conversation. Local engine: STEER — the message
+    // is injected into the live run between tool batches (Codex behavior), so
+    // "actually, use pnpm" lands while the agent works instead of after it
+    // finishes. Attachments can't ride a steer, and other providers have no
+    // steering — those fall back to the queue, drained when the run ends.
     if (isBusy(snapshot)) {
+      if (session.provider === "local" && uploads.length === 0 && bridge.steer) {
+        try {
+          await bridge.steer(session.id, [{ type: "text", text }]);
+          return;
+        } catch {
+          /* the run just ended, or steering is unavailable — queue instead */
+        }
+      }
       const queuedMessage = { id: crypto.randomUUID(), text, uploads };
       const entry = liveSessions.get(session.id);
       if (entry) entry.queued = [...entry.queued, queuedMessage];

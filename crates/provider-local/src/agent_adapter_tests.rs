@@ -38,6 +38,85 @@ async fn desktop_sink_preserves_stream_lifecycle_events_as_trace() {
     }
 }
 
+#[tokio::test]
+async fn desktop_sink_captures_only_canonical_completed_turns() {
+    let (send, _receive) = async_channel::unbounded();
+    let sink = DesktopEventSink::new(
+        send,
+        RunId::new("run-1"),
+        Arc::new(ToolRegistry::new(None, None)),
+        None,
+    );
+    let completed = sink.completed_transcript();
+    let user = ca::AgentMessage::User {
+        content: ca::UserContent::Text("inspect it".into()),
+        timestamp: None,
+    };
+    ca::EventSink::emit(
+        &sink,
+        ca::AgentEvent::MessageEnd {
+            message: user.clone(),
+        },
+    )
+    .await;
+
+    // A fully streamed assistant message is still provisional until TurnEnd:
+    // max-token retries and tool execution failures both stop before that gate.
+    ca::EventSink::emit(
+        &sink,
+        ca::AgentEvent::MessageEnd {
+            message: ca::AgentMessage::Assistant {
+                content: ca::AssistantContent::text("discarded attempt"),
+                stop_reason: ca::StopReason::MaxTokens,
+                error_message: None,
+                timestamp: None,
+                usage: None,
+            },
+        },
+    )
+    .await;
+
+    let assistant = ca::AgentMessage::Assistant {
+        content: ca::AssistantContent::text("completed turn"),
+        stop_reason: ca::StopReason::EndTurn,
+        error_message: None,
+        timestamp: None,
+        usage: None,
+    };
+    let tool_result = ca::AgentMessage::ToolResult {
+        tool_call_id: "call-1".into(),
+        tool_name: "read_file".into(),
+        content: ca::ToolResultContent::text("contents"),
+        is_error: false,
+        narration: None,
+        details: None,
+        timestamp: None,
+    };
+    ca::EventSink::emit(
+        &sink,
+        ca::AgentEvent::TurnEnd {
+            message: assistant.clone(),
+            tool_results: vec![tool_result.clone()],
+        },
+    )
+    .await;
+    ca::EventSink::emit(
+        &sink,
+        ca::AgentEvent::MessageEnd {
+            message: ca::AgentMessage::Assistant {
+                content: ca::AssistantContent::text("transport error"),
+                stop_reason: ca::StopReason::Error,
+                error_message: Some("disconnected".into()),
+                timestamp: None,
+                usage: None,
+            },
+        },
+    )
+    .await;
+
+    assert_eq!(completed.snapshot(), vec![user, assistant, tool_result]);
+}
+
 #[test]
 fn tool_title_uses_salient_argument() {
     assert_eq!(

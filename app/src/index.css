@@ -408,11 +408,26 @@ svg.lucide {
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
+/* Explicit, guaranteed spin: every spinner uses the arbitrary
+   `animate-[spin_1s_linear_infinite]` form, which compiles to the `spin`
+   keyframes above. Defined as a utility (not Tailwind's theme-variable
+   `animate-spin`, which breaks if the theme chain is ever reordered). */
+.animate-spin {
+  animation: spin 1s linear infinite;
+}
 @keyframes breathe {
   0%, 100% { opacity: 0.55; }
   50% { opacity: 1; }
 }
 .breathe { animation: breathe 1.6s ease-in-out infinite; }
+
+/* Streaming caret: a soft blink that keeps reading pace without the harsh
+   hard-edged flash of a terminal cursor. */
+@keyframes caret-blink {
+  0%, 100% { opacity: 0.9; }
+  50% { opacity: 0.25; }
+}
+.stream-caret { animation: caret-blink 1s ease-in-out infinite; }
 
 /* Skeleton shimmer for render previews while content loads. */
 @keyframes shimmer {
@@ -456,7 +471,8 @@ svg.lucide {
   .breathe,
   .fade-in,
   .appear-delayed,
-  .skeleton {
+  .skeleton,
+  .stream-caret {
     animation: none !important;
   }
 

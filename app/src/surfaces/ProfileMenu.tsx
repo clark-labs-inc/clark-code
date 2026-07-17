@@ -81,7 +81,7 @@ export function ProfileMenu({ variant = "topbar" }: { variant?: "topbar" | "side
           onClick={() => setOpen((o) => !o)}
           aria-label="Account"
           title={user.email ?? user.name}
-          className="flex h-8 w-full items-center gap-2 rounded-lg px-1.5 text-left transition hover:bg-bg-hover"
+          className="flex h-9 w-full items-center gap-2 rounded-lg px-2 text-left transition hover:bg-bg-hover"
         >
           {user.avatar ? (
             <img src={user.avatar} alt="" className="size-5 shrink-0 rounded-full" />
@@ -90,7 +90,7 @@ export function ProfileMenu({ variant = "topbar" }: { variant?: "topbar" | "side
               {user.name.charAt(0).toUpperCase()}
             </span>
           )}
-          <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-ink">{user.name}</span>
+          <span className="min-w-0 flex-1 truncate text-sm font-medium leading-5 text-ink">{user.name}</span>
           <ChevronsUpDown className="size-3.5 shrink-0 text-ink-faint" />
         </button>
       ) : (
@@ -103,7 +103,7 @@ export function ProfileMenu({ variant = "topbar" }: { variant?: "topbar" | "side
           {user.avatar ? (
             <img src={user.avatar} alt="" className="size-7 rounded-full" />
           ) : (
-            <span className="grid size-7 place-items-center rounded-full bg-bg-tertiary text-xs font-semibold text-ink-secondary transition hover:bg-bg-hover">
+            <span className="grid size-7 shrink-0 place-items-center rounded-full bg-bg-tertiary text-[11px] font-semibold text-ink-secondary transition hover:bg-bg-hover">
               {user.name.charAt(0).toUpperCase()}
             </span>
           )}

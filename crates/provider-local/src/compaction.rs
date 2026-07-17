@@ -34,9 +34,25 @@ impl ca::Plugin for CheckpointCompactor {
     }
 }
 
+impl CheckpointCompactor {
+    /// Whether the provider's own accounting says the prompt has crossed the
+    /// threshold. The char/4 heuristic under-counts structured transcripts
+    /// (JSON tool args, code); the `input_tokens` the provider reported for
+    /// the previous call is ground truth for what the next one will cost.
+    fn usage_over_limit(&self, cx: &ca::TransformContext<'_>) -> bool {
+        self.config.enabled()
+            && cx.last_provider_usage.is_some_and(|usage| {
+                usage.input_tokens.max(0) as usize >= self.config.auto_compact_token_limit
+            })
+    }
+}
+
 #[async_trait]
 impl ca::ContextTransform for CheckpointCompactor {
-    fn should_run(&self, messages: &[ca::AgentMessage], _cx: &ca::TransformContext<'_>) -> bool {
+    fn should_run(&self, messages: &[ca::AgentMessage], cx: &ca::TransformContext<'_>) -> bool {
+        if self.usage_over_limit(cx) {
+            return true;
+        }
         let views = message_views(messages);
         core::should_compact(&views, &self.config, &core::CharHeuristic)
     }
@@ -46,39 +62,93 @@ impl ca::ContextTransform for CheckpointCompactor {
         messages: Vec<ca::AgentMessage>,
         cx: &ca::TransformContext<'_>,
     ) -> Vec<ca::AgentMessage> {
-        let views = message_views(&messages);
-        let Some(prepared) = core::prepare_compaction(&views, &self.config, &core::CharHeuristic)
-        else {
-            return messages;
+        // When real provider usage crossed the limit but the char heuristic
+        // hasn't, force the pass — `prepare_compaction` re-checks the
+        // heuristic internally and would otherwise no-op forever.
+        let config = if self.usage_over_limit(cx) {
+            forced(&self.config)
+        } else {
+            self.config.clone()
         };
-
-        let Ok(mut summary) = self
-            .llm
-            .complete(None, &prepared.request.prompt, cx.signal)
-            .await
-        else {
-            return messages;
-        };
-
-        if prepared.request.omitted_messages > 0 {
-            summary.push_str(&format!(
-                "\n\nNote: {omitted} older message(s) were omitted before compaction because the transcript was already near the context limit.",
-                omitted = prepared.request.omitted_messages
-            ));
+        match compact_once(&self.llm, &config, &messages, cx.signal).await {
+            Some(next) => next,
+            None => messages,
         }
-        // The summary is a point-in-time snapshot that outlives the files it
-        // describes — other agents share this tree, so beliefs formed from it
-        // go stale. Stamp it the way resume-context already is.
-        summary.push_str(
-            "\n\n[Point-in-time summary: files and code described above may have changed since \
-this was written — re-read a file before relying on its described contents.]",
-        );
-
-        let compacted = core::finalize_compaction(&prepared.plan, &summary);
-        let mut next = vec![user_message(compacted.summary_message)];
-        next.extend(compacted.recent_user_messages.into_iter().map(user_message));
-        next
     }
+}
+
+/// The auto-compaction threshold in tokens, `None` when compaction is
+/// disabled — the number the UI's context meter should measure against.
+pub(crate) fn limit_of(config: &CompactionConfig) -> Option<u64> {
+    config
+        .enabled()
+        .then_some(config.auto_compact_token_limit as u64)
+}
+
+/// A config whose threshold always fires, keeping the other budgets intact.
+fn forced(config: &CompactionConfig) -> CompactionConfig {
+    CompactionConfig {
+        auto_compact_token_limit: 1,
+        ..config.clone()
+    }
+}
+
+/// One checkpoint-compaction pass over `messages`: summarize via the LLM
+/// (one retry on a transient failure) and rebuild the transcript as
+/// `[summary] + recent user tail`. `None` = nothing to do or the LLM failed —
+/// callers keep the original messages (fail-open).
+pub(crate) async fn compact_once(
+    llm: &LlmClient,
+    config: &CompactionConfig,
+    messages: &[ca::AgentMessage],
+    signal: &tokio_util::sync::CancellationToken,
+) -> Option<Vec<ca::AgentMessage>> {
+    let views = message_views(messages);
+    let prepared = core::prepare_compaction(&views, config, &core::CharHeuristic)?;
+
+    let mut summary = match llm.complete(None, &prepared.request.prompt, signal).await {
+        Ok(summary) => summary,
+        Err(_) if !signal.is_cancelled() => {
+            // One retry: compaction failing means the run dies at the window
+            // edge later, so a transient summarizer hiccup is worth absorbing.
+            tokio::time::sleep(std::time::Duration::from_millis(350)).await;
+            llm.complete(None, &prepared.request.prompt, signal)
+                .await
+                .ok()?
+        }
+        Err(_) => return None,
+    };
+
+    if prepared.request.omitted_messages > 0 {
+        summary.push_str(&format!(
+            "\n\nNote: {omitted} older message(s) were omitted before compaction because the transcript was already near the context limit.",
+            omitted = prepared.request.omitted_messages
+        ));
+    }
+    // The summary is a point-in-time snapshot that outlives the files it
+    // describes — other agents share this tree, so beliefs formed from it
+    // go stale. Stamp it the way resume-context already is.
+    summary.push_str(
+        "\n\n[Point-in-time summary: files and code described above may have changed since \
+this was written — re-read a file before relying on its described contents.]",
+    );
+
+    let compacted = core::finalize_compaction(&prepared.plan, &summary);
+    let mut next = vec![user_message(compacted.summary_message)];
+    next.extend(compacted.recent_user_messages.into_iter().map(user_message));
+    Some(next)
+}
+
+/// Force a compaction pass regardless of the configured threshold — the
+/// engine's context-overflow recovery: the provider just rejected the prompt,
+/// so the transcript must shrink for the retry to have any chance.
+pub(crate) async fn force_compact(
+    llm: &LlmClient,
+    config: &CompactionConfig,
+    messages: &[ca::AgentMessage],
+    signal: &tokio_util::sync::CancellationToken,
+) -> Option<Vec<ca::AgentMessage>> {
+    compact_once(llm, &forced(config), messages, signal).await
 }
 
 #[derive(Clone, Copy)]
@@ -345,5 +415,66 @@ mod tests {
         assert!(first.contains(core::DEFAULT_SUMMARY_PREFIX));
         let last = rendered(next.last().unwrap());
         assert!(last.contains("CLARK_LIVE_COMPACTION_DONE_3003"));
+    }
+}
+
+#[cfg(test)]
+mod usage_trigger_tests {
+    use super::*;
+    use tokio_util::sync::CancellationToken;
+
+    fn compactor(limit: usize) -> CheckpointCompactor {
+        let provider_config = agent_core::provider::ProviderConfig {
+            auth_token: Some("k".into()),
+            extra: serde_json::json!({"base_url": "http://127.0.0.1:1/v1", "model": "m"}),
+            ..Default::default()
+        };
+        let local = crate::config::LocalConfig::from_provider_config(&provider_config);
+        let llm = crate::llm::LlmClient::new(&local).unwrap();
+        CheckpointCompactor::new(
+            llm,
+            CompactionConfig {
+                auto_compact_token_limit: limit,
+                ..CompactionConfig::default()
+            },
+        )
+    }
+
+    #[test]
+    fn provider_usage_triggers_compaction_before_the_char_heuristic() {
+        use clark_agent::ContextTransform;
+        let cancel = CancellationToken::new();
+        // A tiny transcript the char heuristic would never flag…
+        let messages = vec![user_message("short")];
+        let over = ca::types::Usage {
+            input_tokens: 2_000,
+            output_tokens: 0,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 0,
+        };
+        let cx = ca::TransformContext {
+            signal: &cancel,
+            model_id: "m",
+            iteration: 3,
+            last_provider_usage: Some(&over),
+            estimator: &ca::CHAR_HEURISTIC,
+        };
+        // …but the provider says the real prompt already crossed the limit.
+        assert!(compactor(1_000).should_run(&messages, &cx));
+
+        let under = ca::types::Usage {
+            input_tokens: 10,
+            output_tokens: 0,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 0,
+        };
+        let cx_under = ca::TransformContext {
+            signal: &cancel,
+            model_id: "m",
+            iteration: 3,
+            last_provider_usage: Some(&under),
+            estimator: &ca::CHAR_HEURISTIC,
+        };
+        assert!(!compactor(1_000).should_run(&messages, &cx_under));
     }
 }

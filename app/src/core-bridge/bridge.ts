@@ -78,6 +78,10 @@ export interface CoreBridge {
    *  going) — surface a non-blocking warning. Returns an unsubscribe fn. */
   onCloudSyncWarning?(handler: (message: string) => void): () => void;
   prompt(sessionId: string, blocks: ContentBlock[], attachments?: Upload[]): Promise<void>;
+  /** Inject a user message into the session's ACTIVE run (mid-run steering).
+   *  Rejects when the provider has no live run or no steering support —
+   *  callers fall back to queueing the message as a normal follow-up. */
+  steer?(sessionId: string, blocks: ContentBlock[]): Promise<void>;
   cancel(sessionId: string, runId: string): Promise<void>;
   respond(sessionId: string, response: ClientResponse): Promise<void>;
   /** Best-effort: ask the provider to switch the session's named mode (e.g.

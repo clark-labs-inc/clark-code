@@ -37,6 +37,31 @@ pub const DEFAULT_MAX_ITERATIONS: u32 = 1000;
 /// context before the next model request. GLM 5.2 gives us a 1M-token window, so
 /// leave plenty of room for the next turn instead of compacting early.
 pub const DEFAULT_AUTO_COMPACT_TOKEN_LIMIT: usize = 300_000;
+
+/// Known context windows for the clark-code tier models (mirrors the stated
+/// windows in `app/src/lib/localAgent.ts`). Only models with a product-stated
+/// window are listed; unknown models fall back to the flat default plus the
+/// engine's overflow-recovery path.
+fn model_context_window(model: &str) -> Option<usize> {
+    match model {
+        "clark-code" => Some(1_000_000),         // GLM 5.2
+        "clark-code:kimi_k3" => Some(1_000_000), // "1M context"
+        "clark-code:grok45" => Some(500_000),    // "500K context"
+        _ => None,
+    }
+}
+
+/// Effective auto-compaction threshold for `model`: the flat default, lowered
+/// (never raised — 300k on a 1M window is a deliberate cost choice) to 90% of
+/// the model's known context window when that is smaller. Codex's rule, applied
+/// defensively: a model whose whole window is under the flat default must
+/// compact before it overflows, not after.
+pub(crate) fn default_auto_compact_limit(model: &str) -> usize {
+    match model_context_window(model) {
+        Some(window) => DEFAULT_AUTO_COMPACT_TOKEN_LIMIT.min(window / 10 * 9),
+        None => DEFAULT_AUTO_COMPACT_TOKEN_LIMIT,
+    }
+}
 /// Approximate source budget for the summarization request itself.
 pub const DEFAULT_COMPACT_REQUEST_TOKEN_LIMIT: usize = 250_000;
 /// Approximate budget for preserving recent real user messages after compaction.
@@ -240,7 +265,7 @@ impl LocalConfig {
         {
             let auto_compact_token_limit = usize_field(extra, "auto_compact_token_limit")
                 .filter(|n| *n > 0)
-                .unwrap_or(DEFAULT_AUTO_COMPACT_TOKEN_LIMIT);
+                .unwrap_or_else(|| default_auto_compact_limit(&model));
             let compact_request_token_limit = usize_field(extra, "compact_request_token_limit")
                 .filter(|n| *n > 0)
                 .unwrap_or_else(|| {

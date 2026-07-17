@@ -6,6 +6,10 @@ import { useEffect, useRef, useState } from "react";
 const DRAIN_RATIO = 12;
 /** Floor so short backlogs still advance visibly every frame. */
 const MIN_CHARS_PER_FRAME = 2;
+/** Cap the reveal cadence. At a full 60fps every rAF tick re-slices the string
+ *  and re-parses the streaming markdown tail — twice the work of the provider's
+ *  own token rate for no visible gain. ~30fps still reads as smooth typing. */
+const FRAME_MS = 33;
 
 /**
  * Reveal streamed text at a steady left-to-right pace instead of the chunky
@@ -28,12 +32,16 @@ export function useSmoothText(target: string, active: boolean): string {
   useEffect(() => {
     if (!active) return;
     let raf = 0;
-    const step = () => {
-      setShown((s) => {
-        const backlog = target.length - s;
-        if (backlog <= 0) return s;
-        return s + Math.max(MIN_CHARS_PER_FRAME, Math.ceil(backlog / DRAIN_RATIO));
-      });
+    let last = 0;
+    const step = (now: number) => {
+      if (now - last >= FRAME_MS) {
+        last = now;
+        setShown((s) => {
+          const backlog = target.length - s;
+          if (backlog <= 0) return s;
+          return s + Math.max(MIN_CHARS_PER_FRAME, Math.ceil(backlog / DRAIN_RATIO));
+        });
+      }
       raf = requestAnimationFrame(step);
     };
     raf = requestAnimationFrame(step);

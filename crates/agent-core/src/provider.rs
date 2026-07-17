@@ -188,6 +188,16 @@ pub trait Provider: Send + Sync {
     /// Send a user turn; returns the run's normalized event stream.
     async fn prompt(&mut self, session: &SessionId, input: PromptInput) -> Result<EventStream>;
 
+    /// Inject a user message into the session's ACTIVE run — it lands between
+    /// tool batches (steering) instead of waiting for the run to end. Errors
+    /// with `Unsupported` when the provider has no steering or no live run;
+    /// callers fall back to queueing the message as a normal follow-up turn.
+    async fn steer(&mut self, _session: &SessionId, _input: PromptInput) -> Result<()> {
+        Err(crate::error::Error::Unsupported(
+            "this provider does not support mid-run steering".into(),
+        ))
+    }
+
     async fn cancel(&mut self, session: &SessionId, run: &RunId) -> Result<()>;
 
     /// Release session-owned resources before the host drops the provider.

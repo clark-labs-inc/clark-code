@@ -163,6 +163,9 @@ export function CommandPalette({
             onKeyDown={onKey}
             placeholder="Search actions and conversations…"
             aria-label="Search commands"
+            autoCorrect="off"
+            autoCapitalize="off"
+            spellCheck={false}
             className="composer-input w-full shrink-0 border-b border-border-subtle bg-transparent px-4 py-3.5 text-sm text-ink outline-none placeholder:text-ink-muted"
           />
           <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto p-1.5">

@@ -19,6 +19,7 @@ pub(crate) struct DesktopEventSink {
     events: Sender<desktop::AgentEvent>,
     run: RunId,
     registry: Arc<ToolRegistry>,
+    completed_transcript: CompletedRunTranscript,
     /// The app-managed document workspace (canonical), when this is a local
     /// session. Markdown files written here are surfaced as inline artifacts.
     docs_dir: Option<std::path::PathBuf>,
@@ -34,14 +35,73 @@ impl DesktopEventSink {
             events,
             run,
             registry,
+            completed_transcript: CompletedRunTranscript::default(),
             docs_dir,
         }
+    }
+
+    pub fn completed_transcript(&self) -> CompletedRunTranscript {
+        self.completed_transcript.clone()
+    }
+}
+
+/// Canonical messages that reached a complete commit boundary during a run.
+///
+/// `clark_agent::run` returns its message tail only on success. On an error it
+/// still emits typed lifecycle events, so retain the initial prompt/steering
+/// messages plus complete `TurnEnd` assistant/tool-result groups. Assistant
+/// `MessageEnd` alone is not a commit boundary: it can be a discarded
+/// max-token attempt, a transport error, or a tool turn that never completed.
+#[derive(Clone, Default)]
+pub(crate) struct CompletedRunTranscript {
+    messages: Arc<std::sync::Mutex<Vec<ca::AgentMessage>>>,
+}
+
+impl CompletedRunTranscript {
+    fn observe(&self, event: &ca::AgentEvent) {
+        let mut messages = self.messages.lock().expect("run transcript lock");
+        match event {
+            ca::AgentEvent::MessageEnd { message }
+                if !matches!(message, ca::AgentMessage::Assistant { .. }) =>
+            {
+                messages.push(message.clone());
+            }
+            ca::AgentEvent::TurnEnd {
+                message,
+                tool_results,
+            } if !matches!(
+                message,
+                ca::AgentMessage::Assistant {
+                    stop_reason: ca::StopReason::Error | ca::StopReason::Aborted,
+                    ..
+                }
+            ) =>
+            {
+                messages.push(message.clone());
+                messages.extend(tool_results.iter().cloned());
+            }
+            _ => {}
+        }
+    }
+
+    #[cfg(test)]
+    pub fn snapshot(&self) -> Vec<ca::AgentMessage> {
+        self.messages.lock().expect("run transcript lock").clone()
+    }
+
+    /// Take everything observed so far, leaving the tracker empty. The
+    /// engine's overflow recovery folds progress into the session transcript
+    /// mid-run; draining (instead of snapshotting) means a later fold after
+    /// the retry can't duplicate the same messages.
+    pub fn drain(&self) -> Vec<ca::AgentMessage> {
+        std::mem::take(&mut *self.messages.lock().expect("run transcript lock"))
     }
 }
 
 #[async_trait]
 impl ca::EventSink for DesktopEventSink {
     async fn emit(&self, event: ca::AgentEvent) {
+        self.completed_transcript.observe(&event);
         if let Ok(payload) = serde_json::to_value(&event) {
             let _ = self
                 .events
@@ -53,6 +113,27 @@ impl ca::EventSink for DesktopEventSink {
                 .await;
         }
         match event {
+            // The in-loop compactor rewrote the model-visible transcript.
+            // Surface it — a silent context rewrite reads as the agent
+            // "forgetting" for no reason (Codex shows the same warning).
+            ca::AgentEvent::ContextTransformApplied {
+                plugin,
+                before,
+                after,
+                ..
+            } if plugin == "checkpoint_compactor" && after.len() < before.len() => {
+                let _ = self
+                    .events
+                    .send(desktop::AgentEvent::MessageChunk {
+                        run: self.run.clone(),
+                        role: desktop::Role::System,
+                        delta: desktop::ContentBlock::text(
+                            "The conversation reached the model's context limit — earlier turns \
+                             were summarized so this task can continue.",
+                        ),
+                    })
+                    .await;
+            }
             ca::AgentEvent::MessageUpdate {
                 chunk: ca::AssistantStreamChunk::Text { delta },
                 ..

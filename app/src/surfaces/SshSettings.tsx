@@ -33,6 +33,8 @@ function HostCard({
           onChange={(e) => onChange({ ...host, label: e.target.value })}
           placeholder="label (e.g. gpu box)"
           className={cn(input, "flex-1 font-medium")}
+          autoCorrect="off"
+          autoCapitalize="off"
           spellCheck={false}
         />
         <button
@@ -60,6 +62,8 @@ function HostCard({
             onChange={(e) => onChange({ ...host, host: e.target.value })}
             placeholder="alias or user@host"
             className={cn(input, "font-mono text-xs")}
+            autoCorrect="off"
+            autoCapitalize="off"
             spellCheck={false}
           />
         </div>
@@ -70,6 +74,8 @@ function HostCard({
             onChange={(e) => onChange({ ...host, remoteRoot: e.target.value })}
             placeholder="/home/you/project"
             className={cn(input, "font-mono text-xs")}
+            autoCorrect="off"
+            autoCapitalize="off"
             spellCheck={false}
           />
         </div>
@@ -84,6 +90,8 @@ function HostCard({
           onChange={(e) => onChange({ ...host, binaryPath: e.target.value })}
           placeholder="Leave blank — fetched automatically for the remote's arch"
           className={cn(input, "font-mono text-xs")}
+          autoCorrect="off"
+          autoCapitalize="off"
           spellCheck={false}
         />
       </div>

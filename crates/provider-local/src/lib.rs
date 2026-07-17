@@ -47,10 +47,11 @@ mod resume;
 mod safety;
 mod sandbox;
 mod tools;
+mod truncation;
 mod workspace;
 
 pub use changes::{changes_diff, changes_revert, changes_summary, ChangedFile};
-pub use checkpoint::{create_checkpoint, is_git_repo, restore_checkpoint};
+pub use checkpoint::{create_checkpoint, is_git_repo};
 // Migrate an existing Claude Code setup: discover its MCP servers + skills.
 pub use claude_import::{discover_mcp_servers, discover_skills, ClaudeSkill};
 pub use commands::{discover_commands, CustomCommand};

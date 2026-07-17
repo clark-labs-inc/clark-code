@@ -7,6 +7,7 @@ import { useSessionStore } from "../store/sessionStore";
 import { projectName } from "../lib/localAgent";
 import { useIsNarrow } from "../lib/responsive";
 import { fuzzyFilter } from "../lib/fuzzy";
+import { stableRankMap } from "../lib/stableOrder";
 import { cn } from "../lib/cn";
 import { ProfileMenu } from "./ProfileMenu";
 import type { ConversationMeta } from "../lib/history";
@@ -21,9 +22,12 @@ interface ProjectGroup {
   latest: number;
 }
 
-/** Group conversations by their project (remote host, local folder, or none),
- *  Codex-style: newest project first, newest conversation first within each. */
-function groupByProject(list: ConversationMeta[]): ProjectGroup[] {
+/** Group conversations by their project (remote host, local folder, or none).
+ *  Order is STABLE: groups and the conversations within them keep the position
+ *  they first appeared in this session, so a conversation streaming in parallel
+ *  (its `updatedAt` bumping on every flush) never re-sorts the list out from
+ *  under the user. `rank` maps each conversation id to its first-seen slot. */
+function groupByProject(list: ConversationMeta[], rank: (id: string) => number): ProjectGroup[] {
   const map = new Map<string, ProjectGroup>();
   for (const c of list) {
     let key: string, label: string, title: string, kind: GroupKind;
@@ -45,15 +49,17 @@ function groupByProject(list: ConversationMeta[]): ProjectGroup[] {
     }
     let g = map.get(key);
     if (!g) {
-      g = { key, label, title, kind, convos: [], latest: 0 };
+      g = { key, label, title, kind, convos: [], latest: Infinity };
       map.set(key, g);
     }
     g.convos.push(c);
-    g.latest = Math.max(g.latest, c.updatedAt);
+    // A group's slot is set by its newest member (smallest stable rank key) and
+    // never moves afterward — a parallel run's timestamp bump can't reshuffle it.
+    g.latest = Math.min(g.latest, rank(c.id));
   }
   const groups = [...map.values()];
-  for (const g of groups) g.convos.sort((a, b) => b.updatedAt - a.updatedAt);
-  groups.sort((a, b) => b.latest - a.latest);
+  for (const g of groups) g.convos.sort((a, b) => rank(a.id) - rank(b.id));
+  groups.sort((a, b) => a.latest - b.latest);
   return groups;
 }
 
@@ -129,6 +135,9 @@ function ConversationRow({
               }
             }}
             aria-label="Rename conversation"
+            autoCorrect="off"
+            autoCapitalize="off"
+            spellCheck={false}
             className="composer-input min-w-0 flex-1 rounded-md bg-bg-sunken px-1.5 py-0.5 text-sm text-ink outline-none ring-1 ring-border-subtle"
           />
         </div>
@@ -191,15 +200,15 @@ function ArchivedRow({ c }: { c: ConversationMeta }) {
   const del = useSessionStore((s) => s.deleteConversation);
   const [confirming, setConfirming] = useState(false);
   return (
-    <div className="group flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-sm text-ink-faint transition hover:bg-bg-hover">
+    <div className="group flex h-7 w-full items-center gap-1 rounded-lg px-2 text-sm text-ink-faint transition hover:bg-bg-hover">
       <button
         onClick={() => restore(c.id)}
         title={`Restore “${c.title}”`}
         aria-label={`Restore ${c.title}`}
-        className="flex min-w-0 flex-1 items-center gap-2 text-left transition hover:text-ink-secondary"
+        className="flex min-w-0 flex-1 items-center gap-1.5 text-left transition hover:text-ink-secondary"
       >
         <MessageSquare className="size-3.5 shrink-0 text-ink-faint" />
-        <span className="min-w-0 flex-1 truncate leading-tight">{c.title}</span>
+        <span className="min-w-0 flex-1 truncate leading-5">{c.title}</span>
         <ArchiveRestore className="size-3.5 shrink-0 opacity-0 transition group-hover:opacity-100" />
       </button>
       {confirming ? (
@@ -207,14 +216,14 @@ function ArchivedRow({ c }: { c: ConversationMeta }) {
           <button
             onClick={() => del(c.id)}
             aria-label={`Permanently delete ${c.title}`}
-            className="min-h-8 rounded-md px-2 text-xs font-medium text-danger transition hover:bg-danger/10"
+            className="rounded-md px-1.5 py-0.5 text-xs font-medium text-danger transition hover:bg-danger/10"
           >
             Delete
           </button>
           <button
             onClick={() => setConfirming(false)}
             aria-label="Cancel delete"
-            className="min-h-8 rounded-md px-2 text-xs text-ink-muted transition hover:bg-bg-hover hover:text-ink"
+            className="rounded-md px-1.5 py-0.5 text-xs text-ink-muted transition hover:bg-bg-hover hover:text-ink"
           >
             Cancel
           </button>
@@ -224,7 +233,7 @@ function ArchivedRow({ c }: { c: ConversationMeta }) {
           onClick={() => setConfirming(true)}
           title="Delete permanently"
           aria-label={`Delete ${c.title} permanently`}
-          className="grid size-8 shrink-0 place-items-center rounded-md text-ink-faint opacity-0 transition hover:bg-danger/10 hover:text-danger group-hover:opacity-100"
+          className="grid size-6 shrink-0 place-items-center rounded-md text-ink-faint opacity-0 transition hover:bg-danger/10 hover:text-danger group-hover:opacity-100"
         >
           <Trash2 className="size-3.5" />
         </button>
@@ -357,16 +366,26 @@ export function Sidebar({
   // auto-collapses to the icon rail (and can't be expanded until there's room).
   const narrow = useIsNarrow(768);
 
+  // No artificial cap here: a hard limit combined with ranking by recency is
+  // what made the WHOLE list reshuffle once you passed it (any update landed in
+  // the top-N and triggered a full re-sort). Keep every conversation; order is
+  // stabilized below, and search narrows it when you actually filter.
   const visible = useMemo(
     () =>
       fuzzyFilter(
         conversations,
         filter,
         (c) => `${c.title} ${c.project ? projectName(c.project) : ""} ${c.remoteHost ?? ""}`,
-        200,
+        5000,
       ).map((m) => m.item),
     [conversations, filter],
   );
+  // One stable rank per conversation, shared by the group + row ordering so a
+  // parallel run's timestamp bump never reshuffles the list mid-session.
+  const rank = useMemo(() => {
+    const m = stableRankMap(visible);
+    return (id: string) => m.get(id) ?? 0;
+  }, [visible]);
   // Archived conversations are hidden from the project groups and collected into
   // their own collapsed section (search still matches across both).
   const activeConvos = useMemo(() => visible.filter((c) => !c.archived), [visible]);
@@ -374,7 +393,7 @@ export function Sidebar({
     () => visible.filter((c) => c.archived).sort((a, b) => b.updatedAt - a.updatedAt),
     [visible],
   );
-  const groups = useMemo(() => groupByProject(activeConvos), [activeConvos]);
+  const groups = useMemo(() => groupByProject(activeConvos, rank), [activeConvos, rank]);
 
   const openContextMenu = (e: React.MouseEvent, id: string) => {
     e.preventDefault();
@@ -479,6 +498,9 @@ export function Sidebar({
               onChange={(e) => setFilter(e.target.value)}
               placeholder="Search conversations…"
               aria-label="Search conversations"
+              autoCorrect="off"
+              autoCapitalize="off"
+              spellCheck={false}
               onKeyDown={(e) => {
                 if (e.key === "Escape") {
                   setFilter("");
@@ -545,34 +567,37 @@ export function Sidebar({
                 No active conversations.
               </p>
             )}
-
-            {archivedConvos.length > 0 && (
-              <section>
-                <button
-                  onClick={() => setArchivedOpen((o) => !o)}
-                  aria-expanded={archivedOpen}
-                  className="mt-3 mb-1 flex h-7 w-full items-center gap-2 px-2 text-sm font-medium text-ink-muted transition hover:text-ink first:mt-0"
-                >
-                  <ChevronRight
-                    className={`size-3 shrink-0 transition-transform ${archivedOpen ? "rotate-90" : ""}`}
-                  />
-                  <span>Archived</span>
-                  <span className="ml-auto shrink-0 text-xs font-normal tabular-nums text-ink-faint">
-                    {archivedConvos.length}
-                  </span>
-                </button>
-                {archivedOpen && (
-                  <div className="flex flex-col gap-0.5">
-                    {archivedConvos.map((c) => (
-                      <ArchivedRow key={c.id} c={c} />
-                    ))}
-                  </div>
-                )}
-              </section>
-            )}
           </div>
         )}
       </div>
+
+      {/* Archived lives outside the scrollable list so it never gets pushed
+          below the fold by a long project list: the toggle stays pinned above
+          the profile row, and expanding it opens a bounded, scrollable tray. */}
+      {archivedConvos.length > 0 && (
+        <div className="shrink-0 border-t border-border-subtle">
+          <button
+            onClick={() => setArchivedOpen((o) => !o)}
+            aria-expanded={archivedOpen}
+            className="flex h-9 w-full items-center gap-2 px-4 text-sm font-medium text-ink-muted transition hover:text-ink"
+          >
+            <ChevronRight
+              className={`size-3 shrink-0 transition-transform ${archivedOpen ? "rotate-90" : ""}`}
+            />
+            <span>Archived</span>
+            <span className="ml-auto shrink-0 text-xs font-normal tabular-nums text-ink-faint">
+              {archivedConvos.length}
+            </span>
+          </button>
+          {archivedOpen && (
+            <div className="flex max-h-56 flex-col gap-0.5 overflow-y-auto px-2 pb-2">
+              {archivedConvos.map((c) => (
+                <ArchivedRow key={c.id} c={c} />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {selectedIds.size > 0 && (
         <div className="flex shrink-0 items-center gap-1.5 border-t border-border-subtle px-3 py-2 text-xs text-ink-muted">
@@ -602,7 +627,7 @@ export function Sidebar({
         </div>
       )}
 
-      <div className="shrink-0 border-t border-border-subtle p-1.5">
+      <div className="shrink-0 border-t border-border-subtle px-2 py-1">
         <ProfileMenu variant="sidebar" />
       </div>
 

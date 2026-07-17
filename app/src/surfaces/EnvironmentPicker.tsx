@@ -182,6 +182,8 @@ function FolderChip({ cwd }: { cwd: string }) {
             value={cwd}
             onChange={(e) => setLocal({ cwd: e.target.value })}
             placeholder={tauri ? "…or paste an absolute path" : "/Users/you/code/my-project"}
+            autoCorrect="off"
+            autoCapitalize="off"
             spellCheck={false}
             className="w-full rounded-lg border border-border bg-bg px-2.5 py-1.5 text-sm text-ink outline-none transition focus:border-accent placeholder:text-ink-muted"
           />

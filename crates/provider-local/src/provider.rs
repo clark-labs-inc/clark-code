@@ -253,6 +253,7 @@ impl Provider for LocalAgentProvider {
             // stale plan_mode from its previous session).
             s.plan_mode = options.mode.as_deref() == Some("plan");
             s.plan_exited = false;
+            s.steering = None;
             s.policy = config.permissions.clone();
             s.allow_commands = crate::project_settings::union_unique(
                 config.command_allowlist.clone(),
@@ -488,6 +489,25 @@ impl Provider for LocalAgentProvider {
                 self.control.lock().await.resolve(&request, resolution);
                 Ok(())
             }
+        }
+    }
+
+    async fn steer(&mut self, _session: &SessionId, input: PromptInput) -> Result<()> {
+        let text = prompt_input::prompt_text(&input);
+        if text.trim().is_empty() {
+            return Err(Error::Unsupported("steering message was empty".into()));
+        }
+        let steering = self.session.lock().await.steering.clone();
+        match steering {
+            // Raw user text, no per-turn scaffolding (env/git context rides
+            // the turn that's already in flight).
+            Some(queue) => {
+                queue.push_user_text(text);
+                Ok(())
+            }
+            None => Err(Error::Unsupported(
+                "no active run to steer — send it as a new message".into(),
+            )),
         }
     }
 

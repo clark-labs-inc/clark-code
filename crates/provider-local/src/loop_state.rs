@@ -42,6 +42,11 @@ pub(crate) struct SessionState {
     /// First `check_diagnostics` call's output lines this session — later
     /// calls diff against this and report only new lines.
     pub diagnostics_baseline: Option<Vec<String>>,
+    /// Live steering queue for the ACTIVE run, when one is in flight: a user
+    /// message sent mid-run is injected between tool batches instead of
+    /// waiting for the run to end. Set by the engine at run start, cleared
+    /// at run end.
+    pub steering: Option<std::sync::Arc<crate::engine::EngineSteering>>,
 }
 
 /// Live control surface for the current run, reachable from respond/cancel.

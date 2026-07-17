@@ -686,3 +686,300 @@ async fn plan_mode_journey_denies_edits_threads_feedback_and_builds_after_approv
     // Tidy the app-managed workspace this session created.
     let _ = std::fs::remove_dir_all(&docs_root);
 }
+
+/// One SSE body carrying TWO tool calls in a single assistant turn.
+fn two_tool_calls_sse(name: &str, args_a: serde_json::Value, args_b: serde_json::Value) -> String {
+    let chunk = json!({
+        "choices": [{"delta": {"tool_calls": [
+            {"index": 0, "id": "par_a", "function": {"name": name, "arguments": args_a.to_string()}},
+            {"index": 1, "id": "par_b", "function": {"name": name, "arguments": args_b.to_string()}}
+        ]}}]
+    });
+    format!(
+        "data: {chunk}\n\ndata: {}\n\ndata: [DONE]\n\n",
+        r#"{"choices":[{"delta":{},"finish_reason":"tool_calls"}]}"#
+    )
+}
+
+/// An in-band provider failure ending the stream — the shape OpenRouter uses
+/// when it must fail after committing to SSE.
+fn overflow_error_body() -> String {
+    [
+        r#"data: {"error":{"code":400,"message":"This endpoint's maximum context length is 1000 tokens. However, you requested 2000 tokens."}}"#,
+        "data: [DONE]",
+        "",
+    ]
+    .join("\n\n")
+}
+
+fn text_body(text: &str) -> String {
+    format!(
+        "data: {}\n\ndata: {}\n\ndata: [DONE]\n\n",
+        json!({"choices":[{"delta":{"content": text}}]}),
+        r#"{"choices":[{"delta":{},"finish_reason":"stop"}]}"#
+    )
+}
+
+async fn connect_provider(addr: std::net::SocketAddr) -> provider_local::LocalAgentProvider {
+    let mut provider = provider_local::LocalAgentProvider::new();
+    provider
+        .connect(ProviderConfig {
+            auth_token: Some("test-key".into()),
+            extra: json!({
+                "base_url": format!("http://{addr}/v1"),
+                "model": "fake-model",
+                "memories": false
+            }),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    provider
+}
+
+async fn drain_run(stream: &mut agent_core::provider::EventStream) -> Vec<AgentEvent> {
+    let mut events = Vec::new();
+    while let Some(ev) = stream.next().await {
+        let done = matches!(&ev, AgentEvent::RunFinished { .. });
+        events.push(ev);
+        if done {
+            break;
+        }
+    }
+    events
+}
+
+/// A single giant tool output is truncated middle-out at record time — it must
+/// not ride the next model request in full.
+#[tokio::test]
+async fn giant_tool_output_is_truncated_before_the_next_model_call() {
+    let dir = tempfile::tempdir().unwrap();
+    let big: String = (0..8_000)
+        .map(|i| format!("row {i} {}\n", "x".repeat(10)))
+        .collect();
+    assert!(big.len() > 100_000);
+    std::fs::write(dir.path().join("big.txt"), &big).unwrap();
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let serve_handle = tokio::spawn(serve(
+        listener,
+        vec![
+            tool_call_sse("c1", "read_file", json!({"path": "big.txt"})),
+            final_body(),
+        ],
+    ));
+
+    let mut provider = connect_provider(addr).await;
+    let session = provider
+        .new_session(SessionOptions {
+            cwd: Some(dir.path().to_string_lossy().to_string()),
+            mode: None,
+            resume: None,
+        })
+        .await
+        .unwrap();
+    let mut stream = provider
+        .prompt(&session.id, PromptInput::text("read big.txt"))
+        .await
+        .unwrap();
+    drain_run(&mut stream).await;
+
+    let captured = serve_handle.await.unwrap();
+    let second = String::from_utf8_lossy(&captured[1]).to_string();
+    assert!(
+        second.contains("Warning: truncated output"),
+        "tool result must carry the truncation header"
+    );
+    assert!(second.contains("chars omitted"));
+    assert!(second.contains("row 0 "), "head preserved");
+    assert!(second.contains("row 7999"), "tail preserved");
+    assert!(
+        captured[1].len() < 80_000,
+        "request stays bounded, got {} bytes",
+        captured[1].len()
+    );
+}
+
+/// A user message sent while the run is active lands INSIDE the run (between
+/// tool batches) — Codex-style steering — not after it finishes.
+#[tokio::test]
+async fn steering_message_is_injected_into_the_active_run() {
+    let dir = tempfile::tempdir().unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let serve_handle = tokio::spawn(serve(
+        listener,
+        vec![
+            // A slow tool keeps the run alive while the steer lands.
+            tool_call_sse("c1", "bash", json!({"command": "sleep 1"})),
+            final_body(),
+        ],
+    ));
+
+    let mut provider = connect_provider(addr).await;
+    let session = provider
+        .new_session(SessionOptions {
+            cwd: Some(dir.path().to_string_lossy().to_string()),
+            mode: None,
+            resume: None,
+        })
+        .await
+        .unwrap();
+    let mut stream = provider
+        .prompt(&session.id, PromptInput::text("wait a moment"))
+        .await
+        .unwrap();
+
+    let mut steered = false;
+    let mut finished = false;
+    while let Some(ev) = stream.next().await {
+        match &ev {
+            AgentEvent::ToolCall { .. } if !steered => {
+                steered = true;
+                provider
+                    .steer(&session.id, PromptInput::text("ALSO CHECK THE README"))
+                    .await
+                    .expect("active run accepts steering");
+            }
+            AgentEvent::RunFinished { .. } => {
+                finished = true;
+                break;
+            }
+            _ => {}
+        }
+    }
+    assert!(steered && finished);
+
+    let captured = serve_handle.await.unwrap();
+    let second = String::from_utf8_lossy(&captured[1]).to_string();
+    assert!(
+        second.contains("ALSO CHECK THE README"),
+        "the steered message must reach the model inside the same run"
+    );
+
+    // With no active run, steering is refused so callers fall back to a
+    // normal follow-up message.
+    let refused = provider
+        .steer(&session.id, PromptInput::text("too late"))
+        .await;
+    assert!(refused.is_err());
+}
+
+/// A provider context-window rejection no longer kills the run: the engine
+/// folds progress in, force-compacts, and continues the same turn.
+#[tokio::test]
+async fn context_overflow_recovers_by_compacting_and_continuing() {
+    let dir = tempfile::tempdir().unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let serve_handle = tokio::spawn(serve(
+        listener,
+        vec![
+            // 1) the turn's first model call is rejected for context size,
+            overflow_error_body(),
+            // 2) the compaction summarizer runs,
+            text_body("SUMMARY: the user wants a haiku about databases."),
+            // 3) the same turn continues on the compacted transcript.
+            final_body(),
+        ],
+    ));
+
+    let mut provider = connect_provider(addr).await;
+    let session = provider
+        .new_session(SessionOptions {
+            cwd: Some(dir.path().to_string_lossy().to_string()),
+            mode: None,
+            resume: None,
+        })
+        .await
+        .unwrap();
+    let mut stream = provider
+        .prompt(
+            &session.id,
+            PromptInput::text("write a haiku about databases"),
+        )
+        .await
+        .unwrap();
+    let events = drain_run(&mut stream).await;
+
+    assert!(
+        events.iter().any(|e| matches!(
+            e,
+            AgentEvent::RunFinished { outcome, .. } if outcome.status == RunStatus::Done
+        )),
+        "the run must finish cleanly after recovery: {events:?}"
+    );
+    assert!(
+        events.iter().any(|e| matches!(
+            e,
+            AgentEvent::MessageChunk {
+                role: agent_core::domain::Role::System,
+                ..
+            }
+        )),
+        "the recovery must be visible in the conversation"
+    );
+
+    let captured = serve_handle.await.unwrap();
+    assert_eq!(captured.len(), 3, "overflow → summarize → continue");
+    let retry = String::from_utf8_lossy(&captured[2]).to_string();
+    assert!(
+        retry.contains("compacted transcript handoff"),
+        "the retried call must run on the compacted transcript"
+    );
+    assert!(
+        retry.contains("haiku about databases"),
+        "the user's request survives compaction"
+    );
+}
+
+/// Two read-only tool calls in one assistant turn execute as one batch and
+/// both results come back, in emission order (the parallel execution mode).
+#[tokio::test]
+async fn parallel_read_batch_returns_both_results_in_order() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("a.txt"), "alpha contents").unwrap();
+    std::fs::write(dir.path().join("b.txt"), "bravo contents").unwrap();
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let serve_handle = tokio::spawn(serve(
+        listener,
+        vec![
+            two_tool_calls_sse(
+                "read_file",
+                json!({"path": "a.txt"}),
+                json!({"path": "b.txt"}),
+            ),
+            final_body(),
+        ],
+    ));
+
+    let mut provider = connect_provider(addr).await;
+    let session = provider
+        .new_session(SessionOptions {
+            cwd: Some(dir.path().to_string_lossy().to_string()),
+            mode: None,
+            resume: None,
+        })
+        .await
+        .unwrap();
+    let mut stream = provider
+        .prompt(&session.id, PromptInput::text("read both files"))
+        .await
+        .unwrap();
+    let events = drain_run(&mut stream).await;
+    assert!(events.iter().any(|e| matches!(
+        e,
+        AgentEvent::RunFinished { outcome, .. } if outcome.status == RunStatus::Done
+    )));
+
+    let captured = serve_handle.await.unwrap();
+    let second = String::from_utf8_lossy(&captured[1]).to_string();
+    assert!(second.contains("alpha contents"));
+    assert!(second.contains("bravo contents"));
+    let a = second.find("par_a").expect("first result present");
+    let b = second.find("par_b").expect("second result present");
+    assert!(a < b, "results keep tool-call emission order");
+}

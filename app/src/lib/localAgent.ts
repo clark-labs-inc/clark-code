@@ -95,6 +95,56 @@ export function saveLocalSettings(settings: LocalAgentSettings): void {
   }
 }
 
+// The model + reasoning effort are per-conversation, so each chat can run a
+// different model. The global `LocalAgentSettings.model` stays the DEFAULT a
+// new chat seeds from (and the start-screen picker edits); an override is
+// written only when the model is changed inside an open chat. The cloud stores
+// transcripts, not model preferences, so these overrides live in localStorage
+// (scoped by conversation id) and survive restarts + reopens within a session.
+const CHAT_MODELS_KEY = "clark-desktop:chat-models";
+
+export interface ChatModelOverride {
+  model: string;
+  reasoningEffort: string;
+}
+
+export function loadChatModels(): Record<string, ChatModelOverride> {
+  try {
+    const raw = localStorage.getItem(CHAT_MODELS_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? (parsed as Record<string, ChatModelOverride>) : {};
+  } catch {
+    return {};
+  }
+}
+
+export function saveChatModels(models: Record<string, ChatModelOverride>): void {
+  try {
+    localStorage.setItem(CHAT_MODELS_KEY, JSON.stringify(models));
+  } catch {
+    // Non-fatal.
+  }
+}
+
+/** The model + reasoning effort the ACTIVE conversation runs with: its
+ *  per-chat override, else the global default. Pass `chatId` null for the
+ *  start screen (no chat yet) to just echo the global default. */
+export function effectiveModelSettings(
+  base: LocalAgentSettings,
+  chatModels: Record<string, ChatModelOverride>,
+  chatId: string | null,
+): LocalAgentSettings {
+  if (!chatId) return base;
+  const ov = chatModels[chatId];
+  if (!ov) return base;
+  return {
+    ...base,
+    ...(ov.model ? { model: ov.model } : {}),
+    ...(ov.reasoningEffort !== undefined ? { reasoningEffort: ov.reasoningEffort } : {}),
+  };
+}
+
 // Durable memory is a single global (per-user) preference, on by default. When
 // on, the agent gets the `memory` tool and its saved facts (project + global)
 // are injected into the system prompt.

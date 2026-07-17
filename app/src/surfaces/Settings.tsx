@@ -18,6 +18,7 @@ import {
 import { clarkBillingUrl, openExternal } from "../lib/account";
 import { useAppVersion } from "../lib/appInfo";
 import { OrganizationKnowledgeSettings } from "./OrganizationKnowledgeSettings";
+import { GroupLabel, Card, Row, Toggle } from "./settings/Primitives";
 
 const input =
   "w-full rounded-lg border border-border bg-bg px-2.5 py-1.5 text-sm text-ink outline-none transition focus:border-accent placeholder:text-ink-muted";
@@ -30,59 +31,6 @@ const SECTIONS: { id: SettingsSection; label: string; icon: typeof SlidersHorizo
   { id: "account", label: "Account", icon: CircleUser },
   { id: "about", label: "About & updates", icon: Info },
 ];
-
-// --- shared presentational bits --------------------------------------------
-
-function GroupLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-ink-faint">
-      {children}
-    </div>
-  );
-}
-
-function Card({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="overflow-hidden rounded-xl border border-border-subtle bg-bg-elevated/40 [&>*+*]:border-t [&>*+*]:border-border-subtle">
-      {children}
-    </div>
-  );
-}
-
-function Row({ name, sub, children }: { name: React.ReactNode; sub?: React.ReactNode; children?: React.ReactNode }) {
-  return (
-    <div className="flex items-center gap-3 px-3.5 py-3">
-      <div className="min-w-0 flex-1">
-        <div className="text-sm text-ink">{name}</div>
-        {sub && <div className="mt-0.5 text-xs text-ink-faint">{sub}</div>}
-      </div>
-      {children}
-    </div>
-  );
-}
-
-function Toggle({ on, onClick, label }: { on: boolean; onClick: () => void; label: string }) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={on}
-      aria-label={label}
-      onClick={onClick}
-      className={cn(
-        "relative h-[18px] w-8 shrink-0 rounded-full transition-colors",
-        on ? "bg-accent" : "bg-bg-tertiary",
-      )}
-    >
-      <span
-        className={cn(
-          "absolute top-0.5 size-[14px] rounded-full bg-white shadow-sm transition-all",
-          on ? "left-[15px]" : "left-0.5",
-        )}
-      />
-    </button>
-  );
-}
 
 // --- General ---------------------------------------------------------------
 
@@ -206,11 +154,8 @@ function GeneralSection({
         <GroupLabel>Memory</GroupLabel>
         <Card>
           <Row
-            name={
-              <span className="flex items-center gap-2">
-                <Brain className="size-4 text-ink-muted" /> Enable memories
-              </span>
-            }
+            icon={<Brain className="size-4" />}
+            name="Enable memories"
             sub="Remember facts across chats — per project and globally"
           >
             <Toggle on={memoriesEnabled} onClick={() => setMemoriesEnabled(!memoriesEnabled)} label="Enable memories" />
@@ -222,11 +167,8 @@ function GeneralSection({
         <GroupLabel>Experimental</GroupLabel>
         <Card>
           <Row
-            name={
-              <span className="flex items-center gap-2">
-                <AlertTriangle className="size-4 text-warning" /> Enable browser tool
-              </span>
-            }
+            icon={<AlertTriangle className="size-4 text-warning" />}
+            name="Enable browser tool"
             sub="Downloads a ~150-300MB browser (clark-browser) on first use. Every action needs your approval."
           >
             <Toggle on={browserEnabled} onClick={() => setBrowserEnabled(!browserEnabled)} label="Enable browser tool" />
@@ -288,6 +230,8 @@ function ProjectSection() {
           value={model}
           onChange={(e) => setLocalSettings({ model: e.target.value })}
           placeholder="clark-code"
+          autoCorrect="off"
+          autoCapitalize="off"
           spellCheck={false}
           className={cn(input, "font-mono")}
         />
@@ -304,6 +248,8 @@ function ProjectSection() {
             onChange={(e) => setLocalSettings({ apiKey: e.target.value })}
             type={showKey ? "text" : "password"}
             placeholder="ck_live_…"
+            autoCorrect="off"
+            autoCapitalize="off"
             spellCheck={false}
             autoComplete="off"
             className={cn(input, "font-mono")}
@@ -349,11 +295,8 @@ function IntegrationsSection() {
         <GroupLabel>Extend Clark Code</GroupLabel>
         <Card>
           <Row
-            name={
-              <span className="flex items-center gap-2">
-                <Blocks className="size-4 text-ink-muted" /> MCP servers
-              </span>
-            }
+            icon={<Blocks className="size-4" />}
+            name="MCP servers"
             sub={
               servers.length
                 ? `${mcpEnabled} enabled · ${servers.length} configured`
@@ -368,11 +311,8 @@ function IntegrationsSection() {
             </button>
           </Row>
           <Row
-            name={
-              <span className="flex items-center gap-2">
-                <Server className="size-4 text-ink-muted" /> Remote hosts
-              </span>
-            }
+            icon={<Server className="size-4" />}
+            name="Remote hosts"
             sub={
               hosts.length
                 ? `${hosts.length} host${hosts.length === 1 ? "" : "s"} saved`
@@ -425,6 +365,8 @@ function PolicyList({
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && onAdd()}
           placeholder={placeholder}
+          autoCorrect="off"
+          autoCapitalize="off"
           spellCheck={false}
           className={cn(input, "font-mono text-xs")}
         />

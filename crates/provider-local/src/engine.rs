@@ -22,6 +22,52 @@ use crate::tools::{ToolCtx, ToolRegistry};
 /// against the 1000-turn cap in [`crate::config`].
 const GRACE_ITERATIONS: usize = 40;
 
+/// Steering queue shared between the provider (`Provider::steer` pushes) and
+/// the active run (clark-agent drains it between tool batches). A queue —
+/// not a raw channel — because leftovers must be recoverable: when the run
+/// ends before injecting a message (a terminal batch suppresses steering),
+/// the engine folds the remainder into the session transcript so the next
+/// turn still sees what the user said.
+#[derive(Default)]
+pub(crate) struct EngineSteering {
+    queue: std::sync::Mutex<std::collections::VecDeque<clark_agent::AgentMessage>>,
+}
+
+impl EngineSteering {
+    pub fn push_user_text(&self, text: String) {
+        self.queue.lock().expect("steering queue lock").push_back(
+            clark_agent::AgentMessage::User {
+                content: clark_agent::UserContent::Text(text),
+                timestamp: None,
+            },
+        );
+    }
+
+    fn drain_all(&self) -> Vec<clark_agent::AgentMessage> {
+        self.queue
+            .lock()
+            .expect("steering queue lock")
+            .drain(..)
+            .collect()
+    }
+}
+
+impl clark_agent::Plugin for EngineSteering {
+    fn name(&self) -> &'static str {
+        "desktop_steering"
+    }
+    fn capabilities(&self) -> clark_agent::PluginCapabilities {
+        clark_agent::PluginCapabilities::steering()
+    }
+}
+
+#[async_trait::async_trait]
+impl clark_agent::SteeringSource for EngineSteering {
+    async fn next_steering_messages(&self) -> Vec<clark_agent::AgentMessage> {
+        self.drain_all()
+    }
+}
+
 /// Everything `run_turn` needs, bundled to keep the spawned task signature sane.
 pub(crate) struct TurnContext {
     pub llm: LlmClient,
@@ -65,11 +111,6 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
         return;
     }
 
-    let (system_prompt, transcript) = {
-        let session = tc.session.lock().await;
-        (session.system_prompt.clone(), session.transcript.clone())
-    };
-
     let tools = desktop_tool_registry(
         tc.registry.clone(),
         tc.ctx.clone(),
@@ -87,6 +128,7 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
         tc.registry.clone(),
         docs_dir,
     ));
+    let completed_transcript = sink.completed_transcript();
 
     // The stream adapter accumulates token/cost usage across the run's model
     // calls; the handle folds those totals into the run outcome at finish.
@@ -96,16 +138,23 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
     // so the raised iteration cap can't be burned on a spinning agent. One
     // instance, shared across the before- and after-tool-call hook lists.
     let loop_breaker = Arc::new(LoopBreaker::new());
+    // Parallel batches: read-only tools in one assistant turn run concurrently
+    // (Codex's model). Mutating tools set `requires_exclusive_sandbox`, which
+    // downgrades their whole batch to sequential, so edits/shell keep today's
+    // one-at-a-time ordering and the permission gate never faces two
+    // simultaneous prompts.
+    let steering = Arc::new(EngineSteering::default());
     let mut builder = clark_agent::AgentBuilder::new()
         .stream(Arc::new(stream))
         .tools(tools)
         .event_sink(sink)
-        .default_execution_mode(clark_agent::ExecutionMode::Sequential)
+        .default_execution_mode(clark_agent::ExecutionMode::Parallel)
         .max_iterations(tc.max_iterations as usize)
         .grace_iterations(GRACE_ITERATIONS)
         .before_tool_call_arc(loop_breaker.clone())
         .after_tool_call_arc(loop_breaker.clone())
         .model_id(tc.model.clone())
+        .steering_arc(steering.clone())
         .context_transform(CheckpointCompactor::new(
             tc.llm.clone(),
             tc.compaction.clone(),
@@ -140,9 +189,6 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
     let identity = clark_agent::RunIdentity::root()
         .with_run_id(run.as_str())
         .with_conversation_id(tc.session_id.as_str());
-    let context = clark_agent::AgentContext::new(system_prompt)
-        .with_messages(transcript)
-        .with_identity(identity);
     // The turn consumes user_text; extraction needs its own copy afterwards.
     let extraction = tc.memory_extraction.map(|ctx| (ctx, tc.user_text.clone()));
     let prompt = clark_agent::AgentMessage::User {
@@ -150,10 +196,87 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
         timestamp: None,
     };
 
-    match clark_agent::run(vec![prompt], context, &config, cancel).await {
+    // Expose the live steering queue: a user message sent while this run is
+    // active is injected between tool batches instead of waiting for the end.
+    tc.session.lock().await.steering = Some(steering.clone());
+
+    // Drive the run, recovering ONCE from a context-window overflow: preserve
+    // the progress the user already saw, force-compact the transcript, and
+    // continue the same turn — instead of dying with "model_error" at the
+    // window edge (which is what happens when the model's real window is
+    // smaller than the compaction threshold assumes).
+    let mut prompts = vec![prompt];
+    let mut recovered_from_overflow = false;
+    let run_result = loop {
+        let context = {
+            let session = tc.session.lock().await;
+            clark_agent::AgentContext::new(session.system_prompt.clone())
+                .with_messages(session.transcript.clone())
+                .with_identity(identity.clone())
+        };
+        let attempt = if prompts.is_empty() {
+            clark_agent::run_continue(context, &config, cancel.clone()).await
+        } else {
+            clark_agent::run(
+                std::mem::take(&mut prompts),
+                context,
+                &config,
+                cancel.clone(),
+            )
+            .await
+        };
+        match attempt {
+            Err(error)
+                if is_context_overflow(&error)
+                    && !recovered_from_overflow
+                    && !cancel.is_cancelled() =>
+            {
+                recovered_from_overflow = true;
+                // Fold what completed so far into the transcript, then shrink.
+                {
+                    let mut session = tc.session.lock().await;
+                    let progress = completed_transcript.drain();
+                    session.transcript.extend(progress);
+                }
+                let snapshot = tc.session.lock().await.transcript.clone();
+                match crate::compaction::force_compact(&tc.llm, &tc.compaction, &snapshot, &cancel)
+                    .await
+                {
+                    Some(compacted) => {
+                        tc.session.lock().await.transcript = compacted;
+                        let _ = tx
+                            .send(AgentEvent::MessageChunk {
+                                run: run.clone(),
+                                role: agent_core::domain::Role::System,
+                                delta: agent_core::domain::ContentBlock::text(
+                                    "The conversation hit the model's context limit — earlier \
+                                     turns were summarized so this task can continue.",
+                                ),
+                            })
+                            .await;
+                        continue;
+                    }
+                    None => break Err(error),
+                }
+            }
+            other => break other,
+        }
+    };
+    // The queue is only valid while this run drives the loop. Anything still
+    // queued (the user steered during the final batch, where injection is
+    // suppressed) is folded into the transcript below so the next turn sees it.
+    tc.session.lock().await.steering = None;
+    let leftover_steering = steering.drain_all();
+
+    let context_limit = crate::compaction::limit_of(&tc.compaction);
+    match run_result {
         Ok(result) => {
             let outcome = result.outcome;
-            tc.session.lock().await.transcript.extend(result.messages);
+            {
+                let mut session = tc.session.lock().await;
+                session.transcript.extend(result.messages);
+                session.transcript.extend(leftover_steering);
+            }
             // Post-turn, off the latency path: extract durable facts the model
             // may not have saved itself. Detached — the turn never waits on it.
             if let Some((ctx, user_text)) = extraction {
@@ -168,7 +291,7 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
                     RunStatus::Done,
                     Some(outcome.label().to_string()),
                     None,
-                    usage.snapshot(),
+                    with_limit(usage.snapshot(), context_limit),
                 )
                 .await;
             } else {
@@ -189,12 +312,36 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
                          approach.",
                         tc.max_iterations
                     )),
-                    usage.snapshot(),
+                    with_limit(usage.snapshot(), context_limit),
                 )
                 .await;
             }
         }
         Err(error) => {
+            // The core returns its message tail only on success. Preserve the
+            // typed prompt/steering messages and every complete assistant/tool
+            // turn observed before the failure so a follow-up continues from
+            // the work the user can already see instead of starting from an
+            // empty model transcript.
+            {
+                let mut session = tc.session.lock().await;
+                session.transcript.extend(completed_transcript.drain());
+                session.transcript.extend(leftover_steering);
+                // Tell the model the turn was cut off (Codex records the same
+                // marker): without it, the next turn continues as if the last
+                // one finished cleanly, re-trusting steps that never ran.
+                if matches!(error, clark_agent::LoopError::Aborted) {
+                    session.transcript.push(clark_agent::AgentMessage::User {
+                        content: clark_agent::UserContent::Text(
+                            "[runtime note — the user stopped the previous turn before it \
+                             finished; some of its steps may be incomplete. Take stock of the \
+                             current state before continuing.]"
+                                .to_string(),
+                        ),
+                        timestamp: None,
+                    });
+                }
+            }
             let mapped = map_loop_error(error);
             if let Some((code, message)) = mapped.ui_error.clone() {
                 let _ = tx
@@ -211,11 +358,31 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
                 mapped.status,
                 None,
                 mapped.run_error,
-                usage.snapshot(),
+                with_limit(usage.snapshot(), context_limit),
             )
             .await;
         }
     }
+}
+
+fn is_context_overflow(error: &clark_agent::LoopError) -> bool {
+    matches!(
+        error,
+        clark_agent::LoopError::Stream(clark_agent::StreamError::ContextOverflow(_))
+    )
+}
+
+/// Stamp the engine's auto-compaction threshold onto the run usage so the UI
+/// can show an honest context meter (percent of the number that actually
+/// triggers compaction, not a hardcoded guess).
+fn with_limit(
+    usage: Option<agent_core::domain::RunUsage>,
+    limit: Option<u64>,
+) -> Option<agent_core::domain::RunUsage> {
+    usage.map(|mut usage| {
+        usage.context_limit = limit;
+        usage
+    })
 }
 
 #[derive(Clone)]
@@ -302,4 +469,37 @@ async fn finish(
         })
         .await;
     tx.close();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clark_agent::SteeringSource;
+
+    #[tokio::test]
+    async fn steering_queue_injects_in_order_and_recovers_leftovers() {
+        let steering = EngineSteering::default();
+        steering.push_user_text("first".into());
+        steering.push_user_text("second".into());
+
+        // The loop drains via the SteeringSource seam…
+        let drained = steering.next_steering_messages().await;
+        assert_eq!(drained.len(), 2);
+        let texts: Vec<_> = drained
+            .iter()
+            .map(|m| match m {
+                clark_agent::AgentMessage::User {
+                    content: clark_agent::UserContent::Text(t),
+                    ..
+                } => t.as_str(),
+                other => panic!("expected user text, got {other:?}"),
+            })
+            .collect();
+        assert_eq!(texts, vec!["first", "second"]);
+
+        // …and anything left after the run ends is recoverable, not lost.
+        steering.push_user_text("too late".into());
+        assert_eq!(steering.drain_all().len(), 1);
+        assert!(steering.drain_all().is_empty());
+    }
 }

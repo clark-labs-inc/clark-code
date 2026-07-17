@@ -249,6 +249,9 @@ export function PermissionGate({ req }: { req: PermissionRequest }) {
             onKeyDown={onFeedbackKeyDown}
             disabled={picked !== null}
             rows={4}
+            autoCorrect="off"
+            autoCapitalize="off"
+            spellCheck={false}
             placeholder="Tell Clark what to change — what's missing, wrong, or should work differently…"
             className="w-full resize-y rounded-lg border border-border bg-bg px-3 py-2 text-sm leading-relaxed text-ink outline-none placeholder:text-ink-faint focus:border-accent focus:ring-2 focus:ring-accent/20 disabled:opacity-50"
           />

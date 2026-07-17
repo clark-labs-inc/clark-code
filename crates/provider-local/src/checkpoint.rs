@@ -1,10 +1,10 @@
-//! Working-tree checkpoints for one-click "undo this run".
+//! Working-tree checkpoints used as per-run change-tracking baselines.
 //!
 //! Checkpoints use a throwaway index through the session's executor. The real
 //! Git index and HEAD are never changed, and local and remote sessions follow
 //! exactly the same bounded command path.
 
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 use crate::exec::Executor;
 
@@ -112,110 +112,10 @@ pub async fn create_checkpoint(exec: &dyn Executor, root: &Path) -> Result<Optio
     Ok(Some(sha))
 }
 
-/// Whether a checkpoint commit still resolves.
-pub async fn checkpoint_exists(exec: &dyn Executor, root: &Path, sha: &str) -> bool {
-    if sha.is_empty() {
-        return false;
-    }
-    crate::git_metadata::succeeds(
-        exec,
-        root,
-        &["cat-file", "-e", &format!("{sha}^{{commit}}")],
-    )
-    .await
-    .unwrap_or(false)
-}
-
-fn safe_relative(path: &str) -> Option<&Path> {
-    let path = Path::new(path);
-    if path.as_os_str().is_empty() || path.is_absolute() {
-        return None;
-    }
-    path.components()
-        .all(|component| matches!(component, Component::Normal(_)))
-        .then_some(path)
-}
-
-async fn remove_added_path(exec: &dyn Executor, root: &Path, path: &str) -> Result<(), String> {
-    let relative = safe_relative(path).ok_or_else(|| "Git returned an unsafe path".to_string())?;
-    let target = root.join(relative);
-    match exec.metadata(&target).await {
-        Ok(meta) if meta.is_dir && !meta.is_symlink => exec.remove_dir_all(&target).await,
-        Ok(_) => exec.remove_file(&target).await,
-        Err(_) => Ok(()),
-    }
-}
-
-/// Restore only the working tree to a checkpoint. The user's real index and
-/// HEAD are preserved; files created after the checkpoint are removed using
-/// executor filesystem primitives instead of a repository-wide `git clean`.
-pub async fn restore_checkpoint(exec: &dyn Executor, root: &Path, sha: &str) -> Result<(), String> {
-    if !is_git_repo(exec, root).await {
-        return Err("Undo needs a git repository.".to_string());
-    }
-    if !checkpoint_exists(exec, root, sha).await {
-        return Err("This checkpoint is no longer available.".to_string());
-    }
-
-    let current = working_tree(exec, root).await?;
-    let added = crate::git_metadata::required(
-        exec,
-        root,
-        &[
-            "diff",
-            "--no-renames",
-            "--name-only",
-            "-z",
-            "--diff-filter=A",
-            sha,
-            &current,
-        ],
-    )
-    .await?;
-    crate::git_metadata::required(
-        exec,
-        root,
-        &["restore", "--source", sha, "--worktree", "--", "."],
-    )
-    .await?;
-    for path in added.split('\0').filter(|path| !path.is_empty()) {
-        remove_added_path(exec, root, path).await?;
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::exec::LocalExecutor;
-    use std::fs;
-    use std::process::Command;
-
-    fn run(root: &Path, args: &[&str]) {
-        let output = Command::new("git")
-            .arg("-C")
-            .arg(root)
-            .args(args)
-            .env("GIT_AUTHOR_NAME", "t")
-            .env("GIT_AUTHOR_EMAIL", "t@t")
-            .env("GIT_COMMITTER_NAME", "t")
-            .env("GIT_COMMITTER_EMAIL", "t@t")
-            .output()
-            .unwrap();
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-
-    fn init(root: &Path) {
-        run(root, &["init", "-q"]);
-        fs::write(root.join("keep.txt"), "original\n").unwrap();
-        fs::write(root.join("delete_me.txt"), "bye\n").unwrap();
-        run(root, &["add", "-A"]);
-        run(root, &["commit", "-qm", "init"]);
-    }
 
     #[tokio::test]
     async fn non_git_dir_has_no_checkpoint() {
@@ -223,73 +123,6 @@ mod tests {
         assert_eq!(
             create_checkpoint(&LocalExecutor, dir.path()).await.unwrap(),
             None
-        );
-        assert!(restore_checkpoint(&LocalExecutor, dir.path(), "deadbeef")
-            .await
-            .is_err());
-    }
-
-    #[tokio::test]
-    async fn checkpoint_restores_tree_without_changing_real_index() {
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path();
-        init(root);
-        fs::write(root.join("staged.txt"), "staged before checkpoint\n").unwrap();
-        run(root, &["add", "staged.txt"]);
-        let index_before = Command::new("git")
-            .args(["-C", root.to_str().unwrap(), "diff", "--cached", "--raw"])
-            .output()
-            .unwrap()
-            .stdout;
-
-        let sha = create_checkpoint(&LocalExecutor, root)
-            .await
-            .unwrap()
-            .expect("checkpoint");
-        fs::write(root.join("keep.txt"), "MANGLED\n").unwrap();
-        fs::write(root.join("new_file.txt"), "agent made this\n").unwrap();
-        fs::remove_file(root.join("delete_me.txt")).unwrap();
-
-        restore_checkpoint(&LocalExecutor, root, &sha)
-            .await
-            .unwrap();
-        assert_eq!(
-            fs::read_to_string(root.join("keep.txt")).unwrap(),
-            "original\n"
-        );
-        assert!(!root.join("new_file.txt").exists());
-        assert_eq!(
-            fs::read_to_string(root.join("delete_me.txt")).unwrap(),
-            "bye\n"
-        );
-        let index_after = Command::new("git")
-            .args(["-C", root.to_str().unwrap(), "diff", "--cached", "--raw"])
-            .output()
-            .unwrap()
-            .stdout;
-        assert_eq!(
-            index_after, index_before,
-            "restore must preserve the real index"
-        );
-    }
-
-    #[tokio::test]
-    async fn checkpoint_captures_untracked_files() {
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path();
-        init(root);
-        fs::write(root.join("untracked.txt"), "keep me\n").unwrap();
-        let sha = create_checkpoint(&LocalExecutor, root)
-            .await
-            .unwrap()
-            .expect("checkpoint");
-        fs::remove_file(root.join("untracked.txt")).unwrap();
-        restore_checkpoint(&LocalExecutor, root, &sha)
-            .await
-            .unwrap();
-        assert_eq!(
-            fs::read_to_string(root.join("untracked.txt")).unwrap(),
-            "keep me\n"
         );
     }
 }

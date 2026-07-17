@@ -1,0 +1,125 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { useSessionStore } from "./sessionStore";
+import type { CoreBridge } from "../core-bridge/bridge";
+import { emptySnapshot, type Session } from "../core-bridge/types";
+import { effectiveModelSettings } from "../lib/localAgent";
+
+// Each chat should keep its own model: switching models in one conversation
+// must not change what another conversation runs. Before the fix a single
+// global localStorage setting was the only model, so the composer pill in any
+// chat edited the one default every chat displayed and baked into its config.
+
+const baseSettings = {
+  cwd: "/tmp/project",
+  model: "clark-code",
+  reasoningEffort: "",
+  apiKey: "",
+};
+
+const sessionA = { id: "chat-a", provider: "local" } as unknown as Session;
+const sessionB = { id: "chat-b", provider: "local" } as unknown as Session;
+
+function stubBridge(overrides: Partial<CoreBridge> = {}): CoreBridge {
+  return {
+    listProviders: async () => [{ id: "local", label: "Local", capabilities: {
+      streaming: true, permissions: true, fs: true, terminal: true, load_session: false, modes: [],
+    } }],
+    connect: vi.fn(async () => {}),
+    newSession: vi.fn(async () => sessionA),
+    loadSession: async () => sessionA,
+    prompt: async () => {},
+    cancel: vi.fn(async () => {}),
+    respond: vi.fn(async () => {}),
+    setMode: vi.fn(async () => {}),
+    subscribe: () => () => {},
+    ...overrides,
+  } as unknown as CoreBridge;
+}
+
+beforeEach(() => {
+  useSessionStore.setState({
+    bridge: null,
+    session: null,
+    snapshot: emptySnapshot(),
+    permissionMode: "auto",
+    activeProvider: "local",
+    auth: null,
+    connecting: false,
+    opening: null,
+    queued: [],
+    localSettings: { ...baseSettings },
+    chatModels: {},
+    activeRemote: null,
+  });
+});
+
+describe("per-conversation model", () => {
+  it("changing the model in one chat does not affect another", async () => {
+    const bridge = stubBridge();
+    useSessionStore.setState({ bridge, localSettings: { ...baseSettings }, chatModels: {} });
+
+    // Chat A: switch to Grok 4.5.
+    useSessionStore.setState({ session: sessionA });
+    await useSessionStore.getState().updateModelSettings({ model: "clark-code:grok45" });
+
+    // Chat B never diverges: its effective model is still the global default.
+    useSessionStore.setState({ session: sessionB });
+    expect(
+      effectiveModelSettings(useSessionStore.getState().localSettings, useSessionStore.getState().chatModels, sessionB.id).model,
+    ).toBe("clark-code");
+
+    // Chat A keeps its own choice.
+    expect(
+      effectiveModelSettings(useSessionStore.getState().localSettings, useSessionStore.getState().chatModels, sessionA.id).model,
+    ).toBe("clark-code:grok45");
+
+    // The global default the start screen shows is untouched — only the chat
+    // override moved.
+    expect(useSessionStore.getState().localSettings.model).toBe("clark-code");
+  });
+
+  it("the per-chat model overrides the global default", async () => {
+    const bridge = stubBridge();
+    useSessionStore.setState({ bridge, localSettings: { ...baseSettings }, chatModels: {} });
+
+    useSessionStore.setState({ session: sessionA });
+    await useSessionStore.getState().updateModelSettings({ model: "clark-code:grok45" });
+    await useSessionStore.getState().updateModelSettings({ reasoningEffort: "high" });
+
+    useSessionStore.setState({ session: sessionB });
+    await useSessionStore.getState().updateModelSettings({ model: "clark-code:kimi_k3" });
+
+    const { chatModels, localSettings } = useSessionStore.getState();
+    expect(effectiveModelSettings(localSettings, chatModels, sessionA.id)).toMatchObject({
+      model: "clark-code:grok45",
+      reasoningEffort: "high",
+    });
+    expect(effectiveModelSettings(localSettings, chatModels, sessionB.id).model).toBe("clark-code:kimi_k3");
+  });
+
+  it("with no active chat, updating the model edits the global default", async () => {
+    const bridge = stubBridge();
+    useSessionStore.setState({ bridge, session: null, localSettings: { ...baseSettings }, chatModels: {} });
+
+    await useSessionStore.getState().updateModelSettings({ model: "clark-code:grok45" });
+
+    // Start-screen picker (no chat) edits the default new chats seed from — no
+    // per-chat override is written.
+    expect(useSessionStore.getState().localSettings.model).toBe("clark-code:grok45");
+    expect(Object.keys(useSessionStore.getState().chatModels)).toHaveLength(0);
+  });
+
+  it("reconfigures the live provider with the chat's effective model", async () => {
+    const reconfigure = vi.fn(async () => {});
+    const bridge = stubBridge({ reconfigure });
+    useSessionStore.setState({ bridge, localSettings: { ...baseSettings }, chatModels: {} });
+
+    useSessionStore.setState({ session: sessionA });
+    await useSessionStore.getState().updateModelSettings({ model: "clark-code:grok45" });
+
+    expect(reconfigure).toHaveBeenCalledTimes(1);
+    const calls = vi.mocked(reconfigure).mock.calls as unknown as [string, { extra?: unknown }][];
+    const configArg = calls[0]?.[1];
+    expect(configArg?.extra).toMatchObject({ model: "clark-code:grok45" });
+  });
+});

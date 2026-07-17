@@ -16,7 +16,7 @@ pub struct RunView {
     pub status: RunStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outcome: Option<RunOutcome>,
-    /// Restore handle for "undo this run" (set when a pre-run checkpoint exists).
+    /// Pre-run working-tree checkpoint used as a change-tracking baseline.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub checkpoint: Option<String>,
 }

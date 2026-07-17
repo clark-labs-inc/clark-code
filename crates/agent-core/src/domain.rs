@@ -298,6 +298,10 @@ pub struct RunUsage {
     /// Upstream USD cost summed across calls, when reported.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cost_usd: Option<f64>,
+    /// The engine's auto-compaction threshold in tokens, when known — the
+    /// denominator for an honest UI context meter.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_limit: Option<u64>,
 }
 
 /// A file the user attached but a provider hasn't ingested yet. The bytes ride
@@ -360,8 +364,8 @@ pub enum AgentEvent {
     RunStarted {
         run: RunId,
     },
-    /// A working-tree snapshot was taken before this run's edits, so the UI can
-    /// offer "undo this run". `id` is an opaque restore handle (a git SHA).
+    /// A working-tree snapshot was taken before this run for change tracking.
+    /// `id` is the checkpoint commit SHA used as a diff baseline.
     Checkpoint {
         run: RunId,
         id: String,

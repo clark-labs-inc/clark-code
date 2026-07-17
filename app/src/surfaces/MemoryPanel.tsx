@@ -91,7 +91,7 @@ function MemoryPopover() {
           aria-label="Reload memory"
           className="ml-auto grid size-7 place-items-center rounded-md text-ink-muted transition hover:bg-bg-hover hover:text-ink disabled:opacity-50"
         >
-          <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />
+          <RefreshCw className={cn("size-3.5", loading && "animate-[spin_1s_linear_infinite]")} />
         </button>
         <button
           onClick={() => setOpen(false)}

@@ -18,7 +18,14 @@ pub(super) fn to_wire_messages(
     if !system_prompt.trim().is_empty() {
         out.push(ChatMessage::system(system_prompt));
     }
-    for message in messages {
+    // Reasoning replays only for the in-flight exchange: assistant messages
+    // AFTER the latest user message (the current turn's tool loop, per the
+    // OpenRouter contract for GLM/Kimi reasoning models). Older reasoning is
+    // display history — replaying it across turns would balloon every prompt.
+    let last_user = messages
+        .iter()
+        .rposition(|m| matches!(m, ca::AgentMessage::User { .. }));
+    for (index, message) in messages.iter().enumerate() {
         match message {
             ca::AgentMessage::System { content, .. } => {
                 out.push(ChatMessage::system(content.clone()));
@@ -28,6 +35,7 @@ pub(super) fn to_wire_messages(
             }
             ca::AgentMessage::Assistant { content, .. } => {
                 let text = content.plain_text();
+                let in_flight = last_user.is_none_or(|user| index > user);
                 out.push(ChatMessage {
                     role: "assistant".into(),
                     content: (!text.is_empty()).then(|| ChatContent::text(text)),
@@ -37,6 +45,7 @@ pub(super) fn to_wire_messages(
                         .map(to_wire_tool_call)
                         .collect(),
                     tool_call_id: None,
+                    reasoning: in_flight.then(|| reasoning_text(content)).flatten(),
                 });
             }
             ca::AgentMessage::ToolResult {
@@ -123,6 +132,7 @@ pub(super) fn user_chat_message(content: &ca::UserContent) -> ChatMessage {
         content: Some(ChatContent::Parts(parts)),
         tool_calls: Vec::new(),
         tool_call_id: None,
+        reasoning: None,
     }
 }
 
@@ -150,8 +160,20 @@ pub(super) fn assistant_message(turn: AssistantTurn) -> ca::AgentMessage {
     } else {
         ca::StopReason::ToolUse
     };
+    let mut content = ca::AssistantContent::with_tool_calls(Some(turn.text), tool_calls);
+    // Keep provider-native reasoning as a typed block: `plain_text()` skips
+    // it (so it never leaks into visible content or compaction rendering),
+    // and `to_wire_messages` replays it for the current tool exchange only.
+    if !turn.reasoning.trim().is_empty() {
+        content.blocks.insert(
+            0,
+            ca::AssistantBlock::Reasoning(ca::TextContent {
+                text: turn.reasoning,
+            }),
+        );
+    }
     ca::AgentMessage::Assistant {
-        content: ca::AssistantContent::with_tool_calls(Some(turn.text), tool_calls),
+        content,
         stop_reason,
         error_message: None,
         timestamp: None,
@@ -162,6 +184,21 @@ pub(super) fn assistant_message(turn: AssistantTurn) -> ca::AgentMessage {
             cache_read_input_tokens: 0,
         }),
     }
+}
+
+/// Concatenated provider-native reasoning blocks of one assistant message,
+/// `None` when it has none.
+fn reasoning_text(content: &ca::AssistantContent) -> Option<String> {
+    let text = content
+        .blocks
+        .iter()
+        .filter_map(|block| match block {
+            ca::AssistantBlock::Reasoning(t) => Some(t.text.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("");
+    (!text.is_empty()).then_some(text)
 }
 
 pub(super) fn to_core_tool_call(call: &WireToolCall) -> ca::ToolCall {
@@ -214,8 +251,26 @@ pub(super) fn stream_error(error: LlmError) -> (ca::stream::StreamErrorKind, Str
             "insufficient_credits: You're out of Clark credits. Add credits to keep coding."
                 .to_string(),
         ),
+        LlmError::Message(message) if is_context_overflow_message(&message) => {
+            // Typed so the engine's overflow recovery (force-compact + retry
+            // the turn) can catch it instead of failing the run outright.
+            (ca::stream::StreamErrorKind::ContextOverflow, message)
+        }
         LlmError::Message(message) => (ca::stream::StreamErrorKind::Fatal, message),
     }
+}
+
+/// Whether a provider error says the prompt exceeded the model's context
+/// window. OpenAI-compatible backends phrase it differently — OpenRouter/
+/// OpenAI use `context_length_exceeded` and "maximum context length is N
+/// tokens"; others say "context window" or "too many tokens".
+pub(super) fn is_context_overflow_message(message: &str) -> bool {
+    let lower = message.to_ascii_lowercase();
+    lower.contains("context_length_exceeded")
+        || lower.contains("context length")
+        || lower.contains("context window")
+        || lower.contains("exceeds the maximum number of tokens")
+        || (lower.contains("too many tokens") && !lower.contains("rate"))
 }
 
 pub(super) fn tool_result_blocks_to_content(
@@ -356,5 +411,73 @@ pub(super) fn tool_title(name: &str, args: &Value) -> String {
             format!("{name}: {snippet}")
         }
         None => name.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn turn(text: &str, reasoning: &str) -> AssistantTurn {
+        AssistantTurn {
+            text: text.to_string(),
+            tool_calls: Vec::new(),
+            finish_reason: Some("stop".into()),
+            usage: None,
+            reasoning: reasoning.to_string(),
+        }
+    }
+
+    #[test]
+    fn assistant_message_keeps_reasoning_as_typed_block_out_of_plain_text() {
+        let message = assistant_message(turn("the answer", "step by step thinking"));
+        let ca::AgentMessage::Assistant { content, .. } = &message else {
+            panic!("expected assistant message");
+        };
+        // Reasoning is preserved as a typed block…
+        assert_eq!(
+            reasoning_text(content).as_deref(),
+            Some("step by step thinking")
+        );
+        // …but never leaks into the visible text (compaction and the wire
+        // `content` field both read plain_text()).
+        assert_eq!(content.plain_text(), "the answer");
+    }
+
+    #[test]
+    fn reasoning_replays_only_for_the_in_flight_exchange() {
+        let old_assistant = assistant_message(turn("old turn", "old reasoning"));
+        let user = ca::AgentMessage::User {
+            content: ca::UserContent::Text("new question".into()),
+            timestamp: None,
+        };
+        let live_assistant = assistant_message(turn("working on it", "live reasoning"));
+
+        let wire = to_wire_messages("sys", &[old_assistant, user, live_assistant]);
+
+        // [system, old assistant, user, live assistant]
+        assert_eq!(wire.len(), 4);
+        assert_eq!(
+            wire[1].reasoning, None,
+            "reasoning from before the last user message must not replay"
+        );
+        assert_eq!(wire[3].reasoning.as_deref(), Some("live reasoning"));
+    }
+
+    #[test]
+    fn context_overflow_messages_map_to_the_typed_stream_error() {
+        for message in [
+            "model stream error (400): This endpoint's maximum context length is 128000 tokens. However, you requested 190000 tokens.",
+            "context_length_exceeded",
+            "the prompt exceeds the model's context window",
+        ] {
+            let (kind, _) = stream_error(LlmError::Message(message.to_string()));
+            assert!(
+                matches!(kind, ca::stream::StreamErrorKind::ContextOverflow),
+                "{message} should classify as overflow"
+            );
+        }
+        let (kind, _) = stream_error(LlmError::Message("connection reset".into()));
+        assert!(matches!(kind, ca::stream::StreamErrorKind::Fatal));
     }
 }

@@ -3,6 +3,7 @@ import { motion, useReducedMotion } from "motion/react";
 import { ChevronRight, MessageSquare, FolderGit2, Server } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
 import { projectName } from "../lib/localAgent";
+import { stableOrderIds } from "../lib/stableOrder";
 import type { ConversationMeta } from "../lib/history";
 
 function relativeTime(ts: number): string {
@@ -36,8 +37,12 @@ export function StartCard() {
 
   const firstName = (auth?.user.name ?? "").split(" ")[0] || auth?.user.name || "there";
 
+  // `conversations` arrives newest-first (the store prepends on every update).
+  // Stabilize rather than re-sort by `updatedAt`: a running conversation's
+  // timestamp ticks on every streamed flush, and re-sorting on each tick made
+  // the rows visibly reshuffle while several chats progressed in parallel.
   const recent = useMemo(
-    () => conversations.filter((c) => !c.archived).sort((a, b) => b.updatedAt - a.updatedAt),
+    () => stableOrderIds(conversations.filter((c) => !c.archived)),
     [conversations],
   );
   const shown = showAll ? recent : recent.slice(0, 5);

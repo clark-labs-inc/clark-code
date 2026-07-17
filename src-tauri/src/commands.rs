@@ -362,6 +362,69 @@ pub async fn update_cloud_token(token: String, state: State<'_, AppState>) -> Re
     Ok(())
 }
 
+/// Inject a user message into the session's ACTIVE run (mid-run steering) —
+/// it lands between tool batches instead of waiting for the run to finish.
+/// Fails when the provider has no live run to steer; the frontend falls back
+/// to its queued-message flow. On success the message is echoed into the
+/// snapshot (providers don't re-emit steered input) and appended durably.
+#[tauri::command]
+pub async fn steer(
+    app: AppHandle,
+    session_id: String,
+    blocks: Vec<ContentBlock>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let entry = state
+        .session_entry(&session_id)
+        .await
+        .ok_or("no such session")?;
+    let sid = SessionId::new(session_id);
+
+    // Ask the provider FIRST — only echo a message the run actually accepted.
+    {
+        let mut s = entry.lock().await;
+        s.provider
+            .steer(
+                &sid,
+                PromptInput {
+                    blocks: blocks.clone(),
+                    attachments: Vec::new(),
+                },
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+        for block in &blocks {
+            apply(
+                &mut s.snapshot,
+                &AgentEvent::MessageChunk {
+                    run: RunId::new(USER_RUN),
+                    role: Role::User,
+                    delta: block.clone(),
+                },
+            );
+        }
+        let _ = app.emit("snapshot", &s.snapshot);
+    }
+
+    let trajectory = entry.lock().await.trajectory.clone();
+    if let Some(trajectory) = trajectory {
+        let durable: Vec<AgentEvent> = blocks
+            .iter()
+            .cloned()
+            .map(|delta| AgentEvent::MessageChunk {
+                run: RunId::new(USER_RUN),
+                role: Role::User,
+                delta,
+            })
+            .collect();
+        trajectory
+            .append(&durable)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn prompt(
     app: AppHandle,
@@ -1027,18 +1090,6 @@ pub async fn clark_mcp_probe(
     Ok(provider_local::probe_mcp_servers(&servers).await)
 }
 
-/// Restore the project's working tree to a pre-run checkpoint (one-click undo).
-/// `sha` is the run's `checkpoint` handle. Runs git off the UI thread.
-#[tauri::command]
-pub async fn clark_checkpoint_restore(
-    cwd: String,
-    sha: String,
-    remote: Option<RemoteArg>,
-) -> Result<(), String> {
-    let exec = project_executor(remote).await?;
-    provider_local::restore_checkpoint(exec.as_ref(), std::path::Path::new(&cwd), &sha).await
-}
-
 #[tauri::command]
 pub async fn clark_repository_inspect(
     cwd: String,
@@ -1207,7 +1258,7 @@ pub async fn desktop_conv_set_archived(
 }
 
 /// Real-backend coverage for the Tauri commands that have no `State<AppState>`
-/// dependency (`list_commands`, `changes_*`, `clark_checkpoint_restore`) — the
+/// dependency (`list_commands`, `changes_*`) — the
 /// exact functions the webview's `invoke()` calls, exercised directly against a
 /// real temp git repo and real files. No mocking: real `git`, real filesystem,
 /// real `provider_local::` logic. This exists because GUI automation of the
@@ -1316,36 +1367,5 @@ mod real_backend_tests {
         let restored = std::fs::read_to_string(dir.path().join("main.rs")).unwrap();
         assert_eq!(restored, "fn main() {}\n");
         assert!(dir.path().join("new_file.rs").exists());
-    }
-
-    #[tokio::test]
-    async fn clark_checkpoint_restore_reverts_the_whole_real_tree() {
-        let dir = tempfile::tempdir().unwrap();
-        init_repo(dir.path());
-        let base = provider_local::create_checkpoint(&provider_local::LocalExecutor, dir.path())
-            .await
-            .unwrap()
-            .unwrap();
-
-        std::fs::write(dir.path().join("main.rs"), "fn main() { /* changed */ }\n").unwrap();
-        std::fs::write(
-            dir.path().join("scratch.rs"),
-            "// created after checkpoint\n",
-        )
-        .unwrap();
-
-        let cwd = dir.path().to_string_lossy().to_string();
-        clark_checkpoint_restore(cwd, base, None)
-            .await
-            .expect("clark_checkpoint_restore succeeds against a real checkpoint");
-
-        assert_eq!(
-            std::fs::read_to_string(dir.path().join("main.rs")).unwrap(),
-            "fn main() {}\n"
-        );
-        assert!(
-            !dir.path().join("scratch.rs").exists(),
-            "a whole-tree restore should remove files created after the checkpoint"
-        );
     }
 }

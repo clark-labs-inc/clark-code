@@ -10,8 +10,6 @@ import { WorkBlock } from "./work/WorkBlock";
 import { ArtifactCard } from "./work/ArtifactCard";
 import { PermissionGate } from "./PermissionGate";
 import { UpgradePrompt } from "./UpgradePrompt";
-import { UndoBar } from "./UndoBar";
-import { RewindPicker } from "./RewindPicker";
 import { FanOutPanel } from "./FanOutPanel";
 import { PlanChecklist } from "./PlanChecklist";
 import type { Artifact, TimelineItem, ToolCall } from "../core-bridge/types";
@@ -80,12 +78,24 @@ function group(timeline: TimelineItem[]): Block[] {
   return blocks;
 }
 
-/** Common motion props for transient elements at the foot of the conversation. */
+/** Common motion props for transient elements at the foot of the conversation.
+ *  Enter: fade + gentle rise with height opening, so the content below doesn't
+ *  snap down. Exit: fade + collapse, so when one banner replaces another (or
+ *  clears) the list reflows smoothly instead of jumping. */
 const TRANSIENT = {
-  initial: { opacity: 0, y: 4 },
-  animate: { opacity: 1, y: 0 },
+  initial: { opacity: 0, y: 6, height: 0 },
+  animate: { opacity: 1, y: 0, height: "auto" },
+  exit: { opacity: 0, y: -4, height: 0, transition: { duration: 0.22, ease: [0.4, 0, 0.2, 1] as const } },
+  transition: { duration: 0.26, ease: [0.22, 1, 0.36, 1] as const },
+  style: { overflow: "hidden" },
+};
+
+/** Reduced-motion variant: a bare fade, no height/y movement. */
+const TRANSIENT_INSTANT = {
+  initial: { opacity: 0 },
+  animate: { opacity: 1 },
   exit: { opacity: 0, transition: { duration: 0.15 } },
-  transition: { duration: 0.2, ease: [0.22, 1, 0.36, 1] as const },
+  transition: { duration: 0.15 },
 };
 
 // `min-w-0` lets this flex child shrink to the column width (flex items default
@@ -185,16 +195,6 @@ export function Conversation({
       ? latestRun
       : undefined;
   const outOfCredits = !!failed?.outcome?.error?.includes("insufficient_credits");
-  // Offer "undo" for the most recent finished run that snapshotted the tree, but
-  // only if the agent actually changed files this session.
-  const madeEdits = Object.values(toolCalls).some((t) => t.kind === "edit");
-  const undoSha =
-    !activity.busy && madeEdits
-      ? [...Object.values(runs)]
-          .reverse()
-          .find((r) => r.status !== "running" && r.status !== "queued" && r.checkpoint)?.checkpoint
-      : undefined;
-
   return (
     <div ref={scrollRef} onScroll={onScroll} className="flex-1 overflow-y-auto">
       <div className="mx-auto flex max-w-3xl flex-col gap-2.5 px-5 py-4">
@@ -260,33 +260,26 @@ export function Conversation({
 
         <FanOutPanel />
 
-        {undoSha && (
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-            <UndoBar key={undoSha} sha={undoSha} />
-            <RewindPicker excludeSha={undoSha} />
-          </div>
-        )}
-
-        <AnimatePresence initial={false}>
+        <AnimatePresence initial={false} mode="popLayout">
           {showPending && (
-            <motion.div key="pending" {...TRANSIENT}>
+            <motion.div key="pending" {...(reduce ? TRANSIENT_INSTANT : TRANSIENT)}>
               <Pending label={activity.label} detail={activity.detail} skeleton={awaitingReply} />
             </motion.div>
           )}
           {pending_permission && (
-            <motion.div key="permission" {...TRANSIENT}>
+            <motion.div key="permission" {...(reduce ? TRANSIENT_INSTANT : TRANSIENT)}>
               <PermissionGate req={pending_permission} />
             </motion.div>
           )}
           {failed && outOfCredits && (
-            <motion.div key="upgrade" {...TRANSIENT}>
+            <motion.div key="upgrade" {...(reduce ? TRANSIENT_INSTANT : TRANSIENT)}>
               <UpgradePrompt />
             </motion.div>
           )}
           {failed && !outOfCredits && (
             <motion.div
               key="failed"
-              {...TRANSIENT}
+              {...(reduce ? TRANSIENT_INSTANT : TRANSIENT)}
               className={cn(DANGER_BANNER, "flex items-start gap-2")}
               title={failed.outcome?.error || undefined}
             >
@@ -302,7 +295,7 @@ export function Conversation({
           {error && (
             <motion.div
               key="error"
-              {...TRANSIENT}
+              {...(reduce ? TRANSIENT_INSTANT : TRANSIENT)}
               className={cn(DANGER_BANNER, "flex items-start gap-2")}
               title={error}
             >
@@ -315,14 +308,20 @@ export function Conversation({
 
       {/* Jump-to-latest: a sticky pill (stays in the scroll flow — no positioned
           ancestor) shown only when the user has scrolled up during/after a run. */}
-      {!atBottom && visible.length > 0 && (
-        <button
-          onClick={scrollToBottom}
-          className="sticky bottom-4 left-1/2 z-10 mx-auto flex w-fit -translate-x-1/2 items-center gap-1.5 rounded-full bg-bg-elevated px-3 py-1.5 text-xs font-medium text-ink-secondary shadow-lg ring-1 ring-border-subtle transition hover:text-ink"
-        >
-          <ArrowDown className="size-3.5" /> Jump to latest
-        </button>
-      )}
+      <AnimatePresence>
+        {!atBottom && visible.length > 0 && (
+          <motion.button
+            onClick={scrollToBottom}
+            initial={reduce ? false : { opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={reduce ? { opacity: 0 } : { opacity: 0, y: 8 }}
+            transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+            className="sticky bottom-4 left-1/2 z-10 mx-auto flex w-fit -translate-x-1/2 items-center gap-1.5 rounded-full bg-bg-elevated px-3 py-1.5 text-xs font-medium text-ink-secondary shadow-lg ring-1 ring-border-subtle transition-colors hover:text-ink"
+          >
+            <ArrowDown className="size-3.5" /> Jump to latest
+          </motion.button>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

@@ -1,5 +1,5 @@
-//! Real Git workflow through the WebSocket executor, including checkpoint and
-//! restore. This covers the same path used by remote Changes/Undo UI commands.
+//! Real Git workflow through the WebSocket executor, including checkpoint-backed
+//! change review. This covers the same path used by remote Changes UI commands.
 
 mod support;
 
@@ -9,8 +9,7 @@ use std::time::Duration;
 use exec_core::Executor;
 use exec_server::Config;
 use provider_local::{
-    changes_summary, create_checkpoint, list_project_files, load_index, memory_dir,
-    restore_checkpoint, RemoteExecutor,
+    changes_summary, create_checkpoint, list_project_files, load_index, memory_dir, RemoteExecutor,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -30,7 +29,7 @@ async fn start_server(root: PathBuf) -> String {
 }
 
 #[tokio::test]
-async fn remote_checkpoint_review_and_restore_round_trip() {
+async fn remote_checkpoint_review_round_trip() {
     let fixture = support::GitFixture::new();
     let main = fixture.main.clone();
     let root = fixture.detached.clone();
@@ -82,14 +81,11 @@ async fn remote_checkpoint_review_and_restore_round_trip() {
     assert!(changes.iter().any(|change| change.path == "tracked.txt"));
     assert!(changes.iter().any(|change| change.path == "created.txt"));
 
-    restore_checkpoint(&remote, &root, &checkpoint)
-        .await
-        .unwrap();
     assert_eq!(
         std::fs::read_to_string(root.join("tracked.txt")).unwrap(),
-        "main\n"
+        "remote edit\n"
     );
-    assert!(!root.join("created.txt").exists());
+    assert!(root.join("created.txt").exists());
     assert_eq!(
         std::fs::read_to_string(main.join("tracked.txt")).unwrap(),
         "main\n"

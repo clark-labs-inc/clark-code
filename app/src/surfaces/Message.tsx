@@ -228,7 +228,7 @@ function ThinkingBlock({ text }: { text: string }) {
             initial={reduce ? false : { height: 0, opacity: 0 }}
             animate={{ height: "auto", opacity: 1 }}
             exit={reduce ? { opacity: 0 } : { height: 0, opacity: 0 }}
-            transition={{ duration: 0.18 }}
+            transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
             className="overflow-hidden"
           >
             <div className={cn("mt-1 max-h-52 overflow-auto border-l border-border-subtle pl-3 text-xs leading-relaxed text-ink-muted", MD_CLASSES)}>
@@ -295,6 +295,7 @@ function MessageImpl({
       <div className="min-w-0 space-y-1.5">
         {spans.map((span, i) => {
           if (span.kind === "thinking") return <ThinkingBlock key={i} text={span.text} />;
+          const lastSpan = i === spans.length - 1;
           return (
             <div
               key={i}
@@ -305,6 +306,12 @@ function MessageImpl({
               )}
             >
               {streaming ? <StreamingMd text={span.text} /> : <Md>{span.text}</Md>}
+              {streaming && lastSpan && (
+                <span
+                  aria-hidden
+                  className="stream-caret ml-0.5 inline-block h-[1em] w-[7px] translate-y-[0.15em] rounded-[1px] bg-accent/80"
+                />
+              )}
             </div>
           );
         })}

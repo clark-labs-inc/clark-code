@@ -137,6 +137,9 @@ export interface RunUsage {
   /** Prompt size of the last model call — the live context footprint. */
   context_tokens: number;
   cost_usd?: number;
+  /** The engine's auto-compaction threshold in tokens, when known — the
+   *  denominator for an honest context meter. */
+  context_limit?: number;
 }
 
 export interface RunOutcome {
@@ -150,7 +153,7 @@ export interface RunView {
   id: string;
   status: RunStatus;
   outcome?: RunOutcome;
-  /** Restore handle for "undo this run" (a pre-run working-tree checkpoint). */
+  /** Pre-run working-tree checkpoint used as a change-tracking baseline. */
   checkpoint?: string;
 }
 

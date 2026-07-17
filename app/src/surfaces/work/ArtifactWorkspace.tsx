@@ -198,7 +198,7 @@ function ArtifactPreview({
     if (loading) {
       return (
         <div className="grid min-h-full place-items-center text-sm text-ink-faint">
-          <span className="flex items-center gap-2"><Loader2 className="size-4 animate-spin" /> Loading document…</span>
+          <span className="flex items-center gap-2"><Loader2 className="size-4 animate-[spin_1s_linear_infinite]" /> Loading document…</span>
         </div>
       );
     }
@@ -608,7 +608,7 @@ export function ArtifactWorkspace({
               disabled={downloading}
               className="flex h-8 items-center gap-1.5 rounded-lg px-2 text-xs text-ink-muted transition hover:bg-bg-hover hover:text-ink disabled:opacity-50"
             >
-              {downloading ? <Loader2 className="size-3.5 animate-spin" /> : saved ? <Check className="size-3.5 text-success" /> : <Download className="size-3.5" />} {saved ? "Saved" : "Download"}
+              {downloading ? <Loader2 className="size-3.5 animate-[spin_1s_linear_infinite]" /> : saved ? <Check className="size-3.5 text-success" /> : <Download className="size-3.5" />} {saved ? "Saved" : "Download"}
             </button>
           )}
           {text != null && (

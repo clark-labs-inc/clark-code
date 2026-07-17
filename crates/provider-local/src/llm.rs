@@ -7,14 +7,15 @@
 //! fragmented tool-call deltas. The parser reassembles those into a single
 //! [`AssistantTurn`]; text streams out live via a callback for the UI.
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, time::Duration};
 
-use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio_util::sync::CancellationToken;
 
 use crate::config::LocalConfig;
+
+mod retry;
 
 /// A single message in the running transcript, serialized straight to the wire.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -26,6 +27,11 @@ pub struct ChatMessage {
     pub tool_calls: Vec<WireToolCall>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_call_id: Option<String>,
+    /// Provider-native reasoning replayed on assistant messages of the
+    /// in-flight tool exchange (OpenRouter's `reasoning` field). GLM/Kimi
+    /// reasoning models keep their chain across tool calls this way.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<String>,
 }
 
 /// `content` on the OpenAI-compatible wire format is either a plain string or
@@ -78,6 +84,7 @@ impl ChatMessage {
             content: Some(ChatContent::Parts(parts)),
             tool_calls: Vec::new(),
             tool_call_id: None,
+            reasoning: None,
         }
     }
     pub fn tool(tool_call_id: impl Into<String>, content: impl Into<String>) -> Self {
@@ -86,6 +93,7 @@ impl ChatMessage {
             content: Some(ChatContent::text(content)),
             tool_calls: Vec::new(),
             tool_call_id: Some(tool_call_id.into()),
+            reasoning: None,
         }
     }
     fn simple(role: &str, text: impl Into<String>) -> Self {
@@ -94,6 +102,7 @@ impl ChatMessage {
             content: Some(ChatContent::text(text)),
             tool_calls: Vec::new(),
             tool_call_id: None,
+            reasoning: None,
         }
     }
 }
@@ -180,7 +189,9 @@ pub struct AssistantTurn {
     pub usage: Option<TokenUsage>,
     /// Hidden reasoning the model streamed in `delta.reasoning` (GLM/OpenRouter)
     /// or `delta.reasoning_content` (some providers) — separate from `text`.
-    /// Display-only; never sent back to the model on the next turn.
+    /// Shown in the UI, kept as a typed `Reasoning` block in history, and
+    /// replayed on the wire for the current tool exchange (reasoning models
+    /// keep their chain across tool calls that way).
     pub reasoning: String,
 }
 
@@ -330,76 +341,6 @@ impl LlmClient {
         }
         body
     }
-
-    /// Stream one chat completion. `on_text` receives assistant text deltas as
-    /// they arrive; `on_reasoning` receives hidden reasoning deltas (GLM's
-    /// `delta.reasoning` / the `reasoning_content` alias) so the UI can surface
-    /// a live Thinking block instead of silence. The assembled turn (text +
-    /// tool calls + reasoning) is returned at the end. Honors `cancel` both
-    /// before and during the stream.
-    pub async fn stream_chat(
-        &self,
-        messages: &[ChatMessage],
-        tools: &[ToolSchema],
-        cancel: &CancellationToken,
-        mut on_text: impl FnMut(&str),
-        mut on_reasoning: impl FnMut(&str),
-    ) -> Result<AssistantTurn, LlmError> {
-        if cancel.is_cancelled() {
-            return Err(LlmError::Cancelled);
-        }
-        let url = format!("{}/chat/completions", self.base_url);
-        let mut req = self.http.post(&url).json(&self.body(messages, tools));
-        if let Some(key) = &self.api_key {
-            req = req.bearer_auth(key);
-        }
-        for (k, v) in &self.headers {
-            req = req.header(k.as_str(), v.as_str());
-        }
-
-        let resp = tokio::select! {
-            _ = cancel.cancelled() => return Err(LlmError::Cancelled),
-            r = req.send() => r.map_err(|e| LlmError::Message(format!("model request failed: {e}")))?,
-        };
-        let status = resp.status();
-        if !status.is_success() {
-            let body = resp.text().await.unwrap_or_default();
-            // Clark returns 403 with a credits message when the wallet is empty.
-            if status.as_u16() == 403 && body.to_lowercase().contains("credit") {
-                return Err(LlmError::InsufficientCredits);
-            }
-            return Err(LlmError::Message(format!(
-                "model endpoint returned {status}: {}",
-                body.chars().take(500).collect::<String>()
-            )));
-        }
-
-        let mut stream = resp.bytes_stream();
-        let mut buf: Vec<u8> = Vec::new();
-        let mut acc = Accumulator::default();
-        loop {
-            let next = tokio::select! {
-                _ = cancel.cancelled() => return Err(LlmError::Cancelled),
-                n = stream.next() => n,
-            };
-            match next {
-                None => break,
-                Some(Err(e)) => {
-                    return Err(LlmError::Message(format!("model stream error: {e}")));
-                }
-                Some(Ok(bytes)) => {
-                    buf.extend_from_slice(&bytes);
-                    if drain_lines(&mut buf, &mut acc, &mut on_text, &mut on_reasoning) {
-                        break; // saw [DONE]
-                    }
-                }
-            }
-        }
-        if let Some(error) = acc.stream_error.take() {
-            return Err(LlmError::Message(error));
-        }
-        Ok(acc.finish())
-    }
 }
 
 /// Extract complete `\n`-terminated lines from `buf`, feeding each SSE `data:`
@@ -443,7 +384,21 @@ struct Accumulator {
     tool_calls: BTreeMap<u64, PartialToolCall>,
     finish_reason: Option<String>,
     usage: Option<TokenUsage>,
-    stream_error: Option<String>,
+    stream_error: Option<StreamFailure>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct StreamFailure {
+    message: String,
+    code: Option<u16>,
+    error_type: Option<String>,
+    retry_after: Option<Duration>,
+}
+
+impl StreamFailure {
+    fn is_rate_limited(&self) -> bool {
+        self.code == Some(429) || self.error_type.as_deref() == Some("rate_limit_exceeded")
+    }
 }
 
 #[derive(Default)]
@@ -466,28 +421,44 @@ impl Accumulator {
         // contract instead of silently discarding the only event and later
         // misreporting it as an empty assistant turn.
         if let Some(error) = chunk.get("error").and_then(Value::as_object) {
-            let code = error.get("code").map(|value| match value {
+            let code_label = error.get("code").map(|value| match value {
                 Value::String(value) => value.clone(),
                 other => other.to_string(),
+            });
+            let code = error.get("code").and_then(|value| match value {
+                Value::Number(value) => value.as_u64().and_then(|value| value.try_into().ok()),
+                Value::String(value) => value.parse().ok(),
+                _ => None,
             });
             let error_type = error
                 .get("metadata")
                 .and_then(Value::as_object)
                 .and_then(|metadata| metadata.get("error_type"))
-                .and_then(Value::as_str);
+                .and_then(Value::as_str)
+                .map(str::to_string);
+            let retry_after = error
+                .get("metadata")
+                .and_then(Value::as_object)
+                .and_then(retry_after_from_metadata);
             let message = error
                 .get("message")
                 .and_then(Value::as_str)
                 .unwrap_or("provider stream failed");
-            let label = [code.as_deref(), error_type]
+            let label = [code_label.as_deref(), error_type.as_deref()]
                 .into_iter()
                 .flatten()
                 .collect::<Vec<_>>()
                 .join(" ");
-            self.stream_error = Some(if label.is_empty() {
+            let message = if label.is_empty() {
                 format!("model stream error: {message}")
             } else {
                 format!("model stream error ({label}): {message}")
+            };
+            self.stream_error = Some(StreamFailure {
+                message,
+                code,
+                error_type,
+                retry_after,
             });
         }
         // The final chunk carries the whole call's usage (include_usage is set
@@ -581,6 +552,24 @@ impl Accumulator {
             reasoning: self.reasoning,
         }
     }
+
+    fn emitted_output(&self) -> bool {
+        !self.text.is_empty() || !self.reasoning.is_empty()
+    }
+}
+
+fn retry_after_from_metadata(metadata: &serde_json::Map<String, Value>) -> Option<Duration> {
+    ["retry_after_seconds", "retry_after_seconds_raw"]
+        .into_iter()
+        .filter_map(|key| metadata.get(key))
+        .find_map(|value| match value {
+            Value::Number(value) => value
+                .as_u64()
+                .or_else(|| value.as_f64().map(|seconds| seconds.ceil() as u64)),
+            Value::String(value) => value.parse().ok(),
+            _ => None,
+        })
+        .map(Duration::from_secs)
 }
 
 #[cfg(test)]
@@ -691,7 +680,9 @@ mod tests {
         });
         acc.push_chunk(&v, &mut |_| {}, &mut |_| {});
         assert_eq!(
-            acc.stream_error.as_deref(),
+            acc.stream_error
+                .as_ref()
+                .map(|error| error.message.as_str()),
             Some(
                 "model stream error (502 provider_unavailable): Provider disconnected unexpectedly"
             )

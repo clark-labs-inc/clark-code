@@ -72,6 +72,10 @@ export class TauriBridge implements CoreBridge {
     return invoke("prompt", { sessionId, blocks, attachments });
   }
 
+  steer(sessionId: string, blocks: ContentBlock[]): Promise<void> {
+    return invoke("steer", { sessionId, blocks });
+  }
+
   cancel(sessionId: string, runId: string): Promise<void> {
     return invoke("cancel", { sessionId, runId });
   }

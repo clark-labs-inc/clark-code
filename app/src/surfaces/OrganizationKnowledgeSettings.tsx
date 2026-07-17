@@ -14,6 +14,7 @@ import {
   setProjectKnowledgeEnabled,
   type RepositoryIdentity,
 } from "../lib/repositoryKnowledge";
+import { GroupLabel, Card, Row, Toggle } from "./settings/Primitives";
 
 /** Explicit, repository-scoped consent for contributing local Git history. */
 export function OrganizationKnowledgeSettings() {
@@ -83,85 +84,74 @@ export function OrganizationKnowledgeSettings() {
   return (
     <div className="space-y-6">
       <div>
-        <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-ink-faint">
-          Project knowledge
-        </div>
-        <div className="flex items-center gap-3 rounded-xl border border-border-subtle bg-bg-elevated/40 px-3.5 py-3">
-          <FolderGit2 className="size-4 shrink-0 text-ink-muted" />
-          <div className="min-w-0 flex-1">
-            <div className="text-sm text-ink">Index repository history</div>
-            <div className="mt-0.5 text-xs text-ink-faint">
-              Sync Git identity and bounded commit history for repositories inside the selected folder.
-            </div>
-          </div>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={enabled}
-            aria-label="Sync project knowledge"
-            onClick={() => {
-              const next = !enabled;
-              setProjectKnowledgeEnabled(next);
-              setEnabled(next);
-            }}
-            className={`relative h-[18px] w-8 shrink-0 rounded-full transition-colors ${
-              enabled ? "bg-accent" : "bg-bg-tertiary"
-            }`}
+        <GroupLabel>Project knowledge</GroupLabel>
+        <Card>
+          <Row
+            icon={<FolderGit2 className="size-4" />}
+            name="Index repository history"
+            sub="Sync Git identity and bounded commit history for repositories inside the selected folder."
           >
-            <span className={`absolute top-0.5 size-[14px] rounded-full bg-white shadow-sm transition-all ${
-              enabled ? "left-[15px]" : "left-0.5"
-            }`} />
-          </button>
-        </div>
+            <Toggle
+              on={enabled}
+              onClick={() => {
+                const next = !enabled;
+                setProjectKnowledgeEnabled(next);
+                setEnabled(next);
+              }}
+              label="Sync project knowledge"
+            />
+          </Row>
+        </Card>
       </div>
       {auth && (
-      <div>
-      <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-ink-faint">
-        Organization knowledge
-      </div>
-      <div className="rounded-xl border border-border-subtle bg-bg-elevated/40 px-3.5 py-3">
-        <div className="flex items-center gap-3">
-          <Building2 className="size-4 shrink-0 text-ink-muted" />
-          <div className="min-w-0 flex-1">
-            <div className="text-sm text-ink">Contribute this repository</div>
-            <div className="mt-0.5 text-xs text-ink-faint">{detail}</div>
-          </div>
-          {loading ? (
-            <Loader2 className="size-4 animate-spin text-ink-muted" aria-label="Loading organizations" />
-          ) : (
-            <select
-              aria-label="Organization for this repository"
-              value={selection}
-              disabled={unavailable}
-              onChange={(event) => {
-                if (!repository) return;
-                const organizationId = event.target.value;
-                setOrganizationForRepository(
-                  repository.fingerprint,
-                  organizationId || null,
-                );
-                setSelection(organizationId);
-              }}
-              className="max-w-48 rounded-lg border border-border bg-bg px-2.5 py-1.5 text-xs text-ink outline-none disabled:opacity-50"
+        <div>
+          <GroupLabel>Organization knowledge</GroupLabel>
+          <Card>
+            <Row
+              icon={<Building2 className="size-4" />}
+              name="Contribute this repository"
+              sub={detail}
             >
-              <option value="">Private — personal only</option>
-              {organizations.map((organization) => (
-                <option key={organization.organization_id} value={organization.organization_id}>
-                  {organization.name}
-                </option>
-              ))}
-            </select>
-          )}
+              {loading ? (
+                <Loader2 className="size-4 shrink-0 animate-[spin_1s_linear_infinite] text-ink-muted" aria-label="Loading organizations" />
+              ) : (
+                <select
+                  aria-label="Organization for this repository"
+                  value={selection}
+                  disabled={unavailable}
+                  onChange={(event) => {
+                    if (!repository) return;
+                    const organizationId = event.target.value;
+                    setOrganizationForRepository(
+                      repository.fingerprint,
+                      organizationId || null,
+                    );
+                    setSelection(organizationId);
+                  }}
+                  className="max-w-48 shrink-0 rounded-lg border border-border bg-bg px-2.5 py-1.5 text-xs text-ink outline-none disabled:opacity-50"
+                >
+                  <option value="">Private — personal only</option>
+                  {organizations.map((organization) => (
+                    <option key={organization.organization_id} value={organization.organization_id}>
+                      {organization.name}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </Row>
+            {(selection || error) && (
+              <div className="px-3.5 py-2.5">
+                {selection && (
+                  <p className="flex items-center gap-1.5 text-xs text-ink-faint">
+                    <LockKeyhole className="size-3.5 shrink-0" />
+                    Only active members can retrieve extracted claims; raw repository files are not uploaded.
+                  </p>
+                )}
+                {error && <p className="mt-1 text-xs text-danger">Could not load organizations.</p>}
+              </div>
+            )}
+          </Card>
         </div>
-        {selection && (
-          <p className="mt-2 flex items-center gap-1.5 text-xs text-ink-faint">
-            <LockKeyhole className="size-3.5" />
-            Only active members can retrieve extracted claims; raw repository files are not uploaded.
-          </p>
-        )}
-        {error && <p className="mt-2 text-xs text-danger">Could not load organizations.</p>}
-      </div>
-      </div>
       )}
     </div>
   );
