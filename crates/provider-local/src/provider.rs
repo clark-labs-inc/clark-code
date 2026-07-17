@@ -254,6 +254,7 @@ impl Provider for LocalAgentProvider {
             s.plan_mode = options.mode.as_deref() == Some("plan");
             s.plan_exited = false;
             s.steering = None;
+            s.goal = None;
             s.policy = config.permissions.clone();
             s.allow_commands = crate::project_settings::union_unique(
                 config.command_allowlist.clone(),

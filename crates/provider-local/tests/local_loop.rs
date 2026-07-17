@@ -983,3 +983,176 @@ async fn parallel_read_batch_returns_both_results_in_order() {
     let b = second.find("par_b").expect("second result present");
     assert!(a < b, "results keep tool-call emission order");
 }
+
+fn final_body_with_usage(text: &str, prompt_tokens: u64, completion_tokens: u64) -> String {
+    format!(
+        "data: {}\n\ndata: {}\n\ndata: [DONE]\n\n",
+        json!({"choices":[{"delta":{"content": text}}]}),
+        json!({
+            "choices":[{"delta":{},"finish_reason":"stop"}],
+            "usage": {"prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens}
+        })
+    )
+}
+
+/// The full goal lifecycle against the real engine: `create_goal` starts the
+/// autonomy loop, the engine launches a continuation turn carrying the
+/// objective + budget, the model does real work in it (a gated write), marks
+/// the goal complete, and the run ends instead of continuing forever.
+#[tokio::test]
+async fn goal_mode_continues_the_run_until_update_goal_complete() {
+    let dir = tempfile::tempdir().unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let serve_handle = tokio::spawn(serve(
+        listener,
+        vec![
+            // Turn 1: the model creates the goal…
+            tool_call_sse(
+                "g1",
+                "create_goal",
+                json!({"objective": "hello.txt must exist containing exactly HELLO"}),
+            ),
+            // …and ends its turn with a status line (natural stop).
+            text_body("Goal created — starting."),
+            // Continuation turn 1 (engine-launched): do the actual work…
+            tool_call_sse(
+                "g2",
+                "write_file",
+                json!({"path": "hello.txt", "content": "HELLO"}),
+            ),
+            // …verify + mark the goal complete…
+            tool_call_sse("g3", "update_goal", json!({"status": "complete"})),
+            // …and deliver the final answer.
+            final_body(),
+        ],
+    ));
+
+    let mut provider = connect_provider(addr).await;
+    let session = provider
+        .new_session(SessionOptions {
+            cwd: Some(dir.path().to_string_lossy().to_string()),
+            mode: None,
+            resume: None,
+        })
+        .await
+        .unwrap();
+    let mut stream = provider
+        .prompt(
+            &session.id,
+            PromptInput::text("keep going until hello.txt exists — make it a goal"),
+        )
+        .await
+        .unwrap();
+
+    let mut goal_notes = 0;
+    let mut finished = None;
+    while let Some(ev) = stream.next().await {
+        match &ev {
+            AgentEvent::PermissionRequest { request } => {
+                provider
+                    .respond(
+                        &session.id,
+                        ClientResponse::Permission {
+                            request: request.id.clone(),
+                            option: "allow_once".into(),
+                            feedback: None,
+                        },
+                    )
+                    .await
+                    .unwrap();
+            }
+            AgentEvent::MessageChunk {
+                role: agent_core::domain::Role::System,
+                ..
+            } => goal_notes += 1,
+            AgentEvent::RunFinished { outcome, .. } => {
+                finished = Some(outcome.status);
+                break;
+            }
+            _ => {}
+        }
+    }
+
+    assert_eq!(finished, Some(RunStatus::Done));
+    assert!(goal_notes >= 1, "the continuation must be visible");
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("hello.txt")).unwrap(),
+        "HELLO",
+        "the goal's work happened in the continuation turn"
+    );
+
+    let captured = serve_handle.await.unwrap();
+    assert_eq!(captured.len(), 5, "one user turn + one continuation turn");
+    let continuation = String::from_utf8_lossy(&captured[2]).to_string();
+    assert!(
+        continuation.contains("goal continuation turn 1"),
+        "the engine-launched turn carries the continuation reminder"
+    );
+    assert!(continuation.contains("hello.txt must exist containing exactly HELLO"));
+    assert!(continuation.contains("audit EVERY explicit requirement"));
+    let after_complete = String::from_utf8_lossy(&captured[4]).to_string();
+    assert!(
+        after_complete.contains("Goal marked complete"),
+        "the model sees the completion confirmation"
+    );
+}
+
+/// A goal with a token budget gets exactly one wrap-up turn once usage crosses
+/// the budget, then the run stops — no infinite autonomy.
+#[tokio::test]
+async fn goal_budget_exhaustion_triggers_one_wrapup_turn_then_stops() {
+    let dir = tempfile::tempdir().unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let serve_handle = tokio::spawn(serve(
+        listener,
+        vec![
+            tool_call_sse(
+                "g1",
+                "create_goal",
+                json!({"objective": "an endless task", "token_budget": 10}),
+            ),
+            // Ending the first turn reports usage far over the 10-token budget.
+            final_body_with_usage("Working on it.", 500, 100),
+            // The engine's ONE wrap-up turn.
+            final_body_with_usage("Out of budget — here is where things stand.", 200, 50),
+        ],
+    ));
+
+    let mut provider = connect_provider(addr).await;
+    let session = provider
+        .new_session(SessionOptions {
+            cwd: Some(dir.path().to_string_lossy().to_string()),
+            mode: None,
+            resume: None,
+        })
+        .await
+        .unwrap();
+    let mut stream = provider
+        .prompt(
+            &session.id,
+            PromptInput::text("pursue this as a goal with a 10 token budget"),
+        )
+        .await
+        .unwrap();
+    let events = drain_run(&mut stream).await;
+
+    assert!(events.iter().any(|e| matches!(
+        e,
+        AgentEvent::RunFinished { outcome, .. } if outcome.status == RunStatus::Done
+    )));
+
+    let captured = serve_handle.await.unwrap();
+    assert_eq!(
+        captured.len(),
+        3,
+        "user turn + exactly one budget wrap-up turn"
+    );
+    let wrapup = String::from_utf8_lossy(&captured[2]).to_string();
+    assert!(
+        wrapup.contains("goal budget exhausted"),
+        "the wrap-up turn carries the budget-limit reminder"
+    );
+    assert!(wrapup.contains("Do not start new substantive work"));
+}

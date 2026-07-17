@@ -11,7 +11,7 @@ use crate::agent_adapter::{desktop_tool_registry, ClarkAgentStream, DesktopEvent
 use crate::compaction::{CheckpointCompactor, CompactionConfig};
 use crate::llm::LlmClient;
 use crate::loop_breaker::LoopBreaker;
-use crate::loop_state::{RunControl, SessionState};
+use crate::loop_state::{GoalStatus, RunControl, SessionState};
 use crate::tools::{ToolCtx, ToolRegistry};
 
 /// Turns of head-room before the hard `max_iterations` cap at which the
@@ -21,6 +21,20 @@ use crate::tools::{ToolCtx, ToolRegistry};
 /// and what's left (reported as a clean finish, not a failure). Sized
 /// against the 1000-turn cap in [`crate::config`].
 const GRACE_ITERATIONS: usize = 40;
+
+/// Hard cap on engine-launched goal-continuation turns within one run — the
+/// circuit breaker against a goal that never converges. Each continuation is
+/// itself bounded by `max_iterations` + the LoopBreaker, so this bounds the
+/// outer autonomy loop, not the work inside a turn.
+const MAX_GOAL_CONTINUATIONS: u32 = 24;
+
+/// What the goal loop does after a cleanly completed iteration.
+enum GoalStep {
+    /// Launch another continuation turn with this prompt text.
+    Continue { text: String, note: String },
+    /// Stop the run and surface this note (cap reached).
+    Stop(String),
+}
 
 /// Steering queue shared between the provider (`Provider::steer` pushes) and
 /// the active run (clark-agent drains it between tool batches). A queue —
@@ -200,66 +214,191 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
     // active is injected between tool batches instead of waiting for the end.
     tc.session.lock().await.steering = Some(steering.clone());
 
-    // Drive the run, recovering ONCE from a context-window overflow: preserve
-    // the progress the user already saw, force-compact the transcript, and
-    // continue the same turn — instead of dying with "model_error" at the
-    // window edge (which is what happens when the model's real window is
-    // smaller than the compaction threshold assumes).
+    // Drive the run, recovering ONCE from a context-window overflow (preserve
+    // progress, force-compact, continue the same turn) — and, when a session
+    // goal is active, CONTINUING the run after each clean completion with a
+    // goal-continuation turn (the Codex thread-goal loop): the run keeps going
+    // until the model proves the goal complete, gets blocked, or the budget
+    // runs out. Steering and cancel keep working throughout — it is all one
+    // desktop run.
     let mut prompts = vec![prompt];
     let mut recovered_from_overflow = false;
-    let run_result = loop {
-        let context = {
-            let session = tc.session.lock().await;
-            clark_agent::AgentContext::new(session.system_prompt.clone())
-                .with_messages(session.transcript.clone())
-                .with_identity(identity.clone())
+    let run_result = 'goal: loop {
+        let iteration_started = std::time::Instant::now();
+        let usage_before = usage
+            .snapshot()
+            .map(|u| u.input_tokens + u.output_tokens)
+            .unwrap_or(0);
+        let attempt_result = loop {
+            let context = {
+                let session = tc.session.lock().await;
+                clark_agent::AgentContext::new(session.system_prompt.clone())
+                    .with_messages(session.transcript.clone())
+                    .with_identity(identity.clone())
+            };
+            let attempt = if prompts.is_empty() {
+                clark_agent::run_continue(context, &config, cancel.clone()).await
+            } else {
+                clark_agent::run(
+                    std::mem::take(&mut prompts),
+                    context,
+                    &config,
+                    cancel.clone(),
+                )
+                .await
+            };
+            match attempt {
+                Err(error)
+                    if is_context_overflow(&error)
+                        && !recovered_from_overflow
+                        && !cancel.is_cancelled() =>
+                {
+                    recovered_from_overflow = true;
+                    // Fold what completed so far into the transcript, then shrink.
+                    {
+                        let mut session = tc.session.lock().await;
+                        let progress = completed_transcript.drain();
+                        session.transcript.extend(progress);
+                    }
+                    let snapshot = tc.session.lock().await.transcript.clone();
+                    match crate::compaction::force_compact(
+                        &tc.llm,
+                        &tc.compaction,
+                        &snapshot,
+                        &cancel,
+                    )
+                    .await
+                    {
+                        Some(compacted) => {
+                            tc.session.lock().await.transcript = compacted;
+                            let _ = tx
+                                .send(AgentEvent::MessageChunk {
+                                    run: run.clone(),
+                                    role: agent_core::domain::Role::System,
+                                    delta: agent_core::domain::ContentBlock::text(
+                                        "The conversation hit the model's context limit — \
+                                         earlier turns were summarized so this task can \
+                                         continue.",
+                                    ),
+                                })
+                                .await;
+                            continue;
+                        }
+                        None => break Err(error),
+                    }
+                }
+                other => break other,
+            }
         };
-        let attempt = if prompts.is_empty() {
-            clark_agent::run_continue(context, &config, cancel.clone()).await
-        } else {
-            clark_agent::run(
-                std::mem::take(&mut prompts),
-                context,
-                &config,
-                cancel.clone(),
-            )
-            .await
-        };
-        match attempt {
-            Err(error)
-                if is_context_overflow(&error)
-                    && !recovered_from_overflow
-                    && !cancel.is_cancelled() =>
-            {
-                recovered_from_overflow = true;
-                // Fold what completed so far into the transcript, then shrink.
+
+        match attempt_result {
+            Ok(result) if result.outcome.is_complete() => {
                 {
                     let mut session = tc.session.lock().await;
-                    let progress = completed_transcript.drain();
-                    session.transcript.extend(progress);
+                    session.transcript.extend(result.messages);
                 }
-                let snapshot = tc.session.lock().await.transcript.clone();
-                match crate::compaction::force_compact(&tc.llm, &tc.compaction, &snapshot, &cancel)
-                    .await
-                {
-                    Some(compacted) => {
-                        tc.session.lock().await.transcript = compacted;
+                // The completed-transcript observer saw the same messages the
+                // loop just returned; reset it so a LATER failed continuation
+                // can't fold duplicates into the transcript.
+                let _ = completed_transcript.drain();
+
+                // Goal bookkeeping: account this iteration's tokens/time, then
+                // decide whether the run continues.
+                let usage_now = usage
+                    .snapshot()
+                    .map(|u| u.input_tokens + u.output_tokens)
+                    .unwrap_or(usage_before);
+                let next = {
+                    let mut session = tc.session.lock().await;
+                    let plan_mode = session.plan_mode;
+                    match session.goal.as_mut() {
+                        Some(goal) => {
+                            goal.tokens_used += usage_now.saturating_sub(usage_before);
+                            goal.time_used_seconds += iteration_started.elapsed().as_secs();
+                            if goal.status != GoalStatus::Active
+                                || plan_mode
+                                || cancel.is_cancelled()
+                            {
+                                None
+                            } else if goal.continuations >= MAX_GOAL_CONTINUATIONS {
+                                goal.status = GoalStatus::Blocked;
+                                Some(GoalStep::Stop(format!(
+                                    "The goal ran for {MAX_GOAL_CONTINUATIONS} continuation \
+                                     turns without completing — it is now marked blocked. \
+                                     Review the progress above and send a message to continue."
+                                )))
+                            } else if goal
+                                .token_budget
+                                .is_some_and(|budget| goal.tokens_used >= budget)
+                            {
+                                goal.status = GoalStatus::BudgetLimited;
+                                goal.continuations += 1;
+                                Some(GoalStep::Continue {
+                                    text: crate::prompt::goal_budget_limit_reminder(goal),
+                                    note: format!(
+                                        "Goal budget exhausted ({} tokens) — wrapping up.",
+                                        goal.tokens_used
+                                    ),
+                                })
+                            } else {
+                                // Render BEFORE incrementing: the reminder
+                                // numbers the turn it introduces.
+                                let text = crate::prompt::goal_continuation_reminder(goal);
+                                goal.continuations += 1;
+                                let note = format!(
+                                    "Goal turn {}: continuing toward the objective ({} \
+                                     tokens used).",
+                                    goal.continuations, goal.tokens_used
+                                );
+                                Some(GoalStep::Continue { text, note })
+                            }
+                        }
+                        None => None,
+                    }
+                };
+                match next {
+                    Some(GoalStep::Continue { text, note }) => {
                         let _ = tx
                             .send(AgentEvent::MessageChunk {
                                 run: run.clone(),
                                 role: agent_core::domain::Role::System,
-                                delta: agent_core::domain::ContentBlock::text(
-                                    "The conversation hit the model's context limit — earlier \
-                                     turns were summarized so this task can continue.",
-                                ),
+                                delta: agent_core::domain::ContentBlock::text(note),
                             })
                             .await;
-                        continue;
+                        prompts = vec![clark_agent::AgentMessage::User {
+                            content: clark_agent::UserContent::Text(text),
+                            timestamp: None,
+                        }];
+                        continue 'goal;
                     }
-                    None => break Err(error),
+                    Some(GoalStep::Stop(note)) => {
+                        let _ = tx
+                            .send(AgentEvent::MessageChunk {
+                                run: run.clone(),
+                                role: agent_core::domain::Role::System,
+                                delta: agent_core::domain::ContentBlock::text(note),
+                            })
+                            .await;
+                        break 'goal Ok(result.outcome);
+                    }
+                    None => break 'goal Ok(result.outcome),
                 }
             }
-            other => break other,
+            Ok(result) => {
+                // HitMaxIterations: fold what we have and stop any goal.
+                {
+                    let mut session = tc.session.lock().await;
+                    session.transcript.extend(result.messages);
+                    if let Some(goal) = session.goal.as_mut() {
+                        if goal.status == GoalStatus::Active {
+                            goal.status = GoalStatus::Blocked;
+                        }
+                    }
+                }
+                let _ = completed_transcript.drain();
+                break 'goal Ok(result.outcome);
+            }
+            Err(error) => break 'goal Err(error),
         }
     };
     // The queue is only valid while this run drives the loop. Anything still
@@ -270,11 +409,9 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
 
     let context_limit = crate::compaction::limit_of(&tc.compaction);
     match run_result {
-        Ok(result) => {
-            let outcome = result.outcome;
+        Ok(outcome) => {
             {
                 let mut session = tc.session.lock().await;
-                session.transcript.extend(result.messages);
                 session.transcript.extend(leftover_steering);
             }
             // Post-turn, off the latency path: extract durable facts the model
@@ -327,6 +464,16 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
                 let mut session = tc.session.lock().await;
                 session.transcript.extend(completed_transcript.drain());
                 session.transcript.extend(leftover_steering);
+                // A goal must never auto-continue into a wall: a failed run
+                // blocks it (Codex does the same "to prevent automatic
+                // continuation from looping and consuming tokens"). A user
+                // cancel merely pauses pursuit — also expressed as Blocked,
+                // resumed by the user's next explicit ask.
+                if let Some(goal) = session.goal.as_mut() {
+                    if goal.status == GoalStatus::Active {
+                        goal.status = GoalStatus::Blocked;
+                    }
+                }
                 // Tell the model the turn was cut off (Codex records the same
                 // marker): without it, the next turn continues as if the last
                 // one finished cleanly, re-trusting steps that never ran.

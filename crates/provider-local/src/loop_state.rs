@@ -47,6 +47,53 @@ pub(crate) struct SessionState {
     /// waiting for the run to end. Set by the engine at run start, cleared
     /// at run end.
     pub steering: Option<std::sync::Arc<crate::engine::EngineSteering>>,
+    /// Standing objective the session pursues autonomously (the Codex
+    /// `/goal` analog): while `Active`, the engine keeps continuing the run
+    /// with goal-continuation turns after each clean completion, until the
+    /// model proves the goal complete, gets genuinely blocked, or the token
+    /// budget runs out.
+    pub goal: Option<SessionGoal>,
+}
+
+/// One session goal. Created by the model's `create_goal` tool (only on an
+/// explicit user request); status transitions to `Complete`/`Blocked` come
+/// from `update_goal`, and to `Blocked`/`BudgetLimited` from the engine
+/// (errors, iteration caps, budget crossings).
+#[derive(Clone, Debug)]
+pub(crate) struct SessionGoal {
+    pub objective: String,
+    pub status: GoalStatus,
+    /// Optional cap on tokens (input+output) spent pursuing the goal.
+    pub token_budget: Option<u64>,
+    /// Tokens (input+output) attributed to the goal so far.
+    pub tokens_used: u64,
+    /// Wall-clock seconds spent in goal-driven turns.
+    pub time_used_seconds: u64,
+    /// Goal-continuation turns launched by the engine so far.
+    pub continuations: u32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum GoalStatus {
+    Active,
+    /// The engine or the model stopped: repeated blocker, terminal error, or
+    /// the continuation cap. Needs the user to intervene.
+    Blocked,
+    /// The token budget is exhausted; one wrap-up turn runs, then the run
+    /// stops.
+    BudgetLimited,
+    Complete,
+}
+
+impl GoalStatus {
+    pub fn label(self) -> &'static str {
+        match self {
+            GoalStatus::Active => "active",
+            GoalStatus::Blocked => "blocked",
+            GoalStatus::BudgetLimited => "budget-limited",
+            GoalStatus::Complete => "complete",
+        }
+    }
 }
 
 /// Live control surface for the current run, reachable from respond/cancel.

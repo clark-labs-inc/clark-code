@@ -26,6 +26,7 @@ pub mod browser;
 pub mod clark;
 pub mod diagnostics;
 pub mod fs;
+pub mod goal;
 pub mod grep;
 #[cfg(target_os = "macos")]
 pub mod ios_simulator;
@@ -290,6 +291,9 @@ impl ToolRegistry {
             Arc::new(plan::ProposePlan),
             Arc::new(plan::EnterPlanMode),
             Arc::new(plan::UpdatePlan),
+            Arc::new(goal::CreateGoal),
+            Arc::new(goal::UpdateGoal),
+            Arc::new(goal::GetGoal),
             Arc::new(web_fetch::WebFetchTool::new(clark.clone())),
             Arc::new(diagnostics::CheckDiagnostics),
             Arc::new(android_emulator::ListDevices),
