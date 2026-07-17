@@ -1026,8 +1026,11 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       let config;
       let options;
       let remoteHost: string | null = null;
-      // The engine starts in the mode the composer shows (plan mode's read-only
-      // gate is enforced engine-side) — providers without modes ignore it.
+      // The LOCAL engine starts in the mode the composer shows (plan mode's
+      // read-only gate is enforced engine-side). Only the local provider gets
+      // it: `SessionOptions.mode` is provider-defined — for the Clark cloud
+      // provider it selects the TIER (`clark`/`clark_max`), so sending a
+      // permission mode there would corrupt the tier.
       const mode = get().permissionMode;
       if (isRemote) {
         const host = loadSshHosts().find((h) => h.id === get().selectedHostId);
@@ -1041,7 +1044,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         options = { cwd: localSettings.cwd.trim(), mode };
       } else {
         config = { endpoint: auth?.clark.endpoint, auth_token: auth?.clark.token };
-        options = { mode };
+        options = {};
       }
 
       // Superseded (cancel / another open) while connecting → abandon quietly.
@@ -1236,9 +1239,10 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       let config;
       let options;
       let remoteHost: string | null = null;
-      // Reopened sessions resume in the composer's current mode, same as new
-      // ones — the engine rebuilds from scratch and would otherwise default to
-      // plan_mode off even while the pill says "Plan first".
+      // Reopened LOCAL sessions resume in the composer's current mode, same as
+      // new ones — the engine rebuilds from scratch and would otherwise default
+      // to plan_mode off even while the pill says "Plan first". (Local-only:
+      // for the cloud provider `mode` means the tier, not a permission mode.)
       const mode = get().permissionMode;
       if (wantRemote) {
         const host = loadSshHosts().find((h) => h.host.trim() === openingMeta!.remoteHost);
@@ -1260,7 +1264,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         options = { cwd: requestedProjectRoot, mode };
       } else {
         config = { endpoint: auth?.clark.endpoint, auth_token: auth?.clark.token };
-        options = { mode };
+        options = {};
       }
 
       // Providers that can't resume have no server-side context either: replay

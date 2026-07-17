@@ -84,6 +84,19 @@ describe("permission-mode ↔ engine sync", () => {
     );
   });
 
+  it("startSession does NOT send the permission mode to the cloud provider", async () => {
+    // `SessionOptions.mode` is provider-defined: for the Clark cloud provider
+    // it selects the TIER (clark/clark_max), so the client permission mode
+    // must never ride along — it would corrupt the tier.
+    const bridge = stubBridge();
+    useSessionStore.setState({ bridge, permissionMode: "plan", activeProvider: "clark" });
+
+    await useSessionStore.getState().startSession();
+
+    const optionsArg = vi.mocked(bridge.newSession).mock.calls[0][1];
+    expect(optionsArg.mode).toBeUndefined();
+  });
+
   it("openConversation passes the composer mode to newSession", async () => {
     const bridge = stubBridge();
     useSessionStore.setState({
