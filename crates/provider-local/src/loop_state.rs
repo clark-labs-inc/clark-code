@@ -25,6 +25,10 @@ pub(crate) struct SessionState {
     /// Plan Mode: while true, every mutating tool except `propose_plan` is
     /// denied by the [`crate::permissions::PermissionGate`].
     pub plan_mode: bool,
+    /// One-shot: set when plan mode ends (plan approved, or the user switched
+    /// modes) so the next turn opens with a short "plan mode is off" note and
+    /// the model stops treating the session as read-only.
+    pub plan_exited: bool,
     /// Output style: a key into `crate::prompt::OUTPUT_STYLES`, prepended to
     /// each turn's text like the plan-mode reminder. Empty string = default.
     pub output_style: String,
@@ -48,20 +52,38 @@ pub(crate) struct RunControl {
 
 struct Pending {
     id: PermissionRequestId,
-    responder: oneshot::Sender<Decision>,
+    responder: oneshot::Sender<Resolution>,
+}
+
+/// A resolved permission prompt: the user's decision plus any free-text they
+/// attached (today: "keep planning" feedback, threaded back to the model as
+/// the rejection reason so the same run can revise its plan).
+#[derive(Debug)]
+pub(crate) struct Resolution {
+    pub decision: Decision,
+    pub feedback: Option<String>,
+}
+
+impl From<Decision> for Resolution {
+    fn from(decision: Decision) -> Self {
+        Self {
+            decision,
+            feedback: None,
+        }
+    }
 }
 
 impl RunControl {
-    pub fn arm(&mut self, id: PermissionRequestId, responder: oneshot::Sender<Decision>) {
+    pub fn arm(&mut self, id: PermissionRequestId, responder: oneshot::Sender<Resolution>) {
         self.pending = Some(Pending { id, responder });
     }
 
     /// Deliver a user's answer to the in-flight permission request. Returns
     /// `true` if a request was actually waiting.
-    pub fn resolve(&mut self, id: &PermissionRequestId, decision: Decision) -> bool {
+    pub fn resolve(&mut self, id: &PermissionRequestId, resolution: Resolution) -> bool {
         match self.pending.take() {
             Some(p) if &p.id == id || id.as_str().is_empty() => {
-                let _ = p.responder.send(decision);
+                let _ = p.responder.send(resolution);
                 true
             }
             other => {
@@ -91,6 +113,9 @@ impl Decision {
             "allow_always" => Decision::AllowAlways,
             "reject_always" => Decision::RejectAlways,
             "reject_once" | "reject" | "deny" => Decision::RejectOnce,
+            // Plan approval: both variants approve; they differ only in which
+            // client-side mode the app switches to afterwards.
+            "approve_auto" | "approve_review" => Decision::AllowOnce,
             _ => Decision::AllowOnce,
         }
     }
@@ -114,6 +139,9 @@ mod tests {
             Decision::RejectAlways
         );
         assert_eq!(Decision::from_option("deny"), Decision::RejectOnce);
+        // Plan-approval options are approvals regardless of the follow-up mode.
+        assert_eq!(Decision::from_option("approve_auto"), Decision::AllowOnce);
+        assert_eq!(Decision::from_option("approve_review"), Decision::AllowOnce);
     }
 
     #[tokio::test]
@@ -122,7 +150,25 @@ mod tests {
         let id = PermissionRequestId::new("perm-1");
         let (tx, rx) = oneshot::channel();
         control.arm(id.clone(), tx);
-        assert!(control.resolve(&id, Decision::AllowOnce));
-        assert_eq!(rx.await.unwrap(), Decision::AllowOnce);
+        assert!(control.resolve(&id, Decision::AllowOnce.into()));
+        assert_eq!(rx.await.unwrap().decision, Decision::AllowOnce);
+    }
+
+    #[tokio::test]
+    async fn run_control_resolution_carries_feedback() {
+        let mut control = RunControl::default();
+        let id = PermissionRequestId::new("perm-2");
+        let (tx, rx) = oneshot::channel();
+        control.arm(id.clone(), tx);
+        assert!(control.resolve(
+            &id,
+            Resolution {
+                decision: Decision::RejectOnce,
+                feedback: Some("add tests".to_string()),
+            }
+        ));
+        let resolution = rx.await.unwrap();
+        assert_eq!(resolution.decision, Decision::RejectOnce);
+        assert_eq!(resolution.feedback.as_deref(), Some("add tests"));
     }
 }

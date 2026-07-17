@@ -7,7 +7,7 @@ use serde_json::Value;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
-use crate::loop_state::{Decision, RunControl, SessionState};
+use crate::loop_state::{Decision, Resolution, RunControl, SessionState};
 use crate::mcp::is_mcp_tool;
 use crate::safety::{classify_command, CommandRisk};
 use crate::tools::{PermissionMode, ToolCtx, ToolExecutor};
@@ -54,7 +54,60 @@ impl PermissionGate {
             return PermissionOutcome::Allowed;
         }
 
+        // The per-session document workspace is provisioned by Clark and
+        // deliberately attached to this sandbox for agent-authored reports,
+        // plans, and design docs. Writing there should not prompt like a source
+        // edit. Keep an explicit per-tool deny authoritative, though.
+        if matches!(tool_name, "write_file" | "edit_file")
+            && ctx
+                .sandbox
+                .is_docs_write(args.get("path").and_then(Value::as_str).unwrap_or(""))
+        {
+            let explicitly_denied = self
+                .session
+                .lock()
+                .await
+                .policy
+                .get(tool_name)
+                .is_some_and(|mode| *mode == PermissionMode::Deny);
+            return if explicitly_denied {
+                PermissionOutcome::Denied(format!(
+                    "The user denied permission to run `{tool_name}`."
+                ))
+            } else {
+                PermissionOutcome::Allowed
+            };
+        }
+
         if tool_name != "propose_plan" && self.session.lock().await.plan_mode {
+            if tool_name == "enter_plan_mode" {
+                return PermissionOutcome::Denied(
+                    "Plan mode is already active — research and call propose_plan when your \
+                    plan is ready."
+                        .to_string(),
+                );
+            }
+            // Plan mode is a research phase, not a straitjacket: strictly
+            // read-only shell (ls, git log, rg…) may still run. The hard floor
+            // (Blocked classification + user denylist) is checked first so
+            // plan mode never widens what a command could do.
+            if tool_name == "bash" {
+                let info = gate_info(tool_name, args);
+                if let Some(why) = self.hard_refusal(tool_name, &info).await {
+                    return PermissionOutcome::Denied(format!(
+                        "Refused: {why}. The command was not run."
+                    ));
+                }
+                if crate::safety::is_read_only_command(info.detail.as_deref().unwrap_or("")) {
+                    return PermissionOutcome::Allowed;
+                }
+                return PermissionOutcome::Denied(
+                    "Plan mode is active — only read-only commands can run right now, and \
+                    this command could change something. Research with read-only tools, then \
+                    call propose_plan."
+                        .to_string(),
+                );
+            }
             return PermissionOutcome::Denied(
                 "Plan mode is active — read-only until your plan is approved. Research more, \
                 then call propose_plan."
@@ -75,9 +128,11 @@ impl PermissionGate {
             return PermissionOutcome::Allowed;
         }
 
-        // A plan must always get an explicit human decision, in every
-        // permission mode — never auto-allowed/denied by the session policy.
-        let mode = if tool_name == "propose_plan" {
+        // A plan decision (proposing one, or entering plan mode) must always
+        // get an explicit human answer, in every permission mode — never
+        // auto-allowed/denied by the session policy.
+        let is_plan_gate = matches!(tool_name, "propose_plan" | "enter_plan_mode");
+        let mode = if is_plan_gate {
             PermissionMode::Ask
         } else {
             let s = self.session.lock().await;
@@ -86,30 +141,54 @@ impl PermissionGate {
                 .copied()
                 .unwrap_or(PermissionMode::Ask)
         };
-        let approved = match mode {
-            PermissionMode::Allow => true,
-            PermissionMode::Deny => false,
+        let (approved, feedback) = match mode {
+            PermissionMode::Allow => (true, None),
+            PermissionMode::Deny => (false, None),
             PermissionMode::Ask => {
                 match self.ask_permission(tool_id, tool_name, &info, signal).await {
-                    Some(decision) => {
-                        self.apply_policy(tool_name, &info, decision).await;
-                        decision.approved()
+                    Some(resolution) => {
+                        // Plan gates never write policy: "always allow plans"
+                        // is not a grant the options offer or the gate honors.
+                        if !is_plan_gate {
+                            self.apply_policy(tool_name, &info, resolution.decision).await;
+                        }
+                        (resolution.decision.approved(), resolution.feedback)
                     }
                     None => return PermissionOutcome::Cancelled,
                 }
             }
         };
 
-        if tool_name == "propose_plan" && approved {
-            self.session.lock().await.plan_mode = false;
+        if is_plan_gate && approved {
+            let mut s = self.session.lock().await;
+            if tool_name == "propose_plan" {
+                s.plan_mode = false;
+                // Queue the one-shot "plan mode is off" note for the next turn.
+                s.plan_exited = true;
+            } else {
+                s.plan_mode = true;
+                s.plan_exited = false;
+            }
         }
 
         if approved {
             PermissionOutcome::Allowed
         } else if tool_name == "propose_plan" {
+            PermissionOutcome::Denied(match feedback {
+                Some(feedback) => format!(
+                    "The user reviewed your plan and isn't ready to approve it. Their \
+                    feedback:\n\n{feedback}\n\nStay in plan mode: address the feedback — \
+                    research more if needed — then call propose_plan again with the updated \
+                    plan."
+                ),
+                None => "The user isn't ready to approve this plan yet — keep researching or \
+                    refine the plan, then call propose_plan again."
+                    .to_string(),
+            })
+        } else if tool_name == "enter_plan_mode" {
             PermissionOutcome::Denied(
-                "The user isn't ready to approve this plan yet — keep researching or refine \
-                the plan, then call propose_plan again."
+                "The user wants you to proceed directly — skip the planning phase and build \
+                it, asking questions as needed."
                     .to_string(),
             )
         } else {
@@ -128,7 +207,7 @@ impl PermissionGate {
         tool_name: &str,
         info: &GateInfo,
         signal: &CancellationToken,
-    ) -> Option<Decision> {
+    ) -> Option<Resolution> {
         let request_id = PermissionRequestId::new(format!("perm-{}", tool_id.as_str()));
         let (responder, rx) = tokio::sync::oneshot::channel();
         {
@@ -148,6 +227,8 @@ impl PermissionGate {
                     detail: info.detail.clone(),
                     risk: if tool_name == "propose_plan" {
                         Some("plan".to_string())
+                    } else if tool_name == "enter_plan_mode" {
+                        Some("plan_entry".to_string())
                     } else if info.external {
                         Some("external".to_string())
                     } else {
@@ -158,14 +239,14 @@ impl PermissionGate {
             })
             .await;
 
-        let decision = tokio::select! {
+        let resolution = tokio::select! {
             _ = signal.cancelled() => None,
-            d = rx => d.ok(),
+            r = rx => r.ok(),
         };
-        if decision.is_none() {
+        if resolution.is_none() {
             self.control.lock().await.clear();
         }
-        decision
+        resolution
     }
 
     async fn hard_refusal(&self, name: &str, info: &GateInfo) -> Option<String> {
@@ -288,6 +369,15 @@ fn gate_info(name: &str, args: &Value) -> GateInfo {
             reason: None,
             external: false,
         },
+        "enter_plan_mode" => GateInfo {
+            detail: args
+                .get("reason")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            risk: None,
+            reason: None,
+            external: false,
+        },
         // MCP-tool posture, not `clark_research`'s zero-gate one: it drives a
         // real browser against live sites under arbitrary session state, a
         // much larger blast radius than a bounded server-side call — `external:
@@ -321,7 +411,8 @@ fn permission_title(tool: &str) -> String {
         "bash" => "Run a shell command?".to_string(),
         "edit_file" => "Apply this edit?".to_string(),
         "write_file" => "Write this file?".to_string(),
-        "propose_plan" => "Approve this plan?".to_string(),
+        "propose_plan" => "Ready to build?".to_string(),
+        "enter_plan_mode" => "Start with a plan?".to_string(),
         "browser" => "Run this browser action?".to_string(),
         t if is_mcp_tool(t) => "Run an MCP tool?".to_string(),
         other => format!("Allow `{other}` to run?"),
@@ -330,15 +421,36 @@ fn permission_title(tool: &str) -> String {
 
 fn permission_options(tool: &str) -> Vec<PermissionOption> {
     if tool == "propose_plan" {
+        // Both approvals proceed; they differ in the permission mode the app
+        // switches to afterwards (run autonomously vs. review each step).
         return vec![
             PermissionOption {
-                id: "allow_once".into(),
-                label: "Approve & implement".into(),
+                id: "approve_auto".into(),
+                label: "Approve — run it for me".into(),
+                kind: PermissionOptionKind::AllowOnce,
+            },
+            PermissionOption {
+                id: "approve_review".into(),
+                label: "Approve — check each step with me".into(),
                 kind: PermissionOptionKind::AllowOnce,
             },
             PermissionOption {
                 id: "reject_once".into(),
                 label: "Keep planning".into(),
+                kind: PermissionOptionKind::RejectOnce,
+            },
+        ];
+    }
+    if tool == "enter_plan_mode" {
+        return vec![
+            PermissionOption {
+                id: "allow_once".into(),
+                label: "Yes, plan first".into(),
+                kind: PermissionOptionKind::AllowOnce,
+            },
+            PermissionOption {
+                id: "reject_once".into(),
+                label: "No, just build".into(),
                 kind: PermissionOptionKind::RejectOnce,
             },
         ];
@@ -384,7 +496,8 @@ mod tests {
     fn tool_titles_are_user_facing() {
         assert_eq!(permission_title("bash"), "Run a shell command?");
         assert_eq!(permission_title("write_file"), "Write this file?");
-        assert_eq!(permission_title("propose_plan"), "Approve this plan?");
+        assert_eq!(permission_title("propose_plan"), "Ready to build?");
+        assert_eq!(permission_title("enter_plan_mode"), "Start with a plan?");
         assert_eq!(permission_title("browser"), "Run this browser action?");
     }
 
@@ -459,6 +572,74 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn document_workspace_writes_are_allowed_without_prompt_in_plan_mode() {
+        let project = tempfile::tempdir().unwrap();
+        let docs = tempfile::tempdir().unwrap();
+        let session = Arc::new(Mutex::new(SessionState {
+            plan_mode: true,
+            ..Default::default()
+        }));
+        let control = Arc::new(Mutex::new(RunControl::default()));
+        let (tx, rx) = async_channel::unbounded::<AgentEvent>();
+        let gate = PermissionGate::new(session, control, SessionId::new("s1"), tx);
+        let mut ctx = test_ctx(project.path());
+        ctx.sandbox = Arc::new(
+            crate::sandbox::Sandbox::new(project.path())
+                .unwrap()
+                .with_docs(docs.path().to_path_buf()),
+        );
+        let target = ctx.sandbox.docs_root().unwrap().join("design.md");
+
+        let outcome = gate
+            .check(
+                &ToolCallId::new("t1"),
+                "write_file",
+                &FakeMutating,
+                &serde_json::json!({"path": target}),
+                &ctx,
+                &CancellationToken::new(),
+            )
+            .await;
+
+        assert!(matches!(outcome, PermissionOutcome::Allowed));
+        assert!(rx.is_empty(), "trusted workspace write must not prompt");
+    }
+
+    #[tokio::test]
+    async fn explicit_write_deny_still_applies_to_document_workspace() {
+        let project = tempfile::tempdir().unwrap();
+        let docs = tempfile::tempdir().unwrap();
+        let mut state = SessionState::default();
+        state
+            .policy
+            .insert("write_file".to_string(), PermissionMode::Deny);
+        let session = Arc::new(Mutex::new(state));
+        let control = Arc::new(Mutex::new(RunControl::default()));
+        let (tx, _rx) = async_channel::unbounded::<AgentEvent>();
+        let gate = PermissionGate::new(session, control, SessionId::new("s1"), tx);
+        let mut ctx = test_ctx(project.path());
+        ctx.sandbox = Arc::new(
+            crate::sandbox::Sandbox::new(project.path())
+                .unwrap()
+                .with_docs(docs.path().to_path_buf()),
+        );
+        let target = ctx.sandbox.docs_root().unwrap().join("design.md");
+
+        let outcome = gate
+            .check(
+                &ToolCallId::new("t1"),
+                "write_file",
+                &FakeMutating,
+                &serde_json::json!({"path": target}),
+                &ctx,
+                &CancellationToken::new(),
+            )
+            .await;
+
+        assert!(matches!(outcome, PermissionOutcome::Denied(_)));
+    }
+
+    #[tokio::test]
     async fn propose_plan_always_asks_and_clears_plan_mode_on_approval() {
         let dir = tempfile::tempdir().unwrap();
         let session = Arc::new(Mutex::new(SessionState {
@@ -487,14 +668,25 @@ mod tests {
             panic!("expected a permission request");
         };
         assert_eq!(request.risk.as_deref(), Some("plan"));
+        // The plan gate offers the two approval flavors plus "keep planning".
+        assert_eq!(
+            request
+                .options
+                .iter()
+                .map(|o| o.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["approve_auto", "approve_review", "reject_once"]
+        );
         control
             .lock()
             .await
-            .resolve(&request.id, Decision::AllowOnce);
+            .resolve(&request.id, Decision::AllowOnce.into());
 
         let outcome = check.await.unwrap();
         assert!(matches!(outcome, PermissionOutcome::Allowed));
-        assert!(!session.lock().await.plan_mode);
+        let s = session.lock().await;
+        assert!(!s.plan_mode);
+        assert!(s.plan_exited, "approval queues the one-shot exit note");
     }
 
     #[tokio::test]
@@ -525,18 +717,215 @@ mod tests {
         let AgentEvent::PermissionRequest { request } = event else {
             panic!("expected a permission request");
         };
-        control
-            .lock()
-            .await
-            .resolve(&request.id, Decision::RejectOnce);
+        control.lock().await.resolve(
+            &request.id,
+            Resolution {
+                decision: Decision::RejectOnce,
+                feedback: Some("add tests for the login flow".to_string()),
+            },
+        );
 
         let outcome = check.await.unwrap();
-        assert!(matches!(outcome, PermissionOutcome::Denied(_)));
+        let PermissionOutcome::Denied(message) = outcome else {
+            panic!("expected a denial");
+        };
+        assert!(
+            message.contains("add tests for the login flow"),
+            "the user's feedback must reach the model as the rejection reason: {message}"
+        );
         assert!(session.lock().await.plan_mode);
     }
 
     fn bash_gate(cmd: &str) -> GateInfo {
         gate_info("bash", &serde_json::json!({ "command": cmd }))
+    }
+
+    fn plan_mode_gate(
+        state: SessionState,
+    ) -> (
+        PermissionGate,
+        Arc<Mutex<SessionState>>,
+        Arc<Mutex<RunControl>>,
+        async_channel::Receiver<AgentEvent>,
+    ) {
+        let session = Arc::new(Mutex::new(state));
+        let control = Arc::new(Mutex::new(RunControl::default()));
+        let (tx, rx) = async_channel::unbounded::<AgentEvent>();
+        let gate = PermissionGate::new(session.clone(), control.clone(), SessionId::new("s1"), tx);
+        (gate, session, control, rx)
+    }
+
+    #[tokio::test]
+    async fn plan_mode_allows_readonly_bash_and_denies_the_rest() {
+        let dir = tempfile::tempdir().unwrap();
+        let (gate, _session, _control, rx) = plan_mode_gate(SessionState {
+            plan_mode: true,
+            ..Default::default()
+        });
+        let ctx = test_ctx(dir.path());
+
+        let readonly = gate
+            .check(
+                &ToolCallId::new("t1"),
+                "bash",
+                &FakeMutating,
+                &serde_json::json!({"command": "git status && rg propose_plan | head"}),
+                &ctx,
+                &CancellationToken::new(),
+            )
+            .await;
+        assert!(matches!(readonly, PermissionOutcome::Allowed));
+        assert!(rx.is_empty(), "read-only research must not prompt");
+
+        let mutating = gate
+            .check(
+                &ToolCallId::new("t2"),
+                "bash",
+                &FakeMutating,
+                &serde_json::json!({"command": "touch src/new.rs"}),
+                &ctx,
+                &CancellationToken::new(),
+            )
+            .await;
+        let PermissionOutcome::Denied(message) = mutating else {
+            panic!("a mutating command must be denied in plan mode");
+        };
+        assert!(message.contains("Plan mode is active"));
+        assert!(message.contains("propose_plan"));
+    }
+
+    #[tokio::test]
+    async fn plan_mode_keeps_the_hard_floor_for_bash() {
+        let dir = tempfile::tempdir().unwrap();
+        let (gate, _session, _control, _rx) = plan_mode_gate(SessionState {
+            plan_mode: true,
+            deny_commands: vec!["git log".to_string()],
+            ..Default::default()
+        });
+        let ctx = test_ctx(dir.path());
+
+        // Read-only but user-denylisted → still refused.
+        let denylisted = gate
+            .check(
+                &ToolCallId::new("t1"),
+                "bash",
+                &FakeMutating,
+                &serde_json::json!({"command": "git log"}),
+                &ctx,
+                &CancellationToken::new(),
+            )
+            .await;
+        let PermissionOutcome::Denied(message) = denylisted else {
+            panic!("denylisted command must be refused");
+        };
+        assert!(message.contains("denylist"));
+    }
+
+    #[tokio::test]
+    async fn enter_plan_mode_asks_then_flips_plan_mode_on_approval() {
+        let dir = tempfile::tempdir().unwrap();
+        let (gate, session, control, rx) = plan_mode_gate(SessionState::default());
+        let ctx = test_ctx(dir.path());
+
+        let check = tokio::spawn(async move {
+            gate.check(
+                &ToolCallId::new("t1"),
+                "enter_plan_mode",
+                &FakeMutating,
+                &serde_json::json!({"reason": "touches several files"}),
+                &ctx,
+                &CancellationToken::new(),
+            )
+            .await
+        });
+
+        let event = rx.recv().await.unwrap();
+        let AgentEvent::PermissionRequest { request } = event else {
+            panic!("expected a permission request");
+        };
+        assert_eq!(request.risk.as_deref(), Some("plan_entry"));
+        assert_eq!(request.title, "Start with a plan?");
+        assert_eq!(request.detail.as_deref(), Some("touches several files"));
+        assert_eq!(
+            request
+                .options
+                .iter()
+                .map(|o| o.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["allow_once", "reject_once"]
+        );
+        control
+            .lock()
+            .await
+            .resolve(&request.id, Decision::AllowOnce.into());
+
+        let outcome = check.await.unwrap();
+        assert!(matches!(outcome, PermissionOutcome::Allowed));
+        let s = session.lock().await;
+        assert!(s.plan_mode);
+        assert!(!s.plan_exited);
+    }
+
+    #[tokio::test]
+    async fn enter_plan_mode_rejection_tells_the_model_to_proceed() {
+        let dir = tempfile::tempdir().unwrap();
+        let (gate, session, control, rx) = plan_mode_gate(SessionState::default());
+        let ctx = test_ctx(dir.path());
+
+        let check = tokio::spawn(async move {
+            gate.check(
+                &ToolCallId::new("t1"),
+                "enter_plan_mode",
+                &FakeMutating,
+                &serde_json::json!({}),
+                &ctx,
+                &CancellationToken::new(),
+            )
+            .await
+        });
+
+        let event = rx.recv().await.unwrap();
+        let AgentEvent::PermissionRequest { request } = event else {
+            panic!("expected a permission request");
+        };
+        control
+            .lock()
+            .await
+            .resolve(&request.id, Decision::RejectOnce.into());
+
+        let outcome = check.await.unwrap();
+        let PermissionOutcome::Denied(message) = outcome else {
+            panic!("expected a denial");
+        };
+        assert!(message.contains("proceed directly"));
+        assert!(!session.lock().await.plan_mode);
+    }
+
+    #[tokio::test]
+    async fn enter_plan_mode_is_denied_when_already_planning() {
+        let dir = tempfile::tempdir().unwrap();
+        let (gate, _session, _control, rx) = plan_mode_gate(SessionState {
+            plan_mode: true,
+            ..Default::default()
+        });
+        let ctx = test_ctx(dir.path());
+
+        let outcome = gate
+            .check(
+                &ToolCallId::new("t1"),
+                "enter_plan_mode",
+                &FakeMutating,
+                &serde_json::json!({}),
+                &ctx,
+                &CancellationToken::new(),
+            )
+            .await;
+
+        let PermissionOutcome::Denied(message) = outcome else {
+            panic!("expected a denial");
+        };
+        assert!(message.contains("already active"));
+        assert!(rx.is_empty(), "no prompt for a redundant request");
     }
 
     #[tokio::test]

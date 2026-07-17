@@ -211,6 +211,10 @@ export type ClientResponse = {
   kind: "permission";
   request: string;
   option: string;
+  /** Optional free-text attached to the choice — e.g. plan feedback on a
+   *  "keep planning" rejection, delivered to the model as the rejection
+   *  reason. */
+  feedback?: string;
 };
 
 /** One per-fact memory file under `<cwd>/.clark/memory/`. */

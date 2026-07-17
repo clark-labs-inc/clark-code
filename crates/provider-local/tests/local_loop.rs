@@ -350,6 +350,7 @@ async fn mutating_tool_waits_for_permission_then_writes() {
                         ClientResponse::Permission {
                             request: request.id.clone(),
                             option: "allow_once".into(),
+                            feedback: None,
                         },
                     )
                     .await
@@ -496,4 +497,185 @@ async fn image_attachments_are_described_by_vision_fallback_before_the_coding_ca
         !coding_text.contains("aGVsbG8=") && !coding_text.contains("data:image"),
         "raw image data must never reach the coding model: {coding_text:?}"
     );
+}
+
+/// One SSE chat-completion body that calls `name` with `args`, then stops for
+/// tool results.
+fn tool_call_sse(call_id: &str, name: &str, args: serde_json::Value) -> String {
+    let chunk = json!({
+        "choices": [{"delta": {"tool_calls": [{
+            "index": 0,
+            "id": call_id,
+            "function": {"name": name, "arguments": args.to_string()}
+        }]}}]
+    });
+    format!(
+        "data: {chunk}\n\ndata: {}\n\ndata: [DONE]\n\n",
+        r#"{"choices":[{"delta":{},"finish_reason":"tool_calls"}]}"#
+    )
+}
+
+/// The full Plan Mode journey against the real engine: a session started in
+/// plan mode refuses edits without prompting, the plan gate fires for
+/// `propose_plan`, "keep planning" feedback rides the rejection back to the
+/// model IN the same run (nothing cancelled, research kept), approval persists
+/// `plan.md` into the docs workspace, and the next turn opens with the
+/// one-shot "plan mode is off" note.
+#[tokio::test]
+async fn plan_mode_journey_denies_edits_threads_feedback_and_builds_after_approval() {
+    let dir = tempfile::tempdir().unwrap();
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let serve_handle = tokio::spawn(serve(
+        listener,
+        vec![
+            // Turn 1 (plan mode): the model first tries to edit — refused —
+            tool_call_sse(
+                "c1",
+                "write_file",
+                json!({"path": "out.txt", "content": "written"}),
+            ),
+            // — then proposes a plan; the user sends it back with feedback —
+            tool_call_sse("c2", "propose_plan", json!({"plan": "Plan v1: add out.txt"})),
+            // — then proposes the revised plan; the user approves.
+            tool_call_sse(
+                "c3",
+                "propose_plan",
+                json!({"plan": "Plan v2: add out.txt with tests"}),
+            ),
+            final_body(),
+            // Turn 2, after approval: a plain answer.
+            final_body(),
+        ],
+    ));
+
+    let mut provider = provider_local::LocalAgentProvider::new();
+    provider
+        .connect(ProviderConfig {
+            auth_token: Some("test-key".into()),
+            extra: json!({
+                "base_url": format!("http://{addr}/v1"),
+                "model": "fake-model",
+                "memories": false
+            }),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let session = provider
+        .new_session(SessionOptions {
+            cwd: Some(dir.path().to_string_lossy().to_string()),
+            mode: Some("plan".to_string()),
+            resume: None,
+        })
+        .await
+        .unwrap();
+    assert_eq!(session.mode.as_deref(), Some("plan"));
+
+    let mut stream = provider
+        .prompt(&session.id, PromptInput::text("add an out.txt file"))
+        .await
+        .unwrap();
+
+    let mut plan_prompts = 0usize;
+    while let Some(ev) = stream.next().await {
+        match &ev {
+            AgentEvent::PermissionRequest { request } => {
+                assert_eq!(
+                    request.risk.as_deref(),
+                    Some("plan"),
+                    "only propose_plan may prompt in plan mode: {request:?}"
+                );
+                plan_prompts += 1;
+                let (option, feedback) = if plan_prompts == 1 {
+                    assert_eq!(
+                        request.options.iter().map(|o| o.id.as_str()).collect::<Vec<_>>(),
+                        vec!["approve_auto", "approve_review", "reject_once"]
+                    );
+                    ("reject_once", Some("make it two files".to_string()))
+                } else {
+                    ("approve_auto", None)
+                };
+                provider
+                    .respond(
+                        &session.id,
+                        ClientResponse::Permission {
+                            request: request.id.clone(),
+                            option: option.into(),
+                            feedback,
+                        },
+                    )
+                    .await
+                    .unwrap();
+            }
+            AgentEvent::RunFinished { .. } => break,
+            _ => {}
+        }
+    }
+    assert_eq!(plan_prompts, 2, "reject once, then approve");
+    // The write_file attempt was refused engine-side without prompting.
+    assert!(!dir.path().join("out.txt").exists());
+
+    // The approved plan is persisted into the session's docs workspace.
+    let docs_root = session
+        .environment
+        .as_ref()
+        .and_then(|e| e.docs_root.clone())
+        .expect("local sessions get a docs workspace");
+    let plan_path = std::path::Path::new(&docs_root).join("plan.md");
+    assert_eq!(
+        std::fs::read_to_string(&plan_path).unwrap(),
+        "Plan v2: add out.txt with tests"
+    );
+
+    // Turn 2: plan mode is off; the one-shot exit note precedes the user text.
+    let mut stream = provider
+        .prompt(&session.id, PromptInput::text("thanks"))
+        .await
+        .unwrap();
+    while let Some(ev) = stream.next().await {
+        if matches!(ev, AgentEvent::RunFinished { .. }) {
+            break;
+        }
+    }
+
+    let captured = serve_handle.await.unwrap();
+    assert_eq!(captured.len(), 5, "five model calls end to end");
+    let last_user = |i: usize| -> String {
+        request_json(&captured[i])["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|m| m["role"] == "user")
+            .next_back()
+            .expect("request has a user message")["content"]
+            .as_str()
+            .expect("user content is a plain string")
+            .to_string()
+    };
+
+    // Call 1: the workflow reminder rides the plan-mode turn.
+    let turn1 = last_user(0);
+    assert!(turn1.contains("Plan mode is active."));
+    assert!(turn1.contains("plan.md"), "reminder names the draft file");
+    // Call 2: the refused edit came back as a plan-mode denial.
+    let call2 = request_json(&captured[1]).to_string();
+    assert!(call2.contains("Plan mode is active"));
+    // Call 3: the rejection carried the user's feedback into the same run.
+    let call3 = request_json(&captured[2]).to_string();
+    assert!(call3.contains("make it two files"));
+    assert!(call3.contains("Stay in plan mode"));
+    // Call 4: approval → build instruction + saved-plan pointer.
+    let call4 = request_json(&captured[3]).to_string();
+    assert!(call4.contains("The user approved your plan"));
+    assert!(call4.contains("plan.md"));
+    // Call 5 (turn 2): the one-shot exit note, and no active reminder.
+    let turn2 = last_user(4);
+    assert!(turn2.contains("Plan mode is off"));
+    assert!(turn2.contains("thanks"));
+    assert!(!turn2.contains("Plan mode is active."));
+
+    // Tidy the app-managed workspace this session created.
+    let _ = std::fs::remove_dir_all(&docs_root);
 }

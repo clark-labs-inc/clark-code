@@ -1,7 +1,9 @@
-//! Plan Mode tools: `propose_plan` (the Claude-Code-`ExitPlanMode`/Codex-
-//! `<proposed_plan>` analog — signals "done researching, please approve") and
-//! `update_plan` (the Codex `update_plan` checklist analog — an
-//! always-available, advisory TODO tracker, independent of Plan Mode).
+//! Plan Mode tools: `enter_plan_mode` (the Claude-Code-`EnterPlanMode` analog —
+//! the agent suggests planning first, the user approves), `propose_plan` (the
+//! Claude-Code-`ExitPlanMode`/Codex-`<proposed_plan>` analog — signals "done
+//! researching, please approve") and `update_plan` (the Codex `update_plan`
+//! checklist analog — an always-available, advisory TODO tracker, independent
+//! of Plan Mode).
 
 use agent_core::domain::ToolKind;
 use async_trait::async_trait;
@@ -44,8 +46,89 @@ impl ToolExecutor for ProposePlan {
     fn preview(&self, args: &Value, _ctx: &ToolCtx) -> Option<String> {
         arg_str(args, "plan").ok()
     }
-    async fn invoke(&self, _args: Value, _ctx: &ToolCtx) -> ToolOutcome {
-        ToolOutcome::ok("The user approved your plan. You can now implement it.")
+    // Runs only after the user approved (the gate forces an explicit decision).
+    // Persist the approved plan into the session's document workspace so it
+    // survives the gate: the write surfaces as an inline document card in the
+    // conversation, and the model gets a stable path to consult while building.
+    async fn invoke(&self, args: Value, ctx: &ToolCtx) -> ToolOutcome {
+        let plan = arg_str(&args, "plan").unwrap_or_default();
+        let saved = ctx.sandbox.docs_root().and_then(|docs| {
+            let path = crate::workspace::plan_file(docs);
+            std::fs::write(&path, plan.as_bytes()).ok()?;
+            Some(path)
+        });
+        let mut content = String::from(
+            "The user approved your plan. You can now build it. Start by setting up your task \
+            checklist with `update_plan` if the work has multiple steps.",
+        );
+        if let Some(path) = &saved {
+            content.push_str(&format!(
+                "\n\nYour plan is saved at: {} — refer back to it during implementation.",
+                path.display()
+            ));
+        }
+        content.push_str(&format!("\n\n## Approved plan\n{plan}"));
+        let outcome = ToolOutcome::ok(content);
+        match saved {
+            Some(path) => outcome.with_location(path.display().to_string(), None),
+            None => outcome,
+        }
+    }
+}
+
+pub struct EnterPlanMode;
+
+#[async_trait]
+impl ToolExecutor for EnterPlanMode {
+    fn name(&self) -> &str {
+        "enter_plan_mode"
+    }
+    fn description(&self) -> &str {
+        "Suggest switching to Plan Mode before building. Call this for large, multi-file, or \
+        ambiguous requests where agreeing on an approach first would save rework — not for \
+        small fixes, pure research/explanation tasks, or when the user gave precise \
+        instructions. The user must approve; if they decline, proceed directly without a \
+        separate planning phase."
+    }
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "reason": {
+                    "type": "string",
+                    "description": "One short, plain sentence shown to the user on why \
+                        planning first helps here."
+                }
+            }
+        })
+    }
+    fn kind(&self) -> ToolKind {
+        ToolKind::Other
+    }
+    fn mutating(&self) -> bool {
+        // Not literally a mutation, but it must always pass through the
+        // permission gate — entering plan mode is the user's call.
+        true
+    }
+    // Runs only after the user approved; the gate has already flipped the
+    // session into plan mode. The full workflow reminder arrives with the next
+    // user turn — this result carries the condensed rules for the rest of the
+    // current turn.
+    async fn invoke(&self, _args: Value, ctx: &ToolCtx) -> ToolOutcome {
+        let mut content = String::from(
+            "Entered plan mode — the user wants to agree on a plan before anything changes. \
+            Research the project read-only (edits and mutating commands will be refused), ask \
+            the user in plain text when you hit a decision only they can make, and when your \
+            plan covers what to change, where, what to reuse, and how to verify it, call \
+            `propose_plan` with the complete plan.",
+        );
+        if let Some(docs) = ctx.sandbox.docs_root() {
+            content.push_str(&format!(
+                " Draft your plan as you research in {} — it renders live for the user.",
+                crate::workspace::plan_file(docs).display()
+            ));
+        }
+        ToolOutcome::ok(content)
     }
 }
 
@@ -131,6 +214,61 @@ mod tests {
         assert!(tool.mutating());
         let args = json!({"plan": "1. do a thing"});
         assert_eq!(tool.preview(&args, &ctx), Some("1. do a thing".to_string()));
+    }
+
+    #[tokio::test]
+    async fn propose_plan_persists_the_approved_plan_into_the_docs_workspace() {
+        let project = tempfile::tempdir().unwrap();
+        let docs = tempfile::tempdir().unwrap();
+        let mut ctx = test_ctx(project.path());
+        ctx.sandbox = Arc::new(
+            Sandbox::new(project.path())
+                .unwrap()
+                .with_docs(docs.path().to_path_buf()),
+        );
+
+        let outcome = ProposePlan
+            .invoke(json!({"plan": "# Plan\n1. do the thing"}), &ctx)
+            .await;
+
+        assert!(!outcome.is_error);
+        let path = ctx.sandbox.docs_root().unwrap().join("plan.md");
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "# Plan\n1. do the thing"
+        );
+        // The location makes the event sink surface the plan as an inline
+        // document card.
+        assert_eq!(outcome.locations.len(), 1);
+        assert!(outcome.locations[0].path.ends_with("plan.md"));
+        assert!(outcome.content.contains("## Approved plan"));
+        assert!(outcome.content.contains("update_plan"));
+    }
+
+    #[tokio::test]
+    async fn propose_plan_without_docs_workspace_still_succeeds() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = test_ctx(dir.path());
+
+        let outcome = ProposePlan.invoke(json!({"plan": "the steps"}), &ctx).await;
+
+        assert!(!outcome.is_error);
+        assert!(outcome.locations.is_empty());
+        assert!(outcome.content.contains("the steps"));
+        assert!(!outcome.content.contains("saved at"));
+    }
+
+    #[tokio::test]
+    async fn enter_plan_mode_is_gated_and_returns_condensed_rules() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = test_ctx(dir.path());
+        assert!(EnterPlanMode.mutating(), "must always pass the gate");
+
+        let outcome = EnterPlanMode.invoke(json!({}), &ctx).await;
+
+        assert!(!outcome.is_error);
+        assert!(outcome.content.contains("propose_plan"));
+        assert!(outcome.content.contains("read-only"));
     }
 
     #[test]

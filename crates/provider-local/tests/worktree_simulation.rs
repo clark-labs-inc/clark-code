@@ -193,6 +193,7 @@ async fn clark_code_runs_real_git_and_edits_only_the_selected_worktree() {
                         ClientResponse::Permission {
                             request: request.id,
                             option: "allow_once".into(),
+                            feedback: None,
                         },
                     )
                     .await

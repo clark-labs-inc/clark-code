@@ -67,6 +67,6 @@ export function previewFanOut(): void {
   });
 }
 
-if (import.meta.env.DEV) {
+if (import.meta.env.DEV && typeof window !== "undefined") {
   (window as unknown as { previewFanOut?: () => void }).previewFanOut = previewFanOut;
 }

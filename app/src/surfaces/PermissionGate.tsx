@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { ShieldQuestion, ShieldAlert, ListChecks, Loader2 } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
 import { wouldAutoApprove } from "../lib/permissions";
@@ -15,6 +15,22 @@ const OPTION_STYLE: Record<PermissionOptionKind, string> = {
   reject_always: "text-danger/80 hover:bg-danger/10 hover:text-danger",
 };
 
+// The plan-approval gate offers two allow_once options that differ only in the
+// follow-up mode; keep one bright primary and one quiet secondary rather than
+// two competing accent buttons.
+const PLAN_OPTION_STYLE: Record<string, string> = {
+  approve_auto: OPTION_STYLE.allow_once,
+  approve_review: OPTION_STYLE.allow_always,
+};
+
+/** The permission mode the app switches to after a plan-gate choice. */
+function modeAfterPlanChoice(risk: string | undefined, optionId: string) {
+  if (risk === "plan" && optionId === "approve_auto") return "auto" as const;
+  if (risk === "plan" && optionId === "approve_review") return "ask" as const;
+  if (risk === "plan_entry" && optionId === "allow_once") return "plan" as const;
+  return null;
+}
+
 function riskTone(risk?: string): { ring: string; chip: string; label: string } | null {
   switch (risk) {
     case "danger":
@@ -26,6 +42,7 @@ function riskTone(risk?: string): { ring: string; chip: string; label: string } 
     case "safe":
       return { ring: "bg-bg-secondary", chip: "bg-bg-tertiary text-ink-muted", label: "Safe" };
     case "plan":
+    case "plan_entry":
       return { ring: "bg-accent/10", chip: "bg-accent/15 text-accent", label: "Plan" };
     default:
       return null;
@@ -90,13 +107,25 @@ function withChips(text: string) {
  *  Hidden when the current permission policy auto-grants this request. */
 export function PermissionGate({ req }: { req: PermissionRequest }) {
   const resolve = useSessionStore((s) => s.resolvePermission);
+  const providePlanFeedback = useSessionStore((s) => s.providePlanFeedback);
+  const setPermissionMode = useSessionStore((s) => s.setPermissionMode);
   const mode = useSessionStore((s) => s.permissionMode);
   const project = useSessionStore((s) => s.activeProjectRoot ?? "");
   // Which option was clicked; disables the row until the engine consumes the
   // response (the gate unmounts on the next snapshot) or the send fails.
   const [picked, setPicked] = useState<string | null>(null);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [feedback, setFeedback] = useState("");
+  const feedbackRef = useRef<HTMLTextAreaElement>(null);
   // A different request can reuse this mounted gate — reset the pending pick.
-  useEffect(() => setPicked(null), [req.id]);
+  useEffect(() => {
+    setPicked(null);
+    setFeedbackOpen(false);
+    setFeedback("");
+  }, [req.id]);
+  useEffect(() => {
+    if (feedbackOpen) feedbackRef.current?.focus();
+  }, [feedbackOpen]);
   if (wouldAutoApprove(mode, req)) return null;
 
   const tone = riskTone(req.risk);
@@ -115,7 +144,31 @@ export function PermissionGate({ req }: { req: PermissionRequest }) {
     }
     setPicked(opt.id);
     // On failure the store surfaces the error; re-enable so the user can retry.
-    resolve(opt.id).catch(() => setPicked(null));
+    resolve(opt.id)
+      .then(() => {
+        // A plan-gate choice also picks the app's follow-up mode: approve a
+        // plan into "run it for me"/"check each step", or enter plan mode.
+        // setPermissionMode syncs the engine, so pill + gate + engine agree.
+        const next = modeAfterPlanChoice(req.risk, opt.id);
+        if (next) setPermissionMode(next);
+      })
+      .catch(() => setPicked(null));
+  };
+
+  const feedbackOption = req.options.find((opt) => opt.kind === "reject_once");
+  const submitFeedback = () => {
+    if (!feedbackOption || !feedback.trim() || picked) return;
+    setPicked(feedbackOption.id);
+    providePlanFeedback(feedback).catch(() => setPicked(null));
+  };
+  const onFeedbackKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+      event.preventDefault();
+      submitFeedback();
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      setFeedbackOpen(false);
+    }
   };
 
   return (
@@ -127,7 +180,7 @@ export function PermissionGate({ req }: { req: PermissionRequest }) {
       <div className="mb-2 flex items-center gap-2 text-sm font-medium text-ink">
         {danger ? (
           <ShieldAlert className="size-4 text-danger" />
-        ) : req.risk === "plan" ? (
+        ) : req.risk === "plan" || req.risk === "plan_entry" ? (
           <ListChecks className="size-4 text-accent" />
         ) : (
           <ShieldQuestion className="size-4 text-warning" />
@@ -149,13 +202,22 @@ export function PermissionGate({ req }: { req: PermissionRequest }) {
         <div
           className={cn(
             MD_CLASSES,
-            "mb-3 max-h-72 overflow-auto rounded-md border border-border-subtle bg-bg-sunken px-3 py-2",
+            "mb-3 max-h-[70vh] overflow-auto rounded-md border border-border-subtle bg-bg-sunken px-3 py-2",
           )}
         >
           <Md>{req.detail}</Md>
         </div>
+      ) : req.detail && req.risk === "plan_entry" ? (
+        // The model's one-line rationale for planning first — prose, not code.
+        <p className="mb-3 text-sm leading-relaxed text-ink-secondary">{req.detail}</p>
       ) : (
         req.detail && <DetailView text={req.detail} />
+      )}
+      {req.risk === "plan_entry" && (
+        <p className="mb-3 text-xs text-ink-muted">
+          In plan mode Clark researches read-only and proposes a plan — nothing changes until
+          you approve it.
+        </p>
       )}
       {req.reason && (
         <p className="mb-3 text-xs text-ink-muted">
@@ -163,28 +225,91 @@ export function PermissionGate({ req }: { req: PermissionRequest }) {
         </p>
       )}
 
-      <div className="flex flex-wrap gap-2">
-        {req.options.map((opt) => (
-          <button
-            key={opt.id}
-            onClick={() => onPick(opt)}
-            disabled={picked !== null}
-            className={cn(
-              "rounded-lg px-3 py-1.5 text-sm font-medium transition disabled:opacity-50",
-              OPTION_STYLE[opt.kind],
-              picked === opt.id && "opacity-100",
-            )}
+      {req.risk === "plan" && feedbackOpen && (
+        <div className="mb-3 rounded-lg border border-border-subtle bg-bg-elevated p-3">
+          <label
+            htmlFor={`plan-feedback-${req.id}`}
+            className="mb-1.5 block text-sm font-medium text-ink"
           >
-            {picked === opt.id ? (
-              <span className="flex items-center gap-1.5">
-                <Loader2 className="size-3.5 animate-[spin_1s_linear_infinite]" />
-                {opt.label}
-              </span>
-            ) : (
-              opt.label
-            )}
+            What should change before you approve this plan?
+          </label>
+          <textarea
+            ref={feedbackRef}
+            id={`plan-feedback-${req.id}`}
+            value={feedback}
+            onChange={(event) => setFeedback(event.target.value)}
+            onKeyDown={onFeedbackKeyDown}
+            disabled={picked !== null}
+            rows={4}
+            placeholder="Tell Clark what to change — what's missing, wrong, or should work differently…"
+            className="w-full resize-y rounded-lg border border-border bg-bg px-3 py-2 text-sm leading-relaxed text-ink outline-none placeholder:text-ink-faint focus:border-accent focus:ring-2 focus:ring-accent/20 disabled:opacity-50"
+          />
+          <div className="mt-2 flex items-center justify-between gap-3">
+            <span className="text-xs text-ink-faint">⌘ Enter to send</span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setFeedbackOpen(false)}
+                disabled={picked !== null}
+                className="rounded-lg px-3 py-1.5 text-sm font-medium text-ink-muted transition hover:bg-bg-hover hover:text-ink disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={submitFeedback}
+                disabled={!feedback.trim() || picked !== null}
+                className="rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-on-accent transition hover:bg-accent-hover disabled:opacity-50"
+              >
+                {picked === feedbackOption?.id ? (
+                  <span className="flex items-center gap-1.5">
+                    <Loader2 className="size-3.5 animate-[spin_1s_linear_infinite]" />
+                    Sending feedback
+                  </span>
+                ) : (
+                  "Send feedback"
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="flex flex-wrap gap-2">
+        {req.options
+          .filter((opt) => req.risk !== "plan" || opt.kind !== "reject_once")
+          .map((opt) => (
+            <button
+              key={opt.id}
+              type="button"
+              onClick={() => onPick(opt)}
+              disabled={picked !== null}
+              className={cn(
+                "rounded-lg px-3 py-1.5 text-sm font-medium transition disabled:opacity-50",
+                (req.risk === "plan" && PLAN_OPTION_STYLE[opt.id]) || OPTION_STYLE[opt.kind],
+                picked === opt.id && "opacity-100",
+              )}
+            >
+              {picked === opt.id ? (
+                <span className="flex items-center gap-1.5">
+                  <Loader2 className="size-3.5 animate-[spin_1s_linear_infinite]" />
+                  {opt.label}
+                </span>
+              ) : (
+                opt.label
+              )}
+            </button>
+          ))}
+        {req.risk === "plan" && feedbackOption && !feedbackOpen && (
+          <button
+            type="button"
+            onClick={() => setFeedbackOpen(true)}
+            disabled={picked !== null}
+            className="rounded-lg px-3 py-1.5 text-sm font-medium text-ink-muted transition hover:bg-bg-hover hover:text-ink disabled:opacity-50"
+          >
+            Suggest changes
           </button>
-        ))}
+        )}
       </div>
     </div>
   );

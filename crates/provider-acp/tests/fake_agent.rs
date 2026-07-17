@@ -178,6 +178,7 @@ async fn full_turn_with_permission_round_trip() {
                         ClientResponse::Permission {
                             request: request.id.clone(),
                             option,
+                            feedback: None,
                         },
                     )
                     .await

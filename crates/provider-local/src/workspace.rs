@@ -25,6 +25,13 @@ pub fn session_workspace(session_id: &str) -> Option<PathBuf> {
     workspace_root().map(|root| root.join(session_id))
 }
 
+/// The Plan Mode document inside one session's workspace: drafted by the agent
+/// while planning (the one writable file in plan mode besides other workspace
+/// docs), and (re)written with the final text when a plan is approved.
+pub fn plan_file(docs_dir: &Path) -> PathBuf {
+    docs_dir.join("plan.md")
+}
+
 /// True for a path that names a Markdown document.
 pub fn is_markdown(path: &Path) -> bool {
     matches!(

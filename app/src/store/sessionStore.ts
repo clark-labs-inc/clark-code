@@ -343,6 +343,9 @@ interface SessionState {
   setSidebarCollapsed: (collapsed: boolean) => void;
   cancelActive: () => Promise<void>;
   resolvePermission: (option: string) => Promise<void>;
+  /** Stop the proposed-plan turn and send the user's concrete revision
+   *  guidance as the next turn, without consuming composer attachments. */
+  providePlanFeedback: (feedback: string) => Promise<void>;
 }
 
 // Session transitions (start / open / end) are async and can take 10–20s over
@@ -1023,19 +1026,22 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       let config;
       let options;
       let remoteHost: string | null = null;
+      // The engine starts in the mode the composer shows (plan mode's read-only
+      // gate is enforced engine-side) — providers without modes ignore it.
+      const mode = get().permissionMode;
       if (isRemote) {
         const host = loadSshHosts().find((h) => h.id === get().selectedHostId);
         if (!host) throw new Error("Pick a remote host first, or add one.");
         remote = await openRemote(host);
         remoteHost = host.host.trim();
         config = localConnectConfig(localSettings, remoteTarget(remote));
-        options = { cwd: remote.cwd };
+        options = { cwd: remote.cwd, mode };
       } else if (isLocal) {
         config = localConnectConfig(localSettings);
-        options = { cwd: localSettings.cwd.trim() };
+        options = { cwd: localSettings.cwd.trim(), mode };
       } else {
         config = { endpoint: auth?.clark.endpoint, auth_token: auth?.clark.token };
-        options = {};
+        options = { mode };
       }
 
       // Superseded (cancel / another open) while connecting → abandon quietly.
@@ -1230,6 +1236,10 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       let config;
       let options;
       let remoteHost: string | null = null;
+      // Reopened sessions resume in the composer's current mode, same as new
+      // ones — the engine rebuilds from scratch and would otherwise default to
+      // plan_mode off even while the pill says "Plan first".
+      const mode = get().permissionMode;
       if (wantRemote) {
         const host = loadSshHosts().find((h) => h.host.trim() === openingMeta!.remoteHost);
         if (!host) {
@@ -1241,16 +1251,16 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         );
         remoteHost = host.host.trim();
         config = localConnectConfig(localSettings, remoteTarget(remote));
-        options = { cwd: remote.cwd };
+        options = { cwd: remote.cwd, mode };
       } else if (isLocal) {
         if (!requestedProjectRoot) {
           throw new Error("This conversation has no project folder. Choose one before reopening it.");
         }
         config = localConnectConfig({ ...localSettings, cwd: requestedProjectRoot });
-        options = { cwd: requestedProjectRoot };
+        options = { cwd: requestedProjectRoot, mode };
       } else {
         config = { endpoint: auth?.clark.endpoint, auth_token: auth?.clark.token };
-        options = {};
+        options = { mode };
       }
 
       // Providers that can't resume have no server-side context either: replay
@@ -1623,8 +1633,16 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   setPermissionMode: (mode) => {
     savePermissionMode(mode);
     set({ permissionMode: mode });
-    // If a prompt is open and the new mode would grant it, resolve it now.
     const { bridge, session, snapshot } = get();
+    // Best-effort engine sync: not every provider supports server-side mode
+    // switching (e.g. an ACP agent that doesn't advertise modes) — but the
+    // local agent's plan-mode gate lives engine-side, so every mode change
+    // must reach it, whether it came from the composer pill, Shift+Tab, or a
+    // plan-approval flow.
+    if (bridge?.setMode && session) {
+      void bridge.setMode(session.id, mode).catch(() => {});
+    }
+    // If a prompt is open and the new mode would grant it, resolve it now.
     const pend = snapshot.pending_permission;
     if (bridge && session && pend && wouldAutoApprove(mode, pend)) {
       const opt = pickAllowOption(pend);
@@ -1637,15 +1655,8 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   },
 
   cyclePermissionMode: () => {
-    const { permissionMode, setPermissionMode, bridge, session } = get();
-    const next = nextPermissionMode(permissionMode);
-    setPermissionMode(next);
-    // Best-effort: not every provider supports server-side mode switching
-    // (e.g. an ACP agent that doesn't advertise modes) — enforcement for the
-    // local agent lives in setPermissionMode's own gate-driven flow either way.
-    if (bridge?.setMode && session) {
-      void bridge.setMode(session.id, next).catch(() => {});
-    }
+    const { permissionMode, setPermissionMode } = get();
+    setPermissionMode(nextPermissionMode(permissionMode));
   },
 
   setOutputStyle: (style) => {
@@ -1694,6 +1705,33 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       // there — surface it like every other failed action.
       set({ error: String(e) });
       throw e; // let the gate re-enable its buttons
+    }
+  },
+
+  providePlanFeedback: async (feedback) => {
+    const text = feedback.trim();
+    const { bridge, session, snapshot } = get();
+    const pending = snapshot.pending_permission;
+    if (!text || !bridge || !session || !pending || pending.risk !== "plan") return;
+    const reject = pending.options.find((o) => o.kind === "reject_once");
+    if (!reject) return;
+
+    // The feedback rides the rejection result: the engine hands it to the
+    // model as the rejection reason, so the same run keeps its research
+    // in-transcript, revises the plan, and re-proposes. (The old cancel +
+    // re-prompt flow aborted the turn, which dropped the model's entire
+    // planning context from the transcript.)
+    try {
+      await bridge.respond(session.id, {
+        kind: "permission",
+        request: pending.id,
+        option: reject.id,
+        feedback: text,
+      });
+      set({ error: null });
+    } catch (e) {
+      set({ error: String(e) });
+      throw e;
     }
   },
 }));

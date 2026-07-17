@@ -189,6 +189,7 @@ async fn drive_prompt(
                             ClientResponse::Permission {
                                 request: request.id,
                                 option: "allow_once".into(),
+                                feedback: None,
                             },
                         )
                         .await

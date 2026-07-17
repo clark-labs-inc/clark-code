@@ -47,9 +47,10 @@ export function pickAllowOption(req: PermissionRequest): PermissionOption | unde
  *  refused anything catastrophic, so nothing here can run a blocked command. */
 export function wouldAutoApprove(mode: PermissionMode, req: PermissionRequest): boolean {
   if (!pickAllowOption(req)) return false; // nothing to grant — must prompt
-  // A plan approval always needs an explicit human decision, in every mode —
-  // the engine forces `ask` for it server-side regardless of session policy.
-  if (req.risk === "plan") return false;
+  // A plan decision (approving one, or entering plan mode) always needs an
+  // explicit human answer, in every mode — the engine forces `ask` for these
+  // server-side regardless of session policy.
+  if (req.risk === "plan" || req.risk === "plan_entry") return false;
   if (mode === "full") return true;
   // Ask only for destructive shell commands and external (MCP) tools on first
   // use; everything else (reads, sandboxed edits, safe/caution shell) auto-runs.

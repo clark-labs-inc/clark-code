@@ -109,6 +109,7 @@ async fn live_model_edits_only_the_selected_linked_worktree() {
                             ClientResponse::Permission {
                                 request: request.id,
                                 option: "allow_once".into(),
+                                feedback: None,
                             },
                         )
                         .await

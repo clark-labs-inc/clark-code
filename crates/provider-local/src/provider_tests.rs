@@ -125,6 +125,66 @@
     }
 
     #[tokio::test]
+    async fn new_session_mode_option_controls_plan_mode() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut p = LocalAgentProvider::new();
+        p.connect(ProviderConfig::default()).await.unwrap();
+
+        let session = p
+            .new_session(SessionOptions {
+                cwd: Some(dir.path().to_string_lossy().to_string()),
+                mode: Some("plan".to_string()),
+                resume: None,
+            })
+            .await
+            .unwrap();
+        assert_eq!(session.mode.as_deref(), Some("plan"));
+        assert!(p.session.lock().await.plan_mode);
+
+        // A provider instance reused for a fresh session must not inherit the
+        // stale flag.
+        p.new_session(SessionOptions {
+            cwd: Some(dir.path().to_string_lossy().to_string()),
+            mode: Some("auto".to_string()),
+            resume: None,
+        })
+        .await
+        .unwrap();
+        assert!(!p.session.lock().await.plan_mode);
+    }
+
+    #[tokio::test]
+    async fn set_mode_transitions_queue_the_one_shot_exit_note() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut p = LocalAgentProvider::new();
+        p.connect(ProviderConfig::default()).await.unwrap();
+        let session = p
+            .new_session(SessionOptions {
+                cwd: Some(dir.path().to_string_lossy().to_string()),
+                mode: Some("plan".to_string()),
+                resume: None,
+            })
+            .await
+            .unwrap();
+
+        p.set_mode(&session.id, "auto".to_string()).await.unwrap();
+        {
+            let s = p.session.lock().await;
+            assert!(!s.plan_mode);
+            assert!(s.plan_exited, "leaving plan mode queues the exit note");
+        }
+
+        // Re-entering cancels a queued note (quick toggle must not tell the
+        // model it both entered and exited).
+        p.set_mode(&session.id, "plan".to_string()).await.unwrap();
+        {
+            let s = p.session.lock().await;
+            assert!(s.plan_mode);
+            assert!(!s.plan_exited);
+        }
+    }
+
+    #[tokio::test]
     async fn new_session_replays_typed_resume_into_history() {
         let dir = tempfile::tempdir().unwrap();
         let mut p = LocalAgentProvider::new();

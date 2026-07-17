@@ -159,6 +159,11 @@ pub enum ClientResponse {
     Permission {
         request: PermissionRequestId,
         option: String,
+        /// Optional free-text the user attached to their choice — e.g. plan
+        /// feedback on a "keep planning" rejection, delivered to the model as
+        /// the rejection reason so the same run can revise.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        feedback: Option<String>,
     },
 }
 

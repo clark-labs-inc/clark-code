@@ -49,6 +49,12 @@ describe("wouldAutoApprove", () => {
       expect(wouldAutoApprove(mode, req("plan"))).toBe(false);
     }
   });
+
+  it("entering plan mode is never auto-approved, in any mode", () => {
+    for (const mode of ["ask", "auto", "full", "plan"] as const) {
+      expect(wouldAutoApprove(mode, req("plan_entry"))).toBe(false);
+    }
+  });
 });
 
 describe("nextPermissionMode", () => {

@@ -72,6 +72,7 @@ async fn live_gemini_says_pong() {
                             ClientResponse::Permission {
                                 request: request.id.clone(),
                                 option,
+                                feedback: None,
                             },
                         )
                         .await

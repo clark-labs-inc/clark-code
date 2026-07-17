@@ -34,14 +34,10 @@ use crate::tools::{ReadTracker, ToolCtx, ToolRegistry};
 
 use prompt_input::*;
 
-/// Injected as a prefix to the user's turn text while Plan Mode is active.
-/// Per-turn (not baked into the cached system-prompt prefix) since the mode
-/// can flip mid-session via Shift+Tab — see `prompt.rs`'s doc comment on
-/// keeping volatile facts out of the stable prompt.
-const PLAN_MODE_REMINDER: &str = "Plan mode is active. You MUST NOT edit files, run non-read-only \
-shell commands, or otherwise mutate the system — this supersedes any other instruction. Read-only \
-tools (read_file, grep, glob, list_dir) remain available. Research thoroughly, then call \
-propose_plan with your full plan written out in markdown for the user to approve.";
+// The Plan Mode workflow reminder and its exit note live in
+// `crate::prompt::{plan_mode_reminder, plan_mode_exit_note}` — injected
+// per-turn below (never baked into the cached system-prompt prefix) since the
+// mode can flip mid-session via Shift+Tab or a plan approval.
 
 pub struct LocalAgentProvider {
     config: Option<LocalConfig>,
@@ -82,7 +78,12 @@ impl Provider for LocalAgentProvider {
             fs: true,
             terminal: true,
             load_session: false,
-            modes: Vec::new(),
+            modes: vec![
+                "ask".to_string(),
+                "auto".to_string(),
+                "full".to_string(),
+                "plan".to_string(),
+            ],
         }
     }
 
@@ -253,6 +254,11 @@ impl Provider for LocalAgentProvider {
             let mut s = self.session.lock().await;
             s.system_prompt = prompt;
             s.transcript = resumed_transcript;
+            // The session starts in the mode the client asked for (and a
+            // provider instance reused across "new chat" must not inherit a
+            // stale plan_mode from its previous session).
+            s.plan_mode = options.mode.as_deref() == Some("plan");
+            s.plan_exited = false;
             s.policy = config.permissions.clone();
             s.allow_commands = crate::project_settings::union_unique(
                 config.command_allowlist.clone(),
@@ -300,7 +306,7 @@ impl Provider for LocalAgentProvider {
             id,
             provider: self.id(),
             capabilities: self.capabilities(),
-            mode: None,
+            mode: options.mode,
             environment: Some(SessionEnvironment {
                 checkout_root: Some(checkout_root),
                 repository_root,
@@ -386,15 +392,24 @@ impl Provider for LocalAgentProvider {
         if let Some(git) = git_snapshot {
             text = format!("{git}\n{text}");
         }
+        let docs_root = self
+            .sandbox
+            .as_ref()
+            .and_then(|sb| sb.docs_root())
+            .map(std::path::Path::to_path_buf);
         let text = {
-            let s = self.session.lock().await;
+            let mut s = self.session.lock().await;
             let mut text = text;
             let style = crate::prompt::output_style_instructions(&s.output_style);
             if !style.is_empty() {
                 text = format!("{style}\n\n{text}");
             }
             if s.plan_mode {
-                text = format!("{PLAN_MODE_REMINDER}\n\n{text}");
+                let reminder = crate::prompt::plan_mode_reminder(docs_root.as_deref());
+                text = format!("{reminder}\n\n{text}");
+            } else if std::mem::take(&mut s.plan_exited) {
+                let note = crate::prompt::plan_mode_exit_note(docs_root.as_deref());
+                text = format!("{note}\n\n{text}");
             }
             text
         };
@@ -466,16 +481,33 @@ impl Provider for LocalAgentProvider {
 
     async fn respond(&mut self, _session: &SessionId, response: ClientResponse) -> Result<()> {
         match response {
-            ClientResponse::Permission { request, option } => {
-                let decision = Decision::from_option(&option);
-                self.control.lock().await.resolve(&request, decision);
+            ClientResponse::Permission {
+                request,
+                option,
+                feedback,
+            } => {
+                let resolution = crate::loop_state::Resolution {
+                    decision: Decision::from_option(&option),
+                    feedback: feedback.filter(|f| !f.trim().is_empty()),
+                };
+                self.control.lock().await.resolve(&request, resolution);
                 Ok(())
             }
         }
     }
 
     async fn set_mode(&mut self, _session: &SessionId, mode: String) -> Result<()> {
-        self.session.lock().await.plan_mode = mode == "plan";
+        let mut s = self.session.lock().await;
+        let entering_plan = mode == "plan";
+        // Leaving plan mode queues the one-shot "plan mode is off" note for the
+        // next turn; re-entering cancels a queued note so a quick toggle
+        // doesn't tell the model it both entered and exited.
+        if s.plan_mode && !entering_plan {
+            s.plan_exited = true;
+        } else if entering_plan {
+            s.plan_exited = false;
+        }
+        s.plan_mode = entering_plan;
         Ok(())
     }
 

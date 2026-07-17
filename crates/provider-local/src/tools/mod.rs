@@ -288,6 +288,7 @@ impl ToolRegistry {
             Arc::new(shell::BashInput),
             Arc::new(shell::BashKill),
             Arc::new(plan::ProposePlan),
+            Arc::new(plan::EnterPlanMode),
             Arc::new(plan::UpdatePlan),
             Arc::new(web_fetch::WebFetchTool::new(clark.clone())),
             Arc::new(diagnostics::CheckDiagnostics),

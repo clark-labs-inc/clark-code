@@ -501,7 +501,9 @@ impl Provider for ClarkProvider {
 
     async fn respond(&mut self, session: &SessionId, response: ClientResponse) -> Result<()> {
         match response {
-            ClientResponse::Permission { request, option } => {
+            ClientResponse::Permission {
+                request, option, ..
+            } => {
                 let command = self.command.clone().ok_or(Error::NotConnected)?;
                 let approved = option.contains("allow") || option == "approve";
                 let (conversation_id, job_id) = {
