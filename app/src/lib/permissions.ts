@@ -51,6 +51,10 @@ export function wouldAutoApprove(mode: PermissionMode, req: PermissionRequest): 
   // explicit human answer, in every mode — the engine forces `ask` for these
   // server-side regardless of session policy.
   if (req.risk === "plan" || req.risk === "plan_entry") return false;
+  // A cloud confirmation gate means Clark's backend paused before an
+  // irreversible action (sending a message, a purchase…). The pause exists
+  // precisely to get a human answer — no client mode may auto-grant it.
+  if (req.risk === "confirm") return false;
   if (mode === "full") return true;
   // Ask only for destructive shell commands and external (MCP) tools on first
   // use; everything else (reads, sandboxed edits, safe/caution shell) auto-runs.

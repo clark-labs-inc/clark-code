@@ -44,6 +44,14 @@ function riskTone(risk?: string): { ring: string; chip: string; label: string } 
     case "plan":
     case "plan_entry":
       return { ring: "bg-accent/10", chip: "bg-accent/15 text-accent", label: "Plan" };
+    case "confirm":
+      // Clark's backend paused before an irreversible action (e.g. sending a
+      // message) and wants an explicit go/no-go.
+      return {
+        ring: "bg-warning/10",
+        chip: "bg-warning/15 text-warning",
+        label: "Needs confirmation",
+      };
     default:
       return null;
   }

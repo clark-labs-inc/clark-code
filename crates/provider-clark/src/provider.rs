@@ -210,7 +210,8 @@ async fn engine(mut rx: UnboundedReceiver<Value>, shared: Shared) {
                     }
                 }
 
-                for mut ev in translate::events_to_agent(event, &run) {
+                let session = SessionId::new(conv.clone().unwrap_or_default());
+                for mut ev in translate::events_to_agent(event, &run, &session) {
                     // Make relative artifact/preview URLs openable.
                     if let AgentEvent::Artifact { artifact, .. } = &mut ev {
                         if let Some(uri) = &artifact.uri {

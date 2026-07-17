@@ -21,9 +21,10 @@ impl ToolExecutor for ProposePlan {
     fn description(&self) -> &str {
         "Call this when you've finished researching and are ready for the user to review your \
         plan. Only for tasks that require planning implementation steps that will change code or \
-        the system — not for pure research/explanation tasks. Write the complete plan, in \
-        markdown, as the `plan` argument; the user will approve it (letting you proceed) or ask \
-        you to keep planning."
+        the system — not for pure research/explanation tasks. Write the complete plan as terse \
+        markdown: normally 3–7 steps, exact paths, reuse, and verification; omit the research \
+        diary, preamble, and exhaustive alternatives. The user will approve it or provide \
+        concrete feedback."
     }
     fn parameters(&self) -> Value {
         json!({
@@ -117,10 +118,10 @@ impl ToolExecutor for EnterPlanMode {
     async fn invoke(&self, _args: Value, ctx: &ToolCtx) -> ToolOutcome {
         let mut content = String::from(
             "Entered plan mode — the user wants to agree on a plan before anything changes. \
-            Research the project read-only (edits and mutating commands will be refused), ask \
-            the user in plain text when you hit a decision only they can make, and when your \
-            plan covers what to change, where, what to reuse, and how to verify it, call \
-            `propose_plan` with the complete plan.",
+            Research read-only. Be terse: one batched search, then read only the few relevant \
+            files; no repeated probes or narrated research. Ask only about decisions the user \
+            must make. Once what / where / reuse / verify are known, call `propose_plan` with \
+            normally 3–7 concise steps.",
         );
         if let Some(docs) = ctx.sandbox.docs_root() {
             content.push_str(&format!(
@@ -269,6 +270,8 @@ mod tests {
         assert!(!outcome.is_error);
         assert!(outcome.content.contains("propose_plan"));
         assert!(outcome.content.contains("read-only"));
+        assert!(outcome.content.contains("one batched search"));
+        assert!(outcome.content.contains("no repeated probes"));
     }
 
     #[test]

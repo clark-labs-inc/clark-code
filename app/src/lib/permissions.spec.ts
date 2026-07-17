@@ -55,6 +55,14 @@ describe("wouldAutoApprove", () => {
       expect(wouldAutoApprove(mode, req("plan_entry"))).toBe(false);
     }
   });
+
+  it("a cloud confirmation gate is never auto-approved, in any mode", () => {
+    // The backend paused before an irreversible action — the pause exists to
+    // get a human answer, so even "full" must not grant it.
+    for (const mode of ["ask", "auto", "full", "plan"] as const) {
+      expect(wouldAutoApprove(mode, req("confirm"))).toBe(false);
+    }
+  });
 });
 
 describe("nextPermissionMode", () => {

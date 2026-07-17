@@ -90,31 +90,36 @@ pub(crate) fn plan_mode_reminder(docs_root: Option<&std::path::Path>) -> String 
         ));
     }
     p.push_str(
-        "\nHow to plan with the user (they may not be an engineer — keep it plain):\n\
-         1. **Explore.** Quickly scan the few files that matter; note existing code worth \
-         reusing.\n",
+        "\nPlan efficiently (plain language; fragments are fine):\n\
+         1. **Minimize research.** Start with files the user named and the most likely contract \
+         boundary. Default to one batched search plus reads of 2–5 relevant files. Prefer \
+         `read_file`/`grep`/`glob` over shell. Never repeat an equivalent search or read. Stop \
+         as soon as you know what / where / reuse / verify; exceed this budget only for a \
+         concrete unresolved question.\n\
+         2. **Use compressed language.** Think and report in short fragments or bullets. Do not \
+         narrate tool choice, restate findings, announce another lookup, or produce a research \
+         diary. Spend words only on decisions and evidence that changes the plan.\n",
     );
     match &plan_path {
         Some(path) => p.push_str(&format!(
-            "2. **Write as you learn.** Keep `{}` updated after each discovery — start with a \
-             rough skeleton on your first pass rather than exploring everything first.\n",
+            "3. **Draft early.** Keep `{}` current; start with a rough skeleton instead of \
+             exploring everything first.\n",
             path.display()
         )),
         None => p.push_str(
-            "2. **Write as you learn.** Summarize findings in your replies as you go — the \
-             final plan goes to `propose_plan`.\n",
+            "3. **Draft early.** Keep interim findings terse; the final plan goes to \
+             `propose_plan`.\n",
         ),
     }
     p.push_str(
-        "3. **Ask when a real choice appears.** If a decision depends on something only the \
+        "4. **Ask only for real choices.** If a decision depends on something only the \
          user can know (what they want, priorities, trade-offs), ask in plain text in your \
          reply — batch related questions, offer your best guess with each so they can answer \
          in a word, and never ask something the code can answer.\n\
          \n\
-         A good plan is short enough to scan and complete enough to build from: why the change \
-         is being made, the one approach you recommend (not every alternative), which files \
-         change (exact paths), what existing code gets reused, and how you'll verify it \
-         works.\n\
+         Final plan: normally 3–7 terse steps. Include only the goal, recommended approach, \
+         exact paths, reuse, and verification. No preamble, repeated background, exhaustive \
+         alternatives, or speculative test matrix. Expand only when the work truly requires it.\n\
          \n\
          When the plan covers what / where / reuse / verify and no open questions remain, call \
          `propose_plan` with the complete plan as the `plan` argument — never ask for approval \
@@ -284,6 +289,10 @@ mod tests {
         assert!(r.starts_with("Plan mode is active."));
         assert!(r.contains("MUST NOT edit project files"));
         assert!(r.contains("Run read-only shell commands"));
+        assert!(r.contains("Default to one batched search"));
+        assert!(r.contains("Think and report in short fragments or bullets"));
+        assert!(r.contains("normally 3–7 terse steps"));
+        assert!(r.contains("Never repeat an equivalent search or read"));
         assert!(r.contains("plan.md"));
         assert!(r.contains("propose_plan"));
         // No stale draft → no re-entry paragraph.
@@ -294,7 +303,7 @@ mod tests {
     fn plan_reminder_without_docs_workspace_drops_the_draft_guidance() {
         let r = plan_mode_reminder(None);
         assert!(!r.contains("plan.md"));
-        assert!(r.contains("Summarize findings in your replies"));
+        assert!(r.contains("Keep interim findings terse"));
         assert!(r.contains("propose_plan"));
     }
 

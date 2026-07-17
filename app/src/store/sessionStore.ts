@@ -1659,7 +1659,12 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   },
 
   cyclePermissionMode: () => {
-    const { permissionMode, setPermissionMode } = get();
+    const { permissionMode, setPermissionMode, session, activeProvider } = get();
+    // Permission modes only govern the local engine; with a cloud session (or
+    // a cloud target on the start screen) the pill is hidden and Shift+Tab
+    // cycling an invisible mode would just surprise the next local session.
+    const isLocalTarget = session ? session.provider === "local" : activeProvider === "local";
+    if (!isLocalTarget) return;
     setPermissionMode(nextPermissionMode(permissionMode));
   },
 

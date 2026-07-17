@@ -62,6 +62,19 @@ describe("permission-mode ↔ engine sync", () => {
     expect(bridge.setMode).toHaveBeenCalledWith("sess-1", "full");
   });
 
+  it("cyclePermissionMode is a no-op while a cloud session is active", () => {
+    // Permission modes govern the local engine only; the pill is hidden for
+    // cloud sessions, so Shift+Tab must not silently rotate an invisible mode.
+    const bridge = stubBridge();
+    const cloudSession = { id: "conv-9", provider: "clark" } as unknown as Session;
+    useSessionStore.setState({ bridge, session: cloudSession, permissionMode: "auto" });
+
+    useSessionStore.getState().cyclePermissionMode();
+
+    expect(useSessionStore.getState().permissionMode).toBe("auto");
+    expect(bridge.setMode).not.toHaveBeenCalled();
+  });
+
   it("setPermissionMode without a live session only updates client state", () => {
     const bridge = stubBridge();
     useSessionStore.setState({ bridge, session: null });

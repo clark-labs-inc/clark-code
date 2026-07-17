@@ -5,7 +5,7 @@
 //! usage, thinking) are ignored so the run keeps streaming.
 
 use agent_core::domain::*;
-use agent_core::ids::{RunId, ToolCallId};
+use agent_core::ids::{PermissionRequestId, RunId, SessionId, ToolCallId};
 use serde_json::Value;
 
 fn s<'a>(v: &'a Value, key: &str) -> Option<&'a str> {
@@ -336,7 +336,7 @@ fn terminal_artifact(artifact: &Value, index: usize) -> Option<Artifact> {
 /// Map one gateway event to zero or more normalized events. Terminal artifacts
 /// in completion envelopes are emitted before the final run state so the UI can
 /// render finished files/decks/sites even when no separate artifact event fired.
-pub fn events_to_agent(event: &Value, run: &RunId) -> Vec<AgentEvent> {
+pub fn events_to_agent(event: &Value, run: &RunId, session: &SessionId) -> Vec<AgentEvent> {
     let ty = event.get("type").and_then(Value::as_str);
     let mut events = Vec::new();
     if matches!(ty, Some("run_completed") | Some("turn_completed")) {
@@ -349,15 +349,44 @@ pub fn events_to_agent(event: &Value, run: &RunId) -> Vec<AgentEvent> {
             }
         }
     }
-    if let Some(event) = event_to_agent(event, run) {
+    // The backend paused for a clarification answer (`message_ask`). Surface
+    // the question as agent text and END the desktop turn: the composer
+    // unblocks, and the user's next message resumes the same backend job (a
+    // `user_message` clears the server-side pending gate).
+    if ty == Some("message_ask") {
+        if let Some(question) = event
+            .get("data")
+            .and_then(|d| d.get("question"))
+            .and_then(Value::as_str)
+            .filter(|q| !q.trim().is_empty())
+        {
+            events.push(AgentEvent::MessageChunk {
+                run: run.clone(),
+                role: Role::Agent,
+                delta: ContentBlock::text(question),
+            });
+        }
+        events.push(AgentEvent::RunFinished {
+            run: run.clone(),
+            outcome: RunOutcome {
+                status: RunStatus::Done,
+                stop_reason: Some("message_ask".to_string()),
+                error: None,
+                usage: None,
+            },
+        });
+        return events;
+    }
+    if let Some(event) = event_to_agent(event, run, session) {
         events.push(event);
     }
     events
 }
 
 /// Map one inner `event` object to an [`AgentEvent`]. `run` is the
-/// client-synthesized run id for the active turn.
-pub fn event_to_agent(event: &Value, run: &RunId) -> Option<AgentEvent> {
+/// client-synthesized run id for the active turn; `session` is the desktop
+/// session (conversation) id, stamped on permission requests.
+pub fn event_to_agent(event: &Value, run: &RunId, session: &SessionId) -> Option<AgentEvent> {
     let ty = event.get("type").and_then(Value::as_str)?;
     let data = event.get("data");
     match ty {
@@ -432,6 +461,57 @@ pub fn event_to_agent(event: &Value, run: &RunId) -> Option<AgentEvent> {
                 run: run.clone(),
                 id: ToolCallId::new(id),
                 patch,
+            })
+        }
+
+        // The backend paused before an irreversible action and wants an
+        // approve/reject decision. The `action_id` becomes the permission
+        // request id — `respond` sends it back verbatim in the `confirm`
+        // command. The wire resumption is binary (approved: bool), so backend
+        // `choices` reduce to one approve label (the non-"Cancel" one, same
+        // heuristic as the web UI) and one reject label.
+        "confirmation_requested" => {
+            let d = data?;
+            let action_id = s(d, "action_id").filter(|id| !id.trim().is_empty())?;
+            let choices = d.get("choices").and_then(Value::as_array);
+            let choice_label = |want_cancel: bool| -> Option<String> {
+                choices?.iter().find_map(|c| {
+                    let label = s(c, "label")?.trim();
+                    (!label.is_empty() && label.eq_ignore_ascii_case("cancel") == want_cancel)
+                        .then(|| label.to_string())
+                })
+            };
+            let title = s(d, "description")
+                .map(str::trim)
+                .filter(|t| !t.is_empty())
+                .unwrap_or("Clark needs your confirmation to continue")
+                .to_string();
+            Some(AgentEvent::PermissionRequest {
+                request: PermissionRequest {
+                    id: PermissionRequestId::new(action_id),
+                    session: session.clone(),
+                    tool_call: s(d, "tool_call_id")
+                        .filter(|t| !t.trim().is_empty())
+                        .map(ToolCallId::new),
+                    title,
+                    options: vec![
+                        PermissionOption {
+                            id: "approve".into(),
+                            label: choice_label(false).unwrap_or_else(|| "Confirm".to_string()),
+                            kind: PermissionOptionKind::AllowOnce,
+                        },
+                        PermissionOption {
+                            id: "reject".into(),
+                            label: choice_label(true).unwrap_or_else(|| "Cancel".to_string()),
+                            kind: PermissionOptionKind::RejectOnce,
+                        },
+                    ],
+                    detail: s(d, "draft_preview")
+                        .filter(|p| !p.trim().is_empty())
+                        .map(str::to_string),
+                    risk: Some("confirm".to_string()),
+                    reason: None,
+                },
             })
         }
 
@@ -579,6 +659,10 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    fn sess() -> SessionId {
+        SessionId::new("conv-1")
+    }
+
     fn run() -> RunId {
         RunId::new("r1")
     }
@@ -586,7 +670,7 @@ mod tests {
     #[test]
     fn message_stream_delta_becomes_agent_text() {
         let ev = json!({"type":"message_stream_delta","data":{"delta":"pong"}});
-        match event_to_agent(&ev, &run()).unwrap() {
+        match event_to_agent(&ev, &run(), &sess()).unwrap() {
             AgentEvent::MessageChunk { role, delta, .. } => {
                 assert_eq!(role, Role::Agent);
                 assert_eq!(delta, ContentBlock::text("pong"));
@@ -602,7 +686,7 @@ mod tests {
             "data":{"tool_call_id":"t1","tool_name":"file",
                     "arguments":{"action":"write","path":"/home/user/workspace/t.txt","content":"a\nb"}}
         });
-        match event_to_agent(&ev, &run()).unwrap() {
+        match event_to_agent(&ev, &run(), &sess()).unwrap() {
             AgentEvent::ToolCall { call, .. } => {
                 assert_eq!(call.kind, ToolKind::Edit);
                 assert_eq!(call.status, ToolStatus::InProgress);
@@ -617,12 +701,12 @@ mod tests {
     fn file_read_kind_and_browser_and_search_titles() {
         let read = json!({"type":"tool_call","data":{"tool_call_id":"a","tool_name":"file","arguments":{"action":"read","path":"/x/y.md"}}});
         assert!(matches!(
-            event_to_agent(&read, &run()),
+            event_to_agent(&read, &run(), &sess()),
             Some(AgentEvent::ToolCall { call, .. }) if call.kind == ToolKind::Read && call.title == "Read y.md"
         ));
         let search = json!({"type":"tool_call","data":{"tool_call_id":"b","tool_name":"web_search","arguments":{"query":"joke of the day"}}});
         assert!(matches!(
-            event_to_agent(&search, &run()),
+            event_to_agent(&search, &run(), &sess()),
             Some(AgentEvent::ToolCall { call, .. }) if call.kind == ToolKind::Search
         ));
     }
@@ -634,7 +718,7 @@ mod tests {
             "data":{"tool_call_id":"t1","is_error":false,
                     "result":{"success":true,"content":"wrote 6 bytes","excerpt":"a\nb\nc\n"}}
         });
-        match event_to_agent(&ev, &run()).unwrap() {
+        match event_to_agent(&ev, &run(), &sess()).unwrap() {
             AgentEvent::ToolCallUpdate { id, patch, .. } => {
                 assert_eq!(id.as_str(), "t1");
                 assert_eq!(patch.status, Some(ToolStatus::Completed));
@@ -653,7 +737,7 @@ mod tests {
                 {"id":2,"title":"Read file","status":"pending"}
             ]}
         });
-        match event_to_agent(&ev, &run()).unwrap() {
+        match event_to_agent(&ev, &run(), &sess()).unwrap() {
             AgentEvent::Plan { plan, .. } => {
                 assert_eq!(plan.phases.len(), 2);
                 assert_eq!(plan.phases[0].status, PlanPhaseStatus::InProgress);
@@ -666,7 +750,7 @@ mod tests {
     #[test]
     fn workspace_focus_maps_surface() {
         let ev = json!({"type":"workspace_focus","data":{"surface":"files","path":"/x/y.txt"}});
-        match event_to_agent(&ev, &run()).unwrap() {
+        match event_to_agent(&ev, &run(), &sess()).unwrap() {
             AgentEvent::Surface { focus } => {
                 assert_eq!(focus.surface, WorkspaceSurfaceKind::Files);
                 assert_eq!(focus.path.as_deref(), Some("/x/y.txt"));
@@ -679,7 +763,7 @@ mod tests {
     fn run_completed_finishes_done() {
         let ev = json!({"type":"run_completed","data":{"loop_outcome":"done"}});
         assert!(matches!(
-            event_to_agent(&ev, &run()),
+            event_to_agent(&ev, &run(), &sess()),
             Some(AgentEvent::RunFinished { outcome, .. }) if outcome.status == RunStatus::Done
         ));
     }
@@ -713,7 +797,7 @@ mod tests {
             }
         });
 
-        let events = events_to_agent(&ev, &run());
+        let events = events_to_agent(&ev, &run(), &sess());
         assert_eq!(events.len(), 3);
         match &events[0] {
             AgentEvent::Artifact { artifact, .. } => {
@@ -739,6 +823,86 @@ mod tests {
     }
 
     #[test]
+    fn confirmation_requested_becomes_a_permission_gate() {
+        let ev = json!({
+            "type": "confirmation_requested",
+            "data": {
+                "action_id": "act-9",
+                "description": "Send this email to the vendor?",
+                "draft_preview": "Subject: Order update\n\nHi — confirming quantities…",
+                "tool_call_id": "t7",
+                "choices": [
+                    {"label": "Send it", "description": "", "value": "approve"},
+                    {"label": "Cancel", "description": "", "value": "reject"}
+                ]
+            }
+        });
+        match event_to_agent(&ev, &run(), &sess()).unwrap() {
+            AgentEvent::PermissionRequest { request } => {
+                // The action id round-trips as the request id — `respond`
+                // sends it back verbatim in the confirm command.
+                assert_eq!(request.id.as_str(), "act-9");
+                assert_eq!(request.session.as_str(), "conv-1");
+                assert_eq!(request.title, "Send this email to the vendor?");
+                assert_eq!(request.tool_call.as_ref().map(|t| t.as_str()), Some("t7"));
+                assert!(request.detail.as_deref().unwrap().contains("Order update"));
+                assert_eq!(request.risk.as_deref(), Some("confirm"));
+                let opts: Vec<_> = request
+                    .options
+                    .iter()
+                    .map(|o| (o.id.as_str(), o.label.as_str()))
+                    .collect();
+                assert_eq!(opts, vec![("approve", "Send it"), ("reject", "Cancel")]);
+            }
+            other => panic!("got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn confirmation_without_choices_gets_default_labels() {
+        let ev = json!({
+            "type": "confirmation_requested",
+            "data": {"action_id": "act-1", "description": "Proceed?"}
+        });
+        match event_to_agent(&ev, &run(), &sess()).unwrap() {
+            AgentEvent::PermissionRequest { request } => {
+                assert!(request.tool_call.is_none());
+                assert!(request.detail.is_none());
+                let labels: Vec<_> = request.options.iter().map(|o| o.label.as_str()).collect();
+                assert_eq!(labels, vec!["Confirm", "Cancel"]);
+            }
+            other => panic!("got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn message_ask_surfaces_the_question_and_ends_the_turn() {
+        let ev = json!({
+            "type": "message_ask",
+            "data": {"question": "Which vendor should I contact first?"}
+        });
+        let events = events_to_agent(&ev, &run(), &sess());
+        assert_eq!(events.len(), 2);
+        match &events[0] {
+            AgentEvent::MessageChunk { role, delta, .. } => {
+                assert_eq!(*role, Role::Agent);
+                assert_eq!(
+                    *delta,
+                    ContentBlock::text("Which vendor should I contact first?")
+                );
+            }
+            other => panic!("got {other:?}"),
+        }
+        match &events[1] {
+            AgentEvent::RunFinished { outcome, .. } => {
+                assert_eq!(outcome.status, RunStatus::Done);
+                assert_eq!(outcome.stop_reason.as_deref(), Some("message_ask"));
+            }
+            other => panic!("got {other:?}"),
+        }
+    }
+
+    #[test]
     fn internal_events_ignored() {
         for t in [
             "runtime_checkpoint",
@@ -746,7 +910,7 @@ mod tests {
             "llm_response",
             "assistant_thinking",
         ] {
-            assert!(event_to_agent(&json!({"type": t, "data": {}}), &run()).is_none());
+            assert!(event_to_agent(&json!({"type": t, "data": {}}), &run(), &sess()).is_none());
         }
     }
 
@@ -754,7 +918,7 @@ mod tests {
     fn tool_titles_never_leak_internal_tool_names() {
         // create_artifact → no "create_artifact"/underscore in the label.
         let art = json!({"type":"tool_call","data":{"tool_call_id":"x","tool_name":"create_artifact","arguments":{"name":"index.html"}}});
-        match event_to_agent(&art, &run()).unwrap() {
+        match event_to_agent(&art, &run(), &sess()).unwrap() {
             AgentEvent::ToolCall { call, .. } => {
                 assert_eq!(call.kind, ToolKind::Edit);
                 assert!(!call.title.contains('_'), "leaked: {}", call.title);
@@ -769,7 +933,7 @@ mod tests {
         }
         // publish → no "publish" in the label.
         let publish = json!({"type":"tool_call","data":{"tool_call_id":"y","tool_name":"publish_website","arguments":{}}});
-        match event_to_agent(&publish, &run()).unwrap() {
+        match event_to_agent(&publish, &run(), &sess()).unwrap() {
             AgentEvent::ToolCall { call, .. } => {
                 assert_eq!(call.kind, ToolKind::Fetch);
                 assert!(
@@ -789,7 +953,7 @@ mod tests {
             "data":{"tool_call_id":"z","tool_name":"create_artifact",
                     "public_activity_label":"Building the homepage","arguments":{}}
         });
-        match event_to_agent(&ev, &run()).unwrap() {
+        match event_to_agent(&ev, &run(), &sess()).unwrap() {
             AgentEvent::ToolCall { call, .. } => assert_eq!(call.title, "Building the homepage"),
             other => panic!("got {other:?}"),
         }
@@ -805,7 +969,7 @@ mod tests {
                 "summary":"Summarized auth.rs"
             }
         });
-        match event_to_agent(&ev, &run()).unwrap() {
+        match event_to_agent(&ev, &run(), &sess()).unwrap() {
             AgentEvent::FanOut { parent, agent, .. } => {
                 assert_eq!(parent.as_str(), "map-1");
                 assert_eq!(agent.id, "2");
@@ -827,7 +991,7 @@ mod tests {
             }
         });
         assert!(matches!(
-            event_to_agent(&ev, &run()),
+            event_to_agent(&ev, &run(), &sess()),
             Some(AgentEvent::ToolCallUpdate { id, .. }) if id.as_str() == "call-1"
         ));
     }

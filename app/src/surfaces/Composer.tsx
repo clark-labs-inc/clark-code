@@ -80,12 +80,19 @@ const MODE_ICON: Record<PermissionMode, typeof Shield> = {
 function PermissionPill() {
   const mode = useSessionStore((s) => s.permissionMode);
   const setMode = useSessionStore((s) => s.setPermissionMode);
+  // Permission modes govern the LOCAL engine's gate; a Clark cloud session
+  // runs every tool server-side in its own sandbox and never consults them,
+  // so showing the pill there would promise control that doesn't exist.
+  const isLocalTarget = useSessionStore((s) =>
+    s.session ? s.session.provider === "local" : s.activeProvider === "local",
+  );
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useOutsideClose(ref, () => setOpen(false));
 
   const info = PERMISSION_MODES.find((m) => m.id === mode) ?? PERMISSION_MODES[2];
   const Icon = MODE_ICON[mode];
+  if (!isLocalTarget) return null;
 
   return (
     <div ref={ref} className="relative">

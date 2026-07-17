@@ -477,6 +477,11 @@ pub(crate) fn split_segments(command: &str) -> Vec<&str> {
 /// `system()`), archivers, `env` (`env CMD` executes CMD), `find`/`fd`
 /// (handled per-flag below).
 const READONLY_INSPECT: &[&str] = &[
+    // Changes only the shell process's working directory. Plan-mode commands
+    // commonly prefix a batched inspection with `cd app && ...`; treating
+    // that as a mutation creates a redundant permission prompt even though
+    // every subsequent segment is independently checked below.
+    "cd",
     "ls",
     "cat",
     "head",
@@ -747,6 +752,7 @@ mod tests {
     fn read_only_predicate_accepts_pure_inspection() {
         for c in [
             "ls -la",
+            "cd app && echo 'package' && cat package.json",
             "cat src/main.rs",
             "git status && git log --oneline",
             "git diff HEAD~1",
