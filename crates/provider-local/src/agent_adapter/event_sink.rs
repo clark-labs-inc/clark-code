@@ -8,6 +8,17 @@ use async_channel::Sender;
 use async_trait::async_trait;
 use clark_agent as ca;
 
+/// Rough serialized size of a transcript, for detecting a real compaction
+/// shrink. Message COUNT is the wrong signal: compaction trades many messages
+/// for a summary + recent tail, which can leave the count flat while cutting
+/// the text massively.
+fn transcript_chars(messages: &[ca::AgentMessage]) -> usize {
+    messages
+        .iter()
+        .map(|m| serde_json::to_string(m).map(|s| s.len()).unwrap_or(0))
+        .sum()
+}
+
 use crate::tools::ToolRegistry;
 
 use super::{
@@ -121,7 +132,9 @@ impl ca::EventSink for DesktopEventSink {
                 before,
                 after,
                 ..
-            } if plugin == "checkpoint_compactor" && after.len() < before.len() => {
+            } if plugin == "checkpoint_compactor"
+                && transcript_chars(&after) < transcript_chars(&before) =>
+            {
                 let _ = self
                     .events
                     .send(desktop::AgentEvent::MessageChunk {

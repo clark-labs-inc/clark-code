@@ -866,8 +866,9 @@ async fn steering_message_is_injected_into_the_active_run() {
     assert!(refused.is_err());
 }
 
-/// A provider context-window rejection no longer kills the run: the engine
-/// folds progress in, force-compacts, and continues the same turn.
+/// A provider context-window rejection no longer kills the run: clark-agent's
+/// overflow-recovery hook (the OverflowCompactor) force-compacts the live
+/// transcript and retries the same call, transparently, and the run finishes.
 #[tokio::test]
 async fn context_overflow_recovers_by_compacting_and_continuing() {
     let dir = tempfile::tempdir().unwrap();
@@ -886,11 +887,31 @@ async fn context_overflow_recovers_by_compacting_and_continuing() {
     ));
 
     let mut provider = connect_provider(addr).await;
+    // Seed a genuinely large prior exchange so compaction has something to
+    // shrink (compacting a one-message transcript would only ADD a summary —
+    // the recovery's no-progress guard correctly refuses that). The big
+    // assistant turn is what gets folded away.
+    let big_assistant = "In prior work I explored the schema at length. ".repeat(3_000);
+    let resume = agent_core::provider::ResumeTranscript {
+        truncated: false,
+        items: vec![
+            agent_core::provider::ResumeItem::Message {
+                role: agent_core::domain::Role::User,
+                blocks: vec![agent_core::domain::ContentBlock::text(
+                    "earlier: design the DB",
+                )],
+            },
+            agent_core::provider::ResumeItem::Message {
+                role: agent_core::domain::Role::Agent,
+                blocks: vec![agent_core::domain::ContentBlock::text(big_assistant)],
+            },
+        ],
+    };
     let session = provider
         .new_session(SessionOptions {
             cwd: Some(dir.path().to_string_lossy().to_string()),
             mode: None,
-            resume: None,
+            resume: Some(resume),
         })
         .await
         .unwrap();

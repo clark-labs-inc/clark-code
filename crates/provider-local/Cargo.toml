@@ -8,7 +8,7 @@ description = "Local coding-agent provider for clark-desktop: an OpenAI-compatib
 
 [dependencies]
 agent-core = { path = "../agent-core", features = ["native"] }
-clark-agent = { git = "https://github.com/clark-labs-inc/clark-agent", rev = "739a0bdf627d81ef60414ec22061cdfa85741d43" }
+clark-agent = { git = "https://github.com/clark-labs-inc/clark-agent", rev = "c5ea6b58ef67eac12c7649afed6da7754dcb45bc" }
 clark-agent-compaction = { git = "https://github.com/clark-labs-inc/clark-agent-compaction", rev = "860f3159944ca78b33da4eea517e1df34ee8b490" }
 # The Executor trait + LocalExecutor live here (shared with clark-exec-server);
 # exec-protocol is the wire contract RemoteExecutor speaks to it.

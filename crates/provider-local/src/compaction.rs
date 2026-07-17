@@ -140,8 +140,8 @@ this was written — re-read a file before relying on its described contents.]",
 }
 
 /// Force a compaction pass regardless of the configured threshold — the
-/// engine's context-overflow recovery: the provider just rejected the prompt,
-/// so the transcript must shrink for the retry to have any chance.
+/// context-overflow recovery path: the provider just rejected the prompt, so
+/// the transcript must shrink for the retry to have any chance.
 pub(crate) async fn force_compact(
     llm: &LlmClient,
     config: &CompactionConfig,
@@ -149,6 +149,48 @@ pub(crate) async fn force_compact(
     signal: &tokio_util::sync::CancellationToken,
 ) -> Option<Vec<ca::AgentMessage>> {
     compact_once(llm, &forced(config), messages, signal).await
+}
+
+/// clark-agent's [`ContextOverflowRecovery`] hook: when the provider rejects a
+/// request for exceeding the model's window, the loop hands us the live
+/// transcript, we force-compact it, and the loop retries the same call on the
+/// shrunk history. Names itself `checkpoint_compactor` so the same "reached
+/// the context limit" note the in-loop compactor emits fires for a recovery
+/// too (`agent_adapter::event_sink`).
+#[derive(Clone)]
+pub(crate) struct OverflowCompactor {
+    llm: LlmClient,
+    config: CompactionConfig,
+}
+
+impl OverflowCompactor {
+    pub fn new(llm: LlmClient, config: CompactionConfig) -> Self {
+        Self { llm, config }
+    }
+}
+
+#[async_trait::async_trait]
+impl ca::ContextOverflowRecovery for OverflowCompactor {
+    async fn recover(
+        &self,
+        messages: Vec<ca::AgentMessage>,
+        cx: &ca::TransformContext<'_>,
+    ) -> Vec<ca::AgentMessage> {
+        // Fail-open: if compaction can't run (LLM error, nothing to shrink),
+        // return the input unchanged — the loop's no-progress guard then lets
+        // the overflow surface instead of retrying against the same history.
+        force_compact(&self.llm, &self.config, &messages, cx.signal)
+            .await
+            .unwrap_or(messages)
+    }
+
+    fn max_attempts(&self) -> u8 {
+        2
+    }
+
+    fn name(&self) -> &'static str {
+        "checkpoint_compactor"
+    }
 }
 
 #[derive(Clone, Copy)]

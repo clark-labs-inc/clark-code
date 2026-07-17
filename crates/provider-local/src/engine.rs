@@ -172,6 +172,14 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
         .context_transform(CheckpointCompactor::new(
             tc.llm.clone(),
             tc.compaction.clone(),
+        ))
+        // Transparent context-window recovery: a provider overflow mid-run
+        // force-compacts the live transcript and retries the same call
+        // (clark-agent ≥0.2.2), any number of times at any iteration —
+        // replacing the old engine-level once-per-run restart.
+        .overflow_recovery(crate::compaction::OverflowCompactor::new(
+            tc.llm.clone(),
+            tc.compaction.clone(),
         ));
     if let Some(temperature) = tc.temperature {
         builder = builder.temperature(temperature);
@@ -214,29 +222,28 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
     // active is injected between tool batches instead of waiting for the end.
     tc.session.lock().await.steering = Some(steering.clone());
 
-    // Drive the run, recovering ONCE from a context-window overflow (preserve
-    // progress, force-compact, continue the same turn) — and, when a session
-    // goal is active, CONTINUING the run after each clean completion with a
-    // goal-continuation turn (the Codex thread-goal loop): the run keeps going
-    // until the model proves the goal complete, gets blocked, or the budget
-    // runs out. Steering and cancel keep working throughout — it is all one
-    // desktop run.
+    // Drive the run and, when a session goal is active, CONTINUE it after each
+    // clean completion with a goal-continuation turn (the Codex thread-goal
+    // loop): the run keeps going until the model proves the goal complete, gets
+    // blocked, or the budget runs out. Context-window overflows are recovered
+    // transparently inside `clark_agent::run` (the OverflowCompactor hook
+    // registered above), so there is no overflow bookkeeping here. Steering and
+    // cancel keep working throughout — it is all one desktop run.
     let mut prompts = vec![prompt];
-    let mut recovered_from_overflow = false;
     let run_result = 'goal: loop {
         let iteration_started = std::time::Instant::now();
         let usage_before = usage
             .snapshot()
             .map(|u| u.input_tokens + u.output_tokens)
             .unwrap_or(0);
-        let attempt_result = loop {
+        let attempt_result = {
             let context = {
                 let session = tc.session.lock().await;
                 clark_agent::AgentContext::new(session.system_prompt.clone())
                     .with_messages(session.transcript.clone())
                     .with_identity(identity.clone())
             };
-            let attempt = if prompts.is_empty() {
+            if prompts.is_empty() {
                 clark_agent::run_continue(context, &config, cancel.clone()).await
             } else {
                 clark_agent::run(
@@ -246,48 +253,6 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
                     cancel.clone(),
                 )
                 .await
-            };
-            match attempt {
-                Err(error)
-                    if is_context_overflow(&error)
-                        && !recovered_from_overflow
-                        && !cancel.is_cancelled() =>
-                {
-                    recovered_from_overflow = true;
-                    // Fold what completed so far into the transcript, then shrink.
-                    {
-                        let mut session = tc.session.lock().await;
-                        let progress = completed_transcript.drain();
-                        session.transcript.extend(progress);
-                    }
-                    let snapshot = tc.session.lock().await.transcript.clone();
-                    match crate::compaction::force_compact(
-                        &tc.llm,
-                        &tc.compaction,
-                        &snapshot,
-                        &cancel,
-                    )
-                    .await
-                    {
-                        Some(compacted) => {
-                            tc.session.lock().await.transcript = compacted;
-                            let _ = tx
-                                .send(AgentEvent::MessageChunk {
-                                    run: run.clone(),
-                                    role: agent_core::domain::Role::System,
-                                    delta: agent_core::domain::ContentBlock::text(
-                                        "The conversation hit the model's context limit — \
-                                         earlier turns were summarized so this task can \
-                                         continue.",
-                                    ),
-                                })
-                                .await;
-                            continue;
-                        }
-                        None => break Err(error),
-                    }
-                }
-                other => break other,
             }
         };
 
@@ -510,13 +475,6 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
             .await;
         }
     }
-}
-
-fn is_context_overflow(error: &clark_agent::LoopError) -> bool {
-    matches!(
-        error,
-        clark_agent::LoopError::Stream(clark_agent::StreamError::ContextOverflow(_))
-    )
 }
 
 /// Stamp the engine's auto-compaction threshold onto the run usage so the UI
