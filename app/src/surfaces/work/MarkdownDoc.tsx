@@ -5,6 +5,7 @@ import {
 } from "lucide-react";
 import type { Artifact } from "../../core-bridge/types";
 import { readDocText, isLocalDocUri } from "../../lib/docs";
+import { DUR, EASE } from "../../lib/motion";
 
 /** True for an artifact we render as an inline markdown document. */
 export function isMarkdownDoc(a: Artifact): boolean {
@@ -62,7 +63,7 @@ export function MarkdownDoc({
     <motion.div
       initial={reduce ? false : { opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.2 }}
+      transition={{ duration: DUR.base, ease: EASE.out }}
       className={`overflow-hidden rounded-lg border bg-bg-elevated [content-visibility:auto] [contain-intrinsic-size:auto_10rem] ${
         active ? "border-accent shadow-[inset_3px_0_0_var(--color-accent)]" : "border-border"
       }`}

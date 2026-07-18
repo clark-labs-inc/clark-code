@@ -8,6 +8,7 @@ import { slashCommands } from "../lib/slashCommands";
 import { fuzzyFilter } from "../lib/fuzzy";
 import { projectName } from "../lib/localAgent";
 import { cn } from "../lib/cn";
+import { DUR } from "../lib/motion";
 
 interface PaletteItem {
   id: string;
@@ -143,7 +144,7 @@ export function CommandPalette({
         initial={reduce ? false : { opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
-        transition={{ duration: reduce ? 0 : 0.12 }}
+        transition={{ duration: reduce ? 0 : DUR.fast }}
         onMouseDown={(e) => e.target === e.currentTarget && setOpen(false)}
       >
         <motion.div
@@ -153,7 +154,7 @@ export function CommandPalette({
           initial={reduce ? false : { opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          transition={{ duration: reduce ? 0 : 0.12 }}
+          transition={{ duration: reduce ? 0 : DUR.fast }}
           className="popover-surface flex max-h-[70vh] w-full max-w-xl flex-col overflow-hidden rounded-[22px] bg-bg-elevated shadow-lifted ring-1 ring-border-subtle"
         >
           <input

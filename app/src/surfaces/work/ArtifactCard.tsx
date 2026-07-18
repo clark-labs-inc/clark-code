@@ -7,6 +7,7 @@ import {
 import type { Artifact, ArtifactKind } from "../../core-bridge/types";
 import { MarkdownDoc, isMarkdownDoc } from "./MarkdownDoc";
 import { isLocalDocUri, readImageDataUrl } from "../../lib/docs";
+import { DUR, EASE } from "../../lib/motion";
 
 const KIND_ICON: Record<ArtifactKind, typeof Globe> = {
   website: Globe, video: Film, media: Film, image: ImageIcon,
@@ -125,7 +126,7 @@ export function ArtifactCard({
     <motion.div
       initial={reduce ? false : { opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.2 }}
+      transition={{ duration: DUR.base, ease: EASE.out }}
       className={`overflow-hidden rounded-lg border bg-bg-elevated [content-visibility:auto] [contain-intrinsic-size:auto_14rem] ${
         active ? "border-accent shadow-[inset_3px_0_0_var(--color-accent)]" : "border-border"
       }`}

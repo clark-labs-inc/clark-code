@@ -17,6 +17,7 @@ import { slashCommands, type SlashCommand } from "../lib/slashCommands";
 import { listCustomCommands } from "../lib/customCommands";
 import { fuzzyFilter, fuzzyFilterFiles } from "../lib/fuzzy";
 import { cn } from "../lib/cn";
+import { DUR, EASE } from "../lib/motion";
 import { EnvironmentPicker } from "./EnvironmentPicker";
 /** What the user is mid-typing at the caret: an `@file` mention (anywhere) or a
  *  `/command` (only at the very start of the message). */
@@ -345,7 +346,7 @@ function AttachmentChips() {
             initial={{ opacity: 0, scale: 0.96, y: 3 }}
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.96, y: 2 }}
-            transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+            transition={{ duration: DUR.base, ease: EASE.out }}
             className="group relative flex items-center gap-2 rounded-xl bg-bg-tertiary py-1 pl-1 pr-2"
           >
             {a.previewUrl ? (
@@ -391,7 +392,7 @@ function QueuedMessages({ onEdit }: { onEdit: (q: QueuedMessage) => void }) {
               initial={{ opacity: 0, height: 0 }}
               animate={{ opacity: 1, height: "auto" }}
               exit={{ opacity: 0, height: 0 }}
-              transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+              transition={{ duration: DUR.base, ease: EASE.out }}
               className="group flex items-center gap-2 overflow-hidden rounded-xl bg-accent-subtle py-2 pl-3 pr-2"
             >
               <CornerDownRight className="size-3.5 shrink-0 text-ink-faint" />
@@ -436,10 +437,13 @@ function AutocompletePopover({
 }) {
   return (
     <motion.div
-      initial={{ opacity: 0 }}
+      // Appear instantly (no entry fade): fading a shadowed popover in WKWebView
+      // paints half-opacity frames that read as flicker — the same reason the
+      // model/permission menus are un-animated. A quick exit fade is fine.
+      initial={false}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      transition={{ duration: 0.12 }}
+      transition={{ duration: DUR.fast, ease: EASE.out }}
       className="popover-surface absolute bottom-full left-0 z-30 mb-2 max-h-64 w-80 overflow-y-auto rounded-2xl bg-bg-elevated p-1.5 shadow-lifted ring-1 ring-border-subtle"
     >
       {suggestions.map((s, i) => {

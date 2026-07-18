@@ -9,6 +9,7 @@ import {
   ListChecks,
 } from "lucide-react";
 import { cn } from "../lib/cn";
+import { DUR, EASE } from "../lib/motion";
 import type { Plan, PlanPhaseStatus } from "../core-bridge/types";
 
 const STATUS_ICON: Record<PlanPhaseStatus, typeof Circle> = {
@@ -23,7 +24,6 @@ const STATUS_CLASS: Record<PlanPhaseStatus, string> = {
   completed: "text-ink-faint line-through decoration-ink-faint/60",
 };
 
-const EASE = [0.4, 0, 0.2, 1] as const;
 
 /** Live checklist for the current plan — the render surface for the local
  *  agent's `update_plan` tool (and, for ACP/Clark providers, their own
@@ -49,7 +49,7 @@ function PlanChecklistImpl({ plan }: { plan?: Plan }) {
     <motion.div
       initial={reduce ? { opacity: 0 } : { opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.24, ease: EASE }}
+      transition={{ duration: DUR.base, ease: EASE.out }}
       className="rounded-lg border border-border-subtle bg-bg-elevated px-3 py-2.5"
     >
       <button

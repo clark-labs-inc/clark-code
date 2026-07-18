@@ -270,15 +270,15 @@ export function PermissionGate({ req }: { req: PermissionRequest }) {
                 type="button"
                 onClick={submitFeedback}
                 disabled={!feedback.trim() || picked !== null}
-                className="rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-on-accent transition hover:bg-accent-hover disabled:opacity-50"
+                className="relative rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-on-accent transition hover:bg-accent-hover disabled:opacity-50"
               >
-                {picked === feedbackOption?.id ? (
-                  <span className="flex items-center gap-1.5">
+                <span className={cn(picked === feedbackOption?.id && "opacity-0")}>
+                  Send feedback
+                </span>
+                {picked === feedbackOption?.id && (
+                  <span className="absolute inset-0 grid place-items-center">
                     <Loader2 className="size-3.5 animate-[spin_1s_linear_infinite]" />
-                    Sending feedback
                   </span>
-                ) : (
-                  "Send feedback"
                 )}
               </button>
             </div>
@@ -296,18 +296,18 @@ export function PermissionGate({ req }: { req: PermissionRequest }) {
               onClick={() => onPick(opt)}
               disabled={picked !== null}
               className={cn(
-                "rounded-lg px-3 py-1.5 text-sm font-medium transition disabled:opacity-50",
+                "relative rounded-lg px-3 py-1.5 text-sm font-medium transition disabled:opacity-50",
                 (req.risk === "plan" && PLAN_OPTION_STYLE[opt.id]) || OPTION_STYLE[opt.kind],
                 picked === opt.id && "opacity-100",
               )}
             >
-              {picked === opt.id ? (
-                <span className="flex items-center gap-1.5">
+              {/* The spinner overlays the label (which stays, invisible) so the
+                  button keeps its exact width when picked — no sibling shove. */}
+              <span className={cn(picked === opt.id && "opacity-0")}>{opt.label}</span>
+              {picked === opt.id && (
+                <span className="absolute inset-0 grid place-items-center">
                   <Loader2 className="size-3.5 animate-[spin_1s_linear_infinite]" />
-                  {opt.label}
                 </span>
-              ) : (
-                opt.label
               )}
             </button>
           ))}

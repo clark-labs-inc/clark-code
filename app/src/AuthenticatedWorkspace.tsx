@@ -39,7 +39,13 @@ export default function AuthenticatedWorkspace() {
   const mcpOpen = useSessionStore((state) => state.mcpOpen);
   const sshOpen = useSessionStore((state) => state.sshOpen);
   const settingsOpen = useSessionStore((state) => state.settingsOpen);
-  const snapshot = useSessionStore((state) => state.snapshot);
+  // A PRIMITIVE, not the snapshot object: the host re-clones the whole snapshot
+  // per streamed token, so subscribing to `state.snapshot` here re-rendered the
+  // entire workspace (TopBar, Composer, Sidebar…) ~60fps. The count only moves
+  // when an artifact is added, so the shell stays still during streaming. The
+  // artifact arrays themselves are read where they're actually needed:
+  // callbacks via getState(), and ArtifactWorkspace subscribes itself.
+  const artifactCount = useSessionStore((state) => state.snapshot.artifacts.length);
   const conversationTitle = useSessionStore((state) =>
     state.session ? state.conversations.find((conversation) => conversation.id === state.session?.id)?.title : null,
   );
@@ -52,17 +58,21 @@ export default function AuthenticatedWorkspace() {
     setActiveArtifactId(null);
   }, [session?.id]);
   useEffect(() => {
-    if (activeArtifactId && !snapshot.artifacts.some((artifact) => artifact.id === activeArtifactId)) {
+    // Re-check membership when the artifact set changes (count is the cheap
+    // signal; the array is read fresh from the store).
+    const artifacts = useSessionStore.getState().snapshot.artifacts;
+    if (activeArtifactId && !artifacts.some((artifact) => artifact.id === activeArtifactId)) {
       setActiveArtifactId(null);
     }
-  }, [activeArtifactId, snapshot.artifacts]);
+  }, [activeArtifactId, artifactCount]);
 
   const openArtifact = (artifact: Artifact) => setActiveArtifactId(artifact.id);
   const openArtifacts = () => {
-    const latest = snapshot.artifacts.at(-1);
+    const artifacts = useSessionStore.getState().snapshot.artifacts;
+    const latest = artifacts.at(-1);
     if (!latest) return;
     setActiveArtifactId((current) =>
-      current && snapshot.artifacts.some((artifact) => artifact.id === current) ? current : latest.id,
+      current && artifacts.some((artifact) => artifact.id === current) ? current : latest.id,
     );
   };
   const jumpToSource = (artifact: Artifact) => {
@@ -94,7 +104,7 @@ export default function AuthenticatedWorkspace() {
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-bg text-ink">
       <MobileRemoteAgent />
-      <Sidebar artifactCount={snapshot.artifacts.length} onOpenArtifacts={openArtifacts} />
+      <Sidebar artifactCount={artifactCount} onOpenArtifacts={openArtifacts} />
       <div className="flex min-w-0 flex-1 flex-col">
         <TopBar dark={dark} onToggleTheme={toggle} />
         <OfflineBanner />
@@ -138,10 +148,8 @@ export default function AuthenticatedWorkspace() {
             {activeArtifactId && (
               <Suspense fallback={<div className="min-w-0 flex-1 bg-bg-elevated" />}>
                 <ArtifactWorkspace
-                  artifacts={snapshot.artifacts}
                   activeArtifactId={activeArtifactId}
                   conversationTitle={conversationTitle ?? "Current conversation"}
-                  toolCalls={snapshot.tool_calls}
                   onSelect={setActiveArtifactId}
                   onClose={() => setActiveArtifactId(null)}
                   onJumpToSource={jumpToSource}

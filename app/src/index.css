@@ -95,7 +95,18 @@
 
   --shadow-soft: 0 12px 34px rgba(55, 48, 42, 0.08);
   --shadow-lifted: 0 18px 56px rgba(48, 40, 35, 0.14);
+
+  /* ── Motion tokens ───────────────────────────────────────────────
+   * One easing curve and a small, deliberate speed scale for the whole
+   * app, so every transition feels like one system. `ease-clark` is a
+   * gentle ease-out (fast start, soft landing); `ease-clark-inout` is
+   * for symmetric moves (a value sliding between two states). Keep JS
+   * (lib/motion.ts) and these in sync — same numbers, two consumers. */
   --ease-clark: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-clark-inout: cubic-bezier(0.4, 0, 0.2, 1);
+  --dur-fast: 120ms;   /* hovers, taps, small icon/color changes */
+  --dur-base: 200ms;   /* the default — enters, popovers, most UI */
+  --dur-slow: 300ms;   /* large surfaces, deliberate reveals */
 }
 
 /* Dark keeps the same violet interaction contract on a warm graphite canvas. */

@@ -5,6 +5,7 @@ import { useSessionStore } from "../store/sessionStore";
 import { currentActivity } from "../lib/activity";
 import { humanizeError } from "../lib/errors";
 import { cn } from "../lib/cn";
+import { DUR, EASE, INSTANT } from "../lib/motion";
 import { Message } from "./Message";
 import { WorkBlock } from "./work/WorkBlock";
 import { ArtifactCard } from "./work/ArtifactCard";
@@ -85,18 +86,14 @@ function group(timeline: TimelineItem[]): Block[] {
 const TRANSIENT = {
   initial: { opacity: 0, y: 6, height: 0 },
   animate: { opacity: 1, y: 0, height: "auto" },
-  exit: { opacity: 0, y: -4, height: 0, transition: { duration: 0.22, ease: [0.4, 0, 0.2, 1] as const } },
-  transition: { duration: 0.26, ease: [0.22, 1, 0.36, 1] as const },
+  exit: { opacity: 0, height: 0, transition: { duration: DUR.base, ease: EASE.inOut } },
+  transition: { duration: DUR.base, ease: EASE.out },
   style: { overflow: "hidden" },
 };
 
-/** Reduced-motion variant: a bare fade, no height/y movement. */
-const TRANSIENT_INSTANT = {
-  initial: { opacity: 0 },
-  animate: { opacity: 1 },
-  exit: { opacity: 0, transition: { duration: 0.15 } },
-  transition: { duration: 0.15 },
-};
+/** Reduced-motion variant: truly instant — no opacity keyframe (a fading frame
+ *  still paints partial opacity in WKWebView, which reads as flicker). */
+const TRANSIENT_INSTANT = INSTANT;
 
 // `min-w-0` lets this flex child shrink to the column width (flex items default
 // to min-width:auto, so an unbreakable token — a long URL or a raw provider JSON
@@ -260,7 +257,11 @@ export function Conversation({
 
         <FanOutPanel />
 
-        <AnimatePresence initial={false} mode="popLayout">
+        {/* Default (sync) mode, not popLayout: popLayout yanks an exiting
+            banner OUT of the layout flow, so a collapsing Pending briefly
+            floats over the content below it. In-flow exit collapses height in
+            place — no overlap. */}
+        <AnimatePresence initial={false}>
           {showPending && (
             <motion.div key="pending" {...(reduce ? TRANSIENT_INSTANT : TRANSIENT)}>
               <Pending label={activity.label} detail={activity.detail} skeleton={awaitingReply} />
@@ -314,8 +315,8 @@ export function Conversation({
             onClick={scrollToBottom}
             initial={reduce ? false : { opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={reduce ? { opacity: 0 } : { opacity: 0, y: 8 }}
-            transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+            exit={reduce ? { opacity: 0, transition: { duration: 0 } } : { opacity: 0, y: 8 }}
+            transition={{ duration: DUR.fast, ease: EASE.out }}
             className="sticky bottom-4 left-1/2 z-10 mx-auto flex w-fit -translate-x-1/2 items-center gap-1.5 rounded-full bg-bg-elevated px-3 py-1.5 text-xs font-medium text-ink-secondary shadow-lg ring-1 ring-border-subtle transition-colors hover:text-ink"
           >
             <ArrowDown className="size-3.5" /> Jump to latest

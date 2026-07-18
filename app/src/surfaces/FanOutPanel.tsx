@@ -1,6 +1,7 @@
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { CheckCircle2, Circle, Loader2, Network, XCircle } from "lucide-react";
 import { cn } from "../lib/cn";
+import { DUR, EASE } from "../lib/motion";
 import { useFanOutStore, type FanOut, type FanOutAgent } from "../store/fanOutStore";
 
 const STATUS_COPY: Record<FanOutAgent["status"], string> = {
@@ -10,7 +11,6 @@ const STATUS_COPY: Record<FanOutAgent["status"], string> = {
   failed: "Failed",
 };
 
-const EASE = [0.4, 0, 0.2, 1] as const;
 
 function StatusIcon({ status }: { status: FanOutAgent["status"] }) {
   if (status === "done") return <CheckCircle2 className="size-3.5 text-success" />;
@@ -31,7 +31,7 @@ function FanOutCard({ fanOut, reduce }: { fanOut: FanOut; reduce: boolean | null
       initial={reduce ? { opacity: 0 } : { opacity: 0, y: 8, scale: 0.99 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={reduce ? { opacity: 0 } : { opacity: 0, y: -6, scale: 0.98 }}
-      transition={{ duration: 0.28, ease: EASE }}
+      transition={{ duration: DUR.base, ease: EASE.out }}
       className="overflow-hidden rounded-xl border border-border-subtle bg-bg-elevated p-4"
     >
       <div className="flex items-center gap-3">
@@ -51,7 +51,7 @@ function FanOutCard({ fanOut, reduce }: { fanOut: FanOut; reduce: boolean | null
           className="h-full rounded-full bg-accent"
           initial={false}
           animate={{ width: `${Math.max(3, pct)}%` }}
-          transition={{ duration: 0.5, ease: EASE }}
+          transition={{ duration: DUR.slow, ease: EASE.out }}
         />
       </div>
       <div className="mt-1.5 font-mono text-xs tabular-nums text-ink-faint">
@@ -68,9 +68,9 @@ function FanOutCard({ fanOut, reduce }: { fanOut: FanOut; reduce: boolean | null
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -4 }}
               transition={{
-                duration: 0.2,
+                duration: DUR.base,
                 delay: reduce ? 0 : Math.min(i * 0.015, 0.2),
-                ease: EASE,
+                ease: EASE.out,
               }}
               className={cn(
                 "flex min-w-0 items-start gap-2 rounded-md border border-border-subtle bg-bg-secondary px-2.5 py-2",

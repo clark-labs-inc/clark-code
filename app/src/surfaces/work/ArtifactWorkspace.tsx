@@ -25,6 +25,7 @@ import {
   X,
 } from "lucide-react";
 import type { Artifact, ArtifactKind, ToolCall } from "../../core-bridge/types";
+import { useSessionStore } from "../../store/sessionStore";
 import { useCopy } from "../../lib/clipboard";
 import { cn } from "../../lib/cn";
 import { readDocText, saveDocText } from "../../lib/docs";
@@ -346,22 +347,24 @@ function ContextPopover({
 }
 
 export function ArtifactWorkspace({
-  artifacts,
   activeArtifactId,
   conversationTitle,
-  toolCalls,
   onSelect,
   onClose,
   onJumpToSource,
 }: {
-  artifacts: Artifact[];
   activeArtifactId: string;
   conversationTitle: string;
-  toolCalls: Record<string, ToolCall>;
   onSelect: (id: string) => void;
   onClose: () => void;
   onJumpToSource: (artifact: Artifact) => void;
 }) {
+  // Subscribe here rather than take these as props, so the parent
+  // (AuthenticatedWorkspace) needn't subscribe to the full snapshot and
+  // re-render the whole workspace ~60fps while a run streams. Per-frame
+  // re-renders are scoped to this panel, which is only mounted when open.
+  const artifacts = useSessionStore((s) => s.snapshot.artifacts);
+  const toolCalls = useSessionStore((s) => s.snapshot.tool_calls);
   const [openArtifactIds, setOpenArtifactIds] = useState<Set<string>>(
     () => new Set([activeArtifactId]),
   );

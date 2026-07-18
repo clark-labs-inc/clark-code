@@ -4,6 +4,7 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useSessionStore } from "../store/sessionStore";
 import { projectName } from "../lib/localAgent";
 import { cn } from "../lib/cn";
+import { DUR, EASE } from "../lib/motion";
 import { ChangesButton } from "./ChangesPanel";
 import { MemoryButton } from "./MemoryPanel";
 
@@ -38,7 +39,7 @@ function UpdatePill() {
           initial={reduce ? false : { opacity: 0, y: -3 }}
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: -3 }}
-          transition={{ duration: reduce ? 0 : 0.18, ease: [0.22, 1, 0.36, 1] }}
+          transition={{ duration: reduce ? 0 : DUR.fast, ease: EASE.out }}
         >
           {content}
         </motion.div>

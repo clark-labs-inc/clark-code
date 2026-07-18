@@ -1,9 +1,8 @@
 import { useEffect } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { AlertTriangle, CheckCircle2, X } from "lucide-react";
+import { DUR, EASE } from "../lib/motion";
 import { useSessionStore } from "../store/sessionStore";
-
-const EASE = [0.4, 0, 0.2, 1] as const;
 
 /** Transient success/info confirmation, bottom-center, auto-dismissing. Backs
  *  the store's `notice` channel — used for user actions whose only other signal
@@ -28,7 +27,7 @@ export function NoticeToast() {
           initial={reduce ? { opacity: 0 } : { opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
           exit={reduce ? { opacity: 0 } : { opacity: 0, y: 12 }}
-          transition={{ duration: 0.25, ease: EASE }}
+          transition={{ duration: DUR.base, ease: EASE.out }}
           role="status"
           className="fixed bottom-4 left-1/2 z-[90] flex max-w-[calc(100vw-2rem)] -translate-x-1/2 items-center gap-2.5 rounded-xl border border-border-subtle bg-bg-elevated px-3.5 py-2.5 shadow-lg"
         >
@@ -69,7 +68,7 @@ export function WarningToast() {
           initial={reduce ? { opacity: 0 } : { opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
           exit={reduce ? { opacity: 0 } : { opacity: 0, y: 12 }}
-          transition={{ duration: 0.25, ease: EASE }}
+          transition={{ duration: DUR.base, ease: EASE.out }}
           role="status"
           className="fixed bottom-4 left-1/2 z-[90] flex max-w-[calc(100vw-2rem)] -translate-x-1/2 items-center gap-2.5 rounded-xl border border-border-subtle bg-bg-elevated px-3.5 py-2.5 shadow-lg"
         >

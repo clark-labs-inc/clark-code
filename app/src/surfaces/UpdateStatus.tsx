@@ -2,9 +2,8 @@ import { useEffect } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { CheckCircle2, X } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
+import { DUR, EASE } from "../lib/motion";
 import { ClarkMark } from "./ClarkMark";
-
-const EASE = [0.4, 0, 0.2, 1] as const;
 
 /** Full-window "applying update" overlay. The staged bundle is already on disk,
  *  so this is brief — its job is to make the relaunch feel intentional instead
@@ -21,13 +20,13 @@ function UpdateOverlay() {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          transition={{ duration: 0.2, ease: EASE }}
+          transition={{ duration: DUR.base, ease: EASE.out }}
           className="fixed inset-0 z-[100] grid place-items-center bg-bg/80 backdrop-blur-sm"
         >
           <motion.div
             initial={reduce ? false : { opacity: 0, y: 8, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            transition={{ duration: 0.25, ease: EASE }}
+            transition={{ duration: DUR.base, ease: EASE.out }}
             className="flex w-72 flex-col items-center gap-3 rounded-2xl border border-border-subtle bg-bg-elevated p-6 text-center shadow-xl"
           >
             <ClarkMark size={40} className="rounded-xl" />
@@ -72,7 +71,7 @@ function JustUpdatedToast() {
           initial={reduce ? { opacity: 0 } : { opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
           exit={reduce ? { opacity: 0 } : { opacity: 0, y: 12 }}
-          transition={{ duration: 0.25, ease: EASE }}
+          transition={{ duration: DUR.base, ease: EASE.out }}
           role="status"
           className="fixed bottom-4 left-1/2 z-[90] flex -translate-x-1/2 items-center gap-2.5 rounded-xl border border-border-subtle bg-bg-elevated px-3.5 py-2.5 shadow-lg"
         >

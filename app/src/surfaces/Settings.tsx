@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { useSessionStore, type SettingsSection } from "../store/sessionStore";
 import { cn } from "../lib/cn";
+import { DUR } from "../lib/motion";
 import { PERMISSION_MODES } from "../lib/permissions";
 import { OUTPUT_STYLES } from "../lib/outputStyle";
 import { projectName, loadRecentProjects } from "../lib/localAgent";
@@ -659,7 +660,7 @@ export function Settings({
           initial={reduce ? false : { opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          transition={{ duration: reduce ? 0 : 0.15 }}
+          transition={{ duration: reduce ? 0 : DUR.fast }}
           className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-6"
           onClick={() => setOpen(false)}
         >
@@ -670,7 +671,7 @@ export function Settings({
             initial={reduce ? false : { opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            transition={{ duration: reduce ? 0 : 0.12 }}
+            transition={{ duration: reduce ? 0 : DUR.fast }}
             onClick={(e) => e.stopPropagation()}
             className="popover-surface flex h-[80vh] max-h-[640px] w-full max-w-3xl overflow-hidden rounded-[22px] border border-border-subtle bg-bg-elevated shadow-lifted"
           >

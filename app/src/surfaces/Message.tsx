@@ -7,6 +7,7 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { Brain, ChevronRight, Copy, Check, Pencil } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
 import { cn } from "../lib/cn";
+import { DUR, EASE } from "../lib/motion";
 import { useCopy } from "../lib/clipboard";
 import { parseNarration } from "../lib/narration";
 import { useSmoothText } from "../lib/useSmoothText";
@@ -227,8 +228,8 @@ function ThinkingBlock({ text }: { text: string }) {
           <motion.div
             initial={reduce ? false : { height: 0, opacity: 0 }}
             animate={{ height: "auto", opacity: 1 }}
-            exit={reduce ? { opacity: 0 } : { height: 0, opacity: 0 }}
-            transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+            exit={reduce ? { opacity: 0, transition: { duration: 0 } } : { height: 0, opacity: 0 }}
+            transition={{ duration: DUR.base, ease: EASE.inOut }}
             className="overflow-hidden"
           >
             <div className={cn("mt-1 max-h-52 overflow-auto border-l border-border-subtle pl-3 text-xs leading-relaxed text-ink-muted", MD_CLASSES)}>
@@ -289,7 +290,11 @@ function MessageImpl({
       );
     }
     // Assistant: full-width text (no avatar), split into answer / narration /
-    // thinking spans.
+    // thinking spans. Always render through `StreamingMd` — the SAME component
+    // type whether streaming or settled — so when `streaming` flips off the
+    // markdown subtree is NOT unmounted and rebuilt (which flashed a re-parse).
+    // `StreamingMd` renders identical DOM to a bare `<Md>` once the text is
+    // whole, so the last streamed frame and the settled frame are the same.
     const spans = parseNarration(streaming ? smoothed : body);
     return (
       <div className="min-w-0 space-y-1.5">
@@ -305,7 +310,7 @@ function MessageImpl({
                 span.kind === "narrate" && "text-ink-secondary",
               )}
             >
-              {streaming ? <StreamingMd text={span.text} /> : <Md>{span.text}</Md>}
+              <StreamingMd text={span.text} />
               {streaming && lastSpan && (
                 <span
                   aria-hidden
@@ -319,14 +324,18 @@ function MessageImpl({
     );
   })();
 
+  // The wrapper is stable across the whole message lifecycle: the agent's
+  // group/copy container and the content-visibility containment are applied
+  // regardless of `streaming`, so nothing remounts or recalculates when the
+  // reply settles. The copy button stays hover-only (invisible mid-stream).
   return (
     <motion.div
       initial={reduce ? false : { opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
-      className={streaming ? undefined : "[content-visibility:auto] [contain-intrinsic-size:auto_6rem]"}
+      transition={{ duration: DUR.base, ease: EASE.out }}
+      className="[content-visibility:auto] [contain-intrinsic-size:auto_120px]"
     >
-      {role === "agent" && !streaming && body.trim() ? (
+      {role === "agent" ? (
         <div className="group/msg relative">
           {inner}
           <CopyButton

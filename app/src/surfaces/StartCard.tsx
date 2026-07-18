@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { motion, useReducedMotion } from "motion/react";
 import { ChevronRight, MessageSquare, FolderGit2, Server } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
+import { DUR, EASE } from "../lib/motion";
 import { projectName } from "../lib/localAgent";
 import { stableOrderIds } from "../lib/stableOrder";
 import type { ConversationMeta } from "../lib/history";
@@ -53,7 +54,7 @@ export function StartCard() {
       <motion.div
         initial={reduce ? false : { opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: reduce ? 0 : 0.3, ease: [0.22, 1, 0.36, 1] }}
+        transition={{ duration: reduce ? 0 : DUR.slow, ease: EASE.out }}
         className="mx-auto w-full max-w-3xl px-6 pb-6 pt-10"
       >
         <div className="mb-6">
