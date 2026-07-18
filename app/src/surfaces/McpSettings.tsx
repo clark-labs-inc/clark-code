@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { Blocks, Plus, Trash2, X, Loader2, CheckCircle2, AlertCircle, DownloadCloud } from "lucide-react";
+import { Blocks, Plus, Trash2, X, Loader2, CheckCircle2, AlertCircle } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
 import {
   loadMcpServers,
@@ -13,8 +13,9 @@ import {
   MCP_PRESETS,
   type McpServer,
 } from "../lib/mcpServers";
-import { probeMcp, discoverClaude, type McpStatus } from "../lib/mcp";
+import { mergeDiscoveredMcp, probeMcp, type McpStatus } from "../lib/mcp";
 import { cn } from "../lib/cn";
+import { AgentMigrationPanel } from "./AgentMigrationPanel";
 
 const input =
   "w-full rounded-lg border border-border bg-bg px-2.5 py-1.5 text-sm text-ink outline-none transition focus:border-accent placeholder:text-ink-muted";
@@ -193,21 +194,18 @@ export function McpSettings() {
   const localCwd = useSessionStore((s) => s.localSettings.cwd);
   const activeProjectRoot = useSessionStore((s) => s.activeProjectRoot);
   const activeRemote = useSessionStore((s) => s.activeRemote);
-  // For a remote project, read its remote `.claude` over the tunnel.
+  // For a remote project, inspect agent setup over the SSH executor tunnel.
   const cwd = activeRemote?.cwd ?? activeProjectRoot ?? localCwd;
   const [servers, setServers] = useState<McpServer[]>([]);
   const [savedServers, setSavedServers] = useState<McpServer[]>([]);
   const [statuses, setStatuses] = useState<Record<string, McpStatus>>({});
   const [testing, setTesting] = useState(false);
-  const [importing, setImporting] = useState(false);
-  const [importNote, setImportNote] = useState<string | null>(null);
 
   useEffect(() => {
     if (open) {
       const loaded = loadMcpServers();
       setServers(loaded);
       setSavedServers(loaded);
-      setImportNote(null);
     }
   }, [open]);
 
@@ -243,46 +241,6 @@ export function McpSettings() {
       );
     } finally {
       setTesting(false);
-    }
-  };
-
-  // One-click migration: pull the MCP servers (and detect skills) from an
-  // existing Claude Code setup in this project. New servers merge in by name.
-  const importFromClaude = async () => {
-    setImporting(true);
-    setImportNote(null);
-    try {
-      const remote = activeRemote
-        ? { ws_url: activeRemote.ws_url, token: activeRemote.token }
-        : undefined;
-      const { mcp, skills } = await discoverClaude(cwd, remote);
-      const have = new Set(servers.map((s) => s.name.trim()));
-      const added = mcp
-        .filter((m) => m.name.trim() && !have.has(m.name.trim()))
-        .map((m) => ({
-          id: crypto.randomUUID(),
-          name: m.name,
-          command: m.command,
-          args: m.args ?? [],
-          env: m.env ?? {},
-          enabled: true,
-        }));
-      if (added.length) setServers([...servers, ...added]);
-      const parts: string[] = [];
-      parts.push(
-        added.length
-          ? `Imported ${added.length} MCP server${added.length === 1 ? "" : "s"}`
-          : mcp.length
-            ? "MCP servers already imported"
-            : "No MCP servers found",
-      );
-      if (skills.length)
-        parts.push(`${skills.length} Claude skill${skills.length === 1 ? "" : "s"} detected — used automatically`);
-      setImportNote(parts.join(" · "));
-    } catch (e) {
-      setImportNote(`Couldn't read Claude Code config: ${String(e)}`);
-    } finally {
-      setImporting(false);
     }
   };
 
@@ -326,31 +284,20 @@ export function McpSettings() {
             </div>
 
             <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
-              {/* Migrate an existing Claude Code setup with one click. */}
-              <div className="flex items-center gap-3 rounded-xl border border-border-subtle bg-bg-elevated/40 p-3">
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium text-ink">Already use Claude Code?</p>
-                  <p className="text-xs text-ink-muted">
-                    Import its MCP servers from this project — skills in{" "}
-                    <span className="font-mono text-ink-faint">.claude</span> are picked up
-                    automatically.
-                  </p>
-                  {importNote && <p className="mt-1 text-xs text-ink-secondary">{importNote}</p>}
-                </div>
-                <button
-                  onClick={() => void importFromClaude()}
-                  disabled={importing || !cwd.trim()}
-                  title={cwd.trim() ? "Read .mcp.json / ~/.claude.json / .claude" : "Open a project first"}
-                  className="flex shrink-0 items-center gap-1.5 rounded-lg bg-bg-tertiary px-3 py-1.5 text-sm font-medium text-ink-secondary transition hover:bg-bg-hover disabled:opacity-50"
-                >
-                  {importing ? (
-                    <Loader2 className="size-3.5 animate-[spin_1s_linear_infinite]" />
-                  ) : (
-                    <DownloadCloud className="size-3.5" />
-                  )}
-                  Import from Claude Code
-                </button>
-              </div>
+              <AgentMigrationPanel
+                cwd={cwd}
+                remote={
+                  activeRemote
+                    ? { ws_url: activeRemote.ws_url, token: activeRemote.token }
+                    : undefined
+                }
+                servers={servers}
+                onImport={(discovered) => {
+                  const merged = mergeDiscoveredMcp(servers, discovered);
+                  if (merged.added > 0) setServers(merged.servers);
+                  return merged.added;
+                }}
+              />
 
               {servers.length === 0 && (
                 <p className="px-1 pb-1 text-sm text-ink-muted">

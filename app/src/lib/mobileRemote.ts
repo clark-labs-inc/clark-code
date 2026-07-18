@@ -55,6 +55,13 @@ export interface CodeRemoteCommandReceipt {
   command: CodeRemoteCommand;
 }
 
+export interface DownloadedCodeRemoteAttachment {
+  filename: string;
+  content_type: string;
+  size_bytes: number;
+  data_base64: string;
+}
+
 export async function registerCodeRemoteHost(
   creds: CloudCreds,
   registration: CodeRemoteHostRegistration,
@@ -100,5 +107,18 @@ export async function ackCodeRemoteCommand(
     hostId,
     status,
     response,
+  });
+}
+
+export async function downloadCodeRemoteAttachment(
+  creds: CloudCreds,
+  commandId: string,
+  attachmentId: string,
+): Promise<DownloadedCodeRemoteAttachment> {
+  return invoke<DownloadedCodeRemoteAttachment>("desktop_code_attachment_download", {
+    endpoint: creds.endpoint,
+    token: creds.token,
+    commandId,
+    attachmentId,
   });
 }

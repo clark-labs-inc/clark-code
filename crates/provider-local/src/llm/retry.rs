@@ -12,6 +12,18 @@ use super::{
 
 const MAX_RATE_LIMIT_RETRIES: usize = 12;
 const MAX_RATE_LIMIT_DELAY: Duration = Duration::from_secs(30);
+const MAX_AUTH_RETRIES: usize = 1;
+
+/// Classify the provider's context-overflow dialect while the response is
+/// still at the model transport boundary.
+fn is_context_overflow_message(message: &str) -> bool {
+    let lower = message.to_ascii_lowercase();
+    lower.contains("context_length_exceeded")
+        || lower.contains("context length")
+        || lower.contains("context window")
+        || lower.contains("exceeds the maximum number of tokens")
+        || (lower.contains("too many tokens") && !lower.contains("rate"))
+}
 
 struct RateLimitFailure {
     message: String,
@@ -22,6 +34,7 @@ struct RateLimitFailure {
 enum AttemptError {
     Terminal(LlmError),
     RateLimited(RateLimitFailure),
+    PlatformKeyRejected(String),
 }
 
 impl From<LlmError> for AttemptError {
@@ -42,6 +55,7 @@ impl LlmClient {
         mut on_reasoning: impl FnMut(&str),
     ) -> Result<AssistantTurn, LlmError> {
         let mut retries = 0;
+        let mut auth_retries = 0;
         loop {
             if cancel.is_cancelled() {
                 return Err(LlmError::Cancelled);
@@ -72,7 +86,20 @@ impl LlmClient {
                     }
                 }
                 Err(AttemptError::RateLimited(failure)) => {
-                    return Err(LlmError::Message(failure.message));
+                    return Err(LlmError::RateLimited(failure.message));
+                }
+                Err(AttemptError::PlatformKeyRejected(_message))
+                    if auth_retries < MAX_AUTH_RETRIES =>
+                {
+                    auth_retries += 1;
+                    tracing::warn!(
+                        retry = auth_retries,
+                        max_retries = MAX_AUTH_RETRIES,
+                        "Clark API rejected the current platform key; retrying once",
+                    );
+                }
+                Err(AttemptError::PlatformKeyRejected(message)) => {
+                    return Err(LlmError::PlatformKeyRejected(message));
                 }
             }
         }
@@ -98,7 +125,7 @@ impl LlmClient {
         let response = tokio::select! {
             _ = cancel.cancelled() => return Err(LlmError::Cancelled.into()),
             response = request.send() => response.map_err(|error| {
-                LlmError::Message(format!("model request failed: {error}"))
+                LlmError::Transport(format!("model request failed: {error}"))
             })?,
         };
         let status = response.status();
@@ -115,6 +142,9 @@ impl LlmClient {
                 "model endpoint returned {status}: {}",
                 body.chars().take(500).collect::<String>()
             );
+            if status.as_u16() == 401 {
+                return Err(AttemptError::PlatformKeyRejected(message));
+            }
             if status.as_u16() == 429 {
                 return Err(AttemptError::RateLimited(RateLimitFailure {
                     message,
@@ -122,7 +152,10 @@ impl LlmClient {
                     retry_safe: true,
                 }));
             }
-            return Err(LlmError::Message(message).into());
+            if is_context_overflow_message(&message) {
+                return Err(LlmError::ContextOverflow(message).into());
+            }
+            return Err(LlmError::Provider(message).into());
         }
 
         let mut stream = response.bytes_stream();
@@ -136,7 +169,7 @@ impl LlmClient {
             match next {
                 None => break,
                 Some(Err(error)) => {
-                    return Err(LlmError::Message(format!("model stream error: {error}")).into());
+                    return Err(LlmError::Transport(format!("model stream error: {error}")).into());
                 }
                 Some(Ok(bytes)) => {
                     buffer.extend_from_slice(&bytes);
@@ -154,7 +187,10 @@ impl LlmClient {
                     retry_safe: !accumulator.emitted_output(),
                 }));
             }
-            return Err(LlmError::Message(error.message).into());
+            if is_context_overflow_message(&error.message) {
+                return Err(LlmError::ContextOverflow(error.message).into());
+            }
+            return Err(LlmError::Provider(error.message).into());
         }
         Ok(accumulator.finish())
     }
@@ -207,6 +243,15 @@ mod tests {
         let body = r#"{"error":{"code":429,"message":"Provider returned error","metadata":{"retry_after_seconds":0}}}"#;
         format!(
             "HTTP/1.1 429 Too Many Requests\r\nContent-Type: application/json\r\nRetry-After: {retry_after}\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len(),
+        )
+        .into_bytes()
+    }
+
+    fn http_unauthorized() -> Vec<u8> {
+        let body = r#"{"error":{"message":"invalid Clark platform key"}}"#;
+        format!(
+            "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{body}",
             body.len(),
         )
         .into_bytes()
@@ -336,6 +381,15 @@ mod tests {
         let mut output = String::new();
         let turn = run(&base_url, &mut output).await.unwrap();
         assert_eq!(turn.text, "done");
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn retries_current_platform_key_once_then_returns_typed_rejection() {
+        let (base_url, calls) = endpoint(vec![http_unauthorized(), http_unauthorized()]).await;
+        let mut output = String::new();
+        let error = run(&base_url, &mut output).await.unwrap_err();
+        assert!(matches!(error, LlmError::PlatformKeyRejected(_)));
         assert_eq!(calls.load(Ordering::SeqCst), 2);
     }
 

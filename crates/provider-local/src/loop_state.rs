@@ -47,6 +47,9 @@ pub(crate) struct SessionState {
     /// waiting for the run to end. Set by the engine at run start, cleared
     /// at run end.
     pub steering: Option<std::sync::Arc<crate::engine::EngineSteering>>,
+    /// Root execution ledger for the active run. A normal single-agent turn
+    /// owns `/root`; optional read-only children attach beneath this identity.
+    pub active_execution: Option<crate::root_execution::RootExecutionTrace>,
     /// Standing objective the session pursues autonomously (the Codex
     /// `/goal` analog): while `Active`, the engine keeps continuing the run
     /// with goal-continuation turns after each clean completion, until the
@@ -147,6 +150,10 @@ impl RunControl {
 
     pub fn clear(&mut self) {
         self.pending = None;
+    }
+
+    pub fn has_pending(&self) -> bool {
+        self.pending.is_some()
     }
 }
 

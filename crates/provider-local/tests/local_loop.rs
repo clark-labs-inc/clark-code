@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use agent_core::domain::{AgentEvent, ContentBlock, PendingUpload, RunStatus, ToolStatus};
 use agent_core::provider::{ClientResponse, PromptInput, Provider, ProviderConfig, SessionOptions};
+use agent_orchestration::{ExecutionEvent, ExecutionEventKind, ExecutionLedger, ExecutionState};
 use futures::StreamExt;
 use serde_json::json;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -227,6 +228,15 @@ async fn local_loop_reads_file_and_answers() {
         )
     });
     assert!(finished, "expected RunFinished Done: {events:?}");
+    let execution = events.iter().find_map(|event| match event {
+        AgentEvent::RunFinished { outcome, .. } => outcome.execution.as_ref(),
+        _ => None,
+    });
+    let execution = execution.expect("default single-agent run has a /root execution receipt");
+    assert_eq!(execution.root_path, "/root");
+    assert_eq!(execution.attempts, 1);
+    assert_eq!(execution.recoveries, 0);
+    assert_eq!(execution.completed_tools, vec!["read_file"]);
 }
 
 #[tokio::test]
@@ -338,7 +348,19 @@ async fn mutating_tool_waits_for_permission_then_writes() {
     let mut saw_permission = false;
     let mut approved = false;
     let mut finished = false;
+    let mut lifecycle = Vec::new();
     while let Some(ev) = stream.next().await {
+        if let AgentEvent::Trace {
+            source, payload, ..
+        } = &ev
+        {
+            if source == "execution_lifecycle" {
+                lifecycle.push(
+                    serde_json::from_value::<ExecutionEvent>(payload.clone())
+                        .expect("typed lifecycle trace"),
+                );
+            }
+        }
         match &ev {
             AgentEvent::PermissionRequest { request } => {
                 saw_permission = true;
@@ -375,6 +397,17 @@ async fn mutating_tool_waits_for_permission_then_writes() {
     assert_eq!(
         std::fs::read_to_string(dir.path().join("out.txt")).unwrap(),
         "written"
+    );
+    assert!(lifecycle.iter().any(|event| matches!(
+        event.kind,
+        ExecutionEventKind::StateChanged {
+            to: ExecutionState::AwaitingInput,
+            ..
+        }
+    )));
+    assert_eq!(
+        ExecutionLedger::replay(&lifecycle).unwrap().state,
+        ExecutionState::Completed
     );
 }
 

@@ -17,6 +17,19 @@ use crate::config::LocalConfig;
 
 mod retry;
 
+fn clark_code_user_agent() -> String {
+    let platform = match std::env::consts::OS {
+        "macos" => "darwin",
+        other => other,
+    };
+    format!(
+        "clark-code/{} ({} {})",
+        env!("CARGO_PKG_VERSION"),
+        platform,
+        std::env::consts::ARCH,
+    )
+}
+
 /// A single message in the running transcript, serialized straight to the wire.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ChatMessage {
@@ -202,8 +215,16 @@ pub enum LlmError {
     Cancelled,
     /// The account is out of Clark credits (403). The UI prompts an upgrade.
     InsufficientCredits,
-    /// Any other failure (transport, non-2xx, decode).
-    Message(String),
+    /// Clark's API rejected the desktop platform key (401).
+    PlatformKeyRejected(String),
+    /// The selected model/provider exhausted its retry budget.
+    RateLimited(String),
+    /// The request could not reach Clark or its response stream broke.
+    Transport(String),
+    /// Clark or the upstream provider returned an application-level failure.
+    Provider(String),
+    /// The provider rejected the request because its context was too large.
+    ContextOverflow(String),
 }
 
 impl std::fmt::Display for LlmError {
@@ -211,7 +232,11 @@ impl std::fmt::Display for LlmError {
         match self {
             LlmError::Cancelled => f.write_str("model request cancelled"),
             LlmError::InsufficientCredits => f.write_str("insufficient_credits"),
-            LlmError::Message(m) => f.write_str(m),
+            LlmError::PlatformKeyRejected(message)
+            | LlmError::RateLimited(message)
+            | LlmError::Transport(message)
+            | LlmError::Provider(message)
+            | LlmError::ContextOverflow(message) => f.write_str(message),
         }
     }
 }
@@ -260,6 +285,7 @@ impl LlmClient {
         temperature: Option<f32>,
     ) -> Result<Self, String> {
         let http = reqwest::Client::builder()
+            .user_agent(clark_code_user_agent())
             .build()
             .map_err(|e| format!("llm client build failed: {e}"))?;
         Ok(Self {
@@ -327,10 +353,9 @@ impl LlmClient {
             body["temperature"] = json!(t);
         }
         // Kimi K3's reasoning is mandatory and its live OpenRouter contract
-        // accepts only the literal `max`. The shared product picker calls its
-        // maximum level `xhigh`, while an omitted override would inherit the
-        // Clark alias's stale `high` default. Normalize at the wire seam so
-        // desktop, remote, and direct provider-local harnesses all agree.
+        // accepts only the literal `max`. Normalize at the wire seam too so
+        // legacy settings, remote clients, and direct provider-local harnesses
+        // cannot send the Clark alias's stale `high` default upstream.
         let reasoning_effort = if self.model == "clark-code:kimi_k3" {
             Some("max")
         } else {
@@ -575,6 +600,13 @@ fn retry_after_from_metadata(metadata: &serde_json::Map<String, Value>) -> Optio
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn user_agent_identifies_clark_code_version_and_platform() {
+        let user_agent = clark_code_user_agent();
+        assert!(user_agent.starts_with(&format!("clark-code/{} (", env!("CARGO_PKG_VERSION"))));
+        assert!(user_agent.ends_with(&format!(" {})", std::env::consts::ARCH)));
+    }
 
     fn feed(frames: &[&str]) -> AssistantTurn {
         let mut acc = Accumulator::default();

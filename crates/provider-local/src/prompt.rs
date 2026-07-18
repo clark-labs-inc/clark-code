@@ -250,6 +250,7 @@ You write and modify real files and run real commands on their computer.\n\n",
     );
     p.push_str("- Don't run repo-wide formatters or lint --fix unasked — format only the lines you touch.\n");
     p.push_str("- Don't commit or push unless asked. When you do commit, stage only the specific files you changed — never `git add -A` or `git commit -a`.\n");
+    p.push_str("- When you create a commit for work you performed, keep the repository's configured human author — never change the Git identity or pass `--author`. End the commit message with a blank line followed by exactly `Co-authored-by: Clark Code <noreply@clarkchat.com>`, unless the user explicitly asks you to omit Clark Code attribution.\n");
     p.push('\n');
 
     p.push_str("# Working with the user\n");
@@ -419,6 +420,8 @@ mod tests {
         assert!(p.contains("# Git"));
         assert!(p.contains("`git stash`"));
         assert!(p.contains("changes you did not create"));
+        assert!(p.contains("keep the repository's configured human author"));
+        assert!(p.contains("Co-authored-by: Clark Code <noreply@clarkchat.com>"));
         // Test-quality bar: at least one would-fail case.
         assert!(p.contains("# Testing"));
         assert!(p.contains("would fail if your change were broken"));

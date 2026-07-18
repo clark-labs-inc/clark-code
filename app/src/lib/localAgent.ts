@@ -4,7 +4,7 @@
 // delegated to Clark's sandbox.
 //
 // Persisted in localStorage; the model API key is the only secret and never
-// leaves the device except in requests to the configured endpoint.
+// leaves the device except in requests to Clark's API.
 
 import type { ConnectConfig } from "../core-bridge/bridge";
 import { loadAllowlist, loadDenylist } from "./commandPolicy";
@@ -33,26 +33,86 @@ export const DEFAULT_LOCAL_SETTINGS: LocalAgentSettings = {
   apiKey: "",
 };
 
-/** The coding models the composer picker offers (clark-code tier options). */
+/** Reasoning effort ids accepted by the OpenRouter models behind Clark Code. */
+export type ReasoningEffortId = "" | "max" | "xhigh" | "high" | "medium" | "low";
+
+/** All effort labels used across the model-specific selectors. `max` and
+ *  `xhigh` are distinct OpenRouter wire values but share the same product label. */
+export const REASONING_EFFORTS = [
+  { id: "", label: "Auto" },
+  { id: "max", label: "Max" },
+  { id: "xhigh", label: "Max" },
+  { id: "high", label: "High" },
+  { id: "medium", label: "Medium" },
+  { id: "low", label: "Low" },
+] as const;
+
+/** The coding models the composer picker offers (clark-code tier options).
+ *  `reasoningEfforts` mirrors OpenRouter's `GET /api/v1/models` reasoning
+ *  metadata. An empty list means the model reasons but exposes no effort knob. */
 export const CODING_MODELS = [
-  { id: "clark-code", label: "GLM 5.2", hint: "Deep reasoning · default" },
-  { id: "clark-code:kimi_k3", label: "Kimi K3", hint: "Long-horizon coding · 1M context" },
-  { id: "clark-code:kimi_k27_code", label: "Kimi K2.7 Code", hint: "Fast agentic coding" },
-  { id: "clark-code:grok45", label: "Grok 4.5", hint: "Frontier coding · 500K context" },
+  {
+    id: "clark-code",
+    label: "GLM 5.2",
+    hint: "Deep reasoning · default",
+    reasoningEfforts: ["", "xhigh", "high"],
+    defaultReasoningEffort: "",
+  },
+  {
+    id: "clark-code:kimi_k3",
+    label: "Kimi K3",
+    hint: "Long-horizon coding · 1M context",
+    reasoningEfforts: ["max"],
+    defaultReasoningEffort: "max",
+  },
+  {
+    id: "clark-code:kimi_k27_code",
+    label: "Kimi K2.7 Code",
+    hint: "Fast agentic coding",
+    reasoningEfforts: [],
+    defaultReasoningEffort: "",
+  },
+  {
+    id: "clark-code:grok45",
+    label: "Grok 4.5",
+    hint: "Frontier coding · 500K context",
+    reasoningEfforts: ["high", "medium", "low"],
+    defaultReasoningEffort: "high",
+  },
   {
     id: "clark-code:deepseek_v4_pro",
     label: "DeepSeek V4 Pro",
     hint: "Long-horizon coding · 1M context",
+    reasoningEfforts: ["", "xhigh", "high"],
+    defaultReasoningEffort: "",
   },
-] as const;
+] as const satisfies readonly {
+  id: string;
+  label: string;
+  hint: string;
+  reasoningEfforts: readonly ReasoningEffortId[];
+  defaultReasoningEffort: ReasoningEffortId;
+}[];
 
-/** Reasoning-effort choices ("" lets the model's server default apply).
- *  Clark Code models share High and Max as their portable reasoning budgets. */
-export const REASONING_EFFORTS = [
-  { id: "", label: "Auto" },
-  { id: "high", label: "High" },
-  { id: "xhigh", label: "Max" },
-] as const;
+/** Reasoning choices for one model, in OpenRouter's advertised order. */
+export function reasoningEffortsForModel(model: string) {
+  const ids = CODING_MODELS.find((candidate) => candidate.id === model)?.reasoningEfforts ?? [""];
+  return ids.map((id) => REASONING_EFFORTS.find((effort) => effort.id === id)!);
+}
+
+/** Keep persisted and programmatic settings inside the selected model's
+ *  OpenRouter contract. Model switches fall back to that model's default. */
+export function normalizeReasoningEffort(model: string, effort: string): ReasoningEffortId {
+  const config = CODING_MODELS.find((candidate) => candidate.id === model);
+  if (!config) {
+    return REASONING_EFFORTS.some((candidate) => candidate.id === effort)
+      ? (effort as ReasoningEffortId)
+      : "";
+  }
+  return (config.reasoningEfforts as readonly string[]).includes(effort)
+    ? (effort as ReasoningEffortId)
+    : config.defaultReasoningEffort;
+}
 
 /** Short display label for the current model id. */
 export function modelLabel(id: string): string {
@@ -70,7 +130,11 @@ export function loadLocalSettings(): LocalAgentSettings {
           ...(devCwd ? { cwd: devCwd } : {}),
         }
       : { ...DEFAULT_LOCAL_SETTINGS, cwd: devCwd };
-    return migrate(merged);
+    const migrated = migrate(merged);
+    // Rewrite legacy objects once so obsolete endpoint fields disappear from
+    // storage itself, not only from the in-memory settings object.
+    if (raw) localStorage.setItem(KEY, JSON.stringify(migrated));
+    return migrated;
   } catch {
     return { ...DEFAULT_LOCAL_SETTINGS };
   }
@@ -82,14 +146,23 @@ export function loadLocalSettings(): LocalAgentSettings {
 // with "Unknown Clark model tier". Same for a stale reasoning effort the models
 // don't actually support (e.g. "low"/"medium" from an early build) → Auto.
 function migrate(s: LocalAgentSettings): LocalAgentSettings {
-  const model = s.model.includes("/") ? DEFAULT_LOCAL_SETTINGS.model : s.model;
-  const effortValid = REASONING_EFFORTS.some((e) => e.id === s.reasoningEffort);
-  return { ...s, model, reasoningEffort: effortValid ? s.reasoningEffort : "" };
+  const savedModel = typeof s.model === "string" ? s.model : DEFAULT_LOCAL_SETTINGS.model;
+  const savedEffort = typeof s.reasoningEffort === "string" ? s.reasoningEffort : "";
+  const model = savedModel.includes("/") ? DEFAULT_LOCAL_SETTINGS.model : savedModel;
+  // Return the current schema explicitly. Older builds persisted `baseUrl`
+  // (often OpenRouter) and spreading the parsed object kept that misleading,
+  // unused field alive forever even though Clark Code always uses Clark's API.
+  return {
+    cwd: typeof s.cwd === "string" ? s.cwd : "",
+    model,
+    reasoningEffort: normalizeReasoningEffort(model, savedEffort),
+    apiKey: typeof s.apiKey === "string" ? s.apiKey : "",
+  };
 }
 
 export function saveLocalSettings(settings: LocalAgentSettings): void {
   try {
-    localStorage.setItem(KEY, JSON.stringify(settings));
+    localStorage.setItem(KEY, JSON.stringify(migrate(settings)));
   } catch {
     // Non-fatal: settings just won't persist across restarts.
   }
@@ -135,13 +208,21 @@ export function effectiveModelSettings(
   chatModels: Record<string, ChatModelOverride>,
   chatId: string | null,
 ): LocalAgentSettings {
-  if (!chatId) return base;
+  if (!chatId) {
+    return { ...base, reasoningEffort: normalizeReasoningEffort(base.model, base.reasoningEffort) };
+  }
   const ov = chatModels[chatId];
-  if (!ov) return base;
+  if (!ov) {
+    return { ...base, reasoningEffort: normalizeReasoningEffort(base.model, base.reasoningEffort) };
+  }
+  const model = ov.model || base.model;
+  const reasoningEffort = ov.reasoningEffort !== undefined
+    ? ov.reasoningEffort
+    : base.reasoningEffort;
   return {
     ...base,
-    ...(ov.model ? { model: ov.model } : {}),
-    ...(ov.reasoningEffort !== undefined ? { reasoningEffort: ov.reasoningEffort } : {}),
+    model,
+    reasoningEffort: normalizeReasoningEffort(model, reasoningEffort),
   };
 }
 
@@ -186,6 +267,26 @@ export function saveBrowserEnabled(on: boolean): void {
   }
 }
 
+// Experimental, bounded multi-agent fan-out. Off by default. Delegates are
+// structurally read-only and the root coding agent remains the sole writer.
+const ORCHESTRATION_KEY = "clark-desktop:orchestration-enabled";
+
+export function loadOrchestrationEnabled(): boolean {
+  try {
+    return localStorage.getItem(ORCHESTRATION_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+export function saveOrchestrationEnabled(on: boolean): void {
+  try {
+    localStorage.setItem(ORCHESTRATION_KEY, String(on));
+  } catch {
+    // Non-fatal.
+  }
+}
+
 /**
  * Build the `connect` config the native coding provider expects. Everything
  * routes through the production Clark Platform API; the only inputs are the
@@ -217,6 +318,9 @@ export function localConnectConfig(
       project_knowledge: projectKnowledgeEnabled(),
       // Experimental `browser` tool — off unless the user opted in.
       browser_enabled: loadBrowserEnabled(),
+      // Parallel local investigation only. Remote hosts need their own proven
+      // read-only child boundary before this can be enabled there.
+      orchestration: { enabled: !remote && loadOrchestrationEnabled() },
       // When present, the provider runs this session's tools on the remote host.
       ...(remote ? { remote } : {}),
     },

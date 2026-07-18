@@ -130,6 +130,18 @@ export interface Artifact {
 export type RunStatus =
   | "queued" | "running" | "awaiting_input" | "done" | "cancelled" | "failed";
 
+export type RunFailureKind =
+  | "session_expired"
+  | "platform_key_rejected"
+  | "provider_error"
+  | "rate_limited"
+  | "transport_error"
+  | "context_overflow"
+  | "insufficient_credits"
+  | "tool_fatal"
+  | "local_state"
+  | "empty_response";
+
 /** Aggregated model usage for one run (the local coding loop surfaces it). */
 export interface RunUsage {
   input_tokens: number;
@@ -146,7 +158,23 @@ export interface RunOutcome {
   status: RunStatus;
   stop_reason?: string;
   error?: string;
+  failure_kind?: RunFailureKind;
   usage?: RunUsage;
+  /** Runtime-derived receipt for the root execution tree. */
+  execution?: {
+    execution_id: string;
+    root_path: string;
+    attempts: number;
+    recoveries: number;
+    child_executions: number;
+    completed_children: number;
+    failed_children: number;
+    weighted_tokens: number;
+    cost_usd: number;
+    changed_paths: string[];
+    completed_tools: string[];
+    failed_tools: string[];
+  };
 }
 
 export interface RunView {

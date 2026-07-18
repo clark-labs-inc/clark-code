@@ -166,24 +166,37 @@ impl ca::StreamFn for ClarkAgentStream {
     }
 }
 
+pub(crate) struct DesktopToolRegistryOptions {
+    pub session: Arc<Mutex<SessionState>>,
+    pub control: Arc<Mutex<RunControl>>,
+    pub session_id: SessionId,
+    pub run: RunId,
+    pub events: Sender<desktop::AgentEvent>,
+    pub execution: Option<crate::root_execution::RootExecutionTrace>,
+}
+
 pub(crate) fn desktop_tool_registry(
     source: Arc<ToolRegistry>,
     ctx: ToolCtx,
-    session: Arc<Mutex<SessionState>>,
-    control: Arc<Mutex<RunControl>>,
-    session_id: SessionId,
-    run: RunId,
-    events: Sender<desktop::AgentEvent>,
+    options: DesktopToolRegistryOptions,
 ) -> ca::ToolRegistry {
     let mut registry = ca::ToolRegistry::new();
-    let gate = PermissionGate::new(session, control, session_id, events.clone());
+    let mut gate = PermissionGate::new(
+        options.session,
+        options.control,
+        options.session_id,
+        options.events.clone(),
+    );
+    if let Some(execution) = options.execution {
+        gate = gate.with_execution(execution);
+    }
     for exec in source.executors() {
         registry.register(Arc::new(DesktopToolAdapter {
             exec,
             ctx: ctx.clone(),
             gate: gate.clone(),
-            run: run.clone(),
-            events: events.clone(),
+            run: options.run.clone(),
+            events: options.events.clone(),
         }));
     }
     registry

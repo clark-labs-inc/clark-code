@@ -2,8 +2,8 @@ import { memo, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { ArrowDown, X } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
-import { currentActivity } from "../lib/activity";
-import { humanizeError } from "../lib/errors";
+import { currentActivity, shouldShowPending } from "../lib/activity";
+import { humanizeError, humanizeRunFailure } from "../lib/errors";
 import { cn } from "../lib/cn";
 import { DUR, EASE, INSTANT } from "../lib/motion";
 import { Message } from "./Message";
@@ -62,7 +62,7 @@ function Pending({ label, detail, skeleton }: { label: string; detail?: string; 
 
 /** Group consecutive tool-call lines so agent "work" reads as a dense block. */
 type Block =
-  | { kind: "item"; item: TimelineItem; key: string }
+  | { kind: "item"; item: TimelineItem; timelineIndex: number; key: string }
   | { kind: "work"; ids: string[]; key: string };
 
 function group(timeline: TimelineItem[]): Block[] {
@@ -73,7 +73,7 @@ function group(timeline: TimelineItem[]): Block[] {
       if (last && last.kind === "work") last.ids.push(item.id);
       else blocks.push({ kind: "work", ids: [item.id], key: `w${i}` });
     } else {
-      blocks.push({ kind: "item", item, key: `i${i}` });
+      blocks.push({ kind: "item", item, timelineIndex: i, key: `i${i}` });
     }
   });
   return blocks;
@@ -174,14 +174,11 @@ export function Conversation({
   const lastBlockKey = blocks[blocks.length - 1]?.key;
 
   const activity = currentActivity(snapshot);
-  const toolActive = Object.values(toolCalls).some((t) => t.status === "in_progress");
   const last = visible[visible.length - 1];
   const awaitingReply = !last || (last.item === "message" && last.role === "user");
-  // Only show the "thinking" indicator while the model is producing text (after a
-  // message) — not in the gap between sequential tool calls, where it would
-  // otherwise flicker in and out as each tool starts.
-  const lastIsMessage = !last || last.item === "message";
-  const showPending = activity.busy && !toolActive && lastIsMessage;
+  // This placeholder owns only the gap before the first agent response. Typed
+  // agent content (including reasoning) and tool rows own their live state.
+  const showPending = shouldShowPending(snapshot);
   // The "Run failed" banner reflects only the MOST RECENT run — so it clears
   // on its own once the next turn starts, instead of every past failure
   // lingering below the messages forever. It can also be dismissed outright.
@@ -191,7 +188,7 @@ export function Conversation({
     latestRun?.status === "failed" && !dismissedFailedRuns.includes(latestRun.id)
       ? latestRun
       : undefined;
-  const outOfCredits = !!failed?.outcome?.error?.includes("insufficient_credits");
+  const outOfCredits = failed?.outcome?.failure_kind === "insufficient_credits";
   return (
     <div ref={scrollRef} onScroll={onScroll} className="flex-1 overflow-y-auto">
       <div className="mx-auto flex max-w-2xl flex-col gap-4 px-5 py-5">
@@ -225,6 +222,7 @@ export function Conversation({
                 key={block.key}
                 role={item.role}
                 blocks={item.blocks}
+                timelineIndex={block.timelineIndex}
                 streaming={activity.busy && block.key === lastBlockKey && item.role === "agent"}
               />
             );
@@ -286,9 +284,7 @@ export function Conversation({
             >
               <div className="min-w-0 flex-1">
                 <span className="font-medium">Run failed.</span>{" "}
-                {failed.outcome?.error
-                  ? humanizeError(failed.outcome.error)
-                  : "The agent ended unexpectedly."}
+                {humanizeRunFailure(failed.outcome)}
               </div>
               <DismissButton onClick={() => dismissFailedRun(failed.id)} />
             </motion.div>

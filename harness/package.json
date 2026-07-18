@@ -3,7 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test:webkit": "node webkit-smoke.mjs"
+    "test:webkit": "node webkit-smoke.mjs",
+    "test:attachments": "node attachment-smoke.mjs"
   },
   "dependencies": {
     "playwright": "^1.49.0"

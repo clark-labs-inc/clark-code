@@ -44,6 +44,49 @@ final result: passed
 
 ---
 
+# Streamlined Settings Design QA
+
+- Source visual truth: `/var/folders/sx/5vx_xn5j0c31t3jw27sjtnqc0000gn/T/TemporaryItems/NSIRD_screencaptureui_p3n2ml/Screenshot 2026-07-18 at 1.09.06 PM.png`
+- Implementation screenshot: `.design-qa/settings/implementation-pass-2.jpg`
+- Full-view comparison: `.design-qa/settings/full-comparison-pass-2.png`
+- Focused comparison: `.design-qa/settings/focused-comparison-pass-2.png`
+- Viewport: 1280 x 720 implementation; the 3427 x 1310 Codex reference was normalized to the implementation width for comparison.
+- State: dark theme, General settings selected, default text size, Approve for me permission mode.
+
+## Findings
+
+No actionable P0, P1, or P2 differences remain for the requested Settings redesign scope.
+
+- Information architecture: passed. Settings now use a full-window shell with a persistent grouped rail, global search, compact section labels, and one centered content column. Clark-specific areas are grouped into Personal, Workspace, Extensions, and System rather than copying irrelevant Codex sections.
+- Typography and spacing: passed. Section headings, descriptions, labels, supporting copy, card rows, and navigation use a restrained hierarchy with consistent row density and readable line lengths.
+- Surfaces and state: passed. Cards use quiet solid surfaces and separators; active navigation and selected rows are neutral, with violet reserved for the selected control itself.
+- Interaction: passed. Search filters sections by labels, descriptions, and keywords; filtered navigation opens the target section; Back to app and Escape close Settings; large text reflows without horizontal page overflow.
+- Accessibility: passed for inspected behavior. The shell is exposed as a named modal dialog, search has an accessible label, text-size choices use a radio group, toggles are switches with enlarged hit targets, and navigation remains keyboard-addressable.
+
+## Comparison History
+
+1. Initial P1: Clark used a centered modal with a narrow tab strip, weak section grouping, and a form layout that felt denser and less navigable than the Codex full-window settings surface.
+2. First implementation: introduced the full-window shell, persistent grouped navigation, settings search, centered content column, simplified section labels, solid cards, and larger control hit targets.
+3. P1 refinement: the first combined comparison showed selected permission and output rows still reading as violet panels. Their fills were changed to neutral foreground tints so the accent is reserved for the selected radio control.
+4. Post-fix evidence: `.design-qa/settings/full-comparison-pass-2.png` and `.design-qa/settings/focused-comparison-pass-2.png`. No actionable P0/P1/P2 differences remain.
+
+## Verification
+
+- TypeScript typecheck passed.
+- 32 Vitest files and 170 tests passed.
+- Production Vite build passed.
+- Search, section navigation, Back to app, Escape close, and large-text reflow passed at 1280 x 720.
+- Large text produced no horizontal document overflow.
+- Browser console errors: none.
+
+## Follow-up Polish
+
+- P3: verify the same information density in the packaged Windows and Linux WebViews at 100% and 125% display scaling before release.
+
+final result: passed
+
+---
+
 # Codex-like Typography and Spacing Design QA
 
 - Source visual truth: `/tmp/codex-remote-attachments/019f72e1-2841-73c1-8058-7b131ccb3187/AAB29689-95AB-4E2B-969C-E7B24A1EB557/1-Photo-1.jpg`

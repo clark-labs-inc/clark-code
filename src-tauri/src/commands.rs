@@ -173,16 +173,8 @@ pub async fn ssh_probe(host: String) -> Result<ssh::Probe, String> {
     ssh::probe(&host).await
 }
 
-/// What Clark can migrate from an existing Claude Code setup in `cwd`.
-#[derive(serde::Serialize)]
-pub struct ClaudeDiscovery {
-    /// MCP servers found in `.mcp.json` / `~/.claude.json` / `.claude/settings*`.
-    pub mcp: Vec<provider_local::McpServerConfig>,
-    /// Skills found in `.claude/skills` (project + personal).
-    pub skills: Vec<provider_local::ClaudeSkill>,
-}
-
-/// A live remote project's tunnel, so discovery can read the remote `.claude`.
+/// A live remote project's tunnel, so discovery reads setup on the executor's
+/// machine rather than accidentally consulting the desktop filesystem.
 #[derive(serde::Deserialize)]
 pub struct RemoteArg {
     pub ws_url: String,
@@ -200,21 +192,17 @@ async fn project_executor(
     }
 }
 
-/// Discover the MCP servers + skills a user already configured in Claude Code,
-/// so they can be imported with one click (skills are picked up automatically).
-/// Reads through an executor: local disk, or — when `remote` is given — the
-/// remote host's `.claude` over the exec-server tunnel.
+/// Detect compatible MCP servers, skills, and instructions from Claude Code and
+/// Codex. Discovery is read-only; the UI chooses which missing MCP servers to
+/// add while skills and instructions remain sourced in place.
 #[tauri::command]
-pub async fn claude_discover(
+pub async fn external_agent_discover(
     cwd: String,
     remote: Option<RemoteArg>,
-) -> Result<ClaudeDiscovery, String> {
+) -> Result<Vec<provider_local::AgentMigrationDiscovery>, String> {
     let root = std::path::PathBuf::from(cwd);
     let exec = project_executor(remote).await?;
-    Ok(ClaudeDiscovery {
-        mcp: provider_local::discover_mcp_servers(exec.as_ref(), &root).await,
-        skills: provider_local::discover_skills(exec.as_ref(), &root).await,
-    })
+    Ok(provider_local::discover_agent_setups(exec.as_ref(), &root).await)
 }
 
 /// List custom user-authored slash commands (`.claude/commands/*.md`,
@@ -301,11 +289,22 @@ async fn register_session(
         snapshot: snapshot.clone(),
         trajectory: None,
     };
-    state
+    let replaced = state
         .sessions
         .lock()
         .await
         .insert(session.id.to_string(), Arc::new(Mutex::new(entry)));
+    // Edit-and-resend intentionally rebinds the same conversation id to a
+    // provider resumed from an earlier transcript prefix. Close the displaced
+    // provider after the map swap so its background work and resources cannot
+    // leak, while its stream task sees that it is no longer current.
+    if let Some(replaced) = replaced {
+        let mut replaced = replaced.lock().await;
+        let replaced_id = replaced.session.id.clone();
+        if let Err(error) = replaced.provider.close_session(&replaced_id).await {
+            tracing::warn!(%error, session = %replaced_id, "superseded provider close failed");
+        }
+    }
     let _ = app.emit("snapshot", &snapshot);
     serde_json::to_value(&session).map_err(|e| e.to_string())
 }
@@ -1133,7 +1132,10 @@ pub async fn clark_provision_code_key(endpoint: String, token: String) -> Result
     let resp = clark_http_client()?
         .post(url)
         .header("Authorization", format!("Bearer {token}"))
-        .json(&serde_json::json!({ "name": "Clark Code (Desktop)" }))
+        .json(&serde_json::json!({
+            "name": "Clark Code (Desktop)",
+            "purpose": "clark_code_desktop",
+        }))
         .send()
         .await
         .map_err(|e| format!("key provision request failed: {e}"))?;

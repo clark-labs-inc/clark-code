@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Plus, MessageSquare, Archive, ArchiveRestore, ChevronRight, PanelLeftClose, PanelLeft,
-  FolderGit2, Server, Search, X, Trash2, Loader2, Library,
+  FolderGit2, FolderPlus, Server, Search, SquareTerminal, X, Trash2, Loader2, Library,
 } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
 import { projectName } from "../lib/localAgent";
@@ -18,6 +18,8 @@ interface ProjectGroup {
   label: string;
   title: string; // full path / host for the tooltip
   kind: GroupKind;
+  /** The local folder behind the group (local projects only). */
+  path?: string;
   convos: ConversationMeta[];
   latest: number;
 }
@@ -49,7 +51,7 @@ function groupByProject(list: ConversationMeta[], rank: (id: string) => number):
     }
     let g = map.get(key);
     if (!g) {
-      g = { key, label, title, kind, convos: [], latest: Infinity };
+      g = { key, label, title, kind, path: kind === "local" ? c.project : undefined, convos: [], latest: Infinity };
       map.set(key, g);
     }
     g.convos.push(c);
@@ -64,14 +66,26 @@ function groupByProject(list: ConversationMeta[], rank: (id: string) => number):
 }
 
 function GroupHeader({ group }: { group: ProjectGroup }) {
+  const openProjectTerminal = useSessionStore((s) => s.openProjectTerminal);
   const Icon = group.kind === "remote" ? Server : group.kind === "local" ? FolderGit2 : MessageSquare;
+  const path = group.kind === "local" ? group.path : undefined;
   return (
     <div
       title={group.title}
-      className="mb-0.5 mt-2 flex h-7 items-center gap-2 px-2 text-sm font-medium text-ink-secondary first:mt-0"
+      className="group mb-0.5 mt-2 flex h-7 items-center gap-2 px-2 text-sm font-medium text-ink-secondary first:mt-0"
     >
       <Icon className="size-3.5 shrink-0 text-ink-muted" />
       <span className="truncate">{group.label}</span>
+      {path && (
+        <button
+          onClick={() => void openProjectTerminal(path)}
+          title={`Set ${group.label} as the current project and open a terminal in it`}
+          aria-label={`Open terminal in ${group.label}`}
+          className="ml-auto grid size-5 shrink-0 place-items-center rounded-md text-ink-faint opacity-0 transition hover:bg-bg-sunken hover:text-ink group-hover:opacity-100 group-focus-within:opacity-100"
+        >
+          <SquareTerminal className="size-3.5" />
+        </button>
+      )}
     </div>
   );
 }
@@ -352,6 +366,7 @@ export function Sidebar({
   // its own pulsing "Working…" dot, whether or not it's on screen.
   const runningIds = useSessionStore((s) => s.runningIds);
   const newConversation = useSessionStore((s) => s.endSession);
+  const openProjectTerminal = useSessionStore((s) => s.openProjectTerminal);
   const selectedIds = useSessionStore((s) => s.selectedConversationIds);
   const setSelection = useSessionStore((s) => s.setConversationSelection);
   const archiveSelected = useSessionStore((s) => s.archiveSelectedConversations);
@@ -428,6 +443,14 @@ export function Sidebar({
         >
           <Plus className="size-4" />
         </button>
+        <button
+          onClick={() => void openProjectTerminal()}
+          aria-label="New project"
+          title="New project — choose a folder and open a terminal in it"
+          className="grid size-8 place-items-center rounded-lg text-ink-secondary transition hover:bg-bg-hover hover:text-ink"
+        >
+          <FolderPlus className="size-4" />
+        </button>
         {onOpenArtifacts && (
           <button
             onClick={onOpenArtifacts}
@@ -472,6 +495,13 @@ export function Sidebar({
           className="flex h-8 w-full items-center gap-2.5 rounded-lg px-2 text-sm font-medium text-ink-secondary transition hover:bg-bg-hover hover:text-ink"
         >
           <Plus className="size-4" /> New session
+        </button>
+        <button
+          onClick={() => void openProjectTerminal()}
+          title="Choose a folder, set it as the current project, and open a terminal in it"
+          className="flex h-8 w-full items-center gap-2.5 rounded-lg px-2 text-sm font-medium text-ink-secondary transition hover:bg-bg-hover hover:text-ink"
+        >
+          <FolderPlus className="size-4" /> New project…
         </button>
         {/* Always rendered (even at 0) so the row's height never pops in/out
             when switching conversations — a conditional row made the whole

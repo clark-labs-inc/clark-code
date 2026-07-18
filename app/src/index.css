@@ -77,14 +77,15 @@
   --font-mono: "JetBrains Mono", "SF Mono", ui-monospace, "Menlo", monospace;
   --font-display: "Newsreader Variable", Newsreader, Georgia, serif;
 
-  /* Compact desktop scale: controls stay quiet while long-form answers retain
-     a comfortable reading size and a clear heading step. */
-  --text-xs: 0.6875rem;   /* 11px */
-  --text-sm: 0.75rem;     /* 12px */
-  --text-base: 0.8125rem; /* 13px */
-  --text-lg: 0.9375rem;   /* 15px */
-  --text-xl: 1.125rem;    /* 18px */
-  --text-2xl: 1.375rem;   /* 22px */
+  /* Default application type scale. Compact preserves the original dense
+     scale; Large prioritizes readability. Settings and keyboard shortcuts
+     switch these semantic tokens without scaling the layout chrome. */
+  --text-xs: 0.75rem;     /* 12px */
+  --text-sm: 0.8125rem;   /* 13px */
+  --text-base: 0.9375rem; /* 15px */
+  --text-lg: 1.0625rem;   /* 17px */
+  --text-xl: 1.25rem;     /* 20px */
+  --text-2xl: 1.5rem;     /* 24px */
 
   --radius-sm: 8px;
   --radius-md: 12px;
@@ -106,6 +107,24 @@
   --dur-fast: 120ms;   /* hovers, taps, small icon/color changes */
   --dur-base: 200ms;   /* the default — enters, popovers, most UI */
   --dur-slow: 300ms;   /* large surfaces, deliberate reveals */
+}
+
+html[data-text-size="compact"] {
+  --text-xs: 0.6875rem;   /* 11px */
+  --text-sm: 0.75rem;     /* 12px */
+  --text-base: 0.8125rem; /* 13px */
+  --text-lg: 0.9375rem;   /* 15px */
+  --text-xl: 1.125rem;    /* 18px */
+  --text-2xl: 1.375rem;   /* 22px */
+}
+
+html[data-text-size="large"] {
+  --text-xs: 0.8125rem;   /* 13px */
+  --text-sm: 0.9375rem;   /* 15px */
+  --text-base: 1.0625rem; /* 17px */
+  --text-lg: 1.1875rem;   /* 19px */
+  --text-xl: 1.375rem;    /* 22px */
+  --text-2xl: 1.625rem;   /* 26px */
 }
 
 /* Dark keeps the same violet interaction contract on a warm graphite canvas. */

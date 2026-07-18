@@ -120,6 +120,12 @@ pub struct LocalConfig {
     /// downloaded on first use). Off by default — the user opts in from
     /// Settings (`extra.browser_enabled = true`).
     pub browser_enabled: bool,
+    /// Opt-in read-only multi-agent orchestration. Disabled unless the provider
+    /// config explicitly enables it.
+    pub(crate) orchestration: crate::orchestration::OrchestrationConfig,
+    /// Universal root execution lifecycle. This is always present; its limits
+    /// control bounded recovery and accounting rather than tool permissions.
+    pub(crate) execution: crate::root_execution::RootExecutionConfig,
 }
 
 /// A remote project target. The agent's file/shell tools run against `cwd` on a
@@ -257,6 +263,8 @@ impl LocalConfig {
             .get("browser_enabled")
             .and_then(Value::as_bool)
             .unwrap_or(false);
+        let mut orchestration = crate::orchestration::OrchestrationConfig::from_extra(extra);
+        let execution = crate::root_execution::RootExecutionConfig::from_extra(extra);
 
         let compaction = if extra
             .get("auto_compact")
@@ -294,6 +302,12 @@ impl LocalConfig {
                 cwd: str_field(r, "cwd")?,
             })
         });
+        // The first orchestration boundary launches nested local/ACP processes.
+        // A remote project needs a remote-aware child transport and read-only
+        // enforcement on that host, neither of which this adapter can prove yet.
+        if remote.is_some() {
+            orchestration.enabled = false;
+        }
 
         Self {
             base_url,
@@ -318,6 +332,8 @@ impl LocalConfig {
             project_knowledge_enabled,
             compaction,
             browser_enabled,
+            orchestration,
+            execution,
         }
     }
 
@@ -437,11 +453,13 @@ mod tests {
                     "ws_url": "ws://127.0.0.1:54321",
                     "token": "cap-token",
                     "cwd": "/home/me/project"
-                }
+                },
+                "orchestration": {"enabled": true}
             }),
             ..Default::default()
         };
         let cfg = LocalConfig::from_provider_config(&pc);
+        assert!(!cfg.orchestration.enabled);
         let remote = cfg.remote.expect("remote target parsed");
         assert_eq!(remote.ws_url, "ws://127.0.0.1:54321");
         assert_eq!(remote.token, "cap-token");

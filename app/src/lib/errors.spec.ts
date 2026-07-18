@@ -1,5 +1,27 @@
 import { describe, it, expect } from "vitest";
-import { humanizeError } from "./errors";
+import { humanizeError, humanizeRunFailure } from "./errors";
+
+describe("humanizeRunFailure", () => {
+  it("keeps session expiry and platform-key rejection distinct", () => {
+    expect(humanizeRunFailure({ failure_kind: "session_expired" })).toMatch(/sign-in expired/i);
+    expect(humanizeRunFailure({ failure_kind: "platform_key_rejected" })).toMatch(/access key/i);
+  });
+
+  it("trusts the typed category instead of misleading provider prose", () => {
+    const msg = humanizeRunFailure({
+      failure_kind: "provider_error",
+      error: "403 authentication failed upstream",
+    });
+    expect(msg).toMatch(/provider/i);
+    expect(msg).not.toMatch(/sign-in|access key/i);
+  });
+
+  it("does not infer auth from an untyped legacy error", () => {
+    expect(
+      humanizeRunFailure({ error: "model endpoint returned 401 Unauthorized" }),
+    ).not.toMatch(/sign-in|access key/i);
+  });
+});
 
 describe("humanizeError", () => {
   it("collapses the raw 429 provider JSON blob into one friendly line", () => {
@@ -10,10 +32,6 @@ describe("humanizeError", () => {
     expect(msg).not.toContain("{");
     expect(msg).not.toContain("user_id");
     expect(msg.length).toBeLessThan(120);
-  });
-
-  it("recognizes auth failures", () => {
-    expect(humanizeError("model endpoint returned 401 Unauthorized: ...")).toMatch(/sign/i);
   });
 
   it("recognizes context-window overflow", () => {

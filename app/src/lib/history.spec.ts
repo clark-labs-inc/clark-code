@@ -1,5 +1,10 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { buildResumeTranscript, drainLocalHistory, settleRuns } from "./history";
+import {
+  buildResumeTranscript,
+  drainLocalHistory,
+  settleRuns,
+  snapshotBeforeTimelineItem,
+} from "./history";
 import type { Snapshot, ToolCall } from "../core-bridge/types";
 
 // The Node test env has no localStorage; back it with a tiny in-memory mock.
@@ -172,5 +177,63 @@ describe("buildResumeTranscript", () => {
     expect(out.truncated).toBe(true);
     expect(JSON.stringify(out)).toContain("turn 49");
     expect(JSON.stringify(out)).not.toContain("turn 0 ");
+  });
+});
+
+describe("snapshotBeforeTimelineItem", () => {
+  it("drops the edited turn and every later branch item", () => {
+    const snapshot: Snapshot = {
+      session: "chat-1",
+      runs: {
+        r1: { id: "r1", status: "done" },
+        r2: { id: "r2", status: "failed" },
+      },
+      timeline: [
+        { item: "message", run: "user", role: "user", blocks: [{ type: "text", text: "first" }] },
+        { item: "tool_call", id: "t1" },
+        { item: "message", run: "r1", role: "agent", blocks: [{ type: "text", text: "done" }] },
+        { item: "artifact", id: "a1" },
+        {
+          item: "message",
+          run: "user",
+          role: "user",
+          blocks: [{ type: "text", text: "old second" }],
+        },
+        { item: "tool_call", id: "t2" },
+        { item: "message", run: "r2", role: "agent", blocks: [{ type: "text", text: "failed" }] },
+        { item: "artifact", id: "a2" },
+      ],
+      tool_calls: {
+        t1: tool("t1", "completed"),
+        t2: tool("t2", "failed"),
+      },
+      artifacts: [
+        { id: "a1", title: "kept", kind: "file" },
+        { id: "a2", title: "dropped", kind: "file" },
+      ],
+      pending_permission: { id: "p1", session: "chat-1", title: "stale", options: [] },
+      focus: { surface: "files", path: "stale.ts" },
+      fan_out: { title: "stale", total: 1, done: 0, running: 1, agents: [] },
+    };
+
+    const prefix = snapshotBeforeTimelineItem(snapshot, 4);
+
+    expect(prefix.timeline).toHaveLength(4);
+    expect(
+      prefix.timeline.some(
+        (item) =>
+          item.item === "message" &&
+          item.role === "user" &&
+          item.blocks.some(
+            (block) => block.type === "text" && block.text === "old second",
+          ),
+      ),
+    ).toBe(false);
+    expect(Object.keys(prefix.runs)).toEqual(["r1"]);
+    expect(Object.keys(prefix.tool_calls)).toEqual(["t1"]);
+    expect(prefix.artifacts.map((artifact) => artifact.id)).toEqual(["a1"]);
+    expect(prefix.pending_permission).toBeUndefined();
+    expect(prefix.focus).toBeUndefined();
+    expect(prefix.fan_out).toBeUndefined();
   });
 });

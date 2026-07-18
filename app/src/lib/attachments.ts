@@ -13,6 +13,14 @@ export interface PendingAttachment {
   previewUrl?: string;
 }
 
+/** Large clipboard text compacted in the composer but sent as ordinary text. */
+export interface PendingPaste {
+  id: string;
+  placeholder: string;
+  text: string;
+  charCount: number;
+}
+
 /** The minimal wire shape a provider ingests (mirrors Rust `PendingUpload`). */
 export interface Upload {
   filename: string;
@@ -21,8 +29,57 @@ export interface Upload {
 }
 
 export const MAX_ATTACHMENT_BYTES = 12 * 1024 * 1024;
+export const LARGE_TEXT_PASTE_CHAR_THRESHOLD = 1_000;
 const MAX_IMAGE_DIM = 1568;
 const IMAGE_PASSTHROUGH_BYTES = 1_200_000;
+
+/** Match Codex's composer boundary: only text over 1,000 characters is compacted. */
+export function shouldThumbnailPastedText(text: string): boolean {
+  return text.trim().length > 0 && Array.from(text).length > LARGE_TEXT_PASTE_CHAR_THRESHOLD;
+}
+
+/** Create the unique display marker that stands in for a large paste. */
+export function createPendingPaste(text: string, existing: PendingPaste[]): PendingPaste {
+  const charCount = Array.from(text).length;
+  const base = `[Pasted Content ${charCount} chars]`;
+  const prefix = `${base} #`;
+  let maxSuffix = 0;
+  for (const paste of existing) {
+    if (paste.placeholder === base) {
+      maxSuffix = Math.max(maxSuffix, 1);
+      continue;
+    }
+    if (paste.placeholder.startsWith(prefix)) {
+      const suffixText = paste.placeholder.slice(prefix.length);
+      if (/^\d+$/.test(suffixText)) {
+        maxSuffix = Math.max(maxSuffix, Number.parseInt(suffixText, 10));
+      }
+    }
+  }
+  const placeholder = maxSuffix === 0 ? base : `${base} #${maxSuffix + 1}`;
+  return {
+    id:
+      typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `paste-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    placeholder,
+    text,
+    charCount,
+  };
+}
+
+/** Expand inline markers, or append chip-only pastes, into normal user text. */
+export function expandPendingPastes(text: string, pastes: PendingPaste[]): string {
+  let expanded = text;
+  for (const paste of pastes) {
+    if (expanded.includes(paste.placeholder)) {
+      expanded = expanded.replace(paste.placeholder, paste.text);
+    } else {
+      expanded += `${expanded.trim() ? "\n\n" : ""}${paste.text}`;
+    }
+  }
+  return expanded;
+}
 
 export function toUpload(a: PendingAttachment): Upload {
   return { filename: a.filename, content_type: a.content_type, data_base64: a.data_base64 };

@@ -1,18 +1,25 @@
 //! Thin launcher from clark-desktop's provider API into `clark_agent::run`.
 
+mod error;
+
 use std::sync::Arc;
 
-use agent_core::domain::{AgentEvent, RunOutcome, RunStatus};
+use agent_core::domain::{AgentEvent, RunFailureKind, RunOutcome, RunStatus, RunUsage};
 use agent_core::ids::{RunId, SessionId};
+use agent_orchestration::FailureClass;
 use async_channel::Sender;
 use tokio::sync::Mutex;
 
-use crate::agent_adapter::{desktop_tool_registry, ClarkAgentStream, DesktopEventSink};
+use crate::agent_adapter::{
+    desktop_tool_registry, ClarkAgentStream, DesktopEventSink, DesktopToolRegistryOptions,
+};
 use crate::compaction::{CheckpointCompactor, CompactionConfig};
 use crate::llm::LlmClient;
 use crate::loop_breaker::LoopBreaker;
 use crate::loop_state::{GoalStatus, RunControl, SessionState};
+use crate::root_execution::{RootExecutionConfig, RootExecutionTrace};
 use crate::tools::{ToolCtx, ToolRegistry};
+use error::map_loop_error;
 
 /// Turns of head-room before the hard `max_iterations` cap at which the
 /// built-in graceful wrap-up fires. When crossed, the loop injects a
@@ -42,13 +49,32 @@ enum GoalStep {
 /// ends before injecting a message (a terminal batch suppresses steering),
 /// the engine folds the remainder into the session transcript so the next
 /// turn still sees what the user said.
-#[derive(Default)]
 pub(crate) struct EngineSteering {
     queue: std::sync::Mutex<std::collections::VecDeque<clark_agent::AgentMessage>>,
+    execution: Option<RootExecutionTrace>,
+}
+
+impl Default for EngineSteering {
+    fn default() -> Self {
+        Self {
+            queue: std::sync::Mutex::new(std::collections::VecDeque::new()),
+            execution: None,
+        }
+    }
 }
 
 impl EngineSteering {
+    fn with_execution(execution: RootExecutionTrace) -> Self {
+        Self {
+            execution: Some(execution),
+            ..Self::default()
+        }
+    }
+
     pub fn push_user_text(&self, text: String) {
+        if let Some(execution) = &self.execution {
+            execution.steering();
+        }
         self.queue.lock().expect("steering queue lock").push_back(
             clark_agent::AgentMessage::User {
                 content: clark_agent::UserContent::Text(text),
@@ -97,6 +123,23 @@ pub(crate) struct TurnContext {
     pub user_text: String,
     /// When memories are enabled: post-turn durable-fact extraction context.
     pub memory_extraction: Option<crate::memory_extraction::ExtractionCtx>,
+    pub execution: RootExecutionConfig,
+}
+
+struct RootFinishContext {
+    executor: Arc<dyn crate::exec::Executor>,
+    root: std::path::PathBuf,
+    session: Arc<Mutex<SessionState>>,
+}
+
+impl RootFinishContext {
+    fn from_turn(tc: &TurnContext) -> Self {
+        Self {
+            executor: tc.ctx.executor.clone(),
+            root: tc.ctx.sandbox.root().to_path_buf(),
+            session: tc.session.clone(),
+        }
+    }
 }
 
 /// Drive one user turn to completion, emitting normalized Desktop events into
@@ -105,10 +148,41 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
     let cancel = tc.ctx.cancel.clone();
     let _ = tx.send(AgentEvent::RunStarted { run: run.clone() }).await;
 
+    let execution = match RootExecutionTrace::new(&tc.session_id, &run, &tc.execution, tx.clone()) {
+        Ok(execution) => execution,
+        Err(error) => {
+            let message = format!("failed to create root execution ledger: {error}");
+            let _ = tx
+                .send(AgentEvent::Error {
+                    code: "local_execution_state".into(),
+                    message: message.clone(),
+                    run: Some(run.clone()),
+                })
+                .await;
+            finish(
+                &tx,
+                &run,
+                RunOutcome {
+                    status: RunStatus::Failed,
+                    stop_reason: None,
+                    error: Some(message),
+                    failure_kind: Some(RunFailureKind::LocalState),
+                    usage: None,
+                    execution: None,
+                },
+            )
+            .await;
+            return;
+        }
+    };
+    tc.session.lock().await.active_execution = Some(execution.clone());
+    let finish_context = RootFinishContext::from_turn(&tc);
+
     match crate::checkpoint::create_checkpoint(tc.ctx.executor.as_ref(), tc.ctx.sandbox.root())
         .await
     {
         Ok(Some(id)) => {
+            execution.checkpoint(id.clone());
             let _ = tx
                 .send(AgentEvent::Checkpoint {
                     run: run.clone(),
@@ -121,27 +195,39 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
     }
 
     if cancel.is_cancelled() {
-        finish(&tx, &run, RunStatus::Cancelled, None, None, None).await;
+        finish_root(
+            &tx,
+            &run,
+            &execution,
+            &finish_context,
+            RunStatus::Cancelled,
+            None,
+            None,
+            None,
+            None,
+        )
+        .await;
         return;
     }
 
     let tools = desktop_tool_registry(
         tc.registry.clone(),
         tc.ctx.clone(),
-        tc.session.clone(),
-        tc.control.clone(),
-        tc.session_id.clone(),
-        run.clone(),
-        tx.clone(),
+        DesktopToolRegistryOptions {
+            session: tc.session.clone(),
+            control: tc.control.clone(),
+            session_id: tc.session_id.clone(),
+            run: run.clone(),
+            events: tx.clone(),
+            execution: Some(execution.clone()),
+        },
     );
     // Documents the agent writes into this workspace become inline artifacts.
     let docs_dir = tc.ctx.sandbox.docs_root().map(std::path::Path::to_path_buf);
-    let sink = Arc::new(DesktopEventSink::new(
-        tx.clone(),
-        run.clone(),
-        tc.registry.clone(),
-        docs_dir,
-    ));
+    let sink = Arc::new(
+        DesktopEventSink::new(tx.clone(), run.clone(), tc.registry.clone(), docs_dir)
+            .with_execution(execution.clone()),
+    );
     let completed_transcript = sink.completed_transcript();
 
     // The stream adapter accumulates token/cost usage across the run's model
@@ -157,7 +243,7 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
     // downgrades their whole batch to sequential, so edits/shell keep today's
     // one-at-a-time ordering and the permission gate never faces two
     // simultaneous prompts.
-    let steering = Arc::new(EngineSteering::default());
+    let steering = Arc::new(EngineSteering::with_execution(execution.clone()));
     let mut builder = clark_agent::AgentBuilder::new()
         .stream(Arc::new(stream))
         .tools(tools)
@@ -195,12 +281,15 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
                     run: Some(run.clone()),
                 })
                 .await;
-            finish(
+            finish_root(
                 &tx,
                 &run,
+                &execution,
+                &finish_context,
                 RunStatus::Failed,
                 None,
                 Some(message),
+                Some(RunFailureKind::LocalState),
                 usage.snapshot(),
             )
             .await;
@@ -230,20 +319,21 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
     // registered above), so there is no overflow bookkeeping here. Steering and
     // cancel keep working throughout — it is all one desktop run.
     let mut prompts = vec![prompt];
+    let mut accounted_usage: Option<RunUsage> = None;
     let run_result = 'goal: loop {
         let iteration_started = std::time::Instant::now();
         let usage_before = usage
             .snapshot()
             .map(|u| u.input_tokens + u.output_tokens)
             .unwrap_or(0);
-        let attempt_result = {
+        let attempt_result = loop {
             let context = {
                 let session = tc.session.lock().await;
                 clark_agent::AgentContext::new(session.system_prompt.clone())
                     .with_messages(session.transcript.clone())
                     .with_identity(identity.clone())
             };
-            if prompts.is_empty() {
+            let result = if prompts.is_empty() {
                 clark_agent::run_continue(context, &config, cancel.clone()).await
             } else {
                 clark_agent::run(
@@ -253,7 +343,44 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
                     cancel.clone(),
                 )
                 .await
+            };
+            let Err(error) = result else {
+                break result;
+            };
+            let Some((failure_class, failure_message)) = recovery_candidate(&error) else {
+                break Err(error);
+            };
+            let permission_pending = tc.control.lock().await.has_pending();
+            if cancel.is_cancelled()
+                || permission_pending
+                || !completed_transcript.has_commit_boundary()
+                || !execution.can_recover(failure_class)
+            {
+                break Err(error);
             }
+
+            let usage_now = usage.snapshot();
+            execution.record_usage_delta(accounted_usage, usage_now);
+            accounted_usage = usage_now;
+            if !execution.schedule_recovery(failure_class, failure_message) {
+                break Err(error);
+            }
+            {
+                let mut session = tc.session.lock().await;
+                session.transcript.extend(completed_transcript.drain());
+                session.transcript.push(recovery_marker());
+            }
+            let _ = tx
+                .send(AgentEvent::MessageChunk {
+                    run: run.clone(),
+                    role: agent_core::domain::Role::System,
+                    delta: agent_core::domain::ContentBlock::text(
+                        "A transient provider interruption ended at a safe tool boundary. \
+                         Clark preserved completed work and is resuming once.",
+                    ),
+                })
+                .await;
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         };
 
         match attempt_result {
@@ -371,6 +498,8 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
     // suppressed) is folded into the transcript below so the next turn sees it.
     tc.session.lock().await.steering = None;
     let leftover_steering = steering.drain_all();
+    let final_usage = usage.snapshot();
+    execution.record_usage_delta(accounted_usage, final_usage);
 
     let context_limit = crate::compaction::limit_of(&tc.compaction);
     match run_result {
@@ -387,13 +516,16 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
                 });
             }
             if outcome.is_complete() {
-                finish(
+                finish_root(
                     &tx,
                     &run,
+                    &execution,
+                    &finish_context,
                     RunStatus::Done,
                     Some(outcome.label().to_string()),
                     None,
-                    with_limit(usage.snapshot(), context_limit),
+                    None,
+                    with_limit(final_usage, context_limit),
                 )
                 .await;
             } else {
@@ -402,9 +534,11 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
                 // is specifically "ran out of steps without wrapping up",
                 // which almost always means a stuck approach. Say that, and
                 // point at the saved transcript, instead of a bare count.
-                finish(
+                finish_root(
                     &tx,
                     &run,
+                    &execution,
+                    &finish_context,
                     RunStatus::Failed,
                     Some(outcome.label().to_string()),
                     Some(format!(
@@ -414,7 +548,8 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
                          approach.",
                         tc.max_iterations
                     )),
-                    with_limit(usage.snapshot(), context_limit),
+                    Some(RunFailureKind::LocalState),
+                    with_limit(final_usage, context_limit),
                 )
                 .await;
             }
@@ -464,17 +599,83 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
                     })
                     .await;
             }
-            finish(
+            finish_root(
                 &tx,
                 &run,
+                &execution,
+                &finish_context,
                 mapped.status,
                 None,
                 mapped.run_error,
-                with_limit(usage.snapshot(), context_limit),
+                mapped.failure_kind,
+                with_limit(final_usage, context_limit),
             )
             .await;
         }
     }
+}
+
+fn recovery_candidate(error: &clark_agent::LoopError) -> Option<(FailureClass, String)> {
+    match error {
+        clark_agent::LoopError::Stream(clark_agent::StreamError::Transient(message)) => {
+            Some((FailureClass::TransientTransport, message.clone()))
+        }
+        clark_agent::LoopError::Stream(clark_agent::StreamError::ProviderRateLimited(message)) => {
+            Some((FailureClass::RateLimited, message.clone()))
+        }
+        _ => None,
+    }
+}
+
+fn recovery_marker() -> clark_agent::AgentMessage {
+    clark_agent::AgentMessage::User {
+        content: clark_agent::UserContent::Text(
+            "[runtime recovery — the previous model stream failed after every started tool had a \
+             terminal receipt. Completed transcript and current workspace state were preserved. \
+             Re-read any state you depend on, do not repeat completed writes, and continue from \
+             the current repository.]"
+                .to_string(),
+        ),
+        timestamp: None,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn finish_root(
+    tx: &Sender<AgentEvent>,
+    run: &RunId,
+    execution: &RootExecutionTrace,
+    context: &RootFinishContext,
+    status: RunStatus,
+    stop_reason: Option<String>,
+    error: Option<String>,
+    failure_kind: Option<RunFailureKind>,
+    usage: Option<RunUsage>,
+) {
+    let terminal = match status {
+        RunStatus::Done => agent_orchestration::ExecutionState::Completed,
+        RunStatus::Cancelled => agent_orchestration::ExecutionState::Cancelled,
+        RunStatus::Failed => agent_orchestration::ExecutionState::Failed,
+        _ => agent_orchestration::ExecutionState::Blocked,
+    };
+    let reason = error.clone().or_else(|| stop_reason.clone());
+    let execution_summary = execution
+        .finalize(context.executor.as_ref(), &context.root, terminal, reason)
+        .await;
+    context.session.lock().await.active_execution = None;
+    finish(
+        tx,
+        run,
+        RunOutcome {
+            status,
+            stop_reason,
+            error,
+            failure_kind,
+            usage,
+            execution: Some(execution_summary),
+        },
+    )
+    .await;
 }
 
 /// Stamp the engine's auto-compaction threshold onto the run usage so the UI
@@ -490,87 +691,11 @@ fn with_limit(
     })
 }
 
-#[derive(Clone)]
-struct MappedLoopError {
-    status: RunStatus,
-    run_error: Option<String>,
-    ui_error: Option<(String, String)>,
-}
-
-fn map_loop_error(error: clark_agent::LoopError) -> MappedLoopError {
-    match error {
-        clark_agent::LoopError::Aborted => MappedLoopError {
-            status: RunStatus::Cancelled,
-            run_error: None,
-            ui_error: None,
-        },
-        clark_agent::LoopError::Stream(stream) => map_stream_error(stream),
-        clark_agent::LoopError::ToolFatal { tool, reason } => {
-            let message = format!("fatal tool `{tool}` error: {reason}");
-            MappedLoopError::failed("tool_fatal", message)
-        }
-        clark_agent::LoopError::InvalidContinuation(message) => {
-            MappedLoopError::failed("local_agent_state", message)
-        }
-        clark_agent::LoopError::EmptyOutcomeBudgetExhausted { budget, observed } => {
-            MappedLoopError::failed(
-                "empty_agent_response",
-                format!(
-                    "empty assistant outcome retry budget exhausted: observed {observed}, budget {budget}"
-                ),
-            )
-        }
-    }
-}
-
-fn map_stream_error(error: clark_agent::StreamError) -> MappedLoopError {
-    match error {
-        clark_agent::StreamError::Fatal(message)
-            if message.starts_with("insufficient_credits:") =>
-        {
-            MappedLoopError::failed("insufficient_credits", message)
-        }
-        clark_agent::StreamError::Transient(message)
-        | clark_agent::StreamError::ProviderRateLimited(message)
-        | clark_agent::StreamError::ZeroOutputTransport(message)
-        | clark_agent::StreamError::Fatal(message)
-        | clark_agent::StreamError::ContextOverflow(message) => {
-            MappedLoopError::failed("model_error", message)
-        }
-        clark_agent::StreamError::Empty => MappedLoopError::failed(
-            "model_error",
-            "model returned an empty response".to_string(),
-        ),
-    }
-}
-
-impl MappedLoopError {
-    fn failed(code: &str, message: String) -> Self {
-        Self {
-            status: RunStatus::Failed,
-            run_error: Some(message.clone()),
-            ui_error: Some((code.to_string(), message)),
-        }
-    }
-}
-
-async fn finish(
-    tx: &Sender<AgentEvent>,
-    run: &RunId,
-    status: RunStatus,
-    stop_reason: Option<String>,
-    error: Option<String>,
-    usage: Option<agent_core::domain::RunUsage>,
-) {
+async fn finish(tx: &Sender<AgentEvent>, run: &RunId, outcome: RunOutcome) {
     let _ = tx
         .send(AgentEvent::RunFinished {
             run: run.clone(),
-            outcome: RunOutcome {
-                status,
-                stop_reason,
-                error,
-                usage,
-            },
+            outcome,
         })
         .await;
     tx.close();

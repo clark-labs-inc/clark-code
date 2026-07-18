@@ -150,6 +150,46 @@ export function buildResumeTranscript(
   return { items: kept, truncated: truncated || kept.length < items.length };
 }
 
+/** Return the settled conversation prefix before one timeline item. Used by
+ * edit-and-resend: everything from the selected user turn onward belongs to
+ * the abandoned branch and must be removed from both display and replay. */
+export function snapshotBeforeTimelineItem(snapshot: Snapshot, index: number): Snapshot {
+  const timeline = snapshot.timeline.slice(0, Math.max(0, index));
+  const toolIds = new Set(
+    timeline.flatMap((item) => (item.item === "tool_call" ? [item.id] : [])),
+  );
+  const artifactIds = new Set(
+    timeline.flatMap((item) => (item.item === "artifact" ? [item.id] : [])),
+  );
+  const runIds = new Set(
+    timeline.flatMap((item) => {
+      if (item.item === "message") return [item.run];
+      if (item.item === "plan" && item.run) return [item.run];
+      return [];
+    }),
+  );
+  const runs = Object.fromEntries(
+    Object.entries(snapshot.runs).filter(([id]) => runIds.has(id)),
+  );
+  const tool_calls = Object.fromEntries(
+    Object.entries(snapshot.tool_calls).filter(([id]) => toolIds.has(id)),
+  );
+  const artifacts = snapshot.artifacts.filter((artifact) => artifactIds.has(artifact.id));
+  let lastPlan: Snapshot["plan"];
+  for (const item of timeline) {
+    if (item.item === "plan" && item.plan) lastPlan = item.plan;
+  }
+
+  return {
+    ...(snapshot.session ? { session: snapshot.session } : {}),
+    runs,
+    timeline,
+    tool_calls,
+    ...(lastPlan ? { plan: lastPlan } : {}),
+    artifacts,
+  };
+}
+
 /** First user message → a compact title; falls back to a generic label. */
 export function deriveTitle(snapshot: Snapshot): string {
   for (const item of snapshot.timeline) {

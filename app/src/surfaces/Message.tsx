@@ -245,10 +245,12 @@ function ThinkingBlock({ text }: { text: string }) {
 function MessageImpl({
   role,
   blocks,
+  timelineIndex,
   streaming = false,
 }: {
   role: Role;
   blocks: ContentBlock[];
+  timelineIndex: number;
   /** True for the assistant message currently being streamed — enables the
    *  cheaper prefix-memoized markdown path. */
   streaming?: boolean;
@@ -263,13 +265,16 @@ function MessageImpl({
   const inner = (() => {
     if (role === "user") {
       // Codex form: a quiet right-aligned pill, not a loud accent bubble.
-      // Hover reveals copy + "edit & resend" (stages the text in the composer).
+      // Hover reveals copy + edit. The timeline identity lets submit replace
+      // this turn and the abandoned suffix instead of appending a duplicate.
       return (
         <div className="group/user flex items-center justify-end gap-1.5">
           <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition group-hover/user:opacity-100">
             <button
               type="button"
-              onClick={() => useSessionStore.getState().setComposerPrefill(body)}
+              onClick={() =>
+                useSessionStore.getState().setComposerPrefill(body, timelineIndex)
+              }
               aria-label="Edit and resend"
               title="Edit & resend"
               className="grid size-7 place-items-center rounded-md text-ink-faint transition hover:bg-bg-hover hover:text-ink-secondary"
@@ -367,5 +372,9 @@ function sameBlocks(a: ContentBlock[], b: ContentBlock[]): boolean {
 
 export const Message = memo(
   MessageImpl,
-  (a, b) => a.role === b.role && a.streaming === b.streaming && sameBlocks(a.blocks, b.blocks),
+  (a, b) =>
+    a.role === b.role &&
+    a.timelineIndex === b.timelineIndex &&
+    a.streaming === b.streaming &&
+    sameBlocks(a.blocks, b.blocks),
 );

@@ -3,6 +3,7 @@
 use agent_core::domain::{AgentEvent, RunStatus};
 use agent_core::ids::RunId;
 use agent_core::provider::{PromptInput, Provider, ProviderConfig, Session, SessionOptions};
+use agent_orchestration::{ExecutionEvent, ExecutionLedger, ExecutionState};
 use futures::StreamExt;
 use serde_json::{json, Value};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -34,15 +35,6 @@ fn http_response(body: &str) -> Vec<u8> {
         "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
         body.len(),
         body
-    )
-    .into_bytes()
-}
-
-fn http_error_response() -> Vec<u8> {
-    let body = "transient upstream failure";
-    format!(
-        "HTTP/1.1 502 Bad Gateway\r\nContent-Type: text/plain\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{body}",
-        body.len()
     )
     .into_bytes()
 }
@@ -125,6 +117,19 @@ async fn run_status(stream: agent_core::provider::EventStream) -> RunStatus {
     panic!("run ended without RunFinished");
 }
 
+async fn run_events(stream: agent_core::provider::EventStream) -> Vec<AgentEvent> {
+    futures::pin_mut!(stream);
+    let mut events = Vec::new();
+    while let Some(event) = stream.next().await {
+        let finished = matches!(event, AgentEvent::RunFinished { .. });
+        events.push(event);
+        if finished {
+            break;
+        }
+    }
+    events
+}
+
 fn assert_continuation_context(raw: &[u8]) {
     let request = request_json(raw);
     let messages = request["messages"]
@@ -166,46 +171,119 @@ fn assert_continuation_context(raw: &[u8]) {
     );
 }
 
+fn assert_recovery_context(raw: &[u8]) {
+    let request = request_json(raw);
+    let messages = request["messages"]
+        .as_array()
+        .expect("recovery request has messages");
+    assert!(
+        messages.iter().any(|message| {
+            message["role"] == "assistant"
+                && message["tool_calls"].as_array().is_some_and(|calls| {
+                    calls
+                        .iter()
+                        .any(|call| call["function"]["name"] == "read_file")
+                })
+        }) && messages.iter().any(|message| {
+            message["role"] == "tool"
+                && message["content"]
+                    .as_str()
+                    .is_some_and(|content| content.contains("hi"))
+        }),
+        "recovery lost the completed assistant/tool pair: {messages:?}"
+    );
+    assert!(
+        messages.last().is_some_and(|message| {
+            message["role"] == "user"
+                && message["content"]
+                    .as_str()
+                    .is_some_and(|content| content.contains("runtime recovery"))
+        }),
+        "recovery marker must be the final message: {messages:?}"
+    );
+}
+
 #[tokio::test]
-async fn failed_turn_preserves_completed_context_for_follow_up() {
+async fn transient_failure_recovers_once_from_a_completed_tool_boundary() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("hello.txt"), "hi").unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let server = tokio::spawn(async move {
-        let responses = [
-            http_response(&tool_call_body()),
-            http_error_response(),
-            http_response(&final_body()),
-        ];
         let mut requests = Vec::new();
-        for response in responses {
-            let (mut socket, _) = listener.accept().await.unwrap();
-            requests.push(read_request(&mut socket).await);
-            socket.write_all(&response).await.unwrap();
-        }
+
+        let (mut first, _) = listener.accept().await.unwrap();
+        requests.push(read_request(&mut first).await);
+        first
+            .write_all(&http_response(&tool_call_body()))
+            .await
+            .unwrap();
+
+        // End the connection before HTTP headers. Reqwest classifies this as
+        // transport uncertainty, which is the lifecycle's recoverable class.
+        let (mut interrupted, _) = listener.accept().await.unwrap();
+        requests.push(read_request(&mut interrupted).await);
+        drop(interrupted);
+
+        let (mut recovered, _) = listener.accept().await.unwrap();
+        requests.push(read_request(&mut recovered).await);
+        recovered
+            .write_all(&http_response(&final_body()))
+            .await
+            .unwrap();
         requests
     });
     let (mut provider, session) = new_provider(addr, dir.path()).await;
 
-    let first = provider
+    let stream = provider
         .prompt(
             &session.id,
             PromptInput::text("Read hello.txt. CONTEXT_SENTINEL_2048"),
         )
         .await
         .unwrap();
-    assert_eq!(run_status(first).await, RunStatus::Failed);
+    let events = run_events(stream).await;
 
-    let follow_up = provider
-        .prompt(&session.id, PromptInput::text("continue"))
-        .await
-        .unwrap();
-    assert_eq!(run_status(follow_up).await, RunStatus::Done);
+    let outcome = events
+        .iter()
+        .find_map(|event| match event {
+            AgentEvent::RunFinished { outcome, .. } => Some(outcome),
+            _ => None,
+        })
+        .expect("run has a terminal outcome");
+    assert_eq!(outcome.status, RunStatus::Done, "events: {events:#?}");
+    let execution = outcome.execution.as_ref().expect("root execution summary");
+    assert_eq!(execution.attempts, 2);
+    assert_eq!(execution.recoveries, 1);
+    assert_eq!(
+        execution
+            .completed_tools
+            .iter()
+            .filter(|name| name.as_str() == "read_file")
+            .count(),
+        1,
+        "a completed tool must not be counted twice"
+    );
+
+    let trace = events
+        .iter()
+        .filter_map(|event| match event {
+            AgentEvent::Trace {
+                source, payload, ..
+            } if source == "execution_lifecycle" => {
+                Some(serde_json::from_value::<ExecutionEvent>(payload.clone()).unwrap())
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let replay = ExecutionLedger::replay(&trace).expect("lifecycle trace is replayable");
+    assert_eq!(replay.state, ExecutionState::Completed);
+    assert_eq!(replay.recoveries, 1);
+    assert_eq!(replay.evidence.tools.len(), 1);
 
     let requests = server.await.unwrap();
     assert_eq!(requests.len(), 3);
-    assert_continuation_context(&requests[2]);
+    assert_recovery_context(&requests[2]);
 }
 
 #[tokio::test]

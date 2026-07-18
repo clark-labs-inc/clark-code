@@ -18,6 +18,7 @@ pub(crate) struct PermissionGate {
     control: Arc<Mutex<RunControl>>,
     session_id: SessionId,
     events: Sender<AgentEvent>,
+    execution: Option<crate::root_execution::RootExecutionTrace>,
 }
 
 pub(crate) enum PermissionOutcome {
@@ -38,7 +39,16 @@ impl PermissionGate {
             control,
             session_id,
             events,
+            execution: None,
         }
+    }
+
+    pub(crate) fn with_execution(
+        mut self,
+        execution: crate::root_execution::RootExecutionTrace,
+    ) -> Self {
+        self.execution = Some(execution);
+        self
     }
 
     pub async fn check(
@@ -209,6 +219,12 @@ impl PermissionGate {
         info: &GateInfo,
         signal: &CancellationToken,
     ) -> Option<Resolution> {
+        if let Some(execution) = &self.execution {
+            execution.transition(
+                agent_orchestration::ExecutionState::AwaitingInput,
+                Some(format!("permission requested for {tool_name}")),
+            );
+        }
         let request_id = PermissionRequestId::new(format!("perm-{}", tool_id.as_str()));
         let (responder, rx) = tokio::sync::oneshot::channel();
         {
@@ -244,6 +260,12 @@ impl PermissionGate {
             _ = signal.cancelled() => None,
             r = rx => r.ok(),
         };
+        if let Some(execution) = &self.execution {
+            execution.transition(
+                agent_orchestration::ExecutionState::Running,
+                Some("permission wait resolved".to_string()),
+            );
+        }
         if resolution.is_none() {
             self.control.lock().await.clear();
         }

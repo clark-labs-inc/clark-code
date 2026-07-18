@@ -1,7 +1,37 @@
-// Turn a raw model/run error — which can be a transport string, an HTTP status
-// dump, or a provider's giant JSON blob — into one short, friendly sentence for
-// the UI. The original text is kept by the caller (e.g. as a hover `title`) for
-// debugging; this is only about what the user reads at a glance.
+import type { RunOutcome } from "../core-bridge/types";
+
+// Run failures use the typed provider contract below. `humanizeError` remains
+// only for non-run errors and legacy records that predate `failure_kind`.
+
+/** Map a typed terminal run failure to product language. */
+export function humanizeRunFailure(
+  outcome?: Pick<RunOutcome, "failure_kind" | "error">,
+): string {
+  switch (outcome?.failure_kind) {
+    case "session_expired":
+      return "Your Clark sign-in expired. Sign in again.";
+    case "platform_key_rejected":
+      return "Clark Code’s access key was rejected. Reconnect Clark Code and try again.";
+    case "rate_limited":
+      return "The model is busy right now (rate-limited). Give it a moment and try again.";
+    case "transport_error":
+      return "Couldn’t reach the model. Check your connection and try again.";
+    case "provider_error":
+      return "The model provider hit a temporary error. Please try again in a moment.";
+    case "context_overflow":
+      return "This conversation is too long for the model’s context window. Start a new session.";
+    case "insufficient_credits":
+      return "You’re out of Clark credits.";
+    case "tool_fatal":
+      return "A coding action failed unexpectedly. Review the last step and try again.";
+    case "local_state":
+      return "Clark Code couldn’t continue this run. Start another run and try again.";
+    case "empty_response":
+      return "The model returned no response. Please try again.";
+    default:
+      return "The run ended unexpectedly. Please try again.";
+  }
+}
 
 /** Map a raw error string to a concise, human-readable message. */
 export function humanizeError(raw?: string | null): string {
@@ -23,17 +53,6 @@ export function humanizeError(raw?: string | null): string {
   // Out of credits (normally handled by the upgrade prompt, but just in case).
   if (lower.includes("insufficient_credits") || lower.includes("out of credit")) {
     return "You’re out of Clark credits.";
-  }
-
-  // Auth — 401, or a 403 that isn’t about credits.
-  if (
-    lower.includes("401") ||
-    lower.includes("unauthorized") ||
-    (lower.includes("403") && !lower.includes("credit")) ||
-    lower.includes("invalid api key") ||
-    lower.includes("authentication")
-  ) {
-    return "Sign-in expired or the key was rejected. Try signing out and back in.";
   }
 
   // Context window exceeded.

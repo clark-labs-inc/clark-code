@@ -345,6 +345,13 @@ impl ToolRegistry {
         self.tools.push(Arc::new(browser::BrowserTool::new()));
     }
 
+    /// Register the opt-in read-only orchestration tools as one shared control
+    /// plane. Disabled configurations never advertise either tool.
+    pub fn enable_orchestration(&mut self, config: crate::orchestration::OrchestrationToolsConfig) {
+        self.tools
+            .extend(crate::orchestration::orchestration_tools(config));
+    }
+
     /// Register organization recall independently of the optional research
     /// agent. A Platform key is sufficient; authorization is rechecked by the
     /// service for every read.

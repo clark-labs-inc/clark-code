@@ -2,7 +2,7 @@
 // connects each server, lists its tools, and returns status).
 
 import { invoke } from "@tauri-apps/api/core";
-import type { McpServerConfig } from "./mcpServers";
+import type { McpServer, McpServerConfig } from "./mcpServers";
 
 function isTauri(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -23,21 +23,59 @@ export async function probeMcp(servers: McpServerConfig[]): Promise<McpStatus[]>
   return invoke<McpStatus[]>("clark_mcp_probe", { servers });
 }
 
-export interface ClaudeSkill {
+export type MigrationSource = "claude" | "codex";
+
+export interface MigratedSkill {
   name: string;
   description: string;
   path: string;
   scope: "project" | "personal";
+  source: MigrationSource;
 }
 
-/** MCP servers + skills discovered from an existing Claude Code setup in `cwd`
- *  (`.mcp.json`, `~/.claude.json`, `.claude/skills`). When `remote` is given,
- *  reads the remote host's `.claude` over the exec-server tunnel; otherwise the
- *  local disk. Empty in browser preview. */
-export async function discoverClaude(
+export interface MigratedInstruction {
+  path: string;
+  scope: "project" | "personal";
+  source: MigrationSource;
+}
+
+export interface AgentMigrationDiscovery {
+  source: MigrationSource;
+  mcp: McpServerConfig[];
+  skills: MigratedSkill[];
+  instructions: MigratedInstruction[];
+}
+
+/** Read-only discovery from Claude Code and Codex on the project executor. */
+export async function discoverAgentSetups(
   cwd: string,
   remote?: { ws_url: string; token: string },
-): Promise<{ mcp: McpServerConfig[]; skills: ClaudeSkill[] }> {
-  if (!isTauri() || !cwd.trim()) return { mcp: [], skills: [] };
-  return invoke("claude_discover", { cwd: cwd.trim(), remote: remote ?? null });
+): Promise<AgentMigrationDiscovery[]> {
+  if (!isTauri() || !cwd.trim()) return [];
+  return invoke("external_agent_discover", { cwd: cwd.trim(), remote: remote ?? null });
+}
+
+/** Merge only missing names. Existing Clark configuration always wins. */
+export function mergeDiscoveredMcp(
+  existing: McpServer[],
+  discovered: McpServerConfig[],
+  createId: () => string = () => crypto.randomUUID(),
+): { servers: McpServer[]; added: number } {
+  const names = new Set(existing.map((server) => server.name.trim()).filter(Boolean));
+  const added: McpServer[] = [];
+  for (const server of discovered) {
+    const name = server.name.trim();
+    const command = server.command.trim();
+    if (!name || !command || names.has(name)) continue;
+    names.add(name);
+    added.push({
+      id: createId(),
+      name,
+      command,
+      args: server.args ?? [],
+      env: server.env ?? {},
+      enabled: true,
+    });
+  }
+  return { servers: [...existing, ...added], added: added.length };
 }

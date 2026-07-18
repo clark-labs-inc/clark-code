@@ -33,6 +33,7 @@ import {
 import {
   drainLocalHistory,
   buildResumeTranscript,
+  snapshotBeforeTimelineItem,
   settleRuns,
   deriveTitle,
   hasContent,
@@ -48,10 +49,13 @@ import {
   saveMemoriesEnabled,
   loadBrowserEnabled,
   saveBrowserEnabled,
+  loadOrchestrationEnabled,
+  saveOrchestrationEnabled,
   localSettingsReady,
   loadChatModels,
   saveChatModels,
   effectiveModelSettings,
+  normalizeReasoningEffort,
   type LocalAgentSettings,
   type ChatModelOverride,
 } from "../lib/localAgent";
@@ -105,6 +109,12 @@ export interface QueuedMessage {
   id: string;
   text: string;
   uploads: Upload[];
+}
+
+export interface ComposerPrefill {
+  text: string;
+  /** Present only for edit-and-resend; identifies the turn to replace. */
+  timelineIndex?: number;
 }
 
 function isBusy(snap: Snapshot): boolean {
@@ -185,8 +195,8 @@ interface SessionState {
     title: string;
     remoteHost: string | null;
   } | null;
-  /** Text staged into the composer by "Edit & resend" on a sent message. */
-  composerPrefill: string | null;
+  /** Text staged into the composer, optionally tied to a sent turn to replace. */
+  composerPrefill: ComposerPrefill | null;
   /** Config for the "Local coding" provider (persisted to localStorage). */
   localSettings: LocalAgentSettings;
   /** Per-conversation model + reasoning-effort overrides, keyed by conversation
@@ -213,6 +223,9 @@ interface SessionState {
   /** Whether the experimental `browser` tool is enabled (off by default —
    *  downloads clark-browser, ~150-300MB, on first use). */
   browserEnabled: boolean;
+  /** Whether bounded, read-only parallel repository investigation is enabled.
+   *  The root agent remains the sole writer. */
+  orchestrationEnabled: boolean;
   /** Last memory status message (e.g. a load error). */
   memoryStatus: string | null;
   /** Whether the memory viewer popover is open. */
@@ -233,6 +246,9 @@ interface SessionState {
   outputStyle: string;
   /** Whether the in-chat terminal drawer is open. */
   terminalOpen: boolean;
+  /** One-shot request to open a fresh terminal tab rooted at `cwd`. `nonce`
+   *  increments per request so the panel only reacts to the latest one. */
+  terminalLaunch: { cwd: string; nonce: number } | null;
   /** Whether the MCP servers settings modal is open. */
   mcpOpen: boolean;
   /** Whether the remote-hosts (SSH) settings modal is open. */
@@ -266,6 +282,7 @@ interface SessionState {
   pickProjectFolder: () => Promise<void>;
   setMemoriesEnabled: (on: boolean) => void;
   setBrowserEnabled: (on: boolean) => void;
+  setOrchestrationEnabled: (on: boolean) => void;
   loadMemory: () => Promise<void>;
   toggleMemoryViewer: () => void;
   setMemoryViewerOpen: (open: boolean) => void;
@@ -314,8 +331,9 @@ interface SessionState {
    *  LLM (the transcript is kept; the next turn continues with full context on
    *  the new model). With no active chat, edits the global default instead. */
   updateModelSettings: (patch: { model?: string; reasoningEffort?: string }) => Promise<void>;
-  /** Stage text in the composer ("Edit & resend" on a sent message). */
-  setComposerPrefill: (text: string | null) => void;
+  /** Stage text in the composer. A timeline index makes submit replace that
+   * turn and its abandoned suffix instead of appending a duplicate. */
+  setComposerPrefill: (text: string | null, timelineIndex?: number) => void;
   /** Create a public read-only link for the viewed conversation + copy it. */
   shareConversation: () => Promise<void>;
   /** Revoke the viewed conversation's public link. */
@@ -323,6 +341,8 @@ interface SessionState {
   addFiles: (files: File[]) => Promise<void>;
   removeAttachment: (id: string) => void;
   send: (text: string) => Promise<void>;
+  /** Replace one prior Clark Code user turn and rerun from the retained prefix. */
+  resendFrom: (timelineIndex: number, text: string) => Promise<void>;
   removeQueued: (id: string) => void;
   setPermissionMode: (mode: PermissionMode) => void;
   /** Shift+Tab: advance to the next permission mode in the cycle. */
@@ -330,6 +350,10 @@ interface SessionState {
   setOutputStyle: (style: string) => void;
   toggleTerminal: () => void;
   setTerminalOpen: (open: boolean) => void;
+  /** Make a folder the current project (seeding the next session) and open a
+   *  fresh terminal tab rooted in it. With no `path`, asks the OS for a
+   *  folder first; cancelling the picker is a no-op. */
+  openProjectTerminal: (path?: string) => Promise<void>;
   setMcpOpen: (open: boolean) => void;
   setSshOpen: (open: boolean) => void;
   /** Open/close the unified Settings modal, optionally jumping to a section. */
@@ -550,6 +574,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   activeProjectRoot: null,
   memoriesEnabled: loadMemoriesEnabled(),
   browserEnabled: loadBrowserEnabled(),
+  orchestrationEnabled: loadOrchestrationEnabled(),
   memoryStatus: null,
   memoryViewerOpen: false,
   loadingMemory: false,
@@ -560,6 +585,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   permissionMode: loadPermissionMode(),
   outputStyle: loadOutputStyle(),
   terminalOpen: false,
+  terminalLaunch: null,
   mcpOpen: false,
   sshOpen: false,
   settingsOpen: false,
@@ -944,6 +970,11 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   setBrowserEnabled: (on) => {
     saveBrowserEnabled(on);
     set({ browserEnabled: on });
+  },
+
+  setOrchestrationEnabled: (on) => {
+    saveOrchestrationEnabled(on);
+    set({ orchestrationEnabled: on });
   },
 
   loadMemory: async () => {
@@ -1568,7 +1599,10 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         reasoningEffort: localSettings.reasoningEffort,
       };
       effectiveModel = model !== undefined ? model : ov.model;
-      effectiveEffort = reasoningEffort !== undefined ? reasoningEffort : ov.reasoningEffort;
+      effectiveEffort = normalizeReasoningEffort(
+        effectiveModel,
+        reasoningEffort !== undefined ? reasoningEffort : ov.reasoningEffort,
+      );
       nextChatModels = {
         ...chatModels,
         [id]: { model: effectiveModel, reasoningEffort: effectiveEffort },
@@ -1576,10 +1610,14 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       saveChatModels(nextChatModels);
       set({ chatModels: nextChatModels });
     } else {
+      const nextModel = model !== undefined ? model : localSettings.model;
       nextLocal = {
         ...localSettings,
-        ...(model !== undefined ? { model } : {}),
-        ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
+        model: nextModel,
+        reasoningEffort: normalizeReasoningEffort(
+          nextModel,
+          reasoningEffort !== undefined ? reasoningEffort : localSettings.reasoningEffort,
+        ),
       };
       effectiveModel = nextLocal.model;
       effectiveEffort = nextLocal.reasoningEffort;
@@ -1605,7 +1643,8 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     }
   },
 
-  setComposerPrefill: (text) => set({ composerPrefill: text }),
+  setComposerPrefill: (text, timelineIndex) =>
+    set({ composerPrefill: text === null ? null : { text, timelineIndex } }),
 
   shareConversation: async () => {
     const { session, auth } = get();
@@ -1656,6 +1695,144 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     const a = get().attachments.find((x) => x.id === id);
     if (a?.previewUrl) URL.revokeObjectURL(a.previewUrl);
     set((s) => ({ attachments: s.attachments.filter((x) => x.id !== id) }));
+  },
+
+  resendFrom: async (timelineIndex, text) => {
+    let state = get();
+    const { bridge, session, snapshot } = state;
+    if (!bridge || !session) return;
+    const rejectEdit = (error: string) =>
+      set({ error, composerPrefill: { text, timelineIndex } });
+    if (session.provider !== "local") {
+      rejectEdit("Editing earlier turns is currently available in Clark Code only.");
+      return;
+    }
+    if (!text.trim() && state.attachments.length === 0) return;
+    if (isBusy(snapshot)) {
+      rejectEdit("Stop the current run before editing an earlier message.");
+      return;
+    }
+    const target = snapshot.timeline[timelineIndex];
+    if (target?.item !== "message" || target.role !== "user") {
+      rejectEdit("That message changed before it could be edited. Try again.");
+      return;
+    }
+    const previousEntry = liveSessions.get(session.id);
+    if (!previousEntry) {
+      rejectEdit("This conversation is no longer live. Reopen it and try again.");
+      return;
+    }
+
+    await get().ensureCodeKey();
+    state = get();
+    const projectRoot = previousEntry.projectRoot || state.activeProjectRoot;
+    if (!projectRoot) {
+      rejectEdit("This conversation has no project folder to resume from.");
+      return;
+    }
+
+    const prefix = snapshotBeforeTimelineItem(snapshot, timelineIndex);
+    const historyPrefix = prefix.timeline.length > 0 ? prefix : null;
+    const resume = buildResumeTranscript(prefix);
+    const effective = effectiveModelSettings(state.localSettings, state.chatModels, session.id);
+    const settings = { ...state.localSettings, ...effective, cwd: projectRoot };
+    const config = previousEntry.remote
+      ? localConnectConfig(settings, remoteTarget(previousEntry.remote))
+      : localConnectConfig(settings);
+    const options: SessionOptions = {
+      cwd: projectRoot,
+      mode: state.permissionMode,
+      ...(resume ? { resume } : {}),
+    };
+    const uploads = state.attachments.map(toUpload);
+    const previousMeta = state.conversations.find((conversation) => conversation.id === session.id);
+    const meta: ConversationMeta = previousMeta ?? {
+      id: session.id,
+      title: deriveTitle(snapshot),
+      provider: "local",
+      project: projectRoot,
+      remoteHost: previousEntry.remoteHost ?? undefined,
+      mode: session.mode,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+
+    let detached = false;
+    let replaced = false;
+    let ready = false;
+    let opened: Session | null = null;
+    set({ connecting: true, error: null });
+    try {
+      await bridge.connect("local", config);
+      // Ignore the clean snapshot emitted while the replacement session is
+      // registered. Otherwise it can be routed into the old live entry and
+      // briefly restore the abandoned branch before this function swaps it.
+      liveSessions.delete(session.id);
+      detached = true;
+      opened = await bridge.newSession("local", options, session.id);
+      replaced = true;
+      await bindCloudTrajectory(bridge, opened, meta, state.auth, {
+        resumed: true,
+        editedFromTimelineIndex: timelineIndex,
+        projectMode: previousEntry.remote ? "remote" : "local",
+        model: effective.model,
+        reasoningEffort: effective.reasoningEffort,
+        permissionMode: state.permissionMode,
+        outputStyle: state.outputStyle,
+      });
+
+      const nextEntry = newLiveEntry(opened, {
+        historyPrefix,
+        remote: previousEntry.remote,
+        remoteHost: previousEntry.remoteHost,
+        projectRoot,
+      });
+      liveSessions.set(session.id, nextEntry);
+      snapshotCache.set(session.id, prefix);
+      resetFanOut();
+      for (const attachment of state.attachments) {
+        if (attachment.previewUrl) URL.revokeObjectURL(attachment.previewUrl);
+      }
+      set({
+        session: opened,
+        snapshot: prefix,
+        historyPrefix,
+        attachments: [],
+        queued: [],
+        connecting: false,
+        runningIds: get().runningIds.filter((id) => id !== session.id),
+        dismissedFailedRuns: [],
+      });
+
+      const creds = cloudCreds(state.auth);
+      if (creds) scheduleCloudPut(creds, meta, prefix, "idle");
+      ready = true;
+      await bridge.prompt(session.id, [{ type: "text", text }], uploads);
+    } catch (error) {
+      if (ready) {
+        set({ error: String(error), connecting: false });
+        return;
+      }
+      if (detached && !replaced) liveSessions.set(session.id, previousEntry);
+      if (replaced) {
+        liveSessions.delete(session.id);
+        if (opened) void bridge.closeSession?.(opened.id);
+        if (previousEntry.remote) void sshDisconnect(previousEntry.remote.id);
+        set({
+          session: null,
+          snapshot: emptySnapshot(),
+          historyPrefix: null,
+          activeRemote: null,
+          activeRemoteHost: null,
+          activeProjectRoot: null,
+        });
+      }
+      set({
+        error: String(error),
+        connecting: false,
+        composerPrefill: { text, timelineIndex },
+      });
+    }
   },
 
   send: async (text) => {
@@ -1747,6 +1924,24 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     terminalOpen: s.activeRemote ? false : !s.terminalOpen,
   })),
   setTerminalOpen: (open) => set({ terminalOpen: open }),
+  openProjectTerminal: async (path) => {
+    let target = path?.trim();
+    if (!target) {
+      try {
+        target = (await pickFolder(get().localSettings.cwd || undefined))?.trim() || undefined;
+      } catch (e) {
+        set({ error: String(e) });
+        return;
+      }
+    }
+    if (!target) return;
+    const cwd = target;
+    get().setProjectFolder(cwd);
+    set((s) => ({
+      terminalOpen: true,
+      terminalLaunch: { cwd, nonce: (s.terminalLaunch?.nonce ?? 0) + 1 },
+    }));
+  },
   setMcpOpen: (open) => set({ mcpOpen: open }),
   setSshOpen: (open) => set({ sshOpen: open }),
   setSettingsOpen: (open, section) =>

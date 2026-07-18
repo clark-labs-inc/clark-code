@@ -8,10 +8,12 @@
 //! [`AcpProvider`] implements the stdio transport and the `Provider` trait
 //! end-to-end.
 
+mod orchestration;
 mod provider;
 mod translate;
 pub mod transport;
 
+pub use orchestration::read_only_harness;
 pub use provider::AcpProvider;
 pub use transport::{spawn_child, BoxRead, BoxWrite, Incoming, Peer};
 

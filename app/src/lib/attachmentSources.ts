@@ -37,6 +37,36 @@ export function useFileDrop(onFiles: (files: File[]) => void) {
   return { dragging, handlers: { onDragEnter, onDragOver, onDragLeave, onDrop } };
 }
 
+/** Window-level safety net for OS file drops. Tauri's native drag-drop is
+ *  disabled (so the composer's HTML5 drop target works), and with it gone an
+ *  unhandled file drop would navigate the webview to the file — wiping the UI.
+ *  Swallow every file drop no other target handled (React handlers run before
+ *  this window listener, so `defaultPrevented` marks the composer's drops) and
+ *  optionally forward it, giving drop-anywhere-in-the-window attach. */
+export function useWindowFileDropGuard(onFiles?: (files: File[]) => void) {
+  const cb = useRef(onFiles);
+  cb.current = onFiles;
+  useEffect(() => {
+    const hasFiles = (e: globalThis.DragEvent) =>
+      Array.from(e.dataTransfer?.types ?? []).includes("Files");
+    const onDragOver = (e: globalThis.DragEvent) => {
+      if (hasFiles(e)) e.preventDefault();
+    };
+    const onDrop = (e: globalThis.DragEvent) => {
+      if (!hasFiles(e) || e.defaultPrevented) return;
+      e.preventDefault();
+      const files = Array.from(e.dataTransfer?.files ?? []);
+      if (files.length) cb.current?.(files);
+    };
+    window.addEventListener("dragover", onDragOver);
+    window.addEventListener("drop", onDrop);
+    return () => {
+      window.removeEventListener("dragover", onDragOver);
+      window.removeEventListener("drop", onDrop);
+    };
+  }, []);
+}
+
 /** Paste source: picks up files/images pasted anywhere while enabled. */
 export function usePaste(onFiles: (files: File[]) => void, enabled = true) {
   useEffect(() => {

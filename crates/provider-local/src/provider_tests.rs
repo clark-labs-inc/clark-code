@@ -62,6 +62,61 @@ async fn new_session_requires_cwd() {
 }
 
 #[tokio::test]
+async fn isolated_orchestration_session_has_no_ambient_writable_surfaces() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".clark")).unwrap();
+    std::fs::write(
+        dir.path().join(".clark/settings.json"),
+        r#"{
+          "hooks":{"PreToolUse":[{"matcher":"*","command":"touch /tmp/should-not-run"}]},
+          "permissions":{"allow":["bash"]},
+          "check_command":"touch /tmp/should-not-run"
+        }"#,
+    )
+    .unwrap();
+    let mut provider = LocalAgentProvider::new();
+    provider
+        .connect(ProviderConfig {
+            extra: serde_json::json!({
+                "isolated_writer": true,
+                "memories": false,
+                "research": false,
+                "browser_enabled": false,
+                "mcp_servers": [],
+                "permissions": {
+                    "write_file": "allow",
+                    "edit_file": "allow",
+                    "apply_patch": "allow",
+                    "bash": "deny"
+                }
+            }),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let session = provider
+        .new_session(SessionOptions {
+            cwd: Some(dir.path().to_string_lossy().into_owned()),
+            mode: Some("auto".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let environment = session.environment.unwrap();
+    assert!(environment.docs_root.is_none());
+    assert_eq!(environment.workspace_roots.len(), 1);
+    let state = provider.session.lock().await;
+    assert!(state.hooks.is_empty());
+    assert!(state.allow_commands.is_empty());
+    assert!(state.check_command.is_none());
+    drop(state);
+    let registry = provider.registry.as_ref().unwrap();
+    assert!(registry.get("memory").is_none());
+    assert!(registry.get("organization_knowledge").is_none());
+    assert!(registry.get("browser").is_none());
+}
+
+#[tokio::test]
 async fn set_mode_flips_plan_mode_flag() {
     let mut p = LocalAgentProvider::new();
     let session_id = SessionId::new("s1");
@@ -118,6 +173,43 @@ async fn new_session_seeds_system_prompt_without_history() {
     assert!(!s.system_prompt.is_empty());
     assert!(s.transcript.is_empty());
     assert!(!s.system_prompt.contains("# Resumed conversation"));
+}
+
+#[tokio::test]
+async fn orchestration_tools_and_rules_exist_only_when_explicitly_enabled() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut disabled = LocalAgentProvider::new();
+    disabled.connect(ProviderConfig::default()).await.unwrap();
+    assert!(disabled
+        .registry
+        .as_ref()
+        .unwrap()
+        .get("delegate_read_only")
+        .is_none());
+
+    let mut enabled = LocalAgentProvider::new();
+    enabled
+        .connect(ProviderConfig {
+            extra: serde_json::json!({"orchestration": {"enabled": true}}),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let registry = enabled.registry.as_ref().unwrap();
+    assert!(registry.get("delegate_read_only").is_some());
+    assert!(registry.get("resolve_delegation").is_some());
+    enabled
+        .new_session(SessionOptions {
+            cwd: Some(dir.path().to_string_lossy().into_owned()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let state = enabled.session.lock().await;
+    assert!(state
+        .system_prompt
+        .contains("root agent is the only writer"));
+    assert!(state.system_prompt.contains("resolve_delegation"));
 }
 
 #[tokio::test]

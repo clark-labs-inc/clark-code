@@ -3,11 +3,13 @@ import { useSessionStore } from "../store/sessionStore";
 import { cloudCreds, type CloudCreds } from "../lib/cloudHistory";
 import {
   ackCodeRemoteCommand,
+  downloadCodeRemoteAttachment,
   pollCodeRemoteCommands,
   registerCodeRemoteHost,
   type CodeRemoteCommand,
   type CodeRemoteProjectRegistration,
 } from "../lib/mobileRemote";
+import type { PendingAttachment } from "../lib/attachments";
 import { loadSshHosts, hostLabel, hostReady } from "../lib/sshHosts";
 import { pickAllowOption } from "../lib/permissions";
 import { notify } from "../lib/notify";
@@ -85,6 +87,55 @@ function commandText(command: CodeRemoteCommand): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function commandAttachmentIds(command: CodeRemoteCommand): string[] {
+  const value = command.request.attachments;
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const attachmentId = (item as Record<string, unknown>).attachment_id;
+    return typeof attachmentId === "string" && attachmentId.trim()
+      ? [attachmentId.trim()]
+      : [];
+  });
+}
+
+async function commandAttachments(
+  creds: CloudCreds,
+  command: CodeRemoteCommand,
+): Promise<PendingAttachment[]> {
+  return Promise.all(commandAttachmentIds(command).map(async (attachmentId) => {
+    const downloaded = await downloadCodeRemoteAttachment(
+      creds,
+      command.command_id,
+      attachmentId,
+    );
+    return {
+      id: `remote-${attachmentId}`,
+      filename: downloaded.filename,
+      content_type: downloaded.content_type,
+      data_base64: downloaded.data_base64,
+      size: downloaded.size_bytes,
+    };
+  }));
+}
+
+async function sendRemotePrompt(text: string, attachments: PendingAttachment[]): Promise<void> {
+  if (attachments.length === 0) {
+    await useSessionStore.getState().send(text);
+    return;
+  }
+  // `send` owns the queue/busy semantics but normally consumes the visible
+  // composer attachments. Stage only the remote batch for that synchronous
+  // handoff, then immediately restore anything the desktop user was composing.
+  const preserved = useSessionStore.getState().attachments;
+  useSessionStore.setState({ attachments });
+  const submission = useSessionStore.getState().send(text);
+  useSessionStore.setState((current) => ({
+    attachments: [...preserved, ...current.attachments],
+  }));
+  await submission;
+}
+
 function commandBool(command: CodeRemoteCommand, key: string): boolean | null {
   const value = command.request[key];
   return typeof value === "boolean" ? value : null;
@@ -135,10 +186,11 @@ async function applyProject(command: CodeRemoteCommand): Promise<void> {
   state.setSelectedHostId(host.id);
 }
 
-async function submitPrompt(command: CodeRemoteCommand): Promise<void> {
+async function submitPrompt(creds: CloudCreds, command: CodeRemoteCommand): Promise<void> {
   const text = commandText(command);
-  if (!text) {
-    throw new Error("Clark Code command has no prompt text.");
+  const attachments = await commandAttachments(creds, command);
+  if (!text && attachments.length === 0) {
+    throw new Error("Clark Code command has no prompt or attachments.");
   }
   await applyProject(command);
   const state = useSessionStore.getState();
@@ -163,7 +215,7 @@ async function submitPrompt(command: CodeRemoteCommand): Promise<void> {
     // here means the open itself failed (e.g. its SSH host is gone).
     throw new Error("Could not open the target conversation on the desktop.");
   }
-  await useSessionStore.getState().send(text);
+  await sendRemotePrompt(text, attachments);
 }
 
 async function resolvePermission(command: CodeRemoteCommand): Promise<void> {
@@ -220,7 +272,7 @@ async function runCommand(creds: CloudCreds, hostId: string, command: CodeRemote
       command_type: command.command_type,
     });
     if (command.command_type === "start_session" || command.command_type === "send_message") {
-      await submitPrompt(command);
+      await submitPrompt(creds, command);
     } else if (command.command_type === "cancel_run") {
       await cancelRun(command);
     } else if (command.command_type === "resolve_permission") {

@@ -150,6 +150,7 @@ async fn agent_writes_a_file_and_runs_a_command_on_the_remote() {
                             ClientResponse::Permission {
                                 request: request.id.clone(),
                                 option: "allow_once".into(),
+                                feedback: None,
                             },
                         )
                         .await;
@@ -299,6 +300,7 @@ async fn remote_agent_selects_and_follows_a_claude_skill() {
                             ClientResponse::Permission {
                                 request: request.id.clone(),
                                 option: "allow_once".into(),
+                                feedback: None,
                             },
                         )
                         .await;

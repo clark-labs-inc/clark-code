@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { fileToAttachment, toUpload, prettySize } from "./attachments";
+import {
+  createPendingPaste,
+  expandPendingPastes,
+  fileToAttachment,
+  prettySize,
+  shouldThumbnailPastedText,
+  toUpload,
+} from "./attachments";
 
 describe("fileToAttachment", () => {
   it("encodes a non-image file to a base64 upload", async () => {
@@ -33,5 +40,29 @@ describe("prettySize", () => {
     expect(prettySize(500)).toBe("500 B");
     expect(prettySize(2048)).toBe("2 KB");
     expect(prettySize(3 * 1024 * 1024)).toBe("3.0 MB");
+  });
+});
+
+describe("large pasted text", () => {
+  it("compacts only text over Codex's 1,000-character boundary", () => {
+    expect(shouldThumbnailPastedText("short paste")).toBe(false);
+    expect(shouldThumbnailPastedText("x".repeat(1_000))).toBe(false);
+    expect(shouldThumbnailPastedText("x".repeat(1_001))).toBe(true);
+    expect(shouldThumbnailPastedText("😀".repeat(1_001))).toBe(true);
+  });
+
+  it("creates collision-free placeholders and expands them in place", () => {
+    const text = "x".repeat(1_001);
+    const first = createPendingPaste(text, []);
+    const second = createPendingPaste(text, [first]);
+    expect(first.placeholder).toBe("[Pasted Content 1001 chars]");
+    expect(second.placeholder).toBe("[Pasted Content 1001 chars] #2");
+    expect(
+      expandPendingPastes(`before ${first.placeholder} middle ${second.placeholder} after`, [
+        first,
+        second,
+      ]),
+    ).toBe(`before ${text} middle ${text} after`);
+    expect(expandPendingPastes("typed request", [first])).toBe(`typed request\n\n${text}`);
   });
 });

@@ -8,6 +8,7 @@ description = "Agent Client Protocol (ACP) provider for clark-desktop: drives lo
 
 [dependencies]
 agent-core = { path = "../agent-core", features = ["native"] }
+agent-orchestration = { path = "../agent-orchestration" }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

@@ -1,24 +1,43 @@
 import {
-  useEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ClipboardEvent,
+  type KeyboardEvent,
+  type RefObject,
 } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import {
   ArrowUp, Square, Plus, X, FileText, CornerDownRight, Pencil, Slash,
-  Shield, ShieldCheck, ShieldAlert, ChevronDown, Check, ListChecks,
+  ChevronDown, Check,
 } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
 import type { QueuedMessage } from "../store/sessionStore";
 import { useFileDrop, usePaste } from "../lib/attachmentSources";
-import { prettySize } from "../lib/attachments";
-import { CODING_MODELS, REASONING_EFFORTS, modelLabel, effectiveModelSettings } from "../lib/localAgent";
-import { PERMISSION_MODES, type PermissionMode } from "../lib/permissions";
+import {
+  CODING_MODELS,
+  modelLabel,
+  effectiveModelSettings,
+  normalizeReasoningEffort,
+  reasoningEffortsForModel,
+} from "../lib/localAgent";
 import { projectFiles } from "../lib/projectFiles";
 import { slashCommands, type SlashCommand } from "../lib/slashCommands";
 import { listCustomCommands } from "../lib/customCommands";
 import { fuzzyFilter, fuzzyFilterFiles } from "../lib/fuzzy";
 import { cn } from "../lib/cn";
 import { DUR, EASE } from "../lib/motion";
+import { executionDiagnostic } from "../lib/activity";
 import { EnvironmentPicker } from "./EnvironmentPicker";
+import { AttachmentChips } from "./ComposerAttachments";
+import { ComposerPermissionPill } from "./ComposerPermissionPill";
+import {
+  createPendingPaste,
+  expandPendingPastes,
+  shouldThumbnailPastedText,
+  type PendingPaste,
+} from "../lib/attachments";
 /** What the user is mid-typing at the caret: an `@file` mention (anywhere) or a
  *  `/command` (only at the very start of the message). */
 interface Trigger {
@@ -68,89 +87,6 @@ function useOutsideClose(ref: RefObject<HTMLElement | null>, onClose: () => void
       document.removeEventListener("keydown", onKey);
     };
   }, [ref]);
-}
-
-const MODE_ICON: Record<PermissionMode, typeof Shield> = {
-  ask: Shield,
-  auto: ShieldCheck,
-  full: ShieldAlert,
-  plan: ListChecks,
-};
-
-/** Codex-style approval policy selector. Full access is the default. */
-function PermissionPill() {
-  const mode = useSessionStore((s) => s.permissionMode);
-  const setMode = useSessionStore((s) => s.setPermissionMode);
-  // Permission modes govern the LOCAL engine's gate; a Clark cloud session
-  // runs every tool server-side in its own sandbox and never consults them,
-  // so showing the pill there would promise control that doesn't exist.
-  const isLocalTarget = useSessionStore((s) =>
-    s.session ? s.session.provider === "local" : s.activeProvider === "local",
-  );
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  useOutsideClose(ref, () => setOpen(false));
-
-  const info = PERMISSION_MODES.find((m) => m.id === mode) ?? PERMISSION_MODES[2];
-  const Icon = MODE_ICON[mode];
-  if (!isLocalTarget) return null;
-
-  return (
-    <div ref={ref} className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        title="How Clark's actions are approved (Shift+Tab to cycle)"
-        className={cn(
-          "flex min-h-8 items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-medium transition duration-200 ease-clark hover:bg-accent-subtle",
-          mode === "full" ? "text-warning" :
-            mode === "plan" ? "bg-accent-subtle text-accent" : "text-ink-secondary",
-        )}
-      >
-        <Icon className="size-3.5" />
-        {info.label}
-        <ChevronDown className="size-3 opacity-70" />
-      </button>
-
-      {/* Instant show/hide — no fade. A fading anchored popover renders
-          half-opacity frames that read as flicker in WKWebView on rapid toggle. */}
-      {open && (
-        <div
-          role="menu"
-          className="popover-surface absolute bottom-full left-0 z-30 mb-2 w-72 rounded-2xl bg-bg-elevated p-1.5 shadow-lifted ring-1 ring-border-subtle"
-        >
-          <div className="px-2.5 py-1.5 text-xs font-medium uppercase tracking-wide text-ink-faint">
-            How should Clark act?
-          </div>
-          {PERMISSION_MODES.map((m) => {
-              const I = MODE_ICON[m.id];
-              return (
-                <button
-                  key={m.id}
-                  type="button"
-                  role="menuitemradio"
-                  aria-checked={m.id === mode}
-                  onClick={() => {
-                    setMode(m.id);
-                    setOpen(false);
-                  }}
-                  className={cn("flex w-full items-start gap-2.5 rounded-xl px-2.5 py-2.5 text-left transition duration-200 ease-clark hover:bg-accent-subtle", m.id === mode && "bg-accent-subtle")}
-                >
-                  <I className={cn("mt-0.5 size-4 shrink-0", m.id === "full" ? "text-warning" : m.id === "plan" ? "text-accent" : "text-ink-muted")} />
-                  <span className="min-w-0 flex-1">
-                    <span className="block text-sm text-ink">{m.label}</span>
-                    <span className="block text-xs leading-snug text-ink-muted">{m.description}</span>
-                  </span>
-                  {m.id === mode && <Check className="mt-0.5 size-4 shrink-0 text-accent" />}
-                </button>
-              );
-            })}
-        </div>
-      )}
-    </div>
-  );
 }
 
 /** Fallback auto-compact threshold when the engine hasn't reported one yet —
@@ -203,6 +139,14 @@ function UsageChip() {
     Object.values(s.snapshot.runs).reduce(
       (n, r) => n + (r.outcome?.usage?.cost_usd ?? 0), 0),
   );
+  const execution = useSessionStore((s) => {
+    const runs = Object.values(s.snapshot.runs);
+    for (let i = runs.length - 1; i >= 0; i--) {
+      const diagnostic = executionDiagnostic(runs[i].outcome);
+      if (diagnostic) return diagnostic;
+    }
+    return "";
+  });
 
   if (totalIn === 0 && totalOut === 0) return null;
   const pct = Math.min(100, Math.round((contextTokens / contextLimit) * 100));
@@ -210,7 +154,7 @@ function UsageChip() {
 
   return (
     <span
-      title={`Context: ${contextTokens.toLocaleString()} tokens — ${pct}% of the ${fmtTokens(contextLimit)} auto-compact threshold\nThis conversation: ${totalIn.toLocaleString()} in · ${totalOut.toLocaleString()} out${cost > 0 ? ` · ${fmtCost(cost)}` : ""}`}
+      title={`Context: ${contextTokens.toLocaleString()} tokens — ${pct}% of the ${fmtTokens(contextLimit)} auto-compact threshold\nThis conversation: ${totalIn.toLocaleString()} in · ${totalOut.toLocaleString()} out${cost > 0 ? ` · ${fmtCost(cost)}` : ""}${execution ? `\n${execution}` : ""}`}
       className="hidden items-center gap-1.5 font-mono text-xs tabular-nums text-ink-faint sm:flex"
     >
       {contextTokens > 0 && (
@@ -252,7 +196,8 @@ function ModelPill() {
   const ref = useRef<HTMLDivElement>(null);
   useOutsideClose(ref, () => setOpen(false));
 
-  const effortLabel = REASONING_EFFORTS.find((e) => e.id === effort)?.label;
+  const reasoningEfforts = reasoningEffortsForModel(model);
+  const effortLabel = reasoningEfforts.find((e) => e.id === effort)?.label;
 
   return (
     <div ref={ref} className="relative">
@@ -285,7 +230,10 @@ function ModelPill() {
               role="menuitemradio"
               aria-checked={m.id === model}
               onClick={() => {
-                void update({ model: m.id });
+                void update({
+                  model: m.id,
+                  reasoningEffort: normalizeReasoningEffort(m.id, effort),
+                });
                 setOpen(false);
               }}
               className={cn("flex w-full items-start gap-2.5 rounded-xl px-2.5 py-2.5 text-left transition duration-200 ease-clark hover:bg-accent-subtle", m.id === model && "bg-accent-subtle")}
@@ -303,71 +251,39 @@ function ModelPill() {
           <div className="px-2.5 py-1.5 text-xs font-medium uppercase tracking-wide text-ink-faint">
             Reasoning effort
           </div>
-          <div className="flex gap-1 px-2.5 pb-2">
-            {REASONING_EFFORTS.map((e) => (
-              <button
-                key={e.id}
-                type="button"
-                role="menuitemradio"
-                aria-checked={e.id === effort}
-                onClick={() => void update({ reasoningEffort: e.id })}
-                className={cn(
-                  "min-h-8 flex-1 rounded-lg px-1 py-1 text-xs font-medium transition duration-200 ease-clark",
-                  e.id === effort
-                    ? "bg-accent text-on-accent"
-                    : "bg-bg-tertiary text-ink-secondary hover:bg-bg-hover",
-                )}
-              >
-                {e.label}
-              </button>
-            ))}
-          </div>
+          {reasoningEfforts.length > 0 ? (
+            <div className="flex gap-1 px-2.5 pb-2">
+              {reasoningEfforts.map((e) => (
+                <button
+                  key={e.id}
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={e.id === effort}
+                  onClick={() => void update({ reasoningEffort: e.id })}
+                  className={cn(
+                    "min-h-8 flex-1 rounded-lg px-1 py-1 text-xs font-medium transition duration-200 ease-clark",
+                    e.id === effort
+                      ? "bg-accent text-on-accent"
+                      : "bg-bg-tertiary text-ink-secondary hover:bg-bg-hover",
+                  )}
+                >
+                  {e.label}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <p className="px-2.5 pb-2 text-xs leading-snug text-ink-muted">
+              This model controls its reasoning effort automatically.
+            </p>
+          )}
           <p className="px-2.5 pb-1.5 text-xs leading-snug text-ink-faint">
-            Auto uses each model's provider default. Applies from the next
-            message — the conversation keeps its context.
+            {reasoningEfforts.some((candidate) => candidate.id === "")
+              ? "Auto uses this model's provider default. "
+              : "Only levels supported by this model are shown. "}
+            Applies from the next message — the conversation keeps its context.
           </p>
         </div>
       )}
-    </div>
-  );
-}
-
-function AttachmentChips() {
-  const attachments = useSessionStore((s) => s.attachments);
-  const remove = useSessionStore((s) => s.removeAttachment);
-  if (attachments.length === 0) return null;
-  return (
-    <div className="mb-2 flex flex-wrap gap-2">
-      <AnimatePresence initial={false}>
-        {attachments.map((a) => (
-          <motion.div
-            key={a.id}
-            layout
-            initial={{ opacity: 0, scale: 0.96, y: 3 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.96, y: 2 }}
-            transition={{ duration: DUR.base, ease: EASE.out }}
-            className="group relative flex items-center gap-2 rounded-xl bg-bg-tertiary py-1 pl-1 pr-2"
-          >
-            {a.previewUrl ? (
-              <img src={a.previewUrl} alt="" className="size-8 rounded-md object-cover" />
-            ) : (
-              <span className="grid size-8 place-items-center rounded-md bg-bg-sunken text-ink-muted">
-                <FileText className="size-4" />
-              </span>
-            )}
-            <span className="max-w-40 truncate text-xs text-ink-secondary">{a.filename}</span>
-            <span className="text-xs text-ink-faint">{prettySize(a.size)}</span>
-            <button
-              onClick={() => remove(a.id)}
-              aria-label={`Remove ${a.filename}`}
-              className="grid size-4 place-items-center rounded-full bg-ink/10 text-ink-muted transition hover:bg-danger/20 hover:text-danger"
-            >
-              <X className="size-3" />
-            </button>
-          </motion.div>
-        ))}
-      </AnimatePresence>
     </div>
   );
 }
@@ -489,6 +405,7 @@ export function Composer() {
   const [customCommands, setCustomCommands] = useState<SlashCommand[]>([]);
   const [sel, setSel] = useState(0);
   const [dismissed, setDismissed] = useState(false);
+  const [pendingPastes, setPendingPastes] = useState<PendingPaste[]>([]);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const session = useSessionStore((s) => s.session);
@@ -512,13 +429,14 @@ export function Composer() {
   const addFiles = useSessionStore((s) => s.addFiles);
   const prefill = useSessionStore((s) => s.composerPrefill);
   const setPrefill = useSessionStore((s) => s.setComposerPrefill);
+  const resendFrom = useSessionStore((s) => s.resendFrom);
+  const [editTimelineIndex, setEditTimelineIndex] = useState<number | null>(null);
   // Start-screen mode: with no active session the composer starts one on submit
   // (type a task → session begins), gated by the environment's readiness.
   const start = useSessionStore((s) => s.startSession);
   const connecting = useSessionStore((s) => s.connecting);
   const startBlocked = useSessionStore((s) => (s.session ? null : s.startBlockedReason()));
   const startError = useSessionStore((s) => (s.session ? null : s.error));
-
   const { dragging, handlers } = useFileDrop((files) => void addFiles(files));
   usePaste((files) => void addFiles(files), !!session);
 
@@ -540,7 +458,8 @@ export function Composer() {
   // "Edit & resend" staged text from a sent message: load it and focus.
   useEffect(() => {
     if (prefill === null) return;
-    setValue(prefill);
+    setValue(prefill.text);
+    setEditTimelineIndex(prefill.timelineIndex ?? null);
     setPrefill(null);
     requestAnimationFrame(() => {
       const ta = taRef.current;
@@ -551,7 +470,7 @@ export function Composer() {
     });
   }, [prefill, setPrefill]);
 
-  const hasContent = value.trim().length > 0 || attachments.length > 0;
+  const hasContent = value.trim().length > 0 || attachments.length > 0 || pendingPastes.length > 0;
   const canSend =
     hasContent && (!!session || (!startBlocked && !connecting));
 
@@ -605,6 +524,20 @@ export function Composer() {
 
   const syncCaret = () => setCaret(taRef.current?.selectionStart ?? 0);
 
+  const onPaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    if (!session || event.clipboardData.files.length > 0) return;
+    const text = event.clipboardData.getData("text/plain");
+    if (!shouldThumbnailPastedText(text)) return;
+
+    event.preventDefault();
+    const paste = createPendingPaste(text, pendingPastes);
+    setPendingPastes((current) => [...current, paste]);
+  };
+
+  const removePendingPaste = (id: string) => {
+    setPendingPastes((current) => current.filter((paste) => paste.id !== id));
+  };
+
   const accept = (s: Suggestion) => {
     if (!trigger) return;
     if (s.kind === "slash") {
@@ -648,8 +581,11 @@ export function Composer() {
 
   const submit = async () => {
     if (!canSend) return;
-    const t = value;
+    const t = expandPendingPastes(value, pendingPastes);
+    const editIndex = editTimelineIndex;
     setValue("");
+    setPendingPastes([]);
+    setEditTimelineIndex(null);
     // No session yet → start one on the selected environment, then send. If the
     // connect fails (SSH down, bad folder…) the composer has remounted by then —
     // stage the text as a prefill so the user's task is never lost.
@@ -660,7 +596,8 @@ export function Composer() {
         return;
       }
     }
-    await send(t.trim());
+    if (editIndex !== null) await resendFrom(editIndex, t.trim());
+    else await send(t.trim());
   };
 
   // Pull a queued message back into the composer to revise it.
@@ -741,7 +678,26 @@ export function Composer() {
           )}
         </AnimatePresence>
 
-        <AttachmentChips />
+        <AttachmentChips pastes={pendingPastes} onRemovePaste={removePendingPaste} />
+
+        {editTimelineIndex !== null && (
+          <div className="flex items-center gap-1.5 pb-1 pt-0.5 text-xs text-ink-muted">
+            <Pencil className="size-3" />
+            <span>Editing message — later turns will be replaced</span>
+            <button
+              type="button"
+              onClick={() => {
+                setEditTimelineIndex(null);
+                setValue("");
+              }}
+              aria-label="Cancel editing message"
+              title="Cancel edit"
+              className="ml-auto grid size-5 place-items-center rounded text-ink-faint transition hover:bg-bg-hover hover:text-ink-secondary"
+            >
+              <X className="size-3" />
+            </button>
+          </div>
+        )}
 
         <input
           ref={fileRef}
@@ -762,6 +718,7 @@ export function Composer() {
             setValue(e.target.value);
             setCaret(e.target.selectionStart ?? 0);
           }}
+          onPaste={onPaste}
           onKeyDown={onKey}
           onSelect={syncCaret}
           onClick={syncCaret}
@@ -792,7 +749,7 @@ export function Composer() {
             >
               <Plus className="size-4" />
             </button>
-            <PermissionPill />
+            <ComposerPermissionPill />
           </div>
 
           <div className="flex min-w-0 items-center gap-2.5">

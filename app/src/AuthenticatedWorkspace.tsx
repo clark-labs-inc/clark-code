@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { useSessionStore } from "./store/sessionStore";
 import { useTheme } from "./lib/useTheme";
 import { useHotkeys } from "./lib/hotkeys";
+import type { TextSize } from "./lib/useTextSize";
 import { TopBar } from "./surfaces/TopBar";
 import { Sidebar } from "./surfaces/Sidebar";
 import { StartCard } from "./surfaces/StartCard";
@@ -32,7 +33,13 @@ const Settings = lazy(() =>
   import("./surfaces/Settings").then((module) => ({ default: module.Settings })),
 );
 
-export default function AuthenticatedWorkspace() {
+export default function AuthenticatedWorkspace({
+  textSize,
+  onTextSizeChange,
+}: {
+  textSize: TextSize;
+  onTextSizeChange: (size: TextSize) => void;
+}) {
   const session = useSessionStore((state) => state.session);
   const openingScreen = useSessionStore((state) => state.opening !== null);
   const terminalOpen = useSessionStore((state) => state.terminalOpen);
@@ -130,20 +137,6 @@ export default function AuthenticatedWorkspace() {
                 <Conversation activeArtifactId={activeArtifactId} onOpenArtifact={openArtifact} />
               </Suspense>
               <Composer />
-              {terminalTouched.current && (
-                <Suspense
-                  fallback={
-                    terminalOpen ? (
-                      <div className="flex h-10 shrink-0 items-center gap-2 border-t border-border px-4 text-xs text-ink-muted">
-                        <span className="size-3 animate-[spin_1s_linear_infinite] rounded-full border border-ink-faint border-t-transparent" />
-                        Loading terminal…
-                      </div>
-                    ) : null
-                  }
-                >
-                  <TerminalPanel />
-                </Suspense>
-              )}
             </div>
             {activeArtifactId && (
               <Suspense fallback={<div className="min-w-0 flex-1 bg-bg-elevated" />}>
@@ -163,6 +156,24 @@ export default function AuthenticatedWorkspace() {
             <Composer />
           </>
         )}
+        {/* The terminal drawer lives at the shell level (not inside a branch)
+            so it survives switching between the start screen and a session —
+            and so the sidebar can open it in a freshly picked project folder
+            before any session exists. */}
+        {terminalTouched.current && (
+          <Suspense
+            fallback={
+              terminalOpen ? (
+                <div className="flex h-10 shrink-0 items-center gap-2 border-t border-border px-4 text-xs text-ink-muted">
+                  <span className="size-3 animate-[spin_1s_linear_infinite] rounded-full border border-ink-faint border-t-transparent" />
+                  Loading terminal…
+                </div>
+              ) : null
+            }
+          >
+            <TerminalPanel />
+          </Suspense>
+        )}
       </div>
       {mcpOpen && (
         <Suspense fallback={null}>
@@ -176,7 +187,14 @@ export default function AuthenticatedWorkspace() {
       )}
       {settingsOpen && (
         <Suspense fallback={null}>
-          <Settings dark={dark} onToggleTheme={toggle} colorblind={colorblind} onToggleColorblind={toggleColorblind} />
+          <Settings
+            dark={dark}
+            onToggleTheme={toggle}
+            colorblind={colorblind}
+            onToggleColorblind={toggleColorblind}
+            textSize={textSize}
+            onTextSizeChange={onTextSizeChange}
+          />
         </Suspense>
       )}
       <CommandPalette dark={dark} onToggleTheme={toggle} />

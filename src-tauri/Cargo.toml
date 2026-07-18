@@ -72,3 +72,6 @@ tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 # tokio_util CancellationToken.
 tokio-util = { version = "0.7", default-features = false }
 tempfile = "3"
+# Deterministic attachment parity uses the real WebSocket executor transport
+# without requiring SSH; the ignored lane swaps this for the real orchestrator.
+exec-server = { path = "../crates/exec-server" }

@@ -20,12 +20,12 @@ mod browser_binary;
 mod browser_cdp;
 mod changes;
 mod checkpoint;
-mod claude_import;
 mod commands;
 mod compaction;
 mod config;
 mod engine;
 mod exec;
+mod external_import;
 mod files;
 mod git_metadata;
 mod hooks;
@@ -37,6 +37,9 @@ mod markdown_frontmatter;
 mod mcp;
 mod memory;
 mod memory_extraction;
+mod multi_repo_provider;
+mod multi_repo_workspace;
+mod orchestration;
 mod permissions;
 mod platform;
 mod project_settings;
@@ -44,6 +47,7 @@ mod prompt;
 mod provider;
 mod repository;
 mod resume;
+mod root_execution;
 mod safety;
 mod sandbox;
 mod tools;
@@ -52,10 +56,13 @@ mod workspace;
 
 pub use changes::{changes_diff, changes_revert, changes_summary, ChangedFile};
 pub use checkpoint::{create_checkpoint, is_git_repo};
-// Migrate an existing Claude Code setup: discover its MCP servers + skills.
-pub use claude_import::{discover_mcp_servers, discover_skills, ClaudeSkill};
+// Discover compatible setup from Claude Code and Codex without mutating it.
 pub use commands::{discover_commands, CustomCommand};
 pub use config::{LocalConfig, DEFAULT_BASE_URL, DEFAULT_RESEARCH_MODEL};
+pub use external_import::{
+    discover_agent_setups, discover_agent_setups_with_home, AgentMigrationDiscovery,
+    MigratedInstruction, MigratedSkill, MigrationSource,
+};
 // The execution backends. `LocalExecutor` is wired today; `RemoteExecutor`
 // (over clark-exec-server) is selected per session once remote projects land.
 pub use exec::{Executor, LocalExecutor, RemoteExecutor};
@@ -64,6 +71,16 @@ pub use mcp::{probe_mcp_servers, McpServerConfig, McpStatus};
 pub use memory::{
     global_memory_dir, load_facts, load_index, memory_dir, MemoryFact, MemoryHeader, MemoryType,
 };
+pub use multi_repo_provider::{
+    ClarkCloudWriterConfig, ClarkCloudWriterHarness, LocalIntegrationHarness,
+    LocalMultiRepoRuntime, LocalMultiRepoRuntimeConfig, LocalReaderHarness, LocalReviewHarness,
+    LocalWriterHarness,
+};
+pub use multi_repo_workspace::{
+    FreshIntegrationWorkspace, IsolatedReaderWorkspace, IsolatedWriterWorkspace,
+    RepositorySelection, RepositorySelectionRequest, SelectedRepository,
+};
+pub use orchestration::{local_read_only_harness, WorkspaceDigestGuard};
 pub use platform::{
     personal_memory_section, recall_personal_memories, recall_repository_context,
     repository_context_section, scope_personal_memories, PersonalMemory, RepositoryCommitContext,

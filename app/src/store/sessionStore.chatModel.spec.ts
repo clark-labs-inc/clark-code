@@ -95,6 +95,30 @@ describe("per-conversation model", () => {
       reasoningEffort: "high",
     });
     expect(effectiveModelSettings(localSettings, chatModels, sessionB.id).model).toBe("clark-code:kimi_k3");
+    expect(effectiveModelSettings(localSettings, chatModels, sessionB.id).reasoningEffort).toBe("max");
+  });
+
+  it("normalizes the effort atomically when switching model contracts", async () => {
+    const reconfigure = vi.fn(async () => {});
+    const bridge = stubBridge({ reconfigure });
+    useSessionStore.setState({
+      bridge,
+      session: sessionA,
+      localSettings: { ...baseSettings, reasoningEffort: "xhigh" },
+      chatModels: {},
+    });
+
+    await useSessionStore.getState().updateModelSettings({ model: "clark-code:kimi_k3" });
+
+    expect(useSessionStore.getState().chatModels[sessionA.id]).toEqual({
+      model: "clark-code:kimi_k3",
+      reasoningEffort: "max",
+    });
+    const calls = vi.mocked(reconfigure).mock.calls as unknown as [string, { extra?: Record<string, unknown> }][];
+    expect(calls[0]?.[1].extra).toMatchObject({
+      model: "clark-code:kimi_k3",
+      reasoning_effort: "max",
+    });
   });
 
   it("with no active chat, updating the model edits the global default", async () => {

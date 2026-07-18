@@ -20,7 +20,7 @@ use std::process::Command;
 use std::time::Duration;
 
 use clark_desktop_lib::ssh::{self, RemoteSpec};
-use provider_local::{discover_mcp_servers, discover_skills, Executor, RemoteExecutor};
+use provider_local::{discover_agent_setups, Executor, MigrationSource, RemoteExecutor};
 use tokio_util::sync::CancellationToken;
 
 struct Env {
@@ -299,10 +299,10 @@ async fn remote_processes_survive_reconnect_and_remain_contained() {
     eprintln!("remote process/reconnect e2e: OK");
 }
 
-/// Claude-migration discovery must read the *remote* `.claude` over the tunnel.
+/// Agent migration discovery must read the *remote* setup over the tunnel.
 #[tokio::test]
 #[ignore = "needs a live SSH host; set CLARK_SSH_TEST_{HOST,ROOT}"]
-async fn discovers_claude_config_on_the_remote() {
+async fn discovers_agent_config_on_the_remote() {
     let Some(env) = env() else {
         eprintln!("skipping: set CLARK_SSH_TEST_HOST / _ROOT");
         return;
@@ -335,21 +335,26 @@ async fn discovers_claude_config_on_the_remote() {
         .expect("RemoteExecutor");
 
     let root = std::path::Path::new(&env.root);
-    let mcp = discover_mcp_servers(&remote, root).await;
+    let discoveries = discover_agent_setups(&remote, root).await;
+    let claude = discoveries
+        .iter()
+        .find(|discovery| discovery.source == MigrationSource::Claude)
+        .expect("remote Claude setup");
     eprintln!(
         "remote mcp: {:?}",
-        mcp.iter().map(|m| &m.name).collect::<Vec<_>>()
+        claude.mcp.iter().map(|m| &m.name).collect::<Vec<_>>()
     );
-    assert!(mcp
+    assert!(claude
+        .mcp
         .iter()
         .any(|m| m.name == "remote-mcp" && m.command == "echo"));
 
-    let skills = discover_skills(&remote, root).await;
     eprintln!(
         "remote skills: {:?}",
-        skills.iter().map(|s| &s.name).collect::<Vec<_>>()
+        claude.skills.iter().map(|s| &s.name).collect::<Vec<_>>()
     );
-    let s = skills
+    let s = claude
+        .skills
         .iter()
         .find(|s| s.name == "remote-skill")
         .expect("remote skill");

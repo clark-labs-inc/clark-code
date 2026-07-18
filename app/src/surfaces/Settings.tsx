@@ -1,11 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
-  X, SlidersHorizontal, FolderGit2, Blocks, SquareTerminal, CircleUser, Info,
-  Sun, Moon, Eye, EyeOff, AlertTriangle, ExternalLink, CreditCard, LogOut,
+  Blocks, Info, Sun, Moon, Eye, EyeOff, AlertTriangle, ExternalLink, CreditCard, LogOut,
   RefreshCw, Loader2, Trash2, Plus, Server, Brain, Check, FolderOpen,
 } from "lucide-react";
-import { useSessionStore, type SettingsSection } from "../store/sessionStore";
+import { useSessionStore } from "../store/sessionStore";
 import { cn } from "../lib/cn";
 import { DUR } from "../lib/motion";
 import { PERMISSION_MODES } from "../lib/permissions";
@@ -18,20 +17,16 @@ import {
 } from "../lib/commandPolicy";
 import { clarkBillingUrl, openExternal } from "../lib/account";
 import { useAppVersion } from "../lib/appInfo";
+import { TEXT_SIZES, TEXT_SIZE_LABELS, type TextSize } from "../lib/useTextSize";
 import { OrganizationKnowledgeSettings } from "./OrganizationKnowledgeSettings";
 import { GroupLabel, Card, Row, Toggle } from "./settings/Primitives";
+import {
+  SETTINGS_SECTIONS,
+  SettingsNavigation,
+} from "./settings/SettingsNavigation";
 
 const input =
   "w-full rounded-lg border border-border bg-bg px-2.5 py-1.5 text-sm text-ink outline-none transition focus:border-accent placeholder:text-ink-muted";
-
-const SECTIONS: { id: SettingsSection; label: string; icon: typeof SlidersHorizontal }[] = [
-  { id: "general", label: "General", icon: SlidersHorizontal },
-  { id: "project", label: "Project", icon: FolderGit2 },
-  { id: "integrations", label: "Integrations", icon: Blocks },
-  { id: "commands", label: "Command policy", icon: SquareTerminal },
-  { id: "account", label: "Account", icon: CircleUser },
-  { id: "about", label: "About & updates", icon: Info },
-];
 
 // --- General ---------------------------------------------------------------
 
@@ -40,11 +35,15 @@ function GeneralSection({
   onToggleTheme,
   colorblind,
   onToggleColorblind,
+  textSize,
+  onTextSizeChange,
 }: {
   dark: boolean;
   onToggleTheme: () => void;
   colorblind: boolean;
   onToggleColorblind: () => void;
+  textSize: TextSize;
+  onTextSizeChange: (size: TextSize) => void;
 }) {
   const permissionMode = useSessionStore((s) => s.permissionMode);
   const setPermissionMode = useSessionStore((s) => s.setPermissionMode);
@@ -52,7 +51,9 @@ function GeneralSection({
   const setOutputStyle = useSessionStore((s) => s.setOutputStyle);
   const memoriesEnabled = useSessionStore((s) => s.memoriesEnabled);
   const browserEnabled = useSessionStore((s) => s.browserEnabled);
+  const orchestrationEnabled = useSessionStore((s) => s.orchestrationEnabled);
   const setBrowserEnabled = useSessionStore((s) => s.setBrowserEnabled);
+  const setOrchestrationEnabled = useSessionStore((s) => s.setOrchestrationEnabled);
   const setMemoriesEnabled = useSessionStore((s) => s.setMemoriesEnabled);
 
   const themeBtn = (isDark: boolean, Icon: typeof Sun, text: string) => (
@@ -78,6 +79,31 @@ function GeneralSection({
               {themeBtn(true, Moon, "Dark")}
             </div>
           </Row>
+          <Row name="Text size" sub="Messages, code, terminal · Ctrl/⌘ +/− · Ctrl/⌘ 0 resets">
+            <div
+              role="radiogroup"
+              aria-label="Text size"
+              className="inline-flex shrink-0 rounded-lg border border-border-subtle bg-bg-sunken p-0.5 text-xs"
+            >
+              {TEXT_SIZES.map((size) => (
+                <button
+                  key={size}
+                  type="button"
+                  role="radio"
+                  aria-checked={textSize === size}
+                  onClick={() => onTextSizeChange(size)}
+                  className={cn(
+                    "rounded-md px-2 py-1 transition",
+                    textSize === size
+                      ? "bg-bg-elevated text-ink shadow-sm"
+                      : "text-ink-muted hover:text-ink-secondary",
+                  )}
+                >
+                  {TEXT_SIZE_LABELS[size]}
+                </button>
+              ))}
+            </div>
+          </Row>
           <Row name="Colorblind-friendly colors" sub="Blue/orange status instead of red/green">
             <Toggle on={colorblind} onClick={onToggleColorblind} label="Toggle colorblind-friendly colors" />
           </Row>
@@ -95,7 +121,7 @@ function GeneralSection({
                 onClick={() => setPermissionMode(m.id)}
                 className={cn(
                   "flex w-full items-start gap-3 px-3.5 py-3 text-left transition",
-                  active ? "bg-accent-subtle" : "hover:bg-bg-hover/30",
+                  active ? "bg-ink/5" : "hover:bg-ink/[0.035]",
                 )}
               >
                 <span
@@ -130,7 +156,7 @@ function GeneralSection({
                 onClick={() => setOutputStyle(style.id)}
                 className={cn(
                   "flex w-full items-start gap-3 px-3.5 py-3 text-left transition",
-                  active ? "bg-accent-subtle" : "hover:bg-bg-hover/30",
+                  active ? "bg-ink/5" : "hover:bg-ink/[0.035]",
                 )}
               >
                 <span
@@ -167,6 +193,17 @@ function GeneralSection({
       <div>
         <GroupLabel>Experimental</GroupLabel>
         <Card>
+          <Row
+            icon={<Blocks className="size-4" />}
+            name="Parallel read-only agents"
+            sub="Allow Clark to delegate large, decomposable investigations in new sessions. Clark stays the only writer; delegates must return evidence for review."
+          >
+            <Toggle
+              on={orchestrationEnabled}
+              onClick={() => setOrchestrationEnabled(!orchestrationEnabled)}
+              label="Enable parallel read-only agents"
+            />
+          </Row>
           <Row
             icon={<AlertTriangle className="size-4 text-warning" />}
             name="Enable browser tool"
@@ -629,15 +666,20 @@ export function Settings({
   onToggleTheme,
   colorblind,
   onToggleColorblind,
+  textSize,
+  onTextSizeChange,
 }: {
   dark: boolean;
   onToggleTheme: () => void;
   colorblind: boolean;
   onToggleColorblind: () => void;
+  textSize: TextSize;
+  onTextSizeChange: (size: TextSize) => void;
 }) {
   const open = useSessionStore((s) => s.settingsOpen);
   const section = useSessionStore((s) => s.settingsSection);
   const setOpen = useSessionStore((s) => s.setSettingsOpen);
+  const [query, setQuery] = useState("");
   // Reduced Motion (or WKWebView's opacity-fade flicker in general) → appear
   // instantly, no fade. The opacity animation is exactly the "half-opacity
   // flicker" the ProfileMenu popover was fixed for; the modal dialogs never
@@ -653,66 +695,51 @@ export function Settings({
     return () => document.removeEventListener("keydown", onKey);
   }, [open, setOpen]);
 
+  useEffect(() => {
+    if (!open) setQuery("");
+  }, [open]);
+
+  const activeSection = SETTINGS_SECTIONS.find((item) => item.id === section);
+
   return (
     <AnimatePresence>
       {open && (
-        <motion.div
+        <motion.section
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="settings-title"
           initial={reduce ? false : { opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: reduce ? 0 : DUR.fast }}
-          className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-6"
-          onClick={() => setOpen(false)}
+          className="fixed inset-0 z-50 flex overflow-hidden bg-bg"
         >
-          <motion.div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="settings-title"
-            initial={reduce ? false : { opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: reduce ? 0 : DUR.fast }}
-            onClick={(e) => e.stopPropagation()}
-            className="popover-surface flex h-[80vh] max-h-[640px] w-full max-w-3xl overflow-hidden rounded-[22px] border border-border-subtle bg-bg-elevated shadow-lifted"
-          >
-            {/* Left rail */}
-            <nav className="flex w-52 shrink-0 flex-col border-r border-border-subtle bg-bg-secondary/50 p-3">
-              <h2 id="settings-title" className="px-2 py-2 text-sm font-semibold text-ink">
-                Settings
-              </h2>
-              {SECTIONS.map((s) => (
-                <button
-                  key={s.id}
-                  onClick={() => setOpen(true, s.id)}
-                  className={cn(
-                    "flex min-h-9 w-full items-center gap-2.5 rounded-xl px-2.5 py-1.5 text-left text-sm transition duration-200 ease-clark",
-                    section === s.id ? "bg-accent-soft text-ink" : "text-ink-secondary hover:bg-accent-subtle",
-                  )}
-                >
-                  <s.icon className={cn("size-4 shrink-0", section === s.id ? "text-accent" : "text-ink-muted")} />
-                  {s.label}
-                </button>
-              ))}
-            </nav>
+          <SettingsNavigation
+            active={section}
+            query={query}
+            onQueryChange={setQuery}
+            onSelect={(next) => setOpen(true, next)}
+            onClose={() => setOpen(false)}
+          />
 
-            {/* Right pane */}
-            <div className="relative min-w-0 flex-1 overflow-y-auto p-5">
-              <button
-                onClick={() => setOpen(false)}
-                aria-label="Close settings"
-                className="absolute right-3 top-3 grid size-7 place-items-center rounded-md text-ink-muted transition hover:bg-bg-hover hover:text-ink"
-              >
-                <X className="size-4" />
-              </button>
-              <h3 className="mb-4 text-sm font-semibold text-ink">
-                {SECTIONS.find((s) => s.id === section)?.label}
-              </h3>
+          <main className="min-w-0 flex-1 overflow-y-auto bg-bg">
+            <div className="mx-auto w-full max-w-[42rem] px-8 pb-20 pt-10 lg:px-10 lg:pt-12">
+              <header className="mb-7">
+                <h3 className="text-lg font-semibold tracking-tight text-ink">
+                  {activeSection?.label}
+                </h3>
+                {activeSection?.description && (
+                  <p className="mt-1 text-sm text-ink-muted">{activeSection.description}</p>
+                )}
+              </header>
               {section === "general" && (
                 <GeneralSection
                   dark={dark}
                   onToggleTheme={onToggleTheme}
                   colorblind={colorblind}
                   onToggleColorblind={onToggleColorblind}
+                  textSize={textSize}
+                  onTextSizeChange={onTextSizeChange}
                 />
               )}
               {section === "project" && <ProjectSection />}
@@ -721,8 +748,8 @@ export function Settings({
               {section === "account" && <AccountSection />}
               {section === "about" && <AboutSection />}
             </div>
-          </motion.div>
-        </motion.div>
+          </main>
+        </motion.section>
       )}
     </AnimatePresence>
   );

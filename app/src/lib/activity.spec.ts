@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { currentActivity } from "./activity";
+import { currentActivity, executionDiagnostic, shouldShowPending } from "./activity";
 import { emptySnapshot, type Snapshot } from "../core-bridge/types";
 
 function withRun(status: Snapshot["runs"][string]["status"]): Snapshot {
@@ -46,5 +46,73 @@ describe("currentActivity", () => {
     const a = currentActivity(withRun("failed"));
     expect(a.failed).toBe(true);
     expect(a.label).toBe("Run failed");
+  });
+
+  it("shows pending only before the agent has emitted a typed response", () => {
+    const beforeResponse = withRun("running");
+    beforeResponse.timeline.push({
+      item: "message",
+      run: "r1",
+      role: "user",
+      blocks: [{ type: "text", text: "Help me" }],
+    });
+    expect(shouldShowPending(beforeResponse)).toBe(true);
+
+    const reasoningStarted = structuredClone(beforeResponse);
+    reasoningStarted.timeline.push({
+      item: "message",
+      run: "r1",
+      role: "agent",
+      blocks: [{ type: "thinking", text: "Inspecting the request" }],
+    });
+    expect(shouldShowPending(reasoningStarted)).toBe(false);
+
+    const answerStarted = structuredClone(beforeResponse);
+    answerStarted.timeline.push({
+      item: "message",
+      run: "r1",
+      role: "agent",
+      blocks: [{ type: "text", text: "I found it" }],
+    });
+    expect(shouldShowPending(answerStarted)).toBe(false);
+  });
+
+  it("lets an active tool own the pending state", () => {
+    const snapshot = withRun("running");
+    snapshot.tool_calls.tool = {
+      id: "tool",
+      title: "Inspect files",
+      kind: "read",
+      status: "in_progress",
+      locations: [],
+      content: [],
+    };
+    expect(shouldShowPending(snapshot)).toBe(false);
+  });
+});
+
+describe("executionDiagnostic", () => {
+  it("summarizes typed root lifecycle evidence without parsing prose", () => {
+    expect(executionDiagnostic({
+      status: "done",
+      execution: {
+        execution_id: "session:run-1",
+        root_path: "/root",
+        attempts: 2,
+        recoveries: 1,
+        child_executions: 0,
+        completed_children: 0,
+        failed_children: 0,
+        weighted_tokens: 120,
+        cost_usd: 0.01,
+        changed_paths: ["src/lib.rs"],
+        completed_tools: ["edit_file"],
+        failed_tools: [],
+      },
+    })).toBe("Root execution: 2 attempts · 1 recovered interruption · 1 changed path");
+  });
+
+  it("stays absent for providers without a lifecycle receipt", () => {
+    expect(executionDiagnostic({ status: "done" })).toBeUndefined();
   });
 });

@@ -372,7 +372,9 @@ pub fn events_to_agent(event: &Value, run: &RunId, session: &SessionId) -> Vec<A
                 status: RunStatus::Done,
                 stop_reason: Some("message_ask".to_string()),
                 error: None,
+                failure_kind: None,
                 usage: None,
+                execution: None,
             },
         });
         return events;
@@ -629,7 +631,9 @@ pub fn event_to_agent(event: &Value, run: &RunId, session: &SessionId) -> Option
                     status: RunStatus::Done,
                     stop_reason: Some(outcome.to_string()),
                     error: None,
+                    failure_kind: None,
                     usage: None,
+                    execution: None,
                 },
             })
         }
@@ -645,7 +649,9 @@ pub fn event_to_agent(event: &Value, run: &RunId, session: &SessionId) -> Option
                     status: RunStatus::Failed,
                     stop_reason: None,
                     error: Some(message.to_string()),
+                    failure_kind: None,
                     usage: None,
+                    execution: None,
                 },
             })
         }

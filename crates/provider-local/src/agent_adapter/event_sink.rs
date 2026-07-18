@@ -1,5 +1,6 @@
 //! Projection of typed agent-loop events into desktop events.
 
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use agent_core::domain as desktop;
@@ -31,6 +32,7 @@ pub(crate) struct DesktopEventSink {
     run: RunId,
     registry: Arc<ToolRegistry>,
     completed_transcript: CompletedRunTranscript,
+    execution: Option<crate::root_execution::RootExecutionTrace>,
     /// The app-managed document workspace (canonical), when this is a local
     /// session. Markdown files written here are surfaced as inline artifacts.
     docs_dir: Option<std::path::PathBuf>,
@@ -47,8 +49,14 @@ impl DesktopEventSink {
             run,
             registry,
             completed_transcript: CompletedRunTranscript::default(),
+            execution: None,
             docs_dir,
         }
+    }
+
+    pub fn with_execution(mut self, execution: crate::root_execution::RootExecutionTrace) -> Self {
+        self.execution = Some(execution);
+        self
     }
 
     pub fn completed_transcript(&self) -> CompletedRunTranscript {
@@ -98,6 +106,14 @@ impl CompletedRunTranscript {
     #[cfg(test)]
     pub fn snapshot(&self) -> Vec<ca::AgentMessage> {
         self.messages.lock().expect("run transcript lock").clone()
+    }
+
+    pub fn has_commit_boundary(&self) -> bool {
+        !self
+            .messages
+            .lock()
+            .expect("run transcript lock")
+            .is_empty()
     }
 
     /// Take everything observed so far, leaving the tracker empty. The
@@ -184,11 +200,18 @@ impl ca::EventSink for DesktopEventSink {
                 tool_name,
                 args,
             } => {
-                let kind = self
-                    .registry
-                    .get(&tool_name)
+                let executor = self.registry.get(&tool_name);
+                let kind = executor
+                    .as_ref()
                     .map(|tool| tool.kind())
                     .unwrap_or_default();
+                if let Some(execution) = &self.execution {
+                    execution.tool_started(
+                        &tool_call_id,
+                        &tool_name,
+                        executor.as_ref().is_some_and(|tool| tool.mutating()),
+                    );
+                }
                 let id = ToolCallId::new(tool_call_id);
                 let _ = self
                     .events
@@ -233,6 +256,20 @@ impl ca::EventSink for DesktopEventSink {
                 ..
             } => {
                 let locations = locations_from_details(&result.details);
+                if let Some(execution) = &self.execution {
+                    execution.tool_finished(
+                        &tool_call_id,
+                        if is_error {
+                            agent_orchestration::ToolExecutionStatus::Failed
+                        } else {
+                            agent_orchestration::ToolExecutionStatus::Completed
+                        },
+                        locations
+                            .iter()
+                            .map(|location| location.path.clone())
+                            .collect::<BTreeSet<_>>(),
+                    );
+                }
                 // A Markdown file (or mobile-tool screenshot) written into the
                 // document workspace becomes an inline artifact (a rendered
                 // doc/slide viewer, or an image card). Emitted before the tool

@@ -155,7 +155,11 @@ export class MockBridge implements CoreBridge {
       this.snapshot.runs[run] = {
         id: run,
         status: "failed",
-        outcome: { status: "failed", error: "insufficient_credits: out of Clark credits" },
+        outcome: {
+          status: "failed",
+          error: "insufficient_credits: out of Clark credits",
+          failure_kind: "insufficient_credits",
+        },
         checkpoint: "mock-checkpoint-sha",
       };
       this.emit();

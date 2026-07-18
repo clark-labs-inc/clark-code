@@ -3,9 +3,15 @@ import {
   CODING_MODELS,
   DEFAULT_LOCAL_SETTINGS,
   REASONING_EFFORTS,
+  normalizeReasoningEffort,
+  reasoningEffortsForModel,
   modelLabel,
   effectiveModelSettings,
+  loadLocalSettings,
   loadChatModels,
+  loadOrchestrationEnabled,
+  localConnectConfig,
+  saveOrchestrationEnabled,
   saveChatModels,
   type ChatModelOverride,
 } from "./localAgent";
@@ -55,8 +61,48 @@ describe("Clark Code model settings", () => {
     ]);
   });
 
-  it("offers only the portable High and Max reasoning overrides", () => {
-    expect(REASONING_EFFORTS.map(({ id }) => id)).toEqual(["", "high", "xhigh"]);
+  it("keeps a label for every OpenRouter effort used by the model catalog", () => {
+    expect(REASONING_EFFORTS.map(({ id }) => id)).toEqual([
+      "", "max", "xhigh", "high", "medium", "low",
+    ]);
+  });
+
+  it("exposes each model's current OpenRouter reasoning levels", () => {
+    expect(reasoningEffortsForModel("clark-code").map(({ id }) => id))
+      .toEqual(["", "xhigh", "high"]);
+    expect(reasoningEffortsForModel("clark-code:kimi_k3").map(({ id }) => id))
+      .toEqual(["max"]);
+    expect(reasoningEffortsForModel("clark-code:kimi_k27_code")).toEqual([]);
+    expect(reasoningEffortsForModel("clark-code:grok45").map(({ id }) => id))
+      .toEqual(["high", "medium", "low"]);
+    expect(reasoningEffortsForModel("clark-code:deepseek_v4_pro").map(({ id }) => id))
+      .toEqual(["", "xhigh", "high"]);
+  });
+
+  it("normalizes stale effort choices when the selected model changes", () => {
+    expect(normalizeReasoningEffort("clark-code:kimi_k3", "xhigh")).toBe("max");
+    expect(normalizeReasoningEffort("clark-code:kimi_k27_code", "high")).toBe("");
+    expect(normalizeReasoningEffort("clark-code:grok45", "xhigh")).toBe("high");
+  });
+
+  it("drops the obsolete OpenRouter endpoint from legacy saved settings", () => {
+    store.setItem(
+      "clark-desktop:local-agent",
+      JSON.stringify({
+        ...DEFAULT_LOCAL_SETTINGS,
+        cwd: "/tmp/project",
+        apiKey: "ck_live_test",
+        baseUrl: "https://openrouter.ai/api/v1",
+      }),
+    );
+
+    expect(loadLocalSettings()).toEqual({
+      ...DEFAULT_LOCAL_SETTINGS,
+      cwd: "/tmp/project",
+      apiKey: "ck_live_test",
+    });
+    expect(loadLocalSettings()).not.toHaveProperty("baseUrl");
+    expect(JSON.parse(store.getItem("clark-desktop:local-agent")!)).not.toHaveProperty("baseUrl");
   });
 });
 
@@ -102,5 +148,23 @@ describe("chat model overrides round-trip localStorage", () => {
     });
     saveChatModels({});
     expect(loadChatModels()).toEqual({});
+  });
+});
+
+describe("read-only orchestration opt-in", () => {
+  it("is disabled by default and reaches only local connect configs", () => {
+    expect(loadOrchestrationEnabled()).toBe(false);
+    expect(localConnectConfig({ ...DEFAULT_LOCAL_SETTINGS, cwd: "/repo" }).extra)
+      .toMatchObject({ orchestration: { enabled: false } });
+
+    saveOrchestrationEnabled(true);
+    expect(loadOrchestrationEnabled()).toBe(true);
+    expect(localConnectConfig({ ...DEFAULT_LOCAL_SETTINGS, cwd: "/repo" }).extra)
+      .toMatchObject({ orchestration: { enabled: true } });
+
+    expect(localConnectConfig(
+      { ...DEFAULT_LOCAL_SETTINGS, cwd: "/repo" },
+      { ws_url: "ws://127.0.0.1:1", token: "secret", cwd: "/remote/repo" },
+    ).extra).toMatchObject({ orchestration: { enabled: false } });
   });
 });

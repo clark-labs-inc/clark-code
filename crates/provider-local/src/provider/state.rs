@@ -5,6 +5,7 @@ use super::*;
 impl LocalAgentProvider {
     pub fn new() -> Self {
         Self {
+            isolation: ProviderIsolation::default(),
             config: None,
             llm: None,
             registry: None,

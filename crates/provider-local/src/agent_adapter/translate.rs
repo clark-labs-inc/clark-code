@@ -251,26 +251,24 @@ pub(super) fn stream_error(error: LlmError) -> (ca::stream::StreamErrorKind, Str
             "insufficient_credits: You're out of Clark credits. Add credits to keep coding."
                 .to_string(),
         ),
-        LlmError::Message(message) if is_context_overflow_message(&message) => {
-            // Typed so the engine's overflow recovery (force-compact + retry
-            // the turn) can catch it instead of failing the run outright.
+        LlmError::PlatformKeyRejected(message) => (
+            ca::stream::StreamErrorKind::Fatal,
+            format!("platform_key_rejected:{message}"),
+        ),
+        LlmError::RateLimited(message) => {
+            (ca::stream::StreamErrorKind::ProviderRateLimited, message)
+        }
+        LlmError::Transport(message) => (ca::stream::StreamErrorKind::Transient, message),
+        LlmError::Provider(message) => (
+            ca::stream::StreamErrorKind::Fatal,
+            format!("provider_error:{message}"),
+        ),
+        // Typed so the engine's overflow recovery (force-compact + retry the
+        // turn) can catch it instead of failing the run outright.
+        LlmError::ContextOverflow(message) => {
             (ca::stream::StreamErrorKind::ContextOverflow, message)
         }
-        LlmError::Message(message) => (ca::stream::StreamErrorKind::Fatal, message),
     }
-}
-
-/// Whether a provider error says the prompt exceeded the model's context
-/// window. OpenAI-compatible backends phrase it differently — OpenRouter/
-/// OpenAI use `context_length_exceeded` and "maximum context length is N
-/// tokens"; others say "context window" or "too many tokens".
-pub(super) fn is_context_overflow_message(message: &str) -> bool {
-    let lower = message.to_ascii_lowercase();
-    lower.contains("context_length_exceeded")
-        || lower.contains("context length")
-        || lower.contains("context window")
-        || lower.contains("exceeds the maximum number of tokens")
-        || (lower.contains("too many tokens") && !lower.contains("rate"))
 }
 
 pub(super) fn tool_result_blocks_to_content(
@@ -465,19 +463,22 @@ mod tests {
     }
 
     #[test]
-    fn context_overflow_messages_map_to_the_typed_stream_error() {
-        for message in [
-            "model stream error (400): This endpoint's maximum context length is 128000 tokens. However, you requested 190000 tokens.",
-            "context_length_exceeded",
-            "the prompt exceeds the model's context window",
-        ] {
-            let (kind, _) = stream_error(LlmError::Message(message.to_string()));
-            assert!(
-                matches!(kind, ca::stream::StreamErrorKind::ContextOverflow),
-                "{message} should classify as overflow"
-            );
-        }
-        let (kind, _) = stream_error(LlmError::Message("connection reset".into()));
+    fn typed_llm_failures_map_to_typed_stream_errors() {
+        let (kind, _) = stream_error(LlmError::ContextOverflow("too large".into()));
+        assert!(matches!(kind, ca::stream::StreamErrorKind::ContextOverflow));
+
+        let (kind, _) = stream_error(LlmError::Transport("connection reset".into()));
+        assert!(matches!(kind, ca::stream::StreamErrorKind::Transient));
+
+        let (kind, _) = stream_error(LlmError::RateLimited("busy".into()));
+        assert!(matches!(
+            kind,
+            ca::stream::StreamErrorKind::ProviderRateLimited
+        ));
+
+        let (kind, message) =
+            stream_error(LlmError::PlatformKeyRejected("401 Unauthorized".into()));
         assert!(matches!(kind, ca::stream::StreamErrorKind::Fatal));
+        assert!(message.starts_with("platform_key_rejected:"));
     }
 }

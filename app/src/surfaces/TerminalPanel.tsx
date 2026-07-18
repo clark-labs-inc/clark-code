@@ -6,6 +6,7 @@ import { SquareTerminal, X, Plus } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
 import { projectName } from "../lib/localAgent";
 import { cn } from "../lib/cn";
+import { documentTextSize, TERMINAL_FONT_SIZES } from "../lib/useTextSize";
 import {
   isTauri,
   openTerminal,
@@ -33,7 +34,7 @@ function readTheme() {
   };
 }
 
-type TermTab = { id: string; n: number };
+type TermTab = { id: string; n: number; cwd?: string };
 
 /** One live terminal: its own xterm instance + PTY, created on mount and torn
  *  down on unmount (closing the tab). Kept mounted while inactive — only its
@@ -51,7 +52,7 @@ function TerminalInstance({ id, cwd, active }: { id: string; cwd?: string; activ
 
     const term = new XTerm({
       fontFamily: MONO,
-      fontSize: 12.5,
+      fontSize: TERMINAL_FONT_SIZES[documentTextSize()],
       lineHeight: 1.2,
       cursorBlink: true,
       scrollback: 5000,
@@ -95,8 +96,18 @@ function TerminalInstance({ id, cwd, active }: { id: string; cwd?: string; activ
 
     const mo = new MutationObserver(() => {
       term.options.theme = readTheme();
+      term.options.fontSize = TERMINAL_FONT_SIZES[documentTextSize()];
+      try {
+        fit.fit();
+        void resizeTerminal(id, term.cols, term.rows);
+      } catch {
+        /* host hidden or not laid out */
+      }
     });
-    mo.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+    mo.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["class", "data-text-size"],
+    });
 
     return () => {
       disposed = true;
@@ -137,15 +148,33 @@ function TerminalInstance({ id, cwd, active }: { id: string; cwd?: string; activ
 export function TerminalPanel() {
   const open = useSessionStore((s) => s.terminalOpen);
   const setOpen = useSessionStore((s) => s.setTerminalOpen);
-  const cwd = useSessionStore((s) => s.activeProjectRoot ?? "");
+  // Tabs root at the active session's project; with no session (the start
+  // screen) they root at the folder picked for the next session.
+  const cwd = useSessionStore((s) => s.activeProjectRoot ?? s.localSettings.cwd);
   const remote = useSessionStore((s) => s.activeRemote !== null);
+  const launchNonce = useSessionStore((s) => s.terminalLaunch?.nonce ?? 0);
 
   // Monotonic label counter so tab names stay stable as tabs open/close.
   const counter = useRef(0);
-  const makeTab = (): TermTab => ({ id: crypto.randomUUID(), n: ++counter.current });
+  const makeTab = (tabCwd?: string): TermTab => ({ id: crypto.randomUUID(), n: ++counter.current, cwd: tabCwd });
   const [tabs, setTabs] = useState<TermTab[]>(() => [makeTab()]);
   const [activeId, setActiveId] = useState<string>(() => tabs[0].id);
   const active = tabs.some((t) => t.id === activeId) ? activeId : tabs[0]?.id;
+
+  // A sidebar "open terminal in this project" click lands here as a launch
+  // request: open a FRESH tab rooted at that folder (existing tabs keep their
+  // own roots) and focus it. The ref skips the request that was current at
+  // mount, so a remount (close/reopen) never re-fires a stale launch.
+  const seenLaunch = useRef(launchNonce);
+  useEffect(() => {
+    if (launchNonce === 0 || launchNonce === seenLaunch.current) return;
+    seenLaunch.current = launchNonce;
+    const launchCwd = useSessionStore.getState().terminalLaunch?.cwd;
+    const t = makeTab(launchCwd);
+    setTabs((prev) => [...prev, t]);
+    setActiveId(t.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [launchNonce]);
 
   const addTab = () => {
     const t = makeTab();
@@ -231,7 +260,9 @@ export function TerminalPanel() {
         <div className="relative min-h-0 flex-1">
           {tabs.map((t) => (
             <div key={t.id} className={cn("absolute inset-0", t.id !== active && "hidden")}>
-              <TerminalInstance id={t.id} cwd={cwd || undefined} active={t.id === active} />
+              {/* A tab launched "in project X" keeps that root forever; other
+                  tabs follow the current session/picked folder. */}
+              <TerminalInstance id={t.id} cwd={t.cwd ?? (cwd || undefined)} active={t.id === active} />
             </div>
           ))}
         </div>

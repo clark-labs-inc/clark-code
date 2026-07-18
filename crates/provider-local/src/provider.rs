@@ -3,6 +3,7 @@
 //! session is bound to a project root; each prompt drives a local tool-calling
 //! loop ([`crate::engine`]) whose normalized events stream back to the UI.
 
+mod isolation;
 mod prompt_input;
 mod state;
 
@@ -32,6 +33,7 @@ use crate::prompt::system_prompt;
 use crate::sandbox::Sandbox;
 use crate::tools::{ReadTracker, ToolCtx, ToolRegistry};
 
+use isolation::ProviderIsolation;
 use prompt_input::*;
 
 // The Plan Mode workflow reminder and its exit note live in
@@ -40,6 +42,7 @@ use prompt_input::*;
 // mode can flip mid-session via Shift+Tab or a plan approval.
 
 pub struct LocalAgentProvider {
+    isolation: ProviderIsolation,
     config: Option<LocalConfig>,
     llm: Option<LlmClient>,
     registry: Option<Arc<ToolRegistry>>,
@@ -88,6 +91,7 @@ impl Provider for LocalAgentProvider {
     }
 
     async fn connect(&mut self, config: ProviderConfig) -> Result<()> {
+        self.isolation = ProviderIsolation::from_provider_config(&config);
         let local = LocalConfig::from_provider_config(&config);
         let llm = LlmClient::new(&local).map_err(Error::Other)?;
         let memory = local
@@ -102,16 +106,23 @@ impl Provider for LocalAgentProvider {
                 }),
             });
         let mut registry = ToolRegistry::new(local.clark.clone(), memory);
-        if let Some(api_key) = local.api_key.clone() {
-            registry.enable_organization_knowledge(
-                crate::tools::organization_knowledge::OrganizationKnowledgeConfig {
-                    base_url: local.base_url.clone(),
-                    api_key,
-                },
-            );
+        if !self.isolation.disposable_writer() {
+            if let Some(api_key) = local.api_key.clone() {
+                registry.enable_organization_knowledge(
+                    crate::tools::organization_knowledge::OrganizationKnowledgeConfig {
+                        base_url: local.base_url.clone(),
+                        api_key,
+                    },
+                );
+            }
         }
         if local.browser_enabled {
             registry.enable_browser();
+        }
+        if local.orchestration.enabled {
+            registry.enable_orchestration(
+                crate::orchestration::OrchestrationToolsConfig::from_local(&local),
+            );
         }
         // Connect MCP servers and register their tools (failures are non-fatal).
         self.mcp_status = registry.connect_mcp(&local.mcp_servers).await;
@@ -149,7 +160,7 @@ impl Provider for LocalAgentProvider {
         // path). Extend the sandbox to permit writes there in addition to the
         // project root; the prompt then points the agent at it for documents.
         let mut sandbox = sandbox;
-        if config.remote.is_none() {
+        if config.remote.is_none() && !self.isolation.disposable_writer() {
             if let Some(ws) = crate::workspace::session_workspace(id.as_str()) {
                 if std::fs::create_dir_all(&ws).is_ok() {
                     sandbox = sandbox.with_docs(ws);
@@ -182,13 +193,20 @@ impl Provider for LocalAgentProvider {
         if let Some(docs) = sandbox.docs_root() {
             prompt.push_str(&crate::workspace::prompt_section(docs));
         }
-        // Surface the user's Claude Code skills (read `.claude` through the
-        // session executor — the local disk, or the remote host over the tunnel).
-        if let Some(skills) =
-            crate::claude_import::skills_prompt_section(self.executor.as_ref(), sandbox.root())
-                .await
-        {
-            prompt.push_str(&skills);
+        if config.orchestration.enabled {
+            prompt.push_str(crate::orchestration::prompt_section());
+        }
+        // Surface compatible Codex and Claude skills through the session
+        // executor — local disk or the remote host over the SSH tunnel.
+        if !self.isolation.disposable_writer() {
+            if let Some(skills) = crate::external_import::skills_prompt_section(
+                self.executor.as_ref(),
+                sandbox.root(),
+            )
+            .await
+            {
+                prompt.push_str(&skills);
+            }
         }
         // Durable memory, when enabled: list the project scope (through the
         // session executor — local or remote) and the global scope (always
@@ -243,7 +261,11 @@ impl Provider for LocalAgentProvider {
         // union with the global (UI-driven) ones; deny always wins because
         // `PermissionGate::hard_refusal` checks `deny_commands` before
         // `command_preapproved` checks `allow_commands`.
-        let project = crate::project_settings::load(self.executor.as_ref(), sandbox.root()).await;
+        let project = if self.isolation.disposable_writer() {
+            crate::project_settings::ProjectSettings::default()
+        } else {
+            crate::project_settings::load(self.executor.as_ref(), sandbox.root()).await
+        };
         {
             let mut s = self.session.lock().await;
             s.system_prompt = prompt;
@@ -254,6 +276,7 @@ impl Provider for LocalAgentProvider {
             s.plan_mode = options.mode.as_deref() == Some("plan");
             s.plan_exited = false;
             s.steering = None;
+            s.active_execution = None;
             s.goal = None;
             s.policy = config.permissions.clone();
             s.allow_commands = crate::project_settings::union_unique(
@@ -458,6 +481,7 @@ impl Provider for LocalAgentProvider {
             temperature: config.temperature,
             user_text: text,
             memory_extraction,
+            execution: config.execution,
         };
         tokio::spawn(run_turn(tc, tx, run));
         Ok(rx.boxed())

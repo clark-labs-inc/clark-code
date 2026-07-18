@@ -271,6 +271,49 @@ pub enum RunStatus {
     Failed,
 }
 
+/// Machine-readable reason a run failed. Providers classify failures at their
+/// transport boundary so presentation never has to infer auth, rate limits, or
+/// provider state from human-readable error text.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RunFailureKind {
+    SessionExpired,
+    PlatformKeyRejected,
+    ProviderError,
+    RateLimited,
+    TransportError,
+    ContextOverflow,
+    InsufficientCredits,
+    ToolFatal,
+    LocalState,
+    EmptyResponse,
+}
+
+/// Terminal result of a run.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct RunExecutionSummary {
+    /// Stable identity for the root execution tree. A normal single-agent run
+    /// has this root and no children.
+    pub execution_id: String,
+    pub root_path: String,
+    pub attempts: u32,
+    pub recoveries: u32,
+    #[serde(default)]
+    pub child_executions: u32,
+    #[serde(default)]
+    pub completed_children: u32,
+    #[serde(default)]
+    pub failed_children: u32,
+    pub weighted_tokens: f64,
+    pub cost_usd: f64,
+    #[serde(default)]
+    pub changed_paths: Vec<String>,
+    #[serde(default)]
+    pub completed_tools: Vec<String>,
+    #[serde(default)]
+    pub failed_tools: Vec<String>,
+}
+
 /// Terminal result of a run.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct RunOutcome {
@@ -279,10 +322,16 @@ pub struct RunOutcome {
     pub stop_reason: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure_kind: Option<RunFailureKind>,
     /// Token/cost accounting summed over the run's model calls, when the
     /// provider surfaces it (the local coding loop does).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage: Option<RunUsage>,
+    /// Runtime-derived execution receipt. Providers that do not expose a root
+    /// lifecycle ledger leave this absent for backwards compatibility.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution: Option<RunExecutionSummary>,
 }
 
 /// Aggregated model usage for one run.
@@ -429,4 +478,31 @@ pub enum AgentEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         run: Option<RunId>,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn run_failure_kind_is_machine_readable_and_backward_compatible() {
+        let outcome = RunOutcome {
+            status: RunStatus::Failed,
+            stop_reason: None,
+            error: Some("raw provider detail".into()),
+            failure_kind: Some(RunFailureKind::PlatformKeyRejected),
+            usage: None,
+            execution: None,
+        };
+        let json = serde_json::to_value(&outcome).unwrap();
+        assert_eq!(json["failure_kind"], "platform_key_rejected");
+
+        let legacy: RunOutcome = serde_json::from_value(serde_json::json!({
+            "status": "failed",
+            "error": "old untyped error"
+        }))
+        .unwrap();
+        assert_eq!(legacy.failure_kind, None);
+        assert_eq!(legacy.execution, None);
+    }
 }
