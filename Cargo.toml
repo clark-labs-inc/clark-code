@@ -14,7 +14,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.57"
+version = "0.1.58"
 edition = "2021"
 license = "Apache-2.0"
 repository = "https://github.com/clark/clark-desktop"
