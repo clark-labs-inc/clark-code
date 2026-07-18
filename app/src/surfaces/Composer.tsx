@@ -379,7 +379,7 @@ function QueuedMessages({ onEdit }: { onEdit: (q: QueuedMessage) => void }) {
   const removeQueued = useSessionStore((s) => s.removeQueued);
   if (queued.length === 0) return null;
   return (
-    <div className="mx-auto mb-2 max-w-3xl">
+    <div className="mx-auto mb-2 max-w-2xl">
       <div className="mb-1 px-1 text-xs font-medium uppercase tracking-wide text-ink-faint">
         Queued · sends when Clark finishes
       </div>
@@ -712,13 +712,13 @@ export function Composer() {
     <div className="bg-bg px-6 pb-4 pt-2.5" {...handlers}>
       <QueuedMessages onEdit={editQueued} />
       {!session && (
-        <div className="mx-auto mb-2 max-w-3xl">
+        <div className="mx-auto mb-2 max-w-2xl">
           <EnvironmentPicker />
         </div>
       )}
       <div
         className={cn(
-          "relative mx-auto max-w-3xl rounded-[22px] border border-border-subtle bg-bg-elevated px-4 py-2.5 shadow-soft transition duration-200 ease-clark",
+          "relative mx-auto max-w-2xl rounded-[22px] border border-border-subtle bg-bg-elevated px-4 py-1.5 shadow-soft transition duration-200 ease-clark",
           dragging
             ? "ring-2 ring-accent/40"
             : "ring-4 ring-transparent focus-within:border-accent/30 focus-within:ring-accent-subtle",
@@ -778,10 +778,10 @@ export function Composer() {
                 : "Ask Clark anything about this project…"
           }
           disabled={connecting}
-          className="composer-input max-h-52 w-full resize-none bg-transparent px-0.5 py-1.5 text-base leading-relaxed text-ink outline-none placeholder:text-ink-muted disabled:opacity-50"
+          className="composer-input max-h-52 w-full resize-none bg-transparent px-0.5 py-0.5 text-base leading-[1.5] text-ink outline-none placeholder:text-ink-muted disabled:opacity-50"
         />
 
-        <div className="mt-1.5 flex items-center justify-between gap-2">
+        <div className="mt-0.5 flex items-center justify-between gap-2">
           <div className="flex items-center gap-1">
             <button
               onClick={() => fileRef.current?.click()}
@@ -802,7 +802,7 @@ export function Composer() {
               <button
                 onClick={() => void cancelActive()}
                 aria-label="Stop"
-                className="grid size-10 shrink-0 place-items-center rounded-full bg-danger/12 text-danger transition duration-200 ease-clark hover:bg-danger/20"
+                className="grid size-8 shrink-0 place-items-center rounded-full bg-danger/12 text-danger transition duration-200 ease-clark hover:bg-danger/20"
               >
                 <Square className="size-3 fill-current" />
               </button>
@@ -812,7 +812,7 @@ export function Composer() {
                 disabled={!canSend}
                 aria-label={busy ? "Queue message" : "Send"}
                 title={busy ? "Queue message (sends when Clark finishes)" : "Send · ⇧↵ newline"}
-                className="grid size-10 shrink-0 place-items-center rounded-full bg-accent text-on-accent shadow-soft transition duration-200 ease-clark hover:-translate-y-0.5 hover:bg-accent-hover active:translate-y-0 disabled:translate-y-0 disabled:bg-bg-tertiary disabled:text-ink-muted disabled:shadow-none"
+                className="grid size-8 shrink-0 place-items-center rounded-full bg-accent text-on-accent shadow-soft transition duration-200 ease-clark hover:-translate-y-0.5 hover:bg-accent-hover active:translate-y-0 disabled:translate-y-0 disabled:bg-bg-tertiary disabled:text-ink-muted disabled:shadow-none"
               >
                 {busy ? <CornerDownRight className="size-4" /> : <ArrowUp className="size-4" />}
               </button>
@@ -826,7 +826,7 @@ export function Composer() {
       {!session && (startError || startBlocked) && (
         <p
           className={cn(
-            "mx-auto mt-2 max-w-3xl px-1 text-xs",
+            "mx-auto mt-2 max-w-2xl px-1 text-xs",
             startError ? "text-danger" : "text-ink-faint",
           )}
         >

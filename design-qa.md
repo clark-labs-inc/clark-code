@@ -44,6 +44,50 @@ final result: passed
 
 ---
 
+# Codex-like Typography and Spacing Design QA
+
+- Source visual truth: `/tmp/codex-remote-attachments/019f72e1-2841-73c1-8058-7b131ccb3187/AAB29689-95AB-4E2B-969C-E7B24A1EB557/1-Photo-1.jpg`
+- Original Clark reference: `/tmp/codex-remote-attachments/019f72e1-2841-73c1-8058-7b131ccb3187/AAB29689-95AB-4E2B-969C-E7B24A1EB557/2-Photo-2.jpg`
+- Implementation screenshot: `/tmp/clark-type-qa/clark-dark-transcript-final.jpg`
+- Full-view comparison: `/tmp/clark-type-qa/codex-vs-clark-final-full.jpg`
+- Focused text comparison: `/tmp/clark-type-qa/codex-vs-clark-final-text.jpg`
+- Viewport: 1280 × 755.
+- State: Codex light-theme completed transcript compared with Clark Code dark-theme completed demo transcript. Content and theme intentionally differ; typography scale, hierarchy, line measure, and spacing rhythm are the fidelity targets.
+
+## Findings
+
+No actionable P0, P1, or P2 differences remain for the requested typography and spacing scope.
+
+- Fonts and typography: passed. Clark keeps its existing DM Sans product face and Newsreader display face, but the desktop scale now uses an 11px / 12px / 13px UI hierarchy, regular 400 body weight, 13px assistant copy, 20.8px answer line height, and normal letter spacing. This matches the compact, crisp hierarchy in the Codex reference without copying its light theme or font family.
+- Spacing and layout rhythm: passed. The conversation, start screen, environment controls, queued messages, and composer now share a 42rem maximum reading width. Transcript blocks have a consistent 16px gap; Markdown paragraphs and lists use 10px separation; headings receive a clearer 16px lead-in. The cold-loaded composer is 78px tall instead of the original oversized card.
+- Colors and visual tokens: passed for scope. Clark intentionally retains its black surfaces, violet interaction state, and current contrast tokens; the white Codex palette was not copied.
+- Image quality and asset fidelity: passed. Neither reference requires new raster assets, logos, or illustrations. Existing library icons remain crisp at the smaller scale.
+- Copy and content: passed for scope. Clark-specific plan, tool, project, permission, and model copy remains unchanged. The demo transcript differs from the supplied Codex transcript, so textual line breaks were assessed by scale and line measure rather than exact sentence matching.
+- Accessibility and interaction: passed for the inspected states. New session submission, the mock run, dark theme, and the settled composer were exercised at the target viewport. The browser console reported no errors. Screenshot evidence alone does not prove every OS text-scaling or keyboard-focus combination.
+
+## Comparison History
+
+1. Initial P1: the supplied Clark screen and source used a 16px base scale with a 450 default weight, making navigation and transcript text materially larger and heavier than Codex. A later density pass had tightened gaps around that enlarged type, producing a heavy-but-cramped rhythm.
+2. First fix: reduced the base to 14px/400, narrowed the reading column, restored Markdown section spacing, and reduced the start-screen headline. The first rendered comparison found a remaining P2: Clark's body copy and 101px composer were still visibly larger than the Codex reference.
+3. Final fix: reduced the desktop base to 13px, aligned the supporting UI steps to 11px and 12px, tightened answer line height to 1.6, and reduced the cold-loaded composer to 78px with a consistent 32px action row.
+4. Post-fix evidence: `/tmp/clark-type-qa/codex-vs-clark-final-full.jpg` and `/tmp/clark-type-qa/codex-vs-clark-final-text.jpg`. The final dark Clark screen now has comparable compactness, optical weight, and vertical rhythm without losing its own theme.
+
+## Verification
+
+- TypeScript typecheck passed.
+- 27 Vitest files and 143 tests passed.
+- Production Vite build passed.
+- Demo conversation submission and completion passed at 1280 × 755.
+- Browser console errors: none.
+
+## Follow-up Polish
+
+- P3: evaluate the final scale on Windows WebView at 100% and 125% display scaling before the next desktop release.
+
+final result: passed
+
+---
+
 # Sidebar Design QA
 
 - Source visual truth: `/var/folders/sx/5vx_xn5j0c31t3jw27sjtnqc0000gn/T/TemporaryItems/NSIRD_screencaptureui_R3OM3B/Screenshot 2026-07-13 at 8.43.09 PM.png`

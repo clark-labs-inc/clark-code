@@ -55,13 +55,13 @@ export function StartCard() {
         initial={reduce ? false : { opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: reduce ? 0 : DUR.slow, ease: EASE.out }}
-        className="mx-auto w-full max-w-3xl px-6 pb-6 pt-10"
+        className="mx-auto w-full max-w-2xl px-6 pb-6 pt-10"
       >
         <div className="mb-6">
           <div className="mb-2.5 text-xs font-semibold uppercase tracking-[0.16em] text-accent">
             Clark Code
           </div>
-          <h1 className="font-display max-w-xl text-4xl leading-[1.08] text-ink">
+          <h1 className="font-display max-w-xl text-3xl leading-[1.12] text-ink">
             {daypart()}, {firstName}.
           </h1>
           <p className="mt-2 max-w-lg text-base text-ink-muted">
@@ -118,7 +118,7 @@ function SessionRow({ c }: { c: ConversationMeta }) {
   return (
     <button
       onClick={() => void open(c.id)}
-      className="group flex min-h-12 items-center gap-3 px-4 py-3 text-left transition duration-200 ease-clark hover:bg-accent-subtle"
+      className="group flex min-h-11 items-center gap-3 px-4 py-2.5 text-left transition duration-200 ease-clark hover:bg-accent-subtle"
     >
       <Icon className="size-4 shrink-0 text-ink-faint" />
       <span className="min-w-0 flex-1 truncate text-sm text-ink">{c.title}</span>
