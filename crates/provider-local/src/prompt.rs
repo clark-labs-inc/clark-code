@@ -229,14 +229,25 @@ pub(crate) fn goal_budget_limit_reminder(goal: &crate::loop_state::SessionGoal) 
 }
 
 /// Build the one system message for a session rooted at `sandbox`.
-pub fn system_prompt(sandbox: &Sandbox, research_available: bool) -> String {
+pub fn system_prompt(sandbox: &Sandbox, research_available: bool, remote: bool) -> String {
     let root = sandbox.root().display();
     let mut p = String::new();
 
-    p.push_str(
-        "You are a coding agent operating directly on the user's local machine and codebase. \
+    if remote {
+        p.push_str(
+            "You are a coding agent operating directly on an SSH-connected remote computer and \
+its codebase. File and shell tools execute on that remote computer, not on the computer running \
+Clark Desktop. Desktop-only Android emulator and iOS simulator tools are intentionally unavailable in \
+this session. Never fall back to the desktop machine. If a requested workflow needs SDKs, \
+emulators, or other dependencies, inspect the remote computer and set them up there with your \
+shell tools when that is within the user's request.\n\n",
+        );
+    } else {
+        p.push_str(
+            "You are a coding agent operating directly on the user's local machine and codebase. \
 You write and modify real files and run real commands on their computer.\n\n",
-    );
+        );
+    }
 
     // Hard rules first: instructions at the very start of the prompt carry
     // the most weight, and these must veto anything that comes later.
@@ -333,7 +344,7 @@ mod tests {
     fn includes_root_and_research_note_when_available() {
         let dir = tempfile::tempdir().unwrap();
         let sb = Sandbox::new(dir.path()).unwrap();
-        let p = system_prompt(&sb, true);
+        let p = system_prompt(&sb, true, false);
         assert!(p.contains("Project root:"));
         assert!(p.contains("clark_research"));
     }
@@ -342,15 +353,27 @@ mod tests {
     fn omits_research_note_when_unavailable() {
         let dir = tempfile::tempdir().unwrap();
         let sb = Sandbox::new(dir.path()).unwrap();
-        let p = system_prompt(&sb, false);
+        let p = system_prompt(&sb, false, false);
         assert!(!p.contains("clark_research"));
+    }
+
+    #[test]
+    fn remote_prompt_keeps_tools_and_setup_on_the_ssh_host() {
+        let dir = tempfile::tempdir().unwrap();
+        let sb = Sandbox::new_remote(dir.path().to_str().unwrap()).unwrap();
+        let p = system_prompt(&sb, false, true);
+        assert!(p.contains("SSH-connected remote computer"));
+        assert!(p.contains("Android emulator"));
+        assert!(p.contains("intentionally unavailable"));
+        assert!(p.contains("Never fall back to the desktop machine"));
+        assert!(!p.contains("operating directly on the user's local machine"));
     }
 
     #[test]
     fn includes_planning_guidance() {
         let dir = tempfile::tempdir().unwrap();
         let sb = Sandbox::new(dir.path()).unwrap();
-        let p = system_prompt(&sb, false);
+        let p = system_prompt(&sb, false, false);
         assert!(p.contains("update_plan"));
         // Plan Mode is discoverable from the stable prompt (both entry points).
         assert!(p.contains("enter_plan_mode"));
@@ -412,7 +435,7 @@ mod tests {
     fn includes_shared_tree_and_audience_guidance() {
         let dir = tempfile::tempdir().unwrap();
         let sb = Sandbox::new(dir.path()).unwrap();
-        let p = system_prompt(&sb, false);
+        let p = system_prompt(&sb, false, false);
         // Non-engineer audience + clarify-first.
         assert!(p.contains("# Working with the user"));
         assert!(p.contains("ONE short clarifying question"));

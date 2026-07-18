@@ -345,6 +345,15 @@ impl ToolRegistry {
         self.tools.push(Arc::new(browser::BrowserTool::new()));
     }
 
+    /// Remove device-control capabilities that are physically attached to the
+    /// Clark Desktop machine. Remote sessions must discover and operate any
+    /// mobile SDK or emulator on their SSH host through the remote shell.
+    pub fn disable_desktop_mobile_tools(&mut self) {
+        self.tools.retain(|tool| {
+            !tool.name().starts_with("android_") && !tool.name().starts_with("ios_")
+        });
+    }
+
     /// Register the opt-in read-only orchestration tools as one shared control
     /// plane. Disabled configurations never advertise either tool.
     pub fn enable_orchestration(&mut self, config: crate::orchestration::OrchestrationToolsConfig) {
@@ -624,6 +633,20 @@ mod tests {
                 "{name} should be mutating"
             );
         }
+    }
+
+    #[test]
+    fn remote_registry_does_not_expose_desktop_mobile_tools() {
+        let mut reg = ToolRegistry::new(None, None);
+        reg.disable_desktop_mobile_tools();
+        let names: Vec<_> = reg
+            .schemas()
+            .into_iter()
+            .map(|tool| tool.function.name)
+            .collect();
+        assert!(names.iter().all(|name| !name.starts_with("android_")));
+        assert!(names.iter().all(|name| !name.starts_with("ios_")));
+        assert!(names.iter().any(|name| name == "bash"));
     }
 
     #[test]

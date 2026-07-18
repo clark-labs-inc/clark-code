@@ -105,6 +105,8 @@ export interface CoreBridge {
   listFiles?(cwd: string, remote?: RemoteExecutorTarget | null): Promise<string[]>;
   /** Open a path in the OS default app, or reveal it in the file manager. */
   openPath?(path: string, reveal?: boolean): Promise<void>;
+  /** Create a named, sibling Git worktree and return its absolute path. */
+  createPermanentWorktree?(projectPath: string, name: string): Promise<string>;
 }
 
 export interface RemoteExecutorTarget {

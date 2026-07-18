@@ -362,6 +362,17 @@ export function addRecentProject(path: string): string[] {
   return next;
 }
 
+/** Forget one folder from the project list without touching its files or chats. */
+export function removeRecentProject(path: string): string[] {
+  const next = loadRecentProjects().filter((candidate) => candidate !== path.trim());
+  try {
+    localStorage.setItem(RECENTS_KEY, JSON.stringify(next));
+  } catch {
+    // Non-fatal.
+  }
+  return next;
+}
+
 /** The last path segment of a folder, for compact display. */
 export function projectName(path: string): string {
   const cleaned = path.replace(/[/\\]+$/, "");

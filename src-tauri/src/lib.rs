@@ -12,6 +12,7 @@ use tauri_plugin_deep_link::DeepLinkExt;
 
 mod commands;
 mod mobile_remote;
+mod project_worktree;
 // Public so the gated `tests/remote_e2e.rs` harness can drive the real
 // orchestration against a live host; otherwise host-internal.
 pub mod ssh;
@@ -130,6 +131,7 @@ pub fn run() {
             commands::read_image_data_url,
             commands::save_doc_text,
             commands::open_path,
+            project_worktree::project_worktree_create,
             commands::clark_exchange_google_idtoken,
             commands::clark_provision_code_key,
             commands::clark_billing_me,

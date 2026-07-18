@@ -106,6 +106,9 @@ impl Provider for LocalAgentProvider {
                 }),
             });
         let mut registry = ToolRegistry::new(local.clark.clone(), memory);
+        if local.remote.is_some() {
+            registry.disable_desktop_mobile_tools();
+        }
         if !self.isolation.disposable_writer() {
             if let Some(api_key) = local.api_key.clone() {
                 registry.enable_organization_knowledge(
@@ -179,7 +182,7 @@ impl Provider for LocalAgentProvider {
             None
         };
 
-        let mut prompt = system_prompt(&sandbox, config.clark.is_some());
+        let mut prompt = system_prompt(&sandbox, config.clark.is_some(), config.remote.is_some());
         self.instruction_snapshot =
             crate::instructions::load(self.executor.as_ref(), sandbox.root())
                 .await

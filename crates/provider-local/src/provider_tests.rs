@@ -176,6 +176,29 @@ async fn new_session_seeds_system_prompt_without_history() {
 }
 
 #[tokio::test]
+async fn remote_connect_hides_desktop_mobile_capabilities() {
+    let mut provider = LocalAgentProvider::new();
+    provider
+        .connect(ProviderConfig {
+            extra: serde_json::json!({
+                "remote": {
+                    "ws_url": "ws://127.0.0.1:9",
+                    "token": "test-token",
+                    "cwd": "/remote/project"
+                }
+            }),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+    let registry = provider.registry.as_ref().unwrap();
+    assert!(registry.get("android_boot_emulator").is_none());
+    assert!(registry.get("ios_boot_simulator").is_none());
+    assert!(registry.get("bash").is_some());
+}
+
+#[tokio::test]
 async fn orchestration_tools_and_rules_exist_only_when_explicitly_enabled() {
     let dir = tempfile::tempdir().unwrap();
     let mut disabled = LocalAgentProvider::new();

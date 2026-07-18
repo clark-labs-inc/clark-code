@@ -1,94 +1,33 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Plus, MessageSquare, Archive, ArchiveRestore, ChevronRight, PanelLeftClose, PanelLeft,
-  FolderGit2, FolderPlus, Server, Search, SquareTerminal, X, Trash2, Loader2, Library,
+  FolderPlus, Search, X, Trash2, Loader2, Library,
 } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
-import { projectName } from "../lib/localAgent";
+import { projectName, removeRecentProject } from "../lib/localAgent";
 import { useIsNarrow } from "../lib/responsive";
 import { fuzzyFilter } from "../lib/fuzzy";
 import { stableRankMap } from "../lib/stableOrder";
 import { cn } from "../lib/cn";
+import { getBridge } from "../core-bridge/bridge";
+import { openProjectPath } from "../lib/openPath";
+import {
+  groupSidebarProjects,
+  loadProjectSidebarPreferences,
+  saveProjectSidebarPreferences,
+  withProjectAlias,
+  withProjectPinned,
+  withoutProjectPreferences,
+  type ProjectGroup,
+  type ProjectSidebarPreferences,
+} from "../lib/projectSidebar";
 import { ProfileMenu } from "./ProfileMenu";
+import {
+  ProjectActionsMenu,
+  ProjectHeader,
+  type ProjectMenuPosition,
+} from "./ProjectActionsMenu";
 import type { ConversationMeta } from "../lib/history";
-
-type GroupKind = "remote" | "local" | "none";
-interface ProjectGroup {
-  key: string;
-  label: string;
-  title: string; // full path / host for the tooltip
-  kind: GroupKind;
-  /** The local folder behind the group (local projects only). */
-  path?: string;
-  convos: ConversationMeta[];
-  latest: number;
-}
-
-/** Group conversations by their project (remote host, local folder, or none).
- *  Order is STABLE: groups and the conversations within them keep the position
- *  they first appeared in this session, so a conversation streaming in parallel
- *  (its `updatedAt` bumping on every flush) never re-sorts the list out from
- *  under the user. `rank` maps each conversation id to its first-seen slot. */
-function groupByProject(list: ConversationMeta[], rank: (id: string) => number): ProjectGroup[] {
-  const map = new Map<string, ProjectGroup>();
-  for (const c of list) {
-    let key: string, label: string, title: string, kind: GroupKind;
-    if (c.remoteHost) {
-      key = `r:${c.remoteHost}`;
-      label = c.remoteHost;
-      title = `Remote · ${c.remoteHost}${c.project ? ` · ${c.project}` : ""}`;
-      kind = "remote";
-    } else if (c.project) {
-      key = `p:${c.project}`;
-      label = projectName(c.project);
-      title = c.project;
-      kind = "local";
-    } else {
-      key = "none";
-      label = "Other";
-      title = "Conversations without a project";
-      kind = "none";
-    }
-    let g = map.get(key);
-    if (!g) {
-      g = { key, label, title, kind, path: kind === "local" ? c.project : undefined, convos: [], latest: Infinity };
-      map.set(key, g);
-    }
-    g.convos.push(c);
-    // A group's slot is set by its newest member (smallest stable rank key) and
-    // never moves afterward — a parallel run's timestamp bump can't reshuffle it.
-    g.latest = Math.min(g.latest, rank(c.id));
-  }
-  const groups = [...map.values()];
-  for (const g of groups) g.convos.sort((a, b) => rank(a.id) - rank(b.id));
-  groups.sort((a, b) => a.latest - b.latest);
-  return groups;
-}
-
-function GroupHeader({ group }: { group: ProjectGroup }) {
-  const openProjectTerminal = useSessionStore((s) => s.openProjectTerminal);
-  const Icon = group.kind === "remote" ? Server : group.kind === "local" ? FolderGit2 : MessageSquare;
-  const path = group.kind === "local" ? group.path : undefined;
-  return (
-    <div
-      title={group.title}
-      className="group mb-0.5 mt-2 flex h-7 items-center gap-2 px-2 text-sm font-medium text-ink-secondary first:mt-0"
-    >
-      <Icon className="size-3.5 shrink-0 text-ink-muted" />
-      <span className="truncate">{group.label}</span>
-      {path && (
-        <button
-          onClick={() => void openProjectTerminal(path)}
-          title={`Set ${group.label} as the current project and open a terminal in it`}
-          aria-label={`Open terminal in ${group.label}`}
-          className="ml-auto grid size-5 shrink-0 place-items-center rounded-md text-ink-faint opacity-0 transition hover:bg-bg-sunken hover:text-ink group-hover:opacity-100 group-focus-within:opacity-100"
-        >
-          <SquareTerminal className="size-3.5" />
-        </button>
-      )}
-    </div>
-  );
-}
 
 function ConversationRow({
   c,
@@ -367,6 +306,10 @@ export function Sidebar({
   const runningIds = useSessionStore((s) => s.runningIds);
   const newConversation = useSessionStore((s) => s.endSession);
   const openProjectTerminal = useSessionStore((s) => s.openProjectTerminal);
+  const defaultProject = useSessionStore((s) => s.localSettings.cwd);
+  const setLocalSettings = useSessionStore((s) => s.setLocalSettings);
+  const recentProjects = useSessionStore((s) => s.recentProjects);
+  const flashNotice = useSessionStore((s) => s.flashNotice);
   const selectedIds = useSessionStore((s) => s.selectedConversationIds);
   const setSelection = useSessionStore((s) => s.setConversationSelection);
   const archiveSelected = useSessionStore((s) => s.archiveSelectedConversations);
@@ -374,6 +317,13 @@ export function Sidebar({
   const [filter, setFilter] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [archivedOpen, setArchivedOpen] = useState(false);
+  const [projectPreferences, setProjectPreferences] = useState<ProjectSidebarPreferences>(
+    () => loadProjectSidebarPreferences(),
+  );
+  const [projectMenu, setProjectMenu] = useState<{
+    group: ProjectGroup;
+    position: ProjectMenuPosition;
+  } | null>(null);
   // The right-click menu: positioned at the cursor; acts on the selection when
   // the right-clicked row is in it, else just that row.
   const [menu, setMenu] = useState<{ x: number; y: number; ids: string[] } | null>(null);
@@ -408,10 +358,45 @@ export function Sidebar({
     () => visible.filter((c) => c.archived).sort((a, b) => b.updatedAt - a.updatedAt),
     [visible],
   );
-  const groups = useMemo(() => groupByProject(activeConvos, rank), [activeConvos, rank]);
+  const rememberedProjects = useMemo(
+    () => defaultProject.trim()
+      ? [defaultProject.trim(), ...recentProjects.filter((path) => path !== defaultProject.trim())]
+      : recentProjects,
+    [defaultProject, recentProjects],
+  );
+  const groups = useMemo(
+    () => groupSidebarProjects(activeConvos, rememberedProjects, rank, projectPreferences, filter),
+    [activeConvos, rememberedProjects, rank, projectPreferences, filter],
+  );
+
+  const commitProjectPreferences = (next: ProjectSidebarPreferences) => {
+    saveProjectSidebarPreferences(next);
+    setProjectPreferences(next);
+  };
+
+  const openProjectMenu = (group: ProjectGroup, button: HTMLButtonElement) => {
+    if (projectMenu?.group.key === group.key) {
+      setProjectMenu(null);
+      return;
+    }
+    setMenu(null);
+    const rect = button.getBoundingClientRect();
+    const width = 240;
+    const estimatedHeight = group.path ? 212 : 152;
+    const left = Math.max(8, Math.min(rect.right + 6, window.innerWidth - width - 8));
+    const top = Math.max(8, Math.min(rect.top - 8, window.innerHeight - estimatedHeight - 8));
+    setProjectMenu({ group, position: { left, top } });
+  };
+
+  const archiveProjectChats = (group: ProjectGroup) => {
+    if (group.convos.length === 0) return;
+    setSelection(new Set(group.convos.map((conversation) => conversation.id)));
+    archiveSelected();
+  };
 
   const openContextMenu = (e: React.MouseEvent, id: string) => {
     e.preventDefault();
+    setProjectMenu(null);
     // Act on the whole selection when the right-clicked row is part of it;
     // otherwise the action targets just this row (and the selection becomes it,
     // so the visual matches what the menu will act on).
@@ -569,11 +554,11 @@ export function Sidebar({
           if (e.target === e.currentTarget && selectedIds.size > 0) setSelection(new Set());
         }}
       >
-        {conversations.length === 0 ? (
+        {conversations.length === 0 && groups.length === 0 ? (
           <p className="px-1 py-6 text-center text-xs text-ink-faint">
             {conversationsLoading ? "Loading conversations…" : "Your conversations will show up here."}
           </p>
-        ) : visible.length === 0 ? (
+        ) : visible.length === 0 && groups.length === 0 ? (
           <p className="px-1 py-6 text-center text-xs text-ink-faint">
             No conversations match “{filter}”.
           </p>
@@ -584,7 +569,12 @@ export function Sidebar({
             )}
             {groups.map((g) => (
               <section key={g.key}>
-                <GroupHeader group={g} />
+                <ProjectHeader
+                  group={g}
+                  menuOpen={projectMenu?.group.key === g.key}
+                  onOpenMenu={(button) => openProjectMenu(g, button)}
+                  onOpenTerminal={(path) => void openProjectTerminal(path)}
+                />
                 <div className="flex flex-col">
                   {g.convos.map((c) => (
                     <ConversationRow
@@ -682,6 +672,54 @@ export function Sidebar({
           onDelete={() => {
             setSelection(new Set(menu.ids));
             deleteSelected();
+          }}
+        />
+      )}
+
+      {projectMenu && (
+        <ProjectActionsMenu
+          key={projectMenu.group.key}
+          group={projectMenu.group}
+          position={projectMenu.position}
+          pinned={projectPreferences.pinned.includes(projectMenu.group.key)}
+          onClose={() => setProjectMenu(null)}
+          onPin={(pinned) =>
+            commitProjectPreferences(
+              withProjectPinned(projectPreferences, projectMenu.group.key, pinned),
+            )
+          }
+          onReveal={() => {
+            const path = projectMenu.group.path;
+            if (path) void openProjectPath(path, "", true);
+          }}
+          onCreateWorktree={async (name) => {
+            const path = projectMenu.group.path;
+            if (!path) throw new Error("A local project folder is required.");
+            const bridge = await getBridge();
+            if (!bridge.createPermanentWorktree) {
+              throw new Error("Permanent worktrees are available in the desktop app.");
+            }
+            const createdPath = await bridge.createPermanentWorktree(path, name);
+            await openProjectTerminal(createdPath);
+            flashNotice(`Created worktree ${projectName(createdPath)}`);
+          }}
+          onRename={(name) =>
+            commitProjectPreferences(
+              withProjectAlias(projectPreferences, projectMenu.group.key, name),
+            )
+          }
+          onArchive={() => archiveProjectChats(projectMenu.group)}
+          onRemove={() => {
+            archiveProjectChats(projectMenu.group);
+            const path = projectMenu.group.path;
+            if (path) {
+              if (defaultProject.trim() === path) setLocalSettings({ cwd: "" });
+              const next = removeRecentProject(path);
+              useSessionStore.setState({ recentProjects: next });
+            }
+            commitProjectPreferences(
+              withoutProjectPreferences(projectPreferences, projectMenu.group.key),
+            );
           }}
         />
       )}
