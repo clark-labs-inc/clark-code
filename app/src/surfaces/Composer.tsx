@@ -413,6 +413,7 @@ export function Composer() {
   const send = useSessionStore((s) => s.send);
   const removeQueued = useSessionStore((s) => s.removeQueued);
   const cancelActive = useSessionStore((s) => s.cancelActive);
+  const askSideQuestion = useSessionStore((s) => s.askSideQuestion);
   const cwd = useSessionStore((s) => s.activeProjectRoot ?? s.localSettings.cwd);
   const activeRemote = useSessionStore((s) => s.activeRemote);
   const remote = useMemo(
@@ -574,6 +575,15 @@ export function Composer() {
     setValue("");
     setPendingPastes([]);
     setEditTimelineIndex(null);
+    // `/btw <question>` — a forked side question that never interrupts the
+    // active run. Needs an open session (the fork reads its transcript), so
+    // route it only once a session exists; otherwise let the normal start
+    // flow open one and the user re-sends. Takes precedence over edit/resend.
+    const btw = t.match(/^\s*\/btw\s+(\S[\s\S]*)/);
+    if (btw && session) {
+      await askSideQuestion(btw[1].trim());
+      return;
+    }
     // No session yet → start one on the selected environment, then send. If the
     // connect fails (SSH down, bad folder…) the composer has remounted by then —
     // stage the text as a prefill so the user's task is never lost.

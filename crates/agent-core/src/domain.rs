@@ -385,6 +385,25 @@ impl PendingUpload {
                 "application/json" | "application/xml" | "application/javascript"
             )
     }
+
+    /// The presentation echo for the conversation timeline. Images carry their
+    /// (composer-downscaled) bytes so the UI can render a thumbnail; every
+    /// other file becomes a data-less link chip, so a multi-MB binary never
+    /// lands in the snapshot that hosts clone and re-emit per streamed token.
+    pub fn echo_block(&self) -> ContentBlock {
+        if self.is_image() {
+            ContentBlock::Image {
+                mime_type: self.content_type.clone(),
+                data: self.data_base64.clone(),
+                uri: None,
+            }
+        } else {
+            ContentBlock::ResourceLink {
+                uri: format!("attachment://{}", self.filename),
+                name: Some(self.filename.clone()),
+            }
+        }
+    }
 }
 
 /// Lifecycle of one child agent in a parallel `subagent_map` fan-out.
@@ -521,5 +540,35 @@ mod tests {
         .unwrap();
         assert_eq!(legacy.failure_kind, None);
         assert_eq!(legacy.execution, None);
+    }
+
+    #[test]
+    fn pending_upload_echo_block_keeps_bytes_only_for_images() {
+        let image = PendingUpload {
+            filename: "shot.webp".into(),
+            content_type: "image/webp".into(),
+            data_base64: "aGVsbG8".into(),
+        };
+        assert_eq!(
+            image.echo_block(),
+            ContentBlock::Image {
+                mime_type: "image/webp".into(),
+                data: "aGVsbG8".into(),
+                uri: None,
+            }
+        );
+
+        let pdf = PendingUpload {
+            filename: "spec.pdf".into(),
+            content_type: "application/pdf".into(),
+            data_base64: "huge".into(),
+        };
+        assert_eq!(
+            pdf.echo_block(),
+            ContentBlock::ResourceLink {
+                uri: "attachment://spec.pdf".into(),
+                name: Some("spec.pdf".into()),
+            }
+        );
     }
 }

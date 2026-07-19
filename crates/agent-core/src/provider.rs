@@ -223,4 +223,17 @@ pub trait Provider: Send + Sync {
     async fn set_output_style(&mut self, _session: &SessionId, _style: String) -> Result<()> {
         Ok(())
     }
+
+    /// Answer a one-off "side question" against the session's current context
+    /// WITHOUT interrupting the active run or mutating session state — a
+    /// forked, single-turn, tool-less model call (the `/btw` feature, ported
+    /// from Claude Code's `runSideQuestion`). Returns the answer text directly
+    /// (no event stream). Errors with `Unsupported` on providers that can't
+    /// fork the context; callers surface the failure in the UI but never touch
+    /// the main run.
+    async fn side_question(&mut self, _session: &SessionId, _question: &str) -> Result<String> {
+        Err(crate::error::Error::Unsupported(
+            "this provider does not support side questions".into(),
+        ))
+    }
 }

@@ -538,3 +538,73 @@ async fn paid_explicit_vs_proactive_delegation_trigger_precision() {
     }
     println!("{}", serde_json::to_string_pretty(&records).unwrap());
 }
+
+#[tokio::test]
+async fn side_question_returns_not_connected_without_llm() {
+    // A provider that never connected has no LLM client: the fork must fail
+    // cleanly with NotConnected, not panic.
+    let mut p = LocalAgentProvider::new();
+    let err = p
+        .side_question(&SessionId::new("s1"), "what files have you touched?")
+        .await
+        .unwrap_err();
+    assert!(matches!(err, Error::NotConnected));
+}
+
+#[tokio::test]
+async fn side_question_leaves_session_transcript_byte_identical() {
+    // The forked side-question call must NOT mutate session state: the active
+    // run reads/writes the same transcript, and a side question that scribbled
+    // into it would corrupt the run's history. We can't reach a live model in
+    // a unit test, so we exercise the snapshot+build half of the fork directly
+    // and assert the transcript is unchanged after building wire messages.
+    use clark_agent::{AgentMessage, UserContent};
+
+    let dir = tempfile::tempdir().unwrap();
+    let mut p = LocalAgentProvider::new();
+    p.connect(ProviderConfig::default()).await.unwrap();
+    p.new_session(SessionOptions {
+        cwd: Some(dir.path().to_string_lossy().to_string()),
+        mode: None,
+        resume: None,
+    })
+    .await
+    .unwrap();
+
+    // Seed a transcript that mimics an in-flight run.
+    {
+        let mut s = p.session.lock().await;
+        s.transcript.push(AgentMessage::User {
+            content: UserContent::Text("read foo.rs and fix the bug".into()),
+            timestamp: None,
+        });
+    }
+    let before: Vec<String> = p
+        .session
+        .lock()
+        .await
+        .transcript
+        .iter()
+        .map(|m| format!("{m:?}"))
+        .collect();
+
+    // Rebuild the fork's wire messages (the read-only half of side_question).
+    let (system_prompt, transcript) = {
+        let s = p.session.lock().await;
+        (s.system_prompt.clone(), s.transcript.clone())
+    };
+    let _messages = crate::agent_adapter::to_wire_messages(&system_prompt, &transcript);
+
+    let after: Vec<String> = p
+        .session
+        .lock()
+        .await
+        .transcript
+        .iter()
+        .map(|m| format!("{m:?}"))
+        .collect();
+    assert_eq!(
+        before, after,
+        "side-question snapshot must not mutate transcript"
+    );
+}

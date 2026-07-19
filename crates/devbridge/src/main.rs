@@ -223,6 +223,8 @@ async fn handle_cmd(cmd: Value, conn: &SharedConn, sink: &SharedSink) {
 
             let stream = {
                 let mut c = conn.lock().await;
+                // Echo the user's turn (text + attachment thumbnails/chips) so
+                // the timeline shows what was sent, mirroring the Tauri host.
                 for b in &blocks {
                     apply(
                         &mut c.snapshot,
@@ -230,6 +232,16 @@ async fn handle_cmd(cmd: Value, conn: &SharedConn, sink: &SharedSink) {
                             run: RunId::new("user"),
                             role: Role::User,
                             delta: b.clone(),
+                        },
+                    );
+                }
+                for a in &attachments {
+                    apply(
+                        &mut c.snapshot,
+                        &AgentEvent::MessageChunk {
+                            run: RunId::new("user"),
+                            role: Role::User,
+                            delta: a.echo_block(),
                         },
                     );
                 }

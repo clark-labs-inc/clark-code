@@ -123,6 +123,18 @@ export interface ComposerPrefill {
   timelineIndex?: number;
 }
 
+/** `/btw` overlay state. `loading` is true while the forked side-question call
+ *  is in flight; a stale token (bumped on dismiss) lets a late result be
+ *  dropped without clobbering a closed/newer overlay. */
+export interface SideQuestionState {
+  question: string;
+  answer: string | null;
+  error: string | null;
+  loading: boolean;
+  /** Monotonic token; only a result that matches this token is applied. */
+  token: number;
+}
+
 function isBusy(snap: Snapshot): boolean {
   return Object.values(snap.runs).some(
     (r) => r.status === "running" || r.status === "queued",
@@ -263,6 +275,10 @@ interface SessionState {
   settingsSection: SettingsSection;
   /** Whether the ⌘K command palette is open. */
   paletteOpen: boolean;
+  /** `/btw` side-question overlay state. A forked, tool-less model call over
+   *  the session context that never interrupts the active run. Null when the
+   *  overlay is closed. */
+  sideQuestion: SideQuestionState | null;
   /** Whether the sidebar is collapsed to its icon rail. */
   sidebarCollapsed: boolean;
   /** Billing summary (plan, subscription, credits) from Clark; null until loaded. */
@@ -387,6 +403,10 @@ interface SessionState {
   setSidebarCollapsed: (collapsed: boolean) => void;
   cancelActive: () => Promise<void>;
   resolvePermission: (option: string) => Promise<void>;
+  /** `/btw` — ask a side question (forked, no main-run interruption). */
+  askSideQuestion: (question: string) => Promise<void>;
+  /** Dismiss the side-question overlay (and drop a still-pending answer). */
+  dismissSideQuestion: () => void;
   /** Stop the proposed-plan turn and send the user's concrete revision
    *  guidance as the next turn, without consuming composer attachments. */
   providePlanFeedback: (feedback: string) => Promise<void>;
@@ -644,6 +664,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   settingsOpen: false,
   settingsSection: "general",
   paletteOpen: false,
+  sideQuestion: null,
   sidebarCollapsed: false,
   billing: null,
   loadingBilling: false,
@@ -1317,6 +1338,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       composerPrefill: null,
       queued: [],
       terminalOpen: false,
+      sideQuestion: null,
       activeRemote: null,
       activeRemoteHost: null,
       activeProjectRoot: null,
@@ -2112,6 +2134,40 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       set({ error: String(e) });
       throw e; // let the gate re-enable its buttons
     }
+  },
+
+  askSideQuestion: async (question) => {
+    const text = question.trim();
+    if (!text) return;
+    const { bridge, session } = get();
+    if (!bridge || !session) return;
+    // The fork lives on the host; if this bridge can't fork, surface it in the
+    // overlay rather than as a generic app error.
+    if (!bridge.sideQuestion) {
+      set({ sideQuestion: { question: text, answer: null, error: "Side questions aren't available here.", loading: false, token: 0 } });
+      return;
+    }
+    const token = (get().sideQuestion?.token ?? 0) + 1;
+    set({ sideQuestion: { question: text, answer: null, error: null, loading: true, token } });
+    try {
+      const answer = await bridge.sideQuestion(session.id, text);
+      // Drop a stale result: the user dismissed or asked a newer question.
+      const current = get().sideQuestion;
+      if (!current || current.token !== token) return;
+      set({ sideQuestion: { ...current, answer, error: null, loading: false } });
+    } catch (e) {
+      const current = get().sideQuestion;
+      if (!current || current.token !== token) return;
+      set({ sideQuestion: { ...current, answer: null, error: String(e), loading: false } });
+    }
+  },
+
+  dismissSideQuestion: () => {
+    // Bump the token so an in-flight answer can't revive the overlay after the
+    // user closed it. Never touches the main run's cancellation path.
+    const current = get().sideQuestion;
+    set({ sideQuestion: null });
+    if (current) void current; // token dies with the cleared state
   },
 
   providePlanFeedback: async (feedback) => {

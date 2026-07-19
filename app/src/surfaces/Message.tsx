@@ -4,11 +4,12 @@ import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { Brain, ChevronRight, Copy, Check, Pencil } from "lucide-react";
+import { Brain, ChevronRight, Copy, Check, FileText, Pencil } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
 import { cn } from "../lib/cn";
 import { DUR, EASE } from "../lib/motion";
 import { useCopy } from "../lib/clipboard";
+import { userAttachmentBlocks, userTextBody } from "../lib/messageBlocks";
 import { parseNarration, presentationKind } from "../lib/narration";
 import { useSmoothText } from "../lib/useSmoothText";
 import { highlight, resolveLang } from "../lib/highlight";
@@ -242,6 +243,39 @@ function ThinkingBlock({ text }: { text: string }) {
   );
 }
 
+/** Attachment echoes on a user turn: image thumbnails and quiet file chips,
+ *  rendered above the text inside the bubble. */
+function UserAttachments({ blocks }: { blocks: ContentBlock[] }) {
+  return (
+    <div className="flex flex-wrap justify-end gap-1.5">
+      {blocks.map((block, i) => {
+        if (block.type === "image") {
+          return (
+            <img
+              key={i}
+              src={`data:${block.mime_type};base64,${block.data}`}
+              alt="Attachment"
+              className="max-h-40 max-w-full rounded-xl border border-border-subtle object-cover"
+            />
+          );
+        }
+        if (block.type === "resource_link") {
+          return (
+            <span
+              key={i}
+              className="flex max-w-full items-center gap-1.5 rounded-lg bg-bg-sunken px-2 py-1 text-xs text-ink-secondary"
+            >
+              <FileText className="size-3.5 shrink-0 text-ink-muted" />
+              <span className="max-w-48 truncate">{block.name ?? block.uri}</span>
+            </span>
+          );
+        }
+        return null;
+      })}
+    </div>
+  );
+}
+
 function MessageImpl({
   role,
   blocks,
@@ -258,7 +292,9 @@ function MessageImpl({
   streaming?: boolean;
 }) {
   const reduce = useReducedMotion();
-  const body = text(blocks);
+  // User turns carry attachment echo blocks (image / resource_link) alongside
+  // the text; keep those out of the flattened copy/edit body.
+  const body = role === "user" ? userTextBody(blocks) : text(blocks);
   // Streamed tokens arrive in uneven bursts; reveal them at a steady
   // left-to-right pace so the reply reads as continuous typing. Honors
   // reduced-motion by showing text as it arrives.
@@ -269,6 +305,7 @@ function MessageImpl({
       // Codex form: a quiet right-aligned pill, not a loud accent bubble.
       // Hover reveals copy + edit. The timeline identity lets submit replace
       // this turn and the abandoned suffix instead of appending a duplicate.
+      const attachments = userAttachmentBlocks(blocks);
       return (
         <div className="group/user flex items-center justify-end gap-1.5">
           <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition group-hover/user:opacity-100">
@@ -286,6 +323,11 @@ function MessageImpl({
             <CopyButton text={body} label="Copy message" className="size-7" />
           </div>
           <div className="max-w-[80%] whitespace-pre-wrap [overflow-wrap:anywhere] rounded-2xl rounded-br-md border border-border-subtle bg-bg-tertiary px-3.5 py-1.5 text-sm text-ink">
+            {attachments.length > 0 && (
+              <div className={body ? "mb-1.5" : ""}>
+                <UserAttachments blocks={attachments} />
+              </div>
+            )}
             {body}
           </div>
         </div>
@@ -369,6 +411,12 @@ function sameBlocks(a: ContentBlock[], b: ContentBlock[]): boolean {
     if (blk.type !== other.type) return false;
     if (blk.type === "text" || blk.type === "thinking")
       return blk.text === (other as { text: string }).text;
+    // Attachment image echoes carry large base64 payloads — compare fields
+    // directly instead of JSON.stringify-ing them on every streamed token.
+    if (blk.type === "image") {
+      const o = other as { mime_type: string; data: string; uri?: string };
+      return blk.mime_type === o.mime_type && blk.data === o.data && blk.uri === o.uri;
+    }
     return JSON.stringify(blk) === JSON.stringify(other);
   });
 }

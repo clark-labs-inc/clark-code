@@ -93,6 +93,10 @@ export class TauriBridge implements CoreBridge {
     return invoke("set_output_style", { sessionId, style });
   }
 
+  sideQuestion(sessionId: string, question: string): Promise<string> {
+    return invoke<string>("side_question", { sessionId, question });
+  }
+
   subscribe(handler: (snapshot: Snapshot) => void): () => void {
     const unlisten = listen<Snapshot>("snapshot", (event) => {
       handler(event.payload);

@@ -133,6 +133,18 @@ export class MockBridge implements CoreBridge {
     /* no-op in the browser preview */
   }
 
+  // `/btw` in the browser preview: a scripted answer after a short delay so
+  // the overlay is demoable without a native provider. Never throws — a mock
+  // failure would be indistinguishable from a real one in the UI.
+  async sideQuestion(_sessionId: string, question: string): Promise<string> {
+    await new Promise((r) => setTimeout(r, 700));
+    return (
+      `That's a side question — in the desktop app this is answered by a forked, tool-less ` +
+      `model call over the current conversation context, without interrupting the active run.\n\n` +
+      `> ${question}\n\n(Mock response — the real provider answers from the live session.)`
+    );
+  }
+
   // --- internals -----------------------------------------------------------
 
   private lastRunId(): string | undefined {

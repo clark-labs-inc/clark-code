@@ -98,6 +98,10 @@ export interface CoreBridge {
   setMode?(sessionId: string, mode: string): Promise<void>;
   /** Best-effort: switch the session's output style (see `lib/outputStyle.ts`). */
   setOutputStyle?(sessionId: string, style: string): Promise<void>;
+  /** `/btw` — answer a one-off side question against the session's current
+   *  context WITHOUT interrupting the active run. Returns the answer text for
+   *  an overlay to render; never cancels the main run. */
+  sideQuestion?(sessionId: string, question: string): Promise<string>;
   /** Subscribe to snapshot updates for ALL live sessions. Each snapshot is
    *  tagged with its session id (`snapshot.session`); the handler routes it.
    *  Returns an unsubscribe fn. */
