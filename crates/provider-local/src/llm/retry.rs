@@ -438,6 +438,17 @@ mod tests {
         (format!("http://{address}/v1"), receiver)
     }
 
+    async fn stalled_endpoint(delay: Duration) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let _ = read_request(&mut stream).await;
+            tokio::time::sleep(delay).await;
+        });
+        format!("http://{address}/v1")
+    }
+
     async fn run(base_url: &str, output: &mut String) -> Result<AssistantTurn, LlmError> {
         let client = LlmClient::from_parts(base_url, "fake-model", None, Vec::new(), None).unwrap();
         client
@@ -575,6 +586,43 @@ mod tests {
         cancel.cancel();
         assert!(matches!(task.await.unwrap(), Err(LlmError::Cancelled)));
         assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn request_deadline_bounds_a_stalled_provider() {
+        let base_url = stalled_endpoint(Duration::from_millis(500)).await;
+        let client = LlmClient::from_parts_with_timeout(
+            &base_url,
+            "fake-model",
+            None,
+            Vec::new(),
+            None,
+            Duration::from_millis(40),
+        )
+        .unwrap();
+        let mut on_text = |_: &str| {};
+        let mut on_reasoning = |_: &str| {};
+        let started = std::time::Instant::now();
+        let error = client
+            .stream_chat_once(
+                &[ChatMessage::user("hello")],
+                &[],
+                &CancellationToken::new(),
+                "deadline-test",
+                &mut on_text,
+                &mut on_reasoning,
+            )
+            .await
+            .unwrap_err();
+        assert!(started.elapsed() < Duration::from_millis(250));
+
+        match error {
+            AttemptError::Transient(failure) => {
+                assert!(failure.message.contains("model request failed"));
+                assert!(failure.retry_safe);
+            }
+            _ => panic!("expected a retry-safe transient timeout"),
+        }
     }
 
     #[tokio::test]

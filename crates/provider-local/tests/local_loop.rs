@@ -344,7 +344,10 @@ async fn local_loop_auto_compacts_large_transcript_before_sampling() {
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    tokio::spawn(serve(listener, vec![compact_summary_body(), final_body()]));
+    let serve_handle = tokio::spawn(serve(
+        listener,
+        vec![compact_summary_body(), final_body(), final_body()],
+    ));
 
     let mut provider = provider_local::LocalAgentProvider::new();
     provider
@@ -407,6 +410,25 @@ async fn local_loop_auto_compacts_large_transcript_before_sampling() {
         ),
         "expected RunFinished Done: {events:?}"
     );
+
+    // A new provider run must start from the installed checkpoint. Before the
+    // fix, the request-time transform left the raw transcript canonical, so
+    // this follow-up invoked the summarizer all over again.
+    let mut follow_up = provider
+        .prompt(&session.id, PromptInput::text("Any final caveat?"))
+        .await
+        .unwrap();
+    let follow_up_events = drain_run(&mut follow_up).await;
+    assert!(follow_up_events.iter().any(|event| matches!(
+        event,
+        AgentEvent::RunFinished { outcome, .. } if outcome.status == RunStatus::Done
+    )));
+
+    let captured = serve_handle.await.unwrap();
+    assert_eq!(captured.len(), 3, "one summary plus two normal turns");
+    let follow_up_request = String::from_utf8_lossy(&captured[2]);
+    assert!(follow_up_request.contains("compacted transcript handoff"));
+    assert!(!follow_up_request.contains(&"important detail ".repeat(100)));
 }
 
 #[tokio::test]
@@ -1007,7 +1029,7 @@ async fn steering_message_is_injected_into_the_active_run() {
 }
 
 /// A provider context-window rejection no longer kills the run: clark-agent's
-/// overflow-recovery hook (the OverflowCompactor) force-compacts the live
+/// checkpoint compactor's overflow-recovery hook force-compacts the live
 /// transcript and retries the same call, transparently, and the run finishes.
 #[tokio::test]
 async fn context_overflow_recovers_by_compacting_and_continuing() {

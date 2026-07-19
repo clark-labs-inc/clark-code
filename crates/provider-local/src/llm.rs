@@ -17,6 +17,10 @@ use crate::config::LocalConfig;
 
 mod retry;
 
+/// Bound the complete HTTP exchange, including a response stream that stops
+/// making progress. Provider retries remain separately bounded in `retry`.
+const DEFAULT_MODEL_REQUEST_TIMEOUT: Duration = Duration::from_secs(7 * 60);
+
 fn clark_code_user_agent() -> String {
     let platform = match std::env::consts::OS {
         "macos" => "darwin",
@@ -284,8 +288,27 @@ impl LlmClient {
         headers: Vec<(String, String)>,
         temperature: Option<f32>,
     ) -> Result<Self, String> {
+        Self::from_parts_with_timeout(
+            base_url,
+            model,
+            api_key,
+            headers,
+            temperature,
+            DEFAULT_MODEL_REQUEST_TIMEOUT,
+        )
+    }
+
+    fn from_parts_with_timeout(
+        base_url: &str,
+        model: &str,
+        api_key: Option<String>,
+        headers: Vec<(String, String)>,
+        temperature: Option<f32>,
+        request_timeout: Duration,
+    ) -> Result<Self, String> {
         let http = reqwest::Client::builder()
             .user_agent(clark_code_user_agent())
+            .timeout(request_timeout)
             .build()
             .map_err(|e| format!("llm client build failed: {e}"))?;
         Ok(Self {

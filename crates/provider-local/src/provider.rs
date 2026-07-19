@@ -7,6 +7,7 @@ mod isolation;
 mod prompt_input;
 mod state;
 
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -41,6 +42,58 @@ use prompt_input::*;
 // per-turn below (never baked into the cached system-prompt prefix) since the
 // mode can flip mid-session via Shift+Tab or a plan approval.
 
+/// Run-addressed cancellation. A provider can have overlapping prompt tasks,
+/// so a single "most recently assigned" token cannot implement
+/// `Provider::cancel(session, run)` correctly.
+#[derive(Clone, Default)]
+pub(crate) struct RunCancellationRegistry {
+    tokens: Arc<std::sync::Mutex<HashMap<String, CancellationToken>>>,
+}
+
+impl RunCancellationRegistry {
+    fn register(&self, run: &RunId, token: CancellationToken) {
+        self.tokens
+            .lock()
+            .expect("run cancellation registry lock")
+            .insert(run.as_str().to_string(), token);
+    }
+
+    fn cancel(&self, run: &RunId) -> bool {
+        let token = self
+            .tokens
+            .lock()
+            .expect("run cancellation registry lock")
+            .get(run.as_str())
+            .cloned();
+        if let Some(token) = token {
+            token.cancel();
+            true
+        } else {
+            false
+        }
+    }
+
+    pub(crate) fn remove(&self, run: &RunId) {
+        self.tokens
+            .lock()
+            .expect("run cancellation registry lock")
+            .remove(run.as_str());
+    }
+
+    fn cancel_all(&self) {
+        let tokens = self
+            .tokens
+            .lock()
+            .expect("run cancellation registry lock")
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
+        for token in tokens {
+            token.cancel();
+        }
+    }
+}
+
 pub struct LocalAgentProvider {
     isolation: ProviderIsolation,
     config: Option<LocalConfig>,
@@ -54,8 +107,10 @@ pub struct LocalAgentProvider {
     reads: Arc<std::sync::Mutex<ReadTracker>>,
     /// Session-scoped `bash(run_in_background: true)` task registry.
     background: Arc<crate::background::BackgroundTasks>,
-    /// Cancellation token for the in-flight run (replaced each prompt).
+    /// Cancellation token for prompt setup and the newest run. Exact run
+    /// cancellation uses `run_cancellations` below.
     cancel: CancellationToken,
+    run_cancellations: RunCancellationRegistry,
     /// Where this session's tool I/O runs — local today, remote (over the
     /// exec-server) once a remote project is selected. Chosen in `new_session`.
     executor: Arc<dyn crate::exec::Executor>,
@@ -455,6 +510,7 @@ impl Provider for LocalAgentProvider {
             "run-{}",
             self.run_counter.fetch_add(1, Ordering::SeqCst) + 1
         ));
+        self.run_cancellations.register(&run, cancel.clone());
         let (tx, rx) = async_channel::unbounded::<AgentEvent>();
 
         // Post-turn durable-fact extraction (structural memory proactivity):
@@ -501,6 +557,7 @@ impl Provider for LocalAgentProvider {
             user_content,
             memory_extraction,
             execution: config.execution,
+            run_cancellations: self.run_cancellations.clone(),
             tool_image_policy: crate::agent_adapter::ToolImagePolicy {
                 native_image_support,
                 vision: config.vision.clone(),
@@ -510,14 +567,20 @@ impl Provider for LocalAgentProvider {
         Ok(rx.boxed())
     }
 
-    async fn cancel(&mut self, _session: &SessionId, _run: &RunId) -> Result<()> {
-        self.cancel.cancel();
+    async fn cancel(&mut self, _session: &SessionId, run: &RunId) -> Result<()> {
+        if !self.run_cancellations.cancel(run) {
+            return Err(Error::Other(format!(
+                "no active local run named {}",
+                run.as_str()
+            )));
+        }
         self.control.lock().await.clear();
         Ok(())
     }
 
     async fn close_session(&mut self, _session: &SessionId) -> Result<()> {
         self.cancel.cancel();
+        self.run_cancellations.cancel_all();
         self.control.lock().await.clear();
         self.background.clear_all().await;
         Ok(())

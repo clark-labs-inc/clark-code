@@ -126,6 +126,7 @@ pub(crate) struct TurnContext {
     /// When memories are enabled: post-turn durable-fact extraction context.
     pub memory_extraction: Option<crate::memory_extraction::ExtractionCtx>,
     pub execution: RootExecutionConfig,
+    pub run_cancellations: crate::provider::RunCancellationRegistry,
     pub tool_image_policy: ToolImagePolicy,
 }
 
@@ -148,6 +149,19 @@ impl RootFinishContext {
 /// Drive one user turn to completion, emitting normalized Desktop events into
 /// `tx` while clark-agent owns the actual LLM/tool loop.
 pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId) {
+    struct CancellationRegistration {
+        registry: crate::provider::RunCancellationRegistry,
+        run: RunId,
+    }
+    impl Drop for CancellationRegistration {
+        fn drop(&mut self) {
+            self.registry.remove(&self.run);
+        }
+    }
+    let _cancellation_registration = CancellationRegistration {
+        registry: tc.run_cancellations.clone(),
+        run: run.clone(),
+    };
     let cancel = tc.ctx.cancel.clone();
     let _ = tx.send(AgentEvent::RunStarted { run: run.clone() }).await;
     // An explicit user turn resumes a previously blocked goal. Budget-limited
@@ -272,6 +286,8 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
     // one-at-a-time ordering and the permission gate never faces two
     // simultaneous prompts.
     let steering = Arc::new(EngineSteering::with_execution(execution.clone()));
+    // Keep the handle so request-time compaction can become canonical history.
+    let compactor = CheckpointCompactor::new(tc.llm.clone(), tc.compaction.clone());
     let mut builder = clark_agent::AgentBuilder::new()
         .stream(Arc::new(stream))
         .tools(tools)
@@ -283,18 +299,12 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
         .after_tool_call_arc(loop_breaker.clone())
         .model_id(tc.model.clone())
         .steering_arc(steering.clone())
-        .context_transform(CheckpointCompactor::new(
-            tc.llm.clone(),
-            tc.compaction.clone(),
-        ))
+        .context_transform(compactor.clone())
         // Transparent context-window recovery: a provider overflow mid-run
         // force-compacts the live transcript and retries the same call
         // (clark-agent ≥0.2.2), any number of times at any iteration —
         // replacing the old engine-level once-per-run restart.
-        .overflow_recovery(crate::compaction::OverflowCompactor::new(
-            tc.llm.clone(),
-            tc.compaction.clone(),
-        ));
+        .overflow_recovery(compactor.clone());
     if let Some(temperature) = tc.temperature {
         builder = builder.temperature(temperature);
     }
@@ -343,7 +353,7 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
     // clean completion with a goal-continuation turn (the Codex thread-goal
     // loop): the run keeps going until the model proves the goal complete, gets
     // blocked, or the budget runs out. Context-window overflows are recovered
-    // transparently inside `clark_agent::run` (the OverflowCompactor hook
+    // transparently inside `clark_agent::run` (the checkpoint compactor hook
     // registered above), so there is no overflow bookkeeping here. Steering and
     // cancel keep working throughout — it is all one desktop run.
     let mut prompts = vec![prompt];
@@ -395,7 +405,7 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
             }
             {
                 let mut session = tc.session.lock().await;
-                session.transcript.extend(completed_transcript.drain());
+                compactor.commit_appended(&mut session.transcript, completed_transcript.drain());
                 session.transcript.push(recovery_marker());
             }
             let _ = tx
@@ -415,7 +425,7 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
             Ok(result) if result.outcome.is_complete() => {
                 {
                     let mut session = tc.session.lock().await;
-                    session.transcript.extend(result.messages);
+                    compactor.commit_appended(&mut session.transcript, result.messages);
                 }
                 // The completed-transcript observer saw the same messages the
                 // loop just returned; reset it so a LATER failed continuation
@@ -524,7 +534,7 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
                 // HitMaxIterations: fold what we have and stop any goal.
                 {
                     let mut session = tc.session.lock().await;
-                    session.transcript.extend(result.messages);
+                    compactor.commit_appended(&mut session.transcript, result.messages);
                     if let Some(goal) = session.goal.as_mut() {
                         if goal.status == GoalStatus::Active {
                             goal.status = GoalStatus::Blocked;
@@ -624,8 +634,9 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
             // empty model transcript.
             {
                 let mut session = tc.session.lock().await;
-                session.transcript.extend(completed_transcript.drain());
-                session.transcript.extend(leftover_steering);
+                let mut completed = completed_transcript.drain();
+                completed.extend(leftover_steering);
+                compactor.commit_appended(&mut session.transcript, completed);
                 // A goal must never auto-continue into a wall: a failed run
                 // blocks it (Codex does the same "to prevent automatic
                 // continuation from looping and consuming tokens"). A user
@@ -786,34 +797,4 @@ async fn finish(tx: &Sender<AgentEvent>, run: &RunId, outcome: RunOutcome) {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use clark_agent::SteeringSource;
-
-    #[tokio::test]
-    async fn steering_queue_injects_in_order_and_recovers_leftovers() {
-        let steering = EngineSteering::default();
-        steering.push_user_text("first".into());
-        steering.push_user_text("second".into());
-
-        // The loop drains via the SteeringSource seam…
-        let drained = steering.next_steering_messages().await;
-        assert_eq!(drained.len(), 2);
-        let texts: Vec<_> = drained
-            .iter()
-            .map(|m| match m {
-                clark_agent::AgentMessage::User {
-                    content: clark_agent::UserContent::Text(t),
-                    ..
-                } => t.as_str(),
-                other => panic!("expected user text, got {other:?}"),
-            })
-            .collect();
-        assert_eq!(texts, vec!["first", "second"]);
-
-        // …and anything left after the run ends is recoverable, not lost.
-        steering.push_user_text("too late".into());
-        assert_eq!(steering.drain_all().len(), 1);
-        assert!(steering.drain_all().is_empty());
-    }
-}
+include!("engine_tests.rs");

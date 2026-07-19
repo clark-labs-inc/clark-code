@@ -33,6 +33,10 @@ pub(crate) struct DesktopEventSink {
     registry: Arc<ToolRegistry>,
     completed_transcript: CompletedRunTranscript,
     execution: Option<crate::root_execution::RootExecutionTrace>,
+    /// Cached checkpoint application runs on every model request. Remember
+    /// the summary at the checkpoint boundary so only a genuinely new
+    /// checkpoint produces another user-visible notice.
+    last_compaction_checkpoint: std::sync::Mutex<Option<String>>,
     /// The app-managed document workspace (canonical), when this is a local
     /// session. Markdown files written here are surfaced as inline artifacts.
     docs_dir: Option<std::path::PathBuf>,
@@ -50,6 +54,7 @@ impl DesktopEventSink {
             registry,
             completed_transcript: CompletedRunTranscript::default(),
             execution: None,
+            last_compaction_checkpoint: std::sync::Mutex::new(None),
             docs_dir,
         }
     }
@@ -61,6 +66,24 @@ impl DesktopEventSink {
 
     pub fn completed_transcript(&self) -> CompletedRunTranscript {
         self.completed_transcript.clone()
+    }
+
+    fn mark_new_compaction_checkpoint(&self, after: &[ca::AgentMessage]) -> bool {
+        let Some(signature) = after
+            .first()
+            .and_then(|message| serde_json::to_string(message).ok())
+        else {
+            return false;
+        };
+        let mut last = self
+            .last_compaction_checkpoint
+            .lock()
+            .expect("compaction notice lock");
+        if last.as_deref() == Some(signature.as_str()) {
+            return false;
+        }
+        *last = Some(signature);
+        true
     }
 }
 
@@ -151,17 +174,19 @@ impl ca::EventSink for DesktopEventSink {
             } if plugin == "checkpoint_compactor"
                 && transcript_chars(&after) < transcript_chars(&before) =>
             {
-                let _ = self
-                    .events
-                    .send(desktop::AgentEvent::MessageChunk {
-                        run: self.run.clone(),
-                        role: desktop::Role::System,
-                        delta: desktop::ContentBlock::text(
-                            "The conversation reached the model's context limit — earlier turns \
-                             were summarized so this task can continue.",
-                        ),
-                    })
-                    .await;
+                if self.mark_new_compaction_checkpoint(&after) {
+                    let _ = self
+                        .events
+                        .send(desktop::AgentEvent::MessageChunk {
+                            run: self.run.clone(),
+                            role: desktop::Role::System,
+                            delta: desktop::ContentBlock::text(
+                                "The conversation reached the model's context limit — earlier \
+                                 turns were summarized so this task can continue.",
+                            ),
+                        })
+                        .await;
+                }
             }
             ca::AgentEvent::MessageEnd {
                 message:

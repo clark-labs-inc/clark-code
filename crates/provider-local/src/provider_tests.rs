@@ -111,6 +111,20 @@ fn base64_decodes_text() {
     );
 }
 
+#[test]
+fn cancellation_registry_targets_the_requested_run() {
+    let registry = RunCancellationRegistry::default();
+    let first = CancellationToken::new();
+    let second = CancellationToken::new();
+    registry.register(&RunId::new("run-1"), first.clone());
+    registry.register(&RunId::new("run-2"), second.clone());
+
+    assert!(registry.cancel(&RunId::new("run-1")));
+    assert!(first.is_cancelled());
+    assert!(!second.is_cancelled());
+    assert!(!registry.cancel(&RunId::new("missing")));
+}
+
 #[tokio::test]
 async fn new_session_requires_cwd() {
     let mut p = LocalAgentProvider::new();

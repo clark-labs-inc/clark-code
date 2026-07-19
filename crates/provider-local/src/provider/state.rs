@@ -16,6 +16,7 @@ impl LocalAgentProvider {
             reads: Arc::new(std::sync::Mutex::new(ReadTracker::default())),
             background: Arc::new(crate::background::BackgroundTasks::default()),
             cancel: CancellationToken::new(),
+            run_cancellations: RunCancellationRegistry::default(),
             executor: Arc::new(crate::exec::LocalExecutor),
             run_counter: AtomicU64::new(0),
             mcp_status: Vec::new(),

@@ -1,12 +1,11 @@
-//! Context checkpointing for the local agent loop.
-//!
-//! The UI transcript remains untouched. This only rewrites the model-visible
-//! `clark_agent::AgentMessage` history through a core `ContextTransform`.
+//! Model-visible context checkpointing; the UI transcript remains untouched.
 
 use async_trait::async_trait;
 use clark_agent as ca;
 use clark_agent_compaction as core;
 use serde_json::Value;
+use sha2::{Digest, Sha256};
+use std::sync::{Arc, Mutex};
 
 use crate::llm::LlmClient;
 
@@ -16,11 +15,107 @@ pub use core::CompactionConfig;
 pub(crate) struct CheckpointCompactor {
     llm: LlmClient,
     config: CompactionConfig,
+    checkpoint: Arc<Mutex<Option<ModelCheckpoint>>>,
+}
+
+#[derive(Clone)]
+struct ModelCheckpoint {
+    /// Raw-lineage length; later messages are new, uncheckpointed turns.
+    source_len: usize,
+    source_fingerprint: Option<[u8; 32]>,
+    messages: Vec<ca::AgentMessage>,
 }
 
 impl CheckpointCompactor {
     pub fn new(llm: LlmClient, config: CompactionConfig) -> Self {
-        Self { llm, config }
+        Self {
+            llm,
+            config,
+            checkpoint: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    /// clark-agent transforms a request-local clone rather than mutating its
+    /// live context. Keep the replacement here and project it over the raw
+    /// lineage on every later request; otherwise the same full transcript is
+    /// summarized again on every turn.
+    fn projected_messages(&self, messages: &[ca::AgentMessage]) -> (Vec<ca::AgentMessage>, bool) {
+        let mut state = self.checkpoint.lock().expect("compaction checkpoint lock");
+        let Some(checkpoint) = state.as_ref() else {
+            return (messages.to_vec(), false);
+        };
+        if messages.len() < checkpoint.source_len
+            || lineage_fingerprint(messages, checkpoint.source_len) != checkpoint.source_fingerprint
+        {
+            // Overflow recovery can replace the live lineage itself. A
+            // checkpoint into the old lineage must not be spliced into it.
+            *state = None;
+            return (messages.to_vec(), false);
+        }
+        let mut projected = checkpoint.messages.clone();
+        projected.extend_from_slice(&messages[checkpoint.source_len..]);
+        (projected, true)
+    }
+
+    fn has_applicable_checkpoint(&self, messages: &[ca::AgentMessage]) -> bool {
+        let mut state = self.checkpoint.lock().expect("compaction checkpoint lock");
+        if state.as_ref().is_some_and(|checkpoint| {
+            messages.len() < checkpoint.source_len
+                || lineage_fingerprint(messages, checkpoint.source_len)
+                    != checkpoint.source_fingerprint
+        }) {
+            *state = None;
+        }
+        state.is_some()
+    }
+
+    fn install_checkpoint(
+        &self,
+        source_len: usize,
+        source_fingerprint: Option<[u8; 32]>,
+        messages: Vec<ca::AgentMessage>,
+    ) {
+        *self.checkpoint.lock().expect("compaction checkpoint lock") = Some(ModelCheckpoint {
+            source_len,
+            source_fingerprint,
+            messages,
+        });
+    }
+
+    /// Atomically install the request-time checkpoint into canonical model
+    /// history. It is consumed only for the exact lineage it summarized, so a
+    /// concurrent or recovery mutation fails closed to `messages`.
+    pub(crate) fn commit_checkpoint(
+        &self,
+        messages: Vec<ca::AgentMessage>,
+    ) -> Vec<ca::AgentMessage> {
+        let checkpoint = self
+            .checkpoint
+            .lock()
+            .expect("compaction checkpoint lock")
+            .take();
+        let Some(checkpoint) = checkpoint else {
+            return messages;
+        };
+        if messages.len() < checkpoint.source_len
+            || lineage_fingerprint(&messages, checkpoint.source_len)
+                != checkpoint.source_fingerprint
+        {
+            return messages;
+        }
+        let mut projected = checkpoint.messages;
+        projected.extend_from_slice(&messages[checkpoint.source_len..]);
+        projected
+    }
+
+    pub(crate) fn commit_appended(
+        &self,
+        transcript: &mut Vec<ca::AgentMessage>,
+        messages: impl IntoIterator<Item = ca::AgentMessage>,
+    ) {
+        let mut combined = std::mem::take(transcript);
+        combined.extend(messages);
+        *transcript = self.commit_checkpoint(combined);
     }
 }
 
@@ -50,6 +145,12 @@ impl CheckpointCompactor {
 #[async_trait]
 impl ca::ContextTransform for CheckpointCompactor {
     fn should_run(&self, messages: &[ca::AgentMessage], cx: &ca::TransformContext<'_>) -> bool {
+        // Applying the cached checkpoint is itself a transform. The upstream
+        // context still contains the raw pre-checkpoint prefix, so skipping
+        // here would expand the next request back to the full transcript.
+        if self.has_applicable_checkpoint(messages) {
+            return true;
+        }
         if self.usage_over_limit(cx) {
             return true;
         }
@@ -62,6 +163,16 @@ impl ca::ContextTransform for CheckpointCompactor {
         messages: Vec<ca::AgentMessage>,
         cx: &ca::TransformContext<'_>,
     ) -> Vec<ca::AgentMessage> {
+        let source_len = messages.len();
+        let source_fingerprint = lineage_fingerprint(&messages, source_len);
+        let (effective, _) = self.projected_messages(&messages);
+        let effective_views = message_views(&effective);
+        let should_checkpoint = self.usage_over_limit(cx)
+            || core::should_compact(&effective_views, &self.config, &core::CharHeuristic);
+        if !should_checkpoint {
+            return effective;
+        }
+
         // When real provider usage crossed the limit but the char heuristic
         // hasn't, force the pass — `prepare_compaction` re-checks the
         // heuristic internally and would otherwise no-op forever.
@@ -70,11 +181,27 @@ impl ca::ContextTransform for CheckpointCompactor {
         } else {
             self.config.clone()
         };
-        match compact_once(&self.llm, &config, &messages, cx.signal).await {
-            Some(next) => next,
-            None => messages,
+        match compact_once(&self.llm, &config, &effective, cx.signal).await {
+            Some(next) => {
+                self.install_checkpoint(source_len, source_fingerprint, next.clone());
+                next
+            }
+            // A failed refresh must keep the last working checkpoint applied;
+            // expanding to the original history recreates the overflow loop.
+            None => effective,
         }
     }
+}
+
+fn lineage_fingerprint(messages: &[ca::AgentMessage], prefix_len: usize) -> Option<[u8; 32]> {
+    let prefix = messages.get(..prefix_len)?;
+    let mut hasher = Sha256::new();
+    for message in prefix {
+        let encoded = serde_json::to_vec(message).ok()?;
+        hasher.update(encoded.len().to_le_bytes());
+        hasher.update(encoded);
+    }
+    Some(hasher.finalize().into())
 }
 
 /// The auto-compaction threshold in tokens, `None` when compaction is
@@ -95,8 +222,7 @@ fn forced(config: &CompactionConfig) -> CompactionConfig {
 
 /// One checkpoint-compaction pass over `messages`: summarize via the LLM
 /// (one retry on a transient failure) and rebuild the transcript as
-/// `[summary] + recent user tail`. `None` = nothing to do or the LLM failed —
-/// callers keep the original messages (fail-open).
+/// `[summary] + contiguous raw tail`. `None` = nothing to do or the LLM failed.
 pub(crate) async fn compact_once(
     llm: &LlmClient,
     config: &CompactionConfig,
@@ -135,8 +261,44 @@ this was written — re-read a file before relying on its described contents.]",
 
     let compacted = core::finalize_compaction(&prepared.plan, &summary);
     let mut next = vec![user_message(compacted.summary_message)];
-    next.extend(compacted.recent_user_messages.into_iter().map(user_message));
+    let raw_tail = recent_raw_tail(messages, config.recent_user_token_budget);
+    if raw_tail.is_empty() {
+        // A single oversized current user request cannot be retained as a raw
+        // typed message within the budget. Preserve the core's truncated user
+        // fallback rather than relying on the summary alone.
+        next.extend(compacted.recent_user_messages.into_iter().map(user_message));
+    } else {
+        next.extend(raw_tail);
+    }
     Some(next)
+}
+
+/// Keep a contiguous suffix so assistant tool calls retain their exact tool
+/// results. Never begin at a tool result: OpenAI-compatible providers require
+/// the preceding assistant tool-call message in the same request.
+fn recent_raw_tail(messages: &[ca::AgentMessage], token_budget: usize) -> Vec<ca::AgentMessage> {
+    if token_budget == 0 {
+        return Vec::new();
+    }
+
+    let mut remaining = token_budget;
+    let mut start = messages.len();
+    while start > 0 {
+        let view = AgentMessageView(&messages[start - 1]);
+        let tokens = core::estimate_transcript_tokens(&[view], &core::CharHeuristic);
+        if tokens > remaining {
+            break;
+        }
+        remaining = remaining.saturating_sub(tokens);
+        start -= 1;
+    }
+    while matches!(
+        messages.get(start),
+        Some(ca::AgentMessage::ToolResult { .. })
+    ) {
+        start += 1;
+    }
+    messages[start..].to_vec()
 }
 
 /// Force a compaction pass regardless of the configured threshold — the
@@ -151,37 +313,26 @@ pub(crate) async fn force_compact(
     compact_once(llm, &forced(config), messages, signal).await
 }
 
-/// clark-agent's [`ContextOverflowRecovery`] hook: when the provider rejects a
-/// request for exceeding the model's window, the loop hands us the live
-/// transcript, we force-compact it, and the loop retries the same call on the
-/// shrunk history. Names itself `checkpoint_compactor` so the same "reached
-/// the context limit" note the in-loop compactor emits fires for a recovery
-/// too (`agent_adapter::event_sink`).
-#[derive(Clone)]
-pub(crate) struct OverflowCompactor {
-    llm: LlmClient,
-    config: CompactionConfig,
-}
-
-impl OverflowCompactor {
-    pub fn new(llm: LlmClient, config: CompactionConfig) -> Self {
-        Self { llm, config }
-    }
-}
-
 #[async_trait::async_trait]
-impl ca::ContextOverflowRecovery for OverflowCompactor {
+impl ca::ContextOverflowRecovery for CheckpointCompactor {
     async fn recover(
         &self,
         messages: Vec<ca::AgentMessage>,
         cx: &ca::TransformContext<'_>,
     ) -> Vec<ca::AgentMessage> {
+        let source_len = messages.len();
+        let source_fingerprint = lineage_fingerprint(&messages, source_len);
+        let (effective, _) = self.projected_messages(&messages);
         // Fail-open: if compaction can't run (LLM error, nothing to shrink),
         // return the input unchanged — the loop's no-progress guard then lets
         // the overflow surface instead of retrying against the same history.
-        force_compact(&self.llm, &self.config, &messages, cx.signal)
-            .await
-            .unwrap_or(messages)
+        match force_compact(&self.llm, &self.config, &effective, cx.signal).await {
+            Some(next) => {
+                self.install_checkpoint(source_len, source_fingerprint, next.clone());
+                next
+            }
+            None => messages,
+        }
     }
 
     fn max_attempts(&self) -> u8 {
@@ -345,178 +496,4 @@ fn compact_json_value(value: &Value) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use clark_agent_compaction::TranscriptMessage;
-
-    fn config() -> CompactionConfig {
-        CompactionConfig {
-            auto_compact_token_limit: 20,
-            compact_request_token_limit: 1_000,
-            recent_user_token_budget: 12,
-            ..CompactionConfig::default()
-        }
-    }
-
-    fn assistant_tool_call() -> ca::AgentMessage {
-        ca::AgentMessage::Assistant {
-            content: ca::AssistantContent::with_tool_calls(
-                Some("reading".into()),
-                vec![ca::ToolCall {
-                    id: "call_1".into(),
-                    name: "read_file".into(),
-                    arguments: serde_json::json!({"path":"src/main.rs"}),
-                }],
-            ),
-            stop_reason: ca::StopReason::ToolUse,
-            error_message: None,
-            timestamp: None,
-            usage: None,
-        }
-    }
-
-    fn tool_result() -> ca::AgentMessage {
-        ca::AgentMessage::ToolResult {
-            tool_call_id: "call_1".into(),
-            tool_name: "read_file".into(),
-            content: ca::ToolResultContent::text("fn main() {}"),
-            is_error: false,
-            narration: None,
-            details: None,
-            timestamp: None,
-        }
-    }
-
-    fn rendered(message: &ca::AgentMessage) -> String {
-        let mut out = String::new();
-        AgentMessageView(message).render_for_compaction(&mut out);
-        out
-    }
-
-    #[test]
-    fn adapter_renders_tool_context_for_core_compaction() {
-        let transcript = vec![
-            user_message("please inspect the project"),
-            assistant_tool_call(),
-            tool_result(),
-        ];
-        let views = message_views(&transcript);
-
-        let prepared = core::prepare_compaction(&views, &config(), &core::CharHeuristic)
-            .expect("compaction request");
-
-        assert!(prepared
-            .request
-            .prompt
-            .contains(r#"read_file({"path":"src/main.rs"})"#));
-        assert!(prepared
-            .request
-            .prompt
-            .contains("[tool result call_1 read_file ok]"));
-    }
-
-    #[test]
-    fn adapter_keeps_image_alt_in_render_but_not_recent_user_text() {
-        let message = ca::AgentMessage::User {
-            content: ca::UserContent::Blocks(vec![
-                ca::UserBlock::Text(ca::TextContent {
-                    text: "look".into(),
-                }),
-                ca::UserBlock::Image(ca::ImageContent {
-                    source: "data:image/png;base64,abc".into(),
-                    media_type: Some("image/png".into()),
-                    alt: Some("diagram".into()),
-                }),
-            ]),
-            timestamp: None,
-        };
-
-        assert!(rendered(&message).contains("[image: diagram]"));
-
-        let mut text = String::new();
-        assert!(AgentMessageView(&message).user_text_for_compaction(&mut text));
-        assert_eq!(text, "look");
-    }
-
-    #[test]
-    fn adapter_finalizes_summary_first_then_recent_user_tail() {
-        let text = format!(
-            "{}\nNow answer with CLARK_LIVE_COMPACTION_DONE_3003.",
-            "Important project context. ".repeat(900)
-        );
-        let transcript = vec![user_message(text)];
-        let views = message_views(&transcript);
-        let prepared = core::prepare_compaction(&views, &config(), &core::CharHeuristic)
-            .expect("compaction request");
-        let compacted = core::finalize_compaction(&prepared.plan, "summary");
-
-        let mut next = vec![user_message(compacted.summary_message)];
-        next.extend(compacted.recent_user_messages.into_iter().map(user_message));
-
-        let first = rendered(next.first().unwrap());
-        assert!(first.contains(core::DEFAULT_SUMMARY_PREFIX));
-        let last = rendered(next.last().unwrap());
-        assert!(last.contains("CLARK_LIVE_COMPACTION_DONE_3003"));
-    }
-}
-
-#[cfg(test)]
-mod usage_trigger_tests {
-    use super::*;
-    use tokio_util::sync::CancellationToken;
-
-    fn compactor(limit: usize) -> CheckpointCompactor {
-        let provider_config = agent_core::provider::ProviderConfig {
-            auth_token: Some("k".into()),
-            extra: serde_json::json!({"base_url": "http://127.0.0.1:1/v1", "model": "m"}),
-            ..Default::default()
-        };
-        let local = crate::config::LocalConfig::from_provider_config(&provider_config);
-        let llm = crate::llm::LlmClient::new(&local).unwrap();
-        CheckpointCompactor::new(
-            llm,
-            CompactionConfig {
-                auto_compact_token_limit: limit,
-                ..CompactionConfig::default()
-            },
-        )
-    }
-
-    #[test]
-    fn provider_usage_triggers_compaction_before_the_char_heuristic() {
-        use clark_agent::ContextTransform;
-        let cancel = CancellationToken::new();
-        // A tiny transcript the char heuristic would never flag…
-        let messages = vec![user_message("short")];
-        let over = ca::types::Usage {
-            input_tokens: 2_000,
-            output_tokens: 0,
-            cache_creation_input_tokens: 0,
-            cache_read_input_tokens: 0,
-        };
-        let cx = ca::TransformContext {
-            signal: &cancel,
-            model_id: "m",
-            iteration: 3,
-            last_provider_usage: Some(&over),
-            estimator: &ca::CHAR_HEURISTIC,
-        };
-        // …but the provider says the real prompt already crossed the limit.
-        assert!(compactor(1_000).should_run(&messages, &cx));
-
-        let under = ca::types::Usage {
-            input_tokens: 10,
-            output_tokens: 0,
-            cache_creation_input_tokens: 0,
-            cache_read_input_tokens: 0,
-        };
-        let cx_under = ca::TransformContext {
-            signal: &cancel,
-            model_id: "m",
-            iteration: 3,
-            last_provider_usage: Some(&under),
-            estimator: &ca::CHAR_HEURISTIC,
-        };
-        assert!(!compactor(1_000).should_run(&messages, &cx_under));
-    }
-}
+include!("compaction_tests.rs");

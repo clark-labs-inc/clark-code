@@ -39,6 +39,65 @@ async fn desktop_sink_preserves_stream_lifecycle_events_as_trace() {
 }
 
 #[tokio::test]
+async fn desktop_sink_announces_each_compaction_checkpoint_once() {
+    let (send, receive) = async_channel::unbounded();
+    let sink = DesktopEventSink::new(
+        send,
+        RunId::new("run-1"),
+        Arc::new(ToolRegistry::new(None, None)),
+        None,
+    );
+    let before = vec![ca::AgentMessage::User {
+        content: ca::UserContent::Text("old context ".repeat(100)),
+        timestamp: None,
+    }];
+    let checkpoint = vec![ca::AgentMessage::User {
+        content: ca::UserContent::Text("checkpoint one".into()),
+        timestamp: None,
+    }];
+
+    for iteration in 1..=2 {
+        ca::EventSink::emit(
+            &sink,
+            ca::AgentEvent::ContextTransformApplied {
+                iteration,
+                plugin: "checkpoint_compactor",
+                before: before.clone(),
+                after: checkpoint.clone(),
+            },
+        )
+        .await;
+    }
+
+    let events = std::iter::from_fn(|| receive.try_recv().ok()).collect::<Vec<_>>();
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(event, desktop::AgentEvent::MessageChunk { .. }))
+            .count(),
+        1
+    );
+
+    ca::EventSink::emit(
+        &sink,
+        ca::AgentEvent::ContextTransformApplied {
+            iteration: 3,
+            plugin: "checkpoint_compactor",
+            before,
+            after: vec![ca::AgentMessage::User {
+                content: ca::UserContent::Text("checkpoint two".into()),
+                timestamp: None,
+            }],
+        },
+    )
+    .await;
+    let new_events = std::iter::from_fn(|| receive.try_recv().ok()).collect::<Vec<_>>();
+    assert!(new_events
+        .iter()
+        .any(|event| matches!(event, desktop::AgentEvent::MessageChunk { .. })));
+}
+
+#[tokio::test]
 async fn desktop_sink_marks_text_with_tool_calls_as_commentary() {
     let (send, receive) = async_channel::unbounded();
     let sink = DesktopEventSink::new(
