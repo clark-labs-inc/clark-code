@@ -19,7 +19,8 @@ import { UpgradePrompt } from "./UpgradePrompt";
 import { FanOutPanel } from "./FanOutPanel";
 import { PlanChecklist } from "./PlanChecklist";
 import { SideQuestionCard } from "./SideQuestionCard";
-import type { Artifact, TimelineItem, ToolCall } from "../core-bridge/types";
+import { GoalWorkSummary } from "./GoalWorkSummary";
+import type { Artifact, GoalState, TimelineItem, ToolCall } from "../core-bridge/types";
 
 /** A row of pulsing dots — the model is generating. Memoized so its animation
  *  isn't re-evaluated on every streamed-token re-render of the parent. */
@@ -67,21 +68,44 @@ function Pending({ label, detail, skeleton }: { label: string; detail?: string; 
 }
 
 /** Group consecutive tool-call lines so agent "work" reads as a dense block. */
-type Block =
+type BaseBlock =
   | { kind: "item"; item: TimelineItem; timelineIndex: number; key: string }
-  | { kind: "work"; ids: string[]; key: string };
+  | { kind: "work"; ids: string[]; run?: string; key: string };
+type Block = BaseBlock | { kind: "goal_work"; blocks: BaseBlock[]; key: string };
 
-function group(timeline: TimelineItem[]): Block[] {
-  const blocks: Block[] = [];
+function group(timeline: TimelineItem[], goal?: GoalState): Block[] {
+  const base: BaseBlock[] = [];
   timeline.forEach((item, i) => {
     if (item.item === "tool_call") {
-      const last = blocks[blocks.length - 1];
-      if (last && last.kind === "work") last.ids.push(item.id);
-      else blocks.push({ kind: "work", ids: [item.id], key: `w${i}` });
+      const last = base[base.length - 1];
+      if (last && last.kind === "work" && last.run === item.run) last.ids.push(item.id);
+      else base.push({ kind: "work", ids: [item.id], run: item.run, key: `w${i}` });
     } else {
-      blocks.push({ kind: "item", item, timelineIndex: i, key: `i${i}` });
+      base.push({ kind: "item", item, timelineIndex: i, key: `i${i}` });
     }
   });
+
+  if (!goal?.run) return base;
+  const blocks: Block[] = [];
+  for (const block of base) {
+    const belongsToGoal = block.kind === "work"
+      ? block.run === goal.run
+      : block.item.item === "plan"
+        ? block.item.run === goal.run
+        : block.item.item === "message"
+          ? block.item.run === goal.run && (
+              block.item.role === "system" ||
+              (block.item.role === "agent" && block.item.phase !== "final_answer")
+            )
+          : false;
+    if (!belongsToGoal) {
+      blocks.push(block);
+      continue;
+    }
+    const last = blocks[blocks.length - 1];
+    if (last?.kind === "goal_work") last.blocks.push(block);
+    else blocks.push({ kind: "goal_work", blocks: [block], key: `g${block.key}` });
+  }
   return blocks;
 }
 
@@ -169,10 +193,17 @@ export function Conversation({
   };
   const scrollToBottom = () => {
     const el = scrollRef.current;
-    if (el) el.scrollTo({ top: el.scrollHeight, behavior: reduce ? "auto" : "smooth" });
+    if (el) {
+      stuck.current = true;
+      setAtBottom(true);
+      el.scrollTo({ top: el.scrollHeight, behavior: reduce ? "auto" : "smooth" });
+      if (sessionId) {
+        scrollByConversation.set(sessionId, { scrollTop: el.scrollHeight, atBottom: true });
+      }
+    }
   };
 
-  const { timeline, tool_calls: toolCalls, artifacts, runs, pending_permission, plan } = snapshot;
+  const { timeline, tool_calls: toolCalls, artifacts, runs, pending_permission, plan, goal } = snapshot;
 
   // Restore after React has committed the target transcript but before paint,
   // avoiding a frame at the previous conversation's unrelated scrollTop.
@@ -218,7 +249,7 @@ export function Conversation({
   if (!session) return null;
 
   const visible = timeline;
-  const allBlocks = group(visible);
+  const allBlocks = group(visible, goal);
   // Long transcripts: render only the recent window. A 400-item DOM makes every
   // style/layout pass (and each streamed frame) pay for history the user isn't
   // reading — the dominant cost on slower machines. "Show earlier" reveals all.
@@ -242,6 +273,61 @@ export function Conversation({
       ? latestRun
       : undefined;
   const outOfCredits = failed?.outcome?.failure_kind === "insufficient_credits";
+
+  const renderBlock = (block: Block | BaseBlock) => {
+    if (block.kind === "goal_work") {
+      return goal ? (
+        <GoalWorkSummary key={block.key} goal={goal}>
+          {block.blocks.map(renderBlock)}
+        </GoalWorkSummary>
+      ) : null;
+    }
+    if (block.kind === "work") {
+      const calls = block.ids
+        .map((id) => toolCalls[id])
+        .filter(Boolean) as ToolCall[];
+      return <WorkBlock key={block.key} calls={calls} />;
+    }
+    const { item } = block;
+    if (item.item === "message") {
+      return (
+        <Message
+          key={block.key}
+          role={item.role}
+          blocks={item.blocks}
+          phase={item.phase}
+          timelineIndex={block.timelineIndex}
+          streaming={activity.busy && block.key === lastBlockKey && item.role === "agent"}
+        />
+      );
+    }
+    if (item.item === "artifact") {
+      const artifact = artifacts.find((candidate) => candidate.id === item.id);
+      return artifact ? (
+        <div
+          id={`artifact-${artifact.id}`}
+          key={block.key}
+          tabIndex={-1}
+          className={cn(
+            "relative outline-none focus-visible:ring-2 focus-visible:ring-accent",
+            artifact.id === activeArtifactId &&
+              "after:absolute after:left-full after:top-1/2 after:h-px after:w-5 after:bg-accent after:content-['']",
+          )}
+        >
+          <ArtifactCard
+            artifact={artifact}
+            active={artifact.id === activeArtifactId}
+            onOpen={onOpenArtifact}
+          />
+        </div>
+      ) : null;
+    }
+    if (item.item === "plan") {
+      return <PlanChecklist key={block.key} plan={item.plan ?? plan} />;
+    }
+    return null;
+  };
+
   return (
     <div ref={scrollRef} onScroll={onScroll} className="flex-1 overflow-y-auto">
       <div ref={contentRef} className="mx-auto flex max-w-2xl flex-col gap-4 px-5 py-5">
@@ -260,52 +346,7 @@ export function Conversation({
           </button>
         )}
 
-        {blocks.map((block) => {
-          if (block.kind === "work") {
-            // Codex form: a quiet stack of inline tool lines, no card border.
-            const calls = block.ids
-              .map((id) => toolCalls[id])
-              .filter(Boolean) as ToolCall[];
-            return <WorkBlock key={block.key} calls={calls} />;
-          }
-          const { item } = block;
-          if (item.item === "message")
-            return (
-              <Message
-                key={block.key}
-                role={item.role}
-                blocks={item.blocks}
-                phase={item.phase}
-                timelineIndex={block.timelineIndex}
-                streaming={activity.busy && block.key === lastBlockKey && item.role === "agent"}
-              />
-            );
-          if (item.item === "artifact") {
-            const a = artifacts.find((x) => x.id === item.id);
-            return a ? (
-              <div
-                id={`artifact-${a.id}`}
-                key={block.key}
-                tabIndex={-1}
-                className={cn(
-                  "relative outline-none focus-visible:ring-2 focus-visible:ring-accent",
-                  a.id === activeArtifactId &&
-                    "after:absolute after:left-full after:top-1/2 after:h-px after:w-5 after:bg-accent after:content-['']",
-                )}
-              >
-                <ArtifactCard
-                  artifact={a}
-                  active={a.id === activeArtifactId}
-                  onOpen={onOpenArtifact}
-                />
-              </div>
-            ) : null;
-          }
-          if (item.item === "plan") {
-            return <PlanChecklist key={block.key} plan={item.plan ?? plan} />;
-          }
-          return null;
-        })}
+        {blocks.map(renderBlock)}
 
         <FanOutPanel />
 

@@ -24,7 +24,7 @@ fn goal_summary(goal: &SessionGoal) -> String {
     };
     format!(
         "Goal is {}. Objective: {} — {budget}; {}s elapsed; {} continuation turn(s).",
-        goal.status.label(),
+        goal.status_label(),
         goal.objective,
         goal.time_used_seconds,
         goal.continuations
@@ -98,20 +98,30 @@ impl ToolExecutor for CreateGoal {
                 return ToolOutcome::error(format!(
                     "an unfinished goal already exists ({}): finish it with update_goal or \
                      ask the user to clear it. Objective: {}",
-                    existing.status.label(),
+                    existing.status_label(),
                     existing.objective
                 ));
             }
         }
         let goal = SessionGoal {
+            id: uuid::Uuid::new_v4().to_string(),
             objective: objective.clone(),
             status: GoalStatus::Active,
             token_budget,
             tokens_used: 0,
             time_used_seconds: 0,
             continuations: 0,
+            updated_at_ms: 0,
+            blocker_reason: None,
+            blocker_observations: 0,
+            last_blocker_continuation: None,
         };
         session.goal = Some(goal);
+        session
+            .goal
+            .as_mut()
+            .expect("goal was just inserted")
+            .touch();
         let budget_note = match token_budget {
             Some(budget) => format!(" Token budget: {budget}."),
             None => String::new(),
@@ -150,6 +160,10 @@ impl ToolExecutor for UpdateGoal {
                     "type": "string",
                     "enum": ["complete", "blocked"],
                     "description": "The new goal status."
+                },
+                "reason": {
+                    "type": "string",
+                    "description": "Required for blocked. The concrete external condition preventing progress."
                 }
             },
             "required": ["status"]
@@ -176,16 +190,53 @@ impl ToolExecutor for UpdateGoal {
         if goal.status == GoalStatus::Complete {
             return ToolOutcome::error("the goal is already complete");
         }
-        goal.status = status;
-        let summary = goal_summary(goal);
         match status {
-            GoalStatus::Complete => ToolOutcome::ok(format!(
-                "Goal marked complete. {summary} Report the final usage to the user."
-            )),
-            _ => ToolOutcome::ok(format!(
-                "Goal marked blocked — automatic continuation stops here. {summary} Tell \
-                 the user exactly what is blocking and what you need from them."
-            )),
+            GoalStatus::Complete => {
+                goal.status = GoalStatus::Complete;
+                goal.blocker_reason = None;
+                goal.touch();
+                let summary = goal_summary(goal);
+                ToolOutcome::ok(format!(
+                    "Goal marked complete. {summary} Report the final usage to the user."
+                ))
+            }
+            GoalStatus::Blocked => {
+                let Some(reason) = args.get("reason").and_then(Value::as_str) else {
+                    return ToolOutcome::error("`reason` is required when marking a goal blocked");
+                };
+                let reason = reason.trim();
+                if reason.is_empty() || reason.chars().count() > 1_000 {
+                    return ToolOutcome::error("`reason` must be between 1 and 1000 characters");
+                }
+                let same_condition = goal
+                    .blocker_reason
+                    .as_deref()
+                    .is_some_and(|previous| previous.eq_ignore_ascii_case(reason));
+                if !same_condition {
+                    goal.blocker_reason = Some(reason.to_string());
+                    goal.blocker_observations = 1;
+                    goal.last_blocker_continuation = Some(goal.continuations);
+                } else if goal.last_blocker_continuation != Some(goal.continuations) {
+                    goal.blocker_observations = goal.blocker_observations.saturating_add(1);
+                    goal.last_blocker_continuation = Some(goal.continuations);
+                }
+                goal.touch();
+                if goal.blocker_observations < 3 {
+                    return ToolOutcome::error(format!(
+                        "Blocked state rejected: this condition has repeated for {}/3 \
+                         consecutive goal turns. The goal remains active; continue with any \
+                         safe work and only report the same blocker again on a later goal turn.",
+                        goal.blocker_observations
+                    ));
+                }
+                goal.status = GoalStatus::Blocked;
+                let summary = goal_summary(goal);
+                ToolOutcome::ok(format!(
+                    "Goal marked blocked — automatic continuation stops here. {summary} Tell \
+                     the user exactly what is blocking and what you need from them."
+                ))
+            }
+            _ => unreachable!("update_goal accepts only complete or blocked"),
         }
     }
 }
@@ -310,5 +361,54 @@ mod tests {
         let report = GetGoal.invoke(json!({}), &ctx).await;
         assert!(report.content.contains("active"));
         assert!(report.content.contains("ship it"));
+    }
+
+    #[tokio::test]
+    async fn blocked_requires_same_reason_on_three_distinct_goal_turns() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = test_ctx(dir.path());
+        CreateGoal
+            .invoke(json!({"objective": "ship it"}), &ctx)
+            .await;
+
+        for continuation in 0..2 {
+            ctx.session
+                .lock()
+                .await
+                .goal
+                .as_mut()
+                .unwrap()
+                .continuations = continuation;
+            let rejected = UpdateGoal
+                .invoke(
+                    json!({"status": "blocked", "reason": "Waiting for the user's API key"}),
+                    &ctx,
+                )
+                .await;
+            assert!(rejected.is_error);
+            assert_eq!(
+                ctx.session.lock().await.goal.as_ref().unwrap().status,
+                GoalStatus::Active
+            );
+        }
+
+        ctx.session
+            .lock()
+            .await
+            .goal
+            .as_mut()
+            .unwrap()
+            .continuations = 2;
+        let accepted = UpdateGoal
+            .invoke(
+                json!({"status": "blocked", "reason": "Waiting for the user's API key"}),
+                &ctx,
+            )
+            .await;
+        assert!(!accepted.is_error);
+        assert_eq!(
+            ctx.session.lock().await.goal.as_ref().unwrap().status,
+            GoalStatus::Blocked
+        );
     }
 }

@@ -76,8 +76,17 @@ export function settleRuns(snapshot: Snapshot): Snapshot {
       tool_calls[id] = t;
     }
   }
+  let goal = snapshot.goal;
+  if (goal?.status === "active") {
+    goal = {
+      ...goal,
+      status: "blocked",
+      blocker_reason: "Clark stopped before the goal finished.",
+    };
+    changed = true;
+  }
   if (!changed && !snapshot.pending_permission) return snapshot;
-  return { ...snapshot, runs, tool_calls, pending_permission: undefined };
+  return { ...snapshot, runs, tool_calls, goal, pending_permission: undefined };
 }
 
 function replayBlocks(blocks: ContentBlock[]): ContentBlock[] {
@@ -91,6 +100,7 @@ function trimItemToBudget(item: ResumeItem, budget: number): ResumeItem {
       .join("");
     return [{ type: "text" as const, text: `…${text.slice(-Math.max(0, budget - 200))}` }];
   };
+  if (item.item === "goal") return item;
   if (item.item === "message") return { ...item, blocks: suffix(item.blocks) };
   return { ...item, arguments: undefined, content: suffix(item.content) };
 }
@@ -127,6 +137,7 @@ export function buildResumeTranscript(
       });
     }
   }
+  if (snapshot.goal) items.push({ item: "goal", goal: snapshot.goal });
   if (items.length === 0) return null;
 
   const kept: ResumeItem[] = [];
@@ -164,6 +175,7 @@ export function snapshotBeforeTimelineItem(snapshot: Snapshot, index: number): S
   const runIds = new Set(
     timeline.flatMap((item) => {
       if (item.item === "message") return [item.run];
+      if (item.item === "tool_call" && item.run) return [item.run];
       if (item.item === "plan" && item.run) return [item.run];
       return [];
     }),
@@ -186,6 +198,7 @@ export function snapshotBeforeTimelineItem(snapshot: Snapshot, index: number): S
     timeline,
     tool_calls,
     ...(lastPlan ? { plan: lastPlan } : {}),
+    ...(snapshot.goal?.run && runIds.has(snapshot.goal.run) ? { goal: snapshot.goal } : {}),
     artifacts,
   };
 }

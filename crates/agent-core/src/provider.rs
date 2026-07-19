@@ -9,7 +9,7 @@ use futures::stream::BoxStream;
 use serde::{Deserialize, Serialize};
 
 use crate::domain::{
-    AgentEvent, ContentBlock, FsLocation, PendingUpload, Role, ToolKind, ToolStatus,
+    AgentEvent, ContentBlock, FsLocation, GoalState, PendingUpload, Role, ToolKind, ToolStatus,
 };
 use crate::error::Result;
 use crate::ids::{PermissionRequestId, ProviderId, RunId, SessionId};
@@ -97,6 +97,9 @@ pub enum ResumeItem {
         #[serde(default)]
         content: Vec<ContentBlock>,
     },
+    /// Standing goal state carried alongside transcript replay for providers
+    /// without server-side session persistence.
+    Goal { goal: GoalState },
 }
 
 /// A connected conversation with one provider.

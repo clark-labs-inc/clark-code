@@ -224,6 +224,7 @@ fn event_name(ev: &AgentEvent) -> &'static str {
         AgentEvent::ToolCall { .. } => "ToolCall",
         AgentEvent::ToolCallUpdate { .. } => "ToolCallUpdate",
         AgentEvent::Plan { .. } => "Plan",
+        AgentEvent::GoalUpdated { .. } => "GoalUpdated",
         AgentEvent::PermissionRequest { .. } => "PermissionRequest",
         AgentEvent::Artifact { .. } => "Artifact",
         AgentEvent::Surface { .. } => "Surface",

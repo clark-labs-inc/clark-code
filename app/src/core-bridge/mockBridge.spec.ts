@@ -144,4 +144,60 @@ describe("MockBridge", () => {
       "queued",
     ]);
   });
+
+  it("emits a typed blocked-goal receipt for deterministic UI simulation", async () => {
+    const bridge = new MockBridge();
+    await bridge.newSession("local", {});
+    await bridge.prompt("mock-session", [{ type: "text", text: "goal simulation blocked" }]);
+
+    const snapshot = await waitFor((state) => state.goal?.status === "blocked", bridge);
+    expect(snapshot.goal).toMatchObject({
+      objective: "Fully implement and test the typed goal experience",
+      status: "blocked",
+      time_used_seconds: 43,
+      continuations: 2,
+    });
+    expect(snapshot.timeline.filter((item) => item.item === "tool_call")).toHaveLength(24);
+    expect(snapshot.timeline.find((item) => item.item === "tool_call")).toMatchObject({ run: snapshot.goal?.run });
+  });
+
+  it("visibly changes an active goal trajectory after an explicit steer", async () => {
+    const bridge = new MockBridge();
+    await bridge.newSession("local", {});
+    await bridge.prompt("mock-session", [{ type: "text", text: "goal simulation active" }]);
+
+    const active = await waitFor(
+      (state) => state.goal?.status === "active" &&
+        state.timeline.filter((item) => item.item === "tool_call").length === 24,
+      bridge,
+    );
+    expect(active.goal?.continuations).toBe(2);
+
+    const steer = "Prioritize accessibility and keyboard navigation before completion.";
+    await bridge.steer("mock-session", [{ type: "text", text: steer }]);
+    const changed = await waitFor(
+      (state) => Object.values(state.tool_calls).some(
+        (call) => call.locations.some(
+          (location) => location.path === "app/src/goal/accessibility-verification.ts",
+        ),
+      ),
+      bridge,
+    );
+
+    expect(changed.goal).toMatchObject({ status: "active", continuations: 3 });
+    expect(changed.timeline).toContainEqual(expect.objectContaining({
+      item: "message",
+      role: "user",
+      blocks: [{ type: "text", text: steer }],
+    }));
+    expect(changed.plan?.phases).toEqual([
+      expect.objectContaining({ title: "Prioritize accessibility and keyboard-navigation verification", status: "completed" }),
+      expect.objectContaining({ title: "Verify the revised goal trajectory", status: "in_progress" }),
+    ]);
+    expect(changed.timeline).toContainEqual(expect.objectContaining({
+      item: "message",
+      role: "agent",
+      blocks: [expect.objectContaining({ text: expect.stringContaining("The steer took effect") })],
+    }));
+  });
 });

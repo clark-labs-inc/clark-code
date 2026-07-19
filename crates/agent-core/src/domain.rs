@@ -367,6 +367,36 @@ pub struct RunUsage {
     pub context_limit: Option<u64>,
 }
 
+/// Lifecycle of a standing session goal. Unlike a run, a goal can span many
+/// user turns and survives reopening the conversation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GoalStatus {
+    Active,
+    Blocked,
+    BudgetLimited,
+    Complete,
+}
+
+/// Authoritative, provider-owned receipt for a standing goal.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GoalState {
+    pub id: String,
+    pub objective: String,
+    pub status: GoalStatus,
+    /// Most recent run that advanced or changed this goal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run: Option<RunId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token_budget: Option<u64>,
+    pub tokens_used: u64,
+    pub time_used_seconds: u64,
+    pub continuations: u32,
+    pub updated_at_ms: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blocker_reason: Option<String>,
+}
+
 /// A file the user attached but a provider hasn't ingested yet. The bytes ride
 /// base64-encoded; each provider decides how to make it available to the agent
 /// (ACP → content blocks, Clark → an attachment record, …).
@@ -492,6 +522,12 @@ pub enum AgentEvent {
     Plan {
         run: RunId,
         plan: Plan,
+    },
+    /// A standing goal changed status or usage. Providers emit the complete
+    /// state so replay and reconnect remain deterministic.
+    GoalUpdated {
+        run: RunId,
+        goal: GoalState,
     },
     PermissionRequest {
         request: PermissionRequest,

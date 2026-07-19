@@ -117,6 +117,7 @@ fn variant(ev: &AgentEvent) -> String {
         AgentEvent::ToolCall { .. } => "ToolCall",
         AgentEvent::ToolCallUpdate { .. } => "ToolCallUpdate",
         AgentEvent::Plan { .. } => "Plan",
+        AgentEvent::GoalUpdated { .. } => "GoalUpdated",
         AgentEvent::Surface { .. } => "Surface",
         AgentEvent::Artifact { .. } => "Artifact",
         AgentEvent::PermissionRequest { .. } => "PermissionRequest",

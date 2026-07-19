@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
-use agent_core::ids::PermissionRequestId;
+use agent_core::domain::GoalState;
+pub(crate) use agent_core::domain::GoalStatus;
+use agent_core::ids::{PermissionRequestId, RunId};
 use clark_agent::AgentMessage;
 use tokio::sync::oneshot;
 
@@ -64,6 +66,7 @@ pub(crate) struct SessionState {
 /// (errors, iteration caps, budget crossings).
 #[derive(Clone, Debug)]
 pub(crate) struct SessionGoal {
+    pub id: String,
     pub objective: String,
     pub status: GoalStatus,
     /// Optional cap on tokens (input+output) spent pursuing the goal.
@@ -74,27 +77,71 @@ pub(crate) struct SessionGoal {
     pub time_used_seconds: u64,
     /// Goal-continuation turns launched by the engine so far.
     pub continuations: u32,
+    pub updated_at_ms: u64,
+    pub blocker_reason: Option<String>,
+    /// Runtime-only audit used to enforce the three-consecutive-turn blocker
+    /// rule. It intentionally resets after reopening or explicit user resume.
+    pub blocker_observations: u8,
+    pub last_blocker_continuation: Option<u32>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum GoalStatus {
-    Active,
-    /// The engine or the model stopped: repeated blocker, terminal error, or
-    /// the continuation cap. Needs the user to intervene.
-    Blocked,
-    /// The token budget is exhausted; one wrap-up turn runs, then the run
-    /// stops.
-    BudgetLimited,
-    Complete,
-}
+impl SessionGoal {
+    pub fn from_state(state: GoalState) -> Self {
+        Self {
+            id: state.id,
+            objective: state.objective,
+            status: state.status,
+            token_budget: state.token_budget,
+            tokens_used: state.tokens_used,
+            time_used_seconds: state.time_used_seconds,
+            continuations: state.continuations,
+            updated_at_ms: state.updated_at_ms,
+            blocker_reason: state.blocker_reason,
+            blocker_observations: 0,
+            last_blocker_continuation: None,
+        }
+    }
 
-impl GoalStatus {
-    pub fn label(self) -> &'static str {
+    pub fn state(&self, run: Option<&RunId>) -> GoalState {
+        GoalState {
+            id: self.id.clone(),
+            objective: self.objective.clone(),
+            status: self.status,
+            run: run.cloned(),
+            token_budget: self.token_budget,
+            tokens_used: self.tokens_used,
+            time_used_seconds: self.time_used_seconds,
+            continuations: self.continuations,
+            updated_at_ms: self.updated_at_ms,
+            blocker_reason: self.blocker_reason.clone(),
+        }
+    }
+
+    pub fn touch(&mut self) {
+        self.updated_at_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+    }
+
+    pub fn status_label(&self) -> &'static str {
         match self {
-            GoalStatus::Active => "active",
-            GoalStatus::Blocked => "blocked",
-            GoalStatus::BudgetLimited => "budget-limited",
-            GoalStatus::Complete => "complete",
+            Self {
+                status: GoalStatus::Active,
+                ..
+            } => "active",
+            Self {
+                status: GoalStatus::Blocked,
+                ..
+            } => "blocked",
+            Self {
+                status: GoalStatus::BudgetLimited,
+                ..
+            } => "budget-limited",
+            Self {
+                status: GoalStatus::Complete,
+                ..
+            } => "complete",
         }
     }
 }

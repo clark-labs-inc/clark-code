@@ -89,6 +89,9 @@ export class MockBridge implements CoreBridge {
     }
     this.snapshot.timeline.push({ item: "message", run, role: "user", blocks });
     this.emit();
+    if (this.snapshot.goal?.run === run && this.snapshot.goal.status === "active") {
+      await this.playGoalSteer(run, blocks);
+    }
   }
 
   async cancel(): Promise<void> {
@@ -180,6 +183,11 @@ export class MockBridge implements CoreBridge {
     });
     this.emit();
     await sleep(250);
+
+    if (userText.toLowerCase().includes("goal simulation")) {
+      await this.playGoalSimulation(run, userText);
+      return;
+    }
 
     // Demo hook: "out of credits" reproduces the insufficient-credits failure so
     // the upgrade banner can be seen in the browser preview.
@@ -501,5 +509,209 @@ export class MockBridge implements CoreBridge {
       role: "agent",
       blocks: [{ type: "text", text }],
     });
+  }
+
+  /** Deterministic goal fixture for browser QA and product demos. The typed
+   *  state and run-linked tool rows mirror the native provider boundary. */
+  private async playGoalSimulation(run: string, userText: string) {
+    const lower = userText.toLowerCase();
+    const requestedStatus = lower.includes("complete")
+      ? "complete" as const
+      : lower.includes("budget")
+        ? "budget_limited" as const
+        : lower.includes("active")
+          ? "active" as const
+          : "blocked" as const;
+    const goalId = "mock-goal";
+    const objective = "Fully implement and test the typed goal experience";
+    this.snapshot.goal = {
+      id: goalId,
+      objective,
+      status: "active",
+      run,
+      token_budget: 100_000,
+      tokens_used: 18_420,
+      time_used_seconds: 0,
+      continuations: 0,
+      updated_at_ms: Date.now(),
+    };
+    this.snapshot.timeline.push({
+      item: "message",
+      run,
+      role: "agent",
+      phase: "commentary",
+      blocks: [{ type: "text", text: "I’m tracing the goal contract, persistence, and UI receipt before I wire the simulation." }],
+    });
+    this.emit();
+    await sleep(120);
+
+    const addedLines = Array.from({ length: 1_377 }, (_, index) => `+added line ${index + 1}`);
+    const deletedLines = Array.from({ length: 427 }, (_, index) => `-deleted line ${index + 1}`);
+    for (let index = 0; index < 24; index++) {
+      const id = `goal-edit-${index + 1}`;
+      const path = `app/src/goal/fixture-${index + 1}.ts`;
+      this.snapshot.tool_calls[id] = {
+        id,
+        title: `Edit ${path}`,
+        kind: "edit",
+        status: "completed",
+        locations: [{ path, line: 1 }],
+        content: [{
+          type: "text",
+          text: [
+            `diff ${path}`,
+            ...(index === 0 ? [...deletedLines, ...addedLines] : ["-old", "+new"]),
+          ].join("\n"),
+        }],
+      };
+      this.snapshot.timeline.push({ item: "tool_call", id, run });
+    }
+    this.snapshot.timeline.push({
+      item: "message",
+      run,
+      role: "system",
+      blocks: [{ type: "text", text: "Goal turn 2: continuing toward the objective (18,420 tokens used)." }],
+    });
+
+    const blocker = "The paid provider evaluation needs an explicit model and spend cap.";
+    this.snapshot.goal = {
+      ...this.snapshot.goal,
+      status: requestedStatus,
+      tokens_used: 24_870,
+      time_used_seconds: 43,
+      continuations: 2,
+      updated_at_ms: Date.now(),
+      blocker_reason: requestedStatus === "blocked" ? blocker : undefined,
+    };
+    this.snapshot.timeline.push({
+      item: "message",
+      run,
+      role: "agent",
+      phase: requestedStatus === "active" ? "commentary" : "final_answer",
+      blocks: [{
+        type: "text",
+        text: requestedStatus === "active"
+          ? "The core goal flow is in place. I’m keeping the goal active so you can steer what I verify next."
+          : requestedStatus === "blocked"
+            ? "The typed goal flow, compact work receipt, persistence, and deterministic simulation are implemented and verified. The paid evaluation is configured but not run because live model calls require an explicit model and spend cap."
+            : "The typed goal flow, compact work receipt, persistence, and deterministic simulation are implemented and verified.",
+      }],
+    });
+    if (requestedStatus !== "active") {
+      this.snapshot.runs[run] = {
+        id: run,
+        status: "done",
+        outcome: { status: "done", stop_reason: "end_turn" },
+        checkpoint: "mock-checkpoint-sha",
+      };
+    }
+    this.emit();
+  }
+
+  /** Continue an active simulated goal from an explicit queued-message steer.
+   *  The user turn is already echoed by `steer`; this adds visibly different
+   *  plan/work evidence so browser QA proves trajectory change, not just that
+   *  the button removed a queued chip. */
+  private async playGoalSteer(run: string, blocks: ContentBlock[]) {
+    const instruction = blocks
+      .filter((block): block is Extract<ContentBlock, { type: "text" }> => block.type === "text")
+      .map((block) => block.text.trim())
+      .filter(Boolean)
+      .join(" ");
+    const accessibility = /accessib|keyboard|screen reader/i.test(instruction);
+    const direction = accessibility
+      ? "Prioritize accessibility and keyboard-navigation verification"
+      : instruction || "Apply the user's updated direction";
+    const path = accessibility
+      ? "app/src/goal/accessibility-verification.ts"
+      : "app/src/goal/steered-trajectory.ts";
+
+    this.snapshot.plan = {
+      phases: [
+        { title: direction, status: "in_progress" },
+        { title: "Verify the revised goal trajectory", status: "pending" },
+      ],
+    };
+    this.snapshot.timeline.push({
+      item: "plan",
+      run,
+      plan: structuredClone(this.snapshot.plan),
+    });
+    this.snapshot.timeline.push({
+      item: "message",
+      run,
+      role: "agent",
+      phase: "commentary",
+      blocks: [{
+        type: "text",
+        text: `Steering received — ${direction.toLowerCase()} before I complete the goal.`,
+      }],
+    });
+    this.emit();
+    await sleep(180);
+
+    const id = `goal-steer-${Date.now()}`;
+    this.snapshot.tool_calls[id] = {
+      id,
+      title: `Apply steer: ${path}`,
+      kind: "edit",
+      status: "completed",
+      locations: [{ path, line: 1 }],
+      content: [{
+        type: "text",
+        text: [
+          `diff ${path}`,
+          "+export const steeredGoalDirection =",
+          `+  ${JSON.stringify(direction)};`,
+        ].join("\n"),
+      }],
+    };
+    this.snapshot.timeline.push({ item: "tool_call", id, run });
+    this.snapshot.timeline.push({
+      item: "message",
+      run,
+      role: "system",
+      blocks: [{
+        type: "text",
+        text: `Goal turn 3: the user steer changed the active trajectory to “${direction}”.`,
+      }],
+    });
+    if (this.snapshot.goal?.run === run) {
+      const now = Date.now();
+      const liveElapsed = Math.max(
+        0,
+        Math.floor((now - this.snapshot.goal.updated_at_ms) / 1_000),
+      );
+      this.snapshot.goal = {
+        ...this.snapshot.goal,
+        tokens_used: this.snapshot.goal.tokens_used + 1_320,
+        time_used_seconds: this.snapshot.goal.time_used_seconds + liveElapsed,
+        continuations: this.snapshot.goal.continuations + 1,
+        updated_at_ms: now,
+      };
+    }
+    this.snapshot.plan = {
+      phases: [
+        { title: direction, status: "completed" },
+        { title: "Verify the revised goal trajectory", status: "in_progress" },
+      ],
+    };
+    const planItem = this.snapshot.timeline.find(
+      (item) => item.item === "plan" && item.run === run,
+    );
+    if (planItem?.item === "plan") planItem.plan = structuredClone(this.snapshot.plan);
+    this.snapshot.timeline.push({
+      item: "message",
+      run,
+      role: "agent",
+      phase: "commentary",
+      blocks: [{
+        type: "text",
+        text: accessibility
+          ? "The steer took effect: accessibility verification is now on the active path, and keyboard navigation is the next completion gate."
+          : `The steer took effect: “${direction}” is now on the active path.`,
+      }],
+    });
+    this.emit();
   }
 }

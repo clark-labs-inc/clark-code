@@ -78,6 +78,7 @@ async fn diag_multistep_over_sse() {
                     plans += 1;
                     format!("Plan({} phases)", plan.phases.len())
                 }
+                AgentEvent::GoalUpdated { .. } => "GoalUpdated".to_string(),
                 AgentEvent::Surface { focus } => format!("Surface({:?})", focus.surface),
                 AgentEvent::Artifact { artifact, .. } => {
                     format!("Artifact[{:?}] {}", artifact.kind, artifact.title)

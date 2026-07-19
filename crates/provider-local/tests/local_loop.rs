@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use agent_core::domain::{
-    AgentEvent, ContentBlock, MessagePhase, PendingUpload, Role, RunStatus, ToolStatus,
+    AgentEvent, ContentBlock, GoalStatus, MessagePhase, PendingUpload, Role, RunStatus, ToolStatus,
 };
 use agent_core::provider::{ClientResponse, PromptInput, Provider, ProviderConfig, SessionOptions};
 use agent_core::TimelineItem;
@@ -1207,6 +1207,7 @@ async fn goal_mode_continues_the_run_until_update_goal_complete() {
         .unwrap();
 
     let mut goal_notes = 0;
+    let mut typed_goal_complete = false;
     let mut finished = None;
     while let Some(ev) = stream.next().await {
         match &ev {
@@ -1227,6 +1228,9 @@ async fn goal_mode_continues_the_run_until_update_goal_complete() {
                 role: agent_core::domain::Role::System,
                 ..
             } => goal_notes += 1,
+            AgentEvent::GoalUpdated { goal, .. } => {
+                typed_goal_complete |= goal.status == GoalStatus::Complete;
+            }
             AgentEvent::RunFinished { outcome, .. } => {
                 finished = Some(outcome.status);
                 break;
@@ -1236,6 +1240,10 @@ async fn goal_mode_continues_the_run_until_update_goal_complete() {
     }
 
     assert_eq!(finished, Some(RunStatus::Done));
+    assert!(
+        typed_goal_complete,
+        "the provider emits the terminal typed goal state"
+    );
     assert!(goal_notes >= 1, "the continuation must be visible");
     assert_eq!(
         std::fs::read_to_string(dir.path().join("hello.txt")).unwrap(),

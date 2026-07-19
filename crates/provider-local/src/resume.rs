@@ -88,6 +88,7 @@ pub(crate) fn to_agent_messages(resume: Option<&ResumeTranscript>) -> Vec<ca::Ag
                     timestamp: None,
                 });
             }
+            ResumeItem::Goal { .. } => {}
         }
     }
     messages

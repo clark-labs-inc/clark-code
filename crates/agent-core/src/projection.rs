@@ -33,7 +33,11 @@ pub enum TimelineItem {
         phase: Option<MessagePhase>,
     },
     /// Reference into [`Snapshot::tool_calls`] (kept by id so updates are O(1)).
-    ToolCall { id: ToolCallId },
+    ToolCall {
+        id: ToolCallId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        run: Option<RunId>,
+    },
     /// Reference into [`Snapshot::artifacts`] — rendered inline where produced.
     Artifact { id: String },
     Plan {
@@ -55,6 +59,8 @@ pub struct Snapshot {
     pub tool_calls: IndexMap<ToolCallId, ToolCall>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plan: Option<Plan>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub goal: Option<GoalState>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pending_permission: Option<PermissionRequest>,
     pub artifacts: Vec<Artifact>,
@@ -153,6 +159,7 @@ pub fn apply(snapshot: &mut Snapshot, event: &AgentEvent) {
             if !already {
                 snapshot.timeline.push(TimelineItem::ToolCall {
                     id: call.id.clone(),
+                    run: Some(run.clone()),
                 });
             }
         }
@@ -203,6 +210,12 @@ pub fn apply(snapshot: &mut Snapshot, event: &AgentEvent) {
                 });
             }
             snapshot.plan = Some(plan.clone());
+        }
+
+        AgentEvent::GoalUpdated { run, goal } => {
+            let mut next = goal.clone();
+            next.run = Some(run.clone());
+            snapshot.goal = Some(next);
         }
 
         AgentEvent::PermissionRequest { request } => {
@@ -459,6 +472,31 @@ mod tests {
         ];
         let snap = reduce_all(&events);
         assert_eq!(snap.timeline.len(), 2);
+    }
+
+    #[test]
+    fn goal_update_projects_authoritative_state_and_run() {
+        let goal = GoalState {
+            id: "goal-1".into(),
+            objective: "ship the feature".into(),
+            status: GoalStatus::Blocked,
+            run: None,
+            token_budget: Some(50_000),
+            tokens_used: 12_345,
+            time_used_seconds: 43,
+            continuations: 2,
+            updated_at_ms: 99,
+            blocker_reason: Some("needs user input".into()),
+        };
+        let snap = reduce_all(&[AgentEvent::GoalUpdated { run: run(), goal }]);
+
+        let projected = snap.goal.expect("goal projected");
+        assert_eq!(projected.run, Some(run()));
+        assert_eq!(projected.status, GoalStatus::Blocked);
+        assert_eq!(
+            projected.blocker_reason.as_deref(),
+            Some("needs user input")
+        );
     }
 
     #[test]

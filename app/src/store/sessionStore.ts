@@ -159,6 +159,7 @@ function mergeHistory(prefix: Snapshot, live: Snapshot): Snapshot {
     timeline: [...prefix.timeline, ...live.timeline],
     tool_calls: { ...prefix.tool_calls, ...live.tool_calls },
     plan: live.plan ?? prefix.plan,
+    goal: live.goal ?? prefix.goal,
     pending_permission: live.pending_permission,
     artifacts,
     focus: live.focus ?? prefix.focus,

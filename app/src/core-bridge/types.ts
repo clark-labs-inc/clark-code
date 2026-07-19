@@ -47,7 +47,8 @@ export type ResumeItem =
       locations: FsLocation[];
       arguments?: unknown;
       content: ContentBlock[];
-    };
+    }
+  | { item: "goal"; goal: GoalState };
 
 export interface ResumeTranscript {
   items: ResumeItem[];
@@ -196,9 +197,25 @@ export interface RunView {
   checkpoint?: string;
 }
 
+export type GoalStatus = "active" | "blocked" | "budget_limited" | "complete";
+
+/** Provider-owned receipt for a standing goal that can span many runs. */
+export interface GoalState {
+  id: string;
+  objective: string;
+  status: GoalStatus;
+  run?: string;
+  token_budget?: number;
+  tokens_used: number;
+  time_used_seconds: number;
+  continuations: number;
+  updated_at_ms: number;
+  blocker_reason?: string;
+}
+
 export type TimelineItem =
   | { item: "message"; run: string; role: Role; blocks: ContentBlock[]; phase?: MessagePhase }
-  | { item: "tool_call"; id: string }
+  | { item: "tool_call"; id: string; run?: string }
   | { item: "artifact"; id: string }
   | { item: "plan"; run?: string; plan?: Plan };
 
@@ -208,6 +225,7 @@ export interface Snapshot {
   timeline: TimelineItem[];
   tool_calls: Record<string, ToolCall>;
   plan?: Plan;
+  goal?: GoalState;
   pending_permission?: PermissionRequest;
   artifacts: Artifact[];
   focus?: WorkspaceFocus;

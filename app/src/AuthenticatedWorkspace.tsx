@@ -10,6 +10,7 @@ import { Sidebar } from "./surfaces/Sidebar";
 import { StartCard } from "./surfaces/StartCard";
 import { OpeningScreen } from "./surfaces/OpeningScreen";
 import { Composer } from "./surfaces/Composer";
+import { GoalStatusRail } from "./surfaces/GoalStatusRail";
 import { CreditBanner } from "./surfaces/CreditBanner";
 import { OfflineBanner } from "./surfaces/OfflineBanner";
 import { CommandPalette } from "./surfaces/CommandPalette";
@@ -249,6 +250,7 @@ export default function AuthenticatedWorkspace({
               <Suspense fallback={<div className="min-h-0 flex-1" />}>
                 <Conversation activeArtifactId={activeArtifactId} onOpenArtifact={openArtifact} />
               </Suspense>
+              <GoalStatusRail />
               <Composer />
             </div>
             {sidePanelOpen && (

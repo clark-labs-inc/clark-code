@@ -392,10 +392,26 @@ async fn new_session_replays_typed_resume_into_history() {
         mode: None,
         resume: Some(agent_core::ResumeTranscript {
             truncated: false,
-            items: vec![agent_core::ResumeItem::Message {
-                role: Role::User,
-                blocks: vec![ContentBlock::text("install node")],
-            }],
+            items: vec![
+                agent_core::ResumeItem::Message {
+                    role: Role::User,
+                    blocks: vec![ContentBlock::text("install node")],
+                },
+                agent_core::ResumeItem::Goal {
+                    goal: agent_core::domain::GoalState {
+                        id: "goal-restore".into(),
+                        objective: "finish the installation".into(),
+                        status: agent_core::domain::GoalStatus::Blocked,
+                        run: Some(RunId::new("old-run")),
+                        token_budget: Some(20_000),
+                        tokens_used: 4_000,
+                        time_used_seconds: 43,
+                        continuations: 2,
+                        updated_at_ms: 100,
+                        blocker_reason: Some("session was closed".into()),
+                    },
+                },
+            ],
         }),
     };
     p.new_session(opts).await.unwrap();
@@ -406,6 +422,10 @@ async fn new_session_replays_typed_resume_into_history() {
         s.transcript[0],
         clark_agent::AgentMessage::User { .. }
     ));
+    let goal = s.goal.as_ref().expect("standing goal restored");
+    assert_eq!(goal.id, "goal-restore");
+    assert_eq!(goal.status, agent_core::domain::GoalStatus::Blocked);
+    assert_eq!(goal.tokens_used, 4_000);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

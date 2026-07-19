@@ -23,9 +23,12 @@ import {
 } from "../lib/repositoryKnowledge";
 import { desktopHostId } from "../lib/desktopHost";
 import { mobileRemoteRetryDelayMs } from "../lib/mobileRemoteRetry";
+import {
+  MobileRemotePresenceLoop,
+  publishMobileRemotePresence,
+} from "../lib/mobileRemotePresence";
 
 const LOOP_INTERVAL_MS = 500;
-const HOST_HEARTBEAT_INTERVAL_MS = 30_000;
 const COMMAND_POLL_WAIT_MS = 25_000;
 
 function leaf(path: string): string {
@@ -297,8 +300,8 @@ async function runCommand(creds: CloudCreds, hostId: string, command: CodeRemote
 export function MobileRemoteAgent() {
   const auth = useSessionStore((state) => state.auth);
   const cwd = useSessionStore((state) => state.localSettings.cwd);
-  const busyRef = useRef(false);
-  const lastHeartbeatRef = useRef(0);
+  const commandBusyRef = useRef(false);
+  const repositoryBusyRef = useRef(false);
   const consecutiveFailuresRef = useRef(0);
   const retryAtRef = useRef(0);
 
@@ -306,36 +309,78 @@ export function MobileRemoteAgent() {
     if (!auth) return;
     const hostId = desktopHostId();
     let stopped = false;
-    lastHeartbeatRef.current = 0;
+    let authRefresh: Promise<void> | null = null;
     consecutiveFailuresRef.current = 0;
     retryAtRef.current = 0;
 
-    const tick = async () => {
-      if (stopped || busyRef.current) return;
+    const recoverExpiredAuth = async (error: unknown): Promise<boolean> => {
+      if (!isAuthExpiredError(error)) return false;
+      if (!authRefresh) {
+        const attempt = (async () => {
+          const currentAuth = useSessionStore.getState().auth;
+          const refreshed = currentAuth ? await refreshAuthSession(currentAuth) : null;
+          if (stopped) return;
+          if (refreshed) {
+            useSessionStore.setState({ auth: refreshed });
+          } else {
+            useSessionStore.getState().signOutAuth();
+            void notify("Clark sign-in expired", "Sign in again to keep Clark Code remote control online.");
+          }
+        })();
+        authRefresh = attempt;
+        void attempt.finally(() => {
+          if (authRefresh === attempt) authRefresh = null;
+        });
+      }
+      await authRefresh;
+      return true;
+    };
+
+    const refreshPresence = async () => {
+      if (stopped || navigator.onLine === false) return;
+      const creds = cloudCreds(useSessionStore.getState().auth);
+      if (!creds) return;
+      const root = useSessionStore.getState().localSettings.cwd.trim();
+      const refreshRepositories = root && projectKnowledgeEnabled() && !repositoryBusyRef.current
+        ? async () => {
+            repositoryBusyRef.current = true;
+            try {
+              await discoverRepositories(root);
+              const currentCreds = cloudCreds(useSessionStore.getState().auth);
+              if (currentCreds) await syncRepositoriesUnderRoot(currentCreds, root);
+            } finally {
+              repositoryBusyRef.current = false;
+            }
+          }
+        : undefined;
+      try {
+        await publishMobileRemotePresence(
+          async () => {
+            await registerCodeRemoteHost(creds, {
+              hostId,
+              displayName: `${auth.user.name || "Clark"} desktop`,
+              os: navigator.platform || "desktop",
+              arch: "",
+              appVersion: "desktop",
+              projects: currentProjects(),
+            });
+          },
+          refreshRepositories,
+        );
+      } catch (error) {
+        await recoverExpiredAuth(error);
+      }
+    };
+
+    const presenceLoop = new MobileRemotePresenceLoop(refreshPresence);
+
+    const pollCommands = async () => {
+      if (stopped || commandBusyRef.current) return;
       if (navigator.onLine === false || Date.now() < retryAtRef.current) return;
       const creds = cloudCreds(useSessionStore.getState().auth);
       if (!creds) return;
-      busyRef.current = true;
+      commandBusyRef.current = true;
       try {
-        const now = Date.now();
-        if (lastHeartbeatRef.current === 0 || now - lastHeartbeatRef.current >= HOST_HEARTBEAT_INTERVAL_MS) {
-          const root = useSessionStore.getState().localSettings.cwd.trim();
-          if (root && projectKnowledgeEnabled()) {
-            await discoverRepositories(root);
-          }
-          await registerCodeRemoteHost(creds, {
-            hostId,
-            displayName: `${auth.user.name || "Clark"} desktop`,
-            os: navigator.platform || "desktop",
-            arch: "",
-            appVersion: "desktop",
-            projects: currentProjects(),
-          });
-          lastHeartbeatRef.current = Date.now();
-          if (root && projectKnowledgeEnabled()) {
-            void syncRepositoriesUnderRoot(creds, root).catch(() => undefined);
-          }
-        }
         const response = await pollCodeRemoteCommands(creds, hostId, 20, COMMAND_POLL_WAIT_MS);
         for (const command of response.commands) {
           if (stopped) break;
@@ -344,35 +389,29 @@ export function MobileRemoteAgent() {
         consecutiveFailuresRef.current = 0;
         retryAtRef.current = 0;
       } catch (error) {
-        if (isAuthExpiredError(error)) {
-          const currentAuth = useSessionStore.getState().auth;
-          const refreshed = currentAuth ? await refreshAuthSession(currentAuth) : null;
-          if (refreshed) {
-            useSessionStore.setState({ auth: refreshed });
-          } else {
-            useSessionStore.getState().signOutAuth();
-            void notify("Clark sign-in expired", "Sign in again to keep Clark Code remote control online.");
-          }
-        } else {
+        if (!(await recoverExpiredAuth(error))) {
           consecutiveFailuresRef.current += 1;
           retryAtRef.current = Date.now() + mobileRemoteRetryDelayMs(consecutiveFailuresRef.current);
         }
         /* Remote control is a background affordance; normal desktop use continues. */
       } finally {
-        busyRef.current = false;
+        commandBusyRef.current = false;
       }
     };
 
-    void tick();
-    const timer = window.setInterval(() => void tick(), LOOP_INTERVAL_MS);
+    presenceLoop.start();
+    void pollCommands();
+    const timer = window.setInterval(() => void pollCommands(), LOOP_INTERVAL_MS);
     const resumeAfterOutage = () => {
       consecutiveFailuresRef.current = 0;
       retryAtRef.current = 0;
-      void tick();
+      presenceLoop.refreshNow();
+      void pollCommands();
     };
     window.addEventListener("online", resumeAfterOutage);
     return () => {
       stopped = true;
+      presenceLoop.stop();
       window.clearInterval(timer);
       window.removeEventListener("online", resumeAfterOutage);
     };

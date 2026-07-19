@@ -147,6 +147,12 @@ impl Provider for LocalAgentProvider {
 
     async fn new_session(&mut self, options: SessionOptions) -> Result<Session> {
         let config = self.config()?.clone();
+        let restored_goal = options.resume.as_ref().and_then(|resume| {
+            resume.items.iter().rev().find_map(|item| match item {
+                agent_core::provider::ResumeItem::Goal { goal } => Some(goal.clone()),
+                _ => None,
+            })
+        });
 
         // A remote project runs its tools on a remote host over the exec-server;
         // a local project runs them here. Pick the sandbox + executor to match.
@@ -277,7 +283,7 @@ impl Provider for LocalAgentProvider {
             s.plan_exited = false;
             s.steering = None;
             s.active_execution = None;
-            s.goal = None;
+            s.goal = restored_goal.map(crate::loop_state::SessionGoal::from_state);
             s.policy = config.permissions.clone();
             s.allow_commands = crate::project_settings::union_unique(
                 config.command_allowlist.clone(),

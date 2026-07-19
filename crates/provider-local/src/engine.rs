@@ -150,6 +150,30 @@ impl RootFinishContext {
 pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId) {
     let cancel = tc.ctx.cancel.clone();
     let _ = tx.send(AgentEvent::RunStarted { run: run.clone() }).await;
+    // An explicit user turn resumes a previously blocked goal. Budget-limited
+    // and complete goals remain terminal because only the user can grant more
+    // runway or create the next goal.
+    let starting_goal = {
+        let mut session = tc.session.lock().await;
+        session.goal.as_mut().map(|goal| {
+            if goal.status == GoalStatus::Blocked {
+                goal.status = GoalStatus::Active;
+                goal.blocker_reason = None;
+                goal.blocker_observations = 0;
+                goal.last_blocker_continuation = None;
+            }
+            goal.touch();
+            goal.state(Some(&run))
+        })
+    };
+    if let Some(goal) = starting_goal {
+        let _ = tx
+            .send(AgentEvent::GoalUpdated {
+                run: run.clone(),
+                goal,
+            })
+            .await;
+    }
 
     let execution = match RootExecutionTrace::new(&tc.session_id, &run, &tc.execution, tx.clone()) {
         Ok(execution) => execution,
@@ -404,10 +428,10 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
                     .snapshot()
                     .map(|u| u.input_tokens + u.output_tokens)
                     .unwrap_or(usage_before);
-                let next = {
+                let (next, goal_state) = {
                     let mut session = tc.session.lock().await;
                     let plan_mode = session.plan_mode;
-                    match session.goal.as_mut() {
+                    let next = match session.goal.as_mut() {
                         Some(goal) => {
                             goal.tokens_used += usage_now.saturating_sub(usage_before);
                             goal.time_used_seconds += iteration_started.elapsed().as_secs();
@@ -418,6 +442,9 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
                                 None
                             } else if goal.continuations >= MAX_GOAL_CONTINUATIONS {
                                 goal.status = GoalStatus::Blocked;
+                                goal.blocker_reason = Some(format!(
+                                    "Reached the {MAX_GOAL_CONTINUATIONS}-continuation safety limit"
+                                ));
                                 Some(GoalStep::Stop(format!(
                                     "The goal ran for {MAX_GOAL_CONTINUATIONS} continuation \
                                      turns without completing — it is now marked blocked. \
@@ -450,8 +477,21 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
                             }
                         }
                         None => None,
+                    };
+                    if let Some(goal) = session.goal.as_mut() {
+                        goal.touch();
                     }
+                    let state = session.goal.as_ref().map(|goal| goal.state(Some(&run)));
+                    (next, state)
                 };
+                if let Some(goal) = goal_state {
+                    let _ = tx
+                        .send(AgentEvent::GoalUpdated {
+                            run: run.clone(),
+                            goal,
+                        })
+                        .await;
+                }
                 match next {
                     Some(GoalStep::Continue { text, note }) => {
                         let _ = tx
@@ -488,8 +528,26 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
                     if let Some(goal) = session.goal.as_mut() {
                         if goal.status == GoalStatus::Active {
                             goal.status = GoalStatus::Blocked;
+                            goal.blocker_reason =
+                                Some("The agent loop reached its per-turn step limit".to_string());
+                            goal.touch();
                         }
                     }
+                }
+                let goal_state = tc
+                    .session
+                    .lock()
+                    .await
+                    .goal
+                    .as_ref()
+                    .map(|goal| goal.state(Some(&run)));
+                if let Some(goal) = goal_state {
+                    let _ = tx
+                        .send(AgentEvent::GoalUpdated {
+                            run: run.clone(),
+                            goal,
+                        })
+                        .await;
                 }
                 let _ = completed_transcript.drain();
                 break 'goal Ok(result.outcome);
@@ -576,6 +634,13 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
                 if let Some(goal) = session.goal.as_mut() {
                     if goal.status == GoalStatus::Active {
                         goal.status = GoalStatus::Blocked;
+                        goal.blocker_reason =
+                            Some(if matches!(error, clark_agent::LoopError::Aborted) {
+                                "The user stopped the run before it finished".to_string()
+                            } else {
+                                "The provider run failed before the goal finished".to_string()
+                            });
+                        goal.touch();
                     }
                 }
                 // Tell the model the turn was cut off (Codex records the same
@@ -592,6 +657,21 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
                         timestamp: None,
                     });
                 }
+            }
+            let goal_state = tc
+                .session
+                .lock()
+                .await
+                .goal
+                .as_ref()
+                .map(|goal| goal.state(Some(&run)));
+            if let Some(goal) = goal_state {
+                let _ = tx
+                    .send(AgentEvent::GoalUpdated {
+                        run: run.clone(),
+                        goal,
+                    })
+                    .await;
             }
             let mapped = map_loop_error(error);
             if let Some((code, message)) = mapped.ui_error.clone() {

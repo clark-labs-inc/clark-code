@@ -12,10 +12,11 @@
 //! CLARK_CODE_LIVE=1 CLARK_CODE_API_KEY=ck_live_... \
 //!   cargo run -p provider-local --example goal_eval
 //!
-//! Optional: CLARK_CODE_MODEL (default clark-code = GLM 5.2),
-//! GOAL_EVAL_SCENARIOS=snake,website,repo-tools (default: all).
+//! Required safety inputs: CLARK_CODE_MODEL, GOAL_EVAL_SCENARIOS, and
+//! GOAL_EVAL_MAX_COST_USD. The cost cap is enforced between scenarios; each
+//! individual scenario is bounded by GOAL_TOKEN_BUDGET and SCENARIO_TIMEOUT.
 
-use agent_core::domain::{AgentEvent, Role, RunStatus};
+use agent_core::domain::{AgentEvent, GoalStatus, RunStatus};
 use agent_core::provider::{ClientResponse, PromptInput, Provider, ProviderConfig, SessionOptions};
 use futures::StreamExt;
 use provider_local::LocalAgentProvider;
@@ -321,6 +322,7 @@ struct ScenarioResult {
     checks: Vec<Check>,
     status: String,
     goal_completed: bool,
+    goal_status: String,
     goal_turns: u32,
     tool_calls: u32,
     tools_used: BTreeSet<String>,
@@ -329,6 +331,7 @@ struct ScenarioResult {
     cost_usd: f64,
     wall: Duration,
     timed_out: bool,
+    passed: bool,
 }
 
 fn git(dir: &Path, args: &[&str]) {
@@ -423,6 +426,7 @@ async fn run_scenario(
     let mut tool_calls = 0u32;
     let mut tools_used = BTreeSet::new();
     let mut goal_completed = false;
+    let mut goal_status = "missing".to_string();
     let mut run_id = None;
     let mut status = "unfinished".to_string();
     let mut usage = None;
@@ -467,23 +471,15 @@ async fn run_scenario(
                     tools_used.insert(tool_name.clone());
                 }
                 eprintln!("[{}] tool: {}", scenario.id, call.title);
-                if call.tool_name.as_deref() == Some("update_goal") {
-                    let complete = call
-                        .raw_input
-                        .as_ref()
-                        .and_then(|v| v.get("status"))
-                        .and_then(|v| v.as_str())
-                        == Some("complete");
-                    if complete {
-                        goal_completed = true;
-                    }
-                }
             }
-            AgentEvent::MessageChunk {
-                role: Role::System, ..
-            } => {
-                goal_turns += 1;
-                eprintln!("[{}] goal continuation #{goal_turns}", scenario.id);
+            AgentEvent::GoalUpdated { goal, .. } => {
+                goal_turns = goal_turns.max(goal.continuations);
+                goal_completed = goal.status == GoalStatus::Complete;
+                goal_status = format!("{:?}", goal.status).to_lowercase();
+                eprintln!(
+                    "[{}] goal: {} ({} continuation turns)",
+                    scenario.id, goal_status, goal_turns
+                );
             }
             AgentEvent::PermissionRequest { request } => {
                 let _ = provider
@@ -517,6 +513,7 @@ async fn run_scenario(
     let checks = (scenario.grade)(repo.path());
     let score: u32 = checks.iter().filter(|c| c.passed).map(|c| c.weight).sum();
     let max_score: u32 = checks.iter().map(|c| c.weight).sum();
+    let passed = !timed_out && status == "done" && goal_completed && score == max_score;
     let result = ScenarioResult {
         id: scenario.id,
         score,
@@ -524,6 +521,7 @@ async fn run_scenario(
         checks,
         status,
         goal_completed,
+        goal_status,
         goal_turns,
         tool_calls,
         tools_used,
@@ -532,6 +530,7 @@ async fn run_scenario(
         cost_usd: usage.and_then(|u| u.cost_usd).unwrap_or(0.0),
         wall: started.elapsed(),
         timed_out,
+        passed,
     };
     // Keep the artifacts around for inspection.
     let keep = repo.keep();
@@ -553,26 +552,56 @@ async fn main() {
     };
     let base_url = std::env::var("CLARK_CODE_BASE_URL")
         .unwrap_or_else(|_| "https://api.clarkslabs.com/v1".to_string());
-    let model = std::env::var("CLARK_CODE_MODEL").unwrap_or_else(|_| "clark-code".to_string());
-    let filter = std::env::var("GOAL_EVAL_SCENARIOS").ok();
+    let model = match std::env::var("CLARK_CODE_MODEL") {
+        Ok(model) if !model.trim().is_empty() => model,
+        _ => {
+            eprintln!("set CLARK_CODE_MODEL explicitly for this paid run");
+            return;
+        }
+    };
+    let filter = match std::env::var("GOAL_EVAL_SCENARIOS") {
+        Ok(filter) if !filter.trim().is_empty() => filter,
+        _ => {
+            eprintln!("set GOAL_EVAL_SCENARIOS explicitly (snake, website, and/or repo-tools)");
+            return;
+        }
+    };
+    let max_cost = match std::env::var("GOAL_EVAL_MAX_COST_USD")
+        .ok()
+        .and_then(|value| value.parse::<f64>().ok())
+        .filter(|value| value.is_finite() && *value > 0.0)
+    {
+        Some(value) => value,
+        None => {
+            eprintln!("set GOAL_EVAL_MAX_COST_USD to a positive spend ceiling");
+            return;
+        }
+    };
 
     let selected: Vec<Scenario> = scenarios()
         .into_iter()
-        .filter(|s| {
-            filter
-                .as_deref()
-                .map(|f| f.split(',').any(|id| id.trim() == s.id))
-                .unwrap_or(true)
-        })
+        .filter(|s| filter.split(',').any(|id| id.trim() == s.id))
         .collect();
 
+    if selected.is_empty() {
+        eprintln!("GOAL_EVAL_SCENARIOS did not match snake, website, or repo-tools");
+        return;
+    }
+
     eprintln!(
-        "goal_eval: model={model}, scenarios={:?}",
+        "goal_eval: model={model}, max_cost=${max_cost:.2}, scenarios={:?}",
         selected.iter().map(|s| s.id).collect::<Vec<_>>()
     );
 
     let mut results = Vec::new();
+    let mut reported_cost = 0.0;
     for scenario in &selected {
+        if reported_cost >= max_cost {
+            eprintln!(
+                "cost ceiling reached (${reported_cost:.2}/${max_cost:.2}); refusing another scenario"
+            );
+            break;
+        }
         eprintln!("\n=== scenario: {} ===", scenario.id);
         let (result, artifacts) = run_scenario(scenario, &base_url, &model, &api_key).await;
         eprintln!(
@@ -580,21 +609,23 @@ async fn main() {
             scenario.id,
             artifacts.display()
         );
+        reported_cost += result.cost_usd;
         results.push((result, artifacts));
     }
 
     println!("\n# goal_eval results — model: {model}\n");
-    println!("| scenario | score | run | goal complete | goal turns | calls | tool mix | tokens in/out | cost | time |");
-    println!("|---|---|---|---|---|---|---|---|---|---|");
+    println!("| scenario | verdict | score | run | goal | goal turns | calls | tool mix | tokens in/out | cost | time |");
+    println!("|---|---|---|---|---|---|---|---|---|---|---|");
     for (r, _) in &results {
         println!(
-            "| {} | **{}/{}** | {}{} | {} | {} | {} | {} | {}/{} | ${:.2} | {}s |",
+            "| {} | {} | **{}/{}** | {}{} | {} | {} | {} | {} | {}/{} | ${:.2} | {}s |",
             r.id,
+            if r.passed { "PASS" } else { "FAIL" },
             r.score,
             r.max_score,
             r.status,
             if r.timed_out { " (timeout)" } else { "" },
-            if r.goal_completed { "yes" } else { "no" },
+            r.goal_status,
             r.goal_turns,
             r.tool_calls,
             r.tools_used.iter().cloned().collect::<Vec<_>>().join(", "),
@@ -620,5 +651,43 @@ async fn main() {
                 c.weight
             );
         }
+    }
+
+    if let Ok(path) = std::env::var("GOAL_EVAL_RESULTS_JSON") {
+        let receipt = json!({
+            "model": model,
+            "max_cost_usd": max_cost,
+            "reported_cost_usd": reported_cost,
+            "results": results.iter().map(|(result, artifacts)| json!({
+                "scenario": result.id,
+                "passed": result.passed,
+                "score": result.score,
+                "max_score": result.max_score,
+                "run_status": result.status,
+                "goal_status": result.goal_status,
+                "goal_completed": result.goal_completed,
+                "goal_turns": result.goal_turns,
+                "tool_calls": result.tool_calls,
+                "tools_used": result.tools_used,
+                "tokens_in": result.tokens_in,
+                "tokens_out": result.tokens_out,
+                "cost_usd": result.cost_usd,
+                "wall_seconds": result.wall.as_secs(),
+                "timed_out": result.timed_out,
+                "artifacts": artifacts,
+                "checks": result.checks.iter().map(|check| json!({
+                    "label": check.label,
+                    "weight": check.weight,
+                    "passed": check.passed,
+                })).collect::<Vec<_>>(),
+            })).collect::<Vec<_>>(),
+        });
+        std::fs::write(&path, serde_json::to_vec_pretty(&receipt).unwrap())
+            .unwrap_or_else(|error| panic!("write {path}: {error}"));
+        eprintln!("machine-readable receipt: {path}");
+    }
+
+    if results.len() != selected.len() || results.iter().any(|(result, _)| !result.passed) {
+        std::process::exit(1);
     }
 }

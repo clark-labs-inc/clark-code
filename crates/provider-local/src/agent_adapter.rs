@@ -343,6 +343,25 @@ impl ca::AgentTool for DesktopToolAdapter {
                         .await;
                 }
             }
+            if matches!(self.exec.name(), "create_goal" | "update_goal") {
+                let state = self
+                    .ctx
+                    .session
+                    .lock()
+                    .await
+                    .goal
+                    .as_ref()
+                    .map(|goal| goal.state(Some(&self.run)));
+                if let Some(goal) = state {
+                    let _ = self
+                        .events
+                        .send(desktop::AgentEvent::GoalUpdated {
+                            run: self.run.clone(),
+                            goal,
+                        })
+                        .await;
+                }
+            }
         }
 
         if !hooks.post_tool_use.is_empty() {
