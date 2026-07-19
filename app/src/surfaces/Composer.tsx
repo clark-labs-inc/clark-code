@@ -294,6 +294,11 @@ function ModelPill() {
  *  when the run finishes — no interruption. Each can be edited or dropped. */
 function QueuedMessages({ onEdit }: { onEdit: (q: QueuedMessage) => void }) {
   const queued = useSessionStore((s) => s.queued);
+  const session = useSessionStore((s) => s.session);
+  const busy = useSessionStore((s) =>
+    Object.values(s.snapshot.runs).some((r) => r.status === "running" || r.status === "queued"),
+  );
+  const steerQueued = useSessionStore((s) => s.steerQueued);
   const removeQueued = useSessionStore((s) => s.removeQueued);
   if (queued.length === 0) return null;
   return (
@@ -317,7 +322,18 @@ function QueuedMessages({ onEdit }: { onEdit: (q: QueuedMessage) => void }) {
               <span className="min-w-0 flex-1 truncate text-xs text-ink-secondary">
                 {q.text || "(attachments only)"}
               </span>
-              <span className="flex shrink-0 items-center gap-0.5 opacity-0 transition group-hover:opacity-100">
+              <span className="flex shrink-0 items-center gap-0.5">
+                {session?.provider === "local" && busy && q.uploads.length === 0 && (
+                  <button
+                    onClick={() => void steerQueued(q.id)}
+                    aria-label="Steer active run with queued message"
+                    title="Send now and steer the active run"
+                    className="flex h-6 items-center gap-1 rounded-md px-1.5 text-xs text-ink-muted transition hover:bg-bg-hover hover:text-ink"
+                  >
+                    <CornerDownRight className="size-3" />
+                    Steer
+                  </button>
+                )}
                 <button
                   onClick={() => onEdit(q)}
                   aria-label="Edit queued message"

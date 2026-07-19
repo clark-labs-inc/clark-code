@@ -245,8 +245,28 @@ pub fn apply(snapshot: &mut Snapshot, event: &AgentEvent) {
             match fo.agents.iter_mut().find(|a| a.id == agent.id) {
                 Some(existing) => {
                     existing.status = agent.status;
-                    if !agent.label.is_empty() {
+                    if !agent.label.is_empty()
+                        && (existing.label.is_empty() || existing.label.starts_with("Task "))
+                    {
                         existing.label = agent.label.clone();
+                    }
+                    if agent.objective.is_some() {
+                        existing.objective = agent.objective.clone();
+                    }
+                    if agent.activity.is_some() {
+                        existing.activity = agent.activity.clone();
+                    }
+                    if agent.result.is_some() {
+                        existing.result = agent.result.clone();
+                    }
+                    if agent.attempt.is_some() {
+                        existing.attempt = agent.attempt;
+                    }
+                    if existing.started_at_ms.is_none() && agent.started_at_ms.is_some() {
+                        existing.started_at_ms = agent.started_at_ms;
+                    }
+                    if agent.updated_at_ms.is_some() {
+                        existing.updated_at_ms = agent.updated_at_ms;
                     }
                 }
                 None => fo.agents.push(agent.clone()),
@@ -1020,6 +1040,12 @@ mod tests {
                     id: "implementation".into(),
                     label: "Implement the change".into(),
                     status: FanOutStatus::Queued,
+                    objective: Some("Implement the change without touching unrelated files".into()),
+                    activity: Some("Waiting to start".into()),
+                    result: None,
+                    attempt: None,
+                    started_at_ms: None,
+                    updated_at_ms: Some(10),
                 },
             },
         );
@@ -1032,6 +1058,12 @@ mod tests {
                     id: "implementation".into(),
                     label: String::new(),
                     status: FanOutStatus::Running,
+                    objective: None,
+                    activity: Some("Reading the implementation".into()),
+                    result: None,
+                    attempt: Some(1),
+                    started_at_ms: Some(20),
+                    updated_at_ms: Some(30),
                 },
             },
         );
@@ -1041,6 +1073,15 @@ mod tests {
         assert_eq!(fan_out.running, 1);
         assert_eq!(fan_out.done, 0);
         assert_eq!(fan_out.agents[0].label, "Implement the change");
+        assert_eq!(
+            fan_out.agents[0].objective.as_deref(),
+            Some("Implement the change without touching unrelated files")
+        );
+        assert_eq!(
+            fan_out.agents[0].activity.as_deref(),
+            Some("Reading the implementation")
+        );
+        assert_eq!(fan_out.agents[0].started_at_ms, Some(20));
     }
 
     #[test]
@@ -1055,6 +1096,12 @@ mod tests {
                     id: "review".into(),
                     label: "Review the result".into(),
                     status: FanOutStatus::Done,
+                    objective: Some("Review the result".into()),
+                    activity: Some("Review complete".into()),
+                    result: Some("No issues found".into()),
+                    attempt: Some(1),
+                    started_at_ms: Some(10),
+                    updated_at_ms: Some(20),
                 },
             },
         );

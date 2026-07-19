@@ -14,7 +14,8 @@ export type ContentBlock =
 
 export type ToolKind =
   | "read" | "edit" | "delete" | "move"
-  | "search" | "execute" | "think" | "fetch" | "research" | "other";
+  | "search" | "execute" | "think" | "fetch" | "research"
+  | "view_image" | "generate_image" | "other";
 
 export type ToolStatus = "pending" | "in_progress" | "completed" | "failed";
 
@@ -82,7 +83,7 @@ export interface PermissionRequest {
   options: PermissionOption[];
   /** What the action does — a shell command or file path — shown for review. */
   detail?: string;
-  /** Shell-command risk: "safe" | "caution" | "danger". */
+  /** Action classification: shell risk, external tool, billed image, or plan gate. */
   risk?: string;
   /** Why it was flagged ("recursive delete"). */
   reason?: string;
@@ -104,6 +105,15 @@ export interface FanOutAgent {
   id: string;
   label: string;
   status: FanOutStatus;
+  /** Full backend-authored task objective shown in the inspector. */
+  objective?: string;
+  /** Latest public progress update; never hidden model reasoning. */
+  activity?: string;
+  /** Final public result or failure summary. */
+  result?: string;
+  attempt?: number;
+  started_at_ms?: number;
+  updated_at_ms?: number;
 }
 
 /** Live parallel fan-out (a `subagent_map` spread across child agents). */

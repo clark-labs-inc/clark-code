@@ -3,9 +3,8 @@ import { useSessionStore } from "./sessionStore";
 import type { CoreBridge } from "../core-bridge/bridge";
 import { emptySnapshot, type Session, type Snapshot } from "../core-bridge/types";
 
-// A message sent while a LOCAL run is active steers the live run (injected
-// between tool batches, Codex-style) instead of waiting in the queue until
-// the run ends. Cloud runs and failures fall back to the queue.
+// Messages sent during any active run queue by default. A queued, text-only
+// local message can still steer the live run when the user explicitly asks.
 
 const localSession = { id: "sess-1", provider: "local" } as unknown as Session;
 const cloudSession = { id: "conv-1", provider: "clark" } as unknown as Session;
@@ -44,8 +43,8 @@ beforeEach(() => {
   });
 });
 
-describe("mid-run steering", () => {
-  it("steers the active local run instead of queueing", async () => {
+describe("queued follow-ups and explicit steering", () => {
+  it("queues during an active local run instead of steering it", async () => {
     const bridge = stubBridge();
     useSessionStore.setState({
       bridge,
@@ -55,14 +54,33 @@ describe("mid-run steering", () => {
 
     await useSessionStore.getState().send("actually, use pnpm");
 
-    expect(bridge.steer).toHaveBeenCalledWith("sess-1", [
-      { type: "text", text: "actually, use pnpm" },
-    ]);
+    expect(bridge.steer).not.toHaveBeenCalled();
     expect(bridge.prompt).not.toHaveBeenCalled();
-    expect(useSessionStore.getState().queued).toEqual([]);
+    expect(useSessionStore.getState().queued.map((q) => q.text)).toEqual([
+      "actually, use pnpm",
+    ]);
   });
 
-  it("falls back to the queue when the run just ended", async () => {
+  it("steers only when explicitly requested, then removes the queued message", async () => {
+    const bridge = stubBridge();
+    useSessionStore.setState({
+      bridge,
+      session: localSession,
+      snapshot: busySnapshot("sess-1"),
+    });
+
+    await useSessionStore.getState().send("follow-up");
+    const [queued] = useSessionStore.getState().queued;
+    await useSessionStore.getState().steerQueued(queued.id);
+
+    expect(bridge.steer).toHaveBeenCalledWith("sess-1", [
+      { type: "text", text: "follow-up" },
+    ]);
+    expect(useSessionStore.getState().queued).toEqual([]);
+    expect(bridge.prompt).not.toHaveBeenCalled();
+  });
+
+  it("keeps the message queued when explicit steering loses the active-run race", async () => {
     const bridge = stubBridge({
       steer: vi.fn(async () => {
         throw new Error("no active run to steer");
@@ -75,9 +93,10 @@ describe("mid-run steering", () => {
     });
 
     await useSessionStore.getState().send("follow-up");
+    const [queued] = useSessionStore.getState().queued;
+    await useSessionStore.getState().steerQueued(queued.id);
 
     expect(useSessionStore.getState().queued.map((q) => q.text)).toEqual(["follow-up"]);
-    expect(bridge.prompt).not.toHaveBeenCalled();
   });
 
   it("cloud sessions keep the queue behavior", async () => {

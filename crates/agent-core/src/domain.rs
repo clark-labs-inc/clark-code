@@ -89,6 +89,10 @@ pub enum ToolKind {
     Think,
     Fetch,
     Research,
+    /// Inspect an image in a safe workspace path.
+    ViewImage,
+    /// Create or edit an image and save the result as a workspace artifact.
+    GenerateImage,
     #[default]
     Other,
 }
@@ -422,6 +426,22 @@ pub struct FanOutAgent {
     pub id: String,
     pub label: String,
     pub status: FanOutStatus,
+    /// Full backend-authored task objective. Presentation may use `label` as a
+    /// compact selector while preserving this text in the inspector.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub objective: Option<String>,
+    /// Latest public progress update. This must never contain hidden reasoning.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub activity: Option<String>,
+    /// Final public result or failure summary, when the child has settled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attempt: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub started_at_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_at_ms: Option<u64>,
 }
 
 /// Aggregate state of a live parallel fan-out (one `subagent_map` split across

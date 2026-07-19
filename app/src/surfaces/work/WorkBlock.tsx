@@ -1,5 +1,6 @@
 import { memo } from "react";
 import { WorkLine } from "./WorkLine";
+import { sameContentBlocks } from "../../lib/contentBlocks";
 import { summarizeEdits } from "../../lib/diff";
 import type { ToolCall } from "../../core-bridge/types";
 
@@ -43,7 +44,7 @@ function sameCalls(a: ToolCall[], b: ToolCall[]): boolean {
       x.id !== y.id ||
       x.status !== y.status ||
       x.title !== y.title ||
-      x.content.length !== y.content.length ||
+      !sameContentBlocks(x.content, y.content) ||
       x.locations.length !== y.locations.length
     ) {
       return false;

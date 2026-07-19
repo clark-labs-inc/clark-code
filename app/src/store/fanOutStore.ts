@@ -5,7 +5,12 @@ export type { FanOut, FanOutAgent };
 
 interface FanOutState {
   fanOut: FanOut | null;
+  inspectorOpen: boolean;
+  selectedAgentId: string | null;
   setFanOut: (f: FanOut | null) => void;
+  openInspector: (agentId?: string) => void;
+  closeInspector: () => void;
+  selectAgent: (agentId: string) => void;
   clearFanOut: () => void;
 }
 
@@ -15,15 +20,48 @@ interface FanOutState {
  *  per-child `subagent_event` telemetry (see agent-core `Snapshot::fan_out`). */
 export const useFanOutStore = create<FanOutState>((set) => ({
   fanOut: null,
-  setFanOut: (f) => set({ fanOut: f }),
-  clearFanOut: () => set({ fanOut: null }),
+  inspectorOpen: false,
+  selectedAgentId: null,
+  setFanOut: (fanOut) =>
+    set((state) => {
+      if (!fanOut) {
+        return { fanOut: null, inspectorOpen: false, selectedAgentId: null };
+      }
+      const selectedStillExists = fanOut.agents.some(
+        (agent) => agent.id === state.selectedAgentId,
+      );
+      const selectedAgentId = selectedStillExists
+        ? state.selectedAgentId
+        : (fanOut.agents.find((agent) => agent.status === "running")?.id ??
+          fanOut.agents[0]?.id ??
+          null);
+      return { fanOut, selectedAgentId };
+    }),
+  openInspector: (agentId) =>
+    set((state) => ({
+      inspectorOpen: state.fanOut !== null,
+      selectedAgentId:
+        agentId && state.fanOut?.agents.some((agent) => agent.id === agentId)
+          ? agentId
+          : state.selectedAgentId,
+    })),
+  closeInspector: () => set({ inspectorOpen: false }),
+  selectAgent: (selectedAgentId) => set({ selectedAgentId }),
+  clearFanOut: () => set({ fanOut: null, inspectorOpen: false, selectedAgentId: null }),
 }));
 
 /** A cheap content signature so we only push (and re-render the panel) when the
  *  fan-out actually changed, not on every re-cloned snapshot during streaming. */
 function signature(f: FanOut | null | undefined): string {
   if (!f) return "";
-  return `${f.total}:${f.done}:${f.running}:${f.agents.map((a) => a.id + a.status).join(",")}`;
+  return `${f.title}:${f.total}:${f.done}:${f.running}:${f.agents
+    .map(
+      (agent) =>
+        `${agent.id}:${agent.label}:${agent.status}:${agent.objective ?? ""}:${agent.activity ?? ""}:${
+          agent.result ?? ""
+        }:${agent.attempt ?? ""}:${agent.started_at_ms ?? ""}:${agent.updated_at_ms ?? ""}`,
+    )
+    .join(",")}`;
 }
 
 let lastSignature = "";
@@ -48,10 +86,37 @@ export function resetFanOut(): void {
 /** Dev-only: preview the fan-out surface without a live run. `previewFanOut()`
  *  in the console. */
 export function previewFanOut(): void {
+  const now = Date.now();
   const agents: FanOutAgent[] = [
-    { id: "environment", label: "Prepare the test environment", status: "done" },
-    { id: "implementation", label: "Implement the repository changes", status: "running" },
-    { id: "verification", label: "Review and run the full test suite", status: "queued" },
+    {
+      id: "platform-endpoint-survey",
+      label: "Platform endpoint survey",
+      status: "done",
+      objective: "Trace the Clark server route, auth, billing, and artifact seams.",
+      activity: "Complete",
+      result: "Confirmed the platform route and authentication boundary.",
+      attempt: 1,
+      started_at_ms: now - 82_000,
+      updated_at_ms: now - 21_000,
+    },
+    {
+      id: "desktop-tool-wiring",
+      label: "Desktop tool wiring",
+      status: "running",
+      objective: "Add typed local image tools without exposing provider credentials.",
+      activity: "Reviewing the provider-local tool registry",
+      attempt: 1,
+      started_at_ms: now - 54_000,
+      updated_at_ms: now,
+    },
+    {
+      id: "image-workflow-verification",
+      label: "Image workflow verification",
+      status: "queued",
+      objective: "Verify viewing, editing, and generated-image artifacts end to end.",
+      activity: "Waiting to start",
+      updated_at_ms: now,
+    },
   ];
   lastSignature = "preview";
   useFanOutStore.getState().setFanOut({

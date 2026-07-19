@@ -16,16 +16,20 @@ const fanOut: FanOut = {
 };
 
 describe("FanOutCard", () => {
-  it("keeps agent details collapsed by default", () => {
+  it("renders accessible transcript chips with visible status text", () => {
     const markup = renderToStaticMarkup(<FanOutCard fanOut={fanOut} reduce />);
 
     expect(markup).toContain("Parallel work");
-    expect(markup).toContain("1 of 3 parts ready");
-    expect(markup).toContain('aria-expanded="false"');
-    expect(markup).not.toContain("Prepare the test environment");
+    expect(markup).toContain("1 running · 1 complete · 1 queued");
+    expect(markup).toContain("Prepare the test environment");
+    expect(markup).toContain("Implement the change");
+    expect(markup).toContain("Complete");
+    expect(markup).toContain("Running");
+    expect(markup).toContain("Queued");
+    expect(markup).toContain("Open subagent details");
   });
 
-  it("prioritizes failures and completion in the aggregate copy", () => {
+  it("includes failures in the aggregate copy", () => {
     expect(
       fanOutSummary({
         ...fanOut,
@@ -33,7 +37,14 @@ describe("FanOutCard", () => {
           index === 1 ? { ...agent, status: "failed" as const } : agent,
         ),
       }),
-    ).toBe("1 part needs attention");
-    expect(fanOutSummary({ ...fanOut, done: 3, running: 0 })).toBe("All parts are ready");
+    ).toBe("1 complete · 1 queued · 1 needs attention");
+    expect(
+      fanOutSummary({
+        ...fanOut,
+        done: 3,
+        running: 0,
+        agents: fanOut.agents.map((agent) => ({ ...agent, status: "done" as const })),
+      }),
+    ).toBe("3 complete");
   });
 });

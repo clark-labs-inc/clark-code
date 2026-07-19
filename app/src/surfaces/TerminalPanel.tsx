@@ -84,6 +84,18 @@ function TerminalInstance({ id, cwd, active }: { id: string; cwd?: string; activ
 
     const dataSub = term.onData((d) => void writeTerminal(id, d));
 
+    // xterm paints its own selection and never clears it on outside clicks, so
+    // without this a terminal selection stays highlighted when the user clicks
+    // anywhere else in the app (native text clears on any press). A press that
+    // lands outside the terminal root drops the selection.
+    const clearOnOutsidePress = (event: MouseEvent) => {
+      const root = term.element;
+      if (root && !root.contains(event.target as Node) && term.hasSelection()) {
+        term.clearSelection();
+      }
+    };
+    document.addEventListener("mousedown", clearOnOutsidePress);
+
     const ro = new ResizeObserver(() => {
       try {
         fit.fit();
@@ -111,6 +123,7 @@ function TerminalInstance({ id, cwd, active }: { id: string; cwd?: string; activ
 
     return () => {
       disposed = true;
+      document.removeEventListener("mousedown", clearOnOutsidePress);
       ro.disconnect();
       mo.disconnect();
       dataSub.dispose();

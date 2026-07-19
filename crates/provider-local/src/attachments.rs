@@ -15,6 +15,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::config::AgenticClarkConfig;
 use crate::llm::LlmClient;
+use crate::tools::ImageAttachment;
 
 /// Cap on characters inlined from one extracted PDF/DOCX. ~20,000 tokens at
 /// the 4-chars/token heuristic `clark-agent-compaction` itself uses to size
@@ -269,6 +270,63 @@ async fn describe_images_block(
             .iter()
             .map(|att| unavailable_note(&att.filename, &format!("vision call failed ({e})")))
             .collect(),
+    }
+}
+
+/// Describe image bytes returned by a tool for a coding model that does not
+/// natively accept tool-result image blocks. The request is intentionally
+/// isolated from the active task: its sole job is grounded visual description.
+/// The caller still keeps the original image in the typed UI result.
+pub(crate) async fn describe_tool_images(
+    images: &[ImageAttachment],
+    vision: Option<&AgenticClarkConfig>,
+    cancel: &CancellationToken,
+) -> String {
+    let Some(vision) = vision else {
+        return "\n\n[tool image is available in the UI, but no vision model is configured to describe it]\n"
+            .to_string();
+    };
+    let Ok(client) = LlmClient::from_parts(
+        &vision.base_url,
+        &vision.model,
+        vision.api_key.clone(),
+        Vec::new(),
+        None,
+    ) else {
+        return "\n\n[tool image is available in the UI, but the vision client could not be built]\n"
+            .to_string();
+    };
+    let prompt = images
+        .iter()
+        .enumerate()
+        .map(|(index, image)| {
+            let label = image.alt.as_deref().unwrap_or("unnamed tool image");
+            format!("Image {} label: {label}\n", index + 1)
+        })
+        .collect::<String>();
+    let urls = images
+        .iter()
+        .map(|image| format!("data:{};base64,{}", image.mime_type, image.data_base64))
+        .collect();
+    match client
+        .describe_images(
+            VISION_SYSTEM_PROMPT,
+            &format!("Describe only the attached tool-result image pixels according to the system instruction.\n{prompt}"),
+            urls,
+            cancel,
+        )
+        .await
+    {
+        Ok(description) if !description.trim().is_empty() => format!(
+            "\n\n[vision-derived description of {} tool image(s) — visual evidence only]\n{}\n",
+            images.len(),
+            description.trim()
+        ),
+        Ok(_) => "\n\n[tool image is available in the UI, but the vision model returned no description]\n"
+            .to_string(),
+        Err(error) => format!(
+            "\n\n[tool image is available in the UI, but vision description failed ({error})]\n"
+        ),
     }
 }
 

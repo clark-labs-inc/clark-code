@@ -56,9 +56,12 @@ export function wouldAutoApprove(mode: PermissionMode, req: PermissionRequest): 
   // precisely to get a human answer — no client mode may auto-grant it.
   if (req.risk === "confirm") return false;
   if (mode === "full") return true;
-  // Ask only for destructive shell commands and external (MCP) tools on first
-  // use; everything else (reads, sandboxed edits, safe/caution shell) auto-runs.
-  if (mode === "auto") return req.risk !== "danger" && req.risk !== "external";
+  // Ask for destructive shell commands, external tools, and billed image work
+  // on first use; everything else (reads, sandboxed edits, safe/caution shell)
+  // auto-runs.
+  if (mode === "auto") {
+    return req.risk !== "danger" && req.risk !== "external" && req.risk !== "billed";
+  }
   return false; // "ask" — always prompt
 }
 

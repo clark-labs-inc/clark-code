@@ -86,6 +86,25 @@ describe("MockBridge", () => {
     expect(cleared.pending_permission).toBeUndefined();
   });
 
+  it("echoes an explicit steering message into the active mock run", async () => {
+    const b = new MockBridge();
+    await b.newSession("local", {});
+    await b.prompt("mock-session", [{ type: "text", text: "build it" }]);
+
+    await b.steer("mock-session", [{ type: "text", text: "use pnpm instead" }]);
+
+    const steered = await waitFor(
+      (s) => s.timeline.some(
+        (item) => item.item === "message" && item.role === "user" &&
+          item.blocks.some((block) => block.type === "text" && block.text === "use pnpm instead"),
+      ),
+      b,
+    );
+    expect(
+      steered.timeline.filter((item) => item.item === "message" && item.role === "user"),
+    ).toHaveLength(2);
+  });
+
   it("emits linked artifacts for the browser artifact demo", async () => {
     const b = new MockBridge();
     await b.newSession("local", {});
@@ -95,6 +114,22 @@ describe("MockBridge", () => {
     expect(snapshot.artifacts.map((artifact) => artifact.kind)).toEqual(["file", "image", "pdf"]);
     expect(snapshot.artifacts[0].tool_call).toBeTruthy();
     expect(snapshot.timeline.filter((item) => item.item === "artifact")).toHaveLength(3);
+  });
+
+  it("exposes a live Clark Cloud research state before cited findings", async () => {
+    const b = new MockBridge();
+    await b.newSession("local", {});
+    await b.prompt("mock-session", [{ type: "text", text: "preview cloud research" }]);
+
+    const snapshot = await waitFor(
+      (state) => Object.values(state.tool_calls).some(
+        (call) => call.kind === "research" && call.status === "in_progress",
+      ),
+      b,
+    );
+    const research = Object.values(snapshot.tool_calls).find((call) => call.kind === "research");
+    expect(research?.raw_input).toEqual({ query: "latest clap argument-parsing API" });
+    expect(research?.content).toEqual([]);
   });
 
   it("exposes typed parallel-work progress for the orchestration demo", async () => {

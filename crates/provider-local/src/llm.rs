@@ -424,6 +424,17 @@ impl StreamFailure {
     fn is_rate_limited(&self) -> bool {
         self.code == Some(429) || self.error_type.as_deref() == Some("rate_limit_exceeded")
     }
+
+    fn is_transient(&self) -> bool {
+        self.code.is_some_and(|code| {
+            code == 408 || code == 425 || code == 524 || (500..=504).contains(&code)
+        }) || matches!(
+            self.error_type.as_deref(),
+            Some(
+                "provider_unavailable" | "upstream_error" | "upstream_timeout" | "request_timeout"
+            )
+        )
+    }
 }
 
 #[derive(Default)]

@@ -7,6 +7,7 @@
 use agent_core::domain::*;
 use agent_core::ids::{PermissionRequestId, RunId, SessionId, ToolCallId};
 use serde_json::Value;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 fn s<'a>(v: &'a Value, key: &str) -> Option<&'a str> {
     v.get(key).and_then(Value::as_str)
@@ -30,6 +31,12 @@ fn basename(path: &str) -> &str {
 /// Classify a Clark work tool into a presentational kind.
 fn tool_kind(tool_name: &str, action: Option<&str>) -> ToolKind {
     let n = tool_name.to_ascii_lowercase();
+    if n == "view_image" || n.contains("image_view") {
+        return ToolKind::ViewImage;
+    }
+    if n == "generate_image" || n.contains("image_generation") {
+        return ToolKind::GenerateImage;
+    }
     if n.contains("browser") {
         return ToolKind::Fetch;
     }
@@ -105,6 +112,8 @@ fn tool_title(kind: ToolKind, action: Option<&str>, args: &Value) -> String {
         ToolKind::Research => s(args, "query")
             .map(|q| format!("Researching \u{201c}{q}\u{201d}"))
             .unwrap_or_else(|| "Researching".into()),
+        ToolKind::ViewImage => with("Viewed", "Viewing an image"),
+        ToolKind::GenerateImage => with("Generated", "Generating an image"),
         ToolKind::Other => target
             .map(str::to_string)
             .unwrap_or_else(|| "Working".into()),
@@ -143,6 +152,20 @@ fn fan_out_status(phase: &str) -> FanOutStatus {
         // "started", "running", "in_progress", per-step tool_call/tool_result, …
         _ => FanOutStatus::Running,
     }
+}
+
+fn wall_clock_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .try_into()
+        .unwrap_or(u64::MAX)
+}
+
+fn first_u64(v: &Value, keys: &[&str]) -> Option<u64> {
+    keys.iter()
+        .find_map(|key| v.get(key).and_then(Value::as_u64))
 }
 
 fn workspace_surface(name: Option<&str>) -> WorkspaceSurfaceKind {
@@ -566,17 +589,44 @@ pub fn event_to_agent(event: &Value, run: &RunId, session: &SessionId) -> Option
                     .and_then(Value::as_u64)
                     .unwrap_or(0);
                 let phase = first_s(d, &["phase", "event_type"]).unwrap_or("");
-                let label = first_s(d, &["summary"])
-                    .or_else(|| scope.and_then(|sc| non_empty(s(sc, "input_label"))))
+                let status = fan_out_status(phase);
+                let summary = first_s(d, &["public_activity_label", "summary", "tool"]);
+                let objective = scope.and_then(|sc| non_empty(s(sc, "input_label")));
+                let label = objective
+                    .or_else(|| first_s(d, &["label", "title"]))
+                    .or(summary)
                     .map(str::to_string)
                     .unwrap_or_else(|| format!("Task {}", row + 1));
+                let now = wall_clock_ms();
+                let started_at_ms = first_u64(d, &["started_at_ms", "started_ms"])
+                    .or_else(|| {
+                        scope.and_then(|sc| first_u64(sc, &["started_at_ms", "started_ms"]))
+                    })
+                    .or_else(|| (status == FanOutStatus::Running).then_some(now));
+                let updated_at_ms =
+                    first_u64(d, &["updated_at_ms", "timestamp_ms", "finished_ms"]).unwrap_or(now);
                 return Some(AgentEvent::FanOut {
                     run: run.clone(),
                     parent: ToolCallId::new(parent),
                     agent: FanOutAgent {
                         id: row.to_string(),
                         label,
-                        status: fan_out_status(phase),
+                        status,
+                        objective: objective.map(str::to_string),
+                        activity: match status {
+                            FanOutStatus::Queued => Some("Waiting to start".into()),
+                            FanOutStatus::Running => summary.map(str::to_string),
+                            FanOutStatus::Done => Some("Complete".into()),
+                            FanOutStatus::Failed => Some("Needs attention".into()),
+                        },
+                        result: matches!(status, FanOutStatus::Done | FanOutStatus::Failed)
+                            .then(|| summary.map(str::to_string))
+                            .flatten(),
+                        attempt: first_u64(d, &["attempt"])
+                            .or_else(|| scope.and_then(|sc| first_u64(sc, &["attempt"])))
+                            .and_then(|value| value.try_into().ok()),
+                        started_at_ms,
+                        updated_at_ms: Some(updated_at_ms),
                     },
                 });
             }
@@ -953,6 +1003,28 @@ mod tests {
     }
 
     #[test]
+    fn image_tools_get_typed_kinds_and_user_facing_titles() {
+        assert_eq!(tool_kind("view_image", None), ToolKind::ViewImage);
+        assert_eq!(
+            tool_title(
+                ToolKind::ViewImage,
+                None,
+                &json!({"path": "design/mockup.png"}),
+            ),
+            "Viewed mockup.png"
+        );
+        assert_eq!(tool_kind("image_generation", None), ToolKind::GenerateImage);
+        assert_eq!(
+            tool_title(
+                ToolKind::GenerateImage,
+                None,
+                &json!({"path": "images/hero.png"}),
+            ),
+            "Generated hero.png"
+        );
+    }
+
+    #[test]
     fn backend_public_label_is_used_when_present() {
         let ev = json!({
             "type":"tool_call",
@@ -981,6 +1053,9 @@ mod tests {
                 assert_eq!(agent.id, "2");
                 assert_eq!(agent.status, FanOutStatus::Done);
                 assert_eq!(agent.label, "Summarized auth.rs");
+                assert_eq!(agent.activity.as_deref(), Some("Complete"));
+                assert_eq!(agent.result.as_deref(), Some("Summarized auth.rs"));
+                assert!(agent.updated_at_ms.is_some());
             }
             other => panic!("got {other:?}"),
         }

@@ -4,7 +4,7 @@ import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { Brain, ChevronRight, Copy, Check, FileText, Pencil } from "lucide-react";
+import { ChevronRight, Copy, Check, FileText, Pencil } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
 import { cn } from "../lib/cn";
 import { DUR, EASE } from "../lib/motion";
@@ -218,9 +218,8 @@ function ThinkingBlock({ text }: { text: string }) {
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="group/think flex items-center gap-1.5 rounded-md py-0.5 text-xs text-ink-faint transition hover:text-ink-muted"
+        className="group/think flex items-center gap-1 rounded-md py-0.5 text-xs text-ink-faint transition hover:text-ink-muted"
       >
-        <Brain className="size-3.5" />
         <span className="font-medium">Thinking</span>
         <ChevronRight className={cn("size-3 opacity-60 transition-transform group-hover/think:opacity-100", open && "rotate-90")} />
       </button>

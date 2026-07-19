@@ -1,7 +1,7 @@
 use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use agent_core::domain::{FanOutAgent, FanOutStatus, ToolKind};
 use agent_core::provider::{Provider, ProviderConfig};
@@ -326,6 +326,12 @@ async fn run_workstreams(
                 id: task.id.to_string(),
                 label: task_label(task),
                 status: FanOutStatus::Queued,
+                objective: Some(task.objective.clone()),
+                activity: Some("Waiting to start".into()),
+                result: None,
+                attempt: None,
+                started_at_ms: None,
+                updated_at_ms: Some(wall_clock_ms()),
             });
         }
     }
@@ -335,15 +341,29 @@ async fn run_workstreams(
         }
         if let Some(agent_progress) = &agent_progress {
             match &event {
-                MultiRepoCoordinatorEvent::TaskStarted { task_id, .. } => {
+                MultiRepoCoordinatorEvent::TaskStarted {
+                    task_id,
+                    attempt,
+                    started_ms,
+                } => {
                     agent_progress(FanOutAgent {
                         id: task_id.to_string(),
                         label: String::new(),
                         status: FanOutStatus::Running,
+                        objective: None,
+                        activity: Some("Working in an isolated checkout".into()),
+                        result: None,
+                        attempt: Some(*attempt),
+                        started_at_ms: Some(*started_ms),
+                        updated_at_ms: Some(*started_ms),
                     });
                 }
                 MultiRepoCoordinatorEvent::TaskFinished {
-                    task_id, outcome, ..
+                    task_id,
+                    attempt,
+                    outcome,
+                    finished_ms,
+                    error,
                 } => {
                     agent_progress(FanOutAgent {
                         id: task_id.to_string(),
@@ -353,6 +373,19 @@ async fn run_workstreams(
                         } else {
                             FanOutStatus::Failed
                         },
+                        objective: None,
+                        activity: Some(if *outcome == TaskRunOutcome::Completed {
+                            "Workstream complete".into()
+                        } else {
+                            "Needs attention".into()
+                        }),
+                        result: error.clone().or_else(|| {
+                            (*outcome == TaskRunOutcome::Completed)
+                                .then(|| "Completed in an isolated checkout".into())
+                        }),
+                        attempt: Some(*attempt),
+                        started_at_ms: None,
+                        updated_at_ms: Some(*finished_ms),
                     });
                 }
                 MultiRepoCoordinatorEvent::RecoveryScheduled {
@@ -363,11 +396,23 @@ async fn run_workstreams(
                         id: failed_task_id.to_string(),
                         label: String::new(),
                         status: FanOutStatus::Failed,
+                        objective: None,
+                        activity: Some("Recovery scheduled".into()),
+                        result: Some("This workstream will be retried safely".into()),
+                        attempt: None,
+                        started_at_ms: None,
+                        updated_at_ms: Some(wall_clock_ms()),
                     });
                     agent_progress(FanOutAgent {
                         id: replacement_task_id.to_string(),
                         label: "Retry failed work safely".into(),
                         status: FanOutStatus::Queued,
+                        objective: Some("Retry failed work safely".into()),
+                        activity: Some("Waiting to start".into()),
+                        result: None,
+                        attempt: None,
+                        started_at_ms: None,
+                        updated_at_ms: Some(wall_clock_ms()),
                     });
                 }
                 _ => {}
@@ -439,6 +484,15 @@ async fn run_workstreams(
         "resources": resource_receipts,
         "events": captured.lock().expect("event lock").clone()
     })))
+}
+
+fn wall_clock_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .try_into()
+        .unwrap_or(u64::MAX)
 }
 
 fn task_label(task: &MultiRepoTask) -> String {

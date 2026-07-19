@@ -23,8 +23,8 @@ fn transcript_chars(messages: &[ca::AgentMessage]) -> usize {
 use crate::tools::ToolRegistry;
 
 use super::{
-    locations_from_details, markdown_artifact, mobile_screenshot_artifact,
-    tool_result_blocks_to_content, tool_title,
+    locations_from_details, markdown_artifact, mobile_screenshot_artifact, tool_result_to_content,
+    tool_title,
 };
 
 pub(crate) struct DesktopEventSink {
@@ -254,7 +254,7 @@ impl ca::EventSink for DesktopEventSink {
                 partial,
                 ..
             } => {
-                let blocks = tool_result_blocks_to_content(&partial.content);
+                let blocks = tool_result_to_content(&partial);
                 let _ = self
                     .events
                     .send(desktop::AgentEvent::ToolCallUpdate {
@@ -328,7 +328,7 @@ impl ca::EventSink for DesktopEventSink {
                             // Replace (not append): the final result supersedes
                             // any streamed partials so progress lines don't
                             // linger or duplicate the output.
-                            replace_content: Some(tool_result_blocks_to_content(&result.content)),
+                            replace_content: Some(tool_result_to_content(&result)),
                             ..Default::default()
                         },
                     })

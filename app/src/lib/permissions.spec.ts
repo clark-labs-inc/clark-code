@@ -19,12 +19,13 @@ describe("wouldAutoApprove", () => {
     }
   });
 
-  it("auto mode approves all but destructive + external tools", () => {
+  it("auto mode approves all but destructive, external, and billed tools", () => {
     expect(wouldAutoApprove("auto", req("safe"))).toBe(true);
     expect(wouldAutoApprove("auto", req("caution"))).toBe(true);
     expect(wouldAutoApprove("auto", req(undefined))).toBe(true); // file edits
     expect(wouldAutoApprove("auto", req("danger"))).toBe(false); // asks
     expect(wouldAutoApprove("auto", req("external"))).toBe(false); // MCP — asks
+    expect(wouldAutoApprove("auto", req("billed"))).toBe(false); // image generation — asks
   });
 
   it("full mode approves everything (engine still blocks catastrophic)", () => {

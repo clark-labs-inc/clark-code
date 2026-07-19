@@ -175,6 +175,41 @@ fn tool_title_special_cases_plan_tools() {
 }
 
 #[test]
+fn tool_title_special_cases_image_tools() {
+    assert_eq!(
+        tool_title("view_image", &json!({"path": "design/mockup.png"})),
+        "View image: design/mockup.png"
+    );
+    assert_eq!(tool_title("generate_image", &json!({})), "Generate image");
+    assert_eq!(
+        tool_title("generate_image", &json!({"output_path": "images/hero.png"})),
+        "Generate image: images/hero.png"
+    );
+}
+
+#[test]
+fn produced_image_artifact_preserves_its_typed_preview_uri() {
+    let artifact = produced_artifact_to_desktop(
+        &crate::tools::ProducedArtifact {
+            id: "image:images/hero.png".into(),
+            title: "hero.png".into(),
+            kind: desktop::ArtifactKind::Image,
+            mime_type: Some("image/png".into()),
+            uri: Some("data:image/png;base64,QUJD".into()),
+        },
+        &ToolCallId::new("call-1".to_string()),
+    );
+
+    assert_eq!(artifact.kind, desktop::ArtifactKind::Image);
+    assert_eq!(artifact.mime_type.as_deref(), Some("image/png"));
+    assert_eq!(artifact.uri.as_deref(), Some("data:image/png;base64,QUJD"));
+    assert_eq!(
+        artifact.tool_call.as_ref().map(|id| id.as_str()),
+        Some("call-1")
+    );
+}
+
+#[test]
 fn parse_update_plan_maps_steps_and_statuses() {
     let args = json!({"plan": [
         {"step": "read the code", "status": "completed"},
@@ -374,4 +409,25 @@ fn tool_result_blocks_to_content_maps_image_data_url_to_image_block() {
         }
         other => panic!("expected an Image content block, got {other:?}"),
     }
+}
+
+#[test]
+fn tool_result_metadata_keeps_ui_images_when_model_images_are_suppressed() {
+    let mut result = ca::ToolResult::text("The screenshot was captured.");
+    store_tool_images(
+        &mut result.details,
+        &[crate::tools::ImageAttachment {
+            mime_type: "image/png".into(),
+            data_base64: "QUJD".into(),
+            alt: Some("browser screenshot".into()),
+        }],
+    );
+
+    let content = tool_result_to_content(&result);
+    assert_eq!(content.len(), 2);
+    assert!(matches!(
+        &content[1],
+        desktop::ContentBlock::Image { mime_type, data, uri }
+            if mime_type == "image/png" && data == "QUJD" && uri.is_none()
+    ));
 }

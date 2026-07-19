@@ -12,8 +12,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
-use agent_core::domain::{FanOutAgent, FsLocation, ToolKind};
+use agent_core::domain::{ArtifactKind, FanOutAgent, FsLocation, ToolKind};
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
@@ -28,6 +29,7 @@ pub mod diagnostics;
 pub mod fs;
 pub mod goal;
 pub mod grep;
+pub mod image;
 #[cfg(target_os = "macos")]
 pub mod ios_simulator;
 pub mod memory;
@@ -190,18 +192,36 @@ pub struct ToolOutcome {
     pub is_error: bool,
     pub locations: Vec<FsLocation>,
     pub images: Vec<ImageAttachment>,
+    /// Typed, user-visible outputs made by the tool. These are projected into
+    /// desktop artifact cards by the adapter rather than inferred from text or
+    /// a generic file location.
+    pub artifacts: Vec<ProducedArtifact>,
     pub details: Value,
 }
 
-/// An image a tool wants to attach to its result — both shown to the model
-/// (as a synthetic follow-up multimodal turn, since tool-role messages can't
-/// carry image content-parts on the OpenAI-compatible wire format) and, when
-/// it also arrives via `with_location`, rendered as an Artifact card.
-#[derive(Clone, Debug)]
+/// An image a tool wants to attach to its result. The adapter either forwards
+/// it to a model with native image support or derives a bounded vision
+/// description, while always preserving the typed bytes for the UI. Tools that
+/// create a durable output additionally emit a [`ProducedArtifact`].
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ImageAttachment {
     pub mime_type: String,
     pub data_base64: String,
     pub alt: Option<String>,
+}
+
+/// A durable user-facing result emitted by a tool.
+///
+/// The URI may be a `data:` URL when the image was produced on a remote
+/// executor: the desktop host cannot safely read arbitrary remote paths, but
+/// it can render bytes the tool just received from the trusted platform relay.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ProducedArtifact {
+    pub id: String,
+    pub title: String,
+    pub kind: ArtifactKind,
+    pub mime_type: Option<String>,
+    pub uri: Option<String>,
 }
 
 impl ToolOutcome {
@@ -211,6 +231,7 @@ impl ToolOutcome {
             is_error: false,
             locations: Vec::new(),
             images: Vec::new(),
+            artifacts: Vec::new(),
             details: Value::Null,
         }
     }
@@ -220,6 +241,7 @@ impl ToolOutcome {
             is_error: true,
             locations: Vec::new(),
             images: Vec::new(),
+            artifacts: Vec::new(),
             details: Value::Null,
         }
     }
@@ -241,6 +263,10 @@ impl ToolOutcome {
             data_base64: data_base64.into(),
             alt,
         });
+        self
+    }
+    pub fn with_artifact(mut self, artifact: ProducedArtifact) -> Self {
+        self.artifacts.push(artifact);
         self
     }
     pub fn with_details(mut self, details: Value) -> Self {
@@ -289,6 +315,7 @@ impl ToolRegistry {
             Arc::new(fs::ListDir),
             Arc::new(fs::Glob),
             Arc::new(grep::Grep),
+            Arc::new(image::ViewImage),
             Arc::new(fs::WriteFile),
             Arc::new(fs::EditFile),
             Arc::new(apply_patch::ApplyPatch),
@@ -352,6 +379,13 @@ impl ToolRegistry {
     /// advertised to the model unless enabled.
     pub fn enable_browser(&mut self) {
         self.tools.push(Arc::new(browser::BrowserTool::new()));
+    }
+
+    /// Register Clark-platform-backed image generation/editing when a signed-in
+    /// session has a platform key. The key stays between Desktop and Clark;
+    /// the relay owns provider credentials and billing.
+    pub fn enable_image_generation(&mut self, config: image::ImageGenerationConfig) {
+        self.tools.push(Arc::new(image::GenerateImage::new(config)));
     }
 
     /// Remove device-control capabilities that are physically attached to the
@@ -553,6 +587,18 @@ mod tests {
         // Rationale first: explanation tokens condition the plan steps.
         wire_order(&reg, "update_plan", &["explanation", "plan"]);
         wire_order(&reg, "grep", &["pattern", "path"]);
+        wire_order(&reg, "view_image", &["path"]);
+
+        let mut image_registry = ToolRegistry::new(None, None);
+        image_registry.enable_image_generation(image::ImageGenerationConfig {
+            base_url: "https://api.clarkslabs.com/v1".into(),
+            api_key: "ck_live_test".into(),
+        });
+        wire_order(
+            &image_registry,
+            "generate_image",
+            &["prompt", "input_images", "output_path"],
+        );
     }
 
     #[test]
@@ -566,6 +612,8 @@ mod tests {
         assert!(names.contains(&"read_file".to_string()));
         assert!(names.contains(&"edit_file".to_string()));
         assert!(names.contains(&"bash".to_string()));
+        assert!(names.contains(&"view_image".to_string()));
+        assert!(!names.contains(&"generate_image".to_string()));
         assert!(!names.contains(&"clark_research".to_string()));
         assert!(!names.contains(&"memory".to_string()));
         assert!(local.get("read_file").is_some());
@@ -620,6 +668,14 @@ mod tests {
         assert!(reg.get("bash").unwrap().mutating());
         assert!(!reg.get("read_file").unwrap().mutating());
         assert!(!reg.get("grep").unwrap().mutating());
+        assert!(!reg.get("view_image").unwrap().mutating());
+
+        let mut signed_in = ToolRegistry::new(None, None);
+        signed_in.enable_image_generation(image::ImageGenerationConfig {
+            base_url: "https://api.clarkslabs.com/v1".into(),
+            api_key: "ck_live_test".into(),
+        });
+        assert!(signed_in.get("generate_image").unwrap().mutating());
     }
 
     #[test]

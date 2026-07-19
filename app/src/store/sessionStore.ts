@@ -366,6 +366,8 @@ interface SessionState {
   send: (text: string) => Promise<void>;
   /** Replace one prior Clark Code user turn and rerun from the retained prefix. */
   resendFrom: (timelineIndex: number, text: string) => Promise<void>;
+  /** Explicitly inject one queued text-only message into the active local run. */
+  steerQueued: (id: string) => Promise<void>;
   removeQueued: (id: string) => void;
   setPermissionMode: (mode: PermissionMode) => void;
   /** Shift+Tab: advance to the next permission mode in the cycle. */
@@ -1994,20 +1996,10 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     const uploads = attachments.map(toUpload);
     for (const a of attachments) if (a.previewUrl) URL.revokeObjectURL(a.previewUrl);
     set({ attachments: [], error: null });
-    // A run is active in THIS conversation. Local engine: STEER — the message
-    // is injected into the live run between tool batches (Codex behavior), so
-    // "actually, use pnpm" lands while the agent works instead of after it
-    // finishes. Attachments can't ride a steer, and other providers have no
-    // steering — those fall back to the queue, drained when the run ends.
+    // A run is active in THIS conversation: queue by default. The queue drains
+    // in order after each run settles, so a follow-up never changes the work
+    // already in progress unless the user explicitly chooses "Steer" on it.
     if (isBusy(snapshot)) {
-      if (session.provider === "local" && uploads.length === 0 && bridge.steer) {
-        try {
-          await bridge.steer(session.id, [{ type: "text", text }]);
-          return;
-        } catch {
-          /* the run just ended, or steering is unavailable — queue instead */
-        }
-      }
       const queuedMessage = { id: crypto.randomUUID(), text, uploads };
       const entry = liveSessions.get(session.id);
       if (entry) entry.queued = [...entry.queued, queuedMessage];
@@ -2025,6 +2017,25 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     } catch (e) {
       // Surface the failure instead of silently doing nothing.
       set({ error: String(e) });
+    }
+  },
+
+  steerQueued: async (id) => {
+    const { bridge, session, queued, snapshot } = get();
+    const message = queued.find((candidate) => candidate.id === id);
+    if (!bridge?.steer || !session || session.provider !== "local" || !message) return;
+    if (message.uploads.length > 0) {
+      get().flashNotice("Messages with attachments stay queued until Clark finishes.");
+      return;
+    }
+    if (!isBusy(snapshot)) return;
+    try {
+      await bridge.steer(session.id, [{ type: "text", text: message.text }]);
+      get().removeQueued(id);
+    } catch {
+      // The run may have settled between the click and the native command. Keep
+      // the message safely queued; the normal drain will send it next.
+      get().flashNotice("Clark finished before the message could steer; it remains queued.");
     }
   },
 

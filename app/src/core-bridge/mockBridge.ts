@@ -82,6 +82,15 @@ export class MockBridge implements CoreBridge {
     void this.playRun(userText);
   }
 
+  async steer(_sessionId: string, blocks: ContentBlock[]): Promise<void> {
+    const run = this.lastRunId();
+    if (!run || this.snapshot.runs[run]?.status !== "running") {
+      throw new Error("no active run to steer");
+    }
+    this.snapshot.timeline.push({ item: "message", run, role: "user", blocks });
+    this.emit();
+  }
+
   async cancel(): Promise<void> {
     const last = this.lastRunId();
     if (last && this.snapshot.runs[last]) {
@@ -209,19 +218,48 @@ export class MockBridge implements CoreBridge {
     await sleep(300);
 
     if (parallelDemo) {
+      const now = Date.now();
       this.snapshot.fan_out = {
-        title: "Build the feature in isolated workspaces, then combine and verify the result",
+        title: "Map the provider path and validate local tool wiring",
         total: 3,
         done: 1,
         running: 1,
         agents: [
-          { id: "environment", label: "Prepare the test environment", status: "done" },
-          { id: "implementation", label: "Implement the repository changes", status: "running" },
-          { id: "verification", label: "Review and run the full test suite", status: "queued" },
+          {
+            id: "platform-endpoint-survey",
+            label: "Platform endpoint survey",
+            status: "done",
+            objective: "Trace the Clark server route, auth, billing, and artifact seams.",
+            activity: "Complete",
+            result: "Confirmed the platform route and authentication boundary.",
+            attempt: 1,
+            started_at_ms: now - 82_000,
+            updated_at_ms: now - 21_000,
+          },
+          {
+            id: "desktop-tool-wiring",
+            label: "Desktop tool wiring",
+            status: "running",
+            objective: "Add typed local image tools without exposing provider credentials.",
+            activity: "Reviewing the provider-local tool registry",
+            attempt: 1,
+            started_at_ms: now - 54_000,
+            updated_at_ms: now,
+          },
+          {
+            id: "image-workflow-verification",
+            label: "Image workflow verification",
+            status: "queued",
+            objective: "Verify viewing, editing, and generated-image artifacts end to end.",
+            activity: "Waiting to start",
+            updated_at_ms: now,
+          },
         ],
       };
       this.emit();
-      await sleep(500);
+      // Keep the live state visible long enough to exercise selection, elapsed
+      // time, and the inspector before the scripted run settles.
+      await sleep(20_000);
     }
 
     this.snapshot.timeline.push({
@@ -232,7 +270,9 @@ export class MockBridge implements CoreBridge {
       blocks: [
         {
           type: "text",
-          text: "I found the entrypoint. I’m checking the implementation path before I make the edit.",
+          text: parallelDemo
+            ? "I’ve mapped the provider path. Three bounded subagents are checking independent seams."
+            : "I found the entrypoint. I’m checking the implementation path before I make the edit.",
         },
       ],
     });
@@ -285,30 +325,50 @@ export class MockBridge implements CoreBridge {
     this.emit();
     await sleep(250);
 
-    // A Clark research call — findings rendered as markdown with cited sources.
+    // A Clark research call — keep the cloud phase live in browser demos long
+    // enough to inspect its compact progress surface before cited findings land.
     const research = `tc-research-${Date.now()}`;
+    const xtermResearch = userText.toLowerCase().includes("xterm");
+    const researchQuery = xtermResearch
+      ? "xterm.js selection behavior and VS Code integration"
+      : "latest clap argument-parsing API";
     this.snapshot.tool_calls[research] = {
       id: research,
-      title: "clark_research: latest clap argument-parsing API",
+      title: `clark_research: ${researchQuery}`,
       kind: "research",
-      status: "completed",
+      status: "in_progress",
       locations: [],
-      raw_input: { query: "latest clap argument-parsing API" },
+      raw_input: { query: researchQuery },
+      content: [],
+    };
+    this.snapshot.timeline.push({ item: "tool_call", id: research });
+    this.emit();
+    await sleep(userText.toLowerCase().includes("research") ? 10_000 : 250);
+
+    this.snapshot.tool_calls[research] = {
+      ...this.snapshot.tool_calls[research],
+      status: "completed",
       content: [
         {
           type: "text",
-          text:
-            "**clap 4.x** is the current standard for argument parsing in Rust. The " +
-            "derive API is recommended:\n\n" +
-            "- Add `clap = { version = \"4\", features = [\"derive\"] }`\n" +
-            "- Define a `#[derive(Parser)]` struct and call `Args::parse()`\n\n" +
-            "The builder API remains available for dynamic cases. See the docs at " +
-            "https://docs.rs/clap/latest/clap/ and the derive tutorial at " +
-            "https://docs.rs/clap/latest/clap/_derive/_tutorial/index.html.",
+          text: xtermResearch
+            ? "**xterm.js clears terminal selection through `SelectionService.clearSelection()`** " +
+              "when input or buffer changes invalidate the current selection model.\n\n" +
+              "- `onUserInput` clears an active selection before terminal input proceeds.\n" +
+              "- Vertical buffer changes can reset selection through the `rowsChanged` path.\n" +
+              "- VS Code preserves higher-level selection state around its terminal integration.\n\n" +
+              "See the upstream source at https://github.com/xtermjs/xterm.js and the " +
+              "API documentation at https://xtermjs.org/docs/api/terminal/classes/terminal/."
+            : "**clap 4.x** is the current standard for argument parsing in Rust. The " +
+              "derive API is recommended:\n\n" +
+              "- Add `clap = { version = \"4\", features = [\"derive\"] }`\n" +
+              "- Define a `#[derive(Parser)]` struct and call `Args::parse()`\n\n" +
+              "The builder API remains available for dynamic cases. See the docs at " +
+              "https://docs.rs/clap/latest/clap/ and the derive tutorial at " +
+              "https://docs.rs/clap/latest/clap/_derive/_tutorial/index.html.",
         },
       ],
     };
-    this.snapshot.timeline.push({ item: "tool_call", id: research });
     this.emit();
     await sleep(250);
 
@@ -408,7 +468,13 @@ export class MockBridge implements CoreBridge {
         ...this.snapshot.fan_out,
         done: 3,
         running: 0,
-        agents: this.snapshot.fan_out.agents.map((agent) => ({ ...agent, status: "done" })),
+        agents: this.snapshot.fan_out.agents.map((agent) => ({
+          ...agent,
+          status: "done",
+          activity: "Complete",
+          result: agent.result ?? "Completed the delegated task.",
+          updated_at_ms: Date.now(),
+        })),
       };
     }
     this.snapshot.runs[run] = {

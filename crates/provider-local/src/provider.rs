@@ -110,6 +110,12 @@ impl Provider for LocalAgentProvider {
                 }),
             });
         let mut registry = ToolRegistry::new(local.clark.clone(), memory);
+        if let Some(api_key) = local.api_key.clone() {
+            registry.enable_image_generation(crate::tools::image::ImageGenerationConfig {
+                base_url: local.base_url.clone(),
+                api_key,
+            });
+        }
         if local.remote.is_some() {
             registry.disable_desktop_mobile_tools();
         }
@@ -489,6 +495,10 @@ impl Provider for LocalAgentProvider {
             user_content,
             memory_extraction,
             execution: config.execution,
+            tool_image_policy: crate::agent_adapter::ToolImagePolicy {
+                native_image_support,
+                vision: config.vision.clone(),
+            },
         };
         tokio::spawn(run_turn(tc, tx, run));
         Ok(rx.boxed())

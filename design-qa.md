@@ -42,6 +42,56 @@ No actionable P0, P1, or P2 differences remain. The implementation preserves the
 
 final result: passed
 
+# Compact Clark Cloud Agent Design QA
+
+- Source visual truth: `/Users/stan/.codex/generated_images/019f7906-2c3d-7d41-a300-e8ca04fb846d/exec-5983220d-a430-4140-847d-53b547f0cb34.png`
+- Live implementation: `.design-qa/cloud-agent-live.png`
+- Completed expanded implementation: `.design-qa/cloud-agent-completed-expanded.png`
+- Completed collapsed implementation: `.design-qa/cloud-agent-completed-collapsed.png`
+- Full-view comparison: `.design-qa/cloud-agent-full-comparison.png`
+- Focused comparison: `.design-qa/cloud-agent-focused-comparison.png`
+- Viewport: 1440 × 1024 for source normalization and every implementation capture.
+- State: dark Clark Desktop browser mock; live Clark Cloud research, completed cited findings, and collapsed completed receipt.
+
+## Findings
+
+No actionable P0, P1, or P2 differences remain. The implementation preserves the selected mock's Clark Cloud identity and research-process hierarchy while applying the requested simplification and using only data the current tool contract can prove.
+
+- Fonts and typography: passed. The implementation uses Clark's existing DM Sans and JetBrains Mono roles, keeps the cloud identity at the conversation's normal 14 px hierarchy, and maintains readable 11–12 px process labels without clipping.
+- Spacing and layout rhythm: passed. The live surface is about one-third the selected mock's height and fits the existing `max-w-2xl` conversation column. The completed receipt collapses to a compact identity-and-action surface while the expanded findings remain bounded and scrollable.
+- Colors and visual tokens: passed. Warm graphite surfaces, quiet borders, off-white text, and existing violet accent tokens match the source. Violet remains limited to the live receipt, process motion, focus, and primary brief action.
+- Image quality and asset fidelity: passed. The implementation reuses Clark's official open-C mark component and the project's installed interface icon system. No generated raster asset or placeholder is needed for this product-native surface.
+- Copy and content: passed. `Clark Cloud Agent` and `Running securely on clarkchat.com` make provenance unmistakable. The live process names planning, web search, source reading, and cited synthesis. Completed source counts are derived from returned citations; the mock's invented thread and line counters are intentionally omitted because the current typed tool contract does not expose them.
+- Accessibility and interaction: passed. The research surface is a named region, the disclosure reports `aria-expanded`, the live state auto-opens, the completed state collapses, and `View research brief` reopens the cited findings. Source actions retain titles and accessible labels.
+
+## Full-view Comparison Evidence
+
+The combined image places the selected compact mock beside the real live and completed Clark Desktop states at the same viewport. The implementation is intentionally narrower because it follows the production conversation column instead of enlarging the app content region. Composer, surrounding work rows, and conversation hierarchy remain stable in both states.
+
+## Focused Region Comparison Evidence
+
+The focused comparison shows the source component, live implementation, and completed implementation at a common height. Identity, provenance, phase hierarchy, violet restraint, corner treatment, and code typography remain legible. The implementation removes the source's two nested work rows and duplicate scale strip, which is the requested space-efficiency change rather than design drift.
+
+## Comparison History
+
+The first rendered comparison had no actionable P0/P1/P2 mismatch. No corrective visual iteration was required after QA. The intentional contract-driven differences are the omitted unverified telemetry and the separation of live process state from completed findings.
+
+## Interaction and Runtime Evidence
+
+- Submitted the xterm.js research scenario through the ordinary Clark Desktop composer.
+- Verified the live surface automatically expanded with `Live`, the four research phases, and the exact clarkchat.com provenance line.
+- Verified completion replaced live process detail with two real cited sources.
+- Collapsed the completed result and reopened it through `View research brief`; `aria-expanded` returned to `true`.
+- Browser application errors: none. The only console output was the expected reduced-motion development warning.
+- Frontend tests passed: 40 files and 204 tests.
+- Frontend TypeScript typecheck passed.
+
+## Follow-up Polish
+
+- P3: if the cloud research contract later exposes typed nested-agent activity or reviewed-source counts, the header has room for one quiet real-time scale receipt without restoring the mock's larger dashboard footprint.
+
+final result: passed
+
 ---
 
 # Simplified Parallel Work Design QA
@@ -374,5 +424,179 @@ No actionable P0, P1, or P2 differences remain for the attachment workflow. Clar
 ## Follow-up Polish
 
 - P3: add arrow-key roving focus if the Add menu grows beyond the current two actions.
+
+final result: passed
+
+---
+
+# Composer checkout strip design QA
+
+## Evidence
+
+- Source visual truth:
+  - `/Users/stan/Desktop/Screenshot 2026-07-18 at 10.05.35 PM.png` — compact independent metadata pills above the composer.
+  - `/var/folders/sx/5vx_xn5j0c31t3jw27sjtnqc0000gn/T/TemporaryItems/NSIRD_screencaptureui_4H5arg/Screenshot 2026-07-18 at 10.07.10 PM.png` — light-mode oversized shared-cap state to remove.
+- Rendered implementation:
+  - `/tmp/clark-context-dark-running-after.jpeg`
+  - `/tmp/clark-context-light-running-after.jpeg`
+- Combined normalized comparison: `/tmp/clark-context-final-comparison.jpeg`
+- Viewport: 1179 × 768 native macOS app window; composer regions normalized to 1179 px wide in the combined comparison.
+- State: authenticated desktop app, existing local conversation, active model run, local checkout on `main`; verified in dark and light themes.
+
+## Full-view comparison evidence
+
+The native captures show the strip centered to the same 672 px content column as the composer. It remains visible during an active run without overlapping the timeline, composer, sidebar, or Stop control. Dark and light theme surfaces retain clear separation without a shared border or cap.
+
+## Focused region comparison evidence
+
+The combined comparison places each source composer region directly above its rendered counterpart. This focused view was required because typography, 6 px spacing, icon alignment, semantic branch color, and the removal of the old shared cap are too small to judge reliably in the full app view.
+
+## Findings
+
+No actionable P0, P1, or P2 differences remain.
+
+- Fonts and typography: 11 px DM Sans UI text, medium weight, and `leading-none` produce the requested quieter density without clipping. Long project and checkout names retain truncation.
+- Spacing and layout rhythm: pills are 22 px high with 6 px between the strip and composer; each pill uses 6 px horizontal padding and a 6 px inter-pill gap. The former oversized cap, negative overlap, border collision, and excess vertical padding are gone.
+- Colors and visual tokens: pills use the existing composer-context token in both themes. Branch and worktree keep distinct semantic foreground tokens; the live branch state is visibly different from location/project metadata in light and dark modes.
+- Image quality and asset fidelity: no raster assets were introduced. Existing Lucide laptop, folder, branch, and worktree icons remain sharp and optically aligned at 12 px.
+- Copy and content: labels remain data-derived (`Local`, project name, branch/worktree name), with no new static copy.
+- Behavior and accessibility: in the active-run AX tree, Checkout context is exposed as plain text (`Local clark-desktop main`), not buttons, while the independent Stop button remains available. Before a session starts, environment and folder controls remain interactive.
+
+## Open questions
+
+None. The reference's add-folder affordance is intentionally absent from an ongoing conversation because the checkout is pinned and informational in that state.
+
+## Comparison history
+
+1. Initial source comparison found a P1 surface/layout mismatch: one oversized shared cap introduced excessive height, border collision, and a visual attachment to the composer. Fix: replaced the shared cap with independent pills, removed the negative overlap, aligned the strip to the composer column, and reordered location before project and checkout.
+2. The next light-mode comparison found a P2 density mismatch: the strip still used 12 px type and 24 px controls with more vertical space than requested. Fix: reduced type to 11 px, controls to 22 px, and the composer gap to 6 px.
+3. Post-fix dark and light native captures were combined with the source regions in `/tmp/clark-context-final-comparison.jpeg`. No actionable P0/P1/P2 mismatch remains.
+
+## Implementation checklist
+
+- [x] Independent context pills above the composer
+- [x] 11 px type and 22 px pill height
+- [x] 6 px vertical gap to composer
+- [x] Distinct branch/worktree semantic colors
+- [x] Read-only metadata during active runs
+- [x] Dark-mode native verification
+- [x] Light-mode native verification
+- [x] Signed 0.1.61 bundle installed in `/Applications/Clark Code.app`
+
+## Follow-up polish
+
+No P3 follow-up is required for this scope.
+
+final result: passed
+
+---
+
+# Artifact workspace horizontal resize design QA
+
+## Evidence
+
+- Source visual truth: `/Users/stan/Desktop/Screenshot 2026-07-18 at 10.29.30 PM.png`
+- Rendered implementation:
+  - `/tmp/clark-artifact-resize-before.jpeg`
+  - `/tmp/clark-artifact-resize-wide.jpeg`
+  - `/tmp/clark-artifact-resize-narrow.jpeg`
+- Combined full-view comparison: `/tmp/clark-artifact-resize-comparison.jpeg`
+- Combined focused divider comparison: `/tmp/clark-artifact-resize-focused-comparison.jpeg`
+- Viewport: 1179 × 768 native macOS app window for implementation captures; source capture is 1312 × 1007 and was normalized to the same comparison height.
+- State: authenticated Clark Code desktop app, dark theme, completed local conversation, Markdown artifact workspace open.
+
+## Full-view comparison evidence
+
+The source shows a fixed conversation/artifact split. The two implementation captures show the same artifact and conversation at one wider and one narrower artifact width. The conversation, composer, artifact toolbar, document preview, and context rail remain within their panes without overlap during either state.
+
+## Focused region comparison evidence
+
+The focused comparison isolates the split boundary from the source and both implementation states. It shows the divider moving from x=697 to x=559 when expanding the artifact and then to x=760 when narrowing it. The corrected drag does not select document or conversation text.
+
+## Findings
+
+No actionable P0, P1, or P2 differences remain.
+
+- Fonts and typography: resizing changes available line length only; existing DM Sans and Newsreader typography, weights, line heights, and truncation remain unchanged.
+- Spacing and layout rhythm: an 8 px hit area sits between panes with a single 1 px tokenized divider. The artifact is constrained to at least 420 px and the conversation to at least 320 px.
+- Colors and visual tokens: the idle divider uses `border-subtle`; hover, focus, and active drag use the existing accent token.
+- Image quality and asset fidelity: no images or icon assets were introduced or altered.
+- Copy and content: no product copy changed. The divider tooltip explains drag and double-click reset behavior.
+- Behavior and accessibility: native mouse dragging works in both directions and continues outside the divider through window-level tracking. Width is persisted locally. The divider is a focusable vertical separator with value metadata; Left/Right arrows resize by 24 px, Home selects the minimum, End selects the maximum, and double-click resets to the default.
+- Responsive behavior: below the existing `xl` breakpoint the artifact remains full-width and the splitter stays hidden, preserving the prior narrow-window behavior.
+
+## Open questions
+
+None.
+
+## Comparison history
+
+1. Initial implementation used pointer capture. Native Computer Use exposed a P1 interaction failure: dragging selected page text and did not move the split.
+2. Fix: moved the desktop interaction to `mousedown` plus window-level `mousemove`/`mouseup`, retained the keyboard separator contract, and disabled selection only while resizing.
+3. Post-fix native drags moved the boundary 138 px left and 201 px right with no text-selection artifact. Full and focused combined comparisons show no remaining actionable P0/P1/P2 issue.
+
+## Implementation checklist
+
+- [x] Horizontal drag in both directions
+- [x] Window-level drag tracking
+- [x] Conversation and artifact minimum widths
+- [x] Persisted width
+- [x] Keyboard-accessible separator
+- [x] Double-click reset
+- [x] Responsive fallback below `xl`
+- [x] Native dark-mode verification
+- [x] Signed 0.1.61 bundle installed in `/Applications/Clark Code.app`
+
+## Follow-up polish
+
+No P3 follow-up is required for this scope.
+
+final result: passed
+
+---
+
+# Accessible Subagents Inspector Design QA
+
+## Evidence
+
+- Source visual truth: `/Users/stan/.codex/attachments/09c170c5-c010-4a04-823d-1e1c95aea4f5/image-1.png`
+- Rendered implementation: `.test-ui-screenshots/subagents-inspector-final-1440.png`
+- Full-view comparison: `.test-ui-screenshots/subagents-design-qa-comparison.png`
+- Focused comparison: `.test-ui-screenshots/subagents-design-qa-focus.png`
+- Responsive captures: `.test-ui-screenshots/subagents-inspector-1024.png` and `.test-ui-screenshots/subagents-inspector-800.png`
+- Primary viewport: 1440 x 1024; responsive checks at 1024 x 768 and 800 x 720.
+- State: dark Clark Code browser mock, one running subagent selected, one complete, and one queued.
+
+## Findings
+
+No actionable P0, P1, or P2 differences remain. The implementation preserves the reference's conversation chips, quiet right inspector, selected-running state, objective, current activity, and public progress receipt while fitting Clark's existing centered conversation system.
+
+- Fonts and typography: passed. Existing Clark type roles and compact hierarchy remain intact; agent labels wrap instead of truncating when three cards share the production conversation width.
+- Spacing and layout rhythm: passed. The inspector uses the existing resizable detail shell and restrained separators. The narrower production conversation column is an intentional Clark-system adaptation rather than a second custom layout.
+- Colors and visual tokens: passed. Graphite surfaces, semantic success/danger states, quiet borders, and violet selection/focus reuse existing tokens.
+- Image quality and asset fidelity: passed. No custom raster asset is needed; status, disclosure, and navigation icons use the installed Lucide set.
+- Copy and content: passed. The inspector exposes bounded objective, activity, attempt, elapsed time, result, and aggregate status. It does not reveal chain-of-thought, private reasoning, raw prompts, tokens, or provider credentials.
+- Accessibility and interaction: passed. Agent chips and selector rows are named buttons with 44 px or larger targets, selected state is exposed through `aria-pressed`, Escape closes the inspector, Jump to transcript returns to the named transcript region, status is not color-only, and reduced motion is respected.
+- Responsive behavior: passed. At 1024 px and 800 px the inspector becomes the primary content pane without horizontal overflow; the persistent Clark navigation remains available.
+
+## Comparison History
+
+1. Initial P2: the compact production conversation width truncated all three visible agent names.
+2. Fix: increased chip height and allowed two-line labels, preserving three parallel cards and the reference hierarchy while making the names fully readable.
+3. Post-fix browser measurements show each chip's scroll and client dimensions match, with no page-level horizontal overflow at desktop or responsive viewports.
+
+## Interaction and Runtime Evidence
+
+- Opened the running agent from its transcript chip and switched to the completed agent from the inspector task list.
+- Closed the inspector with Escape.
+- Reopened it and verified Jump to transcript closes the inspector and returns focus to the parallel-work region.
+- Verified the 1024 px and 800 px layouts and zero body-width overflow.
+- Browser application errors: none. The only warning was the expected reduced-motion development notice.
+- Frontend typecheck and complete Vitest suite passed.
+- Targeted Rust lifecycle/projection tests passed for `agent-core`, `provider-clark`, and `provider-local`.
+
+## Follow-up Polish
+
+- P3: when providers expose typed retry history, the progress timeline can add a compact rework receipt without showing internal reasoning.
 
 final result: passed

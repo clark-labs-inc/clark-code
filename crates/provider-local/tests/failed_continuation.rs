@@ -79,6 +79,17 @@ fn request_json(raw: &[u8]) -> Value {
     serde_json::from_slice(&raw[headers_end + 4..]).expect("request body is valid JSON")
 }
 
+fn request_header<'a>(raw: &'a [u8], expected: &str) -> Option<&'a str> {
+    let headers_end = find_headers_end(raw)?;
+    std::str::from_utf8(&raw[..headers_end])
+        .ok()?
+        .lines()
+        .find_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            name.eq_ignore_ascii_case(expected).then(|| value.trim())
+        })
+}
+
 async fn new_provider(
     addr: std::net::SocketAddr,
     root: &std::path::Path,
@@ -171,7 +182,7 @@ fn assert_continuation_context(raw: &[u8]) {
     );
 }
 
-fn assert_recovery_context(raw: &[u8]) {
+fn assert_transparent_retry_context(raw: &[u8]) {
     let request = request_json(raw);
     let messages = request["messages"]
         .as_array()
@@ -190,21 +201,20 @@ fn assert_recovery_context(raw: &[u8]) {
                     .as_str()
                     .is_some_and(|content| content.contains("hi"))
         }),
-        "recovery lost the completed assistant/tool pair: {messages:?}"
+        "transparent retry lost the completed assistant/tool pair: {messages:?}"
     );
     assert!(
-        messages.last().is_some_and(|message| {
-            message["role"] == "user"
-                && message["content"]
-                    .as_str()
-                    .is_some_and(|content| content.contains("runtime recovery"))
+        !messages.iter().any(|message| {
+            message["content"]
+                .as_str()
+                .is_some_and(|content| content.contains("runtime recovery"))
         }),
-        "recovery marker must be the final message: {messages:?}"
+        "request-local retry must not synthesize a whole-run recovery marker: {messages:?}"
     );
 }
 
 #[tokio::test]
-async fn transient_failure_recovers_once_from_a_completed_tool_boundary() {
+async fn transient_failure_retries_the_same_model_turn_from_a_completed_tool_boundary() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("hello.txt"), "hi").unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -219,8 +229,9 @@ async fn transient_failure_recovers_once_from_a_completed_tool_boundary() {
             .await
             .unwrap();
 
-        // End the connection before HTTP headers. Reqwest classifies this as
-        // transport uncertainty, which is the lifecycle's recoverable class.
+        // End the connection before HTTP headers. No model output exists for
+        // this request, so transport can replay it without restarting the
+        // whole agent attempt or repeating the completed tool.
         let (mut interrupted, _) = listener.accept().await.unwrap();
         requests.push(read_request(&mut interrupted).await);
         drop(interrupted);
@@ -253,8 +264,8 @@ async fn transient_failure_recovers_once_from_a_completed_tool_boundary() {
         .expect("run has a terminal outcome");
     assert_eq!(outcome.status, RunStatus::Done, "events: {events:#?}");
     let execution = outcome.execution.as_ref().expect("root execution summary");
-    assert_eq!(execution.attempts, 2);
-    assert_eq!(execution.recoveries, 1);
+    assert_eq!(execution.attempts, 1);
+    assert_eq!(execution.recoveries, 0);
     assert_eq!(
         execution
             .completed_tools
@@ -278,12 +289,17 @@ async fn transient_failure_recovers_once_from_a_completed_tool_boundary() {
         .collect::<Vec<_>>();
     let replay = ExecutionLedger::replay(&trace).expect("lifecycle trace is replayable");
     assert_eq!(replay.state, ExecutionState::Completed);
-    assert_eq!(replay.recoveries, 1);
+    assert_eq!(replay.recoveries, 0);
     assert_eq!(replay.evidence.tools.len(), 1);
 
     let requests = server.await.unwrap();
     assert_eq!(requests.len(), 3);
-    assert_recovery_context(&requests[2]);
+    assert_transparent_retry_context(&requests[2]);
+    let interrupted_key = request_header(&requests[1], "idempotency-key")
+        .expect("interrupted request has an idempotency key");
+    let retried_key =
+        request_header(&requests[2], "idempotency-key").expect("retry has an idempotency key");
+    assert_eq!(interrupted_key, retried_key);
 }
 
 #[tokio::test]

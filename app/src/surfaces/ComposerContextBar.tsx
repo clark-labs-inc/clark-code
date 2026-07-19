@@ -7,7 +7,7 @@ import { useSessionStore } from "../store/sessionStore";
 import { EnvironmentPicker } from "./EnvironmentPicker";
 
 const ITEM =
-  "flex min-h-7 min-w-0 items-center gap-1.5 text-xs font-medium";
+  "flex h-[22px] min-w-0 items-center gap-1 rounded-md bg-composer-context px-1.5 text-[11px] font-medium leading-none";
 
 /** Checkout identity attached to the composer. Before a session starts the
  * project/environment fields remain interactive; once a session is live they
@@ -76,27 +76,27 @@ export function ComposerContextBar() {
   if (session && (activeProvider !== "local" || !checkoutRoot)) return null;
 
   return (
-    <div className="relative mx-auto -mb-3 max-w-2xl px-3" data-testid="composer-context-bar">
+    <div className="relative z-20 mx-auto mb-1.5 max-w-2xl" data-testid="composer-context-bar">
       <div
         aria-label="Checkout context"
         data-readonly={session ? "true" : undefined}
-        className="flex h-12 min-w-0 items-start justify-center gap-5 rounded-t-[20px] bg-composer-context px-[15px] pb-3.5 pt-1.5"
+        className="flex min-w-0 items-center justify-start gap-1.5"
       >
         {session ? (
           <>
             <span
-              className={`${ITEM} text-ink-secondary`}
-              title={`${context?.isWorktree ? "Linked worktree" : "Project"}: ${checkoutRoot}`}
+              className={`${ITEM} shrink-0 text-ink-secondary`}
+              title={isRemoteSession ? `Remote: ${locationLabel}` : "This Mac"}
             >
-              <Folder className="size-3.5 shrink-0" />
-              <span className="max-w-48 truncate">{projectName(checkoutRoot)}</span>
+              <LocationIcon className="size-3 shrink-0" />
+              <span className="max-w-36 truncate">{locationLabel}</span>
             </span>
             <span
               className={`${ITEM} text-ink-secondary`}
-              title={isRemoteSession ? `Remote: ${locationLabel}` : "This Mac"}
+              title={`${context?.isWorktree ? "Linked worktree" : "Project"}: ${checkoutRoot}`}
             >
-              <LocationIcon className="size-3.5 shrink-0" />
-              <span className="max-w-36 truncate">{locationLabel}</span>
+              <Folder className="size-3 shrink-0" />
+              <span className="max-w-48 truncate">{projectName(checkoutRoot)}</span>
             </span>
           </>
         ) : (
@@ -114,7 +114,7 @@ export function ComposerContextBar() {
                   : `Branch: ${context.branch}`
             }
           >
-            <CheckoutIcon className="size-3.5 shrink-0" />
+            <CheckoutIcon className="size-3 shrink-0" />
             <span className="max-w-48 truncate">
               {context.detached ? `detached@${context.branch}` : context.branch}
             </span>

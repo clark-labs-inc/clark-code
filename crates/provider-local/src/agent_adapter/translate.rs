@@ -9,6 +9,9 @@ use crate::llm::{
     AssistantTurn, ChatContent, ChatMessage, ContentPart, ImageUrlRef, LlmError, ToolSchema,
     WireToolCall,
 };
+use crate::tools::ImageAttachment;
+
+const DESKTOP_IMAGES_DETAIL_KEY: &str = "_clark_desktop_images";
 
 /// Build the wire `ChatMessage` list for a model call from the session's
 /// system prompt + typed transcript. Shared by the live stream adapter and the
@@ -300,6 +303,37 @@ pub(super) fn tool_result_blocks_to_content(
         .collect()
 }
 
+/// Store UI-only image results in tool metadata when the active coding model
+/// cannot accept image content parts. `ToolResult.details` is explicitly
+/// excluded from model context by clark-agent, while the event sink can still
+/// reconstruct the typed desktop image blocks from this structured field.
+pub(super) fn store_tool_images(details: &mut Value, images: &[ImageAttachment]) {
+    if !details.is_object() {
+        *details = json!({});
+    }
+    let encoded = serde_json::to_value(images).unwrap_or(Value::Array(Vec::new()));
+    details[DESKTOP_IMAGES_DETAIL_KEY] = encoded;
+}
+
+pub(super) fn tool_result_to_content(result: &ca::ToolResult) -> Vec<desktop::ContentBlock> {
+    let mut content = tool_result_blocks_to_content(&result.content);
+    let images = result
+        .details
+        .get(DESKTOP_IMAGES_DETAIL_KEY)
+        .and_then(|value| serde_json::from_value::<Vec<ImageAttachment>>(value.clone()).ok())
+        .unwrap_or_default();
+    content.extend(
+        images
+            .into_iter()
+            .map(|image| desktop::ContentBlock::Image {
+                mime_type: image.mime_type,
+                data: image.data_base64,
+                uri: None,
+            }),
+    );
+    content
+}
+
 /// Split a `data:{mime};base64,{data}` URL into its `(mime_type, data)` parts.
 /// Returns `None` for anything else (e.g. an external `https://` URL), which
 /// callers treat as a URI-only image reference instead.
@@ -395,6 +429,20 @@ pub(super) fn tool_title(name: &str, args: &Value) -> String {
         "propose_plan" => return "Proposed a plan".to_string(),
         "update_plan" => return "Updated the plan".to_string(),
         "organization_knowledge" => return "Searched organization knowledge".to_string(),
+        "view_image" => {
+            return args
+                .get("path")
+                .and_then(Value::as_str)
+                .map(|path| format!("View image: {path}"))
+                .unwrap_or_else(|| "View image".to_string())
+        }
+        "generate_image" => {
+            return args
+                .get("output_path")
+                .and_then(Value::as_str)
+                .map(|path| format!("Generate image: {path}"))
+                .unwrap_or_else(|| "Generate image".to_string())
+        }
         _ => {}
     }
     let salient = ["path", "pattern", "command", "query", "old_string"]

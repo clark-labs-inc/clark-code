@@ -246,6 +246,11 @@ impl PermissionGate {
                         Some("plan".to_string())
                     } else if tool_name == "enter_plan_mode" {
                         Some("plan_entry".to_string())
+                    } else if tool_name == "generate_image" {
+                        // Keep this distinct from generic external/MCP work so
+                        // the UI can accurately name a billed generation while
+                        // still requiring review in Auto mode.
+                        Some("billed".to_string())
                     } else if info.external {
                         Some("external".to_string())
                     } else {
@@ -401,6 +406,34 @@ fn gate_info(name: &str, args: &Value) -> GateInfo {
             reason: None,
             external: false,
         },
+        // Image generation writes an output file and calls Clark's billed
+        // platform relay. Keep it outside automatic approval and show the
+        // visual intent without serializing large reference-image payloads.
+        "generate_image" => {
+            let prompt = args
+                .get("prompt")
+                .and_then(Value::as_str)
+                .unwrap_or("(no prompt provided)");
+            let mut prompt_preview = prompt.chars().take(300).collect::<String>();
+            if prompt.chars().nth(300).is_some() {
+                prompt_preview.push('…');
+            }
+            let output = args
+                .get("output_path")
+                .and_then(Value::as_str)
+                .unwrap_or("images/<prompt>.<returned-format>");
+            GateInfo {
+                detail: Some(format!(
+                    "Generate image through Clark (may consume credits)\nPrompt: {prompt_preview}\nSave to: {output} (extension matches returned image)"
+                )),
+                risk: None,
+                reason: Some(
+                    "uses a billed Clark image-generation call; review the visual intent"
+                        .to_string(),
+                ),
+                external: true,
+            }
+        }
         // MCP-tool posture, not `clark_research`'s zero-gate one: it drives a
         // real browser against live sites under arbitrary session state, a
         // much larger blast radius than a bounded server-side call — `external:
@@ -436,6 +469,7 @@ fn permission_title(tool: &str) -> String {
         "write_file" => "Write this file?".to_string(),
         "propose_plan" => "Ready to build?".to_string(),
         "enter_plan_mode" => "Start with a plan?".to_string(),
+        "generate_image" => "Generate an image?".to_string(),
         "browser" => "Run this browser action?".to_string(),
         t if is_mcp_tool(t) => "Run an MCP tool?".to_string(),
         other => format!("Allow `{other}` to run?"),
@@ -521,7 +555,59 @@ mod tests {
         assert_eq!(permission_title("write_file"), "Write this file?");
         assert_eq!(permission_title("propose_plan"), "Ready to build?");
         assert_eq!(permission_title("enter_plan_mode"), "Start with a plan?");
+        assert_eq!(permission_title("generate_image"), "Generate an image?");
         assert_eq!(permission_title("browser"), "Run this browser action?");
+    }
+
+    #[test]
+    fn image_generation_requires_external_review_without_copying_reference_bytes() {
+        let info = gate_info(
+            "generate_image",
+            &serde_json::json!({
+                "prompt": "A small mossy cabin beside a lake",
+                "input_images": ["data:image/png;base64,very-large-image"],
+                "output_path": "images/cabin.png",
+            }),
+        );
+        assert!(info.external);
+        let detail = info.detail.expect("generation detail");
+        assert!(detail.contains("mossy cabin"));
+        assert!(detail.contains("images/cabin.png"));
+        assert!(detail.contains("extension matches returned image"));
+        assert!(!detail.contains("very-large-image"));
+    }
+
+    #[tokio::test]
+    async fn image_generation_uses_the_typed_billed_permission_risk() {
+        let dir = tempfile::tempdir().unwrap();
+        let session = Arc::new(Mutex::new(SessionState::default()));
+        let control = Arc::new(Mutex::new(RunControl::default()));
+        let (tx, rx) = async_channel::unbounded::<AgentEvent>();
+        let gate = PermissionGate::new(session, control.clone(), SessionId::new("s1"), tx);
+        let ctx = test_ctx(dir.path());
+
+        let check = tokio::spawn(async move {
+            gate.check(
+                &ToolCallId::new("image-1"),
+                "generate_image",
+                &FakeMutating,
+                &serde_json::json!({"prompt": "a small yellow house"}),
+                &ctx,
+                &CancellationToken::new(),
+            )
+            .await
+        });
+
+        let event = rx.recv().await.unwrap();
+        let AgentEvent::PermissionRequest { request } = event else {
+            panic!("expected a permission request");
+        };
+        assert_eq!(request.risk.as_deref(), Some("billed"));
+        control
+            .lock()
+            .await
+            .resolve(&request.id, Decision::AllowOnce.into());
+        assert!(matches!(check.await.unwrap(), PermissionOutcome::Allowed));
     }
 
     #[test]

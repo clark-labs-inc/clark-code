@@ -1,0 +1,36 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <link rel="stylesheet" href="/@xterm/xterm/css/xterm.css" />
+  <style>
+    body { margin: 0; font-family: sans-serif; background: #f7f5f1; }
+    #page { display: flex; flex-direction: column; height: 100vh; }
+    #spacer { flex: 1; padding: 40px; color: #555; }
+    #termwrap { height: 320px; background: #1d1a16; padding: 8px; }
+  </style>
+</head>
+<body>
+  <div id="page">
+    <div id="spacer">Empty area — click here to test deselection.</div>
+    <div id="termwrap"><div id="term" style="height:100%"></div></div>
+  </div>
+  <script type="module">
+    import { Terminal } from "/@xterm/xterm/lib/xterm.mjs";
+    const term = new Terminal({ cols: 100, rows: 14, fontSize: 13 });
+    term.open(document.getElementById("term"));
+    for (let i = 1; i <= 20; i++) term.writeln(`line ${i}: the quick brown fox jumps over the lazy dog`);
+    window.term = term;
+
+    if (new URLSearchParams(location.search).has("fixed")) {
+      // Proposed fix: a press that lands OUTSIDE the terminal root clears the
+      // terminal's painted selection.
+      document.addEventListener("mousedown", (e) => {
+        const root = term.element;
+        if (root && !root.contains(e.target) && term.hasSelection()) term.clearSelection();
+      });
+      window.__fixed = true;
+    }
+  </script>
+</body>
+</html>

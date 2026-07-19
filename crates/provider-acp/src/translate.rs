@@ -104,6 +104,8 @@ pub fn tool_kind(k: Option<&str>) -> ToolKind {
         "execute" | "execute_command" => ToolKind::Execute,
         "think" => ToolKind::Think,
         "fetch" => ToolKind::Fetch,
+        "view_image" => ToolKind::ViewImage,
+        "generate_image" | "image_generation" => ToolKind::GenerateImage,
         _ => ToolKind::Other,
     }
 }
@@ -333,6 +335,12 @@ mod tests {
             }
             other => panic!("got {other:?}"),
         }
+    }
+
+    #[test]
+    fn image_tool_kinds_are_preserved() {
+        assert_eq!(tool_kind(Some("view_image")), ToolKind::ViewImage);
+        assert_eq!(tool_kind(Some("image_generation")), ToolKind::GenerateImage);
     }
 
     #[test]

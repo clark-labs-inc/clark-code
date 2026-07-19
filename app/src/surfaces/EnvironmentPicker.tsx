@@ -11,7 +11,7 @@ import { cn } from "../lib/cn";
 const CHIP =
   "flex min-h-8 items-center gap-1.5 rounded-xl border border-accent/10 bg-accent-subtle px-2.5 py-1.5 text-sm font-medium text-ink-secondary transition duration-200 ease-clark hover:bg-accent-soft hover:text-ink";
 const COMPACT_CHIP =
-  "flex min-h-7 items-center gap-1.5 rounded-lg px-0 py-1 text-xs font-medium text-ink-secondary transition duration-200 ease-clark hover:text-ink";
+  "flex h-[22px] items-center gap-1 rounded-md bg-composer-context px-1.5 text-[11px] font-medium leading-none text-ink-secondary transition duration-200 ease-clark hover:bg-bg-hover hover:text-ink";
 
 /** The "Local · Select folder…" control that sits above the start-screen
  *  composer. It maps the target machine (Local / a Cloud provider / an SSH host)
@@ -64,7 +64,7 @@ export function EnvironmentPicker({ compact = false }: { compact?: boolean }) {
     <Popover
       trigger={
         <span className={compact ? COMPACT_CHIP : CHIP}>
-          <TargetIcon className={compact ? "size-3.5" : "size-4"} />
+          <TargetIcon className={compact ? "size-3" : "size-4"} />
           <span className="max-w-[10rem] truncate">{label}</span>
           {!compact && <ChevronDown className="size-3.5 text-ink-faint" />}
         </span>
@@ -134,15 +134,13 @@ export function EnvironmentPicker({ compact = false }: { compact?: boolean }) {
 
   return (
     <div
-      className={cn("flex items-center", compact ? "min-w-0 gap-3.5" : "flex-wrap gap-2")}
+      className={cn("flex items-center", compact ? "min-w-0 gap-1.5" : "flex-wrap gap-2")}
     >
-      {compact && folderPicker}
-
       {/* Target machine */}
       {targetPicker}
 
       {/* Project folder — only meaningful when coding on this machine */}
-      {!compact && folderPicker}
+      {folderPicker}
 
       {isRemote && selectedHost && (
         <button
@@ -176,7 +174,7 @@ function FolderChip({ cwd, compact = false }: { cwd: string; compact?: boolean }
         <span
           className={cn(compact ? COMPACT_CHIP : CHIP, has ? "text-ink" : "text-ink-faint")}
         >
-          <Folder className={compact ? "size-3.5" : "size-4"} />
+          <Folder className={compact ? "size-3" : "size-4"} />
           <span className="max-w-[12rem] truncate">
             {has ? projectName(cwd) : "Select folder…"}
           </span>

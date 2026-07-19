@@ -13,12 +13,13 @@ use serde_json::{json, Value};
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
+use crate::config::AgenticClarkConfig;
 use crate::llm::LlmClient;
 #[cfg(test)]
 use crate::llm::{ChatContent, ContentPart};
 use crate::loop_state::{RunControl, SessionState};
 use crate::permissions::{PermissionGate, PermissionOutcome};
-use crate::tools::{ToolCtx, ToolExecutor, ToolRegistry};
+use crate::tools::{ProducedArtifact, ToolCtx, ToolExecutor, ToolRegistry};
 
 use translate::*;
 
@@ -174,6 +175,17 @@ pub(crate) struct DesktopToolRegistryOptions {
     pub run: RunId,
     pub events: Sender<desktop::AgentEvent>,
     pub execution: Option<crate::root_execution::RootExecutionTrace>,
+    pub image_policy: ToolImagePolicy,
+}
+
+/// How tool-produced images reach the current coding model. The UI always
+/// receives typed image blocks; models without native image input receive a
+/// bounded isolated vision description instead of an incompatible synthetic
+/// multimodal turn.
+#[derive(Clone)]
+pub(crate) struct ToolImagePolicy {
+    pub native_image_support: bool,
+    pub vision: Option<AgenticClarkConfig>,
 }
 
 pub(crate) fn desktop_tool_registry(
@@ -198,6 +210,7 @@ pub(crate) fn desktop_tool_registry(
             gate: gate.clone(),
             run: options.run.clone(),
             events: options.events.clone(),
+            image_policy: options.image_policy.clone(),
         }));
     }
     registry
@@ -212,6 +225,7 @@ struct DesktopToolAdapter {
     /// `DesktopEventSink` translation path).
     run: RunId,
     events: Sender<desktop::AgentEvent>,
+    image_policy: ToolImagePolicy,
 }
 
 #[async_trait]
@@ -351,6 +365,34 @@ impl ca::AgentTool for DesktopToolAdapter {
             }
         }
 
+        if !outcome.is_error {
+            for artifact in &outcome.artifacts {
+                let _ = self
+                    .events
+                    .send(desktop::AgentEvent::Artifact {
+                        run: self.run.clone(),
+                        artifact: produced_artifact_to_desktop(artifact, &tool_id),
+                    })
+                    .await;
+            }
+        }
+
+        if !self.image_policy.native_image_support && !outcome.images.is_empty() {
+            // Keep the actual bytes in structured result metadata for the UI,
+            // but do not inject them into a non-vision coding model's wire
+            // transcript. A separate vision-only request gives the model the
+            // visual facts it needs to continue safely.
+            outcome.content.push_str(
+                &crate::attachments::describe_tool_images(
+                    &outcome.images,
+                    self.image_policy.vision.as_ref(),
+                    &signal,
+                )
+                .await,
+            );
+            store_tool_images(&mut outcome.details, &outcome.images);
+        }
+
         // Cap what one tool result may occupy in the model's context. Without
         // this, a single huge read/grep/shell dump rides the transcript in
         // full until compaction. Middle-out: the head and tail survive, the
@@ -366,14 +408,16 @@ impl ca::AgentTool for DesktopToolAdapter {
         } else {
             ca::ToolResult::text(outcome.content)
         };
-        for image in &outcome.images {
-            result
-                .content
-                .push(ca::ToolResultBlock::Image(ca::ImageContent {
-                    source: format!("data:{};base64,{}", image.mime_type, image.data_base64),
-                    media_type: Some(image.mime_type.clone()),
-                    alt: image.alt.clone(),
-                }));
+        if self.image_policy.native_image_support {
+            for image in &outcome.images {
+                result
+                    .content
+                    .push(ca::ToolResultBlock::Image(ca::ImageContent {
+                        source: format!("data:{};base64,{}", image.mime_type, image.data_base64),
+                        media_type: Some(image.mime_type.clone()),
+                        alt: image.alt.clone(),
+                    }));
+            }
         }
         result.details = outcome.details;
         if !outcome.locations.is_empty() {
@@ -383,6 +427,20 @@ impl ca::AgentTool for DesktopToolAdapter {
             result.details["locations"] = json!(outcome.locations);
         }
         Ok(result)
+    }
+}
+
+fn produced_artifact_to_desktop(
+    artifact: &ProducedArtifact,
+    tool_call: &ToolCallId,
+) -> desktop::Artifact {
+    desktop::Artifact {
+        id: artifact.id.clone(),
+        title: artifact.title.clone(),
+        kind: artifact.kind,
+        mime_type: artifact.mime_type.clone(),
+        uri: artifact.uri.clone(),
+        tool_call: Some(tool_call.clone()),
     }
 }
 

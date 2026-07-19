@@ -31,12 +31,14 @@ function modeAfterPlanChoice(risk: string | undefined, optionId: string) {
   return null;
 }
 
-function riskTone(risk?: string): { ring: string; chip: string; label: string } | null {
+export function riskTone(risk?: string): { ring: string; chip: string; label: string } | null {
   switch (risk) {
     case "danger":
       return { ring: "bg-danger/10", chip: "bg-danger/15 text-danger", label: "Destructive" };
     case "external":
       return { ring: "bg-info/10", chip: "bg-info/15 text-info", label: "MCP tool" };
+    case "billed":
+      return { ring: "bg-warning/10", chip: "bg-warning/15 text-warning", label: "Billed image" };
     case "caution":
       return { ring: "bg-warning/10", chip: "bg-warning/15 text-warning", label: "Caution" };
     case "safe":

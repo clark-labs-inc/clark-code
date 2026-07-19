@@ -12,6 +12,7 @@ use tokio::sync::Mutex;
 
 use crate::agent_adapter::{
     desktop_tool_registry, ClarkAgentStream, DesktopEventSink, DesktopToolRegistryOptions,
+    ToolImagePolicy,
 };
 use crate::compaction::{CheckpointCompactor, CompactionConfig};
 use crate::llm::LlmClient;
@@ -125,6 +126,7 @@ pub(crate) struct TurnContext {
     /// When memories are enabled: post-turn durable-fact extraction context.
     pub memory_extraction: Option<crate::memory_extraction::ExtractionCtx>,
     pub execution: RootExecutionConfig,
+    pub tool_image_policy: ToolImagePolicy,
 }
 
 struct RootFinishContext {
@@ -221,6 +223,7 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
             run: run.clone(),
             events: tx.clone(),
             execution: Some(execution.clone()),
+            image_policy: tc.tool_image_policy.clone(),
         },
     );
     // Documents the agent writes into this workspace become inline artifacts.
