@@ -444,6 +444,14 @@ pub async fn prompt(
         .trajectory
         .clone()
         .ok_or("Clark cloud trajectory is not configured for this session")?;
+    // The visible user turn is the text PLUS an echo of each attachment
+    // (image thumbnail / file chip) — without it the timeline shows only the
+    // text and the files the user attached seem to vanish on send.
+    let echo_blocks: Vec<ContentBlock> = blocks
+        .iter()
+        .cloned()
+        .chain(attachments.iter().map(PendingUpload::echo_block))
+        .collect();
     let mut durable_prompt = vec![AgentEvent::Trace {
         run: None,
         source: "clark_desktop_prompt".into(),
@@ -453,7 +461,7 @@ pub async fn prompt(
         }),
     }];
     durable_prompt.extend(
-        blocks
+        echo_blocks
             .iter()
             .cloned()
             .map(|delta| AgentEvent::MessageChunk {
@@ -468,7 +476,7 @@ pub async fn prompt(
     // then lock the session to obtain the run's event stream and release.
     let stream = {
         let mut s = entry.lock().await;
-        for block in &blocks {
+        for block in &echo_blocks {
             apply(
                 &mut s.snapshot,
                 &AgentEvent::MessageChunk {
@@ -607,6 +615,31 @@ pub async fn set_output_style(
     let mut s = entry.lock().await;
     s.provider
         .set_output_style(&SessionId::new(session_id), style)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// `/btw` — answer a one-off side question against the session's current
+/// context WITHOUT interrupting the active run. The provider forks a
+/// tool-less, single-turn model call over the session transcript (never
+/// mutating it); the answer text returns here for the overlay to render.
+/// Holding the session lock for the call's duration pauses that session's
+/// snapshot emission only — the run's engine task keeps executing and its
+/// buffered events flush when this returns. Other sessions are unaffected
+/// (per-entry locks).
+#[tauri::command]
+pub async fn side_question(
+    session_id: String,
+    question: String,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let entry = state
+        .session_entry(&session_id)
+        .await
+        .ok_or("no such session")?;
+    let mut s = entry.lock().await;
+    s.provider
+        .side_question(&SessionId::new(session_id), &question)
         .await
         .map_err(|e| e.to_string())
 }

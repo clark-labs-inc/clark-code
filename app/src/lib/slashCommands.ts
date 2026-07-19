@@ -61,5 +61,14 @@ export function slashCommands(): SlashCommand[] {
       needsSession: true,
       run: () => s().toggleMemoryViewer(),
     },
+    {
+      name: "btw",
+      hint: "Ask a side question without interrupting the run",
+      needsSession: true,
+      // Not a run-action: the composer intercepts `/btw <question>` on submit
+      // and routes it to `askSideQuestion`. Insert the prefix so the user keeps
+      // typing their question after the space.
+      body: "/btw",
+    },
   ];
 }

@@ -23,6 +23,7 @@ use crate::tools::{ToolCtx, ToolExecutor, ToolRegistry};
 use translate::*;
 
 pub(crate) use event_sink::DesktopEventSink;
+pub(crate) use translate::to_wire_messages;
 
 /// Running token/cost totals across a run's model calls, shared between the
 /// stream adapter (writer) and the engine (reads them into the run outcome).

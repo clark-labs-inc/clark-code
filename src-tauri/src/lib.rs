@@ -124,6 +124,7 @@ pub fn run() {
             commands::respond,
             commands::set_mode,
             commands::set_output_style,
+            commands::side_question,
             commands::local_list_memory,
             commands::local_list_global_memory,
             commands::local_list_files,
