@@ -444,6 +444,14 @@ pub async fn prompt(
         .trajectory
         .clone()
         .ok_or("Clark cloud trajectory is not configured for this session")?;
+    // The visible user turn is the text PLUS an echo of each attachment
+    // (image thumbnail / file chip) — without it the timeline shows only the
+    // text and the files the user attached seem to vanish on send.
+    let echo_blocks: Vec<ContentBlock> = blocks
+        .iter()
+        .cloned()
+        .chain(attachments.iter().map(PendingUpload::echo_block))
+        .collect();
     let mut durable_prompt = vec![AgentEvent::Trace {
         run: None,
         source: "clark_desktop_prompt".into(),
@@ -453,7 +461,7 @@ pub async fn prompt(
         }),
     }];
     durable_prompt.extend(
-        blocks
+        echo_blocks
             .iter()
             .cloned()
             .map(|delta| AgentEvent::MessageChunk {
@@ -468,7 +476,7 @@ pub async fn prompt(
     // then lock the session to obtain the run's event stream and release.
     let stream = {
         let mut s = entry.lock().await;
-        for block in &blocks {
+        for block in &echo_blocks {
             apply(
                 &mut s.snapshot,
                 &AgentEvent::MessageChunk {
