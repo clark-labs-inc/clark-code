@@ -13,6 +13,7 @@ import { PermissionGate } from "./PermissionGate";
 import { UpgradePrompt } from "./UpgradePrompt";
 import { FanOutPanel } from "./FanOutPanel";
 import { PlanChecklist } from "./PlanChecklist";
+import { SideQuestionCard } from "./SideQuestionCard";
 import type { Artifact, TimelineItem, ToolCall } from "../core-bridge/types";
 
 /** A row of pulsing dots — the model is generating. Memoized so its animation
@@ -319,6 +320,11 @@ export function Conversation({
           </motion.button>
         )}
       </AnimatePresence>
+
+      {/* `/btw` side-question overlay — a fixed modal above the transcript.
+          Renders only while a side question is open; the active run keeps
+          streaming behind the translucent backdrop. */}
+      <SideQuestionCard />
     </div>
   );
 }

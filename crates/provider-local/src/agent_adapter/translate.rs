@@ -10,7 +10,10 @@ use crate::llm::{
     WireToolCall,
 };
 
-pub(super) fn to_wire_messages(
+/// Build the wire `ChatMessage` list for a model call from the session's
+/// system prompt + typed transcript. Shared by the live stream adapter and the
+/// `/btw` side-question fork so both send a byte-identical prefix.
+pub(crate) fn to_wire_messages(
     system_prompt: &str,
     messages: &[ca::AgentMessage],
 ) -> Vec<ChatMessage> {

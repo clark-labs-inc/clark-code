@@ -108,6 +108,14 @@ export class DevBridge implements CoreBridge {
     await this.fire({ cmd: "respond", session: sessionId, response });
   }
 
+  // devbridge's WS protocol doesn't implement the `/btw` fork (it's a dev-only
+  // transport, not the full Tauri command surface). Reject so the overlay
+  // shows a clean error instead of hanging; use the native app or the mock
+  // preview to exercise this feature.
+  async sideQuestion(_sessionId: string, _question: string): Promise<string> {
+    throw new Error("side_question is not implemented in devbridge");
+  }
+
   subscribe(handler: (s: Snapshot) => void): () => void {
     this.handlers.add(handler);
     handler(this.snapshot);
