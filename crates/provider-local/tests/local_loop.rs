@@ -590,10 +590,10 @@ async fn image_attachments_are_described_by_vision_fallback_before_the_coding_ca
         "expected exactly one vision call plus one coding call"
     );
 
-    // First request: the vision fallback, hitting the default agentic model
-    // with BOTH images batched into one content-parts array.
+    // First request: the vision fallback, hitting the stateless multimodal
+    // model with BOTH images batched into one content-parts array.
     let vision_req = request_json(&captured[0]);
-    assert_eq!(vision_req["model"], "clark");
+    assert_eq!(vision_req["model"], "google/gemini-3.1-flash-lite");
     let vision_content = &vision_req["messages"]
         .as_array()
         .unwrap()
@@ -918,18 +918,26 @@ async fn giant_tool_output_is_truncated_before_the_next_model_call() {
     drain_run(&mut stream).await;
 
     let captured = serve_handle.await.unwrap();
-    let second = String::from_utf8_lossy(&captured[1]).to_string();
+    let second_request = request_json(&captured[1]);
+    let tool_result = second_request["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|message| message["role"] == "tool")
+        .expect("second request carries the tool result")["content"]
+        .as_str()
+        .expect("tool result content is text");
     assert!(
-        second.contains("Warning: truncated output"),
+        tool_result.contains("Warning: truncated output"),
         "tool result must carry the truncation header"
     );
-    assert!(second.contains("chars omitted"));
-    assert!(second.contains("row 0 "), "head preserved");
-    assert!(second.contains("row 7999"), "tail preserved");
+    assert!(tool_result.contains("chars omitted"));
+    assert!(tool_result.contains("row 0 "), "head preserved");
+    assert!(tool_result.contains("row 7999"), "tail preserved");
     assert!(
-        captured[1].len() < 80_000,
-        "request stays bounded, got {} bytes",
-        captured[1].len()
+        tool_result.chars().count() < 41_000,
+        "tool result stays near its 40K-character budget, got {} characters",
+        tool_result.chars().count()
     );
 }
 
