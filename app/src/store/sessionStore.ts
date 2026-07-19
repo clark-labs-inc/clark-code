@@ -92,12 +92,13 @@ import {
   installStagedUpdate,
   beginUpdateDrain,
   cancelUpdateDrain,
-  onUpdateMenuRequested,
   relaunchApp,
   consumeJustUpdated,
   type StagedUpdate,
   type DownloadProgress,
+  type UpdateCheckResult,
 } from "../lib/updater";
+import { onSettingsMenuRequested, onUpdateMenuRequested } from "../lib/nativeMenu";
 import { updateDrainBlockerCount } from "../lib/updateDrain";
 
 /** A follow-up message the user sent while a run was active. It sends
@@ -289,6 +290,8 @@ interface SessionState {
   update: StagedUpdate | null;
   /** Live byte progress while an update downloads in the background; null when idle. */
   updateProgress: DownloadProgress | null;
+  /** A manifest check is in flight, including the gap before download progress starts. */
+  updateChecking: boolean;
   /** True from "Restart to update" being clicked until the relaunch takes. */
   updateApplying: boolean;
   /** An update was requested and is waiting for active/queued work to settle. */
@@ -387,7 +390,7 @@ interface SessionState {
   setPaletteOpen: (open: boolean) => void;
   togglePalette: () => void;
   /** Check for, download, verify, and stage a newer version (no install yet). */
-  checkForUpdate: () => Promise<void>;
+  checkForUpdate: () => Promise<UpdateCheckResult>;
   /** Drain active work, install the staged update, and relaunch. */
   applyUpdate: () => Promise<void>;
   /** Dismiss the "updated to vX" confirmation. */
@@ -554,6 +557,8 @@ function liveUpdateBlockerCount(): number {
 }
 
 let updateMenuListenerInstalled = false;
+let settingsMenuListenerInstalled = false;
+let updateTimersInstalled = false;
 
 async function bindCloudTrajectory(
   bridge: CoreBridge,
@@ -673,14 +678,24 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   loadingBilling: false,
   update: null,
   updateProgress: null,
+  updateChecking: false,
   updateApplying: false,
   updateWaiting: false,
   justUpdatedTo: null,
 
   checkForUpdate: async () => {
-    if (get().update || get().updateProgress) return; // already staged or in flight
-    const staged = await checkAndStageUpdate((p) => set({ updateProgress: p }));
-    set({ updateProgress: null, ...(staged ? { update: staged } : {}) });
+    const ready = get().update;
+    if (ready) return { status: "ready", update: ready };
+    if (get().updateChecking || get().updateProgress) return { status: "busy" };
+
+    set({ updateChecking: true });
+    try {
+      const result = await checkAndStageUpdate((progress) => set({ updateProgress: progress }));
+      if (result.status === "ready") set({ update: result.update });
+      return result;
+    } finally {
+      set({ updateChecking: false, updateProgress: null });
+    }
   },
   applyUpdate: async () => {
     if (!get().update || get().updateWaiting || get().updateApplying) return;
@@ -750,6 +765,50 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   },
 
   init: async () => {
+    // Native chrome and self-update are app-lifecycle concerns, not provider
+    // concerns. Install them before provider discovery so a broken provider can
+    // never suppress Settings or the recovery update path. Guards also prevent
+    // React Strict Mode's development double-mount from duplicating timers.
+    if (!settingsMenuListenerInstalled) {
+      settingsMenuListenerInstalled = true;
+      void onSettingsMenuRequested(() => get().setSettingsOpen(true)).catch(() => {
+        settingsMenuListenerInstalled = false;
+      });
+    }
+    if (!updateMenuListenerInstalled) {
+      updateMenuListenerInstalled = true;
+      void onUpdateMenuRequested(() => {
+        void (async () => {
+          const result = await get().checkForUpdate();
+          if (result.status === "ready") {
+            get().flashNotice(
+              `Clark Code ${result.update.version} is downloaded and ready to install.`,
+            );
+          } else if (result.status === "up-to-date") {
+            get().flashNotice("Clark Code is already up to date.");
+          } else if (result.status === "busy") {
+            get().flashNotice("Clark Code is already checking for or downloading an update.");
+          } else if (result.status === "error") {
+            get().flashNotice(
+              "Clark Code couldn't check for updates. Check your connection and try again.",
+            );
+          }
+        })();
+      }).catch(() => {
+        updateMenuListenerInstalled = false;
+      });
+    }
+    if (!updateTimersInstalled) {
+      updateTimersInstalled = true;
+      // Downloads + verifies + stages in the background; the UI surfaces the
+      // ready action. Retrying every six hours stays silent on network errors.
+      setTimeout(() => void get().checkForUpdate(), 4000);
+      setInterval(() => void get().checkForUpdate(), 6 * 60 * 60 * 1000);
+      void consumeJustUpdated().then((version) => {
+        if (version) set({ justUpdatedTo: version });
+      });
+    }
+
     try {
       const bridge = await getBridge();
       const providers = await bridge.listProviders();
@@ -976,26 +1035,6 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         providers,
         activeProvider: providers[0]?.id ?? null,
       });
-      if (!updateMenuListenerInstalled) {
-        updateMenuListenerInstalled = true;
-        void onUpdateMenuRequested(() => {
-          void (async () => {
-            if (get().updateProgress) {
-              get().flashNotice("Clark Code is already downloading the latest update.");
-              return;
-            }
-            await get().checkForUpdate();
-            const ready = get().update;
-            get().flashNotice(
-              ready
-                ? `Clark Code ${ready.version} is downloaded and ready to install.`
-                : "Clark Code is already up to date.",
-            );
-          })();
-        }).catch(() => {
-          updateMenuListenerInstalled = false;
-        });
-      }
       // Best-effort: ensure a Clark Code key exists, migrate any residual local
       // chats into the cloud (one-time), pull cloud history, and load the credit
       // balance. All no-op offline / signed out.
@@ -1003,14 +1042,6 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       get().migrateLocalToCloud();
       void get().syncCloudIndex();
       void get().loadBilling();
-      // Auto-update: check shortly after launch, then every 6h. Downloads +
-      // verifies + stages in the background; the UI surfaces "Restart to update".
-      setTimeout(() => void get().checkForUpdate(), 4000);
-      setInterval(() => void get().checkForUpdate(), 6 * 60 * 60 * 1000);
-      // If we just relaunched into a freshly-applied update, confirm it once.
-      void consumeJustUpdated().then((v) => {
-        if (v) set({ justUpdatedTo: v });
-      });
     } catch (e) {
       set({ error: String(e) });
     }

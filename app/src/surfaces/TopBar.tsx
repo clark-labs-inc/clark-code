@@ -10,8 +10,8 @@ import { MemoryButton } from "./MemoryPanel";
 
 /** Update affordance in the top bar. While a new version downloads in the
  *  background it shows live progress; once staged it becomes a non-blocking
- *  "Restart to update" button that relaunches into the new binary. */
-function UpdatePill() {
+ *  "Ready to update" button that relaunches into the new binary. */
+export function UpdatePill() {
   const update = useSessionStore((s) => s.update);
   const progress = useSessionStore((s) => s.updateProgress);
   const apply = useSessionStore((s) => s.applyUpdate);
@@ -33,11 +33,12 @@ function UpdatePill() {
     <button
       key="restart"
       onClick={() => void apply()}
+      aria-label={`Ready to update Clark Code to ${update.version}; restart now`}
       title={`Clark Code ${update.version} is ready — relaunch to update`}
-      className="flex items-center gap-1.5 rounded-xl bg-accent-soft px-3 py-1.5 text-xs font-semibold text-accent transition duration-200 ease-clark hover:bg-accent/20"
+      className="flex shrink-0 items-center gap-1.5 rounded-xl bg-accent-soft px-3 py-1.5 text-xs font-semibold text-accent transition duration-200 ease-clark hover:bg-accent/20"
     >
       <RefreshCw className="size-3.5" />
-      Restart to update
+      Ready to update
     </button>
   ) : null;
 

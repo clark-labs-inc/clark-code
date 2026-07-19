@@ -10,7 +10,6 @@
 // unsigned or tampered payload is refused.
 
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import type { Update } from "@tauri-apps/plugin-updater";
 
 function inTauri(): boolean {
@@ -21,6 +20,13 @@ export interface StagedUpdate {
   version: string;
   notes?: string;
 }
+
+export type UpdateCheckResult =
+  | { status: "ready"; update: StagedUpdate }
+  | { status: "up-to-date" }
+  | { status: "busy" }
+  | { status: "unavailable" }
+  | { status: "error"; message: string };
 
 /** Byte progress while a staged update downloads. `total` is null until the
  *  server reports a content length. */
@@ -35,17 +41,18 @@ export interface DownloadProgress {
 let stagedUpdate: Update | null = null;
 
 /** Check for an update and, if one exists, download + verify + stage it,
- *  reporting byte progress via `onProgress`. Returns the staged version (ready
- *  to apply on relaunch), or null. Never throws. */
+ *  reporting byte progress via `onProgress`. The result keeps "up to date"
+ *  distinct from transport/signature failures so manual checks never report a
+ *  false success. Never throws. */
 export async function checkAndStageUpdate(
   onProgress?: (p: DownloadProgress) => void,
-): Promise<StagedUpdate | null> {
-  if (!inTauri()) return null;
+): Promise<UpdateCheckResult> {
+  if (!inTauri()) return { status: "unavailable" };
   let candidate: Update | null = null;
   try {
     const { check } = await import("@tauri-apps/plugin-updater");
     candidate = await check();
-    if (!candidate) return null;
+    if (!candidate) return { status: "up-to-date" };
     // Download + verify only. `install()` is deferred because it forcibly exits
     // on Windows and must therefore sit behind the active-run drain.
     let total: number | null = null;
@@ -62,12 +69,16 @@ export async function checkAndStageUpdate(
       onProgress?.({ downloaded, total });
     });
     stagedUpdate = candidate;
-    return { version: candidate.version, notes: candidate.body || undefined };
-  } catch {
+    return {
+      status: "ready",
+      update: { version: candidate.version, notes: candidate.body || undefined },
+    };
+  } catch (error) {
     if (candidate) void candidate.close().catch(() => {});
-    // Offline, no manifest yet, or verification failed — stay on the current
-    // version silently; we'll retry on the next check.
-    return null;
+    return {
+      status: "error",
+      message: error instanceof Error ? error.message : String(error),
+    };
   }
 }
 
@@ -91,12 +102,6 @@ export async function beginUpdateDrain(): Promise<number> {
 export async function cancelUpdateDrain(): Promise<void> {
   if (!inTauri()) return;
   await invoke("update_cancel_drain");
-}
-
-/** Route the native app-menu action through the shared frontend coordinator. */
-export async function onUpdateMenuRequested(handler: () => void): Promise<() => void> {
-  if (!inTauri()) return () => {};
-  return listen("update-menu-requested", handler);
 }
 
 /** Relaunch into the staged update. No-op outside the desktop app. */

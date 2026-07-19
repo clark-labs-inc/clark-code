@@ -605,20 +605,21 @@ function AccountSection() {
 function AboutSection() {
   const version = useAppVersion();
   const update = useSessionStore((s) => s.update);
+  const updateChecking = useSessionStore((s) => s.updateChecking);
   const updateWaiting = useSessionStore((s) => s.updateWaiting);
   const checkForUpdate = useSessionStore((s) => s.checkForUpdate);
   const applyUpdate = useSessionStore((s) => s.applyUpdate);
-  const [checking, setChecking] = useState(false);
-  const [checked, setChecked] = useState(false);
+  const [checkFeedback, setCheckFeedback] = useState<"up-to-date" | "error" | null>(null);
+  const [checkError, setCheckError] = useState<string | null>(null);
 
   const check = async () => {
-    setChecking(true);
-    setChecked(false);
-    try {
-      await checkForUpdate();
-    } finally {
-      setChecking(false);
-      setChecked(true);
+    setCheckFeedback(null);
+    setCheckError(null);
+    const result = await checkForUpdate();
+    if (result.status === "up-to-date") setCheckFeedback("up-to-date");
+    if (result.status === "error") {
+      setCheckFeedback("error");
+      setCheckError(result.message);
     }
   };
 
@@ -639,6 +640,7 @@ function AboutSection() {
           <button
             onClick={() => void applyUpdate()}
             disabled={updateWaiting}
+            aria-label={`Ready to update Clark Code to ${update.version}; restart now`}
             className="flex w-full items-center gap-2.5 rounded-lg bg-accent/15 px-3.5 py-2.5 text-sm font-medium text-accent transition hover:bg-accent/25"
           >
             <RefreshCw className={cn("size-4", updateWaiting && "animate-[spin_1.4s_linear_infinite]")} />{" "}
@@ -649,17 +651,26 @@ function AboutSection() {
         ) : (
           <button
             onClick={() => void check()}
-            disabled={checking}
+            disabled={updateChecking}
+            title={checkError ?? undefined}
             className="flex w-full items-center gap-2.5 rounded-lg border border-border-subtle px-3.5 py-2.5 text-sm text-ink-secondary transition hover:bg-bg-hover disabled:opacity-60"
           >
-            {checking ? (
+            {updateChecking ? (
               <Loader2 className="size-4 animate-[spin_1s_linear_infinite]" />
-            ) : checked ? (
+            ) : checkFeedback === "up-to-date" ? (
               <Check className="size-4 text-success" />
+            ) : checkFeedback === "error" ? (
+              <AlertTriangle className="size-4 text-danger" />
             ) : (
               <RefreshCw className="size-4" />
             )}
-            {checking ? "Checking…" : checked ? "You're up to date" : "Check for updates"}
+            {updateChecking
+              ? "Checking…"
+              : checkFeedback === "up-to-date"
+                ? "You're up to date"
+                : checkFeedback === "error"
+                  ? "Couldn't check — try again"
+                  : "Check for updates"}
           </button>
         )}
       </div>

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { motion } from "motion/react";
-import { Loader2, Download, RotateCw, Check } from "lucide-react";
+import { Loader2, Download, RotateCw, Check, AlertCircle } from "lucide-react";
 import { ClarkMark } from "./ClarkMark";
 import { useSessionStore } from "../store/sessionStore";
 import { DUR, EASE } from "../lib/motion";
@@ -17,12 +17,13 @@ function inTauri(): boolean {
 function UpdateControl() {
   const update = useSessionStore((s) => s.update);
   const progress = useSessionStore((s) => s.updateProgress);
+  const checking = useSessionStore((s) => s.updateChecking);
   const applying = useSessionStore((s) => s.updateApplying);
   const waiting = useSessionStore((s) => s.updateWaiting);
   const checkForUpdate = useSessionStore((s) => s.checkForUpdate);
   const applyUpdate = useSessionStore((s) => s.applyUpdate);
-  const [checking, setChecking] = useState(false);
   const [upToDate, setUpToDate] = useState(false);
+  const [checkError, setCheckError] = useState<string | null>(null);
 
   // A verified update is downloaded and staged — offer to restart into it.
   if (update) {
@@ -60,12 +61,11 @@ function UpdateControl() {
   if (!inTauri()) return null;
 
   const check = async () => {
-    setChecking(true);
     setUpToDate(false);
-    await checkForUpdate();
-    setChecking(false);
-    // If the check didn't stage anything, we're already current.
-    if (!useSessionStore.getState().update) setUpToDate(true);
+    setCheckError(null);
+    const result = await checkForUpdate();
+    if (result.status === "up-to-date") setUpToDate(true);
+    if (result.status === "error") setCheckError(result.message);
   };
 
   return (
@@ -85,6 +85,11 @@ function UpdateControl() {
       {upToDate && (
         <span className="flex items-center gap-1 text-xs text-ink-faint">
           <Check className="size-3" /> You’re on the latest version.
+        </span>
+      )}
+      {checkError && (
+        <span className="flex items-center gap-1 text-xs text-danger" title={checkError}>
+          <AlertCircle className="size-3" /> Couldn’t check for updates. Try again.
         </span>
       )}
     </div>
