@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { ArrowDown, X } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
@@ -6,6 +6,11 @@ import { currentActivity, shouldShowPending } from "../lib/activity";
 import { humanizeError, humanizeRunFailure } from "../lib/errors";
 import { cn } from "../lib/cn";
 import { DUR, EASE, INSTANT } from "../lib/motion";
+import {
+  conversationScrollTarget,
+  isConversationAtBottom,
+  type ConversationScrollState,
+} from "../lib/conversationScroll";
 import { Message } from "./Message";
 import { WorkBlock } from "./work/WorkBlock";
 import { ArtifactCard } from "./work/ArtifactCard";
@@ -120,6 +125,12 @@ function DismissButton({ onClick }: { onClick: () => void }) {
  *  "Show earlier" control. Generous enough that normal sessions never notice. */
 const TIMELINE_WINDOW = 80;
 
+/** Conversation is intentionally kept mounted while live sessions switch, so
+ * the scroll element is shared. Keep its viewport state keyed by conversation
+ * instead of leaking one chat's pinned/scrollback state into the next. Module
+ * scope also preserves it across the loading screen used for cold reopens. */
+const scrollByConversation = new Map<string, ConversationScrollState>();
+
 export function Conversation({
   activeArtifactId,
   onOpenArtifact,
@@ -134,10 +145,13 @@ export function Conversation({
   const dismissError = useSessionStore((s) => s.dismissError);
   const dismissFailedRun = useSessionStore((s) => s.dismissFailedRun);
   const dismissedFailedRuns = useSessionStore((s) => s.dismissedFailedRuns);
+  const sessionId = session?.id;
   const scrollRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
   const [showAll, setShowAll] = useState(false);
+  const activity = currentActivity(snapshot);
   // Collapse history again when switching conversations.
-  useEffect(() => setShowAll(false), [session?.id]);
+  useEffect(() => setShowAll(false), [sessionId]);
   // Pin to the bottom only when the user is already there — never yank them up
   // while they're reading scrollback. Instant (not smooth) keeps streaming stable.
   const stuck = useRef(true);
@@ -145,8 +159,11 @@ export function Conversation({
   const onScroll = () => {
     const el = scrollRef.current;
     if (!el) return;
-    const bottom = el.scrollHeight - el.scrollTop - el.clientHeight < 96;
+    const bottom = isConversationAtBottom(el.scrollHeight, el.scrollTop, el.clientHeight);
     stuck.current = bottom;
+    if (sessionId) {
+      scrollByConversation.set(sessionId, { scrollTop: el.scrollTop, atBottom: bottom });
+    }
     if (bottom !== atBottom) setAtBottom(bottom);
   };
   const scrollToBottom = () => {
@@ -156,10 +173,46 @@ export function Conversation({
 
   const { timeline, tool_calls: toolCalls, artifacts, runs, pending_permission, plan } = snapshot;
 
+  // Restore after React has committed the target transcript but before paint,
+  // avoiding a frame at the previous conversation's unrelated scrollTop.
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (!el || !sessionId) return;
+    const remembered = scrollByConversation.get(sessionId);
+    const busy = currentActivity(useSessionStore.getState().snapshot).busy;
+    el.scrollTop = conversationScrollTarget(remembered, busy, el.scrollHeight);
+    const bottom = isConversationAtBottom(el.scrollHeight, el.scrollTop, el.clientHeight);
+    stuck.current = bottom;
+    setAtBottom(bottom);
+    scrollByConversation.set(sessionId, { scrollTop: el.scrollTop, atBottom: bottom });
+  }, [sessionId]);
+
   useEffect(() => {
     const el = scrollRef.current;
-    if (el && stuck.current) el.scrollTop = el.scrollHeight;
-  }, [timeline, toolCalls]);
+    if (el && stuck.current) {
+      el.scrollTop = el.scrollHeight;
+      if (sessionId) {
+        scrollByConversation.set(sessionId, { scrollTop: el.scrollTop, atBottom: true });
+      }
+    }
+  }, [sessionId, timeline, toolCalls]);
+
+  // Timeline rows, images, and animated pending/permission banners can change
+  // height after their snapshot render. Follow the actual content box while
+  // pinned so "latest" remains truly visible rather than a few pixels below
+  // the viewport after an enter animation settles.
+  useEffect(() => {
+    const el = scrollRef.current;
+    const content = contentRef.current;
+    if (!el || !content || !sessionId || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => {
+      if (!stuck.current) return;
+      el.scrollTop = el.scrollHeight;
+      scrollByConversation.set(sessionId, { scrollTop: el.scrollTop, atBottom: true });
+    });
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, [sessionId]);
 
   if (!session) return null;
 
@@ -173,7 +226,6 @@ export function Conversation({
   const hiddenCount = allBlocks.length - blocks.length;
   const lastBlockKey = blocks[blocks.length - 1]?.key;
 
-  const activity = currentActivity(snapshot);
   const last = visible[visible.length - 1];
   const awaitingReply = !last || (last.item === "message" && last.role === "user");
   // This placeholder owns only the gap before the first agent response. Typed
@@ -191,7 +243,7 @@ export function Conversation({
   const outOfCredits = failed?.outcome?.failure_kind === "insufficient_credits";
   return (
     <div ref={scrollRef} onScroll={onScroll} className="flex-1 overflow-y-auto">
-      <div className="mx-auto flex max-w-2xl flex-col gap-4 px-5 py-5">
+      <div ref={contentRef} className="mx-auto flex max-w-2xl flex-col gap-4 px-5 py-5">
         {visible.length === 0 && !showPending && (
           <p className="py-10 text-center text-sm text-ink-faint">
             Ask Clark anything — file work, web research, and computer use show up here as it works.
@@ -222,6 +274,7 @@ export function Conversation({
                 key={block.key}
                 role={item.role}
                 blocks={item.blocks}
+                phase={item.phase}
                 timelineIndex={block.timelineIndex}
                 streaming={activity.busy && block.key === lastBlockKey && item.role === "agent"}
               />

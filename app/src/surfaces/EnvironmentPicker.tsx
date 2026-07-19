@@ -10,11 +10,13 @@ import { cn } from "../lib/cn";
 
 const CHIP =
   "flex min-h-8 items-center gap-1.5 rounded-xl border border-accent/10 bg-accent-subtle px-2.5 py-1.5 text-sm font-medium text-ink-secondary transition duration-200 ease-clark hover:bg-accent-soft hover:text-ink";
+const COMPACT_CHIP =
+  "flex min-h-7 items-center gap-1.5 rounded-lg px-0 py-1 text-xs font-medium text-ink-secondary transition duration-200 ease-clark hover:text-ink";
 
 /** The "Local · Select folder…" control that sits above the start-screen
  *  composer. It maps the target machine (Local / a Cloud provider / an SSH host)
  *  and the project folder onto the same store state the session starts from. */
-export function EnvironmentPicker() {
+export function EnvironmentPicker({ compact = false }: { compact?: boolean }) {
   const providers = useSessionStore((s) => s.providers);
   const activeProvider = useSessionStore((s) => s.activeProvider);
   const selectProvider = useSessionStore((s) => s.selectProvider);
@@ -58,80 +60,96 @@ export function EnvironmentPicker() {
   };
   const pickCloud = (id: string) => selectProvider(id);
 
+  const targetPicker = (
+    <Popover
+      trigger={
+        <span className={compact ? COMPACT_CHIP : CHIP}>
+          <TargetIcon className={compact ? "size-3.5" : "size-4"} />
+          <span className="max-w-[10rem] truncate">{label}</span>
+          {!compact && <ChevronDown className="size-3.5 text-ink-faint" />}
+        </span>
+      }
+    >
+      {(close) => (
+        <div className="w-64">
+          <OptionRow
+            icon={<Laptop className="size-4" />}
+            label="Local"
+            hint="This machine"
+            active={isLocal && !isRemote}
+            onClick={() => {
+              pickLocal();
+              close();
+            }}
+          />
+
+          {cloudProviders.length > 0 && (
+            <>
+              <SectionLabel>Cloud</SectionLabel>
+              {cloudProviders.map((p) => (
+                <OptionRow
+                  key={p.id}
+                  icon={<Cloud className="size-4" />}
+                  label={p.label}
+                  active={activeProvider === p.id}
+                  onClick={() => {
+                    pickCloud(p.id);
+                    close();
+                  }}
+                />
+              ))}
+            </>
+          )}
+
+          <SectionLabel>SSH</SectionLabel>
+          {hosts.map((h) => (
+            <OptionRow
+              key={h.id}
+              icon={<Server className="size-4" />}
+              label={hostLabel(h)}
+              hint={hostReady(h) ? h.host : "needs setup"}
+              active={isRemote && selectedHostId === h.id}
+              onClick={() => {
+                pickRemoteHost(h.id);
+                close();
+              }}
+            />
+          ))}
+          <OptionRow
+            icon={<Plus className="size-4" />}
+            label="Add SSH host…"
+            onClick={() => {
+              setSshOpen(true);
+              close();
+            }}
+          />
+        </div>
+      )}
+    </Popover>
+  );
+
+  const folderPicker = isLocal && !isRemote ? (
+    <FolderChip cwd={cwd} compact={compact} />
+  ) : null;
+
   return (
-    <div className="flex flex-wrap items-center gap-2">
+    <div
+      className={cn("flex items-center", compact ? "min-w-0 gap-3.5" : "flex-wrap gap-2")}
+    >
+      {compact && folderPicker}
+
       {/* Target machine */}
-      <Popover
-        trigger={
-          <span className={CHIP}>
-            <TargetIcon className="size-4" />
-            <span className="max-w-[10rem] truncate">{label}</span>
-            <ChevronDown className="size-3.5 text-ink-faint" />
-          </span>
-        }
-      >
-        {(close) => (
-          <div className="w-64">
-            <OptionRow
-              icon={<Laptop className="size-4" />}
-              label="Local"
-              hint="This machine"
-              active={isLocal && !isRemote}
-              onClick={() => {
-                pickLocal();
-                close();
-              }}
-            />
-
-            {cloudProviders.length > 0 && (
-              <>
-                <SectionLabel>Cloud</SectionLabel>
-                {cloudProviders.map((p) => (
-                  <OptionRow
-                    key={p.id}
-                    icon={<Cloud className="size-4" />}
-                    label={p.label}
-                    active={activeProvider === p.id}
-                    onClick={() => {
-                      pickCloud(p.id);
-                      close();
-                    }}
-                  />
-                ))}
-              </>
-            )}
-
-            <SectionLabel>SSH</SectionLabel>
-            {hosts.map((h) => (
-              <OptionRow
-                key={h.id}
-                icon={<Server className="size-4" />}
-                label={hostLabel(h)}
-                hint={hostReady(h) ? h.host : "needs setup"}
-                active={isRemote && selectedHostId === h.id}
-                onClick={() => {
-                  pickRemoteHost(h.id);
-                  close();
-                }}
-              />
-            ))}
-            <OptionRow
-              icon={<Plus className="size-4" />}
-              label="Add SSH host…"
-              onClick={() => {
-                setSshOpen(true);
-                close();
-              }}
-            />
-          </div>
-        )}
-      </Popover>
+      {targetPicker}
 
       {/* Project folder — only meaningful when coding on this machine */}
-      {isLocal && !isRemote && <FolderChip cwd={cwd} />}
+      {!compact && folderPicker}
 
       {isRemote && selectedHost && (
-        <button onClick={() => setSshOpen(true)} className={CHIP} title="Manage remote hosts">
+        <button
+          onClick={() => setSshOpen(true)}
+          className={compact ? COMPACT_CHIP : CHIP}
+          title="Manage remote hosts"
+        >
           <Settings2 className="size-3.5" />
           <span className="max-w-[12rem] truncate font-mono text-xs">
             {selectedHost.remoteRoot || "no folder set"}
@@ -144,7 +162,7 @@ export function EnvironmentPicker() {
 
 /** Folder chip: shows the project name, opens a popover with a native picker
  *  (Tauri), a path field, and recent projects. */
-function FolderChip({ cwd }: { cwd: string }) {
+function FolderChip({ cwd, compact = false }: { cwd: string; compact?: boolean }) {
   const pick = useSessionStore((s) => s.pickProjectFolder);
   const setProject = useSessionStore((s) => s.setProjectFolder);
   const setLocal = useSessionStore((s) => s.setLocalSettings);
@@ -155,12 +173,14 @@ function FolderChip({ cwd }: { cwd: string }) {
   return (
     <Popover
       trigger={
-        <span className={cn(CHIP, has ? "text-ink" : "text-ink-faint")}>
-          <Folder className="size-4" />
+        <span
+          className={cn(compact ? COMPACT_CHIP : CHIP, has ? "text-ink" : "text-ink-faint")}
+        >
+          <Folder className={compact ? "size-3.5" : "size-4"} />
           <span className="max-w-[12rem] truncate">
             {has ? projectName(cwd) : "Select folder…"}
           </span>
-          <ChevronDown className="size-3.5 text-ink-faint" />
+          {!compact && <ChevronDown className="size-3.5 text-ink-faint" />}
         </span>
       }
     >

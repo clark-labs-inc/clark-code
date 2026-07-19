@@ -420,6 +420,7 @@ mod tests {
                 crate::loop_state::SessionState::default(),
             )),
             progress: None,
+            agent_progress: None,
         }
     }
 

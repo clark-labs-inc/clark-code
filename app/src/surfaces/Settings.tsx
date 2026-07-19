@@ -195,13 +195,13 @@ function GeneralSection({
         <Card>
           <Row
             icon={<Blocks className="size-4" />}
-            name="Parallel read-only agents"
-            sub="Allow Clark to delegate large, decomposable investigations in new sessions. Clark stays the only writer; delegates must return evidence for review."
+            name="Parallel coding agents"
+            sub="Available by default, but used only when you explicitly ask and the task has independent parts. Writers work in safe copies and Clark asks before applying."
           >
             <Toggle
               on={orchestrationEnabled}
               onClick={() => setOrchestrationEnabled(!orchestrationEnabled)}
-              label="Enable parallel read-only agents"
+              label="Enable parallel coding agents"
             />
           </Row>
           <Row
@@ -263,7 +263,7 @@ function ProjectSection() {
       </div>
 
       <div>
-        <GroupLabel>Model</GroupLabel>
+        <GroupLabel>Default model</GroupLabel>
         <input
           value={model}
           onChange={(e) => setLocalSettings({ model: e.target.value })}
@@ -273,7 +273,10 @@ function ProjectSection() {
           spellCheck={false}
           className={cn(input, "font-mono")}
         />
-        <p className="mt-1.5 text-xs text-ink-faint">Clark tier id (see GET /v1/models).</p>
+        <p className="mt-1.5 text-xs text-ink-faint">
+          Clark tier id for new chats (see GET /v1/models). Existing chats keep their own
+          model.
+        </p>
       </div>
 
       <OrganizationKnowledgeSettings />
@@ -602,6 +605,7 @@ function AccountSection() {
 function AboutSection() {
   const version = useAppVersion();
   const update = useSessionStore((s) => s.update);
+  const updateWaiting = useSessionStore((s) => s.updateWaiting);
   const checkForUpdate = useSessionStore((s) => s.checkForUpdate);
   const applyUpdate = useSessionStore((s) => s.applyUpdate);
   const [checking, setChecking] = useState(false);
@@ -634,9 +638,13 @@ function AboutSection() {
         {update ? (
           <button
             onClick={() => void applyUpdate()}
+            disabled={updateWaiting}
             className="flex w-full items-center gap-2.5 rounded-lg bg-accent/15 px-3.5 py-2.5 text-sm font-medium text-accent transition hover:bg-accent/25"
           >
-            <RefreshCw className="size-4" /> Clark Code {update.version} is ready — restart to update
+            <RefreshCw className={cn("size-4", updateWaiting && "animate-[spin_1.4s_linear_infinite]")} />{" "}
+            {updateWaiting
+              ? "Finishing active work before updating…"
+              : `Clark Code ${update.version} is ready — restart to update`}
           </button>
         ) : (
           <button

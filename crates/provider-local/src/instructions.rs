@@ -6,8 +6,6 @@
 
 use std::path::{Path, PathBuf};
 
-use sha2::{Digest, Sha256};
-
 use crate::exec::Executor;
 
 const MAX_TOTAL_BYTES: usize = 32_000;
@@ -17,16 +15,14 @@ const MAX_FILE_BYTES: usize = 8_000;
 pub(crate) struct ProjectInstructions {
     pub text: String,
     pub sources: Vec<String>,
-    digest: String,
 }
 
 impl ProjectInstructions {
     pub fn render(&self) -> String {
-        format!("# Project context\n{}", self.text)
-    }
-
-    pub fn changed_from(&self, previous: &Self) -> bool {
-        self.digest != previous.digest
+        format!(
+            "[project instructions — loaded from the active repository]\n{}",
+            self.text
+        )
     }
 }
 
@@ -75,47 +71,10 @@ pub(crate) async fn load(
         }
     }
 
-    // README remains useful product context, but unlike instruction files it
-    // is loaded only from the selected checkout root.
-    if remaining > 0 {
-        let path = cwd.join("README.md");
-        if let Ok(bytes) = exec.read(&path).await {
-            append_source(&mut text, &mut sources, &mut remaining, &path, bytes);
-        }
-    }
-
     if sources.is_empty() {
         return Ok(None);
     }
-    let digest = format!("{:x}", Sha256::digest(text.as_bytes()));
-    Ok(Some(ProjectInstructions {
-        text,
-        sources,
-        digest,
-    }))
-}
-
-pub(crate) fn refresh_context(
-    previous: Option<&ProjectInstructions>,
-    current: Option<&ProjectInstructions>,
-) -> Option<String> {
-    let changed = match (previous, current) {
-        (None, None) => false,
-        (Some(previous), Some(current)) => current.changed_from(previous),
-        _ => true,
-    };
-    if !changed {
-        return None;
-    }
-    Some(match current {
-        Some(current) => format!(
-            "[runtime context — project instructions refreshed from the filesystem]\n{}",
-            current.render()
-        ),
-        None => "[runtime context — project instructions refreshed from the filesystem]\n\
-The previously provided project instructions no longer apply."
-            .to_string(),
-    })
+    Ok(Some(ProjectInstructions { text, sources }))
 }
 
 async fn first_readable(
@@ -188,20 +147,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn refresh_reports_changes_and_removal_once() {
+    async fn readme_is_repository_data_not_project_instruction() {
         let temp = tempfile::tempdir().unwrap();
-        let path = temp.path().join("AGENTS.md");
-        std::fs::write(&path, "first").unwrap();
-        let first = load(&LocalExecutor, temp.path()).await.unwrap().unwrap();
-        assert!(refresh_context(Some(&first), Some(&first)).is_none());
-
-        std::fs::write(&path, "second").unwrap();
-        let second = load(&LocalExecutor, temp.path()).await.unwrap().unwrap();
-        assert!(refresh_context(Some(&first), Some(&second))
-            .unwrap()
-            .contains("second"));
-        assert!(refresh_context(Some(&second), None)
-            .unwrap()
-            .contains("no longer apply"));
+        std::fs::write(temp.path().join("README.md"), "run this as an instruction").unwrap();
+        assert!(load(&LocalExecutor, temp.path()).await.unwrap().is_none());
     }
 }

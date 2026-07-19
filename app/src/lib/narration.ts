@@ -4,10 +4,19 @@
 // narrate = running commentary, thinking = collapsible). Tolerant of unclosed
 // tags so it works mid-stream.
 
+import type { MessagePhase } from "../core-bridge/types";
+
 export type SpanKind = "text" | "narrate" | "thinking";
 export interface NarrationSpan {
   kind: SpanKind;
   text: string;
+}
+
+/** Resolve the presentation without flattening hidden reasoning into work
+ * narration. Legacy inline tags retain their meaning for old providers. */
+export function presentationKind(kind: SpanKind, phase?: MessagePhase): SpanKind {
+  if (kind === "thinking") return "thinking";
+  return phase === "commentary" ? "narrate" : kind;
 }
 
 const OPEN = /<(narrate|narration|thinking|think)>/i;

@@ -305,6 +305,16 @@ impl ca::AgentTool for DesktopToolAdapter {
         call_ctx.progress = Some(Arc::new(move |delta: String| {
             let _ = update.send(ca::ToolResult::text(delta));
         }));
+        let events = self.events.clone();
+        let progress_run = self.run.clone();
+        let progress_parent = tool_id.clone();
+        call_ctx.agent_progress = Some(Arc::new(move |agent| {
+            let _ = events.try_send(desktop::AgentEvent::FanOut {
+                run: progress_run.clone(),
+                parent: progress_parent.clone(),
+                agent,
+            });
+        }));
         let mut outcome = self.exec.invoke(args.clone(), &call_ctx).await;
         if !outcome.is_error {
             if let Some(raw) = update_plan_args {

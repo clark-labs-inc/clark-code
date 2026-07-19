@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path};
 
 use crate::{HarnessKind, TaskId};
+use sha2::{Digest, Sha256};
 
 #[path = "multi_repo/contract.rs"]
 mod contract;
@@ -109,8 +110,8 @@ impl MultiRepoPlan {
     }
 
     fn validate_repositories(&self) -> Result<(), String> {
-        if self.repositories.len() < 2 {
-            return Err("multi-repository plans require at least two repositories".to_string());
+        if self.repositories.is_empty() {
+            return Err("repository plans require at least one repository".to_string());
         }
         if self.max_parallel_writers == 0 || self.max_parallel_writers > 8 {
             return Err("max_parallel_writers must be between 1 and 8".to_string());
@@ -305,22 +306,49 @@ impl MultiRepoPlan {
                 "review task count does not match the independent-review policy".to_string(),
             );
         }
-        let writer_by_repo = tasks
+        let mut writers_by_repo = BTreeMap::<_, Vec<&MultiRepoTask>>::new();
+        for task in tasks
             .values()
             .filter(|task| task.role == MultiRepoTaskRole::Writer)
-            .filter_map(|task| task.repository_id.as_ref().map(|repo| (repo, *task)))
-            .collect::<BTreeMap<_, _>>();
+        {
+            let repository_id = task
+                .repository_id
+                .as_ref()
+                .expect("validated writer has a repository");
+            writers_by_repo
+                .entry(repository_id)
+                .or_default()
+                .push(*task);
+        }
         let expected = self
             .repositories
             .values()
             .filter(|repo| !repo.allowed_changed_paths.is_empty())
             .map(|repo| &repo.repository_id)
             .collect::<BTreeSet<_>>();
-        if writer_by_repo.keys().copied().collect::<BTreeSet<_>>() != expected {
-            return Err("every writable repository requires exactly one writer task".to_string());
+        if writers_by_repo.keys().copied().collect::<BTreeSet<_>>() != expected {
+            return Err("every writable repository requires at least one writer task".to_string());
         }
-        let writer_ids = writer_by_repo
+        for (repository_id, writers) in &writers_by_repo {
+            let repository = &self.repositories[*repository_id];
+            let mut leased_paths = BTreeSet::new();
+            for writer in writers {
+                if !leased_paths.is_disjoint(&writer.allowed_changed_paths) {
+                    return Err(format!(
+                        "writer leases overlap within repository {repository_id}"
+                    ));
+                }
+                leased_paths.extend(writer.allowed_changed_paths.iter().cloned());
+            }
+            if leased_paths != repository.allowed_changed_paths {
+                return Err(format!(
+                    "writer leases must exactly cover repository {repository_id} change scope"
+                ));
+            }
+        }
+        let writer_ids = writers_by_repo
             .values()
+            .flatten()
             .map(|task| task.id.clone())
             .collect::<BTreeSet<_>>();
         let review_gate = reviewers.first().copied();
@@ -360,6 +388,35 @@ impl MultiRepoPlan {
         }
         Ok(())
     }
+}
+
+/// Produce the repository-level result digest proven by fresh replay.
+///
+/// A single writer keeps the historical package digest. Multiple disjoint
+/// writers are folded in task-id order so one repository still has one stable
+/// receipt value without losing package coverage.
+pub fn repository_result_tree_sha256<'a>(
+    packages: impl IntoIterator<Item = &'a ChangePackageDescriptor>,
+) -> Option<String> {
+    let mut packages = packages.into_iter().collect::<Vec<_>>();
+    packages.sort_by(|left, right| left.task_id.cmp(&right.task_id));
+    if packages.len() == 1 {
+        return Some(packages[0].result_tree_sha256.clone());
+    }
+    if packages.is_empty() {
+        return None;
+    }
+    let mut hasher = Sha256::new();
+    hasher.update(b"clark-repository-result-tree-v1");
+    for package in packages {
+        hasher.update([0]);
+        hasher.update(package.task_id.0.as_bytes());
+        hasher.update([0]);
+        hasher.update(package.patch_sha256.as_bytes());
+        hasher.update([0]);
+        hasher.update(package.result_tree_sha256.as_bytes());
+    }
+    Some(format!("{:x}", hasher.finalize()))
 }
 
 fn topological_layers(

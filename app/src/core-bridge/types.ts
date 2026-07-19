@@ -2,6 +2,7 @@
 // crates/agent-core/src/{domain,projection,provider}.rs.
 
 export type Role = "user" | "agent" | "system";
+export type MessagePhase = "commentary" | "final_answer";
 
 export type ContentBlock =
   | { type: "text"; text: string }
@@ -186,7 +187,7 @@ export interface RunView {
 }
 
 export type TimelineItem =
-  | { item: "message"; run: string; role: Role; blocks: ContentBlock[] }
+  | { item: "message"; run: string; role: Role; blocks: ContentBlock[]; phase?: MessagePhase }
   | { item: "tool_call"; id: string }
   | { item: "artifact"; id: string }
   | { item: "plan"; run?: string; plan?: Plan };

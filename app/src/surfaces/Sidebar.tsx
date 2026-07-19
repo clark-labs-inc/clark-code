@@ -305,6 +305,7 @@ export function Sidebar({
   // its own pulsing "Working…" dot, whether or not it's on screen.
   const runningIds = useSessionStore((s) => s.runningIds);
   const newConversation = useSessionStore((s) => s.endSession);
+  const setProjectFolder = useSessionStore((s) => s.setProjectFolder);
   const openProjectTerminal = useSessionStore((s) => s.openProjectTerminal);
   const defaultProject = useSessionStore((s) => s.localSettings.cwd);
   const setLocalSettings = useSessionStore((s) => s.setLocalSettings);
@@ -573,7 +574,10 @@ export function Sidebar({
                   group={g}
                   menuOpen={projectMenu?.group.key === g.key}
                   onOpenMenu={(button) => openProjectMenu(g, button)}
-                  onOpenTerminal={(path) => void openProjectTerminal(path)}
+                  onNewSession={(path) => {
+                    setProjectFolder(path);
+                    newConversation();
+                  }}
                 />
                 <div className="flex flex-col">
                   {g.convos.map((c) => (

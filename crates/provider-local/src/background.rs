@@ -13,6 +13,7 @@ use std::time::Duration;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::{ChildStdin, Command};
+use tokio_util::sync::CancellationToken;
 
 use crate::exec::Executor;
 
@@ -87,11 +88,25 @@ pub struct BackgroundTasks {
     tasks: Mutex<HashMap<String, Entry>>,
 }
 
+#[derive(Clone, Debug)]
 pub struct TaskStatus {
     pub command: String,
     pub output: String,
     pub exit_code: Option<Option<i32>>,
     pub error: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TaskWaitOutcome {
+    Ready,
+    Finished,
+    TimedOut,
+}
+
+pub struct TaskWaitResult {
+    pub outcome: TaskWaitOutcome,
+    pub status: TaskStatus,
+    pub waited: Duration,
 }
 
 impl BackgroundTasks {
@@ -257,6 +272,52 @@ impl BackgroundTasks {
             exit_code,
             error,
         })
+    }
+
+    pub async fn wait(
+        &self,
+        id: &str,
+        output_contains: Option<&str>,
+        timeout: Duration,
+        poll_interval: Duration,
+        cancel: &CancellationToken,
+    ) -> Result<TaskWaitResult, String> {
+        let started = tokio::time::Instant::now();
+        loop {
+            let status = self
+                .status(id)
+                .await
+                .ok_or_else(|| format!("no background task `{id}`"))?;
+            if output_contains.is_some_and(|marker| status.output.contains(marker)) {
+                return Ok(TaskWaitResult {
+                    outcome: TaskWaitOutcome::Ready,
+                    status,
+                    waited: started.elapsed(),
+                });
+            }
+            if status.exit_code.is_some() {
+                return Ok(TaskWaitResult {
+                    outcome: TaskWaitOutcome::Finished,
+                    status,
+                    waited: started.elapsed(),
+                });
+            }
+            if started.elapsed() >= timeout {
+                return Ok(TaskWaitResult {
+                    outcome: TaskWaitOutcome::TimedOut,
+                    status,
+                    waited: started.elapsed(),
+                });
+            }
+            tokio::select! {
+                _ = cancel.cancelled() => {
+                    return Err(format!(
+                        "cancelled while waiting for `{id}`; the task was not stopped"
+                    ));
+                }
+                _ = tokio::time::sleep(poll_interval) => {}
+            }
+        }
     }
 
     pub async fn write(&self, id: &str, data: &[u8], close: bool) -> Result<(), String> {

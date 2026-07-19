@@ -199,6 +199,126 @@ async fn isolated_packages_replay_without_touching_dirty_primary_checkouts() {
         let root = &integration.repository_roots[&RepositoryId::new(repository).unwrap()];
         assert_eq!(LocalExecutor.read(&root.join(path)).await.unwrap(), b"v2\n");
     }
+
+    let receipt = selection
+        .apply_verified_packages(&LocalExecutor, &plan, &packages, &scratch)
+        .await
+        .unwrap();
+    assert!(receipt.head_unchanged);
+    assert!(receipt.preexisting_changes_preserved);
+    assert_eq!(receipt.patch_sha256.len(), 2);
+    assert_eq!(
+        std::fs::read_to_string(Path::new(&primary_api.baseline.checkout_root).join("src/api.txt"))
+            .unwrap(),
+        "v2\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(
+            Path::new(&primary_api.baseline.checkout_root).join("notes/local.txt")
+        )
+        .unwrap(),
+        "user work\n"
+    );
+}
+
+#[tokio::test]
+async fn fresh_replay_applies_all_disjoint_writers_from_one_repository() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("app");
+    std::fs::create_dir_all(&root).unwrap();
+    seed_repository(&root, "src/engine.txt", "engine-v1\n");
+    std::fs::create_dir_all(root.join("tests")).unwrap();
+    std::fs::write(root.join("tests/engine.txt"), "tests-v1\n").unwrap();
+    run_git(&root, &["add", "--all"]);
+    run_git(&root, &["commit", "--quiet", "-m", "test baseline"]);
+    let repository_id = RepositoryId::new("app").unwrap();
+    let selection = RepositorySelection::resolve(
+        &LocalExecutor,
+        vec![RepositorySelectionRequest {
+            repository_id: repository_id.clone(),
+            root,
+            allowed_changed_paths: BTreeSet::from([
+                "src/engine.txt".into(),
+                "tests/engine.txt".into(),
+            ]),
+            cloud_eligible: false,
+        }],
+    )
+    .await
+    .unwrap();
+    let mut engine_writer = writer("app", "src/engine.txt");
+    engine_writer.id = task_id("engine-writer");
+    let mut test_writer = writer("app", "tests/engine.txt");
+    test_writer.id = task_id("test-writer");
+    let plan = MultiRepoPlan {
+        repositories: selection.baselines(),
+        contracts: Vec::new(),
+        contract_decisions: Vec::new(),
+        tasks: vec![
+            global_task("planner", MultiRepoTaskRole::Planner, &[]),
+            engine_writer.clone(),
+            test_writer.clone(),
+            global_task(
+                "integrator",
+                MultiRepoTaskRole::Integrator,
+                &["engine-writer", "test-writer"],
+            ),
+        ],
+        integration_checks: vec![IntegrationCheck {
+            id: "app-tests".into(),
+            repository_id: repository_id.clone(),
+            argv: vec!["python3".into(), "-c".into(), "pass".into()],
+            timeout_ms: 1_000,
+        }],
+        max_parallel_writers: 2,
+        requires_independent_review: false,
+    };
+    plan.validate().unwrap();
+    let scratch = temp.path().join("scratch");
+    let artifacts = scratch.join("artifacts");
+    let mut packages = Vec::new();
+    for (task, path, contents) in [
+        (engine_writer, "src/engine.txt", b"engine-v2\n".as_slice()),
+        (test_writer, "tests/engine.txt", b"tests-v2\n".as_slice()),
+    ] {
+        let workspace = IsolatedWriterWorkspace::create(&LocalExecutor, &selection, task, &scratch)
+            .await
+            .unwrap();
+        LocalExecutor
+            .write(&workspace.root.join(path), contents)
+            .await
+            .unwrap();
+        packages.push(
+            workspace
+                .package(&LocalExecutor, &plan, &artifacts, Vec::new())
+                .await
+                .unwrap(),
+        );
+    }
+    let integration =
+        FreshIntegrationWorkspace::replay(&LocalExecutor, &selection, &plan, &packages, &scratch)
+            .await
+            .unwrap();
+    let integrated_root = &integration.repository_roots[&repository_id];
+    assert_eq!(
+        LocalExecutor
+            .read(&integrated_root.join("src/engine.txt"))
+            .await
+            .unwrap(),
+        b"engine-v2\n"
+    );
+    assert_eq!(
+        LocalExecutor
+            .read(&integrated_root.join("tests/engine.txt"))
+            .await
+            .unwrap(),
+        b"tests-v2\n"
+    );
+    assert_eq!(integration.receipt().applied_patch_sha256.len(), 2);
+    assert_eq!(
+        integration.receipt().repository_result_trees[&repository_id],
+        agent_orchestration::repository_result_tree_sha256(packages.iter()).unwrap()
+    );
 }
 
 #[tokio::test]

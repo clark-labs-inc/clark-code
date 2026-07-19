@@ -1,72 +1,87 @@
-# Attachment thumbnail design QA
+# Project actions menu design QA
 
-- Source visual truth: `/tmp/codex-remote-attachments/019f72ef-b16e-7b53-96c4-1f3e3b9a309b/D96318F6-CC4C-459B-A64C-8D6DBF9CFFC7/1-Photo-1.jpg`
-- Implementation screenshot: `/tmp/clark-desktop-attachment-smoke.png`
-- Full-view comparison: `/tmp/clark-attachment-full-comparison.png`
-- Focused comparison: `/tmp/clark-attachment-focused-comparison.png`
-- Viewport: default Codex in-app Browser viewport, captured at `1280 x 720`
-- State: authenticated local mock session, light theme, composer with one compacted large-text paste and one image attachment
+- Source visual truth: `/Users/stan/Desktop/Screenshot 2026-07-18 at 1.52.17 PM.png`
+- Clark sidebar context: `/Users/stan/Desktop/Screenshot 2026-07-18 at 1.51.31 PM.png`
+- Implementation screenshot: `/tmp/clark-desktop-project-menu-open.png`
+- Focused implementation crop: `/tmp/clark-desktop-project-menu-focused.png`
+- Combined comparison: `/tmp/clark-desktop-project-menu-comparison.png`
+- New-session implementation screenshot: `/tmp/clark-desktop-project-new-session.png`
+- New-session comparison: `/tmp/clark-desktop-project-new-session-comparison.png`
+- Viewport: `1280 x 720`
+- State: authenticated local mock workspace, light theme, remembered `clark-desktop` project, project actions menu open
 
 ## Full-view comparison evidence
 
-The mobile reference and desktop implementation were placed in one combined
-image. The desktop intentionally keeps Clark's existing paper palette, type,
-controls, and wider workspace composition. Within that product shell, the
-reference behavior is preserved: attachments occupy a compact rail above the
-message field, show a thumbnail or file icon, truncate long names, expose a
-small remove button, and do not make the composer grow as more items are added.
+The browser-rendered implementation was captured in Clark Desktop's complete
+workspace. The project overflow trigger sits at the right edge of the project
+row, and its fixed popover opens to the right of the sidebar without clipping
+the sidebar, conversation workspace, or persistent composer controls.
 
-## Focused region comparison evidence
+## Focused comparison evidence
 
-The composer regions were cropped and placed in one combined image at a common
-width. Both use a single row of 40px attachment chips with compact media,
-filename, and close affordances. The implementation uses Clark's existing DM
-Sans typography and light surface tokens instead of copying the reference's
-iOS dark theme. This is an intentional product-system adaptation, not design
-drift.
+The dark Codex reference and the Clark implementation crop were placed in one
+combined image. Both use a compact six-action vertical menu aligned beside the
+project row, with the same order and copy: Pin project, Reveal in Finder,
+Create permanent worktree, Rename project, Archive chats, and Remove. Standard
+icons communicate each action; Remove uses the reference's X rather than a
+destructive-delete icon. Clark intentionally retains its light paper palette,
+DM Sans typography, existing radii, shadows, and surface tokens.
+
+The project row also reproduces the reference's second trailing control with
+the installed Lucide `SquarePen` icon. Its accessible label and tooltip read
+"New session in clark-desktop". The fresh comparison places the Codex source
+and Clark's focused sidebar state side by side; the ellipsis then note-and-pen
+ordering, scale, spacing, and right-edge alignment match the reference while
+retaining Clark's existing light-theme tokens.
 
 ## Required fidelity surfaces
 
-- Fonts and typography: existing Clark DM Sans hierarchy is unchanged; chip
-  labels use the established compact 12px medium treatment and truncate rather
-  than wrap.
-- Spacing and layout rhythm: the rail stays 42px high with 8px gaps. With five
-  items its `clientWidth` was 646px and `scrollWidth` was 909px, proving
-  horizontal overflow without a second row.
-- Colors and visual tokens: the implementation uses the existing
-  `bg-bg-tertiary`, `bg-bg-sunken`, and ink tokens, preserving light/dark theme
-  compatibility.
-- Image quality and asset fidelity: image attachments use their real object URL
-  thumbnails with `object-cover`; non-image and pasted-text attachments use the
-  existing Lucide file icon. No placeholder raster or handcrafted icon was
-  introduced.
-- Copy and content: original filenames remain visible; large clipboard text is
-  labeled `[Pasted Content N chars]`, with collision-free numbering for repeated
-  pastes. Its full text remains typed pending-paste state and expands into
-  ordinary message text on submit rather than becoming a `.txt` upload.
+- Fonts and typography: Clark's existing DM Sans UI type remains intact. Menu
+  labels render at the established 14px size with a compact 32px row height,
+  no wrapping, truncation, or optical-weight mismatch.
+- Spacing and layout rhythm: the 240px popover, 6px trigger gap, 6px inner
+  padding, 32px action rows, 12px radius, and lifted shadow preserve the source
+  density while fitting Clark's existing sidebar scale.
+- Colors and visual tokens: the component uses `bg-bg-elevated`, `bg-bg-hover`,
+  ink, border, accent, and danger tokens, so it adapts correctly to Clark's
+  light/dark themes instead of hard-coding the source screenshot's dark colors.
+- Image quality and asset fidelity: the reference contains no raster imagery.
+  All controls use the installed Lucide icon library; no handcrafted SVG, CSS
+  drawing, text glyph, or placeholder asset was introduced.
+- Copy and content: all six reference labels are reproduced exactly. The open
+  worktree, rename, and remove subflows add concise product-specific guidance
+  without changing the main menu copy.
 
 ## Findings
 
-- No actionable P0, P1, or P2 differences remain. Theme and overall viewport
-  differences are intentional because the screenshot is a mobile interaction
-  reference being applied inside the existing desktop design system.
+- No actionable P0, P1, or P2 differences remain. Theme, sidebar width, and
+  background conversation content differ intentionally because the reference
+  interaction is adapted to Clark Desktop's existing product system.
 
 ## Comparison history
 
-- Pass 1: no P0/P1/P2 finding. The focused combined comparison confirmed the
-  attachment density, ordering, thumbnail scale, truncation, and close-control
-  placement without requiring a visual correction.
+- Pass 1: the menu matched layout, copy, ordering, and placement. A P3 icon
+  polish issue used a trash can for Remove; it was replaced with the reference's
+  X icon.
+- Pass 2: the revised focused comparison confirmed the X icon and found no
+  actionable P0/P1/P2 differences.
 
 ## Interaction and runtime evidence
 
-- A 1,041-character clipboard payload became `Pasted Content 1041 chars`; the
-  textarea remained empty.
-- The reference image loaded as a real thumbnail chip alongside the paste chip.
-- Removing the paste chip removes exactly that typed pending paste.
-- WebKit submission proved the full paste reached the user turn as ordinary
-  text, with no placeholder leakage and no page errors.
-- Frontend typecheck, all 145 tests, the production Vite build, and the focused
-  attachment smoke passed.
+- The overflow trigger exposes `aria-haspopup="menu"` and toggles its expanded
+  state. Outside click and Escape dismiss the menu.
+- Pin changes to Unpin and persists; rename updates the project label; both were
+  restored after the interaction test.
+- Worktree creation enables only after a name is entered. Browser preview shows
+  the expected desktop-only fallback; the native command is covered separately
+  by a real temporary Git-repository test.
+- Remove opens an explicit confirmation explaining that files are untouched;
+  the test cancelled before mutation.
+- The note-and-pen control was clicked in the rendered browser preview. It
+  returned to the clean session composer with `clark-desktop` selected as the
+  project, confirming both the new-session reset and project scoping.
+- No browser console errors were emitted. The only warnings were the existing
+  Motion reduced-motion notices from the test device.
 
 ## Follow-up polish
 

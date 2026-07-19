@@ -22,8 +22,66 @@ fn prompt_text_inlines_text_attachment() {
     };
     let text = prompt_text(&input);
     assert!(text.contains("see file"));
-    assert!(text.contains("attached file: note.txt"));
+    assert!(text.contains("attached text file: note.txt"));
     assert!(text.contains("hello"));
+}
+
+#[test]
+fn turn_prompt_keeps_context_and_attachments_before_the_user_request() {
+    let input = PromptInput {
+        blocks: vec![ContentBlock::text("implement the feature")],
+        attachments: vec![PendingUpload {
+            filename: "notes.txt".into(),
+            content_type: "text/plain".into(),
+            data_base64: "ZXh0cmEgY29udGV4dA==".into(),
+        }],
+    };
+    let parts = prompt_parts(&input);
+    let wire = assemble_turn_prompt(
+        &["[runtime policy]".into(), parts.text_attachment_context],
+        &parts.user_request,
+    );
+    assert!(wire.find("[runtime policy]").unwrap() < wire.find("notes.txt").unwrap());
+    assert!(wire.find("notes.txt").unwrap() < wire.find("# User request").unwrap());
+    assert!(wire.ends_with("implement the feature"));
+}
+
+#[test]
+fn kimi_native_images_are_forwarded_before_the_user_request() {
+    let attachments = vec![PendingUpload {
+        filename: "design.png".into(),
+        content_type: "image/png".into(),
+        data_base64: "QUJD".into(),
+    }];
+
+    let content = model_user_content("review the design".into(), &attachments, true);
+    let clark_agent::UserContent::Blocks(blocks) = content else {
+        panic!("expected multimodal user content");
+    };
+    assert!(matches!(
+        &blocks[0],
+        clark_agent::UserBlock::Image(image)
+            if image.source == "data:image/png;base64,QUJD"
+                && image.alt.as_deref() == Some("design.png")
+    ));
+    assert!(matches!(
+        &blocks[1],
+        clark_agent::UserBlock::Text(text) if text.text == "review the design"
+    ));
+}
+
+#[test]
+fn non_vision_models_keep_plain_text_user_content() {
+    let attachments = vec![PendingUpload {
+        filename: "design.png".into(),
+        content_type: "image/png".into(),
+        data_base64: "QUJD".into(),
+    }];
+
+    assert!(matches!(
+        model_user_content("fallback description".into(), &attachments, false),
+        clark_agent::UserContent::Text(text) if text == "fallback description"
+    ));
 }
 
 #[test]
@@ -114,6 +172,8 @@ async fn isolated_orchestration_session_has_no_ambient_writable_surfaces() {
     assert!(registry.get("memory").is_none());
     assert!(registry.get("organization_knowledge").is_none());
     assert!(registry.get("browser").is_none());
+    assert!(registry.get("delegate_read_only").is_none());
+    assert!(registry.get("delegate_coding_workstreams").is_none());
 }
 
 #[tokio::test]
@@ -176,6 +236,27 @@ async fn new_session_seeds_system_prompt_without_history() {
 }
 
 #[tokio::test]
+async fn cached_system_prompt_excludes_mutable_project_instructions() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("AGENTS.md"), "UNIQUE_PROJECT_RULE").unwrap();
+    let mut provider = LocalAgentProvider::new();
+    provider.connect(ProviderConfig::default()).await.unwrap();
+    provider
+        .new_session(SessionOptions {
+            cwd: Some(dir.path().to_string_lossy().into_owned()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert!(!provider
+        .session
+        .lock()
+        .await
+        .system_prompt
+        .contains("UNIQUE_PROJECT_RULE"));
+}
+
+#[tokio::test]
 async fn remote_connect_hides_desktop_mobile_capabilities() {
     let mut provider = LocalAgentProvider::new();
     provider
@@ -199,28 +280,15 @@ async fn remote_connect_hides_desktop_mobile_capabilities() {
 }
 
 #[tokio::test]
-async fn orchestration_tools_and_rules_exist_only_when_explicitly_enabled() {
+async fn orchestration_tools_are_default_available_but_can_be_disabled() {
     let dir = tempfile::tempdir().unwrap();
-    let mut disabled = LocalAgentProvider::new();
-    disabled.connect(ProviderConfig::default()).await.unwrap();
-    assert!(disabled
-        .registry
-        .as_ref()
-        .unwrap()
-        .get("delegate_read_only")
-        .is_none());
-
     let mut enabled = LocalAgentProvider::new();
-    enabled
-        .connect(ProviderConfig {
-            extra: serde_json::json!({"orchestration": {"enabled": true}}),
-            ..Default::default()
-        })
-        .await
-        .unwrap();
+    enabled.connect(ProviderConfig::default()).await.unwrap();
     let registry = enabled.registry.as_ref().unwrap();
     assert!(registry.get("delegate_read_only").is_some());
     assert!(registry.get("resolve_delegation").is_some());
+    assert!(registry.get("delegate_coding_workstreams").is_some());
+    assert!(registry.get("resolve_coding_workstreams").is_some());
     enabled
         .new_session(SessionOptions {
             cwd: Some(dir.path().to_string_lossy().into_owned()),
@@ -229,10 +297,29 @@ async fn orchestration_tools_and_rules_exist_only_when_explicitly_enabled() {
         .await
         .unwrap();
     let state = enabled.session.lock().await;
-    assert!(state
-        .system_prompt
-        .contains("root agent is the only writer"));
-    assert!(state.system_prompt.contains("resolve_delegation"));
+    assert!(!state.system_prompt.contains("bounded delegation"));
+    drop(state);
+
+    let mut disabled = LocalAgentProvider::new();
+    disabled
+        .connect(ProviderConfig {
+            extra: serde_json::json!({"orchestration": {"enabled": false}}),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert!(disabled
+        .registry
+        .as_ref()
+        .unwrap()
+        .get("delegate_read_only")
+        .is_none());
+    assert!(disabled
+        .registry
+        .as_ref()
+        .unwrap()
+        .get("delegate_coding_workstreams")
+        .is_none());
 }
 
 #[tokio::test]
@@ -319,4 +406,135 @@ async fn new_session_replays_typed_resume_into_history() {
         s.transcript[0],
         clark_agent::AgentMessage::User { .. }
     ));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "paid trigger-precision A/B; run only with explicit model and API-key authorization"]
+async fn paid_explicit_vs_proactive_delegation_trigger_precision() {
+    use agent_core::domain::RunUsage;
+    use futures::StreamExt as _;
+
+    let api_key = std::env::var("CLARK_CODE_API_KEY")
+        .or_else(|_| std::env::var("CLARK_API_KEY"))
+        .expect("CLARK_CODE_API_KEY or CLARK_API_KEY must be set");
+    let root_model = std::env::var("CLARK_PAID_EVAL_ROOT_MODEL")
+        .unwrap_or_else(|_| "clark-code:kimi_k27_code".into());
+    let subagent_model = std::env::var("CLARK_PAID_EVAL_SUBAGENT_MODEL")
+        .unwrap_or_else(|_| "clark-code:kimi_k27_code".into());
+    let base_url = std::env::var("CLARK_PAID_EVAL_BASE_URL")
+        .unwrap_or_else(|_| crate::config::DEFAULT_BASE_URL.into());
+    let dir = tempfile::tempdir().unwrap();
+    for scope in ["alpha", "beta"] {
+        let scope_dir = dir.path().join(scope);
+        std::fs::create_dir_all(&scope_dir).unwrap();
+        for index in 0..4 {
+            std::fs::write(
+                scope_dir.join(format!("module_{index}.txt")),
+                format!("{scope} contract {index}\n{}", "evidence line\n".repeat(80)),
+            )
+            .unwrap();
+        }
+    }
+    let cases = [
+        (
+            "explicit_ordinary",
+            "explicit",
+            "Inspect alpha and beta and summarize their contracts with file citations.",
+            false,
+        ),
+        (
+            "explicit_requested",
+            "explicit",
+            "Use exactly two read-only subagents in parallel. Have one inspect alpha and one inspect beta. Wait for both, verify their citations, then compare the contracts.",
+            true,
+        ),
+        (
+            "proactive_parallel",
+            "proactive",
+            "Inspect alpha and beta independently and compare their contracts with file citations.",
+            true,
+        ),
+        (
+            "proactive_trivial",
+            "proactive",
+            "Read alpha/module_0.txt and summarize it in one sentence.",
+            false,
+        ),
+    ];
+    let mut records = Vec::new();
+    for (id, mode, prompt, expected_delegate) in cases {
+        let mut provider = LocalAgentProvider::new();
+        provider
+            .connect(ProviderConfig {
+                cwd: Some(dir.path().to_string_lossy().into_owned()),
+                auth_token: Some(api_key.clone()),
+                extra: serde_json::json!({
+                    "base_url": base_url,
+                    "model": root_model,
+                    "reasoning_effort": "low",
+                    "temperature": 0.0,
+                    "max_iterations": 64,
+                    "permissions": {"write_file":"deny","edit_file":"deny","apply_patch":"deny","bash":"deny"},
+                    "orchestration": {
+                        "enabled": true,
+                        "mode": mode,
+                        "max_agents": 2,
+                        "max_attempts": 1,
+                        "minimum_context_tokens": 1,
+                        "token_budget": 80_000,
+                        "subagent_model": subagent_model
+                    },
+                    "research": false,
+                    "memories": false,
+                    "project_knowledge": false,
+                    "browser_enabled": false,
+                    "mcp_servers": []
+                }),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let session = provider
+            .new_session(SessionOptions {
+                cwd: Some(dir.path().to_string_lossy().into_owned()),
+                mode: Some("auto".into()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let mut events = provider
+            .prompt(&session.id, PromptInput::text(prompt))
+            .await
+            .unwrap();
+        let mut delegated = false;
+        let mut usage = RunUsage::default();
+        while let Some(event) = events.next().await {
+            match event {
+                AgentEvent::ToolCall { call, .. } => {
+                    delegated |= call
+                        .tool_name
+                        .as_deref()
+                        .is_some_and(|name| name.starts_with("delegate_"));
+                }
+                AgentEvent::RunFinished { outcome, .. } => {
+                    usage = outcome.usage.unwrap_or_default();
+                }
+                AgentEvent::PermissionRequest { request } => {
+                    panic!("unexpected permission request: {}", request.title)
+                }
+                _ => {}
+            }
+        }
+        records.push(serde_json::json!({
+            "case": id,
+            "mode": mode,
+            "expected_delegate": expected_delegate,
+            "actual_delegate": delegated,
+            "root_model": root_model,
+            "subagent_model": subagent_model,
+            "usage": usage
+        }));
+        assert_eq!(delegated, expected_delegate, "trigger mismatch for {id}");
+    }
+    println!("{}", serde_json::to_string_pretty(&records).unwrap());
 }

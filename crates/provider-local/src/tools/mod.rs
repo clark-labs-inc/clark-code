@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
-use agent_core::domain::{FsLocation, ToolKind};
+use agent_core::domain::{FanOutAgent, FsLocation, ToolKind};
 use async_trait::async_trait;
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
@@ -119,11 +119,19 @@ pub struct ToolCtx {
     /// here and they stream to the UI's tool row while the call runs. `None`
     /// outside a run (tests, session-setup helpers).
     pub progress: Option<ProgressFn>,
+    /// Typed child-lifecycle progress for orchestration tools. This stays
+    /// separate from textual tool output so presentation never has to infer
+    /// agent identity or status from log strings.
+    pub agent_progress: Option<AgentProgressFn>,
 }
 
 /// A tool's live-progress callback — each call appends a text delta to the
 /// in-flight tool call in the UI.
 pub type ProgressFn = Arc<dyn Fn(String) + Send + Sync>;
+
+/// A typed child-agent update projected into the conversation's parallel-work
+/// surface by the desktop adapter.
+pub type AgentProgressFn = Arc<dyn Fn(FanOutAgent) + Send + Sync>;
 
 impl ToolCtx {
     /// Stream a live-progress text delta to the UI for the in-flight call.
@@ -286,6 +294,7 @@ impl ToolRegistry {
             Arc::new(apply_patch::ApplyPatch),
             Arc::new(shell::Bash),
             Arc::new(shell::BashOutput),
+            Arc::new(shell::BashWait),
             Arc::new(shell::BashInput),
             Arc::new(shell::BashKill),
             Arc::new(plan::ProposePlan),
@@ -354,8 +363,8 @@ impl ToolRegistry {
         });
     }
 
-    /// Register the opt-in read-only orchestration tools as one shared control
-    /// plane. Disabled configurations never advertise either tool.
+    /// Register the bounded orchestration tools. Explicitly disabled and
+    /// fail-closed child configurations never advertise them.
     pub fn enable_orchestration(&mut self, config: crate::orchestration::OrchestrationToolsConfig) {
         self.tools
             .extend(crate::orchestration::orchestration_tools(config));
@@ -518,6 +527,23 @@ mod tests {
         wire_order(&reg, "edit_file", &["path", "old_string", "new_string"]);
         wire_order(&reg, "write_file", &["path", "content"]);
         wire_order(&reg, "read_file", &["path", "offset", "limit"]);
+        // Commit to the command and its location/mode before tuning timeout.
+        wire_order(
+            &reg,
+            "bash",
+            &["command", "workdir", "run_in_background", "timeout_ms"],
+        );
+        wire_order(
+            &reg,
+            "bash_wait",
+            &[
+                "task_id",
+                "output_contains",
+                "timeout_ms",
+                "poll_interval_ms",
+            ],
+        );
+        wire_order(&reg, "bash_input", &["task_id", "text", "close"]);
         // Decide the action, scope, and provenance before the fact being saved.
         wire_order(
             &reg,

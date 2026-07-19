@@ -9,6 +9,13 @@ export const TEXT_SIZE_LABELS: Record<TextSize, string> = {
   large: "Large",
 };
 
+/** Browser-style labels for the three semantic text-size presets. */
+export const TEXT_SIZE_PERCENTAGES: Record<TextSize, number> = {
+  compact: 90,
+  default: 100,
+  large: 110,
+};
+
 export const TERMINAL_FONT_SIZES: Record<TextSize, number> = {
   compact: 12.5,
   default: 14,

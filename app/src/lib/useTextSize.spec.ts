@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { loadTextSize, saveTextSize, stepTextSize } from "./useTextSize";
+import {
+  loadTextSize,
+  saveTextSize,
+  stepTextSize,
+  TEXT_SIZE_PERCENTAGES,
+} from "./useTextSize";
 
 class MemoryStorage {
   values = new Map<string, string>();
@@ -32,5 +37,9 @@ describe("text size preference", () => {
     expect(stepTextSize("compact", 1)).toBe("default");
     expect(stepTextSize("default", 1)).toBe("large");
     expect(stepTextSize("large", 1)).toBe("large");
+  });
+
+  it("provides browser-style percentages for shortcut feedback", () => {
+    expect(TEXT_SIZE_PERCENTAGES).toEqual({ compact: 90, default: 100, large: 110 });
   });
 });

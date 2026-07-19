@@ -182,8 +182,8 @@ pub struct TestEvidence {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClaimEvidence {
-    pub claim: String,
     pub evidence_ref: String,
+    pub claim: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -191,7 +191,6 @@ pub struct StructuredReport {
     pub task_id: TaskId,
     pub attempt: u32,
     pub status: ReportStatus,
-    pub summary: String,
     #[serde(default)]
     pub changed_paths: BTreeSet<String>,
     #[serde(default)]
@@ -202,6 +201,7 @@ pub struct StructuredReport {
     pub claims: Vec<ClaimEvidence>,
     #[serde(default)]
     pub unresolved: Vec<String>,
+    pub summary: String,
 }
 
 impl StructuredReport {

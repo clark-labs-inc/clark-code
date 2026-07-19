@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -29,6 +29,10 @@ pub(super) struct FakeState {
     pub(super) maximum_writers: AtomicUsize,
     pub(super) cloud_attachments: AtomicUsize,
     pub(super) write_outside_lease: bool,
+    pub(super) writer_paths: BTreeMap<String, String>,
+    pub(super) fail_first_writer: Option<String>,
+    pub(super) writer_attempts: Mutex<BTreeMap<String, usize>>,
+    pub(super) initial_writer_barrier: Option<Arc<tokio::sync::Barrier>>,
 }
 
 pub(super) struct FakeProvider {
@@ -80,6 +84,7 @@ impl Provider for FakeProvider {
             })
             .collect::<Vec<_>>()
             .join("\n");
+        let mut terminal_error = None;
         let final_message = if text.contains("Clark Cloud repository writer") {
             self.shared
                 .cloud_attachments
@@ -99,13 +104,33 @@ impl Provider for FakeProvider {
             self.shared
                 .maximum_writers
                 .fetch_max(active, Ordering::SeqCst);
+            let workspace_name = cwd.file_name().unwrap().to_string_lossy();
+            let generic_writer = self
+                .shared
+                .writer_paths
+                .iter()
+                .find(|(task_id, _)| workspace_name.starts_with(&format!("{task_id}-")))
+                .map(|(task_id, path)| (task_id.clone(), path.clone()));
+            let generic_attempt = generic_writer.as_ref().map(|(task_id, _)| {
+                let mut attempts = self.shared.writer_attempts.lock().unwrap();
+                let attempt = attempts.entry(task_id.clone()).or_default();
+                *attempt += 1;
+                *attempt
+            });
+            if generic_attempt == Some(1) {
+                if let Some(barrier) = &self.shared.initial_writer_barrier {
+                    barrier.wait().await;
+                }
+            }
             tokio::time::sleep(Duration::from_millis(20)).await;
-            if cwd
-                .file_name()
-                .unwrap()
-                .to_string_lossy()
-                .starts_with("api-writer-")
-            {
+            if let Some((task_id, path)) = generic_writer {
+                let attempt = generic_attempt.expect("generic writer attempt");
+                if self.shared.fail_first_writer.as_ref() == Some(&task_id) && attempt == 1 {
+                    terminal_error = Some(format!("injected failure for {task_id}"));
+                } else {
+                    std::fs::write(cwd.join(path), "v2\n").unwrap();
+                }
+            } else if workspace_name.starts_with("api-writer-") {
                 std::fs::write(cwd.join("src/api.txt"), "v2\n").unwrap();
                 if self.shared.write_outside_lease {
                     std::fs::write(cwd.join("src/not-leased.txt"), "escape\n").unwrap();
@@ -126,9 +151,13 @@ impl Provider for FakeProvider {
             AgentEvent::RunFinished {
                 run,
                 outcome: RunOutcome {
-                    status: RunStatus::Done,
+                    status: if terminal_error.is_some() {
+                        RunStatus::Failed
+                    } else {
+                        RunStatus::Done
+                    },
                     stop_reason: None,
-                    error: None,
+                    error: terminal_error,
                     failure_kind: None,
                     usage: Some(RunUsage {
                         input_tokens: 100,
@@ -342,6 +371,7 @@ fn runtime(
             artifact_root: temp.path().join("artifacts"),
             selection,
             plan,
+            integration_gate: None,
         },
         Arc::new(move || {
             Box::new(FakeProvider {
@@ -472,4 +502,171 @@ async fn out_of_lease_provider_write_is_rejected_without_touching_primary() {
     assert!(!Path::new(&api.baseline.checkout_root)
         .join("src/not-leased.txt")
         .exists());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn six_parallel_writers_retry_one_preserve_five_and_apply_all_packages() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("large-parallel-repository");
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    let writer_paths = (0..6)
+        .map(|index| (format!("writer-{index}"), format!("src/part-{index}.txt")))
+        .collect::<BTreeMap<_, _>>();
+    for path in writer_paths.values() {
+        std::fs::write(root.join(path), "v1\n").unwrap();
+    }
+    git(&root, &["init", "--quiet"]);
+    git(&root, &["config", "user.name", "Clark Large Simulation"]);
+    git(
+        &root,
+        &["config", "user.email", "large-simulation@invalid.local"],
+    );
+    git(&root, &["add", "--all"]);
+    git(&root, &["commit", "--quiet", "-m", "large baseline"]);
+    std::fs::write(root.join("notes.user"), "preserve this user work\n").unwrap();
+
+    let repository_id = RepositoryId::new("large").unwrap();
+    let allowed_changed_paths = writer_paths.values().cloned().collect::<BTreeSet<_>>();
+    let selection = Arc::new(
+        RepositorySelection::resolve(
+            &LocalExecutor,
+            vec![RepositorySelectionRequest {
+                repository_id: repository_id.clone(),
+                root: root.clone(),
+                allowed_changed_paths,
+                cloud_eligible: false,
+            }],
+        )
+        .await
+        .unwrap(),
+    );
+
+    let writer_ids = writer_paths.keys().map(String::as_str).collect::<Vec<_>>();
+    let mut tasks = vec![task("planner", MultiRepoTaskRole::Planner, None, &[], &[])];
+    for (task_id, path) in &writer_paths {
+        tasks.push(task(
+            task_id,
+            MultiRepoTaskRole::Writer,
+            Some("large"),
+            &["planner"],
+            &[path],
+        ));
+    }
+    tasks.push(task(
+        "reviewer",
+        MultiRepoTaskRole::Reviewer,
+        None,
+        &writer_ids,
+        &[],
+    ));
+    tasks.push(task(
+        "integrator",
+        MultiRepoTaskRole::Integrator,
+        None,
+        &["reviewer"],
+        &[],
+    ));
+    let check_paths = writer_paths
+        .values()
+        .map(|path| format!("'{path}'"))
+        .collect::<Vec<_>>()
+        .join(",");
+    let plan = Arc::new(MultiRepoPlan {
+        repositories: selection.baselines(),
+        contracts: Vec::new(),
+        contract_decisions: Vec::new(),
+        tasks,
+        integration_checks: vec![IntegrationCheck {
+            id: "all-six-parts".into(),
+            repository_id: repository_id.clone(),
+            argv: vec![
+                "python3".into(),
+                "-c".into(),
+                format!(
+                    "from pathlib import Path; paths=[{check_paths}]; assert all(Path(path).read_text() == 'v2\\n' for path in paths)"
+                ),
+            ],
+            timeout_ms: 5_000,
+        }],
+        max_parallel_writers: 6,
+        requires_independent_review: true,
+    });
+    plan.validate().unwrap();
+
+    let shared = Arc::new(FakeState {
+        writer_paths: writer_paths.clone(),
+        fail_first_writer: Some("writer-3".into()),
+        initial_writer_barrier: Some(Arc::new(tokio::sync::Barrier::new(6))),
+        ..Default::default()
+    });
+    let runtime = runtime(&temp, selection.clone(), plan.clone(), shared.clone());
+    let integrator = Arc::new(runtime.integration_harness("integrate").unwrap());
+    let mut coordinator = MultiRepoCoordinator::new(
+        (*plan).clone(),
+        SharedBudget::new(BudgetConfig {
+            limit_weighted_tokens: 20_000,
+            ..Default::default()
+        })
+        .unwrap(),
+        2,
+        integrator,
+    )
+    .unwrap();
+    coordinator
+        .register_writer(Arc::new(runtime.writer_harness("writer").unwrap()))
+        .unwrap();
+    coordinator
+        .register_reviewer(Arc::new(runtime.reviewer_harness("review").unwrap()))
+        .unwrap();
+
+    let result = coordinator
+        .run(CancellationToken::new(), Arc::new(|_| {}))
+        .await
+        .unwrap();
+    assert!(result.passed(), "{result:#?}");
+    assert_eq!(result.change_packages.len(), 6);
+    assert_eq!(result.recoveries.len(), 1);
+    assert_eq!(
+        result.recoveries[0].failed_task_id,
+        TaskId::new("writer-3").unwrap()
+    );
+    assert_eq!(result.recoveries[0].preserved_package_sha256.len(), 5);
+    assert_eq!(shared.maximum_writers.load(Ordering::SeqCst), 6);
+    {
+        let attempts = shared.writer_attempts.lock().unwrap();
+        assert_eq!(attempts["writer-3"], 2);
+        assert!(writer_paths
+            .keys()
+            .filter(|task_id| task_id.as_str() != "writer-3")
+            .all(|task_id| attempts[task_id] == 1));
+    }
+
+    selection
+        .verify_primaries_unchanged(&LocalExecutor)
+        .await
+        .unwrap();
+    assert_eq!(
+        std::fs::read_to_string(root.join("notes.user")).unwrap(),
+        "preserve this user work\n"
+    );
+    let application = selection
+        .apply_verified_packages(
+            &LocalExecutor,
+            &plan,
+            &result.change_packages,
+            &temp.path().join("scratch"),
+        )
+        .await
+        .unwrap();
+    assert!(application.head_unchanged);
+    assert!(application.preexisting_changes_preserved);
+    assert_eq!(application.task_ids.len(), 6);
+    assert_eq!(application.changed_paths[&repository_id].len(), 6);
+    for path in writer_paths.values() {
+        assert_eq!(std::fs::read_to_string(root.join(path)).unwrap(), "v2\n");
+    }
+    assert_eq!(
+        std::fs::read_to_string(root.join("notes.user")).unwrap(),
+        "preserve this user work\n"
+    );
 }

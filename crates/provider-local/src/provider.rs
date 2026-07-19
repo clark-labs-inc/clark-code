@@ -65,7 +65,6 @@ pub struct LocalAgentProvider {
     /// Stable identity for the active project, when private project knowledge
     /// is enabled and the selected root is a Git repository.
     repository_fingerprint: Option<String>,
-    instruction_snapshot: Option<crate::instructions::ProjectInstructions>,
 }
 
 #[async_trait]
@@ -92,7 +91,12 @@ impl Provider for LocalAgentProvider {
 
     async fn connect(&mut self, config: ProviderConfig) -> Result<()> {
         self.isolation = ProviderIsolation::from_provider_config(&config);
-        let local = LocalConfig::from_provider_config(&config);
+        let mut local = LocalConfig::from_provider_config(&config);
+        // Child writers must never see orchestration tools or policy, even now
+        // that the root capability is available by default.
+        if self.isolation.disposable_writer() {
+            local.orchestration.enabled = false;
+        }
         let llm = LlmClient::new(&local).map_err(Error::Other)?;
         let memory = local
             .memories_enabled
@@ -183,21 +187,8 @@ impl Provider for LocalAgentProvider {
         };
 
         let mut prompt = system_prompt(&sandbox, config.clark.is_some(), config.remote.is_some());
-        self.instruction_snapshot =
-            crate::instructions::load(self.executor.as_ref(), sandbox.root())
-                .await
-                .ok()
-                .flatten();
-        if let Some(instructions) = self.instruction_snapshot.as_ref() {
-            prompt.push('\n');
-            prompt.push_str(&instructions.render());
-            prompt.push('\n');
-        }
         if let Some(docs) = sandbox.docs_root() {
             prompt.push_str(&crate::workspace::prompt_section(docs));
-        }
-        if config.orchestration.enabled {
-            prompt.push_str(crate::orchestration::prompt_section());
         }
         // Surface compatible Codex and Claude skills through the session
         // executor — local disk or the remote host over the SSH tunnel.
@@ -356,27 +347,32 @@ impl Provider for LocalAgentProvider {
         let cancel = CancellationToken::new();
         self.cancel = cancel.clone();
 
-        let mut text = prompt_text(&input);
+        let parts = prompt_parts(&input);
+        let knowledge_query = prompt_text(&input);
+        let user_request = parts.user_request;
+        let native_image_support = crate::config::model_supports_images(&config.model);
+        let mut context_sections = Vec::new();
+        if config.orchestration.enabled {
+            context_sections.push(
+                crate::orchestration::turn_policy_section(config.orchestration.mode).to_string(),
+            );
+        }
         if let Ok(current_instructions) =
             crate::instructions::load(self.executor.as_ref(), sandbox.root()).await
         {
-            if let Some(refresh) = crate::instructions::refresh_context(
-                self.instruction_snapshot.as_ref(),
-                current_instructions.as_ref(),
-            ) {
-                text = format!("{refresh}\n\n{text}");
+            if let Some(instructions) = current_instructions.as_ref() {
+                context_sections.push(instructions.render());
             }
-            self.instruction_snapshot = current_instructions;
         }
-        text = format!(
-            "{}\n\n{text}",
-            environment_context(&sandbox, config.remote.is_some())
-        );
-        let knowledge_query = text.clone();
+        context_sections.push(environment_context(&sandbox, config.remote.is_some()));
+        if !parts.text_attachment_context.is_empty() {
+            context_sections.push(parts.text_attachment_context);
+        }
         let attachment_context = crate::attachments::process_attachments(
             &input.attachments,
-            &text,
+            &knowledge_query,
             config.vision.as_ref(),
+            native_image_support,
             &cancel,
         );
         let repository_context = async {
@@ -408,34 +404,40 @@ impl Provider for LocalAgentProvider {
         // adding the durations together.
         let (attachment_context, repository_context, git_snapshot) =
             tokio::join!(attachment_context, repository_context, git_snapshot);
-        text.push_str(&attachment_context);
         if let Some(section) = repository_context {
-            text = format!("{section}\n\nUser request:\n{text}");
+            context_sections.push(section);
         }
         if let Some(git) = git_snapshot {
-            text = format!("{git}\n{text}");
+            context_sections.push(git);
+        }
+        if !attachment_context.trim().is_empty() {
+            context_sections.push(attachment_context);
         }
         let docs_root = self
             .sandbox
             .as_ref()
             .and_then(|sb| sb.docs_root())
             .map(std::path::Path::to_path_buf);
-        let text = {
+        {
             let mut s = self.session.lock().await;
-            let mut text = text;
             let style = crate::prompt::output_style_instructions(&s.output_style);
             if !style.is_empty() {
-                text = format!("{style}\n\n{text}");
+                context_sections.push(style.to_string());
             }
             if s.plan_mode {
                 let reminder = crate::prompt::plan_mode_reminder(docs_root.as_deref());
-                text = format!("{reminder}\n\n{text}");
+                context_sections.push(reminder);
             } else if std::mem::take(&mut s.plan_exited) {
                 let note = crate::prompt::plan_mode_exit_note(docs_root.as_deref());
-                text = format!("{note}\n\n{text}");
+                context_sections.push(note);
             }
-            text
-        };
+        }
+        let text = assemble_turn_prompt(&context_sections, &user_request);
+        let user_content = prompt_input::model_user_content(
+            text.clone(),
+            &input.attachments,
+            native_image_support,
+        );
 
         let run = RunId::new(format!(
             "run-{}",
@@ -474,6 +476,7 @@ impl Provider for LocalAgentProvider {
                 // Filled in per tool call by `DesktopToolAdapter::execute`,
                 // which owns the call's update sink.
                 progress: None,
+                agent_progress: None,
             },
             session: self.session.clone(),
             control: self.control.clone(),
@@ -483,6 +486,7 @@ impl Provider for LocalAgentProvider {
             model: config.model,
             temperature: config.temperature,
             user_text: text,
+            user_content,
             memory_extraction,
             execution: config.execution,
         };

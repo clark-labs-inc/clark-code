@@ -31,6 +31,10 @@
   --color-bg-elevated: #fdfcfa;
   --color-bg-hover: #ece8e0;
   --color-bg-sunken: #e4e0d6;
+  --color-composer-context: #e6e2da;
+  --color-composer-surface: #fdfcfa;
+  --color-checkout-branch: #4f664a;
+  --color-checkout-worktree: #5b49cb;
 
   --color-text-primary: #211f1c;
   --color-text-secondary: #544f49;
@@ -136,6 +140,10 @@ html.dark {
   --color-bg-elevated: #161616;
   --color-bg-hover: #24222b;
   --color-bg-sunken: #0a0a0a;
+  --color-composer-context: #1f1f1f;
+  --color-composer-surface: #2d2d2d;
+  --color-checkout-branch: #7faf75;
+  --color-checkout-worktree: #9b8cff;
 
   --color-text-primary: #f5f5f4;
   --color-text-secondary: #c6c4bf;
@@ -171,12 +179,16 @@ html.dark {
    Okabe-Ito blue/orange pair, which stays distinct. Info (blue) shifts to a
    bluish-green so it doesn't collide with the new success-blue. */
 html.colorblind {
+  --color-checkout-branch: #00669e;
+  --color-checkout-worktree: #5b49cb;
   --color-success: #0072b2; /* blue */
   --color-danger: #e69f00;  /* orange */
   --color-info: #56b4e9;    /* sky blue */
   --color-warning: #d55e00; /* vermilion — distinct from orange danger */
 }
 html.colorblind.dark {
+  --color-checkout-branch: #56b4e9;
+  --color-checkout-worktree: #9b8cff;
   --color-success: #56b4e9; /* lighter blue on graphite */
   --color-danger: #f0b86e;  /* lighter orange */
   --color-info: #7fcfff;    /* lighter sky */
@@ -409,6 +421,13 @@ svg.lucide {
    stray box inside the pill. Suppress it here; the pill carries the focus cue. */
 .composer-input:focus-visible {
   outline: none;
+}
+
+/* The fan-out card clips the global focus outline into a stray horizontal line
+   when its details are open. Keep the focus cue as a quiet background instead. */
+.fan-out-toggle:focus-visible {
+  outline: none;
+  background: var(--color-bg-hover);
 }
 
 /* WKWebView (Tauri's macOS webview) re-rasterizes a box-shadow on every frame of

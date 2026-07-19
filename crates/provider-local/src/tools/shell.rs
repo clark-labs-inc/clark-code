@@ -13,6 +13,9 @@ use super::{arg_str, ToolCtx, ToolExecutor, ToolOutcome};
 const MAX_OUTPUT_BYTES: usize = 100_000;
 const DEFAULT_TIMEOUT_MS: u64 = 120_000;
 const MAX_TIMEOUT_MS: u64 = 600_000;
+const DEFAULT_WAIT_POLL_MS: u64 = 250;
+const MIN_WAIT_POLL_MS: u64 = 50;
+const MAX_WAIT_POLL_MS: u64 = 2_000;
 
 pub struct Bash;
 
@@ -29,9 +32,9 @@ impl ToolExecutor for Bash {
             "type": "object",
             "properties": {
                 "command": {"type": "string", "description": "The shell command to run."},
-                "timeout_ms": {"type": "integer", "description": "Timeout in milliseconds (default 120000, max 600000). Ignored when run_in_background is true."},
                 "workdir": {"type": "string", "description": "Optional working directory inside the project, relative to the project root."},
-                "run_in_background": {"type": "boolean", "description": "Start a long-lived command (e.g. a dev server) without blocking; returns a task id immediately. Poll with bash_output, send input with bash_input, and stop with bash_kill."}
+                "run_in_background": {"type": "boolean", "description": "Start a long-lived command (e.g. a dev server) without blocking; returns a task id immediately. Poll with bash_output, send input with bash_input, and stop with bash_kill."},
+                "timeout_ms": {"type": "integer", "description": "Timeout in milliseconds (default 120000, max 600000). Ignored when run_in_background is true."}
             },
             "required": ["command"]
         })
@@ -187,6 +190,135 @@ impl ToolExecutor for BashOutput {
 }
 
 pub struct BashInput;
+
+pub struct BashWait;
+
+#[async_trait]
+impl ToolExecutor for BashWait {
+    fn name(&self) -> &str {
+        "bash_wait"
+    }
+    fn description(&self) -> &str {
+        "Wait inside the host for a background task to finish or emit a readiness marker. Use this instead of repeatedly calling bash_output: the host polls without additional model turns or tokens. A timeout does not stop the task."
+    }
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "task_id": {"type": "string", "description": "The id returned by bash(run_in_background: true)."},
+                "output_contains": {"type": "string", "description": "Optional exact text marker that means the task is ready. Without it, wait for process exit."},
+                "timeout_ms": {"type": "integer", "description": "Maximum host wait in milliseconds (default 120000, max 600000). The process keeps running after a timeout."},
+                "poll_interval_ms": {"type": "integer", "description": "Host polling interval in milliseconds (default 250, range 50-2000)."}
+            },
+            "required": ["task_id"]
+        })
+    }
+    fn kind(&self) -> ToolKind {
+        ToolKind::Execute
+    }
+    async fn invoke(&self, args: Value, ctx: &ToolCtx) -> ToolOutcome {
+        let task_id = match arg_str(&args, "task_id") {
+            Ok(id) => id,
+            Err(error) => return ToolOutcome::error(error),
+        };
+        let output_contains = args
+            .get("output_contains")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+        let timeout_ms = args
+            .get("timeout_ms")
+            .and_then(Value::as_u64)
+            .unwrap_or(DEFAULT_TIMEOUT_MS)
+            .min(MAX_TIMEOUT_MS);
+        let poll_ms = args
+            .get("poll_interval_ms")
+            .and_then(Value::as_u64)
+            .unwrap_or(DEFAULT_WAIT_POLL_MS)
+            .clamp(MIN_WAIT_POLL_MS, MAX_WAIT_POLL_MS);
+        let waited = match ctx
+            .background
+            .wait(
+                &task_id,
+                output_contains.as_deref(),
+                Duration::from_millis(timeout_ms),
+                Duration::from_millis(poll_ms),
+                &ctx.cancel,
+            )
+            .await
+        {
+            Ok(waited) => waited,
+            Err(error) => return ToolOutcome::error(error),
+        };
+        match waited.outcome {
+            crate::background::TaskWaitOutcome::Ready => {
+                waited_outcome(&task_id, waited.status, true, waited.waited)
+            }
+            crate::background::TaskWaitOutcome::Finished => {
+                let mut outcome =
+                    waited_outcome(&task_id, waited.status, false, waited.waited);
+                if output_contains.is_some() {
+                    outcome.is_error = true;
+                    outcome
+                        .content
+                        .push_str("\nreadiness marker was not observed");
+                }
+                outcome
+            }
+            crate::background::TaskWaitOutcome::TimedOut => ToolOutcome::error(format!(
+                "timed out after {} ms waiting for `{task_id}`; the task is still running and was not stopped",
+                waited.waited.as_millis()
+            ))
+            .with_details(json!({
+                "task_id": task_id,
+                "status": "timed_out",
+                "process_still_running": true,
+                "waited_ms": waited.waited.as_millis()
+            })),
+        }
+    }
+}
+
+fn waited_outcome(
+    task_id: &str,
+    status: crate::background::TaskStatus,
+    marker_seen: bool,
+    elapsed: Duration,
+) -> ToolOutcome {
+    let state = if marker_seen { "ready" } else { "finished" };
+    let exit_code = status.exit_code.flatten();
+    let mut body = format!(
+        "task_id: {task_id}\ncommand: {}\nstatus: {state}\nwaited_ms: {}\n",
+        status.command,
+        elapsed.as_millis()
+    );
+    if let Some(code) = exit_code {
+        body.push_str(&format!("exit_code: {code}\n"));
+    } else if status.exit_code == Some(None) {
+        body.push_str("exit_code: signal\n");
+    }
+    if let Some(error) = &status.error {
+        body.push_str(&format!("error: {error}\n"));
+    }
+    body.push_str("--- output ---\n");
+    if status.output.trim().is_empty() {
+        body.push_str("(no output yet)");
+    } else {
+        body.push_str(&clamp(&status.output));
+    }
+    let is_error =
+        status.error.is_some() || matches!(status.exit_code, Some(code) if code != Some(0));
+    let mut outcome = ToolOutcome::ok(body).with_details(json!({
+        "task_id": task_id,
+        "status": state,
+        "marker_seen": marker_seen,
+        "process_finished": status.exit_code.is_some(),
+        "exit_code": exit_code,
+        "waited_ms": elapsed.as_millis()
+    }));
+    outcome.is_error = is_error;
+    outcome
+}
 
 #[async_trait]
 impl ToolExecutor for BashInput {

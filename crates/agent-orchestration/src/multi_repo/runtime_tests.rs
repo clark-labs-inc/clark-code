@@ -298,13 +298,16 @@ impl MultiRepoIntegrationHarness for FakeIntegrator {
             receipt: IntegrationReceipt {
                 fresh_workspace: true,
                 repository_baselines: self.baselines.clone(),
-                repository_result_trees: packages
-                    .iter()
-                    .map(|package| {
-                        (
-                            package.repository_id.clone(),
-                            package.result_tree_sha256.clone(),
+                repository_result_trees: self
+                    .baselines
+                    .keys()
+                    .filter_map(|repository_id| {
+                        super::super::repository_result_tree_sha256(
+                            packages
+                                .iter()
+                                .filter(|package| &package.repository_id == repository_id),
                         )
+                        .map(|digest| (repository_id.clone(), digest))
                     })
                     .collect(),
                 applied_patch_sha256: packages

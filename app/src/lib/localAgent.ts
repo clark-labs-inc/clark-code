@@ -61,7 +61,7 @@ export const CODING_MODELS = [
   {
     id: "clark-code:kimi_k3",
     label: "Kimi K3",
-    hint: "Long-horizon coding · 1M context",
+    hint: "Long-horizon coding · vision · 1M context",
     reasoningEfforts: ["max"],
     defaultReasoningEffort: "max",
   },
@@ -169,11 +169,11 @@ export function saveLocalSettings(settings: LocalAgentSettings): void {
 }
 
 // The model + reasoning effort are per-conversation, so each chat can run a
-// different model. The global `LocalAgentSettings.model` stays the DEFAULT a
-// new chat seeds from (and the start-screen picker edits); an override is
-// written only when the model is changed inside an open chat. The cloud stores
-// transcripts, not model preferences, so these overrides live in localStorage
-// (scoped by conversation id) and survive restarts + reopens within a session.
+// different model. The global `LocalAgentSettings.model` stays the default a
+// new chat seeds from (and the start-screen picker edits); every conversation
+// snapshots those values when it is created or first reopened, then updates
+// only its own entry. The cloud stores transcripts, not model preferences, so
+// these values live in localStorage (scoped by conversation id).
 const CHAT_MODELS_KEY = "clark-desktop:chat-models";
 
 export interface ChatModelOverride {
@@ -200,9 +200,9 @@ export function saveChatModels(models: Record<string, ChatModelOverride>): void 
   }
 }
 
-/** The model + reasoning effort the ACTIVE conversation runs with: its
- *  per-chat override, else the global default. Pass `chatId` null for the
- *  start screen (no chat yet) to just echo the global default. */
+/** The model + reasoning effort the ACTIVE conversation runs with. The global
+ *  default is only a fallback for the start screen and legacy chats that have
+ *  not yet been reopened and pinned on this device. */
 export function effectiveModelSettings(
   base: LocalAgentSettings,
   chatModels: Record<string, ChatModelOverride>,
@@ -267,15 +267,16 @@ export function saveBrowserEnabled(on: boolean): void {
   }
 }
 
-// Experimental, bounded multi-agent fan-out. Off by default. Delegates are
-// structurally read-only and the root coding agent remains the sole writer.
+// Bounded multi-agent fan-out is available by default for local projects. The
+// model-facing policy remains explicit-request-only; coding writers use
+// isolated clones and need a separate apply step.
 const ORCHESTRATION_KEY = "clark-desktop:orchestration-enabled";
 
 export function loadOrchestrationEnabled(): boolean {
   try {
-    return localStorage.getItem(ORCHESTRATION_KEY) === "true";
+    return localStorage.getItem(ORCHESTRATION_KEY) !== "false";
   } catch {
-    return false;
+    return true;
   }
 }
 
@@ -318,8 +319,8 @@ export function localConnectConfig(
       project_knowledge: projectKnowledgeEnabled(),
       // Experimental `browser` tool — off unless the user opted in.
       browser_enabled: loadBrowserEnabled(),
-      // Parallel local investigation only. Remote hosts need their own proven
-      // read-only child boundary before this can be enabled there.
+      // Conservative-by-default parallel investigation and isolated coding
+      // workstreams. Remote hosts need a proven isolation boundary first.
       orchestration: { enabled: !remote && loadOrchestrationEnabled() },
       // When present, the provider runs this session's tools on the remote host.
       ...(remote ? { remote } : {}),

@@ -1,11 +1,11 @@
-import { lazy, Suspense, useEffect } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { useSessionStore } from "./store/sessionStore";
 import { useWindowFileDropGuard } from "./lib/attachmentSources";
 import { useHotkeys } from "./lib/hotkeys";
 import { useTextSize } from "./lib/useTextSize";
 import { SignInScreen } from "./surfaces/SignInScreen";
 import { UpdateStatus } from "./surfaces/UpdateStatus";
-import { NoticeToast, WarningToast } from "./surfaces/Toast";
+import { NoticeToast, TextSizeToast, WarningToast } from "./surfaces/Toast";
 
 const AuthenticatedWorkspace = lazy(() => import("./AuthenticatedWorkspace"));
 
@@ -24,15 +24,21 @@ export default function App() {
   const auth = useSessionStore((s) => s.auth);
   const addFiles = useSessionStore((s) => s.addFiles);
   const { textSize, setTextSize, increaseTextSize, decreaseTextSize, resetTextSize } = useTextSize();
+  const [textSizeToastSignal, setTextSizeToastSignal] = useState(0);
+
+  const runTextSizeShortcut = (action: () => void) => {
+    action();
+    setTextSizeToastSignal((signal) => signal + 1);
+  };
 
   useHotkeys([
     // KeyboardEvent.key varies between "+" and "=" across layouts/keypads.
-    { key: "+", mod: true, shift: true, allowInInput: true, run: increaseTextSize },
-    { key: "+", mod: true, allowInInput: true, run: increaseTextSize },
-    { key: "=", mod: true, shift: true, allowInInput: true, run: increaseTextSize },
-    { key: "=", mod: true, allowInInput: true, run: increaseTextSize },
-    { key: "-", mod: true, allowInInput: true, run: decreaseTextSize },
-    { key: "0", mod: true, allowInInput: true, run: resetTextSize },
+    { key: "+", mod: true, shift: true, allowInInput: true, run: () => runTextSizeShortcut(increaseTextSize) },
+    { key: "+", mod: true, allowInInput: true, run: () => runTextSizeShortcut(increaseTextSize) },
+    { key: "=", mod: true, shift: true, allowInInput: true, run: () => runTextSizeShortcut(increaseTextSize) },
+    { key: "=", mod: true, allowInInput: true, run: () => runTextSizeShortcut(increaseTextSize) },
+    { key: "-", mod: true, allowInInput: true, run: () => runTextSizeShortcut(decreaseTextSize) },
+    { key: "0", mod: true, allowInInput: true, run: () => runTextSizeShortcut(resetTextSize) },
   ]);
 
   useEffect(() => {
@@ -50,6 +56,7 @@ export default function App() {
         <SignInScreen />
         <UpdateStatus />
         <NoticeToast />
+        <TextSizeToast textSize={textSize} signal={textSizeToastSignal} />
       </>
     );
 
@@ -61,6 +68,7 @@ export default function App() {
       <UpdateStatus />
       <NoticeToast />
       <WarningToast />
+      <TextSizeToast textSize={textSize} signal={textSizeToastSignal} />
     </>
   );
 }

@@ -18,6 +18,7 @@ function UpdateControl() {
   const update = useSessionStore((s) => s.update);
   const progress = useSessionStore((s) => s.updateProgress);
   const applying = useSessionStore((s) => s.updateApplying);
+  const waiting = useSessionStore((s) => s.updateWaiting);
   const checkForUpdate = useSessionStore((s) => s.checkForUpdate);
   const applyUpdate = useSessionStore((s) => s.applyUpdate);
   const [checking, setChecking] = useState(false);
@@ -28,15 +29,15 @@ function UpdateControl() {
     return (
       <button
         onClick={() => void applyUpdate()}
-        disabled={applying}
+        disabled={applying || waiting}
         className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl border border-accent px-4 py-2.5 text-sm font-semibold text-accent transition hover:bg-accent hover:text-on-accent disabled:opacity-60"
       >
-        {applying ? (
+        {applying || waiting ? (
           <Loader2 className="size-4 animate-[spin_1s_linear_infinite]" />
         ) : (
           <Download className="size-4" />
         )}
-        Restart to update to {update.version}
+        {waiting ? "Finishing active work before update…" : `Restart to update to ${update.version}`}
       </button>
     );
   }

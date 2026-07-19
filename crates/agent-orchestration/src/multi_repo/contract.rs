@@ -149,8 +149,8 @@ pub struct ChangePackageDescriptor {
 pub struct ReaderReport {
     pub task_id: TaskId,
     pub repository_id: RepositoryId,
-    pub summary: String,
     pub evidence_refs: Vec<String>,
+    pub summary: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -164,9 +164,9 @@ pub enum ReviewDecision {
 pub struct ReviewReceipt {
     pub reviewer_task_id: TaskId,
     pub package_sha256: BTreeSet<String>,
+    pub findings: Vec<String>,
     pub decision: ReviewDecision,
     pub rework_task_ids: BTreeSet<TaskId>,
-    pub findings: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

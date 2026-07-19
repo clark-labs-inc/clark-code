@@ -6,15 +6,15 @@ const HANDOFF_RULES: &str = r#"Finish with exactly one JSON object and no prose 
   "task_id": "TASK_ID",
   "attempt_id": "ATTEMPT_ID",
   "reported_status": "reported",
-  "summary": "concise result",
   "changed_paths": ["relative/path"],
   "baseline_checkpoint": null,
   "result_checkpoint": null,
   "commands": [{"command":"...","exit_code":0,"output_artifact":null}],
   "tests": [{"name":"...","passed":true,"output_artifact":null}],
-  "claims": [{"claim":"...","evidence_ref":"path or command"}],
+  "claims": [{"evidence_ref":"path or command","claim":"..."}],
   "unresolved": [],
-  "artifact_refs": []
+  "artifact_refs": [],
+  "summary": "concise result"
 }
 Use an empty changed_paths array for read-only work. Never claim a command or test you did not run."#;
 
@@ -91,7 +91,7 @@ pub fn reviewer(scenario: &Scenario, task: &TaskContract, attempt_id: &str) -> S
         "You are an independent read-only reviewer. Inspect the current repository changes for this task:\n{}\n\
          Check correctness, completeness, allowed-path scope, and whether the evidence matches disk state. Do not edit.\n\
          Finish with exactly one JSON object and no prose after it:\n\
-         {{\"task_id\":\"{}\",\"accepted\":true,\"findings\":[{{\"severity\":\"high\",\"path\":null,\"message\":\"...\",\"evidence_ref\":\"path or command\"}}]}}\n\
+         {{\"task_id\":\"{}\",\"findings\":[{{\"severity\":\"high\",\"path\":null,\"evidence_ref\":\"path or command\",\"message\":\"...\"}}],\"accepted\":true}}\n\
          Set accepted=false for any material defect. Use an empty findings array only when accepting.\n\
          Benchmark attempt id for traceability: {attempt_id}",
         scenario.prompt, task.id,

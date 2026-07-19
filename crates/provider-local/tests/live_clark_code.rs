@@ -220,6 +220,7 @@ fn event_name(ev: &AgentEvent) -> &'static str {
         AgentEvent::RunStarted { .. } => "RunStarted",
         AgentEvent::Checkpoint { .. } => "Checkpoint",
         AgentEvent::MessageChunk { .. } => "MessageChunk",
+        AgentEvent::MessagePhase { .. } => "MessagePhase",
         AgentEvent::ToolCall { .. } => "ToolCall",
         AgentEvent::ToolCallUpdate { .. } => "ToolCallUpdate",
         AgentEvent::Plan { .. } => "Plan",

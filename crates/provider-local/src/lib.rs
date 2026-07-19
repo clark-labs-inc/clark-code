@@ -72,13 +72,13 @@ pub use memory::{
     global_memory_dir, load_facts, load_index, memory_dir, MemoryFact, MemoryHeader, MemoryType,
 };
 pub use multi_repo_provider::{
-    ClarkCloudWriterConfig, ClarkCloudWriterHarness, LocalIntegrationHarness,
-    LocalMultiRepoRuntime, LocalMultiRepoRuntimeConfig, LocalReaderHarness, LocalReviewHarness,
-    LocalWriterHarness,
+    ClarkCloudWriterConfig, ClarkCloudWriterHarness, IntegrationReadinessGate,
+    LocalIntegrationHarness, LocalMultiRepoRuntime, LocalMultiRepoRuntimeConfig,
+    LocalReaderHarness, LocalReviewHarness, LocalWriterHarness,
 };
 pub use multi_repo_workspace::{
     FreshIntegrationWorkspace, IsolatedReaderWorkspace, IsolatedWriterWorkspace,
-    RepositorySelection, RepositorySelectionRequest, SelectedRepository,
+    PrimaryApplicationReceipt, RepositorySelection, RepositorySelectionRequest, SelectedRepository,
 };
 pub use orchestration::{local_read_only_harness, WorkspaceDigestGuard};
 pub use platform::{

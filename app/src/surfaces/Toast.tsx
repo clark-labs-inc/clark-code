@@ -1,8 +1,42 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { AlertTriangle, CheckCircle2, X } from "lucide-react";
 import { DUR, EASE } from "../lib/motion";
 import { useSessionStore } from "../store/sessionStore";
+import { TEXT_SIZE_PERCENTAGES, type TextSize } from "../lib/useTextSize";
+
+/** Brief browser-style feedback for the global text-size shortcuts. `signal`
+ * increments for every shortcut press so the timeout also resets when the
+ * current preset is already at its minimum or maximum. */
+export function TextSizeToast({ textSize, signal }: { textSize: TextSize; signal: number }) {
+  const [visible, setVisible] = useState(false);
+  const reduce = useReducedMotion();
+
+  useEffect(() => {
+    if (signal === 0) return;
+    setVisible(true);
+    const timeout = setTimeout(() => setVisible(false), 1200);
+    return () => clearTimeout(timeout);
+  }, [signal]);
+
+  return (
+    <AnimatePresence>
+      {visible && (
+        <motion.div
+          initial={reduce ? { opacity: 0 } : { opacity: 0, y: -4, scale: 0.96 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={reduce ? { opacity: 0 } : { opacity: 0, y: -4, scale: 0.96 }}
+          transition={{ duration: DUR.fast, ease: EASE.out }}
+          role="status"
+          aria-live="polite"
+          className="pointer-events-none fixed right-4 top-4 z-[90] rounded-lg border border-border-subtle bg-bg-elevated/95 px-3 py-1.5 font-mono text-sm tabular-nums text-ink shadow-lg backdrop-blur-sm"
+        >
+          {TEXT_SIZE_PERCENTAGES[textSize]}%
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+}
 
 /** Transient success/info confirmation, bottom-center, auto-dismissing. Backs
  *  the store's `notice` channel — used for user actions whose only other signal

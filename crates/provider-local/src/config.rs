@@ -21,10 +21,11 @@ pub const DEFAULT_BASE_URL: &str = "https://api.clarkslabs.com/v1";
 pub const DEFAULT_MODEL: &str = "clark-code";
 /// Agentic Clark model used for research / memory extraction (no client tools).
 pub const DEFAULT_RESEARCH_MODEL: &str = "clark";
-/// Agentic Clark model used to describe image attachments neither coding
-/// model can see (vision fallback). Independent of `research`/`clark` above
-/// — this is core functionality, not an opt-out-able feature.
-pub const DEFAULT_VISION_MODEL: &str = "clark";
+/// Stateless multimodal model used to describe image attachments that the
+/// active coding model cannot see. Keep this on the provider-qualified
+/// passthrough path: agentic Clark tiers own a sandbox/session and may answer
+/// the user's task instead of returning a grounded pixel description.
+pub const DEFAULT_VISION_MODEL: &str = "google/gemini-3.1-flash-lite";
 /// Hard ceiling on model turns in one run — a last-resort circuit breaker,
 /// not the primary loop control. Raised from 50 so genuinely long, healthy
 /// tasks (large refactors, multi-file investigations) aren't cut off
@@ -49,6 +50,12 @@ fn model_context_window(model: &str) -> Option<usize> {
         "clark-code:grok45" => Some(500_000),    // "500K context"
         _ => None,
     }
+}
+
+/// Whether the selected coding tier accepts image content parts directly.
+/// Models not listed here keep using the separate vision-description fallback.
+pub(crate) fn model_supports_images(model: &str) -> bool {
+    matches!(model, "clark-code:kimi_k3")
 }
 
 /// Effective auto-compaction threshold for `model`: the flat default, lowered
@@ -97,9 +104,9 @@ pub struct LocalConfig {
     pub mcp_servers: Vec<crate::mcp::McpServerConfig>,
     /// Clark research config (same Platform API + key), when research is enabled.
     pub clark: Option<AgenticClarkConfig>,
-    /// Vision-fallback Clark config (same Platform API + key as `clark`).
+    /// Vision-fallback config for coding models without native image support.
     /// Independent of the `research` toggle — gated only on a key being
-    /// present, since neither local coding model can see images at all.
+    /// present.
     pub vision: Option<AgenticClarkConfig>,
     /// Project root, when set at connect time. A session's `cwd` option wins.
     pub cwd: Option<String>,
@@ -120,8 +127,8 @@ pub struct LocalConfig {
     /// downloaded on first use). Off by default — the user opts in from
     /// Settings (`extra.browser_enabled = true`).
     pub browser_enabled: bool,
-    /// Opt-in read-only multi-agent orchestration. Disabled unless the provider
-    /// config explicitly enables it.
+    /// Bounded local multi-agent orchestration. Available by default, while its
+    /// model-facing policy remains explicit-request-only.
     pub(crate) orchestration: crate::orchestration::OrchestrationConfig,
     /// Universal root execution lifecycle. This is always present; its limits
     /// control bounded recovery and accounting rather than tool permissions.
@@ -237,8 +244,9 @@ impl LocalConfig {
                 .unwrap_or_else(|| DEFAULT_RESEARCH_MODEL.to_string()),
         });
 
-        // Vision fallback is core functionality (neither coding model can see
-        // images), not the opt-out-able research feature — gated only on a key.
+        // Vision fallback is core functionality for models without native
+        // image support, not the opt-out-able research feature — gated only on
+        // a key.
         let vision = api_key.is_some().then(|| AgenticClarkConfig {
             base_url: base_url.clone(),
             api_key: api_key.clone(),
@@ -379,10 +387,22 @@ mod tests {
             DEFAULT_COMPACT_REQUEST_TOKEN_LIMIT
         );
         assert_eq!(cfg.mode_for("bash"), PermissionMode::Ask);
+        assert!(cfg.orchestration.enabled);
+        assert_eq!(
+            cfg.orchestration.mode,
+            crate::orchestration::DelegationMode::ExplicitRequestOnly
+        );
         // No key → research can't run, so it's disabled.
         assert!(cfg.clark.is_none());
         // No key → vision fallback can't run either.
         assert!(cfg.vision.is_none());
+    }
+
+    #[test]
+    fn kimi_k3_supports_native_images_by_default() {
+        assert!(model_supports_images("clark-code:kimi_k3"));
+        assert!(!model_supports_images("clark-code"));
+        assert!(!model_supports_images("clark-code:kimi_k27_code"));
     }
 
     #[test]
@@ -412,6 +432,7 @@ mod tests {
         assert_eq!(vision.base_url, DEFAULT_BASE_URL);
         assert_eq!(vision.api_key.as_deref(), Some("ck_live_abc"));
         assert_eq!(vision.model, DEFAULT_VISION_MODEL);
+        assert_eq!(vision.model, "google/gemini-3.1-flash-lite");
     }
 
     #[test]

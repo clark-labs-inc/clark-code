@@ -15,10 +15,20 @@ function UpdatePill() {
   const update = useSessionStore((s) => s.update);
   const progress = useSessionStore((s) => s.updateProgress);
   const apply = useSessionStore((s) => s.applyUpdate);
+  const waiting = useSessionStore((s) => s.updateWaiting);
   const reduce = useReducedMotion();
 
   const content = progress ? (
     <DownloadingPill progress={progress} />
+  ) : update && waiting ? (
+    <div
+      key="waiting"
+      className="flex items-center gap-1.5 rounded-xl bg-accent-soft px-3 py-1.5 text-xs font-semibold text-accent"
+      title="The update will install after active runs and queued follow-ups finish"
+    >
+      <RefreshCw className="size-3.5 animate-[spin_1.4s_linear_infinite]" />
+      Finishing work before update…
+    </div>
   ) : update ? (
     <button
       key="restart"
@@ -35,7 +45,7 @@ function UpdatePill() {
     <AnimatePresence mode="wait" initial={false}>
       {content && (
         <motion.div
-          key={progress ? "downloading" : "restart"}
+          key={progress ? "downloading" : waiting ? "waiting" : "restart"}
           initial={reduce ? false : { opacity: 0, y: -3 }}
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: -3 }}

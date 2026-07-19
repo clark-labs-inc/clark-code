@@ -15,6 +15,7 @@ fn ctx(dir: &std::path::Path) -> ToolCtx {
             crate::loop_state::SessionState::default(),
         )),
         progress: None,
+        agent_progress: None,
     }
 }
 
@@ -127,6 +128,63 @@ async fn run_in_background_returns_immediately_and_bash_output_polls_it() {
     }
     assert!(output.contains("bg-hi"), "{output}");
     assert!(output.contains("finished"), "{output}");
+}
+
+#[tokio::test]
+async fn bash_wait_blocks_in_the_host_until_background_completion() {
+    let dir = tempfile::tempdir().unwrap();
+    let c = ctx(dir.path());
+    let started = Bash
+        .invoke(
+            json!({"command": "sleep 0.05; echo complete", "run_in_background": true}),
+            &c,
+        )
+        .await;
+    let task_id = started.content.split('`').nth(1).unwrap().to_string();
+    let output = BashWait
+        .invoke(
+            json!({"task_id": task_id, "timeout_ms": 2_000, "poll_interval_ms": 20}),
+            &c,
+        )
+        .await;
+    assert!(!output.is_error, "{}", output.content);
+    assert!(
+        output.content.contains("status: finished"),
+        "{}",
+        output.content
+    );
+    assert!(output.content.contains("complete"), "{}", output.content);
+}
+
+#[tokio::test]
+async fn bash_wait_can_return_on_readiness_without_stopping_the_process() {
+    let dir = tempfile::tempdir().unwrap();
+    let c = ctx(dir.path());
+    let started = Bash
+        .invoke(
+            json!({"command": "echo SERVER_READY; sleep 2", "run_in_background": true}),
+            &c,
+        )
+        .await;
+    let task_id = started.content.split('`').nth(1).unwrap().to_string();
+    let output = BashWait
+        .invoke(
+            json!({
+                "task_id": task_id,
+                "output_contains": "SERVER_READY",
+                "timeout_ms": 1_000
+            }),
+            &c,
+        )
+        .await;
+    assert!(!output.is_error, "{}", output.content);
+    assert!(
+        output.content.contains("status: ready"),
+        "{}",
+        output.content
+    );
+    assert_eq!(output.details["process_finished"], false);
+    c.background.kill(&task_id).await.unwrap();
 }
 
 #[tokio::test]

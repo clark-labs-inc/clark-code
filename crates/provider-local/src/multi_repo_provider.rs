@@ -44,6 +44,7 @@ pub struct LocalMultiRepoRuntime {
     plan: Arc<MultiRepoPlan>,
     factory: Arc<dyn ProviderFactory>,
     executor: Arc<dyn Executor>,
+    integration_gate: Option<Arc<dyn IntegrationReadinessGate>>,
 }
 
 pub struct LocalMultiRepoRuntimeConfig {
@@ -53,6 +54,12 @@ pub struct LocalMultiRepoRuntimeConfig {
     pub artifact_root: PathBuf,
     pub selection: Arc<RepositorySelection>,
     pub plan: Arc<MultiRepoPlan>,
+    pub integration_gate: Option<Arc<dyn IntegrationReadinessGate>>,
+}
+
+#[async_trait]
+pub trait IntegrationReadinessGate: Send + Sync {
+    async fn wait_ready(&self, cancel: CancellationToken) -> Result<(), String>;
 }
 
 impl LocalMultiRepoRuntime {
@@ -76,6 +83,7 @@ impl LocalMultiRepoRuntime {
             plan: config.plan,
             factory,
             executor,
+            integration_gate: config.integration_gate,
         })
     }
 
@@ -95,6 +103,7 @@ impl LocalMultiRepoRuntime {
                 artifact_root,
                 selection,
                 plan,
+                integration_gate: None,
             },
             Arc::new(|| Box::new(LocalAgentProvider::new()) as Box<dyn Provider>),
             Arc::new(LocalExecutor),
@@ -430,6 +439,9 @@ impl MultiRepoIntegrationHarness for LocalIntegrationHarness {
         validate_task(&task, &self.id, MultiRepoTaskRole::Integrator)?;
         if cancel.is_cancelled() {
             return Err("integration was cancelled before fresh replay".into());
+        }
+        if let Some(gate) = &self.runtime.integration_gate {
+            gate.wait_ready(cancel.child_token()).await?;
         }
         self.runtime.verify_primaries().await?;
         let workspace = FreshIntegrationWorkspace::replay(

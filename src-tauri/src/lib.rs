@@ -12,6 +12,7 @@ use tauri_plugin_deep_link::DeepLinkExt;
 
 mod commands;
 mod mobile_remote;
+mod project_context;
 mod project_worktree;
 // Public so the gated `tests/remote_e2e.rs` harness can drive the real
 // orchestration against a live host; otherwise host-internal.
@@ -118,6 +119,8 @@ pub fn run() {
             commands::session_close,
             commands::session_configure_cloud,
             commands::update_cloud_token,
+            commands::update_begin_drain,
+            commands::update_cancel_drain,
             commands::prompt,
             commands::steer,
             commands::cancel,
@@ -127,6 +130,7 @@ pub fn run() {
             commands::local_list_memory,
             commands::local_list_global_memory,
             commands::local_list_files,
+            commands::project_context,
             commands::read_doc_text,
             commands::read_image_data_url,
             commands::save_doc_text,

@@ -155,6 +155,28 @@ impl WorkspaceGuard for ChangingGuard {
     }
 }
 
+#[test]
+fn delegated_report_schema_requires_evidence_before_summary() {
+    let prompt = structured_prompt(&AttemptContext {
+        orchestration_id: OrchestrationId::new("fanout").unwrap(),
+        agent_path: AgentPath::parse("/root/reader").unwrap(),
+        task: ReadOnlyTask {
+            id: TaskId::new("reader").unwrap(),
+            role: AgentRole::Explorer,
+            objective: "inspect".to_string(),
+            scopes: BTreeSet::from(["src".to_string()]),
+            acceptance: vec!["cite".to_string()],
+            harness: "local".to_string(),
+        },
+        attempt: 1,
+        parent_context: "overall".to_string(),
+        feedback: None,
+        cancel: tokio_util::sync::CancellationToken::new(),
+    });
+    assert!(prompt.find("evidence_ref").unwrap() < prompt.find("summary").unwrap());
+    assert!(prompt.find("evidence_ref").unwrap() < prompt.find("\"claim\":").unwrap());
+}
+
 #[tokio::test]
 async fn provider_harness_rejects_permissions_and_extracts_report() {
     let state = Arc::new(Mutex::new(FakeState::default()));

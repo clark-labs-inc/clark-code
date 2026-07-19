@@ -1,5 +1,6 @@
 use std::sync::{Arc, Mutex};
 
+use agent_core::domain::{FanOutAgent, FanOutStatus};
 use agent_orchestration::{
     AgentRole, AgentStatus, CoordinatorEvent, CoordinatorEventSink, OrchestrationPurpose,
 };
@@ -13,6 +14,7 @@ pub(super) fn event_sink(
     let captured = Arc::new(Mutex::new(Vec::new()));
     let captured_events = captured.clone();
     let progress = ctx.progress.clone();
+    let agent_progress = ctx.agent_progress.clone();
     let sink = Arc::new(move |event: CoordinatorEvent| {
         if let Some(execution) = &execution {
             match &event {
@@ -36,9 +38,33 @@ pub(super) fn event_sink(
         if let Some(progress) = &progress {
             progress(render_event(&event));
         }
+        if let (Some(agent_progress), Some(agent)) = (&agent_progress, fan_out_agent(&event)) {
+            agent_progress(agent);
+        }
         captured_events.lock().expect("event lock").push(event);
     });
     (sink, captured)
+}
+
+fn fan_out_agent(event: &CoordinatorEvent) -> Option<FanOutAgent> {
+    let (path, label, status) = match event {
+        CoordinatorEvent::Queued { path, label } => (path, label.clone(), FanOutStatus::Queued),
+        CoordinatorEvent::Running { path, .. } | CoordinatorEvent::ReworkRequested { path, .. } => {
+            (path, String::new(), FanOutStatus::Running)
+        }
+        CoordinatorEvent::Reported { path, .. } | CoordinatorEvent::Accepted { path, .. } => {
+            (path, String::new(), FanOutStatus::Done)
+        }
+        CoordinatorEvent::Interrupted { path } | CoordinatorEvent::Failed { path, .. } => {
+            (path, String::new(), FanOutStatus::Failed)
+        }
+        CoordinatorEvent::Harness { .. } => return None,
+    };
+    Some(FanOutAgent {
+        id: path.as_str().to_string(),
+        label,
+        status,
+    })
 }
 
 fn render_event(event: &CoordinatorEvent) -> String {
@@ -64,5 +90,29 @@ pub(super) fn role_for_purpose(purpose: OrchestrationPurpose) -> Result<AgentRol
         OrchestrationPurpose::ExternalResearch => {
             Err("external research must use clark_research".to_string())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use agent_orchestration::AgentPath;
+
+    use super::*;
+
+    #[test]
+    fn coordinator_events_become_typed_agent_progress() {
+        let path = AgentPath::parse("/root/api").unwrap();
+        let queued = fan_out_agent(&CoordinatorEvent::Queued {
+            path: path.clone(),
+            label: "Inspect the API".into(),
+        })
+        .unwrap();
+        assert_eq!(queued.id, "/root/api");
+        assert_eq!(queued.label, "Inspect the API");
+        assert_eq!(queued.status, FanOutStatus::Queued);
+
+        let running = fan_out_agent(&CoordinatorEvent::Running { path, attempt: 1 }).unwrap();
+        assert!(running.label.is_empty());
+        assert_eq!(running.status, FanOutStatus::Running);
     }
 }

@@ -183,6 +183,20 @@ export function scheduleCloudPut(
   void drainPush(meta.id);
 }
 
+/** Wait for every currently queued/in-flight snapshot write to settle. The
+ *  updater calls this only after runs and follow-ups drain, so no new streaming
+ *  snapshots should appear. Returns false on a failed or timed-out delivery;
+ *  callers can keep the app running and retry instead of losing the final tail. */
+export async function flushCloudPuts(timeoutMs = 5000): Promise<boolean> {
+  for (const id of [...pending.keys()]) void drainPush(id);
+  const deadline = Date.now() + timeoutMs;
+  while (inflight.size > 0) {
+    if (Date.now() >= deadline) return false;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  return pending.size === 0;
+}
+
 async function drainPush(id: string): Promise<void> {
   if (inflight.has(id)) return; // already sending this conversation
   const job = pending.get(id);

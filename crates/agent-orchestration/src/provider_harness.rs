@@ -320,7 +320,7 @@ fn structured_prompt(context: &AttemptContext) -> String {
          {feedback}\
          Inspect evidence only inside the allowed scopes. Do not duplicate unrelated work.\n\
          Finish with exactly one JSON object and no prose after it, using this shape:\n\
-         {{\"task_id\":\"{}\",\"attempt\":{},\"status\":\"reported\",\"summary\":\"concise result\",\"changed_paths\":[],\"commands\":[],\"tests\":[],\"claims\":[{{\"claim\":\"finding\",\"evidence_ref\":\"path:line or command\"}}],\"unresolved\":[]}}\n\
+         {{\"task_id\":\"{}\",\"attempt\":{},\"status\":\"reported\",\"changed_paths\":[],\"commands\":[],\"tests\":[],\"claims\":[{{\"evidence_ref\":\"path:line or command\",\"claim\":\"finding\"}}],\"unresolved\":[],\"summary\":\"concise result\"}}\n\
          Never claim evidence, commands, or tests you did not actually inspect or run.",
         context.parent_context,
         context.task.objective,

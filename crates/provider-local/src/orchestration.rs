@@ -18,9 +18,26 @@ mod tool;
 
 pub(crate) use tool::orchestration_tools;
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum DelegationMode {
+    #[default]
+    ExplicitRequestOnly,
+    Proactive,
+}
+
+impl DelegationMode {
+    fn parse(value: Option<&Value>) -> Self {
+        match value.and_then(Value::as_str) {
+            Some("proactive") => Self::Proactive,
+            _ => Self::ExplicitRequestOnly,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct OrchestrationConfig {
     pub enabled: bool,
+    pub mode: DelegationMode,
     pub max_agents: usize,
     pub max_attempts: u32,
     pub token_budget: u64,
@@ -28,6 +45,7 @@ pub(crate) struct OrchestrationConfig {
     pub child_system_prompt_tokens: u64,
     pub max_projected_cost_ratio: f64,
     pub subagent_model: Option<String>,
+    pub read_only_harness: String,
     pub root_model_rate: agent_orchestration::ModelRate,
     pub subagent_model_rate: Option<agent_orchestration::ModelRate>,
     pub acp_harnesses: Vec<AcpHarnessConfig>,
@@ -45,7 +63,8 @@ pub(crate) struct AcpHarnessConfig {
 impl Default for OrchestrationConfig {
     fn default() -> Self {
         Self {
-            enabled: false,
+            enabled: true,
+            mode: DelegationMode::ExplicitRequestOnly,
             max_agents: 3,
             max_attempts: 2,
             token_budget: 120_000,
@@ -53,6 +72,7 @@ impl Default for OrchestrationConfig {
             child_system_prompt_tokens: 6_000,
             max_projected_cost_ratio: 1.25,
             subagent_model: None,
+            read_only_harness: "local".to_string(),
             root_model_rate: agent_orchestration::ModelRate::default(),
             subagent_model_rate: None,
             acp_harnesses: Vec::new(),
@@ -74,13 +94,12 @@ impl OrchestrationConfig {
         let Some(object) = value.as_object() else {
             return Self::default();
         };
-        let mut config = Self {
-            enabled: object
-                .get("enabled")
-                .and_then(Value::as_bool)
-                .unwrap_or(false),
-            ..Self::default()
-        };
+        let mut config = Self::default();
+        config.enabled = object
+            .get("enabled")
+            .and_then(Value::as_bool)
+            .unwrap_or(config.enabled);
+        config.mode = DelegationMode::parse(object.get("mode"));
         config.max_agents =
             integer(object, "max_agents", config.max_agents as u64).clamp(1, 4) as usize;
         config.max_attempts =
@@ -119,6 +138,14 @@ impl OrchestrationConfig {
             .filter_map(parse_acp_harness)
             .take(3)
             .collect();
+        config.read_only_harness = object
+            .get("read_only_harness")
+            .and_then(Value::as_str)
+            .filter(|id| {
+                *id == "local" || config.acp_harnesses.iter().any(|harness| harness.id == *id)
+            })
+            .unwrap_or("local")
+            .to_string();
         config
     }
 }
@@ -187,15 +214,26 @@ fn parse_acp_harness(value: &Value) -> Option<AcpHarnessConfig> {
     })
 }
 
-pub(crate) fn prompt_section() -> &'static str {
-    "\n# Read-only delegation\n\
-     You have opt-in multi-agent tools for bounded repository investigation. The root agent is the only writer.\n\
-     - Delegate only when the user or repository instructions explicitly authorize it.\n\
-     - Exploration needs at least two independent, non-overlapping, high-context scopes. Keep ordinary work single-agent.\n\
-     - Use one reviewer or verifier only when concrete risk signals justify an independent gate.\n\
-     - Delegates are read-only: they may inspect and report evidence, never edit, widen permissions, or perform external research. Use clark_research for external research.\n\
-     - Treat reports as leads. Check cited files and commands yourself, then call resolve_delegation with accept or bounded rework for every report.\n\
-     - Do not delegate if repeated prompts and repository reads are projected to cost materially more than the single-agent path.\n"
+pub(crate) fn turn_policy_section(mode: DelegationMode) -> &'static str {
+    match mode {
+        DelegationMode::ExplicitRequestOnly => {
+            "[runtime policy — bounded delegation]\n\
+             Tool availability is not authorization. Do not delegate unless the current user request, applicable project instructions, or an active skill explicitly asks for subagents, delegation, or parallel agent work.\n\
+             Even when authorized, stay single-agent unless there are at least two concrete, bounded, genuinely independent workstreams and parallelism would materially improve speed, context isolation, or correctness. Do not fan out for status, explanation, one small edit, sequential work, or merely to avoid doing local work.\n\
+             While delegates run, continue useful root work that cannot conflict with them.\n\
+             Read-only agents must return evidence before conclusions. Verify cited evidence yourself, then resolve every report.\n\
+             Parallel writers require at least two exact, disjoint file leases. They work in disposable Git clones; the host replays hashed patches and verifies the integrated result before the primary checkout can change.\n\
+             Do not recurse, widen permissions, or use coding delegates for external research."
+        }
+        DelegationMode::Proactive => {
+            "[runtime policy — bounded delegation]\n\
+             You may proactively delegate only when independent workstreams would materially improve speed, context isolation, or correctness. Keep ordinary, small, overlapping, and sequential work single-agent.\n\
+             Delegate concrete, bounded work that can run independently alongside useful local work. Prefer read-heavy exploration, review, verification, and test analysis.\n\
+             Read-only agents must return evidence before conclusions. Verify cited evidence yourself, then resolve every report.\n\
+             Parallel writers require at least two exact, disjoint file leases. They work in disposable Git clones; the host replays hashed patches and verifies the integrated result before the primary checkout can change.\n\
+             Do not recurse, widen permissions, or use coding delegates for external research."
+        }
+    }
 }
 
 /// Hashes the model-visible workspace before and after a delegated attempt.
@@ -347,14 +385,25 @@ mod tests {
     }
 
     #[test]
-    fn orchestration_is_opt_in_bounded_and_refuses_unproved_disposable_acp() {
+    fn orchestration_is_default_available_bounded_and_refuses_unproved_disposable_acp() {
+        let defaults = OrchestrationConfig::from_extra(&json!({}));
+        assert!(defaults.enabled);
+        assert_eq!(defaults.mode, DelegationMode::ExplicitRequestOnly);
+
+        let explicitly_disabled = OrchestrationConfig::from_extra(&json!({
+            "orchestration": {"enabled": false}
+        }));
+        assert!(!explicitly_disabled.enabled);
+
         let config = OrchestrationConfig::from_extra(&json!({
             "orchestration": {
                 "enabled": true,
+                "mode": "proactive",
                 "max_agents": 99,
                 "max_attempts": 99,
                 "token_budget": 75_000,
                 "subagent_model": "cheap-model",
+                "read_only_harness": "sandboxed",
                 "acp_harnesses": [
                     {
                         "id": "unsafe",
@@ -376,10 +425,12 @@ mod tests {
             }
         }));
         assert!(config.enabled);
+        assert_eq!(config.mode, DelegationMode::Proactive);
         assert_eq!(config.max_agents, 4);
         assert_eq!(config.max_attempts, 3);
         assert_eq!(config.token_budget, 75_000);
         assert_eq!(config.subagent_model.as_deref(), Some("cheap-model"));
+        assert_eq!(config.read_only_harness, "sandboxed");
         assert_eq!(config.acp_harnesses.len(), 1);
         assert_eq!(config.acp_harnesses[0].id, "sandboxed");
         assert_eq!(
@@ -392,10 +443,21 @@ mod tests {
     }
 
     #[test]
-    fn orchestration_prompt_pins_one_writer_and_report_resolution() {
-        let prompt = prompt_section();
-        assert!(prompt.contains("root agent is the only writer"));
-        assert!(prompt.contains("resolve_delegation"));
-        assert!(prompt.contains("Use clark_research for external research"));
+    fn explicit_mode_requires_a_real_delegation_trigger() {
+        let prompt = turn_policy_section(DelegationMode::ExplicitRequestOnly);
+        assert!(prompt.contains("Tool availability is not authorization"));
+        assert!(prompt.contains("Do not delegate unless"));
+        assert!(prompt.contains("at least two concrete, bounded, genuinely independent"));
+        assert!(prompt.contains("Do not fan out for status"));
+        assert!(prompt.contains("disposable Git clones"));
+        assert!(prompt.contains("Do not recurse"));
+    }
+
+    #[test]
+    fn proactive_mode_still_rejects_weak_parallelism() {
+        let prompt = turn_policy_section(DelegationMode::Proactive);
+        assert!(prompt.contains("proactively delegate"));
+        assert!(prompt.contains("materially improve"));
+        assert!(prompt.contains("small, overlapping, and sequential work single-agent"));
     }
 }

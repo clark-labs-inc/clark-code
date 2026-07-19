@@ -44,6 +44,167 @@ final result: passed
 
 ---
 
+# Simplified Parallel Work Design QA
+
+- Source visual truth: `.design-qa/multi-agent-collapsed.png` and `.design-qa/multi-agent-expanded.png`
+- Implementation screenshots: `.design-qa/multi-agent-simplified-collapsed.png` and `.design-qa/multi-agent-simplified-expanded.png`
+- Full-view comparisons: `.design-qa/multi-agent-simplified-collapsed-comparison.png` and `.design-qa/multi-agent-simplified-expanded-comparison.png`
+- Viewport: 1280 x 720 for every source and implementation capture
+- State: dark theme, local mock session complete, three parallel parts ready; collapsed and expanded
+
+## Findings
+
+No actionable P0, P1, or P2 differences remain. The implementation intentionally reduces explanatory chrome while preserving the accepted card, status receipt, and disclosure interaction.
+
+- Fonts and typography: passed. The shorter `Parallel work` heading and existing 12px supporting status preserve Clark's compact hierarchy and remove redundant copy without changing the type system.
+- Spacing and layout rhythm: passed. The collapsed card keeps the same footprint and alignment. The expanded state removes the introductory and footer rows, leaving a cleaner three-row task list with consistent separators, padding, and status alignment.
+- Colors and visual tokens: passed. The standalone violet orchestration icon, one-pixel completion receipt, graphite surface, quiet border, and green ready states remain within the existing Clark token system.
+- Image quality and asset fidelity: passed. No raster or custom illustrative asset is required; the orchestration and disclosure marks remain crisp Lucide icons.
+- Copy and content: passed. `Parallel work` and `All parts are ready` communicate the outcome directly. The task list appears only on expansion, without model names, worktree terminology, or orchestration explanation.
+- Accessibility and interaction: passed. The whole summary remains one button with `aria-expanded`; its accessible name includes the heading and status, and the chevron communicates disclosure without a redundant visible Details/Hide label.
+
+## Full-view Comparison Evidence
+
+The collapsed combined image shows the accepted source on the left and the simplified implementation on the right at identical scale. The revised card preserves its placement, size, border, status, and progress receipt while reducing the header to the essential label and chevron. The expanded combined image shows the same shell and state; only the redundant explanation and footer have been removed.
+
+## Focused Region Comparison Evidence
+
+A separate crop was not needed because each card remains fully legible at original resolution in the 2560 x 720 combined comparisons. Both the header controls and all three expanded task/status rows can be judged directly without rescaling.
+
+## Comparison History
+
+1. The accepted source used `Clark is working in parallel`, a visible Details/Hide label, an icon tile, an explanatory expanded intro, three work rows, and a footer explanation.
+2. The requested simplification shortened the heading, removed the visible disclosure label and icon tile, and limited the expanded body to the three work rows and their statuses.
+3. Post-change evidence: `.design-qa/multi-agent-simplified-collapsed-comparison.png` and `.design-qa/multi-agent-simplified-expanded-comparison.png`. No corrective P0/P1/P2 iteration was required.
+
+## Interaction and Runtime Evidence
+
+- Verified the collapsed button exposes `Parallel work All parts are ready` and expands to the three typed work rows.
+- Verified the expanded card collapses from the same control.
+- Browser console errors: none. The only warning was the expected reduced-motion development notice.
+- Frontend typecheck passed.
+- The complete Vitest suite passed: 36 files and 183 tests.
+- Production Vite build passed.
+
+## Follow-up Polish
+
+- No P3 visual change is recommended; further reduction would start hiding useful progress detail.
+
+final result: passed
+
+---
+
+# Parallel Work Extra-Line Removal Design QA
+
+- Source visual truth: `/tmp/codex-remote-attachments/019f733c-78c5-7d21-8533-bbf2cd9cfa31/179D6D0D-47A4-497C-8918-C1B31689F35D/1-Photo-1.jpg` and `.design-qa/multi-agent-simplified-expanded.png`
+- Implementation screenshot: `.design-qa/multi-agent-no-extra-line-expanded.png`
+- Full-view comparison: `.design-qa/multi-agent-no-extra-line-comparison.png`
+- Viewport: 1280 x 720 for the normalized before/after comparison; the supplied phone image is a portrait crop of the same expanded state
+- State: dark theme, completed parallel work, details expanded, summary button focused
+
+## Findings
+
+No actionable P0, P1, or P2 differences remain. The unwanted violet horizontal line is absent while the card's structure, content, dimensions, and expand behavior remain unchanged.
+
+- Fonts and typography: passed. Heading, supporting status, task labels, and ready states are unchanged.
+- Spacing and layout rhythm: passed. Removing the line did not alter the summary height, task-row spacing, card radius, or surrounding conversation layout.
+- Colors and visual tokens: passed. The clipped violet line is gone. Keyboard focus now uses the existing quiet hover background token across the summary instead of drawing a partial outline.
+- Image quality and asset fidelity: passed. No imagery or icon asset changed; the existing Lucide orchestration, disclosure, and status icons remain crisp.
+- Copy and content: passed. `Parallel work`, `All parts are ready`, and the three task/status rows are unchanged.
+- Accessibility and interaction: passed. The summary still exposes `aria-expanded=true` and retains a visible keyboard-focus cue through its background state without the stray line.
+
+## Full-view Comparison Evidence
+
+The combined comparison places the prior expanded state on the left and the revised state on the right at the same viewport. The only structural removal is the horizontal progress divider. In the focused state, the global outline no longer clips into a line at the bottom edge of the summary.
+
+## Focused Region Comparison Evidence
+
+The full-view comparison renders the card large enough to inspect the exact summary/task boundary, so a separate crop is unnecessary. The removed line and preserved task spacing are directly legible at original resolution.
+
+## Comparison History
+
+1. Initial P2: the supplied image and previous implementation showed a bright violet horizontal line between the summary and task rows.
+2. First fix: removed the dedicated progress-divider element. The first post-fix capture showed that a second line persisted when the summary button was focused.
+3. Root fix: the global focus outline was being clipped by the card's `overflow-hidden` boundary. The toggle now suppresses that partial outline and uses a quiet full-summary background as its focus cue.
+4. Post-fix evidence: `.design-qa/multi-agent-no-extra-line-expanded.png` and `.design-qa/multi-agent-no-extra-line-comparison.png`. No actionable P0/P1/P2 issue remains.
+
+## Interaction and Runtime Evidence
+
+- Ran the local mock through the ordinary composer and expanded the completed Parallel Work card.
+- Verified the button remains expanded and its computed outline style is `none` in the focused state.
+- Browser console errors: none.
+- Frontend typecheck passed.
+- The complete Vitest suite passed: 36 files and 183 tests.
+- Production Vite build passed.
+
+## Follow-up Polish
+
+- None recommended for this focused change.
+
+final result: passed
+
+---
+
+# Simple Multi-Agent Progress Design QA
+
+- Source visual truth: `.design-qa/settings/implementation-pass-2.jpg` (Clark Desktop's selected dark-shell, card-density, typography, and token reference)
+- Collapsed implementation: `.design-qa/multi-agent-collapsed.png`
+- Expanded implementation: `.design-qa/multi-agent-expanded.png`
+- Full-view comparison: `.design-qa/multi-agent-design-comparison.png`
+- Focused comparison: `.design-qa/multi-agent-focused-comparison.png`
+- Viewport: 1280 x 720 for both source and implementation captures
+- State: dark theme, local mock session complete, three parallel parts ready; details collapsed and expanded
+
+## Full-view comparison evidence
+
+The source is a different Clark workflow, so the comparison is intentionally
+limited to the existing product shell and design language rather than claiming
+component-for-component fidelity. In the combined image, the implementation
+preserves the same sidebar proportion, centered content width, warm graphite
+surfaces, quiet borders, compact hierarchy, and restrained violet selection.
+The new card reads as part of Clark rather than a separate orchestration
+dashboard.
+
+## Focused comparison evidence
+
+The focused comparison places Clark's existing settings cards beside the
+expanded multi-agent card at a common scale. Row height, separator weight,
+corner radius, muted supporting text, semantic status treatment, and control
+density remain consistent. The orchestration surface adds no bespoke imagery;
+it uses the installed Lucide icon set and existing tokens.
+
+## Findings
+
+No actionable P0, P1, or P2 differences remain for this vertical slice.
+
+- Fonts and typography: passed. The card uses the existing DM Sans hierarchy: 14px primary copy and compact 12px status/supporting copy, with no new display treatment.
+- Spacing and layout rhythm: passed. The collapsed card stays one compact 58px summary surface; expanded rows use the same quiet density, separators, radius, and centered conversation width as adjacent Clark components.
+- Colors and visual tokens: passed. Background, hover, border, ink, accent, success, and danger states all use Clark tokens; violet is limited to the icon tint and progress receipt.
+- Image quality and asset fidelity: passed. No raster or custom decorative asset is required; the Network, status, and disclosure icons come from the installed Lucide library.
+- Copy and content: passed. Default copy explains the outcome in nontechnical language; agent names, model details, tokens, worktrees, and logs are hidden until details are requested.
+- Accessibility and interaction: passed. The whole summary is a single button with `aria-expanded`; Details/Hide tracks the state, and reduced motion is respected.
+
+## Comparison history
+
+1. Initial source implementation was a prominent swarm card with a large accent block, a visible progress bar, numbered agent tiles, and technical copy such as “fanned out” and “merging.”
+2. Fix: replaced it with a single quiet summary row, plain-language status, a one-pixel progress receipt, and details collapsed by default.
+3. Post-fix evidence: `.design-qa/multi-agent-collapsed.png`, `.design-qa/multi-agent-expanded.png`, and `.design-qa/multi-agent-focused-comparison.png`. No actionable P0/P1/P2 issue remains.
+
+## Interaction and runtime evidence
+
+- Ran the local browser mock through the ordinary composer using “Build this feature in parallel, then review and verify it.”
+- Verified the completed receipt remains visible, opens to three typed child rows, and closes from the same control.
+- Browser console errors: none. The only warning was the expected reduced-motion development notice.
+- Frontend typecheck and the complete 182-test Vitest suite passed before capture.
+
+## Follow-up polish
+
+- P3: once retry and failure recovery are exposed in a live model run, capture the “Needs attention” and safe rework states in the same shell.
+
+final result: passed
+
+---
+
 # Streamlined Settings Design QA
 
 - Source visual truth: `/var/folders/sx/5vx_xn5j0c31t3jw27sjtnqc0000gn/T/TemporaryItems/NSIRD_screencaptureui_p3n2ml/Screenshot 2026-07-18 at 1.09.06 PM.png`
@@ -168,5 +329,50 @@ No actionable P0, P1, or P2 differences remain. Clark keeps its own light theme 
 ## Follow-up Polish
 
 - P3: evaluate the same density in dark mode after the light-theme change has been used in the installed app; no dark-mode blocker was observed from token usage.
+
+final result: passed
+
+---
+
+# Composer Add Menu Design QA
+
+- Source visual truth: `/var/folders/sx/5vx_xn5j0c31t3jw27sjtnqc0000gn/T/TemporaryItems/NSIRD_screencaptureui_l7sDKH/Screenshot 2026-07-18 at 9.44.28 PM.png`
+- Light implementation screenshot: `.design-qa/composer-add-menu-light.png`
+- Dark implementation screenshot: `.design-qa/composer-add-menu-dark.png`
+- Focused source/implementation comparison: `.design-qa/composer-add-menu-comparison.png`
+- Viewport: 1280 × 720 implementation; the 797 × 358 Codex reference was normalized into a focused component comparison.
+- State: local Clark Code conversation, Add menu open above the composer; verified before the first turn and after a session starts.
+
+## Findings
+
+No actionable P0, P1, or P2 differences remain for the attachment workflow. Clark intentionally limits the menu to working attachment sources instead of copying unavailable Codex goals and plugin entries.
+
+- Fonts and typography: passed. The menu uses Clark's existing DM Sans scale, with a compact `Add` label, 13px actions, and 12px inline hints matching the reference hierarchy.
+- Spacing and layout rhythm: passed. The final 640px menu follows the composer's width, opens upward from the plus button, uses compact 36px rows, and matches the reference's rounded full-width sheet treatment.
+- Colors and visual tokens: passed. Light and dark captures reuse Clark's elevated, hover, border, ink, and shadow tokens; the menu does not introduce a bespoke surface palette.
+- Image quality and asset fidelity: passed. No raster assets are required. File and folder actions use the repository's established Lucide interface icon system and remain crisp at 16px.
+- Copy and content: passed. `Files` and `Folder` expose the two working attachment sources with concise descriptions. Codex-only goal, plugin, and product-attachment entries were not fabricated.
+- Accessibility and interaction: passed. The plus button exposes `aria-haspopup`, `aria-expanded`, and a stable accessible name. The menu has named menu items, closes on outside click and Escape, and returns focus to its trigger.
+
+## Interaction Verification
+
+- Confirmed Add is enabled before any conversation exists.
+- Opened and dismissed the menu with both pointer and Escape behavior.
+- Selected a text file through the real file-chooser flow and saw its attachment chip.
+- Sent an attachment-only first turn; session creation succeeded and the staged chip cleared after dispatch.
+- Selected a folder through the directory chooser and saw its contained file staged.
+- Confirmed Add remains enabled after a session starts.
+- Verified light and dark menu renders and checked the browser console: no errors.
+
+## Comparison History
+
+1. Initial P1: the existing plus button was disabled before a session existed, so the first-turn attachment workflow was impossible and no Codex-style Add menu appeared.
+2. First implementation restored first-turn attachment staging and introduced working Files and Folder menu actions. The initial 320px stacked-label capture was a P2 density mismatch against the wide, inline Codex reference.
+3. Final fix widened the menu to 640px and moved hints inline, preserving Clark's composer width while matching the reference's sheet proportions and row rhythm.
+4. Post-fix evidence: `.design-qa/composer-add-menu-comparison.png`, `.design-qa/composer-add-menu-dark.png`, and `.design-qa/composer-add-menu-light.png`. No actionable P0/P1/P2 issue remains.
+
+## Follow-up Polish
+
+- P3: add arrow-key roving focus if the Add menu grows beyond the current two actions.
 
 final result: passed

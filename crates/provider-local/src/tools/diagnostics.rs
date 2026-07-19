@@ -131,6 +131,7 @@ mod tests {
             background: Arc::new(crate::background::BackgroundTasks::default()),
             session: Arc::new(tokio::sync::Mutex::new(session)),
             progress: None,
+            agent_progress: None,
         }
     }
 

@@ -18,6 +18,16 @@ pub enum Role {
     System,
 }
 
+/// Whether assistant-authored text is an in-flight work update or the turn's
+/// terminal answer. Providers that cannot distinguish the two may leave the
+/// phase unset and let projection infer it from later tool/run events.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MessagePhase {
+    Commentary,
+    FinalAnswer,
+}
+
 /// A piece of message or tool content. Mirrors ACP content blocks.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -423,6 +433,13 @@ pub enum AgentEvent {
         run: RunId,
         role: Role,
         delta: ContentBlock,
+    },
+    /// Classify the latest still-unphased assistant message for this run.
+    /// Emitted after streaming when the provider learns whether more work
+    /// follows (for example, a response that also contains tool calls).
+    MessagePhase {
+        run: RunId,
+        phase: MessagePhase,
     },
     ToolCall {
         run: RunId,

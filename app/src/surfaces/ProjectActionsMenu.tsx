@@ -11,8 +11,8 @@ import {
   Pin,
   PinOff,
   Server,
-  SquareTerminal,
-  Trash2,
+  SquarePen,
+  X,
 } from "lucide-react";
 import type { ProjectGroup } from "../lib/projectSidebar";
 
@@ -25,12 +25,12 @@ export function ProjectHeader({
   group,
   menuOpen,
   onOpenMenu,
-  onOpenTerminal,
+  onNewSession,
 }: {
   group: ProjectGroup;
   menuOpen: boolean;
   onOpenMenu: (button: HTMLButtonElement) => void;
-  onOpenTerminal: (path: string) => void;
+  onNewSession: (path: string) => void;
 }) {
   const Icon = group.kind === "remote" ? Server : group.kind === "local" ? FolderGit2 : MessageSquare;
   return (
@@ -61,12 +61,12 @@ export function ProjectHeader({
       {group.path && (
         <button
           type="button"
-          onClick={() => onOpenTerminal(group.path!)}
-          title={`Set ${group.label} as the current project and open a terminal in it`}
-          aria-label={`Open terminal in ${group.label}`}
+          onClick={() => onNewSession(group.path!)}
+          title={`New session in ${group.label}`}
+          aria-label={`New session in ${group.label}`}
           className="grid size-5 shrink-0 place-items-center rounded-md text-ink-faint opacity-0 transition hover:bg-bg-sunken hover:text-ink group-hover:opacity-100 group-focus-within:opacity-100"
         >
-          <SquareTerminal className="size-3.5" />
+          <SquarePen className="size-3.5" />
         </button>
       )}
     </div>
@@ -210,7 +210,7 @@ export function ProjectActionsMenu({
           >
             Archive chats
           </MenuItem>
-          <MenuItem icon={Trash2} danger onClick={() => setMode("remove")}>
+          <MenuItem icon={X} danger onClick={() => setMode("remove")}>
             Remove
           </MenuItem>
         </>

@@ -39,6 +39,49 @@ async fn desktop_sink_preserves_stream_lifecycle_events_as_trace() {
 }
 
 #[tokio::test]
+async fn desktop_sink_marks_text_with_tool_calls_as_commentary() {
+    let (send, receive) = async_channel::unbounded();
+    let sink = DesktopEventSink::new(
+        send,
+        RunId::new("run-1"),
+        Arc::new(ToolRegistry::new(None, None)),
+        None,
+    );
+    ca::EventSink::emit(
+        &sink,
+        ca::AgentEvent::MessageEnd {
+            message: ca::AgentMessage::Assistant {
+                content: ca::AssistantContent::with_tool_calls(
+                    Some("I found the config; I’ll inspect its callers next.".into()),
+                    vec![ca::ToolCall {
+                        id: "call-1".into(),
+                        name: "read_file".into(),
+                        arguments: json!({"path": "src/main.rs"}),
+                    }],
+                ),
+                stop_reason: ca::StopReason::ToolUse,
+                error_message: None,
+                timestamp: None,
+                usage: None,
+            },
+        },
+    )
+    .await;
+
+    assert!(matches!(
+        receive.recv().await.expect("trace event"),
+        desktop::AgentEvent::Trace { .. }
+    ));
+    assert!(matches!(
+        receive.recv().await.expect("phase event"),
+        desktop::AgentEvent::MessagePhase {
+            phase: desktop::MessagePhase::Commentary,
+            ..
+        }
+    ));
+}
+
+#[tokio::test]
 async fn desktop_sink_captures_only_canonical_completed_turns() {
     let (send, _receive) = async_channel::unbounded();
     let sink = DesktopEventSink::new(

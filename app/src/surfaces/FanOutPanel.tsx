@@ -1,30 +1,41 @@
+import { useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { CheckCircle2, Circle, Loader2, Network, XCircle } from "lucide-react";
+import { Check, ChevronDown, Circle, Loader2, Network, TriangleAlert } from "lucide-react";
 import { cn } from "../lib/cn";
 import { DUR, EASE } from "../lib/motion";
 import { useFanOutStore, type FanOut, type FanOutAgent } from "../store/fanOutStore";
 
 const STATUS_COPY: Record<FanOutAgent["status"], string> = {
-  done: "Done",
-  running: "Researching",
-  queued: "Queued",
-  failed: "Failed",
+  done: "Ready",
+  running: "Working",
+  queued: "Waiting",
+  failed: "Needs attention",
 };
 
-
 function StatusIcon({ status }: { status: FanOutAgent["status"] }) {
-  if (status === "done") return <CheckCircle2 className="size-3.5 text-success" />;
-  if (status === "failed") return <XCircle className="size-3.5 text-danger" />;
+  if (status === "done") return <Check className="size-3.5 text-success" strokeWidth={2.5} />;
+  if (status === "failed") return <TriangleAlert className="size-3.5 text-danger" />;
   if (status === "running") {
     return <Loader2 className="size-3.5 animate-[spin_1s_linear_infinite] text-accent" />;
   }
   return <Circle className="size-3.5 text-ink-faint" strokeDasharray="3 3" />;
 }
 
-function FanOutCard({ fanOut, reduce }: { fanOut: FanOut; reduce: boolean | null }) {
-  const pct = fanOut.total > 0 ? Math.round((fanOut.done / fanOut.total) * 100) : 0;
-  const shown = fanOut.agents.slice(0, 15);
-  const more = fanOut.total - shown.length;
+export function fanOutSummary(fanOut: FanOut): string {
+  const failed = fanOut.agents.filter((agent) => agent.status === "failed").length;
+  if (failed > 0) {
+    return `${failed} part${failed === 1 ? " needs" : "s need"} attention`;
+  }
+  if (fanOut.done >= fanOut.total && fanOut.total > 0) return "All parts are ready";
+  if (fanOut.running > 0) return `${fanOut.done} of ${fanOut.total} parts ready`;
+  return `${fanOut.total} parts waiting`;
+}
+
+export function FanOutCard({ fanOut, reduce }: { fanOut: FanOut; reduce: boolean | null }) {
+  const [expanded, setExpanded] = useState(false);
+  const shown = fanOut.agents.slice(0, 8);
+  const more = Math.max(0, fanOut.total - shown.length);
+  const summary = fanOutSummary(fanOut);
 
   return (
     <motion.div
@@ -32,84 +43,66 @@ function FanOutCard({ fanOut, reduce }: { fanOut: FanOut; reduce: boolean | null
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={reduce ? { opacity: 0 } : { opacity: 0, y: -6, scale: 0.98 }}
       transition={{ duration: DUR.base, ease: EASE.out }}
-      className="overflow-hidden rounded-xl border border-border-subtle bg-bg-elevated p-4"
+      className="overflow-hidden rounded-xl border border-border-subtle bg-bg-elevated"
     >
-      <div className="flex items-center gap-3">
-        <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-accent text-on-accent">
-          <Network className="size-4" />
-        </span>
+      <button
+        type="button"
+        aria-expanded={expanded}
+        onClick={() => setExpanded((open) => !open)}
+        className="fan-out-toggle group flex w-full items-center gap-3 px-3.5 py-3 text-left transition-colors hover:bg-bg-hover"
+      >
+        <Network className="size-4 shrink-0 text-accent" />
         <div className="min-w-0 flex-1">
-          <div className="text-sm font-semibold text-ink">
-            Fanned out to {fanOut.total.toLocaleString()} agents
-          </div>
-          {fanOut.title && <div className="truncate text-xs text-ink-muted">{fanOut.title}</div>}
+          <div className="text-sm font-medium text-ink">Parallel work</div>
+          <div className="mt-0.5 truncate text-xs text-ink-muted">{summary}</div>
         </div>
-      </div>
-
-      <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-bg-tertiary">
-        <motion.div
-          className="h-full rounded-full bg-accent"
-          initial={false}
-          animate={{ width: `${Math.max(3, pct)}%` }}
-          transition={{ duration: DUR.slow, ease: EASE.out }}
+        <ChevronDown
+          className={cn("size-3.5 text-ink-faint transition-transform", expanded && "rotate-180")}
         />
-      </div>
-      <div className="mt-1.5 font-mono text-xs tabular-nums text-ink-faint">
-        {fanOut.done} done · {fanOut.running} running · merging as they finish
-      </div>
+      </button>
 
-      <div className="mt-3 space-y-1.5">
-        <AnimatePresence initial={false}>
-          {shown.map((a, i) => (
-            <motion.div
-              key={a.id}
-              layout
-              initial={reduce ? false : { opacity: 0, y: 4 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -4 }}
-              transition={{
-                duration: DUR.base,
-                delay: reduce ? 0 : Math.min(i * 0.015, 0.2),
-                ease: EASE.out,
-              }}
-              className={cn(
-                "flex min-w-0 items-start gap-2 rounded-md border border-border-subtle bg-bg-secondary px-2.5 py-2",
-                a.status === "queued" && "opacity-50",
-                a.status === "running" && "border-accent/30 bg-accent/8",
+      <AnimatePresence initial={false}>
+        {expanded && (
+          <motion.div
+            initial={reduce ? { opacity: 0 } : { height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={reduce ? { opacity: 0 } : { height: 0, opacity: 0 }}
+            transition={{ duration: DUR.base, ease: EASE.out }}
+            className="overflow-hidden"
+          >
+            <div className="space-y-0.5 p-2">
+              {shown.map((agent) => (
+                <div
+                  key={agent.id}
+                  className={cn(
+                    "flex min-w-0 items-center gap-2.5 rounded-lg px-2 py-2",
+                    agent.status === "running" && "bg-accent/8",
+                  )}
+                >
+                  <span className="grid size-5 shrink-0 place-items-center">
+                    <StatusIcon status={agent.status} />
+                  </span>
+                  <span className="min-w-0 flex-1 truncate text-sm text-ink-secondary">
+                    {agent.label}
+                  </span>
+                  <span className="shrink-0 text-xs text-ink-faint">
+                    {STATUS_COPY[agent.status]}
+                  </span>
+                </div>
+              ))}
+              {more > 0 && (
+                <div className="px-2 py-1.5 text-xs text-ink-faint">+{more} more parts</div>
               )}
-            >
-              <span className="mt-0.5 grid size-5 shrink-0 place-items-center rounded-full bg-bg-elevated">
-                <StatusIcon status={a.status} />
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
-                  <span className="font-mono text-xs text-ink-faint">
-                    #{i + 1}
-                  </span>
-                  <span className="text-xs font-medium text-ink-muted">
-                    {STATUS_COPY[a.status]}
-                  </span>
-                </span>
-                <span className="mt-0.5 block truncate text-sm text-ink-secondary">
-                  {a.label}
-                </span>
-              </span>
-            </motion.div>
-          ))}
-        </AnimatePresence>
-        {more > 0 && (
-          <div className="rounded-md bg-bg-sunken px-2.5 py-2 font-mono text-xs text-ink-muted">
-            +{more} more
-          </div>
+            </div>
+          </motion.div>
         )}
-      </div>
+      </AnimatePresence>
     </motion.div>
   );
 }
 
-/** The parallel fan-out surface: gives "thousands of cloud agents" a face — a
- *  live swarm of agent tiles with an aggregate progress readout. Fades in when a
- *  fan-out starts and fades out when the run ends; renders nothing otherwise. */
+/** A deliberately quiet parallel-work surface. The aggregate state is visible
+ *  at a glance; agent-by-agent detail stays collapsed unless the user asks. */
 export function FanOutPanel() {
   const fanOut = useFanOutStore((s) => s.fanOut);
   const reduce = useReducedMotion();

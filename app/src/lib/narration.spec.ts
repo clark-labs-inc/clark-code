@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseNarration } from "./narration";
+import { parseNarration, presentationKind } from "./narration";
 
 describe("parseNarration", () => {
   it("returns a single text span when there are no tags", () => {
@@ -42,5 +42,24 @@ describe("parseNarration", () => {
       { kind: "thinking", text: "weighing options…" },
       { kind: "text", text: "Done." },
     ]);
+  });
+});
+
+describe("presentationKind", () => {
+  it("renders typed commentary with narration styling", () => {
+    expect(presentationKind("text", "commentary")).toBe("narrate");
+  });
+
+  it("keeps final answer text normal", () => {
+    expect(presentationKind("text", "final_answer")).toBe("text");
+  });
+
+  it("keeps thinking separate from typed commentary", () => {
+    expect(presentationKind("thinking", "commentary")).toBe("thinking");
+  });
+
+  it("preserves legacy narration tags on final and unphased messages", () => {
+    expect(presentationKind("narrate", "final_answer")).toBe("narrate");
+    expect(presentationKind("narrate")).toBe("narrate");
   });
 });

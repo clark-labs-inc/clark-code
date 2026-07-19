@@ -9,6 +9,7 @@ import type {
   CloudTrajectoryConfig,
   CoreBridge,
   ConnectConfig,
+  ProjectContext,
   SessionOptions,
 } from "./bridge";
 import type { Upload } from "../lib/attachments";
@@ -111,6 +112,13 @@ export class TauriBridge implements CoreBridge {
 
   listFiles(cwd: string, remote?: { ws_url: string; token: string } | null): Promise<string[]> {
     return invoke<string[]>("local_list_files", { cwd, remote: remote ?? null });
+  }
+
+  projectContext(
+    cwd: string,
+    remote?: { ws_url: string; token: string } | null,
+  ): Promise<ProjectContext | null> {
+    return invoke<ProjectContext | null>("project_context", { cwd, remote: remote ?? null });
   }
 
   openPath(path: string, reveal = false): Promise<void> {

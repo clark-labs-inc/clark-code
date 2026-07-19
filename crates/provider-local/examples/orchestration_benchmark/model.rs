@@ -180,8 +180,8 @@ pub struct TestEvidence {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ClaimEvidence {
-    pub claim: String,
     pub evidence_ref: String,
+    pub claim: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -189,7 +189,6 @@ pub struct StructuredHandoff {
     pub task_id: String,
     pub attempt_id: String,
     pub reported_status: TaskStatus,
-    pub summary: String,
     pub changed_paths: BTreeSet<String>,
     pub baseline_checkpoint: Option<String>,
     pub result_checkpoint: Option<String>,
@@ -198,21 +197,22 @@ pub struct StructuredHandoff {
     pub claims: Vec<ClaimEvidence>,
     pub unresolved: Vec<String>,
     pub artifact_refs: Vec<String>,
+    pub summary: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ReviewFinding {
     pub severity: String,
     pub path: Option<String>,
-    pub message: String,
     pub evidence_ref: String,
+    pub message: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ReviewVerdict {
     pub task_id: String,
-    pub accepted: bool,
     pub findings: Vec<ReviewFinding>,
+    pub accepted: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

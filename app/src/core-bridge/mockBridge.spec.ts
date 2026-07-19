@@ -32,6 +32,17 @@ describe("MockBridge", () => {
     expect(providers[0].capabilities.load_session).toBe(false);
   });
 
+  it("exposes checkout context for the browser preview", async () => {
+    const context = await new MockBridge().projectContext("/tmp/clark-desktop");
+
+    expect(context).toEqual({
+      branch: "main",
+      detached: false,
+      isWorktree: false,
+      worktreeRoot: "/tmp/clark-desktop",
+    });
+  });
+
   it("produces a streaming run with user + agent messages, a tool call and a plan", async () => {
     const b = new MockBridge();
     await b.newSession("local", {});
@@ -84,5 +95,18 @@ describe("MockBridge", () => {
     expect(snapshot.artifacts.map((artifact) => artifact.kind)).toEqual(["file", "image", "pdf"]);
     expect(snapshot.artifacts[0].tool_call).toBeTruthy();
     expect(snapshot.timeline.filter((item) => item.item === "artifact")).toHaveLength(3);
+  });
+
+  it("exposes typed parallel-work progress for the orchestration demo", async () => {
+    const b = new MockBridge();
+    await b.newSession("local", {});
+    await b.prompt("mock-session", [{ type: "text", text: "build this in parallel" }]);
+
+    const snapshot = await waitFor((state) => state.fan_out?.running === 1, b);
+    expect(snapshot.fan_out?.agents.map((agent) => agent.status)).toEqual([
+      "done",
+      "running",
+      "queued",
+    ]);
   });
 });

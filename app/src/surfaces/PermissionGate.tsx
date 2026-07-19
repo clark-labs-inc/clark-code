@@ -1,5 +1,13 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
-import { ShieldQuestion, ShieldAlert, ListChecks, Loader2 } from "lucide-react";
+import {
+  ListChecks,
+  Loader2,
+  MessageSquareText,
+  Play,
+  ShieldAlert,
+  ShieldQuestion,
+  X,
+} from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
 import { wouldAutoApprove } from "../lib/permissions";
 import { allowCommand } from "../lib/commandPolicy";
@@ -13,14 +21,6 @@ const OPTION_STYLE: Record<PermissionOptionKind, string> = {
   allow_always: "bg-bg-tertiary text-ink-secondary hover:bg-bg-hover hover:text-ink",
   reject_once: "text-ink-muted hover:bg-bg-hover hover:text-ink",
   reject_always: "text-danger/80 hover:bg-danger/10 hover:text-danger",
-};
-
-// The plan-approval gate offers two allow_once options that differ only in the
-// follow-up mode; keep one bright primary and one quiet secondary rather than
-// two competing accent buttons.
-const PLAN_OPTION_STYLE: Record<string, string> = {
-  approve_auto: OPTION_STYLE.allow_once,
-  approve_review: OPTION_STYLE.allow_always,
 };
 
 /** The permission mode the app switches to after a plan-gate choice. */
@@ -107,6 +107,13 @@ function withChips(text: string) {
   );
 }
 
+/** Plans are markdown, but the approval surface needs only a quiet count in its
+ *  document header. Count top-level ordered-list rows without trying to turn
+ *  presentation code into a second markdown parser. */
+function topLevelPlanStepCount(markdown: string) {
+  return markdown.match(/^\d+\.\s+/gm)?.length ?? 0;
+}
+
 /** Inline human-in-the-loop gate — appears in the conversation flow so the user
  *  always sees, in context, exactly what the agent is asking to do (the command
  *  or file, plus a risk classification for shell commands). The motion wrapper is
@@ -138,6 +145,7 @@ export function PermissionGate({ req }: { req: PermissionRequest }) {
 
   const tone = riskTone(req.risk);
   const danger = req.risk === "danger";
+  const planApproval = req.risk === "plan";
   // A classified shell command (not an MCP/external tool or a file edit).
   const isShellCommand =
     req.risk === "safe" || req.risk === "caution" || req.risk === "danger";
@@ -179,6 +187,174 @@ export function PermissionGate({ req }: { req: PermissionRequest }) {
     }
   };
 
+  const planRunOption = req.options.find((opt) => opt.id === "approve_auto");
+  const planReviewOption = req.options.find((opt) => opt.id === "approve_review");
+
+  if (planApproval) {
+    const stepCount = req.detail ? topLevelPlanStepCount(req.detail) : 0;
+    return (
+      <div role="alertdialog" aria-label="Review proposed plan" className="min-w-0">
+        <div className="flex items-baseline gap-3 px-1">
+          <h2 className="text-lg font-semibold tracking-tight text-ink">Proposed plan</h2>
+          {stepCount > 0 && (
+            <span className="text-sm tabular-nums text-ink-muted">
+              {stepCount} step{stepCount === 1 ? "" : "s"}
+            </span>
+          )}
+        </div>
+        <div aria-hidden="true" className="mt-2 flex h-px bg-border">
+          <span className="w-24 shrink-0 bg-accent" />
+        </div>
+
+        {req.detail && (
+          <div
+            className={cn(
+              MD_CLASSES,
+              "max-h-[70vh] overflow-y-auto px-1 py-5 pr-3 text-sm leading-[1.6]",
+              "[&_ol]:my-0 [&_ol]:space-y-3 [&_ol]:pl-7 [&_li]:my-0 [&_li]:pl-1",
+              "[&_ul]:my-2 [&_ul]:space-y-1 [&_ul]:pl-5",
+              "[&_hr]:my-4 [&_hr]:border-0 [&_hr]:border-t [&_hr]:border-border-subtle",
+            )}
+          >
+            <Md>{req.detail}</Md>
+          </div>
+        )}
+
+        <div className="border-t border-border pt-3">
+          <div className="mb-2 flex items-center gap-2 px-1 text-sm font-semibold text-ink">
+            <MessageSquareText className="size-4 text-accent" />
+            <span>Ready to proceed?</span>
+          </div>
+
+          <div className="rounded-lg border border-border bg-bg-elevated p-3">
+            {feedbackOpen && feedbackOption && (
+              <div className="mb-3">
+                <div className="mb-1.5 flex items-center justify-between gap-3">
+                  <label
+                    htmlFor={`plan-feedback-${req.id}`}
+                    className="text-sm font-medium text-ink"
+                  >
+                    What should change?
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setFeedbackOpen(false)}
+                    disabled={picked !== null}
+                    aria-label="Close feedback without changing the plan"
+                    title="Close feedback without changing the plan"
+                    className="grid size-7 shrink-0 place-items-center rounded-md text-ink-muted transition hover:bg-bg-hover hover:text-ink disabled:opacity-50"
+                  >
+                    <X className="size-4" />
+                  </button>
+                </div>
+                <textarea
+                  ref={feedbackRef}
+                  id={`plan-feedback-${req.id}`}
+                  value={feedback}
+                  onChange={(event) => setFeedback(event.target.value)}
+                  onKeyDown={onFeedbackKeyDown}
+                  disabled={picked !== null}
+                  rows={2}
+                  autoCorrect="off"
+                  autoCapitalize="off"
+                  spellCheck={false}
+                  placeholder="Tell Clark what is missing, wrong, or should work differently…"
+                  // This field owns its focus cue: one accent border. Suppress
+                  // the global outline so it cannot stack into a double ring.
+                  style={{ outline: "none" }}
+                  className="w-full resize-y rounded-lg border border-border bg-bg px-3 py-2 text-sm leading-relaxed text-ink placeholder:text-ink-faint focus:border-accent disabled:opacity-50"
+                />
+                <div className="mt-2 flex items-center justify-between gap-3">
+                  <span className="text-xs text-ink-faint">
+                    Esc to close · ⌘ Enter to send
+                  </span>
+                  <button
+                    type="button"
+                    onClick={submitFeedback}
+                    disabled={!feedback.trim() || picked !== null}
+                    className="relative rounded-lg border border-accent px-3 py-1.5 text-sm font-medium text-accent transition hover:bg-accent/10 disabled:opacity-50"
+                  >
+                    <span className={cn(picked === feedbackOption.id && "opacity-0")}>
+                      Send feedback
+                    </span>
+                    {picked === feedbackOption.id && (
+                      <span className="absolute inset-0 grid place-items-center">
+                        <Loader2 className="size-3.5 animate-[spin_1s_linear_infinite]" />
+                      </span>
+                    )}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <div className="flex flex-wrap items-stretch gap-2">
+              {planRunOption && (
+                <button
+                  type="button"
+                  onClick={() => onPick(planRunOption)}
+                  disabled={picked !== null}
+                  className="relative flex min-h-12 min-w-[14.25rem] basis-[14.25rem] items-center gap-2.5 rounded-lg bg-accent px-3 py-2 text-left text-on-accent transition hover:bg-accent-hover disabled:opacity-50"
+                >
+                  <Play className={cn("size-4 shrink-0", picked === planRunOption.id && "opacity-0")} />
+                  <span className={cn("min-w-0", picked === planRunOption.id && "opacity-0")}>
+                    <span className="block text-sm font-semibold leading-tight">Run the plan</span>
+                    <span className="mt-0.5 block text-xs leading-tight text-on-accent/80">
+                      Clark works through every step
+                    </span>
+                  </span>
+                  {picked === planRunOption.id && (
+                    <span className="absolute inset-0 grid place-items-center">
+                      <Loader2 className="size-4 animate-[spin_1s_linear_infinite]" />
+                    </span>
+                  )}
+                </button>
+              )}
+              {planReviewOption && (
+                <button
+                  type="button"
+                  onClick={() => onPick(planReviewOption)}
+                  disabled={picked !== null}
+                  className="relative flex min-h-12 min-w-[11.75rem] basis-[11.75rem] items-center gap-2.5 rounded-lg border border-border-strong px-3 py-2 text-left text-ink transition hover:bg-bg-hover disabled:opacity-50"
+                >
+                  <ListChecks
+                    className={cn(
+                      "size-4 shrink-0 text-ink-muted",
+                      picked === planReviewOption.id && "opacity-0",
+                    )}
+                  />
+                  <span className={cn("min-w-0", picked === planReviewOption.id && "opacity-0")}>
+                    <span className="block text-sm font-semibold leading-tight">
+                      Review each step
+                    </span>
+                    <span className="mt-0.5 block text-xs leading-tight text-ink-muted">
+                      Ask before changes
+                    </span>
+                  </span>
+                  {picked === planReviewOption.id && (
+                    <span className="absolute inset-0 grid place-items-center">
+                      <Loader2 className="size-4 animate-[spin_1s_linear_infinite]" />
+                    </span>
+                  )}
+                </button>
+              )}
+              {feedbackOption && (
+                <button
+                  type="button"
+                  onClick={() => setFeedbackOpen(true)}
+                  disabled={picked !== null}
+                  className="ml-auto flex min-h-12 items-center gap-2 rounded-lg px-2 py-2 text-sm font-medium text-accent transition hover:bg-accent/10 disabled:opacity-50"
+                >
+                  <MessageSquareText className="size-4" />
+                  Request changes
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       role="alertdialog"
@@ -206,16 +382,7 @@ export function PermissionGate({ req }: { req: PermissionRequest }) {
         )}
       </div>
 
-      {req.detail && req.risk === "plan" ? (
-        <div
-          className={cn(
-            MD_CLASSES,
-            "mb-3 max-h-[70vh] overflow-auto rounded-md border border-border-subtle bg-bg-sunken px-3 py-2",
-          )}
-        >
-          <Md>{req.detail}</Md>
-        </div>
-      ) : req.detail && req.risk === "plan_entry" ? (
+      {req.detail && req.risk === "plan_entry" ? (
         // The model's one-line rationale for planning first — prose, not code.
         <p className="mb-3 text-sm leading-relaxed text-ink-secondary">{req.detail}</p>
       ) : (
@@ -233,62 +400,8 @@ export function PermissionGate({ req }: { req: PermissionRequest }) {
         </p>
       )}
 
-      {req.risk === "plan" && feedbackOpen && (
-        <div className="mb-3 rounded-lg border border-border-subtle bg-bg-elevated p-3">
-          <label
-            htmlFor={`plan-feedback-${req.id}`}
-            className="mb-1.5 block text-sm font-medium text-ink"
-          >
-            What should change before you approve this plan?
-          </label>
-          <textarea
-            ref={feedbackRef}
-            id={`plan-feedback-${req.id}`}
-            value={feedback}
-            onChange={(event) => setFeedback(event.target.value)}
-            onKeyDown={onFeedbackKeyDown}
-            disabled={picked !== null}
-            rows={4}
-            autoCorrect="off"
-            autoCapitalize="off"
-            spellCheck={false}
-            placeholder="Tell Clark what to change — what's missing, wrong, or should work differently…"
-            className="w-full resize-y rounded-lg border border-border bg-bg px-3 py-2 text-sm leading-relaxed text-ink outline-none placeholder:text-ink-faint focus:border-accent focus:ring-2 focus:ring-accent/20 disabled:opacity-50"
-          />
-          <div className="mt-2 flex items-center justify-between gap-3">
-            <span className="text-xs text-ink-faint">⌘ Enter to send</span>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setFeedbackOpen(false)}
-                disabled={picked !== null}
-                className="rounded-lg px-3 py-1.5 text-sm font-medium text-ink-muted transition hover:bg-bg-hover hover:text-ink disabled:opacity-50"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={submitFeedback}
-                disabled={!feedback.trim() || picked !== null}
-                className="relative rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-on-accent transition hover:bg-accent-hover disabled:opacity-50"
-              >
-                <span className={cn(picked === feedbackOption?.id && "opacity-0")}>
-                  Send feedback
-                </span>
-                {picked === feedbackOption?.id && (
-                  <span className="absolute inset-0 grid place-items-center">
-                    <Loader2 className="size-3.5 animate-[spin_1s_linear_infinite]" />
-                  </span>
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       <div className="flex flex-wrap gap-2">
         {req.options
-          .filter((opt) => req.risk !== "plan" || opt.kind !== "reject_once")
           .map((opt) => (
             <button
               key={opt.id}
@@ -297,7 +410,7 @@ export function PermissionGate({ req }: { req: PermissionRequest }) {
               disabled={picked !== null}
               className={cn(
                 "relative rounded-lg px-3 py-1.5 text-sm font-medium transition disabled:opacity-50",
-                (req.risk === "plan" && PLAN_OPTION_STYLE[opt.id]) || OPTION_STYLE[opt.kind],
+                OPTION_STYLE[opt.kind],
                 picked === opt.id && "opacity-100",
               )}
             >
@@ -311,16 +424,6 @@ export function PermissionGate({ req }: { req: PermissionRequest }) {
               )}
             </button>
           ))}
-        {req.risk === "plan" && feedbackOption && !feedbackOpen && (
-          <button
-            type="button"
-            onClick={() => setFeedbackOpen(true)}
-            disabled={picked !== null}
-            className="rounded-lg px-3 py-1.5 text-sm font-medium text-ink-muted transition hover:bg-bg-hover hover:text-ink disabled:opacity-50"
-          >
-            Suggest changes
-          </button>
-        )}
       </div>
     </div>
   );

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use agent_orchestration::{OrchestrationPurpose, RiskSignals};
+use agent_orchestration::OrchestrationPurpose;
 use exec_core::WalkEntry;
 use serde_json::json;
 
@@ -23,31 +23,47 @@ fn tools_config() -> OrchestrationToolsConfig {
 }
 
 #[test]
-fn tool_pair_shares_an_opt_in_control_plane() {
+fn orchestration_tools_share_a_bounded_control_plane() {
     let tools = orchestration_tools(tools_config());
-    assert_eq!(tools.len(), 2);
+    assert_eq!(tools.len(), 4);
     assert_eq!(tools[0].name(), "delegate_read_only");
     assert_eq!(tools[1].name(), "resolve_delegation");
+    assert_eq!(tools[2].name(), "delegate_coding_workstreams");
+    assert_eq!(tools[3].name(), "resolve_coding_workstreams");
     assert!(!tools[0].mutating());
     assert!(!tools[1].mutating());
+    assert!(tools[2].mutating());
+    assert!(tools[3].mutating());
 }
 
 #[test]
 fn delegation_schema_conditions_decision_before_workstreams() {
-    let wire = serde_json::to_string(&delegate_schema(&[])).unwrap();
+    let wire = serde_json::to_string(&delegate_schema()).unwrap();
     let objective = wire.find("\"objective\"").unwrap();
     let purpose = wire.find("\"purpose\"").unwrap();
     let workstreams = wire.find("\"workstreams\"").unwrap();
     assert!(objective < purpose);
     assert!(purpose < workstreams);
+    let id = wire.find("\"id\"").unwrap();
+    let workstream_objective = wire[id..].find("\"objective\"").unwrap() + id;
+    let scopes = wire.find("\"scopes\"").unwrap();
+    let acceptance = wire.find("\"acceptance\"").unwrap();
+    assert!(id < workstream_objective);
+    assert!(workstream_objective < scopes);
+    assert!(scopes < acceptance);
 }
 
 #[test]
-fn partial_risk_signals_default_fail_closed_fields() {
+fn delegation_schema_keeps_host_policy_out_of_model_arguments() {
+    let wire = serde_json::to_string(&delegate_schema()).unwrap();
+    assert!(!wire.contains("root_estimated_output_tokens"));
+    assert!(!wire.contains("estimated_output_tokens"));
+    assert!(!wire.contains("risk"));
+    assert!(!wire.contains("harness"));
+
     let args: DelegateArgs = serde_json::from_value(json!({
         "objective": "review the security boundary",
         "purpose": "review",
-        "risk": {"touches_auth_or_security": true},
         "workstreams": [{
             "id": "review",
             "objective": "inspect auth",
@@ -57,13 +73,6 @@ fn partial_risk_signals_default_fail_closed_fields() {
     }))
     .unwrap();
     assert_eq!(args.purpose, OrchestrationPurpose::Review);
-    assert_eq!(
-        args.risk,
-        RiskSignals {
-            touches_auth_or_security: true,
-            ..Default::default()
-        }
-    );
 }
 
 #[test]

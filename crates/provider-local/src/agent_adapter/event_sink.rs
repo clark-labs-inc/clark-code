@@ -163,6 +163,25 @@ impl ca::EventSink for DesktopEventSink {
                     })
                     .await;
             }
+            ca::AgentEvent::MessageEnd {
+                message:
+                    ca::AgentMessage::Assistant {
+                        content,
+                        stop_reason: ca::StopReason::ToolUse,
+                        ..
+                    },
+            } if !content.plain_text().trim().is_empty() && !content.tool_calls().is_empty() => {
+                // The text and tool requests came from one provider response:
+                // classify the streamed text before tool execution begins so
+                // snapshots persist the provider-backed phase explicitly.
+                let _ = self
+                    .events
+                    .send(desktop::AgentEvent::MessagePhase {
+                        run: self.run.clone(),
+                        phase: desktop::MessagePhase::Commentary,
+                    })
+                    .await;
+            }
             ca::AgentEvent::MessageUpdate {
                 chunk: ca::AssistantStreamChunk::Text { delta },
                 ..

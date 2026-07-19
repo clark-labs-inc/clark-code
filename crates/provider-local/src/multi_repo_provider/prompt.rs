@@ -79,15 +79,15 @@ pub(super) fn reader_prompt(task: &MultiRepoTask) -> String {
          Inspect only this disposable repository clone. Never edit files or request broader permissions.\n\
          Find the smallest set of concrete evidence needed for this task: {}\n\
          Return exactly one JSON object and no trailing prose:\n\
-         {{\"summary\":\"concise implementation-relevant finding\",\"evidence_refs\":[\"relative/path:line\"]}}",
+         {{\"evidence_refs\":[\"relative/path:line\"],\"summary\":\"concise implementation-relevant finding\"}}",
         task.objective
     )
 }
 
 #[derive(Deserialize)]
 struct ReaderReportBody {
-    summary: String,
     evidence_refs: Vec<String>,
+    summary: String,
 }
 
 pub(super) fn parse_reader(text: &str, task: &MultiRepoTask) -> Result<ReaderReport, String> {
@@ -99,8 +99,8 @@ pub(super) fn parse_reader(text: &str, task: &MultiRepoTask) -> Result<ReaderRep
             .repository_id
             .clone()
             .ok_or_else(|| "reader task has no repository".to_string())?,
-        summary: body.summary,
         evidence_refs: body.evidence_refs,
+        summary: body.summary,
     })
 }
 
@@ -120,18 +120,18 @@ pub(super) fn review_prompt(task: &MultiRepoTask, packages: &[ChangePackageDescr
          Review correctness, cross-repository compatibility, and obvious regressions. Never edit files.\n\
          Objective: {}\nPackages:\n{}\n\
          Return exactly one JSON object and no trailing prose:\n\
-         {{\"decision\":\"accept|rework\",\"rework_task_ids\":[\"writer-task-id\"],\"findings\":[\"specific evidence-backed finding\"]}}",
+         {{\"findings\":[\"relative/path:line - specific finding\"],\"decision\":\"accept|rework\",\"rework_task_ids\":[\"writer-task-id\"]}}",
         task.objective, package_summary
     )
 }
 
 #[derive(Deserialize)]
 struct ReviewReport {
+    #[serde(default)]
+    findings: Vec<String>,
     decision: ReviewDecision,
     #[serde(default)]
     rework_task_ids: Vec<String>,
-    #[serde(default)]
-    findings: Vec<String>,
 }
 
 pub(super) struct ParsedReview {
@@ -206,5 +206,10 @@ mod tests {
         .unwrap();
         assert_eq!(report.task_id, task.id);
         assert_eq!(report.repository_id.as_str(), "api");
+
+        let reader = reader_prompt(&task);
+        assert!(reader.find("evidence_refs").unwrap() < reader.find("summary").unwrap());
+        let review = review_prompt(&task, &[]);
+        assert!(review.find("findings").unwrap() < review.find("decision").unwrap());
     }
 }

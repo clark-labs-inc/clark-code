@@ -80,6 +80,7 @@ import {
   cloudShare,
   cloudUnshare,
   scheduleCloudPut,
+  flushCloudPuts,
 } from "../lib/cloudHistory";
 import { provisionCodeKey, billingMe, type BillingSummary } from "../lib/account";
 import { copyText } from "../lib/clipboard";
@@ -88,11 +89,16 @@ import { repositoryFingerprintForRoot } from "../lib/repositoryKnowledge";
 import { conversationProjectRoot, liveProjectRoot } from "../lib/sessionEnvironment";
 import {
   checkAndStageUpdate,
+  installStagedUpdate,
+  beginUpdateDrain,
+  cancelUpdateDrain,
+  onUpdateMenuRequested,
   relaunchApp,
   consumeJustUpdated,
   type StagedUpdate,
   type DownloadProgress,
 } from "../lib/updater";
+import { updateDrainBlockerCount } from "../lib/updateDrain";
 
 /** A follow-up message the user sent while a run was active. It sends
  *  automatically when the run finishes — Codex-style, never interrupting. */
@@ -199,10 +205,9 @@ interface SessionState {
   composerPrefill: ComposerPrefill | null;
   /** Config for the "Local coding" provider (persisted to localStorage). */
   localSettings: LocalAgentSettings;
-  /** Per-conversation model + reasoning-effort overrides, keyed by conversation
-   *  id. The active chat's `effectiveModel` / `effectiveReasoningEffort` fall
-   *  back to `localSettings` when no override is set, so a chat only diverges
-   *  from the default once the model is changed inside it. Persisted to
+  /** Per-conversation model + reasoning-effort settings, keyed by conversation
+   *  id and pinned when the chat is created or first reopened. Legacy chats
+   *  fall back to `localSettings` only until that first open. Persisted to
    *  localStorage (the cloud stores transcripts, not model prefs). */
   chatModels: Record<string, ChatModelOverride>;
   /** Where the next session runs: this machine, or a remote host over SSH. */
@@ -223,8 +228,8 @@ interface SessionState {
   /** Whether the experimental `browser` tool is enabled (off by default —
    *  downloads clark-browser, ~150-300MB, on first use). */
   browserEnabled: boolean;
-  /** Whether bounded, read-only parallel repository investigation is enabled.
-   *  The root agent remains the sole writer. */
+  /** Whether bounded parallel repository work is available. The model-facing
+   *  policy still requires an explicit trigger; writers run in safe copies. */
   orchestrationEnabled: boolean;
   /** Last memory status message (e.g. a load error). */
   memoryStatus: string | null;
@@ -269,6 +274,8 @@ interface SessionState {
   updateProgress: DownloadProgress | null;
   /** True from "Restart to update" being clicked until the relaunch takes. */
   updateApplying: boolean;
+  /** An update was requested and is waiting for active/queued work to settle. */
+  updateWaiting: boolean;
   /** Set once on the first launch after an update applied — the version we're now on. */
   justUpdatedTo: string | null;
 
@@ -360,9 +367,9 @@ interface SessionState {
   setSettingsOpen: (open: boolean, section?: SettingsSection) => void;
   setPaletteOpen: (open: boolean) => void;
   togglePalette: () => void;
-  /** Check for, download, verify, and stage a newer version (no-op outside the app). */
+  /** Check for, download, verify, and stage a newer version (no install yet). */
   checkForUpdate: () => Promise<void>;
-  /** Relaunch into the staged update. */
+  /** Drain active work, install the staged update, and relaunch. */
   applyUpdate: () => Promise<void>;
   /** Dismiss the "updated to vX" confirmation. */
   dismissJustUpdated: () => void;
@@ -424,12 +431,38 @@ interface LiveEntry {
   lastPersist: number;
   prevBusy: boolean;
   dispatching: boolean;
+  /** A prompt invoke has begun but its first running snapshot may not have
+   *  arrived yet. Closes the frontend side of the update/start race. */
+  starting: boolean;
   autoResolvedId: string | null;
   notifiedPermId: string | null;
 }
 
 /** The pool of live sessions, keyed by conversation id. */
 const liveSessions = new Map<string, LiveEntry>();
+
+/** Freeze the model a local conversation was created/reopened with. Without
+ * this snapshot, chats with no explicit override keep following the mutable
+ * new-chat default, so changing that default makes every such chat appear to
+ * switch models retroactively. */
+function pinChatModel(
+  get: () => SessionState,
+  set: (partial: Partial<SessionState>) => void,
+  id: string,
+  settings: LocalAgentSettings,
+): void {
+  const current = get().chatModels;
+  if (current[id]) return;
+  const next = {
+    ...current,
+    [id]: {
+      model: settings.model,
+      reasoningEffort: normalizeReasoningEffort(settings.model, settings.reasoningEffort),
+    },
+  };
+  saveChatModels(next);
+  set({ chatModels: next });
+}
 
 function newLiveEntry(
   session: Session,
@@ -442,6 +475,7 @@ function newLiveEntry(
     lastPersist: 0,
     prevBusy: false,
     dispatching: false,
+    starting: false,
     autoResolvedId: null,
     notifiedPermId: null,
     ...init,
@@ -478,6 +512,25 @@ async function openRemote(host: SshHost, projectRoot = host.remoteRoot): Promise
 // LIST lives in the store's `conversations` and is populated from the cloud on
 // init/sign-in (see `syncCloudIndex`).
 const snapshotCache = new Map<string, Snapshot>();
+
+const UPDATE_DRAIN_POLL_MS = 250;
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function liveUpdateBlockerCount(): number {
+  return updateDrainBlockerCount(
+    [...liveSessions.values()].map((entry) => ({
+      live: entry.live,
+      queuedCount: entry.queued.length,
+      dispatching: entry.dispatching,
+      starting: entry.starting,
+    })),
+  );
+}
+
+let updateMenuListenerInstalled = false;
 
 async function bindCloudTrajectory(
   bridge: CoreBridge,
@@ -597,6 +650,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   update: null,
   updateProgress: null,
   updateApplying: false,
+  updateWaiting: false,
   justUpdatedTo: null,
 
   checkForUpdate: async () => {
@@ -605,11 +659,44 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     set({ updateProgress: null, ...(staged ? { update: staged } : {}) });
   },
   applyUpdate: async () => {
-    set({ updateApplying: true });
-    await relaunchApp();
-    // Still running means the relaunch didn't take — release the overlay so the
-    // user isn't trapped behind it.
-    set({ updateApplying: false });
+    if (!get().update || get().updateWaiting || get().updateApplying) return;
+    set({ updateWaiting: true });
+    let installed = false;
+    try {
+      // Let current runs and already-queued follow-ups finish first. New sends
+      // are rejected while `updateWaiting` is true, but permission responses and
+      // cancellation remain available so a blocked run can still settle.
+      while (get().connecting || liveUpdateBlockerCount() > 0) {
+        await delay(UPDATE_DRAIN_POLL_MS);
+      }
+
+      // Close the final native race: latch prompt starts, then wait for any run
+      // that entered just before the latch to release its RAII guard.
+      while ((await beginUpdateDrain()) > 0) {
+        await delay(UPDATE_DRAIN_POLL_MS);
+      }
+
+      if (!(await flushCloudPuts())) {
+        throw new Error("Clark Code could not save the final conversation state; update postponed.");
+      }
+
+      set({ updateWaiting: false, updateApplying: true });
+      await installStagedUpdate();
+      installed = true;
+      await relaunchApp();
+      // The process normally exits before this fires. If the platform accepted
+      // the request but did not relaunch, release the blocking overlay/latch.
+      await delay(1500);
+      throw new Error("Clark Code did not relaunch. Quit and reopen it to finish the update.");
+    } catch (error) {
+      await cancelUpdateDrain().catch(() => {});
+      set({
+        updateWaiting: false,
+        updateApplying: false,
+        ...(installed ? { update: null } : {}),
+        error: String(error),
+      });
+    }
   },
   dismissJustUpdated: () => set({ justUpdatedTo: null }),
   dismissError: () => set({ error: null }),
@@ -865,6 +952,26 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         providers,
         activeProvider: providers[0]?.id ?? null,
       });
+      if (!updateMenuListenerInstalled) {
+        updateMenuListenerInstalled = true;
+        void onUpdateMenuRequested(() => {
+          void (async () => {
+            if (get().updateProgress) {
+              get().flashNotice("Clark Code is already downloading the latest update.");
+              return;
+            }
+            await get().checkForUpdate();
+            const ready = get().update;
+            get().flashNotice(
+              ready
+                ? `Clark Code ${ready.version} is downloaded and ready to install.`
+                : "Clark Code is already up to date.",
+            );
+          })();
+        }).catch(() => {
+          updateMenuListenerInstalled = false;
+        });
+      }
       // Best-effort: ensure a Clark Code key exists, migrate any residual local
       // chats into the cloud (one-time), pull cloud history, and load the credit
       // balance. All no-op offline / signed out.
@@ -1127,6 +1234,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         createdAt: now,
         updatedAt: now,
       };
+      if (isLocal) pinChatModel(get, set, session.id, localSettings);
       await bindCloudTrajectory(
         bridge,
         session,
@@ -1235,6 +1343,14 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     // conversation we're leaving keeps running in the background.
     const entry = liveSessions.get(id);
     if (entry) {
+      if (entry.session.provider === "local") {
+        pinChatModel(
+          get,
+          set,
+          id,
+          effectiveModelSettings(localSettings, get().chatModels, id),
+        );
+      }
       for (const a of get().attachments) if (a.previewUrl) URL.revokeObjectURL(a.previewUrl);
       const merged = mergedOf(entry);
       // Switching to an idle session emits no snapshot frame, so re-sync the
@@ -1299,6 +1415,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       // model starts it on that model again, not the current default.
       const mode = get().permissionMode;
       const effSettings = effectiveModelSettings(localSettings, get().chatModels, id);
+      if (isLocal) pinChatModel(get, set, id, effSettings);
       if (wantRemote) {
         const host = loadSshHosts().find((h) => h.host.trim() === openingMeta!.remoteHost);
         if (!host) {
@@ -1701,6 +1818,10 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     let state = get();
     const { bridge, session, snapshot } = state;
     if (!bridge || !session) return;
+    if (state.updateWaiting || state.updateApplying) {
+      get().flashNotice("Clark Code is finishing active work before updating; edit after it relaunches.");
+      return;
+    }
     const rejectEdit = (error: string) =>
       set({ error, composerPrefill: { text, timelineIndex } });
     if (session.provider !== "local") {
@@ -1807,7 +1928,12 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       const creds = cloudCreds(state.auth);
       if (creds) scheduleCloudPut(creds, meta, prefix, "idle");
       ready = true;
-      await bridge.prompt(session.id, [{ type: "text", text }], uploads);
+      nextEntry.starting = true;
+      try {
+        await bridge.prompt(session.id, [{ type: "text", text }], uploads);
+      } finally {
+        nextEntry.starting = false;
+      }
     } catch (error) {
       if (ready) {
         set({ error: String(error), connecting: false });
@@ -1838,6 +1964,10 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   send: async (text) => {
     const { bridge, session, attachments, snapshot } = get();
     if (!bridge || !session) return;
+    if (get().updateWaiting || get().updateApplying) {
+      get().flashNotice("Clark Code is finishing active work before updating; send after it relaunches.");
+      return;
+    }
     if (!text.trim() && attachments.length === 0) return;
     const uploads = attachments.map(toUpload);
     for (const a of attachments) if (a.previewUrl) URL.revokeObjectURL(a.previewUrl);
@@ -1863,7 +1993,13 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       return;
     }
     try {
-      await bridge.prompt(session.id, [{ type: "text", text }], uploads);
+      const entry = liveSessions.get(session.id);
+      if (entry) entry.starting = true;
+      try {
+        await bridge.prompt(session.id, [{ type: "text", text }], uploads);
+      } finally {
+        if (entry) entry.starting = false;
+      }
     } catch (e) {
       // Surface the failure instead of silently doing nothing.
       set({ error: String(e) });

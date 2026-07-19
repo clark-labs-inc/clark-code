@@ -142,13 +142,17 @@ impl MultiRepoCoordinator {
             .values()
             .map(|package| package.patch_sha256.clone())
             .collect::<BTreeSet<_>>();
-        let expected_trees = packages
-            .values()
-            .map(|package| {
-                (
-                    package.repository_id.clone(),
-                    package.result_tree_sha256.clone(),
+        let expected_trees = self
+            .plan
+            .repositories
+            .keys()
+            .filter_map(|repository_id| {
+                super::super::repository_result_tree_sha256(
+                    packages
+                        .values()
+                        .filter(|package| &package.repository_id == repository_id),
                 )
+                .map(|digest| (repository_id.clone(), digest))
             })
             .collect::<BTreeMap<_, _>>();
         let checks_valid = integration.check_receipts.len() == self.plan.integration_checks.len()

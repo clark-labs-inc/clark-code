@@ -192,6 +192,21 @@ async fn project_executor(
     }
 }
 
+/// Current branch and linked-worktree identity for the checkout shown above
+/// the composer. A non-Git folder is a normal `None`, not an error.
+#[tauri::command]
+pub async fn project_context(
+    cwd: String,
+    remote: Option<RemoteArg>,
+) -> Result<Option<crate::project_context::ProjectContext>, String> {
+    let executor = project_executor(remote).await?;
+    crate::project_context::inspect_project_context(
+        executor.as_ref(),
+        std::path::Path::new(cwd.trim()),
+    )
+    .await
+}
+
 /// Detect compatible MCP servers, skills, and instructions from Claude Code and
 /// Codex. Discovery is read-only; the UI chooses which missing MCP servers to
 /// add while skills and instructions remain sourced in place.
@@ -361,6 +376,20 @@ pub async fn update_cloud_token(token: String, state: State<'_, AppState>) -> Re
     Ok(())
 }
 
+/// Prevent new provider runs from starting and return the exact native count
+/// still draining. The frontend polls this after its queued follow-ups settle;
+/// installation begins only when it reaches zero.
+#[tauri::command]
+pub fn update_begin_drain(state: State<'_, AppState>) -> usize {
+    state.begin_update_drain()
+}
+
+/// Release a failed/abandoned update drain so coding can continue normally.
+#[tauri::command]
+pub fn update_cancel_drain(state: State<'_, AppState>) {
+    state.cancel_update_drain();
+}
+
 /// Inject a user message into the session's ACTIVE run (mid-run steering) —
 /// it lands between tool batches instead of waiting for the run to finish.
 /// Fails when the provider has no live run to steer; the frontend falls back
@@ -432,6 +461,9 @@ pub async fn prompt(
     attachments: Vec<PendingUpload>,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
+    let run_guard = state.try_start_run().ok_or(
+        "Clark Code is finishing active work before an update; wait for the relaunch to send another message",
+    )?;
     let entry = state
         .session_entry(&session_id)
         .await
@@ -499,6 +531,7 @@ pub async fn prompt(
     let state = state.inner().clone();
     let session_key = sid.as_str().to_string();
     tokio::spawn(async move {
+        let _run_guard = run_guard;
         let mut batches = stream.ready_chunks(64);
         // Cloud trajectory sync is best-effort bookkeeping: a failed append
         // must never kill the live run. Warn once per run (a persistent outage

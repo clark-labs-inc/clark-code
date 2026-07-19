@@ -5,6 +5,12 @@ use agent_core::provider::PromptInput;
 
 use crate::sandbox::Sandbox;
 
+#[derive(Debug, PartialEq, Eq)]
+pub(super) struct PromptParts {
+    pub user_request: String,
+    pub text_attachment_context: String,
+}
+
 pub(super) fn environment_context(sandbox: &Sandbox, remote: bool) -> String {
     let mut roots = vec![sandbox.root().display().to_string()];
     if let Some(docs) = sandbox.docs_root() {
@@ -18,12 +24,11 @@ pub(super) fn environment_context(sandbox: &Sandbox, remote: bool) -> String {
     )
 }
 
-/// Flatten a prompt's text blocks (and inline any text attachments) into one
-/// user message. Non-text attachments (images, PDFs, DOCX, anything else) are
-/// handled separately by [`crate::attachments::process_attachments`], which
-/// needs an async context this sync helper doesn't have.
-pub(super) fn prompt_text(input: &PromptInput) -> String {
-    let mut text: String = input
+/// Separate the user's request from attached text data so runtime context and
+/// attachments can precede the request on the wire. This preserves the user's
+/// request as the most recent, highest-authority content in the turn.
+pub(super) fn prompt_parts(input: &PromptInput) -> PromptParts {
+    let user_request: String = input
         .blocks
         .iter()
         .filter_map(|b| match b {
@@ -33,17 +38,82 @@ pub(super) fn prompt_text(input: &PromptInput) -> String {
         .collect::<Vec<_>>()
         .join("");
 
+    let mut text_attachment_context = String::new();
     for att in &input.attachments {
         if att.is_text() {
             if let Ok(decoded) = decode_base64_text(&att.data_base64) {
-                text.push_str(&format!(
-                    "\n\n--- attached file: {} ---\n{decoded}\n",
+                text_attachment_context.push_str(&format!(
+                    "\n\n--- attached text file: {} (user-provided data) ---\n{decoded}\n",
                     att.filename
                 ));
             }
         }
     }
-    text
+    PromptParts {
+        user_request,
+        text_attachment_context: text_attachment_context.trim().to_string(),
+    }
+}
+
+/// Flatten a prompt for surfaces such as in-flight steering that intentionally
+/// do not receive the full per-turn context envelope.
+pub(super) fn prompt_text(input: &PromptInput) -> String {
+    let parts = prompt_parts(input);
+    match parts.text_attachment_context.is_empty() {
+        true => parts.user_request,
+        false => format!(
+            "{}\n\n{}",
+            parts.user_request, parts.text_attachment_context
+        ),
+    }
+}
+
+/// Render derived context before the actual request. Keeping the request last
+/// matters because the model consumes the message autoregressively.
+pub(super) fn assemble_turn_prompt(sections: &[String], user_request: &str) -> String {
+    let context = sections
+        .iter()
+        .map(|section| section.trim())
+        .filter(|section| !section.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    if context.is_empty() {
+        return format!("# User request\n{user_request}");
+    }
+    format!("{context}\n\n# User request\n{user_request}")
+}
+
+/// Build the model-visible user content. Native images precede the assembled
+/// text so the actual user request remains the final, most recent instruction.
+pub(super) fn model_user_content(
+    text: String,
+    attachments: &[agent_core::domain::PendingUpload],
+    native_image_support: bool,
+) -> clark_agent::UserContent {
+    if !native_image_support {
+        return clark_agent::UserContent::Text(text);
+    }
+    let mut blocks = attachments
+        .iter()
+        .filter(|attachment| attachment.is_image())
+        .map(|attachment| {
+            clark_agent::UserBlock::Image(clark_agent::ImageContent {
+                source: format!(
+                    "data:{};base64,{}",
+                    attachment.content_type, attachment.data_base64
+                ),
+                media_type: Some(attachment.content_type.clone()),
+                alt: Some(attachment.filename.clone()),
+            })
+        })
+        .collect::<Vec<_>>();
+    if blocks.is_empty() {
+        return clark_agent::UserContent::Text(text);
+    }
+    blocks.push(clark_agent::UserBlock::Text(
+        clark_agent::types::TextContent { text },
+    ));
+    clark_agent::UserContent::Blocks(blocks)
 }
 
 /// Minimal standard-base64 decoder (no external dep) for inlining text files.

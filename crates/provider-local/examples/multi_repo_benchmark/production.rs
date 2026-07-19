@@ -95,6 +95,7 @@ async fn run_async(
             artifact_root: artifact_root.clone(),
             selection: selection.clone(),
             plan: plan.clone(),
+            integration_gate: None,
         },
         factory.clone(),
         Arc::new(LocalExecutor),

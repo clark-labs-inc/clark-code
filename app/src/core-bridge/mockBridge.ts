@@ -3,7 +3,7 @@
 // demonstrable without the native host. It deliberately does NOT re-implement
 // the reducer — it just produces snapshots a real run would yield.
 
-import type { CoreBridge, ConnectConfig, SessionOptions } from "./bridge";
+import type { CoreBridge, ConnectConfig, ProjectContext, SessionOptions } from "./bridge";
 import {
   emptySnapshot,
   type ClientResponse,
@@ -119,6 +119,16 @@ export class MockBridge implements CoreBridge {
     ];
   }
 
+  async projectContext(cwd: string): Promise<ProjectContext | null> {
+    if (!cwd.trim()) return null;
+    return {
+      branch: "main",
+      detached: false,
+      isWorktree: false,
+      worktreeRoot: cwd.trim(),
+    };
+  }
+
   async openPath(): Promise<void> {
     /* no-op in the browser preview */
   }
@@ -139,6 +149,7 @@ export class MockBridge implements CoreBridge {
    *  permission gate → streamed answer → done. */
   private async playRun(userText: string) {
     const run = `run-${Date.now()}`;
+    const parallelDemo = userText.toLowerCase().includes("parallel");
     this.snapshot.runs[run] = { id: run, status: "running", checkpoint: "mock-checkpoint-sha" };
     this.snapshot.timeline.push({
       item: "message",
@@ -184,6 +195,35 @@ export class MockBridge implements CoreBridge {
     }
     this.emit();
     await sleep(300);
+
+    if (parallelDemo) {
+      this.snapshot.fan_out = {
+        title: "Build the feature in isolated workspaces, then combine and verify the result",
+        total: 3,
+        done: 1,
+        running: 1,
+        agents: [
+          { id: "environment", label: "Prepare the test environment", status: "done" },
+          { id: "implementation", label: "Implement the repository changes", status: "running" },
+          { id: "verification", label: "Review and run the full test suite", status: "queued" },
+        ],
+      };
+      this.emit();
+      await sleep(500);
+    }
+
+    this.snapshot.timeline.push({
+      item: "message",
+      run,
+      role: "agent",
+      phase: "commentary",
+      blocks: [
+        {
+          type: "text",
+          text: "I found the entrypoint. I’m checking the implementation path before I make the edit.",
+        },
+      ],
+    });
 
     const tc = `tc-${Date.now()}`;
     this.snapshot.tool_calls[tc] = {
@@ -336,6 +376,10 @@ export class MockBridge implements CoreBridge {
       this.emit();
       await sleep(28);
     }
+    const finalMessage = this.snapshot.timeline[this.snapshot.timeline.length - 1];
+    if (finalMessage?.item === "message" && finalMessage.role === "agent") {
+      finalMessage.phase = "final_answer";
+    }
 
     this.snapshot.plan = {
       phases: [
@@ -346,6 +390,14 @@ export class MockBridge implements CoreBridge {
     const finalPlanItem = this.snapshot.timeline.find((t) => t.item === "plan" && t.run === run);
     if (finalPlanItem?.item === "plan") {
       finalPlanItem.plan = structuredClone(this.snapshot.plan);
+    }
+    if (parallelDemo && this.snapshot.fan_out) {
+      this.snapshot.fan_out = {
+        ...this.snapshot.fan_out,
+        done: 3,
+        running: 0,
+        agents: this.snapshot.fan_out.agents.map((agent) => ({ ...agent, status: "done" })),
+      };
     }
     this.snapshot.runs[run] = {
       id: run,

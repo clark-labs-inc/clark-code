@@ -3,11 +3,15 @@
 // Best-practice flow: on launch (and periodically) check a signed manifest on
 // the downloads CDN; if a newer version exists, download + verify + stage it
 // silently in the background, then surface a non-blocking "Restart to update"
-// affordance. The native binary can't be hot-swapped, so applying the update is
-// just a relaunch — which the user does on their own schedule (and which happens
-// automatically on the next cold launch if they don't). All signature
-// verification is done natively by tauri-plugin-updater against the embedded
-// Ed25519 public key; an unsigned or tampered payload is refused.
+// affordance. Download and install are deliberately separate: installing a
+// Tauri update exits the app immediately on Windows, so even the install step
+// must wait for active coding work to drain. All signature verification is done
+// natively by tauri-plugin-updater against the embedded Ed25519 public key; an
+// unsigned or tampered payload is refused.
+
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import type { Update } from "@tauri-apps/plugin-updater";
 
 function inTauri(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -25,6 +29,11 @@ export interface DownloadProgress {
   total: number | null;
 }
 
+// The updater plugin keeps downloaded bytes in a native resource owned by this
+// Update object. It intentionally lives outside reactive state; the UI only
+// needs serializable metadata while this handle waits for the drain gate.
+let stagedUpdate: Update | null = null;
+
 /** Check for an update and, if one exists, download + verify + stage it,
  *  reporting byte progress via `onProgress`. Returns the staged version (ready
  *  to apply on relaunch), or null. Never throws. */
@@ -32,15 +41,16 @@ export async function checkAndStageUpdate(
   onProgress?: (p: DownloadProgress) => void,
 ): Promise<StagedUpdate | null> {
   if (!inTauri()) return null;
+  let candidate: Update | null = null;
   try {
     const { check } = await import("@tauri-apps/plugin-updater");
-    const update = await check();
-    if (!update) return null;
-    // Downloads, verifies the Ed25519 signature, and stages the new bundle.
-    // Throws if the signature doesn't match the embedded pubkey.
+    candidate = await check();
+    if (!candidate) return null;
+    // Download + verify only. `install()` is deferred because it forcibly exits
+    // on Windows and must therefore sit behind the active-run drain.
     let total: number | null = null;
     let downloaded = 0;
-    await update.downloadAndInstall((e) => {
+    await candidate.download((e) => {
       if (e.event === "Started") {
         total = e.data.contentLength ?? null;
         downloaded = 0;
@@ -51,23 +61,49 @@ export async function checkAndStageUpdate(
       }
       onProgress?.({ downloaded, total });
     });
-    return { version: update.version, notes: update.body || undefined };
+    stagedUpdate = candidate;
+    return { version: candidate.version, notes: candidate.body || undefined };
   } catch {
+    if (candidate) void candidate.close().catch(() => {});
     // Offline, no manifest yet, or verification failed — stay on the current
     // version silently; we'll retry on the next check.
     return null;
   }
 }
 
+/** Install the already-downloaded update. On Windows this call exits the app;
+ *  callers must engage and verify the native drain gate first. */
+export async function installStagedUpdate(): Promise<void> {
+  if (!inTauri()) return;
+  const update = stagedUpdate;
+  if (!update) throw new Error("The downloaded update is no longer available; check again.");
+  await update.install();
+  stagedUpdate = null;
+}
+
+/** Engage the native no-new-runs latch and return the exact in-flight count. */
+export async function beginUpdateDrain(): Promise<number> {
+  if (!inTauri()) return 0;
+  return invoke<number>("update_begin_drain");
+}
+
+/** Release the native latch after an install/relaunch failure. */
+export async function cancelUpdateDrain(): Promise<void> {
+  if (!inTauri()) return;
+  await invoke("update_cancel_drain");
+}
+
+/** Route the native app-menu action through the shared frontend coordinator. */
+export async function onUpdateMenuRequested(handler: () => void): Promise<() => void> {
+  if (!inTauri()) return () => {};
+  return listen("update-menu-requested", handler);
+}
+
 /** Relaunch into the staged update. No-op outside the desktop app. */
 export async function relaunchApp(): Promise<void> {
   if (!inTauri()) return;
-  try {
-    const { relaunch } = await import("@tauri-apps/plugin-process");
-    await relaunch();
-  } catch {
-    /* ignore */
-  }
+  const { relaunch } = await import("@tauri-apps/plugin-process");
+  await relaunch();
 }
 
 // The running version is recorded on every launch; when it differs from the last

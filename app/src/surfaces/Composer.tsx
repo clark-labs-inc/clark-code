@@ -9,7 +9,7 @@ import {
 } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import {
-  ArrowUp, Square, Plus, X, FileText, CornerDownRight, Pencil, Slash,
+  ArrowUp, Square, X, FileText, CornerDownRight, Pencil, Slash,
   ChevronDown, Check,
 } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
@@ -29,8 +29,10 @@ import { fuzzyFilter, fuzzyFilterFiles } from "../lib/fuzzy";
 import { cn } from "../lib/cn";
 import { DUR, EASE } from "../lib/motion";
 import { executionDiagnostic } from "../lib/activity";
-import { EnvironmentPicker } from "./EnvironmentPicker";
+import { useComposerAutosize } from "../lib/composerAutosize";
 import { AttachmentChips } from "./ComposerAttachments";
+import { ComposerContextBar } from "./ComposerContextBar";
+import { ComposerAttachmentMenu } from "./ComposerAttachmentMenu";
 import { ComposerPermissionPill } from "./ComposerPermissionPill";
 import {
   createPendingPaste,
@@ -407,7 +409,6 @@ export function Composer() {
   const [dismissed, setDismissed] = useState(false);
   const [pendingPastes, setPendingPastes] = useState<PendingPaste[]>([]);
   const taRef = useRef<HTMLTextAreaElement>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
   const session = useSessionStore((s) => s.session);
   const send = useSessionStore((s) => s.send);
   const removeQueued = useSessionStore((s) => s.removeQueued);
@@ -438,22 +439,9 @@ export function Composer() {
   const startBlocked = useSessionStore((s) => (s.session ? null : s.startBlockedReason()));
   const startError = useSessionStore((s) => (s.session ? null : s.error));
   const { dragging, handlers } = useFileDrop((files) => void addFiles(files));
-  usePaste((files) => void addFiles(files), !!session);
+  usePaste((files) => void addFiles(files), !connecting);
 
-  useEffect(() => {
-    const ta = taRef.current;
-    if (!ta) return;
-    const resize = () => {
-      ta.style.height = "0px";
-      ta.style.height = Math.min(ta.scrollHeight, 200) + "px";
-    };
-    resize();
-    // Re-measure after layout settles: on first mount (the start screen mounts
-    // the composer before the flex layout is final) the initial scrollHeight can
-    // be stale and over-tall, so a post-layout pass snaps it to the real height.
-    const raf = requestAnimationFrame(resize);
-    return () => cancelAnimationFrame(raf);
-  }, [value]);
+  useComposerAutosize(taRef, value);
 
   // "Edit & resend" staged text from a sent message: load it and focus.
   useEffect(() => {
@@ -525,7 +513,7 @@ export function Composer() {
   const syncCaret = () => setCaret(taRef.current?.selectionStart ?? 0);
 
   const onPaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
-    if (!session || event.clipboardData.files.length > 0) return;
+    if (event.clipboardData.files.length > 0) return;
     const text = event.clipboardData.getData("text/plain");
     if (!shouldThumbnailPastedText(text)) return;
 
@@ -648,14 +636,10 @@ export function Composer() {
   return (
     <div className="bg-bg px-6 pb-4 pt-2.5" {...handlers}>
       <QueuedMessages onEdit={editQueued} />
-      {!session && (
-        <div className="mx-auto mb-2 max-w-2xl">
-          <EnvironmentPicker />
-        </div>
-      )}
+      <ComposerContextBar />
       <div
         className={cn(
-          "relative mx-auto max-w-2xl rounded-[22px] border border-border-subtle bg-bg-elevated px-4 py-1.5 shadow-soft transition duration-200 ease-clark",
+          "relative z-10 mx-auto max-w-2xl rounded-[20px] border border-border-subtle bg-composer-surface px-2.5 py-2.5 shadow-soft transition duration-200 ease-clark",
           dragging
             ? "ring-2 ring-accent/40"
             : "ring-4 ring-transparent focus-within:border-accent/30 focus-within:ring-accent-subtle",
@@ -699,18 +683,6 @@ export function Composer() {
           </div>
         )}
 
-        <input
-          ref={fileRef}
-          type="file"
-          multiple
-          hidden
-          onChange={(e) => {
-            const picked = Array.from(e.target.files ?? []);
-            if (picked.length) void addFiles(picked);
-            e.target.value = "";
-          }}
-        />
-
         <textarea
           ref={taRef}
           value={value}
@@ -735,20 +707,15 @@ export function Composer() {
                 : "Ask Clark anything about this project…"
           }
           disabled={connecting}
-          className="composer-input max-h-52 w-full resize-none bg-transparent px-0.5 py-0.5 text-base leading-[1.5] text-ink outline-none placeholder:text-ink-muted disabled:opacity-50"
+          className="composer-input max-h-52 w-full resize-none overflow-y-auto bg-transparent px-0.5 py-0.5 text-base leading-[1.5] text-ink outline-none placeholder:text-ink-muted disabled:opacity-50"
         />
 
         <div className="mt-0.5 flex items-center justify-between gap-2">
           <div className="flex items-center gap-1">
-            <button
-              onClick={() => fileRef.current?.click()}
-              disabled={!session}
-              aria-label="Attach files"
-              title="Attach files"
-              className="grid size-8 shrink-0 place-items-center rounded-full bg-bg-tertiary text-ink-muted transition duration-200 ease-clark hover:bg-accent-subtle hover:text-accent disabled:opacity-40"
-            >
-              <Plus className="size-4" />
-            </button>
+            <ComposerAttachmentMenu
+              disabled={connecting}
+              onFiles={(files) => void addFiles(files)}
+            />
             <ComposerPermissionPill />
           </div>
 

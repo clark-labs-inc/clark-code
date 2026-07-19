@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useSessionStore } from "./sessionStore";
-import type { CoreBridge } from "../core-bridge/bridge";
+import type { CoreBridge, SessionOptions } from "../core-bridge/bridge";
 import { emptySnapshot, type Session } from "../core-bridge/types";
 import { effectiveModelSettings } from "../lib/localAgent";
 
@@ -25,7 +25,9 @@ function stubBridge(overrides: Partial<CoreBridge> = {}): CoreBridge {
       streaming: true, permissions: true, fs: true, terminal: true, load_session: false, modes: [],
     } }],
     connect: vi.fn(async () => {}),
-    newSession: vi.fn(async () => sessionA),
+    newSession: vi.fn(async (_providerId: string, _options: SessionOptions, bindId?: string) =>
+      bindId ? { ...sessionA, id: bindId } : sessionA,
+    ),
     loadSession: async () => sessionA,
     prompt: async () => {},
     cancel: vi.fn(async () => {}),
@@ -43,10 +45,12 @@ beforeEach(() => {
     snapshot: emptySnapshot(),
     permissionMode: "auto",
     activeProvider: "local",
+    providers: [],
     auth: null,
     connecting: false,
     opening: null,
     queued: [],
+    conversations: [],
     localSettings: { ...baseSettings },
     chatModels: {},
     activeRemote: null,
@@ -76,6 +80,67 @@ describe("per-conversation model", () => {
     // The global default the start screen shows is untouched — only the chat
     // override moved.
     expect(useSessionStore.getState().localSettings.model).toBe("clark-code");
+  });
+
+  it("pins a new chat to the model it was created with", async () => {
+    const bridge = stubBridge();
+    useSessionStore.setState({
+      bridge,
+      providers: await bridge.listProviders(),
+      localSettings: { ...baseSettings },
+      chatModels: {},
+      projectMode: "local",
+    });
+
+    await useSessionStore.getState().startSession();
+
+    expect(useSessionStore.getState().chatModels[sessionA.id]).toEqual({
+      model: "clark-code",
+      reasoningEffort: "",
+    });
+
+    // The picker on the start screen edits the default for the NEXT chat. It
+    // must not retroactively change a conversation that already exists.
+    useSessionStore.getState().endSession();
+    await useSessionStore.getState().updateModelSettings({ model: "clark-code:kimi_k3" });
+    const state = useSessionStore.getState();
+    expect(
+      effectiveModelSettings(state.localSettings, state.chatModels, sessionA.id),
+    ).toMatchObject({ model: "clark-code", reasoningEffort: "" });
+  });
+
+  it("pins an existing untracked chat when it is reopened", async () => {
+    const bridge = stubBridge();
+    const legacyId = "legacy-chat-without-model-settings";
+    useSessionStore.setState({
+      bridge,
+      providers: await bridge.listProviders(),
+      localSettings: { ...baseSettings },
+      chatModels: {},
+      conversations: [
+        {
+          id: legacyId,
+          title: "Legacy chat",
+          provider: "local",
+          project: baseSettings.cwd,
+          createdAt: 1,
+          updatedAt: 1,
+        },
+      ],
+    });
+
+    await useSessionStore.getState().openConversation(legacyId);
+    expect(useSessionStore.getState().chatModels[legacyId]).toEqual({
+      model: "clark-code",
+      reasoningEffort: "",
+    });
+
+    useSessionStore.getState().endSession();
+    await useSessionStore.getState().updateModelSettings({ model: "clark-code:grok45" });
+    const state = useSessionStore.getState();
+    expect(effectiveModelSettings(state.localSettings, state.chatModels, legacyId).model).toBe(
+      "clark-code",
+    );
   });
 
   it("the per-chat model overrides the global default", async () => {

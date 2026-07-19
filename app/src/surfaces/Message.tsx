@@ -9,11 +9,11 @@ import { useSessionStore } from "../store/sessionStore";
 import { cn } from "../lib/cn";
 import { DUR, EASE } from "../lib/motion";
 import { useCopy } from "../lib/clipboard";
-import { parseNarration } from "../lib/narration";
+import { parseNarration, presentationKind } from "../lib/narration";
 import { useSmoothText } from "../lib/useSmoothText";
 import { highlight, resolveLang } from "../lib/highlight";
 import { Mermaid } from "./work/Mermaid";
-import type { ContentBlock, Role } from "../core-bridge/types";
+import type { ContentBlock, MessagePhase, Role } from "../core-bridge/types";
 
 function text(blocks: ContentBlock[]): string {
   return blocks
@@ -245,11 +245,13 @@ function ThinkingBlock({ text }: { text: string }) {
 function MessageImpl({
   role,
   blocks,
+  phase,
   timelineIndex,
   streaming = false,
 }: {
   role: Role;
   blocks: ContentBlock[];
+  phase?: MessagePhase;
   timelineIndex: number;
   /** True for the assistant message currently being streamed — enables the
    *  cheaper prefix-memoized markdown path. */
@@ -304,7 +306,8 @@ function MessageImpl({
     return (
       <div className="min-w-0 space-y-1.5">
         {spans.map((span, i) => {
-          if (span.kind === "thinking") return <ThinkingBlock key={i} text={span.text} />;
+          const kind = presentationKind(span.kind, phase);
+          if (kind === "thinking") return <ThinkingBlock key={i} text={span.text} />;
           const lastSpan = i === spans.length - 1;
           return (
             <div
@@ -312,7 +315,7 @@ function MessageImpl({
               className={cn(
                 "text-base leading-[1.6] [overflow-wrap:anywhere]",
                 MD_CLASSES,
-                span.kind === "narrate" && "text-ink-secondary",
+                kind === "narrate" && "text-ink-secondary",
               )}
             >
               <StreamingMd text={span.text} />
@@ -374,6 +377,7 @@ export const Message = memo(
   MessageImpl,
   (a, b) =>
     a.role === b.role &&
+    a.phase === b.phase &&
     a.timelineIndex === b.timelineIndex &&
     a.streaming === b.streaming &&
     sameBlocks(a.blocks, b.blocks),

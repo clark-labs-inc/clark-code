@@ -95,7 +95,13 @@ describe("prepareSnapshotForUpload", () => {
     const bigMessage = "m".repeat(2_000_000);
     const snapshot = snapshotWith(2, 100, {
       timeline: [
-        { item: "message", run: "r1", role: "agent", blocks: [{ type: "text", text: bigMessage }] },
+        {
+          item: "message",
+          run: "r1",
+          role: "agent",
+          phase: "commentary",
+          blocks: [{ type: "text", text: bigMessage }],
+        },
         { item: "tool_call", id: "t0" },
         { item: "tool_call", id: "t1" },
       ],
@@ -103,7 +109,10 @@ describe("prepareSnapshotForUpload", () => {
     const prepared = prepareSnapshotForUpload(snapshot, 1_000_000);
     const msg = prepared.snapshot.timeline[0];
     expect(msg.item).toBe("message");
-    if (msg.item === "message") expect(msg.blocks[0]).toEqual({ type: "text", text: bigMessage });
+    if (msg.item === "message") {
+      expect(msg.blocks[0]).toEqual({ type: "text", text: bigMessage });
+      expect(msg.phase).toBe("commentary");
+    }
   });
 
   it("leaves short text blocks (small diffs) alone even when trimming", () => {

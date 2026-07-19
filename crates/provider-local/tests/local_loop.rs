@@ -6,8 +6,11 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
-use agent_core::domain::{AgentEvent, ContentBlock, PendingUpload, RunStatus, ToolStatus};
+use agent_core::domain::{
+    AgentEvent, ContentBlock, MessagePhase, PendingUpload, Role, RunStatus, ToolStatus,
+};
 use agent_core::provider::{ClientResponse, PromptInput, Provider, ProviderConfig, SessionOptions};
+use agent_core::TimelineItem;
 use agent_orchestration::{ExecutionEvent, ExecutionEventKind, ExecutionLedger, ExecutionState};
 use futures::StreamExt;
 use serde_json::json;
@@ -17,6 +20,19 @@ use tokio::net::{TcpListener, TcpStream};
 /// SSE body for the first model call: ask to read `hello.txt`.
 fn tool_call_body() -> String {
     [
+        r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"read_file","arguments":"{\"path\":\"hello.txt\"}"}}]}}]}"#,
+        r#"data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}"#,
+        "data: [DONE]",
+        "",
+    ]
+    .join("\n\n")
+}
+
+/// SSE body where one assistant response pairs visible progress text with the
+/// tool request that proves work is continuing.
+fn commentary_tool_call_body() -> String {
+    [
+        r#"data: {"choices":[{"delta":{"content":"I found the target file. I’ll read it now, then verify the result."}}]}"#,
         r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"read_file","arguments":"{\"path\":\"hello.txt\"}"}}]}}]}"#,
         r#"data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}"#,
         "data: [DONE]",
@@ -237,6 +253,89 @@ async fn local_loop_reads_file_and_answers() {
     assert_eq!(execution.attempts, 1);
     assert_eq!(execution.recoveries, 0);
     assert_eq!(execution.completed_tools, vec!["read_file"]);
+}
+
+#[tokio::test]
+async fn local_loop_projects_text_with_tool_as_commentary_then_plain_text_as_final() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("hello.txt"), "hi").unwrap();
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(serve(
+        listener,
+        vec![commentary_tool_call_body(), final_body()],
+    ));
+
+    let mut provider = provider_local::LocalAgentProvider::new();
+    provider
+        .connect(ProviderConfig {
+            auth_token: Some("test-key".into()),
+            extra: json!({
+                "base_url": format!("http://{addr}/v1"),
+                "model": "fake-model",
+                "memories": false
+            }),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let session = provider
+        .new_session(SessionOptions {
+            cwd: Some(dir.path().to_string_lossy().to_string()),
+            mode: None,
+            resume: None,
+        })
+        .await
+        .unwrap();
+    let mut stream = provider
+        .prompt(&session.id, PromptInput::text("What does hello.txt say?"))
+        .await
+        .unwrap();
+
+    let mut events = Vec::new();
+    while let Some(event) = stream.next().await {
+        let finished = matches!(event, AgentEvent::RunFinished { .. });
+        events.push(event);
+        if finished {
+            break;
+        }
+    }
+
+    assert!(events.iter().any(|event| matches!(
+        event,
+        AgentEvent::MessagePhase {
+            phase: MessagePhase::Commentary,
+            ..
+        }
+    )));
+    let snapshot = agent_core::reduce_all(&events);
+    assert_eq!(
+        snapshot.timeline.len(),
+        3,
+        "timeline: {:?}",
+        snapshot.timeline
+    );
+    assert!(matches!(
+        &snapshot.timeline[0],
+        TimelineItem::Message {
+            role: Role::Agent,
+            phase: Some(MessagePhase::Commentary),
+            ..
+        }
+    ));
+    assert!(matches!(
+        &snapshot.timeline[1],
+        TimelineItem::ToolCall { .. }
+    ));
+    assert!(matches!(
+        &snapshot.timeline[2],
+        TimelineItem::Message {
+            role: Role::Agent,
+            phase: Some(MessagePhase::FinalAnswer),
+            ..
+        }
+    ));
 }
 
 #[tokio::test]

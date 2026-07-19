@@ -151,16 +151,16 @@ describe("chat model overrides round-trip localStorage", () => {
   });
 });
 
-describe("read-only orchestration opt-in", () => {
-  it("is disabled by default and reaches only local connect configs", () => {
-    expect(loadOrchestrationEnabled()).toBe(false);
-    expect(localConnectConfig({ ...DEFAULT_LOCAL_SETTINGS, cwd: "/repo" }).extra)
-      .toMatchObject({ orchestration: { enabled: false } });
-
-    saveOrchestrationEnabled(true);
+describe("bounded orchestration availability", () => {
+  it("is enabled by default, can be disabled, and reaches only local configs", () => {
     expect(loadOrchestrationEnabled()).toBe(true);
     expect(localConnectConfig({ ...DEFAULT_LOCAL_SETTINGS, cwd: "/repo" }).extra)
       .toMatchObject({ orchestration: { enabled: true } });
+
+    saveOrchestrationEnabled(false);
+    expect(loadOrchestrationEnabled()).toBe(false);
+    expect(localConnectConfig({ ...DEFAULT_LOCAL_SETTINGS, cwd: "/repo" }).extra)
+      .toMatchObject({ orchestration: { enabled: false } });
 
     expect(localConnectConfig(
       { ...DEFAULT_LOCAL_SETTINGS, cwd: "/repo" },

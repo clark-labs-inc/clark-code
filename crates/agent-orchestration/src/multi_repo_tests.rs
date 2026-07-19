@@ -114,6 +114,50 @@ fn valid_plan() -> MultiRepoPlan {
     }
 }
 
+fn single_repository_plan() -> MultiRepoPlan {
+    let app = RepositoryBaseline {
+        allowed_changed_paths: BTreeSet::from(["src/engine.rs".into(), "tests/engine.rs".into()]),
+        ..repository("app", "/tmp/clark-bench/app", "src/engine.rs")
+    };
+    MultiRepoPlan {
+        repositories: BTreeMap::from([(app.repository_id.clone(), app)]),
+        contracts: Vec::new(),
+        contract_decisions: Vec::new(),
+        tasks: vec![
+            task("planner", MultiRepoTaskRole::Planner, None, &[], &[]),
+            task(
+                "engine-writer",
+                MultiRepoTaskRole::Writer,
+                Some("app"),
+                &["planner"],
+                &["src/engine.rs"],
+            ),
+            task(
+                "test-writer",
+                MultiRepoTaskRole::Writer,
+                Some("app"),
+                &["planner"],
+                &["tests/engine.rs"],
+            ),
+            task(
+                "integrator",
+                MultiRepoTaskRole::Integrator,
+                None,
+                &["engine-writer", "test-writer"],
+                &[],
+            ),
+        ],
+        integration_checks: vec![IntegrationCheck {
+            id: "app-tests".into(),
+            repository_id: RepositoryId::new("app").unwrap(),
+            argv: vec!["cargo".into(), "test".into()],
+            timeout_ms: 120_000,
+        }],
+        max_parallel_writers: 2,
+        requires_independent_review: false,
+    }
+}
+
 #[test]
 fn independent_repository_writers_are_selected_for_parallel_delegation() {
     let plan = valid_plan();
@@ -122,6 +166,48 @@ fn independent_repository_writers_are_selected_for_parallel_delegation() {
     assert_eq!(
         decision.parallel_writer_batches,
         vec![vec![id("api-writer"), id("sdk-writer")]]
+    );
+}
+
+#[test]
+fn independent_path_leases_in_one_repository_are_parallelizable() {
+    let plan = single_repository_plan();
+    plan.validate().unwrap();
+    let decision = plan.decomposition_decision().unwrap();
+    assert!(decision.delegated);
+    assert_eq!(
+        decision.parallel_writer_batches,
+        vec![vec![id("engine-writer"), id("test-writer")]]
+    );
+}
+
+#[test]
+fn one_repository_writer_leases_must_be_disjoint_and_cover_scope() {
+    let mut overlapping = single_repository_plan();
+    overlapping
+        .tasks
+        .iter_mut()
+        .find(|task| task.id == id("test-writer"))
+        .unwrap()
+        .allowed_changed_paths
+        .insert("src/engine.rs".into());
+    assert_eq!(
+        overlapping.validate().unwrap_err(),
+        "writer leases overlap within repository app"
+    );
+
+    let mut incomplete = single_repository_plan();
+    incomplete.tasks.retain(|task| task.id != id("test-writer"));
+    incomplete
+        .tasks
+        .iter_mut()
+        .find(|task| task.id == id("integrator"))
+        .unwrap()
+        .dependencies
+        .remove(&id("test-writer"));
+    assert_eq!(
+        incomplete.validate().unwrap_err(),
+        "writer leases must exactly cover repository app change scope"
     );
 }
 
@@ -215,6 +301,37 @@ fn package_descriptor_is_pinned_content_addressed_and_isolated() {
     assert_eq!(
         plan.validate_change_package(&package).unwrap_err(),
         "change package baseline does not match the selected checkout"
+    );
+}
+
+#[test]
+fn repository_result_digest_covers_every_same_repository_package() {
+    let first = ChangePackageDescriptor {
+        task_id: id("engine-writer"),
+        repository_id: RepositoryId::new("app").unwrap(),
+        base_head_oid: "a".repeat(40),
+        changed_paths: BTreeSet::from(["src/engine.rs".into()]),
+        patch_sha256: "b".repeat(64),
+        result_tree_sha256: "c".repeat(64),
+        artifact_path: "/tmp/first.patch".into(),
+        isolation: IsolationKind::LocalEphemeralClone,
+        checks_run: Vec::new(),
+    };
+    let mut second = first.clone();
+    second.task_id = id("test-writer");
+    second.patch_sha256 = "d".repeat(64);
+    second.result_tree_sha256 = "e".repeat(64);
+    assert_eq!(
+        repository_result_tree_sha256([&first]),
+        Some(first.result_tree_sha256.clone())
+    );
+    assert_ne!(
+        repository_result_tree_sha256([&first, &second]),
+        repository_result_tree_sha256([&first])
+    );
+    assert_eq!(
+        repository_result_tree_sha256([&second, &first]),
+        repository_result_tree_sha256([&first, &second])
     );
 }
 

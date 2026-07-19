@@ -14,8 +14,12 @@ use crate::repository::inspect_repository;
 mod git;
 use git::{
     changed_tree_sha256, checkout_kind, clone_at_baseline, git_bytes, git_shell, git_text,
-    parse_nul_paths, sha256, validate_relative_path, working_state_sha256,
+    parse_nul_paths, sha256, validate_relative_path, working_paths, working_state_sha256,
 };
+
+#[path = "multi_repo_workspace/application.rs"]
+mod application;
+pub use application::PrimaryApplicationReceipt;
 
 #[derive(Clone, Debug)]
 pub struct RepositorySelectionRequest {
@@ -29,6 +33,7 @@ pub struct RepositorySelectionRequest {
 pub struct SelectedRepository {
     pub baseline: RepositoryBaseline,
     primary_state_sha256: String,
+    primary_changed_paths: BTreeSet<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -37,12 +42,33 @@ pub struct RepositorySelection {
 }
 
 impl RepositorySelection {
+    #[cfg(test)]
+    pub(crate) fn from_test_baselines(
+        baselines: BTreeMap<RepositoryId, RepositoryBaseline>,
+    ) -> Self {
+        Self {
+            repositories: baselines
+                .into_iter()
+                .map(|(id, baseline)| {
+                    (
+                        id,
+                        SelectedRepository {
+                            primary_state_sha256: baseline.dirty_tree_sha256.clone(),
+                            baseline,
+                            primary_changed_paths: BTreeSet::new(),
+                        },
+                    )
+                })
+                .collect(),
+        }
+    }
+
     pub async fn resolve(
         executor: &dyn Executor,
         requests: Vec<RepositorySelectionRequest>,
     ) -> Result<Self, String> {
-        if requests.len() < 2 {
-            return Err("multi-repository selection requires at least two explicit roots".into());
+        if requests.is_empty() {
+            return Err("repository selection requires at least one explicit root".into());
         }
         let mut repositories = BTreeMap::new();
         let mut fingerprints = BTreeSet::new();
@@ -83,6 +109,7 @@ impl RepositorySelection {
             let checkout_kind =
                 checkout_kind(executor, &root, identity.current_branch.as_deref()).await?;
             let primary_state_sha256 = working_state_sha256(executor, &root).await?;
+            let primary_changed_paths = working_paths(executor, &root).await?;
             let baseline = RepositoryBaseline {
                 repository_id: request.repository_id.clone(),
                 repository_fingerprint: identity.fingerprint,
@@ -101,6 +128,7 @@ impl RepositorySelection {
                     SelectedRepository {
                         baseline,
                         primary_state_sha256,
+                        primary_changed_paths,
                     },
                 )
                 .is_some()
@@ -394,10 +422,12 @@ impl FreshIntegrationWorkspace {
         for (repository_id, selected) in &selection.repositories {
             let destination = root.join(repository_id.as_str());
             clone_at_baseline(executor, &selected.baseline, &destination, &root).await?;
-            if let Some(package) = packages
+            let mut repository_packages = packages
                 .iter()
-                .find(|package| &package.repository_id == repository_id)
-            {
+                .filter(|package| &package.repository_id == repository_id)
+                .collect::<Vec<_>>();
+            repository_packages.sort_by(|left, right| left.task_id.cmp(&right.task_id));
+            for package in &repository_packages {
                 plan.validate_change_package(package)?;
                 let patch = executor.read(Path::new(&package.artifact_path)).await?;
                 if sha256(&patch) != package.patch_sha256 {
@@ -421,8 +451,12 @@ impl FreshIntegrationWorkspace {
                 if result_tree != package.result_tree_sha256 {
                     return Err(format!("result tree mismatch for {repository_id}"));
                 }
-                repository_result_trees.insert(repository_id.clone(), result_tree);
                 applied_patch_sha256.push(package.patch_sha256.clone());
+            }
+            if let Some(result_tree) = agent_orchestration::repository_result_tree_sha256(
+                repository_packages.iter().copied(),
+            ) {
+                repository_result_trees.insert(repository_id.clone(), result_tree);
             }
             repository_roots.insert(repository_id.clone(), destination);
         }

@@ -45,6 +45,14 @@ export interface CloudTrajectoryConfig {
   metadata: Record<string, unknown>;
 }
 
+/** Read-only Git identity for the checkout backing the composer. */
+export interface ProjectContext {
+  branch: string;
+  detached: boolean;
+  isWorktree: boolean;
+  worktreeRoot: string;
+}
+
 export interface CoreBridge {
   listProviders(): Promise<ProviderInfo[]>;
   connect(providerId: string, config: ConnectConfig): Promise<void>;
@@ -103,6 +111,11 @@ export interface CoreBridge {
   listGlobalMemory?(): Promise<MemoryOverview>;
   /** Project-relative file paths under `cwd`, for the `@`-mention picker. */
   listFiles?(cwd: string, remote?: RemoteExecutorTarget | null): Promise<string[]>;
+  /** Current branch and linked-worktree identity for the selected checkout. */
+  projectContext?(
+    cwd: string,
+    remote?: RemoteExecutorTarget | null,
+  ): Promise<ProjectContext | null>;
   /** Open a path in the OS default app, or reveal it in the file manager. */
   openPath?(path: string, reveal?: boolean): Promise<void>;
   /** Create a named, sibling Git worktree and return its absolute path. */

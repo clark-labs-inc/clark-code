@@ -48,21 +48,17 @@ export function resetFanOut(): void {
 /** Dev-only: preview the fan-out surface without a live run. `previewFanOut()`
  *  in the console. */
 export function previewFanOut(): void {
-  const files = [
-    "Button", "Card", "Modal", "Sidebar", "Input", "Table", "Toast", "Badge",
-    "Tabs", "Menu", "Avatar", "Dialog", "Drawer", "Slider", "Chart",
+  const agents: FanOutAgent[] = [
+    { id: "environment", label: "Prepare the test environment", status: "done" },
+    { id: "implementation", label: "Implement the repository changes", status: "running" },
+    { id: "verification", label: "Review and run the full test suite", status: "queued" },
   ];
-  const agents: FanOutAgent[] = files.map((f, i) => ({
-    id: String(i),
-    label: `${f}.tsx`,
-    status: i < 5 ? "done" : i < 13 ? "running" : "queued",
-  }));
   lastSignature = "preview";
   useFanOutStore.getState().setFanOut({
-    title: "Refactoring every component in src/ to the new design tokens",
-    total: 240,
-    done: 37,
-    running: 203,
+    title: "Build the feature in isolated workspaces, then combine and verify the result",
+    total: agents.length,
+    done: 1,
+    running: 1,
     agents,
   });
 }

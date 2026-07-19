@@ -28,6 +28,8 @@ mod resolution;
 mod schema;
 #[path = "orchestration_tool_support.rs"]
 mod support;
+#[path = "orchestration_writer_tool.rs"]
+mod writer;
 
 use schema::delegate_schema;
 use support::{event_sink, role_for_purpose};
@@ -47,17 +49,20 @@ pub(super) struct SharedState {
 }
 
 pub(crate) fn orchestration_tools(config: OrchestrationToolsConfig) -> Vec<Arc<dyn ToolExecutor>> {
+    let writer_config = config.clone();
     let shared = Arc::new(SharedState {
         execution_slots: Arc::new(Semaphore::new(config.policy.max_agents)),
         config,
         orchestrations: Mutex::new(HashMap::new()),
     });
-    vec![
+    let mut tools: Vec<Arc<dyn ToolExecutor>> = vec![
         Arc::new(DelegateReadOnly {
             shared: shared.clone(),
         }),
         resolution::tool(shared),
-    ]
+    ];
+    tools.extend(writer::tools(writer_config));
+    tools
 }
 
 struct DelegateReadOnly {
@@ -69,10 +74,6 @@ struct DelegateReadOnly {
 struct DelegateArgs {
     objective: String,
     purpose: OrchestrationPurpose,
-    #[serde(default)]
-    root_estimated_output_tokens: u64,
-    #[serde(default)]
-    risk: RiskSignals,
     workstreams: Vec<WorkstreamArgs>,
 }
 
@@ -83,14 +84,6 @@ struct WorkstreamArgs {
     objective: String,
     scopes: BTreeSet<String>,
     acceptance: Vec<String>,
-    #[serde(default = "default_harness")]
-    harness: String,
-    #[serde(default = "default_output_tokens")]
-    estimated_output_tokens: u64,
-}
-
-fn default_harness() -> String {
-    "local".to_string()
 }
 
 fn default_output_tokens() -> u64 {
@@ -108,7 +101,7 @@ impl ToolExecutor for DelegateReadOnly {
     }
 
     fn parameters(&self) -> Value {
-        delegate_schema(&self.shared.config.policy.acp_harnesses)
+        delegate_schema()
     }
 
     fn kind(&self) -> ToolKind {
@@ -165,6 +158,15 @@ async fn run_delegation(
 ) -> Result<ToolOutcome, String> {
     let entries = ctx.executor.walk(ctx.sandbox.root()).await?;
     let role = role_for_purpose(args.purpose)?;
+    let risk = RiskSignals {
+        // Selecting a gated review/verify purpose is the structured trigger;
+        // cost, harness, and the rest of the gate policy remain host-owned.
+        user_requested_review: matches!(
+            args.purpose,
+            OrchestrationPurpose::Review | OrchestrationPurpose::Verify
+        ),
+        ..RiskSignals::default()
+    };
     let child_model = shared
         .config
         .policy
@@ -177,13 +179,13 @@ async fn run_delegation(
         let task_id = TaskId::new(workstream.id)?;
         let scopes = resolve_scopes(ctx, &workstream.scopes)?;
         let context_tokens = estimate_context_tokens(&entries, &scopes);
-        let (harness_kind, model, rate) =
-            harness_metadata(shared, &workstream.harness, &child_model)?;
+        let harness = &shared.config.policy.read_only_harness;
+        let (harness_kind, model, rate) = harness_metadata(shared, harness, &child_model)?;
         estimates.push(WorkstreamEstimate {
             task_id: task_id.clone(),
             scopes: workstream.scopes.clone(),
             estimated_context_tokens: context_tokens,
-            estimated_output_tokens: workstream.estimated_output_tokens,
+            estimated_output_tokens: default_output_tokens(),
             harness_kind,
             model,
             model_rate: rate,
@@ -194,20 +196,21 @@ async fn run_delegation(
             objective: workstream.objective,
             scopes: workstream.scopes,
             acceptance: workstream.acceptance,
-            harness: workstream.harness,
+            harness: harness.clone(),
         });
     }
     let orchestration_id = OrchestrationId::new(format!("fanout-{}", Uuid::new_v4()))?;
     let admission = AdmissionRequest {
-        // The host advertises this tool only after the user enables the
-        // experimental feature. Never let the model self-assert authorization.
+        // The model cannot widen this typed value through tool arguments. The
+        // host-injected explicit-request-only policy controls when the model may
+        // call the default-available tool; admission still owns cost and scope.
         authorization: Authorization::UserRequested,
         purpose: args.purpose,
         workstreams: estimates,
         root_model: shared.config.root_model.clone(),
         root_model_rate: shared.config.policy.root_model_rate,
-        root_estimated_output_tokens: args.root_estimated_output_tokens.max(2_000),
-        risk: args.risk,
+        root_estimated_output_tokens: default_output_tokens(),
+        risk,
         external_research_required: false,
     };
     let policy = AdmissionPolicy {

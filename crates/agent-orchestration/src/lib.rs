@@ -30,14 +30,15 @@ pub use execution::{
 };
 pub use harness::{AttemptContext, HarnessAttempt, HarnessError, HarnessEvent, ReadOnlyHarness};
 pub use multi_repo::{
-    ChangePackageDescriptor, CheckoutKind, ContractDecision, DecompositionDecision,
-    IntegrationCheck, IntegrationCheckReceipt, IntegrationHarnessAttempt, IntegrationReceipt,
-    IsolationKind, ModelTier, MultiRepoCoordinator, MultiRepoCoordinatorEvent, MultiRepoEventSink,
-    MultiRepoIntegrationHarness, MultiRepoPlan, MultiRepoReaderHarness, MultiRepoReviewHarness,
-    MultiRepoRunResult, MultiRepoTask, MultiRepoTaskRole, MultiRepoWriterHarness, PlanningReceipt,
-    ReaderFailure, ReaderHarnessAttempt, ReaderReport, RecoveryReceipt, RepositoryBaseline,
-    RepositoryContractEdge, RepositoryId, ReviewDecision, ReviewHarnessAttempt, ReviewReceipt,
-    TaskExecutionReceipt, TaskRunOutcome, WriterFailure, WriterHarnessAttempt,
+    repository_result_tree_sha256, ChangePackageDescriptor, CheckoutKind, ContractDecision,
+    DecompositionDecision, IntegrationCheck, IntegrationCheckReceipt, IntegrationHarnessAttempt,
+    IntegrationReceipt, IsolationKind, ModelTier, MultiRepoCoordinator, MultiRepoCoordinatorEvent,
+    MultiRepoEventSink, MultiRepoIntegrationHarness, MultiRepoPlan, MultiRepoReaderHarness,
+    MultiRepoReviewHarness, MultiRepoRunResult, MultiRepoTask, MultiRepoTaskRole,
+    MultiRepoWriterHarness, PlanningReceipt, ReaderFailure, ReaderHarnessAttempt, ReaderReport,
+    RecoveryReceipt, RepositoryBaseline, RepositoryContractEdge, RepositoryId, ReviewDecision,
+    ReviewHarnessAttempt, ReviewReceipt, TaskExecutionReceipt, TaskRunOutcome, WriterFailure,
+    WriterHarnessAttempt,
 };
 pub use policy::{
     AdmissionDecision, AdmissionPolicy, AdmissionRequest, Authorization, ModelRate,

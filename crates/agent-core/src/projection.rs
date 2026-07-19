@@ -29,6 +29,8 @@ pub enum TimelineItem {
         run: RunId,
         role: Role,
         blocks: Vec<ContentBlock>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        phase: Option<MessagePhase>,
     },
     /// Reference into [`Snapshot::tool_calls`] (kept by id so updates are O(1)).
     ToolCall { id: ToolCallId },
@@ -89,6 +91,10 @@ fn same_artifact_identity(left: &Artifact, right: &Artifact) -> bool {
 pub fn apply(snapshot: &mut Snapshot, event: &AgentEvent) {
     match event {
         AgentEvent::RunStarted { run } => {
+            // Retire the previous turn's parallel-work receipt only when new
+            // work begins. A completed card remains visible long enough for
+            // the user to understand what Clark finished.
+            snapshot.fan_out = None;
             snapshot.runs.entry(run.clone()).or_insert_with(|| RunView {
                 id: run.clone(),
                 status: RunStatus::Running,
@@ -113,6 +119,7 @@ pub fn apply(snapshot: &mut Snapshot, event: &AgentEvent) {
                 run: last_run,
                 role: last_role,
                 blocks,
+                ..
             }) = snapshot.timeline.last_mut()
             {
                 if last_run == run && last_role == role {
@@ -124,10 +131,23 @@ pub fn apply(snapshot: &mut Snapshot, event: &AgentEvent) {
                 run: run.clone(),
                 role: *role,
                 blocks: vec![delta.clone()],
+                phase: None,
             });
         }
 
-        AgentEvent::ToolCall { call, .. } => {
+        AgentEvent::MessagePhase { run, phase } => {
+            set_latest_unphased_agent_message(&mut snapshot.timeline, run, *phase);
+        }
+
+        AgentEvent::ToolCall { run, call } => {
+            // Compatibility fallback for providers that stream assistant text
+            // but do not expose an explicit message phase. Once a tool follows,
+            // the preceding assistant text is necessarily mid-turn commentary.
+            set_latest_unphased_agent_message(
+                &mut snapshot.timeline,
+                run,
+                MessagePhase::Commentary,
+            );
             let already = snapshot.tool_calls.contains_key(&call.id);
             snapshot.tool_calls.insert(call.id.clone(), call.clone());
             if !already {
@@ -245,6 +265,14 @@ pub fn apply(snapshot: &mut Snapshot, event: &AgentEvent) {
         }
 
         AgentEvent::RunFinished { run, outcome } => {
+            // A provider without native phase metadata leaves its terminal
+            // assistant message unresolved until the run boundary. Explicit
+            // commentary is never overwritten here.
+            set_latest_unphased_agent_message(
+                &mut snapshot.timeline,
+                run,
+                MessagePhase::FinalAnswer,
+            );
             let view = snapshot.runs.entry(run.clone()).or_insert_with(|| RunView {
                 id: run.clone(),
                 status: outcome.status,
@@ -255,9 +283,6 @@ pub fn apply(snapshot: &mut Snapshot, event: &AgentEvent) {
             view.outcome = Some(outcome.clone());
             // A finished run clears any permission gate tied to it.
             snapshot.pending_permission = None;
-            // The fan-out surface is a live-run affordance; retire it when the
-            // run ends so it fades out rather than lingering.
-            snapshot.fan_out = None;
         }
 
         AgentEvent::Error { run, .. } => {
@@ -266,6 +291,31 @@ pub fn apply(snapshot: &mut Snapshot, event: &AgentEvent) {
                     view.status = RunStatus::Failed;
                 }
             }
+        }
+    }
+}
+
+fn set_latest_unphased_agent_message(
+    timeline: &mut [TimelineItem],
+    run: &RunId,
+    phase: MessagePhase,
+) {
+    if let Some(TimelineItem::Message {
+        role: Role::Agent,
+        phase: message_phase,
+        ..
+    }) = timeline.iter_mut().rev().find(|item| {
+        matches!(
+            item,
+            TimelineItem::Message {
+                run: message_run,
+                role: Role::Agent,
+                ..
+            } if message_run == run
+        )
+    }) {
+        if message_phase.is_none() {
+            *message_phase = Some(phase);
         }
     }
 }
@@ -389,6 +439,155 @@ mod tests {
         ];
         let snap = reduce_all(&events);
         assert_eq!(snap.timeline.len(), 2);
+    }
+
+    #[test]
+    fn explicit_phase_patches_latest_agent_message_idempotently() {
+        let phase = AgentEvent::MessagePhase {
+            run: run(),
+            phase: MessagePhase::Commentary,
+        };
+        let mut snap = reduce_all(&[
+            AgentEvent::MessageChunk {
+                run: run(),
+                role: Role::Agent,
+                delta: ContentBlock::text("First update"),
+            },
+            phase.clone(),
+            AgentEvent::MessageChunk {
+                run: run(),
+                role: Role::User,
+                delta: ContentBlock::text("User message"),
+            },
+        ]);
+
+        apply(&mut snap, &phase);
+
+        assert!(matches!(
+            &snap.timeline[0],
+            TimelineItem::Message {
+                role: Role::Agent,
+                phase: Some(MessagePhase::Commentary),
+                ..
+            }
+        ));
+        assert!(matches!(
+            &snap.timeline[1],
+            TimelineItem::Message {
+                role: Role::User,
+                phase: None,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn tool_after_unphased_text_classifies_it_as_commentary() {
+        let events = vec![
+            AgentEvent::MessageChunk {
+                run: run(),
+                role: Role::Agent,
+                delta: ContentBlock::text("I found the config; next I’ll inspect its callers."),
+            },
+            AgentEvent::ToolCall {
+                run: run(),
+                call: ToolCall {
+                    id: ToolCallId::new("tc-phase"),
+                    tool_name: Some("read_file".into()),
+                    title: "Read callers".into(),
+                    kind: ToolKind::Read,
+                    status: ToolStatus::Pending,
+                    locations: vec![],
+                    content: vec![],
+                    raw_input: None,
+                },
+            },
+        ];
+
+        let snap = reduce_all(&events);
+        assert!(matches!(
+            &snap.timeline[0],
+            TimelineItem::Message {
+                phase: Some(MessagePhase::Commentary),
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn run_finish_classifies_latest_unphased_agent_message_as_final() {
+        let events = vec![
+            AgentEvent::MessageChunk {
+                run: run(),
+                role: Role::Agent,
+                delta: ContentBlock::text("The requested change is complete."),
+            },
+            AgentEvent::RunFinished {
+                run: run(),
+                outcome: RunOutcome {
+                    status: RunStatus::Done,
+                    stop_reason: Some("end_turn".into()),
+                    error: None,
+                    failure_kind: None,
+                    usage: None,
+                    execution: None,
+                },
+            },
+        ];
+
+        let snap = reduce_all(&events);
+        assert!(matches!(
+            &snap.timeline[0],
+            TimelineItem::Message {
+                phase: Some(MessagePhase::FinalAnswer),
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn run_finish_preserves_explicit_commentary_phase() {
+        let events = vec![
+            AgentEvent::MessageChunk {
+                run: run(),
+                role: Role::Agent,
+                delta: ContentBlock::text("I’m running the focused tests next."),
+            },
+            AgentEvent::MessagePhase {
+                run: run(),
+                phase: MessagePhase::Commentary,
+            },
+            AgentEvent::RunFinished {
+                run: run(),
+                outcome: RunOutcome {
+                    status: RunStatus::Done,
+                    stop_reason: Some("end_turn".into()),
+                    error: None,
+                    failure_kind: None,
+                    usage: None,
+                    execution: None,
+                },
+            },
+        ];
+
+        let snap = reduce_all(&events);
+        assert!(matches!(
+            &snap.timeline[0],
+            TimelineItem::Message {
+                phase: Some(MessagePhase::Commentary),
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn legacy_message_without_phase_deserializes_unphased() {
+        let item: TimelineItem = serde_json::from_str(
+            r#"{"item":"message","run":"run-1","role":"agent","blocks":[{"type":"text","text":"Legacy"}]}"#,
+        )
+        .expect("legacy timeline message should deserialize");
+
+        assert!(matches!(item, TimelineItem::Message { phase: None, .. }));
     }
 
     #[test]
@@ -707,6 +906,10 @@ mod tests {
                 role: Role::User,
                 delta: ContentBlock::text("hello"),
             },
+            AgentEvent::MessagePhase {
+                run: run(),
+                phase: MessagePhase::Commentary,
+            },
             AgentEvent::ToolCall {
                 run: run(),
                 call: ToolCall {
@@ -802,5 +1005,81 @@ mod tests {
         assert_eq!(once.focus.unwrap().surface, WorkspaceSurfaceKind::Browser);
         assert_eq!(once.runs[&run()].status, RunStatus::Done);
         assert!(once.pending_permission.is_none());
+    }
+
+    #[test]
+    fn fan_out_updates_preserve_labels_and_recompute_aggregate_state() {
+        let parent = ToolCallId::new("delegate");
+        let mut snapshot = Snapshot::new();
+        apply(
+            &mut snapshot,
+            &AgentEvent::FanOut {
+                run: run(),
+                parent: parent.clone(),
+                agent: FanOutAgent {
+                    id: "implementation".into(),
+                    label: "Implement the change".into(),
+                    status: FanOutStatus::Queued,
+                },
+            },
+        );
+        apply(
+            &mut snapshot,
+            &AgentEvent::FanOut {
+                run: run(),
+                parent,
+                agent: FanOutAgent {
+                    id: "implementation".into(),
+                    label: String::new(),
+                    status: FanOutStatus::Running,
+                },
+            },
+        );
+
+        let fan_out = snapshot.fan_out.unwrap();
+        assert_eq!(fan_out.total, 1);
+        assert_eq!(fan_out.running, 1);
+        assert_eq!(fan_out.done, 0);
+        assert_eq!(fan_out.agents[0].label, "Implement the change");
+    }
+
+    #[test]
+    fn completed_fan_out_stays_visible_until_the_next_run_starts() {
+        let mut snapshot = Snapshot::new();
+        apply(
+            &mut snapshot,
+            &AgentEvent::FanOut {
+                run: run(),
+                parent: ToolCallId::new("delegate"),
+                agent: FanOutAgent {
+                    id: "review".into(),
+                    label: "Review the result".into(),
+                    status: FanOutStatus::Done,
+                },
+            },
+        );
+        apply(
+            &mut snapshot,
+            &AgentEvent::RunFinished {
+                run: run(),
+                outcome: RunOutcome {
+                    status: RunStatus::Done,
+                    stop_reason: None,
+                    error: None,
+                    failure_kind: None,
+                    usage: None,
+                    execution: None,
+                },
+            },
+        );
+        assert!(snapshot.fan_out.is_some());
+
+        apply(
+            &mut snapshot,
+            &AgentEvent::RunStarted {
+                run: RunId::new("run-2"),
+            },
+        );
+        assert!(snapshot.fan_out.is_none());
     }
 }

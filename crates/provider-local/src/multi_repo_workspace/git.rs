@@ -74,6 +74,19 @@ pub(super) async fn working_state_sha256(
     changed_tree_sha256(executor, root, "working-state", &sha256(&status), &paths).await
 }
 
+pub(super) async fn working_paths(
+    executor: &dyn Executor,
+    root: &Path,
+) -> Result<BTreeSet<String>, String> {
+    let status = git_bytes(
+        executor,
+        root,
+        &["status", "--porcelain=v1", "-z", "--untracked-files=all"],
+    )
+    .await?;
+    parse_porcelain_paths(&status)
+}
+
 pub(super) async fn changed_tree_sha256(
     executor: &dyn Executor,
     root: &Path,
