@@ -325,7 +325,11 @@ async fn project_settings_customize_claude_style_commit_attribution() {
             .count(),
         2
     );
-    assert!(prompt.contains("git commit -m \"$(cat <<'EOF'"));
+    if cfg!(windows) {
+        assert!(prompt.contains("git commit -m @'"));
+    } else {
+        assert!(prompt.contains("git commit -m \"$(cat <<'EOF'"));
+    }
     let registry = provider.registry.as_ref().unwrap();
     assert!(registry.get("bash").is_some());
     assert!(registry.get("git_commit").is_none());

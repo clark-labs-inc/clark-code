@@ -19,9 +19,11 @@ use serde::Serialize;
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::path::Path;
+use std::time::Duration;
 use std::time::Instant;
 
 const MAX_TURNS: usize = 3;
+const TURN_TIMEOUT: Duration = Duration::from_secs(180);
 const CONTROL_PROFILE: &str = "decision_complete";
 const CANDIDATE_PROFILE: &str = "concise";
 
@@ -157,6 +159,7 @@ async fn run_case(
     api_key: &str,
     model: &str,
     base_url: &str,
+    reasoning_effort: &str,
 ) -> ResultRow {
     let temp = tempfile::tempdir().unwrap();
     (scenario.seed)(temp.path());
@@ -172,6 +175,7 @@ async fn run_case(
                 "memories": false,
                 "research": false,
                 "planning_prompt_profile": profile,
+                "reasoning_effort": reasoning_effort,
             }),
             ..Default::default()
         })
@@ -200,27 +204,31 @@ async fn run_case(
             .prompt(&session.id, PromptInput::text(prompt.clone()))
             .await
             .unwrap();
-        while let Some(event) = stream.next().await {
-            match event {
-                AgentEvent::ToolCall { .. } => tool_calls += 1,
-                AgentEvent::ProposedPlanUpdated { plan, .. } => proposal = Some(plan),
-                AgentEvent::RunFinished { outcome, .. } => {
-                    if let Some(usage) = outcome.usage {
-                        input_tokens = input_tokens.saturating_add(usage.input_tokens);
-                        output_tokens = output_tokens.saturating_add(usage.output_tokens);
-                        context_tokens = usage.context_tokens;
-                        cost_usd += usage.cost_usd.unwrap_or(0.0);
+        tokio::time::timeout(TURN_TIMEOUT, async {
+            while let Some(event) = stream.next().await {
+                match event {
+                    AgentEvent::ToolCall { .. } => tool_calls += 1,
+                    AgentEvent::ProposedPlanUpdated { plan, .. } => proposal = Some(plan),
+                    AgentEvent::RunFinished { outcome, .. } => {
+                        if let Some(usage) = outcome.usage {
+                            input_tokens = input_tokens.saturating_add(usage.input_tokens);
+                            output_tokens = output_tokens.saturating_add(usage.output_tokens);
+                            context_tokens = usage.context_tokens;
+                            cost_usd += usage.cost_usd.unwrap_or(0.0);
+                        }
                     }
+                    AgentEvent::PermissionRequest { request } => {
+                        panic!(
+                            "Plan Mode requested permission in {}: {:?}",
+                            scenario.id, request
+                        )
+                    }
+                    _ => {}
                 }
-                AgentEvent::PermissionRequest { request } => {
-                    panic!(
-                        "Plan Mode requested permission in {}: {:?}",
-                        scenario.id, request
-                    )
-                }
-                _ => {}
             }
-        }
+        })
+        .await
+        .unwrap_or_else(|_| panic!("{} {profile} turn {turns} timed out", scenario.id));
         prompt = "Use the repository's existing conventions and your recommended defaults. Resolve any remaining implementation details and propose the complete plan now.".into();
     }
 
@@ -280,6 +288,8 @@ async fn main() {
         .expect("cost cap must be a number");
     let base_url = std::env::var("CLARK_CODE_BASE_URL")
         .unwrap_or_else(|_| "https://api.clarkslabs.com/v1".into());
+    let reasoning_effort =
+        std::env::var("PLANNING_EVAL_REASONING_EFFORT").unwrap_or_else(|_| "low".into());
     let selected = selected.split(',').map(str::trim).collect::<Vec<_>>();
     let repetitions = std::env::var("PLANNING_EVAL_REPETITIONS")
         .ok()
@@ -301,7 +311,17 @@ async fn main() {
                     scenario.id,
                     profile
                 );
-                let row = run_case(scenario, profile, trial, &api_key, &model, &base_url).await;
+                eprintln!("running trial {trial} {}/{}", scenario.id, profile);
+                let row = run_case(
+                    scenario,
+                    profile,
+                    trial,
+                    &api_key,
+                    &model,
+                    &base_url,
+                    &reasoning_effort,
+                )
+                .await;
                 spent += row.cost_usd;
                 println!("{}", serde_json::to_string(&row).unwrap());
                 rows.push(row);
@@ -336,6 +356,7 @@ async fn main() {
         json!({
             "eval": "planning_ab",
             "model": model,
+            "reasoning_effort": reasoning_effort,
             "scenarios": selected,
             "repetitions": repetitions,
             "control_profile": CONTROL_PROFILE,

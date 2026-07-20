@@ -26,9 +26,12 @@ CLARK_CODE_API_KEY=ck_live_... \
 CLARK_CODE_MODEL=clark-code \
 PLANNING_EVAL_SCENARIOS=typed-boundary,preference-migration,parser-fix \
 PLANNING_EVAL_REPETITIONS=2 \
+PLANNING_EVAL_REASONING_EFFORT=low \
 PLANNING_EVAL_MAX_COST_USD=5 \
 cargo run -p provider-local --example planning_eval
 ```
 
 Do not use results from different models, scenario lists, or repository
-fixtures as an A/B comparison.
+fixtures as an A/B comparison. The reasoning effort defaults to `low`; set it
+explicitly when recording a comparison. Each turn fails closed after three
+minutes rather than leaving a paid benchmark hung indefinitely.

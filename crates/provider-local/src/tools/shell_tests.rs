@@ -51,6 +51,59 @@ async fn runs_command_and_captures_stdout() {
     assert!(out.content.contains("hello"));
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn ordinary_git_commit_heredoc_preserves_hooks_and_attribution() {
+    use std::os::unix::fs::PermissionsExt;
+    use std::process::Command;
+
+    let dir = tempfile::tempdir().unwrap();
+    for args in [
+        &["init", "-q"][..],
+        &["config", "user.name", "Human Author"][..],
+        &["config", "user.email", "human@example.com"][..],
+    ] {
+        let status = Command::new("git")
+            .args(args)
+            .current_dir(dir.path())
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?}");
+    }
+    std::fs::write(dir.path().join("work.txt"), "done\n").unwrap();
+    let status = Command::new("git")
+        .args(["add", "--", "work.txt"])
+        .current_dir(dir.path())
+        .status()
+        .unwrap();
+    assert!(status.success());
+    let hook = dir.path().join(".git/hooks/pre-commit");
+    std::fs::write(&hook, "#!/bin/sh\nprintf hook-ran > hook-ran\n").unwrap();
+    std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    let out = Bash
+        .invoke(
+            json!({
+                "command": "git commit -m \"$(cat <<'EOF'\ntest: attributed commit\n\nCo-Authored-By: Clark Code <noreply@clarkchat.com>\nEOF\n)\""
+            }),
+            &ctx(dir.path()),
+        )
+        .await;
+    assert!(!out.is_error, "{}", out.content);
+    assert!(dir.path().join("hook-ran").exists());
+    let message = Command::new("git")
+        .args(["show", "-s", "--format=%B", "HEAD"])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    assert!(
+        String::from_utf8_lossy(&message.stdout)
+            .contains("Co-Authored-By: Clark Code <noreply@clarkchat.com>"),
+        "{}",
+        String::from_utf8_lossy(&message.stdout)
+    );
+}
+
 #[tokio::test]
 async fn nonzero_exit_is_flagged_error() {
     let dir = tempfile::tempdir().unwrap();

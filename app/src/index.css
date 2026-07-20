@@ -118,7 +118,7 @@
    shortcuts scale the rail with the type so line length stays balanced. */
 :root {
   --chat-column-scale: 1;
-  --chat-column-max-width: calc(48rem * var(--chat-column-scale));
+  --chat-column-max-width: calc(50rem * var(--chat-column-scale));
 }
 
 .chat-column-width {

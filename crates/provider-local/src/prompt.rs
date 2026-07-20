@@ -191,12 +191,21 @@ You write and modify real files and run real commands on their computer.\n\n",
             p.push_str(attribution);
             p.push_str("\n\n");
         }
-        p.push_str("- Always pass the complete commit message through a quoted heredoc so multiline bodies and trailers keep their formatting:\n\n```sh\ngit commit -m \"$(cat <<'EOF'\nCommit message here.");
-        if !attribution.is_empty() {
-            p.push_str("\n\n");
-            p.push_str(attribution);
+        if cfg!(windows) {
+            p.push_str("- Always pass the complete commit message through a PowerShell single-quoted here-string so multiline bodies and trailers keep their formatting:\n\n```powershell\ngit commit -m @'\nCommit message here.");
+            if !attribution.is_empty() {
+                p.push_str("\n\n");
+                p.push_str(attribution);
+            }
+            p.push_str("\n'@\n```\n");
+        } else {
+            p.push_str("- Always pass the complete commit message through a quoted heredoc so multiline bodies and trailers keep their formatting:\n\n```sh\ngit commit -m \"$(cat <<'EOF'\nCommit message here.");
+            if !attribution.is_empty() {
+                p.push_str("\n\n");
+                p.push_str(attribution);
+            }
+            p.push_str("\nEOF\n)\"\n```\n");
         }
-        p.push_str("\nEOF\n)\"\n```\n");
     }
     p.push('\n');
 
@@ -402,7 +411,11 @@ mod tests {
         let p = system_prompt(&sb, false, false, Some(custom));
         assert!(p.contains("## Creating commits"));
         assert!(p.contains("git status"));
-        assert!(p.contains("git commit -m \"$(cat <<'EOF'"));
+        if cfg!(windows) {
+            assert!(p.contains("git commit -m @'"));
+        } else {
+            assert!(p.contains("git commit -m \"$(cat <<'EOF'"));
+        }
         assert_eq!(p.matches(custom).count(), 2);
         assert!(p.contains("Never skip hooks or signing checks"));
 
@@ -413,6 +426,7 @@ mod tests {
         let hidden = system_prompt(&sb, false, false, None);
         assert!(!hidden.contains("## Creating commits"));
         assert!(!hidden.contains("git commit -m \"$(cat <<'EOF'"));
+        assert!(!hidden.contains("git commit -m @'"));
     }
 
     #[test]
