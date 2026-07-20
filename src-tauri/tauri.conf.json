@@ -6,8 +6,8 @@
   "build": {
     "frontendDist": "../app/dist",
     "devUrl": "http://localhost:1420",
-    "beforeDevCommand": "pnpm --dir ../app dev",
-    "beforeBuildCommand": "pnpm --dir ../app build",
+    "beforeDevCommand": "corepack pnpm@10 --dir ../app dev",
+    "beforeBuildCommand": "corepack pnpm@10 --dir ../app build",
     "removeUnusedCommands": true
   },
   "app": {
