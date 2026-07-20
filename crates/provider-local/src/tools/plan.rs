@@ -19,12 +19,8 @@ impl ToolExecutor for ProposePlan {
         "propose_plan"
     }
     fn description(&self) -> &str {
-        "Call this when you've finished researching and are ready for the user to review your \
-        plan. Only for tasks that require planning implementation steps that will change code or \
-        the system — not for pure research/explanation tasks. Write the complete plan as terse \
-        markdown: normally 3–7 steps, exact paths, reuse, and verification; omit the research \
-        diary, preamble, and exhaustive alternatives. The user will approve it or provide \
-        concrete feedback."
+        "In Plan Mode, call once when the implementation plan is decision-complete. Provide concise \
+        Markdown with exact paths and verification; the turn ends for user review."
     }
     fn parameters(&self) -> Value {
         json!({
@@ -74,11 +70,8 @@ impl ToolExecutor for EnterPlanMode {
         "enter_plan_mode"
     }
     fn description(&self) -> &str {
-        "Suggest switching to Plan Mode before building. Call this for large, multi-file, or \
-        ambiguous requests where agreeing on an approach first would save rework — not for \
-        small fixes, pure research/explanation tasks, or when the user gave precise \
-        instructions. The user must approve; if they decline, proceed directly without a \
-        separate planning phase."
+        "Suggest Plan Mode for large or materially ambiguous implementation work where agreeing on \
+        an approach would prevent rework. The user must approve."
     }
     fn parameters(&self) -> Value {
         json!({
@@ -104,14 +97,10 @@ impl ToolExecutor for EnterPlanMode {
     // user turn — this result carries the condensed rules for the rest of the
     // current turn.
     async fn invoke(&self, _args: Value, _ctx: &ToolCtx) -> ToolOutcome {
-        let content = String::from(
-            "Entered plan mode — the user wants to agree on a plan before anything changes. \
-            Research read-only. Be terse: one batched search, then read only the few relevant \
-            files; no repeated probes or narrated research. Ask only about decisions the user \
-            must make. Once what / where / reuse / verify are known, call `propose_plan` with \
-            normally 3–7 concise steps.",
-        );
-        ToolOutcome::ok(content)
+        ToolOutcome::ok(
+            "Plan Mode entered. Research read-only and ask only material decisions. When the plan \
+             is decision-complete, call `propose_plan` once and end the turn.",
+        )
     }
 }
 
@@ -123,11 +112,9 @@ impl ToolExecutor for UpdatePlan {
         "update_plan"
     }
     fn description(&self) -> &str {
-        "Update the task checklist shown to the user. Provide the full list of steps each time \
-        (not a diff), each with a status. At most one step may be `in_progress` at a time; move a \
-        step to `in_progress` before marking it `completed` (don't skip straight to completed). \
-        Not usable while Plan Mode is active — that's a separate read-only research phase; use \
-        propose_plan there instead."
+        "Replace the visible execution checklist with the full step list. Keep exactly one step \
+        `in_progress` until completion; move each step through `in_progress` before `completed`, \
+        and explain changed steps. Unavailable in Plan Mode."
     }
     fn parameters(&self) -> Value {
         json!({
@@ -270,8 +257,7 @@ mod tests {
         assert!(!outcome.is_error);
         assert!(outcome.content.contains("propose_plan"));
         assert!(outcome.content.contains("read-only"));
-        assert!(outcome.content.contains("one batched search"));
-        assert!(outcome.content.contains("no repeated probes"));
+        assert!(outcome.content.contains("decision-complete"));
     }
 
     #[test]

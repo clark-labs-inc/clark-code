@@ -55,7 +55,7 @@ export function StartCard() {
         initial={reduce ? false : { opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: reduce ? 0 : DUR.slow, ease: EASE.out }}
-        className="mx-auto w-full max-w-2xl px-6 pb-6 pt-10"
+        className="chat-column-width mx-auto w-full px-6 pb-6 pt-10"
       >
         <div className="mb-6">
           <div className="mb-2.5 text-xs font-semibold uppercase tracking-[0.16em] text-accent">

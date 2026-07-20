@@ -343,7 +343,7 @@ export function Conversation({
 
   return (
     <div ref={scrollRef} onScroll={onScroll} className="flex-1 overflow-y-auto">
-      <div ref={contentRef} className="mx-auto flex max-w-2xl flex-col gap-4 px-5 py-5">
+      <div ref={contentRef} className="chat-column-width mx-auto flex w-full flex-col gap-4 px-5 py-5">
         {visible.length === 0 && !showPending && (
           <p className="py-10 text-center text-sm text-ink-faint">
             Ask Clark anything — file work, web research, and computer use show up here as it works.

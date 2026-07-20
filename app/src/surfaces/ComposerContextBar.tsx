@@ -97,7 +97,7 @@ export function ComposerContextBar() {
     // Keep this wrapper out of its own stacking layer. The context popovers
     // carry their own z-index; a parent z-index would paint these chips over
     // menus opened from the composer card below.
-    <div className="relative mx-auto mb-1.5 max-w-2xl" data-testid="composer-context-bar">
+    <div className="chat-column-width relative mx-auto mb-1.5 w-full" data-testid="composer-context-bar">
       <div
         aria-label="Checkout context"
         data-readonly={session ? "true" : undefined}

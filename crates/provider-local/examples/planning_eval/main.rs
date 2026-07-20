@@ -9,7 +9,7 @@
 //! PLANNING_EVAL_MAX_COST_USD=5 \
 //! cargo run -p provider-local --example planning_eval
 
-use agent_core::domain::{AgentEvent, ProposedPlan, RunOutcome};
+use agent_core::domain::{AgentEvent, ProposedPlan};
 use agent_core::provider::{
     CollaborationMode, PromptInput, Provider, ProviderConfig, SessionOptions,
 };
@@ -22,6 +22,8 @@ use std::path::Path;
 use std::time::Instant;
 
 const MAX_TURNS: usize = 3;
+const CONTROL_PROFILE: &str = "decision_complete";
+const CANDIDATE_PROFILE: &str = "concise";
 
 struct Scenario {
     id: &'static str,
@@ -34,6 +36,7 @@ struct Scenario {
 struct ResultRow {
     profile: &'static str,
     scenario: &'static str,
+    trial: usize,
     proposed: bool,
     read_only: bool,
     contract_hits: usize,
@@ -43,6 +46,7 @@ struct ResultRow {
     tool_calls: usize,
     input_tokens: u64,
     output_tokens: u64,
+    context_tokens: u64,
     cost_usd: f64,
     elapsed_ms: u128,
     plan: Option<String>,
@@ -149,6 +153,7 @@ fn tree_digest(root: &Path) -> String {
 async fn run_case(
     scenario: &'static Scenario,
     profile: &'static str,
+    trial: usize,
     api_key: &str,
     model: &str,
     base_url: &str,
@@ -182,9 +187,12 @@ async fn run_case(
         .unwrap();
 
     let mut proposal: Option<ProposedPlan> = None;
-    let mut outcome: Option<RunOutcome> = None;
     let mut tool_calls = 0;
     let mut turns = 0;
+    let mut input_tokens = 0_u64;
+    let mut output_tokens = 0_u64;
+    let mut context_tokens = 0_u64;
+    let mut cost_usd = 0.0;
     let mut prompt = scenario.prompt.to_string();
     while proposal.is_none() && turns < MAX_TURNS {
         turns += 1;
@@ -196,7 +204,14 @@ async fn run_case(
             match event {
                 AgentEvent::ToolCall { .. } => tool_calls += 1,
                 AgentEvent::ProposedPlanUpdated { plan, .. } => proposal = Some(plan),
-                AgentEvent::RunFinished { outcome: run, .. } => outcome = Some(run),
+                AgentEvent::RunFinished { outcome, .. } => {
+                    if let Some(usage) = outcome.usage {
+                        input_tokens = input_tokens.saturating_add(usage.input_tokens);
+                        output_tokens = output_tokens.saturating_add(usage.output_tokens);
+                        context_tokens = usage.context_tokens;
+                        cost_usd += usage.cost_usd.unwrap_or(0.0);
+                    }
+                }
                 AgentEvent::PermissionRequest { request } => {
                     panic!(
                         "Plan Mode requested permission in {}: {:?}",
@@ -228,10 +243,10 @@ async fn run_case(
     let score = (if proposed { 0.25 } else { 0.0 })
         + (if read_only { 0.25 } else { 0.0 })
         + 0.5 * contract_hits as f64 / scenario.required_terms.len() as f64;
-    let usage = outcome.and_then(|run| run.usage).unwrap_or_default();
     ResultRow {
         profile,
         scenario: scenario.id,
+        trial,
         proposed,
         read_only,
         contract_hits,
@@ -239,9 +254,10 @@ async fn run_case(
         score,
         turns,
         tool_calls,
-        input_tokens: usage.input_tokens,
-        output_tokens: usage.output_tokens,
-        cost_usd: usage.cost_usd.unwrap_or(0.0),
+        input_tokens,
+        output_tokens,
+        context_tokens,
+        cost_usd,
         elapsed_ms: started.elapsed().as_millis(),
         plan: proposal.map(|plan| plan.markdown),
     }
@@ -265,24 +281,31 @@ async fn main() {
     let base_url = std::env::var("CLARK_CODE_BASE_URL")
         .unwrap_or_else(|_| "https://api.clarkslabs.com/v1".into());
     let selected = selected.split(',').map(str::trim).collect::<Vec<_>>();
+    let repetitions = std::env::var("PLANNING_EVAL_REPETITIONS")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(1);
     let all = Box::leak(scenarios().into_boxed_slice());
     let mut rows = Vec::new();
     let mut spent = 0.0;
-    for scenario in all
-        .iter()
-        .filter(|scenario| selected.contains(&scenario.id))
-    {
-        for profile in ["legacy", "decision_complete"] {
-            assert!(
-                spent < max_cost,
-                "planning eval cost cap reached before {}/{}",
-                scenario.id,
-                profile
-            );
-            let row = run_case(scenario, profile, &api_key, &model, &base_url).await;
-            spent += row.cost_usd;
-            println!("{}", serde_json::to_string(&row).unwrap());
-            rows.push(row);
+    for trial in 1..=repetitions {
+        for scenario in all
+            .iter()
+            .filter(|scenario| selected.contains(&scenario.id))
+        {
+            for profile in [CONTROL_PROFILE, CANDIDATE_PROFILE] {
+                assert!(
+                    spent < max_cost,
+                    "planning eval cost cap reached before trial {trial} {}/{}",
+                    scenario.id,
+                    profile
+                );
+                let row = run_case(scenario, profile, trial, &api_key, &model, &base_url).await;
+                spent += row.cost_usd;
+                println!("{}", serde_json::to_string(&row).unwrap());
+                rows.push(row);
+            }
         }
     }
     assert!(!rows.is_empty(), "no selected planning scenarios matched");
@@ -293,15 +316,37 @@ async fn main() {
             .collect::<Vec<_>>();
         matching.iter().map(|row| row.score).sum::<f64>() / matching.len() as f64
     };
+    let mean_input_tokens = |profile: &str| {
+        let matching = rows
+            .iter()
+            .filter(|row| row.profile == profile)
+            .collect::<Vec<_>>();
+        matching
+            .iter()
+            .map(|row| row.input_tokens as f64)
+            .sum::<f64>()
+            / matching.len() as f64
+    };
+    let control_score = mean(CONTROL_PROFILE);
+    let candidate_score = mean(CANDIDATE_PROFILE);
+    let control_input = mean_input_tokens(CONTROL_PROFILE);
+    let candidate_input = mean_input_tokens(CANDIDATE_PROFILE);
     println!(
         "{}",
         json!({
             "eval": "planning_ab",
             "model": model,
             "scenarios": selected,
-            "legacy_mean": mean("legacy"),
-            "candidate_mean": mean("decision_complete"),
-            "score_delta": mean("decision_complete") - mean("legacy"),
+            "repetitions": repetitions,
+            "control_profile": CONTROL_PROFILE,
+            "candidate_profile": CANDIDATE_PROFILE,
+            "control_mean": control_score,
+            "candidate_mean": candidate_score,
+            "score_delta": candidate_score - control_score,
+            "control_mean_input_tokens": control_input,
+            "candidate_mean_input_tokens": candidate_input,
+            "input_token_delta": candidate_input - control_input,
+            "input_token_reduction_fraction": if control_input == 0.0 { 0.0 } else { (control_input - candidate_input) / control_input },
             "total_cost_usd": spent,
         })
     );

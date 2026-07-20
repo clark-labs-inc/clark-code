@@ -50,11 +50,6 @@ impl ToolExecutor for Bash {
             Ok(c) => c,
             Err(e) => return ToolOutcome::error(e),
         };
-        if contains_git_commit(&command) {
-            return ToolOutcome::error(
-                "Direct `git commit` through bash is disabled. Stage only the intended files, then use `git_commit` so Clark Code attribution is applied reliably.",
-            );
-        }
         let workdir = args.get("workdir").and_then(Value::as_str).unwrap_or(".");
         let cwd = match ctx.sandbox.resolve_existing(workdir) {
             Ok(path) => path,
@@ -135,58 +130,6 @@ impl ToolExecutor for Bash {
         outcome.is_error = !matches!(code, Some(0));
         outcome
     }
-}
-
-fn contains_git_commit(command: &str) -> bool {
-    crate::safety::split_segments(command)
-        .into_iter()
-        .any(segment_contains_git_commit)
-}
-
-fn segment_contains_git_commit(segment: &str) -> bool {
-    let tokens = segment.split_whitespace().collect::<Vec<_>>();
-    let Some(git_index) = tokens
-        .iter()
-        .position(|token| token.rsplit('/').next() == Some("git"))
-    else {
-        return false;
-    };
-    if !tokens[..git_index].iter().all(|token| {
-        token.contains('=')
-            || matches!(
-                token.rsplit('/').next().unwrap_or(token),
-                "command" | "env" | "sudo" | "doas"
-            )
-    }) {
-        return false;
-    }
-    let mut index = git_index + 1;
-    while let Some(token) = tokens.get(index) {
-        match *token {
-            "-C" | "-c" | "--git-dir" | "--work-tree" | "--namespace" | "--config-env" => {
-                index += 2;
-            }
-            token
-                if token.starts_with("--git-dir=")
-                    || token.starts_with("--work-tree=")
-                    || token.starts_with("--namespace=")
-                    || token.starts_with("--config-env=") =>
-            {
-                index += 1;
-            }
-            "--no-pager"
-            | "--bare"
-            | "--no-replace-objects"
-            | "--literal-pathspecs"
-            | "--glob-pathspecs"
-            | "--noglob-pathspecs"
-            | "--icase-pathspecs" => {
-                index += 1;
-            }
-            subcommand => return subcommand == "commit",
-        }
-    }
-    false
 }
 
 pub struct BashOutput;

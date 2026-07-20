@@ -52,33 +52,6 @@ async fn runs_command_and_captures_stdout() {
 }
 
 #[tokio::test]
-async fn directs_git_commits_to_the_attributed_commit_tool() {
-    let dir = tempfile::tempdir().unwrap();
-    for command in [
-        "git commit -m test",
-        "cd nested && git -c commit.gpgsign=false commit -m test",
-        "/usr/bin/git --no-pager commit --amend --no-edit",
-    ] {
-        let out = Bash
-            .invoke(json!({"command": command}), &ctx(dir.path()))
-            .await;
-        assert!(out.is_error, "{command}");
-        assert!(out.content.contains("git_commit"), "{}", out.content);
-    }
-}
-
-#[tokio::test]
-async fn does_not_confuse_git_commit_text_with_a_commit_command() {
-    let dir = tempfile::tempdir().unwrap();
-    for command in ["printf 'git commit'", "echo git commit"] {
-        let out = Bash
-            .invoke(json!({"command": command}), &ctx(dir.path()))
-            .await;
-        assert!(!out.is_error, "{command}: {}", out.content);
-    }
-}
-
-#[tokio::test]
 async fn nonzero_exit_is_flagged_error() {
     let dir = tempfile::tempdir().unwrap();
     let out = Bash

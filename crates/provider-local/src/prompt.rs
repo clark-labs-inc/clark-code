@@ -130,7 +130,12 @@ pub(crate) fn goal_budget_limit_reminder(goal: &crate::loop_state::SessionGoal) 
 }
 
 /// Build the one system message for a session rooted at `sandbox`.
-pub fn system_prompt(sandbox: &Sandbox, research_available: bool, remote: bool) -> String {
+pub fn system_prompt(
+    sandbox: &Sandbox,
+    research_available: bool,
+    remote: bool,
+    commit_attribution: Option<&str>,
+) -> String {
     let root = sandbox.root().display();
     let mut p = String::new();
 
@@ -174,7 +179,25 @@ You write and modify real files and run real commands on their computer.\n\n",
     );
     p.push_str("- Don't run repo-wide formatters or lint --fix unasked — format only the lines you touch.\n");
     p.push_str("- Don't commit or push unless asked. When you do commit, stage only the specific files you changed — never `git add -A` or `git commit -a`.\n");
-    p.push_str("- When you create a commit for work you performed, keep the repository's configured human author — never change the Git identity or pass `--author`. Stage only the intended files with `git add`, then create or amend the commit with `git_commit`; direct `git commit` through `bash` is disabled. `git_commit` adds exactly `Co-authored-by: Clark Code <noreply@clarkchat.com>` unless the user explicitly asks you to omit Clark Code attribution.\n");
+    if let Some(attribution) = commit_attribution {
+        p.push_str("\n## Creating commits\n");
+        p.push_str("- Before committing, inspect `git status`, the staged and unstaged diff, and recent commit messages.\n");
+        p.push_str("- Keep the repository's configured human author. Never update Git config or pass `--author`.\n");
+        p.push_str("- Never skip hooks or signing checks (`--no-verify`, `--no-gpg-sign`) unless the user explicitly requests it.\n");
+        p.push_str("- Create a new commit rather than amending unless the user explicitly requests an amend. If a pre-commit hook fails, fix the issue, re-stage, and create a new commit; do not amend the previous commit.\n");
+        p.push_str("- Do not create an empty commit when there are no changes.\n");
+        if !attribution.is_empty() {
+            p.push_str("- End the commit message with this attribution text exactly:\n\n");
+            p.push_str(attribution);
+            p.push_str("\n\n");
+        }
+        p.push_str("- Always pass the complete commit message through a quoted heredoc so multiline bodies and trailers keep their formatting:\n\n```sh\ngit commit -m \"$(cat <<'EOF'\nCommit message here.");
+        if !attribution.is_empty() {
+            p.push_str("\n\n");
+            p.push_str(attribution);
+        }
+        p.push_str("\nEOF\n)\"\n```\n");
+    }
     p.push('\n');
 
     p.push_str("# Working with the user\n");
@@ -224,7 +247,7 @@ call `clark_research` instead — it runs remotely in Clark's sandbox.",
     p.push_str("# Planning\n");
     p.push_str(crate::planning::EXECUTION_CHECKLIST_INSTRUCTIONS);
     p.push_str("- If the project has a check_command configured (.clark/settings.json), call `check_diagnostics` after non-trivial changes — it reports only new problems since your last call.\n");
-    p.push_str("- Separately, there is a Plan Mode: the user can turn it on from the composer, and you can suggest it with `enter_plan_mode` for big or ambiguous build requests. While it's active you'll get per-turn instructions starting \"Plan mode is active\" — research read-only, agree on a plan via `propose_plan`, and only build after approval.\n");
+    p.push_str("- Plan Mode is separate, read-only collaboration: the user selects it or `enter_plan_mode` suggests it; `propose_plan` submits the implementation plan for approval before changes.\n");
     p.push('\n');
 
     p.push_str("# Goals\n");
@@ -260,7 +283,12 @@ mod tests {
     fn includes_root_and_research_note_when_available() {
         let dir = tempfile::tempdir().unwrap();
         let sb = Sandbox::new(dir.path()).unwrap();
-        let p = system_prompt(&sb, true, false);
+        let p = system_prompt(
+            &sb,
+            true,
+            false,
+            Some(crate::project_settings::DEFAULT_COMMIT_ATTRIBUTION),
+        );
         assert!(p.contains("Project root:"));
         assert!(p.contains("clark_research"));
         assert!(p.find("# Instruction boundaries").unwrap() < p.find("# Git").unwrap());
@@ -272,7 +300,12 @@ mod tests {
     fn pins_milestone_narration_and_tool_backed_claims() {
         let dir = tempfile::tempdir().unwrap();
         let sb = Sandbox::new(dir.path()).unwrap();
-        let p = system_prompt(&sb, false, false);
+        let p = system_prompt(
+            &sb,
+            false,
+            false,
+            Some(crate::project_settings::DEFAULT_COMMIT_ATTRIBUTION),
+        );
 
         assert!(p.contains("Before the first non-trivial tool batch"));
         assert!(p.contains("update only at meaningful milestones"));
@@ -286,7 +319,12 @@ mod tests {
     fn omits_research_note_when_unavailable() {
         let dir = tempfile::tempdir().unwrap();
         let sb = Sandbox::new(dir.path()).unwrap();
-        let p = system_prompt(&sb, false, false);
+        let p = system_prompt(
+            &sb,
+            false,
+            false,
+            Some(crate::project_settings::DEFAULT_COMMIT_ATTRIBUTION),
+        );
         assert!(!p.contains("clark_research"));
     }
 
@@ -294,7 +332,12 @@ mod tests {
     fn remote_prompt_keeps_tools_and_setup_on_the_ssh_host() {
         let dir = tempfile::tempdir().unwrap();
         let sb = Sandbox::new_remote(dir.path().to_str().unwrap()).unwrap();
-        let p = system_prompt(&sb, false, true);
+        let p = system_prompt(
+            &sb,
+            false,
+            true,
+            Some(crate::project_settings::DEFAULT_COMMIT_ATTRIBUTION),
+        );
         assert!(p.contains("SSH-connected remote computer"));
         assert!(p.contains("Android emulator"));
         assert!(p.contains("intentionally unavailable"));
@@ -306,7 +349,12 @@ mod tests {
     fn includes_planning_guidance() {
         let dir = tempfile::tempdir().unwrap();
         let sb = Sandbox::new(dir.path()).unwrap();
-        let p = system_prompt(&sb, false, false);
+        let p = system_prompt(
+            &sb,
+            false,
+            false,
+            Some(crate::project_settings::DEFAULT_COMMIT_ATTRIBUTION),
+        );
         assert!(p.contains("update_plan"));
         // Plan Mode is discoverable from the stable prompt (both entry points).
         assert!(p.contains("enter_plan_mode"));
@@ -317,7 +365,12 @@ mod tests {
     fn includes_shared_tree_and_audience_guidance() {
         let dir = tempfile::tempdir().unwrap();
         let sb = Sandbox::new(dir.path()).unwrap();
-        let p = system_prompt(&sb, false, false);
+        let p = system_prompt(
+            &sb,
+            false,
+            false,
+            Some(crate::project_settings::DEFAULT_COMMIT_ATTRIBUTION),
+        );
         // Non-engineer audience + clarify-first.
         assert!(p.contains("# Working with the user"));
         assert!(p.contains("ONE short clarifying question"));
@@ -325,8 +378,8 @@ mod tests {
         assert!(p.contains("# Git"));
         assert!(p.contains("`git stash`"));
         assert!(p.contains("changes you did not create"));
-        assert!(p.contains("keep the repository's configured human author"));
-        assert!(p.contains("Co-authored-by: Clark Code <noreply@clarkchat.com>"));
+        assert!(p.contains("Keep the repository's configured human author"));
+        assert!(p.contains("Co-Authored-By: Clark Code <noreply@clarkchat.com>"));
         // Test-quality bar: at least one would-fail case.
         assert!(p.contains("# Testing"));
         assert!(p.contains("would fail if your change were broken"));
@@ -339,6 +392,27 @@ mod tests {
         assert!(git < p.find("# Working with the user").unwrap());
         assert!(git < p.find("# Judgment").unwrap());
         assert!(git < p.find("# Behavior").unwrap());
+    }
+
+    #[test]
+    fn commit_workflow_matches_claude_customization_and_opt_out() {
+        let dir = tempfile::tempdir().unwrap();
+        let sb = Sandbox::new(dir.path()).unwrap();
+        let custom = "Co-Authored-By: Custom Agent <agent@example.com>";
+        let p = system_prompt(&sb, false, false, Some(custom));
+        assert!(p.contains("## Creating commits"));
+        assert!(p.contains("git status"));
+        assert!(p.contains("git commit -m \"$(cat <<'EOF'"));
+        assert_eq!(p.matches(custom).count(), 2);
+        assert!(p.contains("Never skip hooks or signing checks"));
+
+        let disabled = system_prompt(&sb, false, false, Some(""));
+        assert!(disabled.contains("## Creating commits"));
+        assert!(!disabled.contains("Co-Authored-By:"));
+
+        let hidden = system_prompt(&sb, false, false, None);
+        assert!(!hidden.contains("## Creating commits"));
+        assert!(!hidden.contains("git commit -m \"$(cat <<'EOF'"));
     }
 
     #[test]

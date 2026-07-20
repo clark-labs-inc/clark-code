@@ -296,6 +296,42 @@ async fn cached_system_prompt_excludes_mutable_project_instructions() {
 }
 
 #[tokio::test]
+async fn project_settings_customize_claude_style_commit_attribution() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(".clark")).unwrap();
+    std::fs::write(
+        dir.path().join(".clark/settings.json"),
+        r#"{
+          "attribution": {
+            "commit": "Co-Authored-By: Project Agent <agent@example.com>"
+          }
+        }"#,
+    )
+    .unwrap();
+    let mut provider = LocalAgentProvider::new();
+    provider.connect(ProviderConfig::default()).await.unwrap();
+    provider
+        .new_session(SessionOptions {
+            cwd: Some(dir.path().to_string_lossy().into_owned()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+    let prompt = &provider.session.lock().await.system_prompt;
+    assert_eq!(
+        prompt
+            .matches("Co-Authored-By: Project Agent <agent@example.com>")
+            .count(),
+        2
+    );
+    assert!(prompt.contains("git commit -m \"$(cat <<'EOF'"));
+    let registry = provider.registry.as_ref().unwrap();
+    assert!(registry.get("bash").is_some());
+    assert!(registry.get("git_commit").is_none());
+}
+
+#[tokio::test]
 async fn remote_connect_hides_desktop_mobile_capabilities() {
     let mut provider = LocalAgentProvider::new();
     provider

@@ -29,7 +29,6 @@ pub mod browser;
 pub mod clark;
 pub mod diagnostics;
 pub mod fs;
-pub mod git;
 pub mod goal;
 pub mod grep;
 pub mod image;
@@ -365,7 +364,6 @@ impl ToolRegistry {
             Arc::new(fs::WriteFile),
             Arc::new(fs::EditFile),
             Arc::new(apply_patch::ApplyPatch),
-            Arc::new(git::GitCommit),
             Arc::new(shell::Bash),
             Arc::new(shell::BashOutput),
             Arc::new(shell::BashWait),
@@ -615,11 +613,6 @@ mod tests {
             &reg,
             "bash",
             &["command", "workdir", "run_in_background", "timeout_ms"],
-        );
-        wire_order(
-            &reg,
-            "git_commit",
-            &["message", "amend", "allow_empty", "omit_clark_coauthor"],
         );
         wire_order(
             &reg,

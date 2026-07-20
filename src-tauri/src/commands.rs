@@ -24,15 +24,6 @@ use crate::{builtin_providers, AppState, ProviderInfo};
 
 /// Synthetic run id used to attribute the user's own message in the timeline.
 const USER_RUN: &str = "user";
-const COMMIT_ATTRIBUTION_POLICY: &str = "[Clark Desktop runtime policy]\nWhen you create or amend a Git commit for work performed in this session, preserve the repository's configured human author and include exactly `Co-authored-by: Clark Code <noreply@clarkchat.com>` as a commit-message trailer. Do not change Git identity or pass `--author`. An explicit user request to omit Clark Code attribution overrides this policy.\n\n";
-
-fn provider_prompt_blocks(blocks: &[ContentBlock]) -> Vec<ContentBlock> {
-    std::iter::once(ContentBlock::Text {
-        text: COMMIT_ATTRIBUTION_POLICY.to_string(),
-    })
-    .chain(blocks.iter().cloned())
-    .collect()
-}
 
 /// Construct a provider instance by id.
 fn make_provider(id: &str) -> Result<Box<dyn Provider>, String> {
@@ -529,13 +520,11 @@ pub async fn prompt(
         }
         let _ = app.emit("snapshot", &s.snapshot);
 
-        let provider_blocks = provider_prompt_blocks(&blocks);
-
         s.provider
             .prompt(
                 &sid,
                 PromptInput {
-                    blocks: provider_blocks,
+                    blocks,
                     attachments,
                 },
             )
@@ -1390,20 +1379,6 @@ mod real_backend_tests {
         std::fs::write(dir.join("main.rs"), "fn main() {}\n").unwrap();
         git(dir, &["add", "-A"]);
         git(dir, &["commit", "-q", "-m", "initial"]);
-    }
-
-    #[test]
-    fn provider_prompt_keeps_commit_policy_hidden_and_user_request_last() {
-        let user = ContentBlock::Text {
-            text: "commit the finished work".into(),
-        };
-        let blocks = provider_prompt_blocks(std::slice::from_ref(&user));
-        assert_eq!(blocks.len(), 2);
-        let ContentBlock::Text { text: policy } = &blocks[0] else {
-            panic!("policy must be text");
-        };
-        assert!(policy.contains("Co-authored-by: Clark Code"));
-        assert_eq!(blocks[1], user);
     }
 
     #[tokio::test]

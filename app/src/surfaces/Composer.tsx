@@ -284,7 +284,7 @@ function QueuedMessages({ onEdit }: { onEdit: (q: QueuedMessage) => void }) {
   const removeQueued = useSessionStore((s) => s.removeQueued);
   if (queued.length === 0) return null;
   return (
-    <div className="mx-auto mb-2 max-w-2xl">
+    <div className="chat-column-width mx-auto mb-2 w-full">
       <div className="mb-1 px-1 text-xs font-medium uppercase tracking-wide text-ink-faint">
         Queued · sends when Clark finishes
       </div>
@@ -624,7 +624,7 @@ export function Composer() {
           through the checkout chips at compact window heights. */}
       <AnimatePresence>
         {suggestions.length > 0 && (
-          <div className="relative z-30 mx-auto mb-2 max-w-2xl">
+          <div className="chat-column-width relative z-30 mx-auto mb-2 w-full">
             <ComposerAutocomplete
               suggestions={suggestions}
               selectedIndex={sel}
@@ -637,7 +637,7 @@ export function Composer() {
       <ComposerContextBar />
       <div
         className={cn(
-          "relative z-10 mx-auto max-w-2xl rounded-[20px] border border-border-subtle bg-composer-surface px-2.5 py-2.5 shadow-soft transition duration-200 ease-clark",
+          "chat-column-width relative z-10 mx-auto w-full rounded-[20px] border border-border-subtle bg-composer-surface px-2.5 py-2.5 shadow-soft transition duration-200 ease-clark",
           dragging
             ? "ring-2 ring-accent/40"
             : "ring-4 ring-transparent focus-within:border-accent/30 focus-within:ring-accent-subtle",
@@ -758,7 +758,7 @@ export function Composer() {
       {!session && (startError || startBlocked) && (
         <p
           className={cn(
-            "mx-auto mt-2 max-w-2xl px-1 text-xs",
+            "chat-column-width mx-auto mt-2 w-full px-1 text-xs",
             startError ? "text-danger" : "text-ink-faint",
           )}
         >

@@ -423,7 +423,23 @@ impl Provider for LocalAgentProvider {
             None
         };
 
-        let mut prompt = system_prompt(&sandbox, config.clark.is_some(), config.remote.is_some());
+        // Project-scoped config (`.clark/settings.json`) mirrors Claude Code's
+        // configurable commit attribution and also layers permissions/hooks
+        // beneath the global UI-driven config.
+        let project = if self.isolation.disposable_writer() {
+            crate::project_settings::ProjectSettings::default()
+        } else {
+            crate::project_settings::load(self.executor.as_ref(), sandbox.root()).await
+        };
+        let commit_attribution = project
+            .include_git_instructions()
+            .then(|| project.commit_attribution());
+        let mut prompt = system_prompt(
+            &sandbox,
+            config.clark.is_some(),
+            config.remote.is_some(),
+            commit_attribution,
+        );
         if let Some(docs) = sandbox.docs_root() {
             prompt.push_str(&crate::workspace::prompt_section(docs));
         }
@@ -488,15 +504,6 @@ impl Provider for LocalAgentProvider {
             }
         }
         let resumed_transcript = crate::resume::to_agent_messages(options.resume.as_ref());
-        // Project-scoped config (`.clark/settings.json`): permission arrays
-        // union with the global (UI-driven) ones; deny always wins because
-        // `PermissionGate::hard_refusal` checks `deny_commands` before
-        // `command_preapproved` checks `allow_commands`.
-        let project = if self.isolation.disposable_writer() {
-            crate::project_settings::ProjectSettings::default()
-        } else {
-            crate::project_settings::load(self.executor.as_ref(), sandbox.root()).await
-        };
         {
             let mut s = self.session.lock().await;
             s.system_prompt = prompt;
