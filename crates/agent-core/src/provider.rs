@@ -9,7 +9,8 @@ use futures::stream::BoxStream;
 use serde::{Deserialize, Serialize};
 
 use crate::domain::{
-    AgentEvent, ContentBlock, FsLocation, GoalState, PendingUpload, Role, ToolKind, ToolStatus,
+    AgentEvent, ContentBlock, FsLocation, GoalState, PendingUpload, ProposedPlan, Role, ToolKind,
+    ToolStatus,
 };
 use crate::error::Result;
 use crate::ids::{PermissionRequestId, ProviderId, RunId, SessionId};
@@ -32,6 +33,17 @@ pub struct ProviderCapabilities {
     pub load_session: bool,
     /// Named operating modes (ACP modes / Clark tiers).
     pub modes: Vec<String>,
+    /// Host collaboration modes supported independently of provider-native modes.
+    #[serde(default)]
+    pub collaboration_modes: Vec<CollaborationMode>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CollaborationMode {
+    #[default]
+    Default,
+    Plan,
 }
 
 /// How to reach a provider. Adapters read the fields they care about.
@@ -63,6 +75,8 @@ pub struct SessionOptions {
     pub cwd: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mode: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collaboration_mode: Option<CollaborationMode>,
     /// Typed transcript of the conversation being reopened. Providers that
     /// cannot resume server-side replay this into their canonical history.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -100,6 +114,8 @@ pub enum ResumeItem {
     /// Standing goal state carried alongside transcript replay for providers
     /// without server-side session persistence.
     Goal { goal: GoalState },
+    /// Latest typed plan proposal carried through history replay.
+    ProposedPlan { plan: ProposedPlan },
 }
 
 /// A connected conversation with one provider.
@@ -129,6 +145,8 @@ pub struct Session {
     pub capabilities: ProviderCapabilities,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mode: Option<String>,
+    #[serde(default)]
+    pub collaboration_mode: CollaborationMode,
     /// Authoritative filesystem binding for this conversation. UI actions must
     /// use this instead of a global project-folder preference.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -168,6 +186,29 @@ pub enum ClientResponse {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         feedback: Option<String>,
     },
+    PlanDecision {
+        plan_id: String,
+        decision: PlanDecision,
+    },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "action", rename_all = "snake_case")]
+pub enum PlanDecision {
+    Implement {
+        context: PlanImplementationContext,
+    },
+    ContinuePlanning {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        feedback: Option<String>,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PlanImplementationContext {
+    Current,
+    Fresh,
 }
 
 /// The provider abstraction.
@@ -215,6 +256,15 @@ pub trait Provider: Send + Sync {
     /// Switch the session's named operating mode (e.g. `"plan"`). Best-effort:
     /// providers that don't support server-side modes leave this a no-op.
     async fn set_mode(&mut self, _session: &SessionId, _mode: String) -> Result<()> {
+        Ok(())
+    }
+
+    /// Switch the host-owned collaboration mode independently of provider-native modes.
+    async fn set_collaboration_mode(
+        &mut self,
+        _session: &SessionId,
+        _mode: CollaborationMode,
+    ) -> Result<()> {
         Ok(())
     }
 

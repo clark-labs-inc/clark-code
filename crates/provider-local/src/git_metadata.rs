@@ -118,25 +118,9 @@ async fn run(
     args: &[&str],
     env: &[(&str, &str)],
 ) -> Result<exec_core::ExecOutput, String> {
-    let mut words = env
-        .iter()
-        .map(|(name, value)| format!("{name}={}", shell_word(value)))
-        .collect::<Vec<_>>();
-    words.extend([
-        "GIT_OPTIONAL_LOCKS=0".to_string(),
-        "GIT_TERMINAL_PROMPT=0".to_string(),
-        "git".to_string(),
-        "--no-optional-locks".to_string(),
-        "-c".to_string(),
-        shell_word(&format!("core.hooksPath={DISABLED_HOOKS_PATH}")),
-        "-c".to_string(),
-        "credential.helper=".to_string(),
-        "-c".to_string(),
-        "core.fsmonitor=false".to_string(),
-    ]);
-    words.extend(args.iter().map(|arg| shell_word(arg)));
+    let arguments = args.iter().map(|arg| shell_word(arg)).collect::<Vec<_>>();
     exec.exec(
-        &words.join(" "),
+        &protected_git_command(&arguments.join(" "), env),
         root,
         COMMAND_TIMEOUT,
         &CancellationToken::new(),
@@ -144,19 +128,77 @@ async fn run(
     .await
 }
 
+/// Build a non-interactive Git command using the syntax of the executor's
+/// platform shell. Every Git caller shares this path so Windows never receives
+/// POSIX-only `NAME=value command` prefixes or single-quote escaping.
+pub(crate) fn protected_git_command(arguments: &str, env: &[(&str, &str)]) -> String {
+    let mut environment = env.to_vec();
+    environment.extend([("GIT_OPTIONAL_LOCKS", "0"), ("GIT_TERMINAL_PROMPT", "0")]);
+    format!(
+        "{}git --no-optional-locks -c {} -c credential.helper= -c core.fsmonitor=false {arguments}",
+        shell_environment_prefix(&environment),
+        shell_word(&format!("core.hooksPath={DISABLED_HOOKS_PATH}")),
+    )
+}
+
 pub(crate) fn shell_word(value: &str) -> String {
-    if !value.is_empty()
-        && value.bytes().all(|byte| {
-            byte.is_ascii_alphanumeric()
-                || matches!(
-                    byte,
-                    b'_' | b'-' | b'.' | b'/' | b':' | b'=' | b'@' | b'%' | b'+' | b','
-                )
-        })
-    {
+    shell_word_for(exec_core::scripted_shell_kind(), value)
+}
+
+fn shell_word_for(kind: exec_core::ShellKind, value: &str) -> String {
+    if shell_word_is_unquoted_safe(kind, value) {
         return value.to_string();
     }
-    format!("'{}'", value.replace('\'', "'\\''"))
+    match kind {
+        exec_core::ShellKind::Posix => format!("'{}'", value.replace('\'', "'\\''")),
+        exec_core::ShellKind::PowerShell => format!("'{}'", value.replace('\'', "''")),
+        exec_core::ShellKind::Cmd => format!("\"{}\"", cmd_quoted(value)),
+    }
+}
+
+fn shell_word_is_unquoted_safe(kind: exec_core::ShellKind, value: &str) -> bool {
+    !value.is_empty()
+        && value.bytes().all(|byte| {
+            let common = byte.is_ascii_alphanumeric()
+                || matches!(byte, b'_' | b'-' | b'.' | b'/' | b':' | b'=' | b'+' | b',');
+            let shell_specific = match kind {
+                exec_core::ShellKind::Posix => matches!(byte, b'@' | b'%'),
+                exec_core::ShellKind::PowerShell => byte == b'%',
+                exec_core::ShellKind::Cmd => false,
+            };
+            common || shell_specific
+        })
+}
+
+fn shell_environment_prefix(env: &[(&str, &str)]) -> String {
+    shell_environment_prefix_for(exec_core::scripted_shell_kind(), env)
+}
+
+fn shell_environment_prefix_for(kind: exec_core::ShellKind, env: &[(&str, &str)]) -> String {
+    match kind {
+        exec_core::ShellKind::Posix => {
+            env.iter()
+                .map(|(name, value)| format!("{name}={}", shell_word_for(kind, value)))
+                .collect::<Vec<_>>()
+                .join(" ")
+                + " "
+        }
+        exec_core::ShellKind::PowerShell => env
+            .iter()
+            .map(|(name, value)| format!("$env:{name} = {};", shell_word_for(kind, value)))
+            .collect::<String>(),
+        exec_core::ShellKind::Cmd => env
+            .iter()
+            .map(|(name, value)| format!("set \"{name}={}\" && ", cmd_quoted(value)))
+            .collect(),
+    }
+}
+
+fn cmd_quoted(value: &str) -> String {
+    value
+        .replace('^', "^^")
+        .replace('%', "%%")
+        .replace('"', "\\\"")
 }
 
 #[cfg(test)]
@@ -164,11 +206,38 @@ mod tests {
     use super::*;
 
     #[test]
-    fn shell_words_preserve_metadata_arguments() {
-        assert_eq!(shell_word("status"), "status");
-        assert_eq!(shell_word("--format=%H%x00%P"), "--format=%H%x00%P");
-        assert_eq!(shell_word("path with spaces"), "'path with spaces'");
-        assert_eq!(shell_word("it's"), "'it'\\''s'");
+    fn posix_shell_words_preserve_metadata_arguments() {
+        let word = |value| shell_word_for(exec_core::ShellKind::Posix, value);
+        assert_eq!(word("status"), "status");
+        assert_eq!(word("--format=%H%x00%P"), "--format=%H%x00%P");
+        assert_eq!(word("path with spaces"), "'path with spaces'");
+        assert_eq!(word("it's"), "'it'\\''s'");
+    }
+
+    #[test]
+    fn powershell_words_and_environment_prefix_escape_for_windows() {
+        assert_eq!(
+            shell_word_for(exec_core::ShellKind::PowerShell, "C:/O'Brien/repo"),
+            "'C:/O''Brien/repo'"
+        );
+        assert_eq!(
+            shell_environment_prefix_for(
+                exec_core::ShellKind::PowerShell,
+                &[("GIT_INDEX_FILE", "C:/work tree/index")],
+            ),
+            "$env:GIT_INDEX_FILE = 'C:/work tree/index';"
+        );
+    }
+
+    #[test]
+    fn cmd_prefix_disables_expansion_of_percent_in_environment_values() {
+        assert_eq!(
+            shell_environment_prefix_for(
+                exec_core::ShellKind::Cmd,
+                &[("GIT_INDEX_FILE", r"C:\work%USERPROFILE%\index")],
+            ),
+            r#"set "GIT_INDEX_FILE=C:\work%%USERPROFILE%%\index" && "#
+        );
     }
 
     #[test]

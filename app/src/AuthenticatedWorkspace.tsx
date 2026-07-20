@@ -12,6 +12,7 @@ import { OpeningScreen } from "./surfaces/OpeningScreen";
 import { Composer } from "./surfaces/Composer";
 import { GoalStatusRail } from "./surfaces/GoalStatusRail";
 import { CreditBanner } from "./surfaces/CreditBanner";
+import { ActivityRewardToast } from "./surfaces/ActivityRewardToast";
 import { OfflineBanner } from "./surfaces/OfflineBanner";
 import { CommandPalette } from "./surfaces/CommandPalette";
 import { MobileRemoteAgent } from "./surfaces/MobileRemoteAgent";
@@ -214,12 +215,13 @@ export default function AuthenticatedWorkspace({
     },
     { key: ".", mod: true, allowInInput: true, run: () => void useSessionStore.getState().cancelActive() },
     { key: ",", mod: true, allowInInput: true, run: () => useSessionStore.getState().setSettingsOpen(true) },
-    { key: "Tab", shift: true, allowInInput: true, run: () => useSessionStore.getState().cyclePermissionMode() },
+    { key: "Tab", shift: true, allowInInput: true, run: () => useSessionStore.getState().cycleApprovalPolicy() },
   ]);
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-bg text-ink">
       <MobileRemoteAgent />
+      <ActivityRewardToast />
       <Sidebar artifactCount={artifactCount} onOpenArtifacts={openArtifacts} />
       <div className="flex min-w-0 flex-1 flex-col">
         <TopBar dark={dark} onToggleTheme={toggle} />

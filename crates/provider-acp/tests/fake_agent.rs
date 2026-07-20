@@ -233,7 +233,10 @@ async fn full_turn_with_permission_round_trip() {
         vec![agent_core::ContentBlock::text("fn main(){}")]
     );
 
-    assert!(snap.plan.is_some(), "plan should be present");
+    assert!(
+        snap.execution_checklist.is_some(),
+        "execution checklist should be present"
+    );
     assert!(
         snap.pending_permission.is_none(),
         "permission gate cleared on run finish"

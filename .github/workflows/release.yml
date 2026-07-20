@@ -15,6 +15,11 @@ permissions:
 
 env:
   AWS_REGION: us-west-2
+  # Rust's MSVC target dynamically links vcruntime by default. The app and its
+  # private helpers must also start on a clean Windows profile, before any
+  # machine-wide VC++ redistributable has been installed.
+  CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS: "-C target-feature=+crt-static"
+  CARGO_TARGET_AARCH64_PC_WINDOWS_MSVC_RUSTFLAGS: "-C target-feature=+crt-static"
   CLARK_DESKTOP_DOWNLOAD_BUCKET: ${{ vars.CLARK_DESKTOP_DOWNLOAD_BUCKET || 'clark-desktop-downloads-prod' }}
   CLARK_DESKTOP_DOWNLOAD_BASE_URL: ${{ vars.CLARK_DESKTOP_DOWNLOAD_BASE_URL || 'https://downloads.clarkchat.com/desktop' }}
   CLARK_DESKTOP_DOWNLOAD_UPLOAD_ROLE_ARN: ${{ vars.CLARK_DESKTOP_DOWNLOAD_UPLOAD_ROLE_ARN || 'arn:aws:iam::293723385520:role/clark-desktop-downloads-prod-upload' }}
@@ -26,21 +31,23 @@ jobs:
       fail-fast: false
       matrix:
         # One native runner per OS — cross-compiling a Tauri app isn't viable.
-        # macOS: one signed + notarized universal build. Windows: NSIS + MSI
-        # (unsigned — SmartScreen warns). Linux: .deb + .rpm + .AppImage. Each
+        # macOS: one signed + notarized universal build. Windows: Authenticode-
+        # signed per-user NSIS installer. We intentionally do not ship an MSI:
+        # its machine-wide installation model adds an avoidable UAC prompt.
+        # Linux: .deb + .rpm + .AppImage. Each
         # leg uploads its installers under canonical ClarkCode.* names; the
         # updater latest.json is macOS-only (keyed on the .app.tar.gz.sig).
         include:
           - platform: macos-latest
-            args: "--target universal-apple-darwin --config src-tauri/tauri.release.conf.json"
+            args: "--target universal-apple-darwin --config src-tauri/tauri.release.conf.json --config src-tauri/tauri.sandbox.macos.conf.json"
             bundle-target: "universal-apple-darwin"
             rust-targets: "aarch64-apple-darwin,x86_64-apple-darwin"
           - platform: ubuntu-22.04
-            args: "--config src-tauri/tauri.release.conf.json"
+            args: "--config src-tauri/tauri.release.conf.json --config src-tauri/tauri.sandbox.linux.conf.json"
             bundle-target: "x86_64-unknown-linux-gnu"
             rust-targets: ""
           - platform: windows-latest
-            args: "--config src-tauri/tauri.release.conf.json"
+            args: "--bundles nsis --config src-tauri/tauri.release.conf.json --config src-tauri/tauri.sandbox.windows.conf.json --config src-tauri/tauri.windows-signing.conf.json"
             bundle-target: "x86_64-pc-windows-msvc"
             rust-targets: ""
     runs-on: ${{ matrix.platform }}
@@ -67,7 +74,11 @@ jobs:
             libxdo-dev \
             build-essential \
             file \
-            patchelf
+            patchelf \
+            meson \
+            ninja-build \
+            pkg-config \
+            libcap-dev
 
       - uses: pnpm/action-setup@v4
         with:
@@ -92,12 +103,72 @@ jobs:
           suffix=""
           if [ "${{ runner.os }}" = "Windows" ]; then suffix=".exe"; fi
           "src-tauri/binaries/rg-${{ matrix.bundle-target }}${suffix}" --version
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            "src-tauri/binaries/bwrap-${{ matrix.bundle-target }}" --version
+          fi
 
       - name: Install WebKit smoke dependencies
         if: matrix.platform == 'macos-latest'
         run: |
           pnpm --dir harness install --frozen-lockfile
           pnpm --dir harness exec playwright install webkit
+
+      - name: Build private Windows sandbox helpers
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_BASE64) -or
+              [string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PASSWORD)) {
+            throw "Windows Authenticode certificate secrets are required for release"
+          }
+          $pfx = Join-Path $env:RUNNER_TEMP "clark-windows-signing.pfx"
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_BASE64))
+          $password = ConvertTo-SecureString $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force
+          $certificate = Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password $password
+          if (-not $certificate.HasPrivateKey) { throw "Windows signing certificate has no private key" }
+          $signingConfig = @{
+            bundle = @{
+              windows = @{
+                certificateThumbprint = $certificate.Thumbprint
+                digestAlgorithm = "sha256"
+                timestampUrl = "https://timestamp.digicert.com"
+              }
+            }
+          } | ConvertTo-Json -Depth 4
+          Set-Content src-tauri/tauri.windows-signing.conf.json $signingConfig -Encoding utf8
+          "WINDOWS_SIGNING_THUMBPRINT=$($certificate.Thumbprint)" >> $env:GITHUB_ENV
+          "WINDOWS_SIGNING_PFX=$pfx" >> $env:GITHUB_ENV
+
+          cargo build --release -p exec-sandbox-windows --bins
+          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" |
+            Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $signtool) { throw "signtool.exe was not found" }
+          $windowsExecutables = @(
+            "src-tauri/binaries/rg-x86_64-pc-windows-msvc.exe",
+            "target/release/clark-command-runner.exe",
+            "target/release/clark-windows-sandbox-setup.exe"
+          )
+          foreach ($executable in $windowsExecutables) {
+            & $signtool.FullName sign /sha1 $certificate.Thumbprint /fd SHA256 /tr https://timestamp.digicert.com /td SHA256 $executable
+            if ($LASTEXITCODE -ne 0) { throw "Authenticode signing failed for $executable" }
+            $signature = Get-AuthenticodeSignature $executable
+            if ($signature.Status -ne "Valid") { throw "Invalid Authenticode signature for ${executable}: $($signature.Status)" }
+          }
+
+          $dumpbin = Get-Command dumpbin.exe -ErrorAction Stop
+          foreach ($helper in $windowsExecutables | Where-Object { $_ -like "target/release/*" }) {
+            $imports = (& $dumpbin.Source /dependents $helper | Out-String)
+            if ($imports -match '(?im)^\s*(?:vcruntime|msvcp)[^\s]*\.dll\s*$') {
+              throw "Clean-machine runtime invariant failed; $helper imports a VC++ runtime DLL:`n$imports"
+            }
+          }
+          Copy-Item target/release/clark-command-runner.exe src-tauri/binaries/clark-command-runner-x86_64-pc-windows-msvc.exe
+          Copy-Item target/release/clark-windows-sandbox-setup.exe src-tauri/binaries/clark-windows-sandbox-setup-x86_64-pc-windows-msvc.exe
+          src-tauri/binaries/clark-command-runner-x86_64-pc-windows-msvc.exe --self-test
+          src-tauri/binaries/clark-windows-sandbox-setup-x86_64-pc-windows-msvc.exe --self-test
 
       - name: Smoke production frontend in WebKit
         if: matrix.platform == 'macos-latest'
@@ -150,8 +221,8 @@ jobs:
             Inc.) and notarized by Apple — drag Clark Code into Applications
             and open it, no Gatekeeper workaround needed.
 
-            **Windows** SmartScreen may warn on the unsigned installer. Click
-            **More info → Run anyway**.
+            **Windows** builds and their sandbox privilege helpers are signed
+            with Clark Labs' Authenticode certificate.
 
             **Linux** — `.AppImage` (portable, `chmod +x` and run), `.deb`
             (Debian/Ubuntu), or `.rpm` (Fedora/RHEL).
@@ -160,6 +231,120 @@ jobs:
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
+
+      - name: Verify packaged macOS runtime layout
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          app="$(find target -type d -path '*/bundle/macos/*.app' -print -quit)"
+          test -n "$app"
+          python3 scripts/verify-bundled-layout.py \
+            --platform macos \
+            --resource-root "$app/Contents/Resources" \
+            --executable-dir "$app/Contents/MacOS"
+          codesign --verify --deep --strict --verbose=2 "$app"
+
+      - name: Verify packaged Linux runtime layout
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          deb="$(find target -type f -path '*/bundle/deb/*.deb' -print -quit)"
+          test -n "$deb"
+          extracted="$(mktemp -d)"
+          dpkg-deb --extract "$deb" "$extracted"
+          path_dir="$(find "$extracted/usr/lib" -type d -name clark-path -print -quit)"
+          test -n "$path_dir"
+          python3 scripts/verify-bundled-layout.py \
+            --platform linux \
+            --resource-root "$(dirname "$path_dir")" \
+            --executable-dir "$extracted/usr/bin" \
+            --staged-bwrap src-tauri/binaries/bwrap-x86_64-unknown-linux-gnu
+
+      - name: Verify packaged Windows runtime layout
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $nsis = Get-ChildItem target -Recurse -File -Filter *-setup.exe |
+            Where-Object { $_.FullName -match '[\\/]bundle[\\/]nsis[\\/]' } |
+            Select-Object -First 1
+          if (-not $nsis) { throw "packaged NSIS installer was not found" }
+          $unexpectedMsi = Get-ChildItem target -Recurse -File -Filter *.msi |
+            Where-Object { $_.FullName -match '[\\/]bundle[\\/]msi[\\/]' }
+          if ($unexpectedMsi) { throw "Windows release must not publish an elevation-prone MSI" }
+
+          $installerSignature = Get-AuthenticodeSignature $nsis.FullName
+          if ($installerSignature.Status -ne "Valid") {
+            throw "Invalid NSIS signature for $($nsis.FullName): $($installerSignature.Status)"
+          }
+
+          # Exercise the actual user-facing artifact. A per-machine installer
+          # would block here on UAC; bound the wait so that fails closed instead
+          # of hanging the release job.
+          $installRoot = Join-Path $env:RUNNER_TEMP "clark-nsis-smoke"
+          $install = Start-Process $nsis.FullName -ArgumentList @("/S", "/D=$installRoot") -PassThru
+          if (-not $install.WaitForExit(120000)) {
+            Stop-Process -Id $install.Id -Force -ErrorAction SilentlyContinue
+            throw "NSIS installation timed out (possible unexpected elevation prompt)"
+          }
+          if ($install.ExitCode -ne 0) { throw "NSIS installation failed with $($install.ExitCode)" }
+
+          python scripts/verify-bundled-layout.py `
+            --platform windows `
+            --resource-root $installRoot `
+            --executable-dir $installRoot
+
+          $packagedExecutables = @(
+            Join-Path $installRoot "clark-desktop.exe"
+            Join-Path $installRoot "clark-path/rg.exe"
+            Join-Path $installRoot "clark-resources/sandbox/windows/clark-command-runner.exe"
+            Join-Path $installRoot "clark-resources/sandbox/windows/clark-windows-sandbox-setup.exe"
+          )
+          $dumpbin = Get-Command dumpbin.exe -ErrorAction Stop
+          foreach ($executable in $packagedExecutables) {
+            if (-not (Test-Path $executable -PathType Leaf)) {
+              throw "Expected installed executable is missing: $executable"
+            }
+            $signature = Get-AuthenticodeSignature $executable
+            if ($signature.Status -ne "Valid") {
+              throw "Invalid packaged executable signature for ${executable}: $($signature.Status)"
+            }
+            $imports = (& $dumpbin.Source /dependents $executable | Out-String)
+            if ($imports -match '(?im)^\s*(?:vcruntime|msvcp)[^\s]*\.dll\s*$') {
+              throw "Packaged executable imports a VC++ runtime DLL: ${executable}`n$imports"
+            }
+          }
+
+          & (Join-Path $installRoot "clark-resources/sandbox/windows/clark-command-runner.exe") --self-test
+          if ($LASTEXITCODE -ne 0) { throw "Installed Windows sandbox runner self-test failed" }
+          & (Join-Path $installRoot "clark-resources/sandbox/windows/clark-windows-sandbox-setup.exe") --self-test
+          if ($LASTEXITCODE -ne 0) { throw "Installed Windows sandbox setup self-test failed" }
+
+          $app = Start-Process (Join-Path $installRoot "clark-desktop.exe") -PassThru
+          Start-Sleep -Seconds 5
+          $app.Refresh()
+          if ($app.HasExited) {
+            throw "Installed Clark Code exited during startup with $($app.ExitCode)"
+          }
+          Stop-Process -Id $app.Id -Force
+
+          $uninstall = Start-Process (Join-Path $installRoot "uninstall.exe") -ArgumentList "/S" -PassThru
+          if (-not $uninstall.WaitForExit(120000)) {
+            Stop-Process -Id $uninstall.Id -Force -ErrorAction SilentlyContinue
+            throw "NSIS uninstall timed out"
+          }
+          if ($uninstall.ExitCode -ne 0) { throw "NSIS uninstall failed with $($uninstall.ExitCode)" }
+
+      - name: Remove Windows signing material
+        if: always() && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if ($env:WINDOWS_SIGNING_THUMBPRINT) {
+            Remove-Item "Cert:\CurrentUser\My\$env:WINDOWS_SIGNING_THUMBPRINT" -ErrorAction SilentlyContinue
+          }
+          if ($env:WINDOWS_SIGNING_PFX) {
+            Remove-Item $env:WINDOWS_SIGNING_PFX -Force -ErrorAction SilentlyContinue
+          }
+          Remove-Item src-tauri/tauri.windows-signing.conf.json -Force -ErrorAction SilentlyContinue
 
       - name: Configure AWS credentials for public download upload
         uses: aws-actions/configure-aws-credentials@v4
@@ -191,7 +376,6 @@ jobs:
           done < <(
             find target -type f -path "*/bundle/*" \( \
               -name "*.dmg" -o \
-              -name "*.msi" -o \
               -name "*.exe" -o \
               -name "*.AppImage" -o \
               -name "*.deb" -o \
@@ -215,7 +399,6 @@ jobs:
           content_type_for() {
             case "$1" in
               *.dmg) echo "application/x-apple-diskimage" ;;
-              *.msi) echo "application/x-msi" ;;
               *.exe) echo "application/vnd.microsoft.portable-executable" ;;
               *.AppImage) echo "application/octet-stream" ;;
               *.deb) echo "application/vnd.debian.binary-package" ;;
@@ -234,7 +417,6 @@ jobs:
               *.dmg) echo "ClarkCode.dmg" ;;
               *.app.tar.gz) echo "ClarkCode.app.tar.gz" ;;
               *x64-setup.exe) echo "ClarkCode_x64-setup.exe" ;;
-              *.msi) echo "ClarkCode_x64_en-US.msi" ;;
               *.AppImage) echo "ClarkCode_amd64.AppImage" ;;
               *.deb) echo "ClarkCode_amd64.deb" ;;
               *.rpm) echo "ClarkCode_x86_64.rpm" ;;

@@ -10,6 +10,7 @@ import type {
   CoreBridge,
   ConnectConfig,
   ProjectContext,
+  LocalSandboxStatus,
   SessionOptions,
 } from "./bridge";
 import type { Upload } from "../lib/attachments";
@@ -20,6 +21,7 @@ import type {
   Session,
   Snapshot,
   MemoryOverview,
+  CollaborationMode,
 } from "./types";
 
 export class TauriBridge implements CoreBridge {
@@ -89,6 +91,10 @@ export class TauriBridge implements CoreBridge {
     return invoke("set_mode", { sessionId, mode });
   }
 
+  setCollaborationMode(sessionId: string, mode: CollaborationMode): Promise<void> {
+    return invoke("set_collaboration_mode", { sessionId, mode });
+  }
+
   setOutputStyle(sessionId: string, style: string): Promise<void> {
     return invoke("set_output_style", { sessionId, style });
   }
@@ -131,5 +137,13 @@ export class TauriBridge implements CoreBridge {
 
   createPermanentWorktree(projectPath: string, name: string): Promise<string> {
     return invoke<string>("project_worktree_create", { projectPath, name });
+  }
+
+  localSandboxStatus(cwd: string): Promise<LocalSandboxStatus> {
+    return invoke<LocalSandboxStatus>("local_sandbox_status", { cwd });
+  }
+
+  setupLocalSandbox(cwd: string): Promise<LocalSandboxStatus> {
+    return invoke<LocalSandboxStatus>("local_sandbox_setup", { cwd });
   }
 }

@@ -111,6 +111,7 @@ async fn new_provider(
         .new_session(SessionOptions {
             cwd: Some(root.to_string_lossy().to_string()),
             mode: None,
+            collaboration_mode: None,
             resume: None,
         })
         .await

@@ -49,9 +49,9 @@ export function currentActivity(snapshot: Snapshot): Activity {
 
   let progress: number | undefined;
   let steps: { done: number; total: number } | undefined;
-  if (snapshot.plan && snapshot.plan.phases.length > 0) {
-    const total = snapshot.plan.phases.length;
-    const done = snapshot.plan.phases.filter((p) => p.status === "completed").length;
+  if (snapshot.execution_checklist && snapshot.execution_checklist.steps.length > 0) {
+    const total = snapshot.execution_checklist.steps.length;
+    const done = snapshot.execution_checklist.steps.filter((step) => step.status === "completed").length;
     steps = { done, total };
     progress = done / total;
   }
@@ -73,8 +73,8 @@ export function currentActivity(snapshot: Snapshot): Activity {
       steps,
     };
   }
-  const phase = snapshot.plan?.phases.find((p) => p.status === "in_progress");
-  if (phase) return { busy: true, label: phase.title, progress, steps };
+  const step = snapshot.execution_checklist?.steps.find((candidate) => candidate.status === "in_progress");
+  if (step) return { busy: true, label: step.title, progress, steps };
 
   return { busy: true, label: "Thinking…", progress, steps };
 }

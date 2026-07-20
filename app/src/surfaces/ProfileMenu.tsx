@@ -3,7 +3,7 @@ import {
   CreditCard, ExternalLink, LogOut, Loader2, Brain, SlidersHorizontal, ChevronsUpDown,
 } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
-import { clarkBillingUrl, openExternal } from "../lib/account";
+import { billingPlanLabel, clarkBillingUrl, effectiveBilling, openExternal } from "../lib/account";
 import { cn } from "../lib/cn";
 
 function statusTone(status?: string | null): { label: string; tone: string } {
@@ -19,10 +19,6 @@ function statusTone(status?: string | null): { label: string; tone: string } {
     default:
       return { label: "No plan", tone: "text-ink-muted" };
   }
-}
-
-function titleCase(s: string): string {
-  return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
 function formatDate(iso?: string | null): string | null {
@@ -69,9 +65,11 @@ export function ProfileMenu({ variant = "topbar" }: { variant?: "topbar" | "side
 
   if (!auth) return null;
   const user = auth.user;
-  const sub = billing?.subscription ?? null;
+  const activeBilling = effectiveBilling(billing);
+  const isTeamBilling = activeBilling?.owner_kind === "organization";
+  const sub = activeBilling?.subscription ?? null;
   const st = statusTone(sub?.status);
-  const credits = billing?.credits;
+  const credits = activeBilling?.credits;
   const renews = formatDate(sub?.current_period_end);
   const firstLoad = loading && !billing;
   return (
@@ -126,6 +124,14 @@ export function ProfileMenu({ variant = "topbar" }: { variant?: "topbar" | "side
             <div className="mx-1 border-t border-border-subtle" />
 
             <div className="space-y-2 px-3 py-2.5">
+              {isTeamBilling && (
+                <div className={ROW}>
+                  <span className="text-xs text-ink-muted">Billing account</span>
+                  <span className="max-w-40 truncate text-sm font-medium text-ink">
+                    {activeBilling?.display_name ?? "Team"} team
+                  </span>
+                </div>
+              )}
               <div className={ROW}>
                 <span className="text-xs text-ink-muted">Plan</span>
                 {firstLoad ? (
@@ -133,14 +139,14 @@ export function ProfileMenu({ variant = "topbar" }: { variant?: "topbar" | "side
                 ) : (
                   <span className="flex items-center gap-1.5 text-sm">
                     <span className="font-medium text-ink">
-                      {sub?.plan_key ? titleCase(sub.plan_key) : "Free"}
+                      {billingPlanLabel(sub?.plan_key)}
                     </span>
                     <span className={cn("text-xs", st.tone)}>· {st.label}</span>
                   </span>
                 )}
               </div>
               <div className={ROW}>
-                <span className="text-xs text-ink-muted">Credits</span>
+                <span className="text-xs text-ink-muted">{isTeamBilling ? "Team credits" : "Credits"}</span>
                 <span className="text-sm font-medium tabular-nums text-ink">
                   {credits?.is_unlimited
                     ? "Unlimited"

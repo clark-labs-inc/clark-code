@@ -412,6 +412,7 @@ async fn run_scenario(
         .new_session(SessionOptions {
             cwd: Some(repo.path().to_string_lossy().to_string()),
             mode: None,
+            collaboration_mode: None,
             resume: None,
         })
         .await

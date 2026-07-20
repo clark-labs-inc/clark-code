@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { diffStats, langFromPath, parseDiff } from "./diff";
+import { diffStats, langFromPath, parseDiff, summarizeEdits } from "./diff";
+import type { ToolCall } from "../core-bridge/types";
 
 const SAMPLE = `diff --git a/src/lib.rs b/src/lib.rs
 index 3f2a1b4..9c8e7d2 100644
@@ -80,5 +81,43 @@ describe("langFromPath", () => {
   it("returns null for unknown / extensionless paths", () => {
     expect(langFromPath("Makefile")).toBeNull();
     expect(langFromPath("weird.xyz")).toBeNull();
+  });
+});
+
+describe("summarizeEdits", () => {
+  it("includes only paths belonging to rendered edits", () => {
+    const calls: ToolCall[] = [
+      {
+        id: "read-1",
+        title: "Read factory.py",
+        kind: "read",
+        status: "completed",
+        locations: [{ path: "src/mochi/agents/factory.py" }],
+        content: [{ type: "text", text: "file contents" }],
+      },
+      {
+        id: "edit-1",
+        title: "Edit run_config.py",
+        kind: "edit",
+        status: "completed",
+        locations: [{ path: "src/mochi/agents/run_config.py" }],
+        content: [{ type: "text", text: SAMPLE }],
+      },
+      {
+        id: "read-2",
+        title: "Read registry.py",
+        kind: "read",
+        status: "completed",
+        locations: [{ path: "src/mochi/tools/registry.py" }],
+        content: [{ type: "text", text: "file contents" }],
+      },
+    ];
+
+    expect(summarizeEdits(calls)).toEqual({
+      files: 1,
+      adds: 3,
+      dels: 1,
+      paths: ["src/mochi/agents/run_config.py"],
+    });
   });
 });

@@ -7,7 +7,7 @@ import {
 import { useSessionStore } from "../store/sessionStore";
 import { cn } from "../lib/cn";
 import { DUR } from "../lib/motion";
-import { PERMISSION_MODES } from "../lib/permissions";
+import { APPROVAL_POLICIES } from "../lib/permissions";
 import { OUTPUT_STYLES } from "../lib/outputStyle";
 import { projectName, loadRecentProjects } from "../lib/localAgent";
 import { loadMcpServers } from "../lib/mcpServers";
@@ -15,10 +15,11 @@ import { loadSshHosts } from "../lib/sshHosts";
 import {
   loadAllowlist, loadDenylist, allowCommand, denyCommand, removeAllowed, removeDenied,
 } from "../lib/commandPolicy";
-import { clarkBillingUrl, openExternal } from "../lib/account";
+import { billingPlanLabel, clarkBillingUrl, effectiveBilling, openExternal } from "../lib/account";
 import { useAppVersion } from "../lib/appInfo";
 import { TEXT_SIZES, TEXT_SIZE_LABELS, type TextSize } from "../lib/useTextSize";
 import { OrganizationKnowledgeSettings } from "./OrganizationKnowledgeSettings";
+import { SandboxSetupCard } from "./SandboxSetupCard";
 import { GroupLabel, Card, Row, Toggle } from "./settings/Primitives";
 import {
   SETTINGS_SECTIONS,
@@ -45,8 +46,8 @@ function GeneralSection({
   textSize: TextSize;
   onTextSizeChange: (size: TextSize) => void;
 }) {
-  const permissionMode = useSessionStore((s) => s.permissionMode);
-  const setPermissionMode = useSessionStore((s) => s.setPermissionMode);
+  const approvalPolicy = useSessionStore((s) => s.approvalPolicy);
+  const setApprovalPolicy = useSessionStore((s) => s.setApprovalPolicy);
   const outputStyle = useSessionStore((s) => s.outputStyle);
   const setOutputStyle = useSessionStore((s) => s.setOutputStyle);
   const memoriesEnabled = useSessionStore((s) => s.memoriesEnabled);
@@ -113,12 +114,12 @@ function GeneralSection({
       <div>
         <GroupLabel>Approvals</GroupLabel>
         <Card>
-          {PERMISSION_MODES.map((m) => {
-            const active = permissionMode === m.id;
+          {APPROVAL_POLICIES.map((m) => {
+            const active = approvalPolicy === m.id;
             return (
               <button
                 key={m.id}
-                onClick={() => setPermissionMode(m.id)}
+                onClick={() => setApprovalPolicy(m.id)}
                 className={cn(
                   "flex w-full items-start gap-3 px-3.5 py-3 text-left transition",
                   active ? "bg-ink/5" : "hover:bg-ink/[0.035]",
@@ -261,6 +262,8 @@ function ProjectSection() {
           </div>
         )}
       </div>
+
+      <SandboxSetupCard cwd={cwd} />
 
       <div>
         <GroupLabel>Default model</GroupLabel>
@@ -521,9 +524,11 @@ function AccountSection() {
 
   if (!auth) return null;
   const user = auth.user;
-  const sub = billing?.subscription ?? null;
+  const activeBilling = effectiveBilling(billing);
+  const isTeamBilling = activeBilling?.owner_kind === "organization";
+  const sub = activeBilling?.subscription ?? null;
   const st = statusTone(sub?.status);
-  const credits = billing?.credits;
+  const credits = activeBilling?.credits;
   const renews = formatDate(sub?.current_period_end);
   const firstLoad = loading && !billing;
 
@@ -549,19 +554,26 @@ function AccountSection() {
       </div>
 
       <div>
-        <GroupLabel>Plan & credits</GroupLabel>
+        <GroupLabel>{isTeamBilling ? "Team plan & credits" : "Plan & credits"}</GroupLabel>
         <Card>
+          {isTeamBilling && (
+            <Row name="Billing account">
+              <span className="text-sm font-medium text-ink">
+                {activeBilling?.display_name ?? "Team"} team
+              </span>
+            </Row>
+          )}
           <Row name="Plan">
             {firstLoad ? (
               <Loader2 className="size-3.5 animate-[spin_1s_linear_infinite] text-ink-muted" />
             ) : (
               <span className="flex items-center gap-1.5 text-sm">
-                <span className="font-medium text-ink">{sub?.plan_key ? sub.plan_key : "Free"}</span>
+                <span className="font-medium text-ink">{billingPlanLabel(sub?.plan_key)}</span>
                 <span className={cn("text-xs", st.tone)}>· {st.label}</span>
               </span>
             )}
           </Row>
-          <Row name="Credits">
+          <Row name={isTeamBilling ? "Team credits" : "Credits"}>
             <span className="text-sm font-medium tabular-nums text-ink">
               {credits?.is_unlimited
                 ? "Unlimited"

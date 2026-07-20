@@ -203,10 +203,7 @@ pub(super) async fn git_shell(
     root: &Path,
     arguments: &str,
 ) -> Result<exec_core::ExecOutput, String> {
-    let hooks = if cfg!(windows) { "NUL" } else { "/dev/null" };
-    let command = format!(
-        "GIT_OPTIONAL_LOCKS=0 GIT_TERMINAL_PROMPT=0 git --no-optional-locks -c core.hooksPath={hooks} -c credential.helper= -c core.fsmonitor=false {arguments}"
-    );
+    let command = crate::git_metadata::protected_git_command(arguments, &[]);
     let output = executor
         .exec(&command, root, GIT_TIMEOUT, &CancellationToken::new())
         .await?;

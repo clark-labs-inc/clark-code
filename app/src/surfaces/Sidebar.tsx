@@ -11,6 +11,7 @@ import { stableRankMap } from "../lib/stableOrder";
 import { cn } from "../lib/cn";
 import { getBridge } from "../core-bridge/bridge";
 import { openProjectPath } from "../lib/openPath";
+import { loadSshHosts } from "../lib/sshHosts";
 import {
   groupSidebarProjects,
   loadProjectSidebarPreferences,
@@ -305,7 +306,11 @@ export function Sidebar({
   // its own pulsing "Working…" dot, whether or not it's on screen.
   const runningIds = useSessionStore((s) => s.runningIds);
   const newConversation = useSessionStore((s) => s.endSession);
+  const selectProvider = useSessionStore((s) => s.selectProvider);
+  const setProjectMode = useSessionStore((s) => s.setProjectMode);
+  const setSelectedHostId = useSessionStore((s) => s.setSelectedHostId);
   const setProjectFolder = useSessionStore((s) => s.setProjectFolder);
+  const setSshOpen = useSessionStore((s) => s.setSshOpen);
   const openProjectTerminal = useSessionStore((s) => s.openProjectTerminal);
   const defaultProject = useSessionStore((s) => s.localSettings.cwd);
   const setLocalSettings = useSessionStore((s) => s.setLocalSettings);
@@ -393,6 +398,35 @@ export function Sidebar({
     if (group.convos.length === 0) return;
     setSelection(new Set(group.convos.map((conversation) => conversation.id)));
     archiveSelected();
+  };
+
+  const startProjectSession = (group: ProjectGroup) => {
+    setProjectMenu(null);
+    if (group.kind === "remote") {
+      const destination = group.remoteHost;
+      const candidates = loadSshHosts().filter(
+        (candidate) => candidate.host.trim() === destination,
+      );
+      const host =
+        candidates.find((candidate) => candidate.remoteRoot.trim() === group.remoteRoot) ??
+        candidates[0];
+      if (!host) {
+        flashNotice(`Reconnect ${group.label} in Remote hosts to start a new session.`);
+        setSshOpen(true);
+        return;
+      }
+      selectProvider("local");
+      setProjectMode("remote");
+      setSelectedHostId(host.id);
+      newConversation();
+      return;
+    }
+    if (group.path) {
+      selectProvider("local");
+      setProjectMode("local");
+      setProjectFolder(group.path);
+      newConversation();
+    }
   };
 
   const openContextMenu = (e: React.MouseEvent, id: string) => {
@@ -574,10 +608,7 @@ export function Sidebar({
                   group={g}
                   menuOpen={projectMenu?.group.key === g.key}
                   onOpenMenu={(button) => openProjectMenu(g, button)}
-                  onNewSession={(path) => {
-                    setProjectFolder(path);
-                    newConversation();
-                  }}
+                  onNewSession={() => startProjectSession(g)}
                 />
                 <div className="flex flex-col">
                   {g.convos.map((c) => (

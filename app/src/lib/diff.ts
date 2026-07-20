@@ -147,6 +147,7 @@ export interface EditSummary {
   files: number;
   adds: number;
   dels: number;
+  paths: string[];
 }
 
 /** Aggregate edit stats across a group of tool calls — the "N files changed,
@@ -167,5 +168,5 @@ export function summarizeEdits(calls: ToolCall[]): EditSummary | null {
     adds += s.adds;
     dels += s.dels;
   }
-  return { files: byFile.size, adds, dels };
+  return { files: byFile.size, adds, dels, paths: [...byFile.keys()] };
 }

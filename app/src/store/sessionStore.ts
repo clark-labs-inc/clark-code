@@ -9,6 +9,8 @@ import { syncFanOut, resetFanOut } from "./fanOutStore";
 import {
   emptySnapshot,
   type ClientResponse,
+  type CollaborationMode,
+  type PlanImplementationContext,
   type ProviderInfo,
   type Session,
   type Snapshot,
@@ -63,12 +65,14 @@ import { pickFolder } from "../lib/pickFolder";
 import { sshConnect, sshDisconnect, remoteTarget, type RemoteInfo } from "../lib/ssh";
 import { loadSshHosts, hostReady, type SshHost } from "../lib/sshHosts";
 import {
-  loadPermissionMode,
-  savePermissionMode,
+  loadApprovalPolicy,
+  loadCollaborationMode,
+  saveApprovalPolicy,
+  saveCollaborationMode,
   pickAllowOption,
   wouldAutoApprove,
-  nextPermissionMode,
-  type PermissionMode,
+  nextApprovalPolicy,
+  type ApprovalPolicy,
 } from "../lib/permissions";
 import { loadOutputStyle, saveOutputStyle } from "../lib/outputStyle";
 import {
@@ -82,7 +86,13 @@ import {
   scheduleCloudPut,
   flushCloudPuts,
 } from "../lib/cloudHistory";
-import { provisionCodeKey, billingMe, type BillingSummary } from "../lib/account";
+import {
+  provisionCodeKey,
+  billingMe,
+  latestActivityReward,
+  type ActivityReward,
+  type BillingSummary,
+} from "../lib/account";
 import { copyText } from "../lib/clipboard";
 import { notify } from "../lib/notify";
 import { repositoryFingerprintForRoot } from "../lib/repositoryKnowledge";
@@ -159,7 +169,8 @@ function mergeHistory(prefix: Snapshot, live: Snapshot): Snapshot {
     runs: { ...prefix.runs, ...live.runs },
     timeline: [...prefix.timeline, ...live.timeline],
     tool_calls: { ...prefix.tool_calls, ...live.tool_calls },
-    plan: live.plan ?? prefix.plan,
+    execution_checklist: live.execution_checklist ?? prefix.execution_checklist,
+    proposed_plan: live.proposed_plan ?? prefix.proposed_plan,
     goal: live.goal ?? prefix.goal,
     pending_permission: live.pending_permission,
     artifacts,
@@ -260,7 +271,9 @@ interface SessionState {
   /** Follow-up messages sent while a run is active; drained when it finishes. */
   queued: QueuedMessage[];
   /** How agent permission requests are approved (Codex-style). */
-  permissionMode: PermissionMode;
+  approvalPolicy: ApprovalPolicy;
+  /** Read-only planning is independent from action approval policy. */
+  collaborationMode: CollaborationMode;
   /** The agent's reply tone/persona for this session — see `lib/outputStyle.ts`. */
   outputStyle: string;
   /** Whether the in-chat terminal drawer is open. */
@@ -286,6 +299,8 @@ interface SessionState {
   /** Billing summary (plan, subscription, credits) from Clark; null until loaded. */
   billing: BillingSummary | null;
   loadingBilling: boolean;
+  /** A fresh server-issued reward earned by completed paid activity. */
+  activityReward: ActivityReward | null;
   /** A downloaded + staged app update awaiting a relaunch to apply. */
   update: StagedUpdate | null;
   /** Live byte progress while an update downloads in the background; null when idle. */
@@ -373,9 +388,15 @@ interface SessionState {
   /** Explicitly inject one queued text-only message into the active local run. */
   steerQueued: (id: string) => Promise<void>;
   removeQueued: (id: string) => void;
-  setPermissionMode: (mode: PermissionMode) => void;
+  setApprovalPolicy: (mode: ApprovalPolicy) => void;
   /** Shift+Tab: advance to the next permission mode in the cycle. */
-  cyclePermissionMode: () => void;
+  cycleApprovalPolicy: () => void;
+  setCollaborationMode: (mode: CollaborationMode) => void;
+  decidePlan: (
+    planId: string,
+    decision: { action: "implement"; context: PlanImplementationContext } |
+      { action: "continue_planning"; feedback?: string },
+  ) => Promise<void>;
   setOutputStyle: (style: string) => void;
   toggleTerminal: () => void;
   setTerminalOpen: (open: boolean) => void;
@@ -403,6 +424,8 @@ interface SessionState {
   dismissNotice: () => void;
   /** Clear the transient warning toast. */
   dismissWarning: () => void;
+  /** Hide the current activity reward and remember that it was seen. */
+  dismissActivityReward: () => void;
   /** Hide the "Run failed" banner for a specific run. */
   dismissFailedRun: (runId: string) => void;
   toggleSidebar: () => void;
@@ -413,9 +436,6 @@ interface SessionState {
   askSideQuestion: (question: string) => Promise<void>;
   /** Dismiss the side-question overlay (and drop a still-pending answer). */
   dismissSideQuestion: () => void;
-  /** Stop the proposed-plan turn and send the user's concrete revision
-   *  guidance as the next turn, without consuming composer attachments. */
-  providePlanFeedback: (feedback: string) => Promise<void>;
 }
 
 // Session transitions (start / open / end) are async and can take 10–20s over
@@ -560,6 +580,33 @@ let updateMenuListenerInstalled = false;
 let settingsMenuListenerInstalled = false;
 let updateTimersInstalled = false;
 
+const ACTIVITY_REWARD_SEEN_PREFIX = "clark.activity-reward.seen.v1";
+
+function activityRewardSeenKey(auth: AuthSession | null, reward: ActivityReward): string | null {
+  const account = auth?.user.email?.trim() || auth?.user.name.trim();
+  return account ? `${ACTIVITY_REWARD_SEEN_PREFIX}.${encodeURIComponent(account)}.${reward.id}` : null;
+}
+
+function hasSeenActivityReward(auth: AuthSession | null, reward: ActivityReward): boolean {
+  const key = activityRewardSeenKey(auth, reward);
+  if (!key) return true;
+  try {
+    return localStorage.getItem(key) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function markActivityRewardSeen(auth: AuthSession | null, reward: ActivityReward): void {
+  const key = activityRewardSeenKey(auth, reward);
+  if (!key) return;
+  try {
+    localStorage.setItem(key, "1");
+  } catch {
+    // This is presentation-only; an in-memory dismissal still avoids a loop.
+  }
+}
+
 async function bindCloudTrajectory(
   bridge: CoreBridge,
   session: Session,
@@ -663,7 +710,8 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   globalMemoryOverview: null,
   recentProjects: loadRecentProjects(),
   queued: [],
-  permissionMode: loadPermissionMode(),
+  approvalPolicy: loadApprovalPolicy(),
+  collaborationMode: loadCollaborationMode(),
   outputStyle: loadOutputStyle(),
   terminalOpen: false,
   terminalLaunch: null,
@@ -676,6 +724,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   sidebarCollapsed: false,
   billing: null,
   loadingBilling: false,
+  activityReward: null,
   update: null,
   updateProgress: null,
   updateChecking: false,
@@ -742,6 +791,11 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   flashNotice: (message) => set({ notice: message }),
   dismissNotice: () => set({ notice: null }),
   dismissWarning: () => set({ warning: null }),
+  dismissActivityReward: () => {
+    const reward = get().activityReward;
+    if (reward) markActivityRewardSeen(get().auth, reward);
+    set({ activityReward: null });
+  },
   dismissFailedRun: (runId) =>
     set((s) =>
       s.dismissedFailedRuns.includes(runId)
@@ -752,13 +806,17 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   loadBilling: async () => {
     const creds = cloudCreds(get().auth);
     if (!creds) {
-      set({ billing: null });
+      set({ billing: null, activityReward: null });
       return;
     }
     set({ loadingBilling: true });
     try {
       const billing = await billingMe(creds);
-      set({ billing, loadingBilling: false });
+      const reward = latestActivityReward(billing);
+      const current = get().activityReward;
+      const activityReward =
+        current ?? (reward && !hasSeenActivityReward(get().auth, reward) ? reward : null);
+      set({ billing, loadingBilling: false, activityReward });
     } catch {
       set({ loadingBilling: false });
     }
@@ -886,6 +944,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         entry.live = live;
         const snapshot = entry.historyPrefix ? mergeHistory(entry.historyPrefix, live) : live;
         const busyNow = isBusy(live);
+        const justSettled = entry.prevBusy && !busyNow;
         const isActive = get().session?.id === id;
 
         if (isActive) {
@@ -966,7 +1025,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
         // Native notification on the busy→idle edge (desktop only, and only when
         // the window is unfocused — see notify()).
-        if (entry.prevBusy && !busyNow) {
+        if (justSettled) {
           const failedRun = Object.values(live.runs).some((r) => r.status === "failed");
           const title = get().conversations.find((c) => c.id === id)?.title;
           if (failedRun) {
@@ -981,7 +1040,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         // banner reflects spend (throttled — billing is a network call).
         if (!busyNow) {
           const now = Date.now();
-          if (now - lastBilling > 15000) {
+          if (justSettled || now - lastBilling > 15000) {
             lastBilling = now;
             void get().loadBilling();
           }
@@ -994,7 +1053,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         // conversation isn't on screen.
         const pend = live.pending_permission;
         if (pend) {
-          if (pend.id !== entry.autoResolvedId && wouldAutoApprove(get().permissionMode, pend)) {
+          if (pend.id !== entry.autoResolvedId && wouldAutoApprove(get().approvalPolicy, pend)) {
             const opt = pickAllowOption(pend);
             if (opt) {
               entry.autoResolvedId = pend.id;
@@ -1002,7 +1061,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
                 .respond(id, { kind: "permission", request: pend.id, option: opt.id })
                 .catch((e) => set({ error: String(e) }));
             }
-          } else if (pend.id !== entry.notifiedPermId && !wouldAutoApprove(get().permissionMode, pend)) {
+          } else if (pend.id !== entry.notifiedPermId && !wouldAutoApprove(get().approvalPolicy, pend)) {
             // The gate will actually block for the user — ping them.
             entry.notifiedPermId = pend.id;
             void notify("Approval needed", pend.title || "Clark is waiting for your approval.");
@@ -1180,12 +1239,13 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     const auth = await signInWithGoogle();
     // Start from an empty list for the new account; the cloud fetch below is the
     // authoritative source (a different account never inherits the prior list).
-    set({ auth, conversations: [], conversationsLoading: true });
+    set({ auth, billing: null, activityReward: null, conversations: [], conversationsLoading: true });
     // Provision the Clark Code key; migrate any residual local chats into this
     // account's cloud (one-time — self-cleaning); then pull the cloud list.
     void get().ensureCodeKey();
     get().migrateLocalToCloud();
     void get().syncCloudIndex();
+    void get().loadBilling();
   },
 
   signOutAuth: () => {
@@ -1194,7 +1254,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     // Drop the in-memory history entirely so the signed-out (and any next)
     // account starts clean.
     snapshotCache.clear();
-    set({ auth: null, billing: null, conversations: [], conversationsLoading: false });
+    set({ auth: null, billing: null, activityReward: null, conversations: [], conversationsLoading: false });
   },
 
   startBlockedReason: () => {
@@ -1239,22 +1299,17 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       let config;
       let options;
       let remoteHost: string | null = null;
-      // The LOCAL engine starts in the mode the composer shows (plan mode's
-      // read-only gate is enforced engine-side). Only the local provider gets
-      // it: `SessionOptions.mode` is provider-defined — for the Clark cloud
-      // provider it selects the TIER (`clark`/`clark_max`), so sending a
-      // permission mode there would corrupt the tier.
-      const mode = get().permissionMode;
+      const collaboration_mode = get().collaborationMode;
       if (isRemote) {
         const host = loadSshHosts().find((h) => h.id === get().selectedHostId);
         if (!host) throw new Error("Pick a remote host first, or add one.");
         remote = await openRemote(host);
         remoteHost = host.host.trim();
         config = localConnectConfig(localSettings, remoteTarget(remote));
-        options = { cwd: remote.cwd, mode };
+        options = { cwd: remote.cwd, collaboration_mode };
       } else if (isLocal) {
         config = localConnectConfig(localSettings);
-        options = { cwd: localSettings.cwd.trim(), mode };
+        options = { cwd: localSettings.cwd.trim(), collaboration_mode };
       } else {
         config = { endpoint: auth?.clark.endpoint, auth_token: auth?.clark.token };
         options = {};
@@ -1299,7 +1354,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
           projectMode: get().projectMode,
           model: isLocal ? localSettings.model : undefined,
           reasoningEffort: isLocal ? localSettings.reasoningEffort : undefined,
-          permissionMode: get().permissionMode,
+          approvalPolicy: get().approvalPolicy,
           outputStyle: get().outputStyle,
           memoriesEnabled: get().memoriesEnabled,
           browserEnabled: get().browserEnabled,
@@ -1462,14 +1517,11 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       let config;
       let options;
       let remoteHost: string | null = null;
-      // Reopened LOCAL sessions resume in the composer's current mode, same as
-      // new ones — the engine rebuilds from scratch and would otherwise default
-      // to plan_mode off even while the pill says "Plan first". (Local-only:
-      // for the cloud provider `mode` means the tier, not a permission mode.)
+      // Reopened local sessions resume in the composer's collaboration mode.
       // The model comes from the conversation's per-chat override when one was
       // set, else the global default — so reopening a chat that ran a different
       // model starts it on that model again, not the current default.
-      const mode = get().permissionMode;
+      const collaboration_mode = get().collaborationMode;
       const effSettings = effectiveModelSettings(localSettings, get().chatModels, id);
       if (isLocal) pinChatModel(get, set, id, effSettings);
       if (wantRemote) {
@@ -1483,13 +1535,13 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         );
         remoteHost = host.host.trim();
         config = localConnectConfig(effSettings, remoteTarget(remote));
-        options = { cwd: remote.cwd, mode };
+        options = { cwd: remote.cwd, collaboration_mode };
       } else if (isLocal) {
         if (!requestedProjectRoot) {
           throw new Error("This conversation has no project folder. Choose one before reopening it.");
         }
         config = localConnectConfig({ ...effSettings, cwd: requestedProjectRoot });
-        options = { cwd: requestedProjectRoot, mode };
+        options = { cwd: requestedProjectRoot, collaboration_mode };
       } else {
         config = { endpoint: auth?.clark.endpoint, auth_token: auth?.clark.token };
         options = {};
@@ -1540,7 +1592,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         projectMode: wantRemote ? "remote" : "local",
         model: isLocal ? effSettings.model : undefined,
         reasoningEffort: isLocal ? effSettings.reasoningEffort : undefined,
-        permissionMode: get().permissionMode,
+        approvalPolicy: get().approvalPolicy,
         outputStyle: get().outputStyle,
       });
       const projectRoot = liveProjectRoot(
@@ -1918,7 +1970,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       : localConnectConfig(settings);
     const options: SessionOptions = {
       cwd: projectRoot,
-      mode: state.permissionMode,
+      collaboration_mode: state.collaborationMode,
       ...(resume ? { resume } : {}),
     };
     const uploads = state.attachments.map(toUpload);
@@ -1954,7 +2006,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         projectMode: previousEntry.remote ? "remote" : "local",
         model: effective.model,
         reasoningEffort: effective.reasoningEffort,
-        permissionMode: state.permissionMode,
+        approvalPolicy: state.approvalPolicy,
         outputStyle: state.outputStyle,
       });
 
@@ -2078,18 +2130,10 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     set((s) => ({ queued: s.queued.filter((q) => q.id !== id) }));
   },
 
-  setPermissionMode: (mode) => {
-    savePermissionMode(mode);
-    set({ permissionMode: mode });
+  setApprovalPolicy: (mode) => {
+    saveApprovalPolicy(mode);
+    set({ approvalPolicy: mode });
     const { bridge, session, snapshot } = get();
-    // Best-effort engine sync: not every provider supports server-side mode
-    // switching (e.g. an ACP agent that doesn't advertise modes) — but the
-    // local agent's plan-mode gate lives engine-side, so every mode change
-    // must reach it, whether it came from the composer pill, Shift+Tab, or a
-    // plan-approval flow.
-    if (bridge?.setMode && session) {
-      void bridge.setMode(session.id, mode).catch(() => {});
-    }
     // If a prompt is open and the new mode would grant it, resolve it now.
     const pend = snapshot.pending_permission;
     if (bridge && session && pend && wouldAutoApprove(mode, pend)) {
@@ -2102,14 +2146,64 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     }
   },
 
-  cyclePermissionMode: () => {
-    const { permissionMode, setPermissionMode, session, activeProvider } = get();
+  cycleApprovalPolicy: () => {
+    const { approvalPolicy, setApprovalPolicy, session, activeProvider } = get();
     // Permission modes only govern the local engine; with a cloud session (or
     // a cloud target on the start screen) the pill is hidden and Shift+Tab
     // cycling an invisible mode would just surprise the next local session.
     const isLocalTarget = session ? session.provider === "local" : activeProvider === "local";
     if (!isLocalTarget) return;
-    setPermissionMode(nextPermissionMode(permissionMode));
+    setApprovalPolicy(nextApprovalPolicy(approvalPolicy));
+  },
+
+  setCollaborationMode: (mode) => {
+    saveCollaborationMode(mode);
+    const { bridge, session } = get();
+    set({
+      collaborationMode: mode,
+      ...(session ? { session: { ...session, collaboration_mode: mode } } : {}),
+    });
+    if (bridge?.setCollaborationMode && session) {
+      void bridge.setCollaborationMode(session.id, mode).catch((error) => {
+        set({ error: String(error) });
+      });
+    }
+  },
+
+  decidePlan: async (planId, decision) => {
+    const { bridge, session } = get();
+    if (!bridge || !session) return;
+    try {
+      await bridge.respond(session.id, {
+        kind: "plan_decision",
+        plan_id: planId,
+        decision,
+      });
+      if (decision.action === "implement") {
+        saveCollaborationMode("default");
+        set((state) => ({
+          collaborationMode: "default",
+          session: state.session ? { ...state.session, collaboration_mode: "default" } : null,
+          snapshot: state.snapshot.proposed_plan?.id === planId
+            ? {
+                ...state.snapshot,
+                proposed_plan: { ...state.snapshot.proposed_plan, status: "approved" },
+                timeline: state.snapshot.timeline.map((item) =>
+                  item.item === "proposed_plan" && item.plan.id === planId
+                    ? { ...item, plan: { ...item.plan, status: "approved" } }
+                    : item,
+                ),
+              }
+            : state.snapshot,
+        }));
+        await get().send("Implement the approved plan.");
+      } else if (decision.feedback?.trim()) {
+        await get().send(decision.feedback.trim());
+      }
+    } catch (error) {
+      set({ error: String(error) });
+      throw error;
+    }
   },
 
   setOutputStyle: (style) => {
@@ -2213,32 +2307,6 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     if (current) void current; // token dies with the cleared state
   },
 
-  providePlanFeedback: async (feedback) => {
-    const text = feedback.trim();
-    const { bridge, session, snapshot } = get();
-    const pending = snapshot.pending_permission;
-    if (!text || !bridge || !session || !pending || pending.risk !== "plan") return;
-    const reject = pending.options.find((o) => o.kind === "reject_once");
-    if (!reject) return;
-
-    // The feedback rides the rejection result: the engine hands it to the
-    // model as the rejection reason, so the same run keeps its research
-    // in-transcript, revises the plan, and re-proposes. (The old cancel +
-    // re-prompt flow aborted the turn, which dropped the model's entire
-    // planning context from the transcript.)
-    try {
-      await bridge.respond(session.id, {
-        kind: "permission",
-        request: pending.id,
-        option: reject.id,
-        feedback: text,
-      });
-      set({ error: null });
-    } catch (e) {
-      set({ error: String(e) });
-      throw e;
-    }
-  },
 }));
 
 // Dev-only test seam: lets headless harnesses inject store state (e.g. a low

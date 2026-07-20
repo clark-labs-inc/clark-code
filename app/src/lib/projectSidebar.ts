@@ -12,6 +12,10 @@ export interface ProjectGroup {
   kind: ProjectGroupKind;
   /** The local folder behind the group (local projects only). */
   path?: string;
+  /** SSH destination behind a remote group, independent of its display alias. */
+  remoteHost?: string;
+  /** Remote root associated with the group's first conversation. */
+  remoteRoot?: string;
   convos: ConversationMeta[];
   latest: number;
 }
@@ -140,6 +144,8 @@ export function groupSidebarProjects(
         title,
         kind,
         path: kind === "local" ? conversation.project : undefined,
+        remoteHost: kind === "remote" ? conversation.remoteHost : undefined,
+        remoteRoot: kind === "remote" ? conversation.project : undefined,
         convos: [],
         latest: Infinity,
       };

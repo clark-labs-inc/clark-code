@@ -43,7 +43,7 @@ beforeEach(() => {
     bridge: null,
     session: null,
     snapshot: emptySnapshot(),
-    permissionMode: "auto",
+    approvalPolicy: "auto",
     activeProvider: "local",
     providers: [],
     auth: null,

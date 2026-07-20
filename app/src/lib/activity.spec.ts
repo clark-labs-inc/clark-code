@@ -29,7 +29,7 @@ describe("currentActivity", () => {
 
   it("falls back to the in-progress plan phase, then Thinking", () => {
     const s = withRun("running");
-    s.plan = { phases: [
+    s.execution_checklist = { revision: 1, steps: [
       { title: "Step A", status: "completed" },
       { title: "Step B", status: "in_progress" },
     ] };

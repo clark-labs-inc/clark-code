@@ -24,13 +24,9 @@ pub(crate) struct SessionState {
     /// Shell-command prefixes that are always refused. Union of the global
     /// denylist and the project's `.clark/settings.json` `permissions.deny`.
     pub deny_commands: Vec<String>,
-    /// Plan Mode: while true, every mutating tool except `propose_plan` is
-    /// denied by the [`crate::permissions::PermissionGate`].
-    pub plan_mode: bool,
-    /// One-shot: set when plan mode ends (plan approved, or the user switched
-    /// modes) so the next turn opens with a short "plan mode is off" note and
-    /// the model stops treating the session as read-only.
-    pub plan_exited: bool,
+    /// Collaboration-mode and execution-checklist state. Kept independent
+    /// from permission policy and standing goals.
+    pub planning: crate::planning::PlanningState,
     /// Output style: a key into `crate::prompt::OUTPUT_STYLES`, prepended to
     /// each turn's text like the plan-mode reminder. Empty string = default.
     pub output_style: String,
@@ -219,9 +215,6 @@ impl Decision {
             "allow_always" => Decision::AllowAlways,
             "reject_always" => Decision::RejectAlways,
             "reject_once" | "reject" | "deny" => Decision::RejectOnce,
-            // Plan approval: both variants approve; they differ only in which
-            // client-side mode the app switches to afterwards.
-            "approve_auto" | "approve_review" => Decision::AllowOnce,
             _ => Decision::AllowOnce,
         }
     }
@@ -246,8 +239,6 @@ mod tests {
         );
         assert_eq!(Decision::from_option("deny"), Decision::RejectOnce);
         // Plan-approval options are approvals regardless of the follow-up mode.
-        assert_eq!(Decision::from_option("approve_auto"), Decision::AllowOnce);
-        assert_eq!(Decision::from_option("approve_review"), Decision::AllowOnce);
     }
 
     #[tokio::test]

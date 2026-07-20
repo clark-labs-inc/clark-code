@@ -8,7 +8,9 @@ use std::{
     time::Duration,
 };
 
-use exec_core::{isolate_process_group, terminate_process_tree, Executor, LocalExecutor};
+use exec_core::{
+    isolate_process_group, terminate_process_tree, Executor, LocalExecutor, ProcessFence,
+};
 use exec_protocol::{
     b64_decode, b64_encode, error_code, method, Notification, ProcessExitParams, ProcessIdParams,
     ProcessInputParams, ProcessOutputParams, ProcessResumeParams, ProcessStartParams,
@@ -329,9 +331,9 @@ async fn run_process(
         return;
     }
 
-    let mut cmd = tokio::process::Command::new("/bin/sh");
-    cmd.arg("-c")
-        .arg(&command)
+    let shell = exec_core::scripted_shell(&command);
+    let mut cmd = tokio::process::Command::new(shell.program);
+    cmd.args(shell.args)
         .current_dir(&cwd)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -346,9 +348,17 @@ async fn run_process(
             return;
         }
     };
+    let process_fence = ProcessFence::attach(child.id());
 
     let (otx, mut orx) = mpsc::channel::<(Stream, Vec<u8>)>(64);
-    let outcome = tokio::spawn(pump(child, otx, proc.cancel.clone(), timeout, input_rx));
+    let outcome = tokio::spawn(pump(
+        child,
+        process_fence,
+        otx,
+        proc.cancel.clone(),
+        timeout,
+        input_rx,
+    ));
 
     while let Some((stream, data)) = orx.recv().await {
         append_output(&proc, stream, data);
@@ -368,6 +378,7 @@ enum Outcome {
 
 async fn pump(
     mut child: tokio::process::Child,
+    _process_fence: ProcessFence,
     otx: mpsc::Sender<(Stream, Vec<u8>)>,
     cancel: CancellationToken,
     timeout: Duration,

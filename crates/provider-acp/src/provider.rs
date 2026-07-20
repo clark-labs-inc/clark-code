@@ -212,6 +212,7 @@ impl Provider for AcpProvider {
             terminal: false,
             load_session,
             modes: vec![],
+            collaboration_modes: Vec::new(),
         }
     }
 
@@ -256,6 +257,7 @@ impl Provider for AcpProvider {
             provider: self.id(),
             capabilities: self.capabilities(),
             mode: options.mode,
+            collaboration_mode: options.collaboration_mode.unwrap_or_default(),
             environment: Some(SessionEnvironment {
                 checkout_root: Some(cwd.clone()),
                 repository_root: None,
@@ -283,6 +285,7 @@ impl Provider for AcpProvider {
             provider: self.id(),
             capabilities: self.capabilities(),
             mode: None,
+            collaboration_mode: agent_core::provider::CollaborationMode::Default,
             environment: Some(SessionEnvironment {
                 checkout_root: Some(cwd.clone()),
                 repository_root: None,
@@ -387,6 +390,9 @@ impl Provider for AcpProvider {
                 )
                 .await
             }
+            ClientResponse::PlanDecision { .. } => Err(Error::Unsupported(
+                "ACP provider does not expose host-owned plan proposals".into(),
+            )),
         }
     }
 

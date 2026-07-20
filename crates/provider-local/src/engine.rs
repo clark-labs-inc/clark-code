@@ -123,6 +123,9 @@ pub(crate) struct TurnContext {
     pub temperature: Option<f32>,
     pub user_text: String,
     pub user_content: clark_agent::UserContent,
+    /// Provider-owned state transitions that become visible at the start of
+    /// this run, after `RunStarted` and before model output.
+    pub initial_events: Vec<AgentEvent>,
     /// When memories are enabled: post-turn durable-fact extraction context.
     pub memory_extraction: Option<crate::memory_extraction::ExtractionCtx>,
     pub execution: RootExecutionConfig,
@@ -164,6 +167,9 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
     };
     let cancel = tc.ctx.cancel.clone();
     let _ = tx.send(AgentEvent::RunStarted { run: run.clone() }).await;
+    for event in tc.initial_events.iter().cloned() {
+        let _ = tx.send(event).await;
+    }
     // An explicit user turn resumes a previously blocked goal. Budget-limited
     // and complete goals remain terminal because only the user can grant more
     // runway or create the next goal.
@@ -440,7 +446,7 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
                     .unwrap_or(usage_before);
                 let (next, goal_state) = {
                     let mut session = tc.session.lock().await;
-                    let plan_mode = session.plan_mode;
+                    let plan_mode = session.planning.plan_mode();
                     let next = match session.goal.as_mut() {
                         Some(goal) => {
                             goal.tokens_used += usage_now.saturating_sub(usage_before);

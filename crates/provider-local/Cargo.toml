@@ -16,6 +16,7 @@ clark-agent-compaction = { git = "https://github.com/clark-labs-inc/clark-agent-
 # The Executor trait + LocalExecutor live here (shared with clark-exec-server);
 # exec-protocol is the wire contract RemoteExecutor speaks to it.
 exec-core = { path = "../exec-core" }
+exec-sandbox = { path = "../exec-sandbox" }
 exec-protocol = { path = "../exec-protocol" }
 clark-install-context = { path = "../install-context" }
 serde.workspace = true
@@ -32,7 +33,7 @@ sha2 = "0.10"
 url = "2"
 # OpenAI-compatible streaming chat client (mirrors provider-clark's reqwest setup
 # so `https://` works without a system OpenSSL/cert dependency).
-reqwest = { version = "0.12", default-features = false, features = ["stream", "json", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["http2", "stream", "json", "rustls-tls"] }
 tokio-util = { version = "0.7", default-features = false }
 # RemoteExecutor's transport to clark-exec-server (plaintext ws over the SSH tunnel).
 tokio-tungstenite = "0.29"
@@ -55,10 +56,13 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 # documents any more than it can read images).
 pdf-extract = "0.12"
 docx-rs = { version = "0.4", default-features = false }
+tempfile = "3"
+
+[target.'cfg(windows)'.dependencies]
+exec-sandbox-windows = { path = "../exec-sandbox-windows" }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util", "net"] }
-tempfile = "3"
 # Spin up a real clark-exec-server in-process to test RemoteExecutor parity.
 exec-server = { path = "../exec-server" }
 exec-protocol = { path = "../exec-protocol" }

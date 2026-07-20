@@ -126,6 +126,7 @@ async fn new_live_provider(
         .new_session(SessionOptions {
             cwd: Some(cwd.to_string_lossy().to_string()),
             mode: None,
+            collaboration_mode: None,
             resume: None,
         })
         .await
@@ -223,7 +224,8 @@ fn event_name(ev: &AgentEvent) -> &'static str {
         AgentEvent::MessagePhase { .. } => "MessagePhase",
         AgentEvent::ToolCall { .. } => "ToolCall",
         AgentEvent::ToolCallUpdate { .. } => "ToolCallUpdate",
-        AgentEvent::Plan { .. } => "Plan",
+        AgentEvent::ExecutionChecklistUpdated { .. } => "ExecutionChecklistUpdated",
+        AgentEvent::ProposedPlanUpdated { .. } => "ProposedPlanUpdated",
         AgentEvent::GoalUpdated { .. } => "GoalUpdated",
         AgentEvent::PermissionRequest { .. } => "PermissionRequest",
         AgentEvent::Artifact { .. } => "Artifact",

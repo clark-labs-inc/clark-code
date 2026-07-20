@@ -89,7 +89,8 @@ async fn drive(
                         *s.kinds.entry(variant(&ev)).or_default() += 1;
                         match ev {
                             AgentEvent::ToolCall { .. } => s.tool_calls += 1,
-                            AgentEvent::Plan { .. } => s.plans += 1,
+                            AgentEvent::ExecutionChecklistUpdated { .. } => s.plans += 1,
+                            AgentEvent::ProposedPlanUpdated { .. } => s.plans += 1,
                             AgentEvent::Artifact { .. } => s.artifacts += 1,
                             AgentEvent::MessageChunk { delta: ContentBlock::Text { text }, .. } => {
                                 s.text_len += text.len();
@@ -116,7 +117,8 @@ fn variant(ev: &AgentEvent) -> String {
         AgentEvent::MessageChunk { .. } => "MessageChunk",
         AgentEvent::ToolCall { .. } => "ToolCall",
         AgentEvent::ToolCallUpdate { .. } => "ToolCallUpdate",
-        AgentEvent::Plan { .. } => "Plan",
+        AgentEvent::ExecutionChecklistUpdated { .. } => "ExecutionChecklistUpdated",
+        AgentEvent::ProposedPlanUpdated { .. } => "ProposedPlanUpdated",
         AgentEvent::GoalUpdated { .. } => "GoalUpdated",
         AgentEvent::Surface { .. } => "Surface",
         AgentEvent::Artifact { .. } => "Artifact",

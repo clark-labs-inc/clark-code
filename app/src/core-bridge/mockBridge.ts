@@ -26,6 +26,7 @@ const PROVIDERS: ProviderInfo[] = [
       terminal: true,
       load_session: false,
       modes: [],
+      collaboration_modes: ["default", "plan"],
     },
   },
 ];
@@ -56,6 +57,7 @@ export class MockBridge implements CoreBridge {
       provider: provider.id,
       capabilities: provider.capabilities,
       mode: provider.capabilities.modes[0],
+      collaboration_mode: _options.collaboration_mode ?? "default",
     };
   }
 
@@ -68,6 +70,7 @@ export class MockBridge implements CoreBridge {
       provider: provider.id,
       capabilities: provider.capabilities,
       mode: provider.capabilities.modes[0],
+      collaboration_mode: "default",
     };
   }
 
@@ -106,8 +109,15 @@ export class MockBridge implements CoreBridge {
     if (response.kind === "permission") {
       this.snapshot = { ...this.snapshot, pending_permission: undefined };
       this.emit();
+    } else if (response.kind === "plan_decision" && this.snapshot.proposed_plan?.id === response.plan_id) {
+      if (response.decision.action === "implement") {
+        this.snapshot.proposed_plan = { ...this.snapshot.proposed_plan, status: "approved" };
+      }
+      this.emit();
     }
   }
+
+  async setCollaborationMode(_sessionId: string, _mode: "default" | "plan"): Promise<void> {}
 
   subscribe(handler: (s: Snapshot) => void): () => void {
     this.handlers.add(handler);
@@ -138,6 +148,20 @@ export class MockBridge implements CoreBridge {
       detached: false,
       isWorktree: false,
       worktreeRoot: cwd.trim(),
+      activity: {
+        changedFiles: 2,
+        untrackedFiles: 1,
+        conflictedFiles: 0,
+        externalAgents: [
+          {
+            id: "codex-preview",
+            title: "Polish the shared checkout experience",
+            agentNickname: "Codex",
+            updatedAtMs: Date.now() - 18_000,
+          },
+        ],
+        detectedAtMs: Date.now(),
+      },
     };
   }
 
@@ -184,7 +208,7 @@ export class MockBridge implements CoreBridge {
     this.emit();
     await sleep(250);
 
-    if (userText.toLowerCase().includes("goal simulation")) {
+    if (/^\s*\/goal(?:\s|$)/i.test(userText) || userText.toLowerCase().includes("goal simulation")) {
       await this.playGoalSimulation(run, userText);
       return;
     }
@@ -206,20 +230,21 @@ export class MockBridge implements CoreBridge {
       return;
     }
 
-    this.snapshot.plan = {
-      phases: [
+    this.snapshot.execution_checklist = {
+      steps: [
         { title: "Inspect the workspace", status: "in_progress" },
         { title: "Apply the change", status: "pending" },
       ],
+      revision: 1,
     };
-    const planItem = this.snapshot.timeline.find((t) => t.item === "plan" && t.run === run);
-    if (planItem?.item === "plan") {
-      planItem.plan = structuredClone(this.snapshot.plan);
+    const planItem = this.snapshot.timeline.find((t) => t.item === "execution_checklist" && t.run === run);
+    if (planItem?.item === "execution_checklist") {
+      planItem.checklist = structuredClone(this.snapshot.execution_checklist);
     } else {
       this.snapshot.timeline.push({
-        item: "plan",
+        item: "execution_checklist",
         run,
-        plan: structuredClone(this.snapshot.plan),
+        checklist: structuredClone(this.snapshot.execution_checklist),
       });
     }
     this.emit();
@@ -461,15 +486,16 @@ export class MockBridge implements CoreBridge {
       finalMessage.phase = "final_answer";
     }
 
-    this.snapshot.plan = {
-      phases: [
+    this.snapshot.execution_checklist = {
+      steps: [
         { title: "Inspect the workspace", status: "completed" },
         { title: "Apply the change", status: "pending" },
       ],
+      revision: 2,
     };
-    const finalPlanItem = this.snapshot.timeline.find((t) => t.item === "plan" && t.run === run);
-    if (finalPlanItem?.item === "plan") {
-      finalPlanItem.plan = structuredClone(this.snapshot.plan);
+    const finalPlanItem = this.snapshot.timeline.find((t) => t.item === "execution_checklist" && t.run === run);
+    if (finalPlanItem?.item === "execution_checklist") {
+      finalPlanItem.checklist = structuredClone(this.snapshot.execution_checklist);
     }
     if (parallelDemo && this.snapshot.fan_out) {
       this.snapshot.fan_out = {
@@ -523,7 +549,8 @@ export class MockBridge implements CoreBridge {
           ? "active" as const
           : "blocked" as const;
     const goalId = "mock-goal";
-    const objective = "Fully implement and test the typed goal experience";
+    const commandObjective = userText.match(/^\s*\/goal\s+([\s\S]+)/i)?.[1]?.trim();
+    const objective = commandObjective || "Fully implement and test the typed goal experience";
     this.snapshot.goal = {
       id: goalId,
       objective,
@@ -626,16 +653,17 @@ export class MockBridge implements CoreBridge {
       ? "app/src/goal/accessibility-verification.ts"
       : "app/src/goal/steered-trajectory.ts";
 
-    this.snapshot.plan = {
-      phases: [
+    this.snapshot.execution_checklist = {
+      steps: [
         { title: direction, status: "in_progress" },
         { title: "Verify the revised goal trajectory", status: "pending" },
       ],
+      revision: 1,
     };
     this.snapshot.timeline.push({
-      item: "plan",
+      item: "execution_checklist",
       run,
-      plan: structuredClone(this.snapshot.plan),
+      checklist: structuredClone(this.snapshot.execution_checklist),
     });
     this.snapshot.timeline.push({
       item: "message",
@@ -690,16 +718,19 @@ export class MockBridge implements CoreBridge {
         updated_at_ms: now,
       };
     }
-    this.snapshot.plan = {
-      phases: [
+    this.snapshot.execution_checklist = {
+      steps: [
         { title: direction, status: "completed" },
         { title: "Verify the revised goal trajectory", status: "in_progress" },
       ],
+      revision: 2,
     };
     const planItem = this.snapshot.timeline.find(
-      (item) => item.item === "plan" && item.run === run,
+      (item) => item.item === "execution_checklist" && item.run === run,
     );
-    if (planItem?.item === "plan") planItem.plan = structuredClone(this.snapshot.plan);
+    if (planItem?.item === "execution_checklist") {
+      planItem.checklist = structuredClone(this.snapshot.execution_checklist);
+    }
     this.snapshot.timeline.push({
       item: "message",
       run,

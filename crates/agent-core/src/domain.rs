@@ -159,24 +159,43 @@ pub struct ToolCallPatch {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum PlanPhaseStatus {
+pub enum ChecklistStatus {
     Pending,
     InProgress,
     Completed,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct PlanPhase {
+pub struct ChecklistStep {
     pub title: String,
-    pub status: PlanPhaseStatus,
+    pub status: ChecklistStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub priority: Option<String>,
 }
 
-/// The agent's current plan (ACP `plan` update / Clark plan phases).
+/// The agent's live execution checklist (ACP `plan` update / Clark plan phases).
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct Plan {
-    pub phases: Vec<PlanPhase>,
+pub struct ExecutionChecklist {
+    pub steps: Vec<ChecklistStep>,
+    #[serde(default)]
+    pub revision: u32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProposedPlanStatus {
+    AwaitingDecision,
+    Approved,
+    Superseded,
+}
+
+/// A decision-complete implementation proposal produced in read-only Plan Mode.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ProposedPlan {
+    pub id: String,
+    pub revision: u32,
+    pub markdown: String,
+    pub status: ProposedPlanStatus,
 }
 
 /// How a permission option resolves.
@@ -519,9 +538,15 @@ pub enum AgentEvent {
         id: ToolCallId,
         patch: ToolCallPatch,
     },
-    Plan {
+    ExecutionChecklistUpdated {
         run: RunId,
-        plan: Plan,
+        checklist: ExecutionChecklist,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        explanation: Option<String>,
+    },
+    ProposedPlanUpdated {
+        run: RunId,
+        plan: ProposedPlan,
     },
     /// A standing goal changed status or usage. Providers emit the complete
     /// state so replay and reconnect remain deterministic.

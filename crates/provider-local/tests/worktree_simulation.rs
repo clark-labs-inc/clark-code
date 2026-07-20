@@ -1,5 +1,6 @@
 mod support;
 
+#[cfg(unix)]
 use std::time::Duration;
 
 use agent_core::domain::AgentEvent;
@@ -163,6 +164,7 @@ async fn clark_code_runs_real_git_and_edits_only_the_selected_worktree() {
         .new_session(SessionOptions {
             cwd: Some(fixture.detached.to_string_lossy().into_owned()),
             mode: None,
+            collaboration_mode: None,
             resume: None,
         })
         .await

@@ -2,8 +2,8 @@
 //! These mirror the `agent_core::Provider` trait and drive the live provider.
 
 use agent_core::{
-    apply, ClientResponse, ContentBlock, PendingUpload, PromptInput, Provider, ProviderConfig,
-    RunId, Session, SessionId, SessionOptions, Snapshot,
+    apply, ClientResponse, CollaborationMode, ContentBlock, PendingUpload, PromptInput, Provider,
+    ProviderConfig, RunId, Session, SessionId, SessionOptions, Snapshot,
 };
 use agent_core::{AgentEvent, Role};
 use futures::StreamExt;
@@ -24,6 +24,15 @@ use crate::{builtin_providers, AppState, ProviderInfo};
 
 /// Synthetic run id used to attribute the user's own message in the timeline.
 const USER_RUN: &str = "user";
+const COMMIT_ATTRIBUTION_POLICY: &str = "[Clark Desktop runtime policy]\nWhen you create or amend a Git commit for work performed in this session, preserve the repository's configured human author and include exactly `Co-authored-by: Clark Code <noreply@clarkchat.com>` as a commit-message trailer. Do not change Git identity or pass `--author`. An explicit user request to omit Clark Code attribution overrides this policy.\n\n";
+
+fn provider_prompt_blocks(blocks: &[ContentBlock]) -> Vec<ContentBlock> {
+    std::iter::once(ContentBlock::Text {
+        text: COMMIT_ATTRIBUTION_POLICY.to_string(),
+    })
+    .chain(blocks.iter().cloned())
+    .collect()
+}
 
 /// Construct a provider instance by id.
 fn make_provider(id: &str) -> Result<Box<dyn Provider>, String> {
@@ -520,11 +529,13 @@ pub async fn prompt(
         }
         let _ = app.emit("snapshot", &s.snapshot);
 
+        let provider_blocks = provider_prompt_blocks(&blocks);
+
         s.provider
             .prompt(
                 &sid,
                 PromptInput {
-                    blocks,
+                    blocks: provider_blocks,
                     attachments,
                 },
             )
@@ -633,6 +644,24 @@ pub async fn set_mode(
         .set_mode(&SessionId::new(session_id), mode)
         .await
         .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn set_collaboration_mode(
+    session_id: String,
+    mode: CollaborationMode,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let entry = state
+        .session_entry(&session_id)
+        .await
+        .ok_or("no such session")?;
+    let mut session = entry.lock().await;
+    session
+        .provider
+        .set_collaboration_mode(&SessionId::new(session_id), mode)
+        .await
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -891,8 +920,14 @@ fn open_command(path: &str, reveal: bool) -> std::process::Command {
         c.arg(format!("/select,{path}"));
         c
     } else {
-        let mut c = std::process::Command::new("cmd");
-        c.args(["/C", "start", "", path]);
+        let mut c = std::process::Command::new("powershell.exe");
+        c.args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "& { param($target) Start-Process -FilePath $target }",
+            path,
+        ]);
         c
     }
 }
@@ -1355,6 +1390,20 @@ mod real_backend_tests {
         std::fs::write(dir.join("main.rs"), "fn main() {}\n").unwrap();
         git(dir, &["add", "-A"]);
         git(dir, &["commit", "-q", "-m", "initial"]);
+    }
+
+    #[test]
+    fn provider_prompt_keeps_commit_policy_hidden_and_user_request_last() {
+        let user = ContentBlock::Text {
+            text: "commit the finished work".into(),
+        };
+        let blocks = provider_prompt_blocks(std::slice::from_ref(&user));
+        assert_eq!(blocks.len(), 2);
+        let ContentBlock::Text { text: policy } = &blocks[0] else {
+            panic!("policy must be text");
+        };
+        assert!(policy.contains("Co-authored-by: Clark Code"));
+        assert_eq!(blocks[1], user);
     }
 
     #[tokio::test]

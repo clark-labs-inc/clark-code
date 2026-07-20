@@ -27,6 +27,8 @@ struct BrowserState {
     /// Kept alive for its `kill_on_drop`; dropped (killing the process) when
     /// the tool itself is dropped at session end.
     child: Option<Child>,
+    /// On Windows, owns the browser's whole child tree for the session.
+    _process_fence: Option<exec_core::ProcessFence>,
     session: Option<BrowserSession>,
 }
 
@@ -88,8 +90,9 @@ impl ToolExecutor for BrowserTool {
         let mut state = self.state.lock().await;
         if state.session.is_none() {
             match start_browser(ctx).await {
-                Ok((child, session)) => {
+                Ok((child, process_fence, session)) => {
                     state.child = Some(child);
+                    state._process_fence = Some(process_fence);
                     state.session = Some(session);
                 }
                 Err(e) => return ToolOutcome::error(e),
@@ -138,7 +141,9 @@ impl ToolExecutor for BrowserTool {
     }
 }
 
-async fn start_browser(_ctx: &ToolCtx) -> Result<(Child, BrowserSession), String> {
+async fn start_browser(
+    _ctx: &ToolCtx,
+) -> Result<(Child, exec_core::ProcessFence, BrowserSession), String> {
     // Downloads (and caches) the binary if this is the first use — can take a
     // while for a ~150-300MB archive; the tool call blocks on it rather than
     // streaming progress into the tool-call UI in v1 (no "long download" UI
@@ -174,12 +179,13 @@ async fn start_browser(_ctx: &ToolCtx) -> Result<(Child, BrowserSession), String
         .kill_on_drop(true)
         .spawn()
         .map_err(|e| format!("failed to start clark-browser: {e}"))?;
+    let process_fence = exec_core::ProcessFence::attach(child.id());
 
     // Give the browser a moment to open its devtools port before we probe it.
     let mut last_err = String::new();
     for _ in 0..50 {
         match BrowserSession::connect(port).await {
-            Ok(session) => return Ok((child, session)),
+            Ok(session) => return Ok((child, process_fence, session)),
             Err(e) => {
                 last_err = e;
                 tokio::time::sleep(std::time::Duration::from_millis(100)).await;

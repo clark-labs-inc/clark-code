@@ -199,6 +199,7 @@ impl Provider for ScriptedProvider {
             terminal: true,
             load_session: false,
             modes: vec!["scripted".into()],
+            collaboration_modes: Vec::new(),
         }
     }
 
@@ -219,6 +220,7 @@ impl Provider for ScriptedProvider {
             provider: self.id(),
             capabilities: self.capabilities(),
             mode: Some("scripted".into()),
+            collaboration_mode: options.collaboration_mode.unwrap_or_default(),
             environment: Some(SessionEnvironment {
                 checkout_root: Some(cwd.to_string_lossy().into_owned()),
                 repository_root: Some(cwd.to_string_lossy().into_owned()),

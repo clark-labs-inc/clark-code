@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import {
   buildResumeTranscript,
   drainLocalHistory,
+  migratePlanningSnapshot,
   settleRuns,
   snapshotBeforeTimelineItem,
 } from "./history";
@@ -177,6 +178,36 @@ describe("buildResumeTranscript", () => {
     expect(out.truncated).toBe(true);
     expect(JSON.stringify(out)).toContain("turn 49");
     expect(JSON.stringify(out)).not.toContain("turn 0 ");
+  });
+
+  it("replays the latest proposed plan as typed state", () => {
+    const snapshot: Snapshot = {
+      runs: {}, timeline: [], tool_calls: {}, artifacts: [],
+      proposed_plan: {
+        id: "plan-1", revision: 2, markdown: "1. Build it", status: "awaiting_decision",
+      },
+    };
+    expect(buildResumeTranscript(snapshot)?.items).toContainEqual({
+      item: "proposed_plan",
+      plan: snapshot.proposed_plan,
+    });
+  });
+});
+
+describe("planning history migration", () => {
+  it("upgrades the old overloaded plan shape once at the replay boundary", () => {
+    const legacy = {
+      runs: {}, tool_calls: {}, artifacts: [],
+      plan: { phases: [{ title: "Inspect", status: "in_progress" }] },
+      timeline: [{
+        item: "plan", run: "r1",
+        plan: { phases: [{ title: "Inspect", status: "in_progress" }] },
+      }],
+    } as unknown as Snapshot;
+    const migrated = migratePlanningSnapshot(legacy);
+    expect(migrated.execution_checklist?.steps[0].title).toBe("Inspect");
+    expect(migrated.timeline[0]).toMatchObject({ item: "execution_checklist", run: "r1" });
+    expect("plan" in migrated).toBe(false);
   });
 });
 

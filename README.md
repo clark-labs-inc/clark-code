@@ -61,6 +61,8 @@ agent (`crates/provider-local`) is designed around that:
 | `crates/agent-core` | Domain model, projection reducers, `Provider` trait, codecs. Native + WASM. |
 | `crates/provider-acp` | Agent Client Protocol adapter (JSON-RPC over stdio). |
 | `crates/provider-clark` | Clark runtime adapter: HTTP command writes (`/api/conversation-sync/commands`) + resumable SSE event stream, with a WS for realtime session binding. |
+| `crates/provider-local` | Local coding loop with brokered Clark Cloud tools and a default-on native command sandbox. |
+| `crates/exec-sandbox*` | Cross-platform policy, Seatbelt/bubblewrap adapters, and the Windows restricted-token privilege boundary. See [sandbox design](docs/sandboxing.md). |
 | `crates/devbridge` | Dev-only WebSocket bridge that drives the real providers + projection from a browser (headless UI testing, video capture). Not shipped. |
 | `src-tauri` | Tauri 2 host: commands, event bridge, sidecar, state. |
 | `app` | Vite + React + TS + Tailwind v4 frontend. |

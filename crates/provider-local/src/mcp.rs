@@ -13,6 +13,7 @@
 //! session.
 
 use std::collections::HashMap;
+use std::path::Path;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -23,7 +24,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::process::{Child, ChildStdin, Command};
+use tokio::process::{Child, ChildStdin};
 use tokio::sync::{oneshot, Mutex as AsyncMutex};
 
 use crate::tools::{ToolCtx, ToolExecutor, ToolOutcome};
@@ -73,20 +74,25 @@ pub struct McpClient {
     tools: Vec<McpToolDef>,
     /// Kept alive (with `kill_on_drop`) so the server dies with the client.
     _child: Child,
+    /// On Windows, owns every descendant the configured server starts.
+    _process_fence: exec_core::ProcessFence,
 }
 
 impl McpClient {
     /// Spawn the server, handshake, and list its tools.
-    pub async fn connect(cfg: &McpServerConfig) -> Result<Self, String> {
-        let mut child = Command::new(&cfg.command)
-            .args(&cfg.args)
-            .envs(&cfg.env)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .kill_on_drop(true)
-            .spawn()
-            .map_err(|e| format!("failed to start `{}`: {e}", cfg.command))?;
+    pub async fn connect(
+        cfg: &McpServerConfig,
+        executor: &dyn exec_core::Executor,
+        cwd: &Path,
+    ) -> Result<Self, String> {
+        let mut process = exec_core::ProcessSpec::argv(&cfg.command, cwd).args(cfg.args.clone());
+        for (name, value) in &cfg.env {
+            process = process.env(name, value);
+        }
+        let process = executor.prepare_process(process)?;
+        let mut child =
+            exec_core::spawn_process(&process, Stdio::piped(), Stdio::piped(), Stdio::piped())?;
+        let process_fence = exec_core::ProcessFence::attach(child.id());
 
         let stdin = child.stdin.take().ok_or("server has no stdin")?;
         let stdout = child.stdout.take().ok_or("server has no stdout")?;
@@ -140,6 +146,7 @@ impl McpClient {
             next_id: AtomicI64::new(1),
             tools: Vec::new(),
             _child: child,
+            _process_fence: process_fence,
         };
 
         // initialize handshake.
@@ -246,9 +253,11 @@ impl McpClient {
 /// Connect each server, collect its status (tools discovered, or the error),
 /// then drop it. A stateless "test connection" for the settings UI.
 pub async fn probe_mcp_servers(servers: &[McpServerConfig]) -> Vec<McpStatus> {
+    let executor = exec_core::LocalExecutor;
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let mut out = Vec::new();
     for cfg in servers {
-        out.push(match McpClient::connect(cfg).await {
+        out.push(match McpClient::connect(cfg, &executor, &cwd).await {
             Ok(client) => McpStatus {
                 server: cfg.name.clone(),
                 connected: true,
@@ -465,7 +474,9 @@ rl.on('line', (line) => {
             args: vec![script.to_string_lossy().into_owned()],
             env: HashMap::new(),
         };
-        let client = McpClient::connect(&cfg).await.expect("connect");
+        let client = McpClient::connect(&cfg, &exec_core::LocalExecutor, dir.path())
+            .await
+            .expect("connect");
         assert_eq!(client.tool_count(), 1);
         assert_eq!(client.tool_names(), vec!["mcp_mock_echo".to_string()]);
 
@@ -479,12 +490,17 @@ rl.on('line', (line) => {
 
     #[tokio::test]
     async fn a_missing_server_command_fails_cleanly() {
+        let dir = tempfile::tempdir().unwrap();
         let cfg = McpServerConfig {
             name: "nope".into(),
             command: "definitely-not-a-real-binary-xyz".into(),
             args: vec![],
             env: HashMap::new(),
         };
-        assert!(McpClient::connect(&cfg).await.is_err());
+        assert!(
+            McpClient::connect(&cfg, &exec_core::LocalExecutor, dir.path())
+                .await
+                .is_err()
+        );
     }
 }

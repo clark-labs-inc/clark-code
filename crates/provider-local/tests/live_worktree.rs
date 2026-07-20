@@ -69,6 +69,7 @@ async fn live_model_edits_only_the_selected_linked_worktree() {
         .new_session(SessionOptions {
             cwd: Some(fixture.detached.to_string_lossy().into_owned()),
             mode: None,
+            collaboration_mode: None,
             resume: None,
         })
         .await

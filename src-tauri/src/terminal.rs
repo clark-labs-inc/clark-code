@@ -22,6 +22,7 @@ struct Session {
     writer: Box<dyn Write + Send>,
     master: Box<dyn MasterPty + Send>,
     child: Box<dyn Child + Send + Sync>,
+    _process_fence: exec_core::ProcessFence,
 }
 
 /// Managed map of open terminals, keyed by a UI-generated id.
@@ -33,10 +34,6 @@ struct TermData {
     id: String,
     /// base64 of the raw PTY bytes.
     chunk: String,
-}
-
-fn default_shell() -> String {
-    std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string())
 }
 
 fn pty_size(cols: u16, rows: u16) -> PtySize {
@@ -61,14 +58,16 @@ pub fn terminal_open(
         .openpty(pty_size(cols, rows))
         .map_err(|e| e.to_string())?;
 
-    let mut cmd = CommandBuilder::new(default_shell());
-    cmd.arg("-l"); // login shell: inherit the user's PATH/profile
+    let shell = exec_core::interactive_shell();
+    let mut cmd = CommandBuilder::new(shell.program);
+    cmd.args(shell.args);
     cmd.env("TERM", "xterm-256color");
     if let Some(dir) = cwd.filter(|d| !d.is_empty()) {
         cmd.cwd(dir);
     }
 
     let child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
+    let process_fence = exec_core::ProcessFence::attach(child.process_id());
     // Drop the slave so the PTY reports EOF once the shell exits.
     drop(pair.slave);
 
@@ -111,6 +110,7 @@ pub fn terminal_open(
             writer,
             master: pair.master,
             child,
+            _process_fence: process_fence,
         },
     );
     Ok(())

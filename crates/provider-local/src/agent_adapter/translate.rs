@@ -424,45 +424,6 @@ pub(super) fn mobile_screenshot_artifact(
     })
 }
 
-pub(super) fn tool_title(name: &str, args: &Value) -> String {
-    match name {
-        "propose_plan" => return "Proposed a plan".to_string(),
-        "update_plan" => return "Updated the plan".to_string(),
-        "organization_knowledge" => return "Searched organization knowledge".to_string(),
-        "view_image" => {
-            return args
-                .get("path")
-                .and_then(Value::as_str)
-                .map(|path| format!("View image: {path}"))
-                .unwrap_or_else(|| "View image".to_string())
-        }
-        "generate_image" => {
-            return args
-                .get("output_path")
-                .and_then(Value::as_str)
-                .map(|path| format!("Generate image: {path}"))
-                .unwrap_or_else(|| "Generate image".to_string())
-        }
-        _ => {}
-    }
-    let salient = ["path", "pattern", "command", "query", "old_string"]
-        .iter()
-        .find_map(|key| args.get(*key).and_then(Value::as_str));
-    match salient {
-        Some(value) => {
-            let snippet: String = value
-                .lines()
-                .next()
-                .unwrap_or("")
-                .chars()
-                .take(80)
-                .collect();
-            format!("{name}: {snippet}")
-        }
-        None => name.to_string(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

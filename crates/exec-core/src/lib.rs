@@ -14,6 +14,7 @@
 //! `clark-exec-server` binary that links it stays lean.
 
 use std::path::{Path, PathBuf};
+#[cfg(windows)]
 use std::process::Stdio;
 use std::time::{Duration, SystemTime};
 
@@ -21,7 +22,11 @@ use async_trait::async_trait;
 use tokio_util::sync::CancellationToken;
 
 mod local;
+mod process;
+mod process_fence;
 pub use local::LocalExecutor;
+pub use process::{run_process_streaming, run_process_streaming_pty, spawn_process, ProcessSpec};
+pub use process_fence::ProcessFence;
 
 pub const NONINTERACTIVE_ENV: &[(&str, &str)] = &[
     ("PAGER", "cat"),
@@ -38,6 +43,139 @@ pub const NONINTERACTIVE_ENV: &[(&str, &str)] = &[
     ("NO_COLOR", "1"),
 ];
 
+/// The command interpreter selected for locally executed scripts.
+///
+/// Windows follows Codex's preference for PowerShell, which is available on
+/// supported Windows versions. CMD remains a profile-free fallback when a
+/// PowerShell executable cannot be resolved.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ShellKind {
+    Posix,
+    PowerShell,
+    Cmd,
+}
+
+/// A shell executable plus the arguments required to run it.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ShellInvocation {
+    pub program: PathBuf,
+    pub args: Vec<String>,
+    pub kind: ShellKind,
+}
+
+/// Resolve a non-interactive shell for one script.
+pub fn scripted_shell(command: &str) -> ShellInvocation {
+    #[cfg(windows)]
+    {
+        let (kind, program) = default_windows_shell();
+        ShellInvocation {
+            program,
+            args: windows_shell_args(kind, Some(command)),
+            kind,
+        }
+    }
+
+    #[cfg(not(windows))]
+    {
+        ShellInvocation {
+            program: PathBuf::from("/bin/sh"),
+            args: vec!["-c".to_string(), command.to_string()],
+            kind: ShellKind::Posix,
+        }
+    }
+}
+
+/// Resolve an interactive shell for the embedded terminal.
+pub fn interactive_shell() -> ShellInvocation {
+    #[cfg(windows)]
+    {
+        let (kind, program) = default_windows_shell();
+        ShellInvocation {
+            program,
+            args: windows_shell_args(kind, None),
+            kind,
+        }
+    }
+
+    #[cfg(not(windows))]
+    {
+        ShellInvocation {
+            program: std::env::var_os("SHELL")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from("/bin/bash")),
+            args: vec!["-l".to_string()],
+            kind: ShellKind::Posix,
+        }
+    }
+}
+
+/// Return the platform's current non-interactive shell kind without spawning a
+/// child. Callers that construct shell syntax themselves use this to quote or
+/// prefix commands correctly.
+pub fn scripted_shell_kind() -> ShellKind {
+    #[cfg(windows)]
+    {
+        default_windows_shell().0
+    }
+
+    #[cfg(not(windows))]
+    {
+        ShellKind::Posix
+    }
+}
+
+#[cfg(any(windows, test))]
+fn windows_shell_args(kind: ShellKind, command: Option<&str>) -> Vec<String> {
+    let mut args = match kind {
+        ShellKind::PowerShell => vec!["-NoLogo".to_string(), "-NoProfile".to_string()],
+        ShellKind::Cmd => vec!["/D".to_string(), "/Q".to_string()],
+        ShellKind::Posix => unreachable!("Windows cannot select a POSIX shell"),
+    };
+    if let Some(command) = command {
+        match kind {
+            ShellKind::PowerShell => {
+                args.push("-NonInteractive".to_string());
+                args.push("-Command".to_string());
+            }
+            ShellKind::Cmd => args.push("/C".to_string()),
+            ShellKind::Posix => unreachable!("Windows cannot select a POSIX shell"),
+        }
+        args.push(command.to_string());
+    }
+    args
+}
+
+#[cfg(windows)]
+fn default_windows_shell() -> (ShellKind, PathBuf) {
+    const PWSH_FALLBACK: &str = r"C:\Program Files\PowerShell\7\pwsh.exe";
+    const POWERSHELL_FALLBACK: &str = r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe";
+
+    find_windows_executable("pwsh.exe", Some(PWSH_FALLBACK))
+        .map(|path| (ShellKind::PowerShell, path))
+        .or_else(|| {
+            find_windows_executable("powershell.exe", Some(POWERSHELL_FALLBACK))
+                .map(|path| (ShellKind::PowerShell, path))
+        })
+        .unwrap_or_else(|| {
+            (
+                ShellKind::Cmd,
+                std::env::var_os("COMSPEC")
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| PathBuf::from("cmd.exe")),
+            )
+        })
+}
+
+#[cfg(windows)]
+fn find_windows_executable(name: &str, fallback: Option<&str>) -> Option<PathBuf> {
+    let on_path = std::env::var_os("PATH").and_then(|path| {
+        std::env::split_paths(&path)
+            .map(|dir| dir.join(name))
+            .find(|candidate| candidate.is_file())
+    });
+    on_path.or_else(|| fallback.map(PathBuf::from).filter(|path| path.is_file()))
+}
+
 pub fn configure_noninteractive(command: &mut tokio::process::Command) {
     command.envs(NONINTERACTIVE_ENV.iter().copied());
 }
@@ -45,6 +183,8 @@ pub fn configure_noninteractive(command: &mut tokio::process::Command) {
 pub fn isolate_process_group(command: &mut tokio::process::Command) {
     #[cfg(unix)]
     command.process_group(0);
+    #[cfg(not(unix))]
+    let _ = command;
 }
 
 pub async fn terminate_pid_tree(root_pid: Option<u32>) {
@@ -110,6 +250,18 @@ pub struct ExecOutput {
     pub code: Option<i32>,
 }
 
+/// Who owns containment for process and filesystem operations.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ExecutionContainment {
+    /// The host executes directly; callers must classify this as a trusted host
+    /// capability rather than an agent sandbox.
+    Host,
+    /// This executor applies a local OS sandbox and matching filesystem checks.
+    Managed,
+    /// A remote executor is responsible for enforcing its own boundary.
+    External,
+}
+
 /// One ordered output chunk from a long-lived process.
 #[derive(Clone, Debug)]
 pub struct BackgroundOutput {
@@ -171,6 +323,17 @@ pub trait Executor: Send + Sync {
     /// Recursively list files under `root`, honoring repository ignore files
     /// and skipping fixed noisy directories (`.git`, `node_modules`, …).
     async fn walk(&self, root: &Path) -> ExecResult<Vec<WalkEntry>>;
+
+    /// Transform an argv-shaped process before it is spawned. Agent-owned
+    /// subprocesses that cannot use [`Executor::exec`] directly (background
+    /// tasks, pinned helpers, stdio transports) must call this hook.
+    fn prepare_process(&self, process: ProcessSpec) -> ExecResult<ProcessSpec> {
+        Ok(process)
+    }
+
+    fn containment(&self) -> ExecutionContainment {
+        ExecutionContainment::Host
+    }
     /// Run `command` through `/bin/sh -c` at `cwd`, capturing stdout/stderr/code.
     /// Honors `cancel` (kills the process) and `timeout`. `Err` for spawn
     /// failure / cancellation / timeout; `Ok` even on a non-zero exit.

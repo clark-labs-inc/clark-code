@@ -220,10 +220,24 @@ async fn desktop_sink_captures_only_canonical_completed_turns() {
 }
 
 #[test]
-fn tool_title_uses_salient_argument() {
+fn tool_title_describes_file_and_web_activity() {
     assert_eq!(
         tool_title("read_file", &json!({"path":"src/main.rs"})),
-        "read_file: src/main.rs"
+        "Read src/main.rs"
+    );
+    assert_eq!(
+        tool_title("web_fetch", &json!({"url":"https://example.com/docs"})),
+        "Read https://example.com/docs"
+    );
+    assert_eq!(tool_title("web_fetch", &json!({})), "Reading a web page");
+}
+
+#[test]
+fn tool_title_never_falls_back_to_an_internal_identifier() {
+    assert_eq!(tool_title("future_internal_tool", &json!({})), "Working");
+    assert_eq!(
+        tool_title("mcp_github_create_issue", &json!({})),
+        "Using a connected service"
     );
 }
 
@@ -266,26 +280,6 @@ fn produced_image_artifact_preserves_its_typed_preview_uri() {
         artifact.tool_call.as_ref().map(|id| id.as_str()),
         Some("call-1")
     );
-}
-
-#[test]
-fn parse_update_plan_maps_steps_and_statuses() {
-    let args = json!({"plan": [
-        {"step": "read the code", "status": "completed"},
-        {"step": "write the fix", "status": "in_progress"},
-        {"step": "test it", "status": "pending"},
-    ]});
-    let plan = parse_update_plan(&args).expect("valid plan");
-    assert_eq!(plan.phases.len(), 3);
-    assert_eq!(plan.phases[0].title, "read the code");
-    assert_eq!(plan.phases[0].status, desktop::PlanPhaseStatus::Completed);
-    assert_eq!(plan.phases[1].status, desktop::PlanPhaseStatus::InProgress);
-    assert_eq!(plan.phases[2].status, desktop::PlanPhaseStatus::Pending);
-}
-
-#[test]
-fn parse_update_plan_rejects_missing_plan_array() {
-    assert!(parse_update_plan(&json!({})).is_none());
 }
 
 #[test]

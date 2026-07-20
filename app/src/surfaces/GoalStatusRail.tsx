@@ -24,10 +24,6 @@ export function GoalStatusRail() {
     return Object.values(calls).filter((call) => ids.has(call.id));
   }, [calls, goal?.run, timeline]);
   const edits = useMemo(() => summarizeEdits(allCalls), [allCalls]);
-  const paths = useMemo(
-    () => [...new Set(allCalls.flatMap((call) => call.locations.map((location) => location.path)))],
-    [allCalls],
-  );
 
   useEffect(() => {
     if (goal?.status !== "active") return;
@@ -59,9 +55,9 @@ export function GoalStatusRail() {
         {edits.files} file{edits.files === 1 ? "" : "s"} changed
         <span className="ml-2 font-mono text-xs"><span className="text-success">+{edits.adds}</span>{" "}<span className="text-danger">−{edits.dels}</span></span>
       </p>
-      {paths.length > 0 && (
+      {edits.paths.length > 0 && (
         <ul className="mt-2 max-h-32 space-y-1 overflow-y-auto font-mono text-xs text-ink-muted">
-          {paths.slice(0, 8).map((path) => <li key={path} className="truncate">{path}</li>)}
+          {edits.paths.slice(0, 8).map((path) => <li key={path} className="truncate">{path}</li>)}
         </ul>
       )}
     </div>

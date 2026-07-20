@@ -25,51 +25,60 @@ pub(super) async fn search(
         .ok()
         .filter(|path| !path.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."));
-    let mut command = tokio::process::Command::new(clark_install_context::rg_command());
-    command
-        .current_dir(root)
-        .args([
-            "--color=never",
-            "--no-heading",
-            "--hidden",
-            "--no-require-git",
-            "--glob=!.git/**",
-            "--max-filesize=2M",
-            "--with-filename",
-        ])
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true);
+    let mut args = vec![
+        "--color=never".to_string(),
+        "--no-heading".to_string(),
+        "--hidden".to_string(),
+        "--no-require-git".to_string(),
+        "--glob=!.git/**".to_string(),
+        "--max-filesize=2M".to_string(),
+        "--with-filename".to_string(),
+    ];
     match mode {
         "files_with_matches" => {
-            command.arg("--files-with-matches");
+            args.push("--files-with-matches".to_string());
         }
         "count" => {
-            command.arg("--count");
+            args.push("--count".to_string());
         }
         _ => {
-            command.args([
-                "--line-number",
-                "--max-columns=400",
-                "--max-columns-preview",
-            ]);
+            args.extend(
+                [
+                    "--line-number",
+                    "--max-columns=400",
+                    "--max-columns-preview",
+                ]
+                .into_iter()
+                .map(str::to_string),
+            );
         }
     }
     if let Some(filter) = name_filter {
-        command.arg("--glob").arg(filter.as_str());
+        args.push("--glob".to_string());
+        args.push(filter.as_str().to_string());
     }
-    command.arg("--").arg(pattern).arg(scope);
+    args.push("--".to_string());
+    args.push(pattern.to_string());
+    args.push(scope.to_string_lossy().into_owned());
 
-    let mut child = match command.spawn() {
-        Ok(child) => child,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,
-        Err(error) => {
-            return Some(ToolOutcome::error(format!(
-                "failed to start bundled ripgrep: {error}"
-            )))
-        }
+    let process = match ctx.executor.prepare_process(
+        exec_core::ProcessSpec::argv(clark_install_context::rg_command(), root).args(args),
+    ) {
+        Ok(process) => process,
+        Err(error) => return Some(ToolOutcome::error(error)),
     };
+    let mut child =
+        match exec_core::spawn_process(&process, Stdio::null(), Stdio::piped(), Stdio::piped()) {
+            Ok(child) => child,
+            Err(error) if error.contains("No such file") || error.contains("not found") => {
+                return None
+            }
+            Err(error) => {
+                return Some(ToolOutcome::error(format!(
+                    "failed to start bundled ripgrep: {error}"
+                )))
+            }
+        };
     let stdout = child.stdout.take().expect("piped ripgrep stdout");
     let mut stderr = child.stderr.take().expect("piped ripgrep stderr");
     let stderr_task = tokio::spawn(async move {

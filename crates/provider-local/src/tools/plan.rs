@@ -9,7 +9,7 @@ use agent_core::domain::ToolKind;
 use async_trait::async_trait;
 use serde_json::{json, Value};
 
-use crate::tools::{arg_str, ToolCtx, ToolExecutor, ToolOutcome};
+use crate::tools::{arg_str, ToolCtx, ToolExecutor, ToolOutcome, ToolSignal};
 
 pub struct ProposePlan;
 
@@ -42,38 +42,27 @@ impl ToolExecutor for ProposePlan {
         ToolKind::Other
     }
     fn mutating(&self) -> bool {
-        true
+        false
     }
     fn preview(&self, args: &Value, _ctx: &ToolCtx) -> Option<String> {
         arg_str(args, "plan").ok()
     }
-    // Runs only after the user approved (the gate forces an explicit decision).
-    // Persist the approved plan into the session's document workspace so it
-    // survives the gate: the write surfaces as an inline document card in the
-    // conversation, and the model gets a stable path to consult while building.
     async fn invoke(&self, args: Value, ctx: &ToolCtx) -> ToolOutcome {
-        let plan = arg_str(&args, "plan").unwrap_or_default();
-        let saved = ctx.sandbox.docs_root().and_then(|docs| {
-            let path = crate::workspace::plan_file(docs);
-            std::fs::write(&path, plan.as_bytes()).ok()?;
-            Some(path)
-        });
-        let mut content = String::from(
-            "The user approved your plan. You can now build it. Start by setting up your task \
-            checklist with `update_plan` if the work has multiple steps.",
-        );
-        if let Some(path) = &saved {
-            content.push_str(&format!(
-                "\n\nYour plan is saved at: {} — refer back to it during implementation.",
-                path.display()
-            ));
+        if !ctx.session.lock().await.planning.plan_mode() {
+            return ToolOutcome::error("propose_plan is only available in Plan Mode");
         }
-        content.push_str(&format!("\n\n## Approved plan\n{plan}"));
-        let outcome = ToolOutcome::ok(content);
-        match saved {
-            Some(path) => outcome.with_location(path.display().to_string(), None),
-            None => outcome,
+        let markdown = arg_str(&args, "plan")
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+        if markdown.is_empty() {
+            return ToolOutcome::error("the proposed plan cannot be empty");
         }
+        let plan = ctx.session.lock().await.planning.next_proposal(markdown);
+        ToolOutcome::ok(
+            "Plan proposed for review. Plan Mode remains active; end this turn and wait for the user's decision.",
+        )
+        .with_signal(ToolSignal::ProposedPlan(plan))
     }
 }
 
@@ -107,28 +96,21 @@ impl ToolExecutor for EnterPlanMode {
         ToolKind::Other
     }
     fn mutating(&self) -> bool {
-        // Not literally a mutation, but it must always pass through the
-        // permission gate — entering plan mode is the user's call.
+        // Collaboration-mode requests require an explicit user decision.
         true
     }
     // Runs only after the user approved; the gate has already flipped the
     // session into plan mode. The full workflow reminder arrives with the next
     // user turn — this result carries the condensed rules for the rest of the
     // current turn.
-    async fn invoke(&self, _args: Value, ctx: &ToolCtx) -> ToolOutcome {
-        let mut content = String::from(
+    async fn invoke(&self, _args: Value, _ctx: &ToolCtx) -> ToolOutcome {
+        let content = String::from(
             "Entered plan mode — the user wants to agree on a plan before anything changes. \
             Research read-only. Be terse: one batched search, then read only the few relevant \
             files; no repeated probes or narrated research. Ask only about decisions the user \
             must make. Once what / where / reuse / verify are known, call `propose_plan` with \
             normally 3–7 concise steps.",
         );
-        if let Some(docs) = ctx.sandbox.docs_root() {
-            content.push_str(&format!(
-                " Draft your plan as you research in {} — it renders live for the user.",
-                crate::workspace::plan_file(docs).display()
-            ));
-        }
         ToolOutcome::ok(content)
     }
 }
@@ -178,10 +160,24 @@ impl ToolExecutor for UpdatePlan {
         ToolKind::Other
     }
     async fn invoke(&self, args: Value, _ctx: &ToolCtx) -> ToolOutcome {
-        if !args.get("plan").is_some_and(Value::is_array) {
-            return ToolOutcome::error("missing required array argument `plan`");
+        let mut session = _ctx.session.lock().await;
+        if session.planning.plan_mode() {
+            return ToolOutcome::error(
+                "update_plan is a TODO/checklist tool and is not allowed in Plan Mode",
+            );
         }
-        ToolOutcome::ok("Plan updated")
+        let update = match crate::planning::parse_checklist_update(
+            &args,
+            session.planning.execution_checklist.as_ref(),
+        ) {
+            Ok(update) => update,
+            Err(error) => return ToolOutcome::error(error),
+        };
+        session.planning.execution_checklist = Some(update.checklist.clone());
+        ToolOutcome::ok("Plan updated").with_signal(ToolSignal::ExecutionChecklist {
+            checklist: update.checklist,
+            explanation: update.explanation,
+        })
     }
 }
 
@@ -209,17 +205,17 @@ mod tests {
     }
 
     #[test]
-    fn propose_plan_is_mutating_and_previews_the_plan_text() {
+    fn propose_plan_is_read_only_and_previews_the_plan_text() {
         let dir = tempfile::tempdir().unwrap();
         let ctx = test_ctx(dir.path());
         let tool = ProposePlan;
-        assert!(tool.mutating());
+        assert!(!tool.mutating());
         let args = json!({"plan": "1. do a thing"});
         assert_eq!(tool.preview(&args, &ctx), Some("1. do a thing".to_string()));
     }
 
     #[tokio::test]
-    async fn propose_plan_persists_the_approved_plan_into_the_docs_workspace() {
+    async fn propose_plan_emits_typed_state_without_writing_a_file() {
         let project = tempfile::tempdir().unwrap();
         let docs = tempfile::tempdir().unwrap();
         let mut ctx = test_ctx(project.path());
@@ -228,36 +224,39 @@ mod tests {
                 .unwrap()
                 .with_docs(docs.path().to_path_buf()),
         );
+        ctx.session
+            .lock()
+            .await
+            .planning
+            .set_mode(agent_core::provider::CollaborationMode::Plan);
 
         let outcome = ProposePlan
             .invoke(json!({"plan": "# Plan\n1. do the thing"}), &ctx)
             .await;
 
         assert!(!outcome.is_error);
-        let path = ctx.sandbox.docs_root().unwrap().join("plan.md");
-        assert_eq!(
-            std::fs::read_to_string(&path).unwrap(),
-            "# Plan\n1. do the thing"
+        assert!(!docs.path().join("plan.md").exists());
+        assert!(outcome.locations.is_empty());
+        assert!(
+            matches!(outcome.signals.as_slice(), [ToolSignal::ProposedPlan(plan)] if plan.markdown.contains("do the thing"))
         );
-        // The location makes the event sink surface the plan as an inline
-        // document card.
-        assert_eq!(outcome.locations.len(), 1);
-        assert!(outcome.locations[0].path.ends_with("plan.md"));
-        assert!(outcome.content.contains("## Approved plan"));
-        assert!(outcome.content.contains("update_plan"));
     }
 
     #[tokio::test]
     async fn propose_plan_without_docs_workspace_still_succeeds() {
         let dir = tempfile::tempdir().unwrap();
         let ctx = test_ctx(dir.path());
+        ctx.session
+            .lock()
+            .await
+            .planning
+            .set_mode(agent_core::provider::CollaborationMode::Plan);
 
         let outcome = ProposePlan.invoke(json!({"plan": "the steps"}), &ctx).await;
 
         assert!(!outcome.is_error);
         assert!(outcome.locations.is_empty());
-        assert!(outcome.content.contains("the steps"));
-        assert!(!outcome.content.contains("saved at"));
+        assert!(outcome.content.contains("wait for the user's decision"));
     }
 
     #[tokio::test]

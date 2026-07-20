@@ -30,6 +30,13 @@ function conversation(id: string, project: string): ConversationMeta {
   };
 }
 
+function remoteConversation(id: string, host: string, project: string): ConversationMeta {
+  return {
+    ...conversation(id, project),
+    remoteHost: host,
+  };
+}
+
 describe("project sidebar preferences", () => {
   it("persists pins and aliases and clears both when a project is removed", () => {
     const storage = new MemoryStorage();
@@ -61,5 +68,21 @@ describe("project sidebar preferences", () => {
       ["Second repo", 0],
       ["one", 1],
     ]);
+  });
+
+  it("keeps the SSH destination on aliased remote groups", () => {
+    const groups = groupSidebarProjects(
+      [remoteConversation("remote", "ubuntu@cpu", "/home/ubuntu/clark")],
+      [],
+      () => 0,
+      { pinned: [], aliases: { "r:ubuntu@cpu": "Build server" } },
+    );
+
+    expect(groups[0]).toMatchObject({
+      kind: "remote",
+      label: "Build server",
+      remoteHost: "ubuntu@cpu",
+      remoteRoot: "/home/ubuntu/clark",
+    });
   });
 });

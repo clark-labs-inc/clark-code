@@ -48,23 +48,34 @@ export type ResumeItem =
       arguments?: unknown;
       content: ContentBlock[];
     }
-  | { item: "goal"; goal: GoalState };
+  | { item: "goal"; goal: GoalState }
+  | { item: "proposed_plan"; plan: ProposedPlan };
 
 export interface ResumeTranscript {
   items: ResumeItem[];
   truncated: boolean;
 }
 
-export type PlanPhaseStatus = "pending" | "in_progress" | "completed";
+export type ChecklistStatus = "pending" | "in_progress" | "completed";
 
-export interface PlanPhase {
+export interface ChecklistStep {
   title: string;
-  status: PlanPhaseStatus;
+  status: ChecklistStatus;
   priority?: string;
 }
 
-export interface Plan {
-  phases: PlanPhase[];
+export interface ExecutionChecklist {
+  steps: ChecklistStep[];
+  revision: number;
+}
+
+export type ProposedPlanStatus = "awaiting_decision" | "approved" | "superseded";
+
+export interface ProposedPlan {
+  id: string;
+  revision: number;
+  markdown: string;
+  status: ProposedPlanStatus;
 }
 
 export type PermissionOptionKind =
@@ -217,14 +228,21 @@ export type TimelineItem =
   | { item: "message"; run: string; role: Role; blocks: ContentBlock[]; phase?: MessagePhase }
   | { item: "tool_call"; id: string; run?: string }
   | { item: "artifact"; id: string }
-  | { item: "plan"; run?: string; plan?: Plan };
+  | {
+      item: "execution_checklist";
+      run?: string;
+      checklist?: ExecutionChecklist;
+      explanation?: string;
+    }
+  | { item: "proposed_plan"; run: string; plan: ProposedPlan };
 
 export interface Snapshot {
   session?: string;
   runs: Record<string, RunView>;
   timeline: TimelineItem[];
   tool_calls: Record<string, ToolCall>;
-  plan?: Plan;
+  execution_checklist?: ExecutionChecklist;
+  proposed_plan?: ProposedPlan;
   goal?: GoalState;
   pending_permission?: PermissionRequest;
   artifacts: Artifact[];
@@ -243,7 +261,10 @@ export interface ProviderCapabilities {
   terminal: boolean;
   load_session: boolean;
   modes: string[];
+  collaboration_modes: CollaborationMode[];
 }
+
+export type CollaborationMode = "default" | "plan";
 
 export interface ProviderInfo {
   id: string;
@@ -264,18 +285,28 @@ export interface Session {
   provider: string;
   capabilities: ProviderCapabilities;
   mode?: string;
+  collaboration_mode: CollaborationMode;
   environment?: SessionEnvironment;
 }
 
-export type ClientResponse = {
-  kind: "permission";
-  request: string;
-  option: string;
-  /** Optional free-text attached to the choice — e.g. plan feedback on a
-   *  "keep planning" rejection, delivered to the model as the rejection
-   *  reason. */
-  feedback?: string;
-};
+export type PlanImplementationContext = "current" | "fresh";
+
+export type PlanDecision =
+  | { action: "implement"; context: PlanImplementationContext }
+  | { action: "continue_planning"; feedback?: string };
+
+export type ClientResponse =
+  | {
+      kind: "permission";
+      request: string;
+      option: string;
+      feedback?: string;
+    }
+  | {
+      kind: "plan_decision";
+      plan_id: string;
+      decision: PlanDecision;
+    };
 
 /** One per-fact memory file under `<cwd>/.clark/memory/`. */
 export interface MemoryFactView {

@@ -298,7 +298,7 @@ impl LlmClient {
         )
     }
 
-    fn from_parts_with_timeout(
+    pub(crate) fn from_parts_with_timeout(
         base_url: &str,
         model: &str,
         api_key: Option<String>,

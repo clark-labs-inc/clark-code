@@ -1,85 +1,105 @@
-// Codex-style permission policy for how agent actions get approved. The mode is
-// persisted locally and applied in the session store's snapshot handler: under
-// "full" every request is auto-granted, under "auto" only non-destructive ones,
-// and under "ask" the inline PermissionGate prompts the user.
+// Approval policy and collaboration mode are orthogonal preferences. Approval
+// answers "which actions need confirmation?"; collaboration answers "are we
+// executing or agreeing on a read-only plan?".
 
-import type { PermissionOption, PermissionRequest } from "../core-bridge/types";
+import type {
+  CollaborationMode,
+  PermissionOption,
+  PermissionRequest,
+} from "../core-bridge/types";
 
-export type PermissionMode = "ask" | "auto" | "full" | "plan";
+export type ApprovalPolicy = "ask" | "auto" | "full";
 
-export interface PermissionModeInfo {
-  id: PermissionMode;
+export interface ApprovalPolicyInfo {
+  id: ApprovalPolicy;
   label: string;
   description: string;
 }
 
 /** Order matters: shown top-to-bottom in the picker. */
-export const PERMISSION_MODES: PermissionModeInfo[] = [
-  { id: "ask", label: "Ask for approval", description: "Review every edit and command before it runs" },
-  { id: "auto", label: "Approve for me", description: "Auto-run safe edits & commands; ask before anything destructive" },
-  { id: "full", label: "Full access", description: "Run everything without asking (catastrophic commands are still blocked)" },
-  { id: "plan", label: "Plan first", description: "Research read-only, then propose a plan before any edits" },
+export const APPROVAL_POLICIES: ApprovalPolicyInfo[] = [
+  { id: "ask", label: "Ask for approval", description: "Review each edit and command before it runs" },
+  { id: "auto", label: "Approve for me", description: "Run safe actions; ask before risky ones" },
+  { id: "full", label: "Full access", description: "Run without asking; hard safety blocks still apply" },
 ];
 
-/** Shift+Tab cycle order — mirrors Claude Code's mode-cycling shortcut. */
-const MODE_CYCLE: PermissionMode[] = ["ask", "auto", "full", "plan"];
+const APPROVAL_CYCLE: ApprovalPolicy[] = ["ask", "auto", "full"];
 
-export function nextPermissionMode(mode: PermissionMode): PermissionMode {
-  const i = MODE_CYCLE.indexOf(mode);
-  return MODE_CYCLE[(i + 1) % MODE_CYCLE.length];
+export function nextApprovalPolicy(policy: ApprovalPolicy): ApprovalPolicy {
+  const index = APPROVAL_CYCLE.indexOf(policy);
+  return APPROVAL_CYCLE[(index + 1) % APPROVAL_CYCLE.length];
 }
 
-/** Safe by default: auto-run safe work, prompt on anything the engine classifies
- *  destructive. (Catastrophic commands are refused engine-side regardless.) */
-export const DEFAULT_PERMISSION_MODE: PermissionMode = "auto";
+export const DEFAULT_APPROVAL_POLICY: ApprovalPolicy = "auto";
+export const DEFAULT_COLLABORATION_MODE: CollaborationMode = "default";
 
 /** The option that grants the request, preferring a one-time allow. */
 export function pickAllowOption(req: PermissionRequest): PermissionOption | undefined {
   return (
-    req.options.find((o) => o.kind === "allow_once") ??
-    req.options.find((o) => o.kind === "allow_always") ??
-    req.options.find((o) => o.kind.startsWith("allow"))
+    req.options.find((option) => option.kind === "allow_once") ??
+    req.options.find((option) => option.kind === "allow_always") ??
+    req.options.find((option) => option.kind.startsWith("allow"))
   );
 }
 
-/** Whether the current mode grants this request without prompting. The engine
- *  classifies shell commands and sends an authoritative `risk`; it has already
- *  refused anything catastrophic, so nothing here can run a blocked command. */
-export function wouldAutoApprove(mode: PermissionMode, req: PermissionRequest): boolean {
-  if (!pickAllowOption(req)) return false; // nothing to grant — must prompt
-  // A plan decision (approving one, or entering plan mode) always needs an
-  // explicit human answer, in every mode — the engine forces `ask` for these
-  // server-side regardless of session policy.
-  if (req.risk === "plan" || req.risk === "plan_entry") return false;
-  // A cloud confirmation gate means Clark's backend paused before an
-  // irreversible action (sending a message, a purchase…). The pause exists
-  // precisely to get a human answer — no client mode may auto-grant it.
+/** Whether an approval policy grants this request without prompting. */
+export function wouldAutoApprove(policy: ApprovalPolicy, req: PermissionRequest): boolean {
+  if (!pickAllowOption(req)) return false;
+  // Entering Plan Mode is a collaboration choice, not an action approval.
+  if (req.risk === "plan_entry") return false;
+  // Backend confirmation gates exist precisely to get a human answer.
   if (req.risk === "confirm") return false;
-  if (mode === "full") return true;
-  // Ask for destructive shell commands, external tools, and billed image work
-  // on first use; everything else (reads, sandboxed edits, safe/caution shell)
-  // auto-runs.
-  if (mode === "auto") {
+  if (policy === "full") return true;
+  if (policy === "auto") {
     return req.risk !== "danger" && req.risk !== "external" && req.risk !== "billed";
   }
-  return false; // "ask" — always prompt
+  return false;
 }
 
-const KEY = "clark-desktop:permission-mode";
+const APPROVAL_KEY = "clark-desktop:approval-policy";
+const COLLABORATION_KEY = "clark-desktop:collaboration-mode";
+const LEGACY_MODE_KEY = "clark-desktop:permission-mode";
 
-export function loadPermissionMode(): PermissionMode {
+function legacyMode(): string | null {
   try {
-    const v = localStorage.getItem(KEY);
-    if (v === "ask" || v === "auto" || v === "full" || v === "plan") return v;
+    return localStorage.getItem(LEGACY_MODE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function loadApprovalPolicy(): ApprovalPolicy {
+  try {
+    const value = localStorage.getItem(APPROVAL_KEY);
+    if (value === "ask" || value === "auto" || value === "full") return value;
+  } catch {
+    return DEFAULT_APPROVAL_POLICY;
+  }
+  const legacy = legacyMode();
+  return legacy === "ask" || legacy === "full" ? legacy : DEFAULT_APPROVAL_POLICY;
+}
+
+export function saveApprovalPolicy(policy: ApprovalPolicy): void {
+  try {
+    localStorage.setItem(APPROVAL_KEY, policy);
   } catch {
     /* ignore */
   }
-  return DEFAULT_PERMISSION_MODE;
 }
 
-export function savePermissionMode(mode: PermissionMode): void {
+export function loadCollaborationMode(): CollaborationMode {
   try {
-    localStorage.setItem(KEY, mode);
+    const value = localStorage.getItem(COLLABORATION_KEY);
+    if (value === "default" || value === "plan") return value;
+  } catch {
+    return DEFAULT_COLLABORATION_MODE;
+  }
+  return legacyMode() === "plan" ? "plan" : DEFAULT_COLLABORATION_MODE;
+}
+
+export function saveCollaborationMode(mode: CollaborationMode): void {
+  try {
+    localStorage.setItem(COLLABORATION_KEY, mode);
   } catch {
     /* ignore */
   }

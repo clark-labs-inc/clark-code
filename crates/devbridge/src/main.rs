@@ -42,6 +42,7 @@ fn caps(streaming_only: bool) -> ProviderCapabilities {
         terminal: false,
         load_session: true,
         modes: vec![],
+        collaboration_modes: vec![],
     }
 }
 

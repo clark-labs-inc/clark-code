@@ -5,6 +5,7 @@ import argparse
 import hashlib
 import json
 import os
+import platform
 import shutil
 import stat
 import subprocess
@@ -86,8 +87,9 @@ def extract_member(
     archive = verified_archive(artifact)
     member_name = member_name or artifact["member"]
     destination.parent.mkdir(parents=True, exist_ok=True)
-    if artifact["format"] == "tar.gz":
-        with tarfile.open(archive, "r:gz") as source:
+    if artifact["format"] in {"tar.gz", "tar.xz"}:
+        mode = "r:gz" if artifact["format"] == "tar.gz" else "r:xz"
+        with tarfile.open(archive, mode) as source:
             member = source.extractfile(member_name)
             if member is None:
                 raise RuntimeError(f"missing archive member {member_name}")
@@ -104,11 +106,70 @@ def extract_member(
         destination.chmod(destination.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
 
+def extract_source_tree(artifact: dict, destination: Path) -> Path:
+    archive = verified_archive(artifact)
+    source_dir = artifact["source_dir"]
+    with tarfile.open(archive, "r:xz") as source:
+        for member in source.getmembers():
+            member_path = Path(member.name)
+            if member_path.is_absolute() or ".." in member_path.parts:
+                raise RuntimeError(f"unsafe source archive member {member.name}")
+            if member.issym() or member.islnk():
+                link_path = Path(member.linkname)
+                if link_path.is_absolute() or ".." in link_path.parts:
+                    raise RuntimeError(
+                        f"unsafe source archive link {member.name} -> {member.linkname}"
+                    )
+        source.extractall(destination)
+    extracted = destination / source_dir
+    if not extracted.is_dir():
+        raise RuntimeError(f"missing source directory {source_dir}")
+    return extracted
+
+
+def build_meson_artifact(artifact: dict, target: str, destination: Path) -> None:
+    required_commands = ("meson", "ninja", "pkg-config")
+    missing_commands = [
+        command for command in required_commands if shutil.which(command) is None
+    ]
+    if missing_commands:
+        raise RuntimeError(
+            "source build prerequisites are missing: " + ", ".join(missing_commands)
+        )
+    expected_arch = target.split("-", 1)[0]
+    host_arch = platform.machine().lower()
+    aliases = {"amd64": "x86_64", "arm64": "aarch64"}
+    host_arch = aliases.get(host_arch, host_arch)
+    if host_arch != expected_arch:
+        raise RuntimeError(
+            f"native source build for {target} requires {expected_arch}, host is {host_arch}"
+        )
+    with tempfile.TemporaryDirectory(prefix="clark-tool-build-") as temp:
+        temp_dir = Path(temp)
+        source = extract_source_tree(artifact, temp_dir)
+        build = temp_dir / "build"
+        subprocess.run(
+            ["meson", "setup", str(build), str(source), *artifact.get("meson_args", [])],
+            check=True,
+        )
+        subprocess.run(
+            ["meson", "compile", "-C", str(build), artifact["build_target"]],
+            check=True,
+        )
+        built = build / artifact["output"]
+        if not built.is_file():
+            raise RuntimeError(f"Meson build did not produce {built}")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(built, destination)
+        destination.chmod(destination.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+
+
 def stage_tool(tool: dict, target: str, destination: Path) -> None:
     artifact = tool["targets"].get(target)
     if artifact is None:
         raise RuntimeError(f"{tool['command']} has no artifact for {target}")
-    if artifact.get("strategy") == "macho-universal":
+    strategy = artifact.get("strategy")
+    if strategy == "macho-universal":
         with tempfile.TemporaryDirectory(prefix="clark-tool-lipo-") as temp:
             inputs = []
             for source_target in artifact["merge"]:
@@ -120,8 +181,20 @@ def stage_tool(tool: dict, target: str, destination: Path) -> None:
                 check=True,
             )
             destination.chmod(destination.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    elif strategy == "meson-source":
+        build_meson_artifact(artifact, target, destination)
     else:
         extract_member(artifact, destination)
+
+
+def target_platform(target: str) -> str:
+    if "windows" in target:
+        return "windows"
+    if "linux" in target:
+        return "linux"
+    if "darwin" in target:
+        return "macos"
+    raise RuntimeError(f"unsupported target platform: {target}")
 
 
 def main() -> int:
@@ -129,6 +202,9 @@ def main() -> int:
     manifest = load_manifest()
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     for tool in manifest["tools"].values():
+        platforms = tool.get("platforms")
+        if platforms is not None and target_platform(args.target) not in platforms:
+            continue
         suffix = ".exe" if "windows" in args.target else ""
         destination = OUTPUT_DIR / f"{tool['command']}-{args.target}{suffix}"
         if destination.exists():
@@ -141,7 +217,9 @@ def main() -> int:
             notice_artifact = tool["targets"][notice_artifact["merge"][0]]
         # Archive member names always use POSIX separators, even when this
         # staging script runs on Windows.
-        archive_root = notice_artifact["member"].rsplit("/", 1)[0]
+        archive_root = notice_artifact.get("source_dir")
+        if archive_root is None:
+            archive_root = notice_artifact["member"].rsplit("/", 1)[0]
         for notice in tool.get("notices", []):
             notice_destination = OUTPUT_DIR / f"{tool['command']}-{notice}"
             notice_destination.unlink(missing_ok=True)
@@ -150,6 +228,25 @@ def main() -> int:
                 notice_destination,
                 f"{archive_root}/{notice}",
             )
+        if tool.get("bundle_source_archive"):
+            if "merge" in tool["targets"][args.target]:
+                raise RuntimeError(
+                    f"{tool['command']} cannot bundle a merged artifact as source"
+                )
+            source_archive = verified_archive(tool["targets"][args.target])
+            source_format = tool["targets"][args.target]["format"]
+            source_suffix = {
+                "tar.gz": ".tar.gz",
+                "tar.xz": ".tar.xz",
+                "zip": ".zip",
+            }.get(source_format)
+            if source_suffix is None:
+                raise RuntimeError(f"unsupported bundled source format {source_format}")
+            source_destination = OUTPUT_DIR / (
+                f"{tool['command']}-{tool['version']}-source{source_suffix}"
+            )
+            source_destination.unlink(missing_ok=True)
+            shutil.copy2(source_archive, source_destination)
         print(
             f"staged {tool['command']} {tool['version']} for {args.target}: {destination}",
             flush=True,

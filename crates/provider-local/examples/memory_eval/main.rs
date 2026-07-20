@@ -225,6 +225,7 @@ async fn run_scenario(
         .new_session(SessionOptions {
             cwd: Some(dir.path().to_string_lossy().to_string()),
             mode: None,
+            collaboration_mode: None,
             resume: None,
         })
         .await

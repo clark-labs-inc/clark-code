@@ -7,16 +7,24 @@
 //! server-side and returns the final findings. Uses the same `ck_live_` key as
 //! the coding model; nothing here touches the local filesystem.
 
+use std::time::Duration;
+
 use agent_core::domain::ToolKind;
 use async_trait::async_trait;
 use serde_json::{json, Value};
 
-use super::{arg_str, arg_str_opt, ToolCtx, ToolExecutor, ToolOutcome};
+use super::{arg_str, arg_str_opt, ToolCtx, ToolExecutor, ToolOutcome, ToolPermissionClass};
 
 use crate::config::AgenticClarkConfig;
 use crate::llm::LlmClient;
 
 const RESEARCH_SYSTEM: &str = "You are Clark's research agent. Investigate the user's request thoroughly using your web search, browsing, and reasoning, and return a concise, well-organized findings report. Cite sources where relevant.";
+// Clark Code's web-research delegation legitimately outlives the Platform
+// API's short public default. Ask the server to wait ten minutes and keep one
+// minute of client-side transport headroom for the terminal SSE frames.
+const RESPONSE_WAIT_HEADER: &str = "x-clark-response-wait-ms";
+const RESEARCH_SERVER_WAIT: Duration = Duration::from_secs(10 * 60);
+const RESEARCH_CLIENT_TIMEOUT: Duration = Duration::from_secs(11 * 60);
 
 pub struct ClarkResearchTool {
     client: Option<LlmClient>,
@@ -24,12 +32,16 @@ pub struct ClarkResearchTool {
 
 impl ClarkResearchTool {
     pub fn new(config: AgenticClarkConfig) -> Self {
-        let client = LlmClient::from_parts(
+        let client = LlmClient::from_parts_with_timeout(
             &config.base_url,
             &config.model,
             config.api_key,
-            Vec::new(),
+            vec![(
+                RESPONSE_WAIT_HEADER.to_string(),
+                RESEARCH_SERVER_WAIT.as_millis().to_string(),
+            )],
             None,
+            RESEARCH_CLIENT_TIMEOUT,
         )
         .ok();
         Self { client }
@@ -56,6 +68,9 @@ impl ToolExecutor for ClarkResearchTool {
     }
     fn kind(&self) -> ToolKind {
         ToolKind::Research
+    }
+    fn permission_class(&self) -> ToolPermissionClass {
+        ToolPermissionClass::BrokeredClarkCloud
     }
     async fn invoke(&self, args: Value, ctx: &ToolCtx) -> ToolOutcome {
         let Some(client) = &self.client else {
@@ -93,7 +108,13 @@ mod tests {
         });
         assert_eq!(t.name(), "clark_research");
         assert!(!t.mutating());
+        assert_eq!(
+            t.permission_class(),
+            ToolPermissionClass::BrokeredClarkCloud
+        );
         let params = t.parameters();
         assert_eq!(params["required"][0], "query");
+        assert_eq!(RESEARCH_SERVER_WAIT, Duration::from_secs(600));
+        assert!(RESEARCH_CLIENT_TIMEOUT > RESEARCH_SERVER_WAIT);
     }
 }

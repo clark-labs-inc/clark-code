@@ -1,5 +1,10 @@
-import { describe, expect, it } from "vitest";
-import { nextPermissionMode, wouldAutoApprove } from "./permissions";
+import { beforeEach, describe, expect, it } from "vitest";
+import {
+  loadApprovalPolicy,
+  loadCollaborationMode,
+  nextApprovalPolicy,
+  wouldAutoApprove,
+} from "./permissions";
 import type { PermissionRequest } from "../core-bridge/types";
 
 function req(risk?: string): PermissionRequest {
@@ -11,6 +16,18 @@ function req(risk?: string): PermissionRequest {
     options: [{ id: "allow_once", label: "Allow once", kind: "allow_once" }],
   };
 }
+
+beforeEach(() => {
+  const values = new Map<string, string>();
+  (globalThis as { localStorage: Storage }).localStorage = {
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => values.set(key, value),
+    removeItem: (key) => values.delete(key),
+    clear: () => values.clear(),
+    key: (index) => [...values.keys()][index] ?? null,
+    get length() { return values.size; },
+  } as Storage;
+});
 
 describe("wouldAutoApprove", () => {
   it("ask mode never auto-approves", () => {
@@ -45,14 +62,8 @@ describe("wouldAutoApprove", () => {
     expect(wouldAutoApprove("full", noAllow)).toBe(false);
   });
 
-  it("a plan approval is never auto-approved, in any mode", () => {
-    for (const mode of ["ask", "auto", "full", "plan"] as const) {
-      expect(wouldAutoApprove(mode, req("plan"))).toBe(false);
-    }
-  });
-
   it("entering plan mode is never auto-approved, in any mode", () => {
-    for (const mode of ["ask", "auto", "full", "plan"] as const) {
+    for (const mode of ["ask", "auto", "full"] as const) {
       expect(wouldAutoApprove(mode, req("plan_entry"))).toBe(false);
     }
   });
@@ -60,17 +71,24 @@ describe("wouldAutoApprove", () => {
   it("a cloud confirmation gate is never auto-approved, in any mode", () => {
     // The backend paused before an irreversible action — the pause exists to
     // get a human answer, so even "full" must not grant it.
-    for (const mode of ["ask", "auto", "full", "plan"] as const) {
+    for (const mode of ["ask", "auto", "full"] as const) {
       expect(wouldAutoApprove(mode, req("confirm"))).toBe(false);
     }
   });
 });
 
-describe("nextPermissionMode", () => {
-  it("cycles ask -> auto -> full -> plan -> ask", () => {
-    expect(nextPermissionMode("ask")).toBe("auto");
-    expect(nextPermissionMode("auto")).toBe("full");
-    expect(nextPermissionMode("full")).toBe("plan");
-    expect(nextPermissionMode("plan")).toBe("ask");
+describe("nextApprovalPolicy", () => {
+  it("cycles approval without mixing in collaboration mode", () => {
+    expect(nextApprovalPolicy("ask")).toBe("auto");
+    expect(nextApprovalPolicy("auto")).toBe("full");
+    expect(nextApprovalPolicy("full")).toBe("ask");
+  });
+});
+
+describe("legacy preference migration", () => {
+  it("maps old plan mode to auto approval plus Plan collaboration", () => {
+    localStorage.setItem("clark-desktop:permission-mode", "plan");
+    expect(loadApprovalPolicy()).toBe("auto");
+    expect(loadCollaborationMode()).toBe("plan");
   });
 });

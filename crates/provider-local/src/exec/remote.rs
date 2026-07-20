@@ -257,6 +257,10 @@ fn route(conn: &Conn, text: &str) {
 
 #[async_trait]
 impl Executor for RemoteExecutor {
+    fn containment(&self) -> exec_core::ExecutionContainment {
+        exec_core::ExecutionContainment::External
+    }
+
     fn is_local(&self) -> bool {
         false
     }

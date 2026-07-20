@@ -111,6 +111,7 @@ async fn live_steering_compaction_and_parallel_reads_in_sandbox_repo() {
         .new_session(SessionOptions {
             cwd: Some(dir.path().to_string_lossy().to_string()),
             mode: None,
+            collaboration_mode: None,
             resume: None,
         })
         .await

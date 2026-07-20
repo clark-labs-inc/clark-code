@@ -68,6 +68,27 @@ pub(super) fn prompt_text(input: &PromptInput) -> String {
     }
 }
 
+/// Parse the built-in `/goal <objective>` command without treating lookalikes
+/// such as `/goals` as commands. `Some("")` is intentional: callers can give
+/// the user a focused missing-objective error instead of sending ambiguous
+/// prose to the model.
+pub(super) fn goal_command_objective(user_request: &str) -> Option<String> {
+    let command = user_request.trim_start();
+    let rest = command.strip_prefix("/goal")?;
+    if !rest.is_empty() && !rest.starts_with(char::is_whitespace) {
+        return None;
+    }
+    Some(rest.trim().to_string())
+}
+
+pub(super) fn goal_command_context() -> String {
+    "[runtime command — derived from the user's explicit `/goal` prefix]\n\
+The runtime has already created the standing goal before this turn began. Do not call \
+`create_goal` again. Begin working toward the objective now, and use `update_goal` only \
+when completion or a qualifying repeated blocker is proven."
+        .into()
+}
+
 /// Render derived context before the actual request. Keeping the request last
 /// matters because the model consumes the message autoregressively.
 pub(super) fn assemble_turn_prompt(sections: &[String], user_request: &str) -> String {

@@ -9,7 +9,10 @@ use std::sync::Arc;
 use agent_core::domain::{
     AgentEvent, ContentBlock, GoalStatus, MessagePhase, PendingUpload, Role, RunStatus, ToolStatus,
 };
-use agent_core::provider::{ClientResponse, PromptInput, Provider, ProviderConfig, SessionOptions};
+use agent_core::provider::{
+    ClientResponse, CollaborationMode, PlanDecision, PlanImplementationContext, PromptInput,
+    Provider, ProviderConfig, SessionOptions,
+};
 use agent_core::TimelineItem;
 use agent_orchestration::{ExecutionEvent, ExecutionEventKind, ExecutionLedger, ExecutionState};
 use futures::StreamExt;
@@ -184,6 +187,7 @@ async fn local_loop_reads_file_and_answers() {
         .new_session(SessionOptions {
             cwd: Some(dir.path().to_string_lossy().to_string()),
             mode: None,
+            collaboration_mode: None,
             resume: None,
         })
         .await
@@ -205,13 +209,16 @@ async fn local_loop_reads_file_and_answers() {
 
     // The model's read_file call ran locally against the real file.
     let read_tool = events.iter().find_map(|e| match e {
-        AgentEvent::ToolCall { call, .. } if call.title.contains("read_file") => Some(call),
+        AgentEvent::ToolCall { call, .. } if call.tool_name.as_deref() == Some("read_file") => {
+            Some(call)
+        }
         _ => None,
     });
     assert!(
         read_tool.is_some(),
         "expected a read_file tool call: {events:?}"
     );
+    assert_eq!(read_tool.unwrap().title, "Read hello.txt");
 
     // It completed (not failed), having found the file.
     let completed = events.iter().any(|e| {
@@ -284,6 +291,7 @@ async fn local_loop_projects_text_with_tool_as_commentary_then_plain_text_as_fin
         .new_session(SessionOptions {
             cwd: Some(dir.path().to_string_lossy().to_string()),
             mode: None,
+            collaboration_mode: None,
             resume: None,
         })
         .await
@@ -370,6 +378,7 @@ async fn local_loop_auto_compacts_large_transcript_before_sampling() {
         .new_session(SessionOptions {
             cwd: Some(dir.path().to_string_lossy().to_string()),
             mode: None,
+            collaboration_mode: None,
             resume: None,
         })
         .await
@@ -456,6 +465,7 @@ async fn mutating_tool_waits_for_permission_then_writes() {
         .new_session(SessionOptions {
             cwd: Some(dir.path().to_string_lossy().to_string()),
             mode: None,
+            collaboration_mode: None,
             resume: None,
         })
         .await
@@ -568,6 +578,7 @@ async fn image_attachments_are_described_by_vision_fallback_before_the_coding_ca
         .new_session(SessionOptions {
             cwd: Some(dir.path().to_string_lossy().to_string()),
             mode: None,
+            collaboration_mode: None,
             resume: None,
         })
         .await
@@ -669,12 +680,9 @@ fn tool_call_sse(call_id: &str, name: &str, args: serde_json::Value) -> String {
     )
 }
 
-/// The full Plan Mode journey against the real engine: a session started in
-/// plan mode refuses edits without prompting, the plan gate fires for
-/// `propose_plan`, "keep planning" feedback rides the rejection back to the
-/// model IN the same run (nothing cancelled, research kept), approval persists
-/// `plan.md` into the docs workspace, and the next turn opens with the
-/// one-shot "plan mode is off" note.
+/// The full typed Plan Mode journey against the real engine: edits are denied,
+/// proposals are first-class state (not permissions or files), feedback starts
+/// a revision, approval exits read-only mode, and implementation can proceed.
 #[tokio::test]
 async fn plan_mode_journey_denies_edits_threads_feedback_and_builds_after_approval() {
     let dir = tempfile::tempdir().unwrap();
@@ -684,26 +692,32 @@ async fn plan_mode_journey_denies_edits_threads_feedback_and_builds_after_approv
     let serve_handle = tokio::spawn(serve(
         listener,
         vec![
-            // Turn 1 (plan mode): the model first tries to edit — refused —
+            // Planning turn 1: an edit is refused, then proposal v1 is emitted.
             tool_call_sse(
                 "c1",
                 "write_file",
                 json!({"path": "out.txt", "content": "written"}),
             ),
-            // — then proposes a plan; the user sends it back with feedback —
             tool_call_sse(
                 "c2",
                 "propose_plan",
                 json!({"plan": "Plan v1: add out.txt"}),
             ),
-            // — then proposes the revised plan; the user approves.
+            final_body(),
+            // Planning turn 2: feedback arrives as a normal user turn and the
+            // proposal keeps its identity while incrementing its revision.
             tool_call_sse(
                 "c3",
                 "propose_plan",
                 json!({"plan": "Plan v2: add out.txt with tests"}),
             ),
             final_body(),
-            // Turn 2, after approval: a plain answer.
+            // Implementation turn after approval.
+            tool_call_sse(
+                "c4",
+                "write_file",
+                json!({"path": "out.txt", "content": "written"}),
+            ),
             final_body(),
         ],
     ));
@@ -724,48 +738,97 @@ async fn plan_mode_journey_denies_edits_threads_feedback_and_builds_after_approv
     let session = provider
         .new_session(SessionOptions {
             cwd: Some(dir.path().to_string_lossy().to_string()),
-            mode: Some("plan".to_string()),
+            mode: None,
+            collaboration_mode: Some(CollaborationMode::Plan),
             resume: None,
         })
         .await
         .unwrap();
-    assert_eq!(session.mode.as_deref(), Some("plan"));
+    assert_eq!(session.collaboration_mode, CollaborationMode::Plan);
 
     let mut stream = provider
         .prompt(&session.id, PromptInput::text("add an out.txt file"))
         .await
         .unwrap();
 
-    let mut plan_prompts = 0usize;
+    let mut first_plan = None;
     while let Some(ev) = stream.next().await {
         match &ev {
             AgentEvent::PermissionRequest { request } => {
-                assert_eq!(
-                    request.risk.as_deref(),
-                    Some("plan"),
-                    "only propose_plan may prompt in plan mode: {request:?}"
-                );
-                plan_prompts += 1;
-                let (option, feedback) = if plan_prompts == 1 {
-                    assert_eq!(
-                        request
-                            .options
-                            .iter()
-                            .map(|o| o.id.as_str())
-                            .collect::<Vec<_>>(),
-                        vec!["approve_auto", "approve_review", "reject_once"]
-                    );
-                    ("reject_once", Some("make it two files".to_string()))
-                } else {
-                    ("approve_auto", None)
-                };
+                panic!("Plan Mode writes and proposals must not become permissions: {request:?}");
+            }
+            AgentEvent::ProposedPlanUpdated { plan, .. } => first_plan = Some(plan.clone()),
+            AgentEvent::RunFinished { .. } => break,
+            _ => {}
+        }
+    }
+    assert!(!dir.path().join("out.txt").exists());
+    let first_plan = first_plan.expect("typed proposal v1");
+    assert_eq!(first_plan.revision, 1);
+
+    provider
+        .respond(
+            &session.id,
+            ClientResponse::PlanDecision {
+                plan_id: first_plan.id.clone(),
+                decision: PlanDecision::ContinuePlanning {
+                    feedback: Some("make it two files".into()),
+                },
+            },
+        )
+        .await
+        .unwrap();
+
+    let mut stream = provider
+        .prompt(&session.id, PromptInput::text("make it two files"))
+        .await
+        .unwrap();
+    let mut revised = None;
+    while let Some(ev) = stream.next().await {
+        if let AgentEvent::ProposedPlanUpdated { plan, .. } = &ev {
+            revised = Some(plan.clone());
+        }
+        if matches!(ev, AgentEvent::RunFinished { .. }) {
+            break;
+        }
+    }
+    let revised = revised.expect("typed proposal v2");
+    assert_eq!(revised.id, first_plan.id);
+    assert_eq!(revised.revision, 2);
+
+    provider
+        .respond(
+            &session.id,
+            ClientResponse::PlanDecision {
+                plan_id: revised.id.clone(),
+                decision: PlanDecision::Implement {
+                    context: PlanImplementationContext::Current,
+                },
+            },
+        )
+        .await
+        .unwrap();
+    let mut stream = provider
+        .prompt(
+            &session.id,
+            PromptInput::text("Implement the approved plan."),
+        )
+        .await
+        .unwrap();
+    let mut saw_approved = false;
+    while let Some(ev) = stream.next().await {
+        match ev {
+            AgentEvent::ProposedPlanUpdated { plan, .. } => {
+                saw_approved = plan.status == agent_core::domain::ProposedPlanStatus::Approved;
+            }
+            AgentEvent::PermissionRequest { request } => {
                 provider
                     .respond(
                         &session.id,
                         ClientResponse::Permission {
-                            request: request.id.clone(),
-                            option: option.into(),
-                            feedback,
+                            request: request.id,
+                            option: "allow_once".into(),
+                            feedback: None,
                         },
                     )
                     .await
@@ -775,35 +838,14 @@ async fn plan_mode_journey_denies_edits_threads_feedback_and_builds_after_approv
             _ => {}
         }
     }
-    assert_eq!(plan_prompts, 2, "reject once, then approve");
-    // The write_file attempt was refused engine-side without prompting.
-    assert!(!dir.path().join("out.txt").exists());
-
-    // The approved plan is persisted into the session's docs workspace.
-    let docs_root = session
-        .environment
-        .as_ref()
-        .and_then(|e| e.docs_root.clone())
-        .expect("local sessions get a docs workspace");
-    let plan_path = std::path::Path::new(&docs_root).join("plan.md");
+    assert!(saw_approved);
     assert_eq!(
-        std::fs::read_to_string(&plan_path).unwrap(),
-        "Plan v2: add out.txt with tests"
+        std::fs::read_to_string(dir.path().join("out.txt")).unwrap(),
+        "written"
     );
 
-    // Turn 2: plan mode is off; the one-shot exit note precedes the user text.
-    let mut stream = provider
-        .prompt(&session.id, PromptInput::text("thanks"))
-        .await
-        .unwrap();
-    while let Some(ev) = stream.next().await {
-        if matches!(ev, AgentEvent::RunFinished { .. }) {
-            break;
-        }
-    }
-
     let captured = serve_handle.await.unwrap();
-    assert_eq!(captured.len(), 5, "five model calls end to end");
+    assert_eq!(captured.len(), 7, "seven model calls end to end");
     let last_user = |i: usize| -> String {
         request_json(&captured[i])["messages"]
             .as_array()
@@ -816,29 +858,19 @@ async fn plan_mode_journey_denies_edits_threads_feedback_and_builds_after_approv
             .to_string()
     };
 
-    // Call 1: the workflow reminder rides the plan-mode turn.
     let turn1 = last_user(0);
-    assert!(turn1.contains("Plan mode is active."));
-    assert!(turn1.contains("plan.md"), "reminder names the draft file");
-    // Call 2: the refused edit came back as a plan-mode denial.
+    assert!(turn1.contains("Plan Mode is active."));
+    assert!(turn1.contains("Propose; do not execute"));
+    assert!(!turn1.contains("plan.md"));
     let call2 = request_json(&captured[1]).to_string();
     assert!(call2.contains("Plan mode is active"));
-    // Call 3: the rejection carried the user's feedback into the same run.
-    let call3 = request_json(&captured[2]).to_string();
-    assert!(call3.contains("make it two files"));
-    assert!(call3.contains("Stay in plan mode"));
-    // Call 4: approval → build instruction + saved-plan pointer.
-    let call4 = request_json(&captured[3]).to_string();
-    assert!(call4.contains("The user approved your plan"));
-    assert!(call4.contains("plan.md"));
-    // Call 5 (turn 2): the one-shot exit note, and no active reminder.
-    let turn2 = last_user(4);
-    assert!(turn2.contains("Plan mode is off"));
-    assert!(turn2.contains("thanks"));
-    assert!(!turn2.contains("Plan mode is active."));
-
-    // Tidy the app-managed workspace this session created.
-    let _ = std::fs::remove_dir_all(&docs_root);
+    let revision_turn = last_user(3);
+    assert!(revision_turn.contains("make it two files"));
+    assert!(revision_turn.contains("previous proposal"));
+    let implementation_turn = last_user(5);
+    assert!(implementation_turn.contains("Plan Mode is off"));
+    assert!(implementation_turn.contains("Plan v2"));
+    assert!(!implementation_turn.contains("Plan Mode is active."));
 }
 
 /// One SSE body carrying TWO tool calls in a single assistant turn.
@@ -929,6 +961,7 @@ async fn giant_tool_output_is_truncated_before_the_next_model_call() {
         .new_session(SessionOptions {
             cwd: Some(dir.path().to_string_lossy().to_string()),
             mode: None,
+            collaboration_mode: None,
             resume: None,
         })
         .await
@@ -984,6 +1017,7 @@ async fn steering_message_is_injected_into_the_active_run() {
         .new_session(SessionOptions {
             cwd: Some(dir.path().to_string_lossy().to_string()),
             mode: None,
+            collaboration_mode: None,
             resume: None,
         })
         .await
@@ -1073,6 +1107,7 @@ async fn context_overflow_recovers_by_compacting_and_continuing() {
         .new_session(SessionOptions {
             cwd: Some(dir.path().to_string_lossy().to_string()),
             mode: None,
+            collaboration_mode: None,
             resume: Some(resume),
         })
         .await
@@ -1144,6 +1179,7 @@ async fn parallel_read_batch_returns_both_results_in_order() {
         .new_session(SessionOptions {
             cwd: Some(dir.path().to_string_lossy().to_string()),
             mode: None,
+            collaboration_mode: None,
             resume: None,
         })
         .await
@@ -1216,6 +1252,7 @@ async fn goal_mode_continues_the_run_until_update_goal_complete() {
         .new_session(SessionOptions {
             cwd: Some(dir.path().to_string_lossy().to_string()),
             mode: None,
+            collaboration_mode: None,
             resume: None,
         })
         .await
@@ -1316,6 +1353,7 @@ async fn goal_budget_exhaustion_triggers_one_wrapup_turn_then_stops() {
         .new_session(SessionOptions {
             cwd: Some(dir.path().to_string_lossy().to_string()),
             mode: None,
+            collaboration_mode: None,
             resume: None,
         })
         .await

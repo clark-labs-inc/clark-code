@@ -12,6 +12,8 @@ export interface SlashCommand {
   hint: string;
   /** Only applicable once a session is open (e.g. terminal, memory). */
   needsSession?: boolean;
+  /** Local coding-agent command; unavailable on cloud/ACP providers. */
+  localOnly?: boolean;
   /** Built-in commands run an action and clear the composer. */
   run?: () => void;
   /** User-authored commands (`.claude/commands/*.md`) insert this into the
@@ -23,6 +25,15 @@ export function slashCommands(): SlashCommand[] {
   const s = () => useSessionStore.getState();
   return [
     { name: "new", hint: "Start a new conversation", run: () => s().endSession() },
+    {
+      name: "goal",
+      hint: "Keep working autonomously until the objective is done",
+      localOnly: true,
+      // The provider recognizes this prefix deterministically and creates the
+      // goal before the model begins the turn. Keep it in the composer so the
+      // user can add the objective after choosing the command.
+      body: "/goal",
+    },
     {
       name: "terminal",
       hint: "Toggle the terminal dock",
@@ -71,4 +82,14 @@ export function slashCommands(): SlashCommand[] {
       body: "/btw",
     },
   ];
+}
+
+/** Return the objective for an exact `/goal` command, or `null` for ordinary
+ * text. An empty string means the command is valid but still needs a goal. */
+export function goalCommandObjective(text: string): string | null {
+  const command = text.trimStart();
+  if (!command.startsWith("/goal")) return null;
+  const rest = command.slice("/goal".length);
+  if (rest.length > 0 && !/^\s/.test(rest)) return null;
+  return rest.trim();
 }

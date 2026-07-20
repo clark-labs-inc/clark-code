@@ -12,7 +12,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
-use agent_core::domain::{ArtifactKind, FanOutAgent, FsLocation, ToolKind};
+use agent_core::domain::{
+    ArtifactKind, ExecutionChecklist, FanOutAgent, FsLocation, GoalState, ProposedPlan, ToolKind,
+};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -27,6 +29,7 @@ pub mod browser;
 pub mod clark;
 pub mod diagnostics;
 pub mod fs;
+pub mod git;
 pub mod goal;
 pub mod grep;
 pub mod image;
@@ -86,6 +89,23 @@ pub enum PermissionMode {
     Ask,
     /// Never run; feed a denial back to the model.
     Deny,
+}
+
+/// Authorization class is independent of whether a tool mutates local state.
+/// In particular, Clark Cloud is a trusted brokered capability while direct
+/// network access still needs consent even for an HTTP GET.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ToolPermissionClass {
+    LocalRead,
+    LocalMutation,
+    External,
+    BrokeredClarkCloud,
+}
+
+impl ToolPermissionClass {
+    pub fn requires_gate(self) -> bool {
+        matches!(self, Self::LocalMutation | Self::External)
+    }
 }
 
 impl PermissionMode {
@@ -197,6 +217,19 @@ pub struct ToolOutcome {
     /// a generic file location.
     pub artifacts: Vec<ProducedArtifact>,
     pub details: Value,
+    /// Typed state changes emitted by tools. The desktop adapter attaches the
+    /// active run id and forwards them without switching on tool names.
+    pub signals: Vec<ToolSignal>,
+}
+
+#[derive(Clone, Debug)]
+pub enum ToolSignal {
+    ExecutionChecklist {
+        checklist: ExecutionChecklist,
+        explanation: Option<String>,
+    },
+    ProposedPlan(ProposedPlan),
+    Goal(GoalState),
 }
 
 /// An image a tool wants to attach to its result. The adapter either forwards
@@ -233,6 +266,7 @@ impl ToolOutcome {
             images: Vec::new(),
             artifacts: Vec::new(),
             details: Value::Null,
+            signals: Vec::new(),
         }
     }
     pub fn error(message: impl Into<String>) -> Self {
@@ -243,6 +277,7 @@ impl ToolOutcome {
             images: Vec::new(),
             artifacts: Vec::new(),
             details: Value::Null,
+            signals: Vec::new(),
         }
     }
     pub fn with_location(mut self, path: impl Into<String>, line: Option<u32>) -> Self {
@@ -273,6 +308,10 @@ impl ToolOutcome {
         self.details = details;
         self
     }
+    pub fn with_signal(mut self, signal: ToolSignal) -> Self {
+        self.signals.push(signal);
+        self
+    }
 }
 
 /// A tool the model can call. Object-safe so the registry can hold a mix of
@@ -288,6 +327,13 @@ pub trait ToolExecutor: Send + Sync {
     /// Whether the call mutates state and must pass the permission gate.
     fn mutating(&self) -> bool {
         false
+    }
+    fn permission_class(&self) -> ToolPermissionClass {
+        if self.mutating() {
+            ToolPermissionClass::LocalMutation
+        } else {
+            ToolPermissionClass::LocalRead
+        }
     }
     /// A read-only preview of what `invoke` would change, shown in the permission
     /// gate so the user reviews edits *before* they touch disk. Default: none.
@@ -319,6 +365,7 @@ impl ToolRegistry {
             Arc::new(fs::WriteFile),
             Arc::new(fs::EditFile),
             Arc::new(apply_patch::ApplyPatch),
+            Arc::new(git::GitCommit),
             Arc::new(shell::Bash),
             Arc::new(shell::BashOutput),
             Arc::new(shell::BashWait),
@@ -422,10 +469,12 @@ impl ToolRegistry {
     pub async fn connect_mcp(
         &mut self,
         servers: &[crate::mcp::McpServerConfig],
+        executor: &dyn crate::exec::Executor,
+        cwd: &Path,
     ) -> Vec<crate::mcp::McpStatus> {
         let mut statuses = Vec::new();
         for cfg in servers {
-            match crate::mcp::McpClient::connect(cfg).await {
+            match crate::mcp::McpClient::connect(cfg, executor, cwd).await {
                 Ok(client) => {
                     let client = Arc::new(client);
                     let mut added = Vec::new();
@@ -569,6 +618,11 @@ mod tests {
         );
         wire_order(
             &reg,
+            "git_commit",
+            &["message", "amend", "allow_empty", "omit_clark_coauthor"],
+        );
+        wire_order(
+            &reg,
             "bash_wait",
             &[
                 "task_id",
@@ -681,15 +735,17 @@ mod tests {
     #[test]
     fn plan_tools_are_registered_with_correct_mutating_flags() {
         let reg = ToolRegistry::new(None, None);
-        assert!(reg.get("propose_plan").unwrap().mutating());
+        assert!(!reg.get("propose_plan").unwrap().mutating());
+        assert!(reg.get("enter_plan_mode").unwrap().mutating());
         assert!(!reg.get("update_plan").unwrap().mutating());
     }
 
     #[test]
-    fn web_fetch_is_always_registered_and_non_mutating() {
+    fn web_fetch_is_registered_non_mutating_but_requires_external_consent() {
         let reg = ToolRegistry::new(None, None);
         let t = reg.get("web_fetch").unwrap();
         assert!(!t.mutating());
+        assert_eq!(t.permission_class(), ToolPermissionClass::External);
     }
 
     #[test]

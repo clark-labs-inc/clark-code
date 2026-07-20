@@ -120,11 +120,11 @@ pub fn tool_status(s: Option<&str>) -> ToolStatus {
     }
 }
 
-fn plan_status(s: Option<&str>) -> PlanPhaseStatus {
+fn plan_status(s: Option<&str>) -> ChecklistStatus {
     match s.unwrap_or("") {
-        "in_progress" => PlanPhaseStatus::InProgress,
-        "completed" => PlanPhaseStatus::Completed,
-        _ => PlanPhaseStatus::Pending,
+        "in_progress" => ChecklistStatus::InProgress,
+        "completed" => ChecklistStatus::Completed,
+        _ => ChecklistStatus::Pending,
     }
 }
 
@@ -175,12 +175,70 @@ fn tool_content(v: Option<&Value>) -> Vec<ContentBlock> {
         .collect()
 }
 
+fn public_tool_title(v: &Value) -> Option<String> {
+    let title = s(v, "title")?.trim();
+    if title.is_empty() {
+        return None;
+    }
+    let matches_tool_name =
+        s(v, "toolName").is_some_and(|name| title.eq_ignore_ascii_case(name.trim()));
+    let looks_like_identifier = (title.contains('_') || title.contains('-'))
+        && title
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '_' | '-'));
+    (!matches_tool_name && !looks_like_identifier).then(|| title.to_string())
+}
+
+fn input_argument<'a>(v: &'a Value, key: &str) -> Option<&'a str> {
+    v.get("rawInput")
+        .and_then(|input| s(input, key))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
+fn fallback_tool_title(v: &Value, kind: ToolKind) -> String {
+    let path = locations(v.get("locations"))
+        .first()
+        .map(|location| location.path.clone())
+        .or_else(|| input_argument(v, "path").map(String::from));
+    match kind {
+        ToolKind::Read => path
+            .map(|path| format!("Read {path}"))
+            .unwrap_or_else(|| "Reading a file".to_string()),
+        ToolKind::Edit => path
+            .map(|path| format!("Edit {path}"))
+            .unwrap_or_else(|| "Editing a file".to_string()),
+        ToolKind::Delete => path
+            .map(|path| format!("Delete {path}"))
+            .unwrap_or_else(|| "Deleting a file".to_string()),
+        ToolKind::Move => path
+            .map(|path| format!("Move {path}"))
+            .unwrap_or_else(|| "Moving a file".to_string()),
+        ToolKind::Search => input_argument(v, "query")
+            .or_else(|| input_argument(v, "pattern"))
+            .map(|query| format!("Search for {query}"))
+            .unwrap_or_else(|| "Searching".to_string()),
+        ToolKind::Execute => input_argument(v, "command")
+            .map(String::from)
+            .unwrap_or_else(|| "a command".to_string()),
+        ToolKind::Think => "Thinking".to_string(),
+        ToolKind::Fetch => input_argument(v, "url")
+            .map(|url| format!("Read {url}"))
+            .unwrap_or_else(|| "Reading a web page".to_string()),
+        ToolKind::ViewImage => "Viewing an image".to_string(),
+        ToolKind::GenerateImage => "Generating an image".to_string(),
+        ToolKind::Research => "Researching".to_string(),
+        _ => "Working".to_string(),
+    }
+}
+
 fn tool_call(v: &Value) -> ToolCall {
+    let kind = tool_kind(s(v, "kind"));
     ToolCall {
         id: ToolCallId::new(s(v, "toolCallId").unwrap_or_default()),
         tool_name: s(v, "toolName").map(String::from),
-        title: s(v, "title").unwrap_or("Tool call").to_string(),
-        kind: tool_kind(s(v, "kind")),
+        title: public_tool_title(v).unwrap_or_else(|| fallback_tool_title(v, kind)),
+        kind,
         status: tool_status(s(v, "status")),
         locations: locations(v.get("locations")),
         content: tool_content(v.get("content")),
@@ -190,7 +248,7 @@ fn tool_call(v: &Value) -> ToolCall {
 
 fn tool_call_patch(v: &Value) -> ToolCallPatch {
     ToolCallPatch {
-        title: s(v, "title").map(String::from),
+        title: public_tool_title(v),
         kind: v.get("kind").map(|k| tool_kind(k.as_str())),
         status: v.get("status").map(|st| tool_status(st.as_str())),
         locations: v.get("locations").map(|l| locations(Some(l))),
@@ -199,13 +257,13 @@ fn tool_call_patch(v: &Value) -> ToolCallPatch {
     }
 }
 
-fn plan(v: &Value) -> Plan {
-    let phases = v
+fn execution_checklist(v: &Value) -> ExecutionChecklist {
+    let steps = v
         .get("entries")
         .and_then(Value::as_array)
         .map(|arr| {
             arr.iter()
-                .map(|e| PlanPhase {
+                .map(|e| ChecklistStep {
                     title: s(e, "content").unwrap_or_default().to_string(),
                     status: plan_status(s(e, "status")),
                     priority: s(e, "priority").map(String::from),
@@ -213,7 +271,7 @@ fn plan(v: &Value) -> Plan {
                 .collect()
         })
         .unwrap_or_default();
-    Plan { phases }
+    ExecutionChecklist { steps, revision: 0 }
 }
 
 /// Translate one `session/update` `update` object into an [`AgentEvent`].
@@ -249,9 +307,10 @@ pub fn update_to_event(update: &Value, run: &RunId) -> Option<AgentEvent> {
             id: ToolCallId::new(s(update, "toolCallId").unwrap_or_default()),
             patch: tool_call_patch(update),
         }),
-        "plan" => Some(AgentEvent::Plan {
+        "plan" => Some(AgentEvent::ExecutionChecklistUpdated {
             run: run.clone(),
-            plan: plan(update),
+            checklist: execution_checklist(update),
+            explanation: None,
         }),
         _ => None,
     }
@@ -287,9 +346,8 @@ pub fn permission_request(params: &Value, rpc_id: &str) -> PermissionRequest {
         session: SessionId::new(s(params, "sessionId").unwrap_or_default()),
         tool_call: tc.and_then(|t| s(t, "toolCallId")).map(ToolCallId::new),
         title: tc
-            .and_then(|t| s(t, "title"))
-            .unwrap_or("Permission required")
-            .to_string(),
+            .and_then(public_tool_title)
+            .unwrap_or_else(|| "Permission required".to_string()),
         options,
         detail: None,
         risk: None,
@@ -338,6 +396,47 @@ mod tests {
     }
 
     #[test]
+    fn raw_or_blank_tool_titles_get_semantic_fallbacks() {
+        let raw = json!({
+            "type":"tool_call", "toolCallId":"t1", "toolName":"web_fetch",
+            "title":"web_fetch", "kind":"fetch",
+            "rawInput":{"url":"https://example.com/docs"}
+        });
+        let blank = json!({
+            "type":"tool_call", "toolCallId":"t2", "title":" ", "kind":"fetch"
+        });
+
+        let AgentEvent::ToolCall { call: raw_call, .. } = update_to_event(&raw, &run()).unwrap()
+        else {
+            panic!("expected tool call");
+        };
+        let AgentEvent::ToolCall {
+            call: blank_call, ..
+        } = update_to_event(&blank, &run()).unwrap()
+        else {
+            panic!("expected tool call");
+        };
+
+        assert_eq!(raw_call.title, "Read https://example.com/docs");
+        assert_eq!(blank_call.title, "Reading a web page");
+    }
+
+    #[test]
+    fn raw_tool_title_updates_are_ignored() {
+        let update = json!({
+            "type":"tool_call_update", "toolCallId":"t1",
+            "toolName":"web_fetch", "title":"web_fetch"
+        });
+
+        let AgentEvent::ToolCallUpdate { patch, .. } = update_to_event(&update, &run()).unwrap()
+        else {
+            panic!("expected tool call update");
+        };
+
+        assert_eq!(patch.title, None);
+    }
+
+    #[test]
     fn image_tool_kinds_are_preserved() {
         assert_eq!(tool_kind(Some("view_image")), ToolKind::ViewImage);
         assert_eq!(tool_kind(Some("image_generation")), ToolKind::GenerateImage);
@@ -350,10 +449,10 @@ mod tests {
             {"content":"step b","status":"in_progress"}
         ]});
         match update_to_event(&u, &run()).unwrap() {
-            AgentEvent::Plan { plan, .. } => {
-                assert_eq!(plan.phases.len(), 2);
-                assert_eq!(plan.phases[0].status, PlanPhaseStatus::Completed);
-                assert_eq!(plan.phases[1].status, PlanPhaseStatus::InProgress);
+            AgentEvent::ExecutionChecklistUpdated { checklist, .. } => {
+                assert_eq!(checklist.steps.len(), 2);
+                assert_eq!(checklist.steps[0].status, ChecklistStatus::Completed);
+                assert_eq!(checklist.steps[1].status, ChecklistStatus::InProgress);
             }
             other => panic!("got {other:?}"),
         }

@@ -5,6 +5,7 @@ import { projectName } from "../lib/localAgent";
 import { loadProjectContext } from "../lib/projectContext";
 import { useSessionStore } from "../store/sessionStore";
 import { EnvironmentPicker } from "./EnvironmentPicker";
+import { ParallelWorkContext } from "./ParallelWorkContext";
 
 const ITEM =
   "flex h-[22px] min-w-0 items-center gap-1 rounded-md bg-composer-context px-1.5 text-[11px] font-medium leading-none";
@@ -20,6 +21,8 @@ export function ComposerContextBar() {
   const activeProjectRoot = useSessionStore((state) => state.activeProjectRoot);
   const activeRemote = useSessionStore((state) => state.activeRemote);
   const activeRemoteHost = useSessionStore((state) => state.activeRemoteHost);
+  const conversations = useSessionStore((state) => state.conversations);
+  const runningIds = useSessionStore((state) => state.runningIds);
   const runState = useSessionStore((state) =>
     Object.values(state.snapshot.runs)
       .map((run) => `${run.id}:${run.status}`)
@@ -44,6 +47,7 @@ export function ComposerContextBar() {
     key: string;
     value: ProjectContext | null;
   } | null>(null);
+  const [refreshTick, setRefreshTick] = useState(0);
   const context =
     loadedContext?.key === inspectionKey ? loadedContext.value : null;
 
@@ -62,7 +66,13 @@ export function ComposerContextBar() {
     return () => {
       current = false;
     };
-  }, [canInspect, cwd, inspectionKey, remote, runState]);
+  }, [canInspect, cwd, inspectionKey, remote, runState, refreshTick]);
+
+  useEffect(() => {
+    if (!canInspect) return;
+    const timer = window.setInterval(() => setRefreshTick((tick) => tick + 1), 15_000);
+    return () => window.clearInterval(timer);
+  }, [canInspect, inspectionKey]);
 
   const isRemoteSession = Boolean(activeRemote);
   const locationLabel = activeRemoteHost?.trim() || (isRemoteSession ? "Remote" : "Local");
@@ -72,11 +82,22 @@ export function ComposerContextBar() {
   const checkoutTone = context?.isWorktree
     ? "text-checkout-worktree"
     : "text-checkout-branch";
+  const normalizedCheckout = checkoutRoot.replace(/\/+$/, "");
+  const clarkPeers = conversations
+    .filter((conversation) => {
+      if (!runningIds.includes(conversation.id) || conversation.id === session?.id) return false;
+      if ((conversation.project ?? "").replace(/\/+$/, "") !== normalizedCheckout) return false;
+      return (conversation.remoteHost ?? null) === (activeRemoteHost ?? null);
+    })
+    .map((conversation) => ({ id: conversation.id, title: conversation.title }));
 
   if (session && (activeProvider !== "local" || !checkoutRoot)) return null;
 
   return (
-    <div className="relative z-20 mx-auto mb-1.5 max-w-2xl" data-testid="composer-context-bar">
+    // Keep this wrapper out of its own stacking layer. The context popovers
+    // carry their own z-index; a parent z-index would paint these chips over
+    // menus opened from the composer card below.
+    <div className="relative mx-auto mb-1.5 max-w-2xl" data-testid="composer-context-bar">
       <div
         aria-label="Checkout context"
         data-readonly={session ? "true" : undefined}
@@ -119,6 +140,13 @@ export function ComposerContextBar() {
               {context.detached ? `detached@${context.branch}` : context.branch}
             </span>
           </span>
+        )}
+        {context && (
+          <ParallelWorkContext
+            activity={context.activity}
+            branch={context.detached ? `detached@${context.branch}` : context.branch}
+            clarkPeers={clarkPeers}
+          />
         )}
       </div>
     </div>

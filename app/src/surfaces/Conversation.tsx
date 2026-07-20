@@ -17,7 +17,8 @@ import { ArtifactCard } from "./work/ArtifactCard";
 import { PermissionGate } from "./PermissionGate";
 import { UpgradePrompt } from "./UpgradePrompt";
 import { FanOutPanel } from "./FanOutPanel";
-import { PlanChecklist } from "./PlanChecklist";
+import { ExecutionChecklistCard } from "./PlanChecklist";
+import { ProposedPlanCard } from "./ProposedPlanCard";
 import { SideQuestionCard } from "./SideQuestionCard";
 import { GoalWorkSummary } from "./GoalWorkSummary";
 import type { Artifact, GoalState, TimelineItem, ToolCall } from "../core-bridge/types";
@@ -90,7 +91,7 @@ function group(timeline: TimelineItem[], goal?: GoalState): Block[] {
   for (const block of base) {
     const belongsToGoal = block.kind === "work"
       ? block.run === goal.run
-      : block.item.item === "plan"
+      : block.item.item === "execution_checklist" || block.item.item === "proposed_plan"
         ? block.item.run === goal.run
         : block.item.item === "message"
           ? block.item.run === goal.run && (
@@ -203,7 +204,16 @@ export function Conversation({
     }
   };
 
-  const { timeline, tool_calls: toolCalls, artifacts, runs, pending_permission, plan, goal } = snapshot;
+  const {
+    timeline,
+    tool_calls: toolCalls,
+    artifacts,
+    runs,
+    pending_permission,
+    execution_checklist,
+    proposed_plan,
+    goal,
+  } = snapshot;
 
   // Restore after React has committed the target transcript but before paint,
   // avoiding a frame at the previous conversation's unrelated scrollTop.
@@ -322,8 +332,11 @@ export function Conversation({
         </div>
       ) : null;
     }
-    if (item.item === "plan") {
-      return <PlanChecklist key={block.key} plan={item.plan ?? plan} />;
+    if (item.item === "execution_checklist") {
+      return <ExecutionChecklistCard key={block.key} checklist={item.checklist ?? execution_checklist} />;
+    }
+    if (item.item === "proposed_plan") {
+      return <ProposedPlanCard key={block.key} plan={item.plan ?? proposed_plan} />;
     }
     return null;
   };

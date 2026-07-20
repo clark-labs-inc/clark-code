@@ -41,6 +41,7 @@ mod multi_repo_provider;
 mod multi_repo_workspace;
 mod orchestration;
 mod permissions;
+mod planning;
 mod platform;
 mod project_settings;
 mod prompt;
@@ -86,7 +87,7 @@ pub use platform::{
     repository_context_section, scope_personal_memories, PersonalMemory, RepositoryCommitContext,
     RepositoryContext,
 };
-pub use provider::LocalAgentProvider;
+pub use provider::{local_sandbox_setup_policy, LocalAgentProvider};
 pub use repository::{
     discover_repositories, inspect_repository, load_git_history, GitCommitEvidence,
     GitHistoryBatch, RepositoryIdentity, RepositoryRemote,

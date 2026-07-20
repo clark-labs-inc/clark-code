@@ -11,9 +11,12 @@
 
 import type {
   ContentBlock,
+  ExecutionChecklist,
+  ProposedPlan,
   ResumeItem,
   ResumeTranscript,
   Snapshot,
+  TimelineItem,
 } from "../core-bridge/types";
 
 export interface ConversationMeta {
@@ -53,6 +56,7 @@ function safeStore(): Storage | null {
  *  prompt, so a reopened (or reloaded) conversation never shows a stuck
  *  "Thinking…", a spinning tool chip, or a dead prompt. */
 export function settleRuns(snapshot: Snapshot): Snapshot {
+  snapshot = migratePlanningSnapshot(snapshot);
   let changed = false;
   const runs: Snapshot["runs"] = {};
   for (const [id, r] of Object.entries(snapshot.runs)) {
@@ -89,6 +93,52 @@ export function settleRuns(snapshot: Snapshot): Snapshot {
   return { ...snapshot, runs, tool_calls, goal, pending_permission: undefined };
 }
 
+/** Upgrade persisted snapshots from the original overloaded `plan` shape.
+ * Cloud history is durable across app releases, so this boundary accepts the
+ * old wire form once and returns only the current typed representation. */
+export function migratePlanningSnapshot(snapshot: Snapshot): Snapshot {
+  const legacy = snapshot as Snapshot & {
+    plan?: { phases?: Array<{ title: string; status: string; priority?: string }> };
+    timeline: Array<TimelineItem | {
+      item: "plan";
+      run?: string;
+      plan?: { phases?: Array<{ title: string; status: string; priority?: string }> };
+    }>;
+  };
+  const convert = (value: typeof legacy.plan): ExecutionChecklist | undefined => {
+    if (!value?.phases) return undefined;
+    return {
+      revision: 0,
+      steps: value.phases.map((phase) => ({
+        title: phase.title,
+        status: phase.status as ExecutionChecklist["steps"][number]["status"],
+        ...(phase.priority ? { priority: phase.priority } : {}),
+      })),
+    };
+  };
+  const hasLegacyTimeline = legacy.timeline.some(
+    (item) => (item as { item?: string }).item === "plan",
+  );
+  if (!legacy.plan && !hasLegacyTimeline) return snapshot;
+  const timeline = legacy.timeline.map((item) => {
+    const raw = item as TimelineItem | {
+      item: "plan";
+      run?: string;
+      plan?: { phases?: Array<{ title: string; status: string; priority?: string }> };
+    };
+    if (raw.item !== "plan") return raw;
+    return {
+      item: "execution_checklist" as const,
+      run: raw.run,
+      checklist: convert(raw.plan),
+    };
+  });
+  const execution_checklist = snapshot.execution_checklist ?? convert(legacy.plan);
+  const migrated = { ...snapshot, timeline, execution_checklist } as Snapshot & { plan?: unknown };
+  delete migrated.plan;
+  return migrated;
+}
+
 function replayBlocks(blocks: ContentBlock[]): ContentBlock[] {
   return blocks.filter((block) => block.type !== "thinking");
 }
@@ -100,7 +150,7 @@ function trimItemToBudget(item: ResumeItem, budget: number): ResumeItem {
       .join("");
     return [{ type: "text" as const, text: `…${text.slice(-Math.max(0, budget - 200))}` }];
   };
-  if (item.item === "goal") return item;
+  if (item.item === "goal" || item.item === "proposed_plan") return item;
   if (item.item === "message") return { ...item, blocks: suffix(item.blocks) };
   return { ...item, arguments: undefined, content: suffix(item.content) };
 }
@@ -135,9 +185,17 @@ export function buildResumeTranscript(
         arguments: tool.raw_input,
         content: replayBlocks(tool.content),
       });
+    } else if (item.item === "proposed_plan") {
+      items.push({ item: "proposed_plan", plan: item.plan });
     }
   }
   if (snapshot.goal) items.push({ item: "goal", goal: snapshot.goal });
+  if (
+    snapshot.proposed_plan &&
+    !items.some((item) => item.item === "proposed_plan" && item.plan.id === snapshot.proposed_plan?.id)
+  ) {
+    items.push({ item: "proposed_plan", plan: snapshot.proposed_plan });
+  }
   if (items.length === 0) return null;
 
   const kept: ResumeItem[] = [];
@@ -176,7 +234,8 @@ export function snapshotBeforeTimelineItem(snapshot: Snapshot, index: number): S
     timeline.flatMap((item) => {
       if (item.item === "message") return [item.run];
       if (item.item === "tool_call" && item.run) return [item.run];
-      if (item.item === "plan" && item.run) return [item.run];
+      if (item.item === "execution_checklist" && item.run) return [item.run];
+      if (item.item === "proposed_plan") return [item.run];
       return [];
     }),
   );
@@ -187,9 +246,11 @@ export function snapshotBeforeTimelineItem(snapshot: Snapshot, index: number): S
     Object.entries(snapshot.tool_calls).filter(([id]) => toolIds.has(id)),
   );
   const artifacts = snapshot.artifacts.filter((artifact) => artifactIds.has(artifact.id));
-  let lastPlan: Snapshot["plan"];
+  let lastChecklist: ExecutionChecklist | undefined;
+  let lastProposedPlan: ProposedPlan | undefined;
   for (const item of timeline) {
-    if (item.item === "plan" && item.plan) lastPlan = item.plan;
+    if (item.item === "execution_checklist" && item.checklist) lastChecklist = item.checklist;
+    if (item.item === "proposed_plan") lastProposedPlan = item.plan;
   }
 
   return {
@@ -197,7 +258,8 @@ export function snapshotBeforeTimelineItem(snapshot: Snapshot, index: number): S
     runs,
     timeline,
     tool_calls,
-    ...(lastPlan ? { plan: lastPlan } : {}),
+    ...(lastChecklist ? { execution_checklist: lastChecklist } : {}),
+    ...(lastProposedPlan ? { proposed_plan: lastProposedPlan } : {}),
     ...(snapshot.goal?.run && runIds.has(snapshot.goal.run) ? { goal: snapshot.goal } : {}),
     artifacts,
   };

@@ -10,7 +10,7 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 
 use crate::loop_state::{GoalStatus, SessionGoal};
-use crate::tools::{arg_str, ToolCtx, ToolExecutor, ToolOutcome};
+use crate::tools::{arg_str, ToolCtx, ToolExecutor, ToolOutcome, ToolSignal};
 
 fn goal_summary(goal: &SessionGoal) -> String {
     let budget = match goal.token_budget {
@@ -29,6 +29,57 @@ fn goal_summary(goal: &SessionGoal) -> String {
         goal.time_used_seconds,
         goal.continuations
     )
+}
+
+/// Start a goal from either the model tool or the deterministic `/goal`
+/// command path. Keeping the validation here prevents the two entry points
+/// from drifting into subtly different lifecycle semantics.
+pub(crate) fn start_goal(
+    session: &mut crate::loop_state::SessionState,
+    objective: String,
+    token_budget: Option<u64>,
+) -> Result<(), String> {
+    let objective = objective.trim().to_string();
+    if objective.is_empty() {
+        return Err("`objective` must not be empty".into());
+    }
+    if objective.chars().count() > 4_000 {
+        return Err("`objective` must be at most 4000 characters".into());
+    }
+    if session.planning.plan_mode() {
+        return Err(
+            "Plan mode is active — agree on a plan first; a goal can be created after \
+             the plan is approved."
+                .into(),
+        );
+    }
+    if let Some(existing) = &session.goal {
+        if existing.status != GoalStatus::Complete {
+            return Err(format!(
+                "an unfinished goal already exists ({}): finish it with update_goal or \
+                 ask the user to clear it. Objective: {}",
+                existing.status_label(),
+                existing.objective
+            ));
+        }
+    }
+
+    let mut goal = SessionGoal {
+        id: uuid::Uuid::new_v4().to_string(),
+        objective,
+        status: GoalStatus::Active,
+        token_budget,
+        tokens_used: 0,
+        time_used_seconds: 0,
+        continuations: 0,
+        updated_at_ms: 0,
+        blocker_reason: None,
+        blocker_observations: 0,
+        last_blocker_continuation: None,
+    };
+    goal.touch();
+    session.goal = Some(goal);
+    Ok(())
 }
 
 pub struct CreateGoal;
@@ -69,13 +120,6 @@ impl ToolExecutor for CreateGoal {
         let Ok(objective) = arg_str(&args, "objective") else {
             return ToolOutcome::error("missing required string argument `objective`");
         };
-        let objective = objective.trim().to_string();
-        if objective.is_empty() {
-            return ToolOutcome::error("`objective` must not be empty");
-        }
-        if objective.chars().count() > 4_000 {
-            return ToolOutcome::error("`objective` must be at most 4000 characters");
-        }
         let token_budget = match args.get("token_budget") {
             None | Some(Value::Null) => None,
             Some(value) => match value.as_u64().filter(|budget| *budget > 0) {
@@ -87,51 +131,21 @@ impl ToolExecutor for CreateGoal {
         };
 
         let mut session = ctx.session.lock().await;
-        if session.plan_mode {
-            return ToolOutcome::error(
-                "Plan mode is active — agree on a plan first; a goal can be created after \
-                 the plan is approved.",
-            );
+        if let Err(error) = start_goal(&mut session, objective.to_string(), token_budget) {
+            return ToolOutcome::error(error);
         }
-        if let Some(existing) = &session.goal {
-            if existing.status != GoalStatus::Complete {
-                return ToolOutcome::error(format!(
-                    "an unfinished goal already exists ({}): finish it with update_goal or \
-                     ask the user to clear it. Objective: {}",
-                    existing.status_label(),
-                    existing.objective
-                ));
-            }
-        }
-        let goal = SessionGoal {
-            id: uuid::Uuid::new_v4().to_string(),
-            objective: objective.clone(),
-            status: GoalStatus::Active,
-            token_budget,
-            tokens_used: 0,
-            time_used_seconds: 0,
-            continuations: 0,
-            updated_at_ms: 0,
-            blocker_reason: None,
-            blocker_observations: 0,
-            last_blocker_continuation: None,
-        };
-        session.goal = Some(goal);
-        session
-            .goal
-            .as_mut()
-            .expect("goal was just inserted")
-            .touch();
         let budget_note = match token_budget {
             Some(budget) => format!(" Token budget: {budget}."),
             None => String::new(),
         };
+        let state = session.goal.as_ref().expect("goal was created").state(None);
         ToolOutcome::ok(format!(
             "Goal created and active.{budget_note} The runtime will keep giving you \
              continuation turns toward it after each completed turn. Work toward the full \
              objective; call update_goal with status \"complete\" only when current evidence \
              proves every requirement is satisfied."
         ))
+        .with_signal(ToolSignal::Goal(state))
     }
 }
 
@@ -190,7 +204,7 @@ impl ToolExecutor for UpdateGoal {
         if goal.status == GoalStatus::Complete {
             return ToolOutcome::error("the goal is already complete");
         }
-        match status {
+        let outcome = match status {
             GoalStatus::Complete => {
                 goal.status = GoalStatus::Complete;
                 goal.blocker_reason = None;
@@ -237,7 +251,9 @@ impl ToolExecutor for UpdateGoal {
                 ))
             }
             _ => unreachable!("update_goal accepts only complete or blocked"),
-        }
+        };
+        let state = goal.state(None);
+        outcome.with_signal(ToolSignal::Goal(state))
     }
 }
 
@@ -347,12 +363,20 @@ mod tests {
     async fn create_goal_refused_in_plan_mode_and_reports_via_get() {
         let dir = tempfile::tempdir().unwrap();
         let ctx = test_ctx(dir.path());
-        ctx.session.lock().await.plan_mode = true;
+        ctx.session
+            .lock()
+            .await
+            .planning
+            .set_mode(agent_core::provider::CollaborationMode::Plan);
         let refused = CreateGoal.invoke(json!({"objective": "x"}), &ctx).await;
         assert!(refused.is_error);
         assert!(refused.content.contains("Plan mode"));
 
-        ctx.session.lock().await.plan_mode = false;
+        ctx.session
+            .lock()
+            .await
+            .planning
+            .set_mode(agent_core::provider::CollaborationMode::Default);
         let empty = GetGoal.invoke(json!({}), &ctx).await;
         assert!(empty.content.contains("No goal"));
         CreateGoal

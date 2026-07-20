@@ -3,12 +3,11 @@ import { useSessionStore } from "./sessionStore";
 import type { CoreBridge } from "../core-bridge/bridge";
 import { emptySnapshot, type Session } from "../core-bridge/types";
 
-// Every permission-mode change must reach the engine: the local agent's
-// plan-mode gate (read-only until the plan is approved) lives server-side, so
-// a composer-pill pick that only updates client state silently degrades plan
-// mode to "ask for everything".
-
-const session = { id: "sess-1", provider: "local" } as unknown as Session;
+const session = {
+  id: "sess-1",
+  provider: "local",
+  collaboration_mode: "default",
+} as unknown as Session;
 
 function stubBridge(overrides: Partial<CoreBridge> = {}): CoreBridge {
   return {
@@ -20,6 +19,7 @@ function stubBridge(overrides: Partial<CoreBridge> = {}): CoreBridge {
     cancel: vi.fn(async () => {}),
     respond: vi.fn(async () => {}),
     setMode: vi.fn(async () => {}),
+    setCollaborationMode: vi.fn(async () => {}),
     subscribe: () => () => {},
     ...overrides,
   } as CoreBridge;
@@ -30,7 +30,8 @@ beforeEach(() => {
     bridge: null,
     session: null,
     snapshot: emptySnapshot(),
-    permissionMode: "auto",
+    approvalPolicy: "auto",
+    collaborationMode: "default",
     activeProvider: "local",
     auth: null,
     connecting: false,
@@ -39,94 +40,37 @@ beforeEach(() => {
   });
 });
 
-describe("permission-mode ↔ engine sync", () => {
-  it("setPermissionMode pushes the mode to the engine", () => {
+describe("approval and collaboration mode", () => {
+  it("changes approval policy without changing the provider mode", () => {
     const bridge = stubBridge();
     useSessionStore.setState({ bridge, session });
-
-    useSessionStore.getState().setPermissionMode("plan");
-
-    expect(useSessionStore.getState().permissionMode).toBe("plan");
-    expect(bridge.setMode).toHaveBeenCalledWith("sess-1", "plan");
+    useSessionStore.getState().setApprovalPolicy("full");
+    expect(useSessionStore.getState().approvalPolicy).toBe("full");
+    expect(bridge.setMode).not.toHaveBeenCalled();
+    expect(bridge.setCollaborationMode).not.toHaveBeenCalled();
   });
 
-  it("cyclePermissionMode syncs the engine exactly once per cycle", () => {
+  it("syncs collaboration mode independently", () => {
     const bridge = stubBridge();
-    useSessionStore.setState({ bridge, session, permissionMode: "auto" });
-
-    useSessionStore.getState().cyclePermissionMode();
-
-    // MODE_CYCLE: ask → auto → full → plan.
-    expect(useSessionStore.getState().permissionMode).toBe("full");
-    expect(bridge.setMode).toHaveBeenCalledTimes(1);
-    expect(bridge.setMode).toHaveBeenCalledWith("sess-1", "full");
+    useSessionStore.setState({ bridge, session });
+    useSessionStore.getState().setCollaborationMode("plan");
+    expect(useSessionStore.getState().collaborationMode).toBe("plan");
+    expect(bridge.setCollaborationMode).toHaveBeenCalledWith("sess-1", "plan");
   });
 
-  it("cyclePermissionMode is a no-op while a cloud session is active", () => {
-    // Permission modes govern the local engine only; the pill is hidden for
-    // cloud sessions, so Shift+Tab must not silently rotate an invisible mode.
+  it("cycles only the three approval policies", () => {
+    const bridge = stubBridge();
+    useSessionStore.setState({ bridge, session, approvalPolicy: "full" });
+    useSessionStore.getState().cycleApprovalPolicy();
+    expect(useSessionStore.getState().approvalPolicy).toBe("ask");
+    expect(bridge.setMode).not.toHaveBeenCalled();
+  });
+
+  it("does not cycle an invisible local approval policy for cloud sessions", () => {
     const bridge = stubBridge();
     const cloudSession = { id: "conv-9", provider: "clark" } as unknown as Session;
-    useSessionStore.setState({ bridge, session: cloudSession, permissionMode: "auto" });
-
-    useSessionStore.getState().cyclePermissionMode();
-
-    expect(useSessionStore.getState().permissionMode).toBe("auto");
-    expect(bridge.setMode).not.toHaveBeenCalled();
-  });
-
-  it("setPermissionMode without a live session only updates client state", () => {
-    const bridge = stubBridge();
-    useSessionStore.setState({ bridge, session: null });
-
-    useSessionStore.getState().setPermissionMode("plan");
-
-    expect(useSessionStore.getState().permissionMode).toBe("plan");
-    expect(bridge.setMode).not.toHaveBeenCalled();
-  });
-
-  it("startSession passes the composer mode to newSession", async () => {
-    const bridge = stubBridge();
-    useSessionStore.setState({ bridge, permissionMode: "plan" });
-
-    await useSessionStore.getState().startSession();
-
-    expect(bridge.newSession).toHaveBeenCalledWith(
-      "local",
-      expect.objectContaining({ mode: "plan" }),
-    );
-  });
-
-  it("startSession does NOT send the permission mode to the cloud provider", async () => {
-    // `SessionOptions.mode` is provider-defined: for the Clark cloud provider
-    // it selects the TIER (clark/clark_max), so the client permission mode
-    // must never ride along — it would corrupt the tier.
-    const bridge = stubBridge();
-    useSessionStore.setState({ bridge, permissionMode: "plan", activeProvider: "clark" });
-
-    await useSessionStore.getState().startSession();
-
-    const optionsArg = vi.mocked(bridge.newSession).mock.calls[0][1];
-    expect(optionsArg.mode).toBeUndefined();
-  });
-
-  it("openConversation passes the composer mode to newSession", async () => {
-    const bridge = stubBridge();
-    useSessionStore.setState({
-      bridge,
-      permissionMode: "plan",
-      localSettings: {
-        ...useSessionStore.getState().localSettings,
-        cwd: "/tmp/project",
-      },
-    });
-
-    await useSessionStore.getState().openConversation("conv-reopen");
-
-    expect(bridge.newSession).toHaveBeenCalledWith(
-      "local",
-      expect.objectContaining({ mode: "plan" }),
-      "conv-reopen",
-    );
+    useSessionStore.setState({ bridge, session: cloudSession, approvalPolicy: "auto" });
+    useSessionStore.getState().cycleApprovalPolicy();
+    expect(useSessionStore.getState().approvalPolicy).toBe("auto");
   });
 });

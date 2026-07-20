@@ -74,10 +74,11 @@ async fn diag_multistep_over_sse() {
                 AgentEvent::ToolCallUpdate { id, patch, .. } => {
                     format!("ToolCallUpdate {} -> {:?}", id.as_str(), patch.status)
                 }
-                AgentEvent::Plan { plan, .. } => {
+                AgentEvent::ExecutionChecklistUpdated { checklist, .. } => {
                     plans += 1;
-                    format!("Plan({} phases)", plan.phases.len())
+                    format!("ExecutionChecklist({} steps)", checklist.steps.len())
                 }
+                AgentEvent::ProposedPlanUpdated { .. } => "ProposedPlan".to_string(),
                 AgentEvent::GoalUpdated { .. } => "GoalUpdated".to_string(),
                 AgentEvent::Surface { focus } => format!("Surface({:?})", focus.surface),
                 AgentEvent::Artifact { artifact, .. } => {

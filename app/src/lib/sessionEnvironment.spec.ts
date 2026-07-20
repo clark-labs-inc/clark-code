@@ -11,7 +11,9 @@ const session = (checkout?: string) => ({
     terminal: true,
     load_session: false,
     modes: [],
+    collaboration_modes: ["default" as const, "plan" as const],
   },
+  collaboration_mode: "default" as const,
   environment: checkout
     ? { checkout_root: checkout, workspace_roots: [checkout], remote: false }
     : undefined,

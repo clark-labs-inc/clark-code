@@ -92,6 +92,9 @@ pub struct LocalConfig {
     pub reasoning_effort: Option<String>,
     /// Hard cap on model<->tool iterations per turn.
     pub max_iterations: u32,
+    /// Hidden A/B switch used by the paid planning benchmark. Production and
+    /// normal tests always use the decision-complete profile.
+    pub(crate) planning_prompt_profile: crate::planning::PlanningPromptProfile,
     /// Default permission mode per (mutating) tool name.
     pub permissions: HashMap<String, PermissionMode>,
     /// Shell-command prefixes the user has chosen to always allow (skip the
@@ -114,6 +117,10 @@ pub struct LocalConfig {
     /// exec-server) rather than locally. The host fills this in after it brings
     /// up the SSH tunnel + server.
     pub remote: Option<RemoteTarget>,
+    /// Local OS containment policy. `Auto` uses a ready backend and otherwise
+    /// reports host execution; `Required` fails session creation if containment
+    /// cannot be established; `Disabled` is an explicit host-capability mode.
+    pub sandbox_mode: LocalSandboxMode,
     /// Whether durable memory is enabled — exposes the `memory` tool and injects
     /// the project + global memory into the system prompt. On by default; the
     /// user turns it off from the profile menu (`extra.memories = false`).
@@ -133,6 +140,23 @@ pub struct LocalConfig {
     /// Universal root execution lifecycle. This is always present; its limits
     /// control bounded recovery and accounting rather than tool permissions.
     pub(crate) execution: crate::root_execution::RootExecutionConfig,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LocalSandboxMode {
+    Auto,
+    Required,
+    Disabled,
+}
+
+impl LocalSandboxMode {
+    fn from_extra(extra: &Value) -> Self {
+        match extra.get("sandbox_mode").and_then(Value::as_str) {
+            Some("required") => Self::Required,
+            Some("disabled") => Self::Disabled,
+            _ => Self::Auto,
+        }
+    }
 }
 
 /// A remote project target. The agent's file/shell tools run against `cwd` on a
@@ -221,6 +245,9 @@ impl LocalConfig {
             .map(|n| n as u32)
             .filter(|n| *n > 0)
             .unwrap_or(DEFAULT_MAX_ITERATIONS);
+        let planning_prompt_profile = crate::planning::PlanningPromptProfile::from_extra(
+            extra.get("planning_prompt_profile").and_then(Value::as_str),
+        );
 
         let mut permissions = default_permissions();
         if let Some(map) = extra.get("permissions").and_then(Value::as_object) {
@@ -310,6 +337,7 @@ impl LocalConfig {
                 cwd: str_field(r, "cwd")?,
             })
         });
+        let sandbox_mode = LocalSandboxMode::from_extra(extra);
         // The first orchestration boundary launches nested local/ACP processes.
         // A remote project needs a remote-aware child transport and read-only
         // enforcement on that host, neither of which this adapter can prove yet.
@@ -325,6 +353,7 @@ impl LocalConfig {
             temperature,
             reasoning_effort,
             max_iterations,
+            planning_prompt_profile,
             permissions,
             command_allowlist: str_vec(extra, "command_allowlist"),
             command_denylist: str_vec(extra, "command_denylist"),
@@ -336,6 +365,7 @@ impl LocalConfig {
             vision,
             cwd,
             remote,
+            sandbox_mode,
             memories_enabled,
             project_knowledge_enabled,
             compaction,
@@ -378,6 +408,7 @@ mod tests {
         assert_eq!(cfg.base_url, DEFAULT_BASE_URL);
         assert_eq!(cfg.model, DEFAULT_MODEL);
         assert_eq!(cfg.max_iterations, DEFAULT_MAX_ITERATIONS);
+        assert_eq!(cfg.sandbox_mode, LocalSandboxMode::Auto);
         assert_eq!(
             cfg.compaction.auto_compact_token_limit,
             DEFAULT_AUTO_COMPACT_TOKEN_LIMIT
@@ -406,12 +437,13 @@ mod tests {
     }
 
     #[test]
-    fn a_key_enables_research_through_the_same_api() {
+    fn default_auto_sandbox_keeps_clark_cloud_enabled_through_the_same_api() {
         let pc = ProviderConfig {
             auth_token: Some("ck_live_abc".into()),
             ..Default::default()
         };
         let cfg = LocalConfig::from_provider_config(&pc);
+        assert_eq!(cfg.sandbox_mode, LocalSandboxMode::Auto);
         assert_eq!(cfg.api_key.as_deref(), Some("ck_live_abc"));
         let clark = cfg.clark.expect("research enabled when a key is present");
         assert_eq!(clark.base_url, DEFAULT_BASE_URL);

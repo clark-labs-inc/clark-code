@@ -9,8 +9,7 @@ import {
 } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import {
-  ArrowUp, Square, X, FileText, CornerDownRight, Pencil, Slash,
-  ChevronDown, Check,
+  ArrowUp, Square, X, CornerDownRight, Pencil, ChevronDown, Check, Target,
 } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
 import type { QueuedMessage } from "../store/sessionStore";
@@ -23,52 +22,35 @@ import {
   reasoningEffortsForModel,
 } from "../lib/localAgent";
 import { projectFiles } from "../lib/projectFiles";
-import { slashCommands, type SlashCommand } from "../lib/slashCommands";
+import {
+  composerSubmissionState,
+  detectComposerTrigger,
+  type ComposerSuggestion,
+} from "../lib/composerInput";
+import {
+  goalCommandObjective,
+  slashCommands,
+  type SlashCommand,
+} from "../lib/slashCommands";
 import { listCustomCommands } from "../lib/customCommands";
 import { fuzzyFilter, fuzzyFilterFiles } from "../lib/fuzzy";
 import { cn } from "../lib/cn";
 import { DUR, EASE } from "../lib/motion";
+import { inTauri } from "../lib/pickFolder";
 import { executionDiagnostic } from "../lib/activity";
 import { useComposerAutosize } from "../lib/composerAutosize";
 import { AttachmentChips } from "./ComposerAttachments";
 import { ComposerContextBar } from "./ComposerContextBar";
 import { ComposerAttachmentMenu } from "./ComposerAttachmentMenu";
+import { ComposerAutocomplete } from "./ComposerAutocomplete";
 import { ComposerPermissionPill } from "./ComposerPermissionPill";
+import { ComposerCollaborationPill } from "./ComposerCollaborationPill";
 import {
   createPendingPaste,
   expandPendingPastes,
   shouldThumbnailPastedText,
   type PendingPaste,
 } from "../lib/attachments";
-/** What the user is mid-typing at the caret: an `@file` mention (anywhere) or a
- *  `/command` (only at the very start of the message). */
-interface Trigger {
-  type: "@" | "/";
-  query: string;
-  /** Index of the trigger character in the text. */
-  start: number;
-}
-
-function detectTrigger(text: string, caret: number): Trigger | null {
-  for (let i = caret - 1; i >= 0; i--) {
-    const ch = text[i];
-    if (ch === "@" || ch === "/") {
-      const before = i === 0 ? "" : text[i - 1];
-      if (i !== 0 && !/\s/.test(before)) return null; // mid-word @ (e.g. an email)
-      if (ch === "/" && i !== 0) return null; // slash commands only start the line
-      const query = text.slice(i + 1, caret);
-      if (/\s/.test(query)) return null; // a space ends the token
-      return { type: ch, query, start: i };
-    }
-    if (/\s/.test(ch)) return null; // ran into whitespace before any trigger
-  }
-  return null;
-}
-
-type Suggestion =
-  | { kind: "file"; path: string }
-  | { kind: "slash"; cmd: SlashCommand };
-
 /** Close a popover when the user clicks outside of it or presses Escape. The
  *  listeners are registered once (not re-bound every render) and always call
  *  the latest `onClose` via a ref. */
@@ -357,65 +339,6 @@ function QueuedMessages({ onEdit }: { onEdit: (q: QueuedMessage) => void }) {
   );
 }
 
-/** The `@`-file / `/`-command suggestion list, anchored above the textarea. */
-function AutocompletePopover({
-  suggestions,
-  sel,
-  onPick,
-  onHover,
-}: {
-  suggestions: Suggestion[];
-  sel: number;
-  onPick: (s: Suggestion) => void;
-  onHover: (i: number) => void;
-}) {
-  return (
-    <motion.div
-      // Appear instantly (no entry fade): fading a shadowed popover in WKWebView
-      // paints half-opacity frames that read as flicker — the same reason the
-      // model/permission menus are un-animated. A quick exit fade is fine.
-      initial={false}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      transition={{ duration: DUR.fast, ease: EASE.out }}
-      className="popover-surface absolute bottom-full left-0 z-30 mb-2 max-h-64 w-80 overflow-y-auto rounded-2xl bg-bg-elevated p-1.5 shadow-lifted ring-1 ring-border-subtle"
-    >
-      {suggestions.map((s, i) => {
-        const key = s.kind === "file" ? s.path : `/${s.cmd.name}`;
-        return (
-          <button
-            key={key}
-            type="button"
-            // Use mousedown so the pick fires before the textarea blurs.
-            onMouseDown={(e) => {
-              e.preventDefault();
-              onPick(s);
-            }}
-            onMouseMove={() => onHover(i)}
-            className={cn(
-              "flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-sm transition duration-200 ease-clark",
-              i === sel ? "bg-accent-subtle text-ink" : "text-ink-secondary",
-            )}
-          >
-            {s.kind === "file" ? (
-              <>
-                <FileText className="size-3.5 shrink-0 text-ink-faint" />
-                <span className="min-w-0 flex-1 truncate font-mono text-xs">{s.path}</span>
-              </>
-            ) : (
-              <>
-                <Slash className="size-3.5 shrink-0 text-ink-faint" />
-                <span className="shrink-0 font-mono text-xs text-ink">/{s.cmd.name}</span>
-                <span className="min-w-0 flex-1 truncate text-xs text-ink-faint">{s.cmd.hint}</span>
-              </>
-            )}
-          </button>
-        );
-      })}
-    </motion.div>
-  );
-}
-
 export function Composer() {
   const [value, setValue] = useState("");
   const [caret, setCaret] = useState(0);
@@ -426,7 +349,12 @@ export function Composer() {
   const [pendingPastes, setPendingPastes] = useState<PendingPaste[]>([]);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const session = useSessionStore((s) => s.session);
+  const activeProvider = useSessionStore((s) => s.activeProvider);
+  const projectMode = useSessionStore((s) => s.projectMode);
+  const localCwd = useSessionStore((s) => s.localSettings.cwd);
   const send = useSessionStore((s) => s.send);
+  const pickProjectFolder = useSessionStore((s) => s.pickProjectFolder);
+  const flashNotice = useSessionStore((s) => s.flashNotice);
   const removeQueued = useSessionStore((s) => s.removeQueued);
   const cancelActive = useSessionStore((s) => s.cancelActive);
   const askSideQuestion = useSessionStore((s) => s.askSideQuestion);
@@ -476,11 +404,20 @@ export function Composer() {
   }, [prefill, setPrefill]);
 
   const hasContent = value.trim().length > 0 || attachments.length > 0 || pendingPastes.length > 0;
-  const canSend =
-    hasContent && (!!session || (!startBlocked && !connecting));
+  const submission = composerSubmissionState({
+    hasContent,
+    hasSession: !!session,
+    connecting,
+    activeProvider,
+    projectMode,
+    localCwd,
+    startBlocked,
+    canPickProjectFolder: inTauri(),
+  });
+  const canSend = submission.canSubmit;
 
   // --- @-file / slash autocomplete ----------------------------------------
-  const trigger = useMemo(() => detectTrigger(value, caret), [value, caret]);
+  const trigger = useMemo(() => detectComposerTrigger(value, caret), [value, caret]);
 
   // Lazily fetch the project file list the first time an @ is typed.
   useEffect(() => {
@@ -503,7 +440,7 @@ export function Composer() {
     );
   }, [cwd, remote]);
 
-  const suggestions = useMemo<Suggestion[]>(() => {
+  const suggestions = useMemo<ComposerSuggestion[]>(() => {
     if (!trigger || dismissed) return [];
     if (trigger.type === "@") {
       return fuzzyFilterFiles(projFiles, trigger.query, 8).map((path) => ({
@@ -511,7 +448,10 @@ export function Composer() {
         path,
       }));
     }
-    const builtins = slashCommands().filter((c) => !c.needsSession || session);
+    const localTarget = session ? session.provider === "local" : activeProvider === "local";
+    const builtins = slashCommands().filter(
+      (c) => (!c.needsSession || session) && (!c.localOnly || localTarget),
+    );
     const builtinNames = new Set(builtins.map((c) => c.name));
     // Built-ins win name collisions.
     const custom = customCommands.filter((c) => !builtinNames.has(c.name));
@@ -520,7 +460,7 @@ export function Composer() {
       kind: "slash" as const,
       cmd: m.item,
     }));
-  }, [trigger, dismissed, projFiles, session, customCommands]);
+  }, [trigger, dismissed, projFiles, session, activeProvider, customCommands]);
 
   // Keep the highlighted row in range as results change; clear the Escape
   // dismissal once the user edits the trigger again.
@@ -543,11 +483,11 @@ export function Composer() {
     setPendingPastes((current) => current.filter((paste) => paste.id !== id));
   };
 
-  const accept = (s: Suggestion) => {
+  const accept = (s: ComposerSuggestion) => {
     if (!trigger) return;
     if (s.kind === "slash") {
-      // A custom command (has a body) inserts its text for the user to review
-      // and send; a built-in runs its action and clears the composer.
+      // A prompt-style command (has a body) inserts its text for the user to
+      // finish/review; an action-style built-in runs and clears the composer.
       if (s.cmd.body !== undefined) {
         const before = value.slice(0, trigger.start);
         const after = value.slice(caret).trimStart();
@@ -586,7 +526,22 @@ export function Composer() {
 
   const submit = async () => {
     if (!canSend) return;
+    if (submission.shouldPickProjectFolder) {
+      await pickProjectFolder();
+      if (useSessionStore.getState().startBlockedReason()) return;
+    }
     const t = expandPendingPastes(value, pendingPastes);
+    const goalObjective = goalCommandObjective(t);
+    if (goalObjective === "") {
+      setValue("/goal ");
+      flashNotice("Describe what Clark should keep working toward after /goal.");
+      requestAnimationFrame(() => {
+        taRef.current?.focus();
+        taRef.current?.setSelectionRange(6, 6);
+        setCaret(6);
+      });
+      return;
+    }
     const editIndex = editTimelineIndex;
     setValue("");
     setPendingPastes([]);
@@ -613,6 +568,8 @@ export function Composer() {
     if (editIndex !== null) await resendFrom(editIndex, t.trim());
     else await send(t.trim());
   };
+
+  const goalIntent = goalCommandObjective(value);
 
   // Pull a queued message back into the composer to revise it.
   const editQueued = (q: QueuedMessage) => {
@@ -662,6 +619,21 @@ export function Composer() {
   return (
     <div className="bg-bg px-6 pb-4 pt-2.5" {...handlers}>
       <QueuedMessages onEdit={editQueued} />
+      {/* Keep suggestions in normal layout flow. The old absolute menu was
+          trapped below the context bar's stacking layer and visibly painted
+          through the checkout chips at compact window heights. */}
+      <AnimatePresence>
+        {suggestions.length > 0 && (
+          <div className="relative z-30 mx-auto mb-2 max-w-2xl">
+            <ComposerAutocomplete
+              suggestions={suggestions}
+              selectedIndex={sel}
+              onPick={accept}
+              onHover={setSel}
+            />
+          </div>
+        )}
+      </AnimatePresence>
       <ComposerContextBar />
       <div
         className={cn(
@@ -677,18 +649,15 @@ export function Composer() {
           </div>
         )}
 
-        <AnimatePresence>
-          {suggestions.length > 0 && (
-            <AutocompletePopover
-              suggestions={suggestions}
-              sel={sel}
-              onPick={accept}
-              onHover={setSel}
-            />
-          )}
-        </AnimatePresence>
-
         <AttachmentChips pastes={pendingPastes} onRemovePaste={removePendingPaste} />
+
+        {goalIntent !== null && (
+          <div className="flex items-center gap-1.5 pb-1 pt-0.5 text-xs font-medium text-accent">
+            <Target className="size-3.5" />
+            <span>Standing goal</span>
+            <span className="font-normal text-ink-faint">Clark keeps going until it is done</span>
+          </div>
+        )}
 
         {editTimelineIndex !== null && (
           <div className="flex items-center gap-1.5 pb-1 pt-0.5 text-xs text-ink-muted">
@@ -743,6 +712,7 @@ export function Composer() {
               onFiles={(files) => void addFiles(files)}
             />
             <ComposerPermissionPill />
+            <ComposerCollaborationPill />
           </div>
 
           <div className="flex min-w-0 items-center gap-2.5">
@@ -760,8 +730,20 @@ export function Composer() {
               <button
                 onClick={() => void submit()}
                 disabled={!canSend}
-                aria-label={busy ? "Queue message" : "Send"}
-                title={busy ? "Queue message (sends when Clark finishes)" : "Send · ⇧↵ newline"}
+                aria-label={
+                  submission.shouldPickProjectFolder
+                    ? "Choose project folder and send"
+                    : busy
+                      ? "Queue message"
+                      : "Send"
+                }
+                title={
+                  submission.shouldPickProjectFolder
+                    ? "Choose project folder and send"
+                    : busy
+                      ? "Queue message (sends when Clark finishes)"
+                      : "Send · ⇧↵ newline"
+                }
                 className="grid size-8 shrink-0 place-items-center rounded-full bg-accent text-on-accent shadow-soft transition duration-200 ease-clark hover:-translate-y-0.5 hover:bg-accent-hover active:translate-y-0 disabled:translate-y-0 disabled:bg-bg-tertiary disabled:text-ink-muted disabled:shadow-none"
               >
                 {busy ? <CornerDownRight className="size-4" /> : <ArrowUp className="size-4" />}

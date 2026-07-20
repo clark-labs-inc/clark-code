@@ -89,6 +89,18 @@ pub(crate) fn to_agent_messages(resume: Option<&ResumeTranscript>) -> Vec<ca::Ag
                 });
             }
             ResumeItem::Goal { .. } => {}
+            ResumeItem::ProposedPlan { plan } => {
+                messages.push(ca::AgentMessage::Custom {
+                    kind: "proposed_plan".into(),
+                    payload: serde_json::json!({
+                        "id": plan.id,
+                        "revision": plan.revision,
+                        "markdown": plan.markdown,
+                        "status": plan.status,
+                    }),
+                    timestamp: None,
+                });
+            }
         }
     }
     messages

@@ -52,6 +52,34 @@ export interface Subscription {
   source_provider?: string | null;
 }
 
+/** A durable billing-ledger row. The server supplies this—never the client. */
+export interface LedgerEntry {
+  id: string;
+  amount: number;
+  direction: -1 | 1;
+  reason: string;
+  source_type: string;
+  source_id: string;
+  reward_tier?: "base" | "bonus" | "jackpot";
+  created_at: string;
+}
+
+export interface ActivityReward {
+  id: string;
+  credits: number;
+  tier: "base" | "bonus" | "jackpot";
+  createdAt: string;
+}
+
+export interface EffectiveBilling {
+  owner_kind: "user" | "organization";
+  display_name: string;
+  domain?: string;
+  credits: CreditAccount;
+  subscription?: Subscription | null;
+  ledger: LedgerEntry[];
+}
+
 export interface BillingSummary {
   stripe_enabled: boolean;
   enforcement_enabled: boolean;
@@ -59,7 +87,8 @@ export interface BillingSummary {
   credits: CreditAccount;
   subscription?: Subscription | null;
   plans?: unknown[];
-  ledger?: unknown[];
+  ledger?: LedgerEntry[];
+  effective?: EffectiveBilling;
 }
 
 export function billingMe(c: CloudCreds): Promise<BillingSummary> {
@@ -67,6 +96,41 @@ export function billingMe(c: CloudCreds): Promise<BillingSummary> {
     endpoint: c.endpoint,
     token: c.token,
   });
+}
+
+/** The wallet Clark Code actually admits and debits for new runs. */
+export function effectiveBilling(billing: BillingSummary | null): EffectiveBilling | null {
+  if (!billing) return null;
+  return billing.effective ?? {
+    owner_kind: "user",
+    display_name: "Personal",
+    credits: billing.credits,
+    subscription: billing.subscription,
+    ledger: billing.ledger ?? [],
+  };
+}
+
+export function billingPlanLabel(planKey?: string | null): string {
+  if (!planKey) return "Free";
+  return planKey
+    .split("_")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+/** The newest server-issued reward earned from completed paid activity. */
+export function latestActivityReward(billing: BillingSummary | null): ActivityReward | null {
+  const entry = effectiveBilling(billing)?.ledger.find(
+    (value) => value.reason === "activity_reward" && value.direction === 1 && value.amount > 0,
+  );
+  if (!entry) return null;
+  return {
+    id: entry.id,
+    credits: entry.amount,
+    tier: entry.reward_tier ?? "base",
+    createdAt: entry.created_at,
+  };
 }
 
 export type CreditState = "ok" | "low" | "out";
@@ -77,7 +141,8 @@ const LOW_CREDIT_DOLLARS = 2;
 
 export function creditState(billing: BillingSummary | null): CreditState {
   if (!billing || !billing.enforcement_enabled) return "ok";
-  const c = billing.credits;
+  const c = effectiveBilling(billing)?.credits;
+  if (!c) return "ok";
   if (c.is_unlimited) return "ok";
   if (c.available_credits <= 0) return "out";
   const perDollar = Math.max(1, billing.credits_per_dollar);
@@ -87,5 +152,6 @@ export function creditState(billing: BillingSummary | null): CreditState {
 /** Approximate remaining dollar value of the credit balance, for display. */
 export function creditDollars(billing: BillingSummary | null): number {
   if (!billing) return 0;
-  return billing.credits.available_credits / Math.max(1, billing.credits_per_dollar);
+  const credits = effectiveBilling(billing)?.credits.available_credits ?? 0;
+  return credits / Math.max(1, billing.credits_per_dollar);
 }

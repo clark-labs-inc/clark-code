@@ -271,6 +271,7 @@ async fn run_attachment_benchmark(mode: EvalMode, local_cwd: Option<PathBuf>) {
         .new_session(SessionOptions {
             cwd: local_cwd.map(|path| path.to_string_lossy().into_owned()),
             mode: None,
+            collaboration_mode: None,
             resume: None,
         })
         .await

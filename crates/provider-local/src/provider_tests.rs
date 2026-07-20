@@ -11,6 +11,17 @@ fn prompt_text_joins_blocks() {
 }
 
 #[test]
+fn goal_command_requires_an_exact_prefix_and_preserves_the_objective() {
+    assert_eq!(
+        goal_command_objective("  /goal investigate and fix the composer"),
+        Some("investigate and fix the composer".into())
+    );
+    assert_eq!(goal_command_objective("/goal"), Some(String::new()));
+    assert_eq!(goal_command_objective("/goals list"), None);
+    assert_eq!(goal_command_objective("please /goal later"), None);
+}
+
+#[test]
 fn prompt_text_inlines_text_attachment() {
     let input = PromptInput {
         blocks: vec![ContentBlock::text("see file")],
@@ -191,16 +202,29 @@ async fn isolated_orchestration_session_has_no_ambient_writable_surfaces() {
 }
 
 #[tokio::test]
-async fn set_mode_flips_plan_mode_flag() {
+async fn set_collaboration_mode_flips_plan_mode_flag() {
     let mut p = LocalAgentProvider::new();
     let session_id = SessionId::new("s1");
-    assert!(!p.session.lock().await.plan_mode);
+    {
+        let mut state = p.session.lock().await;
+        assert!(!state.planning.plan_mode());
+        crate::tools::goal::start_goal(&mut state, "finish the migration".into(), None).unwrap();
+    }
 
-    p.set_mode(&session_id, "plan".to_string()).await.unwrap();
-    assert!(p.session.lock().await.plan_mode);
+    p.set_collaboration_mode(&session_id, CollaborationMode::Plan)
+        .await
+        .unwrap();
+    assert!(p.session.lock().await.planning.plan_mode());
 
-    p.set_mode(&session_id, "ask".to_string()).await.unwrap();
-    assert!(!p.session.lock().await.plan_mode);
+    p.set_collaboration_mode(&session_id, CollaborationMode::Default)
+        .await
+        .unwrap();
+    assert!(!p.session.lock().await.planning.plan_mode());
+    assert_eq!(
+        p.session.lock().await.goal.as_ref().unwrap().objective,
+        "finish the migration",
+        "Goal Mode remains an orthogonal lifecycle"
+    );
 }
 
 #[tokio::test]
@@ -239,6 +263,7 @@ async fn new_session_seeds_system_prompt_without_history() {
     let opts = SessionOptions {
         cwd: Some(dir.path().to_string_lossy().to_string()),
         mode: None,
+        collaboration_mode: None,
         resume: None,
     };
     let session = p.new_session(opts).await.unwrap();
@@ -337,7 +362,7 @@ async fn orchestration_tools_are_default_available_but_can_be_disabled() {
 }
 
 #[tokio::test]
-async fn new_session_mode_option_controls_plan_mode() {
+async fn collaboration_mode_option_controls_plan_mode_independently() {
     let dir = tempfile::tempdir().unwrap();
     let mut p = LocalAgentProvider::new();
     p.connect(ProviderConfig::default()).await.unwrap();
@@ -345,24 +370,75 @@ async fn new_session_mode_option_controls_plan_mode() {
     let session = p
         .new_session(SessionOptions {
             cwd: Some(dir.path().to_string_lossy().to_string()),
-            mode: Some("plan".to_string()),
+            mode: Some("auto".to_string()),
+            collaboration_mode: Some(CollaborationMode::Plan),
             resume: None,
         })
         .await
         .unwrap();
-    assert_eq!(session.mode.as_deref(), Some("plan"));
-    assert!(p.session.lock().await.plan_mode);
+    assert_eq!(session.mode.as_deref(), Some("auto"));
+    assert_eq!(session.collaboration_mode, CollaborationMode::Plan);
+    assert!(p.session.lock().await.planning.plan_mode());
+    #[cfg(target_os = "macos")]
+    assert!(p
+        .executor
+        .write(&dir.path().join("plan-must-not-write.txt"), b"denied")
+        .await
+        .is_err());
 
     // A provider instance reused for a fresh session must not inherit the
     // stale flag.
     p.new_session(SessionOptions {
         cwd: Some(dir.path().to_string_lossy().to_string()),
         mode: Some("auto".to_string()),
+        collaboration_mode: Some(CollaborationMode::Default),
         resume: None,
     })
     .await
     .unwrap();
-    assert!(!p.session.lock().await.plan_mode);
+    assert!(!p.session.lock().await.planning.plan_mode());
+    p.executor
+        .write(&dir.path().join("auto-can-write.txt"), b"allowed")
+        .await
+        .unwrap();
+}
+
+#[cfg(target_os = "macos")]
+#[tokio::test]
+async fn full_access_switches_platform_containment_off_and_default_restores_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut provider = LocalAgentProvider::new();
+    provider.connect(ProviderConfig::default()).await.unwrap();
+    let session = provider
+        .new_session(SessionOptions {
+            cwd: Some(dir.path().to_string_lossy().into_owned()),
+            mode: Some("auto".to_string()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        provider.executor.containment(),
+        exec_core::ExecutionContainment::Managed
+    );
+
+    provider
+        .set_mode(&session.id, "full".to_string())
+        .await
+        .unwrap();
+    assert_eq!(
+        provider.executor.containment(),
+        exec_core::ExecutionContainment::Host
+    );
+
+    provider
+        .set_mode(&session.id, "auto".to_string())
+        .await
+        .unwrap();
+    assert_eq!(
+        provider.executor.containment(),
+        exec_core::ExecutionContainment::Managed
+    );
 }
 
 #[tokio::test]
@@ -373,26 +449,31 @@ async fn set_mode_transitions_queue_the_one_shot_exit_note() {
     let session = p
         .new_session(SessionOptions {
             cwd: Some(dir.path().to_string_lossy().to_string()),
-            mode: Some("plan".to_string()),
+            mode: Some("auto".to_string()),
+            collaboration_mode: Some(CollaborationMode::Plan),
             resume: None,
         })
         .await
         .unwrap();
 
-    p.set_mode(&session.id, "auto".to_string()).await.unwrap();
+    p.set_collaboration_mode(&session.id, CollaborationMode::Default)
+        .await
+        .unwrap();
     {
         let s = p.session.lock().await;
-        assert!(!s.plan_mode);
-        assert!(s.plan_exited, "leaving plan mode queues the exit note");
+        assert!(!s.planning.plan_mode());
+        assert!(s.planning.exited, "leaving plan mode queues the exit note");
     }
 
     // Re-entering cancels a queued note (quick toggle must not tell the
     // model it both entered and exited).
-    p.set_mode(&session.id, "plan".to_string()).await.unwrap();
+    p.set_collaboration_mode(&session.id, CollaborationMode::Plan)
+        .await
+        .unwrap();
     {
         let s = p.session.lock().await;
-        assert!(s.plan_mode);
-        assert!(!s.plan_exited);
+        assert!(s.planning.plan_mode());
+        assert!(!s.planning.exited);
     }
 }
 
@@ -404,6 +485,7 @@ async fn new_session_replays_typed_resume_into_history() {
     let opts = SessionOptions {
         cwd: Some(dir.path().to_string_lossy().to_string()),
         mode: None,
+        collaboration_mode: None,
         resume: Some(agent_core::ResumeTranscript {
             truncated: false,
             items: vec![
@@ -600,6 +682,7 @@ async fn side_question_leaves_session_transcript_byte_identical() {
     p.new_session(SessionOptions {
         cwd: Some(dir.path().to_string_lossy().to_string()),
         mode: None,
+        collaboration_mode: None,
         resume: None,
     })
     .await
@@ -641,4 +724,71 @@ async fn side_question_leaves_session_transcript_byte_identical() {
         before, after,
         "side-question snapshot must not mutate transcript"
     );
+}
+
+#[tokio::test]
+async fn plan_decision_current_approves_without_erasing_research_context() {
+    use clark_agent::{AgentMessage, UserContent};
+
+    let mut provider = LocalAgentProvider::new();
+    let plan_id = {
+        let mut state = provider.session.lock().await;
+        state.planning.set_mode(CollaborationMode::Plan);
+        state.transcript.push(AgentMessage::User {
+            content: UserContent::Text("research context".into()),
+            timestamp: None,
+        });
+        state.planning.next_proposal("1. Implement it".into()).id
+    };
+    provider
+        .respond(
+            &SessionId::new("session"),
+            ClientResponse::PlanDecision {
+                plan_id,
+                decision: PlanDecision::Implement {
+                    context: agent_core::provider::PlanImplementationContext::Current,
+                },
+            },
+        )
+        .await
+        .unwrap();
+    let state = provider.session.lock().await;
+    assert_eq!(state.transcript.len(), 1);
+    assert_eq!(state.planning.mode, CollaborationMode::Default);
+    assert_eq!(
+        state.planning.proposed_plan.as_ref().unwrap().status,
+        agent_core::domain::ProposedPlanStatus::Approved
+    );
+}
+
+#[tokio::test]
+async fn plan_decision_fresh_discards_research_transcript_but_keeps_typed_plan() {
+    use clark_agent::{AgentMessage, UserContent};
+
+    let mut provider = LocalAgentProvider::new();
+    let plan_id = {
+        let mut state = provider.session.lock().await;
+        state.planning.set_mode(CollaborationMode::Plan);
+        state.transcript.push(AgentMessage::User {
+            content: UserContent::Text("large research transcript".into()),
+            timestamp: None,
+        });
+        state.planning.next_proposal("1. Implement it".into()).id
+    };
+    provider
+        .respond(
+            &SessionId::new("session"),
+            ClientResponse::PlanDecision {
+                plan_id,
+                decision: PlanDecision::Implement {
+                    context: agent_core::provider::PlanImplementationContext::Fresh,
+                },
+            },
+        )
+        .await
+        .unwrap();
+    let state = provider.session.lock().await;
+    assert!(state.transcript.is_empty());
+    assert!(state.planning.proposed_plan.is_some());
+    assert!(state.planning.exited);
 }

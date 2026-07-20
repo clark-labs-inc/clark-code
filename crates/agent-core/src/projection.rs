@@ -39,12 +39,20 @@ pub enum TimelineItem {
         run: Option<RunId>,
     },
     /// Reference into [`Snapshot::artifacts`] — rendered inline where produced.
-    Artifact { id: String },
-    Plan {
+    Artifact {
+        id: String,
+    },
+    ExecutionChecklist {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         run: Option<RunId>,
         #[serde(default)]
-        plan: Plan,
+        checklist: ExecutionChecklist,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        explanation: Option<String>,
+    },
+    ProposedPlan {
+        run: RunId,
+        plan: ProposedPlan,
     },
 }
 
@@ -58,7 +66,9 @@ pub struct Snapshot {
     pub timeline: Vec<TimelineItem>,
     pub tool_calls: IndexMap<ToolCallId, ToolCall>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub plan: Option<Plan>,
+    pub execution_checklist: Option<ExecutionChecklist>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proposed_plan: Option<ProposedPlan>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub goal: Option<GoalState>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -195,21 +205,45 @@ pub fn apply(snapshot: &mut Snapshot, event: &AgentEvent) {
             }
         }
 
-        AgentEvent::Plan { run, plan } => {
-            if let Some(TimelineItem::Plan {
+        AgentEvent::ExecutionChecklistUpdated {
+            run,
+            checklist,
+            explanation,
+        } => {
+            if let Some(TimelineItem::ExecutionChecklist {
+                checklist: existing_checklist,
+                explanation: existing_explanation,
+                ..
+            }) = snapshot.timeline.iter_mut().rev().find(|item| {
+                matches!(item, TimelineItem::ExecutionChecklist { run: Some(checklist_run), .. } if checklist_run == run)
+            }) {
+                *existing_checklist = checklist.clone();
+                *existing_explanation = explanation.clone();
+            } else {
+                snapshot.timeline.push(TimelineItem::ExecutionChecklist {
+                    run: Some(run.clone()),
+                    checklist: checklist.clone(),
+                    explanation: explanation.clone(),
+                });
+            }
+            snapshot.execution_checklist = Some(checklist.clone());
+        }
+
+        AgentEvent::ProposedPlanUpdated { run, plan } => {
+            if let Some(TimelineItem::ProposedPlan {
                 plan: existing_plan,
                 ..
             }) = snapshot.timeline.iter_mut().rev().find(|item| {
-                matches!(item, TimelineItem::Plan { run: Some(plan_run), .. } if plan_run == run)
+                matches!(item, TimelineItem::ProposedPlan { plan: existing, .. } if existing.id == plan.id)
             }) {
                 *existing_plan = plan.clone();
             } else {
-                snapshot.timeline.push(TimelineItem::Plan {
-                    run: Some(run.clone()),
+                snapshot.timeline.push(TimelineItem::ProposedPlan {
+                    run: run.clone(),
                     plan: plan.clone(),
                 });
             }
-            snapshot.plan = Some(plan.clone());
+            snapshot.proposed_plan = Some(plan.clone());
         }
 
         AgentEvent::GoalUpdated { run, goal } => {
@@ -818,69 +852,105 @@ mod tests {
 
     #[test]
     fn plan_pushes_one_timeline_marker_per_run_and_updates_in_place() {
-        let mk = |s: PlanPhaseStatus| AgentEvent::Plan {
+        let mk = |s: ChecklistStatus| AgentEvent::ExecutionChecklistUpdated {
             run: run(),
-            plan: Plan {
-                phases: vec![PlanPhase {
+            checklist: ExecutionChecklist {
+                steps: vec![ChecklistStep {
                     title: "step".into(),
                     status: s,
                     priority: None,
                 }],
+                revision: 1,
             },
+            explanation: None,
         };
-        let snap = reduce_all(&[mk(PlanPhaseStatus::Pending), mk(PlanPhaseStatus::Completed)]);
+        let snap = reduce_all(&[mk(ChecklistStatus::Pending), mk(ChecklistStatus::Completed)]);
         assert_eq!(
             snap.timeline
                 .iter()
-                .filter(|i| matches!(i, TimelineItem::Plan { .. }))
+                .filter(|i| matches!(i, TimelineItem::ExecutionChecklist { .. }))
                 .count(),
             1
         );
         match &snap.timeline[0] {
-            TimelineItem::Plan {
+            TimelineItem::ExecutionChecklist {
                 run: plan_run,
-                plan,
+                checklist,
+                ..
             } => {
                 assert_eq!(plan_run.as_ref(), Some(&run()));
-                assert_eq!(plan.phases[0].status, PlanPhaseStatus::Completed);
+                assert_eq!(checklist.steps[0].status, ChecklistStatus::Completed);
             }
             other => panic!("expected plan, got {other:?}"),
         }
         assert_eq!(
-            snap.plan.unwrap().phases[0].status,
-            PlanPhaseStatus::Completed
+            snap.execution_checklist.unwrap().steps[0].status,
+            ChecklistStatus::Completed
         );
 
         let run_two = RunId::new("run-2");
         let snap = reduce_all(&[
-            AgentEvent::Plan {
+            AgentEvent::ExecutionChecklistUpdated {
                 run: run(),
-                plan: Plan {
-                    phases: vec![PlanPhase {
+                checklist: ExecutionChecklist {
+                    steps: vec![ChecklistStep {
                         title: "first".into(),
-                        status: PlanPhaseStatus::Completed,
+                        status: ChecklistStatus::Completed,
                         priority: None,
                     }],
+                    revision: 1,
                 },
+                explanation: None,
             },
-            AgentEvent::Plan {
+            AgentEvent::ExecutionChecklistUpdated {
                 run: run_two,
-                plan: Plan {
-                    phases: vec![PlanPhase {
+                checklist: ExecutionChecklist {
+                    steps: vec![ChecklistStep {
                         title: "second".into(),
-                        status: PlanPhaseStatus::InProgress,
+                        status: ChecklistStatus::InProgress,
                         priority: None,
                     }],
+                    revision: 1,
                 },
+                explanation: None,
             },
         ]);
         assert_eq!(
             snap.timeline
                 .iter()
-                .filter(|i| matches!(i, TimelineItem::Plan { .. }))
+                .filter(|i| matches!(i, TimelineItem::ExecutionChecklist { .. }))
                 .count(),
             2
         );
+    }
+
+    #[test]
+    fn proposed_plan_revision_and_approval_update_one_durable_timeline_item() {
+        let proposal = |revision, status, markdown: &str| AgentEvent::ProposedPlanUpdated {
+            run: run(),
+            plan: ProposedPlan {
+                id: "proposal-1".into(),
+                revision,
+                markdown: markdown.into(),
+                status,
+            },
+        };
+        let snap = reduce_all(&[
+            proposal(1, ProposedPlanStatus::AwaitingDecision, "first"),
+            proposal(2, ProposedPlanStatus::AwaitingDecision, "revised"),
+            proposal(2, ProposedPlanStatus::Approved, "revised"),
+        ]);
+        assert_eq!(
+            snap.timeline
+                .iter()
+                .filter(|item| matches!(item, TimelineItem::ProposedPlan { .. }))
+                .count(),
+            1
+        );
+        let plan = snap.proposed_plan.expect("latest proposal");
+        assert_eq!(plan.revision, 2);
+        assert_eq!(plan.status, ProposedPlanStatus::Approved);
+        assert_eq!(plan.markdown, "revised");
     }
 
     #[test]
@@ -937,15 +1007,15 @@ mod tests {
     }
 
     #[test]
-    fn legacy_plan_timeline_item_deserializes() {
+    fn execution_checklist_timeline_item_deserializes() {
         let item: TimelineItem = serde_json::from_value(serde_json::json!({
-            "item": "plan"
+            "item": "execution_checklist"
         }))
         .unwrap();
         match item {
-            TimelineItem::Plan { run, plan } => {
+            TimelineItem::ExecutionChecklist { run, checklist, .. } => {
                 assert!(run.is_none());
-                assert!(plan.phases.is_empty());
+                assert!(checklist.steps.is_empty());
             }
             other => panic!("expected legacy plan item, got {other:?}"),
         }
@@ -992,9 +1062,19 @@ mod tests {
                     ..Default::default()
                 },
             },
-            AgentEvent::Plan {
+            AgentEvent::ExecutionChecklistUpdated {
                 run: run(),
-                plan: Plan::default(),
+                checklist: ExecutionChecklist::default(),
+                explanation: None,
+            },
+            AgentEvent::ProposedPlanUpdated {
+                run: run(),
+                plan: ProposedPlan {
+                    id: "plan-1".into(),
+                    revision: 1,
+                    markdown: "# Plan".into(),
+                    status: ProposedPlanStatus::AwaitingDecision,
+                },
             },
             AgentEvent::PermissionRequest {
                 request: PermissionRequest {

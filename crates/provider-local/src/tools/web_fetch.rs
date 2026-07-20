@@ -18,7 +18,7 @@ use futures::StreamExt;
 use serde_json::{json, Value};
 use tokio_util::sync::CancellationToken;
 
-use super::{arg_str, ToolCtx, ToolExecutor, ToolOutcome};
+use super::{arg_str, ToolCtx, ToolExecutor, ToolOutcome, ToolPermissionClass};
 use crate::config::AgenticClarkConfig;
 use crate::llm::LlmClient;
 
@@ -70,6 +70,9 @@ impl ToolExecutor for WebFetchTool {
     }
     fn kind(&self) -> ToolKind {
         ToolKind::Fetch
+    }
+    fn permission_class(&self) -> ToolPermissionClass {
+        ToolPermissionClass::External
     }
     async fn invoke(&self, args: Value, ctx: &ToolCtx) -> ToolOutcome {
         let url = match arg_str(&args, "url") {

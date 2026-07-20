@@ -28,6 +28,9 @@ tauri-plugin-shell = "2"
 # Fast, interactive in-app terminal: a real PTY (colors, resize, interactive
 # programs) streamed to an xterm.js view in the chat.
 portable-pty = "0.9"
+exec-core = { path = "../crates/exec-core" }
+exec-sandbox = { path = "../crates/exec-sandbox" }
+exec-sandbox-windows = { path = "../crates/exec-sandbox-windows" }
 base64 = "0.22"
 # Native folder picker for selecting the local coding project root.
 tauri-plugin-dialog = "2"
@@ -37,6 +40,9 @@ tauri-plugin-notification = "2"
 # Secure in-app auto-update: checks a signed manifest on the downloads CDN,
 # verifies the Ed25519 signature, swaps the bundle, and relaunches.
 tauri-plugin-updater = "2"
+# Tauri's updater owns a separate Reqwest 0.13 client. Enable its optional
+# HTTP/2 stack here so Cargo unifies the feature into that client as well.
+reqwest-updater = { package = "reqwest", version = "0.13.4", default-features = false, features = ["http2"] }
 tauri-plugin-process = "2"
 # Native Google sign-in (system browser + localhost loopback). Returns a Google
 # ID token we exchange with Clark's Better Auth backend.
@@ -46,7 +52,7 @@ tauri-plugin-google-auth = "0.5"
 # tab in their browser.
 tauri-plugin-deep-link = "2"
 # Server-to-server token exchange against Clark's auth API (no browser CORS).
-reqwest = { version = "0.12", default-features = false, features = ["json", "cookies", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["http2", "json", "cookies", "rustls-tls"] }
 # Percent-encode desktop conversation ids in REST sync URLs.
 urlencoding = "2"
 # Ids for live remote-project connections + capability tokens (SSH orchestration).

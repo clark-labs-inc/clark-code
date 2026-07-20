@@ -395,7 +395,7 @@ fn acp_harness(
     root: &str,
     workspace: Arc<dyn agent_orchestration::WorkspaceGuard>,
 ) -> Result<agent_orchestration::ProviderHarness, String> {
-    let command = os_read_only_command(&acp.command)?;
+    let command = os_read_only_command(&acp.command, root)?;
     provider_acp::read_only_harness(
         agent_orchestration::ProviderHarnessConfig {
             id: acp.id.clone(),
@@ -415,23 +415,22 @@ fn acp_harness(
     )
 }
 
-fn os_read_only_command(command: &[String]) -> Result<Vec<String>, String> {
-    #[cfg(target_os = "macos")]
-    {
-        let mut wrapped = vec![
-            "/usr/bin/sandbox-exec".to_string(),
-            "-p".to_string(),
-            "(version 1) (allow default) (deny file-write*)".to_string(),
-            "--".to_string(),
-        ];
-        wrapped.extend(command.iter().cloned());
-        Ok(wrapped)
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        let _ = command;
-        Err("ACP read-only orchestration currently requires the macOS sandbox adapter".to_string())
-    }
+fn os_read_only_command(command: &[String], root: &str) -> Result<Vec<String>, String> {
+    let (program, args) = command
+        .split_first()
+        .ok_or_else(|| "ACP sandbox command is empty".to_string())?;
+    let policy = exec_sandbox::SandboxPolicy::read_only();
+    let manager = exec_sandbox::SandboxManager::current(policy)?;
+    let process = manager
+        .prepare_process(exec_core::ProcessSpec::argv(program, root).args(args.iter().cloned()))?;
+    let mut wrapped = vec![process.program.to_string_lossy().into_owned()];
+    wrapped.extend(
+        process
+            .args
+            .into_iter()
+            .map(|part| part.to_string_lossy().into_owned()),
+    );
+    Ok(wrapped)
 }
 
 #[cfg(test)]

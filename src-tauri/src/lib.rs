@@ -5,7 +5,7 @@
 //! (`invoke`) and events (`emit`): provider discovery, the command surface, the
 //! live ACP provider, and snapshot streaming.
 
-use agent_core::ProviderCapabilities;
+use agent_core::{CollaborationMode, ProviderCapabilities};
 use serde::Serialize;
 use tauri::Manager;
 use tauri_plugin_deep_link::DeepLinkExt;
@@ -14,6 +14,7 @@ mod commands;
 mod mobile_remote;
 mod project_context;
 mod project_worktree;
+mod sandbox_setup;
 // Public so the gated `tests/remote_e2e.rs` harness can drive the real
 // orchestration against a live host; otherwise host-internal.
 pub mod ssh;
@@ -47,6 +48,7 @@ pub fn builtin_providers() -> Vec<ProviderInfo> {
             terminal: true,
             load_session: false,
             modes: Vec::new(),
+            collaboration_modes: vec![CollaborationMode::Default, CollaborationMode::Plan],
         },
     }]
 }
@@ -126,7 +128,10 @@ pub fn run() {
             commands::cancel,
             commands::respond,
             commands::set_mode,
+            commands::set_collaboration_mode,
             commands::set_output_style,
+            sandbox_setup::local_sandbox_status,
+            sandbox_setup::local_sandbox_setup,
             commands::side_question,
             commands::local_list_memory,
             commands::local_list_global_memory,

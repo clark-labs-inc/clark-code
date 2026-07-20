@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "Runtime discovery for tools shipped beside Clark Code."
+description = "Runtime discovery for Clark Code's public tools and private resources."
 
 [dev-dependencies]
 tempfile = "3"

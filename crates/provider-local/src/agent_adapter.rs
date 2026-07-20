@@ -1,4 +1,5 @@
 mod event_sink;
+mod tool_title;
 mod translate;
 
 use std::sync::Arc;
@@ -19,8 +20,9 @@ use crate::llm::LlmClient;
 use crate::llm::{ChatContent, ContentPart};
 use crate::loop_state::{RunControl, SessionState};
 use crate::permissions::{PermissionGate, PermissionOutcome};
-use crate::tools::{ProducedArtifact, ToolCtx, ToolExecutor, ToolRegistry};
+use crate::tools::{ProducedArtifact, ToolCtx, ToolExecutor, ToolRegistry, ToolSignal};
 
+use tool_title::tool_title;
 use translate::*;
 
 pub(crate) use event_sink::DesktopEventSink;
@@ -220,9 +222,8 @@ struct DesktopToolAdapter {
     exec: Arc<dyn ToolExecutor>,
     ctx: ToolCtx,
     gate: PermissionGate,
-    /// Needed so `update_plan` calls can emit a synthetic `AgentEvent::Plan`
-    /// (that tool isn't part of `ca::AgentEvent`, so it can't ride the normal
-    /// `DesktopEventSink` translation path).
+    /// Typed tool effects are normalized against the active run here because
+    /// they are provider-local outcomes, not `clark-agent` stream events.
     run: RunId,
     events: Sender<desktop::AgentEvent>,
     image_policy: ToolImagePolicy,
@@ -254,16 +255,6 @@ impl ca::AgentTool for DesktopToolAdapter {
         update: ca::ToolUpdateSink,
     ) -> Result<ca::ToolResult, ca::ToolError> {
         let tool_id = ToolCallId::new(call_id.to_string());
-
-        // `update_plan` is an execution-progress checklist; Plan Mode is a
-        // separate read-only research phase. It's non-mutating so it never
-        // reaches the gate below, hence this dedicated check.
-        if self.exec.name() == "update_plan" && self.gate.plan_mode_active().await {
-            return Ok(ca::ToolResult::error(
-                "update_plan is a checklist tool for the implementation phase — you're in Plan \
-                mode; write your plan and call propose_plan instead.",
-            ));
-        }
 
         let mut args = match args {
             Value::Null => json!({}),
@@ -312,7 +303,6 @@ impl ca::AgentTool for DesktopToolAdapter {
             return Err(ca::ToolError::Aborted);
         }
 
-        let update_plan_args = (self.exec.name() == "update_plan").then(|| args.clone());
         // Hand the tool a live-progress sink: each reported delta rides the
         // engine's update channel out as `ToolExecutionUpdate`, which the UI
         // shows on the in-flight tool row (streamed shell output, grep progress).
@@ -332,35 +322,29 @@ impl ca::AgentTool for DesktopToolAdapter {
         }));
         let mut outcome = self.exec.invoke(args.clone(), &call_ctx).await;
         if !outcome.is_error {
-            if let Some(raw) = update_plan_args {
-                if let Some(plan) = parse_update_plan(&raw) {
-                    let _ = self
-                        .events
-                        .send(desktop::AgentEvent::Plan {
-                            run: self.run.clone(),
-                            plan,
-                        })
-                        .await;
-                }
-            }
-            if matches!(self.exec.name(), "create_goal" | "update_goal") {
-                let state = self
-                    .ctx
-                    .session
-                    .lock()
-                    .await
-                    .goal
-                    .as_ref()
-                    .map(|goal| goal.state(Some(&self.run)));
-                if let Some(goal) = state {
-                    let _ = self
-                        .events
-                        .send(desktop::AgentEvent::GoalUpdated {
+            for signal in std::mem::take(&mut outcome.signals) {
+                let event = match signal {
+                    ToolSignal::ExecutionChecklist {
+                        checklist,
+                        explanation,
+                    } => desktop::AgentEvent::ExecutionChecklistUpdated {
+                        run: self.run.clone(),
+                        checklist,
+                        explanation,
+                    },
+                    ToolSignal::ProposedPlan(plan) => desktop::AgentEvent::ProposedPlanUpdated {
+                        run: self.run.clone(),
+                        plan,
+                    },
+                    ToolSignal::Goal(mut goal) => {
+                        goal.run = Some(self.run.clone());
+                        desktop::AgentEvent::GoalUpdated {
                             run: self.run.clone(),
                             goal,
-                        })
-                        .await;
-                }
+                        }
+                    }
+                };
+                let _ = self.events.send(event).await;
             }
         }
 
@@ -461,31 +445,6 @@ fn produced_artifact_to_desktop(
         uri: artifact.uri.clone(),
         tool_call: Some(tool_call.clone()),
     }
-}
-
-/// Parse an `update_plan` call's `{plan: [{step, status}]}` args into the
-/// normalized `desktop::Plan` the projection layer already understands (it's
-/// the same shape ACP's `plan` session/update and Clark's execution-plan
-/// events already produce — see `provider-acp`/`provider-clark` translate.rs).
-fn parse_update_plan(args: &Value) -> Option<desktop::Plan> {
-    let items = args.get("plan")?.as_array()?;
-    let phases = items
-        .iter()
-        .filter_map(|item| {
-            let title = item.get("step")?.as_str()?.to_string();
-            let status = match item.get("status").and_then(Value::as_str).unwrap_or("") {
-                "in_progress" => desktop::PlanPhaseStatus::InProgress,
-                "completed" => desktop::PlanPhaseStatus::Completed,
-                _ => desktop::PlanPhaseStatus::Pending,
-            };
-            Some(desktop::PlanPhase {
-                title,
-                status,
-                priority: None,
-            })
-        })
-        .collect();
-    Some(desktop::Plan { phases })
 }
 
 #[cfg(test)]

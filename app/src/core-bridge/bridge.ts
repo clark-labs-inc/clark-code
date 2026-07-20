@@ -13,6 +13,7 @@ import type {
   ContentBlock,
   ResumeTranscript,
   MemoryOverview,
+  CollaborationMode,
 } from "./types";
 import type { Upload } from "../lib/attachments";
 
@@ -29,6 +30,7 @@ export interface ConnectConfig {
 export interface SessionOptions {
   cwd?: string;
   mode?: string;
+  collaboration_mode?: CollaborationMode;
   /** Typed transcript replay for providers without server-side resume. */
   resume?: ResumeTranscript;
 }
@@ -51,6 +53,31 @@ export interface ProjectContext {
   detached: boolean;
   isWorktree: boolean;
   worktreeRoot: string;
+  activity: ProjectActivity;
+}
+
+export interface ProjectActivity {
+  changedFiles: number;
+  untrackedFiles: number;
+  conflictedFiles: number;
+  externalAgents: ExternalAgentActivity[];
+  detectedAtMs: number;
+}
+
+export interface ExternalAgentActivity {
+  id: string;
+  title: string;
+  agentNickname?: string | null;
+  updatedAtMs: number;
+}
+
+export type LocalSandboxState = "enforced" | "setup_required" | "unavailable";
+
+export interface LocalSandboxStatus {
+  state: LocalSandboxState;
+  backend: "macos_seatbelt" | "linux_bubblewrap" | "windows_restricted_token";
+  reason?: string | null;
+  setup_available: boolean;
 }
 
 export interface CoreBridge {
@@ -96,6 +123,8 @@ export interface CoreBridge {
    *  "plan"). Not every bridge/provider supports this — callers should treat
    *  a rejected promise as a silent no-op. */
   setMode?(sessionId: string, mode: string): Promise<void>;
+  /** Switch read-only planning independently of provider-native modes and approvals. */
+  setCollaborationMode?(sessionId: string, mode: CollaborationMode): Promise<void>;
   /** Best-effort: switch the session's output style (see `lib/outputStyle.ts`). */
   setOutputStyle?(sessionId: string, style: string): Promise<void>;
   /** `/btw` — answer a one-off side question against the session's current
@@ -124,6 +153,10 @@ export interface CoreBridge {
   openPath?(path: string, reveal?: boolean): Promise<void>;
   /** Create a named, sibling Git worktree and return its absolute path. */
   createPermanentWorktree?(projectPath: string, name: string): Promise<string>;
+  /** Inspect the platform sandbox without prompting or changing privilege. */
+  localSandboxStatus?(cwd: string): Promise<LocalSandboxStatus>;
+  /** Run the explicit, product-owned setup flow (UAC on Windows). */
+  setupLocalSandbox?(cwd: string): Promise<LocalSandboxStatus>;
 }
 
 export interface RemoteExecutorTarget {

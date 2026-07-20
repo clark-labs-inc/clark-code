@@ -271,6 +271,7 @@ impl Provider for ClarkProvider {
             terminal: false,
             load_session: true,
             modes: vec!["clark".into(), "clark_max".into()],
+            collaboration_modes: Vec::new(),
         }
     }
 
@@ -348,6 +349,7 @@ impl Provider for ClarkProvider {
             provider: self.id(),
             capabilities: self.capabilities(),
             mode: Some(self.tier_id.clone()),
+            collaboration_mode: agent_core::provider::CollaborationMode::Default,
             environment: None,
         })
     }
@@ -374,6 +376,7 @@ impl Provider for ClarkProvider {
             provider: self.id(),
             capabilities: self.capabilities(),
             mode: Some(self.tier_id.clone()),
+            collaboration_mode: agent_core::provider::CollaborationMode::Default,
             environment: None,
         })
     }
@@ -530,6 +533,9 @@ impl Provider for ClarkProvider {
                     .await?;
                 Ok(())
             }
+            ClientResponse::PlanDecision { .. } => Err(Error::Unsupported(
+                "Clark provider does not expose host-owned plan proposals".into(),
+            )),
         }
     }
 }

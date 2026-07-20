@@ -13,7 +13,9 @@ const session: Session = {
     terminal: true,
     load_session: false,
     modes: [],
+    collaboration_modes: ["default", "plan"],
   },
+  collaboration_mode: "default",
   environment: {
     checkout_root: "/tmp/project",
     workspace_roots: ["/tmp/project"],
@@ -58,7 +60,7 @@ beforeEach(() => {
     activeRemote: null,
     activeRemoteHost: null,
     activeProjectRoot: null,
-    permissionMode: "auto",
+    approvalPolicy: "auto",
   });
 });
 

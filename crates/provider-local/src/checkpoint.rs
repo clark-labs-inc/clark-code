@@ -44,10 +44,14 @@ async fn remove_temp_index(exec: &dyn Executor, root: &Path, index: &Path) {
     // A linked worktree's Git dir can live outside the checkout root. Remote
     // filesystem RPCs are correctly root-confined, so clean this trusted,
     // Git-derived temporary path through the target shell instead.
-    let command = format!(
-        "rm -f -- {}",
-        crate::git_metadata::shell_word(&index.to_string_lossy())
-    );
+    let path = crate::git_metadata::shell_word(&index.to_string_lossy());
+    let command = match exec_core::scripted_shell_kind() {
+        exec_core::ShellKind::Posix => format!("rm -f -- {path}"),
+        exec_core::ShellKind::PowerShell => {
+            format!("Remove-Item -LiteralPath {path} -Force -ErrorAction SilentlyContinue")
+        }
+        exec_core::ShellKind::Cmd => format!("del /F /Q {path}"),
+    };
     let _ = exec
         .exec(
             &command,

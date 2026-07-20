@@ -35,12 +35,20 @@ describe("MockBridge", () => {
   it("exposes checkout context for the browser preview", async () => {
     const context = await new MockBridge().projectContext("/tmp/clark-desktop");
 
-    expect(context).toEqual({
+    expect(context).toEqual(expect.objectContaining({
       branch: "main",
       detached: false,
       isWorktree: false,
       worktreeRoot: "/tmp/clark-desktop",
-    });
+      activity: expect.objectContaining({
+        changedFiles: 2,
+        untrackedFiles: 1,
+        conflictedFiles: 0,
+        externalAgents: expect.arrayContaining([
+          expect.objectContaining({ id: "codex-preview" }),
+        ]),
+      }),
+    }));
   });
 
   it("produces a streaming run with user + agent messages, a tool call and a plan", async () => {
@@ -60,13 +68,13 @@ describe("MockBridge", () => {
     expect(roles).toContain("agent");
 
     expect(done.timeline.some((t) => t.item === "tool_call")).toBe(true);
-    expect(done.timeline.some((t) => t.item === "plan")).toBe(true);
+    expect(done.timeline.some((t) => t.item === "execution_checklist")).toBe(true);
     expect(Object.keys(done.tool_calls).length).toBeGreaterThan(0);
 
     // Plan markers are de-duplicated to a single timeline entry.
-    const plans = done.timeline.filter((t) => t.item === "plan");
+    const plans = done.timeline.filter((t) => t.item === "execution_checklist");
     expect(plans.length).toBe(1);
-    expect(plans[0].item === "plan" ? plans[0].plan?.phases.length : 0).toBe(2);
+    expect(plans[0].item === "execution_checklist" ? plans[0].checklist?.steps.length : 0).toBe(2);
   });
 
   it("clears the permission gate when resolved", async () => {
@@ -190,7 +198,7 @@ describe("MockBridge", () => {
       role: "user",
       blocks: [{ type: "text", text: steer }],
     }));
-    expect(changed.plan?.phases).toEqual([
+    expect(changed.execution_checklist?.steps).toEqual([
       expect.objectContaining({ title: "Prioritize accessibility and keyboard-navigation verification", status: "completed" }),
       expect.objectContaining({ title: "Verify the revised goal trajectory", status: "in_progress" }),
     ]);

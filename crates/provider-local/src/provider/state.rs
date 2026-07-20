@@ -21,6 +21,7 @@ impl LocalAgentProvider {
             run_counter: AtomicU64::new(0),
             mcp_status: Vec::new(),
             repository_fingerprint: None,
+            sandbox_temp: None,
         }
     }
 

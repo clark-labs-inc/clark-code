@@ -30,9 +30,14 @@ export function ProjectHeader({
   group: ProjectGroup;
   menuOpen: boolean;
   onOpenMenu: (button: HTMLButtonElement) => void;
-  onNewSession: (path: string) => void;
+  onNewSession: () => void;
 }) {
   const Icon = group.kind === "remote" ? Server : group.kind === "local" ? FolderGit2 : MessageSquare;
+  const canStartSession = Boolean(group.path || group.remoteHost);
+  const newSessionLabel =
+    group.kind === "remote"
+      ? `New session on ${group.label}`
+      : `New session in ${group.label}`;
   return (
     <div
       title={group.title}
@@ -40,6 +45,20 @@ export function ProjectHeader({
     >
       <Icon className="size-3.5 shrink-0 text-ink-muted" />
       <span className="min-w-0 flex-1 truncate">{group.label}</span>
+      {canStartSession && (
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            onNewSession();
+          }}
+          title={newSessionLabel}
+          aria-label={newSessionLabel}
+          className="grid size-5 shrink-0 place-items-center rounded-md text-ink-faint opacity-0 transition hover:bg-bg-sunken hover:text-ink group-hover:opacity-100 group-focus-within:opacity-100"
+        >
+          <SquarePen className="size-3.5" />
+        </button>
+      )}
       {group.kind !== "none" && (
         <button
           type="button"
@@ -56,17 +75,6 @@ export function ProjectHeader({
           }`}
         >
           <MoreHorizontal className="size-3.5" />
-        </button>
-      )}
-      {group.path && (
-        <button
-          type="button"
-          onClick={() => onNewSession(group.path!)}
-          title={`New session in ${group.label}`}
-          aria-label={`New session in ${group.label}`}
-          className="grid size-5 shrink-0 place-items-center rounded-md text-ink-faint opacity-0 transition hover:bg-bg-sunken hover:text-ink group-hover:opacity-100 group-focus-within:opacity-100"
-        >
-          <SquarePen className="size-3.5" />
         </button>
       )}
     </div>

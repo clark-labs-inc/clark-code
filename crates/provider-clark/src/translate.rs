@@ -37,7 +37,7 @@ fn tool_kind(tool_name: &str, action: Option<&str>) -> ToolKind {
     if n == "generate_image" || n.contains("image_generation") {
         return ToolKind::GenerateImage;
     }
-    if n.contains("browser") {
+    if n.contains("browser") || n.contains("fetch") {
         return ToolKind::Fetch;
     }
     if n.contains("search") {
@@ -74,11 +74,11 @@ fn tool_kind(tool_name: &str, action: Option<&str>) -> ToolKind {
 /// (paths / queries / urls — the user's own content). It never references the
 /// backend's internal tool name; those identifiers must not leak into the UI.
 fn tool_title(kind: ToolKind, action: Option<&str>, args: &Value) -> String {
-    let target = s(args, "path")
+    let target = non_empty(s(args, "path"))
         .map(basename)
-        .or_else(|| s(args, "name"))
-        .or_else(|| s(args, "title"))
-        .or_else(|| s(args, "slug"));
+        .or_else(|| non_empty(s(args, "name")))
+        .or_else(|| non_empty(s(args, "title")))
+        .or_else(|| non_empty(s(args, "slug")));
     let with = |verb: &str, fallback: &str| match target {
         Some(t) => format!("{verb} {t}"),
         None => fallback.to_string(),
@@ -95,21 +95,21 @@ fn tool_title(kind: ToolKind, action: Option<&str>, args: &Value) -> String {
         }
         ToolKind::Delete => with("Delete", "Deleting a file"),
         ToolKind::Move => with("Move", "Moving a file"),
-        ToolKind::Search => s(args, "query")
-            .or_else(|| s(args, "q"))
+        ToolKind::Search => non_empty(s(args, "query"))
+            .or_else(|| non_empty(s(args, "q")))
             .map(|q| format!("Search \u{201c}{q}\u{201d}"))
             .unwrap_or_else(|| "Searching the web".into()),
-        ToolKind::Fetch => s(args, "url")
-            .or_else(|| s(args, "href"))
-            .map(str::to_string)
-            .unwrap_or_else(|| "Working on the web".into()),
-        ToolKind::Execute => s(args, "command")
-            .or_else(|| s(args, "cmd"))
-            .or_else(|| s(args, "script"))
+        ToolKind::Fetch => non_empty(s(args, "url"))
+            .or_else(|| non_empty(s(args, "href")))
+            .map(|url| format!("Read {url}"))
+            .unwrap_or_else(|| "Reading a web page".into()),
+        ToolKind::Execute => non_empty(s(args, "command"))
+            .or_else(|| non_empty(s(args, "cmd")))
+            .or_else(|| non_empty(s(args, "script")))
             .map(str::to_string)
             .unwrap_or_else(|| "Running a command".into()),
         ToolKind::Think => "Thinking".into(),
-        ToolKind::Research => s(args, "query")
+        ToolKind::Research => non_empty(s(args, "query"))
             .map(|q| format!("Researching \u{201c}{q}\u{201d}"))
             .unwrap_or_else(|| "Researching".into()),
         ToolKind::ViewImage => with("Viewed", "Viewing an image"),
@@ -121,8 +121,13 @@ fn tool_title(kind: ToolKind, action: Option<&str>, args: &Value) -> String {
 }
 
 /// A backend-provided, user-facing label if present. Explicitly excludes the
-/// internal `tool_name`; only fields meant for display are consulted.
-fn public_label(data: &Value) -> Option<String> {
+/// internal `tool_name`; only fields meant for display are consulted, and a
+/// malformed display field that merely repeats that identifier is rejected.
+fn public_label(data: &Value, tool_name: &str) -> Option<String> {
+    let normalized_tool_name = tool_name
+        .trim()
+        .to_ascii_lowercase()
+        .replace(['_', '-'], " ");
     [
         "public_activity_label",
         "activity_label",
@@ -131,15 +136,18 @@ fn public_label(data: &Value) -> Option<String> {
     ]
     .iter()
     .filter_map(|k| s(data, k))
-    .find(|v| !v.trim().is_empty())
+    .map(str::trim)
+    .find(|v| {
+        !v.is_empty() && v.to_ascii_lowercase().replace(['_', '-'], " ") != normalized_tool_name
+    })
     .map(str::to_string)
 }
 
-fn plan_status(status: Option<&str>) -> PlanPhaseStatus {
+fn plan_status(status: Option<&str>) -> ChecklistStatus {
     match status.unwrap_or("") {
-        "running" | "in_progress" | "active" => PlanPhaseStatus::InProgress,
-        "completed" | "done" | "complete" => PlanPhaseStatus::Completed,
-        _ => PlanPhaseStatus::Pending,
+        "running" | "in_progress" | "active" => ChecklistStatus::InProgress,
+        "completed" | "done" | "complete" => ChecklistStatus::Completed,
+        _ => ChecklistStatus::Pending,
     }
 }
 
@@ -434,7 +442,7 @@ pub fn event_to_agent(event: &Value, run: &RunId, session: &SessionId) -> Option
             let kind = tool_kind(name, action);
             // Prefer a backend public label; otherwise derive from kind + args.
             // The raw tool name is used only to pick an icon kind, never shown.
-            let title = public_label(d).unwrap_or_else(|| tool_title(kind, action, &args));
+            let title = public_label(d, name).unwrap_or_else(|| tool_title(kind, action, &args));
             Some(AgentEvent::ToolCall {
                 run: run.clone(),
                 call: ToolCall {
@@ -541,19 +549,20 @@ pub fn event_to_agent(event: &Value, run: &RunId, session: &SessionId) -> Option
         }
 
         "execution_plan_committed" | "execution_plan_provisional" => {
-            let phases = data?
+            let steps = data?
                 .get("phases")?
                 .as_array()?
                 .iter()
-                .map(|p| PlanPhase {
+                .map(|p| ChecklistStep {
                     title: s(p, "title").unwrap_or_default().to_string(),
                     status: plan_status(s(p, "status")),
                     priority: None,
                 })
                 .collect();
-            Some(AgentEvent::Plan {
+            Some(AgentEvent::ExecutionChecklistUpdated {
                 run: run.clone(),
-                plan: Plan { phases },
+                checklist: ExecutionChecklist { steps, revision: 0 },
+                explanation: None,
             })
         }
 
@@ -794,10 +803,10 @@ mod tests {
             ]}
         });
         match event_to_agent(&ev, &run(), &sess()).unwrap() {
-            AgentEvent::Plan { plan, .. } => {
-                assert_eq!(plan.phases.len(), 2);
-                assert_eq!(plan.phases[0].status, PlanPhaseStatus::InProgress);
-                assert_eq!(plan.phases[1].status, PlanPhaseStatus::Pending);
+            AgentEvent::ExecutionChecklistUpdated { checklist, .. } => {
+                assert_eq!(checklist.steps.len(), 2);
+                assert_eq!(checklist.steps[0].status, ChecklistStatus::InProgress);
+                assert_eq!(checklist.steps[1].status, ChecklistStatus::Pending);
             }
             other => panic!("got {other:?}"),
         }
@@ -997,6 +1006,24 @@ mod tests {
                     "leaked: {}",
                     call.title
                 );
+            }
+            other => panic!("got {other:?}"),
+        }
+        // `web_fetch` is a page read, even if a malformed public label repeats
+        // its internal identifier. An empty URL still gets a meaningful label.
+        let fetch = json!({"type":"tool_call","data":{"tool_call_id":"z","tool_name":"web_fetch","public_activity_label":"web_fetch","arguments":{"url":"https://example.com/docs"}}});
+        match event_to_agent(&fetch, &run(), &sess()).unwrap() {
+            AgentEvent::ToolCall { call, .. } => {
+                assert_eq!(call.kind, ToolKind::Fetch);
+                assert_eq!(call.title, "Read https://example.com/docs");
+            }
+            other => panic!("got {other:?}"),
+        }
+        let untargeted_fetch = json!({"type":"tool_call","data":{"tool_call_id":"z2","tool_name":"web_fetch","activity_label":"Web fetch","arguments":{"url":"  "}}});
+        match event_to_agent(&untargeted_fetch, &run(), &sess()).unwrap() {
+            AgentEvent::ToolCall { call, .. } => {
+                assert_eq!(call.kind, ToolKind::Fetch);
+                assert_eq!(call.title, "Reading a web page");
             }
             other => panic!("got {other:?}"),
         }

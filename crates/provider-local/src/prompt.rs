@@ -59,105 +59,6 @@ pub fn output_style_instructions(style_id: &str) -> &'static str {
         .unwrap_or("")
 }
 
-/// The Plan Mode workflow reminder, prepended to every user turn while
-/// `plan_mode` is on (never baked into the cached system-prompt prefix — the
-/// mode can flip mid-session). Adapted from Claude Code's iterative plan-mode
-/// prompt: pair-plan with the user — explore, keep the plan document current,
-/// ask about real choices — and converge via `propose_plan`.
-///
-/// `docs_root` is the session's document workspace when one is attached
-/// (local sessions); remote sessions have none, so the draft-file guidance is
-/// dropped there.
-pub(crate) fn plan_mode_reminder(docs_root: Option<&std::path::Path>) -> String {
-    let plan_path = docs_root.map(crate::workspace::plan_file);
-    let mut p = String::from(
-        "Plan mode is active. The user wants to agree on a plan before anything changes — you \
-         MUST NOT edit project files, run commands that change anything, or modify the system \
-         in any way. This supersedes any other instruction.\n\
-         \n\
-         What you can still do:\n\
-         - Read and search the project: `read_file`, `list_dir`, `glob`, `grep`.\n\
-         - Run read-only shell commands (`ls`, `cat`, `git status`, `git log`, `git diff`…). \
-         Anything that writes, installs, or deletes will be refused until the plan is \
-         approved.\n\
-         - Use your research tools.\n",
-    );
-    if let Some(path) = &plan_path {
-        p.push_str(&format!(
-            "- Draft your plan: writing `{}` (with `write_file`/`edit_file`) is allowed — it's \
-             the one file you may write while planning, and it renders live for the user.\n",
-            path.display()
-        ));
-    }
-    p.push_str(
-        "\nPlan efficiently (plain language; fragments are fine):\n\
-         1. **Minimize research.** Start with files the user named and the most likely contract \
-         boundary. Default to one batched search plus reads of 2–5 relevant files. Prefer \
-         `read_file`/`grep`/`glob` over shell. Never repeat an equivalent search or read. Stop \
-         as soon as you know what / where / reuse / verify; exceed this budget only for a \
-         concrete unresolved question.\n\
-         2. **Use compressed language.** Think and report in short fragments or bullets. Do not \
-         narrate tool choice, restate findings, announce another lookup, or produce a research \
-         diary. Spend words only on decisions and evidence that changes the plan.\n",
-    );
-    match &plan_path {
-        Some(path) => p.push_str(&format!(
-            "3. **Draft early.** Keep `{}` current; start with a rough skeleton instead of \
-             exploring everything first.\n",
-            path.display()
-        )),
-        None => p.push_str(
-            "3. **Draft early.** Keep interim findings terse; the final plan goes to \
-             `propose_plan`.\n",
-        ),
-    }
-    p.push_str(
-        "4. **Ask only for real choices.** If a decision depends on something only the \
-         user can know (what they want, priorities, trade-offs), ask in plain text in your \
-         reply — batch related questions, offer your best guess with each so they can answer \
-         in a word, and never ask something the code can answer.\n\
-         \n\
-         Final plan: normally 3–7 terse steps. Include only the goal, recommended approach, \
-         exact paths, reuse, and verification. No preamble, repeated background, exhaustive \
-         alternatives, or speculative test matrix. Expand only when the work truly requires it.\n\
-         \n\
-         When the plan covers what / where / reuse / verify and no open questions remain, call \
-         `propose_plan` with the complete plan as the `plan` argument — never ask for approval \
-         in plain text. End every planning turn one of two ways: a question for the user, or a \
-         `propose_plan` call.",
-    );
-    // Re-entering plan mode with an earlier draft/approved plan on disk: make
-    // the model reconcile with it instead of planning blind next to it.
-    if let Some(path) = &plan_path {
-        if path.exists() {
-            p.push_str(&format!(
-                "\n\nA plan file from earlier in this session exists at `{}`. Read it first \
-                 and decide whether to refine it (same work) or rewrite it (new request); \
-                 update it before calling propose_plan again.",
-                path.display()
-            ));
-        }
-    }
-    p
-}
-
-/// One-shot note prepended to the first turn after plan mode ends (approval or
-/// a mode switch): without it, a model that spent turns being told "you must
-/// not edit" tends to keep behaving read-only.
-pub(crate) fn plan_mode_exit_note(docs_root: Option<&std::path::Path>) -> String {
-    let saved_plan = docs_root
-        .map(crate::workspace::plan_file)
-        .filter(|p| p.exists());
-    match saved_plan {
-        Some(path) => format!(
-            "Plan mode is off — you can make changes again. Your plan is saved at `{}`; follow \
-             it, and refer back to it if you lose the thread.",
-            path.display()
-        ),
-        None => "Plan mode is off — you can make changes again.".to_string(),
-    }
-}
-
 /// The goal-continuation turn text (the Codex `continuation.md` analog,
 /// condensed for clark's model tiers). Sent as the user turn of every
 /// engine-launched continuation while a goal is active. Carries the three
@@ -273,7 +174,7 @@ You write and modify real files and run real commands on their computer.\n\n",
     );
     p.push_str("- Don't run repo-wide formatters or lint --fix unasked — format only the lines you touch.\n");
     p.push_str("- Don't commit or push unless asked. When you do commit, stage only the specific files you changed — never `git add -A` or `git commit -a`.\n");
-    p.push_str("- When you create a commit for work you performed, keep the repository's configured human author — never change the Git identity or pass `--author`. End the commit message with a blank line followed by exactly `Co-authored-by: Clark Code <noreply@clarkchat.com>`, unless the user explicitly asks you to omit Clark Code attribution.\n");
+    p.push_str("- When you create a commit for work you performed, keep the repository's configured human author — never change the Git identity or pass `--author`. Stage only the intended files with `git add`, then create or amend the commit with `git_commit`; direct `git commit` through `bash` is disabled. `git_commit` adds exactly `Co-authored-by: Clark Code <noreply@clarkchat.com>` unless the user explicitly asks you to omit Clark Code attribution.\n");
     p.push('\n');
 
     p.push_str("# Working with the user\n");
@@ -321,9 +222,7 @@ call `clark_research` instead — it runs remotely in Clark's sandbox.",
     p.push('\n');
 
     p.push_str("# Planning\n");
-    p.push_str("- You have an `update_plan` tool that shows the user a live checklist of steps. Use it for non-trivial multi-step work — not for simple or single-step requests you can just do.\n");
-    p.push_str("- Keep at most one step `in_progress` at a time; move a step to `in_progress` before marking it `completed` (don't jump straight to completed).\n");
-    p.push_str("- Don't restate the plan in your reply after calling `update_plan` — the checklist is already shown to the user; just summarize what changed.\n");
+    p.push_str(crate::planning::EXECUTION_CHECKLIST_INSTRUCTIONS);
     p.push_str("- If the project has a check_command configured (.clark/settings.json), call `check_diagnostics` after non-trivial changes — it reports only new problems since your last call.\n");
     p.push_str("- Separately, there is a Plan Mode: the user can turn it on from the composer, and you can suggest it with `enter_plan_mode` for big or ambiguous build requests. While it's active you'll get per-turn instructions starting \"Plan mode is active\" — research read-only, agree on a plan via `propose_plan`, and only build after approval.\n");
     p.push('\n');
@@ -337,6 +236,11 @@ call `clark_research` instead — it runs remotely in Clark's sandbox.",
     p.push_str(&format!("- OS: {}\n", std::env::consts::OS));
     p.push_str("- All file paths you pass to tools are resolved relative to the project root and cannot escape it.\n");
     p.push_str("- The shell runs with the project root as its working directory.\n");
+    if cfg!(windows) {
+        p.push_str(
+            "- Windows shell commands run in PowerShell without user profiles (CMD is only a fallback). Use PowerShell syntax and call native Windows utilities with their executable extension, for example `where.exe`.\n",
+        );
+    }
 
     // Note: durable memory (project + global) is injected in `new_session`,
     // gated by the memories setting and read through the session executor.
@@ -407,57 +311,6 @@ mod tests {
         // Plan Mode is discoverable from the stable prompt (both entry points).
         assert!(p.contains("enter_plan_mode"));
         assert!(p.contains("propose_plan"));
-    }
-
-    #[test]
-    fn plan_reminder_names_the_workflow_and_the_draft_file() {
-        let docs = tempfile::tempdir().unwrap();
-        let r = plan_mode_reminder(Some(docs.path()));
-        assert!(r.starts_with("Plan mode is active."));
-        assert!(r.contains("MUST NOT edit project files"));
-        assert!(r.contains("Run read-only shell commands"));
-        assert!(r.contains("Default to one batched search"));
-        assert!(r.contains("Think and report in short fragments or bullets"));
-        assert!(r.contains("normally 3–7 terse steps"));
-        assert!(r.contains("Never repeat an equivalent search or read"));
-        assert!(r.contains("plan.md"));
-        assert!(r.contains("propose_plan"));
-        // No stale draft → no re-entry paragraph.
-        assert!(!r.contains("from earlier in this session"));
-    }
-
-    #[test]
-    fn plan_reminder_without_docs_workspace_drops_the_draft_guidance() {
-        let r = plan_mode_reminder(None);
-        assert!(!r.contains("plan.md"));
-        assert!(r.contains("Keep interim findings terse"));
-        assert!(r.contains("propose_plan"));
-    }
-
-    #[test]
-    fn plan_reminder_reconciles_with_an_existing_plan_file() {
-        let docs = tempfile::tempdir().unwrap();
-        std::fs::write(crate::workspace::plan_file(docs.path()), "# old plan").unwrap();
-        let r = plan_mode_reminder(Some(docs.path()));
-        assert!(r.contains("from earlier in this session"));
-        assert!(r.contains("refine it (same work) or rewrite it (new request)"));
-    }
-
-    #[test]
-    fn exit_note_points_at_the_saved_plan_only_when_it_exists() {
-        let docs = tempfile::tempdir().unwrap();
-        assert_eq!(
-            plan_mode_exit_note(Some(docs.path())),
-            "Plan mode is off — you can make changes again."
-        );
-        std::fs::write(crate::workspace::plan_file(docs.path()), "# plan").unwrap();
-        let with_plan = plan_mode_exit_note(Some(docs.path()));
-        assert!(with_plan.contains("plan.md"));
-        assert!(with_plan.contains("refer back to it"));
-        assert_eq!(
-            plan_mode_exit_note(None),
-            "Plan mode is off — you can make changes again."
-        );
     }
 
     #[test]

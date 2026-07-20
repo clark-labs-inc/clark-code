@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::process::{ChildStdin, Command};
+use tokio::process::ChildStdin;
 use tokio_util::sync::CancellationToken;
 
 use crate::exec::Executor;
@@ -64,6 +64,7 @@ enum Backend {
     Local {
         pid: Option<u32>,
         stdin: Arc<tokio::sync::Mutex<Option<ChildStdin>>>,
+        _process_fence: exec_core::ProcessFence,
     },
     Remote {
         executor: Arc<dyn Executor>,
@@ -124,21 +125,11 @@ impl BackgroundTasks {
         let error = Arc::new(Mutex::new(None));
 
         let backend = if executor.is_local() {
-            let mut process = Command::new("sh");
-            process
-                .arg("-c")
-                .arg(&command)
-                .current_dir(cwd)
-                .stdin(Stdio::piped())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .kill_on_drop(true);
-            exec_core::configure_noninteractive(&mut process);
-            exec_core::isolate_process_group(&mut process);
-            let mut child = process
-                .spawn()
-                .map_err(|e| format!("failed to start background task: {e}"))?;
+            let process = executor.prepare_process(exec_core::ProcessSpec::shell(&command, cwd))?;
+            let mut child =
+                exec_core::spawn_process(&process, Stdio::piped(), Stdio::piped(), Stdio::piped())?;
             let pid = child.id();
+            let process_fence = exec_core::ProcessFence::attach(pid);
             let stdin = Arc::new(tokio::sync::Mutex::new(child.stdin.take()));
             let stdout = child.stdout.take();
             let stderr = child.stderr.take();
@@ -170,7 +161,11 @@ impl BackgroundTasks {
                     }
                 }
             });
-            Backend::Local { pid, stdin }
+            Backend::Local {
+                pid,
+                stdin,
+                _process_fence: process_fence,
+            }
         } else {
             let process_id = executor.background_start(&command, cwd).await?;
             Backend::Remote {

@@ -17,8 +17,8 @@ use agent_core::domain::{ContentBlock, Role};
 use agent_core::error::{Error, Result};
 use agent_core::ids::{ProviderId, RunId, SessionId};
 use agent_core::provider::{
-    ClientResponse, EventStream, PromptInput, Provider, ProviderCapabilities, ProviderConfig,
-    Session, SessionEnvironment, SessionOptions,
+    ClientResponse, CollaborationMode, EventStream, PlanDecision, PromptInput, Provider,
+    ProviderCapabilities, ProviderConfig, Session, SessionEnvironment, SessionOptions,
 };
 use async_trait::async_trait;
 use futures::StreamExt;
@@ -37,8 +37,7 @@ use crate::tools::{ReadTracker, ToolCtx, ToolRegistry};
 use isolation::ProviderIsolation;
 use prompt_input::*;
 
-// The Plan Mode workflow reminder and its exit note live in
-// `crate::prompt::{plan_mode_reminder, plan_mode_exit_note}` — injected
+// The Plan Mode workflow reminder and its exit note live in `planning` — injected
 // per-turn below (never baked into the cached system-prompt prefix) since the
 // mode can flip mid-session via Shift+Tab or a plan approval.
 
@@ -120,6 +119,154 @@ pub struct LocalAgentProvider {
     /// Stable identity for the active project, when private project knowledge
     /// is enabled and the selected root is a Git repository.
     repository_fingerprint: Option<String>,
+    /// Owns the narrow temporary write root exposed to sandboxed children.
+    sandbox_temp: Option<tempfile::TempDir>,
+}
+
+fn build_local_executor(
+    config: &LocalConfig,
+    sandbox: &Sandbox,
+    preset: exec_sandbox::SandboxPreset,
+) -> Result<(Arc<dyn Executor>, Option<tempfile::TempDir>)> {
+    if config.sandbox_mode == crate::config::LocalSandboxMode::Disabled
+        || preset == exec_sandbox::SandboxPreset::DangerFullAccess
+    {
+        return Ok((Arc::new(LocalExecutor), None));
+    }
+
+    let mut extra_write_roots = Vec::new();
+    if let Some(docs) = sandbox.docs_root() {
+        extra_write_roots.push(docs.to_path_buf());
+    }
+    #[cfg(windows)]
+    if let Some(docs_root) = crate::workspace::workspace_root() {
+        extra_write_roots.push(docs_root);
+    }
+    #[cfg(windows)]
+    let private_temp = {
+        let base = std::env::var_os("LOCALAPPDATA")
+            .map(std::path::PathBuf::from)
+            .ok_or_else(|| Error::Io("LOCALAPPDATA is unavailable".to_string()))?
+            .join("Clark Code")
+            .join("sandbox-tmp");
+        std::fs::create_dir_all(&base).map_err(|error| Error::Io(error.to_string()))?;
+        extra_write_roots.push(base.clone());
+        tempfile::Builder::new()
+            .prefix("session-")
+            .tempdir_in(base)
+            .map_err(|error| Error::Io(error.to_string()))?
+    };
+    #[cfg(not(windows))]
+    let private_temp = tempfile::Builder::new()
+        .prefix("clark-sandbox-")
+        .tempdir()
+        .map_err(|error| Error::Io(error.to_string()))?;
+    let policy = match preset {
+        exec_sandbox::SandboxPreset::ReadOnly => {
+            exec_sandbox::SandboxPolicy::read_only().with_write_roots(extra_write_roots)
+        }
+        exec_sandbox::SandboxPreset::WorkspaceWrite => {
+            exec_sandbox::SandboxPolicy::workspace_write(
+                sandbox.root().to_path_buf(),
+                extra_write_roots,
+            )
+        }
+        exec_sandbox::SandboxPreset::DangerFullAccess => unreachable!(),
+    }
+    .with_process_temp_root(private_temp.path().to_path_buf());
+    let install = clark_install_context::InstallContext::current();
+    let runtime = exec_sandbox::SandboxRuntime {
+        linux_bubblewrap: install.bundled_tool(clark_install_context::BUBBLEWRAP),
+        windows_runner: install.bundled_tool(clark_install_context::WINDOWS_SANDBOX_RUNNER),
+        windows_setup: install.bundled_tool(clark_install_context::WINDOWS_SANDBOX_SETUP),
+        windows_state_dir: None,
+    };
+    let manager =
+        exec_sandbox::SandboxManager::current_with_runtime(policy.clone(), runtime.clone())
+            .map_err(Error::Other)?;
+    #[cfg(windows)]
+    let manager = auto_enroll_windows_workspace(manager, policy, runtime)?;
+    if matches!(
+        manager.status(),
+        exec_sandbox::SandboxStatus::Enforced { .. }
+    ) {
+        let executor =
+            Arc::new(exec_sandbox::SandboxedExecutor::with_manager(manager).map_err(Error::Other)?);
+        return Ok((executor, Some(private_temp)));
+    }
+    if config.sandbox_mode == crate::config::LocalSandboxMode::Required {
+        return Err(Error::Unsupported(format!(
+            "required local sandbox is not ready: {:?}",
+            manager.status()
+        )));
+    }
+    tracing::warn!(status = ?manager.status(), "local sandbox is not ready; using explicit host execution");
+    Ok((Arc::new(LocalExecutor), None))
+}
+
+#[cfg(windows)]
+fn auto_enroll_windows_workspace(
+    manager: exec_sandbox::SandboxManager,
+    policy: exec_sandbox::SandboxPolicy,
+    runtime: exec_sandbox::SandboxRuntime,
+) -> Result<exec_sandbox::SandboxManager> {
+    if !matches!(
+        manager.status(),
+        exec_sandbox::SandboxStatus::SetupRequired { .. }
+    ) {
+        return Ok(manager);
+    }
+    let Some(action) = manager.setup_action().map_err(Error::Other)? else {
+        return Ok(manager);
+    };
+    if action.requires_elevation {
+        for path in action.cleanup_paths {
+            let _ = std::fs::remove_file(path);
+        }
+        return Ok(manager);
+    }
+    match exec_sandbox_windows::run_setup_action(
+        &action.program,
+        &action.args,
+        false,
+        action.cleanup_paths,
+    ) {
+        Ok(()) => exec_sandbox::SandboxManager::current_with_runtime(policy, runtime)
+            .map_err(Error::Other),
+        Err(error) => {
+            tracing::warn!(
+                error,
+                "automatic user-mode Windows workspace enrollment failed"
+            );
+            Ok(manager)
+        }
+    }
+}
+
+/// Stable policy used by the desktop's explicit Windows setup flow. Session
+/// directories nest under these roots, so one consented ACL reconciliation is
+/// reusable without broadening access beyond Clark's project/docs/temp areas.
+pub fn local_sandbox_setup_policy(cwd: &std::path::Path) -> Result<exec_sandbox::SandboxPolicy> {
+    #[cfg(not(windows))]
+    let write_roots = Vec::new();
+    #[cfg(windows)]
+    let mut write_roots = Vec::new();
+    #[cfg(windows)]
+    {
+        if let Some(docs_root) = crate::workspace::workspace_root() {
+            write_roots.push(docs_root);
+        }
+        let temp_root = std::env::var_os("LOCALAPPDATA")
+            .map(std::path::PathBuf::from)
+            .ok_or_else(|| Error::Io("LOCALAPPDATA is unavailable".to_string()))?
+            .join("Clark Code")
+            .join("sandbox-tmp");
+        write_roots.push(temp_root);
+    }
+    Ok(exec_sandbox::SandboxPolicy::workspace_write(
+        cwd.to_path_buf(),
+        write_roots,
+    ))
 }
 
 #[async_trait]
@@ -135,12 +282,8 @@ impl Provider for LocalAgentProvider {
             fs: true,
             terminal: true,
             load_session: false,
-            modes: vec![
-                "ask".to_string(),
-                "auto".to_string(),
-                "full".to_string(),
-                "plan".to_string(),
-            ],
+            modes: vec!["ask".to_string(), "auto".to_string(), "full".to_string()],
+            collaboration_modes: vec![CollaborationMode::Default, CollaborationMode::Plan],
         }
     }
 
@@ -192,8 +335,6 @@ impl Provider for LocalAgentProvider {
                 crate::orchestration::OrchestrationToolsConfig::from_local(&local),
             );
         }
-        // Connect MCP servers and register their tools (failures are non-fatal).
-        self.mcp_status = registry.connect_mcp(&local.mcp_servers).await;
         self.llm = Some(llm);
         self.registry = Some(Arc::new(registry));
         self.config = Some(local);
@@ -202,46 +343,75 @@ impl Provider for LocalAgentProvider {
 
     async fn new_session(&mut self, options: SessionOptions) -> Result<Session> {
         let config = self.config()?.clone();
+        let collaboration_mode = options.collaboration_mode.unwrap_or_default();
         let restored_goal = options.resume.as_ref().and_then(|resume| {
             resume.items.iter().rev().find_map(|item| match item {
                 agent_core::provider::ResumeItem::Goal { goal } => Some(goal.clone()),
                 _ => None,
             })
         });
+        let restored_proposed_plan = options.resume.as_ref().and_then(|resume| {
+            resume.items.iter().rev().find_map(|item| match item {
+                agent_core::provider::ResumeItem::ProposedPlan { plan } => Some(plan.clone()),
+                _ => None,
+            })
+        });
+
+        let id = SessionId::new(uuid::Uuid::new_v4().to_string());
+        let sandbox_preset = match collaboration_mode {
+            CollaborationMode::Plan => exec_sandbox::SandboxPreset::ReadOnly,
+            CollaborationMode::Default => {
+                exec_sandbox::SandboxPreset::for_session_mode(options.mode.as_deref())
+            }
+        };
 
         // A remote project runs its tools on a remote host over the exec-server;
-        // a local project runs them here. Pick the sandbox + executor to match.
-        let (sandbox, executor): (Sandbox, Arc<dyn Executor>) = if let Some(remote) = &config.remote
-        {
+        // a local project runs them here. Resolve every writable root before
+        // selecting the executor so one immutable policy reaches both direct
+        // filesystem operations and child-process compilation.
+        let (sandbox, executor, sandbox_temp): (
+            Sandbox,
+            Arc<dyn Executor>,
+            Option<tempfile::TempDir>,
+        ) = if let Some(remote) = &config.remote {
             let sandbox = Sandbox::new_remote(&remote.cwd).map_err(Error::Other)?;
             let exec = RemoteExecutor::connect(&remote.ws_url, &remote.token)
                 .await
                 .map_err(Error::Other)?;
-            (sandbox, Arc::new(exec))
+            (sandbox, Arc::new(exec), None)
         } else {
             let cwd = options.cwd.or(config.cwd.clone()).ok_or_else(|| {
                 Error::Unsupported("local provider requires a project `cwd`".into())
             })?;
-            let sandbox = Sandbox::new(&cwd).map_err(Error::Io)?;
-            (sandbox, Arc::new(LocalExecutor))
-        };
-        self.executor = executor;
-
-        let id = SessionId::new(uuid::Uuid::new_v4().to_string());
-
-        // Provision a per-session, app-managed workspace for agent-authored
-        // documents (local sessions only — a remote executor can't reach a local
-        // path). Extend the sandbox to permit writes there in addition to the
-        // project root; the prompt then points the agent at it for documents.
-        let mut sandbox = sandbox;
-        if config.remote.is_none() && !self.isolation.disposable_writer() {
-            if let Some(ws) = crate::workspace::session_workspace(id.as_str()) {
-                if std::fs::create_dir_all(&ws).is_ok() {
-                    sandbox = sandbox.with_docs(ws);
+            let mut sandbox = Sandbox::new(&cwd).map_err(Error::Io)?;
+            if !self.isolation.disposable_writer() {
+                if let Some(workspace) = crate::workspace::session_workspace(id.as_str()) {
+                    if std::fs::create_dir_all(&workspace).is_ok() {
+                        sandbox = sandbox.with_docs(workspace);
+                    }
                 }
             }
-        }
+
+            let (executor, sandbox_temp) = build_local_executor(&config, &sandbox, sandbox_preset)?;
+            (sandbox, executor, sandbox_temp)
+        };
+        self.executor = executor;
+        self.sandbox_temp = sandbox_temp;
         let sandbox = Arc::new(sandbox);
+
+        // MCP stdio servers are agent-owned subprocesses. Start them only after
+        // the session has a canonical root and scoped executor, so their launch
+        // passes through the same OS sandbox as shell and helper processes.
+        if !config.mcp_servers.is_empty() && self.mcp_status.is_empty() {
+            let registry = self
+                .registry
+                .as_mut()
+                .and_then(Arc::get_mut)
+                .ok_or_else(|| Error::Other("tool registry is already shared".to_string()))?;
+            self.mcp_status = registry
+                .connect_mcp(&config.mcp_servers, self.executor.as_ref(), sandbox.root())
+                .await;
+        }
 
         self.repository_fingerprint = if config.project_knowledge_enabled {
             crate::repository::inspect_repository(self.executor.as_ref(), sandbox.root())
@@ -331,11 +501,9 @@ impl Provider for LocalAgentProvider {
             let mut s = self.session.lock().await;
             s.system_prompt = prompt;
             s.transcript = resumed_transcript;
-            // The session starts in the mode the client asked for (and a
-            // provider instance reused across "new chat" must not inherit a
-            // stale plan_mode from its previous session).
-            s.plan_mode = options.mode.as_deref() == Some("plan");
-            s.plan_exited = false;
+            s.planning = crate::planning::PlanningState::default();
+            s.planning.mode = collaboration_mode;
+            s.planning.proposed_plan = restored_proposed_plan;
             s.steering = None;
             s.active_execution = None;
             s.goal = restored_goal.map(crate::loop_state::SessionGoal::from_state);
@@ -385,6 +553,7 @@ impl Provider for LocalAgentProvider {
             provider: self.id(),
             capabilities: self.capabilities(),
             mode: options.mode,
+            collaboration_mode,
             environment: Some(SessionEnvironment {
                 checkout_root: Some(checkout_root),
                 repository_root,
@@ -417,6 +586,12 @@ impl Provider for LocalAgentProvider {
         let parts = prompt_parts(&input);
         let knowledge_query = prompt_text(&input);
         let user_request = parts.user_request;
+        let goal_command = goal_command_objective(&user_request);
+        if let Some(objective) = goal_command.as_ref() {
+            let mut session = self.session.lock().await;
+            crate::tools::goal::start_goal(&mut session, objective.clone(), None)
+                .map_err(Error::Other)?;
+        }
         let native_image_support = crate::config::model_supports_images(&config.model);
         let mut context_sections = Vec::new();
         if config.orchestration.enabled {
@@ -434,6 +609,9 @@ impl Provider for LocalAgentProvider {
         context_sections.push(environment_context(&sandbox, config.remote.is_some()));
         if !parts.text_attachment_context.is_empty() {
             context_sections.push(parts.text_attachment_context);
+        }
+        if goal_command.is_some() {
+            context_sections.push(goal_command_context());
         }
         let attachment_context = crate::attachments::process_attachments(
             &input.attachments,
@@ -480,25 +658,27 @@ impl Provider for LocalAgentProvider {
         if !attachment_context.trim().is_empty() {
             context_sections.push(attachment_context);
         }
-        let docs_root = self
-            .sandbox
-            .as_ref()
-            .and_then(|sb| sb.docs_root())
-            .map(std::path::Path::to_path_buf);
-        {
+        let approved_plan = {
             let mut s = self.session.lock().await;
             let style = crate::prompt::output_style_instructions(&s.output_style);
             if !style.is_empty() {
                 context_sections.push(style.to_string());
             }
-            if s.plan_mode {
-                let reminder = crate::prompt::plan_mode_reminder(docs_root.as_deref());
+            if s.planning.plan_mode() {
+                let reminder = crate::planning::plan_mode_instructions_for(
+                    config.planning_prompt_profile,
+                    s.planning.proposed_plan.as_ref(),
+                );
                 context_sections.push(reminder);
-            } else if std::mem::take(&mut s.plan_exited) {
-                let note = crate::prompt::plan_mode_exit_note(docs_root.as_deref());
+                None
+            } else if std::mem::take(&mut s.planning.exited) {
+                let note = crate::planning::plan_mode_exit_note(s.planning.proposed_plan.as_ref());
                 context_sections.push(note);
+                s.planning.proposed_plan.clone()
+            } else {
+                None
             }
-        }
+        };
         let text = assemble_turn_prompt(&context_sections, &user_request);
         let user_content = prompt_input::model_user_content(
             text.clone(),
@@ -555,6 +735,13 @@ impl Provider for LocalAgentProvider {
             temperature: config.temperature,
             user_text: text,
             user_content,
+            initial_events: approved_plan
+                .into_iter()
+                .map(|plan| AgentEvent::ProposedPlanUpdated {
+                    run: run.clone(),
+                    plan,
+                })
+                .collect(),
             memory_extraction,
             execution: config.execution,
             run_cancellations: self.run_cancellations.clone(),
@@ -583,6 +770,7 @@ impl Provider for LocalAgentProvider {
         self.run_cancellations.cancel_all();
         self.control.lock().await.clear();
         self.background.clear_all().await;
+        self.sandbox_temp = None;
         Ok(())
     }
 
@@ -598,6 +786,49 @@ impl Provider for LocalAgentProvider {
                     feedback: feedback.filter(|f| !f.trim().is_empty()),
                 };
                 self.control.lock().await.resolve(&request, resolution);
+                Ok(())
+            }
+            ClientResponse::PlanDecision { plan_id, decision } => {
+                let (implement, fresh) = match decision {
+                    PlanDecision::Implement { context } => (
+                        true,
+                        context == agent_core::provider::PlanImplementationContext::Fresh,
+                    ),
+                    PlanDecision::ContinuePlanning { .. } => (false, false),
+                };
+                {
+                    let mut session = self.session.lock().await;
+                    let plan = session
+                        .planning
+                        .proposed_plan
+                        .as_mut()
+                        .filter(|plan| plan.id == plan_id)
+                        .ok_or_else(|| Error::Other("no matching proposed plan".into()))?;
+                    if implement {
+                        plan.status = agent_core::domain::ProposedPlanStatus::Approved;
+                        session.planning.set_mode(CollaborationMode::Default);
+                        if fresh {
+                            session.transcript.clear();
+                        }
+                    } else {
+                        session.planning.set_mode(CollaborationMode::Plan);
+                    }
+                }
+                if implement {
+                    if let (Some(config), Some(sandbox)) =
+                        (self.config.as_ref(), self.sandbox.as_ref())
+                    {
+                        if config.remote.is_none() {
+                            let (executor, sandbox_temp) = build_local_executor(
+                                config,
+                                sandbox,
+                                exec_sandbox::SandboxPreset::WorkspaceWrite,
+                            )?;
+                            self.executor = executor;
+                            self.sandbox_temp = sandbox_temp;
+                        }
+                    }
+                }
                 Ok(())
             }
         }
@@ -623,17 +854,34 @@ impl Provider for LocalAgentProvider {
     }
 
     async fn set_mode(&mut self, _session: &SessionId, mode: String) -> Result<()> {
-        let mut s = self.session.lock().await;
-        let entering_plan = mode == "plan";
-        // Leaving plan mode queues the one-shot "plan mode is off" note for the
-        // next turn; re-entering cancels a queued note so a quick toggle
-        // doesn't tell the model it both entered and exited.
-        if s.plan_mode && !entering_plan {
-            s.plan_exited = true;
-        } else if entering_plan {
-            s.plan_exited = false;
+        if let (Some(config), Some(sandbox)) = (self.config.as_ref(), self.sandbox.as_ref()) {
+            if config.remote.is_none() {
+                let preset = exec_sandbox::SandboxPreset::for_session_mode(Some(&mode));
+                let (executor, sandbox_temp) = build_local_executor(config, sandbox, preset)?;
+                self.executor = executor;
+                self.sandbox_temp = sandbox_temp;
+            }
         }
-        s.plan_mode = entering_plan;
+        Ok(())
+    }
+
+    async fn set_collaboration_mode(
+        &mut self,
+        _session: &SessionId,
+        mode: CollaborationMode,
+    ) -> Result<()> {
+        if let (Some(config), Some(sandbox)) = (self.config.as_ref(), self.sandbox.as_ref()) {
+            if config.remote.is_none() {
+                let preset = match mode {
+                    CollaborationMode::Plan => exec_sandbox::SandboxPreset::ReadOnly,
+                    CollaborationMode::Default => exec_sandbox::SandboxPreset::WorkspaceWrite,
+                };
+                let (executor, sandbox_temp) = build_local_executor(config, sandbox, preset)?;
+                self.executor = executor;
+                self.sandbox_temp = sandbox_temp;
+            }
+        }
+        self.session.lock().await.planning.set_mode(mode);
         Ok(())
     }
 

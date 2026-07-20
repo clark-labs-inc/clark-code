@@ -98,7 +98,12 @@ fn context_estimate_counts_only_resolved_scopes() {
 #[cfg(target_os = "macos")]
 #[test]
 fn acp_command_is_wrapped_in_an_os_write_denial() {
-    let command = os_read_only_command(&["codex".to_string(), "acp".to_string()]).unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let command = os_read_only_command(
+        &["codex".to_string(), "acp".to_string()],
+        root.path().to_str().unwrap(),
+    )
+    .unwrap();
     assert_eq!(command[0], "/usr/bin/sandbox-exec");
     assert!(command[2].contains("deny file-write"));
     assert_eq!(&command[4..], ["codex", "acp"]);
