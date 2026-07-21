@@ -197,7 +197,7 @@ fn default_resource_dir(executable_dir: &Path) -> PathBuf {
         if installed.exists() {
             return installed;
         }
-        return executable_dir.to_path_buf();
+        executable_dir.to_path_buf()
     }
 
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
