@@ -155,7 +155,11 @@ export interface CoreBridge {
   ): Promise<ProjectContext | null>;
   /** Open a path in the OS default app, or reveal it in the file manager. */
   openPath?(path: string, reveal?: boolean): Promise<void>;
-  /** Create a named, sibling Git worktree and return its absolute path. */
+  /** Existing local branches that the selected checkout can switch to. */
+  listProjectBranches?(projectPath: string): Promise<string[]>;
+  /** Switch a clean selected checkout to an existing local branch. */
+  switchProjectBranch?(projectPath: string, branch: string): Promise<void>;
+  /** Create a named sibling worktree from the latest advertised origin/main. */
   createPermanentWorktree?(projectPath: string, name: string): Promise<string>;
   /** Inspect the platform sandbox without prompting or changing privilege. */
   localSandboxStatus?(cwd: string): Promise<LocalSandboxStatus>;

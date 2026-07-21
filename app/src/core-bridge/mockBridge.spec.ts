@@ -41,14 +41,26 @@ describe("MockBridge", () => {
       isWorktree: false,
       worktreeRoot: "/tmp/clark-desktop",
       activity: expect.objectContaining({
-        changedFiles: 2,
-        untrackedFiles: 1,
+        changedFiles: 0,
+        untrackedFiles: 0,
         conflictedFiles: 0,
-        externalAgents: expect.arrayContaining([
-          expect.objectContaining({ id: "codex-preview" }),
-        ]),
+        externalAgents: [],
       }),
     }));
+  });
+
+  it("switches the browser preview between known local branches", async () => {
+    const bridge = new MockBridge();
+
+    expect(await bridge.listProjectBranches()).toContain("feature/checkout-context");
+    await bridge.switchProjectBranch("/tmp/clark-desktop", "feature/checkout-context");
+
+    expect((await bridge.projectContext("/tmp/clark-desktop"))?.branch).toBe(
+      "feature/checkout-context",
+    );
+    await expect(
+      bridge.switchProjectBranch("/tmp/clark-desktop", "missing"),
+    ).rejects.toThrow("Local branch missing no longer exists.");
   });
 
   it("produces a streaming run with user + agent messages, a tool call and a plan", async () => {

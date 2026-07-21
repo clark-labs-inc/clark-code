@@ -8,6 +8,8 @@ use std::{
 use tokio::{process::Command, time::timeout};
 
 const GIT_TIMEOUT: Duration = Duration::from_secs(30);
+const DEFAULT_REMOTE: &str = "origin";
+const DEFAULT_BRANCH: &str = "main";
 
 fn validate_name(name: &str) -> Result<&str, String> {
     let clean = name.trim();
@@ -43,6 +45,12 @@ async fn git_output(cwd: &Path, args: Vec<OsString>, action: &str) -> Result<Str
     let mut command = Command::new("git");
     command
         .current_dir(cwd)
+        .args([
+            "-c",
+            "core.fsmonitor=false",
+            "-c",
+            "core.hooksPath=/dev/null",
+        ])
         .args(args)
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("LC_ALL", "C")
@@ -68,13 +76,7 @@ async fn git_output(cwd: &Path, args: Vec<OsString>, action: &str) -> Result<Str
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
-/// Create a durable sibling checkout from the selected project's current HEAD.
-/// The explicit name becomes both the folder suffix and a `clark/<name>` branch;
-/// no shell is involved, and validation prevents either value becoming an option
-/// or path traversal payload.
-#[tauri::command]
-pub async fn project_worktree_create(project_path: String, name: String) -> Result<String, String> {
-    let clean_name = validate_name(&name)?.to_string();
+async fn repository_root(project_path: &str) -> Result<PathBuf, String> {
     let source = PathBuf::from(project_path.trim())
         .canonicalize()
         .map_err(|error| format!("Project folder is unavailable: {error}"))?;
@@ -82,15 +84,156 @@ pub async fn project_worktree_create(project_path: String, name: String) -> Resu
         return Err("Project path is not a folder.".into());
     }
 
-    let repo_root_raw = git_output(
+    let root = git_output(
         &source,
         vec!["rev-parse".into(), "--show-toplevel".into()],
         "Find repository root",
     )
     .await?;
-    let repo_root = PathBuf::from(repo_root_raw)
+    PathBuf::from(root)
         .canonicalize()
-        .map_err(|error| format!("Repository root is unavailable: {error}"))?;
+        .map_err(|error| format!("Repository root is unavailable: {error}"))
+}
+
+fn parse_remote_main(output: &str) -> Result<String, String> {
+    let expected_ref = format!("refs/heads/{DEFAULT_BRANCH}");
+    let Some(line) = output.lines().find(|line| !line.trim().is_empty()) else {
+        return Err(format!(
+            "{DEFAULT_REMOTE} has no {DEFAULT_BRANCH} branch to start from."
+        ));
+    };
+    let mut fields = line.split_whitespace();
+    let commit = fields.next().unwrap_or_default();
+    let remote_ref = fields.next().unwrap_or_default();
+    if remote_ref != expected_ref
+        || !matches!(commit.len(), 40 | 64)
+        || !commit.bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
+        return Err(format!(
+            "{DEFAULT_REMOTE} returned an invalid {DEFAULT_BRANCH} commit."
+        ));
+    }
+    Ok(commit.to_string())
+}
+
+/// Fetch the advertised main commit without updating FETCH_HEAD, origin/main,
+/// the current branch, or the selected checkout. Downloaded objects and the new
+/// worktree branch are the only durable repository changes required to create
+/// a checkout at the latest remote commit.
+async fn fetch_latest_main(repo_root: &Path) -> Result<String, String> {
+    let advertised = git_output(
+        repo_root,
+        vec![
+            "ls-remote".into(),
+            DEFAULT_REMOTE.into(),
+            format!("refs/heads/{DEFAULT_BRANCH}").into(),
+        ],
+        "Find latest origin/main",
+    )
+    .await?;
+    let commit = parse_remote_main(&advertised)?;
+    git_output(
+        repo_root,
+        vec![
+            "fetch".into(),
+            "--quiet".into(),
+            "--no-tags".into(),
+            "--no-write-fetch-head".into(),
+            DEFAULT_REMOTE.into(),
+            commit.clone().into(),
+        ],
+        "Fetch latest origin/main",
+    )
+    .await?;
+    Ok(commit)
+}
+
+/// Local branches available to the selected checkout. Returning only exact
+/// refs/heads names keeps the switch command unambiguous and prevents Git's
+/// remote-branch guessing from creating a branch as a side effect.
+#[tauri::command]
+pub async fn project_branch_list(project_path: String) -> Result<Vec<String>, String> {
+    let repo_root = repository_root(&project_path).await?;
+    let branches = git_output(
+        &repo_root,
+        vec![
+            "for-each-ref".into(),
+            "--format=%(refname:short)".into(),
+            "refs/heads".into(),
+        ],
+        "List branches",
+    )
+    .await?;
+    Ok(branches
+        .lines()
+        .map(str::trim)
+        .filter(|branch| !branch.is_empty())
+        .map(str::to_string)
+        .collect())
+}
+
+/// Switch a clean selected checkout to an existing local branch. Git receives
+/// arguments directly (never through a shell), and the clean-tree gate avoids
+/// silently carrying edits from one branch to another.
+#[tauri::command]
+pub async fn project_branch_switch(project_path: String, branch: String) -> Result<(), String> {
+    let repo_root = repository_root(&project_path).await?;
+    let branch = branch.trim();
+    if branch.is_empty() {
+        return Err("Choose a branch.".into());
+    }
+    let branches = project_branch_list(repo_root.to_string_lossy().into_owned()).await?;
+    if !branches.iter().any(|candidate| candidate == branch) {
+        return Err(format!("Local branch {branch} no longer exists."));
+    }
+
+    let current = git_output(
+        &repo_root,
+        vec!["branch".into(), "--show-current".into()],
+        "Read current branch",
+    )
+    .await?;
+    if current == branch {
+        return Ok(());
+    }
+
+    let status = git_output(
+        &repo_root,
+        vec![
+            "status".into(),
+            "--porcelain=v1".into(),
+            "--untracked-files=normal".into(),
+        ],
+        "Check working tree",
+    )
+    .await?;
+    if !status.is_empty() {
+        return Err("Commit or remove local changes before switching branches.".into());
+    }
+
+    git_output(
+        &repo_root,
+        vec![
+            "switch".into(),
+            "--no-guess".into(),
+            "--".into(),
+            branch.into(),
+        ],
+        "Switch branch",
+    )
+    .await?;
+    Ok(())
+}
+
+/// Create a durable sibling checkout from the latest advertised origin/main.
+/// The explicit name becomes both the folder suffix and a `clark/<name>` branch;
+/// no shell is involved, and validation prevents either value becoming an option
+/// or path traversal payload. The source checkout's HEAD, index, files, and
+/// remote-tracking refs are left untouched.
+#[tauri::command]
+pub async fn project_worktree_create(project_path: String, name: String) -> Result<String, String> {
+    let clean_name = validate_name(&name)?.to_string();
+    let repo_root = repository_root(&project_path).await?;
     let destination = destination_for(&repo_root, &clean_name)?;
     if destination.exists() {
         return Err(format!(
@@ -99,16 +242,17 @@ pub async fn project_worktree_create(project_path: String, name: String) -> Resu
         ));
     }
 
+    let latest_main = fetch_latest_main(&repo_root).await?;
     let branch = format!("clark/{clean_name}");
     git_output(
-        &source,
+        &repo_root,
         vec![
             "worktree".into(),
             "add".into(),
             "-b".into(),
             branch.into(),
             destination.as_os_str().to_os_string(),
-            "HEAD".into(),
+            latest_main.into(),
         ],
         "Create permanent worktree",
     )
@@ -119,7 +263,10 @@ pub async fn project_worktree_create(project_path: String, name: String) -> Resu
 
 #[cfg(test)]
 mod tests {
-    use super::{destination_for, project_worktree_create, validate_name};
+    use super::{
+        destination_for, parse_remote_main, project_branch_list, project_branch_switch,
+        project_worktree_create, validate_name,
+    };
     use std::{
         path::{Path, PathBuf},
         process::Command,
@@ -136,6 +283,20 @@ mod tests {
             "git {args:?}: {}",
             String::from_utf8_lossy(&output.stderr)
         );
+    }
+
+    fn git_text(cwd: &Path, args: &[&str]) -> String {
+        let output = Command::new("git")
+            .current_dir(cwd)
+            .args(args)
+            .output()
+            .expect("run git fixture command");
+        assert!(
+            output.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
     }
 
     #[test]
@@ -155,17 +316,104 @@ mod tests {
         );
     }
 
+    #[test]
+    fn remote_main_requires_an_exact_commit_and_ref() {
+        assert_eq!(
+            parse_remote_main("0123456789abcdef0123456789abcdef01234567\trefs/heads/main\n")
+                .unwrap(),
+            "0123456789abcdef0123456789abcdef01234567"
+        );
+        assert!(parse_remote_main("").is_err());
+        assert!(parse_remote_main("not-a-commit\trefs/heads/main\n").is_err());
+        assert!(
+            parse_remote_main("0123456789abcdef0123456789abcdef01234567\trefs/heads/trunk\n")
+                .is_err()
+        );
+    }
+
     #[tokio::test]
-    async fn creates_a_real_sibling_worktree_from_current_head() {
+    async fn lists_and_switches_local_branches_only_when_the_checkout_is_clean() {
         let temp = tempfile::tempdir().unwrap();
         let repo = temp.path().join("project");
         std::fs::create_dir(&repo).unwrap();
-        git(&repo, &["init", "-q"]);
+        git(&repo, &["init", "-q", "--initial-branch=main"]);
         git(&repo, &["config", "user.email", "test@clark.local"]);
         git(&repo, &["config", "user.name", "Clark Test"]);
         std::fs::write(repo.join("README.md"), "original\n").unwrap();
         git(&repo, &["add", "README.md"]);
         git(&repo, &["commit", "-qm", "initial"]);
+        git(&repo, &["branch", "feature/context-bar"]);
+
+        assert_eq!(
+            project_branch_list(repo.to_string_lossy().into_owned())
+                .await
+                .unwrap(),
+            vec!["feature/context-bar", "main"]
+        );
+        project_branch_switch(
+            repo.to_string_lossy().into_owned(),
+            "feature/context-bar".into(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            git_text(&repo, &["branch", "--show-current"]),
+            "feature/context-bar"
+        );
+
+        std::fs::write(repo.join("README.md"), "dirty\n").unwrap();
+        let error = project_branch_switch(repo.to_string_lossy().into_owned(), "main".into())
+            .await
+            .unwrap_err();
+        assert_eq!(
+            error,
+            "Commit or remove local changes before switching branches."
+        );
+        assert_eq!(
+            git_text(&repo, &["branch", "--show-current"]),
+            "feature/context-bar"
+        );
+        assert_eq!(
+            std::fs::read_to_string(repo.join("README.md")).unwrap(),
+            "dirty\n"
+        );
+    }
+
+    #[tokio::test]
+    async fn creates_a_real_sibling_worktree_from_latest_main_without_touching_source() {
+        let temp = tempfile::tempdir().unwrap();
+        let remote = temp.path().join("remote.git");
+        let repo = temp.path().join("project");
+        let publisher = temp.path().join("publisher");
+        std::fs::create_dir(&remote).unwrap();
+        git(&remote, &["init", "--bare", "-q", "--initial-branch=main"]);
+        let remote_arg = remote.to_string_lossy();
+        let repo_arg = repo.to_string_lossy();
+        git(temp.path(), &["clone", "-q", &remote_arg, &repo_arg]);
+        git(&repo, &["config", "user.email", "test@clark.local"]);
+        git(&repo, &["config", "user.name", "Clark Test"]);
+        std::fs::write(repo.join("README.md"), "original\n").unwrap();
+        git(&repo, &["add", "README.md"]);
+        git(&repo, &["commit", "-qm", "initial"]);
+        git(&repo, &["push", "-qu", "origin", "main"]);
+        git(&repo, &["switch", "-qc", "feature/local"]);
+
+        let publisher_arg = publisher.to_string_lossy();
+        git(temp.path(), &["clone", "-q", &remote_arg, &publisher_arg]);
+        git(&publisher, &["config", "user.email", "test@clark.local"]);
+        git(&publisher, &["config", "user.name", "Clark Test"]);
+        std::fs::write(publisher.join("README.md"), "latest main\n").unwrap();
+        git(&publisher, &["add", "README.md"]);
+        git(&publisher, &["commit", "-qm", "advance main"]);
+        git(&publisher, &["push", "-q", "origin", "main"]);
+        let latest_main = git_text(&publisher, &["rev-parse", "HEAD"]);
+
+        std::fs::write(repo.join("README.md"), "local dirty change\n").unwrap();
+        std::fs::write(repo.join("notes.txt"), "untracked\n").unwrap();
+        let source_branch = git_text(&repo, &["branch", "--show-current"]);
+        let source_head = git_text(&repo, &["rev-parse", "HEAD"]);
+        let source_status = git_text(&repo, &["status", "--short"]);
+        let source_origin_main = git_text(&repo, &["rev-parse", "refs/remotes/origin/main"]);
 
         let created =
             project_worktree_create(repo.to_string_lossy().into_owned(), "sidebar-menu".into())
@@ -182,16 +430,27 @@ mod tests {
         );
         assert_eq!(
             std::fs::read_to_string(created.join("README.md")).unwrap(),
-            "original\n"
+            "latest main\n"
         );
-        let branch = Command::new("git")
-            .current_dir(&created)
-            .args(["branch", "--show-current"])
-            .output()
-            .unwrap();
         assert_eq!(
-            String::from_utf8_lossy(&branch.stdout).trim(),
+            git_text(&created, &["branch", "--show-current"]),
             "clark/sidebar-menu"
+        );
+        assert_eq!(git_text(&created, &["rev-parse", "HEAD"]), latest_main);
+
+        assert_eq!(
+            git_text(&repo, &["branch", "--show-current"]),
+            source_branch
+        );
+        assert_eq!(git_text(&repo, &["rev-parse", "HEAD"]), source_head);
+        assert_eq!(git_text(&repo, &["status", "--short"]), source_status);
+        assert_eq!(
+            git_text(&repo, &["rev-parse", "refs/remotes/origin/main"]),
+            source_origin_main
+        );
+        assert_eq!(
+            std::fs::read_to_string(repo.join("README.md")).unwrap(),
+            "local dirty change\n"
         );
     }
 }

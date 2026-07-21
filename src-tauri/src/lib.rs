@@ -149,6 +149,8 @@ pub fn run() {
             file_actions::copy_local_file,
             markdown_export::export_markdown_pdf,
             commands::open_path,
+            project_worktree::project_branch_list,
+            project_worktree::project_branch_switch,
             project_worktree::project_worktree_create,
             commands::clark_exchange_google_idtoken,
             commands::clark_provision_code_key,

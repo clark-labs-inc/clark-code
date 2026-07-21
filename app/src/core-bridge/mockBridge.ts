@@ -37,6 +37,7 @@ const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve,
 export class MockBridge implements CoreBridge {
   private snapshot: Snapshot = emptySnapshot();
   private handlers = new Set<(s: Snapshot) => void>();
+  private branch = "main";
 
   async listProviders(): Promise<ProviderInfo[]> {
     return PROVIDERS;
@@ -146,23 +147,26 @@ export class MockBridge implements CoreBridge {
 
   async projectContext(cwd: string): Promise<ProjectContext | null> {
     if (!cwd.trim()) return null;
+    const sessionActive = Boolean(this.snapshot.session);
     return {
-      branch: "main",
+      branch: this.branch,
       detached: false,
       isWorktree: false,
       worktreeRoot: cwd.trim(),
       activity: {
-        changedFiles: 2,
-        untrackedFiles: 1,
+        changedFiles: sessionActive ? 2 : 0,
+        untrackedFiles: sessionActive ? 1 : 0,
         conflictedFiles: 0,
-        externalAgents: [
-          {
-            id: "codex-preview",
-            title: "Polish the shared checkout experience",
-            agentNickname: "Codex",
-            updatedAtMs: Date.now() - 18_000,
-          },
-        ],
+        externalAgents: sessionActive
+          ? [
+              {
+                id: "codex-preview",
+                title: "Polish the shared checkout experience",
+                agentNickname: "Codex",
+                updatedAtMs: Date.now() - 18_000,
+              },
+            ]
+          : [],
         detectedAtMs: Date.now(),
       },
     };
@@ -170,6 +174,17 @@ export class MockBridge implements CoreBridge {
 
   async openPath(): Promise<void> {
     /* no-op in the browser preview */
+  }
+
+  async listProjectBranches(): Promise<string[]> {
+    return ["main", "feature/checkout-context", "fix/composer-layout"];
+  }
+
+  async switchProjectBranch(_projectPath: string, branch: string): Promise<void> {
+    if (!(await this.listProjectBranches()).includes(branch)) {
+      throw new Error(`Local branch ${branch} no longer exists.`);
+    }
+    this.branch = branch;
   }
 
   // `/btw` in the browser preview: a scripted answer after a short delay so

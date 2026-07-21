@@ -264,7 +264,7 @@ export function ProjectActionsMenu({
           }}
         >
           <div className="mb-2 text-xs text-ink-muted">
-            Creates a sibling checkout from this project's current HEAD.
+            Fetches the latest <span className="font-medium text-ink-secondary">origin/main</span> commit into a sibling checkout without changing this checkout.
           </div>
           <label className="mb-1.5 block text-xs font-medium text-ink-muted" htmlFor="worktree-name">
             Worktree name

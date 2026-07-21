@@ -142,6 +142,14 @@ export class TauriBridge implements CoreBridge {
     return invoke("open_path", { path, reveal });
   }
 
+  listProjectBranches(projectPath: string): Promise<string[]> {
+    return invoke<string[]>("project_branch_list", { projectPath });
+  }
+
+  switchProjectBranch(projectPath: string, branch: string): Promise<void> {
+    return invoke("project_branch_switch", { projectPath, branch });
+  }
+
   createPermanentWorktree(projectPath: string, name: string): Promise<string> {
     return invoke<string>("project_worktree_create", { projectPath, name });
   }

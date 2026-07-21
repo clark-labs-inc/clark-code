@@ -4,6 +4,7 @@ import type { ProjectContext, RemoteExecutorTarget } from "../core-bridge/bridge
 import { projectName } from "../lib/localAgent";
 import { loadProjectContext } from "../lib/projectContext";
 import { useSessionStore } from "../store/sessionStore";
+import { BranchPicker } from "./BranchPicker";
 import { EnvironmentPicker } from "./EnvironmentPicker";
 import { ParallelWorkContext } from "./ParallelWorkContext";
 
@@ -90,6 +91,18 @@ export function ComposerContextBar() {
       return (conversation.remoteHost ?? null) === (activeRemoteHost ?? null);
     })
     .map((conversation) => ({ id: conversation.id, title: conversation.title }));
+  const workingFiles = context
+    ? context.activity.changedFiles
+      + context.activity.untrackedFiles
+      + context.activity.conflictedFiles
+    : 0;
+  const otherAgentCount = (context?.activity.externalAgents.length ?? 0) + clarkPeers.length;
+  const branchSwitchDisabledReason = otherAgentCount > 0
+    ? "Another agent is active in this checkout. Wait for it to finish before switching branches."
+    : workingFiles > 0
+      ? "Commit or remove local changes before switching branches."
+      : undefined;
+  const canSwitchBranch = !session && projectMode === "local" && !isRemoteSession;
 
   if (session && (activeProvider !== "local" || !checkoutRoot)) return null;
 
@@ -124,7 +137,14 @@ export function ComposerContextBar() {
           <EnvironmentPicker compact />
         )}
 
-        {context && (
+        {context && canSwitchBranch ? (
+          <BranchPicker
+            cwd={checkoutRoot}
+            context={context}
+            disabledReason={branchSwitchDisabledReason}
+            onSwitched={() => setRefreshTick((tick) => tick + 1)}
+          />
+        ) : context ? (
           <span
             className={`${ITEM} shrink-0 ${checkoutTone}`}
             title={
@@ -140,7 +160,7 @@ export function ComposerContextBar() {
               {context.detached ? `detached@${context.branch}` : context.branch}
             </span>
           </span>
-        )}
+        ) : null}
         {context && (
           <ParallelWorkContext
             activity={context.activity}
