@@ -20,6 +20,8 @@ pub(crate) fn to_wire_messages(
     system_prompt: &str,
     messages: &[ca::AgentMessage],
 ) -> Vec<ChatMessage> {
+    let normalized = ca::normalize_tool_call_ids(messages.to_vec());
+    let messages = normalized.messages;
     let mut out = Vec::new();
     if !system_prompt.trim().is_empty() {
         out.push(ChatMessage::system(system_prompt));
@@ -198,7 +200,7 @@ pub(super) fn assistant_message(turn: AssistantTurn) -> ca::AgentMessage {
 
 /// Concatenated provider-native reasoning blocks of one assistant message,
 /// `None` when it has none.
-fn reasoning_text(content: &ca::AssistantContent) -> Option<String> {
+pub(super) fn reasoning_text(content: &ca::AssistantContent) -> Option<String> {
     let text = content
         .blocks
         .iter()
@@ -265,10 +267,6 @@ pub(super) fn stream_error(error: LlmError) -> (ca::stream::StreamErrorKind, Str
             ca::stream::StreamErrorKind::Fatal,
             format!("platform_key_rejected:{message}"),
         ),
-        LlmError::RateLimited(message) => {
-            (ca::stream::StreamErrorKind::ProviderRateLimited, message)
-        }
-        LlmError::Transport(message) => (ca::stream::StreamErrorKind::Transient, message),
         LlmError::Provider(message) => (
             ca::stream::StreamErrorKind::Fatal,
             format!("provider_error:{message}"),
@@ -277,6 +275,15 @@ pub(super) fn stream_error(error: LlmError) -> (ca::stream::StreamErrorKind, Str
         // turn) can catch it instead of failing the run outright.
         LlmError::ContextOverflow(message) => {
             (ca::stream::StreamErrorKind::ContextOverflow, message)
+        }
+        LlmError::Recoverable(context) => {
+            let kind =
+                if context.category == agent_core::recovery::ProviderIncidentCategory::RateLimit {
+                    ca::stream::StreamErrorKind::ProviderRateLimited
+                } else {
+                    ca::stream::StreamErrorKind::Transient
+                };
+            (kind, context.message)
         }
     }
 }
@@ -426,90 +433,4 @@ pub(super) fn mobile_screenshot_artifact(
         uri: Some(uri),
         tool_call: Some(ToolCallId::new(tool_call_id.to_string())),
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn turn(text: &str, reasoning: &str) -> AssistantTurn {
-        AssistantTurn {
-            text: text.to_string(),
-            tool_calls: Vec::new(),
-            finish_reason: Some("stop".into()),
-            usage: None,
-            reasoning: reasoning.to_string(),
-        }
-    }
-
-    #[test]
-    fn assistant_message_keeps_reasoning_as_typed_block_out_of_plain_text() {
-        let message = assistant_message(turn("the answer", "step by step thinking"));
-        let ca::AgentMessage::Assistant { content, .. } = &message else {
-            panic!("expected assistant message");
-        };
-        // Reasoning is preserved as a typed block…
-        assert_eq!(
-            reasoning_text(content).as_deref(),
-            Some("step by step thinking")
-        );
-        // …but never leaks into the visible text (compaction and the wire
-        // `content` field both read plain_text()).
-        assert_eq!(content.plain_text(), "the answer");
-    }
-
-    #[test]
-    fn reasoning_replays_only_for_the_in_flight_exchange() {
-        let old_assistant = assistant_message(turn("old turn", "old reasoning"));
-        let user = ca::AgentMessage::User {
-            content: ca::UserContent::Text("new question".into()),
-            timestamp: None,
-        };
-        let live_assistant = assistant_message(turn("working on it", "live reasoning"));
-
-        let wire = to_wire_messages("sys", &[old_assistant, user, live_assistant]);
-
-        // [system, old assistant, user, live assistant]
-        assert_eq!(wire.len(), 4);
-        assert_eq!(
-            wire[1].reasoning, None,
-            "reasoning from before the last user message must not replay"
-        );
-        assert_eq!(wire[3].reasoning.as_deref(), Some("live reasoning"));
-    }
-
-    #[test]
-    fn collaboration_instruction_uses_developer_role_on_the_wire() {
-        let messages = [crate::planning::developer_instruction_message(
-            "Plan Mode is active".into(),
-        )];
-        let wire = to_wire_messages("system", &messages);
-        assert_eq!(wire.len(), 2);
-        assert_eq!(wire[0].role, "system");
-        assert_eq!(wire[1].role, "developer");
-        assert!(matches!(
-            &wire[1].content,
-            Some(ChatContent::Text(text)) if text == "Plan Mode is active"
-        ));
-    }
-
-    #[test]
-    fn typed_llm_failures_map_to_typed_stream_errors() {
-        let (kind, _) = stream_error(LlmError::ContextOverflow("too large".into()));
-        assert!(matches!(kind, ca::stream::StreamErrorKind::ContextOverflow));
-
-        let (kind, _) = stream_error(LlmError::Transport("connection reset".into()));
-        assert!(matches!(kind, ca::stream::StreamErrorKind::Transient));
-
-        let (kind, _) = stream_error(LlmError::RateLimited("busy".into()));
-        assert!(matches!(
-            kind,
-            ca::stream::StreamErrorKind::ProviderRateLimited
-        ));
-
-        let (kind, message) =
-            stream_error(LlmError::PlatformKeyRejected("401 Unauthorized".into()));
-        assert!(matches!(kind, ca::stream::StreamErrorKind::Fatal));
-        assert!(message.starts_with("platform_key_rejected:"));
-    }
 }

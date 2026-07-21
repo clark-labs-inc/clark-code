@@ -30,6 +30,7 @@ mod external_import;
 mod files;
 mod git_metadata;
 mod hooks;
+mod incidents;
 mod instructions;
 mod llm;
 mod loop_breaker;

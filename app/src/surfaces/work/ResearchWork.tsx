@@ -156,7 +156,7 @@ export function ResearchOutline({
 
   return (
     <div className="max-h-72 overflow-y-auto pr-1" aria-label="Clark Cloud Agent progress">
-      <ol>{progress.phases.map((phase) => <Phase key={phase.id} phase={phase} />)}</ol>
+      <ol className="-ml-5">{progress.phases.map((phase) => <Phase key={phase.id} phase={phase} />)}</ol>
       {progress.agents.length > 0 && (
         <section className="mt-1" aria-label="Parallel research agents">
           <h4 className="min-h-8 border-t border-border-subtle px-0.5 pt-2 text-xs font-medium text-ink-faint">

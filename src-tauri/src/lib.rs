@@ -11,6 +11,7 @@ use tauri::Manager;
 use tauri_plugin_deep_link::DeepLinkExt;
 
 mod commands;
+mod document_preview;
 mod file_actions;
 mod markdown_export;
 mod mobile_remote;
@@ -141,6 +142,9 @@ pub fn run() {
             commands::project_context,
             commands::read_doc_text,
             commands::read_image_data_url,
+            document_preview::render_document_preview,
+            document_preview::read_document_preview_page,
+            document_preview::cleanup_document_preview,
             commands::save_doc_text,
             file_actions::copy_local_file,
             markdown_export::export_markdown_pdf,

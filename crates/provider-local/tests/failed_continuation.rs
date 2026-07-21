@@ -304,6 +304,109 @@ async fn transient_failure_retries_the_same_model_turn_from_a_completed_tool_bou
 }
 
 #[tokio::test]
+async fn exhausted_transport_retries_update_one_provider_incident_that_settles() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("hello.txt"), "hi").unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let mut requests = Vec::new();
+
+        let (mut first, _) = listener.accept().await.unwrap();
+        requests.push(read_request(&mut first).await);
+        first
+            .write_all(&http_response(&tool_call_body()))
+            .await
+            .unwrap();
+
+        // Initial request plus the three request-local retries all fail before
+        // output, exhausting that layer and activating whole-run recovery.
+        for _ in 0..4 {
+            let (mut interrupted, _) = listener.accept().await.unwrap();
+            requests.push(read_request(&mut interrupted).await);
+            drop(interrupted);
+        }
+
+        let (mut recovered, _) = listener.accept().await.unwrap();
+        requests.push(read_request(&mut recovered).await);
+        recovered
+            .write_all(&http_response(&final_body()))
+            .await
+            .unwrap();
+        requests
+    });
+    let (mut provider, session) = new_provider(addr, dir.path()).await;
+
+    let stream = provider
+        .prompt(
+            &session.id,
+            PromptInput::text("Read hello.txt. CONTEXT_SENTINEL_2048"),
+        )
+        .await
+        .unwrap();
+    let events = run_events(stream).await;
+
+    let incidents = events
+        .iter()
+        .filter_map(|event| match event {
+            AgentEvent::ProviderIncidentUpdated { incident, .. } => Some(incident),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(incidents.len(), 6, "events: {events:#?}");
+    assert!(incidents.windows(2).all(|pair| pair[0].id == pair[1].id));
+    assert_eq!(
+        incidents[0].status,
+        agent_core::recovery::ProviderIncidentStatus::Retrying
+    );
+    assert_eq!(incidents[0].request.attempts, 1);
+    assert_eq!(incidents[0].request.retries.transient, 1);
+    let recovering = incidents
+        .iter()
+        .find(|incident| incident.execution_recovery.is_some())
+        .expect("execution recovery update");
+    let recovery = recovering.execution_recovery.as_ref().unwrap();
+    assert_eq!(recovery.attempt, 2);
+    assert_eq!(recovery.max_attempts, 2);
+    assert_eq!(recovering.request.retries.transient, 3);
+    assert_eq!(recovery.boundary.completed_tools, 1);
+    assert_eq!(
+        recovery.boundary.last_completed_tool_name.as_deref(),
+        Some("read_file")
+    );
+    assert_eq!(
+        incidents.last().unwrap().status,
+        agent_core::recovery::ProviderIncidentStatus::Recovered
+    );
+    assert!(incidents.last().unwrap().completed_at_ms.is_some());
+
+    let outcome = events
+        .iter()
+        .find_map(|event| match event {
+            AgentEvent::RunFinished { outcome, .. } => Some(outcome),
+            _ => None,
+        })
+        .expect("run has a terminal outcome");
+    assert_eq!(outcome.status, RunStatus::Done);
+    let execution = outcome.execution.as_ref().expect("execution summary");
+    assert_eq!(execution.attempts, 2);
+    assert_eq!(execution.recoveries, 1);
+
+    let requests = server.await.unwrap();
+    assert_eq!(requests.len(), 6);
+    let recovered = request_json(&requests[5]);
+    assert!(recovered["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|message| {
+            message["content"]
+                .as_str()
+                .is_some_and(|content| content.contains("runtime recovery"))
+        }));
+}
+
+#[tokio::test]
 async fn cancelled_turn_preserves_completed_context_for_follow_up() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("hello.txt"), "hi").unwrap();

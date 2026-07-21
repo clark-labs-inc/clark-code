@@ -554,6 +554,7 @@ impl Provider for LocalAgentProvider {
         self.background.clear_all().await;
 
         self.sandbox = Some(sandbox);
+        self.llm = self.llm.take().map(|llm| llm.with_session_id(id.as_str()));
         self.session_id = Some(id.clone());
         let sandbox = self.sandbox.as_ref().expect("sandbox was just installed");
         let checkout_root = sandbox.root().to_string_lossy().into_owned();
@@ -939,10 +940,9 @@ fn map_llm_error(error: crate::llm::LlmError) -> Error {
         crate::llm::LlmError::PlatformKeyRejected(message) => {
             Error::Other(format!("platform key rejected: {message}"))
         }
-        crate::llm::LlmError::RateLimited(message) => Error::Transport(message),
-        crate::llm::LlmError::Transport(message) => Error::Transport(message),
         crate::llm::LlmError::Provider(message) => Error::Other(message),
         crate::llm::LlmError::ContextOverflow(message) => Error::Other(message),
+        crate::llm::LlmError::Recoverable(context) => Error::Transport(context.message),
     }
 }
 

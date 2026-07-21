@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use agent_core::domain::{AgentEvent, RunExecutionSummary, RunUsage};
@@ -83,6 +83,12 @@ pub(crate) struct RootExecutionTrace {
     run: RunId,
 }
 
+pub(crate) struct RecoveryBoundary {
+    pub attempt: u32,
+    pub max_attempts: u32,
+    pub receipt: agent_core::recovery::ExecutionBoundaryReceipt,
+}
+
 impl RootExecutionTrace {
     pub(crate) fn new(
         session: &SessionId,
@@ -163,6 +169,60 @@ impl RootExecutionTrace {
                 tracing::warn!(%error, "root execution recovery rejected");
                 false
             }
+        }
+    }
+
+    pub(crate) fn recovery_boundary(&self) -> RecoveryBoundary {
+        let snapshot = self.ledger.snapshot();
+        let mut started = BTreeMap::new();
+        let mut completed_tools = 0_u32;
+        let mut last_completed_tool_id = None;
+        let mut last_completed_tool_name = None;
+        let events = self.ledger.events();
+        for event in &events {
+            match &event.kind {
+                agent_orchestration::ExecutionEventKind::ToolStarted { id, name, .. } => {
+                    started.insert(id.clone(), name.clone());
+                }
+                agent_orchestration::ExecutionEventKind::ToolFinished {
+                    id,
+                    status: ToolExecutionStatus::Completed,
+                    ..
+                } => {
+                    completed_tools = completed_tools.saturating_add(1);
+                    last_completed_tool_id = Some(id.clone());
+                    last_completed_tool_name = started.get(id).cloned();
+                }
+                _ => {}
+            }
+        }
+        let attempt = snapshot
+            .attempts
+            .len()
+            .saturating_add(1)
+            .try_into()
+            .unwrap_or(u32::MAX);
+        let event_sequence = events.last().map(|event| event.sequence).unwrap_or(0);
+        RecoveryBoundary {
+            attempt,
+            max_attempts: snapshot.policy.max_attempts,
+            receipt: agent_core::recovery::ExecutionBoundaryReceipt {
+                execution_id: snapshot.id.to_string(),
+                attempt_sequence: snapshot
+                    .active_attempt
+                    .as_ref()
+                    .map(|attempt| attempt.sequence)
+                    .unwrap_or_else(|| attempt.saturating_sub(1)),
+                event_sequence,
+                transcript_commit_id: format!(
+                    "{}:transcript-commit:{event_sequence}",
+                    self.run.as_str()
+                ),
+                completed_tools,
+                last_completed_tool_id,
+                last_completed_tool_name,
+                baseline_checkpoint_id: snapshot.evidence.baseline_checkpoint,
+            },
         }
     }
 

@@ -81,6 +81,7 @@ describe("edit and resend", () => {
       ],
       tool_calls: {},
       artifacts: [],
+      provider_incidents: {},
     };
     useSessionStore.setState({ snapshot });
 

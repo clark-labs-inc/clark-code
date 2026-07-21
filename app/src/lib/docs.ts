@@ -20,7 +20,48 @@ export function isLocalDocUri(uri?: string): boolean {
 
 /** Turn an artifact `uri` into a filesystem path (strips a `file://` scheme). */
 export function toPath(uri: string): string {
-  return uri.startsWith("file://") ? decodeURIComponent(uri.slice("file://".length)) : uri;
+  if (!uri.startsWith("file://")) return uri;
+  let path = decodeURIComponent(uri.slice("file://".length));
+  if (path.startsWith("localhost/")) path = path.slice("localhost".length);
+  if (/^\/[a-z]:\//i.test(path)) path = path.slice(1);
+  return path;
+}
+
+export type DocumentPreview =
+  | { kind: "html"; html: string }
+  | { kind: "pages"; preview_id: string; page_count: number };
+
+export function isPreviewableDocument(uri?: string, title?: string, mimeType?: string): boolean {
+  return (
+    /(?:wordprocessingml|spreadsheetml|presentationml|opendocument|application\/pdf|text\/csv)/i.test(
+      mimeType ?? "",
+    ) ||
+    /\.(?:docx?|odt|pdf|xlsx?|ods|csv|pptx?|odp)(?:[?#]|$)/i.test(uri ?? title ?? "")
+  );
+}
+
+/** Render a local office document through Clark's bundled pure-Rust
+ * libreoffice-rs engine. HTML remains inert inside the caller's sandbox. */
+export async function readDocumentPreview(uri?: string): Promise<DocumentPreview | null> {
+  if (!uri || !isTauri() || !isLocalDocUri(uri)) return null;
+  try {
+    return await invoke<DocumentPreview>("render_document_preview", { path: toPath(uri) });
+  } catch {
+    return null;
+  }
+}
+
+/** Load one generated preview page through Tauri's raw-byte IPC path. */
+export async function readDocumentPreviewPage(previewId: string, page: number): Promise<string> {
+  const bytes = await invoke<ArrayBuffer>("read_document_preview_page", {
+    previewId,
+    page,
+  });
+  return URL.createObjectURL(new Blob([bytes], { type: "image/png" }));
+}
+
+export async function cleanupDocumentPreview(previewId: string): Promise<void> {
+  await invoke("cleanup_document_preview", { previewId });
 }
 
 /** Read a produced document's text from disk. Returns null when it can't be read

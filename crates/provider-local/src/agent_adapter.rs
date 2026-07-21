@@ -62,13 +62,15 @@ impl UsageTotals {
 pub(crate) struct ClarkAgentStream {
     llm: LlmClient,
     totals: Arc<UsageTotals>,
+    incidents: crate::incidents::ProviderIncidentTracker,
 }
 
 impl ClarkAgentStream {
-    pub fn new(llm: LlmClient) -> Self {
+    pub fn new(llm: LlmClient, incidents: crate::incidents::ProviderIncidentTracker) -> Self {
         Self {
             llm,
             totals: Arc::new(UsageTotals::default()),
+            incidents,
         }
     }
 
@@ -87,6 +89,7 @@ impl ca::StreamFn for ClarkAgentStream {
     ) -> BoxStream<'static, ca::StreamEvent> {
         let llm = self.llm.clone();
         let totals = self.totals.clone();
+        let incidents = self.incidents.clone();
         let messages = to_wire_messages(&request.system_prompt, &request.messages);
         let tools = request
             .tools
@@ -102,7 +105,7 @@ impl ca::StreamFn for ClarkAgentStream {
             let chunk_tx = tx.clone();
             let reasoning_tx = tx.clone();
             let turn = llm
-                .stream_chat(
+                .stream_chat_observed(
                     &messages,
                     &tools,
                     &signal,
@@ -123,11 +126,16 @@ impl ca::StreamFn for ClarkAgentStream {
                             },
                         ));
                     },
+                    {
+                        let incidents = incidents.clone();
+                        move |context| incidents.observe_retry(context)
+                    },
                 )
                 .await;
 
             match turn {
                 Ok(turn) => {
+                    incidents.mark_recovered();
                     if let Some(usage) = turn.usage {
                         totals.add(usage);
                     }
@@ -154,6 +162,9 @@ impl ca::StreamFn for ClarkAgentStream {
                     }
                 }
                 Err(error) => {
+                    if let Some(context) = error.provider_failure().cloned() {
+                        incidents.observe_terminal(context);
+                    }
                     let (kind, message) = stream_error(error);
                     let _ = tx.send(ca::StreamEvent::Error {
                         partial: empty_assistant(ca::StopReason::Error, None),
@@ -493,3 +504,7 @@ fn produced_artifact_to_desktop(
 #[cfg(test)]
 #[path = "agent_adapter_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "agent_adapter_translate_tests.rs"]
+mod translate_tests;

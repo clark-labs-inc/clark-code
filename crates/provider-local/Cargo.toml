@@ -11,7 +11,7 @@ agent-core = { path = "../agent-core", features = ["native"] }
 agent-orchestration = { path = "../agent-orchestration" }
 provider-acp = { path = "../provider-acp" }
 provider-clark = { path = "../provider-clark" }
-clark-agent = { git = "https://github.com/clark-labs-inc/clark-agent", rev = "c5ea6b58ef67eac12c7649afed6da7754dcb45bc" }
+clark-agent = "0.2.2"
 clark-agent-compaction = { git = "https://github.com/clark-labs-inc/clark-agent-compaction", rev = "860f3159944ca78b33da4eea517e1df34ee8b490" }
 # The Executor trait + LocalExecutor live here (shared with clark-exec-server);
 # exec-protocol is the wire contract RemoteExecutor speaks to it.

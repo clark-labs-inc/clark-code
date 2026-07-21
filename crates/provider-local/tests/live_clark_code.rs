@@ -6,7 +6,7 @@
 //! ```sh
 //! CLARK_CODE_LIVE=1 \
 //! CLARK_CODE_BASE_URL=https://api.clarkslabs.com/v1 \
-//! CLARK_CODE_MODEL=clark-code \
+//! CLARK_CODE_MODEL=clark-code:deepseek_v4_pro \
 //! CLARK_CODE_API_KEY=ck_live_... \
 //!   cargo test -p provider-local --test live_clark_code -- --ignored --nocapture --test-threads=1
 //! ```
@@ -31,6 +31,10 @@ struct LiveConfig {
     api_key: String,
 }
 
+fn is_clark_code_model(value: &str) -> bool {
+    value == "clark-code" || value.starts_with("clark-code:")
+}
+
 fn live_config() -> Option<LiveConfig> {
     if std::env::var("CLARK_CODE_LIVE").ok().as_deref() != Some("1") {
         eprintln!("skipping: set CLARK_CODE_LIVE=1 to permit live clark-code calls");
@@ -44,13 +48,13 @@ fn live_config() -> Option<LiveConfig> {
         }
     };
     let model = match std::env::var("CLARK_CODE_MODEL") {
-        Ok(value) if value.trim() == "clark-code" => value,
+        Ok(value) if is_clark_code_model(value.trim()) => value,
         Ok(value) => {
-            eprintln!("skipping: CLARK_CODE_MODEL must be clark-code, got {value:?}");
+            eprintln!("skipping: CLARK_CODE_MODEL must be a clark-code tier, got {value:?}");
             return None;
         }
         Err(_) => {
-            eprintln!("skipping: set CLARK_CODE_MODEL=clark-code");
+            eprintln!("skipping: set CLARK_CODE_MODEL to an explicit clark-code tier");
             return None;
         }
     };
@@ -66,6 +70,14 @@ fn live_config() -> Option<LiveConfig> {
         model,
         api_key,
     })
+}
+
+#[test]
+fn live_matrix_accepts_backend_owned_clark_code_aliases_only() {
+    assert!(is_clark_code_model("clark-code"));
+    assert!(is_clark_code_model("clark-code:deepseek_v4_pro"));
+    assert!(!is_clark_code_model("deepseek/deepseek-v4-pro"));
+    assert!(!is_clark_code_model("clark"));
 }
 
 #[derive(Default, Debug)]
@@ -259,6 +271,7 @@ fn event_name(ev: &AgentEvent) -> &'static str {
         AgentEvent::Artifact { .. } => "Artifact",
         AgentEvent::Surface { .. } => "Surface",
         AgentEvent::FanOut { .. } => "FanOut",
+        AgentEvent::ProviderIncidentUpdated { .. } => "ProviderIncidentUpdated",
         AgentEvent::ModeChanged { .. } => "ModeChanged",
         AgentEvent::Trace { .. } => "Trace",
         AgentEvent::RunFinished { .. } => "RunFinished",

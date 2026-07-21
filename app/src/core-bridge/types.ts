@@ -196,6 +196,7 @@ export type RunFailureKind =
   | "insufficient_credits"
   | "tool_fatal"
   | "local_state"
+  | "runtime_interrupted"
   | "empty_response";
 
 /** Aggregated model usage for one run (the local coding loop surfaces it). */
@@ -241,6 +242,80 @@ export interface RunView {
   checkpoint?: string;
 }
 
+export type ProviderIncidentCategory =
+  | "timeout"
+  | "rate_limit"
+  | "upstream_unavailable"
+  | "connection_lost";
+
+export type ProviderIncidentStatus =
+  | "observed"
+  | "retrying"
+  | "recovered"
+  | "failed"
+  | "interrupted";
+export type ProviderFailureClass = "transient_transport" | "rate_limited";
+export type ProviderIncidentScope =
+  | "model_request"
+  | "provider_event_stream"
+  | "provider_process"
+  | "cloud_history_sync"
+  | "tool_execution_host";
+
+export interface ProviderRetryCounts {
+  transient: number;
+  rate_limit: number;
+  authentication: number;
+}
+
+export interface ProviderRequestDiagnostics {
+  idempotency_key: string;
+  provider_request_id?: string;
+  attempts: number;
+  max_attempts: number;
+  retries: ProviderRetryCounts;
+  output_started: boolean;
+  started_at_ms: number;
+}
+
+export interface ExecutionBoundaryReceipt {
+  execution_id: string;
+  attempt_sequence: number;
+  event_sequence: number;
+  transcript_commit_id: string;
+  completed_tools: number;
+  last_completed_tool_id?: string;
+  last_completed_tool_name?: string;
+  baseline_checkpoint_id?: string;
+}
+
+export interface ExecutionRecovery {
+  attempt: number;
+  max_attempts: number;
+  boundary: ExecutionBoundaryReceipt;
+  started_at_ms: number;
+}
+
+/** Durable provider incident, independent from optional execution recovery. */
+export interface ProviderIncident {
+  id: string;
+  status: ProviderIncidentStatus;
+  scope: ProviderIncidentScope;
+  failure_class: ProviderFailureClass;
+  category: ProviderIncidentCategory;
+  message: string;
+  detail: string;
+  model: string;
+  provider_route: string;
+  provider_status?: number;
+  provider_error_type?: string;
+  request: ProviderRequestDiagnostics;
+  execution_recovery?: ExecutionRecovery;
+  observed_at_ms: number;
+  updated_at_ms: number;
+  completed_at_ms?: number;
+}
+
 export type GoalStatus = "active" | "blocked" | "budget_limited" | "complete";
 
 /** Provider-owned receipt for a standing goal that can span many runs. */
@@ -261,6 +336,7 @@ export type TimelineItem =
   | { item: "message"; run: string; role: Role; blocks: ContentBlock[]; phase?: MessagePhase }
   | { item: "tool_call"; id: string; run?: string }
   | { item: "artifact"; id: string }
+  | { item: "provider_incident"; run: string; id: string }
   | {
       item: "execution_checklist";
       run?: string;
@@ -270,6 +346,11 @@ export type TimelineItem =
   | { item: "proposed_plan"; run: string; plan: ProposedPlan };
 
 export interface Snapshot {
+  /** Local outbox has durable events not yet acknowledged by Clark cloud. */
+  sync_pending?: boolean;
+  /** Opaque device-local journal cursor used by the native bridge to
+   * checkpoint exactly the event prefix represented by this snapshot. */
+  history_checkpoint?: number;
   session?: string;
   runs: Record<string, RunView>;
   timeline: TimelineItem[];
@@ -281,10 +362,20 @@ export interface Snapshot {
   artifacts: Artifact[];
   focus?: WorkspaceFocus;
   fan_out?: FanOut;
+  provider_incidents: Record<string, ProviderIncident>;
 }
 
 export function emptySnapshot(): Snapshot {
-  return { runs: {}, timeline: [], tool_calls: {}, artifacts: [] };
+  return { runs: {}, timeline: [], tool_calls: {}, artifacts: [], provider_incidents: {} };
+}
+
+/** Legacy/cloud/native payload shape before it crosses into application state. */
+export type WireSnapshot = Omit<Snapshot, "provider_incidents"> & {
+  provider_incidents?: Record<string, ProviderIncident>;
+};
+
+export function normalizeSnapshot(snapshot: WireSnapshot): Snapshot {
+  return { ...snapshot, provider_incidents: snapshot.provider_incidents ?? {} };
 }
 
 export interface ProviderCapabilities {

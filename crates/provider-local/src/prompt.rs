@@ -206,7 +206,7 @@ You write and modify real files and run real commands on their computer.\n\n",
 
     p.push_str("# Git\n");
     p.push_str("- Other agents (or the user) may be changing this project at the same time. Uncommitted changes you didn't make are someone's work in progress — never revert, overwrite, or \"clean up\" changes you did not create.\n");
-    p.push_str("- Work on the current branch as it is. Isolate your work by touching only the files your task needs — never by moving the tree: no `git stash`, `git reset`, `git checkout`/`git switch`/`git restore` to switch or discard, `git clean`, or `git rebase`, and don't create branches. If git state looks wrong, explain it to the user in plain terms instead of fixing it with git.\n");
+    p.push_str("- Work on the current branch as it is. Isolate your work by touching only the files your task needs — never by moving the tree: no `git stash`, `git reset`, `git checkout`/`git switch`/`git restore` to switch or discard, `git clean`, or `git rebase`, and don't create branches unless the user explicitly asks. Every branch you create must start with `clark/` (for example, `clark/update-koa-3.2.1`). If git state looks wrong, explain it to the user in plain terms instead of fixing it with git.\n");
     p.push_str("- A dirty tree is normal; mention it only when changes you didn't make overlap the files you need to edit — then pause and ask before touching them.\n");
     p.push_str("- Re-read a file before editing it if you haven't read it this turn — it may have changed since you last looked.\n");
     p.push_str(
@@ -454,7 +454,7 @@ mod tests {
         assert!(p.contains("# Working with the user"));
         assert!(p.contains("ONE short clarifying question"));
         // Shared-tree git rules: no stash/reset, foreign changes are off-limits.
-        assert!(p.contains("# Git"));
+        assert!(p.contains("Every branch you create must start with `clark/`"));
         assert!(p.contains("`git stash`"));
         assert!(p.contains("changes you did not create"));
         assert!(p.contains("Keep the repository's configured human author"));

@@ -12,6 +12,7 @@ import {
   type Session,
   type Snapshot,
 } from "./types";
+import { loadStoredResilienceCase, playResilienceSimulation } from "./resilienceBenchmark";
 
 // Mirrors the shipped app: one provider, the local coding agent (which has no
 // server-side session to resume — load_session is false).
@@ -31,7 +32,7 @@ const PROVIDERS: ProviderInfo[] = [
   },
 ];
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 export class MockBridge implements CoreBridge {
   private snapshot: Snapshot = emptySnapshot();
@@ -209,6 +210,18 @@ export class MockBridge implements CoreBridge {
     });
     this.emit();
     await sleep(250);
+
+    const resilienceCase = loadStoredResilienceCase();
+    if (resilienceCase) {
+      await playResilienceSimulation(resilienceCase, {
+        snapshot: this.snapshot,
+        run,
+        emit: () => this.emit(),
+        isCancelled: () => this.snapshot.runs[run]?.status === "cancelled",
+        sleep,
+      });
+      return;
+    }
 
     if (/^\s*\/goal(?:\s|$)/i.test(userText) || userText.toLowerCase().includes("goal simulation")) {
       await this.playGoalSimulation(run, userText);

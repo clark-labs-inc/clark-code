@@ -40,8 +40,6 @@ export function GoalStatusRail() {
       <dl className="mt-3 grid grid-cols-2 gap-x-6 gap-y-2 text-xs">
         <div><dt className="text-ink-faint">Status</dt><dd className="mt-0.5 text-ink-secondary">{goalStatusLabel(goal)}</dd></div>
         <div><dt className="text-ink-faint">Elapsed</dt><dd className="mt-0.5 tabular-nums text-ink-secondary">{formatGoalDuration(goalElapsedSeconds(goal))}</dd></div>
-        <div><dt className="text-ink-faint">Goal turns</dt><dd className="mt-0.5 tabular-nums text-ink-secondary">{goal.continuations}</dd></div>
-        <div><dt className="text-ink-faint">Tokens used</dt><dd className="mt-0.5 tabular-nums text-ink-secondary">{compactNumber(goal.tokens_used)}{goal.token_budget ? ` / ${compactNumber(goal.token_budget)}` : ""}</dd></div>
       </dl>
       {goal.blocker_reason && (
         <p className="mt-3 rounded-lg bg-warning/8 px-3 py-2 text-xs leading-relaxed text-warning">

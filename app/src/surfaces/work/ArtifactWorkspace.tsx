@@ -29,8 +29,16 @@ import type { Artifact, ArtifactKind, ToolCall } from "../../core-bridge/types";
 import { useSessionStore } from "../../store/sessionStore";
 import { useCopy } from "../../lib/clipboard";
 import { cn } from "../../lib/cn";
-import { readDocText, saveDocPdf, saveDocText } from "../../lib/docs";
+import {
+  isLocalDocUri,
+  isPreviewableDocument,
+  readDocText,
+  saveDocPdf,
+  saveDocText,
+  toPath,
+} from "../../lib/docs";
 import { openExternal } from "../../lib/account";
+import { openLocalPath } from "../../lib/fileLinks";
 import {
   artifactAvailability,
   artifactLocationLabel,
@@ -40,6 +48,7 @@ import {
 import { Md, MD_CLASSES } from "../Message";
 import { LocalArtifactImage } from "./ArtifactCard";
 import { isMarkdownDoc } from "./MarkdownDoc";
+import { DocumentPreview } from "./DocumentPreview";
 
 const KIND_ICON: Record<ArtifactKind, typeof FileBox> = {
   website: Globe,
@@ -82,6 +91,17 @@ function isVideoArtifact(artifact: Artifact): boolean {
     artifact.kind === "video" ||
     (artifact.kind === "media" && /video|\.(mp4|webm|mov)/i.test(artifact.uri ?? artifact.mime_type ?? ""))
   );
+}
+
+async function openArtifactExternally(artifact: Artifact): Promise<void> {
+  if (!artifact.uri) return;
+  try {
+    if (isLocalDocUri(artifact.uri)) await openLocalPath(toPath(artifact.uri));
+    else await openExternal(artifact.uri);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    useSessionStore.getState().flashNotice(`Could not open ${artifact.title}: ${detail}`);
+  }
 }
 
 function sourceTitle(call?: ToolCall): string {
@@ -171,7 +191,7 @@ function GenericPreview({ artifact }: { artifact: Artifact }) {
         {canOpenArtifactExternally(artifact) && (
           <button
             type="button"
-            onClick={() => void openExternal(artifact.uri!)}
+            onClick={() => void openArtifactExternally(artifact)}
             className="mt-6 inline-flex h-10 items-center gap-2 rounded-lg bg-accent px-4 text-sm font-medium text-on-accent transition hover:bg-accent-hover"
           >
             View {artifact.title} <ExternalLink className="size-3.5" />
@@ -225,6 +245,16 @@ function ArtifactPreview({
           <Md math diagrams>{text}</Md>
         </div>
       </article>
+    );
+  }
+
+  if (isPreviewableDocument(artifact.uri, artifact.title, artifact.mime_type)) {
+    return (
+      <DocumentPreview
+        title={artifact.title}
+        uri={artifact.uri}
+        onOpen={() => void openArtifactExternally(artifact)}
+      />
     );
   }
 
@@ -665,7 +695,7 @@ export function ArtifactWorkspace({
           {canOpenArtifactExternally(active) && (
             <button
               type="button"
-              onClick={() => void openExternal(active.uri!)}
+              onClick={() => void openArtifactExternally(active)}
               aria-label={`View ${active.title} externally`}
               title={`View ${active.title} externally`}
               className="grid size-8 place-items-center rounded-lg text-ink-muted transition hover:bg-bg-hover hover:text-ink"

@@ -16,6 +16,7 @@ import { ActivityRewardToast } from "./surfaces/ActivityRewardToast";
 import { OfflineBanner } from "./surfaces/OfflineBanner";
 import { CommandPalette } from "./surfaces/CommandPalette";
 import { MobileRemoteAgent } from "./surfaces/MobileRemoteAgent";
+import { PanelErrorBoundary } from "./components/PanelErrorBoundary";
 import type { Artifact } from "./core-bridge/types";
 import {
   DEFAULT_ARTIFACT_PANEL_WIDTH,
@@ -249,9 +250,11 @@ export default function AuthenticatedWorkspace({
                   : "flex min-w-0 flex-1 flex-col"
               }
             >
-              <Suspense fallback={<div className="min-h-0 flex-1" />}>
-                <Conversation activeArtifactId={activeArtifactId} onOpenArtifact={openArtifact} />
-              </Suspense>
+              <PanelErrorBoundary title="Conversation panel needs to restart" resetKey={session.id}>
+                <Suspense fallback={<div className="min-h-0 flex-1" />}>
+                  <Conversation activeArtifactId={activeArtifactId} onOpenArtifact={openArtifact} />
+                </Suspense>
+              </PanelErrorBoundary>
               <GoalStatusRail />
               <Composer />
             </div>
@@ -297,19 +300,28 @@ export default function AuthenticatedWorkspace({
                   className="flex min-w-0 flex-1 xl:flex-none"
                   style={{ width: sidePanelWidth }}
                 >
-                  <Suspense fallback={<div className="min-w-0 flex-1 bg-bg-elevated" />}>
-                    {subagentsOpen ? (
-                      <SubagentsInspector />
-                    ) : activeArtifactId ? (
-                      <ArtifactWorkspace
-                        activeArtifactId={activeArtifactId}
-                        conversationTitle={conversationTitle ?? "Current conversation"}
-                        onSelect={setActiveArtifactId}
-                        onClose={() => setActiveArtifactId(null)}
-                        onJumpToSource={jumpToSource}
-                      />
-                    ) : null}
-                  </Suspense>
+                  <PanelErrorBoundary
+                    title="Details panel needs to restart"
+                    resetKey={subagentsOpen ? "subagents" : activeArtifactId}
+                    onDismiss={() => {
+                      closeSubagents();
+                      setActiveArtifactId(null);
+                    }}
+                  >
+                    <Suspense fallback={<div className="min-w-0 flex-1 bg-bg-elevated" />}>
+                      {subagentsOpen ? (
+                        <SubagentsInspector />
+                      ) : activeArtifactId ? (
+                        <ArtifactWorkspace
+                          activeArtifactId={activeArtifactId}
+                          conversationTitle={conversationTitle ?? "Current conversation"}
+                          onSelect={setActiveArtifactId}
+                          onClose={() => setActiveArtifactId(null)}
+                          onJumpToSource={jumpToSource}
+                        />
+                      ) : null}
+                    </Suspense>
+                  </PanelErrorBoundary>
                 </div>
               </>
             )}
@@ -325,18 +337,20 @@ export default function AuthenticatedWorkspace({
             and so the sidebar can open it in a freshly picked project folder
             before any session exists. */}
         {terminalTouched.current && (
-          <Suspense
-            fallback={
-              terminalOpen ? (
-                <div className="flex h-10 shrink-0 items-center gap-2 border-t border-border px-4 text-xs text-ink-muted">
-                  <span className="size-3 animate-[spin_1s_linear_infinite] rounded-full border border-ink-faint border-t-transparent" />
-                  Loading terminal…
-                </div>
-              ) : null
-            }
-          >
-            <TerminalPanel />
-          </Suspense>
+          <PanelErrorBoundary title="Terminal panel needs to restart" resetKey={terminalOpen ? 1 : 0}>
+            <Suspense
+              fallback={
+                terminalOpen ? (
+                  <div className="flex h-10 shrink-0 items-center gap-2 border-t border-border px-4 text-xs text-ink-muted">
+                    <span className="size-3 animate-[spin_1s_linear_infinite] rounded-full border border-ink-faint border-t-transparent" />
+                    Loading terminal…
+                  </div>
+                ) : null
+              }
+            >
+              <TerminalPanel />
+            </Suspense>
+          </PanelErrorBoundary>
         )}
       </div>
       {mcpOpen && (
@@ -350,16 +364,22 @@ export default function AuthenticatedWorkspace({
         </Suspense>
       )}
       {settingsOpen && (
-        <Suspense fallback={null}>
-          <Settings
-            dark={dark}
-            onToggleTheme={toggle}
-            colorblind={colorblind}
-            onToggleColorblind={toggleColorblind}
-            textSize={textSize}
-            onTextSizeChange={onTextSizeChange}
-          />
-        </Suspense>
+        <PanelErrorBoundary
+          title="Settings needs to restart"
+          resetKey={settingsOpen ? 1 : 0}
+          onDismiss={() => useSessionStore.getState().setSettingsOpen(false)}
+        >
+          <Suspense fallback={null}>
+            <Settings
+              dark={dark}
+              onToggleTheme={toggle}
+              colorblind={colorblind}
+              onToggleColorblind={toggleColorblind}
+              textSize={textSize}
+              onTextSizeChange={onTextSizeChange}
+            />
+          </Suspense>
+        </PanelErrorBoundary>
       )}
       <CommandPalette dark={dark} onToggleTheme={toggle} />
     </div>

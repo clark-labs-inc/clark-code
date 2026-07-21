@@ -6,7 +6,7 @@ import {
   settleRuns,
   snapshotBeforeTimelineItem,
 } from "./history";
-import type { Snapshot, ToolCall } from "../core-bridge/types";
+import type { ProviderIncident, Snapshot, ToolCall } from "../core-bridge/types";
 
 // The Node test env has no localStorage; back it with a tiny in-memory mock.
 class MemStorage {
@@ -62,6 +62,13 @@ describe("drainLocalHistory", () => {
     expect(drainLocalHistory()).toEqual([]);
   });
 
+  it("normalizes incident storage on legacy local snapshots", () => {
+    store.setItem("clark.history.index.v1", JSON.stringify([meta("g1", "Legacy")]));
+    store.setItem("clark.history.snap.v1.g1", JSON.stringify(snap("g1")));
+
+    expect(drainLocalHistory()[0].snapshot.provider_incidents).toEqual({});
+  });
+
   it("drains per-account scoped keys across accounts and carries archived", () => {
     store.setItem("clark.history.index.v1.alice@x.com", JSON.stringify([meta("a1", "Alice", true)]));
     store.setItem("clark.history.snap.v1.alice@x.com.a1", JSON.stringify(snap("a1")));
@@ -103,6 +110,7 @@ describe("settleRuns", () => {
         t3: tool("t3", "failed"),
       },
       artifacts: [],
+      provider_incidents: {},
       pending_permission: { id: "p1", session: "s1", title: "allow?", options: [] },
     };
     const settled = settleRuns(snapshot);
@@ -122,8 +130,44 @@ describe("settleRuns", () => {
       timeline: [],
       tool_calls: { t1: tool("t1", "completed") },
       artifacts: [],
+      provider_incidents: {},
     };
     expect(settleRuns(snapshot)).toBe(snapshot);
+  });
+
+  it("marks an unfinished provider incident interrupted without inventing completion time", () => {
+    const incident: ProviderIncident = {
+      id: "incident-1",
+      status: "retrying",
+      scope: "model_request",
+      failure_class: "transient_transport",
+      category: "connection_lost",
+      message: "The model connection was interrupted.",
+      detail: "connection closed",
+      model: "test-model",
+      provider_route: "gateway.test/v1",
+      request: {
+        idempotency_key: "request-1",
+        attempts: 1,
+        max_attempts: 4,
+        retries: { transient: 1, rate_limit: 0, authentication: 0 },
+        output_started: false,
+        started_at_ms: 10,
+      },
+      observed_at_ms: 20,
+      updated_at_ms: 20,
+    };
+    const snapshot: Snapshot = {
+      runs: {},
+      timeline: [{ item: "provider_incident", run: "r1", id: incident.id }],
+      tool_calls: {},
+      artifacts: [],
+      provider_incidents: { [incident.id]: incident },
+    };
+
+    const settled = settleRuns(snapshot);
+    expect(settled.provider_incidents[incident.id].status).toBe("interrupted");
+    expect(settled.provider_incidents[incident.id].completed_at_ms).toBeUndefined();
   });
 });
 
@@ -143,6 +187,7 @@ describe("buildResumeTranscript", () => {
       ],
       tool_calls: { t1: { ...tool("t1", "completed"), title: "brew install node", locations: [{ path: "/tmp" }] } },
       artifacts: [],
+      provider_incidents: {},
     };
     const out = buildResumeTranscript(snapshot)!;
     expect(out.items[0]).toMatchObject({ item: "message", role: "user" });
@@ -159,7 +204,7 @@ describe("buildResumeTranscript", () => {
 
   it("returns null for an empty transcript and keeps the tail when over budget", () => {
     expect(
-      buildResumeTranscript({ runs: {}, timeline: [], tool_calls: {}, artifacts: [] }),
+      buildResumeTranscript({ runs: {}, timeline: [], tool_calls: {}, artifacts: [], provider_incidents: {} }),
     ).toBeNull();
 
     const long: Snapshot = {
@@ -172,6 +217,7 @@ describe("buildResumeTranscript", () => {
       })),
       tool_calls: {},
       artifacts: [],
+      provider_incidents: {},
     };
     const out = buildResumeTranscript(long, 500)!;
     expect(JSON.stringify(out).length).toBeLessThan(700);
@@ -182,7 +228,7 @@ describe("buildResumeTranscript", () => {
 
   it("replays the latest proposed plan as typed state", () => {
     const snapshot: Snapshot = {
-      runs: {}, timeline: [], tool_calls: {}, artifacts: [],
+      runs: {}, timeline: [], tool_calls: {}, artifacts: [], provider_incidents: {},
       proposed_plan: {
         id: "plan-1", revision: 2, markdown: "1. Build it", status: "awaiting_decision",
       },
@@ -242,6 +288,7 @@ describe("snapshotBeforeTimelineItem", () => {
         { id: "a1", title: "kept", kind: "file" },
         { id: "a2", title: "dropped", kind: "file" },
       ],
+      provider_incidents: {},
       pending_permission: { id: "p1", session: "chat-1", title: "stale", options: [] },
       focus: { surface: "files", path: "stale.ts" },
       fan_out: { title: "stale", total: 1, done: 0, running: 1, agents: [] },

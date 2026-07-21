@@ -54,12 +54,21 @@ pub enum TimelineItem {
         run: RunId,
         plan: ProposedPlan,
     },
+    ProviderIncident {
+        run: RunId,
+        id: String,
+    },
 }
 
 /// Everything the UI renders for a session. Pushed to the frontend (whole or
 /// diffed) after each applied event.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Snapshot {
+    /// Device-local SQLite outbox cursor covered by this projection. The Tauri
+    /// bridge strips it before cloud persistence; it exists only to checkpoint
+    /// the exact local event prefix represented by a frontend snapshot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub history_checkpoint: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session: Option<SessionId>,
     pub runs: IndexMap<RunId, RunView>,
@@ -80,6 +89,10 @@ pub struct Snapshot {
     /// `None` when nothing is fanning out. Rendered by the fan-out surface.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fan_out: Option<FanOut>,
+    /// Durable provider-incident diagnostics, referenced by timeline identity
+    /// so later status updates replace the same card in place.
+    #[serde(default)]
+    pub provider_incidents: IndexMap<String, crate::recovery::ProviderIncident>,
 }
 
 impl Snapshot {
@@ -279,6 +292,19 @@ pub fn apply(snapshot: &mut Snapshot, event: &AgentEvent) {
             snapshot.focus = Some(focus.clone());
         }
 
+        AgentEvent::ProviderIncidentUpdated { run, incident } => {
+            let is_new = !snapshot.provider_incidents.contains_key(&incident.id);
+            snapshot
+                .provider_incidents
+                .insert(incident.id.clone(), incident.clone());
+            if is_new {
+                snapshot.timeline.push(TimelineItem::ProviderIncident {
+                    run: run.clone(),
+                    id: incident.id.clone(),
+                });
+            }
+        }
+
         AgentEvent::ModeChanged { .. } | AgentEvent::Trace { .. } => {}
 
         AgentEvent::FanOut { parent, agent, .. } => {
@@ -454,6 +480,68 @@ mod tests {
 
     fn run() -> RunId {
         RunId::new("run-1")
+    }
+
+    fn incident(
+        status: crate::recovery::ProviderIncidentStatus,
+    ) -> crate::recovery::ProviderIncident {
+        crate::recovery::ProviderIncident {
+            id: "run-1:provider-incident:1".into(),
+            status,
+            scope: crate::recovery::ProviderIncidentScope::ModelRequest,
+            failure_class: crate::recovery::ProviderFailureClass::TransientTransport,
+            category: crate::recovery::ProviderIncidentCategory::Timeout,
+            message: "Model connection timed out while Clark was working.".into(),
+            detail: "gateway timeout".into(),
+            model: "test-model".into(),
+            provider_route: "gateway.test".into(),
+            provider_status: Some(524),
+            provider_error_type: Some("upstream_timeout".into()),
+            request: crate::recovery::ProviderRequestDiagnostics {
+                idempotency_key: "request-1".into(),
+                provider_request_id: Some("upstream-1".into()),
+                attempts: 4,
+                max_attempts: 17,
+                retries: crate::recovery::ProviderRetryCounts {
+                    transient: 3,
+                    ..Default::default()
+                },
+                output_started: false,
+                started_at_ms: 10,
+            },
+            execution_recovery: None,
+            observed_at_ms: 20,
+            updated_at_ms: 21,
+            completed_at_ms: None,
+        }
+    }
+
+    #[test]
+    fn provider_incident_updates_one_durable_timeline_card() {
+        let mut snapshot = Snapshot::new();
+        apply(
+            &mut snapshot,
+            &AgentEvent::ProviderIncidentUpdated {
+                run: run(),
+                incident: incident(crate::recovery::ProviderIncidentStatus::Retrying),
+            },
+        );
+        let mut settled = incident(crate::recovery::ProviderIncidentStatus::Recovered);
+        settled.completed_at_ms = Some(42);
+        apply(
+            &mut snapshot,
+            &AgentEvent::ProviderIncidentUpdated {
+                run: run(),
+                incident: settled.clone(),
+            },
+        );
+
+        assert_eq!(snapshot.timeline.len(), 1);
+        assert!(matches!(
+            &snapshot.timeline[0],
+            TimelineItem::ProviderIncident { id, .. } if id == &settled.id
+        ));
+        assert_eq!(snapshot.provider_incidents[&settled.id], settled);
     }
 
     #[test]

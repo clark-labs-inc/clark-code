@@ -58,6 +58,10 @@ reqwest = { version = "0.12", default-features = false, features = ["http2", "js
 urlencoding = "2"
 # Ids for live remote-project connections + capability tokens (SSH orchestration).
 uuid = { version = "1", features = ["v4"] }
+# Crash-safe local trajectory outbox. SQLite gives us transactional enqueue,
+# acknowledgement, and checkpoint updates without making local disk a second
+# conversation authority.
+rusqlite = { version = "0.32", features = ["bundled"] }
 
 serde.workspace = true
 serde_json.workspace = true

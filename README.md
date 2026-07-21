@@ -91,6 +91,38 @@ cargo tauri dev
 In a plain browser the UI runs against a **mock provider** that plays a scripted
 streaming run, so every surface is demonstrable without the native host.
 
+## Resilience benchmark
+
+The Playwright resilience benchmark drives the real Clark Code conversation UI
+through every combination of six independent conditions: rate limiting,
+duplicated provider tool-call IDs, event-stream disconnects, provider-process
+loss, delayed cloud-history acknowledgment, and explicit user cancellation.
+That is a deterministic 64-case power set, not 64 paid model calls. Each case
+asserts that the conversation stays rendered, internal tool-call IDs remain
+hidden, incident state settles, and interrupted/cancelled work can continue
+from saved progress. Screenshots and a JSON receipt are written to a temporary
+artifact directory printed at the end of the run.
+
+```bash
+cd harness
+node resilience-benchmark.mjs
+```
+
+A separate control drives the real local provider through `devbridge` using
+the Clark-managed `clark-code:deepseek_v4_pro` route. It is intentionally
+opt-in because it spends live model credits. Set `CLARK_CODE_API_KEY` (or keep
+it in the repository's gitignored `.env`) and run:
+
+```bash
+cd harness
+node resilience-benchmark.mjs --live-only
+```
+
+The shared contract in
+`app/src/core-bridge/resilienceBenchmark.json` pins the matrix dimensions,
+provider, and model for both the TypeScript tests and Playwright harness so the
+reported configuration cannot drift from the simulated one.
+
 ## Repository Status
 
 Private Clark repo. Clean-room: no code from the main Clark repository is

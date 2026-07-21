@@ -14,14 +14,16 @@ import type {
   SessionOptions,
 } from "./bridge";
 import type { Upload } from "../lib/attachments";
-import type {
-  ClientResponse,
-  ContentBlock,
-  ProviderInfo,
-  Session,
-  Snapshot,
-  MemoryOverview,
-  CollaborationMode,
+import {
+  normalizeSnapshot,
+  type WireSnapshot,
+  type ClientResponse,
+  type ContentBlock,
+  type ProviderInfo,
+  type Session,
+  type Snapshot,
+  type MemoryOverview,
+  type CollaborationMode,
 } from "./types";
 
 export class TauriBridge implements CoreBridge {
@@ -49,8 +51,13 @@ export class TauriBridge implements CoreBridge {
     return invoke("session_close", { sessionId });
   }
 
-  configureCloudTrajectory(sessionId: string, config: CloudTrajectoryConfig): Promise<void> {
-    return invoke("session_configure_cloud", { sessionId, config });
+  configureCloudTrajectory(
+    sessionId: string,
+    config: CloudTrajectoryConfig,
+    baseSnapshot: Snapshot,
+    baseRev: number,
+  ): Promise<void> {
+    return invoke("session_configure_cloud", { sessionId, config, baseSnapshot, baseRev });
   }
 
   updateCloudToken(token: string): Promise<void> {
@@ -104,8 +111,8 @@ export class TauriBridge implements CoreBridge {
   }
 
   subscribe(handler: (snapshot: Snapshot) => void): () => void {
-    const unlisten = listen<Snapshot>("snapshot", (event) => {
-      handler(event.payload);
+    const unlisten = listen<WireSnapshot>("snapshot", (event) => {
+      handler(normalizeSnapshot(event.payload));
     });
     return () => {
       void unlisten.then((fn) => fn());

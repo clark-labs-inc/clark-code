@@ -18,6 +18,7 @@ use agent_core::{
 use futures::{SinkExt, StreamExt};
 use provider_acp::AcpProvider;
 use provider_clark::ClarkProvider;
+use provider_local::LocalAgentProvider;
 use serde_json::{json, Value};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
@@ -48,6 +49,7 @@ fn caps(streaming_only: bool) -> ProviderCapabilities {
 
 fn providers() -> Value {
     json!([
+        { "id": "local", "label": "Clark Code", "capabilities": LocalAgentProvider::new().capabilities() },
         { "id": "clark", "label": "Clark", "capabilities": caps(true) },
     ])
 }
@@ -56,6 +58,7 @@ fn make_provider(id: &str) -> Result<Box<dyn Provider>, String> {
     match id {
         "acp" => Ok(Box::new(AcpProvider::new())),
         "clark" => Ok(Box::new(ClarkProvider::new())),
+        "local" => Ok(Box::new(LocalAgentProvider::new())),
         other => Err(format!("unknown provider: {other}")),
     }
 }
@@ -64,8 +67,9 @@ fn make_provider(id: &str) -> Result<Box<dyn Provider>, String> {
 async fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "devbridge=info,provider_clark=info,provider_acp=info".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+                "devbridge=info,provider_local=info,provider_clark=info,provider_acp=info".into()
+            }),
         )
         .init();
 

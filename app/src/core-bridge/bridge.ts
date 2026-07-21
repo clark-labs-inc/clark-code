@@ -45,6 +45,8 @@ export interface CloudTrajectoryConfig {
   remoteHost?: string;
   mode?: string;
   metadata: Record<string, unknown>;
+  /** Stable signed-in account scope used only to partition the native outbox. */
+  ownerScope: string;
 }
 
 /** Read-only Git identity for the checkout backing the composer. */
@@ -102,6 +104,8 @@ export interface CoreBridge {
   configureCloudTrajectory?(
     sessionId: string,
     config: CloudTrajectoryConfig,
+    baseSnapshot: Snapshot,
+    baseRev: number,
   ): Promise<void>;
   /** Replace the app-wide Clark cloud JWT after a sign-in refresh — in-flight
    *  trajectory retries read it per request (see `onCloudAuthExpired`). */

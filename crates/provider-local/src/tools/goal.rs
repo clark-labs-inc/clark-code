@@ -209,10 +209,11 @@ impl ToolExecutor for UpdateGoal {
                 goal.status = GoalStatus::Complete;
                 goal.blocker_reason = None;
                 goal.touch();
-                let summary = goal_summary(goal);
-                ToolOutcome::ok(format!(
-                    "Goal marked complete. {summary} Report the final usage to the user."
-                ))
+                ToolOutcome::ok(
+                    "Goal marked complete. The UI shows the elapsed time. In the final reply, \
+                     summarize the outcome only; do not report token usage, budgets, \
+                     continuation counts, or session counts.",
+                )
             }
             GoalStatus::Blocked => {
                 let Some(reason) = args.get("reason").and_then(Value::as_str) else {
@@ -335,6 +336,10 @@ mod tests {
 
         let done = UpdateGoal.invoke(json!({"status": "complete"}), &ctx).await;
         assert!(!done.is_error);
+        assert!(done.content.contains("UI shows the elapsed time"));
+        assert!(!done.content.contains("tokens used"));
+        assert!(!done.content.contains("continuation turn"));
+        assert!(!done.content.contains("Report the final usage"));
         assert_eq!(
             ctx.session.lock().await.goal.as_ref().unwrap().status,
             GoalStatus::Complete

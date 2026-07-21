@@ -27,7 +27,14 @@ function snapshotWith(count: number, textLen: number, extra?: Partial<Snapshot>)
     tool_calls[id] = toolCall(id, textLen);
     timeline.push({ item: "tool_call", id });
   }
-  return { runs: {}, timeline, tool_calls, artifacts: [], ...extra };
+  return {
+    runs: {},
+    timeline,
+    tool_calls,
+    artifacts: [],
+    ...extra,
+    provider_incidents: extra?.provider_incidents ?? {},
+  };
 }
 
 describe("prepareSnapshotForUpload", () => {

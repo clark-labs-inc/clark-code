@@ -21,6 +21,7 @@ import { ExecutionChecklistCard } from "./PlanChecklist";
 import { ProposedPlanCard } from "./ProposedPlanCard";
 import { SideQuestionCard } from "./SideQuestionCard";
 import { GoalWorkSummary } from "./GoalWorkSummary";
+import { ProviderIncidentCard } from "./ProviderIncidentCard";
 import type { Artifact, GoalState, TimelineItem, ToolCall } from "../core-bridge/types";
 
 /** A row of pulsing dots — the model is generating. Memoized so its animation
@@ -220,6 +221,7 @@ export function Conversation({
     execution_checklist,
     proposed_plan,
     goal,
+    provider_incidents: providerIncidents,
   } = snapshot;
 
   // Restore after React has committed the target transcript but before paint,
@@ -273,12 +275,10 @@ export function Conversation({
   const windowed = !showAll && allBlocks.length > TIMELINE_WINDOW;
   const blocks = windowed ? allBlocks.slice(allBlocks.length - TIMELINE_WINDOW) : allBlocks;
   const hiddenCount = allBlocks.length - blocks.length;
-  const lastBlockKey = blocks[blocks.length - 1]?.key;
-
   const last = visible[visible.length - 1];
   const awaitingReply = !last || (last.item === "message" && last.role === "user");
-  // This placeholder owns only the gap before the first agent response. Typed
-  // agent content (including reasoning) and tool rows own their live state.
+  // Tool rows and actively streaming unphased responses own their live state;
+  // completed commentary keeps this row visible until the run advances or ends.
   const showPending = shouldShowPending(snapshot);
   // The "Run failed" banner reflects only the MOST RECENT run — so it clears
   // on its own once the next turn starts, instead of every past failure
@@ -294,6 +294,7 @@ export function Conversation({
       ? latestRun
       : undefined;
   const outOfCredits = failed?.outcome?.failure_kind === "insufficient_credits";
+  const interrupted = failed?.outcome?.failure_kind === "runtime_interrupted" ? failed : undefined;
 
   const renderBlock = (block: Block | BaseBlock) => {
     if (block.kind === "goal_work") {
@@ -318,7 +319,11 @@ export function Conversation({
           blocks={item.blocks}
           phase={item.phase}
           timelineIndex={block.timelineIndex}
-          streaming={activity.busy && block.key === lastBlockKey && item.role === "agent"}
+          streaming={
+            activity.busy &&
+            block.timelineIndex === visible.length - 1 &&
+            item.role === "agent"
+          }
         />
       );
     }
@@ -341,6 +346,22 @@ export function Conversation({
             onOpen={onOpenArtifact}
           />
         </div>
+      ) : null;
+    }
+    if (item.item === "provider_incident") {
+      const incident = providerIncidents[item.id];
+      const canContinue = block.timelineIndex === timeline.length - 1
+        && (incident?.status === "failed" || incident?.status === "interrupted");
+      return incident ? (
+        <ProviderIncidentCard
+          key={block.key}
+          incident={incident}
+          executionLocation={session.environment?.remote ? "your remote host" : "this computer"}
+          modelRouteLabel={session.provider === "local" ? "Clark's cloud model gateway" : "the selected model provider"}
+          onContinue={canContinue
+            ? () => void useSessionStore.getState().continueProviderIncident(incident.id)
+            : undefined}
+        />
       ) : null;
     }
     if (item.item === "execution_checklist") {
@@ -394,18 +415,30 @@ export function Conversation({
               <UpgradePrompt />
             </motion.div>
           )}
-          {failed && !outOfCredits && (
+          {failed && !outOfCredits && !interrupted && (
             <motion.div
               key="failed"
               {...(reduce ? TRANSIENT_INSTANT : TRANSIENT)}
               className={cn(DANGER_BANNER, "flex items-start gap-2")}
-              title={failed.outcome?.error || undefined}
             >
               <div className="min-w-0 flex-1">
                 <span className="font-medium">Run failed.</span>{" "}
                 {humanizeRunFailure(failed.outcome)}
               </div>
               <DismissButton onClick={() => dismissFailedRun(failed.id)} />
+            </motion.div>
+          )}
+          {interrupted && (
+            <motion.div
+              key="interrupted"
+              {...(reduce ? TRANSIENT_INSTANT : TRANSIENT)}
+              className={cn(STOPPED_BANNER, "flex items-start gap-2")}
+            >
+              <div className="min-w-0 flex-1">
+                <span className="font-medium text-ink-secondary">Run interrupted.</span>{" "}
+                {humanizeRunFailure(interrupted.outcome)}
+              </div>
+              <DismissButton muted onClick={() => dismissFailedRun(interrupted.id)} />
             </motion.div>
           )}
           {stopped && (
@@ -426,7 +459,6 @@ export function Conversation({
               key="error"
               {...(reduce ? TRANSIENT_INSTANT : TRANSIENT)}
               className={cn(DANGER_BANNER, "flex items-start gap-2")}
-              title={error}
             >
               <div className="min-w-0 flex-1">{humanizeError(error)}</div>
               <DismissButton onClick={dismissError} />

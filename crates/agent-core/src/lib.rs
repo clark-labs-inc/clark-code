@@ -19,6 +19,7 @@ pub mod error;
 pub mod ids;
 pub mod projection;
 pub mod provider;
+pub mod recovery;
 
 pub use domain::*;
 pub use error::{Error, Result};
@@ -28,4 +29,9 @@ pub use provider::{
     ClientResponse, CollaborationMode, PlanDecision, PlanImplementationContext, PromptInput,
     Provider, ProviderCapabilities, ProviderConfig, ResumeItem, ResumeTranscript, Session,
     SessionOptions,
+};
+pub use recovery::{
+    ExecutionBoundaryReceipt, ExecutionRecovery, ProviderFailureClass, ProviderIncident,
+    ProviderIncidentCategory, ProviderIncidentScope, ProviderIncidentStatus,
+    ProviderRequestDiagnostics, ProviderRetryCounts,
 };

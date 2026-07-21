@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "storageKey": "clark-desktop:resilience-benchmark",
+  "model": "clark-code:deepseek_v4_pro",
+  "modelLabel": "DeepSeek V4 Pro",
+  "provider": "clark-managed",
+  "faults": [
+    "rate_limit",
+    "duplicated_tool_ids",
+    "event_stream_disconnect",
+    "provider_process_loss",
+    "cloud_sync_delay",
+    "user_cancel"
+  ]
+}

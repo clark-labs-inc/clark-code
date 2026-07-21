@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -5,10 +6,23 @@ use agent_core::AgentEvent;
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use tauri::{AppHandle, Emitter};
-use tokio::sync::RwLock;
+use tauri::{AppHandle, Emitter, Manager};
+use tokio::sync::{Mutex, RwLock};
 
 use crate::commands::clark_rest_base;
+
+mod outbox;
+pub(crate) use outbox::{
+    checkpoint_snapshot, delete_conversation, merge_local_summaries, quarantine_snapshot_branch,
+    recover_snapshot, set_archived, wait_for_acknowledged_prefix,
+};
+
+pub(crate) fn outbox_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    app.path()
+        .app_data_dir()
+        .map(|path| path.join("cloud-history-outbox.sqlite3"))
+        .map_err(|error| format!("resolve cloud history outbox: {error}"))
+}
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -23,6 +37,9 @@ pub struct CloudTrajectoryConfig {
     pub mode: Option<String>,
     #[serde(default)]
     pub metadata: Value,
+    /// Stable account scope supplied by the authenticated frontend. It is
+    /// hashed before use as a local SQLite partition key and never uploaded.
+    pub owner_scope: String,
 }
 
 #[derive(Clone)]
@@ -34,22 +51,25 @@ pub struct CloudTrajectoryClient {
     token: Arc<RwLock<Option<String>>>,
     app: AppHandle,
     http: reqwest::Client,
+    outbox: outbox::TrajectoryOutbox,
+    flush_lock: Arc<Mutex<()>>,
+    flush_scheduled: Arc<AtomicBool>,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct Conversation<'a> {
-    title: &'a str,
-    provider: &'a str,
-    project: Option<&'a str>,
-    repository_fingerprint: Option<&'a str>,
-    remote_host: Option<&'a str>,
-    mode: Option<&'a str>,
+struct Conversation {
+    title: String,
+    provider: String,
+    project: Option<String>,
+    repository_fingerprint: Option<String>,
+    remote_host: Option<String>,
+    mode: Option<String>,
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct EventRecord {
+pub(super) struct EventRecord {
     event_id: uuid::Uuid,
     run_id: Option<String>,
     event_kind: String,
@@ -57,10 +77,10 @@ struct EventRecord {
     payload: Value,
 }
 
-#[derive(Serialize)]
-struct AppendRequest<'a> {
-    conversation: Conversation<'a>,
-    events: &'a [EventRecord],
+#[derive(Clone, Serialize, Deserialize)]
+pub(super) struct AppendRequest {
+    conversation: Conversation,
+    events: Vec<EventRecord>,
 }
 
 impl CloudTrajectoryClient {
@@ -69,24 +89,41 @@ impl CloudTrajectoryClient {
         config: CloudTrajectoryConfig,
         token: Arc<RwLock<Option<String>>>,
         app: AppHandle,
+        outbox_path: std::path::PathBuf,
     ) -> Self {
+        let outbox =
+            outbox::TrajectoryOutbox::new(outbox_path, &config.owner_scope, &conversation_id);
         Self {
             conversation_id,
             config,
             token,
             app,
             http: reqwest::Client::new(),
+            outbox,
+            flush_lock: Arc::new(Mutex::new(())),
+            flush_scheduled: Arc::new(AtomicBool::new(false)),
         }
     }
 
-    pub async fn append(&self, events: &[AgentEvent]) -> Result<(), String> {
+    pub async fn initialize(
+        &self,
+        base: &agent_core::Snapshot,
+        base_rev: i64,
+    ) -> Result<(), String> {
+        self.outbox.initialize(&self.config, base, base_rev).await?;
+        // A prior process may have exited after SQLite commit but before cloud
+        // acknowledgement. Stable event IDs make this replay harmless.
+        self.trigger_flush();
+        Ok(())
+    }
+
+    /// Durably enqueue events, then trigger a single-flight background cloud
+    /// flush. The render path waits only for SQLite, never for network backoff.
+    pub async fn append(&self, events: &[AgentEvent]) -> Result<i64, String> {
         if events.is_empty() {
-            return Ok(());
+            return Ok(0);
         }
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as i64;
+        let first_timestamp = reserve_timestamps(events.len());
         let records = events
             .iter()
             .enumerate()
@@ -102,7 +139,7 @@ impl CloudTrajectoryClient {
                     event_id: uuid::Uuid::new_v4(),
                     run_id,
                     event_kind,
-                    recorded_at_unix_ms: now + offset as i64,
+                    recorded_at_unix_ms: first_timestamp + offset as i64,
                     payload: json!({
                         "schemaVersion": 1,
                         "sessionId": self.conversation_id,
@@ -117,15 +154,55 @@ impl CloudTrajectoryClient {
             .collect::<Result<Vec<_>, String>>()?;
         let request = AppendRequest {
             conversation: Conversation {
-                title: &self.config.title,
-                provider: &self.config.provider,
-                project: self.config.project.as_deref(),
-                repository_fingerprint: self.config.repository_fingerprint.as_deref(),
-                remote_host: self.config.remote_host.as_deref(),
-                mode: self.config.mode.as_deref(),
+                title: self.config.title.clone(),
+                provider: self.config.provider.clone(),
+                project: self.config.project.clone(),
+                repository_fingerprint: self.config.repository_fingerprint.clone(),
+                remote_host: self.config.remote_host.clone(),
+                mode: self.config.mode.clone(),
             },
-            events: &records,
+            events: records,
         };
+        let batch = self.outbox.enqueue(&request).await?;
+        self.trigger_flush();
+        Ok(batch.local_seq)
+    }
+
+    fn trigger_flush(&self) {
+        if self.flush_scheduled.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let client = self.clone();
+        tokio::spawn(async move {
+            let _single_flight = client.flush_lock.lock().await;
+            let result = client.flush_pending().await;
+            client.flush_scheduled.store(false, Ordering::SeqCst);
+            if let Err(error) = result {
+                tracing::warn!(%error, "cloud trajectory flush deferred");
+                let _ = client.app.emit(
+                    "cloud-sync-warning",
+                    "Clark saved this run locally and will sync it when the cloud is reachable.",
+                );
+            } else if client
+                .outbox
+                .pending()
+                .await
+                .is_ok_and(|pending| !pending.is_empty())
+            {
+                client.trigger_flush();
+            }
+        });
+    }
+
+    async fn flush_pending(&self) -> Result<(), String> {
+        for batch in self.outbox.pending().await? {
+            self.deliver(&batch.request).await?;
+            self.outbox.acknowledge(&batch.batch_id).await?;
+        }
+        Ok(())
+    }
+
+    async fn deliver(&self, request: &AppendRequest) -> Result<(), String> {
         let url = format!(
             "{}/api/desktop/conversations/{}/trajectory",
             clark_rest_base(&self.config.endpoint),
@@ -149,7 +226,7 @@ impl CloudTrajectoryClient {
                 .http
                 .post(&url)
                 .bearer_auth(&token)
-                .json(&request)
+                .json(request)
                 .send()
                 .await
             {
@@ -180,6 +257,27 @@ impl CloudTrajectoryClient {
             }
         }
         Err(last_error)
+    }
+}
+
+static LAST_EVENT_TIMESTAMP_MS: AtomicI64 = AtomicI64::new(0);
+
+fn reserve_timestamps(count: usize) -> i64 {
+    let wall = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64;
+    let width = i64::try_from(count.max(1)).unwrap_or(i64::MAX);
+    loop {
+        let last = LAST_EVENT_TIMESTAMP_MS.load(Ordering::Relaxed);
+        let first = wall.max(last.saturating_add(1));
+        let next = first.saturating_add(width.saturating_sub(1));
+        if LAST_EVENT_TIMESTAMP_MS
+            .compare_exchange(last, next, Ordering::SeqCst, Ordering::Relaxed)
+            .is_ok()
+        {
+            return first;
+        }
     }
 }
 

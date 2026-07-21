@@ -48,7 +48,7 @@ describe("currentActivity", () => {
     expect(a.label).toBe("Run failed");
   });
 
-  it("shows pending only before the agent has emitted a typed response", () => {
+  it("keeps pending visible after commentary while the run continues", () => {
     const beforeResponse = withRun("running");
     beforeResponse.timeline.push({
       item: "message",
@@ -75,6 +75,40 @@ describe("currentActivity", () => {
       blocks: [{ type: "text", text: "I found it" }],
     });
     expect(shouldShowPending(answerStarted)).toBe(false);
+
+    const commentaryFinished = structuredClone(beforeResponse);
+    commentaryFinished.timeline.push({
+      item: "message",
+      run: "r1",
+      role: "agent",
+      phase: "commentary",
+      blocks: [{ type: "text", text: "Coverage is complete. Writing the report now." }],
+    });
+    expect(shouldShowPending(commentaryFinished)).toBe(true);
+
+    const finalAnswer = structuredClone(beforeResponse);
+    finalAnswer.timeline.push({
+      item: "message",
+      run: "r1",
+      role: "agent",
+      phase: "final_answer",
+      blocks: [{ type: "text", text: "Here is the report." }],
+    });
+    expect(shouldShowPending(finalAnswer)).toBe(false);
+  });
+
+  it("shows pending after a completed timeline item while the next step starts", () => {
+    const snapshot = withRun("running");
+    snapshot.timeline.push({ item: "tool_call", id: "done", run: "r1" });
+    snapshot.tool_calls.done = {
+      id: "done",
+      title: "Inspect files",
+      kind: "read",
+      status: "completed",
+      locations: [],
+      content: [],
+    };
+    expect(shouldShowPending(snapshot)).toBe(true);
   });
 
   it("lets an active tool own the pending state", () => {
@@ -86,6 +120,35 @@ describe("currentActivity", () => {
       status: "in_progress",
       locations: [],
       content: [],
+    };
+    expect(shouldShowPending(snapshot)).toBe(false);
+  });
+
+  it("lets the structured incident card own retry progress", () => {
+    const snapshot = withRun("running");
+    snapshot.timeline.push({ item: "provider_incident", run: "r1", id: "incident-1" });
+    snapshot.provider_incidents = {
+      "incident-1": {
+        id: "incident-1",
+        status: "retrying",
+        scope: "model_request",
+        failure_class: "transient_transport",
+        category: "timeout",
+        message: "Model connection timed out.",
+        detail: "gateway timeout",
+        model: "test-model",
+        provider_route: "gateway.test",
+        request: {
+          idempotency_key: "request-1",
+          attempts: 1,
+          max_attempts: 17,
+          retries: { transient: 1, rate_limit: 0, authentication: 0 },
+          output_started: false,
+          started_at_ms: 1,
+        },
+        observed_at_ms: 2,
+        updated_at_ms: 3,
+      },
     };
     expect(shouldShowPending(snapshot)).toBe(false);
   });

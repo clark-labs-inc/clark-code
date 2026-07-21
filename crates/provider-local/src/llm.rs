@@ -15,7 +15,10 @@ use tokio_util::sync::CancellationToken;
 
 use crate::config::LocalConfig;
 
+mod recovery;
 mod retry;
+
+pub(crate) use recovery::{now_ms, ProviderFailureContext};
 
 /// Bound the complete HTTP exchange, including a response stream that stops
 /// making progress. Provider retries remain separately bounded in `retry`.
@@ -224,14 +227,21 @@ pub enum LlmError {
     InsufficientCredits,
     /// Clark's API rejected the desktop platform key (401).
     PlatformKeyRejected(String),
-    /// The selected model/provider exhausted its retry budget.
-    RateLimited(String),
-    /// The request could not reach Clark or its response stream broke.
-    Transport(String),
     /// Clark or the upstream provider returned an application-level failure.
     Provider(String),
     /// The provider rejected the request because its context was too large.
     ContextOverflow(String),
+    /// A retryable provider failure with presentation-safe structured context.
+    Recoverable(ProviderFailureContext),
+}
+
+impl LlmError {
+    pub(crate) fn provider_failure(&self) -> Option<&ProviderFailureContext> {
+        match self {
+            Self::Recoverable(context) => Some(context),
+            _ => None,
+        }
+    }
 }
 
 impl std::fmt::Display for LlmError {
@@ -240,10 +250,9 @@ impl std::fmt::Display for LlmError {
             LlmError::Cancelled => f.write_str("model request cancelled"),
             LlmError::InsufficientCredits => f.write_str("insufficient_credits"),
             LlmError::PlatformKeyRejected(message)
-            | LlmError::RateLimited(message)
-            | LlmError::Transport(message)
             | LlmError::Provider(message)
             | LlmError::ContextOverflow(message) => f.write_str(message),
+            LlmError::Recoverable(context) => f.write_str(&context.message),
         }
     }
 }
@@ -256,6 +265,8 @@ pub struct LlmClient {
     model: String,
     api_key: Option<String>,
     headers: Vec<(String, String)>,
+    /// Clark conversation UUID forwarded through the gateway for routing.
+    session_id: Option<String>,
     temperature: Option<f32>,
     /// Reasoning-effort override forwarded to the passthrough ("low" … "xhigh").
     /// `None` → the server applies the model's default.
@@ -267,6 +278,12 @@ impl LlmClient {
     /// memory extraction) that shouldn't inherit a weaker session model.
     pub fn with_model(mut self, model: &str) -> Self {
         self.model = model.to_string();
+        self
+    }
+
+    /// Bind subsequent model calls to one Clark conversation.
+    pub fn with_session_id(mut self, session_id: &str) -> Self {
+        self.session_id = Some(session_id.to_string());
         self
     }
 
@@ -320,6 +337,7 @@ impl LlmClient {
             model: model.to_string(),
             api_key,
             headers,
+            session_id: None,
             temperature,
             reasoning_effort: None,
         })
@@ -616,7 +634,7 @@ impl Accumulator {
     }
 
     fn emitted_output(&self) -> bool {
-        !self.text.is_empty() || !self.reasoning.is_empty()
+        !self.text.is_empty() || !self.reasoning.is_empty() || !self.tool_calls.is_empty()
     }
 }
 

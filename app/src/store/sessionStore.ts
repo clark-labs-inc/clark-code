@@ -85,6 +85,7 @@ import {
   cloudUnshare,
   scheduleCloudPut,
   flushCloudPuts,
+  onCloudHistoryConflict,
 } from "../lib/cloudHistory";
 import {
   provisionCodeKey,
@@ -153,7 +154,7 @@ function isBusy(snap: Snapshot): boolean {
 }
 
 /** Past transcript (prefix) + live resumed turns → one displayed snapshot. */
-function mergeHistory(prefix: Snapshot, live: Snapshot): Snapshot {
+export function mergeHistory(prefix: Snapshot, live: Snapshot): Snapshot {
   const artifacts = [...prefix.artifacts];
   const idx = new Map(artifacts.map((a, i) => [a.id, i]));
   for (const a of live.artifacts) {
@@ -166,6 +167,8 @@ function mergeHistory(prefix: Snapshot, live: Snapshot): Snapshot {
   }
   return {
     session: live.session ?? prefix.session,
+    sync_pending: live.sync_pending ?? prefix.sync_pending,
+    history_checkpoint: live.history_checkpoint ?? prefix.history_checkpoint,
     runs: { ...prefix.runs, ...live.runs },
     timeline: [...prefix.timeline, ...live.timeline],
     tool_calls: { ...prefix.tool_calls, ...live.tool_calls },
@@ -179,6 +182,10 @@ function mergeHistory(prefix: Snapshot, live: Snapshot): Snapshot {
     // (its snapshot always has a history prefix), so the swarm panel never
     // renders — it only worked for brand-new sessions.
     fan_out: live.fan_out ?? prefix.fan_out,
+    provider_incidents: {
+      ...prefix.provider_incidents,
+      ...live.provider_incidents,
+    },
   };
 }
 
@@ -383,6 +390,7 @@ interface SessionState {
   addFiles: (files: File[]) => Promise<void>;
   removeAttachment: (id: string) => void;
   send: (text: string) => Promise<void>;
+  continueProviderIncident: (incidentId: string) => Promise<void>;
   /** Replace one prior Clark Code user turn and rerun from the retained prefix. */
   resendFrom: (timelineIndex: number, text: string) => Promise<void>;
   /** Explicitly inject one queued text-only message into the active local run. */
@@ -613,6 +621,7 @@ async function bindCloudTrajectory(
   meta: ConversationMeta,
   auth: AuthSession | null,
   metadata: Record<string, unknown>,
+  baseSnapshot: Snapshot,
 ): Promise<void> {
   // Browser preview/dev bridges have no native cloud sink. Production Tauri
   // always implements it and requires authenticated Clark cloud credentials.
@@ -634,8 +643,9 @@ async function bindCloudTrajectory(
     remoteHost: meta.remoteHost,
     mode: meta.mode,
     metadata,
+    ownerScope: auth?.user.email?.trim().toLowerCase() || auth?.user.name.trim().toLowerCase() || "signed-out",
   };
-  await bridge.configureCloudTrajectory(session.id, config);
+  await bridge.configureCloudTrajectory(session.id, config, baseSnapshot, meta.rev ?? 0);
 }
 
 /** Cloud-first snapshot lookup: the in-memory cache, else a `cloudGet` (settled
@@ -895,9 +905,15 @@ export const useSessionStore = create<SessionState>((set, get) => ({
           }
         })();
       });
-      // Best-effort cloud sync failed for part of a run — the run keeps going;
-      // show a non-blocking warning instead of the fatal error banner.
+      // A network delivery warning means the SQLite prefix is safe and the run
+      // can continue. A local journal failure is fail-closed by the native
+      // bridge at the last durable event and uses this same warning surface.
       bridge.onCloudSyncWarning?.((message) => set({ warning: message }));
+      onCloudHistoryConflict(() => {
+        set({
+          warning: "This conversation changed on another device. Reopen it to continue from Clark cloud’s latest history.",
+        });
+      });
       // The host re-emits a fully cloned snapshot on every streamed token (tens
       // per second), for EVERY live session concurrently. Two throttles keep
       // that from melting the UI:
@@ -1360,6 +1376,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
           memoriesEnabled: get().memoriesEnabled,
           browserEnabled: get().browserEnabled,
         },
+        emptySnapshot(),
       );
       if (isLocal && !isRemote && localSettings.cwd.trim()) {
         set({ recentProjects: addRecentProject(localSettings.cwd.trim()) });
@@ -1596,7 +1613,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         reasoningEffort: isLocal ? effSettings.reasoningEffort : undefined,
         approvalPolicy: get().approvalPolicy,
         outputStyle: get().outputStyle,
-      });
+      }, restored ?? emptySnapshot());
       const projectRoot = liveProjectRoot(
         opened,
         (wantRemote ? remote?.cwd : requestedProjectRoot) || null,
@@ -1622,6 +1639,9 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         activeRemote: remote,
         activeRemoteHost: remoteHost,
         activeProjectRoot: projectRoot,
+        warning: restored?.sync_pending
+          ? "This conversation was recovered from local disk and will sync when Clark cloud is reachable."
+          : get().warning,
       });
     } catch (e) {
       if (nativeSession) void bridge.closeSession?.(nativeSession.id);
@@ -2011,7 +2031,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         reasoningEffort: effective.reasoningEffort,
         approvalPolicy: state.approvalPolicy,
         outputStyle: state.outputStyle,
-      });
+      }, prefix);
 
       const nextEntry = newLiveEntry(opened, {
         historyPrefix,
@@ -2105,6 +2125,27 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       // Surface the failure instead of silently doing nothing.
       set({ error: String(e) });
     }
+  },
+
+  continueProviderIncident: async (incidentId) => {
+    const { snapshot } = get();
+    const incident = snapshot.provider_incidents[incidentId];
+    const incidentIndex = snapshot.timeline.findIndex(
+      (item) => item.item === "provider_incident" && item.id === incidentId,
+    );
+    if (!incident || incidentIndex < 0 || incidentIndex !== snapshot.timeline.length - 1) {
+      set({ error: "That provider incident is no longer the latest saved recovery point." });
+      return;
+    }
+    if (incident.status !== "failed" && incident.status !== "interrupted") return;
+    if (isBusy(snapshot)) {
+      set({ error: "Wait for the active run to finish before continuing saved progress." });
+      return;
+    }
+    await get().send(
+      "Continue from the saved progress. Re-read current state, do not repeat completed writes, "
+      + "and finish the task.",
+    );
   },
 
   steerQueued: async (id) => {

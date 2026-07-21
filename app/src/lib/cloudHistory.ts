@@ -1,13 +1,17 @@
 // Cloud storage for conversation history — Clark's desktop-conversation API.
 //
-// This is the SOURCE OF TRUTH for chats (no local persistence): the list comes
-// from `cloudList`, transcripts from `cloudGet`, writes via `cloudPut` /
-// `cloudSetArchived` / `cloudDelete`. Scoped to the signed-in user by the Clark
-// JWT, so a second account on the same machine only ever sees its own chats.
-// Only available in the desktop app for a signed-in user with a Clark token.
+// The cloud database is the SOURCE OF TRUTH for chats: the list comes from
+// `cloudList`, transcripts from `cloudGet`, and mutations use `cloudPut` /
+// `cloudSetArchived` / `cloudDelete`. The Rust bridge maintains an
+// account-scoped SQLite outbox and acknowledged snapshot cache for atomic local
+// writes, offline delivery, and restart recovery; it reconciles against cloud
+// revisions and cannot overwrite a newer cloud snapshot. The Clark JWT scopes
+// server access and `ownerScope` isolates local records, so another account on
+// the same machine cannot see these chats. Cloud sync is available only in the
+// desktop app for a signed-in user with a Clark token.
 
 import { invoke } from "@tauri-apps/api/core";
-import type { Snapshot } from "../core-bridge/types";
+import { normalizeSnapshot, type Snapshot, type WireSnapshot } from "../core-bridge/types";
 import type { ConversationMeta } from "./history";
 import type { AuthSession } from "./auth";
 import { prepareSnapshotForUpload } from "./snapshotUpload";
@@ -23,6 +27,7 @@ function isTauri(): boolean {
 export interface CloudCreds {
   endpoint: string;
   token: string;
+  ownerScope: string;
 }
 
 /** Cloud creds, or null when sync isn't possible (browser preview or signed out
@@ -32,7 +37,11 @@ export function cloudCreds(auth: AuthSession | null): CloudCreds | null {
   const endpoint = auth?.clark.endpoint;
   const token = auth?.clark.token;
   if (!endpoint || !token) return null;
-  return { endpoint, token };
+  const ownerScope = auth?.user.id?.trim()
+    || auth?.user.email?.trim().toLowerCase()
+    || auth?.user.name.trim().toLowerCase();
+  if (!ownerScope) return null;
+  return { endpoint, token, ownerScope };
 }
 
 interface CloudSummary {
@@ -44,11 +53,14 @@ interface CloudSummary {
   mode?: string;
   titleLocked?: boolean;
   archived?: boolean;
-  createdAt: string;
-  updatedAt: string;
+  createdAt: string | number;
+  updatedAt: string | number;
+  rev: number;
 }
 
 function metaFromSummary(r: CloudSummary): ConversationMeta {
+  const timestamp = (value: string | number) =>
+    typeof value === "number" ? value : Date.parse(value) || Date.now();
   return {
     id: r.id,
     title: r.title,
@@ -58,8 +70,9 @@ function metaFromSummary(r: CloudSummary): ConversationMeta {
     mode: r.mode || undefined,
     titleLocked: r.titleLocked || undefined,
     archived: r.archived || undefined,
-    createdAt: Date.parse(r.createdAt) || Date.now(),
-    updatedAt: Date.parse(r.updatedAt) || Date.now(),
+    createdAt: timestamp(r.createdAt),
+    updatedAt: timestamp(r.updatedAt),
+    rev: r.rev,
   };
 }
 
@@ -68,33 +81,43 @@ export async function cloudList(c: CloudCreds): Promise<ConversationMeta[]> {
   const rows = await invoke<CloudSummary[] | null>("desktop_conv_list", {
     endpoint: c.endpoint,
     token: c.token,
+    ownerScope: c.ownerScope,
   });
-  return (rows ?? []).map(metaFromSummary);
+  const summaries = (rows ?? []).map(metaFromSummary);
+  for (const summary of summaries) serverRevisions.set(summary.id, summary.rev ?? 0);
+  return summaries;
 }
 
 /** Fetch one cloud conversation's snapshot, or null if absent. */
 export async function cloudGet(c: CloudCreds, id: string): Promise<Snapshot | null> {
-  const detail = await invoke<{ snapshot?: Snapshot } | null>("desktop_conv_get", {
+  const detail = await invoke<{ snapshot?: WireSnapshot; rev?: number } | null>("desktop_conv_get", {
     endpoint: c.endpoint,
     token: c.token,
     id,
+    ownerScope: c.ownerScope,
   });
-  return detail?.snapshot ?? null;
+  if (typeof detail?.rev === "number") {
+    serverRevisions.set(id, detail.rev);
+    conflicted.delete(id);
+  }
+  return detail?.snapshot ? normalizeSnapshot(detail.snapshot) : null;
 }
 
-/** Upsert a conversation's snapshot in the cloud. `rev` is a monotonic revision
- *  so the server ignores stale/duplicate deliveries (idempotent, at-most-once). */
+/** Upsert a conversation snapshot with optimistic concurrency. The stable
+ * mutation ID makes a retry idempotent; a mismatched base revision conflicts. */
 export async function cloudPut(
   c: CloudCreds,
   meta: ConversationMeta,
   snapshot: Snapshot,
   rev: number,
   status: "running" | "idle",
-): Promise<void> {
+  baseRev: number,
+  mutationId: string,
+): Promise<number> {
   const repositoryFingerprint = meta.project
     ? await repositoryFingerprintForRoot(meta.project)
     : null;
-  await invoke("desktop_conv_put", {
+  const summary = await invoke<{ rev: number }>("desktop_conv_put", {
     endpoint: c.endpoint,
     token: c.token,
     id: meta.id,
@@ -108,7 +131,11 @@ export async function cloudPut(
     rev,
     snapshot,
     status,
+    ownerScope: c.ownerScope,
+    baseRev,
+    mutationId,
   });
+  return summary.rev;
 }
 
 // --- Single-flight, coalescing write pipeline -----------------------------
@@ -125,6 +152,7 @@ interface PendingPush {
   snapshot: Snapshot;
   rev: number;
   status: "running" | "idle";
+  mutationId: string;
 }
 
 /** Absolute backstop: even after trimming old tool outputs, skip cloud sync
@@ -141,6 +169,23 @@ const pending = new Map<string, PendingPush>();
 // because rev is a timestamp (always "newer"), a no-op PUT would also make
 // every mobile/web poller re-download the full snapshot it already has.
 const lastSent = new Map<string, string>();
+const serverRevisions = new Map<string, number>();
+const conflicted = new Set<string>();
+let conflictHandler: ((conversationId: string) => void) | null = null;
+
+/** The store installs this once so a concurrent-device write conflict is
+ * visible and the stale snapshot is not retried forever. */
+export function onCloudHistoryConflict(handler: (conversationId: string) => void): () => void {
+  conflictHandler = handler;
+  return () => {
+    if (conflictHandler === handler) conflictHandler = null;
+  };
+}
+
+function mutationId(): string {
+  return globalThis.crypto?.randomUUID?.()
+    ?? `desktop-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
 
 /** Tiny FNV-1a content hash — collision odds are negligible here, and the
  *  worst case is one skipped upload that the next real change re-syncs. */
@@ -172,6 +217,8 @@ export function scheduleCloudPut(
   snapshot: Snapshot,
   status: "running" | "idle" = "idle",
 ): void {
+  // A stale branch stays read-only until cloudGet reloads its exact base.
+  if (conflicted.has(meta.id)) return;
   // Monotonic rev: pushes now also happen mid-run (throttled), where the
   // timeline length is stable while message text grows — so a length-based
   // rev would make the server drop streamed updates as stale. A millisecond
@@ -179,7 +226,7 @@ export function scheduleCloudPut(
   // single-flight queue guarantee spacing), survives restarts, and nothing
   // reads the rev back as a length — it is purely an ordering token.
   const rev = Date.now();
-  pending.set(meta.id, { creds, meta, snapshot, rev, status });
+  pending.set(meta.id, { creds, meta, snapshot, rev, status, mutationId: mutationId() });
   void drainPush(meta.id);
 }
 
@@ -210,14 +257,29 @@ async function drainPush(id: string): Promise<void> {
     const prepared = prepareSnapshotForUpload(job.snapshot);
     const mark = fingerprint(job, prepared.json);
     if (prepared.json.length <= MAX_SNAPSHOT_BYTES && lastSent.get(id) !== mark) {
-      await cloudPut(job.creds, job.meta, prepared.snapshot, job.rev, job.status);
+      const storedRev = await cloudPut(
+        job.creds,
+        job.meta,
+        prepared.snapshot,
+        job.rev,
+        job.status,
+        serverRevisions.get(id) ?? job.meta.rev ?? 0,
+        job.mutationId,
+      );
+      serverRevisions.set(id, storedRev);
       lastSent.set(id, mark);
     }
     ok = true;
-  } catch {
+  } catch (error) {
+    if (String(error).includes("cloud_conflict")) {
+      conflicted.add(id);
+      conflictHandler?.(id);
+      ok = true;
+    } else {
     // Transient (offline / backend not deployed). Requeue unless a newer push
     // already superseded it; the next turn retries. No tight retry loop.
-    if (!pending.has(id)) pending.set(id, job);
+      if (!pending.has(id)) pending.set(id, job);
+    }
   } finally {
     inflight.delete(id);
   }
@@ -227,9 +289,15 @@ async function drainPush(id: string): Promise<void> {
 
 /** Delete a conversation from the cloud. */
 export async function cloudDelete(c: CloudCreds, id: string): Promise<void> {
-  await invoke("desktop_conv_delete", { endpoint: c.endpoint, token: c.token, id });
+  await invoke("desktop_conv_delete", {
+    endpoint: c.endpoint,
+    token: c.token,
+    id,
+    ownerScope: c.ownerScope,
+  });
   // A re-created conversation with the same id must upload fresh.
   lastSent.delete(id);
+  conflicted.delete(id);
 }
 
 /** Toggle a conversation's archived flag in the cloud (independent of snapshot
@@ -240,6 +308,7 @@ export async function cloudSetArchived(c: CloudCreds, id: string, archived: bool
     token: c.token,
     id,
     archived,
+    ownerScope: c.ownerScope,
   });
 }
 

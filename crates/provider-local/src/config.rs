@@ -45,9 +45,10 @@ pub const DEFAULT_AUTO_COMPACT_TOKEN_LIMIT: usize = 300_000;
 /// engine's overflow-recovery path.
 fn model_context_window(model: &str) -> Option<usize> {
     match model {
-        "clark-code" => Some(1_000_000),         // GLM 5.2
-        "clark-code:kimi_k3" => Some(1_000_000), // "1M context"
-        "clark-code:grok45" => Some(500_000),    // "500K context"
+        "clark-code" => Some(1_000_000),                 // GLM 5.2
+        "clark-code:kimi_k3" => Some(1_000_000),         // "1M context"
+        "clark-code:grok45" => Some(500_000),            // "500K context"
+        "clark-code:deepseek_v4_pro" => Some(1_000_000), // "1M context"
         _ => None,
     }
 }
@@ -434,6 +435,18 @@ mod tests {
         assert!(model_supports_images("clark-code:kimi_k3"));
         assert!(!model_supports_images("clark-code"));
         assert!(!model_supports_images("clark-code:kimi_k27_code"));
+    }
+
+    #[test]
+    fn deepseek_v4_pro_uses_its_product_stated_context_window() {
+        assert_eq!(
+            model_context_window("clark-code:deepseek_v4_pro"),
+            Some(1_000_000)
+        );
+        assert_eq!(
+            default_auto_compact_limit("clark-code:deepseek_v4_pro"),
+            DEFAULT_AUTO_COMPACT_TOKEN_LIMIT
+        );
     }
 
     #[test]

@@ -22,6 +22,8 @@
 export type AuthMethod = "google" | "local";
 
 export interface AuthUser {
+  /** Stable Clark account identifier. Older persisted sessions may not have it. */
+  id?: string;
   name: string;
   email?: string;
   avatar?: string;
@@ -132,8 +134,9 @@ interface GoogleTokenState {
   expiresAt?: number;
 }
 
-function userFrom(p: { email?: string; name?: string; image?: string }): AuthUser {
+function userFrom(p: { id?: string; email?: string; name?: string; image?: string }): AuthUser {
   return {
+    id: p.id || undefined,
     name: p.name || p.email || "Google user",
     email: p.email || undefined,
     avatar: p.image || undefined,

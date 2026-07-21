@@ -7,11 +7,13 @@ import type { CoreBridge, ConnectConfig, SessionOptions } from "./bridge";
 import type { Upload } from "../lib/attachments";
 import {
   emptySnapshot,
+  normalizeSnapshot,
   type ClientResponse,
   type ContentBlock,
   type ProviderInfo,
   type Session,
   type Snapshot,
+  type WireSnapshot,
 } from "./types";
 
 export class DevBridge implements CoreBridge {
@@ -35,7 +37,7 @@ export class DevBridge implements CoreBridge {
     this.ws.onmessage = (event) => {
       const msg = JSON.parse(event.data as string) as Record<string, unknown>;
       if (msg.type === "snapshot") {
-        const snap = msg.snapshot as Snapshot;
+        const snap = normalizeSnapshot(msg.snapshot as WireSnapshot);
         if (this.alias && snap.session === this.alias.from) snap.session = this.alias.to;
         this.snapshot = snap;
         for (const h of this.handlers) h(this.snapshot);

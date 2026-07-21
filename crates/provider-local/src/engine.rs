@@ -1,12 +1,12 @@
 //! Thin launcher from clark-desktop's provider API into `clark_agent::run`.
 
 mod error;
+mod recovery;
 
 use std::sync::Arc;
 
 use agent_core::domain::{AgentEvent, RunFailureKind, RunOutcome, RunStatus, RunUsage};
 use agent_core::ids::{RunId, SessionId};
-use agent_orchestration::FailureClass;
 use async_channel::Sender;
 use tokio::sync::Mutex;
 
@@ -22,12 +22,7 @@ use crate::root_execution::{RootExecutionConfig, RootExecutionTrace};
 use crate::tools::{ToolCtx, ToolRegistry};
 use error::map_loop_error;
 
-/// Turns of head-room before the hard `max_iterations` cap at which the
-/// built-in graceful wrap-up fires. When crossed, the loop injects a
-/// one-shot "stop and deliver your final result" steer, so a run that would
-/// otherwise slam into the cap instead ends with a summary of what it did
-/// and what's left (reported as a clean finish, not a failure). Sized
-/// against the 1000-turn cap in [`crate::config`].
+/// Headroom for graceful wrap-up before the hard iteration cap.
 const GRACE_ITERATIONS: usize = 40;
 
 /// Hard cap on engine-launched goal-continuation turns within one run — the
@@ -282,7 +277,8 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
 
     // The stream adapter accumulates token/cost usage across the run's model
     // calls; the handle folds those totals into the run outcome at finish.
-    let stream = ClarkAgentStream::new(tc.llm.clone());
+    let incidents = crate::incidents::ProviderIncidentTracker::new(run.clone(), tx.clone());
+    let stream = ClarkAgentStream::new(tc.llm.clone(), incidents.clone());
     let usage = stream.usage();
     // Breaks stuck same-action/same-result loops early (nudge → hard block)
     // so the raised iteration cap can't be burned on a spinning agent. One
@@ -395,10 +391,12 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
                 )
                 .await
             };
-            let Err(error) = result else {
-                break result;
+            let error = match result {
+                Ok(result) => break Ok(result),
+                Err(error) => error,
             };
-            let Some((failure_class, failure_message)) = recovery_candidate(&error) else {
+            let Some((failure_class, failure_message)) = recovery::candidate(&error) else {
+                incidents.mark_failed();
                 break Err(error);
             };
             let permission_pending = tc.control.lock().await.has_pending();
@@ -407,30 +405,24 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
                 || !completed_transcript.has_commit_boundary()
                 || !execution.can_recover(failure_class)
             {
+                incidents.mark_failed();
                 break Err(error);
             }
 
             let usage_now = usage.snapshot();
             execution.record_usage_delta(accounted_usage, usage_now);
             accounted_usage = usage_now;
-            if !execution.schedule_recovery(failure_class, failure_message) {
+            let boundary = execution.recovery_boundary();
+            if !execution.schedule_recovery(failure_class, failure_message.clone()) {
+                incidents.mark_failed();
                 break Err(error);
             }
             {
                 let mut session = tc.session.lock().await;
                 compactor.commit_appended(&mut session.transcript, completed_transcript.drain());
-                session.transcript.push(recovery_marker());
+                session.transcript.push(recovery::transcript_marker());
             }
-            let _ = tx
-                .send(AgentEvent::MessageChunk {
-                    run: run.clone(),
-                    role: agent_core::domain::Role::System,
-                    delta: agent_core::domain::ContentBlock::text(
-                        "A transient provider interruption ended at a safe tool boundary. \
-                         Clark preserved completed work and is resuming once.",
-                    ),
-                })
-                .await;
+            incidents.attach_execution_recovery(recovery::execution_recovery(boundary));
             tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         };
 
@@ -720,31 +712,6 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
             )
             .await;
         }
-    }
-}
-
-fn recovery_candidate(error: &clark_agent::LoopError) -> Option<(FailureClass, String)> {
-    match error {
-        clark_agent::LoopError::Stream(clark_agent::StreamError::Transient(message)) => {
-            Some((FailureClass::TransientTransport, message.clone()))
-        }
-        clark_agent::LoopError::Stream(clark_agent::StreamError::ProviderRateLimited(message)) => {
-            Some((FailureClass::RateLimited, message.clone()))
-        }
-        _ => None,
-    }
-}
-
-fn recovery_marker() -> clark_agent::AgentMessage {
-    clark_agent::AgentMessage::User {
-        content: clark_agent::UserContent::Text(
-            "[runtime recovery — the previous model stream failed after every started tool had a \
-             terminal receipt. Completed transcript and current workspace state were preserved. \
-             Re-read any state you depend on, do not repeat completed writes, and continue from \
-             the current repository.]"
-                .to_string(),
-        ),
-        timestamp: None,
     }
 }
 

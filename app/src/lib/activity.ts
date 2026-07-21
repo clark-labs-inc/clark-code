@@ -45,7 +45,8 @@ export interface Activity {
 export function currentActivity(snapshot: Snapshot): Activity {
   const runs = Object.values(snapshot.runs);
   const busy = runs.some((r) => r.status === "running" || r.status === "queued");
-  const failed = runs.some((r) => r.status === "failed");
+  const interrupted = runs.some((r) => r.outcome?.failure_kind === "runtime_interrupted");
+  const failed = runs.some((r) => r.status === "failed" && r.outcome?.failure_kind !== "runtime_interrupted");
 
   let progress: number | undefined;
   let steps: { done: number; total: number } | undefined;
@@ -57,6 +58,7 @@ export function currentActivity(snapshot: Snapshot): Activity {
   }
 
   if (!busy) {
+    if (interrupted) return { busy: false, label: "Run interrupted", progress, steps };
     if (failed) return { busy: false, failed: true, label: "Run failed", progress, steps };
     return { busy: false, label: "Ready", progress, steps };
   }
@@ -79,10 +81,10 @@ export function currentActivity(snapshot: Snapshot): Activity {
   return { busy: true, label: "Thinking…", progress, steps };
 }
 
-/** Whether the conversation needs a placeholder before the agent has emitted
- *  any typed response. Once an agent message exists, that message owns the live
- *  state (including native thinking blocks), so rendering another pending row
- *  would duplicate the same activity. */
+/** Whether the conversation needs a live activity row at its foot. Tool rows
+ *  and an actively streaming, unphased response own their own animation. A
+ *  completed commentary message does not: while the run continues, keep an
+ *  explicit activity row after it so the update cannot read as a final answer. */
 export function shouldShowPending(snapshot: Snapshot): boolean {
   const activity = currentActivity(snapshot);
   if (!activity.busy) return false;
@@ -91,5 +93,13 @@ export function shouldShowPending(snapshot: Snapshot): boolean {
   }
 
   const last = snapshot.timeline[snapshot.timeline.length - 1];
-  return !last || (last.item === "message" && last.role === "user");
+  if (!last || (last.item === "message" && last.role === "user")) return true;
+  if (
+    last.item === "provider_incident"
+    && ["observed", "retrying"].includes(snapshot.provider_incidents[last.id]?.status)
+  ) {
+    return false;
+  }
+  if (last.item !== "message") return true;
+  return last.role === "agent" && last.phase === "commentary";
 }

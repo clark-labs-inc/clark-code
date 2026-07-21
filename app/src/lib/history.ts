@@ -1,7 +1,9 @@
-// Conversation history is CLOUD-ONLY (see lib/cloudHistory.ts — the source of
-// truth). The desktop app no longer persists chats to localStorage, so a second
-// account on the same machine can never see the first's chats and history
-// follows the user across devices.
+// Conversation history is CLOUD-AUTHORITATIVE (see lib/cloudHistory.ts). The
+// Rust bridge may keep an account-scoped SQLite outbox and acknowledged cache
+// for crash/offline recovery, but local disk never wins a revision conflict.
+// The desktop app does not persist current chats to localStorage, so a second
+// account on the same machine cannot see the first's chats and history follows
+// the user across devices.
 //
 // This module keeps the small pure helpers the rest of the app still uses
 // (ConversationMeta shape, title derivation, content check, run-settling of a
@@ -9,14 +11,16 @@
 // any chats left behind by prior local-first versions into memory so the store
 // can upload them to the cloud, then deletes the local keys.
 
-import type {
-  ContentBlock,
-  ExecutionChecklist,
-  ProposedPlan,
-  ResumeItem,
-  ResumeTranscript,
-  Snapshot,
-  TimelineItem,
+import {
+  normalizeSnapshot,
+  type WireSnapshot,
+  type ContentBlock,
+  type ExecutionChecklist,
+  type ProposedPlan,
+  type ResumeItem,
+  type ResumeTranscript,
+  type Snapshot,
+  type TimelineItem,
 } from "../core-bridge/types";
 
 export interface ConversationMeta {
@@ -36,6 +40,9 @@ export interface ConversationMeta {
   titleLocked?: boolean;
   createdAt: number;
   updatedAt: number;
+  /** Server-owned snapshot revision. Local disk may cache it, but only a cloud
+   * response advances it. */
+  rev?: number;
   /** Soft-delete flag. Archived conversations are hidden from the main list
    *  (shown under a collapsed "Archived" section) but kept in the cloud so they
    *  can be restored with the full transcript. Now round-tripped through the
@@ -88,8 +95,17 @@ export function settleRuns(snapshot: Snapshot): Snapshot {
     };
     changed = true;
   }
+  const provider_incidents = Object.fromEntries(
+    Object.entries(snapshot.provider_incidents).map(([id, incident]) => {
+      if (incident.status !== "retrying" && incident.status !== "observed") {
+        return [id, incident];
+      }
+      changed = true;
+      return [id, { ...incident, status: "interrupted" as const }];
+    }),
+  );
   if (!changed && !snapshot.pending_permission) return snapshot;
-  return { ...snapshot, runs, tool_calls, goal, pending_permission: undefined };
+  return { ...snapshot, runs, tool_calls, goal, provider_incidents, pending_permission: undefined };
 }
 
 /** Upgrade persisted snapshots from the original overloaded `plan` shape.
@@ -235,6 +251,7 @@ export function snapshotBeforeTimelineItem(snapshot: Snapshot, index: number): S
       if (item.item === "tool_call" && item.run) return [item.run];
       if (item.item === "execution_checklist" && item.run) return [item.run];
       if (item.item === "proposed_plan") return [item.run];
+      if (item.item === "provider_incident") return [item.run];
       return [];
     }),
   );
@@ -245,6 +262,12 @@ export function snapshotBeforeTimelineItem(snapshot: Snapshot, index: number): S
     Object.entries(snapshot.tool_calls).filter(([id]) => toolIds.has(id)),
   );
   const artifacts = snapshot.artifacts.filter((artifact) => artifactIds.has(artifact.id));
+  const incidentIds = new Set(
+    timeline.flatMap((item) => (item.item === "provider_incident" ? [item.id] : [])),
+  );
+  const provider_incidents = Object.fromEntries(
+    Object.entries(snapshot.provider_incidents).filter(([id]) => incidentIds.has(id)),
+  );
   let lastChecklist: ExecutionChecklist | undefined;
   let lastProposedPlan: ProposedPlan | undefined;
   for (const item of timeline) {
@@ -261,6 +284,7 @@ export function snapshotBeforeTimelineItem(snapshot: Snapshot, index: number): S
     ...(lastProposedPlan ? { proposed_plan: lastProposedPlan } : {}),
     ...(snapshot.goal?.run && runIds.has(snapshot.goal.run) ? { goal: snapshot.goal } : {}),
     artifacts,
+    provider_incidents,
   };
 }
 
@@ -329,7 +353,11 @@ export function drainLocalHistory(): DrainedConversation[] {
       const raw = store.getItem(snapKey);
       if (!raw) continue;
       try {
-        out.push({ meta, snapshot: JSON.parse(raw) as Snapshot, archived: !!meta.archived });
+        out.push({
+          meta,
+          snapshot: normalizeSnapshot(JSON.parse(raw) as WireSnapshot),
+          archived: !!meta.archived,
+        });
       } catch {
         /* skip a corrupt snapshot; its key is still removed */
       }

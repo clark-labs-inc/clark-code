@@ -4,7 +4,9 @@
   "type": "module",
   "scripts": {
     "test:webkit": "node webkit-smoke.mjs",
-    "test:attachments": "node attachment-smoke.mjs"
+    "test:attachments": "node attachment-smoke.mjs",
+    "benchmark:resilience": "node resilience-benchmark.mjs",
+    "benchmark:resilience:live": "node resilience-benchmark.mjs --live-only"
   },
   "dependencies": {
     "playwright": "^1.61.1"

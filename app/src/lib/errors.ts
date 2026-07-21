@@ -26,6 +26,8 @@ export function humanizeRunFailure(
       return "A coding action failed unexpectedly. Review the last step and try again.";
     case "local_state":
       return "Clark Code couldn’t continue this run. Start another run and try again.";
+    case "runtime_interrupted":
+      return "Clark restarted before this run finished. Continue from the saved history.";
     case "empty_response":
       return "The model returned no response. Please try again.";
     default:

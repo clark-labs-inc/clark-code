@@ -379,6 +379,9 @@ pub enum RunFailureKind {
     InsufficientCredits,
     ToolFatal,
     LocalState,
+    /// The host process ended while a run was live. Distinct from an explicit
+    /// user cancellation and safe for recovery surfaces to offer as resumable.
+    RuntimeInterrupted,
     EmptyResponse,
 }
 
@@ -630,6 +633,12 @@ pub enum AgentEvent {
         run: RunId,
         parent: ToolCallId,
         agent: FanOutAgent,
+    },
+    /// A provider incident changed state. Observation is independent from any
+    /// optional execution recovery so failed incidents remain diagnosable.
+    ProviderIncidentUpdated {
+        run: RunId,
+        incident: crate::recovery::ProviderIncident,
     },
     ModeChanged {
         session: SessionId,
