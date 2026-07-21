@@ -113,6 +113,23 @@ jobs:
           pnpm --dir harness install --frozen-lockfile
           pnpm --dir harness exec playwright install webkit
 
+      - name: Add MSVC tools to PATH
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $installation = & $vswhere -latest -products * `
+            -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+            -property installationPath
+          if ([string]::IsNullOrWhiteSpace($installation)) {
+            throw "Visual Studio C++ tools were not found"
+          }
+          $dumpbin = Get-ChildItem "$installation\VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe" |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+          if (-not $dumpbin) { throw "dumpbin.exe was not found" }
+          $dumpbin.Directory.FullName >> $env:GITHUB_PATH
+
       - name: Build private Windows sandbox helpers
         if: runner.os == 'Windows'
         shell: pwsh
