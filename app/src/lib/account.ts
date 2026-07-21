@@ -79,7 +79,15 @@ export interface EffectiveBilling {
   coverage_status?: "ready" | "action_needed" | "unavailable";
   products?: Array<"clark_web" | "clark_code">;
   balance?: { available_credits: number; is_unlimited: boolean };
-  plan?: { plan_key: string; name: string } | null;
+  plan?: {
+    plan_key: string;
+    name: string;
+    price_cents?: number | null;
+    currency?: string | null;
+    zero_decimal_currency?: boolean | null;
+    billing_interval?: string | null;
+    is_seat_based?: boolean | null;
+  } | null;
   seat?: {
     purchased: number;
     assigned: number;
