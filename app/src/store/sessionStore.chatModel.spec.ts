@@ -94,6 +94,10 @@ describe("per-conversation model", () => {
 
     await useSessionStore.getState().startSession();
 
+    expect(vi.mocked(bridge.newSession).mock.calls[0]?.[1]).toMatchObject({
+      mode: "auto",
+      collaboration_mode: "default",
+    });
     expect(useSessionStore.getState().chatModels[sessionA.id]).toEqual({
       model: "clark-code",
       reasoningEffort: "",
@@ -130,6 +134,10 @@ describe("per-conversation model", () => {
     });
 
     await useSessionStore.getState().openConversation(legacyId);
+    expect(vi.mocked(bridge.newSession).mock.calls[0]?.[1]).toMatchObject({
+      mode: "auto",
+      collaboration_mode: "default",
+    });
     expect(useSessionStore.getState().chatModels[legacyId]).toEqual({
       model: "clark-code",
       reasoningEffort: "",

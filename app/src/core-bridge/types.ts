@@ -24,6 +24,38 @@ export interface FsLocation {
   line?: number;
 }
 
+export interface ToolProgressStep {
+  id: string;
+  title: string;
+  status: ToolStatus;
+  summary?: string;
+}
+
+export interface ToolProgressPhase {
+  id: string;
+  title: string;
+  status: ToolStatus;
+  summary?: string;
+  steps: ToolProgressStep[];
+}
+
+export interface ToolProgressAgent {
+  id: string;
+  label: string;
+  status: ToolStatus;
+  activity?: string;
+  summary?: string;
+}
+
+/** Presentation-safe progress for a long-running delegated tool call. */
+export interface ToolCallProgress {
+  revision: number;
+  status: ToolStatus;
+  latest_activity?: string;
+  phases: ToolProgressPhase[];
+  agents: ToolProgressAgent[];
+}
+
 export interface ToolCall {
   id: string;
   tool_name?: string;
@@ -33,6 +65,7 @@ export interface ToolCall {
   locations: FsLocation[];
   content: ContentBlock[];
   raw_input?: unknown;
+  progress?: ToolCallProgress;
 }
 
 export type ResumeItem =

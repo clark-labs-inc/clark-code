@@ -75,6 +75,15 @@ fn http_response(body: &str) -> Vec<u8> {
     .into_bytes()
 }
 
+fn http_json_error(status: &str, message: &str) -> Vec<u8> {
+    let body = json!({ "error": { "message": message } }).to_string();
+    format!(
+        "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{body}",
+        body.len()
+    )
+    .into_bytes()
+}
+
 /// SSE body for the vision-fallback call: describes two attached images.
 fn vision_description_body() -> String {
     [
@@ -103,15 +112,20 @@ fn write_call_body() -> String {
 /// `tokio::spawn` without awaiting the handle); tests that need to inspect
 /// the outgoing request JSON can `.await` the `JoinHandle` instead.
 async fn serve(listener: TcpListener, bodies: Vec<String>) -> Vec<Vec<u8>> {
+    let responses = bodies.iter().map(|body| http_response(body)).collect();
+    serve_responses(listener, responses).await
+}
+
+async fn serve_responses(listener: TcpListener, responses: Vec<Vec<u8>>) -> Vec<Vec<u8>> {
     let calls = Arc::new(AtomicUsize::new(0));
-    let mut captured = Vec::with_capacity(bodies.len());
-    for _ in 0..bodies.len() {
+    let mut captured = Vec::with_capacity(responses.len());
+    for _ in 0..responses.len() {
         let Ok((mut sock, _)) = listener.accept().await else {
             break;
         };
         captured.push(read_request(&mut sock).await);
         let n = calls.fetch_add(1, Ordering::SeqCst);
-        let _ = sock.write_all(&http_response(&bodies[n])).await;
+        let _ = sock.write_all(&responses[n]).await;
         let _ = sock.flush().await;
     }
     captured
@@ -936,6 +950,109 @@ async fn connect_provider(addr: std::net::SocketAddr) -> provider_local::LocalAg
     provider
 }
 
+#[tokio::test]
+async fn failed_clark_research_can_fall_back_to_web_fetch_on_the_next_model_turn() {
+    let dir = tempfile::tempdir().unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let serve_handle = tokio::spawn(serve_responses(
+        listener,
+        vec![
+            http_response(&tool_call_sse(
+                "research_search",
+                "tool_search",
+                json!({"query": "clark_research", "limit": 1}),
+            )),
+            http_response(&tool_call_sse(
+                "research_call",
+                "clark_research",
+                json!({"query": "Research the current status of example.com"}),
+            )),
+            http_json_error("400 Bad Request", "synthetic Clark research unavailable"),
+            http_response(&tool_call_sse(
+                "fallback_search",
+                "tool_search",
+                json!({"query": "web_fetch", "limit": 1}),
+            )),
+            http_response(&tool_call_sse(
+                "fallback_call",
+                "web_fetch",
+                json!({"url": "not-a-valid-url"}),
+            )),
+            http_response(&final_body()),
+        ],
+    ));
+
+    let mut provider = connect_provider(addr).await;
+    let session = provider
+        .new_session(SessionOptions {
+            cwd: Some(dir.path().to_string_lossy().to_string()),
+            mode: None,
+            collaboration_mode: None,
+            resume: None,
+        })
+        .await
+        .unwrap();
+    let mut stream = provider
+        .prompt(
+            &session.id,
+            PromptInput::text("Check the current status of https://example.com"),
+        )
+        .await
+        .unwrap();
+
+    let mut events = Vec::new();
+    while let Some(event) = stream.next().await {
+        if let AgentEvent::PermissionRequest { request } = &event {
+            provider
+                .respond(
+                    &session.id,
+                    ClientResponse::Permission {
+                        request: request.id.clone(),
+                        option: "allow_once".into(),
+                        feedback: None,
+                    },
+                )
+                .await
+                .unwrap();
+        }
+        let finished = matches!(event, AgentEvent::RunFinished { .. });
+        events.push(event);
+        if finished {
+            break;
+        }
+    }
+
+    let tools = events
+        .iter()
+        .filter_map(|event| match event {
+            AgentEvent::ToolCall { call, .. } => call.tool_name.clone(),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        tools,
+        ["tool_search", "clark_research", "tool_search", "web_fetch"]
+    );
+    assert!(events.iter().any(|event| matches!(
+        event,
+        AgentEvent::RunFinished { outcome, .. } if outcome.status == RunStatus::Done
+    )));
+
+    let captured = serve_handle.await.unwrap();
+    assert_eq!(captured.len(), 6);
+    let after_research_failure = request_json(&captured[3]).to_string();
+    assert!(after_research_failure.contains("synthetic Clark research unavailable"));
+    let fallback_request = request_json(&captured[4]);
+    let fallback_tools = fallback_request["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|tool| tool["function"]["name"].as_str())
+        .collect::<Vec<_>>();
+    assert!(fallback_tools.contains(&"web_fetch"));
+}
+
 async fn drain_run(stream: &mut agent_core::provider::EventStream) -> Vec<AgentEvent> {
     let mut events = Vec::new();
     while let Some(ev) = stream.next().await {
@@ -1041,6 +1158,7 @@ async fn steering_message_is_injected_into_the_active_run() {
         .unwrap();
 
     let mut steered = false;
+    let mut approved = false;
     let mut finished = false;
     while let Some(ev) = stream.next().await {
         match &ev {
@@ -1051,6 +1169,21 @@ async fn steering_message_is_injected_into_the_active_run() {
                     .await
                     .expect("active run accepts steering");
             }
+            AgentEvent::PermissionRequest { request } => {
+                assert_eq!(request.risk.as_deref(), Some("safe"));
+                provider
+                    .respond(
+                        &session.id,
+                        ClientResponse::Permission {
+                            request: request.id.clone(),
+                            option: "allow_once".into(),
+                            feedback: None,
+                        },
+                    )
+                    .await
+                    .expect("Ask mode command approval resolves");
+                approved = true;
+            }
             AgentEvent::RunFinished { .. } => {
                 finished = true;
                 break;
@@ -1058,7 +1191,7 @@ async fn steering_message_is_injected_into_the_active_run() {
             _ => {}
         }
     }
-    assert!(steered && finished);
+    assert!(steered && approved && finished);
 
     let captured = serve_handle.await.unwrap();
     let second = String::from_utf8_lossy(&captured[1]).to_string();

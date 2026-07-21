@@ -36,17 +36,28 @@ describe("wouldAutoApprove", () => {
     }
   });
 
-  it("auto mode approves all but destructive, external, and billed tools", () => {
+  it("auto mode asks at caution, destructive, network, sandbox, external, and billed boundaries", () => {
     expect(wouldAutoApprove("auto", req("safe"))).toBe(true);
-    expect(wouldAutoApprove("auto", req("caution"))).toBe(true);
+    expect(wouldAutoApprove("auto", req("caution"))).toBe(false);
     expect(wouldAutoApprove("auto", req(undefined))).toBe(true); // file edits
     expect(wouldAutoApprove("auto", req("danger"))).toBe(false); // asks
+    expect(wouldAutoApprove("auto", req("network"))).toBe(false); // asks before host network
+    expect(wouldAutoApprove("auto", req("sandbox"))).toBe(false); // asks before host access
     expect(wouldAutoApprove("auto", req("external"))).toBe(false); // MCP — asks
     expect(wouldAutoApprove("auto", req("billed"))).toBe(false); // image generation — asks
   });
 
   it("full mode approves local, destructive, website, external-tool, and billed actions", () => {
-    for (const r of [undefined, "safe", "caution", "danger", "external", "billed"]) {
+    for (const r of [
+      undefined,
+      "safe",
+      "caution",
+      "danger",
+      "network",
+      "sandbox",
+      "external",
+      "billed",
+    ]) {
       expect(wouldAutoApprove("full", req(r))).toBe(true);
     }
   });

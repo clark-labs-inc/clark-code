@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isLocalDocUri, mdFileName, readDocText } from "./docs";
+import { isLocalDocUri, mdFileName, pdfFileName, readDocText } from "./docs";
 
 describe("document artifacts", () => {
   it("distinguishes filesystem paths from fetchable URI schemes", () => {
@@ -18,5 +18,11 @@ describe("document artifacts", () => {
     expect(mdFileName("Artifact UX recommendations.md")).toBe("Artifact UX recommendations.md");
     expect(mdFileName("notes.markdown")).toBe("notes.markdown");
     expect(mdFileName("report")).toBe("report.md");
+  });
+
+  it("derives a PDF filename from Markdown artifact titles", () => {
+    expect(pdfFileName("Artifact UX recommendations.md")).toBe("Artifact UX recommendations.pdf");
+    expect(pdfFileName("notes.markdown")).toBe("notes.pdf");
+    expect(pdfFileName("report")).toBe("report.pdf");
   });
 });

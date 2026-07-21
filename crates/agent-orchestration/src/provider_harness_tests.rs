@@ -85,6 +85,7 @@ impl Provider for FakeProvider {
                     locations: vec![],
                     content: vec![],
                     raw_input: None,
+                    progress: None,
                 },
             },
             AgentEvent::PermissionRequest {

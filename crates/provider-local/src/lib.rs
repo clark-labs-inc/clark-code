@@ -23,6 +23,7 @@ mod checkpoint;
 mod commands;
 mod compaction;
 mod config;
+mod effects;
 mod engine;
 mod exec;
 mod external_import;

@@ -61,6 +61,14 @@ struct McpToolDef {
     name: String,
     description: String,
     input_schema: Value,
+    annotations: McpToolAnnotations,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct McpToolAnnotations {
+    read_only_hint: Option<bool>,
+    destructive_hint: Option<bool>,
+    open_world_hint: Option<bool>,
 }
 
 type Pending = Arc<Mutex<HashMap<i64, oneshot::Sender<Result<Value, String>>>>>;
@@ -279,6 +287,7 @@ pub async fn probe_mcp_servers(servers: &[McpServerConfig]) -> Vec<McpStatus> {
 
 fn parse_tool_def(v: &Value) -> Option<McpToolDef> {
     let name = v.get("name").and_then(Value::as_str)?.to_string();
+    let annotations = v.get("annotations");
     Some(McpToolDef {
         name,
         description: v
@@ -290,6 +299,17 @@ fn parse_tool_def(v: &Value) -> Option<McpToolDef> {
             .get("inputSchema")
             .cloned()
             .unwrap_or_else(|| json!({ "type": "object" })),
+        annotations: McpToolAnnotations {
+            read_only_hint: annotations
+                .and_then(|value| value.get("readOnlyHint"))
+                .and_then(Value::as_bool),
+            destructive_hint: annotations
+                .and_then(|value| value.get("destructiveHint"))
+                .and_then(Value::as_bool),
+            open_world_hint: annotations
+                .and_then(|value| value.get("openWorldHint"))
+                .and_then(Value::as_bool),
+        },
     })
 }
 
@@ -352,6 +372,7 @@ pub struct McpTool {
     raw_name: String,
     description: String,
     schema: Value,
+    annotations: McpToolAnnotations,
     client: Arc<McpClient>,
 }
 
@@ -362,6 +383,7 @@ impl McpTool {
             raw_name: def.name.clone(),
             description: def.description.clone(),
             schema: def.input_schema.clone(),
+            annotations: def.annotations,
             client,
         }
     }
@@ -382,7 +404,22 @@ impl ToolExecutor for McpTool {
         ToolKind::Other
     }
     fn mutating(&self) -> bool {
-        true // external side effects → always gated
+        true // external access remains permission-gated, independent of effect semantics
+    }
+    fn effect_intent(&self, _args: &Value) -> Option<crate::effects::EffectIntent> {
+        let writes = self.annotations.read_only_hint == Some(false)
+            || self.annotations.destructive_hint == Some(true);
+        writes.then(|| {
+            let mut description =
+                "a structured external tool reported a successful mutation".to_string();
+            if self.annotations.destructive_hint == Some(true) {
+                description.push_str(" with destructive semantics");
+            }
+            if self.annotations.open_world_hint == Some(true) {
+                description.push_str(" in an open-world system");
+            }
+            crate::effects::EffectIntent::opaque_external(description)
+        })
     }
     async fn invoke(&self, args: Value, ctx: &ToolCtx) -> ToolOutcome {
         tokio::select! {
@@ -429,12 +466,15 @@ mod tests {
     fn parses_tool_defs() {
         let def = parse_tool_def(&json!({
             "name": "search", "description": "Search the web",
-            "inputSchema": { "type": "object", "properties": { "q": { "type": "string" } } }
+            "inputSchema": { "type": "object", "properties": { "q": { "type": "string" } } },
+            "annotations": { "readOnlyHint": true, "openWorldHint": true }
         }))
         .unwrap();
         assert_eq!(def.name, "search");
         assert_eq!(def.description, "Search the web");
         assert_eq!(def.input_schema["type"], "object");
+        assert_eq!(def.annotations.read_only_hint, Some(true));
+        assert_eq!(def.annotations.open_world_hint, Some(true));
     }
 
     /// A minimal stdio MCP server (newline-delimited JSON-RPC) for the roundtrip test.

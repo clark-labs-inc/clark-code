@@ -65,6 +65,7 @@ pub(super) fn tool_title(name: &str, args: &Value) -> String {
         "create_goal" => "Started a goal".to_string(),
         "update_goal" => "Updated the goal".to_string(),
         "get_goal" => "Checked the goal".to_string(),
+        "verify_effect" => "Verifying an external result".to_string(),
         "memory" => match argument(args, "action") {
             Some("recall") => "Recalling memory".to_string(),
             Some("remember") => "Saving memory".to_string(),

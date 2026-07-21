@@ -132,6 +132,7 @@ mod tests {
             session: Arc::new(tokio::sync::Mutex::new(session)),
             progress: None,
             agent_progress: None,
+            call_progress: None,
         }
     }
 

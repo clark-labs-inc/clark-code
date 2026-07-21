@@ -11,6 +11,8 @@ use tauri::Manager;
 use tauri_plugin_deep_link::DeepLinkExt;
 
 mod commands;
+mod file_actions;
+mod markdown_export;
 mod mobile_remote;
 mod project_context;
 mod project_worktree;
@@ -140,6 +142,8 @@ pub fn run() {
             commands::read_doc_text,
             commands::read_image_data_url,
             commands::save_doc_text,
+            file_actions::copy_local_file,
+            markdown_export::export_markdown_pdf,
             commands::open_path,
             project_worktree::project_worktree_create,
             commands::clark_exchange_google_idtoken,

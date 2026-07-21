@@ -70,6 +70,12 @@ export function mdFileName(title?: string): string {
   return /\.(?:md|markdown|mdx)$/i.test(name) ? name : `${name}.md`;
 }
 
+/** A sensible `.pdf` filename derived from a Markdown artifact title. */
+export function pdfFileName(title?: string): string {
+  const markdownName = mdFileName(title);
+  return markdownName.replace(/\.(?:md|markdown|mdx)$/i, ".pdf");
+}
+
 /** Save document text to disk. In the desktop app, opens the OS save dialog and
  *  writes the chosen path through the `save_doc_text` command (native download).
  *  Outside the app (browser preview), falls back to a Blob download. Returns
@@ -88,6 +94,25 @@ export async function saveDocText(text: string, title?: string): Promise<boolean
   });
   if (!path) return false;
   await invoke("save_doc_text", { path, text });
+  return true;
+}
+
+/** Export Markdown as a polished tagged PDF through libreoffice-pure. */
+export async function saveDocPdf(
+  text: string,
+  title?: string,
+  sourceUri?: string,
+): Promise<boolean> {
+  if (!isTauri()) return false;
+  const { save } = await import("@tauri-apps/plugin-dialog");
+  const path = await save({
+    title: "Export document as PDF",
+    defaultPath: pdfFileName(title),
+    filters: [{ name: "PDF", extensions: ["pdf"] }],
+  });
+  if (!path) return false;
+  const sourcePath = sourceUri && isLocalDocUri(sourceUri) ? toPath(sourceUri) : undefined;
+  await invoke("export_markdown_pdf", { path, text, sourcePath });
   return true;
 }
 

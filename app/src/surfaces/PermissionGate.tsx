@@ -16,6 +16,8 @@ const OPTION_STYLE: Record<PermissionOptionKind, string> = {
 export function riskTone(risk?: string): { ring: string; chip: string; label: string } | null {
   switch (risk) {
     case "danger": return { ring: "bg-danger/10", chip: "bg-danger/15 text-danger", label: "Destructive" };
+    case "network": return { ring: "bg-info/10", chip: "bg-info/15 text-info", label: "Network access" };
+    case "sandbox": return { ring: "bg-warning/10", chip: "bg-warning/15 text-warning", label: "Outside sandbox" };
     case "external": return { ring: "bg-info/10", chip: "bg-info/15 text-info", label: "External access" };
     case "billed": return { ring: "bg-warning/10", chip: "bg-warning/15 text-warning", label: "Billed image" };
     case "caution": return { ring: "bg-warning/10", chip: "bg-warning/15 text-warning", label: "Caution" };
@@ -59,7 +61,8 @@ export function PermissionGate({ req }: { req: PermissionRequest }) {
 
   const tone = riskTone(req.risk);
   const danger = req.risk === "danger";
-  const isShell = req.risk === "safe" || req.risk === "caution" || req.risk === "danger";
+  const boundary = req.risk === "network" || req.risk === "sandbox";
+  const isShell = req.risk === "safe" || req.risk === "caution" || req.risk === "danger" || boundary;
   const onPick = (option: PermissionOption) => {
     if (picked) return;
     if (option.kind === "allow_always" && isShell && req.detail) allowCommand(project, req.detail);
@@ -82,7 +85,8 @@ export function PermissionGate({ req }: { req: PermissionRequest }) {
       </div>
       {req.detail && req.risk === "plan_entry" ? <p className="mb-3 text-sm leading-relaxed text-ink-secondary">{req.detail}</p> : req.detail ? <DetailView text={req.detail} /> : null}
       {req.risk === "plan_entry" && <p className="mb-3 text-xs text-ink-muted">Clark will research read-only and return a decision-complete plan. Execution begins only after you approve it.</p>}
-      {req.reason && <p className="mb-3 text-xs text-ink-muted">Flagged: <span className={cn(danger && "text-danger")}>{req.reason}</span></p>}
+      {boundary && <p className="mb-3 text-xs text-ink-muted">Approval applies only to this command. “Always allow” remembers this exact command, not general host access.</p>}
+      {req.reason && <p className="mb-3 text-xs text-ink-muted">{boundary ? "Why" : "Flagged"}: <span className={cn(danger && "text-danger")}>{req.reason}</span></p>}
       <div className="flex flex-wrap gap-2">
         {req.options.map((option) => (
           <button key={option.id} type="button" onClick={() => onPick(option)} disabled={picked !== null} className={cn("relative rounded-lg px-3 py-1.5 text-sm font-medium transition disabled:opacity-50", OPTION_STYLE[option.kind])}>

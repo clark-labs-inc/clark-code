@@ -35,6 +35,9 @@ pub(crate) struct SessionState {
     /// `PreToolUse`/`PostToolUse` hooks from the project's
     /// `.clark/settings.json`, read once at `new_session`.
     pub hooks: HooksConfig,
+    /// Durable and externally visible mutations that require an independent
+    /// canonical read-back before the agent may finish.
+    pub effects: crate::effects::EffectLedger,
     /// The project's configured check/lint/typecheck command (§7
     /// `check_diagnostics`), from `.clark/settings.json` or a per-project
     /// Settings override.

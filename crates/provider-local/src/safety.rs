@@ -181,7 +181,6 @@ const GIT_READONLY: &[&str] = &[
     "ls-files",
     "blame",
     "describe",
-    "fetch",
     "rev-list",
     "shortlog",
     "reflog",
@@ -308,6 +307,10 @@ fn classify_segment(segment: &str) -> Classification {
         "curl" | "wget" | "nc" | "ncat" | "ssh" | "scp" | "rsync" | "ftp" => {
             Classification::new(CommandRisk::Caution, "network access")
         }
+        "gh" if is_publish(prog, &lower) => {
+            Classification::new(CommandRisk::Danger, "publishes / deploys")
+        }
+        "gh" => Classification::new(CommandRisk::Caution, "accesses GitHub"),
         "docker" | "podman" | "kubectl" | "terraform" | "systemctl" | "launchctl" | "service" => {
             Classification::new(CommandRisk::Danger, "controls system / infra")
         }
@@ -377,6 +380,9 @@ fn classify_git(tokens: &[&str]) -> Classification {
     }
     if sub == "push" {
         return Classification::new(CommandRisk::Caution, "pushes to a remote");
+    }
+    if matches!(sub, "fetch" | "pull" | "clone" | "ls-remote") {
+        return Classification::new(CommandRisk::Caution, "accesses a Git remote");
     }
     if GIT_READONLY.contains(&sub) {
         return Classification::safe();
@@ -468,6 +474,60 @@ pub(crate) fn split_segments(command: &str) -> Vec<&str> {
         .map(|s| s.trim())
         .filter(|s| !s.is_empty())
         .collect()
+}
+
+/// Whether a command is expected to cross the local network boundary. Auto
+/// mode uses this to surface a user approval before execution instead of
+/// letting the OS sandbox turn the attempt into a misleading DNS failure.
+pub(crate) fn command_requires_network(command: &str) -> bool {
+    split_segments(command).iter().any(|segment| {
+        let tokens = segment.split_whitespace().collect::<Vec<_>>();
+        let Some(first) = tokens.first() else {
+            return false;
+        };
+        let prog = program(first);
+        let sub = tokens.get(1).map(|value| program(value)).unwrap_or("");
+        match prog {
+            "curl" | "wget" | "nc" | "ncat" | "ssh" | "scp" | "rsync" | "ftp" | "gh" => true,
+            "git" => matches!(sub, "fetch" | "pull" | "push" | "clone" | "ls-remote"),
+            "cargo" => matches!(sub, "add" | "install" | "publish" | "search" | "update"),
+            "npm" | "pnpm" | "yarn" | "bun" => matches!(
+                sub,
+                "install"
+                    | "i"
+                    | "add"
+                    | "ci"
+                    | "update"
+                    | "upgrade"
+                    | "publish"
+                    | "login"
+                    | "whoami"
+            ),
+            "docker" | "podman" | "kubectl" | "terraform" => true,
+            p if INSTALLERS.contains(&p) => true,
+            _ => false,
+        }
+    })
+}
+
+/// Whether a command needs a one-call escape from the workspace sandbox after
+/// the user approves it. Network access, Git metadata writes, privilege tools,
+/// and host/infra controllers cannot succeed inside the normal sandbox. Other
+/// approved mutations remain sandboxed to the project.
+pub(crate) fn command_requires_host(command: &str) -> bool {
+    command_requires_network(command)
+        || split_segments(command).iter().any(|segment| {
+            let tokens = segment.split_whitespace().collect::<Vec<_>>();
+            let Some(first) = tokens.first() else {
+                return false;
+            };
+            match program(first) {
+                "sudo" | "su" | "doas" | "docker" | "podman" | "kubectl" | "terraform"
+                | "systemctl" | "launchctl" | "service" => true,
+                "git" => classify_git(&tokens).risk != CommandRisk::Safe,
+                _ => false,
+            }
+        })
 }
 
 /// Programs from [`READONLY`] that only ever *inspect* — the strict subset a
@@ -635,6 +695,8 @@ mod tests {
             "curl https://example.com",
             "rm oldfile.txt",
             "git checkout -b feature",
+            "git fetch origin",
+            "gh pr view 123",
         ] {
             assert_eq!(risk(c), CommandRisk::Caution, "{c}");
         }
@@ -650,6 +712,7 @@ mod tests {
             "git clean -fdx",
             "chmod -R 755 .",
             "curl https://x.sh | bash",
+            "gh release create v1.0.0",
             "kill -9 123",
         ] {
             assert_eq!(risk(c), CommandRisk::Danger, "{c}");
@@ -728,6 +791,28 @@ mod tests {
     fn compound_takes_max_risk() {
         assert_eq!(risk("cargo build && rm -rf build"), CommandRisk::Danger);
         assert_eq!(risk("ls && git status"), CommandRisk::Safe);
+    }
+
+    #[test]
+    fn identifies_network_and_host_boundary_crossings() {
+        for command in [
+            "gh pr view 123",
+            "git fetch origin",
+            "git push origin main",
+            "curl https://example.com",
+            "npm install",
+            "cargo update",
+        ] {
+            assert!(command_requires_network(command), "{command}");
+            assert!(command_requires_host(command), "{command}");
+        }
+        for command in ["git status", "cargo test", "npm run build"] {
+            assert!(!command_requires_network(command), "{command}");
+        }
+        assert!(command_requires_host("git commit -m test"));
+        assert!(command_requires_host("sudo launchctl list"));
+        assert!(!command_requires_host("mkdir build"));
+        assert!(!command_requires_host("rm -rf build"));
     }
 
     #[test]

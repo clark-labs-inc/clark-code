@@ -45,7 +45,7 @@ export class MockBridge implements CoreBridge {
 
   async newSession(
     providerId: string,
-    _options: SessionOptions,
+    options: SessionOptions,
     bindId?: string,
   ): Promise<Session> {
     const provider = PROVIDERS.find((p) => p.id === providerId) ?? PROVIDERS[0];
@@ -56,8 +56,8 @@ export class MockBridge implements CoreBridge {
       id,
       provider: provider.id,
       capabilities: provider.capabilities,
-      mode: provider.capabilities.modes[0],
-      collaboration_mode: _options.collaboration_mode ?? "default",
+      mode: options.mode,
+      collaboration_mode: options.collaboration_mode ?? "default",
     };
   }
 
@@ -116,6 +116,8 @@ export class MockBridge implements CoreBridge {
       this.emit();
     }
   }
+
+  async setMode(_sessionId: string, _mode: string): Promise<void> {}
 
   async setCollaborationMode(_sessionId: string, _mode: "default" | "plan"): Promise<void> {}
 

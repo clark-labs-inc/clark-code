@@ -244,6 +244,7 @@ fn tool_call(v: &Value) -> ToolCall {
         locations: locations(v.get("locations")),
         content: tool_content(v.get("content")),
         raw_input: v.get("rawInput").cloned(),
+        progress: None,
     }
 }
 
@@ -255,6 +256,7 @@ fn tool_call_patch(v: &Value) -> ToolCallPatch {
         locations: v.get("locations").map(|l| locations(Some(l))),
         append_content: tool_content(v.get("content")),
         replace_content: None,
+        progress: None,
     }
 }
 

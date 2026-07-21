@@ -118,6 +118,57 @@ pub struct FsLocation {
     pub line: Option<u32>,
 }
 
+/// Structured public progress for a long-running delegated tool call.
+///
+/// This deliberately carries presentation-safe labels and summaries rather
+/// than provider-native events, raw tool arguments, or model reasoning. A
+/// provider may replace the complete value as newer progress arrives.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ToolCallProgress {
+    /// Monotonic presentation revision. Consumers can cheaply skip unchanged
+    /// progress snapshots without deep-comparing a potentially large outline.
+    #[serde(default)]
+    pub revision: u64,
+    pub status: ToolStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latest_activity: Option<String>,
+    #[serde(default)]
+    pub phases: Vec<ToolProgressPhase>,
+    #[serde(default)]
+    pub agents: Vec<ToolProgressAgent>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ToolProgressPhase {
+    pub id: String,
+    pub title: String,
+    pub status: ToolStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+    #[serde(default)]
+    pub steps: Vec<ToolProgressStep>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ToolProgressStep {
+    pub id: String,
+    pub title: String,
+    pub status: ToolStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ToolProgressAgent {
+    pub id: String,
+    pub label: String,
+    pub status: ToolStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub activity: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+}
+
 /// A single tool invocation surfaced to the UI.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ToolCall {
@@ -137,6 +188,9 @@ pub struct ToolCall {
     /// Opaque, provider-specific raw input for debugging/inspection.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub raw_input: Option<serde_json::Value>,
+    /// Latest structured public progress for this tool call.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub progress: Option<ToolCallProgress>,
 }
 
 /// A partial update to an existing [`ToolCall`]. Fields left `None` are unchanged.
@@ -158,6 +212,9 @@ pub struct ToolCallPatch {
     /// result) once the call completes. Applied before `append_content`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub replace_content: Option<Vec<ContentBlock>>,
+    /// Replace the call's structured progress wholesale.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub progress: Option<ToolCallProgress>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -603,6 +660,20 @@ pub enum AgentEvent {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn legacy_tool_call_without_progress_deserializes() {
+        let call: ToolCall = serde_json::from_value(serde_json::json!({
+            "id": "call-1",
+            "title": "Researching",
+            "kind": "research",
+            "status": "in_progress",
+            "locations": [],
+            "content": []
+        }))
+        .unwrap();
+        assert!(call.progress.is_none());
+    }
 
     #[test]
     fn run_failure_kind_is_machine_readable_and_backward_compatible() {

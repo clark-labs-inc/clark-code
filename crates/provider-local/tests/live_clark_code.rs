@@ -99,6 +99,31 @@ impl TurnSummary {
             self.tools
         );
     }
+
+    fn require_cloud_research_first(&self, label: &str) {
+        let research = self
+            .tools
+            .iter()
+            .position(|tool| tool == "clark_research")
+            .unwrap_or_else(|| panic!("{label}: expected clark_research, got {:?}", self.tools));
+        let discovery = self
+            .tools
+            .iter()
+            .position(|tool| tool == "tool_search")
+            .unwrap_or_else(|| panic!("{label}: expected tool_search, got {:?}", self.tools));
+        assert!(
+            discovery < research,
+            "{label}: research must be activated before use: {:?}",
+            self.tools
+        );
+        assert!(
+            !self.tools[..research]
+                .iter()
+                .any(|tool| tool == "web_fetch" || tool == "bash"),
+            "{label}: local retrieval ran before Clark Cloud Agent: {:?}",
+            self.tools
+        );
+    }
 }
 
 async fn new_live_provider(
@@ -170,7 +195,10 @@ async fn drive_prompt(
                     ..
                 } => summary.text.push_str(&text),
                 AgentEvent::ToolCall { call, .. } => {
-                    let tool = tool_name_from_title(&call.title);
+                    let tool = call
+                        .tool_name
+                        .clone()
+                        .unwrap_or_else(|| tool_name_from_title(&call.title));
                     summary.tools.push(tool);
                 }
                 AgentEvent::ToolCallUpdate { id, patch, .. } => {
@@ -425,6 +453,55 @@ async fn live_clark_code_research_tool() {
         "research: expected rust-lang.org in answer: {:?}",
         research.text
     );
+}
+
+#[tokio::test]
+#[ignore = "requires explicit live clark-code env plus CLARK_CODE_LIVE_RESEARCH=1"]
+async fn live_clark_code_routes_external_research_to_cloud_first() {
+    if std::env::var("CLARK_CODE_LIVE_RESEARCH").ok().as_deref() != Some("1") {
+        eprintln!("skipping: set CLARK_CODE_LIVE_RESEARCH=1 to permit research tool spend");
+        return;
+    }
+    let Some(cfg) = live_config() else {
+        return;
+    };
+    let scenarios = [
+        (
+            "commercial_offering",
+            "Research how https://vorflux.com structures its commercial offering and summarize the sales motion for a comparable white-glove service.",
+        ),
+        (
+            "library_documentation",
+            "Check the current official reqwest documentation and report the supported API for configuring per-request timeouts.",
+        ),
+        (
+            "service_outage",
+            "Investigate whether GitHub is currently reporting a service outage or active incident and summarize the evidence.",
+        ),
+        (
+            "single_url",
+            "Read https://www.rust-lang.org/ and briefly summarize what the current page says.",
+        ),
+    ];
+
+    for (label, prompt) in scenarios {
+        let dir = tempfile::tempdir().unwrap();
+        write_project_fixture(dir.path());
+        let (mut provider, session) = new_live_provider(
+            &cfg,
+            dir.path(),
+            json!({
+                "research": true,
+                "research_model": cfg.model,
+                "memories": false
+            }),
+        )
+        .await;
+        let summary = drive_turn(&mut provider, &session.id, prompt).await;
+        println!("[{label}] {summary:?}");
+        summary.require_done(label);
+        summary.require_cloud_research_first(label);
+    }
 }
 
 /// Build a tiny, valid, solid-color PNG (`size`x`size`) with no external

@@ -119,6 +119,10 @@ pub struct LocalAgentProvider {
     /// Stable identity for the active project, when private project knowledge
     /// is enabled and the selected root is a Git repository.
     repository_fingerprint: Option<String>,
+    /// Named approval preset selected for this session. This is stored
+    /// separately from collaboration mode so Plan can temporarily enforce
+    /// read-only execution, then restore the selected sandbox when it exits.
+    session_mode: Option<String>,
     /// Owns the narrow temporary write root exposed to sandboxed children.
     sandbox_temp: Option<tempfile::TempDir>,
 }
@@ -344,6 +348,7 @@ impl Provider for LocalAgentProvider {
     async fn new_session(&mut self, options: SessionOptions) -> Result<Session> {
         let config = self.config()?.clone();
         let collaboration_mode = options.collaboration_mode.unwrap_or_default();
+        let session_mode = options.mode.clone();
         let restored_goal = options.resume.as_ref().and_then(|resume| {
             resume.items.iter().rev().find_map(|item| match item {
                 agent_core::provider::ResumeItem::Goal { goal } => Some(goal.clone()),
@@ -361,7 +366,7 @@ impl Provider for LocalAgentProvider {
         let sandbox_preset = match collaboration_mode {
             CollaborationMode::Plan => exec_sandbox::SandboxPreset::ReadOnly,
             CollaborationMode::Default => {
-                exec_sandbox::SandboxPreset::for_session_mode(options.mode.as_deref())
+                exec_sandbox::SandboxPreset::for_session_mode(session_mode.as_deref())
             }
         };
 
@@ -397,19 +402,28 @@ impl Provider for LocalAgentProvider {
         };
         self.executor = executor;
         self.sandbox_temp = sandbox_temp;
+        self.session_mode = session_mode.clone();
         let sandbox = Arc::new(sandbox);
 
-        // MCP stdio servers are agent-owned subprocesses. Start them only after
-        // the session has a canonical root and scoped executor, so their launch
-        // passes through the same OS sandbox as shell and helper processes.
+        // Configured MCP stdio servers are trusted connector processes. Their
+        // individual tool calls remain permission-gated as External, but a
+        // network connector itself cannot work inside the offline project
+        // sandbox. Keep remote connectors on the remote host; locally, launch
+        // the configured server on the host without widening the session's
+        // normal file/shell executor.
         if !config.mcp_servers.is_empty() && self.mcp_status.is_empty() {
             let registry = self
                 .registry
                 .as_mut()
                 .and_then(Arc::get_mut)
                 .ok_or_else(|| Error::Other("tool registry is already shared".to_string()))?;
+            let mcp_executor: Arc<dyn Executor> = if config.remote.is_some() {
+                self.executor.clone()
+            } else {
+                Arc::new(LocalExecutor)
+            };
             self.mcp_status = registry
-                .connect_mcp(&config.mcp_servers, self.executor.as_ref(), sandbox.root())
+                .connect_mcp(&config.mcp_servers, mcp_executor.as_ref(), sandbox.root())
                 .await;
         }
 
@@ -560,7 +574,7 @@ impl Provider for LocalAgentProvider {
             id,
             provider: self.id(),
             capabilities: self.capabilities(),
-            mode: options.mode,
+            mode: session_mode,
             collaboration_mode,
             environment: Some(SessionEnvironment {
                 checkout_root: Some(checkout_root),
@@ -733,6 +747,7 @@ impl Provider for LocalAgentProvider {
                 // which owns the call's update sink.
                 progress: None,
                 agent_progress: None,
+                call_progress: None,
             },
             session: self.session.clone(),
             control: self.control.clone(),
@@ -866,14 +881,18 @@ impl Provider for LocalAgentProvider {
     }
 
     async fn set_mode(&mut self, _session: &SessionId, mode: String) -> Result<()> {
-        if let (Some(config), Some(sandbox)) = (self.config.as_ref(), self.sandbox.as_ref()) {
-            if config.remote.is_none() {
-                let preset = exec_sandbox::SandboxPreset::for_session_mode(Some(&mode));
-                let (executor, sandbox_temp) = build_local_executor(config, sandbox, preset)?;
-                self.executor = executor;
-                self.sandbox_temp = sandbox_temp;
+        let plan_mode = self.session.lock().await.planning.plan_mode();
+        if !plan_mode {
+            if let (Some(config), Some(sandbox)) = (self.config.as_ref(), self.sandbox.as_ref()) {
+                if config.remote.is_none() {
+                    let preset = exec_sandbox::SandboxPreset::for_session_mode(Some(&mode));
+                    let (executor, sandbox_temp) = build_local_executor(config, sandbox, preset)?;
+                    self.executor = executor;
+                    self.sandbox_temp = sandbox_temp;
+                }
             }
         }
+        self.session_mode = Some(mode);
         Ok(())
     }
 
@@ -886,7 +905,9 @@ impl Provider for LocalAgentProvider {
             if config.remote.is_none() {
                 let preset = match mode {
                     CollaborationMode::Plan => exec_sandbox::SandboxPreset::ReadOnly,
-                    CollaborationMode::Default => exec_sandbox::SandboxPreset::WorkspaceWrite,
+                    CollaborationMode::Default => {
+                        exec_sandbox::SandboxPreset::for_session_mode(self.session_mode.as_deref())
+                    }
                 };
                 let (executor, sandbox_temp) = build_local_executor(config, sandbox, preset)?;
                 self.executor = executor;

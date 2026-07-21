@@ -348,6 +348,7 @@ export const WorkLine = memo(
     a.call.id === b.call.id &&
     a.call.status === b.call.status &&
     a.call.title === b.call.title &&
+    a.call.progress?.revision === b.call.progress?.revision &&
     sameContentBlocks(a.call.content, b.call.content) &&
     a.call.locations.length === b.call.locations.length,
 );

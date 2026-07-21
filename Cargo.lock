@@ -431,6 +431,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
 
 [[package]]
+name = "byteorder-lite"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8f1fe948ff07f4bd06c30984e69f5b4899c516a3ef74f34df92a2df2ab535495"
+
+[[package]]
 name = "bytes"
 version = "1.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -645,6 +651,7 @@ dependencies = [
  "exec-sandbox-windows",
  "exec-server",
  "futures",
+ "libreoffice-pure",
  "portable-pty",
  "provider-acp",
  "provider-clark",
@@ -2344,6 +2351,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "image"
+version = "0.25.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cd6f44aed642f18953a158afeb30206f4d50da59fbc66ecb53c66488de73563b"
+dependencies = [
+ "bytemuck",
+ "byteorder-lite",
+ "image-webp",
+ "num-traits",
+]
+
+[[package]]
+name = "image-webp"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "525e9ff3e1a4be2fbea1fdf0e98686a6d98b4d8f937e1bf7402245af1909e8c3"
+dependencies = [
+ "byteorder-lite",
+ "quick-error",
+]
+
+[[package]]
 name = "indexmap"
 version = "1.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2622,6 +2651,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "libreoffice-pure"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3e22abd9a934355b257fdf8bdf661b052d06861a7160752853b72e7d88ecf15f"
+dependencies = [
+ "lo_app",
+ "lo_base",
+ "lo_calc",
+ "lo_core",
+ "lo_draw",
+ "lo_impress",
+ "lo_math",
+ "lo_odf",
+ "lo_uno",
+ "lo_writer",
+ "lo_zip",
+]
+
+[[package]]
 name = "linux-raw-sys"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2638,6 +2686,137 @@ name = "litrs"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "11d3d7f243d5c5a8b9bb5d6dd2b1602c0cb0b9db1621bafc7ed66e35ff9fe092"
+
+[[package]]
+name = "lo_app"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c909ca6abc8371ff63ef93356089f2521c8f50eb6a6852f31cce6ec3cd56c681"
+dependencies = [
+ "lo_core",
+ "lo_lok",
+ "lo_uno",
+]
+
+[[package]]
+name = "lo_base"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6e55c2d56a5043d62044c1965c345e8d637effbc0dd3e2f7eb039ba5042ca692"
+dependencies = [
+ "lo_calc",
+ "lo_core",
+ "lo_odf",
+ "lo_zip",
+]
+
+[[package]]
+name = "lo_calc"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7a52f266fd405ac9cf150add7aefe9b3eb3f57df2acf6d6671da52adbca5c991"
+dependencies = [
+ "lo_core",
+ "lo_odf",
+ "lo_zip",
+]
+
+[[package]]
+name = "lo_core"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5764f218003d45bf119e3312fe541b97452dd737e85d24eb38c46efa3f688f37"
+dependencies = [
+ "image",
+]
+
+[[package]]
+name = "lo_draw"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "883d34fac8ace8f45e1c71cac119fe550cbf0e742891855cb335fb2e5ae2a62f"
+dependencies = [
+ "lo_core",
+ "lo_odf",
+ "lo_zip",
+]
+
+[[package]]
+name = "lo_impress"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "89a2490dddfaac13ce6c635aa88815c653e5e62f182cd9c3782449368609d962"
+dependencies = [
+ "lo_core",
+ "lo_odf",
+ "lo_zip",
+]
+
+[[package]]
+name = "lo_lok"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b1d96ef5c6ea024da6f2a8debbca4bc1587112394dc2813c80f79e2708da650f"
+dependencies = [
+ "lo_base",
+ "lo_calc",
+ "lo_core",
+ "lo_draw",
+ "lo_impress",
+ "lo_math",
+ "lo_uno",
+ "lo_writer",
+]
+
+[[package]]
+name = "lo_math"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f9493b7b6665546af69b6be91ec01da4631fd7510d5642d94d02007ac87e3079"
+dependencies = [
+ "lo_core",
+ "lo_zip",
+]
+
+[[package]]
+name = "lo_odf"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ca91ffafd3463213186398e81e04d045e064aac52d33fa77a18b3c666373903d"
+dependencies = [
+ "lo_core",
+ "lo_math",
+ "lo_zip",
+]
+
+[[package]]
+name = "lo_uno"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "85109507279506b7c6879f5a7c21e35c8364772c0b40b4c0d6ed4445f1fa543d"
+dependencies = [
+ "lo_core",
+]
+
+[[package]]
+name = "lo_writer"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "627d5123a2133608a0bd7a35b5d22ebc7c153dd0618254eea02d709b04d1233c"
+dependencies = [
+ "lo_core",
+ "lo_odf",
+ "lo_zip",
+]
+
+[[package]]
+name = "lo_zip"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2541e83afaee6014441086ad638b8e9d702ca9a5c04c199eb668a1b41bcd3ec2"
+dependencies = [
+ "lo_core",
+]
 
 [[package]]
 name = "lock_api"
@@ -3680,6 +3859,7 @@ dependencies = [
  "grep-regex",
  "grep-searcher",
  "htmd",
+ "libreoffice-pure",
  "pdf-extract",
  "provider-acp",
  "provider-clark",
@@ -3717,6 +3897,12 @@ dependencies = [
  "idna",
  "psl-types",
 ]
+
+[[package]]
+name = "quick-error"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a993555f31e5a609f617c12db6250dedcac1b0a85076912c436e6fc9b2c8e6a3"
 
 [[package]]
 name = "quick-xml"

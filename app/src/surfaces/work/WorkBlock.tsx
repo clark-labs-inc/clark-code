@@ -44,6 +44,7 @@ function sameCalls(a: ToolCall[], b: ToolCall[]): boolean {
       x.id !== y.id ||
       x.status !== y.status ||
       x.title !== y.title ||
+      x.progress?.revision !== y.progress?.revision ||
       !sameContentBlocks(x.content, y.content) ||
       x.locations.length !== y.locations.length
     ) {

@@ -18,8 +18,16 @@ export interface ApprovalPolicyInfo {
 
 /** Order matters: shown top-to-bottom in the picker. */
 export const APPROVAL_POLICIES: ApprovalPolicyInfo[] = [
-  { id: "ask", label: "Ask for approval", description: "Review each edit and command before it runs" },
-  { id: "auto", label: "Approve for me", description: "Run safe actions; ask before risky ones" },
+  {
+    id: "ask",
+    label: "Ask for approval",
+    description: "Review edits, commands, and connected actions before they run",
+  },
+  {
+    id: "auto",
+    label: "Approve for me",
+    description: "Run routine project actions; ask at risky, network, and external boundaries",
+  },
   {
     id: "full",
     label: "Full access",
@@ -58,7 +66,14 @@ export function wouldAutoApprove(policy: ApprovalPolicy, req: PermissionRequest)
   // and explicit backend confirmations above are not action permissions.
   if (policy === "full") return true;
   if (policy === "auto") {
-    return req.risk !== "danger" && req.risk !== "external" && req.risk !== "billed";
+    return (
+      req.risk !== "caution" &&
+      req.risk !== "danger" &&
+      req.risk !== "network" &&
+      req.risk !== "sandbox" &&
+      req.risk !== "external" &&
+      req.risk !== "billed"
+    );
   }
   return false;
 }

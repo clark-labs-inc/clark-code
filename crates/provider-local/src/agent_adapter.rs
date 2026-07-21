@@ -321,7 +321,32 @@ impl ca::AgentTool for DesktopToolAdapter {
                 agent,
             });
         }));
+        let events = self.events.clone();
+        let progress_run = self.run.clone();
+        let progress_tool = tool_id.clone();
+        call_ctx.call_progress = Some(Arc::new(move |progress| {
+            let _ = events.try_send(desktop::AgentEvent::ToolCallUpdate {
+                run: progress_run.clone(),
+                id: progress_tool.clone(),
+                patch: desktop::ToolCallPatch {
+                    status: Some(desktop::ToolStatus::InProgress),
+                    progress: Some(progress),
+                    ..Default::default()
+                },
+            });
+        }));
+        let effect_intent = self.exec.effect_intent(&args);
         let mut outcome = self.exec.invoke(args.clone(), &call_ctx).await;
+        if !outcome.is_error {
+            if let Some(intent) = effect_intent {
+                let receipt = self.ctx.session.lock().await.effects.register(
+                    call_id.to_string(),
+                    self.exec.name(),
+                    intent,
+                );
+                crate::effects::attach_pending_receipt(&mut outcome, &receipt);
+            }
+        }
         if !outcome.is_error {
             for signal in std::mem::take(&mut outcome.signals) {
                 let event = match signal {
@@ -350,21 +375,38 @@ impl ca::AgentTool for DesktopToolAdapter {
         }
 
         if !hooks.post_tool_use.is_empty() {
-            let extra = crate::hooks::run_post_tool_use(
+            let post = crate::hooks::run_post_tool_use(
                 self.ctx.executor.as_ref(),
                 self.ctx.sandbox.root(),
                 &hooks.post_tool_use,
                 self.exec.name(),
                 &args,
-                &outcome.content,
+                &outcome,
                 &signal,
             )
             .await;
-            if !extra.is_empty() {
+            if let Some(reason) = post.block_reason {
+                if !outcome.details.is_object() {
+                    outcome.details = json!({});
+                }
+                outcome.details["_clark_post_tool_original_content"] =
+                    Value::String(outcome.content.clone());
+                outcome.content = format!(
+                    "PostToolUse hook rejected the tool result after execution: {reason}. Inspect canonical state and correct the effect before continuing."
+                );
+                outcome.is_error = true;
+            } else if let Some(feedback) = post.feedback_message {
+                if !outcome.details.is_object() {
+                    outcome.details = json!({});
+                }
+                outcome.details["_clark_post_tool_original_content"] =
+                    Value::String(outcome.content.clone());
+                outcome.content = feedback;
+            } else if !post.additional_contexts.is_empty() {
                 outcome.content = format!(
                     "{}\n\n[hook context]\n{}",
                     outcome.content,
-                    extra.join("\n")
+                    post.additional_contexts.join("\n")
                 );
             }
         }

@@ -200,6 +200,7 @@ async fn paid_single_repo_workstreams_complete_and_apply() {
         session: Arc::new(tokio::sync::Mutex::new(SessionState::default())),
         progress: None,
         agent_progress: None,
+        call_progress: None,
     };
     let started = Instant::now();
     let outcome = run_workstreams(

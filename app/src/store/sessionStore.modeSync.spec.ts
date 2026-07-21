@@ -41,12 +41,13 @@ beforeEach(() => {
 });
 
 describe("approval and collaboration mode", () => {
-  it("changes approval policy without changing the provider mode", () => {
+  it("changes approval policy and synchronizes the local executor mode", () => {
     const bridge = stubBridge();
     useSessionStore.setState({ bridge, session });
     useSessionStore.getState().setApprovalPolicy("full");
     expect(useSessionStore.getState().approvalPolicy).toBe("full");
-    expect(bridge.setMode).not.toHaveBeenCalled();
+    expect(useSessionStore.getState().session?.mode).toBe("full");
+    expect(bridge.setMode).toHaveBeenCalledWith("sess-1", "full");
     expect(bridge.setCollaborationMode).not.toHaveBeenCalled();
   });
 
@@ -63,7 +64,7 @@ describe("approval and collaboration mode", () => {
     useSessionStore.setState({ bridge, session, approvalPolicy: "full" });
     useSessionStore.getState().cycleApprovalPolicy();
     expect(useSessionStore.getState().approvalPolicy).toBe("ask");
-    expect(bridge.setMode).not.toHaveBeenCalled();
+    expect(bridge.setMode).toHaveBeenCalledWith("sess-1", "ask");
   });
 
   it("does not cycle an invisible local approval policy for cloud sessions", () => {
@@ -72,5 +73,6 @@ describe("approval and collaboration mode", () => {
     useSessionStore.setState({ bridge, session: cloudSession, approvalPolicy: "auto" });
     useSessionStore.getState().cycleApprovalPolicy();
     expect(useSessionStore.getState().approvalPolicy).toBe("auto");
+    expect(bridge.setMode).not.toHaveBeenCalled();
   });
 });

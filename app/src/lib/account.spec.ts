@@ -64,7 +64,11 @@ describe("creditState", () => {
         owner_kind: "organization",
         display_name: "Clark Labs",
         domain: "clarkslabs.com",
-        credits: { available_credits: 7_985, lifetime_granted: 8_521, lifetime_spent: 536, is_unlimited: false },
+        access_state: "ready",
+        coverage_status: "ready",
+        balance: { available_credits: 7_985, is_unlimited: false },
+        plan: { plan_key: "team_monthly", name: "Team Monthly" },
+        seat: { purchased: 1, assigned: 1, assigned_to_current_user: true },
         subscription: { status: "active", plan_key: "team_monthly" },
         ledger: [],
       },
@@ -81,7 +85,7 @@ describe("creditState", () => {
 describe("billingPlanLabel", () => {
   it("renders machine plan keys as product copy", () => {
     expect(billingPlanLabel("team_monthly")).toBe("Team Monthly");
-    expect(billingPlanLabel(null)).toBe("Free");
+    expect(billingPlanLabel(null)).toBe("No active plan");
   });
 });
 

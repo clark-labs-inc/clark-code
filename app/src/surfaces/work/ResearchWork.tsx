@@ -1,15 +1,31 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { ChevronRight, ExternalLink, Globe2, Loader2, X } from "lucide-react";
+import {
+  Bot,
+  ChevronDown,
+  ChevronRight,
+  Circle,
+  CircleCheck,
+  ExternalLink,
+  Globe2,
+  Loader2,
+  TriangleAlert,
+  X,
+} from "lucide-react";
 import { cn } from "../../lib/cn";
 import { DUR, EASE } from "../../lib/motion";
 import { extractSources } from "../../lib/sources";
 import { openExternal } from "../../lib/account";
 import { ClarkMark } from "../ClarkMark";
 import { Md, MD_CLASSES } from "../Message";
-import type { ContentBlock, ToolCall } from "../../core-bridge/types";
-
-const RESEARCH_PHASES = ["Plan", "Search", "Read", "Synthesize"] as const;
+import type {
+  ContentBlock,
+  ToolCall,
+  ToolCallProgress,
+  ToolProgressAgent,
+  ToolProgressPhase,
+  ToolStatus,
+} from "../../core-bridge/types";
 
 function blocksText(blocks: ContentBlock[]): string {
   return blocks.map((block) => (block.type === "text" ? block.text : `[${block.type}]`)).join("");
@@ -20,39 +36,135 @@ export function researchQuery(call: ToolCall): string {
   return (query || call.title.replace(/^clark_research:\s*/, "")).trim();
 }
 
-function ResearchProcess({ reduce }: { reduce: boolean | null }) {
+const STATUS_LABEL: Record<ToolStatus, string> = {
+  pending: "Pending",
+  in_progress: "Running",
+  completed: "Complete",
+  cancelled: "Cancelled",
+  failed: "Failed",
+};
+
+const STATUS_TEXT: Record<ToolStatus, string> = {
+  pending: "text-ink-faint",
+  in_progress: "text-accent",
+  completed: "text-success",
+  cancelled: "text-ink-faint",
+  failed: "text-danger",
+};
+
+function ProgressIcon({
+  status,
+  className,
+}: {
+  status: ToolStatus;
+  className?: string;
+}) {
+  if (status === "completed") {
+    return <CircleCheck aria-hidden className={cn("text-success", className)} />;
+  }
+  if (status === "in_progress") {
+    return (
+      <Loader2
+        aria-hidden
+        className={cn("animate-[spin_1s_linear_infinite] text-accent", className)}
+      />
+    );
+  }
+  if (status === "failed") {
+    return <TriangleAlert aria-hidden className={cn("text-danger", className)} />;
+  }
+  if (status === "cancelled") {
+    return <X aria-hidden className={cn("text-ink-faint", className)} />;
+  }
+  return <Circle aria-hidden className={cn("text-ink-faint", className)} />;
+}
+
+function Phase({ phase }: { phase: ToolProgressPhase }) {
+  const current = phase.status === "in_progress";
   return (
-    <div className="space-y-2.5" aria-label="Clark Cloud Agent research process">
-      <div className="grid grid-cols-4 gap-1.5">
-        {RESEARCH_PHASES.map((phase, index) => (
-          <div key={phase} className="min-w-0">
-            <div className="relative h-0.5 overflow-hidden rounded-full bg-border">
-              <motion.span
-                className="absolute inset-y-0 left-0 rounded-full bg-accent"
-                initial={false}
-                animate={
-                  reduce
-                    ? { width: index === 0 ? "100%" : "45%", opacity: index < 2 ? 1 : 0.45 }
-                    : { width: ["20%", "100%", "20%"], opacity: [0.35, 1, 0.35] }
-                }
-                transition={
-                  reduce
-                    ? { duration: 0 }
-                    : { duration: 1.8, repeat: Infinity, delay: index * 0.2, ease: "easeInOut" }
-                }
-              />
-            </div>
-            <span className="mt-1 block truncate text-[11px] text-ink-faint">{phase}</span>
-          </div>
-        ))}
+    <li className="border-t border-border-subtle first:border-t-0">
+      <div className="grid min-h-8 grid-cols-[0.75rem_1rem_minmax(0,1fr)_auto] items-center gap-2 px-0.5 text-sm">
+        {current ? (
+          <ChevronDown aria-hidden className="size-3 text-ink-faint" />
+        ) : (
+          <span aria-hidden />
+        )}
+        <ProgressIcon status={phase.status} className="size-4" />
+        <span className={cn("min-w-0 truncate", current ? "font-medium text-ink" : "text-ink-secondary")}>
+          {phase.title}
+        </span>
+        <span className={cn("pl-4 text-xs font-medium", STATUS_TEXT[phase.status])}>
+          {STATUS_LABEL[phase.status]}
+        </span>
       </div>
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ink-muted">
-        <span>Web search</span>
-        <span className="text-border-strong" aria-hidden>·</span>
-        <span>Source reading</span>
-        <span className="text-border-strong" aria-hidden>·</span>
-        <span>Cited synthesis</span>
+
+      {current && phase.steps.length > 0 && (
+        <ol className="relative ml-[1.7rem] border-l border-accent/45 pb-1 pl-4">
+          {phase.steps.map((step) => (
+            <li
+              key={step.id}
+              className="grid min-h-7 grid-cols-[1rem_minmax(0,1fr)_auto] items-center gap-2 pr-0.5 text-sm"
+            >
+              <ProgressIcon status={step.status} className="size-3.5" />
+              <span className="min-w-0">
+                <span className="block truncate text-ink-muted">{step.title}</span>
+                {step.summary && step.status === "in_progress" && (
+                  <span className="block truncate text-xs text-ink-faint">{step.summary}</span>
+                )}
+              </span>
+              <span className={cn("pl-4 text-xs", STATUS_TEXT[step.status])}>
+                {STATUS_LABEL[step.status]}
+              </span>
+            </li>
+          ))}
+        </ol>
+      )}
+    </li>
+  );
+}
+
+function Agent({ agent }: { agent: ToolProgressAgent }) {
+  const detail = agent.activity || agent.summary || STATUS_LABEL[agent.status];
+  return (
+    <li className="grid min-h-8 grid-cols-[1rem_minmax(0,1fr)_auto] items-center gap-2 border-t border-border-subtle px-0.5 text-sm sm:grid-cols-[1rem_minmax(0,1fr)_auto_minmax(12rem,1.25fr)]">
+      <Bot aria-hidden className="size-3.5 text-ink-faint" />
+      <span className="min-w-0 truncate text-ink-muted">{agent.label}</span>
+      <span className={cn("flex items-center gap-1.5 pl-3 text-xs font-medium", STATUS_TEXT[agent.status])}>
+        <ProgressIcon status={agent.status} className="size-3.5" />
+        {STATUS_LABEL[agent.status]}
+      </span>
+      <span className="col-span-2 min-w-0 truncate pb-1 pl-6 text-xs text-ink-faint sm:col-span-1 sm:pb-0 sm:pl-6">
+        {detail}
+      </span>
+    </li>
+  );
+}
+
+export function ResearchOutline({
+  progress,
+}: {
+  progress?: ToolCallProgress;
+}) {
+  if (!progress || (progress.phases.length === 0 && progress.agents.length === 0)) {
+    return (
+      <div className="flex min-h-9 items-center gap-2 text-sm text-ink-muted" aria-label="Clark Cloud Agent progress">
+        <ProgressIcon status="in_progress" className="size-4" />
+        <span>{progress?.latest_activity || "Starting Clark Cloud Agent"}</span>
       </div>
+    );
+  }
+
+  return (
+    <div className="max-h-72 overflow-y-auto pr-1" aria-label="Clark Cloud Agent progress">
+      <ol>{progress.phases.map((phase) => <Phase key={phase.id} phase={phase} />)}</ol>
+      {progress.agents.length > 0 && (
+        <section className="mt-1" aria-label="Parallel research agents">
+          <h4 className="min-h-8 border-t border-border-subtle px-0.5 pt-2 text-xs font-medium text-ink-faint">
+            Parallel research · {progress.agents.length} agent{progress.agents.length === 1 ? "" : "s"}
+          </h4>
+          <ul>{progress.agents.map((agent) => <Agent key={agent.id} agent={agent} />)}</ul>
+        </section>
+      )}
     </div>
   );
 }
@@ -102,18 +214,10 @@ function ResearchDetail({ call }: { call: ToolCall }) {
 
 function Status({ call, sourceCount }: { call: ToolCall; sourceCount: number }) {
   if (call.status === "failed") {
-    return (
-      <span className="flex items-center gap-1 text-xs font-medium text-danger">
-        <X className="size-3" /> Failed
-      </span>
-    );
+    return <span className="flex items-center gap-1 text-xs font-medium text-danger"><X className="size-3" /> Failed</span>;
   }
   if (call.status === "cancelled") {
-    return (
-      <span className="flex items-center gap-1 text-xs font-medium text-ink-faint">
-        <X className="size-3" /> Cancelled
-      </span>
-    );
+    return <span className="flex items-center gap-1 text-xs font-medium text-ink-faint"><X className="size-3" /> Cancelled</span>;
   }
   if (call.status === "in_progress" || call.status === "pending") {
     return (
@@ -123,24 +227,33 @@ function Status({ call, sourceCount }: { call: ToolCall; sourceCount: number }) 
     );
   }
   return sourceCount > 0 ? (
-    <span className="text-xs text-ink-faint">
-      {sourceCount} source{sourceCount === 1 ? "" : "s"}
-    </span>
+    <span className="text-xs text-ink-faint">{sourceCount} source{sourceCount === 1 ? "" : "s"}</span>
   ) : (
     <span className="text-xs text-ink-faint">Complete</span>
   );
 }
 
+function completedSubtitle(call: ToolCall): string {
+  if (call.status === "failed") return call.progress?.latest_activity || "Research failed";
+  if (call.status === "cancelled") return "Research cancelled";
+  if (call.status === "completed") return "Research complete";
+  return call.progress?.latest_activity || "Starting Clark Cloud Agent";
+}
+
 export function ResearchWork({ call, active }: { call: ToolCall; active: boolean }) {
   const reduce = useReducedMotion();
   const [open, setOpen] = useState(active);
+  const [activityOpen, setActivityOpen] = useState(false);
+  const wasActive = useRef(active);
   const findings = blocksText(call.content).trim();
   const sources = extractSources(findings);
   const hasFindings = findings.length > 0;
-  const canOpen = active || hasFindings;
+  const canOpen = active || hasFindings || Boolean(call.progress);
 
   useEffect(() => {
     if (active) setOpen(true);
+    else if (wasActive.current) setOpen(false);
+    wasActive.current = active;
   }, [active]);
 
   return (
@@ -167,17 +280,14 @@ export function ResearchWork({ call, active }: { call: ToolCall; active: boolean
         <ClarkMark size={30} className="shrink-0" />
         <span className="min-w-0 flex-1">
           <span className="block text-sm font-medium leading-5 text-ink">Clark Cloud Agent</span>
-          <span className="block truncate text-xs leading-4 text-ink-faint">
-            Running securely on clarkchat.com
+          <span aria-live="polite" className="block truncate text-xs leading-4 text-ink-faint">
+            {completedSubtitle(call)}
           </span>
         </span>
         <span className="flex shrink-0 items-center gap-2">
           <Status call={call} sourceCount={sources.length} />
           {canOpen && (
-            <ChevronRight
-              className={cn("size-3.5 text-ink-faint transition", open && "rotate-90")}
-              aria-hidden
-            />
+            <ChevronDown className={cn("size-3.5 text-ink-faint transition", open && "rotate-180")} aria-hidden />
           )}
         </span>
       </button>
@@ -191,16 +301,40 @@ export function ResearchWork({ call, active }: { call: ToolCall; active: boolean
             transition={{ duration: DUR.fast, ease: EASE.inOut }}
             className="overflow-hidden border-t border-border-subtle"
           >
-            <div className="space-y-3 px-3 py-2.5">
-              <p className="truncate text-sm text-ink-secondary" title={researchQuery(call)}>
-                {researchQuery(call)}
-              </p>
-              {active && !hasFindings ? (
-                <ResearchProcess reduce={reduce} />
+            <div className="space-y-2 px-3 py-2.5">
+              <p className="truncate text-sm text-ink-secondary" title={researchQuery(call)}>{researchQuery(call)}</p>
+              {active || !hasFindings ? (
+                <ResearchOutline progress={call.progress} />
               ) : (
-                <div className="max-h-64 overflow-auto pr-1">
-                  <ResearchDetail call={call} />
-                </div>
+                <>
+                  <div className="max-h-64 overflow-auto pr-1"><ResearchDetail call={call} /></div>
+                  {call.progress && (
+                    <div className="border-t border-border-subtle pt-2">
+                      <button
+                        type="button"
+                        onClick={() => setActivityOpen((value) => !value)}
+                        aria-expanded={activityOpen}
+                        className="flex w-full items-center justify-between text-xs font-medium text-ink-muted transition hover:text-ink-secondary"
+                      >
+                        Run activity
+                        <ChevronRight className={cn("size-3.5 transition", activityOpen && "rotate-90")} />
+                      </button>
+                      <AnimatePresence initial={false}>
+                        {activityOpen && (
+                          <motion.div
+                            initial={reduce ? false : { height: 0, opacity: 0 }}
+                            animate={{ height: "auto", opacity: 1 }}
+                            exit={reduce ? { opacity: 0 } : { height: 0, opacity: 0 }}
+                            transition={{ duration: DUR.fast, ease: EASE.inOut }}
+                            className="overflow-hidden pt-2"
+                          >
+                            <ResearchOutline progress={call.progress} />
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
+                  )}
+                </>
               )}
             </div>
           </motion.div>

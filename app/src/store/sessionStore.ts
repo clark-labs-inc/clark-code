@@ -1300,16 +1300,17 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       let options;
       let remoteHost: string | null = null;
       const collaboration_mode = get().collaborationMode;
+      const mode = get().approvalPolicy;
       if (isRemote) {
         const host = loadSshHosts().find((h) => h.id === get().selectedHostId);
         if (!host) throw new Error("Pick a remote host first, or add one.");
         remote = await openRemote(host);
         remoteHost = host.host.trim();
         config = localConnectConfig(localSettings, remoteTarget(remote));
-        options = { cwd: remote.cwd, collaboration_mode };
+        options = { cwd: remote.cwd, mode, collaboration_mode };
       } else if (isLocal) {
         config = localConnectConfig(localSettings);
-        options = { cwd: localSettings.cwd.trim(), collaboration_mode };
+        options = { cwd: localSettings.cwd.trim(), mode, collaboration_mode };
       } else {
         config = { endpoint: auth?.clark.endpoint, auth_token: auth?.clark.token };
         options = {};
@@ -1522,6 +1523,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       // set, else the global default — so reopening a chat that ran a different
       // model starts it on that model again, not the current default.
       const collaboration_mode = get().collaborationMode;
+      const mode = get().approvalPolicy;
       const effSettings = effectiveModelSettings(localSettings, get().chatModels, id);
       if (isLocal) pinChatModel(get, set, id, effSettings);
       if (wantRemote) {
@@ -1535,13 +1537,13 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         );
         remoteHost = host.host.trim();
         config = localConnectConfig(effSettings, remoteTarget(remote));
-        options = { cwd: remote.cwd, collaboration_mode };
+        options = { cwd: remote.cwd, mode, collaboration_mode };
       } else if (isLocal) {
         if (!requestedProjectRoot) {
           throw new Error("This conversation has no project folder. Choose one before reopening it.");
         }
         config = localConnectConfig({ ...effSettings, cwd: requestedProjectRoot });
-        options = { cwd: requestedProjectRoot, collaboration_mode };
+        options = { cwd: requestedProjectRoot, mode, collaboration_mode };
       } else {
         config = { endpoint: auth?.clark.endpoint, auth_token: auth?.clark.token };
         options = {};
@@ -1970,6 +1972,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       : localConnectConfig(settings);
     const options: SessionOptions = {
       cwd: projectRoot,
+      mode: state.approvalPolicy,
       collaboration_mode: state.collaborationMode,
       ...(resume ? { resume } : {}),
     };
@@ -2132,8 +2135,24 @@ export const useSessionStore = create<SessionState>((set, get) => ({
 
   setApprovalPolicy: (mode) => {
     saveApprovalPolicy(mode);
-    set({ approvalPolicy: mode });
-    const { bridge, session, snapshot } = get();
+    const { bridge, session } = get();
+    const localSessionIds = new Set<string>();
+    for (const entry of liveSessions.values()) {
+      if (entry.session.provider !== "local") continue;
+      entry.session = { ...entry.session, mode };
+      localSessionIds.add(entry.session.id);
+    }
+    if (session?.provider === "local") localSessionIds.add(session.id);
+    set({
+      approvalPolicy: mode,
+      ...(session?.provider === "local" ? { session: { ...session, mode } } : {}),
+    });
+    if (bridge?.setMode) {
+      for (const id of localSessionIds) {
+        void bridge.setMode(id, mode).catch((error) => set({ error: String(error) }));
+      }
+    }
+    const { snapshot } = get();
     // If a prompt is open and the new mode would grant it, resolve it now.
     const pend = snapshot.pending_permission;
     if (bridge && session && pend && wouldAutoApprove(mode, pend)) {

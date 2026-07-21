@@ -4,7 +4,8 @@
 //! Fired from `DesktopToolAdapter::execute` (`agent_adapter.rs`): `PreToolUse`
 //! right before the permission gate (can deny or rewrite the tool's args
 //! before it ever reaches the gate/tool); `PostToolUse` right after the tool
-//! runs (observe-only — can only append context to the result, never block).
+//! runs (it cannot undo the execution, but it can replace or reject the result
+//! shown to the model so the agent corrects canonical state before finishing).
 //!
 //! Hook commands run through the same hard-floor safety check
 //! (`safety::classify_command`) `bash` uses, but — deliberately — bypass the
@@ -39,11 +40,21 @@ struct HookDecision {
     updated_input: Option<Value>,
     /// `PostToolUse` only: appended to the tool result as extra context.
     additional_context: Option<String>,
+    /// `PostToolUse` only: replaces the model-visible result with corrective
+    /// feedback while retaining the already-completed execution in details.
+    feedback_message: Option<String>,
 }
 
 pub enum PreToolUseResult {
     Allow { args: Value },
     Deny { reason: String },
+}
+
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct PostToolUseResult {
+    pub additional_contexts: Vec<String>,
+    pub feedback_message: Option<String>,
+    pub block_reason: Option<String>,
 }
 
 /// Run every `PreToolUse` hook matching `tool_name`, in order. The first
@@ -84,18 +95,18 @@ pub async fn run_pre_tool_use(
 }
 
 /// Run every `PostToolUse` hook matching `tool_name`, collecting any
-/// `additional_context` strings to append to the tool result. Observe-only —
-/// nothing here can change what already ran.
+/// context and optional corrective feedback. A deny blocks the model-visible
+/// result, not the already-completed side effect.
 pub async fn run_post_tool_use(
     exec: &dyn Executor,
     cwd: &Path,
     hooks: &[HookEntry],
     tool_name: &str,
     args: &Value,
-    outcome_content: &str,
+    outcome: &crate::tools::ToolOutcome,
     cancel: &CancellationToken,
-) -> Vec<String> {
-    let mut extra = Vec::new();
+) -> PostToolUseResult {
+    let mut result = PostToolUseResult::default();
     for hook in hooks.iter().filter(|h| matches(h, tool_name)) {
         if hard_floor_violation(&hook.command).is_some() {
             continue;
@@ -103,15 +114,32 @@ pub async fn run_post_tool_use(
         let payload = json!({
             "tool_name": tool_name,
             "tool_input": args,
-            "tool_output": outcome_content,
+            "tool_response": {
+                "content": outcome.content,
+                "is_error": outcome.is_error,
+                "details": outcome.details,
+                "locations": outcome.locations,
+                "artifacts": outcome.artifacts,
+            },
         });
         if let Ok(decision) = run_hook(exec, cwd, &hook.command, &payload, cancel).await {
+            if decision.decision.as_deref() == Some("deny") {
+                result.block_reason = Some(
+                    decision
+                        .reason
+                        .unwrap_or_else(|| format!("blocked by hook: {}", hook.command)),
+                );
+                break;
+            }
             if let Some(ctx) = decision.additional_context.filter(|c| !c.is_empty()) {
-                extra.push(ctx);
+                result.additional_contexts.push(ctx);
+            }
+            if let Some(feedback) = decision.feedback_message.filter(|c| !c.is_empty()) {
+                result.feedback_message = Some(feedback);
             }
         }
     }
-    extra
+    result
 }
 
 fn matches(hook: &HookEntry, tool_name: &str) -> bool {
@@ -292,19 +320,66 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let hooks = vec![hook(
             "*",
-            r#"cat >/dev/null; echo '{"additional_context":"formatted with prettier"}'"#,
+            r#"grep -q '"tool_response"' && echo '{"additional_context":"formatted with prettier"}'"#,
         )];
-        let extra = run_post_tool_use(
+        let outcome =
+            crate::tools::ToolOutcome::ok("wrote 10 lines").with_details(json!({"bytes": 120}));
+        let result = run_post_tool_use(
             &LocalExecutor,
             dir.path(),
             &hooks,
             "write_file",
             &json!({"path": "x.ts"}),
-            "wrote 10 lines",
+            &outcome,
             &CancellationToken::new(),
         )
         .await;
-        assert_eq!(extra, vec!["formatted with prettier".to_string()]);
+        assert_eq!(
+            result.additional_contexts,
+            vec!["formatted with prettier".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn post_tool_use_can_replace_model_result_or_reject_it_after_execution() {
+        let dir = tempfile::tempdir().unwrap();
+        let outcome = crate::tools::ToolOutcome::ok("created resource")
+            .with_details(json!({"uri": "resource://7"}));
+        let feedback = run_post_tool_use(
+            &LocalExecutor,
+            dir.path(),
+            &[hook(
+                "publisher",
+                r#"cat >/dev/null; echo '{"feedback_message":"read canonical state before finishing"}'"#,
+            )],
+            "publisher",
+            &json!({"body": "expected"}),
+            &outcome,
+            &CancellationToken::new(),
+        )
+        .await;
+        assert_eq!(
+            feedback.feedback_message.as_deref(),
+            Some("read canonical state before finishing")
+        );
+
+        let blocked = run_post_tool_use(
+            &LocalExecutor,
+            dir.path(),
+            &[hook(
+                "publisher",
+                r#"cat >/dev/null; echo '{"decision":"deny","reason":"canonical state mismatched"}'"#,
+            )],
+            "publisher",
+            &json!({"body": "expected"}),
+            &outcome,
+            &CancellationToken::new(),
+        )
+        .await;
+        assert_eq!(
+            blocked.block_reason.as_deref(),
+            Some("canonical state mismatched")
+        );
     }
 
     #[tokio::test]

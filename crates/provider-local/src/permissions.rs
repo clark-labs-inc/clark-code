@@ -75,32 +75,6 @@ impl PermissionGate {
             return PermissionOutcome::Allowed;
         }
 
-        // The per-session document workspace is provisioned by Clark and
-        // deliberately attached to this sandbox for agent-authored reports,
-        // plans, and design docs. Writing there should not prompt like a source
-        // edit. Keep an explicit per-tool deny authoritative, though.
-        if matches!(tool_name, "write_file" | "edit_file")
-            && !self.session.lock().await.planning.plan_mode()
-            && ctx
-                .sandbox
-                .is_docs_write(args.get("path").and_then(Value::as_str).unwrap_or(""))
-        {
-            let explicitly_denied = self
-                .session
-                .lock()
-                .await
-                .policy
-                .get(tool_name)
-                .is_some_and(|mode| *mode == PermissionMode::Deny);
-            return if explicitly_denied {
-                PermissionOutcome::Denied(format!(
-                    "The user denied permission to run `{tool_name}`."
-                ))
-            } else {
-                PermissionOutcome::Allowed
-            };
-        }
-
         if self.session.lock().await.planning.plan_mode() {
             if tool_name == "enter_plan_mode" {
                 return PermissionOutcome::Denied(
@@ -119,6 +93,14 @@ impl PermissionGate {
                     return PermissionOutcome::Denied(format!(
                         "Refused: {why}. The command was not run."
                     ));
+                }
+                if info.requires_elevation {
+                    return PermissionOutcome::Denied(
+                        "Plan mode is active — network and host access cannot be granted while \
+                        the session is read-only. Finish the plan, then run the command after \
+                        approval."
+                            .to_string(),
+                    );
                 }
                 if crate::safety::is_read_only_command(info.detail.as_deref().unwrap_or("")) {
                     return PermissionOutcome::Allowed;
@@ -272,7 +254,7 @@ impl PermissionGate {
                     id: request_id.clone(),
                     session: self.session_id.clone(),
                     tool_call: Some(tool_id.clone()),
-                    title: permission_title(tool_name),
+                    title: permission_title(tool_name, info),
                     options: permission_options(tool_name),
                     detail: info.detail.clone(),
                     risk: if tool_name == "enter_plan_mode" {
@@ -284,6 +266,12 @@ impl PermissionGate {
                         Some("billed".to_string())
                     } else if info.external {
                         Some("external".to_string())
+                    } else if matches!(info.risk, Some(CommandRisk::Danger)) {
+                        Some("danger".to_string())
+                    } else if info.network {
+                        Some("network".to_string())
+                    } else if info.requires_elevation {
+                        Some("sandbox".to_string())
                     } else {
                         info.risk.map(|r| r.as_str().to_string())
                     },
@@ -379,10 +367,21 @@ impl PermissionGate {
             return false;
         }
         let s = self.session.lock().await;
-        segments.iter().all(|seg| {
-            classify_command(seg).risk == CommandRisk::Safe
-                || s.allow_commands.iter().any(|a| prefix_match(seg, a))
-        })
+        let mut matched_explicit_rule = false;
+        for segment in segments {
+            if s.allow_commands
+                .iter()
+                .any(|allowed| prefix_match(segment, allowed))
+            {
+                matched_explicit_rule = true;
+            } else if classify_command(segment).risk != CommandRisk::Safe {
+                return false;
+            }
+        }
+        // Safe commands are auto-resolved by Auto mode in the UI. They must
+        // still reach the permission request in Ask mode unless the user has
+        // explicitly remembered a matching command rule.
+        matched_explicit_rule
     }
 
     async fn apply_policy(&self, tool: &str, info: &GateInfo, decision: Decision) {
@@ -413,6 +412,8 @@ struct GateInfo {
     risk: Option<CommandRisk>,
     reason: Option<String>,
     external: bool,
+    network: bool,
+    requires_elevation: bool,
 }
 
 fn gate_info(name: &str, args: &Value) -> GateInfo {
@@ -423,6 +424,8 @@ fn gate_info(name: &str, args: &Value) -> GateInfo {
             risk: None,
             reason: Some("connected service action - review its inputs".to_string()),
             external: true,
+            network: false,
+            requires_elevation: false,
         };
     }
     match name {
@@ -431,6 +434,8 @@ fn gate_info(name: &str, args: &Value) -> GateInfo {
             risk: None,
             reason: Some("accesses an external site directly from this device".to_string()),
             external: true,
+            network: false,
+            requires_elevation: false,
         },
         "bash" => {
             let cmd = args
@@ -440,11 +445,29 @@ fn gate_info(name: &str, args: &Value) -> GateInfo {
                 .trim()
                 .to_string();
             let c = classify_command(&cmd);
+            let network = crate::safety::command_requires_network(&cmd);
+            let explicitly_requested = args
+                .get("sandbox_permissions")
+                .and_then(Value::as_str)
+                .is_some_and(|value| value == "require_escalated");
+            let justification = args
+                .get("justification")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string);
+            let requires_elevation =
+                explicitly_requested || crate::safety::command_requires_host(&cmd);
             GateInfo {
                 detail: Some(cmd),
                 risk: Some(c.risk),
-                reason: c.reason,
+                reason: justification.or(c.reason).or_else(|| {
+                    requires_elevation
+                        .then(|| "requires access outside the project sandbox".to_string())
+                }),
                 external: false,
+                network,
+                requires_elevation,
             }
         }
         "write_file" | "edit_file" => GateInfo {
@@ -452,6 +475,8 @@ fn gate_info(name: &str, args: &Value) -> GateInfo {
             risk: None,
             reason: None,
             external: false,
+            network: false,
+            requires_elevation: false,
         },
         "enter_plan_mode" => GateInfo {
             detail: args
@@ -461,6 +486,8 @@ fn gate_info(name: &str, args: &Value) -> GateInfo {
             risk: None,
             reason: None,
             external: false,
+            network: false,
+            requires_elevation: false,
         },
         // Image generation writes an output file and calls Clark's billed
         // platform relay. Keep it outside automatic approval and show the
@@ -488,6 +515,8 @@ fn gate_info(name: &str, args: &Value) -> GateInfo {
                         .to_string(),
                 ),
                 external: true,
+                network: false,
+                requires_elevation: false,
             }
         }
         // MCP-tool posture, not `clark_research`'s zero-gate one: it drives a
@@ -501,6 +530,8 @@ fn gate_info(name: &str, args: &Value) -> GateInfo {
                 risk: None,
                 reason: Some("experimental browser tool - review its action".to_string()),
                 external: true,
+                network: false,
+                requires_elevation: false,
             }
         }
         _ => GateInfo {
@@ -508,6 +539,8 @@ fn gate_info(name: &str, args: &Value) -> GateInfo {
             risk: None,
             reason: None,
             external: false,
+            network: false,
+            requires_elevation: false,
         },
     }
 }
@@ -518,8 +551,12 @@ fn prefix_match(cmd: &str, entry: &str) -> bool {
     !entry.is_empty() && (cmd == entry || cmd.starts_with(&format!("{entry} ")))
 }
 
-fn permission_title(tool: &str) -> String {
+fn permission_title(tool: &str, info: &GateInfo) -> String {
     match tool {
+        "bash" if info.network => "Allow this command to use the network?".to_string(),
+        "bash" if info.requires_elevation => {
+            "Run this command outside the project sandbox?".to_string()
+        }
         "bash" => "Run a shell command?".to_string(),
         "edit_file" => "Apply this edit?".to_string(),
         "write_file" => "Write this file?".to_string(),
@@ -586,17 +623,58 @@ mod tests {
 
     #[test]
     fn tool_titles_are_user_facing() {
-        assert_eq!(permission_title("bash"), "Run a shell command?");
-        assert_eq!(permission_title("write_file"), "Write this file?");
-        assert_eq!(permission_title("enter_plan_mode"), "Start with a plan?");
-        assert_eq!(permission_title("generate_image"), "Generate an image?");
-        assert_eq!(permission_title("browser"), "Run this browser action?");
         assert_eq!(
-            permission_title("mcp_github_create_issue"),
+            permission_title("bash", &bash_gate("cargo test")),
+            "Run a shell command?"
+        );
+        assert_eq!(
+            permission_title("bash", &bash_gate("gh pr view 123")),
+            "Allow this command to use the network?"
+        );
+        assert_eq!(
+            permission_title(
+                "bash",
+                &gate_info(
+                    "bash",
+                    &serde_json::json!({
+                        "command": "tool-with-custom-host-access",
+                        "sandbox_permissions": "require_escalated",
+                    }),
+                ),
+            ),
+            "Run this command outside the project sandbox?"
+        );
+        assert_eq!(
+            permission_title("write_file", &gate_info("write_file", &Value::Null)),
+            "Write this file?"
+        );
+        assert_eq!(
+            permission_title(
+                "enter_plan_mode",
+                &gate_info("enter_plan_mode", &Value::Null)
+            ),
+            "Start with a plan?"
+        );
+        assert_eq!(
+            permission_title("generate_image", &gate_info("generate_image", &Value::Null)),
+            "Generate an image?"
+        );
+        assert_eq!(
+            permission_title("browser", &gate_info("browser", &Value::Null)),
+            "Run this browser action?"
+        );
+        assert_eq!(
+            permission_title(
+                "mcp_github_create_issue",
+                &gate_info("mcp_github_create_issue", &Value::Null)
+            ),
             "Run this connected action?"
         );
         assert_eq!(
-            permission_title("future_internal_tool"),
+            permission_title(
+                "future_internal_tool",
+                &gate_info("future_internal_tool", &Value::Null)
+            ),
             "Allow this action to run?"
         );
         assert_eq!(
@@ -764,6 +842,7 @@ mod tests {
             session: Arc::new(tokio::sync::Mutex::new(SessionState::default())),
             progress: None,
             agent_progress: None,
+            call_progress: None,
         }
     }
 
@@ -1039,6 +1118,46 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn document_workspace_writes_reach_the_ask_mode_gate() {
+        let project = tempfile::tempdir().unwrap();
+        let docs = tempfile::tempdir().unwrap();
+        let session = Arc::new(Mutex::new(SessionState::default()));
+        let control = Arc::new(Mutex::new(RunControl::default()));
+        let (tx, rx) = async_channel::unbounded::<AgentEvent>();
+        let gate =
+            PermissionGate::new(session, control.clone(), SessionId::new("docs-session"), tx);
+        let mut ctx = test_ctx(project.path());
+        ctx.sandbox = Arc::new(
+            crate::sandbox::Sandbox::new(project.path())
+                .unwrap()
+                .with_docs(docs.path().to_path_buf()),
+        );
+        let target = ctx.sandbox.docs_root().unwrap().join("design.md");
+
+        let check = tokio::spawn(async move {
+            gate.check(
+                &ToolCallId::new("docs-1"),
+                "write_file",
+                &FakeMutating,
+                &serde_json::json!({"path": target}),
+                &ctx,
+                &CancellationToken::new(),
+            )
+            .await
+        });
+
+        let AgentEvent::PermissionRequest { request } = rx.recv().await.unwrap() else {
+            panic!("expected a document write permission request");
+        };
+        assert_eq!(request.title, "Write this file?");
+        control
+            .lock()
+            .await
+            .resolve(&request.id, Decision::AllowOnce.into());
+        assert!(matches!(check.await.unwrap(), PermissionOutcome::Allowed));
+    }
+
+    #[tokio::test]
     async fn explicit_write_deny_still_applies_to_document_workspace() {
         let project = tempfile::tempdir().unwrap();
         let docs = tempfile::tempdir().unwrap();
@@ -1126,6 +1245,22 @@ mod tests {
         };
         assert!(message.contains("Plan mode is active"));
         assert!(message.contains("propose_plan"));
+
+        let network = gate
+            .check(
+                &ToolCallId::new("t3"),
+                "bash",
+                &FakeMutating,
+                &serde_json::json!({"command": "gh pr view 123"}),
+                &ctx,
+                &CancellationToken::new(),
+            )
+            .await;
+        let PermissionOutcome::Denied(message) = network else {
+            panic!("network access must be denied in plan mode");
+        };
+        assert!(message.contains("network and host access"));
+        assert!(rx.is_empty(), "plan-mode network access must not prompt");
     }
 
     #[tokio::test]
@@ -1297,5 +1432,58 @@ mod tests {
                 .command_preapproved("bash", &bash_gate("cargo test $(curl evil)"))
                 .await
         );
+    }
+
+    #[tokio::test]
+    async fn safe_commands_still_ask_without_an_explicit_remembered_rule() {
+        let session = Arc::new(Mutex::new(SessionState::default()));
+        let control = Arc::new(Mutex::new(RunControl::default()));
+        let (tx, _rx) = async_channel::unbounded::<AgentEvent>();
+        let gate = PermissionGate::new(session, control, SessionId::new("s1"), tx);
+
+        assert!(
+            !gate
+                .command_preapproved("bash", &bash_gate("cargo test"))
+                .await
+        );
+    }
+
+    #[tokio::test]
+    async fn github_command_requests_scoped_network_permission() {
+        let dir = tempfile::tempdir().unwrap();
+        let session = Arc::new(Mutex::new(SessionState::default()));
+        let control = Arc::new(Mutex::new(RunControl::default()));
+        let (tx, rx) = async_channel::unbounded::<AgentEvent>();
+        let gate = PermissionGate::new(
+            session,
+            control.clone(),
+            SessionId::new("network-session"),
+            tx,
+        );
+        let ctx = test_ctx(dir.path());
+
+        let check = tokio::spawn(async move {
+            gate.check(
+                &ToolCallId::new("gh-1"),
+                "bash",
+                &FakeMutating,
+                &serde_json::json!({"command": "gh pr view 123"}),
+                &ctx,
+                &CancellationToken::new(),
+            )
+            .await
+        });
+
+        let AgentEvent::PermissionRequest { request } = rx.recv().await.unwrap() else {
+            panic!("expected a permission request");
+        };
+        assert_eq!(request.risk.as_deref(), Some("network"));
+        assert_eq!(request.title, "Allow this command to use the network?");
+        assert_eq!(request.reason.as_deref(), Some("accesses GitHub"));
+        control
+            .lock()
+            .await
+            .resolve(&request.id, Decision::AllowOnce.into());
+        assert!(matches!(check.await.unwrap(), PermissionOutcome::Allowed));
     }
 }

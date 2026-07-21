@@ -9,6 +9,7 @@ import {
   Download,
   ExternalLink,
   FileBox,
+  FileDown,
   FileText,
   Film,
   Globe,
@@ -28,7 +29,7 @@ import type { Artifact, ArtifactKind, ToolCall } from "../../core-bridge/types";
 import { useSessionStore } from "../../store/sessionStore";
 import { useCopy } from "../../lib/clipboard";
 import { cn } from "../../lib/cn";
-import { readDocText, saveDocText } from "../../lib/docs";
+import { readDocText, saveDocPdf, saveDocText } from "../../lib/docs";
 import { openExternal } from "../../lib/account";
 import {
   artifactAvailability,
@@ -374,6 +375,8 @@ export function ArtifactWorkspace({
   const [loadingText, setLoadingText] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [exportingPdf, setExportingPdf] = useState(false);
+  const [pdfSaved, setPdfSaved] = useState(false);
   const [presenting, setPresenting] = useState(false);
   const [copied, copy] = useCopy();
   const pickerContainerRef = useRef<HTMLDivElement>(null);
@@ -403,6 +406,7 @@ export function ArtifactWorkspace({
   useEffect(() => {
     setText(null);
     setSaved(false);
+    setPdfSaved(false);
     setPresenting(false);
     if (!activeId || !activeIsMarkdown) {
       setLoadingText(false);
@@ -490,6 +494,23 @@ export function ArtifactWorkspace({
         }
       })
       .finally(() => setDownloading(false));
+  };
+
+  const exportPdf = () => {
+    if (text == null || exportingPdf) return;
+    setExportingPdf(true);
+    void saveDocPdf(text, active.title, active.uri)
+      .then((ok) => {
+        if (ok) {
+          setPdfSaved(true);
+          setTimeout(() => setPdfSaved(false), 1800);
+        }
+      })
+      .catch((error: unknown) => {
+        const detail = error instanceof Error ? error.message : String(error);
+        useSessionStore.getState().flashNotice(`PDF export failed: ${detail}`);
+      })
+      .finally(() => setExportingPdf(false));
   };
 
   return (
@@ -595,6 +616,16 @@ export function ArtifactWorkspace({
           {byteSize != null && <><span className="mx-1">·</span>{formatBytes(byteSize)}</>}
         </span>
         <div className="ml-auto flex items-center gap-0.5">
+          {text != null && (
+            <button
+              type="button"
+              onClick={exportPdf}
+              disabled={exportingPdf}
+              className="flex h-8 items-center gap-1.5 whitespace-nowrap rounded-lg px-2 text-xs text-ink-muted transition hover:bg-bg-hover hover:text-ink disabled:opacity-50"
+            >
+              {exportingPdf ? <Loader2 className="size-3.5 animate-[spin_1s_linear_infinite]" /> : pdfSaved ? <Check className="size-3.5 text-success" /> : <FileDown className="size-3.5" />} {pdfSaved ? "PDF saved" : "Export PDF"}
+            </button>
+          )}
           {text != null && (
             <button
               type="button"

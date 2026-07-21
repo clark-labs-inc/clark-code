@@ -16,7 +16,66 @@ fn ctx(dir: &std::path::Path) -> ToolCtx {
         )),
         progress: None,
         agent_progress: None,
+        call_progress: None,
     }
+}
+
+#[test]
+fn scoped_host_selection_only_crosses_a_managed_boundary() {
+    use exec_core::ExecutionContainment::{External, Host, Managed};
+
+    assert!(requires_scoped_host(
+        &json!({"command": "gh pr view 123"}),
+        "gh pr view 123",
+        Managed,
+    ));
+    assert!(requires_scoped_host(
+        &json!({
+            "command": "custom-tool",
+            "sandbox_permissions": "require_escalated",
+        }),
+        "custom-tool",
+        Managed,
+    ));
+    assert!(!requires_scoped_host(
+        &json!({"command": "cargo test"}),
+        "cargo test",
+        Managed,
+    ));
+    assert!(!requires_scoped_host(
+        &json!({"command": "gh pr view 123"}),
+        "gh pr view 123",
+        Host,
+    ));
+    assert!(!requires_scoped_host(
+        &json!({"command": "gh pr view 123"}),
+        "gh pr view 123",
+        External,
+    ));
+}
+
+#[test]
+fn only_opaque_mutations_across_the_host_boundary_require_effect_verification() {
+    assert!(Bash
+        .effect_intent(&json!({
+            "command": "gh pr create --title test --body-file body.md",
+            "effect": "create",
+            "effect_target": "pull request"
+        }))
+        .is_some());
+    assert!(Bash
+        .effect_intent(&json!({"command": "gh pr view 123 --json body", "effect": "none"}))
+        .is_none());
+    assert!(Bash
+        .effect_intent(&json!({"command": "cargo test"}))
+        .is_none());
+    assert!(Bash
+        .effect_intent(&json!({
+            "command": "generic-publisher create resource.json",
+            "sandbox_permissions": "require_escalated",
+            "effect": "publish"
+        }))
+        .is_some());
 }
 
 #[tokio::test]

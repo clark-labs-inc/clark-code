@@ -47,7 +47,10 @@ pub fn prompt_section(docs_dir: &Path) -> String {
          Write with an absolute path under that directory (e.g. `{dir}/report.md`). These \
          files render inline for the user as a document viewer, so prefer well-structured \
          Markdown with clear headings; put `---` on its own line between blank lines to \
-         separate slides/sections (the user can page through them). Keep code and project \
+         separate slides/sections (the user can page through them). For PDF, DOCX, and other \
+         office deliverables, activate `document_convert` with `tool_search` and use the \
+         bundled pure-Rust libreoffice-rs converter; do not improvise with `textutil`, \
+         `soffice`, Pandoc, or Python document generators. Keep code and project \
          changes in the project itself — the workspace is only for user-facing documents.\n",
         dir = docs_dir.display(),
     )
@@ -72,5 +75,13 @@ mod tests {
             assert!(ws.starts_with(&root));
             assert!(ws.ends_with("sess-1"));
         }
+    }
+
+    #[test]
+    fn document_deliverables_use_the_bundled_rust_converter() {
+        let prompt = prompt_section(Path::new("/workspace/session"));
+        assert!(prompt.contains("`document_convert`"));
+        assert!(prompt.contains("pure-Rust libreoffice-rs"));
+        assert!(prompt.contains("do not improvise with `textutil`"));
     }
 }

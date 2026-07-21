@@ -461,6 +461,7 @@ pub fn event_to_agent(event: &Value, run: &RunId, session: &SessionId) -> Option
                         .unwrap_or_default(),
                     content: vec![],
                     raw_input: Some(args),
+                    progress: None,
                 },
             })
         }

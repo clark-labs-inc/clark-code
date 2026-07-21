@@ -3,7 +3,7 @@ import {
   CreditCard, ExternalLink, LogOut, Loader2, Brain, SlidersHorizontal, ChevronsUpDown,
 } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
-import { billingPlanLabel, clarkBillingUrl, effectiveBilling, openExternal } from "../lib/account";
+import { billingPlanLabel, clarkBillingUrl, effectiveBalance, effectiveBilling, openExternal } from "../lib/account";
 import { cn } from "../lib/cn";
 
 function statusTone(status?: string | null): { label: string; tone: string } {
@@ -68,8 +68,14 @@ export function ProfileMenu({ variant = "topbar" }: { variant?: "topbar" | "side
   const activeBilling = effectiveBilling(billing);
   const isTeamBilling = activeBilling?.owner_kind === "organization";
   const sub = activeBilling?.subscription ?? null;
-  const st = statusTone(sub?.status);
-  const credits = activeBilling?.credits;
+  const st = activeBilling?.coverage_status === "ready"
+    ? { label: "Ready", tone: "text-success" }
+    : activeBilling?.coverage_status === "action_needed"
+      ? { label: "Action needed", tone: "text-warning" }
+      : statusTone(sub?.status);
+  const planLabel = activeBilling?.plan?.name
+    ?? (isTeamBilling ? "Workspace coverage" : billingPlanLabel(sub?.plan_key));
+  const credits = effectiveBalance(billing);
   const renews = formatDate(sub?.current_period_end);
   const firstLoad = loading && !billing;
   return (
@@ -128,7 +134,7 @@ export function ProfileMenu({ variant = "topbar" }: { variant?: "topbar" | "side
                 <div className={ROW}>
                   <span className="text-xs text-ink-muted">Billing account</span>
                   <span className="max-w-40 truncate text-sm font-medium text-ink">
-                    {activeBilling?.display_name ?? "Team"} team
+                    {activeBilling?.display_name ?? "Workspace"}
                   </span>
                 </div>
               )}
@@ -139,7 +145,7 @@ export function ProfileMenu({ variant = "topbar" }: { variant?: "topbar" | "side
                 ) : (
                   <span className="flex items-center gap-1.5 text-sm">
                     <span className="font-medium text-ink">
-                      {billingPlanLabel(sub?.plan_key)}
+                      {planLabel}
                     </span>
                     <span className={cn("text-xs", st.tone)}>· {st.label}</span>
                   </span>
@@ -155,6 +161,14 @@ export function ProfileMenu({ variant = "topbar" }: { variant?: "topbar" | "side
                       : "—"}
                 </span>
               </div>
+              {isTeamBilling && activeBilling?.seat && (
+                <div className={ROW}>
+                  <span className="text-xs text-ink-muted">Seats</span>
+                  <span className="text-xs text-ink-secondary">
+                    {activeBilling.seat.purchased} purchased · {activeBilling.seat.assigned} assigned
+                  </span>
+                </div>
+              )}
               {renews && (
                 <div className={ROW}>
                   <span className="text-xs text-ink-muted">
@@ -202,7 +216,7 @@ export function ProfileMenu({ variant = "topbar" }: { variant?: "topbar" | "side
             </button>
             <button onClick={() => void openExternal(clarkBillingUrl())} className={ACTION}>
               <CreditCard className="size-4" />
-              Manage subscription &amp; credits
+              Review billing accounts
               <ExternalLink className="ml-auto size-3.5 text-ink-faint" />
             </button>
             <button

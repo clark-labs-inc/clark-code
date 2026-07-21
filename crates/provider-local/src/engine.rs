@@ -306,6 +306,9 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
         .before_tool_call_arc(loop_breaker.clone())
         .after_tool_call_arc(loop_breaker.clone())
         .tool_gate_arc(tc.registry.deferred_tool_gate(tc.session.clone()))
+        .follow_up(crate::effects::EffectCompletionGuard::new(
+            tc.session.clone(),
+        ))
         .model_id(tc.model.clone())
         .steering_arc(steering.clone())
         .context_transform(compactor.clone())

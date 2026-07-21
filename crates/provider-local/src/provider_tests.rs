@@ -472,6 +472,36 @@ async fn full_access_switches_platform_containment_off_and_default_restores_it()
     );
 
     provider
+        .set_collaboration_mode(&session.id, CollaborationMode::Plan)
+        .await
+        .unwrap();
+    assert_eq!(
+        provider.executor.containment(),
+        exec_core::ExecutionContainment::Managed,
+        "Plan temporarily restores the read-only sandbox"
+    );
+
+    provider
+        .set_mode(&session.id, "full".to_string())
+        .await
+        .unwrap();
+    assert_eq!(
+        provider.executor.containment(),
+        exec_core::ExecutionContainment::Managed,
+        "changing approval policy must not widen an active Plan session"
+    );
+
+    provider
+        .set_collaboration_mode(&session.id, CollaborationMode::Default)
+        .await
+        .unwrap();
+    assert_eq!(
+        provider.executor.containment(),
+        exec_core::ExecutionContainment::Host,
+        "leaving Plan restores the selected Full access executor"
+    );
+
+    provider
         .set_mode(&session.id, "auto".to_string())
         .await
         .unwrap();

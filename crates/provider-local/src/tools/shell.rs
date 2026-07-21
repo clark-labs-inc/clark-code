@@ -2,6 +2,7 @@
 //! in the sandbox (a command can reach anywhere), which is why it is `mutating`
 //! and defaults to requiring user confirmation. Output is captured and bounded.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use agent_core::domain::ToolKind;
@@ -33,6 +34,18 @@ impl ToolExecutor for Bash {
             "properties": {
                 "command": {"type": "string", "description": "The shell command to run."},
                 "workdir": {"type": "string", "description": "Optional working directory inside the project, relative to the project root."},
+                "sandbox_permissions": {
+                    "type": "string",
+                    "enum": ["use_default", "require_escalated"],
+                    "description": "Use require_escalated only when the command needs network access, Git metadata writes, or another host resource outside the project sandbox. Clark will request approval unless Full access is active."
+                },
+                "justification": {"type": "string", "description": "Short user-facing reason escalated access is needed."},
+                "effect": {
+                    "type": "string",
+                    "enum": ["none", "create", "update", "publish", "send", "delete", "mutate"],
+                    "description": "Declare the durable or externally visible effect of this command. Use none for inspection. For a mutation across the host/network boundary, choose its generic action so Clark requires canonical read-back before completion."
+                },
+                "effect_target": {"type": "string", "description": "Optional user-facing target hint for the declared effect, such as a resource URL, deployment, branch, or message recipient. Do not include secrets."},
                 "run_in_background": {"type": "boolean", "description": "Start a long-lived command (e.g. a dev server) without blocking; returns a task id immediately. Poll with bash_output, send input with bash_input, and stop with bash_kill."},
                 "timeout_ms": {"type": "integer", "description": "Timeout in milliseconds (default 120000, max 600000). Ignored when run_in_background is true."}
             },
@@ -45,6 +58,41 @@ impl ToolExecutor for Bash {
     fn mutating(&self) -> bool {
         true
     }
+    fn effect_intent(&self, args: &Value) -> Option<crate::effects::EffectIntent> {
+        let command = args.get("command").and_then(Value::as_str)?;
+        if args.get("effect").and_then(Value::as_str) == Some("none") {
+            return None;
+        }
+        let declared_action = match args.get("effect").and_then(Value::as_str) {
+            Some("create") => Some(crate::effects::EffectAction::Create),
+            Some("update") => Some(crate::effects::EffectAction::Update),
+            Some("publish") => Some(crate::effects::EffectAction::Publish),
+            Some("send") => Some(crate::effects::EffectAction::Send),
+            Some("delete") => Some(crate::effects::EffectAction::Delete),
+            Some("mutate") => Some(crate::effects::EffectAction::Mutate),
+            _ => None,
+        };
+        let explicitly_escalated = args
+            .get("sandbox_permissions")
+            .and_then(Value::as_str)
+            .is_some_and(|value| value == "require_escalated");
+        let crosses_host_boundary =
+            explicitly_escalated || crate::safety::command_requires_host(command);
+        if !crosses_host_boundary || crate::safety::is_read_only_command(command) {
+            return None;
+        }
+        let target_hint = args
+            .get("effect_target")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+        Some(crate::effects::EffectIntent::declared_external(
+            declared_action.unwrap_or(crate::effects::EffectAction::Mutate),
+            target_hint,
+            "an opaque host or external command reported a successful mutation",
+        ))
+    }
     async fn invoke(&self, args: Value, ctx: &ToolCtx) -> ToolOutcome {
         let command = match arg_str(&args, "command") {
             Ok(c) => c,
@@ -55,7 +103,8 @@ impl ToolExecutor for Bash {
             Ok(path) => path,
             Err(error) => return ToolOutcome::error(error),
         };
-        match ctx.executor.metadata(&cwd).await {
+        let executor = command_executor(&args, &command, ctx);
+        match executor.metadata(&cwd).await {
             Ok(meta) if meta.is_dir => {}
             Ok(_) => return ToolOutcome::error(format!("{workdir} is not a directory")),
             Err(error) => return ToolOutcome::error(error),
@@ -66,11 +115,7 @@ impl ToolExecutor for Bash {
             .and_then(Value::as_bool)
             .unwrap_or(false)
         {
-            return match ctx
-                .background
-                .spawn(ctx.executor.clone(), command, &cwd)
-                .await
-            {
+            return match ctx.background.spawn(executor, command, &cwd).await {
                 Ok(id) => ToolOutcome::ok(format!(
                     "Started background task `{id}`. Poll its output with \
                     bash_output(task_id=\"{id}\"); stop it with bash_kill(task_id=\"{id}\")."
@@ -88,8 +133,7 @@ impl ToolExecutor for Bash {
         // Runs on the local machine, or on the remote host for a remote project —
         // the executor decides. `cwd` is the project root either way. Output
         // chunks stream to the UI's tool row as the command produces them.
-        let output = match ctx
-            .executor
+        let output = match executor
             .exec_streaming_pty(
                 &command,
                 &cwd,
@@ -130,6 +174,30 @@ impl ToolExecutor for Bash {
         outcome.is_error = !matches!(code, Some(0));
         outcome
     }
+}
+
+fn command_executor(args: &Value, command: &str, ctx: &ToolCtx) -> Arc<dyn crate::exec::Executor> {
+    if requires_scoped_host(args, command, ctx.executor.containment()) {
+        // The permission gate already obtained a scoped approval for this exact
+        // command. Swap only this invocation to host execution; the session's
+        // normal executor remains sandboxed for subsequent tools.
+        Arc::new(crate::exec::LocalExecutor)
+    } else {
+        ctx.executor.clone()
+    }
+}
+
+fn requires_scoped_host(
+    args: &Value,
+    command: &str,
+    containment: exec_core::ExecutionContainment,
+) -> bool {
+    let explicitly_requested = args
+        .get("sandbox_permissions")
+        .and_then(Value::as_str)
+        .is_some_and(|value| value == "require_escalated");
+    let needs_host = explicitly_requested || crate::safety::command_requires_host(command);
+    needs_host && containment == exec_core::ExecutionContainment::Managed
 }
 
 pub struct BashOutput;

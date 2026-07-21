@@ -191,6 +191,7 @@ async fn paid_large_four_writer_workstreams() {
         session: Arc::new(tokio::sync::Mutex::new(SessionState::default())),
         progress: None,
         agent_progress: None,
+        call_progress: None,
     };
     let workstreams = [
         (

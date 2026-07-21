@@ -15,7 +15,7 @@ import { loadSshHosts } from "../lib/sshHosts";
 import {
   loadAllowlist, loadDenylist, allowCommand, denyCommand, removeAllowed, removeDenied,
 } from "../lib/commandPolicy";
-import { billingPlanLabel, clarkBillingUrl, effectiveBilling, openExternal } from "../lib/account";
+import { billingPlanLabel, clarkBillingUrl, effectiveBalance, effectiveBilling, openExternal } from "../lib/account";
 import { useAppVersion } from "../lib/appInfo";
 import { TEXT_SIZES, TEXT_SIZE_LABELS, type TextSize } from "../lib/useTextSize";
 import { OrganizationKnowledgeSettings } from "./OrganizationKnowledgeSettings";
@@ -527,8 +527,14 @@ function AccountSection() {
   const activeBilling = effectiveBilling(billing);
   const isTeamBilling = activeBilling?.owner_kind === "organization";
   const sub = activeBilling?.subscription ?? null;
-  const st = statusTone(sub?.status);
-  const credits = activeBilling?.credits;
+  const st = activeBilling?.coverage_status === "ready"
+    ? { label: "Ready", tone: "text-success" }
+    : activeBilling?.coverage_status === "action_needed"
+      ? { label: "Action needed", tone: "text-warning" }
+      : statusTone(sub?.status);
+  const planLabel = activeBilling?.plan?.name
+    ?? (isTeamBilling ? "Workspace coverage" : billingPlanLabel(sub?.plan_key));
+  const credits = effectiveBalance(billing);
   const renews = formatDate(sub?.current_period_end);
   const firstLoad = loading && !billing;
 
@@ -554,12 +560,12 @@ function AccountSection() {
       </div>
 
       <div>
-        <GroupLabel>{isTeamBilling ? "Team plan & credits" : "Plan & credits"}</GroupLabel>
+        <GroupLabel>Clark coverage</GroupLabel>
         <Card>
           {isTeamBilling && (
             <Row name="Billing account">
               <span className="text-sm font-medium text-ink">
-                {activeBilling?.display_name ?? "Team"} team
+                {activeBilling?.display_name ?? "Workspace"}
               </span>
             </Row>
           )}
@@ -568,7 +574,7 @@ function AccountSection() {
               <Loader2 className="size-3.5 animate-[spin_1s_linear_infinite] text-ink-muted" />
             ) : (
               <span className="flex items-center gap-1.5 text-sm">
-                <span className="font-medium text-ink">{billingPlanLabel(sub?.plan_key)}</span>
+                <span className="font-medium text-ink">{planLabel}</span>
                 <span className={cn("text-xs", st.tone)}>· {st.label}</span>
               </span>
             )}
@@ -582,6 +588,13 @@ function AccountSection() {
                   : "—"}
             </span>
           </Row>
+          {isTeamBilling && activeBilling?.seat && (
+            <Row name="Seats">
+              <span className="text-sm text-ink-secondary">
+                {activeBilling.seat.purchased} purchased · {activeBilling.seat.assigned} assigned
+              </span>
+            </Row>
+          )}
           {renews && (
             <Row name={sub?.cancel_at_period_end ? "Ends" : "Renews"}>
               <span className="text-sm text-ink-secondary">{renews}</span>
@@ -595,7 +608,7 @@ function AccountSection() {
           onClick={() => void openExternal(clarkBillingUrl())}
           className="flex w-full items-center gap-2.5 rounded-lg border border-border-subtle px-3.5 py-2.5 text-sm text-ink-secondary transition hover:bg-bg-hover"
         >
-          <CreditCard className="size-4" /> Manage subscription & credits
+          <CreditCard className="size-4" /> Review billing accounts
           <ExternalLink className="ml-auto size-3.5 text-ink-faint" />
         </button>
         <button

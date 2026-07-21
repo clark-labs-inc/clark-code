@@ -13,6 +13,8 @@ import { userAttachmentBlocks, userTextBody } from "../lib/messageBlocks";
 import { parseNarration, presentationKind } from "../lib/narration";
 import { useSmoothText } from "../lib/useSmoothText";
 import { highlight, resolveLang } from "../lib/highlight";
+import { markdownUrlTransform } from "../lib/fileLinks";
+import { MarkdownLink } from "./MarkdownLink";
 import { Mermaid } from "./work/Mermaid";
 import type { ContentBlock, MessagePhase, Role } from "../core-bridge/types";
 
@@ -144,8 +146,9 @@ export function Md({ children, math = false, diagrams = false }: {
     <Markdown
       remarkPlugins={remark}
       rehypePlugins={rehype}
+      urlTransform={markdownUrlTransform}
       components={{
-        a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noreferrer noopener" />,
+        a: ({ node: _node, ...props }) => <MarkdownLink {...props} />,
         pre: ({ node: _node, children }) => {
           const parsed = codeFromPreChild(children);
           if (parsed) {

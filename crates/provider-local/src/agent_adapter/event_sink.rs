@@ -270,6 +270,7 @@ impl ca::EventSink for DesktopEventSink {
                             locations: Vec::new(),
                             content: Vec::new(),
                             raw_input: Some(args),
+                            progress: None,
                         },
                     })
                     .await;

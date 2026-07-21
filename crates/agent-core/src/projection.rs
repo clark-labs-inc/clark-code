@@ -188,6 +188,9 @@ pub fn apply(snapshot: &mut Snapshot, event: &AgentEvent) {
                 if let Some(loc) = &patch.locations {
                     tc.locations = loc.clone();
                 }
+                if let Some(progress) = &patch.progress {
+                    tc.progress = Some(progress.clone());
+                }
                 if let Some(content) = &patch.replace_content {
                     tc.content = content.clone();
                 }
@@ -623,6 +626,7 @@ mod tests {
                     locations: vec![],
                     content: vec![],
                     raw_input: None,
+                    progress: None,
                 },
             },
         ];
@@ -728,6 +732,7 @@ mod tests {
                     locations: vec![],
                     content: vec![],
                     raw_input: None,
+                    progress: None,
                 },
             },
             AgentEvent::ToolCallUpdate {
@@ -769,6 +774,7 @@ mod tests {
                     locations: vec![],
                     content: vec![],
                     raw_input: None,
+                    progress: None,
                 },
             },
             // Live output streamed while the command runs…
@@ -796,6 +802,68 @@ mod tests {
         let tc = &snap.tool_calls[&id];
         assert_eq!(tc.status, ToolStatus::Completed);
         assert_eq!(tc.content, vec![ContentBlock::text("exit_code: 0")]);
+    }
+
+    #[test]
+    fn structured_tool_progress_survives_final_content_replacement() {
+        let id = ToolCallId::new("research-1");
+        let progress = ToolCallProgress {
+            revision: 3,
+            status: ToolStatus::InProgress,
+            latest_activity: Some("Reading official documentation".into()),
+            phases: vec![ToolProgressPhase {
+                id: "research".into(),
+                title: "Search and verify sources".into(),
+                status: ToolStatus::InProgress,
+                summary: None,
+                steps: vec![ToolProgressStep {
+                    id: "read".into(),
+                    title: "Read documentation".into(),
+                    status: ToolStatus::InProgress,
+                    summary: None,
+                }],
+            }],
+            agents: vec![],
+        };
+        let events = vec![
+            AgentEvent::ToolCall {
+                run: run(),
+                call: ToolCall {
+                    id: id.clone(),
+                    tool_name: Some("clark_research".into()),
+                    title: "Researching".into(),
+                    kind: ToolKind::Research,
+                    status: ToolStatus::Pending,
+                    locations: vec![],
+                    content: vec![],
+                    raw_input: None,
+                    progress: None,
+                },
+            },
+            AgentEvent::ToolCallUpdate {
+                run: run(),
+                id: id.clone(),
+                patch: ToolCallPatch {
+                    status: Some(ToolStatus::InProgress),
+                    progress: Some(progress.clone()),
+                    ..Default::default()
+                },
+            },
+            AgentEvent::ToolCallUpdate {
+                run: run(),
+                id: id.clone(),
+                patch: ToolCallPatch {
+                    status: Some(ToolStatus::Completed),
+                    replace_content: Some(vec![ContentBlock::text("Cited findings")]),
+                    ..Default::default()
+                },
+            },
+        ];
+        let snap = reduce_all(&events);
+        let call = &snap.tool_calls[&id];
+        assert_eq!(call.status, ToolStatus::Completed);
+        assert_eq!(call.content, vec![ContentBlock::text("Cited findings")]);
+        assert_eq!(call.progress.as_ref(), Some(&progress));
     }
 
     #[test]
@@ -859,6 +927,7 @@ mod tests {
                         locations: vec![],
                         content: vec![],
                         raw_input: None,
+                        progress: None,
                     },
                 },
                 AgentEvent::ToolCall {
@@ -872,6 +941,7 @@ mod tests {
                         locations: vec![],
                         content: vec![],
                         raw_input: None,
+                        progress: None,
                     },
                 },
                 AgentEvent::ToolCall {
@@ -885,6 +955,7 @@ mod tests {
                         locations: vec![],
                         content: vec![],
                         raw_input: None,
+                        progress: None,
                     },
                 },
             ]);
@@ -925,6 +996,7 @@ mod tests {
                     locations: vec![],
                     content: vec![],
                     raw_input: None,
+                    progress: None,
                 },
             },
             AgentEvent::PermissionRequest {
@@ -1158,6 +1230,7 @@ mod tests {
                     }],
                     content: vec![],
                     raw_input: Some(serde_json::json!({"cmd": "ls"})),
+                    progress: None,
                 },
             },
             AgentEvent::ToolCallUpdate {

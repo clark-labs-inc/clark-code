@@ -2,12 +2,10 @@
 //!
 //! This is the bridge that lets coding stay local while leaning on Clark's
 //! power: web search, planning, parallel research agents, browsing, and
-//! latest-doc lookups. A call is a single (no-tools) chat completion to an
-//! agentic Clark model on the production Platform API — Clark runs the tools
-//! server-side and returns the final findings. Uses the same `ck_live_` key as
-//! the coding model; nothing here touches the local filesystem.
-
-use std::time::Duration;
+//! latest-doc lookups. A call starts a background Platform response, polls its
+//! public progress projection, then fetches the final findings. Clark runs the
+//! tools server-side. Uses the same `ck_live_` key as the coding model; nothing
+//! here touches the local filesystem.
 
 use agent_core::domain::ToolKind;
 use async_trait::async_trait;
@@ -15,35 +13,16 @@ use serde_json::{json, Value};
 
 use super::{arg_str, arg_str_opt, ToolCtx, ToolExecutor, ToolOutcome, ToolPermissionClass};
 
+use super::clark_progress::ClarkResearchClient;
 use crate::config::AgenticClarkConfig;
-use crate::llm::LlmClient;
-
-const RESEARCH_SYSTEM: &str = "You are Clark's research agent. Investigate the user's request thoroughly using your web search, browsing, and reasoning, and return a concise, well-organized findings report. Cite sources where relevant.";
-// Clark Code's web-research delegation legitimately outlives the Platform
-// API's short public default. Ask the server to wait ten minutes and keep one
-// minute of client-side transport headroom for the terminal SSE frames.
-const RESPONSE_WAIT_HEADER: &str = "x-clark-response-wait-ms";
-const RESEARCH_SERVER_WAIT: Duration = Duration::from_secs(10 * 60);
-const RESEARCH_CLIENT_TIMEOUT: Duration = Duration::from_secs(11 * 60);
 
 pub struct ClarkResearchTool {
-    client: Option<LlmClient>,
+    client: Option<ClarkResearchClient>,
 }
 
 impl ClarkResearchTool {
     pub fn new(config: AgenticClarkConfig) -> Self {
-        let client = LlmClient::from_parts_with_timeout(
-            &config.base_url,
-            &config.model,
-            config.api_key,
-            vec![(
-                RESPONSE_WAIT_HEADER.to_string(),
-                RESEARCH_SERVER_WAIT.as_millis().to_string(),
-            )],
-            None,
-            RESEARCH_CLIENT_TIMEOUT,
-        )
-        .ok();
+        let client = ClarkResearchClient::new(config).ok();
         Self { client }
     }
 }
@@ -85,7 +64,9 @@ impl ToolExecutor for ClarkResearchTool {
             _ => query,
         };
         match client
-            .complete(Some(RESEARCH_SYSTEM), &text, &ctx.cancel)
+            .research(&text, &ctx.cancel, |progress| {
+                ctx.report_call_progress(progress)
+            })
             .await
         {
             Ok(answer) if !answer.is_empty() => ToolOutcome::ok(answer),
@@ -114,7 +95,5 @@ mod tests {
         );
         let params = t.parameters();
         assert_eq!(params["required"][0], "query");
-        assert_eq!(RESEARCH_SERVER_WAIT, Duration::from_secs(600));
-        assert!(RESEARCH_CLIENT_TIMEOUT > RESEARCH_SERVER_WAIT);
     }
 }

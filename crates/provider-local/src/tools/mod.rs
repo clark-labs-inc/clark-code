@@ -14,7 +14,8 @@ use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
 use agent_core::domain::{
-    ArtifactKind, ExecutionChecklist, FanOutAgent, FsLocation, GoalState, ProposedPlan, ToolKind,
+    ArtifactKind, ExecutionChecklist, FanOutAgent, FsLocation, GoalState, ProposedPlan,
+    ToolCallProgress, ToolKind,
 };
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -28,8 +29,11 @@ pub mod android_emulator;
 pub mod apply_patch;
 pub mod browser;
 pub mod clark;
+mod clark_progress;
 mod deferred;
 pub mod diagnostics;
+pub mod document;
+pub mod effect;
 pub mod fs;
 pub mod goal;
 pub mod grep;
@@ -146,6 +150,10 @@ pub struct ToolCtx {
     /// separate from textual tool output so presentation never has to infer
     /// agent identity or status from log strings.
     pub agent_progress: Option<AgentProgressFn>,
+    /// Structured, presentation-safe progress for a long-running delegated
+    /// tool call. Kept separate from text output so UI state never depends on
+    /// parsing human narration.
+    pub call_progress: Option<CallProgressFn>,
 }
 
 /// A tool's live-progress callback — each call appends a text delta to the
@@ -156,11 +164,21 @@ pub type ProgressFn = Arc<dyn Fn(String) + Send + Sync>;
 /// surface by the desktop adapter.
 pub type AgentProgressFn = Arc<dyn Fn(FanOutAgent) + Send + Sync>;
 
+/// A complete replacement snapshot of one tool call's public run outline.
+pub type CallProgressFn = Arc<dyn Fn(ToolCallProgress) + Send + Sync>;
+
 impl ToolCtx {
     /// Stream a live-progress text delta to the UI for the in-flight call.
     pub(crate) fn report(&self, delta: impl Into<String>) {
         if let Some(progress) = &self.progress {
             progress(delta.into());
+        }
+    }
+
+    /// Replace the in-flight call's structured public progress snapshot.
+    pub(crate) fn report_call_progress(&self, progress: ToolCallProgress) {
+        if let Some(report) = &self.call_progress {
+            report(progress);
         }
     }
 
@@ -336,6 +354,13 @@ pub trait ToolExecutor: Send + Sync {
             ToolPermissionClass::LocalRead
         }
     }
+    /// A durable or externally visible effect this invocation may produce.
+    /// Authorization and effect verification are deliberately separate: a
+    /// user can approve an action without asserting that its final state is
+    /// correct.
+    fn effect_intent(&self, _args: &Value) -> Option<crate::effects::EffectIntent> {
+        None
+    }
     /// A read-only preview of what `invoke` would change, shown in the permission
     /// gate so the user reviews edits *before* they touch disk. Default: none.
     fn preview(&self, _args: &Value, _ctx: &ToolCtx) -> Option<String> {
@@ -390,6 +415,8 @@ impl ToolRegistry {
             Arc::new(goal::CreateGoal) as Arc<dyn ToolExecutor>,
             Arc::new(goal::UpdateGoal),
             Arc::new(goal::GetGoal),
+            Arc::new(effect::VerifyEffect),
+            Arc::new(document::DocumentConvert),
             Arc::new(web_fetch::WebFetchTool::new(clark.clone())),
             Arc::new(android_emulator::ListDevices),
             Arc::new(android_emulator::BootEmulator),
@@ -657,11 +684,21 @@ mod tests {
         wire_order(&reg, "edit_file", &["path", "old_string", "new_string"]);
         wire_order(&reg, "write_file", &["path", "content"]);
         wire_order(&reg, "read_file", &["path", "offset", "limit"]);
-        // Commit to the command and its location/mode before tuning timeout.
+        // Commit to the command and location before deciding whether it needs
+        // a user-reviewed sandbox exception; execution tuning comes last.
         wire_order(
             &reg,
             "bash",
-            &["command", "workdir", "run_in_background", "timeout_ms"],
+            &[
+                "command",
+                "workdir",
+                "sandbox_permissions",
+                "justification",
+                "effect",
+                "effect_target",
+                "run_in_background",
+                "timeout_ms",
+            ],
         );
         wire_order(
             &reg,
@@ -685,6 +722,12 @@ mod tests {
         wire_order(&reg, "tool_search", &["query", "limit"]);
         wire_order(&reg, "grep", &["pattern", "path"]);
         wire_order(&reg, "view_image", &["path"]);
+        wire_order(
+            &reg,
+            "verify_effect",
+            &["effect_id", "status", "evidence", "expected", "observed"],
+        );
+        wire_order(&reg, "document_convert", &["path", "to", "output_path"]);
 
         let mut image_registry = ToolRegistry::new(None, None);
         image_registry.enable_image_generation(image::ImageGenerationConfig {
@@ -766,6 +809,7 @@ mod tests {
         }
         for name in [
             "create_goal",
+            "document_convert",
             "web_fetch",
             "android_list_devices",
             "android_tap",

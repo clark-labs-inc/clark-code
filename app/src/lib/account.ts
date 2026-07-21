@@ -75,7 +75,18 @@ export interface EffectiveBilling {
   owner_kind: "user" | "organization";
   display_name: string;
   domain?: string;
-  credits: CreditAccount;
+  access_state?: "ready" | "usage_limited" | "unlimited";
+  coverage_status?: "ready" | "action_needed" | "unavailable";
+  products?: Array<"clark_web" | "clark_code">;
+  balance?: { available_credits: number; is_unlimited: boolean };
+  plan?: { plan_key: string; name: string } | null;
+  seat?: {
+    purchased: number;
+    assigned: number;
+    assigned_to_current_user?: boolean | null;
+  } | null;
+  /** Legacy server field retained only during rolling upgrades. */
+  credits?: CreditAccount;
   subscription?: Subscription | null;
   ledger: LedgerEntry[];
 }
@@ -110,8 +121,17 @@ export function effectiveBilling(billing: BillingSummary | null): EffectiveBilli
   };
 }
 
+export function effectiveBalance(billing: BillingSummary | null): {
+  available_credits: number;
+  is_unlimited: boolean;
+} | null {
+  const effective = effectiveBilling(billing);
+  if (!effective) return null;
+  return effective.balance ?? effective.credits ?? null;
+}
+
 export function billingPlanLabel(planKey?: string | null): string {
-  if (!planKey) return "Free";
+  if (!planKey) return "No active plan";
   return planKey
     .split("_")
     .filter(Boolean)
@@ -141,10 +161,11 @@ const LOW_CREDIT_DOLLARS = 2;
 
 export function creditState(billing: BillingSummary | null): CreditState {
   if (!billing || !billing.enforcement_enabled) return "ok";
-  const c = effectiveBilling(billing)?.credits;
+  const c = effectiveBalance(billing);
+  const access = effectiveBilling(billing)?.access_state;
   if (!c) return "ok";
-  if (c.is_unlimited) return "ok";
-  if (c.available_credits <= 0) return "out";
+  if (access === "unlimited" || c.is_unlimited) return "ok";
+  if (access === "usage_limited" || c.available_credits <= 0) return "out";
   const perDollar = Math.max(1, billing.credits_per_dollar);
   return c.available_credits < perDollar * LOW_CREDIT_DOLLARS ? "low" : "ok";
 }
@@ -152,6 +173,6 @@ export function creditState(billing: BillingSummary | null): CreditState {
 /** Approximate remaining dollar value of the credit balance, for display. */
 export function creditDollars(billing: BillingSummary | null): number {
   if (!billing) return 0;
-  const credits = effectiveBilling(billing)?.credits.available_credits ?? 0;
+  const credits = effectiveBalance(billing)?.available_credits ?? 0;
   return credits / Math.max(1, billing.credits_per_dollar);
 }

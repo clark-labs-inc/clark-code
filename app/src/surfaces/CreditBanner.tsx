@@ -5,10 +5,28 @@ import {
   creditState,
   creditDollars,
   clarkBillingUrl,
+  effectiveBilling,
   openExternal,
+  type BillingSummary,
   type CreditState,
 } from "../lib/account";
 import { cn } from "../lib/cn";
+
+export function creditBannerMessage(
+  billing: BillingSummary | null,
+  state: Exclude<CreditState, "ok">,
+  dollars: number,
+): string {
+  const workspaceCovered = effectiveBilling(billing)?.owner_kind === "organization";
+  if (state === "out") {
+    return workspaceCovered
+      ? "Your workspace billing needs attention before Clark Code can continue."
+      : "You're out of Clark credits — review billing to keep coding.";
+  }
+  return workspaceCovered
+    ? `Your workspace is running low on Clark credits — about $${dollars.toFixed(2)} left.`
+    : `Running low on Clark credits — about $${dollars.toFixed(2)} left.`;
+}
 
 /** Proactive credit warning under the top bar: an amber, dismissible "running
  *  low" notice, escalating to a red, persistent "out of credits" bar. Both link
@@ -34,15 +52,13 @@ export function CreditBanner() {
     >
       <CreditCard className={cn("size-4 shrink-0", out ? "text-danger" : "text-warning")} />
       <span className="min-w-0 flex-1 truncate text-ink">
-        {out
-          ? "You're out of Clark credits — add credits to keep coding."
-          : `Running low on Clark credits — about $${dollars.toFixed(2)} left.`}
+        {creditBannerMessage(billing, out ? "out" : "low", dollars)}
       </span>
       <button
         onClick={() => void openExternal(clarkBillingUrl())}
         className="flex min-h-8 shrink-0 items-center gap-1 rounded-lg bg-accent px-2.5 py-1 text-xs font-semibold text-on-accent transition duration-200 ease-clark hover:bg-accent-hover"
       >
-        Add credits
+        Review billing
         <ArrowUpRight className="size-3.5" />
       </button>
       {!out && (

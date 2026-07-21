@@ -89,6 +89,10 @@ describe("edit and resend", () => {
     const newSession = vi.mocked(bridge.newSession);
     expect(newSession).toHaveBeenCalledTimes(2);
     expect(newSession.mock.calls[1]?.[2]).toBe(session.id);
+    expect(newSession.mock.calls[1]?.[1]).toMatchObject({
+      mode: "auto",
+      collaboration_mode: "default",
+    });
     expect(vi.mocked(bridge.connect).mock.calls[1]?.[1].extra).toMatchObject({
       model: "clark-code:grok45",
       reasoning_effort: "high",
