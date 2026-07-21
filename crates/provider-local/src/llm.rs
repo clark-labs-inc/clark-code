@@ -85,6 +85,9 @@ impl ChatMessage {
     pub fn system(text: impl Into<String>) -> Self {
         Self::simple("system", text)
     }
+    pub fn developer(text: impl Into<String>) -> Self {
+        Self::simple("developer", text)
+    }
     pub fn user(text: impl Into<String>) -> Self {
         Self::simple("user", text)
     }

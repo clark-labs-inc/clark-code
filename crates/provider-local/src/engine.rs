@@ -123,6 +123,8 @@ pub(crate) struct TurnContext {
     pub temperature: Option<f32>,
     pub user_text: String,
     pub user_content: clark_agent::UserContent,
+    /// Per-turn host instructions translated to provider `developer` messages.
+    pub developer_instructions: Vec<clark_agent::AgentMessage>,
     /// Provider-owned state transitions that become visible at the start of
     /// this run, after `RunStarted` and before model output.
     pub initial_events: Vec<AgentEvent>,
@@ -303,6 +305,7 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
         .grace_iterations(GRACE_ITERATIONS)
         .before_tool_call_arc(loop_breaker.clone())
         .after_tool_call_arc(loop_breaker.clone())
+        .tool_gate_arc(tc.registry.deferred_tool_gate(tc.session.clone()))
         .model_id(tc.model.clone())
         .steering_arc(steering.clone())
         .context_transform(compactor.clone())
@@ -362,7 +365,8 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
     // transparently inside `clark_agent::run` (the checkpoint compactor hook
     // registered above), so there is no overflow bookkeeping here. Steering and
     // cancel keep working throughout — it is all one desktop run.
-    let mut prompts = vec![prompt];
+    let mut prompts = tc.developer_instructions;
+    prompts.push(prompt);
     let mut accounted_usage: Option<RunUsage> = None;
     let run_result = 'goal: loop {
         let iteration_started = std::time::Instant::now();

@@ -133,14 +133,21 @@ const TRANSIENT_INSTANT = INSTANT;
 // spilling past its right edge.
 const DANGER_BANNER =
   "min-w-0 whitespace-pre-wrap break-words rounded-lg border border-danger/40 bg-danger/8 px-3.5 py-2.5 text-sm text-danger";
+const STOPPED_BANNER =
+  "min-w-0 whitespace-pre-wrap break-words rounded-lg border border-border bg-bg-secondary px-3.5 py-2.5 text-sm text-ink-muted";
 
 /** Small dismiss (×) affordance for the error banners. */
-function DismissButton({ onClick }: { onClick: () => void }) {
+function DismissButton({ onClick, muted = false }: { onClick: () => void; muted?: boolean }) {
   return (
     <button
       onClick={onClick}
       aria-label="Dismiss"
-      className="-mr-1 -mt-0.5 grid size-6 shrink-0 place-items-center rounded-md text-danger/70 transition hover:bg-danger/10 hover:text-danger"
+      className={cn(
+        "-mr-1 -mt-0.5 grid size-6 shrink-0 place-items-center rounded-md transition",
+        muted
+          ? "text-ink-faint hover:bg-bg-hover hover:text-ink-muted"
+          : "text-danger/70 hover:bg-danger/10 hover:text-danger",
+      )}
     >
       <X className="size-3.5" />
     </button>
@@ -282,6 +289,10 @@ export function Conversation({
     latestRun?.status === "failed" && !dismissedFailedRuns.includes(latestRun.id)
       ? latestRun
       : undefined;
+  const stopped =
+    latestRun?.status === "cancelled" && !dismissedFailedRuns.includes(latestRun.id)
+      ? latestRun
+      : undefined;
   const outOfCredits = failed?.outcome?.failure_kind === "insufficient_credits";
 
   const renderBlock = (block: Block | BaseBlock) => {
@@ -395,6 +406,19 @@ export function Conversation({
                 {humanizeRunFailure(failed.outcome)}
               </div>
               <DismissButton onClick={() => dismissFailedRun(failed.id)} />
+            </motion.div>
+          )}
+          {stopped && (
+            <motion.div
+              key="stopped"
+              {...(reduce ? TRANSIENT_INSTANT : TRANSIENT)}
+              className={cn(STOPPED_BANNER, "flex items-start gap-2")}
+            >
+              <div className="min-w-0 flex-1">
+                <span className="font-medium text-ink-secondary">Run stopped before finishing.</span>{" "}
+                Completed work is preserved; in-flight actions were cancelled.
+              </div>
+              <DismissButton muted onClick={() => dismissFailedRun(stopped.id)} />
             </motion.div>
           )}
           {error && (

@@ -104,6 +104,9 @@ pub enum ToolStatus {
     Pending,
     InProgress,
     Completed,
+    /// The enclosing run ended before the tool produced a terminal receipt.
+    /// Distinct from failure: cancellation may be an intentional user stop.
+    Cancelled,
     Failed,
 }
 

@@ -10,6 +10,7 @@
 //! cargo run -p provider-local --example planning_eval
 
 use agent_core::domain::{AgentEvent, ProposedPlan};
+use agent_core::ids::RunId;
 use agent_core::provider::{
     CollaborationMode, PromptInput, Provider, ProviderConfig, SessionOptions,
 };
@@ -46,11 +47,13 @@ struct ResultRow {
     score: f64,
     turns: usize,
     tool_calls: usize,
+    tools: Vec<String>,
     input_tokens: u64,
     output_tokens: u64,
     context_tokens: u64,
     cost_usd: f64,
     elapsed_ms: u128,
+    timed_out: bool,
     plan: Option<String>,
 }
 
@@ -192,11 +195,13 @@ async fn run_case(
 
     let mut proposal: Option<ProposedPlan> = None;
     let mut tool_calls = 0;
+    let mut tools = Vec::new();
     let mut turns = 0;
     let mut input_tokens = 0_u64;
     let mut output_tokens = 0_u64;
     let mut context_tokens = 0_u64;
     let mut cost_usd = 0.0;
+    let mut timed_out = false;
     let mut prompt = scenario.prompt.to_string();
     while proposal.is_none() && turns < MAX_TURNS {
         turns += 1;
@@ -204,10 +209,15 @@ async fn run_case(
             .prompt(&session.id, PromptInput::text(prompt.clone()))
             .await
             .unwrap();
-        tokio::time::timeout(TURN_TIMEOUT, async {
+        let mut active_run: Option<RunId> = None;
+        let turn_result = tokio::time::timeout(TURN_TIMEOUT, async {
             while let Some(event) = stream.next().await {
                 match event {
-                    AgentEvent::ToolCall { .. } => tool_calls += 1,
+                    AgentEvent::RunStarted { run } => active_run = Some(run),
+                    AgentEvent::ToolCall { call, .. } => {
+                        tool_calls += 1;
+                        tools.push(call.tool_name.unwrap_or(call.title));
+                    }
                     AgentEvent::ProposedPlanUpdated { plan, .. } => proposal = Some(plan),
                     AgentEvent::RunFinished { outcome, .. } => {
                         if let Some(usage) = outcome.usage {
@@ -227,8 +237,14 @@ async fn run_case(
                 }
             }
         })
-        .await
-        .unwrap_or_else(|_| panic!("{} {profile} turn {turns} timed out", scenario.id));
+        .await;
+        if turn_result.is_err() {
+            timed_out = true;
+            if let Some(run) = active_run.as_ref() {
+                let _ = provider.cancel(&session.id, run).await;
+            }
+            break;
+        }
         prompt = "Use the repository's existing conventions and your recommended defaults. Resolve any remaining implementation details and propose the complete plan now.".into();
     }
 
@@ -262,11 +278,13 @@ async fn run_case(
         score,
         turns,
         tool_calls,
+        tools,
         input_tokens,
         output_tokens,
         context_tokens,
         cost_usd,
         elapsed_ms: started.elapsed().as_millis(),
+        timed_out,
         plan: proposal.map(|plan| plan.markdown),
     }
 }
@@ -347,6 +365,11 @@ async fn main() {
             .sum::<f64>()
             / matching.len() as f64
     };
+    let timeout_count = |profile: &str| {
+        rows.iter()
+            .filter(|row| row.profile == profile && row.timed_out)
+            .count()
+    };
     let control_score = mean(CONTROL_PROFILE);
     let candidate_score = mean(CANDIDATE_PROFILE);
     let control_input = mean_input_tokens(CONTROL_PROFILE);
@@ -368,6 +391,8 @@ async fn main() {
             "candidate_mean_input_tokens": candidate_input,
             "input_token_delta": candidate_input - control_input,
             "input_token_reduction_fraction": if control_input == 0.0 { 0.0 } else { (control_input - candidate_input) / control_input },
+            "control_timeouts": timeout_count(CONTROL_PROFILE),
+            "candidate_timeouts": timeout_count(CANDIDATE_PROFILE),
             "total_cost_usd": spent,
         })
     );

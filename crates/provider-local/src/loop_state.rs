@@ -27,6 +27,8 @@ pub(crate) struct SessionState {
     /// Collaboration-mode and execution-checklist state. Kept independent
     /// from permission policy and standing goals.
     pub planning: crate::planning::PlanningState,
+    /// Deferred tool schemas activated for this conversation by `tool_search`.
+    pub deferred_tools: std::collections::HashSet<String>,
     /// Output style: a key into `crate::prompt::OUTPUT_STYLES`, prepended to
     /// each turn's text like the plan-mode reminder. Empty string = default.
     pub output_style: String,
@@ -172,8 +174,23 @@ impl From<Decision> for Resolution {
 }
 
 impl RunControl {
-    pub fn arm(&mut self, id: PermissionRequestId, responder: oneshot::Sender<Resolution>) {
+    /// Register the one permission prompt currently presented to the user.
+    ///
+    /// Refuse to replace an existing responder: dropping that sender wakes its
+    /// waiter as if the user cancelled, which can silently abort an otherwise
+    /// healthy parallel tool batch. Permission acquisition is serialized by
+    /// `PermissionGate`; this check is the defensive backstop that makes any
+    /// coordination regression explicit instead of lossy.
+    pub fn arm(
+        &mut self,
+        id: PermissionRequestId,
+        responder: oneshot::Sender<Resolution>,
+    ) -> Result<(), PermissionRequestId> {
+        if let Some(pending) = &self.pending {
+            return Err(pending.id.clone());
+        }
         self.pending = Some(Pending { id, responder });
+        Ok(())
     }
 
     /// Deliver a user's answer to the in-flight permission request. Returns
@@ -193,6 +210,21 @@ impl RunControl {
 
     pub fn clear(&mut self) {
         self.pending = None;
+    }
+
+    /// Clear only the request owned by this waiter. A stale waiter must never
+    /// discard a newer prompt that reused the same session control surface.
+    pub fn clear_if(&mut self, id: &PermissionRequestId) -> bool {
+        if self
+            .pending
+            .as_ref()
+            .is_some_and(|pending| &pending.id == id)
+        {
+            self.pending = None;
+            true
+        } else {
+            false
+        }
     }
 
     pub fn has_pending(&self) -> bool {
@@ -246,7 +278,7 @@ mod tests {
         let mut control = RunControl::default();
         let id = PermissionRequestId::new("perm-1");
         let (tx, rx) = oneshot::channel();
-        control.arm(id.clone(), tx);
+        control.arm(id.clone(), tx).unwrap();
         assert!(control.resolve(&id, Decision::AllowOnce.into()));
         assert_eq!(rx.await.unwrap().decision, Decision::AllowOnce);
     }
@@ -256,7 +288,7 @@ mod tests {
         let mut control = RunControl::default();
         let id = PermissionRequestId::new("perm-2");
         let (tx, rx) = oneshot::channel();
-        control.arm(id.clone(), tx);
+        control.arm(id.clone(), tx).unwrap();
         assert!(control.resolve(
             &id,
             Resolution {
@@ -267,5 +299,27 @@ mod tests {
         let resolution = rx.await.unwrap();
         assert_eq!(resolution.decision, Decision::RejectOnce);
         assert_eq!(resolution.feedback.as_deref(), Some("add tests"));
+    }
+
+    #[tokio::test]
+    async fn run_control_never_overwrites_an_unresolved_permission() {
+        let mut control = RunControl::default();
+        let first_id = PermissionRequestId::new("perm-first");
+        let second_id = PermissionRequestId::new("perm-second");
+        let (first_tx, first_rx) = oneshot::channel();
+        let (second_tx, second_rx) = oneshot::channel();
+
+        control.arm(first_id.clone(), first_tx).unwrap();
+        assert_eq!(
+            control.arm(second_id, second_tx),
+            Err(first_id.clone()),
+            "the occupied slot must be reported instead of replacing its sender"
+        );
+        assert!(control.resolve(&first_id, Decision::AllowOnce.into()));
+        assert_eq!(first_rx.await.unwrap().decision, Decision::AllowOnce);
+        assert!(
+            second_rx.await.is_err(),
+            "the rejected responder is not armed"
+        );
     }
 }

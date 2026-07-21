@@ -12,6 +12,15 @@ use agent_core::domain::{
 use agent_core::provider::CollaborationMode;
 use serde_json::Value;
 
+pub(crate) const DEVELOPER_INSTRUCTION_MESSAGE_KIND: &str = "developer_instruction";
+const MAX_REINJECTED_PLAN_CHARS: usize = 6_000;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum PlanModeInstructionKind {
+    Full,
+    Reminder,
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) enum PlanningPromptProfile {
     Legacy,
@@ -34,6 +43,7 @@ impl PlanningPromptProfile {
 pub(crate) struct PlanningState {
     pub mode: CollaborationMode,
     pub exited: bool,
+    full_instruction_sent: bool,
     pub execution_checklist: Option<ExecutionChecklist>,
     pub proposed_plan: Option<ProposedPlan>,
 }
@@ -46,10 +56,19 @@ impl PlanningState {
     pub fn set_mode(&mut self, mode: CollaborationMode) {
         if self.mode == CollaborationMode::Plan && mode == CollaborationMode::Default {
             self.exited = true;
-        } else if mode == CollaborationMode::Plan {
+        } else if self.mode != CollaborationMode::Plan && mode == CollaborationMode::Plan {
             self.exited = false;
+            self.full_instruction_sent = false;
         }
         self.mode = mode;
+    }
+
+    pub fn next_plan_instruction_kind(&mut self) -> PlanModeInstructionKind {
+        if std::mem::replace(&mut self.full_instruction_sent, true) {
+            PlanModeInstructionKind::Reminder
+        } else {
+            PlanModeInstructionKind::Full
+        }
     }
 
     pub fn next_proposal(&mut self, markdown: String) -> ProposedPlan {
@@ -80,10 +99,22 @@ pub(crate) const EXECUTION_CHECKLIST_INSTRUCTIONS: &str = "\
 
 /// Per-turn Plan Mode contract. This is intentionally separate from the base
 /// execution checklist guidance so the two mechanisms cannot blur together.
+#[cfg(test)]
 pub(crate) fn plan_mode_instructions_for(
     profile: PlanningPromptProfile,
     previous: Option<&ProposedPlan>,
 ) -> String {
+    plan_mode_instruction_for(profile, previous, PlanModeInstructionKind::Full)
+}
+
+pub(crate) fn plan_mode_instruction_for(
+    profile: PlanningPromptProfile,
+    previous: Option<&ProposedPlan>,
+    kind: PlanModeInstructionKind,
+) -> String {
+    if kind == PlanModeInstructionKind::Reminder {
+        return plan_mode_reminder(previous);
+    }
     if profile == PlanningPromptProfile::Legacy {
         return "Plan mode is active. Research read-only, ask the user about unclear choices, and call `propose_plan` with normally 3-7 concise implementation steps when ready. Do not edit project files or run mutating commands."
             .to_string();
@@ -115,48 +146,100 @@ pub(crate) fn plan_mode_instructions_for(
         return instructions;
     }
 
-    let mut instructions = String::from("[runtime policy]\n");
+    let mut instructions = String::from("<collaboration_mode mode=\"plan\">\n");
     if let Some(plan) = previous {
+        let markdown = bounded_plan_markdown(&plan.markdown);
         instructions.push_str(&format!(
             "Revise this previous proposal using new evidence and feedback:\n\
              <previous_proposed_plan id=\"{}\" revision=\"{}\">\n{}\n</previous_proposed_plan>\n\n",
-            plan.id, plan.revision, plan.markdown
+            plan.id, plan.revision, markdown
         ));
     }
     instructions.push_str(
-        "Plan Mode is active: propose, do not execute. Do not edit files, install software, run \n\
+        "Plan Mode is active. Only a host collaboration-mode change can end it; user requests to \n\
+         implement do not. Propose, do not execute. Do not edit files, install software, run \n\
          mutating commands, or change project or external state. Read-only inspection and research \n\
          are allowed. Do not call `update_plan`.\n\
          \n\
          Work in this order:\n\
-         1. Ground: inspect named files and the smallest relevant contract; resolve code-derived facts yourself.\n\
+         1. Ground: start with one batched search, then read only the few relevant files. Resolve \n\
+         code-derived facts yourself; do not repeat equivalent probes.\n\
          2. Intent: ask only questions that materially change behavior, scope, or trade-offs; batch them and recommend a default.\n\
          3. Implementation: identify exact files and interfaces, reuse or deletion, data flow, edge cases, migration, and verification.\n\
          \n\
-         When no design decision remains, call `propose_plan` once with a concise, implementation-ready \n\
-         Markdown plan, normally 3-7 steps. Otherwise ask the smallest necessary question. After \n\
-         `propose_plan`, end the turn and wait. Never implement in Plan Mode.",
+         When no design decision remains, call `propose_plan` once with 3-7 terse, implementation-ready \n\
+         steps. Each step names the files, change, and verification in at most three sentences. Omit \n\
+         preambles, code blocks, research diaries, alternatives, and out-of-scope sections. Otherwise \n\
+         ask the smallest necessary question. After `propose_plan`, end the turn and wait. Never \n\
+         implement in Plan Mode.\n</collaboration_mode>",
     );
     instructions
 }
 
+fn plan_mode_reminder(previous: Option<&ProposedPlan>) -> String {
+    let proposal = previous
+        .map(|plan| {
+            format!(
+                " Previous proposal: id {}, revision {}; use its typed transcript item and revise only when feedback changes it.",
+                plan.id, plan.revision
+            )
+        })
+        .unwrap_or_default();
+    format!(
+        "<collaboration_mode mode=\"plan\">\nPlan Mode remains active; only a host mode change can end it. Stay read-only, resolve the smallest remaining decision, then call `propose_plan` once and wait.{proposal}\n</collaboration_mode>"
+    )
+}
+
 fn append_previous_proposal(instructions: &mut String, previous: Option<&ProposedPlan>) {
     if let Some(plan) = previous {
+        let markdown = bounded_plan_markdown(&plan.markdown);
         instructions.push_str(&format!(
             "\n\nA previous proposal (id {}, revision {}) exists:\n<previous_proposed_plan>\n{}\n</previous_proposed_plan>\nReconcile new evidence or feedback with it. Re-proposing the same plan must preserve its identity and increment its revision.",
-            plan.id, plan.revision, plan.markdown
+            plan.id, plan.revision, markdown
         ));
+    }
+}
+
+pub(crate) fn bounded_plan_markdown(markdown: &str) -> String {
+    let char_count = markdown.chars().count();
+    if char_count <= MAX_REINJECTED_PLAN_CHARS {
+        return markdown.to_string();
+    }
+    const MARKER: &str = "\n\n[... proposal middle omitted by context bound ...]\n\n";
+    let remaining = MAX_REINJECTED_PLAN_CHARS.saturating_sub(MARKER.chars().count());
+    let head_chars = remaining * 4 / 5;
+    let tail_chars = remaining - head_chars;
+    let head = markdown.chars().take(head_chars).collect::<String>();
+    let tail = markdown
+        .chars()
+        .rev()
+        .take(tail_chars)
+        .collect::<String>()
+        .chars()
+        .rev()
+        .collect::<String>();
+    format!("{head}{MARKER}{tail}")
+}
+
+pub(crate) fn developer_instruction_message(content: String) -> clark_agent::AgentMessage {
+    clark_agent::AgentMessage::Custom {
+        kind: DEVELOPER_INSTRUCTION_MESSAGE_KIND.into(),
+        payload: serde_json::json!({ "content": content }),
+        timestamp: None,
     }
 }
 
 pub(crate) fn plan_mode_exit_note(plan: Option<&ProposedPlan>) -> String {
     match plan {
-        Some(plan) => format!(
-            "[runtime policy]\nPlan Mode is off. Implement the approved plan below.\n\
-             <approved_plan id=\"{}\" revision=\"{}\">\n{}\n</approved_plan>",
-            plan.id, plan.revision, plan.markdown
-        ),
-        None => "[runtime policy]\nPlan Mode is off; normal execution rules apply.".to_string(),
+        Some(plan) => {
+            let markdown = bounded_plan_markdown(&plan.markdown);
+            format!(
+            "<collaboration_mode mode=\"default\">\nPlan Mode is off. Implement the approved plan below.\n\
+             <approved_plan id=\"{}\" revision=\"{}\">\n{}\n</approved_plan>\n</collaboration_mode>",
+            plan.id, plan.revision, markdown
+        )
+        }
+        None => "<collaboration_mode mode=\"default\">\nPlan Mode is off; normal execution rules apply.\n</collaboration_mode>".to_string(),
     }
 }
 
@@ -300,9 +383,13 @@ mod tests {
     fn concise_plan_mode_contract_is_authoritative_and_shorter() {
         let control = plan_mode_instructions_for(PlanningPromptProfile::DecisionComplete, None);
         let candidate = plan_mode_instructions_for(PlanningPromptProfile::Concise, None);
-        assert!(candidate.starts_with("[runtime policy]"));
+        assert!(candidate.starts_with("<collaboration_mode"));
+        assert!(candidate.contains("host collaboration-mode change can end it"));
         assert!(candidate.contains("Work in this order"));
-        assert!(candidate.contains("Never implement in Plan Mode"));
+        assert!(candidate.contains("one batched search"));
+        assert!(candidate.contains("do not repeat equivalent probes"));
+        assert!(candidate.contains("preambles, code blocks"));
+        assert!(candidate.contains("implement in Plan Mode"));
         assert!(candidate.len() < control.len());
     }
 
@@ -318,7 +405,60 @@ mod tests {
         assert!(
             prompt.find("Old instruction").unwrap() < prompt.find("Plan Mode is active").unwrap()
         );
-        assert!(prompt.ends_with("Never implement in Plan Mode."));
+        assert!(prompt.ends_with("</collaboration_mode>"));
+    }
+
+    #[test]
+    fn plan_mode_sends_full_contract_once_then_sparse_reminders() {
+        let mut state = PlanningState::default();
+        state.set_mode(CollaborationMode::Plan);
+        assert_eq!(
+            state.next_plan_instruction_kind(),
+            PlanModeInstructionKind::Full
+        );
+        assert_eq!(
+            state.next_plan_instruction_kind(),
+            PlanModeInstructionKind::Reminder
+        );
+        let reminder = plan_mode_instruction_for(
+            PlanningPromptProfile::Concise,
+            None,
+            PlanModeInstructionKind::Reminder,
+        );
+        assert!(reminder.contains("Plan Mode remains active"));
+        assert!(!reminder.contains("Work in this order"));
+
+        state.set_mode(CollaborationMode::Default);
+        state.set_mode(CollaborationMode::Plan);
+        assert_eq!(
+            state.next_plan_instruction_kind(),
+            PlanModeInstructionKind::Full
+        );
+    }
+
+    #[test]
+    fn reinjected_proposals_have_a_hard_context_bound() {
+        let plan = ProposedPlan {
+            id: "plan-large".into(),
+            revision: 1,
+            markdown: "a".repeat(MAX_REINJECTED_PLAN_CHARS + 2_000),
+            status: ProposedPlanStatus::Approved,
+        };
+        let bounded = bounded_plan_markdown(&plan.markdown);
+        assert_eq!(bounded.chars().count(), MAX_REINJECTED_PLAN_CHARS);
+        assert!(bounded.contains("proposal middle omitted"));
+        assert!(plan_mode_exit_note(Some(&plan)).contains(&bounded));
+    }
+
+    #[test]
+    fn collaboration_policy_is_a_typed_developer_instruction() {
+        let message = developer_instruction_message("policy".into());
+        assert!(matches!(
+            message,
+            clark_agent::AgentMessage::Custom { kind, payload, .. }
+                if kind == DEVELOPER_INSTRUCTION_MESSAGE_KIND
+                    && payload["content"] == "policy"
+        ));
     }
 
     #[test]

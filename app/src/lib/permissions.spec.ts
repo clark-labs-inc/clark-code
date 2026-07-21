@@ -45,8 +45,8 @@ describe("wouldAutoApprove", () => {
     expect(wouldAutoApprove("auto", req("billed"))).toBe(false); // image generation — asks
   });
 
-  it("full mode approves everything (engine still blocks catastrophic)", () => {
-    for (const r of [undefined, "safe", "caution", "danger"]) {
+  it("full mode approves local, destructive, website, external-tool, and billed actions", () => {
+    for (const r of [undefined, "safe", "caution", "danger", "external", "billed"]) {
       expect(wouldAutoApprove("full", req(r))).toBe(true);
     }
   });

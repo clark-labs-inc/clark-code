@@ -45,6 +45,7 @@ impl Provider for FakeProvider {
             provider: self.id(),
             capabilities: self.capabilities(),
             mode: None,
+            collaboration_mode: Default::default(),
             environment: Some(SessionEnvironment::default()),
         })
     }

@@ -511,6 +511,7 @@ impl Provider for LocalAgentProvider {
             s.planning = crate::planning::PlanningState::default();
             s.planning.mode = collaboration_mode;
             s.planning.proposed_plan = restored_proposed_plan;
+            s.deferred_tools.clear();
             s.steering = None;
             s.active_execution = None;
             s.goal = restored_goal.map(crate::loop_state::SessionGoal::from_state);
@@ -665,25 +666,25 @@ impl Provider for LocalAgentProvider {
         if !attachment_context.trim().is_empty() {
             context_sections.push(attachment_context);
         }
-        let approved_plan = {
+        let (approved_plan, collaboration_instruction) = {
             let mut s = self.session.lock().await;
             let style = crate::prompt::output_style_instructions(&s.output_style);
             if !style.is_empty() {
                 context_sections.push(style.to_string());
             }
             if s.planning.plan_mode() {
-                let reminder = crate::planning::plan_mode_instructions_for(
+                let instruction_kind = s.planning.next_plan_instruction_kind();
+                let reminder = crate::planning::plan_mode_instruction_for(
                     config.planning_prompt_profile,
                     s.planning.proposed_plan.as_ref(),
+                    instruction_kind,
                 );
-                context_sections.push(reminder);
-                None
+                (None, Some(reminder))
             } else if std::mem::take(&mut s.planning.exited) {
                 let note = crate::planning::plan_mode_exit_note(s.planning.proposed_plan.as_ref());
-                context_sections.push(note);
-                s.planning.proposed_plan.clone()
+                (s.planning.proposed_plan.clone(), Some(note))
             } else {
-                None
+                (None, None)
             }
         };
         let text = assemble_turn_prompt(&context_sections, &user_request);
@@ -742,6 +743,10 @@ impl Provider for LocalAgentProvider {
             temperature: config.temperature,
             user_text: text,
             user_content,
+            developer_instructions: collaboration_instruction
+                .into_iter()
+                .map(crate::planning::developer_instruction_message)
+                .collect(),
             initial_events: approved_plan
                 .into_iter()
                 .map(|plan| AgentEvent::ProposedPlanUpdated {

@@ -15,6 +15,7 @@ const MAX_RATE_LIMIT_RETRIES: usize = 12;
 const MAX_RATE_LIMIT_DELAY: Duration = Duration::from_secs(30);
 const MAX_TRANSIENT_RETRIES: usize = 3;
 const MAX_TRANSIENT_DELAY: Duration = Duration::from_secs(8);
+const MAX_SERVER_TRANSIENT_DELAY: Duration = Duration::from_secs(30);
 const MAX_AUTH_RETRIES: usize = 1;
 
 /// Classify the provider's context-overflow dialect while the response is
@@ -286,9 +287,10 @@ fn rate_limit_delay(server_hint: Option<Duration>, retry: usize) -> Duration {
 }
 
 fn transient_delay(server_hint: Option<Duration>, retry: usize) -> Duration {
-    server_hint
-        .unwrap_or_else(|| Duration::from_millis(500_u64 << retry.min(4)))
-        .min(MAX_TRANSIENT_DELAY)
+    match server_hint {
+        Some(delay) => delay.min(MAX_SERVER_TRANSIENT_DELAY),
+        None => Duration::from_millis(500_u64 << retry.min(4)).min(MAX_TRANSIENT_DELAY),
+    }
 }
 
 fn is_transient_status(status: u16) -> bool {
@@ -487,6 +489,34 @@ mod tests {
         assert_eq!(
             rate_limit_delay(Some(Duration::from_secs(45)), 0),
             MAX_RATE_LIMIT_DELAY
+        );
+    }
+
+    #[test]
+    fn transient_delay_honors_bounded_server_cooldowns() {
+        let delays = (0..8)
+            .map(|retry| transient_delay(None, retry))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            delays,
+            vec![
+                Duration::from_millis(500),
+                Duration::from_secs(1),
+                Duration::from_secs(2),
+                Duration::from_secs(4),
+                Duration::from_secs(8),
+                Duration::from_secs(8),
+                Duration::from_secs(8),
+                Duration::from_secs(8),
+            ]
+        );
+        assert_eq!(
+            transient_delay(Some(Duration::from_secs(23)), 0),
+            Duration::from_secs(23)
+        );
+        assert_eq!(
+            transient_delay(Some(Duration::from_secs(90)), 0),
+            MAX_SERVER_TRANSIENT_DELAY
         );
     }
 

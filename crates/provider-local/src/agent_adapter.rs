@@ -297,6 +297,7 @@ impl ca::AgentTool for DesktopToolAdapter {
             PermissionOutcome::Allowed => {}
             PermissionOutcome::Denied(message) => return Ok(ca::ToolResult::error(message)),
             PermissionOutcome::Cancelled => return Err(ca::ToolError::Aborted),
+            PermissionOutcome::Failed(message) => return Err(ca::ToolError::Fatal(message)),
         }
 
         if signal.is_cancelled() {

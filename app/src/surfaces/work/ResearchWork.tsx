@@ -108,6 +108,13 @@ function Status({ call, sourceCount }: { call: ToolCall; sourceCount: number }) 
       </span>
     );
   }
+  if (call.status === "cancelled") {
+    return (
+      <span className="flex items-center gap-1 text-xs font-medium text-ink-faint">
+        <X className="size-3" /> Cancelled
+      </span>
+    );
+  }
   if (call.status === "in_progress" || call.status === "pending") {
     return (
       <span className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-accent">

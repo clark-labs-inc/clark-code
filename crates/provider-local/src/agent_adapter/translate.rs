@@ -86,12 +86,16 @@ pub(crate) fn to_wire_messages(
                     ));
                 }
             }
-            ca::AgentMessage::Custom { kind, payload, .. } => {
-                out.push(ChatMessage::system(format!(
-                    "[runtime context: {kind}]\n{}",
-                    payload
-                )));
+            ca::AgentMessage::Custom { kind, payload, .. }
+                if kind == crate::planning::DEVELOPER_INSTRUCTION_MESSAGE_KIND =>
+            {
+                if let Some(content) = payload.get("content").and_then(Value::as_str) {
+                    out.push(ChatMessage::developer(content));
+                }
             }
+            ca::AgentMessage::Custom { kind, payload, .. } => out.push(ChatMessage::system(
+                format!("[runtime context: {kind}]\n{payload}"),
+            )),
         }
     }
     out
@@ -472,6 +476,21 @@ mod tests {
             "reasoning from before the last user message must not replay"
         );
         assert_eq!(wire[3].reasoning.as_deref(), Some("live reasoning"));
+    }
+
+    #[test]
+    fn collaboration_instruction_uses_developer_role_on_the_wire() {
+        let messages = [crate::planning::developer_instruction_message(
+            "Plan Mode is active".into(),
+        )];
+        let wire = to_wire_messages("system", &messages);
+        assert_eq!(wire.len(), 2);
+        assert_eq!(wire[0].role, "system");
+        assert_eq!(wire[1].role, "developer");
+        assert!(matches!(
+            &wire[1].content,
+            Some(ChatContent::Text(text)) if text == "Plan Mode is active"
+        ));
     }
 
     #[test]

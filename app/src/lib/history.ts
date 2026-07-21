@@ -67,14 +67,13 @@ export function settleRuns(snapshot: Snapshot): Snapshot {
       runs[id] = r;
     }
   }
-  // Interrupted tool calls settle to "completed", not "failed": their chip
-  // renders quietly (completion shows no glyph), whereas a red ✗ on every tool
-  // that happened to be in flight when the session ended reads as an error the
-  // user should act on. The run row above already says the run was cancelled.
+  // Preserve the fact that interrupted tool calls never completed. Treating
+  // them as successful loses exactly the state a resumed model and the user
+  // need in order to avoid trusting work that did not happen.
   const tool_calls: Snapshot["tool_calls"] = {};
   for (const [id, t] of Object.entries(snapshot.tool_calls)) {
     if (t.status === "pending" || t.status === "in_progress") {
-      tool_calls[id] = { ...t, status: "completed" };
+      tool_calls[id] = { ...t, status: "cancelled" };
       changed = true;
     } else {
       tool_calls[id] = t;

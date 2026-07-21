@@ -857,17 +857,30 @@ async fn plan_mode_journey_denies_edits_threads_feedback_and_builds_after_approv
             .expect("user content is a plain string")
             .to_string()
     };
+    let last_developer = |i: usize| -> String {
+        request_json(&captured[i])["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .rfind(|message| message["role"] == "developer")
+            .expect("request has a developer collaboration instruction")["content"]
+            .as_str()
+            .expect("developer content is plain text")
+            .to_string()
+    };
 
-    let turn1 = last_user(0);
+    let turn1 = last_developer(0);
     assert!(turn1.contains("Plan Mode is active."));
-    assert!(turn1.contains("Propose; do not execute"));
+    assert!(turn1.contains("Propose, do not execute"));
+    assert!(!last_user(0).contains("Plan Mode is active"));
     assert!(!turn1.contains("plan.md"));
     let call2 = request_json(&captured[1]).to_string();
-    assert!(call2.contains("Plan mode is active"));
-    let revision_turn = last_user(3);
-    assert!(revision_turn.contains("make it two files"));
-    assert!(revision_turn.contains("previous proposal"));
-    let implementation_turn = last_user(5);
+    assert!(call2.contains("Plan Mode is active"));
+    assert!(last_user(3).contains("make it two files"));
+    let revision_turn = last_developer(3);
+    assert!(revision_turn.contains("Plan Mode remains active"));
+    assert!(revision_turn.contains("Previous proposal"));
+    let implementation_turn = last_developer(5);
     assert!(implementation_turn.contains("Plan Mode is off"));
     assert!(implementation_turn.contains("Plan v2"));
     assert!(!implementation_turn.contains("Plan Mode is active."));
@@ -1226,6 +1239,8 @@ async fn goal_mode_continues_the_run_until_update_goal_complete() {
     let serve_handle = tokio::spawn(serve(
         listener,
         vec![
+            // Goal tools are deferred until the model searches for them.
+            tool_call_sse("g0", "tool_search", json!({"query": "goal autonomy"})),
             // Turn 1: the model creates the goal…
             tool_call_sse(
                 "g1",
@@ -1311,15 +1326,38 @@ async fn goal_mode_continues_the_run_until_update_goal_complete() {
     );
 
     let captured = serve_handle.await.unwrap();
-    assert_eq!(captured.len(), 5, "one user turn + one continuation turn");
-    let continuation = String::from_utf8_lossy(&captured[2]).to_string();
+    assert_eq!(
+        captured.len(),
+        6,
+        "discovery + one user turn + one continuation turn"
+    );
+    let initial_tools = request_json(&captured[0])["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|tool| tool["function"]["name"].as_str())
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    assert!(initial_tools.contains(&"tool_search".to_string()));
+    assert!(!initial_tools.contains(&"create_goal".to_string()));
+    let discovered_tools = request_json(&captured[1])["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|tool| tool["function"]["name"].as_str())
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    assert!(discovered_tools.contains(&"create_goal".to_string()));
+    assert!(discovered_tools.contains(&"update_goal".to_string()));
+
+    let continuation = String::from_utf8_lossy(&captured[3]).to_string();
     assert!(
         continuation.contains("goal continuation turn 1"),
         "the engine-launched turn carries the continuation reminder"
     );
     assert!(continuation.contains("hello.txt must exist containing exactly HELLO"));
     assert!(continuation.contains("audit EVERY explicit requirement"));
-    let after_complete = String::from_utf8_lossy(&captured[4]).to_string();
+    let after_complete = String::from_utf8_lossy(&captured[5]).to_string();
     assert!(
         after_complete.contains("Goal marked complete"),
         "the model sees the completion confirmation"
@@ -1336,6 +1374,7 @@ async fn goal_budget_exhaustion_triggers_one_wrapup_turn_then_stops() {
     let serve_handle = tokio::spawn(serve(
         listener,
         vec![
+            tool_call_sse("g0", "tool_search", json!({"query": "goal autonomy"})),
             tool_call_sse(
                 "g1",
                 "create_goal",
@@ -1375,10 +1414,10 @@ async fn goal_budget_exhaustion_triggers_one_wrapup_turn_then_stops() {
     let captured = serve_handle.await.unwrap();
     assert_eq!(
         captured.len(),
-        3,
-        "user turn + exactly one budget wrap-up turn"
+        4,
+        "discovery + user turn + exactly one budget wrap-up turn"
     );
-    let wrapup = String::from_utf8_lossy(&captured[2]).to_string();
+    let wrapup = String::from_utf8_lossy(&captured[3]).to_string();
     assert!(
         wrapup.contains("goal budget exhausted"),
         "the wrap-up turn carries the budget-limit reminder"

@@ -16,6 +16,9 @@ use crate::tools::{PermissionMode, ToolCtx, ToolExecutor};
 pub(crate) struct PermissionGate {
     session: Arc<Mutex<SessionState>>,
     control: Arc<Mutex<RunControl>>,
+    /// Only permission acquisition is serialized. Once each request is
+    /// approved, non-mutating tool bodies can still execute concurrently.
+    permission_queue: Arc<Mutex<()>>,
     session_id: SessionId,
     events: Sender<AgentEvent>,
     execution: Option<crate::root_execution::RootExecutionTrace>,
@@ -25,6 +28,13 @@ pub(crate) enum PermissionOutcome {
     Allowed,
     Denied(String),
     Cancelled,
+    Failed(String),
+}
+
+enum PermissionWaitOutcome {
+    Resolved(Resolution),
+    Cancelled,
+    Failed(String),
 }
 
 impl PermissionGate {
@@ -37,6 +47,7 @@ impl PermissionGate {
         Self {
             session,
             control,
+            permission_queue: Arc::new(Mutex::new(())),
             session_id,
             events,
             execution: None,
@@ -156,16 +167,13 @@ impl PermissionGate {
             PermissionMode::Deny => (false, None),
             PermissionMode::Ask => {
                 match self.ask_permission(tool_id, tool_name, &info, signal).await {
-                    Some(resolution) => {
-                        // Plan gates never write policy: "always allow plans"
-                        // is not a grant the options offer or the gate honors.
-                        if !is_plan_gate {
-                            self.apply_policy(tool_name, &info, resolution.decision)
-                                .await;
-                        }
+                    PermissionWaitOutcome::Resolved(resolution) => {
                         (resolution.decision.approved(), resolution.feedback)
                     }
-                    None => return PermissionOutcome::Cancelled,
+                    PermissionWaitOutcome::Cancelled => return PermissionOutcome::Cancelled,
+                    PermissionWaitOutcome::Failed(message) => {
+                        return PermissionOutcome::Failed(message)
+                    }
                 }
             }
         };
@@ -196,7 +204,48 @@ impl PermissionGate {
         tool_name: &str,
         info: &GateInfo,
         signal: &CancellationToken,
-    ) -> Option<Resolution> {
+    ) -> PermissionWaitOutcome {
+        // clark-agent runs non-mutating tools in parallel, but the desktop UI
+        // intentionally presents one permission decision at a time. Queue only
+        // this acquisition phase; the guard is released before the tool body
+        // runs, preserving parallel fetch/read execution after authorization.
+        let _permission_turn = tokio::select! {
+            biased;
+            _ = signal.cancelled() => return PermissionWaitOutcome::Cancelled,
+            guard = self.permission_queue.lock() => guard,
+        };
+        if signal.is_cancelled() {
+            return PermissionWaitOutcome::Cancelled;
+        }
+
+        // A prior request in this same parallel batch may have changed the
+        // session policy while this one waited its turn. Honor that decision
+        // instead of surfacing a redundant prompt or running against stale
+        // authorization state.
+        let is_plan_gate = tool_name == "enter_plan_mode";
+        if !is_plan_gate {
+            if self.command_preapproved(tool_name, info).await {
+                return PermissionWaitOutcome::Resolved(Decision::AllowOnce.into());
+            }
+            match self
+                .session
+                .lock()
+                .await
+                .policy
+                .get(tool_name)
+                .copied()
+                .unwrap_or(PermissionMode::Ask)
+            {
+                PermissionMode::Allow => {
+                    return PermissionWaitOutcome::Resolved(Decision::AllowOnce.into())
+                }
+                PermissionMode::Deny => {
+                    return PermissionWaitOutcome::Resolved(Decision::RejectOnce.into())
+                }
+                PermissionMode::Ask => {}
+            }
+        }
+
         if let Some(execution) = &self.execution {
             execution.transition(
                 agent_orchestration::ExecutionState::AwaitingInput,
@@ -207,14 +256,20 @@ impl PermissionGate {
         let (responder, rx) = tokio::sync::oneshot::channel();
         {
             let mut control = self.control.lock().await;
-            control.arm(request_id.clone(), responder);
+            if let Err(existing) = control.arm(request_id.clone(), responder) {
+                return PermissionWaitOutcome::Failed(format!(
+                    "permission coordination error: request `{}` was still pending when `{}` tried to start",
+                    existing.as_str(),
+                    request_id.as_str()
+                ));
+            }
         }
 
-        let _ = self
+        if self
             .events
             .send(AgentEvent::PermissionRequest {
                 request: PermissionRequest {
-                    id: request_id,
+                    id: request_id.clone(),
                     session: self.session_id.clone(),
                     tool_call: Some(tool_id.clone()),
                     title: permission_title(tool_name),
@@ -235,22 +290,47 @@ impl PermissionGate {
                     reason: info.reason.clone(),
                 },
             })
-            .await;
+            .await
+            .is_err()
+        {
+            self.control.lock().await.clear_if(&request_id);
+            return PermissionWaitOutcome::Failed(format!(
+                "permission coordination error: request `{}` could not be delivered",
+                request_id.as_str()
+            ));
+        }
 
-        let resolution = tokio::select! {
-            _ = signal.cancelled() => None,
-            r = rx => r.ok(),
+        let outcome = tokio::select! {
+            biased;
+            _ = signal.cancelled() => PermissionWaitOutcome::Cancelled,
+            result = rx => match result {
+                Ok(resolution) => PermissionWaitOutcome::Resolved(resolution),
+                Err(_) if signal.is_cancelled() => PermissionWaitOutcome::Cancelled,
+                Err(_) => PermissionWaitOutcome::Failed(format!(
+                    "permission coordination error: response channel for `{}` closed without a decision",
+                    request_id.as_str()
+                )),
+            },
         };
+        if let PermissionWaitOutcome::Resolved(resolution) = &outcome {
+            // Apply "always" while this request still owns the queue. The next
+            // parallel waiter then observes the updated policy before deciding
+            // whether it needs to ask.
+            if !is_plan_gate {
+                self.apply_policy(tool_name, info, resolution.decision)
+                    .await;
+            }
+        }
         if let Some(execution) = &self.execution {
             execution.transition(
                 agent_orchestration::ExecutionState::Running,
                 Some("permission wait resolved".to_string()),
             );
         }
-        if resolution.is_none() {
-            self.control.lock().await.clear();
+        if !matches!(outcome, PermissionWaitOutcome::Resolved(_)) {
+            self.control.lock().await.clear_if(&request_id);
         }
-        resolution
+        outcome
     }
 
     async fn hard_refusal(&self, name: &str, info: &GateInfo) -> Option<String> {
@@ -650,6 +730,30 @@ mod tests {
         }
     }
 
+    struct FakeExternal;
+
+    #[async_trait::async_trait]
+    impl ToolExecutor for FakeExternal {
+        fn name(&self) -> &str {
+            "fake_external"
+        }
+        fn description(&self) -> &str {
+            "test external tool"
+        }
+        fn parameters(&self) -> Value {
+            serde_json::json!({})
+        }
+        fn kind(&self) -> agent_core::domain::ToolKind {
+            agent_core::domain::ToolKind::Fetch
+        }
+        fn permission_class(&self) -> crate::tools::ToolPermissionClass {
+            crate::tools::ToolPermissionClass::External
+        }
+        async fn invoke(&self, _args: Value, _ctx: &ToolCtx) -> crate::tools::ToolOutcome {
+            crate::tools::ToolOutcome::ok("done")
+        }
+    }
+
     fn test_ctx(dir: &std::path::Path) -> ToolCtx {
         ToolCtx {
             sandbox: Arc::new(crate::sandbox::Sandbox::new(dir).unwrap()),
@@ -690,6 +794,196 @@ mod tests {
             .await;
         assert!(matches!(outcome, PermissionOutcome::Allowed));
         assert!(rx.is_empty());
+    }
+
+    #[tokio::test]
+    async fn parallel_external_permissions_are_presented_and_resolved_without_loss() {
+        let dir = tempfile::tempdir().unwrap();
+        let session = Arc::new(Mutex::new(SessionState::default()));
+        let control = Arc::new(Mutex::new(RunControl::default()));
+        let (tx, rx) = async_channel::unbounded::<AgentEvent>();
+        let gate = PermissionGate::new(
+            session,
+            control.clone(),
+            SessionId::new("parallel-session"),
+            tx,
+        );
+        let ctx = test_ctx(dir.path());
+
+        let first_gate = gate.clone();
+        let first_ctx = ctx.clone();
+        let first = tokio::spawn(async move {
+            first_gate
+                .check(
+                    &ToolCallId::new("web_fetch_0"),
+                    "web_fetch",
+                    &FakeExternal,
+                    &serde_json::json!({"url": "https://one.example"}),
+                    &first_ctx,
+                    &CancellationToken::new(),
+                )
+                .await
+        });
+        let second = tokio::spawn(async move {
+            gate.check(
+                &ToolCallId::new("web_fetch_1"),
+                "web_fetch",
+                &FakeExternal,
+                &serde_json::json!({"url": "https://two.example"}),
+                &ctx,
+                &CancellationToken::new(),
+            )
+            .await
+        });
+
+        let AgentEvent::PermissionRequest {
+            request: first_request,
+        } = rx.recv().await.expect("first permission request")
+        else {
+            panic!("expected a permission request");
+        };
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(25), rx.recv())
+                .await
+                .is_err(),
+            "the second permission must queue instead of replacing the first"
+        );
+        assert!(control
+            .lock()
+            .await
+            .resolve(&first_request.id, Decision::AllowOnce.into()));
+
+        let AgentEvent::PermissionRequest {
+            request: second_request,
+        } = rx.recv().await.expect("second permission request")
+        else {
+            panic!("expected a permission request");
+        };
+        assert_ne!(first_request.id, second_request.id);
+        assert!(control
+            .lock()
+            .await
+            .resolve(&second_request.id, Decision::AllowOnce.into()));
+
+        assert!(matches!(first.await.unwrap(), PermissionOutcome::Allowed));
+        assert!(matches!(second.await.unwrap(), PermissionOutcome::Allowed));
+    }
+
+    #[tokio::test]
+    async fn allow_always_applies_to_parallel_waiters_before_they_prompt() {
+        let dir = tempfile::tempdir().unwrap();
+        let session = Arc::new(Mutex::new(SessionState::default()));
+        let control = Arc::new(Mutex::new(RunControl::default()));
+        let (tx, rx) = async_channel::unbounded::<AgentEvent>();
+        let gate = PermissionGate::new(
+            session,
+            control.clone(),
+            SessionId::new("always-session"),
+            tx,
+        );
+        let ctx = test_ctx(dir.path());
+        let mut checks = Vec::new();
+        for index in 0..2 {
+            let gate = gate.clone();
+            let ctx = ctx.clone();
+            checks.push(tokio::spawn(async move {
+                gate.check(
+                    &ToolCallId::new(format!("web_fetch_{index}")),
+                    "web_fetch",
+                    &FakeExternal,
+                    &serde_json::json!({"url": format!("https://{index}.example")}),
+                    &ctx,
+                    &CancellationToken::new(),
+                )
+                .await
+            }));
+        }
+
+        let AgentEvent::PermissionRequest { request } =
+            rx.recv().await.expect("first permission request")
+        else {
+            panic!("expected a permission request");
+        };
+        assert!(control
+            .lock()
+            .await
+            .resolve(&request.id, Decision::AllowAlways.into()));
+        for check in checks {
+            assert!(matches!(check.await.unwrap(), PermissionOutcome::Allowed));
+        }
+        assert!(
+            rx.is_empty(),
+            "the queued call must inherit allow-always without another prompt"
+        );
+    }
+
+    #[tokio::test]
+    async fn orphaned_permission_responder_is_an_explicit_failure() {
+        let dir = tempfile::tempdir().unwrap();
+        let session = Arc::new(Mutex::new(SessionState::default()));
+        let control = Arc::new(Mutex::new(RunControl::default()));
+        let (tx, rx) = async_channel::unbounded::<AgentEvent>();
+        let gate = PermissionGate::new(
+            session,
+            control.clone(),
+            SessionId::new("orphan-session"),
+            tx,
+        );
+        let ctx = test_ctx(dir.path());
+        let check = tokio::spawn(async move {
+            gate.check(
+                &ToolCallId::new("web_fetch_orphan"),
+                "web_fetch",
+                &FakeExternal,
+                &serde_json::json!({"url": "https://example.com"}),
+                &ctx,
+                &CancellationToken::new(),
+            )
+            .await
+        });
+
+        let AgentEvent::PermissionRequest { .. } = rx.recv().await.expect("permission request")
+        else {
+            panic!("expected a permission request");
+        };
+        control.lock().await.clear();
+
+        let PermissionOutcome::Failed(message) = check.await.unwrap() else {
+            panic!("an orphaned permission must not masquerade as user cancellation");
+        };
+        assert!(message.contains("closed without a decision"));
+    }
+
+    #[tokio::test]
+    async fn closed_permission_event_channel_is_an_explicit_failure() {
+        let dir = tempfile::tempdir().unwrap();
+        let session = Arc::new(Mutex::new(SessionState::default()));
+        let control = Arc::new(Mutex::new(RunControl::default()));
+        let (tx, rx) = async_channel::unbounded::<AgentEvent>();
+        rx.close();
+        let gate = PermissionGate::new(
+            session,
+            control.clone(),
+            SessionId::new("closed-events-session"),
+            tx,
+        );
+        let ctx = test_ctx(dir.path());
+
+        let PermissionOutcome::Failed(message) = gate
+            .check(
+                &ToolCallId::new("web_fetch_closed_events"),
+                "web_fetch",
+                &FakeExternal,
+                &serde_json::json!({"url": "https://example.com"}),
+                &ctx,
+                &CancellationToken::new(),
+            )
+            .await
+        else {
+            panic!("an undeliverable permission must not wait or look cancelled");
+        };
+        assert!(message.contains("could not be delivered"));
+        assert!(!control.lock().await.has_pending());
     }
 
     #[tokio::test]

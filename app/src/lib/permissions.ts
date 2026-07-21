@@ -20,7 +20,11 @@ export interface ApprovalPolicyInfo {
 export const APPROVAL_POLICIES: ApprovalPolicyInfo[] = [
   { id: "ask", label: "Ask for approval", description: "Review each edit and command before it runs" },
   { id: "auto", label: "Approve for me", description: "Run safe actions; ask before risky ones" },
-  { id: "full", label: "Full access", description: "Run without asking; hard safety blocks still apply" },
+  {
+    id: "full",
+    label: "Full access",
+    description: "Run all actions, including websites and external tools; hard blocks still apply",
+  },
 ];
 
 const APPROVAL_CYCLE: ApprovalPolicy[] = ["ask", "auto", "full"];
@@ -49,6 +53,9 @@ export function wouldAutoApprove(policy: ApprovalPolicy, req: PermissionRequest)
   if (req.risk === "plan_entry") return false;
   // Backend confirmation gates exist precisely to get a human answer.
   if (req.risk === "confirm") return false;
+  // Full access covers the complete action surface: local mutations, shell,
+  // websites, MCP/external tools, and billed generation. Collaboration choices
+  // and explicit backend confirmations above are not action permissions.
   if (policy === "full") return true;
   if (policy === "auto") {
     return req.risk !== "danger" && req.risk !== "external" && req.risk !== "billed";

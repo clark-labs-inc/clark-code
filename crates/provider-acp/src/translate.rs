@@ -115,7 +115,8 @@ pub fn tool_status(s: Option<&str>) -> ToolStatus {
         "pending" => ToolStatus::Pending,
         "in_progress" | "running" | "approved" => ToolStatus::InProgress,
         "completed" | "success" => ToolStatus::Completed,
-        "failed" | "error" | "cancelled" => ToolStatus::Failed,
+        "cancelled" => ToolStatus::Cancelled,
+        "failed" | "error" => ToolStatus::Failed,
         _ => ToolStatus::Pending,
     }
 }
@@ -393,6 +394,12 @@ mod tests {
             }
             other => panic!("got {other:?}"),
         }
+    }
+
+    #[test]
+    fn cancelled_tool_status_stays_distinct_from_failure() {
+        assert_eq!(tool_status(Some("cancelled")), ToolStatus::Cancelled);
+        assert_eq!(tool_status(Some("failed")), ToolStatus::Failed);
     }
 
     #[test]

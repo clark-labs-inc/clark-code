@@ -29,6 +29,7 @@ function blocksText(blocks: ContentBlock[]): string {
 // states that need attention — in-progress and failed.
 function StatusGlyph({ status }: { status: ToolStatus }) {
   if (status === "failed") return <X className="size-3.5 text-danger" aria-label="failed" />;
+  if (status === "cancelled") return <X className="size-3.5 text-ink-faint" aria-label="cancelled" />;
   if (status === "in_progress")
     return (
       <Loader2

@@ -108,10 +108,10 @@ describe("settleRuns", () => {
     const settled = settleRuns(snapshot);
     expect(settled.runs.r1.status).toBe("cancelled");
     expect(settled.runs.r2.status).toBe("done");
-    // Interrupted tools settle to completed (no glyph), never left spinning
-    // and never coerced to failed; real failures are preserved.
-    expect(settled.tool_calls.t1.status).toBe("completed");
-    expect(settled.tool_calls.t2.status).toBe("completed");
+    // Interrupted tools remain explicitly incomplete instead of being
+    // rewritten as successful; real failures are preserved.
+    expect(settled.tool_calls.t1.status).toBe("cancelled");
+    expect(settled.tool_calls.t2.status).toBe("cancelled");
     expect(settled.tool_calls.t3.status).toBe("failed");
     expect(settled.pending_permission).toBeUndefined();
   });

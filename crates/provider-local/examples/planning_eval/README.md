@@ -33,5 +33,6 @@ cargo run -p provider-local --example planning_eval
 
 Do not use results from different models, scenario lists, or repository
 fixtures as an A/B comparison. The reasoning effort defaults to `low`; set it
-explicitly when recording a comparison. Each turn fails closed after three
-minutes rather than leaving a paid benchmark hung indefinitely.
+explicitly when recording a comparison. Each turn is cancelled and recorded as
+timed out after three minutes rather than leaving a paid benchmark hung or
+discarding the rest of the paired run.

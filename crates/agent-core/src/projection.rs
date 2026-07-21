@@ -348,6 +348,7 @@ pub fn apply(snapshot: &mut Snapshot, event: &AgentEvent) {
             });
             view.status = outcome.status;
             view.outcome = Some(outcome.clone());
+            settle_run_tool_calls(snapshot, run, outcome.status);
             // A finished run clears any permission gate tied to it.
             snapshot.pending_permission = None;
         }
@@ -357,6 +358,36 @@ pub fn apply(snapshot: &mut Snapshot, event: &AgentEvent) {
                 if let Some(view) = snapshot.runs.get_mut(run) {
                     view.status = RunStatus::Failed;
                 }
+            }
+        }
+    }
+}
+
+/// A terminal run must never leave tool rows looking live. Providers normally
+/// emit a terminal `ToolCallUpdate`; this closes the gap when a batch is
+/// cancelled or a provider terminates without one.
+fn settle_run_tool_calls(snapshot: &mut Snapshot, run: &RunId, status: RunStatus) {
+    let settled = match status {
+        RunStatus::Done => ToolStatus::Completed,
+        RunStatus::Cancelled => ToolStatus::Cancelled,
+        RunStatus::Failed => ToolStatus::Failed,
+        RunStatus::Queued | RunStatus::Running | RunStatus::AwaitingInput => return,
+    };
+    let ids = snapshot
+        .timeline
+        .iter()
+        .filter_map(|item| match item {
+            TimelineItem::ToolCall {
+                id,
+                run: Some(tool_run),
+            } if tool_run == run => Some(id.clone()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    for id in ids {
+        if let Some(call) = snapshot.tool_calls.get_mut(&id) {
+            if matches!(call.status, ToolStatus::Pending | ToolStatus::InProgress) {
+                call.status = settled;
             }
         }
     }
@@ -802,6 +833,81 @@ mod tests {
         );
         assert!(snap.pending_permission.is_none());
         assert_eq!(snap.runs[&run()].status, RunStatus::Done);
+    }
+
+    #[test]
+    fn terminal_run_settles_only_its_unfinished_tool_calls() {
+        for (run_status, expected_tool_status) in [
+            (RunStatus::Done, ToolStatus::Completed),
+            (RunStatus::Cancelled, ToolStatus::Cancelled),
+            (RunStatus::Failed, ToolStatus::Failed),
+        ] {
+            let active_run = run();
+            let other_run = RunId::new("run-other");
+            let pending = ToolCallId::new("pending");
+            let completed = ToolCallId::new("completed");
+            let unrelated = ToolCallId::new("unrelated");
+            let mut snap = reduce_all(&[
+                AgentEvent::ToolCall {
+                    run: active_run.clone(),
+                    call: ToolCall {
+                        id: pending.clone(),
+                        tool_name: Some("web_fetch".into()),
+                        title: "Fetch page".into(),
+                        kind: ToolKind::Fetch,
+                        status: ToolStatus::InProgress,
+                        locations: vec![],
+                        content: vec![],
+                        raw_input: None,
+                    },
+                },
+                AgentEvent::ToolCall {
+                    run: active_run.clone(),
+                    call: ToolCall {
+                        id: completed.clone(),
+                        tool_name: Some("read_file".into()),
+                        title: "Read file".into(),
+                        kind: ToolKind::Read,
+                        status: ToolStatus::Completed,
+                        locations: vec![],
+                        content: vec![],
+                        raw_input: None,
+                    },
+                },
+                AgentEvent::ToolCall {
+                    run: other_run,
+                    call: ToolCall {
+                        id: unrelated.clone(),
+                        tool_name: Some("grep".into()),
+                        title: "Search".into(),
+                        kind: ToolKind::Search,
+                        status: ToolStatus::Pending,
+                        locations: vec![],
+                        content: vec![],
+                        raw_input: None,
+                    },
+                },
+            ]);
+
+            apply(
+                &mut snap,
+                &AgentEvent::RunFinished {
+                    run: active_run,
+                    outcome: RunOutcome {
+                        status: run_status,
+                        stop_reason: None,
+                        error: None,
+                        failure_kind: None,
+                        usage: None,
+                        execution: None,
+                    },
+                },
+            );
+
+            assert_eq!(snap.tool_calls[&pending].status, expected_tool_status);
+            assert_eq!(snap.tool_calls[&completed].status, ToolStatus::Completed);
+            assert_eq!(snap.tool_calls[&unrelated].status, ToolStatus::Pending);
+        }
     }
 
     #[test]

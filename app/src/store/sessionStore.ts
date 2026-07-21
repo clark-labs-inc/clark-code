@@ -194,7 +194,7 @@ interface SessionState {
   notice: string | null;
   /** Transient non-fatal warning toast (e.g. cloud sync hiccup mid-run). */
   warning: string | null;
-  /** Run ids whose "Run failed" banner the user has dismissed this session. */
+  /** Run ids whose failed/stopped terminal banner was dismissed this session. */
   dismissedFailedRuns: string[];
   /** Authenticated user + the Clark connection config it carries. */
   auth: AuthSession | null;
@@ -426,7 +426,7 @@ interface SessionState {
   dismissWarning: () => void;
   /** Hide the current activity reward and remember that it was seen. */
   dismissActivityReward: () => void;
-  /** Hide the "Run failed" banner for a specific run. */
+  /** Hide the failed/stopped terminal banner for a specific run. */
   dismissFailedRun: (runId: string) => void;
   toggleSidebar: () => void;
   setSidebarCollapsed: (collapsed: boolean) => void;

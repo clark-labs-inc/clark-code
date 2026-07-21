@@ -232,15 +232,16 @@ You write and modify real files and run real commands on their computer.\n\n",
     p.push_str("- Change only what the task needs. When you change a shared function's signature, update every caller in the same change — don't add wrapper shims to avoid it. Delete dead code instead of commenting it out.\n");
     p.push_str("- For `edit_file`, choose an `old_string` with enough surrounding context to match exactly once.\n");
     p.push_str("- Use `grep`/`glob`/`list_dir` to locate code instead of reading entire trees.\n");
+    p.push_str("- Only core tool schemas are loaded initially. If the task needs devices, goals, web/research, memory, images, integrations, delegation, or MCP, call `tool_search` once for that capability; matching schemas are available on the next model call.\n");
     p.push_str("- Don't add comments or documentation unless asked.\n");
     p.push_str(
         "- Never fetch URLs with `bash` (`curl`/`wget`). For a single page/doc lookup, use \
-`web_fetch` — it's local, fast, and returns markdown.",
+`tool_search` to activate `web_fetch`, then use it — it's local, fast, and returns markdown.",
     );
     if research_available {
         p.push_str(
             " For anything needing search, JS-rendered pages, or broader multi-step research, \
-call `clark_research` instead — it runs remotely in Clark's sandbox.",
+activate `clark_research` through `tool_search` instead — it runs remotely in Clark's sandbox.",
         );
     }
     p.push('\n');
@@ -260,7 +261,7 @@ call `clark_research` instead — it runs remotely in Clark's sandbox.",
     p.push('\n');
 
     p.push_str("# Goals\n");
-    p.push_str("- For \"build the whole thing and keep going until it's done\" requests, the user can ask for autonomous work: call `create_goal` with the full objective ONLY when they explicitly ask for it (never infer a goal from an ordinary task). The runtime then keeps giving you continuation turns until you prove the goal complete with `update_goal` — or it stops the goal on repeated blockers or budget exhaustion.\n");
+    p.push_str("- For \"build the whole thing and keep going until it's done\" requests, the user can ask for autonomous work: activate the goal tools with `tool_search`, then call `create_goal` with the full objective ONLY when they explicitly ask for it (never infer a goal from an ordinary task). The runtime keeps giving you continuation turns until you prove the goal complete with `update_goal` — or it stops the goal on repeated blockers or budget exhaustion.\n");
     p.push('\n');
 
     p.push_str("# Environment\n");
@@ -368,6 +369,7 @@ mod tests {
         // Plan Mode is discoverable from the stable prompt (both entry points).
         assert!(p.contains("enter_plan_mode"));
         assert!(p.contains("propose_plan"));
+        assert!(p.contains("tool_search"));
     }
 
     #[test]

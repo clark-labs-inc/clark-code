@@ -77,7 +77,7 @@ pub(crate) fn to_agent_messages(resume: Option<&ResumeTranscript>) -> Vec<ca::Ag
                     tool_call_id: id.clone(),
                     tool_name: name,
                     content: ca::ToolResultContent::text(result),
-                    is_error: *status == ToolStatus::Failed,
+                    is_error: matches!(status, ToolStatus::Failed | ToolStatus::Cancelled),
                     narration: Some(title.clone()),
                     details: Some(serde_json::json!({
                         "kind": kind,
@@ -90,12 +90,13 @@ pub(crate) fn to_agent_messages(resume: Option<&ResumeTranscript>) -> Vec<ca::Ag
             }
             ResumeItem::Goal { .. } => {}
             ResumeItem::ProposedPlan { plan } => {
+                let markdown = crate::planning::bounded_plan_markdown(&plan.markdown);
                 messages.push(ca::AgentMessage::Custom {
                     kind: "proposed_plan".into(),
                     payload: serde_json::json!({
                         "id": plan.id,
                         "revision": plan.revision,
-                        "markdown": plan.markdown,
+                        "markdown": markdown,
                         "status": plan.status,
                     }),
                     timestamp: None,
@@ -132,6 +133,7 @@ fn visible_text(blocks: &[ContentBlock]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use agent_core::domain::{ProposedPlan, ProposedPlanStatus};
     use agent_core::{ResumeItem, ResumeTranscript, ToolKind};
 
     #[test]
@@ -170,6 +172,33 @@ mod tests {
     }
 
     #[test]
+    fn replay_marks_cancelled_tools_as_incomplete_errors() {
+        let transcript = ResumeTranscript {
+            truncated: false,
+            items: vec![ResumeItem::ToolCall {
+                id: "cancelled-call".into(),
+                tool_name: Some("web_fetch".into()),
+                title: "Fetch page".into(),
+                kind: ToolKind::Fetch,
+                status: ToolStatus::Cancelled,
+                locations: Vec::new(),
+                arguments: Some(serde_json::json!({"url": "https://example.com"})),
+                content: Vec::new(),
+            }],
+        };
+
+        let messages = to_agent_messages(Some(&transcript));
+        let ca::AgentMessage::ToolResult {
+            is_error, content, ..
+        } = &messages[1]
+        else {
+            panic!("expected a replayed tool result");
+        };
+        assert!(*is_error);
+        assert!(format!("{content:?}").contains("Cancelled"));
+    }
+
+    #[test]
     fn truncated_resume_starts_with_a_typed_boundary_marker() {
         let transcript = ResumeTranscript {
             truncated: true,
@@ -184,5 +213,29 @@ mod tests {
             ca::AgentMessage::Custom { kind, .. } if kind == "resume_boundary"
         ));
         assert!(matches!(messages[1], ca::AgentMessage::User { .. }));
+    }
+
+    #[test]
+    fn resumed_proposal_context_is_bounded_without_changing_typed_state() {
+        let transcript = ResumeTranscript {
+            truncated: false,
+            items: vec![ResumeItem::ProposedPlan {
+                plan: ProposedPlan {
+                    id: "plan-large".into(),
+                    revision: 3,
+                    markdown: "x".repeat(8_000),
+                    status: ProposedPlanStatus::AwaitingDecision,
+                },
+            }],
+        };
+        let messages = to_agent_messages(Some(&transcript));
+        let ca::AgentMessage::Custom { payload, .. } = &messages[0] else {
+            panic!("expected proposed-plan context");
+        };
+        let markdown = payload["markdown"].as_str().unwrap();
+        assert_eq!(markdown.chars().count(), 6_000);
+        assert!(markdown.contains("proposal middle omitted"));
+        assert_eq!(payload["id"], "plan-large");
+        assert_eq!(payload["revision"], 3);
     }
 }

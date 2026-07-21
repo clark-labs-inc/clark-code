@@ -2,8 +2,9 @@
 //!
 //! Every tool — whether it edits a local file, runs a local shell command, or
 //! delegates research to Clark's sandbox — implements one [`ToolExecutor`]
-//! trait. The model sees a single flat tool list ([`ToolRegistry::schemas`]);
-//! execution routes to the right backend behind the trait. Local executors hold
+//! trait. Execution uses one flat registry while the model initially sees only
+//! core schemas and discovers deferred capabilities through `tool_search`.
+//! Local executors hold
 //! a [`Sandbox`]; remote executors carry their own client. This is the seam that
 //! lets coding stay local while research runs in Clark's sandbox.
 
@@ -27,6 +28,7 @@ pub mod android_emulator;
 pub mod apply_patch;
 pub mod browser;
 pub mod clark;
+mod deferred;
 pub mod diagnostics;
 pub mod fs;
 pub mod goal;
@@ -342,9 +344,10 @@ pub trait ToolExecutor: Send + Sync {
     async fn invoke(&self, args: Value, ctx: &ToolCtx) -> ToolOutcome;
 }
 
-/// The ordered set of tools advertised to the model.
+/// The ordered executor registry plus its model-visible exposure catalog.
 pub struct ToolRegistry {
     tools: Vec<Arc<dyn ToolExecutor>>,
+    deferred_catalog: deferred::DeferredToolCatalog,
     /// Live MCP server connections, kept alive for the registry's lifetime.
     _mcp_clients: Vec<Arc<crate::mcp::McpClient>>,
 }
@@ -355,8 +358,14 @@ impl ToolRegistry {
     /// enabled (`memory` is `Some` with the local global dir + optional Clark
     /// personal-recall config).
     pub fn new(clark: Option<AgenticClarkConfig>, memory: Option<memory::MemoryConfig>) -> Self {
-        let mut tools: Vec<Arc<dyn ToolExecutor>> = vec![
-            Arc::new(fs::ReadFile),
+        let deferred_catalog = deferred::DeferredToolCatalog::default();
+        let mut registry = Self {
+            tools: Vec::new(),
+            deferred_catalog: deferred_catalog.clone(),
+            _mcp_clients: Vec::new(),
+        };
+        for tool in [
+            Arc::new(fs::ReadFile) as Arc<dyn ToolExecutor>,
             Arc::new(fs::ListDir),
             Arc::new(fs::Glob),
             Arc::new(grep::Grep),
@@ -372,11 +381,16 @@ impl ToolRegistry {
             Arc::new(plan::ProposePlan),
             Arc::new(plan::EnterPlanMode),
             Arc::new(plan::UpdatePlan),
-            Arc::new(goal::CreateGoal),
+            Arc::new(diagnostics::CheckDiagnostics),
+            Arc::new(deferred::ToolSearch::new(deferred_catalog)),
+        ] {
+            registry.register_eager(tool);
+        }
+        for tool in [
+            Arc::new(goal::CreateGoal) as Arc<dyn ToolExecutor>,
             Arc::new(goal::UpdateGoal),
             Arc::new(goal::GetGoal),
             Arc::new(web_fetch::WebFetchTool::new(clark.clone())),
-            Arc::new(diagnostics::CheckDiagnostics),
             Arc::new(android_emulator::ListDevices),
             Arc::new(android_emulator::BootEmulator),
             Arc::new(android_emulator::ShutdownEmulator),
@@ -388,34 +402,55 @@ impl ToolRegistry {
             Arc::new(android_emulator::Swipe),
             Arc::new(android_emulator::TypeText),
             Arc::new(android_emulator::PressButton),
-        ];
+        ] {
+            registry.register_deferred(tool);
+        }
         #[cfg(target_os = "macos")]
         {
-            tools.push(Arc::new(ios_simulator::ListSimulators));
-            tools.push(Arc::new(ios_simulator::BootSimulator));
-            tools.push(Arc::new(ios_simulator::ShutdownSimulator));
-            tools.push(Arc::new(ios_simulator::InstallApp));
-            tools.push(Arc::new(ios_simulator::UninstallApp));
-            tools.push(Arc::new(ios_simulator::LaunchApp));
-            tools.push(Arc::new(ios_simulator::Screenshot));
-            tools.push(Arc::new(ios_simulator::Tap));
-            tools.push(Arc::new(ios_simulator::Swipe));
-            tools.push(Arc::new(ios_simulator::TypeText));
-            tools.push(Arc::new(ios_simulator::PressButton));
+            for tool in [
+                Arc::new(ios_simulator::ListSimulators) as Arc<dyn ToolExecutor>,
+                Arc::new(ios_simulator::BootSimulator),
+                Arc::new(ios_simulator::ShutdownSimulator),
+                Arc::new(ios_simulator::InstallApp),
+                Arc::new(ios_simulator::UninstallApp),
+                Arc::new(ios_simulator::LaunchApp),
+                Arc::new(ios_simulator::Screenshot),
+                Arc::new(ios_simulator::Tap),
+                Arc::new(ios_simulator::Swipe),
+                Arc::new(ios_simulator::TypeText),
+                Arc::new(ios_simulator::PressButton),
+            ] {
+                registry.register_deferred(tool);
+            }
         }
         if let Some(cfg) = clark {
-            tools.push(Arc::new(clark::ClarkResearchTool::new(cfg)));
+            registry.register_deferred(Arc::new(clark::ClarkResearchTool::new(cfg)));
         }
         if let Some(cfg) = memory {
-            tools.push(Arc::new(memory::MemoryTool::new(
+            registry.register_deferred(Arc::new(memory::MemoryTool::new(
                 cfg.global_dir,
                 cfg.personal,
             )));
         }
-        Self {
-            tools,
-            _mcp_clients: Vec::new(),
-        }
+        registry
+    }
+
+    fn register_eager(&mut self, tool: Arc<dyn ToolExecutor>) {
+        self.deferred_catalog.register(
+            tool.name(),
+            tool.description(),
+            deferred::ToolExposure::Eager,
+        );
+        self.tools.push(tool);
+    }
+
+    fn register_deferred(&mut self, tool: Arc<dyn ToolExecutor>) {
+        self.deferred_catalog.register(
+            tool.name(),
+            tool.description(),
+            deferred::ToolExposure::Deferred,
+        );
+        self.tools.push(tool);
     }
 
     /// Register the opt-in, experimental `browser` tool (clark-browser,
@@ -423,14 +458,14 @@ impl ToolRegistry {
     /// user's Settings toggle (off by default) — the tool isn't even
     /// advertised to the model unless enabled.
     pub fn enable_browser(&mut self) {
-        self.tools.push(Arc::new(browser::BrowserTool::new()));
+        self.register_deferred(Arc::new(browser::BrowserTool::new()));
     }
 
     /// Register Clark-platform-backed image generation/editing when a signed-in
     /// session has a platform key. The key stays between Desktop and Clark;
     /// the relay owns provider credentials and billing.
     pub fn enable_image_generation(&mut self, config: image::ImageGenerationConfig) {
-        self.tools.push(Arc::new(image::GenerateImage::new(config)));
+        self.register_deferred(Arc::new(image::GenerateImage::new(config)));
     }
 
     /// Remove device-control capabilities that are physically attached to the
@@ -440,13 +475,15 @@ impl ToolRegistry {
         self.tools.retain(|tool| {
             !tool.name().starts_with("android_") && !tool.name().starts_with("ios_")
         });
+        self.deferred_catalog.remove_prefix(&["android_", "ios_"]);
     }
 
     /// Register the bounded orchestration tools. Explicitly disabled and
     /// fail-closed child configurations never advertise them.
     pub fn enable_orchestration(&mut self, config: crate::orchestration::OrchestrationToolsConfig) {
-        self.tools
-            .extend(crate::orchestration::orchestration_tools(config));
+        for tool in crate::orchestration::orchestration_tools(config) {
+            self.register_deferred(tool);
+        }
     }
 
     /// Register organization recall independently of the optional research
@@ -456,7 +493,7 @@ impl ToolRegistry {
         &mut self,
         config: organization_knowledge::OrganizationKnowledgeConfig,
     ) {
-        self.tools.push(Arc::new(
+        self.register_deferred(Arc::new(
             organization_knowledge::OrganizationKnowledgeTool::new(config),
         ));
     }
@@ -482,7 +519,7 @@ impl ToolRegistry {
                             continue; // keep the first registration of a name
                         }
                         added.push(name);
-                        self.tools.push(exec);
+                        self.register_deferred(exec);
                     }
                     statuses.push(crate::mcp::McpStatus {
                         server: cfg.name.clone(),
@@ -513,7 +550,18 @@ impl ToolRegistry {
         self.tools.iter().cloned()
     }
 
-    /// Tool schemas in declaration order, for the request `tools` array.
+    pub(crate) fn deferred_tool_gate(
+        &self,
+        session: Arc<tokio::sync::Mutex<crate::loop_state::SessionState>>,
+    ) -> Arc<dyn clark_agent::plugin::ToolGate> {
+        Arc::new(deferred::DeferredToolGate::new(
+            self.deferred_catalog.clone(),
+            session,
+        ))
+    }
+
+    /// Every registered schema in declaration order. Runtime requests apply
+    /// the deferred tool gate before producing their `tools` array.
     #[cfg(test)]
     pub fn schemas(&self) -> Vec<crate::llm::ToolSchema> {
         self.tools
@@ -551,6 +599,7 @@ pub(crate) fn arg_i64_opt(args: &Value, key: &str) -> Option<i64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::loop_state::SessionState;
 
     #[test]
     fn read_tracker_distinguishes_fresh_notread_and_stale() {
@@ -633,6 +682,7 @@ mod tests {
         );
         // Rationale first: explanation tokens condition the plan steps.
         wire_order(&reg, "update_plan", &["explanation", "plan"]);
+        wire_order(&reg, "tool_search", &["query", "limit"]);
         wire_order(&reg, "grep", &["pattern", "path"]);
         wire_order(&reg, "view_image", &["path"]);
 
@@ -680,6 +730,67 @@ mod tests {
             .map(|s| s.function.name.clone())
             .collect();
         assert!(names.contains(&"clark_research".to_string()));
+    }
+
+    #[tokio::test]
+    async fn runtime_catalog_keeps_core_eager_and_defers_specialized_tools() {
+        let registry = ToolRegistry::new(None, None);
+        let session = Arc::new(tokio::sync::Mutex::new(SessionState::default()));
+        let gate = registry.deferred_tool_gate(session.clone());
+        let available = registry
+            .executors()
+            .map(|tool| tool.name().to_string())
+            .collect::<Vec<_>>();
+        let available_refs = available.iter().map(String::as_str).collect::<Vec<_>>();
+        let initial = gate
+            .next_turn_tool_allowlist(clark_agent::plugin::ToolGateContext {
+                iteration: 0,
+                messages: &[],
+                conversation_id: Some("session"),
+                available_tool_names: &available_refs,
+            })
+            .await
+            .unwrap();
+
+        for name in [
+            "read_file",
+            "grep",
+            "edit_file",
+            "bash",
+            "propose_plan",
+            "enter_plan_mode",
+            "update_plan",
+            "tool_search",
+        ] {
+            assert!(initial.contains(name), "{name} should be eager");
+        }
+        for name in [
+            "create_goal",
+            "web_fetch",
+            "android_list_devices",
+            "android_tap",
+        ] {
+            assert!(!initial.contains(name), "{name} should be deferred");
+        }
+        #[cfg(target_os = "macos")]
+        assert!(!initial.contains("ios_list_simulators"));
+
+        session
+            .lock()
+            .await
+            .deferred_tools
+            .insert("android_tap".into());
+        let activated = gate
+            .next_turn_tool_allowlist(clark_agent::plugin::ToolGateContext {
+                iteration: 1,
+                messages: &[],
+                conversation_id: Some("session"),
+                available_tool_names: &available_refs,
+            })
+            .await
+            .unwrap();
+        assert!(activated.contains("android_tap"));
+        assert!(!activated.contains("android_swipe"));
     }
 
     #[test]

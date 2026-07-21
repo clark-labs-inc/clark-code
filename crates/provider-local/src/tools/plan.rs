@@ -19,8 +19,9 @@ impl ToolExecutor for ProposePlan {
         "propose_plan"
     }
     fn description(&self) -> &str {
-        "In Plan Mode, call once when the implementation plan is decision-complete. Provide concise \
-        Markdown with exact paths and verification; the turn ends for user review."
+        "In Plan Mode, call once when the implementation plan is decision-complete. Provide 3-7 \
+        terse Markdown steps with exact paths and verification, without preamble or code blocks; \
+        the turn ends for user review."
     }
     fn parameters(&self) -> Value {
         json!({
