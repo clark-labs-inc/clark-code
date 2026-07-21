@@ -48,7 +48,7 @@ pub async fn local_sandbox_setup(cwd: String) -> Result<LocalSandboxStatus, Stri
         }
         // The user explicitly chose setup, but Windows denied user-mode
         // WRITE_DAC on this root. Rebuild ownership proofs and use the same
-        // signed helper as a narrow elevated fallback.
+        // bundled helper as a narrow elevated fallback.
         let fallback = manager(policy)?
             .setup_action()?
             .ok_or_else(|| "this sandbox backend has no setup action".to_string())?;

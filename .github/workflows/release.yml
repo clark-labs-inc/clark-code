@@ -1,6 +1,6 @@
 name: Release
 
-# Builds signed installers for macOS, Windows, and Linux on GitHub's native
+# Builds native installers for macOS, Windows, and Linux on GitHub's native
 # runners (cross-compiling a Tauri app from one OS to the others is not viable),
 # keeps an operator copy in a private GitHub Release, and publishes public
 # binaries to Clark-owned download hosting. Triggered by a version tag.
@@ -31,8 +31,8 @@ jobs:
       fail-fast: false
       matrix:
         # One native runner per OS — cross-compiling a Tauri app isn't viable.
-        # macOS: one signed + notarized universal build. Windows: Authenticode-
-        # signed per-user NSIS installer. We intentionally do not ship an MSI:
+        # macOS: one signed + notarized universal build. Windows: unsigned
+        # per-user NSIS installer (SmartScreen warns). We intentionally do not ship an MSI:
         # its machine-wide installation model adds an avoidable UAC prompt.
         # Linux: .deb + .rpm + .AppImage. Each
         # leg uploads its installers under canonical ClarkCode.* names; the
@@ -47,7 +47,7 @@ jobs:
             bundle-target: "x86_64-unknown-linux-gnu"
             rust-targets: ""
           - platform: windows-latest
-            args: "--bundles nsis --config src-tauri/tauri.release.conf.json --config src-tauri/tauri.sandbox.windows.conf.json --config src-tauri/tauri.windows-signing.conf.json"
+            args: "--bundles nsis --config src-tauri/tauri.release.conf.json --config src-tauri/tauri.sandbox.windows.conf.json"
             bundle-target: "x86_64-pc-windows-msvc"
             rust-targets: ""
     runs-on: ${{ matrix.platform }}
@@ -116,50 +116,14 @@ jobs:
       - name: Build private Windows sandbox helpers
         if: runner.os == 'Windows'
         shell: pwsh
-        env:
-          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
-          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
         run: |
-          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_BASE64) -or
-              [string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PASSWORD)) {
-            throw "Windows Authenticode certificate secrets are required for release"
-          }
-          $pfx = Join-Path $env:RUNNER_TEMP "clark-windows-signing.pfx"
-          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_BASE64))
-          $password = ConvertTo-SecureString $env:WINDOWS_CERTIFICATE_PASSWORD -AsPlainText -Force
-          $certificate = Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password $password
-          if (-not $certificate.HasPrivateKey) { throw "Windows signing certificate has no private key" }
-          $signingConfig = @{
-            bundle = @{
-              windows = @{
-                certificateThumbprint = $certificate.Thumbprint
-                digestAlgorithm = "sha256"
-                timestampUrl = "https://timestamp.digicert.com"
-              }
-            }
-          } | ConvertTo-Json -Depth 4
-          Set-Content src-tauri/tauri.windows-signing.conf.json $signingConfig -Encoding utf8
-          "WINDOWS_SIGNING_THUMBPRINT=$($certificate.Thumbprint)" >> $env:GITHUB_ENV
-          "WINDOWS_SIGNING_PFX=$pfx" >> $env:GITHUB_ENV
-
           cargo build --release -p exec-sandbox-windows --bins
-          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" |
-            Sort-Object FullName -Descending | Select-Object -First 1
-          if (-not $signtool) { throw "signtool.exe was not found" }
-          $windowsExecutables = @(
-            "src-tauri/binaries/rg-x86_64-pc-windows-msvc.exe",
+          $windowsHelpers = @(
             "target/release/clark-command-runner.exe",
             "target/release/clark-windows-sandbox-setup.exe"
           )
-          foreach ($executable in $windowsExecutables) {
-            & $signtool.FullName sign /sha1 $certificate.Thumbprint /fd SHA256 /tr https://timestamp.digicert.com /td SHA256 $executable
-            if ($LASTEXITCODE -ne 0) { throw "Authenticode signing failed for $executable" }
-            $signature = Get-AuthenticodeSignature $executable
-            if ($signature.Status -ne "Valid") { throw "Invalid Authenticode signature for ${executable}: $($signature.Status)" }
-          }
-
           $dumpbin = Get-Command dumpbin.exe -ErrorAction Stop
-          foreach ($helper in $windowsExecutables | Where-Object { $_ -like "target/release/*" }) {
+          foreach ($helper in $windowsHelpers) {
             $imports = (& $dumpbin.Source /dependents $helper | Out-String)
             if ($imports -match '(?im)^\s*(?:vcruntime|msvcp)[^\s]*\.dll\s*$') {
               throw "Clean-machine runtime invariant failed; $helper imports a VC++ runtime DLL:`n$imports"
@@ -221,8 +185,8 @@ jobs:
             Inc.) and notarized by Apple — drag Clark Code into Applications
             and open it, no Gatekeeper workaround needed.
 
-            **Windows** builds and their sandbox privilege helpers are signed
-            with Clark Labs' Authenticode certificate.
+            **Windows** uses a per-user NSIS installer. SmartScreen may warn
+            because this release is unsigned; choose **More info → Run anyway**.
 
             **Linux** — `.AppImage` (portable, `chmod +x` and run), `.deb`
             (Debian/Ubuntu), or `.rpm` (Fedora/RHEL).
@@ -272,11 +236,6 @@ jobs:
             Where-Object { $_.FullName -match '[\\/]bundle[\\/]msi[\\/]' }
           if ($unexpectedMsi) { throw "Windows release must not publish an elevation-prone MSI" }
 
-          $installerSignature = Get-AuthenticodeSignature $nsis.FullName
-          if ($installerSignature.Status -ne "Valid") {
-            throw "Invalid NSIS signature for $($nsis.FullName): $($installerSignature.Status)"
-          }
-
           # Exercise the actual user-facing artifact. A per-machine installer
           # would block here on UAC; bound the wait so that fails closed instead
           # of hanging the release job.
@@ -304,10 +263,6 @@ jobs:
             if (-not (Test-Path $executable -PathType Leaf)) {
               throw "Expected installed executable is missing: $executable"
             }
-            $signature = Get-AuthenticodeSignature $executable
-            if ($signature.Status -ne "Valid") {
-              throw "Invalid packaged executable signature for ${executable}: $($signature.Status)"
-            }
             $imports = (& $dumpbin.Source /dependents $executable | Out-String)
             if ($imports -match '(?im)^\s*(?:vcruntime|msvcp)[^\s]*\.dll\s*$') {
               throw "Packaged executable imports a VC++ runtime DLL: ${executable}`n$imports"
@@ -333,18 +288,6 @@ jobs:
             throw "NSIS uninstall timed out"
           }
           if ($uninstall.ExitCode -ne 0) { throw "NSIS uninstall failed with $($uninstall.ExitCode)" }
-
-      - name: Remove Windows signing material
-        if: always() && runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          if ($env:WINDOWS_SIGNING_THUMBPRINT) {
-            Remove-Item "Cert:\CurrentUser\My\$env:WINDOWS_SIGNING_THUMBPRINT" -ErrorAction SilentlyContinue
-          }
-          if ($env:WINDOWS_SIGNING_PFX) {
-            Remove-Item $env:WINDOWS_SIGNING_PFX -Force -ErrorAction SilentlyContinue
-          }
-          Remove-Item src-tauri/tauri.windows-signing.conf.json -Force -ErrorAction SilentlyContinue
 
       - name: Configure AWS credentials for public download upload
         uses: aws-actions/configure-aws-credentials@v4

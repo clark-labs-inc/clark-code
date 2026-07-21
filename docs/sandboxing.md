@@ -58,9 +58,9 @@ binary and has no private Clark sandbox helper, that signing-specific placement
 does not mix public and privileged tools.
 
 The Linux bundle carries the exact digest-pinned bubblewrap source archive with
-its LGPL notices. Windows helpers are built from Clark's crates, Authenticode
-signed, installed under the private resource tree, and covered by a versioned
-runner/setup protocol rather than Codex's identities or state.
+its LGPL notices. Windows helpers are built from Clark's crates, installed
+under the private resource tree, and covered by a versioned runner/setup
+protocol rather than Codex's identities or state.
 
 The Windows backend accepts only the product's host-wide-read policy shape. It
 rejects narrowed `read_roots`, `deny_read`, or enabled child networking at the
@@ -84,8 +84,8 @@ enrollment:
 
 1. The unelevated desktop creates an unpredictable `create_new` proof file
    directly inside every requested grant root.
-2. The user clicks **Enable sandbox** and Windows shows the UAC publisher and
-   command prompt once.
+2. The user clicks **Enable sandbox** and Windows shows an **Unknown publisher**
+   UAC prompt and command prompt once.
 3. The elevated helper validates its private install and state locations,
    creates or rotates the offline identity, DPAPI-protects its credential, and
    installs and reads back SID-scoped outbound-deny firewall rules.
@@ -98,7 +98,7 @@ enrollment:
    existing ownership, installs the offline-account and root-specific ACEs,
    and commits the exact policy fingerprint last.
 6. If Windows refuses user-mode `WRITE_DAC` for a protected or administrator-
-   owned root, the explicit setup action retries through the signed helper and
+   owned root, the explicit setup action retries through the bundled helper and
    presents UAC only for that exceptional root.
 
 The proof files prevent either enrollment path from acting as a generic ACL
@@ -109,14 +109,14 @@ previously enrolled ACLs are inert unless that exact root is active in the
 current token. Plan/read-only mode omits the project SID while retaining only
 the already enrolled Clark document/temp roots.
 
-Windows release builds require an Authenticode certificate, explicitly sign and
-verify both privilege helpers, sign the Tauri application/installers, and use a
-per-user NSIS installation so install and update do not require UAC. The helpers
-remain outside child `PATH`, are resolved by absolute path, and validate their
-private sibling location before privileged work. Release operators must provision the repository secrets
-`WINDOWS_CERTIFICATE_BASE64` (a base64 PFX) and
-`WINDOWS_CERTIFICATE_PASSWORD`; the Windows release leg fails closed when
-either is absent.
+Windows release builds currently ship unsigned. They still build and verify
+both privilege helpers, use a per-user NSIS installation, exercise install,
+startup, and uninstall, verify no VC++ runtime dependency, and keep Tauri
+updater artifacts signed with the pinned updater key. Windows may show
+SmartScreen and **Unknown publisher** UAC warnings until Clark adopts publicly
+trusted Authenticode signing. The helpers remain outside child `PATH`, are
+resolved by absolute path, and validate their private sibling location before
+privileged work.
 
 ## Verification
 
