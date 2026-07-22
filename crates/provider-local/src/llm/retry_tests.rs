@@ -43,6 +43,15 @@ fn http_unauthorized() -> Vec<u8> {
     .into_bytes()
 }
 
+fn http_payment_required() -> Vec<u8> {
+    let body = r#"{"error":{"message":"Insufficient Clark credits. Add credits to continue.","type":"usage_limit_reached"}}"#;
+    format!(
+        "HTTP/1.1 402 Payment Required\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{body}",
+        body.len(),
+    )
+    .into_bytes()
+}
+
 fn in_band_rate_limit(prefix: &str) -> Vec<u8> {
     let body = [
         prefix,
@@ -306,6 +315,15 @@ async fn retries_current_platform_key_once_then_returns_typed_rejection() {
     let error = run(&base_url, &mut output).await.unwrap_err();
     assert!(matches!(error, LlmError::PlatformKeyRejected(_)));
     assert_eq!(calls.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test]
+async fn maps_payment_required_to_billing_instead_of_provider_failure() {
+    let (base_url, calls) = endpoint(vec![http_payment_required()]).await;
+    let mut output = String::new();
+    let error = run(&base_url, &mut output).await.unwrap_err();
+    assert!(matches!(error, LlmError::InsufficientCredits));
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
 }
 
 #[tokio::test]

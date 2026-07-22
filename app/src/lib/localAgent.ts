@@ -24,6 +24,9 @@ export interface LocalAgentSettings {
   reasoningEffort: string;
   /** Clark Platform API key (`ck_live_…`). The only credential. */
   apiKey: string;
+  /** Stable signed-in account binding for `apiKey`. Empty means the key came
+   *  from a legacy build and must be re-provisioned before reuse. */
+  apiKeyOwner?: string;
 }
 
 export const DEFAULT_LOCAL_SETTINGS: LocalAgentSettings = {
@@ -31,6 +34,7 @@ export const DEFAULT_LOCAL_SETTINGS: LocalAgentSettings = {
   model: "clark-code",
   reasoningEffort: "",
   apiKey: "",
+  apiKeyOwner: "",
 };
 
 /** Reasoning effort ids accepted by the OpenRouter models behind Clark Code. */
@@ -157,6 +161,7 @@ function migrate(s: LocalAgentSettings): LocalAgentSettings {
     model,
     reasoningEffort: normalizeReasoningEffort(model, savedEffort),
     apiKey: typeof s.apiKey === "string" ? s.apiKey : "",
+    apiKeyOwner: typeof s.apiKeyOwner === "string" ? s.apiKeyOwner : "",
   };
 }
 

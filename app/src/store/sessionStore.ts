@@ -90,6 +90,8 @@ import {
 import {
   provisionCodeKey,
   billingMe,
+  codeKeyAccountBinding,
+  codeKeyMatchesAccount,
   latestActivityReward,
   type ActivityReward,
   type BillingSummary,
@@ -566,6 +568,10 @@ async function openRemote(host: SshHost, projectRoot = host.remoteRoot): Promise
 // LIST lives in the store's `conversations` and is populated from the cloud on
 // init/sign-in (see `syncCloudIndex`).
 const snapshotCache = new Map<string, Snapshot>();
+/** Coalesce key minting per signed-in account. A sign-out or account switch
+ * can happen while the request is in flight, so callers still re-check the
+ * active binding before persisting the returned secret. */
+const codeKeyProvisions = new Map<string, Promise<string>>();
 
 const UPDATE_DRAIN_POLL_MS = 250;
 
@@ -1127,13 +1133,34 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   },
 
   ensureCodeKey: async () => {
-    // Already have a key, or can't provision (browser / signed out).
-    if (get().localSettings.apiKey.trim()) return;
-    const creds = cloudCreds(get().auth);
-    if (!creds) return;
+    const auth = get().auth;
+    const creds = cloudCreds(auth);
+    const owner = codeKeyAccountBinding(auth);
+    if (!creds || !owner) return;
+    const settings = get().localSettings;
+    if (codeKeyMatchesAccount(settings.apiKey, settings.apiKeyOwner, auth)) return;
+    if (settings.apiKey || settings.apiKeyOwner) {
+      // Never make even one request with a legacy or cross-account key while
+      // its replacement is being minted.
+      get().setLocalSettings({ apiKey: "", apiKeyOwner: "" });
+    }
+
+    let provision = codeKeyProvisions.get(owner);
+    if (!provision) {
+      provision = provisionCodeKey(creds);
+      codeKeyProvisions.set(owner, provision);
+      const clearProvision = () => {
+        if (codeKeyProvisions.get(owner) === provision) codeKeyProvisions.delete(owner);
+      };
+      void provision.then(clearProvision, clearProvision);
+    }
     try {
-      const key = await provisionCodeKey(creds);
-      if (key) get().setLocalSettings({ apiKey: key });
+      const key = await provision;
+      // Never attach a key minted for an account that signed out or switched
+      // while provisioning was in flight.
+      if (key && codeKeyAccountBinding(get().auth) === owner) {
+        get().setLocalSettings({ apiKey: key, apiKeyOwner: owner });
+      }
     } catch {
       /* offline / backend not deployed — onboarding still works, the key is
          re-attempted on the next sign-in / session start */
@@ -1269,6 +1296,9 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   },
 
   signOutAuth: () => {
+    // A Clark Code key is account-scoped. Removing the local binding prevents
+    // the next user from silently billing against this account.
+    get().setLocalSettings({ apiKey: "", apiKeyOwner: "" });
     authSignOut();
     get().endSession({ force: true });
     // Drop the in-memory history entirely so the signed-out (and any next)

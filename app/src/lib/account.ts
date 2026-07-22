@@ -7,6 +7,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { open as shellOpen } from "@tauri-apps/plugin-shell";
+import type { AuthSession } from "./auth";
 import type { CloudCreds } from "./cloudHistory";
 
 /** clarkchat.com billing/subscription page (where users buy credits + manage
@@ -34,6 +35,25 @@ export function provisionCodeKey(c: CloudCreds): Promise<string> {
     endpoint: c.endpoint,
     token: c.token,
   });
+}
+
+/** Account identity persisted beside the opaque Clark Code key. The stable
+ * server user id is authoritative; normalized email only supports sessions
+ * written by older desktop builds before that id was persisted. */
+export function codeKeyAccountBinding(auth: AuthSession | null): string | null {
+  const id = auth?.user.id?.trim();
+  if (id) return `id:${id}`;
+  const email = auth?.user.email?.trim().toLowerCase();
+  return email ? `email:${email}` : null;
+}
+
+export function codeKeyMatchesAccount(
+  apiKey: string,
+  apiKeyOwner: string | undefined,
+  auth: AuthSession | null,
+): boolean {
+  const owner = codeKeyAccountBinding(auth);
+  return Boolean(apiKey.trim() && owner && apiKeyOwner === owner);
 }
 
 /** Subscription / plan / credit balance, as returned by `GET /api/billing/me`. */

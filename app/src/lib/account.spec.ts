@@ -1,11 +1,35 @@
 import { describe, expect, it } from "vitest";
 import {
   billingPlanLabel,
+  codeKeyAccountBinding,
+  codeKeyMatchesAccount,
   creditState,
   effectiveBalance,
   latestActivityReward,
   type BillingSummary,
 } from "./account";
+
+describe("Clark Code key ownership", () => {
+  const auth = {
+    user: { id: "user-1", name: "Stan", email: "STAN@example.com", method: "google" as const },
+    clark: { endpoint: "wss://api.example.test/ws", token: "jwt" },
+  };
+
+  it("binds keys to the stable Clark user id", () => {
+    expect(codeKeyAccountBinding(auth)).toBe("id:user-1");
+    expect(codeKeyMatchesAccount("ck_live_current", "id:user-1", auth)).toBe(true);
+  });
+
+  it("rejects legacy and cross-account key bindings", () => {
+    expect(codeKeyMatchesAccount("ck_live_legacy", "", auth)).toBe(false);
+    expect(codeKeyMatchesAccount("ck_live_other", "id:user-2", auth)).toBe(false);
+  });
+
+  it("falls back to normalized email for older sessions without a user id", () => {
+    const legacy = { ...auth, user: { ...auth.user, id: undefined } };
+    expect(codeKeyAccountBinding(legacy)).toBe("email:stan@example.com");
+  });
+});
 
 function billing(available: number, over: Partial<BillingSummary> = {}): BillingSummary {
   return {

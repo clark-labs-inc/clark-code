@@ -223,7 +223,8 @@ pub struct AssistantTurn {
 pub enum LlmError {
     /// The caller's cancellation token fired mid-request.
     Cancelled,
-    /// The account is out of Clark credits (403). The UI prompts an upgrade.
+    /// Clark billing rejected the request (402, plus legacy credit 403s). The
+    /// UI prompts the user to review billing instead of blaming the provider.
     InsufficientCredits,
     /// Clark's API rejected the desktop platform key (401).
     PlatformKeyRejected(String),

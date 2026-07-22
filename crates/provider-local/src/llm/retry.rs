@@ -278,7 +278,9 @@ impl LlmClient {
                 _ = cancel.cancelled() => return Err(LlmError::Cancelled.into()),
                 body = response.text() => body.unwrap_or_default(),
             };
-            if status.as_u16() == 403 && body.to_lowercase().contains("credit") {
+            if status.as_u16() == 402
+                || (status.as_u16() == 403 && body.to_lowercase().contains("credit"))
+            {
                 return Err(LlmError::InsufficientCredits.into());
             }
             let message = format!(
