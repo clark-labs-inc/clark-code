@@ -19,7 +19,7 @@ fn build_fixture(root: &Path, home: &Path) {
     );
     write(
         root.join("AGENTS.md").as_path(),
-        "Codex fixture instructions.",
+        "External fixture instructions.",
     );
     write(
         root.join(".mcp.json").as_path(),
@@ -41,7 +41,7 @@ url = "https://example.test/mcp"
     );
     write(
         root.join(".agents/skills/codex-review/SKILL.md").as_path(),
-        "---\nname: codex-review\ndescription: Review with Codex conventions.\n---\n",
+        "---\nname: codex-review\ndescription: Review with external conventions.\n---\n",
     );
     write(
         home.join(".agents/skills/personal/SKILL.md").as_path(),
@@ -73,7 +73,7 @@ fn assert_fixture(discoveries: &[AgentMigrationDiscovery]) {
 }
 
 #[tokio::test]
-async fn synthetic_claude_and_codex_migration_matches_local_and_remote() {
+async fn synthetic_claude_and_openai_migration_matches_local_and_remote() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path().join("repo");
     let home = temp.path().join("home");
@@ -95,7 +95,7 @@ async fn synthetic_claude_and_codex_migration_matches_local_and_remote() {
         serde_json::json!({
             "eval": "agent_setup_migration",
             "status": "pass",
-            "sources": ["claude", "codex"],
+            "sources": ["claude", "openai"],
             "modes": ["local", "remote_transport"],
             "mcp_servers": 2,
             "skills": 3,

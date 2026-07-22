@@ -230,6 +230,10 @@ fn tool_title_describes_file_and_web_activity() {
         "Read https://example.com/docs"
     );
     assert_eq!(tool_title("web_fetch", &json!({})), "Reading a web page");
+    assert_eq!(
+        tool_title("read_skill", &json!({"skill":"github:gh-fix-ci"})),
+        "Read skill github:gh-fix-ci"
+    );
 }
 
 #[test]

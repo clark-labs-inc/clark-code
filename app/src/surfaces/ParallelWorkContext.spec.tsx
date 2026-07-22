@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { activityAge, ParallelWorkContext } from "./ParallelWorkContext";
 
 describe("ParallelWorkContext", () => {
-  it("summarizes Clark and Codex peers without overstating detection", () => {
+  it("summarizes Clark and external peers without overstating detection", () => {
     const html = renderToStaticMarkup(
       <ParallelWorkContext
         branch="main"
@@ -13,7 +13,7 @@ describe("ParallelWorkContext", () => {
           untrackedFiles: 1,
           conflictedFiles: 0,
           externalAgents: [{
-            id: "codex-1",
+            id: "external-1",
             title: "Fix the composer",
             agentNickname: null,
             updatedAtMs: 90_000,

@@ -53,8 +53,8 @@ pub(crate) struct SessionState {
     /// Root execution ledger for the active run. A normal single-agent turn
     /// owns `/root`; optional read-only children attach beneath this identity.
     pub active_execution: Option<crate::root_execution::RootExecutionTrace>,
-    /// Standing objective the session pursues autonomously (the Codex
-    /// `/goal` analog): while `Active`, the engine keeps continuing the run
+    /// Standing objective the session pursues autonomously: while `Active`, the
+    /// engine keeps continuing the run
     /// with goal-continuation turns after each clean completion, until the
     /// model proves the goal complete, gets genuinely blocked, or the token
     /// budget runs out.

@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { goalCommandObjective, slashCommands } from "./slashCommands";
+import {
+  expandPromptSlashCommand,
+  goalCommandObjective,
+  slashCommands,
+} from "./slashCommands";
 
 describe("goal slash command", () => {
   it("is discoverable as a local built-in that keeps the prefix editable", () => {
@@ -15,5 +19,22 @@ describe("goal slash command", () => {
     expect(goalCommandObjective("/goal")).toBe("");
     expect(goalCommandObjective("/goals list")).toBeNull();
     expect(goalCommandObjective("please /goal later")).toBeNull();
+  });
+});
+
+describe("sentry slash command", () => {
+  it("is discoverable as a local prompt command using the collision-safe skill name", () => {
+    expect(slashCommands()).toContainEqual(expect.objectContaining({
+      name: "sentry",
+      body: "$sentry:sentry",
+      localOnly: true,
+    }));
+  });
+
+  it("expands direct command input without matching lookalike commands", () => {
+    expect(expandPromptSlashCommand("/sentry")).toBe("$sentry:sentry");
+    expect(expandPromptSlashCommand("  /sentry APP-123")).toBe("  $sentry:sentry APP-123");
+    expect(expandPromptSlashCommand("/sentryish APP-123")).toBe("/sentryish APP-123");
+    expect(expandPromptSlashCommand("inspect /sentry APP-123")).toBe("inspect /sentry APP-123");
   });
 });

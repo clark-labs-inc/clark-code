@@ -199,6 +199,7 @@ async fn isolated_orchestration_session_has_no_ambient_writable_surfaces() {
     assert!(registry.get("browser").is_none());
     assert!(registry.get("delegate_read_only").is_none());
     assert!(registry.get("delegate_coding_workstreams").is_none());
+    assert!(registry.get("read_skill").is_none());
 }
 
 #[tokio::test]
@@ -270,8 +271,12 @@ async fn new_session_seeds_system_prompt_without_history() {
     assert_eq!(session.provider, ProviderId::new("local"));
     let s = p.session.lock().await;
     assert!(!s.system_prompt.is_empty());
+    assert!(s.system_prompt.contains("# Skills"));
+    assert!(s.system_prompt.contains("`github:gh-fix-ci`"));
     assert!(s.transcript.is_empty());
     assert!(!s.system_prompt.contains("# Resumed conversation"));
+    drop(s);
+    assert!(p.registry.as_ref().unwrap().get("read_skill").is_some());
 }
 
 #[tokio::test]

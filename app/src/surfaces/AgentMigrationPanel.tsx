@@ -9,7 +9,7 @@ import type { McpServer, McpServerConfig } from "../lib/mcpServers";
 
 const SOURCE_LABEL: Record<MigrationSource, string> = {
   claude: "Claude Code",
-  codex: "Codex",
+  openai: "OpenAI coding agent",
 };
 
 export function AgentMigrationPanel({
@@ -67,7 +67,7 @@ export function AgentMigrationPanel({
     return (
       <div className="flex items-center gap-2 px-1 py-2 text-xs text-ink-muted">
         <Loader2 className="size-3.5 animate-[spin_1s_linear_infinite]" />
-        Checking for Claude Code and Codex setup…
+        Checking for compatible coding-agent setup…
       </div>
     );
   }

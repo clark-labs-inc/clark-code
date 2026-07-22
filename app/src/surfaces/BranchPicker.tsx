@@ -1,13 +1,30 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, ChevronDown, GitBranch, GitFork, Loader2, Search } from "lucide-react";
-import type { ProjectContext } from "../core-bridge/bridge";
+import {
+  Check,
+  ChevronDown,
+  FolderOpen,
+  GitBranch,
+  GitFork,
+  Loader2,
+  Search,
+} from "lucide-react";
+import type { ProjectBranch, ProjectContext } from "../core-bridge/bridge";
 import { getBridge } from "../core-bridge/bridge";
+import { resolveBranchSelection } from "../lib/projectBranches";
 
 const ITEM =
   "flex h-[22px] min-w-0 items-center gap-1 rounded-md bg-composer-context px-1.5 text-[11px] font-medium leading-none";
 
 function errorMessage(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause);
+}
+
+function normalizedPath(path: string): string {
+  return path.replaceAll("\\", "/").replace(/\/+$/, "");
+}
+
+function checkoutName(path: string): string {
+  return normalizedPath(path).split("/").at(-1) || path;
 }
 
 /** Branch selection is intentionally available only before a conversation is
@@ -18,14 +35,16 @@ export function BranchPicker({
   context,
   disabledReason,
   onSwitched,
+  onOpenCheckout,
 }: {
   cwd: string;
   context: ProjectContext;
   disabledReason?: string;
   onSwitched: () => void;
+  onOpenCheckout: (path: string) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const [branches, setBranches] = useState<string[]>([]);
+  const [branches, setBranches] = useState<ProjectBranch[]>([]);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [switching, setSwitching] = useState<string | null>(null);
@@ -37,7 +56,7 @@ export function BranchPicker({
   const filtered = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase();
     if (!needle) return branches;
-    return branches.filter((branch) => branch.toLocaleLowerCase().includes(needle));
+    return branches.filter((branch) => branch.name.toLocaleLowerCase().includes(needle));
   }, [branches, query]);
 
   useEffect(() => {
@@ -57,7 +76,6 @@ export function BranchPicker({
   }, [open]);
 
   const showBranches = async () => {
-    if (disabledReason) return;
     if (open) {
       setOpen(false);
       return;
@@ -80,19 +98,33 @@ export function BranchPicker({
     }
   };
 
-  const chooseBranch = async (branch: string) => {
-    if (!context.detached && branch === context.branch) {
+  const chooseBranch = async (branch: ProjectBranch) => {
+    const selection = resolveBranchSelection(branch, {
+      cwd,
+      branch: context.branch,
+      detached: context.detached,
+    });
+    if (selection.action === "current") {
       setOpen(false);
       return;
     }
-    setSwitching(branch);
+    if (selection.action === "open") {
+      onOpenCheckout(selection.path);
+      setOpen(false);
+      return;
+    }
+    if (disabledReason) {
+      setError(disabledReason);
+      return;
+    }
+    setSwitching(branch.name);
     setError(null);
     try {
       const bridge = await getBridge();
       if (!bridge.switchProjectBranch) {
         throw new Error("Branch switching is available in the desktop app.");
       }
-      await bridge.switchProjectBranch(cwd, branch);
+      await bridge.switchProjectBranch(cwd, branch.name);
       setOpen(false);
       onSwitched();
     } catch (cause) {
@@ -109,10 +141,13 @@ export function BranchPicker({
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label={`Switch branch. Current branch: ${currentLabel}`}
-        disabled={Boolean(disabledReason)}
-        title={disabledReason ?? `Switch branch · current: ${currentLabel}`}
+        title={
+          disabledReason
+            ? `Browse branches · ${disabledReason}`
+            : `Switch branch · current: ${currentLabel}`
+        }
         onClick={() => void showBranches()}
-        className={`${ITEM} ${tone} transition hover:bg-bg-hover disabled:cursor-not-allowed disabled:opacity-55`}
+        className={`${ITEM} ${tone} transition hover:bg-bg-hover`}
       >
         <Icon className="size-3 shrink-0" />
         <span className="max-w-48 truncate">{currentLabel}</span>
@@ -146,23 +181,42 @@ export function BranchPicker({
               </div>
             )}
             {!loading && filtered.map((branch) => {
-              const current = !context.detached && branch === context.branch;
-              const active = switching === branch;
+              const current = !context.detached && branch.name === context.branch;
+              const active = switching === branch.name;
+              const ownedElsewhere = Boolean(
+                branch.checkoutPath
+                && normalizedPath(branch.checkoutPath) !== normalizedPath(cwd),
+              );
+              const switchBlocked = Boolean(disabledReason && !current && !ownedElsewhere);
               return (
                 <button
-                  key={branch}
+                  key={branch.name}
                   type="button"
                   role="menuitemradio"
                   aria-checked={current}
-                  disabled={switching !== null}
+                  disabled={switching !== null || switchBlocked}
                   onClick={() => void chooseBranch(branch)}
+                  title={
+                    ownedElsewhere
+                      ? `Open ${branch.checkoutPath}`
+                      : switchBlocked
+                        ? disabledReason
+                        : undefined
+                  }
                   className="flex min-h-8 w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-sm text-ink-secondary transition hover:bg-bg-hover hover:text-ink disabled:opacity-55"
                 >
-                  <span className="min-w-0 flex-1 truncate" title={branch}>{branch}</span>
+                  <span className="min-w-0 flex-1 truncate">{branch.name}</span>
                   {active ? (
                     <Loader2 className="size-3.5 shrink-0 animate-spin text-accent" />
                   ) : current ? (
                     <Check className="size-3.5 shrink-0 text-accent" />
+                  ) : ownedElsewhere ? (
+                    <span className="flex min-w-0 items-center gap-1 text-[11px] text-ink-faint">
+                      <span className="max-w-28 truncate">
+                        {checkoutName(branch.checkoutPath ?? "")}
+                      </span>
+                      <FolderOpen className="size-3.5 shrink-0" />
+                    </span>
                   ) : null}
                 </button>
               );
@@ -179,7 +233,9 @@ export function BranchPicker({
           )}
           {!error && (
             <p className="border-t border-border-subtle px-3 py-2 text-[11px] text-ink-faint">
-              Existing local branches only. Your working tree must be clean.
+              {disabledReason
+                ? `${disabledReason} Owned branches can still be opened.`
+                : "Owned branches open their existing checkout. Switching requires a clean tree."}
             </p>
           )}
         </div>

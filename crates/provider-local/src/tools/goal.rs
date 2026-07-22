@@ -1,4 +1,4 @@
-//! Session goal tools — the Codex `/goal` analog. `create_goal` starts a
+//! Session goal tools. `create_goal` starts a
 //! standing objective the engine then pursues autonomously (continuation
 //! turns after each clean completion); `update_goal` is restricted to
 //! `complete`/`blocked` so the model can never grant itself more runway

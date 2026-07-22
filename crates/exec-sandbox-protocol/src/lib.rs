@@ -79,7 +79,7 @@ impl WireSandboxPolicy {
         Ok(format!("{:x}", Sha256::digest(encoded)))
     }
 
-    /// The restricted-token backend intentionally implements Codex-style
+    /// The restricted-token backend intentionally implements narrow
     /// host-wide reads. Windows WRITE_RESTRICTED tokens cannot make an
     /// arbitrary deny-read list authoritative, so reject such policies rather
     /// than reporting a weaker boundary as enforced.

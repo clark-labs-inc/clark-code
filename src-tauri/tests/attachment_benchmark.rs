@@ -77,7 +77,7 @@ fn upload(filename: &str, content_type: &str, bytes: &[u8]) -> PendingUpload {
 
 fn eval_input() -> PromptInput {
     PromptInput {
-        // A Codex-style pending paste must already be expanded into normal text
+        // A pending paste must already be expanded into normal text
         // by this boundary. It is deliberately not a text-file attachment.
         blocks: vec![ContentBlock::text(format!(
             "attachment-eval-request\n{}",

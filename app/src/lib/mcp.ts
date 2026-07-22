@@ -23,7 +23,7 @@ export async function probeMcp(servers: McpServerConfig[]): Promise<McpStatus[]>
   return invoke<McpStatus[]>("clark_mcp_probe", { servers });
 }
 
-export type MigrationSource = "claude" | "codex";
+export type MigrationSource = "claude" | "openai";
 
 export interface MigratedSkill {
   name: string;
@@ -46,7 +46,7 @@ export interface AgentMigrationDiscovery {
   instructions: MigratedInstruction[];
 }
 
-/** Read-only discovery from Claude Code and Codex on the project executor. */
+/** Read-only discovery from compatible coding agents on the project executor. */
 export async function discoverAgentSetups(
   cwd: string,
   remote?: { ws_url: string; token: string },

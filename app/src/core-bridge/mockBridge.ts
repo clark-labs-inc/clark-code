@@ -3,7 +3,13 @@
 // demonstrable without the native host. It deliberately does NOT re-implement
 // the reducer — it just produces snapshots a real run would yield.
 
-import type { CoreBridge, ConnectConfig, ProjectContext, SessionOptions } from "./bridge";
+import type {
+  CoreBridge,
+  ConnectConfig,
+  ProjectBranch,
+  ProjectContext,
+  SessionOptions,
+} from "./bridge";
 import {
   emptySnapshot,
   type ClientResponse,
@@ -160,9 +166,9 @@ export class MockBridge implements CoreBridge {
         externalAgents: sessionActive
           ? [
               {
-                id: "codex-preview",
+                id: "external-preview",
                 title: "Polish the shared checkout experience",
-                agentNickname: "Codex",
+                agentNickname: "External agent",
                 updatedAtMs: Date.now() - 18_000,
               },
             ]
@@ -176,12 +182,19 @@ export class MockBridge implements CoreBridge {
     /* no-op in the browser preview */
   }
 
-  async listProjectBranches(): Promise<string[]> {
-    return ["main", "feature/checkout-context", "fix/composer-layout"];
+  async listProjectBranches(projectPath: string): Promise<ProjectBranch[]> {
+    return ["main", "feature/checkout-context", "fix/composer-layout"].map((name) => ({
+      name,
+      checkoutPath: name === this.branch ? projectPath : null,
+    }));
   }
 
-  async switchProjectBranch(_projectPath: string, branch: string): Promise<void> {
-    if (!(await this.listProjectBranches()).includes(branch)) {
+  async switchProjectBranch(projectPath: string, branch: string): Promise<void> {
+    if (
+      !(await this.listProjectBranches(projectPath)).some(
+        (candidate) => candidate.name === branch,
+      )
+    ) {
       throw new Error(`Local branch ${branch} no longer exists.`);
     }
     this.branch = branch;

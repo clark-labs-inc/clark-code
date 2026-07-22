@@ -27,7 +27,7 @@ fn mcp(name: &str, command: &str) -> McpServerConfig {
 }
 
 #[tokio::test]
-async fn synthetic_claude_and_codex_setups_are_detected_without_source_mutation() {
+async fn synthetic_claude_and_openai_setups_are_detected_without_source_mutation() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path().join("repo");
     let home = temp.path().join("home");
@@ -87,15 +87,15 @@ command = "codex-global-shared"
     skill(
         &root.join(".agents/skills"),
         "shared-skill",
-        "Codex project",
+        "OpenAI project",
     );
-    skill(&root.join(".agents/skills"), "codex-skill", "Codex only");
+    skill(&root.join(".agents/skills"), "openai-skill", "OpenAI only");
     skill(
         &home.join(".agents/skills"),
         "personal-codex",
-        "Personal Codex",
+        "Personal OpenAI",
     );
-    write(&root.join("AGENTS.md"), "Use the Codex fixture rules.");
+    write(&root.join("AGENTS.md"), "Use the external fixture rules.");
 
     let before = walkdir::WalkDir::new(temp.path())
         .into_iter()
@@ -130,7 +130,7 @@ command = "codex-global-shared"
     );
     assert_eq!(actual[0].instructions.len(), 1);
 
-    assert_eq!(actual[1].source, MigrationSource::Codex);
+    assert_eq!(actual[1].source, MigrationSource::Openai);
     assert_eq!(
         actual[1].mcp,
         vec![
@@ -150,16 +150,7 @@ command = "codex-global-shared"
             .iter()
             .map(|skill| skill.name.as_str())
             .collect::<Vec<_>>(),
-        vec!["codex-skill", "personal-codex", "shared-skill"]
+        vec!["openai-skill", "personal-codex", "shared-skill"]
     );
     assert_eq!(actual[1].instructions.len(), 1);
-
-    let runtime_skills =
-        discover_runtime_skills_with_home(&LocalExecutor, &root, Some(&home)).await;
-    let shared = runtime_skills
-        .iter()
-        .find(|skill| skill.name == "shared-skill")
-        .expect("shared skill");
-    assert_eq!(shared.source, MigrationSource::Codex);
-    assert_eq!(shared.description, "Codex project");
 }

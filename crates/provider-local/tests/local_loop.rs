@@ -1127,7 +1127,7 @@ async fn giant_tool_output_is_truncated_before_the_next_model_call() {
 }
 
 /// A user message sent while the run is active lands INSIDE the run (between
-/// tool batches) — Codex-style steering — not after it finishes.
+/// tool batches through live steering, not after it finishes.
 #[tokio::test]
 async fn steering_message_is_injected_into_the_active_run() {
     let dir = tempfile::tempdir().unwrap();

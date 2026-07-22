@@ -25,7 +25,7 @@ function blocksText(blocks: ContentBlock[]): string {
   return contentText(blocks);
 }
 
-// Codex restraint: completion is implied (no trailing check). Only surface the
+// Completion is implied (no trailing check). Only surface the
 // states that need attention — in-progress and failed.
 function StatusGlyph({ status }: { status: ToolStatus }) {
   if (status === "failed") return <X className="size-3.5 text-danger" aria-label="failed" />;

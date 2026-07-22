@@ -1,15 +1,24 @@
 use std::{
+    collections::HashMap,
     ffi::OsString,
     path::{Path, PathBuf},
     process::Stdio,
     time::Duration,
 };
 
+use serde::Serialize;
 use tokio::{process::Command, time::timeout};
 
 const GIT_TIMEOUT: Duration = Duration::from_secs(30);
 const DEFAULT_REMOTE: &str = "origin";
 const DEFAULT_BRANCH: &str = "main";
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectBranch {
+    pub name: String,
+    pub checkout_path: Option<String>,
+}
 
 fn validate_name(name: &str) -> Result<&str, String> {
     let clean = name.trim();
@@ -148,27 +157,65 @@ async fn fetch_latest_main(repo_root: &Path) -> Result<String, String> {
     Ok(commit)
 }
 
-/// Local branches available to the selected checkout. Returning only exact
-/// refs/heads names keeps the switch command unambiguous and prevents Git's
-/// remote-branch guessing from creating a branch as a side effect.
+fn parse_branch_owners(output: &str) -> HashMap<String, String> {
+    let mut owners = HashMap::new();
+    let mut checkout_path = None;
+
+    for field in output.split('\0') {
+        if field.is_empty() {
+            checkout_path = None;
+        } else if let Some(path) = field.strip_prefix("worktree ") {
+            checkout_path = Some(path.to_string());
+        } else if let (Some(path), Some(branch)) = (
+            checkout_path.as_ref(),
+            field
+                .strip_prefix("branch ")
+                .and_then(|reference| reference.strip_prefix("refs/heads/")),
+        ) {
+            owners.insert(branch.to_string(), path.clone());
+        }
+    }
+
+    owners
+}
+
+/// Local branches available to the selected checkout, including the checkout
+/// that currently owns each branch. Exact refs keep the switch unambiguous and
+/// let the caller open an existing checkout instead of asking Git to violate
+/// its one-branch-per-worktree invariant.
 #[tauri::command]
-pub async fn project_branch_list(project_path: String) -> Result<Vec<String>, String> {
+pub async fn project_branch_list(project_path: String) -> Result<Vec<ProjectBranch>, String> {
     let repo_root = repository_root(&project_path).await?;
-    let branches = git_output(
-        &repo_root,
-        vec![
-            "for-each-ref".into(),
-            "--format=%(refname:short)".into(),
-            "refs/heads".into(),
-        ],
-        "List branches",
-    )
-    .await?;
+    let (branches, worktrees) = tokio::try_join!(
+        git_output(
+            &repo_root,
+            vec![
+                "for-each-ref".into(),
+                "--format=%(refname:short)".into(),
+                "refs/heads".into(),
+            ],
+            "List branches",
+        ),
+        git_output(
+            &repo_root,
+            vec![
+                "worktree".into(),
+                "list".into(),
+                "--porcelain".into(),
+                "-z".into(),
+            ],
+            "Inspect worktrees",
+        ),
+    )?;
+    let mut owners = parse_branch_owners(&worktrees);
     Ok(branches
         .lines()
         .map(str::trim)
         .filter(|branch| !branch.is_empty())
-        .map(str::to_string)
+        .map(|branch| ProjectBranch {
+            name: branch.to_string(),
+            checkout_path: owners.remove(branch),
+        })
         .collect())
 }
 
@@ -183,9 +230,9 @@ pub async fn project_branch_switch(project_path: String, branch: String) -> Resu
         return Err("Choose a branch.".into());
     }
     let branches = project_branch_list(repo_root.to_string_lossy().into_owned()).await?;
-    if !branches.iter().any(|candidate| candidate == branch) {
+    let Some(target) = branches.iter().find(|candidate| candidate.name == branch) else {
         return Err(format!("Local branch {branch} no longer exists."));
-    }
+    };
 
     let current = git_output(
         &repo_root,
@@ -195,6 +242,14 @@ pub async fn project_branch_switch(project_path: String, branch: String) -> Resu
     .await?;
     if current == branch {
         return Ok(());
+    }
+
+    if let Some(owner) = target.checkout_path.as_deref() {
+        if Path::new(owner).canonicalize().ok().as_ref() != Some(&repo_root) {
+            return Err(format!(
+                "Branch {branch} is already checked out at {owner}. Open that checkout instead."
+            ));
+        }
     }
 
     let status = git_output(
@@ -264,8 +319,8 @@ pub async fn project_worktree_create(project_path: String, name: String) -> Resu
 #[cfg(test)]
 mod tests {
     use super::{
-        destination_for, parse_remote_main, project_branch_list, project_branch_switch,
-        project_worktree_create, validate_name,
+        destination_for, parse_branch_owners, parse_remote_main, project_branch_list,
+        project_branch_switch, project_worktree_create, validate_name,
     };
     use std::{
         path::{Path, PathBuf},
@@ -331,6 +386,22 @@ mod tests {
         );
     }
 
+    #[test]
+    fn parses_branch_owners_from_nul_delimited_porcelain() {
+        let owners = parse_branch_owners(
+            "worktree /repo\0HEAD abc123\0branch refs/heads/feature/local\0\0\
+             worktree /repo-main\0HEAD def456\0branch refs/heads/main\0\0\
+             worktree /repo-detached\0HEAD 012345\0detached\0\0",
+        );
+
+        assert_eq!(
+            owners.get("feature/local").map(String::as_str),
+            Some("/repo")
+        );
+        assert_eq!(owners.get("main").map(String::as_str), Some("/repo-main"));
+        assert_eq!(owners.len(), 2);
+    }
+
     #[tokio::test]
     async fn lists_and_switches_local_branches_only_when_the_checkout_is_clean() {
         let temp = tempfile::tempdir().unwrap();
@@ -344,11 +415,21 @@ mod tests {
         git(&repo, &["commit", "-qm", "initial"]);
         git(&repo, &["branch", "feature/context-bar"]);
 
+        let branches = project_branch_list(repo.to_string_lossy().into_owned())
+            .await
+            .unwrap();
         assert_eq!(
-            project_branch_list(repo.to_string_lossy().into_owned())
-                .await
-                .unwrap(),
+            branches
+                .iter()
+                .map(|branch| branch.name.as_str())
+                .collect::<Vec<_>>(),
             vec!["feature/context-bar", "main"]
+        );
+        assert_eq!(branches[0].checkout_path, None);
+        let repo_path = repo.canonicalize().unwrap().to_string_lossy().into_owned();
+        assert_eq!(
+            branches[1].checkout_path.as_deref(),
+            Some(repo_path.as_str())
         );
         project_branch_switch(
             repo.to_string_lossy().into_owned(),
@@ -376,6 +457,63 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(repo.join("README.md")).unwrap(),
             "dirty\n"
+        );
+    }
+
+    #[tokio::test]
+    async fn reports_the_checkout_that_already_owns_a_branch() {
+        let temp = tempfile::tempdir().unwrap();
+        let repo = temp.path().join("project");
+        let main_checkout = temp.path().join("project-main");
+        std::fs::create_dir(&repo).unwrap();
+        git(&repo, &["init", "-q", "--initial-branch=main"]);
+        git(&repo, &["config", "user.email", "test@clark.local"]);
+        git(&repo, &["config", "user.name", "Clark Test"]);
+        std::fs::write(repo.join("README.md"), "original\n").unwrap();
+        git(&repo, &["add", "README.md"]);
+        git(&repo, &["commit", "-qm", "initial"]);
+        git(&repo, &["switch", "-qc", "feature/local"]);
+        git(
+            &repo,
+            &[
+                "worktree",
+                "add",
+                "-q",
+                main_checkout.to_string_lossy().as_ref(),
+                "main",
+            ],
+        );
+
+        let branches = project_branch_list(repo.to_string_lossy().into_owned())
+            .await
+            .unwrap();
+        let main = branches
+            .iter()
+            .find(|branch| branch.name == "main")
+            .unwrap();
+        let main_checkout_path = main_checkout
+            .canonicalize()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        assert_eq!(
+            main.checkout_path.as_deref(),
+            Some(main_checkout_path.as_str())
+        );
+
+        let error = project_branch_switch(repo.to_string_lossy().into_owned(), "main".into())
+            .await
+            .unwrap_err();
+        assert_eq!(
+            error,
+            format!(
+                "Branch main is already checked out at {}. Open that checkout instead.",
+                main_checkout.canonicalize().unwrap().display()
+            )
+        );
+        assert_eq!(
+            git_text(&repo, &["branch", "--show-current"]),
+            "feature/local"
         );
     }
 

@@ -34,6 +34,7 @@ pub(super) fn tool_title(name: &str, args: &Value) -> String {
     match name {
         "web_fetch" => activity_with_argument(args, "url", "Read", "Reading a web page"),
         "read_file" => activity_with_argument(args, "path", "Read", "Reading a file"),
+        "read_skill" => activity_with_argument(args, "skill", "Read skill", "Reading a skill"),
         "list_dir" => activity_with_argument(args, "path", "List", "Listing files"),
         "glob" => activity_with_argument(args, "pattern", "Find files matching", "Finding files"),
         "grep" => activity_with_argument(args, "pattern", "Search for", "Searching files"),

@@ -53,13 +53,14 @@ mod resume;
 mod root_execution;
 mod safety;
 mod sandbox;
+mod skills;
 mod tools;
 mod truncation;
 mod workspace;
 
 pub use changes::{changes_diff, changes_revert, changes_summary, ChangedFile};
 pub use checkpoint::{create_checkpoint, is_git_repo};
-// Discover compatible setup from Claude Code and Codex without mutating it.
+// Discover compatible setup from other coding agents without mutating it.
 pub use commands::{discover_commands, CustomCommand};
 pub use config::{LocalConfig, DEFAULT_BASE_URL, DEFAULT_RESEARCH_MODEL};
 pub use external_import::{

@@ -61,8 +61,8 @@ pub fn output_style_instructions(style_id: &str) -> &'static str {
         .unwrap_or("")
 }
 
-/// The goal-continuation turn text (the Codex `continuation.md` analog,
-/// condensed for clark's model tiers). Sent as the user turn of every
+/// The goal-continuation turn text, condensed for Clark's model tiers. Sent as
+/// the user turn of every
 /// engine-launched continuation while a goal is active. Carries the three
 /// load-bearing rules: don't shrink the objective, prove completion from
 /// current evidence, and a strict three-strike blocked policy.
@@ -109,8 +109,7 @@ pub(crate) fn goal_continuation_reminder(goal: &crate::loop_state::SessionGoal) 
     )
 }
 
-/// The one wrap-up turn after a goal crosses its token budget (the Codex
-/// `budget_limit.md` analog).
+/// The one wrap-up turn after a goal crosses its token budget.
 pub(crate) fn goal_budget_limit_reminder(goal: &crate::loop_state::SessionGoal) -> String {
     format!(
         "[runtime context — goal budget exhausted, not a new user instruction]\n\
@@ -206,7 +205,7 @@ You write and modify real files and run real commands on their computer.\n\n",
 
     p.push_str("# Git\n");
     p.push_str("- Other agents (or the user) may be changing this project at the same time. Uncommitted changes you didn't make are someone's work in progress — never revert, overwrite, or \"clean up\" changes you did not create.\n");
-    p.push_str("- Work on the current branch as it is. Isolate your work by touching only the files your task needs — never by moving the tree: no `git stash`, `git reset`, `git checkout`/`git switch`/`git restore` to switch or discard, `git clean`, or `git rebase`, and don't create branches unless the user explicitly asks. Every branch you create must start with `clark/` (for example, `clark/update-koa-3.2.1`). If git state looks wrong, explain it to the user in plain terms instead of fixing it with git.\n");
+    p.push_str("- Work on the current branch unless the user explicitly asks for a Git branch or worktree operation. Never use `git stash`, `git reset`, `git checkout`/`git switch`/`git restore`, `git clean`, or `git rebase` to discard or rewrite work without that explicit request. A request such as \"checkout latest main\" authorizes only the non-destructive branch move and fetch it names: inspect `git status` and `git worktree list --porcelain` first, never use `--ignore-other-worktrees`, and don't delete, detach, or modify another checkout without separate explicit approval. If the requested branch already belongs to another checkout, report that exact path and recommend starting the next Clark chat from that checkout instead of offering an open-ended list. Don't create branches unless the user explicitly asks. Every branch you create must start with `clark/` (for example, `clark/update-koa-3.2.1`).\n");
     p.push_str("- A dirty tree is normal; mention it only when changes you didn't make overlap the files you need to edit — then pause and ask before touching them.\n");
     p.push_str("- Re-read a file before editing it if you haven't read it this turn — it may have changed since you last looked.\n");
     p.push_str(
@@ -456,9 +455,13 @@ mod tests {
         // Shared-tree git rules: no stash/reset, foreign changes are off-limits.
         assert!(p.contains("Every branch you create must start with `clark/`"));
         assert!(p.contains("`git stash`"));
+        assert!(p.contains("checkout latest main"));
+        assert!(p.contains("git worktree list --porcelain"));
+        assert!(p.contains("never use `--ignore-other-worktrees`"));
         assert!(p.contains("changes you did not create"));
         assert!(p.contains("Keep the repository's configured human author"));
         assert!(p.contains("Co-Authored-By: Clark Code <noreply@clarkchat.com>"));
+        assert!(!p.to_ascii_lowercase().contains("codex"));
         // Test-quality bar: at least one would-fail case.
         assert!(p.contains("# Testing"));
         assert!(p.contains("would fail if your change were broken"));

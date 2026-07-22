@@ -44,7 +44,7 @@ describe("prettySize", () => {
 });
 
 describe("large pasted text", () => {
-  it("compacts only text over Codex's 1,000-character boundary", () => {
+  it("compacts only text over the 1,000-character boundary", () => {
     expect(shouldThumbnailPastedText("short paste")).toBe(false);
     expect(shouldThumbnailPastedText("x".repeat(1_000))).toBe(false);
     expect(shouldThumbnailPastedText("x".repeat(1_001))).toBe(true);

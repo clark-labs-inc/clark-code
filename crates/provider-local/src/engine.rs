@@ -284,8 +284,8 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
     // so the raised iteration cap can't be burned on a spinning agent. One
     // instance, shared across the before- and after-tool-call hook lists.
     let loop_breaker = Arc::new(LoopBreaker::new());
-    // Parallel batches: read-only tools in one assistant turn run concurrently
-    // (Codex's model). Mutating tools set `requires_exclusive_sandbox`, which
+    // Parallel batches: read-only tools in one assistant turn run concurrently,
+    // as expected by the local model. Mutating tools set `requires_exclusive_sandbox`, which
     // downgrades their whole batch to sequential, so edits/shell keep today's
     // one-at-a-time ordering and the permission gate never faces two
     // simultaneous prompts.
@@ -358,7 +358,7 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
     tc.session.lock().await.steering = Some(steering.clone());
 
     // Drive the run and, when a session goal is active, CONTINUE it after each
-    // clean completion with a goal-continuation turn (the Codex thread-goal
+    // clean completion with a goal-continuation turn (the thread-goal
     // loop): the run keeps going until the model proves the goal complete, gets
     // blocked, or the budget runs out. Context-window overflows are recovered
     // transparently inside `clark_agent::run` (the checkpoint compactor hook
@@ -643,8 +643,8 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
                 completed.extend(leftover_steering);
                 compactor.commit_appended(&mut session.transcript, completed);
                 // A goal must never auto-continue into a wall: a failed run
-                // blocks it (Codex does the same "to prevent automatic
-                // continuation from looping and consuming tokens"). A user
+                // blocks it to prevent automatic continuation from looping and
+                // consuming tokens. A user
                 // cancel merely pauses pursuit — also expressed as Blocked,
                 // resumed by the user's next explicit ask.
                 if let Some(goal) = session.goal.as_mut() {
@@ -659,8 +659,8 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
                         goal.touch();
                     }
                 }
-                // Tell the model the turn was cut off (Codex records the same
-                // marker): without it, the next turn continues as if the last
+                // Tell the model the turn was cut off and record that marker:
+                // without it, the next turn continues as if the last
                 // one finished cleanly, re-trusting steps that never ran.
                 if matches!(error, clark_agent::LoopError::Aborted) {
                     session.transcript.push(clark_agent::AgentMessage::User {

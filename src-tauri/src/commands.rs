@@ -207,8 +207,8 @@ pub async fn project_context(
     .await
 }
 
-/// Detect compatible MCP servers, skills, and instructions from Claude Code and
-/// Codex. Discovery is read-only; the UI chooses which missing MCP servers to
+/// Detect compatible MCP servers, skills, and instructions from other coding
+/// agents. Discovery is read-only; the UI chooses which missing MCP servers to
 /// add while skills and instructions remain sourced in place.
 #[tauri::command]
 pub async fn external_agent_discover(

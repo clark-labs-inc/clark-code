@@ -1,4 +1,4 @@
-//! Atomic-preflight multi-file patch tool using Codex's `*** Begin Patch`
+//! Atomic-preflight multi-file patch tool using Clark's `*** Begin Patch`
 //! envelope. All existing files must satisfy the same read-before-edit guard as
 //! `edit_file`; parsing and replacement computation finish before any write.
 
@@ -13,6 +13,7 @@ use super::{arg_str, ToolCtx, ToolExecutor, ToolOutcome};
 
 const MAX_PATCH_BYTES: usize = 256_000;
 const MAX_RECEIPT_BYTES: usize = 24_000;
+const PATCH_DESCRIPTION: &str = "The complete Clark patch body. Every operation header includes its leading `***`. For an update, use `*** Update File: path`, then `@@` without unified-diff line ranges, then lines prefixed with space, `-`, or `+`. Example: `*** Begin Patch\n*** Update File: path.txt\n@@\n-old\n+new\n*** End Patch`. For an add, use `*** Add File: path` and prefix every content line with `+`.";
 
 pub struct ApplyPatch;
 
@@ -22,13 +23,13 @@ impl ToolExecutor for ApplyPatch {
         "apply_patch"
     }
     fn description(&self) -> &str {
-        "Apply one bounded multi-file patch. Use the Codex patch envelope with *** Begin Patch / *** End Patch and Add File, Update File, Delete File, or Move to headers. Existing files must be read first."
+        "Apply one bounded multi-file patch using the exact Clark patch grammar described by the `patch` parameter. Existing files must be read first."
     }
     fn parameters(&self) -> Value {
         json!({
             "type": "object",
             "properties": {
-                "patch": {"type": "string", "description": "The complete *** Begin Patch ... *** End Patch body."}
+                "patch": {"type": "string", "description": PATCH_DESCRIPTION}
             },
             "required": ["patch"]
         })

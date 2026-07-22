@@ -6,7 +6,7 @@
 //! `RemoteExecutor` connects to that URL, so the agent's file/shell tools run on
 //! the remote while the loop + model stay local.
 //!
-//! Design (mirrors codex's exec-server transport):
+//! Design of the exec-server transport:
 //!   1. `ssh <host> uname -sm` — detect the remote arch.
 //!   2. Ensure `~/.clark/bin/clark-exec-server-v<ver>-<arch>` exists on the
 //!      remote; if not, scp the matching local build up (Phase 5 will swap this

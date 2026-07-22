@@ -1,11 +1,11 @@
-//! Middle-out truncation for tool output (the Codex approach): keep the head
+//! Middle-out truncation for tool output: keep the head
 //! and the tail — where commands put their setup and their verdict — and drop
 //! the middle, labeling exactly what was cut. Applied when a tool result is
 //! recorded, so one giant `cat`/`grep` can't flood the model's context and
 //! ride there until compaction.
 
 /// Default cap on a single tool result, in characters (~10k tokens at the
-/// char/4 heuristic — the same budget Codex gives exec output).
+/// char/4 heuristic used for exec output).
 pub const DEFAULT_TOOL_RESULT_MAX_CHARS: usize = 40_000;
 
 /// Truncate `text` middle-out to at most roughly `max_chars`, returning `None`

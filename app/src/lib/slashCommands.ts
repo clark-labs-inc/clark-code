@@ -6,6 +6,8 @@
 import { useSessionStore } from "../store/sessionStore";
 import { conversationMarkdown } from "./transcript";
 
+const SENTRY_SKILL = "$sentry:sentry";
+
 export interface SlashCommand {
   /** Command word, without the leading slash. */
   name: string;
@@ -33,6 +35,14 @@ export function slashCommands(): SlashCommand[] {
       // goal before the model begins the turn. Keep it in the composer so the
       // user can add the objective after choosing the command.
       body: "/goal",
+    },
+    {
+      name: "sentry",
+      hint: "Inspect current Sentry issues and production errors",
+      localOnly: true,
+      // Use the collision-safe bundled name. The explicit skill mention makes
+      // selection deterministic even when a project also defines `sentry`.
+      body: SENTRY_SKILL,
     },
     {
       name: "terminal",
@@ -92,4 +102,16 @@ export function goalCommandObjective(text: string): string | null {
   const rest = command.slice("/goal".length);
   if (rest.length > 0 && !/^\s/.test(rest)) return null;
   return rest.trim();
+}
+
+/** Expand a directly typed `/sentry …` command to the explicit bundled skill
+ * mention. Autocomplete already inserts this form; normalizing submit makes
+ * typing the whole command by hand behave identically. */
+export function expandPromptSlashCommand(text: string): string {
+  const command = text.trimStart();
+  if (!command.startsWith("/sentry")) return text;
+  const rest = command.slice("/sentry".length);
+  if (rest.length > 0 && !/^\s/.test(rest)) return text;
+  const leading = text.slice(0, text.length - command.length);
+  return `${leading}${SENTRY_SKILL}${rest}`;
 }

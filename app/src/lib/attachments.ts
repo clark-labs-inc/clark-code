@@ -33,7 +33,7 @@ export const LARGE_TEXT_PASTE_CHAR_THRESHOLD = 1_000;
 const MAX_IMAGE_DIM = 1568;
 const IMAGE_PASSTHROUGH_BYTES = 1_200_000;
 
-/** Match Codex's composer boundary: only text over 1,000 characters is compacted. */
+/** Only text over 1,000 characters is compacted. */
 export function shouldThumbnailPastedText(text: string): boolean {
   return text.trim().length > 0 && Array.from(text).length > LARGE_TEXT_PASTE_CHAR_THRESHOLD;
 }

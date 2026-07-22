@@ -19,6 +19,7 @@ export function ComposerContextBar() {
   const activeProvider = useSessionStore((state) => state.activeProvider);
   const projectMode = useSessionStore((state) => state.projectMode);
   const localCwd = useSessionStore((state) => state.localSettings.cwd);
+  const setProjectFolder = useSessionStore((state) => state.setProjectFolder);
   const activeProjectRoot = useSessionStore((state) => state.activeProjectRoot);
   const activeRemote = useSessionStore((state) => state.activeRemote);
   const activeRemoteHost = useSessionStore((state) => state.activeRemoteHost);
@@ -143,6 +144,7 @@ export function ComposerContextBar() {
             context={context}
             disabledReason={branchSwitchDisabledReason}
             onSwitched={() => setRefreshTick((tick) => tick + 1)}
+            onOpenCheckout={(path) => setProjectFolder(path)}
           />
         ) : context ? (
           <span

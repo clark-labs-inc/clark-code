@@ -19,7 +19,7 @@ the sidebar, conversation workspace, or persistent composer controls.
 
 ## Focused comparison evidence
 
-The dark Codex reference and the Clark implementation crop were placed in one
+The dark reference and the Clark implementation crop were placed in one
 combined image. Both use a compact six-action vertical menu aligned beside the
 project row, with the same order and copy: Pin project, Reveal in Finder,
 Create permanent worktree, Rename project, Archive chats, and Remove. Standard
@@ -29,7 +29,7 @@ DM Sans typography, existing radii, shadows, and surface tokens.
 
 The project row also reproduces the reference's second trailing control with
 the installed Lucide `SquarePen` icon. Its accessible label and tooltip read
-"New session in clark-desktop". The fresh comparison places the Codex source
+"New session in clark-desktop". The fresh comparison places the source
 and Clark's focused sidebar state side by side; the ellipsis then note-and-pen
 ordering, scale, spacing, and right-edge alignment match the reference while
 retaining Clark's existing light-theme tokens.

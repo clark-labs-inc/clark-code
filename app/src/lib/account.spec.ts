@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { billingPlanLabel, creditState, latestActivityReward, type BillingSummary } from "./account";
+import {
+  billingPlanLabel,
+  creditState,
+  effectiveBalance,
+  latestActivityReward,
+  type BillingSummary,
+} from "./account";
 
 function billing(available: number, over: Partial<BillingSummary> = {}): BillingSummary {
   return {
@@ -90,6 +96,38 @@ describe("billingPlanLabel", () => {
 });
 
 describe("latestActivityReward", () => {
+  it("accepts the current production envelope without legacy ledger fields", () => {
+    const summary: BillingSummary = {
+      stripe_enabled: true,
+      enforcement_enabled: true,
+      access_state: "ready",
+      credit_usage: { percent_used: 0 },
+      subscription: { status: "active", plan_key: "scale" },
+      plans: [],
+      effective: {
+        owner_kind: "user",
+        display_name: "Personal",
+        access_state: "ready",
+        credit_usage: { percent_used: 0 },
+        coverage_status: "ready",
+        products: ["clark_web", "clark_code"],
+        balance: { available_credits: 12_345, is_unlimited: false },
+        plan: { plan_key: "scale", name: "Scale" },
+        subscription: { status: "active", plan_key: "scale" },
+      },
+      personal_fallback: {
+        status: "active",
+        access_state: "ready",
+        balance: { available_credits: 12_345, is_unlimited: false },
+        subscription: { status: "active", plan_key: "scale" },
+      },
+    };
+
+    expect(latestActivityReward(summary)).toBeNull();
+    expect(effectiveBalance(summary)).toEqual({ available_credits: 12_345, is_unlimited: false });
+    expect(creditState(summary)).toBe("ok");
+  });
+
   it("returns only a server-authored positive activity grant", () => {
     const summary = billing(500, {
       effective: {

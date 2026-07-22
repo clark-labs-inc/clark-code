@@ -299,6 +299,91 @@ fn write_project_fixture(root: &Path) {
 }
 
 #[tokio::test]
+#[ignore = "requires explicit live clark-code env; makes one real DeepSeek V4 Pro call"]
+async fn live_clark_code_skills_end_to_end() {
+    let Some(cfg) = live_config() else {
+        return;
+    };
+    assert_eq!(
+        cfg.model, "clark-code:deepseek_v4_pro",
+        "skills_e2e: refusing paid validation with any model except DeepSeek V4 Pro"
+    );
+
+    let dir = tempfile::tempdir().unwrap();
+    let skill_dir = dir.path().join(".clark/skills/paid-receipt");
+    std::fs::create_dir_all(skill_dir.join("references")).unwrap();
+    let contract =
+        "skill=paid-receipt\nmodel=deepseek-v4-pro\nsentinel=CLARK_SKILL_RESOURCE_SENTINEL_7319\n";
+    std::fs::write(
+        skill_dir.join("SKILL.md"),
+        r#"---
+name: paid-receipt
+description: Produce the paid Clark skill receipt for a live end-to-end validation.
+---
+
+# Paid Clark skill receipt
+
+You must call `read_skill` with `skill` set to `paid-receipt` and `resource` set
+to `references/contract.md`. Do not use `read_file` for that resource.
+
+Then call `write_file` to create `SKILL_E2E_RECEIPT.md` containing the resource
+text verbatim, with no fences or extra text. Finally reply with exactly
+`CLARK_SKILL_E2E_DONE_9472`.
+"#,
+    )
+    .unwrap();
+    std::fs::write(skill_dir.join("references/contract.md"), contract).unwrap();
+
+    let (mut provider, session) = new_live_provider(
+        &cfg,
+        dir.path(),
+        json!({
+            "research": false,
+            "memories": false,
+            "permissions": {
+                "bash": "ask",
+                "write_file": "ask",
+                "edit_file": "ask"
+            }
+        }),
+    )
+    .await;
+
+    let summary = drive_turn(
+        &mut provider,
+        &session.id,
+        "Use $paid-receipt to produce the paid Clark skill receipt. Follow the skill exactly.",
+    )
+    .await;
+    println!(
+        "[skills_e2e] model={} tools={:?} permission_requests={} usage={:?} text={:?}",
+        cfg.model, summary.tools, summary.permission_requests, summary.usage, summary.text
+    );
+
+    summary.require_done("skills_e2e");
+    summary.require_tool("skills_e2e", "read_skill");
+    summary.require_tool("skills_e2e", "write_file");
+    assert!(
+        summary.permission_requests >= 1,
+        "skills_e2e: expected a write permission request: {summary:?}"
+    );
+    assert_eq!(
+        summary.text.trim(),
+        "CLARK_SKILL_E2E_DONE_9472",
+        "skills_e2e: model did not return the exact completion receipt"
+    );
+
+    let receipt = std::fs::read_to_string(dir.path().join("SKILL_E2E_RECEIPT.md"))
+        .expect("skills_e2e: read generated receipt");
+    assert_eq!(
+        receipt.trim_end(),
+        contract.trim_end(),
+        "skills_e2e: written receipt did not preserve the skill resource"
+    );
+    println!("[skills_e2e receipt] {receipt:?}");
+}
+
+#[tokio::test]
 #[ignore = "requires explicit live clark-code env; makes real model calls"]
 async fn live_clark_code_feature_matrix() {
     let Some(cfg) = live_config() else {

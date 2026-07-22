@@ -113,7 +113,7 @@ import { onSettingsMenuRequested, onUpdateMenuRequested } from "../lib/nativeMen
 import { updateDrainBlockerCount } from "../lib/updateDrain";
 
 /** A follow-up message the user sent while a run was active. It sends
- *  automatically when the run finishes — Codex-style, never interrupting. */
+ *  automatically when the run finishes, never interrupting. */
 /** The sections of the unified Settings view (left-rail order). */
 export type SettingsSection =
   | "general"
@@ -277,7 +277,7 @@ interface SessionState {
   recentProjects: string[];
   /** Follow-up messages sent while a run is active; drained when it finishes. */
   queued: QueuedMessage[];
-  /** How agent permission requests are approved (Codex-style). */
+  /** How agent permission requests are approved. */
   approvalPolicy: ApprovalPolicy;
   /** Read-only planning is independent from action approval policy. */
   collaborationMode: CollaborationMode;
@@ -822,11 +822,15 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     set({ loadingBilling: true });
     try {
       const billing = await billingMe(creds);
+      // Billing is authoritative account state. Publish it before deriving the
+      // optional reward presentation so a malformed/older reward field can
+      // never turn a valid plan and balance into the empty-account fallback.
+      set({ billing, loadingBilling: false });
       const reward = latestActivityReward(billing);
       const current = get().activityReward;
       const activityReward =
         current ?? (reward && !hasSeenActivityReward(get().auth, reward) ? reward : null);
-      set({ billing, loadingBilling: false, activityReward });
+      set({ activityReward });
     } catch {
       set({ loadingBilling: false });
     }

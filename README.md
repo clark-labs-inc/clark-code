@@ -8,7 +8,7 @@
 
 Private, cross-platform desktop client for agentic work. One UI that talks to
 many agent backends through a single provider abstraction — **ACP** local CLI
-agents (Codex, Claude Code, Gemini, …) and the **Clark** runtime — with the
+agents and the **Clark** runtime — with the
 performance-critical engine written once in Rust and shared across desktop,
 mobile, and web.
 

@@ -63,6 +63,12 @@ impl DeferredToolCatalog {
             .retain(|entry| !prefixes.iter().any(|prefix| entry.name.starts_with(prefix)));
     }
 
+    pub(super) fn remove_name(&self, name: &str) {
+        let mut catalog = self.inner.lock().unwrap();
+        catalog.eager.remove(name);
+        catalog.deferred.retain(|entry| entry.name != name);
+    }
+
     fn eager_names(&self) -> HashSet<String> {
         self.inner.lock().unwrap().eager.clone()
     }

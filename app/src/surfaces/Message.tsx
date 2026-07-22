@@ -304,7 +304,7 @@ function MessageImpl({
 
   const inner = (() => {
     if (role === "user") {
-      // Codex form: a quiet right-aligned pill, not a loud accent bubble.
+      // Keep this a quiet right-aligned pill, not a loud accent bubble.
       // Hover reveals copy + edit. The timeline identity lets submit replace
       // this turn and the abandoned suffix instead of appending a duplicate.
       const attachments = userAttachmentBlocks(blocks);

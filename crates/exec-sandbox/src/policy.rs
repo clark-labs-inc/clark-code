@@ -46,7 +46,7 @@ pub struct SandboxPolicy {
 }
 
 impl SandboxPolicy {
-    /// Codex-style read-only policy: reads remain available across the host so
+    /// Read-only policy: reads remain available across the host so
     /// compilers, package managers, and inspection commands can resolve their
     /// inputs, while every filesystem write is denied except separately
     /// attached product roots (for example the private process temp dir).

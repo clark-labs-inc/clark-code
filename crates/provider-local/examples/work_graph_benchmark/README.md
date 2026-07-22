@@ -4,9 +4,9 @@ This suite is an executable, failure-seeking contract for dependency-aware codin
 
 It complements the multi-repository benchmark. The existing suite proves Git isolation and replayable cross-repository patches. This suite proves the missing lifecycle control plane: an environment can prepare while code work proceeds, a dependent agent wakes only when the environment is healthy, completed artifacts survive targeted recovery, and pure waiting consumes no model tokens.
 
-## What is borrowed from Codex
+## Target lifecycle contract
 
-The target contract keeps the parts of Codex's multi-agent lifecycle that transfer cleanly:
+The target contract keeps the multi-agent lifecycle behaviors that transfer cleanly:
 
 - one host-owned registry and shared concurrency/budget ceiling;
 - explicit task identities, parent/child lifecycle, cancellation, and completion delivery;

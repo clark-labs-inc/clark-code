@@ -76,6 +76,7 @@ export interface EffectiveBilling {
   display_name: string;
   domain?: string;
   access_state?: "ready" | "usage_limited" | "unlimited";
+  credit_usage?: { percent_used: number };
   coverage_status?: "ready" | "action_needed" | "unavailable";
   products?: Array<"clark_web" | "clark_code">;
   balance?: { available_credits: number; is_unlimited: boolean };
@@ -96,18 +97,29 @@ export interface EffectiveBilling {
   /** Legacy server field retained only during rolling upgrades. */
   credits?: CreditAccount;
   subscription?: Subscription | null;
-  ledger: LedgerEntry[];
+  /** Legacy activity detail; current billing responses intentionally omit it. */
+  ledger?: LedgerEntry[];
 }
 
 export interface BillingSummary {
   stripe_enabled: boolean;
   enforcement_enabled: boolean;
-  credits_per_dollar: number;
-  credits: CreditAccount;
+  access_state?: "ready" | "usage_limited" | "unlimited";
+  credit_usage?: { percent_used: number };
+  /** Legacy fields retained for compatibility with older Clark deployments. */
+  credits_per_dollar?: number;
+  credits?: CreditAccount;
   subscription?: Subscription | null;
   plans?: unknown[];
   ledger?: LedgerEntry[];
+  payment_history?: unknown[];
   effective?: EffectiveBilling;
+  personal_fallback?: {
+    status: "active" | "inactive_workspace_coverage" | "unavailable";
+    access_state: "ready" | "usage_limited" | "unlimited";
+    balance: { available_credits: number; is_unlimited: boolean };
+    subscription?: Subscription | null;
+  };
 }
 
 export function billingMe(c: CloudCreds): Promise<BillingSummary> {
@@ -149,7 +161,7 @@ export function billingPlanLabel(planKey?: string | null): string {
 
 /** The newest server-issued reward earned from completed paid activity. */
 export function latestActivityReward(billing: BillingSummary | null): ActivityReward | null {
-  const entry = effectiveBilling(billing)?.ledger.find(
+  const entry = (effectiveBilling(billing)?.ledger ?? []).find(
     (value) => value.reason === "activity_reward" && value.direction === 1 && value.amount > 0,
   );
   if (!entry) return null;
@@ -174,13 +186,16 @@ export function creditState(billing: BillingSummary | null): CreditState {
   if (!c) return "ok";
   if (access === "unlimited" || c.is_unlimited) return "ok";
   if (access === "usage_limited" || c.available_credits <= 0) return "out";
-  const perDollar = Math.max(1, billing.credits_per_dollar);
+  const perDollar = billing.credits_per_dollar;
+  if (!perDollar || !Number.isFinite(perDollar)) return "ok";
   return c.available_credits < perDollar * LOW_CREDIT_DOLLARS ? "low" : "ok";
 }
 
 /** Approximate remaining dollar value of the credit balance, for display. */
 export function creditDollars(billing: BillingSummary | null): number {
   if (!billing) return 0;
+  const perDollar = billing.credits_per_dollar;
+  if (!perDollar || !Number.isFinite(perDollar)) return 0;
   const credits = effectiveBalance(billing)?.available_credits ?? 0;
-  return credits / Math.max(1, billing.credits_per_dollar);
+  return credits / perDollar;
 }

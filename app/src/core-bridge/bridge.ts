@@ -58,6 +58,12 @@ export interface ProjectContext {
   activity: ProjectActivity;
 }
 
+export interface ProjectBranch {
+  name: string;
+  /** Absolute checkout root when this branch is already attached to a worktree. */
+  checkoutPath?: string | null;
+}
+
 export interface ProjectActivity {
   changedFiles: number;
   untrackedFiles: number;
@@ -155,8 +161,8 @@ export interface CoreBridge {
   ): Promise<ProjectContext | null>;
   /** Open a path in the OS default app, or reveal it in the file manager. */
   openPath?(path: string, reveal?: boolean): Promise<void>;
-  /** Existing local branches that the selected checkout can switch to. */
-  listProjectBranches?(projectPath: string): Promise<string[]>;
+  /** Existing local branches and the checkout that currently owns each one. */
+  listProjectBranches?(projectPath: string): Promise<ProjectBranch[]>;
   /** Switch a clean selected checkout to an existing local branch. */
   switchProjectBranch?(projectPath: string, branch: string): Promise<void>;
   /** Create a named sibling worktree from the latest advertised origin/main. */

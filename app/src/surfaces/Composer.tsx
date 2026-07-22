@@ -28,6 +28,7 @@ import {
   type ComposerSuggestion,
 } from "../lib/composerInput";
 import {
+  expandPromptSlashCommand,
   goalCommandObjective,
   slashCommands,
   type SlashCommand,
@@ -530,7 +531,7 @@ export function Composer() {
       await pickProjectFolder();
       if (useSessionStore.getState().startBlockedReason()) return;
     }
-    const t = expandPendingPastes(value, pendingPastes);
+    const t = expandPromptSlashCommand(expandPendingPastes(value, pendingPastes));
     const goalObjective = goalCommandObjective(t);
     if (goalObjective === "") {
       setValue("/goal ");

@@ -111,7 +111,7 @@ fn parse_skill(text: &str, path: &Path, scope: &'static str) -> Option<MigratedS
         description: fm_field(frontmatter, "description").unwrap_or_default(),
         path: path.to_string_lossy().to_string(),
         scope,
-        source: MigrationSource::Codex,
+        source: MigrationSource::Openai,
     })
 }
 
@@ -169,7 +169,7 @@ pub(super) async fn discover_instructions(
         Some(_) => vec![MigratedInstruction {
             path: path.to_string_lossy().to_string(),
             scope: "project",
-            source: MigrationSource::Codex,
+            source: MigrationSource::Openai,
         }],
         None => Vec::new(),
     }

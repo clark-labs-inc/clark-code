@@ -10,7 +10,7 @@ function pickedFiles(input: HTMLInputElement): File[] {
   return Array.from(input.files ?? []);
 }
 
-/** Codex-style Add menu. Files and folders share the same attachment pipeline,
+/** Compact Add menu. Files and folders share the same attachment pipeline,
  * so every source gets the existing size limits, image processing, chips, and
  * provider upload behavior. */
 export function ComposerAttachmentMenu({

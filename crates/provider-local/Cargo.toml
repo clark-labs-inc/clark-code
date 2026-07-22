@@ -22,6 +22,7 @@ clark-install-context = { path = "../install-context" }
 libreoffice-pure = "0.5.3"
 serde.workspace = true
 serde_json.workspace = true
+serde_yaml = "0.9"
 toml = "0.8"
 thiserror.workspace = true
 futures.workspace = true
@@ -44,7 +45,7 @@ grep-searcher = "0.1"
 grep-regex = "0.1"
 base64 = "0.22"
 # Unified diffs for `edit_file`/`write_file` results — the model sees what
-# changed and the UI renders a red/green diff (Codex/Claude-Code style).
+# changed and the UI renders a red/green diff.
 similar = "2"
 # HTML->Markdown conversion for the local `web_fetch` tool.
 htmd = "0.1"

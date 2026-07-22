@@ -1,7 +1,7 @@
 //! Plan Mode tools: `enter_plan_mode` (the Claude-Code-`EnterPlanMode` analog —
 //! the agent suggests planning first, the user approves), `propose_plan` (the
-//! Claude-Code-`ExitPlanMode`/Codex-`<proposed_plan>` analog — signals "done
-//! researching, please approve") and `update_plan` (the Codex `update_plan`
+//! `ExitPlanMode`/`<proposed_plan>` analog — signals "done
+//! researching, please approve") and `update_plan` (the structured plan
 //! checklist analog — an always-available, advisory TODO tracker, independent
 //! of Plan Mode).
 

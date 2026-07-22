@@ -61,7 +61,7 @@ pub(crate) fn model_supports_images(model: &str) -> bool {
 
 /// Effective auto-compaction threshold for `model`: the flat default, lowered
 /// (never raised — 300k on a 1M window is a deliberate cost choice) to 90% of
-/// the model's known context window when that is smaller. Codex's rule, applied
+/// the model's known context window when that is smaller. Applied
 /// defensively: a model whose whole window is under the flat default must
 /// compact before it overflows, not after.
 pub(crate) fn default_auto_compact_limit(model: &str) -> usize {

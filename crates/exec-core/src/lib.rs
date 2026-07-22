@@ -2,7 +2,7 @@
 //! against the **local** machine or a **remote** host (over the exec-server),
 //! without the tools or engine knowing which.
 //!
-//! Mirrors codex's split of `ExecBackend` (processes) + `ExecutorFileSystem`
+//! Separates `ExecBackend` (processes) from `ExecutorFileSystem`
 //! (files) into one trait here. Every coding tool (`read_file`, `write_file`,
 //! `edit_file`, `list_dir`, `glob`, `grep`, `bash`) performs its I/O through an
 //! [`Executor`], instead of touching `std::fs` / `tokio::process` directly.
@@ -45,7 +45,7 @@ pub const NONINTERACTIVE_ENV: &[(&str, &str)] = &[
 
 /// The command interpreter selected for locally executed scripts.
 ///
-/// Windows follows Codex's preference for PowerShell, which is available on
+/// Windows prefers PowerShell, which is available on
 /// supported Windows versions. CMD remains a profile-free fallback when a
 /// PowerShell executable cannot be resolved.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

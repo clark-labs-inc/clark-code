@@ -60,14 +60,14 @@ does not mix public and privileged tools.
 The Linux bundle carries the exact digest-pinned bubblewrap source archive with
 its LGPL notices. Windows helpers are built from Clark's crates, installed
 under the private resource tree, and covered by a versioned runner/setup
-protocol rather than Codex's identities or state.
+protocol rather than another product's identities or state.
 
 The Windows backend accepts only the product's host-wide-read policy shape. It
 rejects narrowed `read_roots`, `deny_read`, or enabled child networking at the
 protocol boundary instead of claiming to enforce those unsupported shapes.
 Actual readability still follows the dedicated offline account's Windows ACLs:
 the current setup transaction grants the selected write roots but does not yet
-install Codex's broader user-profile read/execute ACL set. Consequently,
+install broader user-profile read/execute ACLs. Consequently,
 dependencies stored below a private primary-user profile (for example a private
 Cargo cache) are not yet guaranteed readable on Windows. The backend reports
 this limitation here rather than treating policy-shape validation as proof of a

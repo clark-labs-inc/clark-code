@@ -9,6 +9,7 @@ import type {
   CloudTrajectoryConfig,
   CoreBridge,
   ConnectConfig,
+  ProjectBranch,
   ProjectContext,
   LocalSandboxStatus,
   SessionOptions,
@@ -142,8 +143,8 @@ export class TauriBridge implements CoreBridge {
     return invoke("open_path", { path, reveal });
   }
 
-  listProjectBranches(projectPath: string): Promise<string[]> {
-    return invoke<string[]>("project_branch_list", { projectPath });
+  listProjectBranches(projectPath: string): Promise<ProjectBranch[]> {
+    return invoke<ProjectBranch[]>("project_branch_list", { projectPath });
   }
 
   switchProjectBranch(projectPath: string, branch: string): Promise<void> {

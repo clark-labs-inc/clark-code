@@ -7,7 +7,7 @@
 
 ## Full-view comparison evidence
 
-The source and implementation were opened together in one comparison pass. Both expose the same primary hierarchy: user request, a quiet `Worked for 43s` disclosure, terminal answer, compact file-change receipt, blocked-goal receipt, and composer. Clark retains its existing desktop side rail, typography, warm-graphite tokens, and composer instead of copying Codex chrome.
+The source and implementation were opened together in one comparison pass. Both expose the same primary hierarchy: user request, a quiet `Worked for 43s` disclosure, terminal answer, compact file-change receipt, blocked-goal receipt, and composer. Clark retains its existing desktop side rail, typography, warm-graphite tokens, and composer instead of copying the reference chrome.
 
 ## Required fidelity surfaces
 
@@ -31,7 +31,7 @@ The full-view comparison kept all important type, disclosure, and chip details r
 
 No actionable P0, P1, or P2 findings remain.
 
-The retained desktop side rail and Clark-specific composer are intentional product constraints, not fidelity defects: this work ports the interaction semantics into Clark Desktop rather than cloning the Codex mobile shell.
+The retained desktop side rail and Clark-specific composer are intentional product constraints, not fidelity defects: this work ports the interaction semantics into Clark Desktop rather than cloning the reference mobile shell.
 
 ## Comparison history
 
@@ -60,8 +60,8 @@ final result: passed
 
 No actionable P0, P1, or P2 differences remain for the requested chat-column and composer-width change.
 
-- Fonts and typography: Clark keeps its existing DM Sans, Newsreader, and JetBrains Mono system. Text remains readable at Compact, Default, and Large. Matching Codex typography was not part of the requested change.
-- Spacing and layout rhythm: the reference Codex conversation rail occupies approximately 50% of its app window. Clark now uses an 800px rail at the 1600px comparison viewport, with the conversation, composer, context bar, queued messages, goal rail, and start screen sharing the same centered edge. The narrow viewport fallback remains fluid because the rail has `width: 100%` within existing page padding.
+- Fonts and typography: Clark keeps its existing DM Sans, Newsreader, and JetBrains Mono system. Text remains readable at Compact, Default, and Large. Matching the reference typography was not part of the requested change.
+- Spacing and layout rhythm: the reference conversation rail occupies approximately 50% of its app window. Clark now uses an 800px rail at the 1600px comparison viewport, with the conversation, composer, context bar, queued messages, goal rail, and start screen sharing the same centered edge. The narrow viewport fallback remains fluid because the rail has `width: 100%` within existing page padding.
 - Colors and visual tokens: Clark's existing warm light palette and dark-mode tokens are unchanged. The comparison uses light mode only to make the reference proportions easier to judge.
 - Image quality and asset fidelity: this change introduces no images, illustrations, logos, or replacement assets.
 - Copy and content: existing Clark copy and the mock conversation remain unchanged. The reference and implementation contain different conversation text, so copy was excluded from fidelity scoring.
@@ -77,7 +77,7 @@ No actionable P0, P1, or P2 differences remain for the requested chat-column and
 
 ## Comparison history
 
-1. Initial pass used a 48rem Default rail (768px / 48% of the viewport). The full comparison showed it remained about 5% narrower than the Codex reference.
+1. Initial pass used a 48rem Default rail (768px / 48% of the viewport). The full comparison showed it remained about 5% narrower than the reference.
 2. The base rail was increased to 50rem while keeping the existing 90% / 100% / 110% text-size scaling.
 3. The final full-view and focused comparisons show the Default composer and conversation at the same approximate 50% window proportion as the reference, with aligned supporting surfaces.
 

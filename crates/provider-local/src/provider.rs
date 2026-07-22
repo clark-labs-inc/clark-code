@@ -119,6 +119,9 @@ pub struct LocalAgentProvider {
     /// Stable identity for the active project, when private project knowledge
     /// is enabled and the selected root is a Git repository.
     repository_fingerprint: Option<String>,
+    /// Session catalog for progressive skill disclosure and explicit `$skill`
+    /// injection. Rebuilt for each project root in `new_session`.
+    skills: Arc<crate::skills::SkillCatalog>,
     /// Named approval preset selected for this session. This is stored
     /// separately from collaboration mode so Plan can temporarily enforce
     /// read-only execution, then restore the selected sandbox when it exits.
@@ -445,6 +448,31 @@ impl Provider for LocalAgentProvider {
         } else {
             crate::project_settings::load(self.executor.as_ref(), sandbox.root()).await
         };
+
+        let mut skills = if self.isolation.disposable_writer() {
+            crate::skills::SkillCatalog::default()
+        } else {
+            crate::skills::discover_catalog(self.executor.as_ref(), sandbox.root()).await
+        };
+        let available_tools = self
+            .registry
+            .as_ref()
+            .map(|registry| registry.tool_names())
+            .unwrap_or_default();
+        skills.resolve_capabilities(&available_tools, &project.skills.disabled);
+        let skills = Arc::new(skills);
+        let registry = self
+            .registry
+            .as_mut()
+            .and_then(Arc::get_mut)
+            .ok_or_else(|| Error::Other("tool registry is already shared".to_string()))?;
+        if skills.enabled().next().is_some() {
+            registry.enable_skills(skills.clone());
+        } else {
+            registry.disable_skills();
+        }
+        self.skills = skills;
+
         let commit_attribution = project
             .include_git_instructions()
             .then(|| project.commit_attribution());
@@ -457,17 +485,8 @@ impl Provider for LocalAgentProvider {
         if let Some(docs) = sandbox.docs_root() {
             prompt.push_str(&crate::workspace::prompt_section(docs));
         }
-        // Surface compatible Codex and Claude skills through the session
-        // executor — local disk or the remote host over the SSH tunnel.
-        if !self.isolation.disposable_writer() {
-            if let Some(skills) = crate::external_import::skills_prompt_section(
-                self.executor.as_ref(),
-                sandbox.root(),
-            )
-            .await
-            {
-                prompt.push_str(&skills);
-            }
+        if let Some(catalog) = crate::skills::render_catalog(&self.skills) {
+            prompt.push_str(&catalog);
         }
         // Durable memory, when enabled: list the project scope (through the
         // session executor — local or remote) and the global scope (always
@@ -629,6 +648,14 @@ impl Provider for LocalAgentProvider {
                 context_sections.push(instructions.render());
             }
         }
+        context_sections.extend(
+            crate::skills::explicit_skill_injections(
+                self.executor.as_ref(),
+                &self.skills,
+                &user_request,
+            )
+            .await,
+        );
         context_sections.push(environment_context(&sandbox, config.remote.is_some()));
         if !parts.text_attachment_context.is_empty() {
             context_sections.push(parts.text_attachment_context);

@@ -103,7 +103,7 @@ async fn inspect_activity(
         ACTIVITY_TIMEOUT,
         &cancel,
     );
-    let agent_command = codex_activity_command(worktree_root, branch, detached);
+    let agent_command = external_agent_activity_command(worktree_root, branch, detached);
     let agents = executor.exec(&agent_command, worktree_root, ACTIVITY_TIMEOUT, &cancel);
     let (tree, agents) = tokio::join!(tree, agents);
 
@@ -115,7 +115,7 @@ async fn inspect_activity(
     let external_agents = agents
         .ok()
         .filter(|output| output.code == Some(0))
-        .map(|output| parse_codex_activity(&String::from_utf8_lossy(&output.stdout)))
+        .map(|output| parse_external_agent_activity(&String::from_utf8_lossy(&output.stdout)))
         .unwrap_or_default();
 
     ProjectActivity {
@@ -144,11 +144,11 @@ fn parse_git_status(status: &str) -> (u32, u32, u32) {
     (changed, untracked, conflicted)
 }
 
-/// Codex's local thread index is an intentionally best-effort signal: when the
-/// CLI/database is absent (including many remote hosts), the command prints no
+/// The external local thread index is an intentionally best-effort signal: when
+/// its database is absent (including many remote hosts), the command prints no
 /// rows and Clark simply reports no externally observed agents. Text fields
 /// are hex-encoded so task titles containing tabs/newlines stay parseable.
-fn codex_activity_command(worktree_root: &Path, branch: &str, detached: bool) -> String {
+fn external_agent_activity_command(worktree_root: &Path, branch: &str, detached: bool) -> String {
     let root = sql_hex(&worktree_root.to_string_lossy());
     let branch_filter = if detached {
         String::new()
@@ -181,7 +181,7 @@ fn sql_hex(value: &str) -> String {
         .collect()
 }
 
-fn parse_codex_activity(stdout: &str) -> Vec<ExternalAgentActivity> {
+fn parse_external_agent_activity(stdout: &str) -> Vec<ExternalAgentActivity> {
     stdout
         .lines()
         .filter_map(|line| {
@@ -224,7 +224,9 @@ fn unix_time_ms() -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{decode_hex, inspect_project_context, parse_codex_activity, parse_git_status};
+    use super::{
+        decode_hex, inspect_project_context, parse_external_agent_activity, parse_git_status,
+    };
     use provider_local::LocalExecutor;
     use std::{path::Path, process::Command};
 
@@ -293,9 +295,10 @@ mod tests {
     }
 
     #[test]
-    fn parses_hex_encoded_codex_rows() {
-        let rows =
-            parse_codex_activity("7468726561642D31\t46697820636F6D706F736572\t123\t416461\n");
+    fn parses_hex_encoded_external_agent_rows() {
+        let rows = parse_external_agent_activity(
+            "7468726561642D31\t46697820636F6D706F736572\t123\t416461\n",
+        );
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].id, "thread-1");
         assert_eq!(rows[0].title, "Fix composer");

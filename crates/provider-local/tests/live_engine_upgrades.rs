@@ -1,4 +1,4 @@
-//! Live end-to-end exercise of the Codex-inspired engine upgrades — mid-run
+//! Live end-to-end exercise of the local engine upgrades — mid-run
 //! steering, usage-driven/forced compaction, parallel read batches, reasoning
 //! replay on the wire, and tool-output truncation — against the REAL
 //! clark-code model in a throwaway sandbox git repo.

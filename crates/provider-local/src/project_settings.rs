@@ -2,8 +2,8 @@
 //! `new_session` through the session [`Executor`] (so it works for remote/SSH
 //! projects too), and layered under the global, UI-driven config
 //! ([`crate::config::LocalConfig`]) rather than replacing it: permission
-//! arrays union, while `check_command`, `hooks`, and commit attribution are
-//! project-scoped values.
+//! arrays union, while `check_command`, `hooks`, skill disables, and commit
+//! attribution are project-scoped values.
 //!
 //! This is intentionally a single flat file, not a directory of fragments —
 //! see `.claude/settings.json` for the convention this mirrors.
@@ -59,6 +59,14 @@ pub struct AttributionConfig {
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
+pub struct SkillsConfig {
+    /// Exact catalog names to disable. Unqualified names disable ordinary
+    /// project/user skills; plugin and bundled skills use their qualified name.
+    #[serde(default)]
+    pub disabled: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
 pub struct ProjectSettings {
     #[serde(default)]
     pub hooks: HooksConfig,
@@ -68,6 +76,8 @@ pub struct ProjectSettings {
     pub check_command: Option<String>,
     #[serde(default)]
     pub attribution: Option<AttributionConfig>,
+    #[serde(default)]
+    pub skills: SkillsConfig,
     #[serde(
         default,
         rename = "includeCoAuthoredBy",
@@ -147,6 +157,7 @@ mod tests {
             "attribution": {
                 "commit": "Co-Authored-By: Custom Agent <agent@example.com>"
             },
+            "skills": { "disabled": ["github:yeet"] },
             "includeGitInstructions": false
         });
         let settings: ProjectSettings = serde_json::from_value(json).unwrap();
@@ -156,6 +167,7 @@ mod tests {
         assert_eq!(settings.permissions.allow, vec!["cargo test"]);
         assert_eq!(settings.permissions.deny, vec!["rm -rf /"]);
         assert_eq!(settings.check_command.as_deref(), Some("cargo check"));
+        assert_eq!(settings.skills.disabled, vec!["github:yeet"]);
         assert_eq!(
             settings.commit_attribution(),
             "Co-Authored-By: Custom Agent <agent@example.com>"

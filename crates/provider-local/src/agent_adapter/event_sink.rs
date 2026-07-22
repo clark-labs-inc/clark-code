@@ -165,7 +165,7 @@ impl ca::EventSink for DesktopEventSink {
         match event {
             // The in-loop compactor rewrote the model-visible transcript.
             // Surface it — a silent context rewrite reads as the agent
-            // "forgetting" for no reason (Codex shows the same warning).
+            // "forgetting" for no reason.
             ca::AgentEvent::ContextTransformApplied {
                 plugin,
                 before,

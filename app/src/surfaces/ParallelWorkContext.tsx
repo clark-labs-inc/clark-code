@@ -110,9 +110,9 @@ export function ParallelWorkContext({
             ))}
             {external.map((agent) => (
               <AgentRow
-                key={`codex:${agent.id}`}
-                label={agent.agentNickname || "Codex"}
-                title={agent.title || "Untitled Codex task"}
+                key={`external:${agent.id}`}
+                label="External agent"
+                title={agent.title || "Untitled external task"}
                 status={activityAge(agent.updatedAtMs)}
               />
             ))}
@@ -137,7 +137,7 @@ export function ParallelWorkContext({
                   : workingFiles > 0
                     ? `${workingFiles} working-tree file${workingFiles === 1 ? "" : "s"}. `
                     : "Working tree clean. "}
-                Codex presence is inferred from tasks updated in the last five minutes.
+                External activity is inferred from tasks updated in the last five minutes.
               </span>
             </p>
           </div>

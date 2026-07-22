@@ -52,7 +52,10 @@ describe("MockBridge", () => {
   it("switches the browser preview between known local branches", async () => {
     const bridge = new MockBridge();
 
-    expect(await bridge.listProjectBranches()).toContain("feature/checkout-context");
+    expect(await bridge.listProjectBranches("/tmp/clark-desktop")).toContainEqual({
+      name: "feature/checkout-context",
+      checkoutPath: null,
+    });
     await bridge.switchProjectBranch("/tmp/clark-desktop", "feature/checkout-context");
 
     expect((await bridge.projectContext("/tmp/clark-desktop"))?.branch).toBe(

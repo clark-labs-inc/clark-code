@@ -45,6 +45,7 @@ pub mod mobile;
 pub mod organization_knowledge;
 pub mod plan;
 pub mod shell;
+pub mod skill;
 pub mod web_fetch;
 
 /// Tracks which files the model has read this session, and their modification
@@ -480,6 +481,25 @@ impl ToolRegistry {
         self.tools.push(tool);
     }
 
+    /// Install the session's progressive-disclosure skill reader. Replacing a
+    /// prior reader keeps repeated `new_session` calls bound to the new root.
+    pub(crate) fn enable_skills(&mut self, catalog: Arc<crate::skills::SkillCatalog>) {
+        self.disable_skills();
+        self.register_eager(Arc::new(skill::ReadSkill::new(catalog)));
+    }
+
+    pub(crate) fn disable_skills(&mut self) {
+        self.tools.retain(|tool| tool.name() != "read_skill");
+        self.deferred_catalog.remove_name("read_skill");
+    }
+
+    pub(crate) fn tool_names(&self) -> std::collections::HashSet<String> {
+        self.tools
+            .iter()
+            .map(|tool| tool.name().to_string())
+            .collect()
+    }
+
     /// Register the opt-in, experimental `browser` tool (clark-browser,
     /// downloaded on first use). Called separately from `new()`, gated by the
     /// user's Settings toggle (off by default) — the tool isn't even
@@ -679,6 +699,10 @@ mod tests {
             );
         }
         let reg = ToolRegistry::new(None, Some(memory::MemoryConfig::default()));
+        let model_visible_schemas = serde_json::to_string(&reg.schemas())
+            .unwrap()
+            .to_ascii_lowercase();
+        assert!(!model_visible_schemas.contains("codex"));
         // Locate before payload: the model must commit to where/what it is
         // replacing before it generates the replacement.
         wire_order(&reg, "edit_file", &["path", "old_string", "new_string"]);
