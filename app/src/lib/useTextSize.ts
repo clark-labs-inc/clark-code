@@ -1,47 +1,45 @@
 import { useCallback, useLayoutEffect, useState } from "react";
 
-export const TEXT_SIZES = ["compact", "default", "large"] as const;
+/** Familiar browser-style stops: precise around the default, faster at the
+ * extremes so repeated shortcuts do not become tedious. */
+export const TEXT_SIZES = [75, 80, 90, 100, 110, 125, 150, 175, 200] as const;
 export type TextSize = (typeof TEXT_SIZES)[number];
 
-export const TEXT_SIZE_LABELS: Record<TextSize, string> = {
-  compact: "Compact",
-  default: "Default",
-  large: "Large",
-};
-
-/** Browser-style labels for the three semantic text-size presets. */
-export const TEXT_SIZE_PERCENTAGES: Record<TextSize, number> = {
+const LEGACY_TEXT_SIZES: Record<string, TextSize> = {
   compact: 90,
   default: 100,
   large: 110,
 };
 
-export const TERMINAL_FONT_SIZES: Record<TextSize, number> = {
-  compact: 12.5,
-  default: 14,
-  large: 16,
-};
-
 const STORAGE_KEY = "clark.text-size";
+const DEFAULT_TEXT_SIZE: TextSize = 100;
 
-export function isTextSize(value: string | null): value is TextSize {
+export function isTextSize(value: number): value is TextSize {
   return TEXT_SIZES.some((size) => size === value);
+}
+
+export function parseTextSize(value: string | null): TextSize | null {
+  if (value === null) return null;
+  const legacy = LEGACY_TEXT_SIZES[value];
+  if (legacy !== undefined) return legacy;
+  const numeric = Number(value);
+  return isTextSize(numeric) ? numeric : null;
 }
 
 export function loadTextSize(storage?: Pick<Storage, "getItem">): TextSize {
   try {
     const source = storage ?? (typeof localStorage === "undefined" ? undefined : localStorage);
     const value = source?.getItem(STORAGE_KEY) ?? null;
-    return isTextSize(value) ? value : "default";
+    return parseTextSize(value) ?? DEFAULT_TEXT_SIZE;
   } catch {
-    return "default";
+    return DEFAULT_TEXT_SIZE;
   }
 }
 
 export function saveTextSize(size: TextSize, storage?: Pick<Storage, "setItem">): void {
   try {
     const target = storage ?? (typeof localStorage === "undefined" ? undefined : localStorage);
-    target?.setItem(STORAGE_KEY, size);
+    target?.setItem(STORAGE_KEY, String(size));
   } catch {
     /* localStorage can be unavailable in a locked-down webview. */
   }
@@ -54,9 +52,13 @@ export function stepTextSize(size: TextSize, direction: -1 | 1): TextSize {
 }
 
 export function documentTextSize(): TextSize {
-  if (typeof document === "undefined") return "default";
+  if (typeof document === "undefined") return DEFAULT_TEXT_SIZE;
   const value = document.documentElement.dataset.textSize ?? null;
-  return isTextSize(value) ? value : "default";
+  return parseTextSize(value) ?? DEFAULT_TEXT_SIZE;
+}
+
+export function terminalFontSize(size: TextSize): number {
+  return (14 * size) / 100;
 }
 
 /** Persisted application text scale. The root data attribute drives semantic
@@ -66,7 +68,8 @@ export function useTextSize() {
   const [textSize, setTextSizeState] = useState<TextSize>(loadTextSize);
 
   useLayoutEffect(() => {
-    document.documentElement.dataset.textSize = textSize;
+    document.documentElement.dataset.textSize = String(textSize);
+    document.documentElement.style.setProperty("--text-size-scale", String(textSize / 100));
     saveTextSize(textSize);
   }, [textSize]);
 
@@ -79,7 +82,7 @@ export function useTextSize() {
     () => setTextSizeState((size) => stepTextSize(size, -1)),
     [],
   );
-  const resetTextSize = useCallback(() => setTextSizeState("default"), []);
+  const resetTextSize = useCallback(() => setTextSizeState(DEFAULT_TEXT_SIZE), []);
 
   return { textSize, setTextSize, increaseTextSize, decreaseTextSize, resetTextSize };
 }

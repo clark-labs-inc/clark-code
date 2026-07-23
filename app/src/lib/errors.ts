@@ -21,7 +21,7 @@ export function humanizeRunFailure(
     case "context_overflow":
       return "This conversation is too long for the model’s context window. Start a new session.";
     case "insufficient_credits":
-      return "You’re out of Clark credits.";
+      return "Clark Code’s usage limit has been reached.";
     case "tool_fatal":
       return "A coding action failed unexpectedly. Review the last step and try again.";
     case "local_state":
@@ -56,7 +56,7 @@ export function humanizeError(raw?: string | null): string {
 
   // Out of credits (normally handled by the upgrade prompt, but just in case).
   if (lower.includes("insufficient_credits") || lower.includes("out of credit")) {
-    return "You’re out of Clark credits.";
+    return "Clark Code’s usage limit has been reached.";
   }
 
   // Context window exceeded.

@@ -19,14 +19,29 @@ const appUrl = "http://localhost:1420";
 const args = new Set(process.argv.slice(2));
 const liveOnly = args.has("--live-only");
 const includeLive = liveOnly || args.has("--live");
+const smokeOnly = args.has("--smoke");
 const selectedCase = process.argv.slice(2).find((value) => value.startsWith("--case="));
 const requestedMask = selectedCase ? Number(selectedCase.slice("--case=".length)) : null;
+const selectedOutput = process.argv.slice(2).find((value) => value.startsWith("--out="));
+const requestedOutput = selectedOutput ? selectedOutput.slice("--out=".length) : null;
 
 if (requestedMask !== null && (!Number.isInteger(requestedMask) || requestedMask < 0 || requestedMask >= 2 ** contract.faults.length)) {
   throw new Error(`--case must be an integer from 0 to ${(2 ** contract.faults.length) - 1}`);
 }
+if (smokeOnly && requestedMask !== null) {
+  throw new Error("--smoke and --case are mutually exclusive");
+}
+if (requestedOutput === "") {
+  throw new Error("--out requires a directory");
+}
 
-const artifactDir = await mkdtemp(path.join(tmpdir(), "clark-desktop-resilience-"));
+const artifactDir = requestedOutput
+  ? path.resolve(process.cwd(), requestedOutput)
+  : await mkdtemp(path.join(tmpdir(), "clark-desktop-resilience-"));
+if (requestedOutput) {
+  await mkdir(path.dirname(artifactDir), { recursive: true });
+  await mkdir(artifactDir);
+}
 await mkdir(path.join(artifactDir, "simulated"), { recursive: true });
 await mkdir(path.join(artifactDir, "live"), { recursive: true });
 
@@ -381,6 +396,7 @@ async function runLiveControl() {
 const report = {
   contract,
   artifactDir,
+  selection: liveOnly ? "live_only" : requestedMask !== null ? "single_case" : smokeOnly ? "smoke" : "full",
   startedAt: new Date().toISOString(),
   simulated: [],
   live: null,
@@ -390,9 +406,13 @@ try {
   await ensureVite();
   browser = await launch();
   if (!liveOnly) {
-    const masks = requestedMask === null
-      ? Array.from({ length: 2 ** contract.faults.length }, (_, mask) => mask)
-      : [requestedMask];
+    const allFaultsMask = (2 ** contract.faults.length) - 1;
+    const smokeMasks = [0, ...contract.faults.map((_, index) => 1 << index), allFaultsMask];
+    const masks = requestedMask !== null
+      ? [requestedMask]
+      : smokeOnly
+        ? [...new Set(smokeMasks)]
+        : Array.from({ length: 2 ** contract.faults.length }, (_, mask) => mask);
     for (const mask of masks) {
       const result = await runSimulatedCase(mask);
       report.simulated.push(result);

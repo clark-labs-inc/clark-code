@@ -2,6 +2,9 @@
 
 mod error;
 mod recovery;
+mod steering;
+
+pub(crate) use steering::EngineSteering;
 
 use std::sync::Arc;
 
@@ -22,86 +25,13 @@ use crate::root_execution::{RootExecutionConfig, RootExecutionTrace};
 use crate::tools::{ToolCtx, ToolRegistry};
 use error::map_loop_error_with_completion_state;
 
-/// Headroom for graceful wrap-up before the hard iteration cap.
+/// Headroom for graceful wrap-up when an explicit iteration cap is configured.
 const GRACE_ITERATIONS: usize = 40;
-
-/// Hard cap on engine-launched goal-continuation turns within one run — the
-/// circuit breaker against a goal that never converges. Each continuation is
-/// itself bounded by `max_iterations` + the LoopBreaker, so this bounds the
-/// outer autonomy loop, not the work inside a turn.
-const MAX_GOAL_CONTINUATIONS: u32 = 24;
 
 /// What the goal loop does after a cleanly completed iteration.
 enum GoalStep {
     /// Launch another continuation turn with this prompt text.
     Continue { text: String, note: String },
-    /// Stop the run and surface this note (cap reached).
-    Stop(String),
-}
-
-/// Steering queue shared between the provider (`Provider::steer` pushes) and
-/// the active run (clark-agent drains it between tool batches). A queue —
-/// not a raw channel — because leftovers must be recoverable: when the run
-/// ends before injecting a message (a terminal batch suppresses steering),
-/// the engine folds the remainder into the session transcript so the next
-/// turn still sees what the user said.
-pub(crate) struct EngineSteering {
-    queue: std::sync::Mutex<std::collections::VecDeque<clark_agent::AgentMessage>>,
-    execution: Option<RootExecutionTrace>,
-}
-
-impl Default for EngineSteering {
-    fn default() -> Self {
-        Self {
-            queue: std::sync::Mutex::new(std::collections::VecDeque::new()),
-            execution: None,
-        }
-    }
-}
-
-impl EngineSteering {
-    fn with_execution(execution: RootExecutionTrace) -> Self {
-        Self {
-            execution: Some(execution),
-            ..Self::default()
-        }
-    }
-
-    pub fn push_user_text(&self, text: String) {
-        if let Some(execution) = &self.execution {
-            execution.steering();
-        }
-        self.queue.lock().expect("steering queue lock").push_back(
-            clark_agent::AgentMessage::User {
-                content: clark_agent::UserContent::Text(text),
-                timestamp: None,
-            },
-        );
-    }
-
-    fn drain_all(&self) -> Vec<clark_agent::AgentMessage> {
-        self.queue
-            .lock()
-            .expect("steering queue lock")
-            .drain(..)
-            .collect()
-    }
-}
-
-impl clark_agent::Plugin for EngineSteering {
-    fn name(&self) -> &'static str {
-        "desktop_steering"
-    }
-    fn capabilities(&self) -> clark_agent::PluginCapabilities {
-        clark_agent::PluginCapabilities::steering()
-    }
-}
-
-#[async_trait::async_trait]
-impl clark_agent::SteeringSource for EngineSteering {
-    async fn next_steering_messages(&self) -> Vec<clark_agent::AgentMessage> {
-        self.drain_all()
-    }
 }
 
 /// Everything `run_turn` needs, bundled to keep the spawned task signature sane.
@@ -112,7 +42,7 @@ pub(crate) struct TurnContext {
     pub session: Arc<Mutex<SessionState>>,
     pub control: Arc<Mutex<RunControl>>,
     pub session_id: SessionId,
-    pub max_iterations: u32,
+    pub max_iterations: Option<u32>,
     pub compaction: CompactionConfig,
     pub model: String,
     pub temperature: Option<f32>,
@@ -170,9 +100,17 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
     // An explicit user turn resumes a previously blocked goal. Budget-limited
     // and complete goals remain terminal because only the user can grant more
     // runway or create the next goal.
-    let starting_goal = {
+    let (starting_goal, completed_goal_id) = {
         let mut session = tc.session.lock().await;
-        session.goal.as_mut().map(|goal| {
+        let completed = session
+            .goal
+            .as_ref()
+            .filter(|goal| goal.status == GoalStatus::Complete)
+            .map(|goal| goal.id.clone());
+        let state = session.goal.as_mut().and_then(|goal| {
+            if completed.is_some() {
+                return None;
+            }
             if goal.status == GoalStatus::Blocked {
                 goal.status = GoalStatus::Active;
                 goal.blocker_reason = None;
@@ -180,8 +118,13 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
                 goal.last_blocker_continuation = None;
             }
             goal.touch();
-            goal.state(Some(&run))
-        })
+            Some(goal.state(Some(&run)))
+        });
+        (state, completed)
+    };
+    let is_completed_before_run = |goal: &crate::loop_state::SessionGoal| {
+        goal.status == GoalStatus::Complete
+            && completed_goal_id.as_deref() == Some(goal.id.as_str())
     };
     if let Some(goal) = starting_goal {
         let _ = tx
@@ -276,13 +219,20 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
     let completed_transcript = sink.completed_transcript();
 
     // The stream adapter accumulates token/cost usage across the run's model
-    // calls; the handle folds those totals into the run outcome at finish.
+    // calls; it publishes cumulative usage after each call and the handle folds
+    // the same authoritative totals into the run outcome at finish.
     let incidents = crate::incidents::ProviderIncidentTracker::new(run.clone(), tx.clone());
-    let stream = ClarkAgentStream::new(tc.llm.clone(), incidents.clone());
+    let context_limit = crate::compaction::limit_of(&tc.compaction);
+    let stream = ClarkAgentStream::new(
+        tc.llm.clone(),
+        incidents.clone(),
+        tx.clone(),
+        run.clone(),
+        context_limit,
+    );
     let usage = stream.usage();
-    // Breaks stuck same-action/same-result loops early (nudge → hard block)
-    // so the raised iteration cap can't be burned on a spinning agent. One
-    // instance, shared across the before- and after-tool-call hook lists.
+    // Breaks stuck same-action/same-result loops early (nudge → hard block).
+    // One instance is shared across the before- and after-tool-call hook lists.
     let loop_breaker = Arc::new(LoopBreaker::new());
     // Parallel batches: read-only tools in one assistant turn run concurrently,
     // as expected by the local model. Mutating tools set `requires_exclusive_sandbox`, which
@@ -297,7 +247,6 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
         .tools(tools)
         .event_sink(sink)
         .default_execution_mode(clark_agent::ExecutionMode::Parallel)
-        .max_iterations(tc.max_iterations as usize)
         .grace_iterations(GRACE_ITERATIONS)
         .before_tool_call_arc(loop_breaker.clone())
         .after_tool_call_arc(loop_breaker.clone())
@@ -314,6 +263,9 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
         // (clark-agent ≥0.2.2), any number of times at any iteration —
         // replacing the old engine-level once-per-run restart.
         .overflow_recovery(compactor.clone());
+    if let Some(max_iterations) = tc.max_iterations {
+        builder = builder.max_iterations(max_iterations as usize);
+    }
     if let Some(temperature) = tc.temperature {
         builder = builder.temperature(temperature);
     }
@@ -446,8 +398,10 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
                     .unwrap_or(usage_before);
                 let (next, goal_state) = {
                     let mut session = tc.session.lock().await;
+                    let dormant = session.goal.as_ref().is_some_and(&is_completed_before_run);
                     let plan_mode = session.planning.plan_mode();
                     let next = match session.goal.as_mut() {
+                        Some(_) if dormant => None,
                         Some(goal) => {
                             goal.tokens_used += usage_now.saturating_sub(usage_before);
                             goal.time_used_seconds += iteration_started.elapsed().as_secs();
@@ -456,22 +410,12 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
                                 || cancel.is_cancelled()
                             {
                                 None
-                            } else if goal.continuations >= MAX_GOAL_CONTINUATIONS {
-                                goal.status = GoalStatus::Blocked;
-                                goal.blocker_reason = Some(format!(
-                                    "Reached the {MAX_GOAL_CONTINUATIONS}-continuation safety limit"
-                                ));
-                                Some(GoalStep::Stop(format!(
-                                    "The goal ran for {MAX_GOAL_CONTINUATIONS} continuation \
-                                     turns without completing — it is now marked blocked. \
-                                     Review the progress above and send a message to continue."
-                                )))
                             } else if goal
                                 .token_budget
                                 .is_some_and(|budget| goal.tokens_used >= budget)
                             {
                                 goal.status = GoalStatus::BudgetLimited;
-                                goal.continuations += 1;
+                                goal.continuations = goal.continuations.saturating_add(1);
                                 Some(GoalStep::Continue {
                                     text: crate::prompt::goal_budget_limit_reminder(goal),
                                     note: format!(
@@ -483,7 +427,7 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
                                 // Render BEFORE incrementing: the reminder
                                 // numbers the turn it introduces.
                                 let text = crate::prompt::goal_continuation_reminder(goal);
-                                goal.continuations += 1;
+                                goal.continuations = goal.continuations.saturating_add(1);
                                 let note = format!(
                                     "Goal turn {}: continuing toward the objective ({} \
                                      tokens used).",
@@ -494,10 +438,14 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
                         }
                         None => None,
                     };
-                    if let Some(goal) = session.goal.as_mut() {
+                    if let Some(goal) = session.goal.as_mut().filter(|_| !dormant) {
                         goal.touch();
                     }
-                    let state = session.goal.as_ref().map(|goal| goal.state(Some(&run)));
+                    let state = if dormant {
+                        None
+                    } else {
+                        session.goal.as_ref().map(|goal| goal.state(Some(&run)))
+                    };
                     (next, state)
                 };
                 if let Some(goal) = goal_state {
@@ -523,16 +471,6 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
                         }];
                         continue 'goal;
                     }
-                    Some(GoalStep::Stop(note)) => {
-                        let _ = tx
-                            .send(AgentEvent::MessageChunk {
-                                run: run.clone(),
-                                role: agent_core::domain::Role::System,
-                                delta: agent_core::domain::ContentBlock::text(note),
-                            })
-                            .await;
-                        break 'goal Ok(result.outcome);
-                    }
                     None => break 'goal Ok(result.outcome),
                 }
             }
@@ -541,7 +479,11 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
                 {
                     let mut session = tc.session.lock().await;
                     compactor.commit_appended(&mut session.transcript, result.messages);
-                    if let Some(goal) = session.goal.as_mut() {
+                    if let Some(goal) = session
+                        .goal
+                        .as_mut()
+                        .filter(|goal| !is_completed_before_run(goal))
+                    {
                         if goal.status == GoalStatus::Active {
                             goal.status = GoalStatus::Blocked;
                             goal.blocker_reason =
@@ -556,6 +498,7 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
                     .await
                     .goal
                     .as_ref()
+                    .filter(|goal| !is_completed_before_run(goal))
                     .map(|goal| goal.state(Some(&run)));
                 if let Some(goal) = goal_state {
                     let _ = tx
@@ -579,7 +522,6 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
     let final_usage = usage.snapshot();
     execution.record_usage_delta(accounted_usage, final_usage);
 
-    let context_limit = crate::compaction::limit_of(&tc.compaction);
     match run_result {
         Ok(outcome) => {
             {
@@ -620,11 +562,13 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
                     RunStatus::Failed,
                     Some(outcome.label().to_string()),
                     Some(format!(
-                        "I hit my safety limit of {} steps before finishing — usually a sign I \
+                        "I hit my configured safety limit of {} steps before finishing — usually a sign I \
                          got stuck repeating an approach that wasn't working. Everything so far is \
                          saved above; send a follow-up to continue, or nudge me toward a different \
                          approach.",
                         tc.max_iterations
+                            .map(|limit| limit.to_string())
+                            .unwrap_or_else(|| "unknown".to_string())
                     )),
                     Some(RunFailureKind::LocalState),
                     with_limit(final_usage, context_limit),
@@ -660,7 +604,11 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
                 // consuming tokens. A user
                 // cancel merely pauses pursuit — also expressed as Blocked,
                 // resumed by the user's next explicit ask.
-                if let Some(goal) = session.goal.as_mut() {
+                if let Some(goal) = session
+                    .goal
+                    .as_mut()
+                    .filter(|goal| !is_completed_before_run(goal))
+                {
                     if goal.status == GoalStatus::Active {
                         goal.status = GoalStatus::Blocked;
                         goal.blocker_reason = Some(if aborted {
@@ -697,6 +645,7 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
                 .await
                 .goal
                 .as_ref()
+                .filter(|goal| !is_completed_before_run(goal))
                 .map(|goal| goal.state(Some(&run)));
             if let Some(goal) = goal_state {
                 let _ = tx

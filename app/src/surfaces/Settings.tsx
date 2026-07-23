@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
   Blocks, Info, Sun, Moon, Eye, EyeOff, AlertTriangle, ExternalLink, CreditCard, LogOut,
-  RefreshCw, Loader2, Trash2, Plus, Server, Brain, Check, FolderOpen,
+  Loader2, Trash2, Plus, Minus, Server, Brain, FolderOpen,
 } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
 import { cn } from "../lib/cn";
@@ -15,9 +15,14 @@ import { loadSshHosts } from "../lib/sshHosts";
 import {
   loadAllowlist, loadDenylist, allowCommand, denyCommand, removeAllowed, removeDenied,
 } from "../lib/commandPolicy";
-import { billingPlanLabel, clarkBillingUrl, effectiveBalance, effectiveBilling, openExternal } from "../lib/account";
-import { useAppVersion } from "../lib/appInfo";
-import { TEXT_SIZES, TEXT_SIZE_LABELS, type TextSize } from "../lib/useTextSize";
+import {
+  billingPlanLabel,
+  clarkBillingUrl,
+  effectiveBilling,
+  effectiveUsagePercent,
+  openExternal,
+} from "../lib/account";
+import { stepTextSize, TEXT_SIZES, type TextSize } from "../lib/useTextSize";
 import { OrganizationKnowledgeSettings } from "./OrganizationKnowledgeSettings";
 import { SandboxSetupCard } from "./SandboxSetupCard";
 import { GroupLabel, Card, Row, Toggle } from "./settings/Primitives";
@@ -25,6 +30,7 @@ import {
   SETTINGS_SECTIONS,
   SettingsNavigation,
 } from "./settings/SettingsNavigation";
+import { AboutSection } from "./settings/AboutSection";
 
 const input =
   "w-full rounded-lg border border-border bg-bg px-2.5 py-1.5 text-sm text-ink outline-none transition focus:border-accent placeholder:text-ink-muted";
@@ -80,29 +86,44 @@ function GeneralSection({
               {themeBtn(true, Moon, "Dark")}
             </div>
           </Row>
-          <Row name="Text size" sub="Messages, code, terminal · Ctrl/⌘ +/− · Ctrl/⌘ 0 resets">
+          <Row name="Text size" sub="Messages, code, terminal · 75–200% · Ctrl/⌘ +/− · Ctrl/⌘ 0 resets">
             <div
-              role="radiogroup"
+              role="group"
               aria-label="Text size"
               className="inline-flex shrink-0 rounded-lg border border-border-subtle bg-bg-sunken p-0.5 text-xs"
             >
-              {TEXT_SIZES.map((size) => (
-                <button
-                  key={size}
-                  type="button"
-                  role="radio"
-                  aria-checked={textSize === size}
-                  onClick={() => onTextSizeChange(size)}
-                  className={cn(
-                    "rounded-md px-2 py-1 transition",
-                    textSize === size
-                      ? "bg-bg-elevated text-ink shadow-sm"
-                      : "text-ink-muted hover:text-ink-secondary",
-                  )}
-                >
-                  {TEXT_SIZE_LABELS[size]}
-                </button>
-              ))}
+              <button
+                type="button"
+                aria-label="Decrease text size"
+                disabled={textSize === TEXT_SIZES[0]}
+                onClick={() => onTextSizeChange(stepTextSize(textSize, -1))}
+                className="grid size-7 place-items-center rounded-md text-ink-muted transition hover:bg-bg-hover hover:text-ink disabled:pointer-events-none disabled:opacity-35"
+              >
+                <Minus className="size-3.5" />
+              </button>
+              <button
+                type="button"
+                aria-label={`Text size ${textSize}%. Reset to 100%`}
+                title="Reset to 100%"
+                onClick={() => onTextSizeChange(100)}
+                className={cn(
+                  "min-w-14 rounded-md px-2 py-1 font-mono tabular-nums transition",
+                  textSize === 100
+                    ? "text-ink"
+                    : "bg-bg-elevated text-ink shadow-sm hover:bg-bg-hover",
+                )}
+              >
+                {textSize}%
+              </button>
+              <button
+                type="button"
+                aria-label="Increase text size"
+                disabled={textSize === TEXT_SIZES[TEXT_SIZES.length - 1]}
+                onClick={() => onTextSizeChange(stepTextSize(textSize, 1))}
+                className="grid size-7 place-items-center rounded-md text-ink-muted transition hover:bg-bg-hover hover:text-ink disabled:pointer-events-none disabled:opacity-35"
+              >
+                <Plus className="size-3.5" />
+              </button>
             </div>
           </Row>
           <Row name="Colorblind-friendly colors" sub="Blue/orange status instead of red/green">
@@ -534,7 +555,7 @@ function AccountSection() {
       : statusTone(sub?.status);
   const planLabel = activeBilling?.plan?.name
     ?? (isTeamBilling ? "Workspace coverage" : billingPlanLabel(sub?.plan_key));
-  const credits = effectiveBalance(billing);
+  const usagePercent = effectiveUsagePercent(billing);
   const renews = formatDate(sub?.current_period_end);
   const firstLoad = loading && !billing;
 
@@ -579,12 +600,12 @@ function AccountSection() {
               </span>
             )}
           </Row>
-          <Row name={isTeamBilling ? "Team credits" : "Credits"}>
+          <Row name="Limit used">
             <span className="text-sm font-medium tabular-nums text-ink">
-              {credits?.is_unlimited
-                ? "Unlimited"
-                : credits
-                  ? credits.available_credits.toLocaleString()
+              {usagePercent !== null
+                ? `${usagePercent}%`
+                : activeBilling?.access_state === "unlimited"
+                  ? "No limit"
                   : "—"}
             </span>
           </Row>
@@ -620,84 +641,6 @@ function AccountSection() {
         >
           <LogOut className="size-4" /> Sign out
         </button>
-      </div>
-    </div>
-  );
-}
-
-// --- About -----------------------------------------------------------------
-
-function AboutSection() {
-  const version = useAppVersion();
-  const update = useSessionStore((s) => s.update);
-  const updateChecking = useSessionStore((s) => s.updateChecking);
-  const updateWaiting = useSessionStore((s) => s.updateWaiting);
-  const checkForUpdate = useSessionStore((s) => s.checkForUpdate);
-  const applyUpdate = useSessionStore((s) => s.applyUpdate);
-  const [checkFeedback, setCheckFeedback] = useState<"up-to-date" | "error" | null>(null);
-  const [checkError, setCheckError] = useState<string | null>(null);
-
-  const check = async () => {
-    setCheckFeedback(null);
-    setCheckError(null);
-    const result = await checkForUpdate();
-    if (result.status === "up-to-date") setCheckFeedback("up-to-date");
-    if (result.status === "error") {
-      setCheckFeedback("error");
-      setCheckError(result.message);
-    }
-  };
-
-  return (
-    <div className="space-y-6">
-      <div>
-        <GroupLabel>About</GroupLabel>
-        <Card>
-          <Row name="Clark Code" sub="Local AI coding agent">
-            <span className="font-mono text-sm text-ink-secondary">{version ? `v${version}` : "—"}</span>
-          </Row>
-        </Card>
-      </div>
-
-      <div>
-        <GroupLabel>Updates</GroupLabel>
-        {update ? (
-          <button
-            onClick={() => void applyUpdate()}
-            disabled={updateWaiting}
-            aria-label={`Ready to update Clark Code to ${update.version}; restart now`}
-            className="flex w-full items-center gap-2.5 rounded-lg bg-accent/15 px-3.5 py-2.5 text-sm font-medium text-accent transition hover:bg-accent/25"
-          >
-            <RefreshCw className={cn("size-4", updateWaiting && "animate-[spin_1.4s_linear_infinite]")} />{" "}
-            {updateWaiting
-              ? "Finishing active work before updating…"
-              : `Clark Code ${update.version} is ready — restart to update`}
-          </button>
-        ) : (
-          <button
-            onClick={() => void check()}
-            disabled={updateChecking}
-            title={checkError ?? undefined}
-            className="flex w-full items-center gap-2.5 rounded-lg border border-border-subtle px-3.5 py-2.5 text-sm text-ink-secondary transition hover:bg-bg-hover disabled:opacity-60"
-          >
-            {updateChecking ? (
-              <Loader2 className="size-4 animate-[spin_1s_linear_infinite]" />
-            ) : checkFeedback === "up-to-date" ? (
-              <Check className="size-4 text-success" />
-            ) : checkFeedback === "error" ? (
-              <AlertTriangle className="size-4 text-danger" />
-            ) : (
-              <RefreshCw className="size-4" />
-            )}
-            {updateChecking
-              ? "Checking…"
-              : checkFeedback === "up-to-date"
-                ? "You're up to date"
-                : checkFeedback === "error"
-                  ? "Couldn't check — try again"
-                  : "Check for updates"}
-          </button>
-        )}
       </div>
     </div>
   );

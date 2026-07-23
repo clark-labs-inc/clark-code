@@ -19,6 +19,8 @@
 //
 // Swapping in a different identity provider only touches this file.
 
+import { invoke } from "@tauri-apps/api/core";
+
 export type AuthMethod = "google" | "local";
 
 export interface AuthUser {
@@ -145,7 +147,6 @@ function userFrom(p: { id?: string; email?: string; name?: string; image?: strin
 }
 
 async function exchangeGoogleIdToken(idToken: string): Promise<{ user: AuthUser; token: string }> {
-  const { invoke } = await import("@tauri-apps/api/core");
   const out = await invoke<ExchangeResult>("clark_exchange_google_idtoken", {
     authOrigin: config.clarkAuthOrigin,
     idToken,
@@ -175,20 +176,20 @@ const AUTH_SUCCESS_HTML = `<!doctype html>
   }
   .card {
     width: min(380px, calc(100vw - 32px)); text-align: center; padding: 40px 44px;
-    border: 1px solid rgba(40, 36, 32, 0.08); border-radius: 22px;
+    border: 1px solid rgba(40, 36, 32, 0.09); border-radius: 22px;
     background: #fdfcfa; box-shadow: 0 18px 46px rgba(33, 31, 28, 0.09);
   }
   .mark {
     width: 48px; height: 48px; margin: 0 auto 20px; border-radius: 16px;
     display: grid; place-items: center;
-    background: #6657d9; color: #fdfcfa;
+    background: #5748c7; color: #fdfcfa;
     font-family: Georgia, serif; font-weight: 600; font-size: 22px;
   }
   h1 { font-family: Georgia, serif; font-size: 1.5rem; font-weight: 600; margin: 0 0 8px; }
-  p { font-size: 0.9375rem; line-height: 1.55; color: #6b645d; margin: 0 0 24px; }
+  p { font-size: 0.9375rem; line-height: 1.55; color: #5d5750; margin: 0 0 24px; }
   a.btn {
     display: inline-block; text-decoration: none;
-    background: #6657d9; color: #fdfcfa;
+    background: #5748c7; color: #fdfcfa;
     padding: 12px 20px; border-radius: 16px; font-size: 0.9375rem; font-weight: 600;
   }
   @media (prefers-color-scheme: dark) {

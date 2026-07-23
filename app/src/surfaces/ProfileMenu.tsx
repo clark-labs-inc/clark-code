@@ -3,7 +3,13 @@ import {
   CreditCard, ExternalLink, LogOut, Loader2, Brain, SlidersHorizontal, ChevronsUpDown,
 } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
-import { billingPlanLabel, clarkBillingUrl, effectiveBalance, effectiveBilling, openExternal } from "../lib/account";
+import {
+  billingPlanLabel,
+  clarkBillingUrl,
+  effectiveBilling,
+  effectiveUsagePercent,
+  openExternal,
+} from "../lib/account";
 import { cn } from "../lib/cn";
 
 function statusTone(status?: string | null): { label: string; tone: string } {
@@ -34,9 +40,10 @@ const ACTION =
 
 /** Account trigger → subscription popover. Subscription + credit state is read
  *  from Clark; "Manage" opens clarkchat.com (same account → same wallet).
- *  `topbar` = a compact avatar button (opens down-right); `sidebar` = a
- *  full-width account row in the sidebar footer (opens up). */
-export function ProfileMenu({ variant = "topbar" }: { variant?: "topbar" | "sidebar" }) {
+ *  `topbar` = a compact avatar button (opens down-right); `rail` = the
+ *  collapsed sidebar avatar (opens right); `sidebar` = a full-width account
+ *  row in the sidebar footer (opens up). */
+export function ProfileMenu({ variant = "topbar" }: { variant?: "topbar" | "rail" | "sidebar" }) {
   const auth = useSessionStore((s) => s.auth);
   const billing = useSessionStore((s) => s.billing);
   const loading = useSessionStore((s) => s.loadingBilling);
@@ -75,7 +82,7 @@ export function ProfileMenu({ variant = "topbar" }: { variant?: "topbar" | "side
       : statusTone(sub?.status);
   const planLabel = activeBilling?.plan?.name
     ?? (isTeamBilling ? "Workspace coverage" : billingPlanLabel(sub?.plan_key));
-  const credits = effectiveBalance(billing);
+  const usagePercent = effectiveUsagePercent(billing);
   const renews = formatDate(sub?.current_period_end);
   const firstLoad = loading && !billing;
   return (
@@ -119,7 +126,11 @@ export function ProfileMenu({ variant = "topbar" }: { variant?: "topbar" | "side
         <div
           className={cn(
             "popover-surface absolute z-30 w-72 rounded-[22px] bg-bg-elevated p-1.5 shadow-lifted ring-1 ring-border-subtle",
-            variant === "sidebar" ? "bottom-full left-0 mb-2" : "right-0 top-full mt-2",
+            variant === "sidebar"
+              ? "bottom-full left-0 mb-2"
+              : variant === "rail"
+                ? "bottom-0 left-full ml-2"
+                : "right-0 top-full mt-2",
           )}
         >
             <div className="px-3 py-2.5">
@@ -152,12 +163,12 @@ export function ProfileMenu({ variant = "topbar" }: { variant?: "topbar" | "side
                 )}
               </div>
               <div className={ROW}>
-                <span className="text-xs text-ink-muted">{isTeamBilling ? "Team credits" : "Credits"}</span>
+                <span className="text-xs text-ink-muted">Limit used</span>
                 <span className="text-sm font-medium tabular-nums text-ink">
-                  {credits?.is_unlimited
-                    ? "Unlimited"
-                    : credits
-                      ? credits.available_credits.toLocaleString()
+                  {usagePercent !== null
+                    ? `${usagePercent}%`
+                    : activeBilling?.access_state === "unlimited"
+                      ? "No limit"
                       : "—"}
                 </span>
               </div>

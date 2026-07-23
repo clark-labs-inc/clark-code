@@ -3,12 +3,11 @@
 //!
 //! ## Why
 //!
-//! The local loop's only stop conditions are a natural end-of-turn and the
-//! hard `max_iterations` cap (see [`crate::engine`]). Nothing in the core
-//! loop looks at whether successive turns make *progress*, so a model that
-//! re-runs the same diagnostic in a circle — `ls`, re-seed, lock-check,
-//! `ls`, … — burns the whole iteration budget and then fails with an
-//! unhelpful "stopped after N model iterations".
+//! The local loop normally runs until a natural end-of-turn, cancellation, or
+//! a typed provider/tool failure. Nothing in the core loop looks at whether
+//! successive turns make *progress*, so a model that re-runs the same
+//! diagnostic in a circle — `ls`, re-seed, lock-check, `ls`, … — can keep
+//! consuming work without converging.
 //!
 //! Clark's *cloud* loop already guards against this with typed stop reasons
 //! (`identical_tool_call`, `fruitless_tool_streak`, `stale_evidence`, …).

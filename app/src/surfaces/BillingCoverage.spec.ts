@@ -18,6 +18,7 @@ function workspaceBilling(available: number): BillingSummary {
       owner_kind: "organization",
       display_name: "clarkslabs.com",
       access_state: available > 0 ? "ready" : "usage_limited",
+      credit_usage: { percent_used: available > 0 ? 25 : 100 },
       coverage_status: available > 0 ? "ready" : "action_needed",
       products: ["clark_web", "clark_code"],
       balance: { available_credits: available, is_unlimited: false },
@@ -39,12 +40,15 @@ describe("Clark Code billing coverage copy", () => {
   it("does not tell a workspace-covered member to buy personal credits", () => {
     const billing = workspaceBilling(0);
     const prompt = upgradePromptCopy(billing);
-    const banner = creditBannerMessage(billing, "out", 0);
+    const banner = creditBannerMessage(billing, "out");
 
     expect(prompt.title).toContain("Workspace billing needs attention");
+    expect(prompt.detail).toContain("100% of the workspace limit used");
     expect(prompt.detail).toContain("assigned workspace seat");
     expect(prompt.detail).not.toContain("choose a plan");
-    expect(banner).toContain("Your workspace billing needs attention");
+    expect(banner).toContain("100% of the workspace Clark Code limit used");
+    expect(banner).toContain("Workspace billing needs attention");
+    expect(`${prompt.detail} ${banner}`).not.toContain("credits");
   });
 
   it("uses the effective workspace balance instead of the empty personal wallet", () => {

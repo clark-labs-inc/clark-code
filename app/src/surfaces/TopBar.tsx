@@ -18,6 +18,30 @@ export function UpdatePill() {
   const waiting = useSessionStore((s) => s.updateWaiting);
   const reduce = useReducedMotion();
 
+  return (
+    <UpdatePillView
+      update={update}
+      progress={progress}
+      waiting={waiting}
+      reduce={reduce}
+      onApply={apply}
+    />
+  );
+}
+
+export function UpdatePillView({
+  update,
+  progress,
+  waiting,
+  reduce,
+  onApply,
+}: {
+  update: { version: string } | null;
+  progress: { downloaded: number; total: number | null } | null;
+  waiting: boolean;
+  reduce: boolean | null;
+  onApply: () => Promise<void>;
+}) {
   const content = progress ? (
     <DownloadingPill progress={progress} />
   ) : update && waiting ? (
@@ -32,7 +56,7 @@ export function UpdatePill() {
   ) : update ? (
     <button
       key="restart"
-      onClick={() => void apply()}
+      onClick={() => void onApply()}
       aria-label={`Ready to update Clark Code to ${update.version}; restart now`}
       title={`Clark Code ${update.version} is ready — relaunch to update`}
       className="flex shrink-0 items-center gap-1.5 rounded-xl bg-accent-soft px-3 py-1.5 text-xs font-semibold text-accent transition duration-200 ease-clark hover:bg-accent/20"

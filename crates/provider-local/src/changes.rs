@@ -10,6 +10,8 @@
 use std::path::Path;
 
 use serde::Serialize;
+use std::collections::HashMap;
+use std::path::Component;
 
 use crate::exec::Executor;
 
@@ -18,6 +20,9 @@ use crate::exec::Executor;
 pub struct ChangedFile {
     /// Repo-relative path.
     pub path: String,
+    /// Original repo-relative path for a rename.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub previous_path: Option<String>,
     pub additions: u32,
     pub deletions: u32,
     /// "added" | "modified" | "deleted" | "renamed".
@@ -35,6 +40,63 @@ fn status_label(letter: &str) -> &'static str {
     }
 }
 
+fn parse_name_status(raw: &str) -> HashMap<String, (String, Option<String>)> {
+    let mut fields = raw.split_terminator('\0');
+    let mut out = HashMap::new();
+    while let Some(letter) = fields.next() {
+        if letter.starts_with('R') {
+            let (Some(previous), Some(path)) = (fields.next(), fields.next()) else {
+                break;
+            };
+            out.insert(
+                path.to_string(),
+                (status_label(letter).to_string(), Some(previous.to_string())),
+            );
+        } else {
+            let Some(path) = fields.next() else { break };
+            out.insert(path.to_string(), (status_label(letter).to_string(), None));
+        }
+    }
+    out
+}
+
+fn parse_numstat(
+    raw: &str,
+    statuses: &HashMap<String, (String, Option<String>)>,
+) -> Vec<ChangedFile> {
+    let mut records = raw.split_terminator('\0');
+    let mut out = Vec::new();
+    while let Some(record) = records.next() {
+        let mut parts = record.splitn(3, '\t');
+        let (Some(add), Some(del), Some(path_field)) = (parts.next(), parts.next(), parts.next())
+        else {
+            continue;
+        };
+        // With `--numstat -z`, a rename has an empty path in the first record,
+        // followed by separate old/new NUL-terminated paths.
+        let path = if path_field.is_empty() {
+            let (Some(_previous), Some(path)) = (records.next(), records.next()) else {
+                break;
+            };
+            path
+        } else {
+            path_field
+        };
+        let (status, previous_path) = statuses
+            .get(path)
+            .cloned()
+            .unwrap_or_else(|| ("modified".into(), None));
+        out.push(ChangedFile {
+            path: path.to_string(),
+            previous_path,
+            additions: add.parse().unwrap_or(0),
+            deletions: del.parse().unwrap_or(0),
+            status,
+        });
+    }
+    out
+}
+
 /// Every file that differs between the baseline checkpoint and the current
 /// working tree, with per-file +/- line counts.
 pub async fn changes_summary(
@@ -46,8 +108,25 @@ pub async fn changes_summary(
         return Err("not a git repository".into());
     }
     let tree = crate::checkpoint::working_tree(exec, root).await?;
-    let numstat_args = ["diff", "--numstat", base, tree.as_str()];
-    let name_status_args = ["diff", "--name-status", base, tree.as_str()];
+    // `-z` is required here: human-readable Git output quotes non-ASCII paths
+    // and encodes renames as display-only `old => new` strings that cannot be
+    // passed back to diff or restore.
+    let numstat_args = [
+        "diff",
+        "--find-renames",
+        "--numstat",
+        "-z",
+        base,
+        tree.as_str(),
+    ];
+    let name_status_args = [
+        "diff",
+        "--find-renames",
+        "--name-status",
+        "-z",
+        base,
+        tree.as_str(),
+    ];
     let (numstat, name_status) = tokio::join!(
         crate::git_metadata::required(exec, root, &numstat_args),
         crate::git_metadata::required(exec, root, &name_status_args),
@@ -55,35 +134,7 @@ pub async fn changes_summary(
     let numstat = numstat?;
     let name_status = name_status?;
 
-    let mut status_by_path = std::collections::HashMap::new();
-    for line in name_status.lines() {
-        let mut parts = line.split('\t');
-        let (Some(letter), Some(path)) = (parts.next(), parts.next()) else {
-            continue;
-        };
-        // Renames carry "old\tnew" — key on the new path.
-        let path = parts.next().unwrap_or(path);
-        status_by_path.insert(path.to_string(), status_label(letter).to_string());
-    }
-
-    let mut out = Vec::new();
-    for line in numstat.lines() {
-        let mut parts = line.split('\t');
-        let (Some(add), Some(del), Some(path)) = (parts.next(), parts.next(), parts.next()) else {
-            continue;
-        };
-        out.push(ChangedFile {
-            path: path.to_string(),
-            // "-" for binary files → 0.
-            additions: add.parse().unwrap_or(0),
-            deletions: del.parse().unwrap_or(0),
-            status: status_by_path
-                .get(path)
-                .cloned()
-                .unwrap_or_else(|| "modified".into()),
-        });
-    }
-    Ok(out)
+    Ok(parse_numstat(&numstat, &parse_name_status(&name_status)))
 }
 
 /// Unified diff of one file against the baseline.
@@ -92,9 +143,42 @@ pub async fn changes_diff(
     root: &Path,
     base: &str,
     path: &str,
+    previous_path: Option<&str>,
 ) -> Result<String, String> {
     let tree = crate::checkpoint::working_tree(exec, root).await?;
-    crate::git_metadata::required(exec, root, &["diff", base, &tree, "--", path]).await
+    let mut args = vec!["diff", "--find-renames", base, &tree, "--"];
+    if let Some(previous) = previous_path.filter(|previous| *previous != path) {
+        args.push(previous);
+    }
+    args.push(path);
+    crate::git_metadata::required(exec, root, &args).await
+}
+
+fn validate_path(root: &Path, path: &str) -> Result<(), String> {
+    let relative = Path::new(path);
+    if relative.as_os_str().is_empty()
+        || relative.is_absolute()
+        || relative.components().any(|component| {
+            matches!(
+                component,
+                Component::ParentDir | Component::RootDir | Component::Prefix(_)
+            )
+        })
+        || !root.join(relative).starts_with(root)
+    {
+        return Err("path escapes the project root".into());
+    }
+    Ok(())
+}
+
+async fn remove_created_path(exec: &dyn Executor, root: &Path, path: &str) -> Result<(), String> {
+    let joined = root.join(path);
+    match exec.metadata(&joined).await {
+        Ok(meta) if meta.is_dir && !meta.is_symlink => exec.remove_dir_all(&joined).await,
+        Ok(_) => exec.remove_file(&joined).await,
+        Err(_) => Ok(()),
+    }
+    .map_err(|error| format!("removing {path}: {error}"))
 }
 
 /// Restore one file to its baseline state: files that existed at the baseline
@@ -105,11 +189,21 @@ pub async fn changes_revert(
     root: &Path,
     base: &str,
     path: &str,
+    previous_path: Option<&str>,
 ) -> Result<(), String> {
-    // Containment: the path must stay inside the repo root.
-    let joined = root.join(path);
-    if !joined.starts_with(root) || path.contains("..") {
-        return Err("path escapes the project root".into());
+    validate_path(root, path)?;
+    if let Some(previous) = previous_path {
+        validate_path(root, previous)?;
+        crate::git_metadata::required(
+            exec,
+            root,
+            &["restore", "--source", base, "--worktree", "--", previous],
+        )
+        .await?;
+        if previous != path {
+            remove_created_path(exec, root, path).await?;
+        }
+        return Ok(());
     }
     let existed =
         crate::git_metadata::succeeds(exec, root, &["cat-file", "-e", &format!("{base}:{path}")])
@@ -124,12 +218,7 @@ pub async fn changes_revert(
         .await?;
         Ok(())
     } else {
-        match exec.metadata(&joined).await {
-            Ok(meta) if meta.is_dir && !meta.is_symlink => exec.remove_dir_all(&joined).await,
-            Ok(_) => exec.remove_file(&joined).await,
-            Err(_) => Ok(()),
-        }
-        .map_err(|error| format!("removing {path}: {error}"))
+        remove_created_path(exec, root, path).await
     }
 }
 
@@ -187,21 +276,21 @@ mod tests {
         assert_eq!(new.additions, 1);
 
         // Per-file diff renders a unified diff.
-        let diff = changes_diff(&LocalExecutor, root, &base, "keep.txt")
+        let diff = changes_diff(&LocalExecutor, root, &base, "keep.txt", None)
             .await
             .expect("diff");
         assert!(diff.contains("-two"), "{diff}");
         assert!(diff.contains("+CHANGED"), "{diff}");
 
         // Revert the edit → original content; revert the creation → file gone.
-        changes_revert(&LocalExecutor, root, &base, "keep.txt")
+        changes_revert(&LocalExecutor, root, &base, "keep.txt", None)
             .await
             .expect("revert edit");
         assert_eq!(
             std::fs::read_to_string(root.join("keep.txt")).unwrap(),
             "one\ntwo\n"
         );
-        changes_revert(&LocalExecutor, root, &base, "new.txt")
+        changes_revert(&LocalExecutor, root, &base, "new.txt", None)
             .await
             .expect("revert creation");
         assert!(!root.join("new.txt").exists());
@@ -221,8 +310,56 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        assert!(changes_revert(&LocalExecutor, tmp.path(), &base, "../evil")
+        assert!(
+            changes_revert(&LocalExecutor, tmp.path(), &base, "../evil", None)
+                .await
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn rename_with_unicode_whitespace_can_be_diffed_and_reverted() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        init_repo(root);
+        let base = create_checkpoint(&LocalExecutor, root)
             .await
-            .is_err());
+            .unwrap()
+            .unwrap();
+        let renamed = "café name\tnew.txt";
+        std::fs::rename(root.join("keep.txt"), root.join(renamed)).unwrap();
+
+        let summary = changes_summary(&LocalExecutor, root, &base).await.unwrap();
+        assert_eq!(summary.len(), 1, "{summary:?}");
+        let changed = &summary[0];
+        assert_eq!(changed.path, renamed);
+        assert_eq!(changed.previous_path.as_deref(), Some("keep.txt"));
+        assert_eq!(changed.status, "renamed");
+
+        let diff = changes_diff(
+            &LocalExecutor,
+            root,
+            &base,
+            &changed.path,
+            changed.previous_path.as_deref(),
+        )
+        .await
+        .unwrap();
+        assert!(diff.contains("similarity index 100%"), "{diff}");
+
+        changes_revert(
+            &LocalExecutor,
+            root,
+            &base,
+            &changed.path,
+            changed.previous_path.as_deref(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(root.join("keep.txt")).unwrap(),
+            "one\ntwo\n"
+        );
+        assert!(!root.join(renamed).exists());
     }
 }

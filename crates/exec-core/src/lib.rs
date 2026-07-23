@@ -221,6 +221,7 @@ pub type ExecResult<T> = Result<T, String>;
 pub struct DirEntry {
     pub name: String,
     pub is_dir: bool,
+    pub is_symlink: bool,
 }
 
 /// Metadata for a path.
@@ -311,10 +312,22 @@ pub trait Executor: Send + Sync {
     async fn remove_file(&self, path: &Path) -> ExecResult<()>;
     /// Remove one directory tree. Missing paths are treated as success.
     async fn remove_dir_all(&self, path: &Path) -> ExecResult<()>;
+    /// Atomically rename one path on the target filesystem when source and
+    /// destination share a filesystem.
+    async fn rename(&self, from: &Path, to: &Path) -> ExecResult<()>;
     /// List a directory's immediate entries.
     async fn read_dir(&self, path: &Path) -> ExecResult<Vec<DirEntry>>;
     /// Metadata for a path; `Err` if it doesn't exist / can't be stat'd.
     async fn metadata(&self, path: &Path) -> ExecResult<FileMeta>;
+    /// Resolve a path through directory/file symlinks on the target filesystem.
+    ///
+    /// Callers use the returned target-owned absolute path as filesystem
+    /// identity. This is deliberately an executor primitive so local and remote
+    /// discovery make identical cycle and alias decisions.
+    async fn canonicalize(&self, path: &Path) -> ExecResult<PathBuf>;
+    /// Target environment's user home. This must describe the executor target,
+    /// not the desktop process hosting a remote executor.
+    async fn home_dir(&self, cwd: &Path) -> ExecResult<PathBuf>;
     /// Modification time, or `None` if the path can't be stat'd. (Convenience
     /// over [`metadata`](Executor::metadata) for the read-before-edit tracker.)
     async fn mtime(&self, path: &Path) -> Option<SystemTime> {

@@ -34,4 +34,18 @@ describe("typed content blocks", () => {
     expect(sameContentBlocks([text("result"), image("first")], [text("result"), image("second")])).toBe(false);
     expect(sameContentBlocks([text("result"), image("first")], [text("result"), image("first")])).toBe(true);
   });
+
+  it("compares exact skill identity and revision without flattening it into text", () => {
+    const skill: ContentBlock = {
+      type: "skill_reference",
+      id: "skill_123",
+      revision: "rev_a",
+      name: "brainstorming",
+    };
+    expect(contentText([text("plan this"), skill])).toBe("plan this");
+    expect(sameContentBlocks([skill], [skill])).toBe(true);
+    expect(
+      sameContentBlocks([skill], [{ ...skill, revision: "rev_b" }]),
+    ).toBe(false);
+  });
 });

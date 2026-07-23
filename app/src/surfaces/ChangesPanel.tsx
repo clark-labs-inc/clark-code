@@ -18,6 +18,7 @@ import { minLoadDuration } from "../lib/minLoadDuration";
 
 export interface ChangedFile {
   path: string;
+  previous_path?: string;
   additions: number;
   deletions: number;
   status: string;
@@ -58,6 +59,10 @@ const STATUS_ICON: Record<string, typeof FilePen> = {
 
 type RemoteExecutorArg = Pick<RemoteInfo, "ws_url" | "token">;
 
+export function changesBaseForRuns(current: string | undefined, runs: string[]): string {
+  return current && runs.includes(current) ? current : runs[0];
+}
+
 function remoteExecutorArg(remote: RemoteInfo | null): RemoteExecutorArg | null {
   return remote ? { ws_url: remote.ws_url, token: remote.token } : null;
 }
@@ -67,6 +72,7 @@ export function ChangesButton() {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
   const runs = useCheckpointedRuns();
+  const sessionId = useSessionStore((s) => s.session?.id ?? null);
 
   useEffect(() => {
     if (!open) return;
@@ -97,7 +103,7 @@ export function ChangesButton() {
         <GitCompareArrows className="size-4" />
       </button>
       {/* Instant show/hide — no fade (avoids WKWebView half-opacity flicker). */}
-      {open && <ChangesPopover runs={runs} onClose={() => setOpen(false)} />}
+      {open && <ChangesPopover key={sessionId} runs={runs} onClose={() => setOpen(false)} />}
     </div>
   );
 }
@@ -112,6 +118,11 @@ function ChangesPopover({ runs, onClose }: { runs: string[]; onClose: () => void
   const [files, setFiles] = useState<ChangedFile[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    setBase((current) => changesBaseForRuns(current, runs));
+    setFiles(null);
+  }, [runs]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -238,7 +249,13 @@ function FileRow({
     setOpen(next);
     if (next && diff === null) {
       try {
-        setDiff(await invoke<string>("changes_diff", { cwd, base, path: file.path, remote }));
+        setDiff(await invoke<string>("changes_diff", {
+          cwd,
+          base,
+          path: file.path,
+          previousPath: file.previous_path ?? null,
+          remote,
+        }));
       } catch (e) {
         setDiff(`(diff unavailable: ${String(e)})`);
       }
@@ -248,7 +265,13 @@ function FileRow({
   const revert = async () => {
     setBusy(true);
     try {
-      await invoke("changes_revert", { cwd, base, path: file.path, remote });
+      await invoke("changes_revert", {
+        cwd,
+        base,
+        path: file.path,
+        previousPath: file.previous_path ?? null,
+        remote,
+      });
       onReverted();
     } catch (e) {
       setDiff(`(revert failed: ${String(e)})`);

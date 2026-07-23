@@ -26,27 +26,27 @@
 ---------------------------------------------------------------------------- */
 @theme {
   --color-bg-primary: #f7f5f1;
-  --color-bg-secondary: #efece6;
-  --color-bg-tertiary: #e6e2da;
+  --color-bg-secondary: #ede9e2;
+  --color-bg-tertiary: #ded8ce;
   --color-bg-elevated: #fdfcfa;
-  --color-bg-hover: #ece8e0;
-  --color-bg-sunken: #e4e0d6;
-  --color-composer-context: #e6e2da;
+  --color-bg-hover: #e9e4db;
+  --color-bg-sunken: #ddd7cc;
+  --color-composer-context: #ded8ce;
   --color-composer-surface: #fdfcfa;
-  --color-checkout-branch: #4f664a;
-  --color-checkout-worktree: #5b49cb;
+  --color-checkout-branch: #4b6347;
+  --color-checkout-worktree: #5748c7;
 
   --color-text-primary: #211f1c;
-  --color-text-secondary: #544f49;
-  --color-text-muted: #6b645d;
-  --color-text-faint: #736d66;
+  --color-text-secondary: #4b4742;
+  --color-text-muted: #5d5750;
+  --color-text-faint: #625c55;
 
-  --color-accent: #6657d9;
-  --color-accent-hover: #5748c7;
-  --color-accent-gradient-start: #5748c7;
-  --color-accent-gradient-end: #7060df;
-  --color-accent-muted: rgba(102, 87, 217, 0.16);
-  --color-accent-subtle: rgba(102, 87, 217, 0.07);
+  --color-accent: #5748c7;
+  --color-accent-hover: #493bad;
+  --color-accent-gradient-start: #493bad;
+  --color-accent-gradient-end: #6657d9;
+  --color-accent-muted: rgba(87, 72, 199, 0.18);
+  --color-accent-subtle: rgba(87, 72, 199, 0.09);
   --color-on-accent: #fdfcfa;
 
   /* Compatibility aliases keep existing desktop utilities on the canonical
@@ -57,7 +57,7 @@
   --color-ink-muted: var(--color-text-muted);
   --color-ink-faint: var(--color-text-faint);
   --color-accent-soft: var(--color-accent-muted);
-  --color-accent-focus: rgba(102, 87, 217, 0.34);
+  --color-accent-focus: rgba(87, 72, 199, 0.38);
   --color-canvas: var(--color-bg-primary);
   --color-surface: var(--color-bg-elevated);
   --color-surface-muted: var(--color-bg-secondary);
@@ -67,29 +67,31 @@
   --color-focus: var(--color-accent-focus);
   --color-on-primary: var(--color-on-accent);
 
-  --color-success: #5a6f55;
-  --color-warning: #84621f;
-  --color-danger: #8c4a45;
-  --color-info: #356f83;
+  /* Light-theme text colors stay at or above 4.5:1 on the darkest paper
+     surface (`bg-sunken`), including small labels and status copy. */
+  --color-success: #4b6347;
+  --color-warning: #745315;
+  --color-danger: #85433e;
+  --color-info: #286478;
 
-  --color-chip: rgba(40, 36, 32, 0.065);
-  --color-border: rgba(40, 36, 32, 0.12);
-  --color-border-subtle: rgba(40, 36, 32, 0.06);
-  --color-border-strong: rgba(40, 36, 32, 0.24);
+  --color-chip: rgba(40, 36, 32, 0.09);
+  --color-border: rgba(40, 36, 32, 0.16);
+  --color-border-subtle: rgba(40, 36, 32, 0.09);
+  --color-border-strong: rgba(40, 36, 32, 0.3);
 
   --font-sans: "DM Sans Variable", -apple-system, system-ui, "Segoe UI", sans-serif;
   --font-mono: "JetBrains Mono", "SF Mono", ui-monospace, "Menlo", monospace;
   --font-display: "Newsreader Variable", Newsreader, Georgia, serif;
 
-  /* Default application type scale. Compact preserves the original dense
-     scale; Large prioritizes readability. Settings and keyboard shortcuts
-     switch these semantic tokens without scaling the layout chrome. */
-  --text-xs: 0.75rem;     /* 12px */
-  --text-sm: 0.8125rem;   /* 13px */
-  --text-base: 0.9375rem; /* 15px */
-  --text-lg: 1.0625rem;   /* 17px */
-  --text-xl: 1.25rem;     /* 20px */
-  --text-2xl: 1.5rem;     /* 24px */
+  /* Settings and keyboard shortcuts scale semantic type without magnifying
+     layout chrome. The scale is set on <html> by useTextSize. */
+  --text-xs: calc(0.75rem * var(--text-size-scale));     /* 12px at 100% */
+  --text-sm: calc(0.8125rem * var(--text-size-scale));   /* 13px at 100% */
+  --text-base: calc(0.9375rem * var(--text-size-scale)); /* 15px at 100% */
+  --text-lg: calc(1.0625rem * var(--text-size-scale));   /* 17px at 100% */
+  --text-xl: calc(1.25rem * var(--text-size-scale));     /* 20px at 100% */
+  --text-2xl: calc(1.5rem * var(--text-size-scale));     /* 24px at 100% */
+  --text-3xl: calc(1.875rem * var(--text-size-scale));   /* 30px at 100% */
 
   --radius-sm: 8px;
   --radius-md: 12px;
@@ -117,32 +119,17 @@
    default is intentionally wider than Tailwind's 42rem `max-w-2xl`; text-size
    shortcuts scale the rail with the type so line length stays balanced. */
 :root {
-  --chat-column-scale: 1;
-  --chat-column-max-width: calc(50rem * var(--chat-column-scale));
+  --text-size-scale: 1;
+  --chat-column-max-width: calc(50rem * var(--text-size-scale));
+  --composer-column-max-width: calc(35rem * var(--text-size-scale));
 }
 
 .chat-column-width {
   max-width: var(--chat-column-max-width);
 }
 
-html[data-text-size="compact"] {
-  --chat-column-scale: 0.9;
-  --text-xs: 0.6875rem;   /* 11px */
-  --text-sm: 0.75rem;     /* 12px */
-  --text-base: 0.8125rem; /* 13px */
-  --text-lg: 0.9375rem;   /* 15px */
-  --text-xl: 1.125rem;    /* 18px */
-  --text-2xl: 1.375rem;   /* 22px */
-}
-
-html[data-text-size="large"] {
-  --chat-column-scale: 1.1;
-  --text-xs: 0.8125rem;   /* 13px */
-  --text-sm: 0.9375rem;   /* 15px */
-  --text-base: 1.0625rem; /* 17px */
-  --text-lg: 1.1875rem;   /* 19px */
-  --text-xl: 1.375rem;    /* 22px */
-  --text-2xl: 1.625rem;   /* 26px */
+.composer-column-width {
+  max-width: var(--composer-column-max-width);
 }
 
 /* Dark keeps the same violet interaction contract on a warm graphite canvas. */
@@ -193,12 +180,12 @@ html.dark {
    Okabe-Ito blue/orange pair, which stays distinct. Info (blue) shifts to a
    bluish-green so it doesn't collide with the new success-blue. */
 html.colorblind {
-  --color-checkout-branch: #00669e;
-  --color-checkout-worktree: #5b49cb;
-  --color-success: #0072b2; /* blue */
-  --color-danger: #e69f00;  /* orange */
-  --color-info: #56b4e9;    /* sky blue */
-  --color-warning: #d55e00; /* vermilion — distinct from orange danger */
+  --color-checkout-branch: #00608f;
+  --color-checkout-worktree: #5748c7;
+  --color-success: #00608f; /* blue */
+  --color-danger: #805200;  /* orange */
+  --color-info: #00637f;    /* blue-green */
+  --color-warning: #9e3d00; /* vermilion — distinct from orange danger */
 }
 html.colorblind.dark {
   --color-checkout-branch: #56b4e9;

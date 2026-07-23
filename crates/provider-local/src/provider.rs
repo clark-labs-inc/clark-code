@@ -3,12 +3,14 @@
 //! session is bound to a project root; each prompt drives a local tool-calling
 //! loop ([`crate::engine`]) whose normalized events stream back to the UI.
 
+mod cancellation;
 mod isolation;
+mod isolation_setup;
 mod prompt_input;
+mod side_question;
 mod state;
 
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use agent_core::domain::AgentEvent;
@@ -34,272 +36,17 @@ use crate::prompt::system_prompt;
 use crate::sandbox::Sandbox;
 use crate::tools::{ReadTracker, ToolCtx, ToolRegistry};
 
+use cancellation::ManualCompactionRegistration;
+pub(crate) use cancellation::RunCancellationRegistry;
 use isolation::ProviderIsolation;
+use isolation_setup::build_local_executor;
+pub use isolation_setup::local_sandbox_setup_policy;
 use prompt_input::*;
+pub use state::LocalAgentProvider;
 
 // The Plan Mode workflow reminder and its exit note live in `planning` — injected
 // per-turn below (never baked into the cached system-prompt prefix) since the
 // mode can flip mid-session via Shift+Tab or a plan approval.
-
-/// Run-addressed cancellation. A provider can have overlapping prompt tasks,
-/// so a single "most recently assigned" token cannot implement
-/// `Provider::cancel(session, run)` correctly.
-#[derive(Clone, Default)]
-pub(crate) struct RunCancellationRegistry {
-    tokens: Arc<std::sync::Mutex<HashMap<String, CancellationToken>>>,
-}
-
-impl RunCancellationRegistry {
-    fn register(&self, run: &RunId, token: CancellationToken) {
-        self.tokens
-            .lock()
-            .expect("run cancellation registry lock")
-            .insert(run.as_str().to_string(), token);
-    }
-
-    fn cancel(&self, run: &RunId) -> bool {
-        let token = self
-            .tokens
-            .lock()
-            .expect("run cancellation registry lock")
-            .get(run.as_str())
-            .cloned();
-        if let Some(token) = token {
-            token.cancel();
-            true
-        } else {
-            false
-        }
-    }
-
-    pub(crate) fn remove(&self, run: &RunId) {
-        self.tokens
-            .lock()
-            .expect("run cancellation registry lock")
-            .remove(run.as_str());
-    }
-
-    fn has_active(&self) -> bool {
-        !self
-            .tokens
-            .lock()
-            .expect("run cancellation registry lock")
-            .is_empty()
-    }
-
-    fn cancel_all(&self) {
-        let tokens = self
-            .tokens
-            .lock()
-            .expect("run cancellation registry lock")
-            .values()
-            .cloned()
-            .collect::<Vec<_>>();
-        for token in tokens {
-            token.cancel();
-        }
-    }
-}
-
-struct ManualCompactionRegistration {
-    registry: RunCancellationRegistry,
-    run: RunId,
-    latch: Arc<AtomicBool>,
-}
-
-impl Drop for ManualCompactionRegistration {
-    fn drop(&mut self) {
-        self.registry.remove(&self.run);
-        self.latch.store(false, Ordering::Release);
-    }
-}
-
-pub struct LocalAgentProvider {
-    isolation: ProviderIsolation,
-    config: Option<LocalConfig>,
-    llm: Option<LlmClient>,
-    registry: Option<Arc<ToolRegistry>>,
-    sandbox: Option<Arc<Sandbox>>,
-    session_id: Option<SessionId>,
-    session: Arc<Mutex<SessionState>>,
-    control: Arc<Mutex<RunControl>>,
-    /// Session-scoped read tracker (read-before-edit/write invariant).
-    reads: Arc<std::sync::Mutex<ReadTracker>>,
-    /// Session-scoped `bash(run_in_background: true)` task registry.
-    background: Arc<crate::background::BackgroundTasks>,
-    /// Cancellation token for prompt setup and the newest run. Exact run
-    /// cancellation uses `run_cancellations` below.
-    cancel: CancellationToken,
-    run_cancellations: RunCancellationRegistry,
-    /// Manual compaction is a standalone, non-steerable run. This latch closes
-    /// the gap before its RunStarted event reaches the frontend and prevents a
-    /// normal prompt from racing the history replacement.
-    manual_compacting: Arc<AtomicBool>,
-    /// Where this session's tool I/O runs — local today, remote (over the
-    /// exec-server) once a remote project is selected. Chosen in `new_session`.
-    executor: Arc<dyn crate::exec::Executor>,
-    run_counter: AtomicU64,
-    /// Last MCP connection result, surfaced to the settings UI.
-    mcp_status: Vec<crate::mcp::McpStatus>,
-    /// Stable identity for the active project, when private project knowledge
-    /// is enabled and the selected root is a Git repository.
-    repository_fingerprint: Option<String>,
-    /// Session catalog for progressive skill disclosure and explicit `$skill`
-    /// injection. Rebuilt for each project root in `new_session`.
-    skills: Arc<crate::skills::SkillCatalog>,
-    /// Named approval preset selected for this session. This is stored
-    /// separately from collaboration mode so Plan can temporarily enforce
-    /// read-only execution, then restore the selected sandbox when it exits.
-    session_mode: Option<String>,
-    /// Owns the narrow temporary write root exposed to sandboxed children.
-    sandbox_temp: Option<tempfile::TempDir>,
-}
-
-fn build_local_executor(
-    config: &LocalConfig,
-    sandbox: &Sandbox,
-    preset: exec_sandbox::SandboxPreset,
-) -> Result<(Arc<dyn Executor>, Option<tempfile::TempDir>)> {
-    if config.sandbox_mode == crate::config::LocalSandboxMode::Disabled
-        || preset == exec_sandbox::SandboxPreset::DangerFullAccess
-    {
-        return Ok((Arc::new(LocalExecutor), None));
-    }
-
-    let mut extra_write_roots = Vec::new();
-    if let Some(docs) = sandbox.docs_root() {
-        extra_write_roots.push(docs.to_path_buf());
-    }
-    #[cfg(windows)]
-    if let Some(docs_root) = crate::workspace::workspace_root() {
-        extra_write_roots.push(docs_root);
-    }
-    #[cfg(windows)]
-    let private_temp = {
-        let base = std::env::var_os("LOCALAPPDATA")
-            .map(std::path::PathBuf::from)
-            .ok_or_else(|| Error::Io("LOCALAPPDATA is unavailable".to_string()))?
-            .join("Clark Code")
-            .join("sandbox-tmp");
-        std::fs::create_dir_all(&base).map_err(|error| Error::Io(error.to_string()))?;
-        extra_write_roots.push(base.clone());
-        tempfile::Builder::new()
-            .prefix("session-")
-            .tempdir_in(base)
-            .map_err(|error| Error::Io(error.to_string()))?
-    };
-    #[cfg(not(windows))]
-    let private_temp = tempfile::Builder::new()
-        .prefix("clark-sandbox-")
-        .tempdir()
-        .map_err(|error| Error::Io(error.to_string()))?;
-    let policy = match preset {
-        exec_sandbox::SandboxPreset::ReadOnly => {
-            exec_sandbox::SandboxPolicy::read_only().with_write_roots(extra_write_roots)
-        }
-        exec_sandbox::SandboxPreset::WorkspaceWrite => {
-            exec_sandbox::SandboxPolicy::workspace_write(
-                sandbox.root().to_path_buf(),
-                extra_write_roots,
-            )
-        }
-        exec_sandbox::SandboxPreset::DangerFullAccess => unreachable!(),
-    }
-    .with_process_temp_root(private_temp.path().to_path_buf());
-    let install = clark_install_context::InstallContext::current();
-    let runtime = exec_sandbox::SandboxRuntime {
-        linux_bubblewrap: install.bundled_tool(clark_install_context::BUBBLEWRAP),
-        windows_runner: install.bundled_tool(clark_install_context::WINDOWS_SANDBOX_RUNNER),
-        windows_setup: install.bundled_tool(clark_install_context::WINDOWS_SANDBOX_SETUP),
-        windows_state_dir: None,
-    };
-    let manager =
-        exec_sandbox::SandboxManager::current_with_runtime(policy.clone(), runtime.clone())
-            .map_err(Error::Other)?;
-    #[cfg(windows)]
-    let manager = auto_enroll_windows_workspace(manager, policy, runtime)?;
-    if matches!(
-        manager.status(),
-        exec_sandbox::SandboxStatus::Enforced { .. }
-    ) {
-        let executor =
-            Arc::new(exec_sandbox::SandboxedExecutor::with_manager(manager).map_err(Error::Other)?);
-        return Ok((executor, Some(private_temp)));
-    }
-    if config.sandbox_mode == crate::config::LocalSandboxMode::Required {
-        return Err(Error::Unsupported(format!(
-            "required local sandbox is not ready: {:?}",
-            manager.status()
-        )));
-    }
-    tracing::warn!(status = ?manager.status(), "local sandbox is not ready; using explicit host execution");
-    Ok((Arc::new(LocalExecutor), None))
-}
-
-#[cfg(windows)]
-fn auto_enroll_windows_workspace(
-    manager: exec_sandbox::SandboxManager,
-    policy: exec_sandbox::SandboxPolicy,
-    runtime: exec_sandbox::SandboxRuntime,
-) -> Result<exec_sandbox::SandboxManager> {
-    if !matches!(
-        manager.status(),
-        exec_sandbox::SandboxStatus::SetupRequired { .. }
-    ) {
-        return Ok(manager);
-    }
-    let Some(action) = manager.setup_action().map_err(Error::Other)? else {
-        return Ok(manager);
-    };
-    if action.requires_elevation {
-        for path in action.cleanup_paths {
-            let _ = std::fs::remove_file(path);
-        }
-        return Ok(manager);
-    }
-    match exec_sandbox_windows::run_setup_action(
-        &action.program,
-        &action.args,
-        false,
-        action.cleanup_paths,
-    ) {
-        Ok(()) => exec_sandbox::SandboxManager::current_with_runtime(policy, runtime)
-            .map_err(Error::Other),
-        Err(error) => {
-            tracing::warn!(
-                error,
-                "automatic user-mode Windows workspace enrollment failed"
-            );
-            Ok(manager)
-        }
-    }
-}
-
-/// Stable policy used by the desktop's explicit Windows setup flow. Session
-/// directories nest under these roots, so one consented ACL reconciliation is
-/// reusable without broadening access beyond Clark's project/docs/temp areas.
-pub fn local_sandbox_setup_policy(cwd: &std::path::Path) -> Result<exec_sandbox::SandboxPolicy> {
-    #[cfg(not(windows))]
-    let write_roots = Vec::new();
-    #[cfg(windows)]
-    let mut write_roots = Vec::new();
-    #[cfg(windows)]
-    {
-        if let Some(docs_root) = crate::workspace::workspace_root() {
-            write_roots.push(docs_root);
-        }
-        let temp_root = std::env::var_os("LOCALAPPDATA")
-            .map(std::path::PathBuf::from)
-            .ok_or_else(|| Error::Io("LOCALAPPDATA is unavailable".to_string()))?
-            .join("Clark Code")
-            .join("sandbox-tmp");
-        write_roots.push(temp_root);
-    }
-    Ok(exec_sandbox::SandboxPolicy::workspace_write(
-        cwd.to_path_buf(),
-        write_roots,
-    ))
-}
 
 #[async_trait]
 impl Provider for LocalAgentProvider {
@@ -474,18 +221,33 @@ impl Provider for LocalAgentProvider {
             crate::project_settings::load(self.executor.as_ref(), sandbox.root()).await
         };
 
-        let mut skills = if self.isolation.disposable_writer() {
-            crate::skills::SkillCatalog::default()
-        } else {
-            crate::skills::discover_catalog(self.executor.as_ref(), sandbox.root()).await
-        };
         let available_tools = self
             .registry
             .as_ref()
             .map(|registry| registry.tool_names())
             .unwrap_or_default();
-        skills.resolve_capabilities(&available_tools, &project.skills.disabled);
-        let skills = Arc::new(skills);
+        let skill_project_root = self
+            .executor
+            .canonicalize(sandbox.root())
+            .await
+            .unwrap_or_else(|_| sandbox.root().to_path_buf());
+        let skill_environment_id = crate::skills::skill_environment_id(
+            &skill_project_root,
+            config.remote.as_ref().map(|remote| remote.ws_url.as_str()),
+        );
+        let skills = if self.isolation.disposable_writer() {
+            Arc::new(crate::skills::SkillCatalog::default())
+        } else {
+            self.skill_catalogs
+                .refresh_for_provider(
+                    self.executor.as_ref(),
+                    &skill_project_root,
+                    &skill_environment_id,
+                    &available_tools,
+                    &project.skills.disabled,
+                )
+                .await
+        };
         let registry = self
             .registry
             .as_mut()
@@ -497,6 +259,8 @@ impl Provider for LocalAgentProvider {
             registry.disable_skills();
         }
         self.skills = skills;
+        self.skill_environment_id = Some(skill_environment_id);
+        self.skill_disabled_names = project.skills.disabled.clone();
 
         let commit_attribution = project
             .include_git_instructions()
@@ -643,9 +407,51 @@ impl Provider for LocalAgentProvider {
                 "wait for context compaction to finish before sending a message".into(),
             ));
         }
+        let sandbox = self.sandbox.clone().ok_or(Error::NotConnected)?;
+        if !self.isolation.disposable_writer() {
+            let environment_id = self
+                .skill_environment_id
+                .as_deref()
+                .ok_or_else(|| Error::Other("skill environment is not initialized".into()))?;
+            let available_tools = self
+                .registry
+                .as_ref()
+                .map(|registry| registry.tool_names())
+                .unwrap_or_default();
+            let skill_project_root = self
+                .executor
+                .canonicalize(sandbox.root())
+                .await
+                .unwrap_or_else(|_| sandbox.root().to_path_buf());
+            let refreshed = self
+                .skill_catalogs
+                .refresh_for_provider(
+                    self.executor.as_ref(),
+                    &skill_project_root,
+                    environment_id,
+                    &available_tools,
+                    &self.skill_disabled_names,
+                )
+                .await;
+            let registry = self
+                .registry
+                .as_mut()
+                .and_then(Arc::get_mut)
+                .ok_or_else(|| Error::Other("tool registry is still in use".to_string()))?;
+            if refreshed.enabled().next().is_some() {
+                registry.enable_skills(refreshed.clone());
+            } else {
+                registry.disable_skills();
+            }
+            let rendered = crate::skills::render_catalog(&refreshed);
+            crate::skills::replace_catalog_section(
+                &mut self.session.lock().await.system_prompt,
+                rendered.as_deref(),
+            );
+            self.skills = refreshed;
+        }
         let llm = self.llm.clone().ok_or(Error::NotConnected)?;
         let registry = self.registry.clone().ok_or(Error::NotConnected)?;
-        let sandbox = self.sandbox.clone().ok_or(Error::NotConnected)?;
         let session_id = self.session_id.clone().ok_or(Error::NotConnected)?;
         let config = self.config()?.clone();
         let max_iterations = config.max_iterations;
@@ -658,6 +464,17 @@ impl Provider for LocalAgentProvider {
         let parts = prompt_parts(&input);
         let knowledge_query = prompt_text(&input);
         let user_request = parts.user_request;
+        // One immutable catalog snapshot governs validation, injection, and
+        // `read_skill` for this run. A refresh can affect the next run but
+        // cannot change capability meaning while the model is acting.
+        let run_skills = self.skills.clone();
+        let selected_skill_sections = crate::skills::bound_skill_injections(
+            self.executor.as_ref(),
+            &run_skills,
+            &input.blocks,
+        )
+        .await
+        .map_err(Error::Other)?;
         let goal_command = goal_command_objective(&user_request);
         if let Some(objective) = goal_command.as_ref() {
             let mut session = self.session.lock().await;
@@ -678,10 +495,11 @@ impl Provider for LocalAgentProvider {
                 context_sections.push(instructions.render());
             }
         }
+        context_sections.extend(selected_skill_sections);
         context_sections.extend(
             crate::skills::explicit_skill_injections(
                 self.executor.as_ref(),
-                &self.skills,
+                &run_skills,
                 &user_request,
             )
             .await,
@@ -1034,69 +852,6 @@ impl Provider for LocalAgentProvider {
 
     async fn side_question(&mut self, _session: &SessionId, question: &str) -> Result<String> {
         self.side_question_impl(question).await
-    }
-}
-
-/// Map a no-tools side-question LLM failure to the engine's error vocabulary.
-/// Cancelled is silent (the user dismissed the overlay); credit/auth failures
-/// keep their typed shape so the UI can prompt appropriately; everything else
-/// becomes a transport error.
-fn map_llm_error(error: crate::llm::LlmError) -> Error {
-    match error {
-        crate::llm::LlmError::Cancelled => Error::Other("side question cancelled".into()),
-        crate::llm::LlmError::InsufficientCredits => Error::Other("insufficient_credits".into()),
-        crate::llm::LlmError::PlatformKeyRejected(message) => {
-            Error::Other(format!("platform key rejected: {message}"))
-        }
-        crate::llm::LlmError::Provider(message) => Error::Other(message),
-        crate::llm::LlmError::ContextOverflow(message) => Error::Other(message),
-        crate::llm::LlmError::Recoverable(context) => Error::Transport(context.message),
-    }
-}
-
-impl LocalAgentProvider {
-    /// `/btw` — answer a one-off side question against the session's current
-    /// context WITHOUT interrupting the active run or mutating session state
-    /// (a forked, single-turn, tool-less model call; ported from Claude
-    /// Code's `runSideQuestion`).
-    ///
-    /// Snapshot the session's system prompt + transcript by clone under the
-    /// session lock, release, then build the wire messages lock-free and run a
-    /// single no-tools `stream_chat`. Nothing is written back into `transcript`
-    /// (or `reads`/`control`/`run_counter`), so the active run — if any — is
-    /// untouched and keeps streaming into its own event channel.
-    async fn side_question_impl(&self, question: &str) -> Result<String> {
-        let llm = self.llm.clone().ok_or(Error::NotConnected)?;
-        let (system_prompt, transcript) = {
-            let s = self.session.lock().await;
-            (s.system_prompt.clone(), s.transcript.clone())
-        };
-
-        let wrapped = format!(
-            "<system-reminder>This is a side question from the user. Answer it directly in a \
-             single response.\n\nIMPORTANT CONTEXT:\n- You are a separate, lightweight agent \
-             spawned to answer this one question.\n- The main agent is NOT interrupted — it \
-             continues working independently in the background.\n- You share the conversation \
-             context but are a completely separate instance.\n- Do NOT reference being \
-             interrupted or what you were \"previously doing\" — that framing is incorrect.\n\n\
-             CRITICAL CONSTRAINTS:\n- You have NO tools available — you cannot read files, run \
-             commands, search, or take any actions.\n- This is a one-off response — there will \
-             be no follow-up turns.\n- You can ONLY provide information based on what you already \
-             know from the conversation context.\n- NEVER say things like \"Let me…\", \
-             \"I'll now…\", or promise to take any action.\n- If you don't know the answer, say \
-             so — do not offer to look it up or investigate.\n\nSimply answer the question with \
-             the information you have.</system-reminder>\n\n{question}"
-        );
-
-        let mut messages = crate::agent_adapter::to_wire_messages(&system_prompt, &transcript);
-        messages.push(crate::llm::ChatMessage::user(wrapped));
-
-        let cancel = CancellationToken::new();
-        let turn = llm
-            .stream_chat(&messages, &[], &cancel, |_| {}, |_| {})
-            .await
-            .map_err(map_llm_error)?;
-        Ok(turn.text)
     }
 }
 

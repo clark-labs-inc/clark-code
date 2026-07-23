@@ -12,6 +12,12 @@ import type {
   ProjectBranch,
   ProjectContext,
   LocalSandboxStatus,
+  ProjectInstructions,
+  InstalledSkillPack,
+  SkillPackOperationResult,
+  SkillPackScope,
+  SkillCatalogChange,
+  SkillCatalogSnapshot,
   SessionOptions,
 } from "./bridge";
 import type { Upload } from "../lib/attachments";
@@ -134,6 +140,87 @@ export class TauriBridge implements CoreBridge {
 
   listFiles(cwd: string, remote?: { ws_url: string; token: string } | null): Promise<string[]> {
     return invoke<string[]>("local_list_files", { cwd, remote: remote ?? null });
+  }
+
+  listSkills(
+    cwd: string,
+    remote?: { ws_url: string; token: string } | null,
+  ): Promise<SkillCatalogSnapshot> {
+    return invoke<SkillCatalogSnapshot>("skills_list", { cwd, remote: remote ?? null });
+  }
+
+  reloadSkills(
+    cwd: string,
+    remote?: { ws_url: string; token: string } | null,
+  ): Promise<SkillCatalogSnapshot> {
+    return invoke<SkillCatalogSnapshot>("skills_reload", { cwd, remote: remote ?? null });
+  }
+
+  skillChanges(
+    cwd: string,
+    sinceRevision: string,
+    remote?: { ws_url: string; token: string } | null,
+  ): Promise<SkillCatalogChange> {
+    return invoke<SkillCatalogChange>("skills_changes", {
+      cwd,
+      sinceRevision,
+      remote: remote ?? null,
+    });
+  }
+
+  onSkillsChanged(handler: (snapshot: SkillCatalogSnapshot) => void): () => void {
+    const unlisten = listen<SkillCatalogSnapshot>("skill-catalog-changed", (event) => {
+      handler(event.payload);
+    });
+    return () => {
+      void unlisten.then((fn) => fn());
+    };
+  }
+
+  listInstructions(
+    cwd: string,
+    remote?: { ws_url: string; token: string } | null,
+  ): Promise<ProjectInstructions | null> {
+    return invoke<ProjectInstructions | null>("instructions_list", {
+      cwd,
+      remote: remote ?? null,
+    });
+  }
+
+  listSkillPacks(
+    cwd: string,
+    remote?: { ws_url: string; token: string } | null,
+  ): Promise<InstalledSkillPack[]> {
+    return invoke<InstalledSkillPack[]>("skill_packs_list", {
+      cwd,
+      remote: remote ?? null,
+    });
+  }
+
+  installSkillPack(
+    cwd: string,
+    request: { packId: string; sourcePath: string; scope: SkillPackScope },
+    remote?: { ws_url: string; token: string } | null,
+  ): Promise<SkillPackOperationResult> {
+    return invoke<SkillPackOperationResult>("skill_pack_install", {
+      cwd,
+      request,
+      remote: remote ?? null,
+    });
+  }
+
+  uninstallSkillPack(
+    cwd: string,
+    packId: string,
+    scope: SkillPackScope,
+    remote?: { ws_url: string; token: string } | null,
+  ): Promise<SkillPackOperationResult> {
+    return invoke<SkillPackOperationResult>("skill_pack_uninstall", {
+      cwd,
+      packId,
+      scope,
+      remote: remote ?? null,
+    });
   }
 
   projectContext(

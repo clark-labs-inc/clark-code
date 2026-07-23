@@ -10,7 +10,8 @@ export type ContentBlock =
   | { type: "image"; mime_type: string; data: string; uri?: string }
   | { type: "audio"; mime_type: string; data: string }
   | { type: "resource"; uri: string; mime_type?: string; text?: string }
-  | { type: "resource_link"; uri: string; name?: string };
+  | { type: "resource_link"; uri: string; name?: string }
+  | { type: "skill_reference"; id: string; revision: string; name: string };
 
 export type ToolKind =
   | "read" | "edit" | "delete" | "move"
@@ -244,6 +245,8 @@ export interface RunOutcome {
 export interface RunView {
   id: string;
   status: RunStatus;
+  /** Latest cumulative usage, available before the run finishes. */
+  usage?: RunUsage;
   outcome?: RunOutcome;
   /** Pre-run working-tree checkpoint used as a change-tracking baseline. */
   checkpoint?: string;

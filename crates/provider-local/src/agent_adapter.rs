@@ -37,7 +37,7 @@ pub(crate) struct UsageTotals {
 }
 
 impl UsageTotals {
-    fn add(&self, usage: crate::llm::TokenUsage) {
+    fn add(&self, usage: crate::llm::TokenUsage) -> agent_core::domain::RunUsage {
         let mut t = self.inner.lock().expect("usage totals lock");
         t.input_tokens += usage.prompt_tokens;
         t.output_tokens += usage.completion_tokens;
@@ -47,6 +47,7 @@ impl UsageTotals {
             t.cost_usd = Some(t.cost_usd.unwrap_or(0.0) + cost);
         }
         self.seen.store(true, std::sync::atomic::Ordering::Relaxed);
+        *t
     }
 
     /// The accumulated usage, or `None` if no call reported any.
@@ -63,14 +64,26 @@ pub(crate) struct ClarkAgentStream {
     llm: LlmClient,
     totals: Arc<UsageTotals>,
     incidents: crate::incidents::ProviderIncidentTracker,
+    events: Sender<desktop::AgentEvent>,
+    run: RunId,
+    context_limit: Option<u64>,
 }
 
 impl ClarkAgentStream {
-    pub fn new(llm: LlmClient, incidents: crate::incidents::ProviderIncidentTracker) -> Self {
+    pub fn new(
+        llm: LlmClient,
+        incidents: crate::incidents::ProviderIncidentTracker,
+        events: Sender<desktop::AgentEvent>,
+        run: RunId,
+        context_limit: Option<u64>,
+    ) -> Self {
         Self {
             llm,
             totals: Arc::new(UsageTotals::default()),
             incidents,
+            events,
+            run,
+            context_limit,
         }
     }
 
@@ -90,6 +103,9 @@ impl ca::StreamFn for ClarkAgentStream {
         let llm = self.llm.clone();
         let totals = self.totals.clone();
         let incidents = self.incidents.clone();
+        let events = self.events.clone();
+        let run = self.run.clone();
+        let context_limit = self.context_limit;
         let messages = to_wire_messages(&request.system_prompt, &request.messages);
         let tools = request
             .tools
@@ -137,7 +153,14 @@ impl ca::StreamFn for ClarkAgentStream {
                 Ok(turn) => {
                     incidents.mark_recovered();
                     if let Some(usage) = turn.usage {
-                        totals.add(usage);
+                        let mut usage = totals.add(usage);
+                        usage.context_limit = context_limit;
+                        let _ = events
+                            .send(desktop::AgentEvent::RunUsageUpdated {
+                                run: run.clone(),
+                                usage,
+                            })
+                            .await;
                     }
                     // GLM 5.2 over the Clark passthrough often ends a turn with
                     // its whole output in the OpenRouter `reasoning` field —

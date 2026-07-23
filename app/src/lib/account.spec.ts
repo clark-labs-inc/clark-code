@@ -5,6 +5,7 @@ import {
   codeKeyMatchesAccount,
   creditState,
   effectiveBalance,
+  effectiveUsagePercent,
   latestActivityReward,
   type BillingSummary,
 } from "./account";
@@ -109,6 +110,28 @@ describe("creditState", () => {
 
   it("falls back to personal billing during a rolling server upgrade", () => {
     expect(creditState(billing(1_000, { effective: undefined }))).toBe("ok");
+  });
+
+  it("prefers the effective workspace percentage and clamps it for display", () => {
+    const summary = billing(10_000, {
+      credit_usage: { percent_used: 12 },
+      effective: {
+        owner_kind: "organization",
+        display_name: "Clark Labs",
+        access_state: "ready",
+        credit_usage: { percent_used: 140 },
+      },
+    });
+
+    expect(effectiveUsagePercent(summary)).toBe(100);
+  });
+
+  it("falls back to the top-level personal percentage", () => {
+    expect(effectiveUsagePercent(billing(10_000, {
+      credit_usage: { percent_used: 42 },
+      effective: undefined,
+    }))).toBe(42);
+    expect(effectiveUsagePercent(null)).toBeNull();
   });
 });
 

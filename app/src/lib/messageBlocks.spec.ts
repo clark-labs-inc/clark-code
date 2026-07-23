@@ -9,6 +9,12 @@ const fileChip: ContentBlock = {
   uri: "attachment://spec.pdf",
   name: "spec.pdf",
 };
+const skill: ContentBlock = {
+  type: "skill_reference",
+  id: "skill_123",
+  revision: "rev_456",
+  name: "brainstorming",
+};
 
 describe("userAttachmentBlocks", () => {
   it("returns nothing for a text-only message", () => {
@@ -16,9 +22,10 @@ describe("userAttachmentBlocks", () => {
   });
 
   it("pulls image and file-chip echoes out of a mixed turn", () => {
-    expect(userAttachmentBlocks([text("look at these"), image, fileChip])).toEqual([
+    expect(userAttachmentBlocks([text("look at these"), image, fileChip, skill])).toEqual([
       image,
       fileChip,
+      skill,
     ]);
   });
 });
@@ -31,10 +38,11 @@ describe("userTextBody", () => {
   it("excludes attachments instead of leaking [image] placeholders", () => {
     // The regression this guards: flattening every block put literal
     // `[image]` / `[resource_link]` markers into the copy/edit text.
-    const body = userTextBody([text("what is in this screenshot?"), image, fileChip]);
+    const body = userTextBody([text("what is in this screenshot?"), image, fileChip, skill]);
     expect(body).toBe("what is in this screenshot?");
     expect(body).not.toContain("[image]");
     expect(body).not.toContain("spec.pdf");
+    expect(body).not.toContain("brainstorming");
   });
 
   it("is empty for an attachment-only message", () => {

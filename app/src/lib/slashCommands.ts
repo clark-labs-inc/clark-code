@@ -44,6 +44,12 @@ export function slashCommands(): SlashCommand[] {
       run: () => void s().compactConversation(),
     },
     {
+      name: "skills",
+      hint: "Browse, select, install, and inspect skills",
+      localOnly: true,
+      body: "/skills",
+    },
+    {
       name: "sentry",
       hint: "Inspect current Sentry issues and production errors",
       localOnly: true,

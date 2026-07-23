@@ -1,7 +1,35 @@
 use std::collections::HashSet;
 
+use agent_core::domain::ContentBlock;
+
 use super::{render_injection, SkillCatalog};
 use crate::exec::Executor;
+
+pub(crate) async fn bound_skill_injections(
+    exec: &dyn Executor,
+    catalog: &SkillCatalog,
+    blocks: &[ContentBlock],
+) -> Result<Vec<String>, String> {
+    let mut sections = Vec::new();
+    let mut seen = HashSet::new();
+    for block in blocks {
+        let ContentBlock::SkillReference {
+            id,
+            revision,
+            name: _,
+        } = block
+        else {
+            continue;
+        };
+        if !seen.insert(id.clone()) {
+            continue;
+        }
+        let skill = catalog.resolve_id(id, Some(revision))?;
+        let contents = catalog.read(exec, skill).await?;
+        sections.push(render_injection(skill, &contents));
+    }
+    Ok(sections)
+}
 
 pub(crate) async fn explicit_skill_injections(
     exec: &dyn Executor,
@@ -14,7 +42,7 @@ pub(crate) async fn explicit_skill_injections(
         let Ok(skill) = catalog.resolve_name(&requested) else {
             continue;
         };
-        if !seen.insert(skill.name.clone()) {
+        if !seen.insert(skill.id.clone()) {
             continue;
         }
         match catalog.read(exec, skill).await {

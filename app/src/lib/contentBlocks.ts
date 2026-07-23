@@ -44,6 +44,10 @@ export function sameContentBlocks(a: ContentBlock[], b: ContentBlock[]): boolean
       const resource = other as Extract<ContentBlock, { type: "resource" }>;
       return block.uri === resource.uri && block.mime_type === resource.mime_type && block.text === resource.text;
     }
+    if (block.type === "skill_reference") {
+      const skill = other as Extract<ContentBlock, { type: "skill_reference" }>;
+      return block.id === skill.id && block.revision === skill.revision && block.name === skill.name;
+    }
     const link = other as Extract<ContentBlock, { type: "resource_link" }>;
     return block.uri === link.uri && block.name === link.name;
   });

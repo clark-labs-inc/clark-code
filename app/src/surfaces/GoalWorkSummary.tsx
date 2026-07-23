@@ -3,16 +3,25 @@ import { ChevronRight } from "lucide-react";
 import type { GoalState } from "../core-bridge/types";
 import { formatGoalDuration, goalElapsedSeconds } from "../lib/goal";
 
-export function GoalWorkSummary({ goal, children }: { goal: GoalState; children: ReactNode }) {
-  const [open, setOpen] = useState(goal.status === "active");
+export function GoalWorkSummary({
+  goal,
+  runActive,
+  children,
+}: {
+  goal: GoalState;
+  runActive: boolean;
+  children: ReactNode;
+}) {
+  const working = goal.status === "active" || runActive;
+  const [open, setOpen] = useState(working);
   const [, tick] = useState(0);
 
-  useEffect(() => setOpen(goal.status === "active"), [goal.id, goal.status]);
+  useEffect(() => setOpen(working), [goal.id, working]);
   useEffect(() => {
-    if (goal.status !== "active") return;
+    if (!working) return;
     const id = window.setInterval(() => tick((value) => value + 1), 1_000);
     return () => window.clearInterval(id);
-  }, [goal.status]);
+  }, [working]);
 
   return (
     <section className="border-b border-border-subtle pb-3" aria-label="Goal work receipt">
@@ -22,8 +31,10 @@ export function GoalWorkSummary({ goal, children }: { goal: GoalState; children:
         aria-expanded={open}
         className="group flex min-h-9 w-full items-center gap-1.5 text-left text-base font-medium text-ink-muted transition-colors hover:text-ink"
       >
-        <span>{goal.status === "active" ? "Working for" : "Worked for"}</span>
-        <span className="tabular-nums">{formatGoalDuration(goalElapsedSeconds(goal))}</span>
+        <span>{working ? "Working for" : "Worked for"}</span>
+        <span className="tabular-nums">
+          {formatGoalDuration(goalElapsedSeconds(goal, Date.now(), working))}
+        </span>
         <ChevronRight
           className={`size-4 transition-transform duration-200 ${open ? "rotate-90" : ""}`}
           aria-hidden

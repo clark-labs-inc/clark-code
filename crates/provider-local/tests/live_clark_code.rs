@@ -5,8 +5,9 @@
 //!
 //! ```sh
 //! CLARK_CODE_LIVE=1 \
+//! CLARK_CODE_PROVIDER=clark-platform \
 //! CLARK_CODE_BASE_URL=https://api.clarkslabs.com/v1 \
-//! CLARK_CODE_MODEL=clark-code:deepseek_v4_pro \
+//! CLARK_CODE_MODEL=clark-code:YOUR_EXPLICIT_TIER \
 //! CLARK_CODE_API_KEY=ck_live_... \
 //!   cargo test -p provider-local --test live_clark_code -- --ignored --nocapture --test-threads=1
 //! ```
@@ -19,16 +20,24 @@ use agent_core::domain::{AgentEvent, ContentBlock, PendingUpload, RunStatus, Too
 use agent_core::provider::{ClientResponse, PromptInput, Provider, ProviderConfig, SessionOptions};
 use base64::Engine as _;
 use futures::StreamExt;
-use provider_local::LocalAgentProvider;
+use provider_local::{
+    install_skill_pack, InstallSkillPackRequest, LocalAgentProvider, LocalExecutor,
+    SkillPackAction, SkillPackScope,
+};
 use serde_json::json;
 
 const TURN_TIMEOUT: Duration = Duration::from_secs(180);
 
 #[derive(Clone, Debug)]
 struct LiveConfig {
+    provider: String,
     base_url: String,
     model: String,
     api_key: String,
+}
+
+fn is_clark_code_provider(value: &str) -> bool {
+    value == "clark-platform"
 }
 
 fn is_clark_code_model(value: &str) -> bool {
@@ -40,6 +49,19 @@ fn live_config() -> Option<LiveConfig> {
         eprintln!("skipping: set CLARK_CODE_LIVE=1 to permit live clark-code calls");
         return None;
     }
+    let provider = match std::env::var("CLARK_CODE_PROVIDER") {
+        Ok(value) if is_clark_code_provider(value.trim()) => value,
+        Ok(value) => {
+            eprintln!(
+                "skipping: CLARK_CODE_PROVIDER must name the clark-platform route, got {value:?}"
+            );
+            return None;
+        }
+        Err(_) => {
+            eprintln!("skipping: set CLARK_CODE_PROVIDER=clark-platform");
+            return None;
+        }
+    };
     let base_url = match std::env::var("CLARK_CODE_BASE_URL") {
         Ok(value) if !value.trim().is_empty() => value,
         _ => {
@@ -66,6 +88,7 @@ fn live_config() -> Option<LiveConfig> {
         }
     };
     Some(LiveConfig {
+        provider,
         base_url,
         model,
         api_key,
@@ -74,6 +97,8 @@ fn live_config() -> Option<LiveConfig> {
 
 #[test]
 fn live_matrix_accepts_backend_owned_clark_code_aliases_only() {
+    assert!(is_clark_code_provider("clark-platform"));
+    assert!(!is_clark_code_provider("openrouter"));
     assert!(is_clark_code_model("clark-code"));
     assert!(is_clark_code_model("clark-code:deepseek_v4_pro"));
     assert!(!is_clark_code_model("deepseek/deepseek-v4-pro"));
@@ -267,6 +292,7 @@ fn event_name(ev: &AgentEvent) -> &'static str {
         AgentEvent::ExecutionChecklistUpdated { .. } => "ExecutionChecklistUpdated",
         AgentEvent::ProposedPlanUpdated { .. } => "ProposedPlanUpdated",
         AgentEvent::GoalUpdated { .. } => "GoalUpdated",
+        AgentEvent::RunUsageUpdated { .. } => "RunUsageUpdated",
         AgentEvent::PermissionRequest { .. } => "PermissionRequest",
         AgentEvent::Artifact { .. } => "Artifact",
         AgentEvent::Surface { .. } => "Surface",
@@ -300,21 +326,19 @@ fn write_project_fixture(root: &Path) {
 }
 
 #[tokio::test]
-#[ignore = "requires explicit live clark-code env; makes one real DeepSeek V4 Pro call"]
+#[ignore = "requires explicit live clark-code env; makes a real Clark Platform turn"]
 async fn live_clark_code_skills_end_to_end() {
     let Some(cfg) = live_config() else {
         return;
     };
-    assert_eq!(
-        cfg.model, "clark-code:deepseek_v4_pro",
-        "skills_e2e: refusing paid validation with any model except DeepSeek V4 Pro"
-    );
 
     let dir = tempfile::tempdir().unwrap();
-    let skill_dir = dir.path().join(".clark/skills/paid-receipt");
+    let skill_dir = dir.path().join("fixture-pack/skills/paid-receipt");
     std::fs::create_dir_all(skill_dir.join("references")).unwrap();
-    let contract =
-        "skill=paid-receipt\nmodel=deepseek-v4-pro\nsentinel=CLARK_SKILL_RESOURCE_SENTINEL_7319\n";
+    let contract = format!(
+        "skill=paid-receipt\nprovider={}\nmodel={}\nsentinel=CLARK_SKILL_RESOURCE_SENTINEL_7319\n",
+        cfg.provider, cfg.model
+    );
     std::fs::write(
         skill_dir.join("SKILL.md"),
         r#"---
@@ -333,7 +357,23 @@ text verbatim, with no fences or extra text. Finally reply with exactly
 "#,
     )
     .unwrap();
-    std::fs::write(skill_dir.join("references/contract.md"), contract).unwrap();
+    std::fs::write(skill_dir.join("references/contract.md"), &contract).unwrap();
+    let installed = install_skill_pack(
+        &LocalExecutor,
+        dir.path(),
+        InstallSkillPackRequest {
+            pack_id: "paid-receipt".into(),
+            source_path: dir
+                .path()
+                .join("fixture-pack")
+                .to_string_lossy()
+                .into_owned(),
+            scope: SkillPackScope::Project,
+        },
+    )
+    .await
+    .expect("install managed live-test pack");
+    assert_eq!(installed.action, SkillPackAction::Installed);
 
     let (mut provider, session) = new_live_provider(
         &cfg,
@@ -357,8 +397,13 @@ text verbatim, with no fences or extra text. Finally reply with exactly
     )
     .await;
     println!(
-        "[skills_e2e] model={} tools={:?} permission_requests={} usage={:?} text={:?}",
-        cfg.model, summary.tools, summary.permission_requests, summary.usage, summary.text
+        "[skills_e2e] provider={} model={} tools={:?} permission_requests={} usage={:?} text={:?}",
+        cfg.provider,
+        cfg.model,
+        summary.tools,
+        summary.permission_requests,
+        summary.usage,
+        summary.text
     );
 
     summary.require_done("skills_e2e");

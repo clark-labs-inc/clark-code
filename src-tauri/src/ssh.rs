@@ -9,8 +9,8 @@
 //! Design of the exec-server transport:
 //!   1. `ssh <host> uname -sm` — detect the remote arch.
 //!   2. Ensure `~/.clark/bin/clark-exec-server-v<ver>-<arch>` exists on the
-//!      remote; if not, scp the matching local build up (Phase 5 will swap this
-//!      for a version-pinned CDN fetch — see [`ensure_binary`]).
+//!      remote; if not, fetch the version-pinned CDN artifact (a local build can
+//!      still be uploaded as an explicit development override).
 //!   3. Run the server in the **foreground** of one ssh channel bound to
 //!      `127.0.0.1:0`; read its printed URL to learn the ephemeral remote port.
 //!      The capability token is delivered over that channel's **stdin**, so it
@@ -96,7 +96,7 @@ impl RemoteArch {
         }
     }
 
-    /// Stable slug for the binary filename and (Phase 5) the CDN asset path.
+    /// Stable slug for the binary filename and CDN asset path.
     pub fn slug(self) -> &'static str {
         match self {
             Self::LinuxX86_64 => "linux-x86_64",
@@ -284,7 +284,7 @@ async fn start_server(
 ) -> Result<(Child, ChildStdin, u16), String> {
     let remote_cmd = format!(
         "read CLARK_EXEC_TOKEN; export CLARK_EXEC_TOKEN; \
-         {} --root {} --listen 127.0.0.1:0 & SRV=$!; \
+         {} --root {} --home \"$HOME\" --listen 127.0.0.1:0 & SRV=$!; \
          cat >/dev/null; kill \"$SRV\" 2>/dev/null",
         shq(remote_bin),
         shq(root)

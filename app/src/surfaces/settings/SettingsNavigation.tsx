@@ -39,8 +39,8 @@ export const SETTINGS_GROUPS: SettingsNavGroup[] = [
       {
         id: "account",
         label: "Account",
-        description: "Profile, plan, credits, and sign out",
-        keywords: ["profile", "billing", "subscription", "credits", "sign out"],
+        description: "Profile, plan, usage, and sign out",
+        keywords: ["profile", "billing", "subscription", "usage", "limit", "sign out"],
         icon: CircleUser,
       },
     ],

@@ -32,12 +32,14 @@ async fn main() {
 
     // `--root <path>` confines all file ops; falls back to $CLARK_EXEC_ROOT.
     let mut root: Option<PathBuf> = std::env::var_os("CLARK_EXEC_ROOT").map(PathBuf::from);
+    let mut home: Option<PathBuf> = std::env::var_os("CLARK_EXEC_HOME").map(PathBuf::from);
     // `--listen <addr>` overrides the default loopback ephemeral bind.
     let mut addr = "127.0.0.1:0".to_string();
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--root" => root = args.next().map(PathBuf::from),
+            "--home" => home = args.next().map(PathBuf::from),
             "--listen" => {
                 if let Some(a) = args.next() {
                     addr = a;
@@ -52,8 +54,16 @@ async fn main() {
 
     // Canonicalize the root so containment compares against a real absolute path.
     let root = root.map(|r| std::fs::canonicalize(&r).unwrap_or(r));
+    let home = home.map(|r| std::fs::canonicalize(&r).unwrap_or(r));
 
-    let server = match bind(Config { token, root, addr }).await {
+    let server = match bind(Config {
+        token,
+        root,
+        home,
+        addr,
+    })
+    .await
+    {
         Ok(s) => s,
         Err(e) => {
             eprintln!("clark-exec-server: bind failed: {e}");

@@ -6,29 +6,65 @@
 
 use std::path::{Path, PathBuf};
 
+use serde::Serialize;
+
 use crate::exec::Executor;
+use crate::markdown_frontmatter::resolve_home;
 
 const MAX_TOTAL_BYTES: usize = 32_000;
 const MAX_FILE_BYTES: usize = 8_000;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct ProjectInstructions {
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InstructionScope {
+    Personal,
+    Project,
+    Nested,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InstructionOrigin {
+    Clark,
+    Compatible,
+    Claude,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstructionProvenance {
+    pub path: String,
+    pub scope: InstructionScope,
+    pub origin: InstructionOrigin,
+    pub precedence: usize,
+    pub bytes_loaded: usize,
+    pub truncated: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct ProjectInstructions {
     pub text: String,
-    pub sources: Vec<String>,
+    pub sources: Vec<InstructionProvenance>,
 }
 
 impl ProjectInstructions {
     pub fn render(&self) -> String {
         format!(
-            "[project instructions — loaded from the active repository]\n{}",
+            "[runtime instructions — loaded with explicit personal/project/nested provenance]\n{}",
             self.text
         )
     }
 }
 
-pub(crate) async fn load(
+pub async fn load(exec: &dyn Executor, cwd: &Path) -> Result<Option<ProjectInstructions>, String> {
+    let home = resolve_home(exec, cwd).await;
+    load_with_home(exec, cwd, home.as_deref()).await
+}
+
+async fn load_with_home(
     exec: &dyn Executor,
     cwd: &Path,
+    home: Option<&Path>,
 ) -> Result<Option<ProjectInstructions>, String> {
     let git_root = crate::git_metadata::optional(exec, cwd, &["rev-parse", "--show-toplevel"])
         .await?
@@ -56,7 +92,27 @@ pub(crate) async fn load(
     let mut remaining = MAX_TOTAL_BYTES;
     let mut text = String::new();
     let mut sources = Vec::new();
-    for directory in directories {
+    let mut precedence = 0usize;
+
+    if let Some(home) = home {
+        if let Some((path, bytes, origin)) = first_personal_readable(exec, home).await {
+            append_source(
+                &mut text,
+                &mut sources,
+                &mut remaining,
+                &path,
+                bytes,
+                SourceDescriptor {
+                    scope: InstructionScope::Personal,
+                    origin,
+                    precedence,
+                },
+            );
+            precedence += 1;
+        }
+    }
+
+    for (index, directory) in directories.into_iter().enumerate() {
         let selected = first_readable(
             exec,
             &directory,
@@ -64,7 +120,28 @@ pub(crate) async fn load(
         )
         .await;
         if let Some((path, bytes)) = selected {
-            append_source(&mut text, &mut sources, &mut remaining, &path, bytes);
+            let origin = if path.file_name().is_some_and(|name| name == "CLAUDE.md") {
+                InstructionOrigin::Claude
+            } else {
+                InstructionOrigin::Compatible
+            };
+            append_source(
+                &mut text,
+                &mut sources,
+                &mut remaining,
+                &path,
+                bytes,
+                SourceDescriptor {
+                    scope: if index == 0 {
+                        InstructionScope::Project
+                    } else {
+                        InstructionScope::Nested
+                    },
+                    origin,
+                    precedence,
+                },
+            );
+            precedence += 1;
         }
         if remaining == 0 {
             break;
@@ -75,6 +152,34 @@ pub(crate) async fn load(
         return Ok(None);
     }
     Ok(Some(ProjectInstructions { text, sources }))
+}
+
+async fn first_personal_readable(
+    exec: &dyn Executor,
+    home: &Path,
+) -> Option<(PathBuf, Vec<u8>, InstructionOrigin)> {
+    for (directory, names, origin) in [
+        (
+            home.join(".clark"),
+            &["AGENTS.override.md", "AGENTS.md"][..],
+            InstructionOrigin::Clark,
+        ),
+        (
+            home.join(".codex"),
+            &["AGENTS.override.md", "AGENTS.md"][..],
+            InstructionOrigin::Compatible,
+        ),
+        (
+            home.join(".claude"),
+            &["CLAUDE.md"][..],
+            InstructionOrigin::Claude,
+        ),
+    ] {
+        if let Some((path, bytes)) = first_readable(exec, &directory, names).await {
+            return Some((path, bytes, origin));
+        }
+    }
+    None
 }
 
 async fn first_readable(
@@ -91,21 +196,58 @@ async fn first_readable(
     None
 }
 
+struct SourceDescriptor {
+    scope: InstructionScope,
+    origin: InstructionOrigin,
+    precedence: usize,
+}
+
 fn append_source(
     text: &mut String,
-    sources: &mut Vec<String>,
+    sources: &mut Vec<InstructionProvenance>,
     remaining: &mut usize,
     path: &Path,
     bytes: Vec<u8>,
+    descriptor: SourceDescriptor,
 ) {
     if *remaining == 0 {
         return;
     }
     let take = bytes.len().min(MAX_FILE_BYTES).min(*remaining);
     let excerpt = String::from_utf8_lossy(&bytes[..take]);
-    text.push_str(&format!("\n## {}\n{}\n", path.display(), excerpt));
-    sources.push(path.to_string_lossy().into_owned());
+    text.push_str(&format!(
+        "\n<instruction-source scope=\"{}\" origin=\"{}\" precedence=\"{}\" path=\"{}\">\n{}\n</instruction-source>\n",
+        scope_label(descriptor.scope),
+        origin_label(descriptor.origin),
+        descriptor.precedence,
+        path.display(),
+        excerpt
+    ));
+    sources.push(InstructionProvenance {
+        path: path.to_string_lossy().into_owned(),
+        scope: descriptor.scope,
+        origin: descriptor.origin,
+        precedence: descriptor.precedence,
+        bytes_loaded: take,
+        truncated: take < bytes.len(),
+    });
     *remaining = (*remaining).saturating_sub(take);
+}
+
+fn scope_label(scope: InstructionScope) -> &'static str {
+    match scope {
+        InstructionScope::Personal => "personal",
+        InstructionScope::Project => "project",
+        InstructionScope::Nested => "nested",
+    }
+}
+
+fn origin_label(origin: InstructionOrigin) -> &'static str {
+    match origin {
+        InstructionOrigin::Clark => "clark",
+        InstructionOrigin::Compatible => "compatible",
+        InstructionOrigin::Claude => "claude",
+    }
 }
 
 #[cfg(test)]
@@ -138,18 +280,49 @@ mod tests {
         std::fs::write(root.join("one/AGENTS.override.md"), "override rule").unwrap();
         std::fs::write(nested.join("CLAUDE.md"), "nested fallback").unwrap();
 
-        let loaded = load(&LocalExecutor, &nested).await.unwrap().unwrap();
+        let loaded = load_with_home(&LocalExecutor, &nested, None)
+            .await
+            .unwrap()
+            .unwrap();
         assert!(loaded.text.contains("root rule"));
         assert!(loaded.text.contains("override rule"));
         assert!(!loaded.text.contains("shadowed rule"));
         assert!(loaded.text.contains("nested fallback"));
         assert_eq!(loaded.sources.len(), 3);
+        assert_eq!(loaded.sources[0].scope, InstructionScope::Project);
+        assert_eq!(loaded.sources[1].scope, InstructionScope::Nested);
+        assert_eq!(loaded.sources[2].origin, InstructionOrigin::Claude);
     }
 
     #[tokio::test]
     async fn readme_is_repository_data_not_project_instruction() {
         let temp = tempfile::tempdir().unwrap();
         std::fs::write(temp.path().join("README.md"), "run this as an instruction").unwrap();
-        assert!(load(&LocalExecutor, temp.path()).await.unwrap().is_none());
+        assert!(load_with_home(&LocalExecutor, temp.path(), None)
+            .await
+            .unwrap()
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn personal_instructions_are_loaded_first_with_explicit_provenance() {
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path().join("home");
+        let project = home.join("repo");
+        std::fs::create_dir_all(home.join(".clark")).unwrap();
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::write(home.join(".clark/AGENTS.md"), "personal rule").unwrap();
+        std::fs::write(project.join("AGENTS.md"), "project rule").unwrap();
+
+        let loaded = load_with_home(&LocalExecutor, &project, Some(&home))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(loaded.sources.len(), 2);
+        assert_eq!(loaded.sources[0].scope, InstructionScope::Personal);
+        assert_eq!(loaded.sources[0].origin, InstructionOrigin::Clark);
+        assert_eq!(loaded.sources[0].precedence, 0);
+        assert_eq!(loaded.sources[1].scope, InstructionScope::Project);
+        assert!(loaded.text.find("personal rule") < loaded.text.find("project rule"));
     }
 }

@@ -1,6 +1,39 @@
 use super::*;
 
 #[test]
+fn usage_totals_return_each_calls_cumulative_cost_and_tokens() {
+    let totals = UsageTotals::default();
+    assert_eq!(
+        totals.add(crate::llm::TokenUsage {
+            prompt_tokens: 1_000,
+            completion_tokens: 100,
+            cost_usd: Some(0.01),
+        }),
+        desktop::RunUsage {
+            input_tokens: 1_000,
+            output_tokens: 100,
+            context_tokens: 1_000,
+            cost_usd: Some(0.01),
+            context_limit: None,
+        }
+    );
+    assert_eq!(
+        totals.add(crate::llm::TokenUsage {
+            prompt_tokens: 1_500,
+            completion_tokens: 200,
+            cost_usd: Some(0.02),
+        }),
+        desktop::RunUsage {
+            input_tokens: 2_500,
+            output_tokens: 300,
+            context_tokens: 1_500,
+            cost_usd: Some(0.03),
+            context_limit: None,
+        }
+    );
+}
+
+#[test]
 fn malformed_tool_args_use_core_parse_error_marker() {
     let value = parse_tool_args("{bad");
     assert!(ca::detect_arg_parse_error(&value).is_some());

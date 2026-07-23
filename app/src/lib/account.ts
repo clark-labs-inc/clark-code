@@ -170,6 +170,16 @@ export function effectiveBalance(billing: BillingSummary | null): {
   return effective.balance ?? effective.credits ?? null;
 }
 
+/** Percentage of the current effective billing limit consumed by Clark Code.
+ * Prefer workspace coverage when present, with the top-level personal value as
+ * a rolling-upgrade fallback. */
+export function effectiveUsagePercent(billing: BillingSummary | null): number | null {
+  const percent = effectiveBilling(billing)?.credit_usage?.percent_used
+    ?? billing?.credit_usage?.percent_used;
+  if (typeof percent !== "number" || !Number.isFinite(percent)) return null;
+  return Math.min(100, Math.max(0, percent));
+}
+
 export function billingPlanLabel(planKey?: string | null): string {
   if (!planKey) return "No active plan";
   return planKey
@@ -209,13 +219,4 @@ export function creditState(billing: BillingSummary | null): CreditState {
   const perDollar = billing.credits_per_dollar;
   if (!perDollar || !Number.isFinite(perDollar)) return "ok";
   return c.available_credits < perDollar * LOW_CREDIT_DOLLARS ? "low" : "ok";
-}
-
-/** Approximate remaining dollar value of the credit balance, for display. */
-export function creditDollars(billing: BillingSummary | null): number {
-  if (!billing) return 0;
-  const perDollar = billing.credits_per_dollar;
-  if (!perDollar || !Number.isFinite(perDollar)) return 0;
-  const credits = effectiveBalance(billing)?.available_credits ?? 0;
-  return credits / perDollar;
 }

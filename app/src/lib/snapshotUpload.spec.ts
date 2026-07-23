@@ -4,6 +4,7 @@ import {
   KEEP_RECENT_TOOL_CALLS,
   prepareSnapshotForUpload,
   TEXT_PREVIEW_CHARS,
+  utf8ByteLength,
 } from "./snapshotUpload";
 
 function toolCall(id: string, textLen: number): ToolCall {
@@ -44,6 +45,7 @@ describe("prepareSnapshotForUpload", () => {
     expect(prepared.elided).toBe(false);
     expect(prepared.snapshot).toBe(snapshot);
     expect(prepared.json).toBe(JSON.stringify(snapshot));
+    expect(prepared.bytes).toBe(utf8ByteLength(prepared.json));
   });
 
   it("elides old tool outputs to bring an oversized snapshot under target", () => {
@@ -51,7 +53,7 @@ describe("prepareSnapshotForUpload", () => {
     const snapshot = snapshotWith(40, 50_000);
     const prepared = prepareSnapshotForUpload(snapshot, 1_000_000);
     expect(prepared.elided).toBe(true);
-    expect(prepared.json.length).toBeLessThan(JSON.stringify(snapshot).length);
+    expect(prepared.bytes).toBeLessThan(utf8ByteLength(JSON.stringify(snapshot)));
     // The original object is never mutated.
     expect(snapshot.tool_calls.t0.content[0]).toEqual({
       type: "text",
@@ -131,5 +133,21 @@ describe("prepareSnapshotForUpload", () => {
     const prepared = prepareSnapshotForUpload(snapshot, 1_000_000);
     expect(prepared.snapshot.tool_calls.t35.content[0]).toEqual({ type: "text", text: small });
     expect(small.length).toBeLessThan(TEXT_PREVIEW_CHARS);
+  });
+
+  it("measures serialized limits in UTF-8 bytes, not UTF-16 code units", () => {
+    const snapshot = snapshotWith(0, 0, {
+      timeline: [{
+        item: "message",
+        run: "r1",
+        role: "user",
+        blocks: [{ type: "text", text: "😀".repeat(100) }],
+      }],
+    });
+    const prepared = prepareSnapshotForUpload(snapshot, 300);
+
+    expect(prepared.json.length).toBeLessThan(prepared.bytes);
+    expect(prepared.bytes).toBe(utf8ByteLength(prepared.json));
+    expect(prepared.bytes).toBeGreaterThan(300);
   });
 });

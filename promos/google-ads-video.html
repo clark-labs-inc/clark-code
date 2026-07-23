@@ -1,0 +1,618 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  @font-face {
+    font-family: "DM Sans";
+    src: url("../app/node_modules/@fontsource-variable/dm-sans/files/dm-sans-latin-wght-normal.woff2") format("woff2");
+  }
+  @font-face {
+    font-family: "Newsreader";
+    src: url("../app/node_modules/@fontsource-variable/newsreader/files/newsreader-latin-wght-normal.woff2") format("woff2");
+  }
+  @font-face {
+    font-family: "JetBrains Mono";
+    src: url("../app/node_modules/@fontsource/jetbrains-mono/files/jetbrains-mono-latin-400-normal.woff2") format("woff2");
+  }
+
+  :root {
+    --paper: #f7f5f1;
+    --paper-2: #ede9e2;
+    --ink: #211f1c;
+    --graphite: #0d0d0d;
+    --graphite-2: #161616;
+    --muted: #5d5750;
+    --violet: #5748c7;
+    --violet-light: #9b8cff;
+    --green: #7faf75;
+    --line: rgba(33, 31, 28, .13);
+    --safe: 6.4%;
+  }
+
+  * { box-sizing: border-box; }
+  html, body {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    overflow: hidden;
+    background: var(--graphite);
+  }
+  body {
+    color: var(--ink);
+    font-family: "DM Sans", sans-serif;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: geometricPrecision;
+  }
+
+  #video {
+    position: relative;
+    width: 100vw;
+    height: 100vh;
+    overflow: hidden;
+    isolation: isolate;
+    background: var(--paper);
+  }
+  #video::before {
+    position: absolute;
+    inset: -35%;
+    z-index: -2;
+    content: "";
+    background:
+      radial-gradient(circle at var(--glow-x, 15%) 35%, rgba(87, 72, 199, .14), transparent 26%),
+      radial-gradient(circle at 80% 75%, rgba(127, 175, 117, .09), transparent 24%);
+  }
+  #video::after {
+    position: absolute;
+    inset: 0;
+    z-index: 50;
+    pointer-events: none;
+    content: "";
+    box-shadow: inset 0 0 8vw rgba(33, 31, 28, .08);
+  }
+
+  .scene {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    padding: var(--safe);
+    opacity: 0;
+    overflow: hidden;
+  }
+  .scene.dark {
+    color: #f5f5f4;
+    background: var(--graphite);
+  }
+
+  .brand {
+    position: absolute;
+    top: var(--safe);
+    left: var(--safe);
+    z-index: 4;
+    display: flex;
+    align-items: center;
+    gap: .75vw;
+    font-size: clamp(18px, 1.7vw, 30px);
+    font-weight: 680;
+    letter-spacing: -.03em;
+  }
+  .brand img {
+    width: clamp(32px, 3.1vw, 52px);
+    height: clamp(32px, 3.1vw, 52px);
+    border-radius: 22%;
+  }
+  .dark .brand { color: #f5f5f4; }
+
+  .copy {
+    position: relative;
+    z-index: 3;
+    align-self: center;
+    max-width: 47%;
+  }
+  .kicker {
+    margin-bottom: 1.1vw;
+    color: var(--violet);
+    font-family: "JetBrains Mono", monospace;
+    font-size: clamp(11px, 1vw, 17px);
+    font-weight: 500;
+    letter-spacing: .18em;
+    text-transform: uppercase;
+  }
+  .dark .kicker { color: var(--violet-light); }
+  h1 {
+    max-width: 12ch;
+    margin: 0;
+    font-family: "Newsreader", serif;
+    font-size: clamp(48px, 6.1vw, 104px);
+    font-weight: 610;
+    line-height: .94;
+    letter-spacing: -.05em;
+    text-wrap: balance;
+  }
+  h1 em {
+    color: var(--violet);
+    font-weight: 560;
+  }
+  .dark h1 em { color: var(--violet-light); }
+  .sub {
+    max-width: 31ch;
+    margin-top: 1.5vw;
+    color: var(--muted);
+    font-size: clamp(18px, 1.8vw, 30px);
+    font-weight: 480;
+    line-height: 1.25;
+  }
+  .dark .sub { color: #b8b6b1; }
+
+  .ui-frame {
+    position: absolute;
+    z-index: 2;
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, .12);
+    border-radius: 1.55vw;
+    background: var(--graphite);
+    box-shadow: 0 2.2vw 5.5vw rgba(18, 16, 14, .25);
+  }
+  .ui-frame img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+  .layout-split .copy { justify-self: start; }
+  .layout-split .ui-frame {
+    top: 8.5%;
+    right: -2%;
+    width: 59%;
+    height: 83%;
+  }
+  .layout-left .copy {
+    justify-self: end;
+    max-width: 47%;
+  }
+  .layout-left .ui-frame {
+    top: 6.5%;
+    left: 3.4%;
+    width: 44%;
+    height: 87%;
+  }
+  .layout-full .ui-frame {
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    border: 0;
+    border-radius: 0;
+    filter: brightness(.58) saturate(.86);
+  }
+  .layout-full .ui-frame::after {
+    position: absolute;
+    inset: 0;
+    content: "";
+    background: linear-gradient(90deg, rgba(13, 13, 13, .88) 0%, rgba(13, 13, 13, .22) 58%, rgba(13, 13, 13, .08));
+  }
+  .layout-full .copy {
+    max-width: 54%;
+    color: #f5f5f4;
+  }
+  .layout-full .sub { color: #c6c4bf; }
+  .layout-full .kicker { color: var(--violet-light); }
+
+  .terminal-window {
+    position: absolute;
+    top: 20%;
+    right: 7%;
+    width: 48%;
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, .13);
+    border-radius: 1.35vw;
+    background: #080808;
+    box-shadow: 0 2vw 5vw rgba(0, 0, 0, .45);
+    font-family: "JetBrains Mono", monospace;
+  }
+  .terminal-bar {
+    display: flex;
+    gap: .55vw;
+    padding: 1vw 1.2vw;
+    border-bottom: 1px solid rgba(255, 255, 255, .08);
+    color: #77736f;
+    font-size: clamp(10px, .9vw, 15px);
+  }
+  .terminal-bar i {
+    width: .75vw;
+    height: .75vw;
+    border-radius: 50%;
+    background: #353535;
+  }
+  .terminal-body {
+    min-height: 18vw;
+    padding: 2vw;
+    color: #b8b6b1;
+    font-size: clamp(15px, 1.55vw, 26px);
+    line-height: 1.75;
+  }
+  .terminal-body b { color: #f5f5f4; font-weight: 500; }
+  .terminal-body .prompt { color: var(--green); }
+  .cursor {
+    display: inline-block;
+    width: .68em;
+    height: 1.15em;
+    vertical-align: -.2em;
+    background: #f5f5f4;
+  }
+
+  .pills {
+    position: absolute;
+    right: 5%;
+    bottom: 7%;
+    z-index: 5;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: .7vw;
+  }
+  .pill {
+    padding: .68vw 1vw;
+    border: 1px solid rgba(255, 255, 255, .14);
+    border-radius: 999px;
+    color: #f5f5f4;
+    background: rgba(13, 13, 13, .78);
+    box-shadow: 0 .6vw 1.8vw rgba(0, 0, 0, .28);
+    font-size: clamp(13px, 1.2vw, 20px);
+    font-weight: 600;
+    backdrop-filter: blur(10px);
+  }
+  .pill::before {
+    display: inline-block;
+    width: .5em;
+    height: .5em;
+    margin-right: .55em;
+    border-radius: 50%;
+    background: var(--violet-light);
+    content: "";
+  }
+
+  .statement {
+    place-items: center;
+    text-align: center;
+  }
+  .statement .copy {
+    max-width: 78%;
+  }
+  .statement h1 {
+    max-width: 16ch;
+    font-size: clamp(62px, 8vw, 136px);
+  }
+  .statement .sub {
+    max-width: 42ch;
+    margin-inline: auto;
+  }
+
+  .end {
+    place-items: center;
+    color: #f5f5f4;
+    text-align: center;
+    background:
+      radial-gradient(circle at 50% 45%, rgba(155, 140, 255, .16), transparent 34%),
+      var(--graphite);
+  }
+  .end .end-mark {
+    width: clamp(56px, 6vw, 96px);
+    height: clamp(56px, 6vw, 96px);
+    margin-bottom: 1.4vw;
+    border-radius: 22%;
+  }
+  .end h1 {
+    max-width: 15ch;
+    font-size: clamp(58px, 7vw, 120px);
+  }
+  .end .sub {
+    margin-inline: auto;
+    color: #c6c4bf;
+  }
+  .cta {
+    display: inline-flex;
+    align-items: center;
+    gap: .7em;
+    margin-top: 1.7vw;
+    padding: .88em 1.25em;
+    border-radius: .8em;
+    color: #17131f;
+    background: #f5f5f4;
+    font-size: clamp(17px, 1.65vw, 28px);
+    font-weight: 700;
+  }
+  .url {
+    margin-top: 1.25vw;
+    color: var(--violet-light);
+    font-family: "JetBrains Mono", monospace;
+    font-size: clamp(13px, 1.1vw, 18px);
+    letter-spacing: .08em;
+  }
+  .progress {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 80;
+    height: .32vw;
+    background: rgba(155, 140, 255, .22);
+  }
+  .progress span {
+    display: block;
+    height: 100%;
+    transform-origin: left;
+    background: var(--violet-light);
+  }
+
+  body.square { --safe: 7.2%; }
+  body.square .brand { gap: 1.3vw; font-size: 3.1vw; }
+  body.square .brand img { width: 5.8vw; height: 5.8vw; }
+  body.square .scene.layout-split,
+  body.square .scene.layout-left {
+    grid-template-rows: 42% 58%;
+  }
+  body.square .layout-split .copy,
+  body.square .layout-left .copy {
+    align-self: start;
+    max-width: 86%;
+    margin-top: 10%;
+    justify-self: start;
+  }
+  body.square .layout-split .ui-frame,
+  body.square .layout-left .ui-frame {
+    top: auto;
+    right: 6%;
+    bottom: -5%;
+    left: 6%;
+    width: 88%;
+    height: 56%;
+  }
+  body.square h1 { font-size: 8.8vw; }
+  body.square .sub { margin-top: 2.3vw; font-size: 3.2vw; }
+  body.square .kicker { margin-bottom: 1.7vw; font-size: 1.7vw; }
+  body.square .terminal-window {
+    top: 67%;
+    right: 7%;
+    width: 86%;
+  }
+  body.square .terminal-body { min-height: 21vw; font-size: 2.15vw; }
+  body.square .layout-full .copy { max-width: 82%; }
+  body.square .pills { right: 7%; bottom: 7%; gap: 1.2vw; }
+  body.square .pill { padding: 1.2vw 1.7vw; font-size: 2.1vw; }
+  body.square .statement h1,
+  body.square .end h1 { font-size: 10.2vw; }
+  body.square .cta { font-size: 2.8vw; }
+  body.square .url { font-size: 1.8vw; }
+
+  body.vertical { --safe: 7%; }
+  body.vertical .brand { gap: 2.2vw; font-size: 4.6vw; }
+  body.vertical .brand img { width: 8.2vw; height: 8.2vw; }
+  body.vertical .scene.layout-split,
+  body.vertical .scene.layout-left {
+    grid-template-rows: 40% 60%;
+  }
+  body.vertical .layout-split .copy,
+  body.vertical .layout-left .copy {
+    align-self: start;
+    max-width: 92%;
+    margin-top: 19%;
+    justify-self: start;
+  }
+  body.vertical .layout-split .ui-frame,
+  body.vertical .layout-left .ui-frame {
+    top: auto;
+    right: 5%;
+    bottom: -2%;
+    left: 5%;
+    width: 90%;
+    height: 57%;
+    border-radius: 3.8vw;
+  }
+  body.vertical h1 { max-width: 11ch; font-size: 12vw; line-height: .98; }
+  body.vertical .sub { margin-top: 4vw; font-size: 4.8vw; }
+  body.vertical .kicker { margin-bottom: 3vw; font-size: 2.55vw; }
+  body.vertical .terminal-window {
+    top: 57%;
+    right: 7%;
+    width: 86%;
+    border-radius: 3vw;
+  }
+  body.vertical .terminal-body { min-height: 35vw; font-size: 3.4vw; }
+  body.vertical .layout-full .copy {
+    align-self: start;
+    max-width: 90%;
+    margin-top: 24%;
+  }
+  body.vertical .layout-full .ui-frame::after {
+    background: linear-gradient(180deg, rgba(13, 13, 13, .92) 0%, rgba(13, 13, 13, .38) 52%, rgba(13, 13, 13, .12));
+  }
+  body.vertical .pills {
+    right: 7%;
+    bottom: 8%;
+    gap: 2vw;
+  }
+  body.vertical .pill { padding: 2vw 2.8vw; font-size: 3.35vw; }
+  body.vertical .statement .copy { max-width: 88%; }
+  body.vertical .statement h1,
+  body.vertical .end h1 { font-size: 13.5vw; }
+  body.vertical .end .end-mark { width: 15vw; height: 15vw; margin-bottom: 5vw; }
+  body.vertical .cta { margin-top: 5vw; font-size: 4.3vw; }
+  body.vertical .url { margin-top: 3.3vw; font-size: 2.8vw; }
+</style>
+</head>
+<body>
+<div id="video">
+  <div id="scenes"></div>
+  <div class="progress"><span id="progress"></span></div>
+</div>
+<script>
+const ASSETS = {
+  chat: "source-ui-chat-current.png",
+  composer: "source-ui-composer-current.png",
+  research: "source-ui-research-current.png",
+  icon: "clark-code-app-icon.png",
+};
+
+const STORIES = {
+  direct: [
+    { start: 0, end: 3.4, kind: "terminal", dark: true, kicker: "THE OLD SHAPE",
+      title: "Claude Code lives<br>in your terminal.", sub: "Powerful agent. Narrow interface." },
+    { start: 3.0, end: 7.0, kind: "split", asset: "chat", kicker: "THE CLARK DIFFERENCE",
+      title: "The same job.<br><em>A real workspace.</em>", sub: "Execution you can actually read." },
+    { start: 6.6, end: 11.1, kind: "full", dark: true, asset: "composer", kicker: "STAYS WITH THE WORK",
+      title: "Project context<br>that persists.", sub: "Your repo. Your branch. Your decisions.",
+      pills: ["Readable execution", "Approval controls", "Change receipts"] },
+    { start: 10.7, end: 15.0, kind: "left", asset: "research", kicker: "WHEN ONE AGENT GETS STUCK",
+      title: "Send thousands<br>to find the fix.", sub: "Parallel research returns to the same conversation." },
+    { start: 14.6, end: 17.4, kind: "statement", kicker: "YOUR INFRASTRUCTURE",
+      title: "Local.<br>Or over SSH.", sub: "Your machine. Your tools. Your call." },
+    { start: 17.0, end: 20.0, kind: "end", title: "Outgrow the terminal.",
+      sub: "Clark Code", cta: "Download for macOS, Windows & Linux" },
+  ],
+  outgrow: [
+    { start: 0, end: 3.4, kind: "terminal", dark: true, kicker: "TERMINAL-ONLY AGENTS",
+      title: "Capable.<br>But cramped.", sub: "The work deserves more than a command line." },
+    { start: 3.0, end: 7.2, kind: "split", asset: "chat", kicker: "CLARK CODE",
+      title: "A real workspace<br>for agent work.", sub: "See the plan, research, changes, and result." },
+    { start: 6.8, end: 11.0, kind: "full", dark: true, asset: "composer", kicker: "CONTEXT THAT STAYS",
+      title: "Stop re-explaining<br><em>your repo.</em>", sub: "Project context stays with the conversation.",
+      pills: ["Project + branch context", "One readable transcript"] },
+    { start: 10.6, end: 14.8, kind: "left", asset: "research", kicker: "BUILT-IN PARALLELISM",
+      title: "More agents<br>when it matters.", sub: "Research difficult bugs without leaving the work." },
+    { start: 14.4, end: 17.4, kind: "statement", kicker: "NATIVE DESKTOP APP",
+      title: "Different<br>where it counts.", sub: "Local or SSH. macOS, Windows, and Linux." },
+    { start: 17.0, end: 20.0, kind: "end", title: "Beyond the terminal.",
+      sub: "Clark Code", cta: "Download Clark Code" },
+  ],
+  research: [
+    { start: 0, end: 3.5, kind: "statement", kicker: "CODING AGENTS GET STUCK",
+      title: "Hit a bug?", sub: "Do not wait on one thread of research." },
+    { start: 3.1, end: 7.4, kind: "split", asset: "research", kicker: "CLARK CALLS FOR BACKUP",
+      title: "Send thousands.", sub: "Search issues, forums, and changelogs in parallel." },
+    { start: 7.0, end: 11.8, kind: "full", dark: true, asset: "research", kicker: "PARALLEL BUG RESEARCH",
+      title: "Find the known fix<br>before you lose flow.", sub: "The research stays inside Clark Code.",
+      pills: ["Research complete", "Source linked", "Back to the repo"] },
+    { start: 11.4, end: 15.8, kind: "split", asset: "chat", kicker: "ONE CONTINUOUS WORKSPACE",
+      title: "The answer lands<br>back in the work.", sub: "No tab maze. No context reset." },
+    { start: 15.4, end: 17.6, kind: "statement", kicker: "MORE THAN ONE AGENT",
+      title: "A coding lab<br>on demand.", sub: "Local control. Cloud-scale research." },
+    { start: 17.2, end: 20.0, kind: "end", title: "Go beyond one agent.",
+      sub: "Clark Code", cta: "Download Clark Code" },
+  ],
+};
+
+const params = new URLSearchParams(location.search);
+const variant = params.get("variant") || "direct";
+const shape = params.get("shape") || "landscape";
+document.body.className = shape;
+const story = STORIES[variant] || STORIES.direct;
+const root = document.getElementById("scenes");
+
+function logo() {
+  return `<div class="brand"><img src="${ASSETS.icon}" alt=""><span>clark labs</span></div>`;
+}
+function copy(scene) {
+  return `<div class="copy">
+    ${scene.kicker ? `<div class="kicker">${scene.kicker}</div>` : ""}
+    <h1>${scene.title || ""}</h1>
+    ${scene.sub ? `<div class="sub">${scene.sub}</div>` : ""}
+  </div>`;
+}
+function ui(scene) {
+  if (!scene.asset) return "";
+  return `<div class="ui-frame"><img src="${ASSETS[scene.asset]}" alt=""></div>`;
+}
+function makeScene(scene, index) {
+  const el = document.createElement("section");
+  el.dataset.index = String(index);
+  const kindClass = scene.kind === "split" ? "layout-split"
+    : scene.kind === "left" ? "layout-left"
+    : scene.kind === "full" ? "layout-full"
+    : scene.kind;
+  el.className = `scene ${kindClass} ${scene.dark ? "dark" : ""}`;
+  if (scene.kind === "terminal") {
+    el.innerHTML = `${logo()}${copy(scene)}
+      <div class="terminal-window">
+        <div class="terminal-bar"><i></i><i></i><i></i><span>claude — terminal</span></div>
+        <div class="terminal-body"><span class="prompt">$</span> <b>claude</b><br>
+          Reading files…<br>Making changes…<br>Running tests… <span class="cursor"></span>
+        </div>
+      </div>`;
+  } else if (scene.kind === "end") {
+    el.innerHTML = `<div>
+      <img class="end-mark" src="${ASSETS.icon}" alt="">
+      <h1>${scene.title}</h1>
+      <div class="sub">${scene.sub}</div>
+      <div class="cta">↓ ${scene.cta}</div>
+      <div class="url">CLARKCHAT.COM/CLARK-CODE</div>
+    </div>`;
+  } else {
+    const pills = (scene.pills || []).map((pill) => `<div class="pill">${pill}</div>`).join("");
+    el.innerHTML = `${scene.kind === "statement" ? logo() : logo()}${copy(scene)}${ui(scene)}
+      ${pills ? `<div class="pills">${pills}</div>` : ""}`;
+  }
+  root.appendChild(el);
+  return el;
+}
+
+const elements = story.map(makeScene);
+const clamp = (value, min = 0, max = 1) => Math.max(min, Math.min(max, value));
+const ease = (value) => 1 - Math.pow(1 - clamp(value), 3);
+const lerp = (a, b, value) => a + (b - a) * value;
+
+function sceneOpacity(t, scene, index) {
+  const fade = Math.min(.48, (scene.end - scene.start) * .18);
+  const incoming = index === 0 ? 1 : clamp((t - scene.start) / fade);
+  const outgoing = index === story.length - 1 ? 1 : clamp((scene.end - t) / fade);
+  return clamp(Math.min(incoming, outgoing));
+}
+
+function seek(t) {
+  document.getElementById("video").style.setProperty("--glow-x", `${lerp(12, 88, t / 20)}%`);
+  document.getElementById("progress").style.transform = `scaleX(${clamp(t / 20)})`;
+  story.forEach((scene, index) => {
+    const el = elements[index];
+    const raw = clamp((t - scene.start) / (scene.end - scene.start));
+    const p = ease(raw);
+    const opacity = sceneOpacity(t, scene, index);
+    el.style.opacity = opacity;
+    el.style.pointerEvents = opacity > .5 ? "auto" : "none";
+    const copyEl = el.querySelector(".copy");
+    if (copyEl) {
+      copyEl.style.transform = `translateY(${lerp(26, -6, p)}px)`;
+      copyEl.style.opacity = clamp(raw * 4);
+    }
+    const frame = el.querySelector(".ui-frame");
+    if (frame) {
+      const direction = scene.kind === "left" ? -1 : 1;
+      frame.style.transform = `translateX(${lerp(18 * direction, -8 * direction, p)}px) scale(${lerp(1.025, 1.07, p)})`;
+    }
+    const terminal = el.querySelector(".terminal-window");
+    if (terminal) {
+      terminal.style.transform = `translateY(${lerp(22, -5, p)}px) scale(${lerp(.97, 1.025, p)})`;
+    }
+    el.querySelectorAll(".pill").forEach((pill, pillIndex) => {
+      const pp = ease(clamp((raw - .18 - pillIndex * .12) / .28));
+      pill.style.opacity = pp;
+      pill.style.transform = `translateX(${lerp(35, 0, pp)}px)`;
+    });
+    const cursor = el.querySelector(".cursor");
+    if (cursor) cursor.style.opacity = Math.floor(t * 3) % 2 ? .16 : 1;
+    const endContent = el.querySelector(":scope > div");
+    if (scene.kind === "end" && endContent) {
+      endContent.style.transform = `translateY(${lerp(24, -3, p)}px) scale(${lerp(.97, 1, p)})`;
+    }
+  });
+}
+
+Promise.all(Array.from(document.images).map((img) => img.decode().catch(() => undefined))).then(() => {
+  document.fonts.ready.then(() => {
+    window.__ready = true;
+    seek(0);
+  });
+});
+window.seek = seek;
+</script>
+</body>
+</html>

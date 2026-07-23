@@ -9,6 +9,11 @@ describe("detectComposerTrigger", () => {
       start: 5,
     });
     expect(detectComposerTrigger("/goal", 5)).toEqual({ type: "/", query: "goal", start: 0 });
+    expect(detectComposerTrigger("use $brain", 10)).toEqual({
+      type: "$",
+      query: "brain",
+      start: 4,
+    });
   });
 
   it("ignores mid-word and completed triggers", () => {

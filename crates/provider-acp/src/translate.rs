@@ -73,6 +73,9 @@ pub fn content_block_to_acp(b: &ContentBlock) -> Value {
         ContentBlock::ResourceLink { uri, name } => {
             serde_json::json!({ "type": "resource_link", "uri": uri, "name": name })
         }
+        ContentBlock::SkillReference { name, .. } => {
+            serde_json::json!({ "type": "text", "text": format!("[Selected skill: {name}]") })
+        }
     }
 }
 

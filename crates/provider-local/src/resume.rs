@@ -210,6 +210,11 @@ fn user_content(blocks: &[ContentBlock]) -> Option<ca::UserContent> {
                     text: name.as_deref().unwrap_or(uri).to_string(),
                 }))
             }
+            ContentBlock::SkillReference { id, revision, name } => {
+                rich.push(ca::UserBlock::Text(ca::TextContent {
+                    text: format!("[Selected Clark skill: {name} ({id}@{revision})]"),
+                }))
+            }
             ContentBlock::Audio { .. }
             | ContentBlock::Thinking { .. }
             | ContentBlock::Resource { text: None, .. } => {}
@@ -274,6 +279,7 @@ fn visible_text(blocks: &[ContentBlock]) -> String {
                     .unwrap_or_else(|| "[image attachment]".into()),
             ),
             ContentBlock::Audio { .. } => Some("[audio attachment]".into()),
+            ContentBlock::SkillReference { name, .. } => Some(format!("[Selected skill: {name}]")),
             ContentBlock::Thinking { .. } | ContentBlock::Resource { text: None, .. } => None,
         })
         .collect::<Vec<_>>()
@@ -408,6 +414,25 @@ mod tests {
             ca::AgentMessage::Custom { kind, .. } if kind == "resume_boundary"
         ));
         assert!(matches!(messages[1], ca::AgentMessage::User { .. }));
+    }
+
+    #[test]
+    fn skill_reference_identity_and_revision_survive_resume_conversion() {
+        let transcript = ResumeTranscript {
+            truncated: false,
+            items: vec![ResumeItem::Message {
+                role: Role::User,
+                blocks: vec![
+                    ContentBlock::text("plan this"),
+                    ContentBlock::skill_reference("skill_123", "rev_456", "brainstorming"),
+                ],
+            }],
+        };
+        let messages = to_agent_messages(Some(&transcript));
+        let rendered = format!("{messages:?}");
+        assert!(rendered.contains("skill_123"));
+        assert!(rendered.contains("rev_456"));
+        assert!(rendered.contains("brainstorming"));
     }
 
     #[test]

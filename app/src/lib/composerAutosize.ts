@@ -8,8 +8,13 @@ type AutosizeTextarea = Pick<HTMLTextAreaElement, "scrollHeight" | "style">;
  * next measurement. This is especially important in WebKit after submission. */
 export function resizeComposerTextarea(
   textarea: AutosizeTextarea,
+  expandForAttachments: boolean,
   maxHeight = COMPOSER_MAX_HEIGHT,
 ): void {
+  if (!expandForAttachments) {
+    textarea.style.height = "";
+    return;
+  }
   textarea.style.height = "0px";
   textarea.style.height = `${Math.min(textarea.scrollHeight, maxHeight)}px`;
 }
@@ -49,21 +54,22 @@ export function observeTextareaWidth(
   };
 }
 
-/** Keep a controlled textarea at its content height, including when its parent
- * changes width after mount (sidebar, artifact panel, or window resizing). */
+/** Keep ordinary text entry to its single `rows={1}` line. Attachment mode may
+ * grow with the content and is remeasured when its wrapping width changes. */
 export function useComposerAutosize(
   ref: RefObject<HTMLTextAreaElement | null>,
   value: string,
+  expandForAttachments: boolean,
 ): void {
   const resize = useCallback(() => {
-    if (ref.current) resizeComposerTextarea(ref.current);
-  }, [ref]);
+    if (ref.current) resizeComposerTextarea(ref.current, expandForAttachments);
+  }, [expandForAttachments, ref]);
 
   useLayoutEffect(resize, [resize, value]);
 
   useLayoutEffect(() => {
     const textarea = ref.current;
-    if (!textarea) return;
+    if (!textarea || !expandForAttachments) return;
 
     // ResizeObserver's initial delivery happens after layout has a real width,
     // correcting an early zero-width measurement without guessing at frames.
@@ -74,5 +80,5 @@ export function useComposerAutosize(
     // Browser fallback for older webviews.
     window.addEventListener("resize", resize);
     return () => window.removeEventListener("resize", resize);
-  }, [ref, resize]);
+  }, [expandForAttachments, ref, resize]);
 }

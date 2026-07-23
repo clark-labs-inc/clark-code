@@ -8,6 +8,8 @@
 //! allow" confirm each), per `ToolExecutor::mutating()` being a static
 //! per-tool property with no per-argument granularity.
 
+mod support;
+
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -19,6 +21,9 @@ use serde_json::{json, Value};
 use super::{
     arg_i64, arg_i64_opt, arg_str, arg_str_opt, mobile, ToolCtx, ToolExecutor, ToolOutcome,
 };
+#[cfg(test)]
+use support::parse_adb_devices;
+use support::{escape_adb_text, keyevent_code, list_adb_devices, resolve_serial};
 
 const ADB_HINT: &str =
     "adb not found — install Android SDK Platform Tools and ensure `adb` is on PATH (or set ANDROID_HOME).";
@@ -27,84 +32,6 @@ const EMULATOR_HINT: &str =
 const CMD_TIMEOUT: Duration = Duration::from_secs(15);
 const BOOT_TIMEOUT: Duration = Duration::from_secs(120);
 const BOOT_POLL_INTERVAL: Duration = Duration::from_secs(2);
-
-/// A running device/emulator as reported by `adb devices -l`.
-struct Device {
-    serial: String,
-    state: String,
-}
-
-async fn list_adb_devices(
-    cancel: &tokio_util::sync::CancellationToken,
-) -> Result<Vec<Device>, String> {
-    let out = mobile::run_cmd("adb", &["devices", "-l"], CMD_TIMEOUT, cancel, ADB_HINT).await?;
-    Ok(out
-        .stdout
-        .lines()
-        .skip(1) // "List of devices attached"
-        .filter_map(|line| {
-            let mut parts = line.split_whitespace();
-            let serial = parts.next()?.to_string();
-            let state = parts.next()?.to_string();
-            Some(Device { serial, state })
-        })
-        .collect())
-}
-
-/// Resolve the `serial` argument: use it verbatim if given, otherwise pick
-/// the single running device, or error listing candidates if there are zero
-/// or several.
-async fn resolve_serial(args: &Value, ctx: &ToolCtx) -> Result<String, String> {
-    if let Some(serial) = arg_str_opt(args, "serial") {
-        return Ok(serial);
-    }
-    let devices = list_adb_devices(&ctx.cancel).await?;
-    match devices.len() {
-        0 => Err("No Android device/emulator is running. Call android_list_devices, then android_boot_emulator.".to_string()),
-        1 => Ok(devices.into_iter().next().unwrap().serial),
-        _ => {
-            let serials: Vec<_> = devices.iter().map(|d| d.serial.as_str()).collect();
-            Err(format!(
-                "Multiple devices are running ({}); pass `serial` to pick one.",
-                serials.join(", ")
-            ))
-        }
-    }
-}
-
-/// Encode a string for `adb shell input text`, which passes its argument
-/// through an on-device shell: spaces use `input text`'s own `%s` escape,
-/// and shell-metacharacters are backslash-escaped so the device shell treats
-/// them literally. Not a complete shell-quoting implementation — documented
-/// as a known limitation on `AndroidTypeText::description()`.
-fn escape_adb_text(text: &str) -> String {
-    text.chars()
-        .map(|c| match c {
-            ' ' => "%s".to_string(),
-            '\'' | '"' | '\\' | '$' | '`' | '(' | ')' | ';' | '&' | '|' | '<' | '>' | '*' | '?'
-            | '~' | '#' => {
-                format!("\\{c}")
-            }
-            _ => c.to_string(),
-        })
-        .collect()
-}
-
-fn keyevent_code(button: &str) -> Result<&'static str, String> {
-    Ok(match button {
-        "home" => "3",
-        "back" => "4",
-        "power" => "26",
-        "volume_up" => "24",
-        "volume_down" => "25",
-        "app_switch" => "187",
-        "enter" => "66",
-        "menu" => "82",
-        other => return Err(format!(
-            "unknown button `{other}` (expected one of: home, back, power, volume_up, volume_down, app_switch, enter, menu)"
-        )),
-    })
-}
 
 pub struct ListDevices;
 
@@ -806,39 +733,5 @@ impl ToolExecutor for PressButton {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parses_adb_devices_output() {
-        let stdout =
-            "List of devices attached\nemulator-5554\tdevice product:sdk_gphone64_arm64\n\n";
-        let devices: Vec<Device> = stdout
-            .lines()
-            .skip(1)
-            .filter_map(|line| {
-                let mut parts = line.split_whitespace();
-                let serial = parts.next()?.to_string();
-                let state = parts.next()?.to_string();
-                Some(Device { serial, state })
-            })
-            .collect();
-        assert_eq!(devices.len(), 1);
-        assert_eq!(devices[0].serial, "emulator-5554");
-        assert_eq!(devices[0].state, "device");
-    }
-
-    #[test]
-    fn escapes_spaces_and_shell_metacharacters() {
-        assert_eq!(escape_adb_text("hello world"), "hello%sworld");
-        assert_eq!(escape_adb_text("a&b"), "a\\&b");
-        assert_eq!(escape_adb_text("it's"), "it\\'s");
-    }
-
-    #[test]
-    fn keyevent_code_maps_known_buttons() {
-        assert_eq!(keyevent_code("home").unwrap(), "3");
-        assert_eq!(keyevent_code("back").unwrap(), "4");
-        assert!(keyevent_code("bogus").is_err());
-    }
-}
+#[path = "android_emulator_tests.rs"]
+mod tests;

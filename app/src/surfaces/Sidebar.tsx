@@ -482,7 +482,7 @@ export function Sidebar({
           </button>
         )}
         <div className="mt-auto">
-          <ProfileMenu />
+          <ProfileMenu variant="rail" />
         </div>
       </div>
     );
@@ -538,7 +538,7 @@ export function Sidebar({
             <span
               className={cn(
                 "ml-auto min-w-5 rounded-full px-1.5 text-center text-xs tabular-nums",
-                artifactCount > 0 ? "bg-chip text-ink-faint" : "text-ink-faint/50",
+                artifactCount > 0 ? "bg-chip text-ink-faint" : "text-ink-faint",
               )}
             >
               {artifactCount}

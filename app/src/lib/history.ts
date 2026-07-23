@@ -160,10 +160,20 @@ function replayBlocks(blocks: ContentBlock[]): ContentBlock[] {
 
 function trimItemToBudget(item: ResumeItem, budget: number): ResumeItem {
   const suffix = (blocks: ContentBlock[]) => {
+    const references = blocks.filter((block) => block.type === "skill_reference");
     const text = blocks
-      .map((block) => (block.type === "text" ? block.text : `[${block.type}]`))
+      .map((block) =>
+        block.type === "text"
+          ? block.text
+          : block.type === "skill_reference"
+            ? ""
+            : `[${block.type}]`,
+      )
       .join("");
-    return [{ type: "text" as const, text: `…${text.slice(-Math.max(0, budget - 200))}` }];
+    return [
+      { type: "text" as const, text: `…${text.slice(-Math.max(0, budget - 200))}` },
+      ...references,
+    ];
   };
   if (item.item === "goal" || item.item === "proposed_plan") return item;
   if (item.item === "message") return { ...item, blocks: suffix(item.blocks) };

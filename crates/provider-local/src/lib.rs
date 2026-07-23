@@ -59,7 +59,7 @@ mod truncation;
 mod workspace;
 
 pub use changes::{changes_diff, changes_revert, changes_summary, ChangedFile};
-pub use checkpoint::{create_checkpoint, is_git_repo};
+pub use checkpoint::{create_checkpoint, is_git_repo, release_checkpoints};
 // Discover compatible setup from other coding agents without mutating it.
 pub use commands::{discover_commands, CustomCommand};
 pub use config::{LocalConfig, DEFAULT_BASE_URL, DEFAULT_RESEARCH_MODEL};
@@ -71,6 +71,10 @@ pub use external_import::{
 // (over clark-exec-server) is selected per session once remote projects land.
 pub use exec::{Executor, LocalExecutor, RemoteExecutor};
 pub use files::list_project_files;
+pub use instructions::{
+    load as discover_instructions, InstructionOrigin, InstructionProvenance, InstructionScope,
+    ProjectInstructions,
+};
 pub use mcp::{probe_mcp_servers, McpServerConfig, McpStatus};
 pub use memory::{
     global_memory_dir, load_facts, load_index, memory_dir, MemoryFact, MemoryHeader, MemoryType,
@@ -94,6 +98,12 @@ pub use provider::{local_sandbox_setup_policy, LocalAgentProvider};
 pub use repository::{
     discover_repositories, inspect_repository, load_git_history, GitCommitEvidence,
     GitHistoryBatch, RepositoryIdentity, RepositoryRemote,
+};
+pub use skills::{
+    discover_skill_catalog_snapshot, install_skill_pack, list_skill_packs, skill_environment_id,
+    uninstall_skill_pack, InstallSkillPackRequest, InstalledSkillPack, SkillCatalogEntry,
+    SkillCatalogService, SkillCatalogSnapshot, SkillDiagnostic, SkillDiagnosticSeverity,
+    SkillOrigin, SkillPackAction, SkillPackReceipt, SkillPackScope, SkillScope,
 };
 // The app-managed document workspace root, so the host can confine `read_doc_text`.
 pub use workspace::workspace_root;

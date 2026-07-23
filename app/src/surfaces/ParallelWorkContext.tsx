@@ -70,7 +70,7 @@ export function ParallelWorkContext({
         <Circle
           className={cn(
             "size-1.5 fill-current",
-            agentCount > 0 ? "text-success" : "text-ink-faint/60",
+            agentCount > 0 ? "text-success" : "text-ink-faint",
           )}
         />
       </button>

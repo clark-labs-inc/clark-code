@@ -13,6 +13,31 @@ macOS download, mirroring the `/clark-code` page on clarkchat.com.
 | `linkedin.md` | LinkedIn copy (primary + short) | — |
 | `promo-card.html` | Source for both images | viewport-driven |
 
+## 20-second ad videos
+
+| File | Positioning | Format |
+| --- | --- | --- |
+| `clark-code-ad-direct-vs-claude-20s-16x9.mp4` | Direct Claude Code comparison | 1280×720, 30 fps |
+| `clark-code-ad-outgrow-terminal-20s-square.mp4` | Policy-safer terminal-agent comparison | 1080×1080, 30 fps |
+| `clark-code-ad-parallel-research-20s-vertical.mp4` | Parallel bug-research differentiator | 1080×1920, 30 fps |
+
+All three are exactly 20 seconds, use H.264 video plus AAC audio, include
+sound-off-safe on-screen copy, and keep the MP4 index at the front for fast
+web playback. The product frames use the current Clark Desktop UI captures in
+`source-ui-*-current.png`, rather than the older simulated IDE layout.
+
+Regenerate the videos and posters with:
+
+```sh
+python3 render_google_ads_videos.py
+```
+
+Render review frames without encoding the videos:
+
+```sh
+python3 render_google_ads_videos.py --preview
+```
+
 ## Regenerating the images
 
 The card is a single viewport-filling HTML; render it at each platform size:

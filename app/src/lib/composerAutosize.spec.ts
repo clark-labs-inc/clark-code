@@ -6,7 +6,13 @@ import {
 } from "./composerAutosize";
 
 describe("composer autosizing", () => {
-  it("clears a stale inline height before measuring empty content", () => {
+  it("keeps ordinary text entry at the textarea's one-row height", () => {
+    const style = { height: "200px" } as CSSStyleDeclaration;
+    resizeComposerTextarea({ style, scrollHeight: 600 }, false);
+    expect(style.height).toBe("");
+  });
+
+  it("clears a stale inline height before measuring attachment-mode content", () => {
     const style = { height: "200px" } as CSSStyleDeclaration;
     const textarea = {
       style,
@@ -15,14 +21,14 @@ describe("composer autosizing", () => {
       },
     } as Pick<HTMLTextAreaElement, "scrollHeight" | "style">;
 
-    resizeComposerTextarea(textarea);
+    resizeComposerTextarea(textarea, true);
 
     expect(style.height).toBe("24px");
   });
 
-  it("caps genuinely long content", () => {
+  it("caps genuinely long attachment-mode content", () => {
     const style = { height: "" } as CSSStyleDeclaration;
-    resizeComposerTextarea({ style, scrollHeight: 600 });
+    resizeComposerTextarea({ style, scrollHeight: 600 }, true);
     expect(style.height).toBe(`${COMPOSER_MAX_HEIGHT}px`);
   });
 

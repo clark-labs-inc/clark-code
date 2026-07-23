@@ -1,23 +1,18 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import { useSessionStore } from "../store/sessionStore";
-import { UpdatePill } from "./TopBar";
-
-beforeEach(() => {
-  useSessionStore.setState({
-    update: null,
-    updateProgress: null,
-    updateChecking: false,
-    updateWaiting: false,
-    updateApplying: false,
-  });
-});
+import { UpdatePillView } from "./TopBar";
 
 describe("UpdatePill", () => {
   it("renders an actionable ready state as soon as an update is staged", () => {
-    useSessionStore.setState({ update: { version: "0.1.65" } });
-
-    const html = renderToStaticMarkup(<UpdatePill />);
+    const html = renderToStaticMarkup(
+      <UpdatePillView
+        update={{ version: "0.1.65" }}
+        progress={null}
+        waiting={false}
+        reduce
+        onApply={async () => {}}
+      />,
+    );
 
     expect(html).toContain("<button");
     expect(html).toContain("Ready to update");
@@ -25,11 +20,15 @@ describe("UpdatePill", () => {
   });
 
   it("shows download progress before the ready action", () => {
-    useSessionStore.setState({
-      updateProgress: { downloaded: 25, total: 100 },
-    });
-
-    const html = renderToStaticMarkup(<UpdatePill />);
+    const html = renderToStaticMarkup(
+      <UpdatePillView
+        update={null}
+        progress={{ downloaded: 25, total: 100 }}
+        waiting={false}
+        reduce
+        onApply={async () => {}}
+      />,
+    );
 
     expect(html).toContain("Downloading update 25%");
     expect(html).not.toContain("Ready to update");

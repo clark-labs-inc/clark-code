@@ -5,6 +5,14 @@
 import { useEffect, useState, useId } from "react";
 import { AlertTriangle } from "lucide-react";
 
+export const MERMAID_CONFIG = {
+  startOnLoad: false,
+  // Diagram source is conversation/artifact content. `strict` runs Mermaid's
+  // SVG and URL sanitizers before the result reaches dangerouslySetInnerHTML.
+  securityLevel: "strict",
+  theme: "default",
+} as const;
+
 /** Render `code` (a Mermaid graph definition) to inline SVG. Shows a plain
  *  fallback while the library loads, and an error note if the diagram fails to
  *  parse (so a malformed block isn't a blank box). */
@@ -17,10 +25,12 @@ export function Mermaid({ code }: { code: string }) {
 
   useEffect(() => {
     let alive = true;
+    setSvg(null);
+    setErr(false);
     (async () => {
       try {
         const mermaid = (await import("mermaid")).default;
-        mermaid.initialize({ startOnLoad: false, securityLevel: "loose", theme: "default" });
+        mermaid.initialize(MERMAID_CONFIG);
         const { svg: out } = await mermaid.render(id, code);
         if (alive) setSvg(out);
       } catch {

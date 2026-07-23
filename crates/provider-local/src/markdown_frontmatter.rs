@@ -4,10 +4,8 @@
 //! conventions use (`SKILL.md`, `.claude/commands/*.md`).
 
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 use serde_json::Value;
-use tokio_util::sync::CancellationToken;
 
 use crate::exec::Executor;
 
@@ -21,17 +19,7 @@ pub async fn read_json(exec: &dyn Executor, path: &Path) -> Option<Value> {
 
 /// `$HOME` on the executor's target machine (local or remote).
 pub async fn resolve_home(exec: &dyn Executor, cwd: &Path) -> Option<PathBuf> {
-    let out = exec
-        .exec(
-            "printf %s \"$HOME\"",
-            cwd,
-            Duration::from_secs(10),
-            &CancellationToken::new(),
-        )
-        .await
-        .ok()?;
-    let home = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    (!home.is_empty()).then(|| PathBuf::from(home))
+    exec.home_dir(cwd).await.ok()
 }
 
 /// The YAML-ish frontmatter between the leading `---` fences.

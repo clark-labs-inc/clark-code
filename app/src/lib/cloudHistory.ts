@@ -160,7 +160,7 @@ interface PendingPush {
  *  transcript can't hammer the network. Must stay ≤ the server's desktop
  *  snapshot body limit (`DESKTOP_SNAPSHOT_BODY_LIMIT_BYTES`, currently 10 MiB)
  *  so anything we do send is always accepted rather than silently 413'd. */
-const MAX_SNAPSHOT_BYTES = 8 * 1024 * 1024;
+export const MAX_SNAPSHOT_BYTES = 8 * 1024 * 1024;
 
 const inflight = new Set<string>();
 const pending = new Map<string, PendingPush>();
@@ -172,6 +172,7 @@ const lastSent = new Map<string, string>();
 const serverRevisions = new Map<string, number>();
 const conflicted = new Set<string>();
 let conflictHandler: ((conversationId: string) => void) | null = null;
+let warningHandler: ((message: string) => void) | null = null;
 
 /** The store installs this once so a concurrent-device write conflict is
  * visible and the stale snapshot is not retried forever. */
@@ -179,6 +180,15 @@ export function onCloudHistoryConflict(handler: (conversationId: string) => void
   conflictHandler = handler;
   return () => {
     if (conflictHandler === handler) conflictHandler = null;
+  };
+}
+
+/** The store installs this once so permanent client-side sync failures are as
+ * visible as native outbox delivery warnings. */
+export function onCloudHistoryWarning(handler: (message: string) => void): () => void {
+  warningHandler = handler;
+  return () => {
+    if (warningHandler === handler) warningHandler = null;
   };
 }
 
@@ -256,7 +266,17 @@ async function drainPush(id: string): Promise<void> {
     // conversations), then fingerprint and size-check what we'll actually send.
     const prepared = prepareSnapshotForUpload(job.snapshot);
     const mark = fingerprint(job, prepared.json);
-    if (prepared.json.length <= MAX_SNAPSHOT_BYTES && lastSent.get(id) !== mark) {
+    if (prepared.bytes > MAX_SNAPSHOT_BYTES) {
+      // Keep the job queued. Marking this successful would let the native
+      // trajectory outbox advance its checkpoint while the cloud snapshot
+      // stayed stale, permanently losing cross-device reconstruction.
+      if (!pending.has(id)) pending.set(id, job);
+      warningHandler?.(
+        "This conversation is too large to sync safely. Its latest history remains on this device; start a new conversation to restore cloud sync.",
+      );
+      return;
+    }
+    if (lastSent.get(id) !== mark) {
       const storedRev = await cloudPut(
         job.creds,
         job.meta,

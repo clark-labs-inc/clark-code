@@ -407,6 +407,13 @@ impl crate::exec::Executor for RemoteLikeExecutor {
     async fn remove_dir_all(&self, path: &std::path::Path) -> exec_core::ExecResult<()> {
         crate::exec::LocalExecutor.remove_dir_all(path).await
     }
+    async fn rename(
+        &self,
+        from: &std::path::Path,
+        to: &std::path::Path,
+    ) -> exec_core::ExecResult<()> {
+        crate::exec::LocalExecutor.rename(from, to).await
+    }
     async fn read_dir(
         &self,
         path: &std::path::Path,
@@ -415,6 +422,15 @@ impl crate::exec::Executor for RemoteLikeExecutor {
     }
     async fn metadata(&self, path: &std::path::Path) -> exec_core::ExecResult<exec_core::FileMeta> {
         crate::exec::LocalExecutor.metadata(path).await
+    }
+    async fn canonicalize(
+        &self,
+        path: &std::path::Path,
+    ) -> exec_core::ExecResult<std::path::PathBuf> {
+        crate::exec::LocalExecutor.canonicalize(path).await
+    }
+    async fn home_dir(&self, cwd: &std::path::Path) -> exec_core::ExecResult<std::path::PathBuf> {
+        crate::exec::LocalExecutor.home_dir(cwd).await
     }
     async fn walk(
         &self,

@@ -1,4 +1,4 @@
-import type { GoalState } from "../core-bridge/types";
+import type { GoalState, TimelineItem } from "../core-bridge/types";
 
 export function formatGoalDuration(seconds: number): string {
   const whole = Math.max(0, Math.floor(seconds));
@@ -10,8 +10,12 @@ export function formatGoalDuration(seconds: number): string {
   return `${minutes}m ${remainder}s`;
 }
 
-export function goalElapsedSeconds(goal: GoalState, now = Date.now()): number {
-  if (goal.status !== "active") return goal.time_used_seconds;
+export function goalElapsedSeconds(
+  goal: GoalState,
+  now = Date.now(),
+  working = goal.status === "active",
+): number {
+  if (!working) return goal.time_used_seconds;
   const live = Math.max(0, Math.floor((now - goal.updated_at_ms) / 1000));
   return goal.time_used_seconds + live;
 }
@@ -27,4 +31,19 @@ export function goalStatusLabel(goal: GoalState): string {
     case "complete":
       return "Goal complete";
   }
+}
+
+/** A completed goal is a receipt for the turn that finished it, not permanent
+ * composer chrome. Keep it through that answer, then retire it when a later
+ * user turn begins. */
+export function shouldShowGoalStatus(goal: GoalState, timeline: TimelineItem[]): boolean {
+  if (goal.status !== "complete" || !goal.run) return true;
+  let lastGoalItem = -1;
+  timeline.forEach((item, index) => {
+    if ("run" in item && item.run === goal.run) lastGoalItem = index;
+  });
+  if (lastGoalItem < 0) return true;
+  return !timeline.slice(lastGoalItem + 1).some(
+    (item) => item.item === "message" && item.role === "user",
+  );
 }

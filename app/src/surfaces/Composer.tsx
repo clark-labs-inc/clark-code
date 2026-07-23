@@ -5,22 +5,15 @@ import {
   useState,
   type ClipboardEvent,
   type KeyboardEvent,
-  type RefObject,
 } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import {
-  ArrowUp, Square, X, CornerDownRight, Pencil, ChevronDown, Check, Target,
+  ArrowUp, Square, X, CornerDownRight, Pencil, Target, Sparkles,
 } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
-import type { QueuedMessage } from "../store/sessionStore";
+import type { QueuedMessage, SkillReferenceBlock } from "../store/sessionStore";
+import type { SkillCatalogEntry } from "../core-bridge/bridge";
 import { useFileDrop, usePaste } from "../lib/attachmentSources";
-import {
-  CODING_MODELS,
-  modelLabel,
-  effectiveModelSettings,
-  normalizeReasoningEffort,
-  reasoningEffortsForModel,
-} from "../lib/localAgent";
 import { projectFiles } from "../lib/projectFiles";
 import {
   composerSubmissionState,
@@ -39,241 +32,22 @@ import { fuzzyFilter, fuzzyFilterFiles } from "../lib/fuzzy";
 import { cn } from "../lib/cn";
 import { DUR, EASE } from "../lib/motion";
 import { inTauri } from "../lib/pickFolder";
-import { executionDiagnostic } from "../lib/activity";
 import { useComposerAutosize } from "../lib/composerAutosize";
+import { useSkillCatalog } from "../lib/useSkillCatalog";
 import { AttachmentChips } from "./ComposerAttachments";
 import { ComposerContextBar } from "./ComposerContextBar";
 import { ComposerAttachmentMenu } from "./ComposerAttachmentMenu";
 import { ComposerAutocomplete } from "./ComposerAutocomplete";
 import { ComposerPermissionPill } from "./ComposerPermissionPill";
 import { ComposerCollaborationPill } from "./ComposerCollaborationPill";
+import { ModelPill, UsageChip } from "./ComposerControls";
+import { SkillsPanel } from "./SkillsPanel";
 import {
   createPendingPaste,
   expandPendingPastes,
   shouldThumbnailPastedText,
   type PendingPaste,
 } from "../lib/attachments";
-/** Close a popover when the user clicks outside of it or presses Escape. The
- *  listeners are registered once (not re-bound every render) and always call
- *  the latest `onClose` via a ref. */
-function useOutsideClose(ref: RefObject<HTMLElement | null>, onClose: () => void) {
-  const cb = useRef(onClose);
-  cb.current = onClose;
-  useEffect(() => {
-    const handler = (e: Event) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) cb.current();
-    };
-    const onKey = (e: globalThis.KeyboardEvent) => {
-      if (e.key === "Escape") cb.current();
-    };
-    document.addEventListener("mousedown", handler);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", handler);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [ref]);
-}
-
-/** Fallback auto-compact threshold when the engine hasn't reported one yet —
- *  mirrors provider-local DEFAULT_AUTO_COMPACT_TOKEN_LIMIT. Runs stamp the
- *  real per-model limit into `usage.context_limit`, which always wins. */
-const CONTEXT_BUDGET_FALLBACK = 300_000;
-
-function fmtTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 10_000) return `${Math.round(n / 1000)}k`;
-  if (n >= 1_000) return `${(n / 1000).toFixed(1)}k`;
-  return String(n);
-}
-
-function fmtCost(usd: number): string {
-  if (usd > 0 && usd < 0.01) return "<$0.01";
-  return `$${usd.toFixed(2)}`;
-}
-
-/** Quiet context-size + cost meter for the viewed conversation. Selectors return
- *  primitives so token-streaming snapshot clones don't re-render this. */
-function UsageChip() {
-  const contextTokens = useSessionStore((s) => {
-    const runs = Object.values(s.snapshot.runs);
-    for (let i = runs.length - 1; i >= 0; i--) {
-      const u = runs[i].outcome?.usage;
-      if (u) return u.context_tokens;
-    }
-    return 0;
-  });
-  // The threshold the engine actually compacts at (per-model), reported with
-  // each run's usage — so the meter measures against the real number.
-  const contextLimit = useSessionStore((s) => {
-    const runs = Object.values(s.snapshot.runs);
-    for (let i = runs.length - 1; i >= 0; i--) {
-      const limit = runs[i].outcome?.usage?.context_limit;
-      if (limit) return limit;
-    }
-    return CONTEXT_BUDGET_FALLBACK;
-  });
-  const totalIn = useSessionStore((s) =>
-    Object.values(s.snapshot.runs).reduce(
-      (n, r) => n + (r.outcome?.usage?.input_tokens ?? 0), 0),
-  );
-  const totalOut = useSessionStore((s) =>
-    Object.values(s.snapshot.runs).reduce(
-      (n, r) => n + (r.outcome?.usage?.output_tokens ?? 0), 0),
-  );
-  const cost = useSessionStore((s) =>
-    Object.values(s.snapshot.runs).reduce(
-      (n, r) => n + (r.outcome?.usage?.cost_usd ?? 0), 0),
-  );
-  const execution = useSessionStore((s) => {
-    const runs = Object.values(s.snapshot.runs);
-    for (let i = runs.length - 1; i >= 0; i--) {
-      const diagnostic = executionDiagnostic(runs[i].outcome);
-      if (diagnostic) return diagnostic;
-    }
-    return "";
-  });
-
-  if (totalIn === 0 && totalOut === 0) return null;
-  const pct = Math.min(100, Math.round((contextTokens / contextLimit) * 100));
-  const high = pct >= 75;
-
-  return (
-    <span
-      title={`Context: ${contextTokens.toLocaleString()} tokens — ${pct}% of the ${fmtTokens(contextLimit)} auto-compact threshold\nThis conversation: ${totalIn.toLocaleString()} in · ${totalOut.toLocaleString()} out${cost > 0 ? ` · ${fmtCost(cost)}` : ""}${execution ? `\n${execution}` : ""}`}
-      className="hidden items-center gap-1.5 font-mono text-xs tabular-nums text-ink-faint sm:flex"
-    >
-      {contextTokens > 0 && (
-        <span className="flex items-center gap-1">
-          {/* Tiny context gauge — fills toward the compaction threshold. */}
-          <span className="relative h-1 w-7 overflow-hidden rounded-full bg-bg-tertiary">
-            <span
-              className={cn("absolute inset-y-0 left-0 rounded-full", high ? "bg-warning" : "bg-ink-faint")}
-              style={{ width: `${Math.max(6, pct)}%` }}
-            />
-          </span>
-          {fmtTokens(contextTokens)}
-        </span>
-      )}
-      {cost > 0 && <span>{fmtCost(cost)}</span>}
-    </span>
-  );
-}
-
-/** Model + reasoning-effort picker. Mirrors the PermissionPill's form; a change
- *  mid-conversation hot-swaps the provider's LLM and keeps the transcript.
- *  The displayed model is the ACTIVE chat's effective choice (its per-chat
- *  override, else the global default), so switching models here never leaks
- *  into other chats — each conversation keeps its own. */
-function ModelPill() {
-  // With a chat open, show + edit THAT chat's model; with none (the start
-  // screen) show + edit the global default, which new chats seed from.
-  // Select primitives (not a derived object) so token-stream snapshot clones
-  // don't re-render the pill — only an actual model/effort change does.
-  const sessionId = useSessionStore((s) => s.session?.id ?? null);
-  const model = useSessionStore((s) =>
-    effectiveModelSettings(s.localSettings, s.chatModels, sessionId).model,
-  );
-  const effort = useSessionStore((s) =>
-    effectiveModelSettings(s.localSettings, s.chatModels, sessionId).reasoningEffort,
-  );
-  const update = useSessionStore((s) => s.updateModelSettings);
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  useOutsideClose(ref, () => setOpen(false));
-
-  const reasoningEfforts = reasoningEffortsForModel(model);
-  const effortLabel = reasoningEfforts.find((e) => e.id === effort)?.label;
-
-  return (
-    <div ref={ref} className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        title="Model & reasoning effort"
-        className="flex min-h-8 items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-medium text-ink-secondary transition duration-200 ease-clark hover:bg-accent-subtle hover:text-accent"
-      >
-        {modelLabel(model)}
-        {effort && effortLabel && <span className="text-ink-faint">· {effortLabel}</span>}
-        <ChevronDown className="size-3 opacity-70" />
-      </button>
-
-      {/* Instant show/hide — no fade (avoids WKWebView half-opacity flicker). */}
-      {open && (
-        <div
-          role="menu"
-          className="popover-surface absolute bottom-full right-0 z-30 mb-2 w-72 rounded-2xl bg-bg-elevated p-1.5 shadow-lifted ring-1 ring-border-subtle"
-        >
-          <div className="px-2.5 py-1.5 text-xs font-medium uppercase tracking-wide text-ink-faint">
-            Model
-          </div>
-          {CODING_MODELS.map((m) => (
-            <button
-              key={m.id}
-              type="button"
-              role="menuitemradio"
-              aria-checked={m.id === model}
-              onClick={() => {
-                void update({
-                  model: m.id,
-                  reasoningEffort: normalizeReasoningEffort(m.id, effort),
-                });
-                setOpen(false);
-              }}
-              className={cn("flex w-full items-start gap-2.5 rounded-xl px-2.5 py-2.5 text-left transition duration-200 ease-clark hover:bg-accent-subtle", m.id === model && "bg-accent-subtle")}
-            >
-              <span className="min-w-0 flex-1">
-                <span className="block text-sm text-ink">{m.label}</span>
-                <span className="block text-xs leading-snug text-ink-muted">{m.hint}</span>
-              </span>
-              {m.id === model && <Check className="mt-0.5 size-4 shrink-0 text-accent" />}
-            </button>
-          ))}
-
-          <div className="mx-1.5 my-1 border-t border-border-subtle" />
-
-          <div className="px-2.5 py-1.5 text-xs font-medium uppercase tracking-wide text-ink-faint">
-            Reasoning effort
-          </div>
-          {reasoningEfforts.length > 0 ? (
-            <div className="flex gap-1 px-2.5 pb-2">
-              {reasoningEfforts.map((e) => (
-                <button
-                  key={e.id}
-                  type="button"
-                  role="menuitemradio"
-                  aria-checked={e.id === effort}
-                  onClick={() => void update({ reasoningEffort: e.id })}
-                  className={cn(
-                    "min-h-8 flex-1 rounded-lg px-1 py-1 text-xs font-medium transition duration-200 ease-clark",
-                    e.id === effort
-                      ? "bg-accent text-on-accent"
-                      : "bg-bg-tertiary text-ink-secondary hover:bg-bg-hover",
-                  )}
-                >
-                  {e.label}
-                </button>
-              ))}
-            </div>
-          ) : (
-            <p className="px-2.5 pb-2 text-xs leading-snug text-ink-muted">
-              This model controls its reasoning effort automatically.
-            </p>
-          )}
-          <p className="px-2.5 pb-1.5 text-xs leading-snug text-ink-faint">
-            {reasoningEfforts.some((candidate) => candidate.id === "")
-              ? "Auto uses this model's provider default. "
-              : "Only levels supported by this model are shown. "}
-            Applies from the next message — the conversation keeps its context.
-          </p>
-        </div>
-      )}
-    </div>
-  );
-}
-
 /** Messages typed while a run is active. They send automatically, in order,
  *  when the run finishes — no interruption. Each can be edited or dropped. */
 function QueuedMessages({ onEdit }: { onEdit: (q: QueuedMessage) => void }) {
@@ -286,7 +60,7 @@ function QueuedMessages({ onEdit }: { onEdit: (q: QueuedMessage) => void }) {
   const removeQueued = useSessionStore((s) => s.removeQueued);
   if (queued.length === 0) return null;
   return (
-    <div className="chat-column-width mx-auto mb-2 w-full">
+    <div className="composer-column-width mx-auto mb-2 w-full">
       <div className="mb-1 px-1 text-xs font-medium uppercase tracking-wide text-ink-faint">
         Queued · sends when Clark finishes
       </div>
@@ -304,10 +78,14 @@ function QueuedMessages({ onEdit }: { onEdit: (q: QueuedMessage) => void }) {
             >
               <CornerDownRight className="size-3.5 shrink-0 text-ink-faint" />
               <span className="min-w-0 flex-1 truncate text-xs text-ink-secondary">
-                {q.text || "(attachments only)"}
+                {q.text || (q.skills.length > 0 ? "(skills selected)" : "(attachments only)")}
               </span>
               <span className="flex shrink-0 items-center gap-0.5">
-                {session?.provider === "local" && busy && q.uploads.length === 0 && (
+                {session?.provider === "local"
+                  && busy
+                  && q.uploads.length === 0
+                  && q.skills.length === 0
+                  && (
                   <button
                     onClick={() => void steerQueued(q.id)}
                     aria-label="Steer active run with queued message"
@@ -346,11 +124,14 @@ export function Composer() {
   const [caret, setCaret] = useState(0);
   const [projFiles, setProjFiles] = useState<string[]>([]);
   const [customCommands, setCustomCommands] = useState<SlashCommand[]>([]);
+  const [selectedSkills, setSelectedSkills] = useState<SkillCatalogEntry[]>([]);
+  const [skillsOpen, setSkillsOpen] = useState(false);
   const [sel, setSel] = useState(0);
   const [dismissed, setDismissed] = useState(false);
   const [pendingPastes, setPendingPastes] = useState<PendingPaste[]>([]);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const session = useSessionStore((s) => s.session);
+  const bridge = useSessionStore((s) => s.bridge);
   const activeProvider = useSessionStore((s) => s.activeProvider);
   const projectMode = useSessionStore((s) => s.projectMode);
   const localCwd = useSessionStore((s) => s.localSettings.cwd);
@@ -367,6 +148,14 @@ export function Composer() {
     () => activeRemote ? { ws_url: activeRemote.ws_url, token: activeRemote.token } : null,
     [activeRemote],
   );
+  const localTarget = session ? session.provider === "local" : activeProvider === "local";
+  const {
+    catalog: skillCatalog,
+    setCatalog: setSkillCatalog,
+    error: skillCatalogError,
+    loading: skillsLoading,
+    reload: reloadSkills,
+  } = useSkillCatalog(bridge, cwd, remote, localTarget);
   // Select the derived boolean, NOT the whole `runs` object: the snapshot is
   // re-cloned on every streamed token, so subscribing to `runs` would re-render
   // the composer (and any open popover) dozens of times a second — the flicker.
@@ -389,13 +178,46 @@ export function Composer() {
   const { dragging, handlers } = useFileDrop((files) => void addFiles(files));
   usePaste((files) => void addFiles(files), !connecting);
 
-  useComposerAutosize(taRef, value);
+  useComposerAutosize(
+    taRef,
+    value,
+    attachments.length > 0 || pendingPastes.length > 0,
+  );
 
   // "Edit & resend" staged text from a sent message: load it and focus.
   useEffect(() => {
     if (prefill === null) return;
     setValue(prefill.text);
     setEditTimelineIndex(prefill.timelineIndex ?? null);
+    if (prefill.timelineIndex !== undefined) {
+      const item = useSessionStore.getState().snapshot.timeline[prefill.timelineIndex];
+      if (item?.item === "message" && item.role === "user") {
+        const references = item.blocks.filter(
+          (block): block is SkillReferenceBlock => block.type === "skill_reference",
+        );
+        setSelectedSkills(
+          references.map((reference) => {
+            const current = skillCatalog?.skills.find((skill) => skill.id === reference.id);
+            return current ?? {
+              id: reference.id,
+              revision: reference.revision,
+              name: reference.name,
+              invocationName: reference.name,
+              description: "Pinned skill from conversation history",
+              scope: "project",
+              origin: "clark",
+              source: "conversation history",
+              requiredTools: [],
+              missingTools: [],
+              allowImplicitInvocation: true,
+              enabled: true,
+              disabledReason: null,
+              hasNameCollision: false,
+            };
+          }),
+        );
+      }
+    }
     setPrefill(null);
     requestAnimationFrame(() => {
       const ta = taRef.current;
@@ -404,9 +226,12 @@ export function Composer() {
         ta.setSelectionRange(ta.value.length, ta.value.length);
       }
     });
-  }, [prefill, setPrefill]);
+  }, [prefill, setPrefill, skillCatalog]);
 
-  const hasContent = value.trim().length > 0 || attachments.length > 0 || pendingPastes.length > 0;
+  const hasContent = value.trim().length > 0
+    || attachments.length > 0
+    || pendingPastes.length > 0
+    || selectedSkills.length > 0;
   const submission = composerSubmissionState({
     hasContent,
     hasSession: !!session,
@@ -451,7 +276,14 @@ export function Composer() {
         path,
       }));
     }
-    const localTarget = session ? session.provider === "local" : activeProvider === "local";
+    if (trigger.type === "$") {
+      return fuzzyFilter(
+        (skillCatalog?.skills ?? []).filter((skill) => skill.enabled),
+        trigger.query,
+        (skill) => `${skill.invocationName} ${skill.name} ${skill.description}`,
+        8,
+      ).map((match) => ({ kind: "skill" as const, skill: match.item }));
+    }
     const builtins = slashCommands().filter(
       (c) => (!c.needsSession || session) && (!c.localOnly || localTarget),
     );
@@ -463,7 +295,15 @@ export function Composer() {
       kind: "slash" as const,
       cmd: m.item,
     }));
-  }, [trigger, dismissed, projFiles, session, activeProvider, customCommands]);
+  }, [
+    trigger,
+    dismissed,
+    projFiles,
+    session,
+    activeProvider,
+    customCommands,
+    skillCatalog,
+  ]);
 
   // Keep the highlighted row in range as results change; clear the Escape
   // dismissal once the user edits the trigger again.
@@ -488,6 +328,24 @@ export function Composer() {
 
   const accept = (s: ComposerSuggestion) => {
     if (!trigger) return;
+    if (s.kind === "skill") {
+      const before = value.slice(0, trigger.start);
+      const after = value.slice(caret);
+      const next = before + after;
+      setValue(next);
+      setSelectedSkills((current) =>
+        current.some((skill) => skill.id === s.skill.id) ? current : [...current, s.skill],
+      );
+      requestAnimationFrame(() => {
+        const ta = taRef.current;
+        if (ta) {
+          ta.focus();
+          ta.setSelectionRange(before.length, before.length);
+          setCaret(before.length);
+        }
+      });
+      return;
+    }
     if (s.kind === "slash") {
       // A prompt-style command (has a body) inserts its text for the user to
       // finish/review; an action-style built-in runs and clears the composer.
@@ -534,13 +392,18 @@ export function Composer() {
       if (useSessionStore.getState().startBlockedReason()) return;
     }
     const t = expandPromptSlashCommand(expandPendingPastes(value, pendingPastes));
+    if (/^\s*\/skills\s*$/.test(t)) {
+      setValue("");
+      setSkillsOpen(true);
+      return;
+    }
     if (isCompactCommand(t)) {
       if (!session) {
         flashNotice("Start a conversation before compacting its context.");
         return;
       }
-      if (attachments.length > 0) {
-        flashNotice("Remove attachments before compacting this conversation.");
+      if (attachments.length > 0 || selectedSkills.length > 0) {
+        flashNotice("Remove attachments and selected skills before compacting this conversation.");
         return;
       }
       setValue("");
@@ -561,9 +424,24 @@ export function Composer() {
       return;
     }
     const editIndex = editTimelineIndex;
+    const staleSkill = selectedSkills.find((selected) => {
+      const current = skillCatalog?.skills.find((skill) => skill.id === selected.id);
+      return !current || !current.enabled || current.revision !== selected.revision;
+    });
+    if (staleSkill) {
+      flashNotice(`$${staleSkill.invocationName} changed or became unavailable. Remove and select it again.`);
+      return;
+    }
+    const skillReferences: SkillReferenceBlock[] = selectedSkills.map((skill) => ({
+      type: "skill_reference",
+      id: skill.id,
+      revision: skill.revision,
+      name: skill.invocationName,
+    }));
     setValue("");
     setPendingPastes([]);
     setEditTimelineIndex(null);
+    setSelectedSkills([]);
     // `/btw <question>` — a forked side question that never interrupts the
     // active run. Needs an open session (the fork reads its transcript), so
     // route it only once a session exists; otherwise let the normal start
@@ -583,8 +461,8 @@ export function Composer() {
         return;
       }
     }
-    if (editIndex !== null) await resendFrom(editIndex, t.trim());
-    else await send(t.trim());
+    if (editIndex !== null) await resendFrom(editIndex, t.trim(), skillReferences);
+    else await send(t.trim(), skillReferences);
   };
 
   const goalIntent = goalCommandObjective(value);
@@ -592,6 +470,14 @@ export function Composer() {
   // Pull a queued message back into the composer to revise it.
   const editQueued = (q: QueuedMessage) => {
     setValue((v) => (v.trim() ? `${v}\n${q.text}` : q.text));
+    setSelectedSkills((current) => {
+      const byId = new Map(current.map((skill) => [skill.id, skill]));
+      for (const reference of q.skills) {
+        const catalogSkill = skillCatalog?.skills.find((skill) => skill.id === reference.id);
+        if (catalogSkill) byId.set(reference.id, catalogSkill);
+      }
+      return [...byId.values()];
+    });
     removeQueued(q.id);
     taRef.current?.focus();
   };
@@ -642,7 +528,7 @@ export function Composer() {
           through the checkout chips at compact window heights. */}
       <AnimatePresence>
         {suggestions.length > 0 && (
-          <div className="chat-column-width relative z-30 mx-auto mb-2 w-full">
+          <div className="composer-column-width relative z-30 mx-auto mb-2 w-full">
             <ComposerAutocomplete
               suggestions={suggestions}
               selectedIndex={sel}
@@ -655,7 +541,7 @@ export function Composer() {
       <ComposerContextBar />
       <div
         className={cn(
-          "chat-column-width relative z-10 mx-auto w-full rounded-[20px] border border-border-subtle bg-composer-surface px-2.5 py-2.5 shadow-soft transition duration-200 ease-clark",
+          "composer-column-width relative z-10 mx-auto w-full rounded-[20px] border border-border-subtle bg-composer-surface px-2.5 py-[1.0625rem] shadow-soft transition duration-200 ease-clark",
           dragging
             ? "ring-2 ring-accent/40"
             : "ring-4 ring-transparent focus-within:border-accent/30 focus-within:ring-accent-subtle",
@@ -668,6 +554,39 @@ export function Composer() {
         )}
 
         <AttachmentChips pastes={pendingPastes} onRemovePaste={removePendingPaste} />
+
+        {selectedSkills.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 pb-1.5">
+            {selectedSkills.map((skill) => {
+              const current = skillCatalog?.skills.find((candidate) => candidate.id === skill.id);
+              const stale = !current || !current.enabled || current.revision !== skill.revision;
+              return (
+                <span
+                  key={skill.id}
+                  className={cn(
+                    "flex items-center gap-1.5 rounded-lg bg-accent-subtle px-2 py-1 text-xs text-accent",
+                    stale && "bg-warning/10 text-warning",
+                  )}
+                  title={stale ? "This skill changed. Remove and select it again." : skill.description}
+                >
+                  <Sparkles className="size-3.5" />
+                  ${skill.invocationName}
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setSelectedSkills((current) =>
+                        current.filter((candidate) => candidate.id !== skill.id),
+                      )
+                    }
+                    aria-label={`Remove ${skill.invocationName}`}
+                  >
+                    <X className="size-3" />
+                  </button>
+                </span>
+              );
+            })}
+          </div>
+        )}
 
         {goalIntent !== null && (
           <div className="flex items-center gap-1.5 pb-1 pt-0.5 text-xs font-medium text-accent">
@@ -686,6 +605,7 @@ export function Composer() {
               onClick={() => {
                 setEditTimelineIndex(null);
                 setValue("");
+                setSelectedSkills([]);
               }}
               aria-label="Cancel editing message"
               title="Cancel edit"
@@ -776,13 +696,34 @@ export function Composer() {
       {!session && (startError || startBlocked) && (
         <p
           className={cn(
-            "chat-column-width mx-auto mt-2 w-full px-1 text-xs",
+            "composer-column-width mx-auto mt-2 w-full px-1 text-xs",
             startError ? "text-danger" : "text-ink-faint",
           )}
         >
           {startError ?? startBlocked}
         </p>
       )}
+      <SkillsPanel
+        open={skillsOpen}
+        bridge={bridge}
+        cwd={cwd}
+        remote={remote}
+        catalog={skillCatalog}
+        loading={skillsLoading}
+        error={skillCatalogError}
+        onClose={() => setSkillsOpen(false)}
+        onReload={reloadSkills}
+        onCatalog={setSkillCatalog}
+        onSelect={(skill) => {
+          setSelectedSkills((current) =>
+            current.some((candidate) => candidate.id === skill.id)
+              ? current
+              : [...current, skill],
+          );
+          setSkillsOpen(false);
+          requestAnimationFrame(() => taRef.current?.focus());
+        }}
+      />
     </div>
   );
 }

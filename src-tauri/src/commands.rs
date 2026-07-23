@@ -1,6 +1,15 @@
 //! Tauri command surface — the IPC boundary the web UI calls via `invoke`.
 //! These mirror the `agent_core::Provider` trait and drive the live provider.
 
+mod cloud;
+mod local;
+mod project;
+mod skills;
+pub use cloud::*;
+pub use local::*;
+use project::project_executor;
+pub use skills::*;
+
 use agent_core::provider::EventStream;
 use agent_core::{
     apply, ClientResponse, CollaborationMode, ContentBlock, PendingUpload, PromptInput, Provider,
@@ -27,11 +36,13 @@ use crate::{builtin_providers, AppState, ProviderInfo};
 const USER_RUN: &str = "user";
 
 /// Construct a provider instance by id.
-fn make_provider(id: &str) -> Result<Box<dyn Provider>, String> {
+fn make_provider(id: &str, state: &AppState) -> Result<Box<dyn Provider>, String> {
     match id {
         "acp" => Ok(Box::new(AcpProvider::new())),
         "clark" => Ok(Box::new(ClarkProvider::new())),
-        "local" => Ok(Box::new(LocalAgentProvider::new())),
+        "local" => Ok(Box::new(
+            LocalAgentProvider::new().with_skill_catalog_service(state.skill_catalogs.clone()),
+        )),
         other => Err(format!("unknown provider: {other}")),
     }
 }
@@ -100,7 +111,7 @@ pub async fn provider_connect(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     tracing::info!(provider = %provider_id, "connecting");
-    let mut provider = make_provider(&provider_id)?;
+    let mut provider = make_provider(&provider_id, state.inner())?;
     provider.connect(config).await.map_err(|e| e.to_string())?;
     // Parked until `session_new`/`session_load` binds it to a session. Each
     // session gets its own provider instance, so any number can stream at once.
@@ -126,10 +137,18 @@ pub async fn changes_diff(
     cwd: String,
     base: String,
     path: String,
+    previous_path: Option<String>,
     remote: Option<RemoteArg>,
 ) -> Result<String, String> {
     let exec = project_executor(remote).await?;
-    provider_local::changes_diff(exec.as_ref(), std::path::Path::new(&cwd), &base, &path).await
+    provider_local::changes_diff(
+        exec.as_ref(),
+        std::path::Path::new(&cwd),
+        &base,
+        &path,
+        previous_path.as_deref(),
+    )
+    .await
 }
 
 /// Restore one file to its baseline state (worktree only; created files are
@@ -139,10 +158,31 @@ pub async fn changes_revert(
     cwd: String,
     base: String,
     path: String,
+    previous_path: Option<String>,
     remote: Option<RemoteArg>,
 ) -> Result<(), String> {
     let exec = project_executor(remote).await?;
-    provider_local::changes_revert(exec.as_ref(), std::path::Path::new(&cwd), &base, &path).await
+    provider_local::changes_revert(
+        exec.as_ref(),
+        std::path::Path::new(&cwd),
+        &base,
+        &path,
+        previous_path.as_deref(),
+    )
+    .await
+}
+
+/// Drop Clark's retention refs for checkpoints owned by a conversation that
+/// the user permanently deleted.
+#[tauri::command]
+pub async fn changes_release_checkpoints(
+    cwd: String,
+    checkpoints: Vec<String>,
+    remote: Option<RemoteArg>,
+) -> Result<(), String> {
+    let exec = project_executor(remote).await?;
+    provider_local::release_checkpoints(exec.as_ref(), std::path::Path::new(&cwd), &checkpoints)
+        .await
 }
 
 /// Re-run `connect` on the EXISTING provider instance — unlike
@@ -232,17 +272,6 @@ pub async fn ssh_probe(host: String) -> Result<ssh::Probe, String> {
 pub struct RemoteArg {
     pub ws_url: String,
     pub token: String,
-}
-
-async fn project_executor(
-    remote: Option<RemoteArg>,
-) -> Result<Box<dyn provider_local::Executor>, String> {
-    match remote {
-        Some(remote) => Ok(Box::new(
-            provider_local::RemoteExecutor::connect(&remote.ws_url, &remote.token).await?,
-        )),
-        None => Ok(Box::new(provider_local::LocalExecutor)),
-    }
 }
 
 /// Current branch and linked-worktree identity for the checkout shown above
@@ -753,846 +782,6 @@ pub async fn set_output_style(
         .map_err(|e| e.to_string())
 }
 
-/// `/btw` — answer a one-off side question against the session's current
-/// context WITHOUT interrupting the active run. The provider forks a
-/// tool-less, single-turn model call over the session transcript (never
-/// mutating it); the answer text returns here for the overlay to render.
-/// Holding the session lock for the call's duration pauses that session's
-/// snapshot emission only — the run's engine task keeps executing and its
-/// buffered events flush when this returns. Other sessions are unaffected
-/// (per-entry locks).
-#[tauri::command]
-pub async fn side_question(
-    session_id: String,
-    question: String,
-    state: State<'_, AppState>,
-) -> Result<String, String> {
-    let entry = state
-        .session_entry(&session_id)
-        .await
-        .ok_or("no such session")?;
-    let mut s = entry.lock().await;
-    s.provider
-        .side_question(&SessionId::new(session_id), &question)
-        .await
-        .map_err(|e| e.to_string())
-}
-
-/// One per-fact memory file, flattened for the UI.
-#[derive(serde::Serialize)]
-pub struct MemoryFactView {
-    pub file: String,
-    pub name: Option<String>,
-    pub description: Option<String>,
-    pub kind: Option<String>,
-    pub body: String,
-}
-
-/// Everything the memory viewer needs for one scope (project or global).
-#[derive(serde::Serialize)]
-pub struct MemoryOverview {
-    /// Absolute path to the scope's `.clark/memory` directory.
-    pub dir: String,
-    /// Whether the scope holds any memory (an index or at least one fact).
-    pub exists: bool,
-    /// Contents of the always-loaded `MEMORY.md` index, if present.
-    pub index: Option<String>,
-    /// Per-fact memory files (newest first).
-    pub facts: Vec<MemoryFactView>,
-}
-
-/// Read one scope's `.clark/memory` directory into a viewer overview. The
-/// directory is always local here (the desktop machine), so `LocalExecutor`.
-async fn memory_overview(
-    exec: &dyn provider_local::Executor,
-    mem_dir: &std::path::Path,
-) -> MemoryOverview {
-    let facts_raw = provider_local::load_facts(exec, mem_dir).await;
-    let index = provider_local::load_index(exec, mem_dir).await;
-    let exists = index.is_some() || !facts_raw.is_empty();
-    let facts = facts_raw
-        .into_iter()
-        .map(|f| MemoryFactView {
-            file: f.header.file,
-            name: f.header.name,
-            description: f.header.description,
-            kind: f.header.kind.map(|k| k.label().to_string()),
-            body: f.body,
-        })
-        .collect();
-    MemoryOverview {
-        dir: mem_dir.to_string_lossy().to_string(),
-        exists,
-        index,
-        facts,
-    }
-}
-
-/// List the project-scoped memory for `cwd` (`<cwd>/.clark/memory/`). Read-only.
-#[tauri::command]
-pub async fn local_list_memory(
-    cwd: String,
-    remote: Option<RemoteArg>,
-) -> Result<MemoryOverview, String> {
-    if cwd.trim().is_empty() {
-        return Err("choose a project folder first".into());
-    }
-    let mem_dir = provider_local::memory_dir(std::path::Path::new(&cwd));
-    let exec = project_executor(remote).await?;
-    Ok(memory_overview(exec.as_ref(), &mem_dir).await)
-}
-
-/// List the user's global memory (`~/.clark/memory/`). Read-only.
-#[tauri::command]
-pub async fn local_list_global_memory() -> Result<MemoryOverview, String> {
-    let Some(mem_dir) = provider_local::global_memory_dir() else {
-        return Err("could not resolve your home directory".into());
-    };
-    Ok(memory_overview(&provider_local::LocalExecutor, &mem_dir).await)
-}
-
-/// List project-relative file paths under `cwd` for the `@`-mention picker.
-/// Read-only; skips ignored directories. Runs the walk off the UI thread.
-#[tauri::command]
-pub async fn local_list_files(
-    cwd: String,
-    remote: Option<RemoteArg>,
-) -> Result<Vec<String>, String> {
-    if cwd.trim().is_empty() {
-        return Ok(Vec::new());
-    }
-    let root = std::path::PathBuf::from(cwd);
-    let exec = project_executor(remote).await?;
-    Ok(provider_local::list_project_files(exec.as_ref(), &root).await)
-}
-
-/// Read an agent-authored document (Markdown) so the UI can render it inline.
-/// Confined to the app-managed workspace (`~/.clark/workspace`) — it never reads
-/// arbitrary files — and capped so a pathological file can't be slurped whole.
-#[tauri::command]
-pub async fn read_doc_text(path: String) -> Result<String, String> {
-    const MAX_DOC_BYTES: u64 = 4 * 1024 * 1024;
-    let root = provider_local::workspace_root()
-        .ok_or_else(|| "no workspace directory".to_string())?
-        .canonicalize()
-        .map_err(|e| format!("workspace: {e}"))?;
-    let canon = PathBuf::from(&path)
-        .canonicalize()
-        .map_err(|e| format!("{path}: {e}"))?;
-    if !canon.starts_with(&root) {
-        return Err("path is outside the document workspace".into());
-    }
-    let meta = std::fs::metadata(&canon).map_err(|e| e.to_string())?;
-    if !meta.is_file() {
-        return Err("not a file".into());
-    }
-    if meta.len() > MAX_DOC_BYTES {
-        return Err("document too large to preview".into());
-    }
-    tokio::task::spawn_blocking(move || std::fs::read_to_string(&canon).map_err(|e| e.to_string()))
-        .await
-        .map_err(|e| format!("read failed: {e}"))?
-}
-
-/// Read a locally-captured screenshot (or other small image) from the
-/// app-managed workspace and return it as a `data:` URL for inline `<img>`
-/// rendering. Confined to `~/.clark/workspace`, same root and containment
-/// check as `read_doc_text`.
-#[tauri::command]
-pub async fn read_image_data_url(path: String) -> Result<String, String> {
-    use base64::Engine as _;
-
-    const MAX_IMAGE_BYTES: u64 = 10 * 1024 * 1024;
-    let root = provider_local::workspace_root()
-        .ok_or_else(|| "no workspace directory".to_string())?
-        .canonicalize()
-        .map_err(|e| format!("workspace: {e}"))?;
-    let canon = PathBuf::from(&path)
-        .canonicalize()
-        .map_err(|e| format!("{path}: {e}"))?;
-    if !canon.starts_with(&root) {
-        return Err("path is outside the document workspace".into());
-    }
-    let meta = std::fs::metadata(&canon).map_err(|e| e.to_string())?;
-    if !meta.is_file() {
-        return Err("not a file".into());
-    }
-    if meta.len() > MAX_IMAGE_BYTES {
-        return Err("image too large to preview".into());
-    }
-    let mime = match canon
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(|e| e.to_ascii_lowercase())
-        .as_deref()
-    {
-        Some("jpg") | Some("jpeg") => "image/jpeg",
-        Some("png") => "image/png",
-        _ => return Err("not a supported image type".into()),
-    };
-    let bytes =
-        tokio::task::spawn_blocking(move || std::fs::read(&canon).map_err(|e| e.to_string()))
-            .await
-            .map_err(|e| format!("read failed: {e}"))??;
-    Ok(format!(
-        "data:{mime};base64,{}",
-        base64::engine::general_purpose::STANDARD.encode(bytes)
-    ))
-}
-
-/// Write an agent-authored document's text to a user-chosen path (the OS save
-/// dialog returns an absolute path). The content itself is the in-memory text
-/// the UI already rendered — the workspace file is only the source of truth for
-/// reading — so the destination is unconstrained (a real download). Capped so a
-/// pathological payload can't stream gigabytes to disk in one call.
-#[tauri::command]
-pub async fn save_doc_text(path: String, text: String) -> Result<(), String> {
-    const MAX_DOC_BYTES: usize = 8 * 1024 * 1024;
-    if text.len() > MAX_DOC_BYTES {
-        return Err("document too large to save".into());
-    }
-    let p = PathBuf::from(&path);
-    tokio::task::spawn_blocking(move || {
-        if let Some(parent) = p.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| format!("create dir: {e}"))?;
-        }
-        std::fs::write(&p, text).map_err(|e| format!("write failed: {e}"))
-    })
-    .await
-    .map_err(|e| format!("save failed: {e}"))?
-}
-
-/// Open a file (or folder) with the OS default handler — for a source file on a
-/// dev machine that's typically the user's editor. `reveal` shows it in the file
-/// manager instead of opening it. Never executes the file directly.
-#[tauri::command]
-pub fn open_path(path: String, reveal: bool) -> Result<(), String> {
-    let p = path.trim();
-    if p.is_empty() {
-        return Err("empty path".into());
-    }
-    let mut cmd = open_command(p, reveal);
-    cmd.spawn().map(|_| ()).map_err(|e| e.to_string())
-}
-
-#[cfg(target_os = "macos")]
-fn open_command(path: &str, reveal: bool) -> std::process::Command {
-    let mut c = std::process::Command::new("open");
-    if reveal {
-        c.arg("-R");
-    }
-    c.arg(path);
-    c
-}
-
-#[cfg(target_os = "windows")]
-fn open_command(path: &str, reveal: bool) -> std::process::Command {
-    if reveal {
-        let mut c = std::process::Command::new("explorer");
-        c.arg(format!("/select,{path}"));
-        c
-    } else {
-        let mut c = std::process::Command::new("powershell.exe");
-        c.args([
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            "& { param($target) Start-Process -FilePath $target }",
-            path,
-        ]);
-        c
-    }
-}
-
-#[cfg(all(unix, not(target_os = "macos")))]
-fn open_command(path: &str, reveal: bool) -> std::process::Command {
-    // No portable "reveal" on Linux — open the containing folder instead.
-    let target = if reveal {
-        std::path::Path::new(path)
-            .parent()
-            .map(|p| p.to_string_lossy().to_string())
-            .unwrap_or_else(|| path.to_string())
-    } else {
-        path.to_string()
-    };
-    let mut c = std::process::Command::new("xdg-open");
-    c.arg(target);
-    c
-}
-
-/// Result of exchanging a Google ID token for a Clark session.
-#[derive(serde::Serialize)]
-pub struct GoogleAuthResult {
-    /// Clark bearer JWT for the gateway WebSocket handshake.
-    pub token: String,
-    pub id: String,
-    pub email: String,
-    pub name: Option<String>,
-    pub image: Option<String>,
-}
-
-/// Exchange a Google ID token (from `tauri-plugin-google-auth`) for a Clark
-/// session via Better Auth, then fetch the bearer JWT the gateway expects.
-///
-/// Done host-side (reqwest) rather than in the WebView so it isn't subject to
-/// browser CORS against the Clark auth origin. No secrets are involved: the
-/// Google ID token is short-lived and the call only reads back Clark's own JWT.
-#[tauri::command]
-pub async fn clark_exchange_google_idtoken(
-    auth_origin: String,
-    id_token: String,
-) -> Result<GoogleAuthResult, String> {
-    let base = auth_origin.trim_end_matches('/').to_string();
-    let client = reqwest::Client::builder()
-        .cookie_store(true)
-        .build()
-        .map_err(|e| e.to_string())?;
-
-    // 1. Trade the Google ID token for a Clark session (sets the session cookie
-    //    on this client's jar).
-    let signin = client
-        .post(format!("{base}/api/auth/sign-in/social"))
-        .json(&serde_json::json!({
-            "provider": "google",
-            "idToken": { "token": id_token },
-        }))
-        .send()
-        .await
-        .map_err(|e| format!("sign-in request failed: {e}"))?;
-    if !signin.status().is_success() {
-        let status = signin.status();
-        let body = signin.text().await.unwrap_or_default();
-        return Err(format!(
-            "Clark rejected the Google sign-in ({status}): {body}"
-        ));
-    }
-    let signin_body: Value = signin.json().await.unwrap_or(Value::Null);
-
-    // Prefer the user echoed by sign-in; fall back to get-session if absent.
-    let mut user = signin_body.get("user").cloned().unwrap_or(Value::Null);
-    if user
-        .get("id")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .is_empty()
-    {
-        if let Ok(resp) = client
-            .get(format!("{base}/api/auth/get-session"))
-            .send()
-            .await
-        {
-            if let Ok(body) = resp.json::<Value>().await {
-                if let Some(u) = body.get("user") {
-                    user = u.clone();
-                }
-            }
-        }
-    }
-
-    // 2. Fetch the bearer JWT the gateway validates on the WebSocket handshake.
-    let token_resp = client
-        .get(format!("{base}/api/auth/token"))
-        .send()
-        .await
-        .map_err(|e| format!("token request failed: {e}"))?;
-    if !token_resp.status().is_success() {
-        return Err(format!(
-            "Clark token bootstrap failed ({})",
-            token_resp.status()
-        ));
-    }
-    let token_body: Value = token_resp.json().await.map_err(|e| e.to_string())?;
-    let token = token_body
-        .get("token")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_string();
-    if token.is_empty() {
-        return Err("Clark returned an empty session token".into());
-    }
-
-    let str_field = |v: &Value, k: &str| {
-        v.get(k)
-            .and_then(Value::as_str)
-            .filter(|s| !s.is_empty())
-            .map(str::to_string)
-    };
-
-    Ok(GoogleAuthResult {
-        token,
-        id: str_field(&user, "id").unwrap_or_default(),
-        email: str_field(&user, "email").unwrap_or_default(),
-        name: str_field(&user, "name"),
-        image: str_field(&user, "image"),
-    })
-}
-
-// ---------------------------------------------------------------------------
-// Desktop conversation cloud sync
-//
-// The local coding agent's transcripts are stored on Clark via the desktop
-// conversation API (`/api/desktop/conversations`). Calls run host-side (reqwest)
-// so they aren't subject to WebView CORS, and authenticate with the user's Clark
-// JWT. The gateway serves both `/ws` and `/api/...` on one host, so the REST base
-// is the WS endpoint with an http(s) scheme and the `/ws` suffix dropped.
-
-/// Derive the HTTPS REST base from the gateway WS endpoint.
-pub(crate) fn clark_rest_base(endpoint: &str) -> String {
-    let mut base = endpoint.trim().to_string();
-    if let Some(rest) = base.strip_prefix("wss://") {
-        base = format!("https://{rest}");
-    } else if let Some(rest) = base.strip_prefix("ws://") {
-        base = format!("http://{rest}");
-    }
-    let base = base.trim_end_matches('/');
-    base.strip_suffix("/ws").unwrap_or(base).to_string()
-}
-
-/// Shared HTTP client for cloud sync. Built once and reused so connections stay
-/// warm (HTTP keep-alive / HTTP/2): each desktop-conversation write is then a
-/// single round-trip, not a fresh TLS handshake — that per-request rebuild was
-/// what made the REST sync feel slow.
-static CLOUD_HTTP: std::sync::LazyLock<reqwest::Client> = std::sync::LazyLock::new(|| {
-    reqwest::Client::builder()
-        .pool_idle_timeout(std::time::Duration::from_secs(90))
-        .build()
-        .expect("build cloud http client")
-});
-
-pub(crate) fn clark_http_client() -> Result<reqwest::Client, String> {
-    Ok(CLOUD_HTTP.clone())
-}
-
-pub(crate) async fn read_json_or_err(resp: reqwest::Response, what: &str) -> Result<Value, String> {
-    let status = resp.status();
-    let text = resp.text().await.unwrap_or_default();
-    if !status.is_success() {
-        return Err(format!("{what} failed ({status}): {text}"));
-    }
-    if text.trim().is_empty() {
-        return Ok(Value::Null);
-    }
-    serde_json::from_str(&text).map_err(|e| format!("{what}: invalid response: {e}"))
-}
-
-/// List the signed-in user's desktop conversations (metadata only). The cloud
-/// response is authoritative; the account-scoped SQLite cache only fills rows
-/// that have not reached the cloud yet or keeps history available offline.
-#[tauri::command]
-pub async fn desktop_conv_list(
-    app: AppHandle,
-    endpoint: String,
-    token: String,
-    owner_scope: String,
-) -> Result<Value, String> {
-    let url = format!("{}/api/desktop/conversations", clark_rest_base(&endpoint));
-    let cloud = clark_http_client()?
-        .get(url)
-        .header("Authorization", format!("Bearer {token}"))
-        .send()
-        .await;
-    let (rows, cloud_available) = match cloud {
-        Ok(response) => match read_json_or_err(response, "desktop list").await {
-            Ok(value) => (value.as_array().cloned().unwrap_or_default(), true),
-            Err(error) => {
-                tracing::warn!(%error, "desktop cloud list unavailable; using local acknowledged cache");
-                (Vec::new(), false)
-            }
-        },
-        Err(error) => {
-            tracing::warn!(%error, "desktop cloud list unavailable; using local acknowledged cache");
-            (Vec::new(), false)
-        }
-    };
-    let merged = crate::trajectory::merge_local_summaries(
-        crate::trajectory::outbox_path(&app)?,
-        owner_scope,
-        rows,
-        cloud_available,
-    )
-    .await?;
-    Ok(Value::Array(merged))
-}
-
-/// Fetch one desktop conversation including its full snapshot blob.
-#[tauri::command]
-pub async fn desktop_conv_get(
-    app: AppHandle,
-    endpoint: String,
-    token: String,
-    id: String,
-    owner_scope: String,
-) -> Result<Value, String> {
-    let url = format!(
-        "{}/api/desktop/conversations/{}",
-        clark_rest_base(&endpoint),
-        urlencoding::encode(&id)
-    );
-    let cloud = clark_http_client()?
-        .get(url)
-        .header("Authorization", format!("Bearer {token}"))
-        .send()
-        .await;
-    let cloud_detail = match cloud {
-        Ok(response) => read_json_or_err(response, "desktop get").await.ok(),
-        Err(error) => {
-            tracing::warn!(%error, conversation_id = %id, "desktop cloud get unavailable; using local acknowledged cache");
-            None
-        }
-    };
-    let cloud_snapshot = cloud_detail.as_ref().and_then(|detail| {
-        let snapshot = serde_json::from_value(detail.get("snapshot")?.clone()).ok()?;
-        let rev = detail
-            .get("rev")
-            .and_then(Value::as_i64)
-            .unwrap_or_default();
-        Some((snapshot, rev))
-    });
-    let recovered = crate::trajectory::recover_snapshot(
-        crate::trajectory::outbox_path(&app)?,
-        owner_scope,
-        id.clone(),
-        cloud_snapshot,
-    )
-    .await?;
-    match (cloud_detail, recovered) {
-        (Some(mut detail), Some(recovered)) => {
-            let mut snapshot =
-                serde_json::to_value(recovered.snapshot).map_err(|e| e.to_string())?;
-            if recovered.pending {
-                snapshot["sync_pending"] = true.into();
-            }
-            detail["snapshot"] = snapshot;
-            detail["syncPending"] = recovered.pending.into();
-            Ok(detail)
-        }
-        (Some(detail), None) => Ok(detail),
-        (None, Some(recovered)) => {
-            let mut snapshot =
-                serde_json::to_value(recovered.snapshot).map_err(|e| e.to_string())?;
-            if recovered.pending {
-                snapshot["sync_pending"] = true.into();
-            }
-            Ok(serde_json::json!({
-                "id": id,
-                "snapshot": snapshot,
-                "syncPending": recovered.pending,
-            }))
-        }
-        (None, None) => Err(format!(
-            "desktop conversation {id} is unavailable locally and in Clark cloud"
-        )),
-    }
-}
-
-/// Insert or replace a desktop conversation snapshot.
-#[tauri::command]
-#[allow(clippy::too_many_arguments)]
-pub async fn desktop_conv_put(
-    app: AppHandle,
-    endpoint: String,
-    token: String,
-    id: String,
-    title: String,
-    provider: String,
-    project: Option<String>,
-    repository_fingerprint: Option<String>,
-    remote_host: Option<String>,
-    mode: Option<String>,
-    title_locked: bool,
-    rev: i64,
-    mut snapshot: Value,
-    status: Option<String>,
-    owner_scope: String,
-    base_rev: Option<i64>,
-    mutation_id: Option<String>,
-) -> Result<Value, String> {
-    let local_live = status.as_deref() == Some("running");
-    let checkpoint_seq = snapshot
-        .get("history_checkpoint")
-        .and_then(Value::as_i64)
-        .unwrap_or_default();
-    // Do not let the cloud read model overtake the append-only history it
-    // represents. This command already runs in the background, so waiting for
-    // the exact covered prefix does not block local rendering or offline work.
-    crate::trajectory::wait_for_acknowledged_prefix(
-        crate::trajectory::outbox_path(&app)?,
-        owner_scope.clone(),
-        id.clone(),
-        checkpoint_seq,
-        std::time::Duration::from_secs(10),
-    )
-    .await?;
-    if let Some(object) = snapshot.as_object_mut() {
-        object.remove("history_checkpoint");
-        object.remove("sync_pending");
-    }
-    let checkpoint_snapshot = snapshot.clone();
-    let checkpoint_metadata = serde_json::json!({
-        "id": id,
-        "title": title,
-        "provider": provider,
-        "project": project,
-        "repositoryFingerprint": repository_fingerprint,
-        "remoteHost": remote_host,
-        "mode": mode,
-        "titleLocked": title_locked,
-        "rev": rev,
-        "archived": false,
-    });
-    let url = format!(
-        "{}/api/desktop/conversations/{}",
-        clark_rest_base(&endpoint),
-        urlencoding::encode(&id)
-    );
-    let resp = clark_http_client()?
-        .put(url)
-        .header("Authorization", format!("Bearer {token}"))
-        .json(&serde_json::json!({
-            "title": title,
-            "provider": provider,
-            "project": project,
-            "repositoryFingerprint": repository_fingerprint,
-            "remoteHost": remote_host,
-            "mode": mode,
-            "titleLocked": title_locked,
-            "rev": rev,
-            "snapshot": snapshot,
-            "status": status,
-            "baseRev": base_rev,
-            "mutationId": mutation_id,
-        }))
-        .send()
-        .await
-        .map_err(|e| format!("desktop put request failed: {e}"))?;
-    if resp.status() == reqwest::StatusCode::CONFLICT {
-        let detail = resp.text().await.unwrap_or_default();
-        crate::trajectory::quarantine_snapshot_branch(
-            crate::trajectory::outbox_path(&app)?,
-            owner_scope,
-            id,
-        )
-        .await?;
-        return Err(format!("desktop put failed (409 Conflict): {detail}"));
-    }
-    let summary = read_json_or_err(resp, "desktop put").await?;
-    let stored_rev = summary
-        .get("rev")
-        .and_then(Value::as_i64)
-        .unwrap_or_default();
-    if stored_rev > rev {
-        return Err(format!(
-            "cloud_conflict: Clark cloud revision {stored_rev} is newer than local revision {rev}"
-        ));
-    }
-    let typed_snapshot: Snapshot = serde_json::from_value(checkpoint_snapshot)
-        .map_err(|error| format!("checkpoint desktop snapshot: {error}"))?;
-    crate::trajectory::checkpoint_snapshot(
-        crate::trajectory::outbox_path(&app)?,
-        owner_scope,
-        id.clone(),
-        checkpoint_metadata,
-        typed_snapshot,
-        stored_rev,
-        checkpoint_seq,
-        local_live,
-    )
-    .await?;
-    Ok(summary)
-}
-
-/// Probe MCP servers — connect each, list its tools, return status — then drop
-/// them. A stateless "test connection" for the MCP settings UI.
-#[tauri::command]
-pub async fn clark_mcp_probe(
-    servers: Vec<provider_local::McpServerConfig>,
-) -> Result<Vec<provider_local::McpStatus>, String> {
-    Ok(provider_local::probe_mcp_servers(&servers).await)
-}
-
-#[tauri::command]
-pub async fn clark_repository_inspect(
-    cwd: String,
-) -> Result<Option<provider_local::RepositoryIdentity>, String> {
-    provider_local::inspect_repository(&provider_local::LocalExecutor, std::path::Path::new(&cwd))
-        .await
-}
-
-#[tauri::command]
-pub async fn clark_repository_discover(
-    cwd: String,
-) -> Result<Vec<provider_local::RepositoryIdentity>, String> {
-    provider_local::discover_repositories(
-        &provider_local::LocalExecutor,
-        std::path::Path::new(&cwd),
-    )
-    .await
-}
-
-#[tauri::command]
-pub async fn clark_repository_history(
-    cwd: String,
-    offset: usize,
-    limit: usize,
-) -> Result<Option<provider_local::GitHistoryBatch>, String> {
-    provider_local::load_git_history(
-        &provider_local::LocalExecutor,
-        std::path::Path::new(&cwd),
-        offset,
-        limit,
-    )
-    .await
-}
-
-/// Provision (mint) a "Clark Code" platform API key for the signed-in user, so
-/// the desktop never has to ask the user to paste one. Returns the full
-/// `ck_live_…` key (shown only at creation — the caller persists it).
-#[tauri::command]
-pub async fn clark_provision_code_key(endpoint: String, token: String) -> Result<String, String> {
-    let url = format!("{}/api/platform/api-keys", clark_rest_base(&endpoint));
-    let resp = clark_http_client()?
-        .post(url)
-        .header("Authorization", format!("Bearer {token}"))
-        .json(&serde_json::json!({
-            "name": "Clark Code (Desktop)",
-            "purpose": "clark_code_desktop",
-        }))
-        .send()
-        .await
-        .map_err(|e| format!("key provision request failed: {e}"))?;
-    let v = read_json_or_err(resp, "provision Clark Code key").await?;
-    v.get("key")
-        .and_then(Value::as_str)
-        .filter(|s| !s.is_empty())
-        .map(str::to_string)
-        .ok_or_else(|| "Clark did not return an API key".to_string())
-}
-
-/// Fetch the signed-in user's billing summary (subscription, plan, credits,
-/// recent ledger) — `GET /api/billing/me`. Returned verbatim to the UI.
-#[tauri::command]
-pub async fn clark_billing_me(endpoint: String, token: String) -> Result<Value, String> {
-    let url = format!("{}/api/billing/me", clark_rest_base(&endpoint));
-    let resp = clark_http_client()?
-        .get(url)
-        .header("Authorization", format!("Bearer {token}"))
-        .send()
-        .await
-        .map_err(|e| format!("billing request failed: {e}"))?;
-    read_json_or_err(resp, "billing").await
-}
-
-/// Create (or fetch the existing) public share for a synced conversation.
-/// Returns `{ share_token, share_url }`.
-#[tauri::command]
-pub async fn desktop_conv_share(
-    endpoint: String,
-    token: String,
-    id: String,
-) -> Result<Value, String> {
-    let url = format!(
-        "{}/api/desktop/conversations/{}/share",
-        clark_rest_base(&endpoint),
-        urlencoding::encode(&id)
-    );
-    let resp = clark_http_client()?
-        .post(url)
-        .header("Authorization", format!("Bearer {token}"))
-        .send()
-        .await
-        .map_err(|e| format!("share request failed: {e}"))?;
-    read_json_or_err(resp, "share conversation").await
-}
-
-/// Revoke the public share for a conversation (idempotent).
-#[tauri::command]
-pub async fn desktop_conv_unshare(
-    endpoint: String,
-    token: String,
-    id: String,
-) -> Result<(), String> {
-    let url = format!(
-        "{}/api/desktop/conversations/{}/share",
-        clark_rest_base(&endpoint),
-        urlencoding::encode(&id)
-    );
-    let resp = clark_http_client()?
-        .delete(url)
-        .header("Authorization", format!("Bearer {token}"))
-        .send()
-        .await
-        .map_err(|e| format!("unshare request failed: {e}"))?;
-    let status = resp.status();
-    if !status.is_success() {
-        let text = resp.text().await.unwrap_or_default();
-        return Err(format!("unshare failed ({status}): {text}"));
-    }
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn desktop_conv_delete(
-    app: AppHandle,
-    endpoint: String,
-    token: String,
-    id: String,
-    owner_scope: String,
-) -> Result<(), String> {
-    let url = format!(
-        "{}/api/desktop/conversations/{}",
-        clark_rest_base(&endpoint),
-        urlencoding::encode(&id)
-    );
-    let resp = clark_http_client()?
-        .delete(url)
-        .header("Authorization", format!("Bearer {token}"))
-        .send()
-        .await
-        .map_err(|e| format!("desktop delete request failed: {e}"))?;
-    let status = resp.status();
-    if !status.is_success() {
-        let text = resp.text().await.unwrap_or_default();
-        return Err(format!("desktop delete failed ({status}): {text}"));
-    }
-    crate::trajectory::delete_conversation(crate::trajectory::outbox_path(&app)?, owner_scope, id)
-        .await
-}
-
-/// Toggle a desktop conversation's archived flag in the cloud (a snapshot `put`
-/// never changes it, so this is the only path that does). Returns the updated
-/// summary.
-#[tauri::command]
-pub async fn desktop_conv_set_archived(
-    app: AppHandle,
-    endpoint: String,
-    token: String,
-    id: String,
-    archived: bool,
-    owner_scope: String,
-) -> Result<Value, String> {
-    let url = format!(
-        "{}/api/desktop/conversations/{}",
-        clark_rest_base(&endpoint),
-        urlencoding::encode(&id)
-    );
-    let resp = clark_http_client()?
-        .patch(url)
-        .header("Authorization", format!("Bearer {token}"))
-        .json(&serde_json::json!({ "archived": archived }))
-        .send()
-        .await
-        .map_err(|e| format!("desktop archive request failed: {e}"))?;
-    let summary = read_json_or_err(resp, "desktop archive").await?;
-    crate::trajectory::set_archived(
-        crate::trajectory::outbox_path(&app)?,
-        owner_scope,
-        id,
-        archived,
-    )
-    .await?;
-    Ok(summary)
-}
-
 /// Real-backend coverage for the Tauri commands that have no `State<AppState>`
 /// dependency (`list_commands`, `changes_*`) — the
 /// exact functions the webview's `invoke()` calls, exercised directly against a
@@ -1603,105 +792,4 @@ pub async fn desktop_conv_set_archived(
 /// Screen Recording) that require a one-time manual grant the session
 /// couldn't perform — see the conversation this landed in for the full story.
 #[cfg(test)]
-mod real_backend_tests {
-    use super::*;
-    use std::process::Command as StdCommand;
-
-    fn git(dir: &std::path::Path, args: &[&str]) {
-        let status = StdCommand::new("git")
-            .args(args)
-            .current_dir(dir)
-            .status()
-            .expect("git available");
-        assert!(status.success(), "git {args:?} failed in {}", dir.display());
-    }
-
-    fn init_repo(dir: &std::path::Path) {
-        git(dir, &["init", "-q"]);
-        git(dir, &["config", "user.email", "test@example.com"]);
-        git(dir, &["config", "user.name", "Test"]);
-        std::fs::write(dir.join("main.rs"), "fn main() {}\n").unwrap();
-        git(dir, &["add", "-A"]);
-        git(dir, &["commit", "-q", "-m", "initial"]);
-    }
-
-    #[tokio::test]
-    async fn list_commands_discovers_a_real_claude_commands_file() {
-        let dir = tempfile::tempdir().unwrap();
-        let cmd_dir = dir.path().join(".claude/commands");
-        std::fs::create_dir_all(&cmd_dir).unwrap();
-        std::fs::write(
-            cmd_dir.join("review.md"),
-            "---\ndescription: Review the current diff.\n---\n\nReview the current diff for bugs.",
-        )
-        .unwrap();
-
-        let found = list_commands(dir.path().to_string_lossy().to_string(), None)
-            .await
-            .expect("list_commands succeeds against a real directory");
-        let review = found
-            .iter()
-            .find(|c| c.name == "review")
-            .expect("the real .claude/commands/review.md was discovered");
-        assert_eq!(review.description, "Review the current diff.");
-        assert_eq!(review.body, "Review the current diff for bugs.");
-    }
-
-    #[tokio::test]
-    async fn list_commands_is_empty_for_a_project_with_no_commands_dir() {
-        let dir = tempfile::tempdir().unwrap();
-        let found = list_commands(dir.path().to_string_lossy().to_string(), None)
-            .await
-            .unwrap();
-        assert!(found.is_empty());
-    }
-
-    #[tokio::test]
-    async fn changes_summary_and_diff_see_a_real_edit_against_a_real_checkpoint() {
-        let dir = tempfile::tempdir().unwrap();
-        init_repo(dir.path());
-
-        // A real checkpoint, via the exact function `engine.rs` calls at the
-        // start of every turn.
-        let base = provider_local::create_checkpoint(&provider_local::LocalExecutor, dir.path())
-            .await
-            .expect("checkpoint command succeeds")
-            .expect("real git repo checkpoints successfully");
-
-        // A real, independent edit after the checkpoint.
-        std::fs::write(
-            dir.path().join("main.rs"),
-            "fn main() { println!(\"hi\"); }\n",
-        )
-        .unwrap();
-        std::fs::write(dir.path().join("new_file.rs"), "// new\n").unwrap();
-
-        let cwd = dir.path().to_string_lossy().to_string();
-        let summary = changes_summary(cwd.clone(), base.clone(), None)
-            .await
-            .expect("changes_summary succeeds against a real checkpoint");
-        assert!(summary
-            .iter()
-            .any(|f| f.path == "main.rs" && f.status == "modified"));
-        assert!(summary
-            .iter()
-            .any(|f| f.path == "new_file.rs" && f.status == "added"));
-
-        let diff = changes_diff(cwd.clone(), base.clone(), "main.rs".to_string(), None)
-            .await
-            .expect("changes_diff succeeds");
-        assert!(
-            diff.contains("println"),
-            "real diff should show the real edit: {diff}"
-        );
-
-        // Revert just the one file — the real filesystem should show the
-        // original content again, and the new file should be untouched.
-        changes_revert(cwd.clone(), base.clone(), "main.rs".to_string(), None)
-            .await
-            .expect("changes_revert succeeds");
-        let restored = std::fs::read_to_string(dir.path().join("main.rs")).unwrap();
-        assert_eq!(restored, "fn main() {}\n");
-        assert!(dir.path().join("new_file.rs").exists());
-    }
-}
+mod real_backend_tests;

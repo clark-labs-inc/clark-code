@@ -24,6 +24,10 @@ import {
 import { desktopHostId } from "../lib/desktopHost";
 import { mobileRemoteRetryDelayMs } from "../lib/mobileRemoteRetry";
 import {
+  mobileRemoteModelSettings,
+  type MobileRemoteModelSettings,
+} from "../lib/mobileRemoteModelSettings";
+import {
   MobileRemotePresenceLoop,
   publishMobileRemotePresence,
 } from "../lib/mobileRemotePresence";
@@ -189,9 +193,13 @@ async function applyProject(command: CodeRemoteCommand): Promise<void> {
   state.setSelectedHostId(host.id);
 }
 
-async function submitPrompt(creds: CloudCreds, command: CodeRemoteCommand): Promise<void> {
+async function submitPrompt(
+  creds: CloudCreds,
+  command: CodeRemoteCommand,
+): Promise<MobileRemoteModelSettings | null> {
   const text = commandText(command);
   const attachments = await commandAttachments(creds, command);
+  const modelSettings = mobileRemoteModelSettings(command);
   if (!text && attachments.length === 0) {
     throw new Error("Clark Code command has no prompt or attachments.");
   }
@@ -218,7 +226,11 @@ async function submitPrompt(creds: CloudCreds, command: CodeRemoteCommand): Prom
     // here means the open itself failed (e.g. its SSH host is gone).
     throw new Error("Could not open the target conversation on the desktop.");
   }
+  if (modelSettings) {
+    await useSessionStore.getState().updateModelSettings(modelSettings);
+  }
   await sendRemotePrompt(text, attachments);
+  return modelSettings;
 }
 
 async function resolvePermission(command: CodeRemoteCommand): Promise<void> {
@@ -274,8 +286,9 @@ async function runCommand(creds: CloudCreds, hostId: string, command: CodeRemote
       accepted_at: new Date().toISOString(),
       command_type: command.command_type,
     });
+    let modelSettings: MobileRemoteModelSettings | null = null;
     if (command.command_type === "start_session" || command.command_type === "send_message") {
-      await submitPrompt(creds, command);
+      modelSettings = await submitPrompt(creds, command);
     } else if (command.command_type === "cancel_run") {
       await cancelRun(command);
     } else if (command.command_type === "resolve_permission") {
@@ -287,6 +300,10 @@ async function runCommand(creds: CloudCreds, hostId: string, command: CodeRemote
     await ackCodeRemoteCommand(creds, hostId, command.command_id, "completed", {
       desktop_id: sessionId,
       submitted_at: new Date().toISOString(),
+      ...(modelSettings ? {
+        model: modelSettings.model,
+        reasoning_effort: modelSettings.reasoningEffort,
+      } : {}),
     });
     void notify("Clark Code", "Mobile command started on this desktop.");
   } catch (error) {

@@ -1,7 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { Files, Target, X } from "lucide-react";
 import { summarizeEdits } from "../lib/diff";
-import { formatGoalDuration, goalElapsedSeconds, goalStatusLabel } from "../lib/goal";
+import {
+  formatGoalDuration,
+  goalElapsedSeconds,
+  goalStatusLabel,
+  shouldShowGoalStatus,
+} from "../lib/goal";
 import { useSessionStore } from "../store/sessionStore";
 
 type OpenReceipt = "changes" | "goal" | null;
@@ -11,18 +16,21 @@ function compactNumber(value: number): string {
 }
 
 export function GoalStatusRail() {
-  const goal = useSessionStore((state) => state.snapshot.goal);
+  const storedGoal = useSessionStore((state) => state.snapshot.goal);
   const calls = useSessionStore((state) => state.snapshot.tool_calls);
   const timeline = useSessionStore((state) => state.snapshot.timeline);
+  const goal = storedGoal && shouldShowGoalStatus(storedGoal, timeline) ? storedGoal : undefined;
   const [open, setOpen] = useState<OpenReceipt>(null);
   const [, tick] = useState(0);
   const allCalls = useMemo(() => {
-    if (!goal?.run) return Object.values(calls);
+    if (!storedGoal?.run) return Object.values(calls);
     const ids = new Set(
-      timeline.flatMap((item) => item.item === "tool_call" && item.run === goal.run ? [item.id] : []),
+      timeline.flatMap((item) =>
+        item.item === "tool_call" && item.run === storedGoal.run ? [item.id] : [],
+      ),
     );
     return Object.values(calls).filter((call) => ids.has(call.id));
-  }, [calls, goal?.run, timeline]);
+  }, [calls, storedGoal?.run, timeline]);
   const edits = useMemo(() => summarizeEdits(allCalls), [allCalls]);
 
   useEffect(() => {

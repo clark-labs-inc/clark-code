@@ -5,7 +5,12 @@ use std::path::Path;
 use crate::exec::LocalExecutor;
 
 use super::loader::discover_catalog_with_home;
-use super::{explicit_skill_injections, render_catalog, SkillOrigin, SkillScope};
+use super::{
+    bound_skill_injections, explicit_skill_injections, install_skill_pack, render_catalog,
+    uninstall_skill_pack, InstallSkillPackRequest, SkillOrigin, SkillPackAction, SkillPackScope,
+    SkillScope,
+};
+use agent_core::domain::ContentBlock;
 
 fn write(path: &Path, contents: &str) {
     fs::create_dir_all(path.parent().expect("parent")).unwrap();
@@ -47,6 +52,61 @@ async fn recursively_discovers_project_skills_and_ignores_hidden_system_skills()
     assert!(catalog.resolve_name("skill-creator").is_err());
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn follows_directory_symlinks_with_canonical_identity_and_cycle_protection() {
+    let temp = tempfile::tempdir().unwrap();
+    let project = temp.path().join("repo");
+    let shared = temp.path().join("superpowers/skills");
+    write_skill(
+        &shared,
+        "brainstorming",
+        "brainstorming",
+        "Explore requirements before implementation",
+        "Ask one question at a time.",
+    );
+    fs::create_dir_all(project.join(".agents/skills")).unwrap();
+    std::os::unix::fs::symlink(&shared, project.join(".agents/skills/superpowers")).unwrap();
+    std::os::unix::fs::symlink(&shared, shared.join("loop")).unwrap();
+
+    let catalog = discover_catalog_with_home(&LocalExecutor, &project, None).await;
+    let matches = catalog
+        .skills
+        .iter()
+        .filter(|skill| skill.base_name == "brainstorming")
+        .collect::<Vec<_>>();
+    assert_eq!(matches.len(), 1);
+    assert_eq!(
+        matches[0].locator(),
+        shared
+            .join("brainstorming/SKILL.md")
+            .canonicalize()
+            .unwrap()
+            .to_string_lossy()
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn ignores_symlinked_skill_files_with_an_actionable_diagnostic() {
+    let temp = tempfile::tempdir().unwrap();
+    let project = temp.path().join("repo");
+    let shared = temp.path().join("shared/SKILL.md");
+    write(
+        &shared,
+        "---\nname: linked\ndescription: Linked file\n---\n\nBody.\n",
+    );
+    fs::create_dir_all(project.join(".agents/skills/linked")).unwrap();
+    std::os::unix::fs::symlink(&shared, project.join(".agents/skills/linked/SKILL.md")).unwrap();
+
+    let catalog = discover_catalog_with_home(&LocalExecutor, &project, None).await;
+    assert!(catalog.resolve_name("linked").is_err());
+    assert!(catalog.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "symlinked_skill_file"
+            && diagnostic.message.contains("link the containing directory")
+    }));
+}
+
 #[tokio::test]
 async fn repairs_common_unquoted_colon_descriptions() {
     let temp = tempfile::tempdir().unwrap();
@@ -62,7 +122,7 @@ async fn repairs_common_unquoted_colon_descriptions() {
 }
 
 #[tokio::test]
-async fn project_skill_overrides_user_skill_with_the_same_name() {
+async fn preserves_name_collisions_with_exact_source_qualified_invocations() {
     let temp = tempfile::tempdir().unwrap();
     let project = temp.path().join("repo");
     let home = temp.path().join("home");
@@ -82,9 +142,18 @@ async fn project_skill_overrides_user_skill_with_the_same_name() {
     );
 
     let catalog = discover_catalog_with_home(&LocalExecutor, &project, Some(&home)).await;
-    let review = catalog.resolve_name("review").unwrap();
-    assert_eq!(review.description, "Project review");
-    assert_eq!(review.scope, SkillScope::Project);
+    assert!(catalog
+        .resolve_name("review")
+        .unwrap_err()
+        .contains("ambiguous"));
+    let project_review = catalog.resolve_name("project:compatible:review").unwrap();
+    let user_review = catalog.resolve_name("user:claude:review").unwrap();
+    assert_eq!(project_review.description, "Project review");
+    assert_eq!(project_review.scope, SkillScope::Project);
+    assert_eq!(user_review.description, "User review");
+    assert_ne!(project_review.id, user_review.id);
+    assert!(project_review.has_name_collision);
+    assert!(user_review.has_name_collision);
 }
 
 #[tokio::test]
@@ -141,6 +210,28 @@ async fn metadata_dependencies_and_explicit_only_policy_are_enforced() {
     );
     assert!(catalog.resolve_name("deploy").is_ok());
     assert!(!render_catalog(&catalog).unwrap().contains("`deploy`"));
+}
+
+#[tokio::test]
+async fn invalid_skill_metadata_is_a_structured_catalog_error() {
+    let temp = tempfile::tempdir().unwrap();
+    let project = temp.path().join("repo");
+    let skill_dir = project.join(".clark/skills/review");
+    write_skill(
+        &project.join(".clark/skills"),
+        "review",
+        "review",
+        "Review changes",
+        "Body.",
+    );
+    write(&skill_dir.join("agents/openai.yaml"), "dependencies: [\n");
+
+    let catalog = discover_catalog_with_home(&LocalExecutor, &project, None).await;
+    assert!(catalog.resolve_name("review").is_err());
+    assert!(catalog.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "invalid_skill"
+            && diagnostic.message.contains("invalid agents/openai.yaml")
+    }));
 }
 
 #[tokio::test]
@@ -256,6 +347,151 @@ async fn catalog_is_bounded_and_describes_clark_authority() {
     assert!(rendered.len() < 8 * 1024 + 200);
     assert!(rendered.contains("not extra authority"));
     assert!(rendered.contains("additional skill(s) omitted"));
+}
+
+#[tokio::test]
+async fn managed_pack_install_update_restart_binding_and_uninstall_are_exact() {
+    let temp = tempfile::tempdir().unwrap();
+    let project = temp.path().join("repo");
+    let source = project.join("fixtures/read-millar-superpowers");
+    write_skill(
+        &source.join("skills"),
+        "brainstorming",
+        "brainstorming",
+        "Explore requirements before implementation",
+        "Version one body.",
+    );
+
+    let installed = install_skill_pack(
+        &LocalExecutor,
+        &project,
+        InstallSkillPackRequest {
+            pack_id: "superpowers".into(),
+            source_path: source.to_string_lossy().into_owned(),
+            scope: SkillPackScope::Project,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(installed.action, SkillPackAction::Installed);
+    assert_eq!(installed.skill_count, 1);
+
+    // A fresh discovery stands in for an app restart: the atomic registry, not
+    // process memory, determines the active revision.
+    let first = discover_catalog_with_home(&LocalExecutor, &project, None).await;
+    let first_skill = first.resolve_name("brainstorming").unwrap();
+    let first_id = first_skill.id.clone();
+    let first_revision = first_skill.revision.clone();
+    let bound = bound_skill_injections(
+        &LocalExecutor,
+        &first,
+        &[ContentBlock::skill_reference(
+            &first_id,
+            &first_revision,
+            "brainstorming",
+        )],
+    )
+    .await
+    .unwrap();
+    assert_eq!(bound.len(), 1);
+    assert!(bound[0].contains("Version one body."));
+
+    write_skill(
+        &source.join("skills"),
+        "brainstorming",
+        "brainstorming",
+        "Explore requirements before implementation",
+        "Version two body.",
+    );
+    let updated = install_skill_pack(
+        &LocalExecutor,
+        &project,
+        InstallSkillPackRequest {
+            pack_id: "superpowers".into(),
+            source_path: source.to_string_lossy().into_owned(),
+            scope: SkillPackScope::Project,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(updated.action, SkillPackAction::Updated);
+    assert_eq!(
+        updated.previous_revision.as_deref(),
+        installed.revision.as_deref()
+    );
+
+    let second = discover_catalog_with_home(&LocalExecutor, &project, None).await;
+    let second_skill = second.resolve_name("brainstorming").unwrap();
+    assert_eq!(second_skill.id, first_id);
+    assert_ne!(second_skill.revision, first_revision);
+    let stale = bound_skill_injections(
+        &LocalExecutor,
+        &second,
+        &[ContentBlock::skill_reference(
+            &first_id,
+            &first_revision,
+            "brainstorming",
+        )],
+    )
+    .await
+    .unwrap_err();
+    assert!(stale.contains("changed from revision"));
+
+    let removed = uninstall_skill_pack(
+        &LocalExecutor,
+        &project,
+        "superpowers",
+        SkillPackScope::Project,
+    )
+    .await
+    .unwrap();
+    assert_eq!(removed.action, SkillPackAction::Uninstalled);
+    let after = discover_catalog_with_home(&LocalExecutor, &project, None).await;
+    assert!(after.resolve_name("brainstorming").is_err());
+}
+
+#[tokio::test]
+#[ignore = "set CLARK_SUPERPOWERS_FIXTURE to exercise a real obra/superpowers checkout"]
+async fn imports_the_real_superpowers_repository_layout() {
+    let source = std::env::var("CLARK_SUPERPOWERS_FIXTURE")
+        .expect("CLARK_SUPERPOWERS_FIXTURE must point to the repository root");
+    let temp = tempfile::tempdir().unwrap();
+    let project = temp.path().join("repo");
+    std::fs::create_dir_all(&project).unwrap();
+    let receipt = install_skill_pack(
+        &LocalExecutor,
+        &project,
+        InstallSkillPackRequest {
+            pack_id: "superpowers".into(),
+            source_path: source,
+            scope: SkillPackScope::Project,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(receipt.action, SkillPackAction::Installed);
+    assert!(receipt.skill_count >= 10);
+
+    let catalog = discover_catalog_with_home(&LocalExecutor, &project, None).await;
+    let brainstorming = catalog.resolve_name("brainstorming").unwrap();
+    let contents = catalog.read(&LocalExecutor, brainstorming).await.unwrap();
+    assert!(contents.contains("brainstorm"));
+    let reference = catalog
+        .read_resource(&LocalExecutor, brainstorming, Some("visual-companion.md"))
+        .await
+        .unwrap();
+    assert!(!reference.trim().is_empty());
+
+    uninstall_skill_pack(
+        &LocalExecutor,
+        &project,
+        "superpowers",
+        SkillPackScope::Project,
+    )
+    .await
+    .unwrap();
+    let after = discover_catalog_with_home(&LocalExecutor, &project, None).await;
+    assert!(after.resolve_name("brainstorming").is_err());
 }
 
 #[tokio::test]

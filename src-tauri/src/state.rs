@@ -46,6 +46,9 @@ pub struct AppState {
     /// The app-wide Clark cloud JWT, shared by every trajectory client so a
     /// frontend refresh (via `update_cloud_token`) reaches in-flight retries.
     pub cloud_token: Arc<RwLock<Option<String>>>,
+    /// Canonical, environment-aware skill catalog shared by native UI commands
+    /// and every local provider instance.
+    pub skill_catalogs: Arc<provider_local::SkillCatalogService>,
     /// Once set, no new provider runs may start. Existing runs retain their
     /// guards and drain normally before the updater installs and restarts.
     update_draining: Arc<AtomicBool>,
@@ -74,6 +77,7 @@ impl AppState {
             sessions: Arc::new(Mutex::new(HashMap::new())),
             remotes: Arc::new(Mutex::new(HashMap::new())),
             cloud_token: Arc::new(RwLock::new(None)),
+            skill_catalogs: Arc::new(provider_local::SkillCatalogService::new()),
             update_draining: Arc::new(AtomicBool::new(false)),
             active_runs: Arc::new(AtomicUsize::new(0)),
         }

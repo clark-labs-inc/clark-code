@@ -226,6 +226,39 @@ describe("buildResumeTranscript", () => {
     expect(JSON.stringify(out)).not.toContain("turn 0 ");
   });
 
+  it("preserves typed skill bindings when a large user turn is budget-trimmed", () => {
+    const snapshot: Snapshot = {
+      runs: {},
+      timeline: [{
+        item: "message",
+        run: "user",
+        role: "user",
+        blocks: [
+          { type: "text", text: "x".repeat(2_000) },
+          {
+            type: "skill_reference",
+            id: "skill_123",
+            revision: "rev_456",
+            name: "brainstorming",
+          },
+        ],
+      }],
+      tool_calls: {},
+      artifacts: [],
+      provider_incidents: {},
+    };
+    const replay = buildResumeTranscript(snapshot, 500)!;
+    expect(replay.items[0]).toMatchObject({
+      item: "message",
+      blocks: expect.arrayContaining([{
+        type: "skill_reference",
+        id: "skill_123",
+        revision: "rev_456",
+        name: "brainstorming",
+      }]),
+    });
+  });
+
   it("replays the latest proposed plan as typed state", () => {
     const snapshot: Snapshot = {
       runs: {}, timeline: [], tool_calls: {}, artifacts: [], provider_incidents: {},

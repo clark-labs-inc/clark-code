@@ -6,7 +6,7 @@ import { SquareTerminal, X, Plus } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
 import { projectName } from "../lib/localAgent";
 import { cn } from "../lib/cn";
-import { documentTextSize, TERMINAL_FONT_SIZES } from "../lib/useTextSize";
+import { documentTextSize, terminalFontSize } from "../lib/useTextSize";
 import {
   isTauri,
   openTerminal,
@@ -52,7 +52,7 @@ function TerminalInstance({ id, cwd, active }: { id: string; cwd?: string; activ
 
     const term = new XTerm({
       fontFamily: MONO,
-      fontSize: TERMINAL_FONT_SIZES[documentTextSize()],
+      fontSize: terminalFontSize(documentTextSize()),
       lineHeight: 1.2,
       cursorBlink: true,
       scrollback: 5000,
@@ -108,7 +108,7 @@ function TerminalInstance({ id, cwd, active }: { id: string; cwd?: string; activ
 
     const mo = new MutationObserver(() => {
       term.options.theme = readTheme();
-      term.options.fontSize = TERMINAL_FONT_SIZES[documentTextSize()];
+      term.options.fontSize = terminalFontSize(documentTextSize());
       try {
         fit.fit();
         void resizeTerminal(id, term.cols, term.rows);

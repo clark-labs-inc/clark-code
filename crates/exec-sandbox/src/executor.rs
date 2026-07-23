@@ -82,12 +82,28 @@ impl Executor for SandboxedExecutor {
         self.local.remove_dir_all(&self.write_path(path)?).await
     }
 
+    async fn rename(&self, from: &Path, to: &Path) -> ExecResult<()> {
+        self.local
+            .rename(&self.write_path(from)?, &self.write_path(to)?)
+            .await
+    }
+
     async fn read_dir(&self, path: &Path) -> ExecResult<Vec<DirEntry>> {
         self.local.read_dir(&self.read_path(path)?).await
     }
 
     async fn metadata(&self, path: &Path) -> ExecResult<FileMeta> {
         self.local.metadata(&self.read_path(path)?).await
+    }
+
+    async fn canonicalize(&self, path: &Path) -> ExecResult<PathBuf> {
+        let requested = self.read_path(path)?;
+        let canonical = self.local.canonicalize(&requested).await?;
+        self.manager.policy().check_read(&canonical)
+    }
+
+    async fn home_dir(&self, cwd: &Path) -> ExecResult<PathBuf> {
+        self.local.home_dir(cwd).await
     }
 
     async fn mtime(&self, path: &Path) -> Option<SystemTime> {

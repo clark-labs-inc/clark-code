@@ -3,7 +3,7 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { AlertTriangle, CheckCircle2, X } from "lucide-react";
 import { DUR, EASE } from "../lib/motion";
 import { useSessionStore } from "../store/sessionStore";
-import { TEXT_SIZE_PERCENTAGES, type TextSize } from "../lib/useTextSize";
+import type { TextSize } from "../lib/useTextSize";
 
 /** Brief browser-style feedback for the global text-size shortcuts. `signal`
  * increments for every shortcut press so the timeout also resets when the
@@ -31,7 +31,7 @@ export function TextSizeToast({ textSize, signal }: { textSize: TextSize; signal
           aria-live="polite"
           className="pointer-events-none fixed right-4 top-4 z-[90] rounded-lg border border-border-subtle bg-bg-elevated/95 px-3 py-1.5 font-mono text-sm tabular-nums text-ink shadow-lg backdrop-blur-sm"
         >
-          {TEXT_SIZE_PERCENTAGES[textSize]}%
+          {textSize}%
         </motion.div>
       )}
     </AnimatePresence>

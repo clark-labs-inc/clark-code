@@ -88,6 +88,86 @@ export interface LocalSandboxStatus {
   setup_available: boolean;
 }
 
+export interface SkillCatalogEntry {
+  id: string;
+  revision: string;
+  name: string;
+  invocationName: string;
+  description: string;
+  scope: "bundled" | "project" | "user";
+  origin: "clark" | "compatible" | "claude" | "plugin";
+  source: string;
+  requiredTools: string[];
+  missingTools: string[];
+  allowImplicitInvocation: boolean;
+  enabled: boolean;
+  disabledReason?: string | null;
+  hasNameCollision: boolean;
+}
+
+export interface SkillDiagnostic {
+  severity: "warning" | "error";
+  code: string;
+  message: string;
+  source?: string | null;
+}
+
+export interface SkillCatalogSnapshot {
+  revision: string;
+  environmentId: string;
+  projectRoot: string;
+  skills: SkillCatalogEntry[];
+  diagnostics: SkillDiagnostic[];
+}
+
+export interface SkillCatalogChange {
+  changed: boolean;
+  revision: string;
+  snapshot?: SkillCatalogSnapshot | null;
+}
+
+export interface InstructionProvenance {
+  path: string;
+  scope: "personal" | "project" | "nested";
+  origin: "clark" | "compatible" | "claude";
+  precedence: number;
+  bytesLoaded: number;
+  truncated: boolean;
+}
+
+export interface ProjectInstructions {
+  text: string;
+  sources: InstructionProvenance[];
+}
+
+export type SkillPackScope = "project" | "user";
+export type SkillPackAction = "installed" | "updated" | "unchanged" | "uninstalled";
+
+export interface InstalledSkillPack {
+  packId: string;
+  revision: string;
+  source: string;
+  skillCount: number;
+  scope: SkillPackScope;
+  installRoot: string;
+}
+
+export interface SkillPackReceipt {
+  action: SkillPackAction;
+  packId: string;
+  revision?: string | null;
+  previousRevision?: string | null;
+  skillCount: number;
+  scope: SkillPackScope;
+  installRoot: string;
+  warnings: string[];
+}
+
+export interface SkillPackOperationResult {
+  receipt: SkillPackReceipt;
+  catalog: SkillCatalogSnapshot;
+}
+
 export interface CoreBridge {
   listProviders(): Promise<ProviderInfo[]>;
   connect(providerId: string, config: ConnectConfig): Promise<void>;
@@ -157,6 +237,42 @@ export interface CoreBridge {
   listGlobalMemory?(): Promise<MemoryOverview>;
   /** Project-relative file paths under `cwd`, for the `@`-mention picker. */
   listFiles?(cwd: string, remote?: RemoteExecutorTarget | null): Promise<string[]>;
+  /** Current canonical skill catalog for this local or remote environment. */
+  listSkills?(
+    cwd: string,
+    remote?: RemoteExecutorTarget | null,
+  ): Promise<SkillCatalogSnapshot>;
+  /** Force discovery and publish a change event when the revision differs. */
+  reloadSkills?(
+    cwd: string,
+    remote?: RemoteExecutorTarget | null,
+  ): Promise<SkillCatalogSnapshot>;
+  /** Poll-friendly delta check used while the composer is active. */
+  skillChanges?(
+    cwd: string,
+    sinceRevision: string,
+    remote?: RemoteExecutorTarget | null,
+  ): Promise<SkillCatalogChange>;
+  onSkillsChanged?(handler: (snapshot: SkillCatalogSnapshot) => void): () => void;
+  listInstructions?(
+    cwd: string,
+    remote?: RemoteExecutorTarget | null,
+  ): Promise<ProjectInstructions | null>;
+  listSkillPacks?(
+    cwd: string,
+    remote?: RemoteExecutorTarget | null,
+  ): Promise<InstalledSkillPack[]>;
+  installSkillPack?(
+    cwd: string,
+    request: { packId: string; sourcePath: string; scope: SkillPackScope },
+    remote?: RemoteExecutorTarget | null,
+  ): Promise<SkillPackOperationResult>;
+  uninstallSkillPack?(
+    cwd: string,
+    packId: string,
+    scope: SkillPackScope,
+    remote?: RemoteExecutorTarget | null,
+  ): Promise<SkillPackOperationResult>;
   /** Current branch and linked-worktree identity for the selected checkout. */
   projectContext?(
     cwd: string,
@@ -182,6 +298,7 @@ export interface RemoteExecutorTarget {
 }
 
 let cached: CoreBridge | null = null;
+let loading: Promise<CoreBridge> | null = null;
 
 /**
  * Returns the right bridge:
@@ -192,20 +309,29 @@ let cached: CoreBridge | null = null;
  */
 export async function getBridge(): Promise<CoreBridge> {
   if (cached) return cached;
-  const runningInTauri =
-    typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
-  const params =
-    typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
+  if (!loading) {
+    loading = (async () => {
+      const runningInTauri =
+        typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+      const params =
+        typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
 
-  if (runningInTauri) {
-    const { TauriBridge } = await import("./tauriBridge");
-    cached = new TauriBridge();
-  } else if (params?.has("dev")) {
-    const { DevBridge } = await import("./devBridge");
-    cached = new DevBridge(params.get("dev") || undefined);
-  } else {
-    const { MockBridge } = await import("./mockBridge");
-    cached = new MockBridge();
+      if (runningInTauri) {
+        const { TauriBridge } = await import("./tauriBridge");
+        return new TauriBridge();
+      }
+      if (params?.has("dev")) {
+        const { DevBridge } = await import("./devBridge");
+        return new DevBridge(params.get("dev") || undefined);
+      }
+      const { MockBridge } = await import("./mockBridge");
+      return new MockBridge();
+    })();
   }
-  return cached;
+  try {
+    cached = await loading;
+    return cached;
+  } finally {
+    loading = null;
+  }
 }

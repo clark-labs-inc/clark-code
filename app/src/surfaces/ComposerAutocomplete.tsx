@@ -1,4 +1,4 @@
-import { FileText, Slash } from "lucide-react";
+import { FileText, Slash, Sparkles } from "lucide-react";
 import { motion } from "motion/react";
 import { cn } from "../lib/cn";
 import type { ComposerSuggestion } from "../lib/composerInput";
@@ -26,7 +26,11 @@ export function ComposerAutocomplete({
       className="popover-surface max-h-64 w-full overflow-y-auto rounded-2xl bg-bg-elevated p-1.5 shadow-lifted ring-1 ring-border-subtle sm:w-80"
     >
       {suggestions.map((suggestion, index) => {
-        const key = suggestion.kind === "file" ? suggestion.path : `/${suggestion.cmd.name}`;
+        const key = suggestion.kind === "file"
+          ? suggestion.path
+          : suggestion.kind === "slash"
+            ? `/${suggestion.cmd.name}`
+            : suggestion.skill.id;
         return (
           <button
             key={key}
@@ -51,7 +55,7 @@ export function ComposerAutocomplete({
                   {suggestion.path}
                 </span>
               </>
-            ) : (
+            ) : suggestion.kind === "slash" ? (
               <>
                 <Slash className="size-3.5 shrink-0 text-ink-faint" />
                 <span className="shrink-0 font-mono text-xs text-ink">
@@ -59,6 +63,18 @@ export function ComposerAutocomplete({
                 </span>
                 <span className="min-w-0 flex-1 truncate text-xs text-ink-faint">
                   {suggestion.cmd.hint}
+                </span>
+              </>
+            ) : (
+              <>
+                <Sparkles className="size-3.5 shrink-0 text-ink-faint" />
+                <span className="shrink-0 font-mono text-xs text-ink">
+                  ${suggestion.skill.invocationName}
+                </span>
+                <span className="min-w-0 flex-1 truncate text-xs text-ink-faint">
+                  {suggestion.skill.enabled
+                    ? suggestion.skill.description
+                    : suggestion.skill.disabledReason}
                 </span>
               </>
             )}

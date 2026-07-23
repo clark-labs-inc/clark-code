@@ -10,7 +10,7 @@ const OPTION_STYLE: Record<PermissionOptionKind, string> = {
   allow_once: "bg-accent text-on-accent hover:bg-accent-hover",
   allow_always: "bg-bg-tertiary text-ink-secondary hover:bg-bg-hover hover:text-ink",
   reject_once: "text-ink-muted hover:bg-bg-hover hover:text-ink",
-  reject_always: "text-danger/80 hover:bg-danger/10 hover:text-danger",
+  reject_always: "text-danger hover:bg-danger/10",
 };
 
 export function riskTone(risk?: string): { ring: string; chip: string; label: string } | null {

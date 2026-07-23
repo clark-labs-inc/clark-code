@@ -7,7 +7,9 @@ import type { ContentBlock } from "../core-bridge/types";
 
 /** Blocks a user message shows as attachment thumbnails/chips, not text. */
 export function userAttachmentBlocks(blocks: ContentBlock[]): ContentBlock[] {
-  return blocks.filter((b) => b.type === "image" || b.type === "resource_link");
+  return blocks.filter(
+    (b) => b.type === "image" || b.type === "resource_link" || b.type === "skill_reference",
+  );
 }
 
 /** The text body of a user message — attachment blocks excluded. */

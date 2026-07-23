@@ -21,7 +21,13 @@ export function conversationMarkdown(snapshot: Snapshot): string {
     flushWork();
     if (item.item === "message") {
       const text = item.blocks
-        .map((b) => (b.type === "text" ? b.text : `[${b.type}]`))
+        .map((b) =>
+          b.type === "text"
+            ? b.text
+            : b.type === "skill_reference"
+              ? `[$${b.name}]`
+              : `[${b.type}]`,
+        )
         .join("")
         .trim();
       if (!text) continue;

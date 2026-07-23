@@ -1,8 +1,8 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it } from "vitest";
 import type { FanOut } from "../core-bridge/types";
-import { resetFanOut, useFanOutStore } from "../store/fanOutStore";
-import { formatElapsed, SubagentsInspector } from "./SubagentsInspector";
+import { resetFanOut } from "../store/fanOutStore";
+import { formatElapsed, SubagentsInspectorView } from "./SubagentsInspector";
 
 const fanOut: FanOut = {
   title: "Map the provider path",
@@ -37,10 +37,16 @@ afterEach(() => resetFanOut());
 
 describe("SubagentsInspector", () => {
   it("shows typed objective, activity, status, and progress for the selected child", () => {
-    useFanOutStore.getState().setFanOut(fanOut);
-    useFanOutStore.getState().openInspector("desktop");
-
-    const markup = renderToStaticMarkup(<SubagentsInspector />);
+    const markup = renderToStaticMarkup(
+      <SubagentsInspectorView
+        fanOut={fanOut}
+        inspectorOpen
+        selectedAgentId="desktop"
+        selectAgent={() => {}}
+        closeInspector={() => {}}
+        reduce
+      />,
+    );
 
     expect(markup).toContain('aria-label="Subagents"');
     expect(markup).toContain("1 running · 1 complete · 1 queued");

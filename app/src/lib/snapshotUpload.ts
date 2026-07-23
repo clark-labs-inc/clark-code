@@ -34,8 +34,16 @@ export interface PreparedSnapshot {
   /** Its serialized form — reused by the caller for the fingerprint and the
    *  hard-cap check so nothing stringifies the blob twice. */
   json: string;
+  /** UTF-8 byte length of `json`, matching HTTP body accounting. */
+  bytes: number;
   /** True when old tool outputs were elided to fit. */
   elided: boolean;
+}
+
+/** Serialized request bodies are UTF-8; JavaScript string length counts UTF-16
+ * code units and can undercount non-ASCII history by almost 2×. */
+export function utf8ByteLength(value: string): number {
+  return new TextEncoder().encode(value).byteLength;
 }
 
 /** Human-readable elided-byte size for the placeholder markers. */
@@ -95,7 +103,8 @@ export function prepareSnapshotForUpload(
   targetBytes: number = SYNC_TARGET_BYTES,
 ): PreparedSnapshot {
   const json = JSON.stringify(snapshot);
-  if (json.length <= targetBytes) return { snapshot, json, elided: false };
+  const bytes = utf8ByteLength(json);
+  if (bytes <= targetBytes) return { snapshot, json, bytes, elided: false };
 
   // Clone via the string we already built — one parse, no second stringify of
   // the original — then trim the clone so the live snapshot is untouched.
@@ -109,7 +118,7 @@ export function prepareSnapshotForUpload(
   // Estimate is approximate (JSON escaping, added markers); the caller's
   // hard-cap check on the returned `json` is the real gate. Erring toward
   // under-trim only risks a slightly larger — never rejected — payload.
-  let estimate = json.length;
+  let estimate = bytes;
   let elided = false;
   for (const id of trimable) {
     if (estimate <= targetBytes) break;
@@ -122,5 +131,11 @@ export function prepareSnapshotForUpload(
     }
   }
 
-  return { snapshot: clone, json: JSON.stringify(clone), elided };
+  const preparedJson = JSON.stringify(clone);
+  return {
+    snapshot: clone,
+    json: preparedJson,
+    bytes: utf8ByteLength(preparedJson),
+    elided,
+  };
 }

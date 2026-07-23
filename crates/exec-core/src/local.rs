@@ -43,14 +43,31 @@ impl Executor for LocalExecutor {
         }
     }
 
+    async fn rename(&self, from: &Path, to: &Path) -> ExecResult<()> {
+        if let Some(parent) = to.parent() {
+            tokio::fs::create_dir_all(parent)
+                .await
+                .map_err(|e| e.to_string())?;
+        }
+        #[cfg(windows)]
+        {
+            atomic_rename(from, to)
+        }
+        #[cfg(not(windows))]
+        {
+            tokio::fs::rename(from, to).await.map_err(|e| e.to_string())
+        }
+    }
+
     async fn read_dir(&self, path: &Path) -> ExecResult<Vec<DirEntry>> {
         let mut rd = tokio::fs::read_dir(path).await.map_err(|e| e.to_string())?;
         let mut out = Vec::new();
         while let Some(entry) = rd.next_entry().await.map_err(|e| e.to_string())? {
-            let is_dir = entry.file_type().await.map(|t| t.is_dir()).unwrap_or(false);
+            let file_type = entry.file_type().await.map_err(|e| e.to_string())?;
             out.push(DirEntry {
                 name: entry.file_name().to_string_lossy().to_string(),
-                is_dir,
+                is_dir: file_type.is_dir(),
+                is_symlink: file_type.is_symlink(),
             });
         }
         Ok(out)
@@ -66,6 +83,19 @@ impl Executor for LocalExecutor {
             is_dir: m.is_dir(),
             is_symlink: m.file_type().is_symlink(),
         })
+    }
+
+    async fn canonicalize(&self, path: &Path) -> ExecResult<PathBuf> {
+        tokio::fs::canonicalize(path)
+            .await
+            .map_err(|e| e.to_string())
+    }
+
+    async fn home_dir(&self, _cwd: &Path) -> ExecResult<PathBuf> {
+        std::env::var_os("HOME")
+            .filter(|home| !home.is_empty())
+            .map(PathBuf::from)
+            .ok_or_else(|| "target environment has no HOME directory".to_string())
     }
 
     async fn walk(&self, root: &Path) -> ExecResult<Vec<WalkEntry>> {
@@ -145,9 +175,40 @@ impl Executor for LocalExecutor {
     }
 }
 
+#[cfg(windows)]
+fn atomic_rename(from: &Path, to: &Path) -> ExecResult<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+    };
+
+    let from = from
+        .as_os_str()
+        .encode_wide()
+        .chain(Some(0))
+        .collect::<Vec<_>>();
+    let to = to
+        .as_os_str()
+        .encode_wide()
+        .chain(Some(0))
+        .collect::<Vec<_>>();
+    let moved = unsafe {
+        MoveFileExW(
+            from.as_ptr(),
+            to.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if moved == 0 {
+        Err(std::io::Error::last_os_error().to_string())
+    } else {
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod shell_tests {
-    use super::{windows_shell_args, ShellKind};
+    use super::{windows_shell_args, Executor, LocalExecutor, ShellKind};
 
     #[test]
     fn cmd_script_disables_autorun_and_command_echo() {
@@ -177,5 +238,21 @@ mod shell_tests {
             windows_shell_args(ShellKind::PowerShell, None),
             ["-NoLogo", "-NoProfile"]
         );
+    }
+
+    #[tokio::test]
+    async fn rename_atomically_replaces_an_existing_file() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let from = temp.path().join("next.json");
+        let to = temp.path().join("current.json");
+        tokio::fs::write(&from, b"next")
+            .await
+            .expect("write source");
+        tokio::fs::write(&to, b"old").await.expect("write target");
+
+        LocalExecutor.rename(&from, &to).await.expect("replace");
+
+        assert_eq!(tokio::fs::read(&to).await.expect("read target"), b"next");
+        assert!(!from.exists());
     }
 }

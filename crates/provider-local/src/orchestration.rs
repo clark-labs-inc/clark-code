@@ -371,7 +371,7 @@ mod tests {
             ..Default::default()
         });
         let local = LocalConfig::from_provider_config(&sanitized);
-        assert_eq!(local.max_iterations, 48);
+        assert_eq!(local.max_iterations, Some(48));
         assert_eq!(
             local.mode_for("write_file"),
             crate::tools::PermissionMode::Deny

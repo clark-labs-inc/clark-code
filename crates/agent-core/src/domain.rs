@@ -64,6 +64,14 @@ pub enum ContentBlock {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         name: Option<String>,
     },
+    /// A user-selected Clark Code skill. Identity and content revision are
+    /// carried separately from display text so the provider can reject stale
+    /// or ambiguous bindings before a run starts.
+    SkillReference {
+        id: String,
+        revision: String,
+        name: String,
+    },
 }
 
 impl ContentBlock {
@@ -72,6 +80,17 @@ impl ContentBlock {
     }
     pub fn thinking(s: impl Into<String>) -> Self {
         ContentBlock::Thinking { text: s.into() }
+    }
+    pub fn skill_reference(
+        id: impl Into<String>,
+        revision: impl Into<String>,
+        name: impl Into<String>,
+    ) -> Self {
+        ContentBlock::SkillReference {
+            id: id.into(),
+            revision: revision.into(),
+            name: name.into(),
+        }
     }
 }
 
@@ -619,6 +638,13 @@ pub enum AgentEvent {
     GoalUpdated {
         run: RunId,
         goal: GoalState,
+    },
+    /// Cumulative token/cost accounting for a run so presentation can update
+    /// after each completed model call instead of waiting for the terminal
+    /// outcome. Providers emit the complete total to keep replay idempotent.
+    RunUsageUpdated {
+        run: RunId,
+        usage: RunUsage,
     },
     PermissionRequest {
         request: PermissionRequest,

@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 
 /// Bumped on any breaking change to the methods/params below. The server
 /// refuses to serve a client advertising a different major value.
-pub const PROTOCOL_VERSION: u32 = 2;
+pub const PROTOCOL_VERSION: u32 = 5;
 
 /// Method names. String constants (not an enum) so unknown methods round-trip to
 /// a clean "method not found" error instead of a deserialize failure.
@@ -34,9 +34,12 @@ pub mod method {
     pub const FS_CREATE_DIR: &str = "fs/createDir";
     pub const FS_REMOVE_FILE: &str = "fs/removeFile";
     pub const FS_REMOVE_DIR: &str = "fs/removeDir";
+    pub const FS_RENAME: &str = "fs/rename";
     pub const FS_READ_DIR: &str = "fs/readDir";
     pub const FS_METADATA: &str = "fs/metadata";
+    pub const FS_CANONICALIZE: &str = "fs/canonicalize";
     pub const FS_WALK: &str = "fs/walk";
+    pub const ENV_HOME: &str = "environment/home";
     pub const PROCESS_START: &str = "process/start";
     pub const PROCESS_RESUME: &str = "process/resume";
     pub const PROCESS_STATUS: &str = "process/status";
@@ -194,6 +197,12 @@ pub struct WriteParams {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RenameParams {
+    pub from: String,
+    pub to: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ReadDirResult {
     pub entries: Vec<WireDirEntry>,
 }
@@ -202,6 +211,7 @@ pub struct ReadDirResult {
 pub struct WireDirEntry {
     pub name: String,
     pub is_dir: bool,
+    pub is_symlink: bool,
 }
 
 /// Stat result. `modified_ms` is Unix-epoch millis, or `None` if unavailable.
@@ -211,6 +221,12 @@ pub struct MetaResult {
     pub len: u64,
     pub is_dir: bool,
     pub is_symlink: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CanonicalizeResult {
+    /// Absolute path on the target machine after resolving symlinks.
+    pub path: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

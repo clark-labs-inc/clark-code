@@ -45,11 +45,13 @@ export function FanOutStatusIcon({
 }
 
 export function fanOutSummary(fanOut: FanOut): string {
+  const running = fanOut.agents.filter((agent) => agent.status === "running").length;
+  const done = fanOut.agents.filter((agent) => agent.status === "done").length;
   const failed = fanOut.agents.filter((agent) => agent.status === "failed").length;
   const queued = fanOut.agents.filter((agent) => agent.status === "queued").length;
   const parts: string[] = [];
-  if (fanOut.running > 0) parts.push(`${fanOut.running} running`);
-  if (fanOut.done > 0) parts.push(`${fanOut.done} complete`);
+  if (running > 0) parts.push(`${running} running`);
+  if (done > 0) parts.push(`${done} complete`);
   if (queued > 0) parts.push(`${queued} queued`);
   if (failed > 0) parts.push(`${failed} need${failed === 1 ? "s" : ""} attention`);
   return parts.join(" · ") || `${fanOut.total} waiting`;

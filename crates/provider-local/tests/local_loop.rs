@@ -1392,6 +1392,8 @@ async fn goal_mode_continues_the_run_until_update_goal_complete() {
             tool_call_sse("g3", "update_goal", json!({"status": "complete"})),
             // …and deliver the final answer.
             final_body(),
+            // A later ordinary conversation turn must not inherit the goal.
+            text_body("Happy to help with the follow-up."),
         ],
     ));
 
@@ -1458,11 +1460,23 @@ async fn goal_mode_continues_the_run_until_update_goal_complete() {
         "the goal's work happened in the continuation turn"
     );
 
+    let mut follow_up = provider
+        .prompt(&session.id, PromptInput::text("Thanks — one more question"))
+        .await
+        .unwrap();
+    let follow_up_events = drain_run(&mut follow_up).await;
+    assert!(
+        follow_up_events
+            .iter()
+            .all(|event| !matches!(event, AgentEvent::GoalUpdated { .. })),
+        "a completed goal is not reassigned to an ordinary follow-up run"
+    );
+
     let captured = serve_handle.await.unwrap();
     assert_eq!(
         captured.len(),
-        6,
-        "discovery + one user turn + one continuation turn"
+        7,
+        "discovery + one user turn + one continuation + one follow-up"
     );
     let initial_tools = request_json(&captured[0])["tools"]
         .as_array()
@@ -1494,6 +1508,68 @@ async fn goal_mode_continues_the_run_until_update_goal_complete() {
     assert!(
         after_complete.contains("Goal marked complete"),
         "the model sees the completion confirmation"
+    );
+    let follow_up_request = String::from_utf8_lossy(&captured[6]).to_string();
+    assert!(follow_up_request.contains("Thanks — one more question"));
+}
+
+#[tokio::test]
+async fn goal_mode_continues_beyond_the_previous_24_turn_limit() {
+    let dir = tempfile::tempdir().unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let mut bodies = vec![
+        tool_call_sse("g0", "tool_search", json!({"query": "goal autonomy"})),
+        tool_call_sse(
+            "g1",
+            "create_goal",
+            json!({"objective": "continue until the twenty-fifth goal turn"}),
+        ),
+        text_body("Goal created — starting."),
+    ];
+    bodies.extend((1..=24).map(|turn| text_body(&format!("Continuation {turn} made progress."))));
+    bodies.push(tool_call_sse(
+        "g25",
+        "update_goal",
+        json!({"status": "complete"}),
+    ));
+    bodies.push(text_body("Completed on continuation 25."));
+    let serve_handle = tokio::spawn(serve(listener, bodies));
+
+    let mut provider = connect_provider(addr).await;
+    let session = provider
+        .new_session(SessionOptions {
+            cwd: Some(dir.path().to_string_lossy().to_string()),
+            mode: None,
+            collaboration_mode: None,
+            resume: None,
+        })
+        .await
+        .unwrap();
+    let mut stream = provider
+        .prompt(
+            &session.id,
+            PromptInput::text("make this a goal and continue for twenty-five goal turns"),
+        )
+        .await
+        .unwrap();
+    let events = drain_run(&mut stream).await;
+
+    assert!(events.iter().any(|event| matches!(
+        event,
+        AgentEvent::GoalUpdated { goal, .. }
+            if goal.status == GoalStatus::Complete && goal.continuations >= 25
+    )));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        AgentEvent::RunFinished { outcome, .. } if outcome.status == RunStatus::Done
+    )));
+
+    let captured = serve_handle.await.unwrap();
+    assert_eq!(captured.len(), 29);
+    assert!(
+        String::from_utf8_lossy(&captured[27]).contains("goal continuation turn 25"),
+        "the engine must launch the turn beyond the former 24-continuation cap"
     );
 }
 
@@ -1538,6 +1614,34 @@ async fn goal_budget_exhaustion_triggers_one_wrapup_turn_then_stops() {
         .await
         .unwrap();
     let events = drain_run(&mut stream).await;
+
+    let live_usage = events
+        .iter()
+        .filter_map(|event| match event {
+            AgentEvent::RunUsageUpdated { usage, .. } => Some(*usage),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        live_usage
+            .iter()
+            .map(|usage| (usage.input_tokens, usage.output_tokens))
+            .collect::<Vec<_>>(),
+        vec![(500, 100), (700, 150)],
+        "usage is published cumulatively after each model call"
+    );
+    let finished_index = events
+        .iter()
+        .position(|event| matches!(event, AgentEvent::RunFinished { .. }))
+        .expect("run finishes");
+    let last_usage_index = events
+        .iter()
+        .rposition(|event| matches!(event, AgentEvent::RunUsageUpdated { .. }))
+        .expect("live usage event");
+    assert!(
+        last_usage_index < finished_index,
+        "the final live usage update precedes the terminal outcome"
+    );
 
     assert!(events.iter().any(|e| matches!(
         e,

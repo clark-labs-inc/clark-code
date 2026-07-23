@@ -1,9 +1,10 @@
 import type { SlashCommand } from "./slashCommands";
+import type { SkillCatalogEntry } from "../core-bridge/bridge";
 
 /** What the user is mid-typing at the caret: an `@file` mention (anywhere) or a
  * `/command` (only at the very start of the message). */
 export interface ComposerTrigger {
-  type: "@" | "/";
+  type: "@" | "/" | "$";
   query: string;
   /** Index of the trigger character in the text. */
   start: number;
@@ -11,12 +12,13 @@ export interface ComposerTrigger {
 
 export type ComposerSuggestion =
   | { kind: "file"; path: string }
-  | { kind: "slash"; cmd: SlashCommand };
+  | { kind: "slash"; cmd: SlashCommand }
+  | { kind: "skill"; skill: SkillCatalogEntry };
 
 export function detectComposerTrigger(text: string, caret: number): ComposerTrigger | null {
   for (let i = caret - 1; i >= 0; i--) {
     const ch = text[i];
-    if (ch === "@" || ch === "/") {
+    if (ch === "@" || ch === "/" || ch === "$") {
       const before = i === 0 ? "" : text[i - 1];
       if (i !== 0 && !/\s/.test(before)) return null;
       if (ch === "/" && i !== 0) return null;

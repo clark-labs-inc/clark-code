@@ -2,16 +2,16 @@ import { useEffect } from "react";
 import { Gift, Sparkles, X } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
 import { cn } from "../lib/cn";
+import type { ActivityReward } from "../lib/account";
 
-function rewardCopy(tier: "base" | "bonus" | "jackpot", credits: number): { title: string; detail: string } {
-  const amount = credits.toLocaleString();
+function rewardCopy(tier: "base" | "bonus" | "jackpot"): { title: string; detail: string } {
   if (tier === "jackpot") {
-    return { title: "Jackpot reward", detail: `Your work earned +${amount} credits.` };
+    return { title: "Jackpot reward", detail: "Your work earned an activity reward." };
   }
   if (tier === "bonus") {
-    return { title: "Bonus reward", detail: `Your work earned +${amount} credits.` };
+    return { title: "Bonus reward", detail: "Your work earned an activity reward." };
   }
-  return { title: "Activity reward", detail: `Your work earned +${amount} credits.` };
+  return { title: "Activity reward", detail: "Your work earned an activity reward." };
 }
 
 /** A calm, dismissible receipt for a reward the billing ledger already issued.
@@ -26,8 +26,17 @@ export function ActivityRewardToast() {
     return () => window.clearTimeout(timer);
   }, [dismiss, reward]);
 
-  if (!reward) return null;
-  const copy = rewardCopy(reward.tier, reward.credits);
+  return reward ? <ActivityRewardReceipt reward={reward} onDismiss={dismiss} /> : null;
+}
+
+export function ActivityRewardReceipt({
+  reward,
+  onDismiss,
+}: {
+  reward: ActivityReward;
+  onDismiss: () => void;
+}) {
+  const copy = rewardCopy(reward.tier);
   const special = reward.tier !== "base";
 
   return (
@@ -53,7 +62,7 @@ export function ActivityRewardToast() {
       </div>
       <button
         type="button"
-        onClick={dismiss}
+        onClick={onDismiss}
         aria-label="Dismiss activity reward"
         className="grid size-7 shrink-0 place-items-center rounded-lg text-ink-muted transition hover:bg-bg-hover hover:text-ink"
       >

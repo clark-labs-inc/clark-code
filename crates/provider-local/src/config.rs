@@ -26,14 +26,6 @@ pub const DEFAULT_RESEARCH_MODEL: &str = "clark";
 /// passthrough path: agentic Clark tiers own a sandbox/session and may answer
 /// the user's task instead of returning a grounded pixel description.
 pub const DEFAULT_VISION_MODEL: &str = "google/gemini-3.1-flash-lite";
-/// Hard ceiling on model turns in one run — a last-resort circuit breaker,
-/// not the primary loop control. Raised from 50 so genuinely long, healthy
-/// tasks (large refactors, multi-file investigations) aren't cut off
-/// mid-flight. What keeps a *stuck* run from wasting this larger budget is
-/// the [`crate::loop_breaker::LoopBreaker`] plugin (breaks same-action/
-/// same-result loops early) plus the graceful wrap-up turn the engine now
-/// injects before the cap; see [`crate::engine`].
-pub const DEFAULT_MAX_ITERATIONS: u32 = 1000;
 /// Approximate transcript-token threshold where the local loop checkpoints old
 /// context before the next model request. GLM 5.2 gives us a 1M-token window, so
 /// leave plenty of room for the next turn instead of compacting early.
@@ -91,8 +83,9 @@ pub struct LocalConfig {
     /// Reasoning-effort override sent with each coding request ("low" …
     /// "xhigh"). `None` → the model's server-side default.
     pub reasoning_effort: Option<String>,
-    /// Hard cap on model<->tool iterations per turn.
-    pub max_iterations: u32,
+    /// Optional hard cap on model<->tool iterations per turn. Production leaves
+    /// this unbounded; tests and evals may set an explicit cap.
+    pub max_iterations: Option<u32>,
     /// Hidden A/B switch used by the paid planning benchmark. Production and
     /// normal tests always use the decision-complete profile.
     pub(crate) planning_prompt_profile: crate::planning::PlanningPromptProfile,
@@ -244,8 +237,7 @@ impl LocalConfig {
             .get("max_iterations")
             .and_then(Value::as_u64)
             .map(|n| n as u32)
-            .filter(|n| *n > 0)
-            .unwrap_or(DEFAULT_MAX_ITERATIONS);
+            .filter(|n| *n > 0);
         let planning_prompt_profile = crate::planning::PlanningPromptProfile::from_extra(
             extra.get("planning_prompt_profile").and_then(Value::as_str),
         );
@@ -408,7 +400,7 @@ mod tests {
         let cfg = LocalConfig::from_provider_config(&ProviderConfig::default());
         assert_eq!(cfg.base_url, DEFAULT_BASE_URL);
         assert_eq!(cfg.model, DEFAULT_MODEL);
-        assert_eq!(cfg.max_iterations, DEFAULT_MAX_ITERATIONS);
+        assert_eq!(cfg.max_iterations, None);
         assert_eq!(cfg.sandbox_mode, LocalSandboxMode::Auto);
         assert_eq!(
             cfg.compaction.auto_compact_token_limit,
@@ -586,7 +578,7 @@ mod tests {
         assert_eq!(cfg.base_url, "http://localhost:1234/v1");
         assert_eq!(cfg.model, "clark_max");
         assert_eq!(cfg.temperature, Some(0.2));
-        assert_eq!(cfg.max_iterations, 8);
+        assert_eq!(cfg.max_iterations, Some(8));
         assert_eq!(cfg.mode_for("bash"), PermissionMode::Deny);
         assert_eq!(cfg.mode_for("edit_file"), PermissionMode::Allow);
         assert_eq!(cfg.mode_for("write_file"), PermissionMode::Ask);

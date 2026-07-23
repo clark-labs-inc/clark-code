@@ -93,6 +93,8 @@ pub(super) async fn roots(
                     scope,
                     origin: SkillOrigin::Plugin,
                     namespace: Some(namespace.clone()),
+                    identity_namespace: Some(format!("plugin:{namespace}")),
+                    revision_context: None,
                 });
             }
         }

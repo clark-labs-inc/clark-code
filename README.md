@@ -30,8 +30,8 @@ mobile, and web.
 React (Tauri WebView)  ──invoke/emit──►  agent-core (Rust, native + WASM)
    surfaces, store            │              domain · projection · Provider trait
                               ▼
-                  provider-acp (JSON-RPC/stdio)   provider-clark (HTTP cmds + SSE)
-                  local CLI agents via sidecar     remote Clark runtime
+           provider-acp (JSON-RPC/stdio)   provider-local (native tool loop)   provider-clark (HTTP + SSE)
+           local CLI agents via sidecar     local/remote project execution      remote Clark runtime
 ```
 
 ## Autoregressive prompt & schema design
@@ -75,8 +75,8 @@ Prerequisites: Rust (stable), Node 24+, pnpm 10+, and the
 
 ```bash
 # Rust engine: test + lint
-cargo test -p agent-core -p provider-acp -p provider-clark
-cargo clippy -p agent-core -p provider-acp -p provider-clark -p devbridge --all-targets -- -D warnings
+cargo test -p agent-core -p provider-acp -p provider-clark -p provider-local
+cargo clippy -p agent-core -p provider-acp -p provider-clark -p provider-local -p devbridge --all-targets -- -D warnings
 cargo fmt --all --check
 
 # Frontend (browser preview uses a mock provider)
@@ -108,6 +108,14 @@ cd harness
 node resilience-benchmark.mjs
 ```
 
+For a quick representative pass, `--smoke` runs the healthy baseline, each of
+the six faults in isolation, and the all-faults interaction case:
+
+```bash
+cd harness
+node resilience-benchmark.mjs --smoke
+```
+
 A separate control drives the real local provider through `devbridge` using
 the Clark-managed `clark-code:deepseek_v4_pro` route. It is intentionally
 opt-in because it spends live model credits. Set `CLARK_CODE_API_KEY` (or keep
@@ -122,6 +130,47 @@ The shared contract in
 `app/src/core-bridge/resilienceBenchmark.json` pins the matrix dimensions,
 provider, and model for both the TypeScript tests and Playwright harness so the
 reported configuration cannot drift from the simulated one.
+
+## Pre-release experience benchmark
+
+Every release build is gated on a fast cross-product sample: core event and
+provider contracts; local tools, permissions, memory, planning, and recovery;
+scripted conversations; remote execution, git, and worktrees; frontend state
+and surfaces; an eight-case browser resilience sample; and the full empty-home
+skill experience. The skill lane covers legacy-compatible discovery, managed
+Superpowers install, collision-safe selection, typed history, provider request
+projection, update/stale-binding handling, restart, uninstall, and the same
+lifecycle against a fake remote user home. It runs against both a self-contained
+fixture and a pinned real Superpowers checkout, then uploads one suite receipt,
+the detailed skill receipt, browser screenshots, and per-family logs.
+
+```bash
+./scripts/run-pre-release-benchmarks.sh \
+  --superpowers /path/to/obra/superpowers
+```
+
+A representative real-model lane can be part of the same gate. It exercises a
+managed skill resource, basic response, read/search tools, permissioned
+mutation, and a memory round trip. It is opt-in so a developer or release
+workflow must explicitly name the Clark Platform route, endpoint, model tier,
+and credential:
+
+```bash
+CLARK_CODE_PROVIDER=clark-platform \
+CLARK_CODE_BASE_URL=https://api.clarkslabs.com/v1 \
+CLARK_CODE_MODEL='clark-code:YOUR_EXPLICIT_TIER' \
+CLARK_CODE_API_KEY=ck_live_... \
+  ./scripts/run-pre-release-benchmarks.sh \
+    --superpowers /path/to/obra/superpowers \
+    --live
+```
+
+For tag releases, set `CLARK_CODE_PRERELEASE_LIVE=1` plus
+`CLARK_CODE_PRERELEASE_PROVIDER`, `CLARK_CODE_PRERELEASE_BASE_URL`, and
+`CLARK_CODE_PRERELEASE_MODEL` as repository variables, and store the credential
+as the `CLARK_CODE_PRERELEASE_API_KEY` repository secret. If live validation
+is enabled but any value is absent or invalid, the release fails before builds
+or publishing.
 
 ## Repository Status
 

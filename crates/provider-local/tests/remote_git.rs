@@ -19,6 +19,7 @@ async fn start_server(root: PathBuf) -> String {
     let server = exec_server::bind(Config {
         token: TOKEN.to_string(),
         root: Some(root),
+        home: None,
         addr: "127.0.0.1:0".into(),
     })
     .await

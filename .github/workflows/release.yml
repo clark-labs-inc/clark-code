@@ -26,7 +26,69 @@ env:
   CLARK_DESKTOP_DOWNLOAD_DISTRIBUTION_ID: ${{ vars.CLARK_DESKTOP_DOWNLOAD_DISTRIBUTION_ID || '' }}
 
 jobs:
+  pre_release_benchmarks:
+    name: Pre-release experience benchmark
+    runs-on: ubuntu-latest
+    env:
+      CLARK_CODE_PRERELEASE_LIVE: ${{ vars.CLARK_CODE_PRERELEASE_LIVE || '0' }}
+      CLARK_CODE_PROVIDER: ${{ vars.CLARK_CODE_PRERELEASE_PROVIDER }}
+      CLARK_CODE_BASE_URL: ${{ vars.CLARK_CODE_PRERELEASE_BASE_URL }}
+      CLARK_CODE_MODEL: ${{ vars.CLARK_CODE_PRERELEASE_MODEL }}
+      CLARK_CODE_API_KEY: ${{ secrets.CLARK_CODE_PRERELEASE_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Pin the external fixture so a release is reproducible. Override the
+      # repository variable deliberately when validating a newer Superpowers
+      # revision; never float this release gate on upstream main.
+      - name: Checkout pinned Superpowers benchmark fixture
+        uses: actions/checkout@v4
+        with:
+          repository: obra/superpowers
+          ref: ${{ vars.CLARK_SUPERPOWERS_BENCHMARK_REF || 'd884ae04edebef577e82ff7c4e143debd0bbec99' }}
+          path: benchmark-fixtures/superpowers
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: |
+            app/pnpm-lock.yaml
+            harness/pnpm-lock.yaml
+      - name: Install benchmark UI dependencies
+        run: |
+          pnpm --dir app install --frozen-lockfile
+          pnpm --dir harness install --frozen-lockfile
+          pnpm --dir harness exec playwright install --with-deps chromium
+
+      - name: Run release-blocking benchmark
+        shell: bash
+        run: |
+          args=(
+            --out target/pre-release-benchmarks/release
+            --superpowers "$GITHUB_WORKSPACE/benchmark-fixtures/superpowers"
+          )
+          if [ "$CLARK_CODE_PRERELEASE_LIVE" = "1" ]; then
+            args+=(--live)
+          fi
+          ./scripts/run-pre-release-benchmarks.sh "${args[@]}"
+
+      - name: Upload benchmark receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pre-release-benchmark
+          path: target/pre-release-benchmarks/release
+          if-no-files-found: warn
+
   build:
+    needs: [pre_release_benchmarks]
     strategy:
       fail-fast: false
       matrix:
@@ -574,6 +636,7 @@ jobs:
   # publish them under exec-server/<tag>/ — see scripts/publish-exec-server.sh
   # and src-tauri/src/ssh.rs `fetch_from_cdn`.
   exec-server:
+    needs: [pre_release_benchmarks]
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4

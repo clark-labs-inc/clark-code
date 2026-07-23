@@ -85,6 +85,34 @@ export function SubagentsInspector() {
   const selectAgent = useFanOutStore((state) => state.selectAgent);
   const closeInspector = useFanOutStore((state) => state.closeInspector);
   const reduce = useReducedMotion();
+
+  return (
+    <SubagentsInspectorView
+      fanOut={fanOut}
+      inspectorOpen={inspectorOpen}
+      selectedAgentId={selectedAgentId}
+      selectAgent={selectAgent}
+      closeInspector={closeInspector}
+      reduce={reduce}
+    />
+  );
+}
+
+export function SubagentsInspectorView({
+  fanOut,
+  inspectorOpen,
+  selectedAgentId,
+  selectAgent,
+  closeInspector,
+  reduce,
+}: {
+  fanOut: ReturnType<typeof useFanOutStore.getState>["fanOut"];
+  inspectorOpen: boolean;
+  selectedAgentId: string | null;
+  selectAgent: (agentId: string) => void;
+  closeInspector: () => void;
+  reduce: boolean | null;
+}) {
   const running = fanOut?.agents.some((agent) => agent.status === "running") ?? false;
   const now = useClock(inspectorOpen && running);
 

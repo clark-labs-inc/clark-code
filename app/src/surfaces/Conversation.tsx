@@ -149,7 +149,7 @@ function DismissButton({ onClick, muted = false }: { onClick: () => void; muted?
         "-mr-1 -mt-0.5 grid size-6 shrink-0 place-items-center rounded-md transition",
         muted
           ? "text-ink-faint hover:bg-bg-hover hover:text-ink-muted"
-          : "text-danger/70 hover:bg-danger/10 hover:text-danger",
+          : "text-danger hover:bg-danger/10",
       )}
     >
       <X className="size-3.5" />
@@ -287,6 +287,8 @@ export function Conversation({
   // lingering below the messages forever. It can also be dismissed outright.
   const runList = Object.values(runs);
   const latestRun = runList[runList.length - 1];
+  const goalRunStatus = goal?.run ? runs[goal.run]?.status : undefined;
+  const goalRunActive = goalRunStatus === "queued" || goalRunStatus === "running";
   const failed =
     latestRun?.status === "failed" && !dismissedFailedRuns.includes(latestRun.id)
       ? latestRun
@@ -303,7 +305,7 @@ export function Conversation({
   const renderBlock = (block: Block | BaseBlock) => {
     if (block.kind === "goal_work") {
       return goal ? (
-        <GoalWorkSummary key={block.key} goal={goal}>
+        <GoalWorkSummary key={block.key} goal={goal} runActive={goalRunActive}>
           {block.blocks.map(renderBlock)}
         </GoalWorkSummary>
       ) : null;
@@ -379,7 +381,7 @@ export function Conversation({
 
   return (
     <div ref={scrollRef} onScroll={onScroll} className="flex-1 overflow-y-auto">
-      <div ref={contentRef} className="chat-column-width mx-auto flex w-full flex-col gap-4 px-5 py-5">
+      <div ref={contentRef} className="chat-column-width mx-auto flex w-full flex-col gap-5 px-5 py-5">
         {visible.length === 0 && !showPending && (
           <p className="py-10 text-center text-sm text-ink-faint">
             Ask Clark anything — file work, web research, and computer use show up here as it works.

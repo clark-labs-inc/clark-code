@@ -11,6 +11,10 @@ use exec_protocol::{
     Stream as WireStream, PROTOCOL_VERSION,
 };
 use futures::{SinkExt, StreamExt};
+use provider_local::{
+    discover_skill_catalog_snapshot, install_skill_pack, uninstall_skill_pack,
+    InstallSkillPackRequest, SkillPackAction, SkillPackScope,
+};
 use provider_local::{Executor, LocalExecutor, RemoteExecutor};
 use tokio_tungstenite::tungstenite::Message;
 use tokio_util::sync::CancellationToken;
@@ -22,6 +26,7 @@ async fn start_server(root: Option<PathBuf>) -> String {
     let server = exec_server::bind(exec_server::Config {
         token: TOKEN.to_string(),
         root,
+        home: None,
         addr: "127.0.0.1:0".to_string(),
     })
     .await
@@ -63,11 +68,20 @@ async fn remote_matches_local_for_every_primitive() {
         .await
         .unwrap()
         .into_iter()
-        .map(|e| (e.name, e.is_dir))
+        .map(|e| (e.name, e.is_dir, e.is_symlink))
         .collect();
     rd.sort();
-    assert!(rd.contains(&("nested".to_string(), true)));
-    assert!(rd.contains(&("sub".to_string(), true)));
+    assert!(rd.contains(&("nested".to_string(), true, false)));
+    assert!(rd.contains(&("sub".to_string(), true, false)));
+
+    let renamed = dir.path().join("nested/renamed.txt");
+    remote.rename(&file, &renamed).await.unwrap();
+    assert!(!file.exists());
+    assert_eq!(remote.read(&renamed).await.unwrap(), bytes);
+    assert_eq!(
+        remote.canonicalize(&renamed).await.unwrap(),
+        local.canonicalize(&renamed).await.unwrap()
+    );
 
     let removed_file = dir.path().join("remove/file.txt");
     remote.write(&removed_file, b"remove me").await.unwrap();
@@ -114,7 +128,7 @@ async fn remote_matches_local_for_every_primitive() {
         .map(|w| w.path)
         .collect());
     assert_eq!(remote_walk, local_walk);
-    assert!(remote_walk.iter().any(|p| p == "nested/a.txt"));
+    assert!(remote_walk.iter().any(|p| p == "nested/renamed.txt"));
     assert!(!remote_walk.iter().any(|p| p.contains("node_modules")));
 
     // exec parity — output + exit code.
@@ -144,6 +158,145 @@ async fn remote_matches_local_for_every_primitive() {
         .unwrap();
     assert_eq!(terminal.code, Some(0));
     assert!(String::from_utf8_lossy(&terminal.stdout).contains("terminal"));
+}
+
+#[tokio::test]
+async fn remote_managed_skill_pack_survives_reconnect_update_and_uninstall() {
+    let temp = tempfile::tempdir().unwrap();
+    let project = temp.path().join("remote-project");
+    let source = project.join("fixtures/superpowers/skills/brainstorming");
+    std::fs::create_dir_all(&source).unwrap();
+    std::fs::write(
+        source.join("SKILL.md"),
+        "---\nname: brainstorming\ndescription: Explore requirements\n---\n\nRemote v1.\n",
+    )
+    .unwrap();
+    let url = start_server(Some(project.clone())).await;
+    let remote = RemoteExecutor::connect(&url, TOKEN).await.unwrap();
+
+    let installed = install_skill_pack(
+        &remote,
+        &project,
+        InstallSkillPackRequest {
+            pack_id: "superpowers".into(),
+            source_path: project
+                .join("fixtures/superpowers")
+                .to_string_lossy()
+                .into_owned(),
+            scope: SkillPackScope::Project,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(installed.action, SkillPackAction::Installed);
+
+    let reconnected = RemoteExecutor::connect(&url, TOKEN).await.unwrap();
+    let snapshot = discover_skill_catalog_snapshot(
+        &reconnected,
+        &project,
+        "remote:test",
+        &std::collections::HashSet::new(),
+        &[],
+    )
+    .await;
+    assert!(snapshot
+        .skills
+        .iter()
+        .any(|skill| skill.name == "brainstorming" && skill.enabled));
+
+    std::fs::write(
+        source.join("SKILL.md"),
+        "---\nname: brainstorming\ndescription: Explore requirements\n---\n\nRemote v2.\n",
+    )
+    .unwrap();
+    let updated = install_skill_pack(
+        &reconnected,
+        &project,
+        InstallSkillPackRequest {
+            pack_id: "superpowers".into(),
+            source_path: project
+                .join("fixtures/superpowers")
+                .to_string_lossy()
+                .into_owned(),
+            scope: SkillPackScope::Project,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(updated.action, SkillPackAction::Updated);
+
+    let removed = uninstall_skill_pack(
+        &reconnected,
+        &project,
+        "superpowers",
+        SkillPackScope::Project,
+    )
+    .await
+    .unwrap();
+    assert_eq!(removed.action, SkillPackAction::Uninstalled);
+    let after = discover_skill_catalog_snapshot(
+        &reconnected,
+        &project,
+        "remote:test",
+        &std::collections::HashSet::new(),
+        &[],
+    )
+    .await;
+    assert!(!after
+        .skills
+        .iter()
+        .any(|skill| skill.name == "brainstorming"));
+}
+
+#[tokio::test]
+async fn remote_catalog_uses_the_target_home_for_personal_skills() {
+    let temp = tempfile::tempdir().unwrap();
+    let project = temp.path().join("project");
+    let home = temp.path().join("remote-home");
+    let skill = home.join(".agents/skills/superpowers/brainstorming/SKILL.md");
+    std::fs::create_dir_all(skill.parent().unwrap()).unwrap();
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::write(
+        &skill,
+        "---\nname: brainstorming\ndescription: Explore requirements\n---\n\nPersonal remote skill.\n",
+    )
+    .unwrap();
+    let server = exec_server::bind(exec_server::Config {
+        token: TOKEN.to_string(),
+        root: Some(project.clone()),
+        home: Some(home.clone()),
+        addr: "127.0.0.1:0".to_string(),
+    })
+    .await
+    .unwrap();
+    let address = server.local_addr().unwrap();
+    tokio::spawn(server.serve());
+    let remote = RemoteExecutor::connect(&format!("ws://{address}"), TOKEN)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        remote.home_dir(&project).await.unwrap(),
+        home.canonicalize().unwrap()
+    );
+    let snapshot = discover_skill_catalog_snapshot(
+        &remote,
+        &project,
+        "remote:personal",
+        &std::collections::HashSet::new(),
+        &[],
+    )
+    .await;
+    let brainstorming = snapshot
+        .skills
+        .iter()
+        .find(|skill| skill.name == "brainstorming")
+        .unwrap();
+    assert_eq!(brainstorming.scope, provider_local::SkillScope::User);
+    assert_eq!(
+        brainstorming.origin,
+        provider_local::SkillOrigin::Compatible
+    );
 }
 
 #[tokio::test]

@@ -3,9 +3,9 @@ import { CreditCard, ArrowUpRight, X } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
 import {
   creditState,
-  creditDollars,
   clarkBillingUrl,
   effectiveBilling,
+  effectiveUsagePercent,
   openExternal,
   type BillingSummary,
   type CreditState,
@@ -15,17 +15,27 @@ import { cn } from "../lib/cn";
 export function creditBannerMessage(
   billing: BillingSummary | null,
   state: Exclude<CreditState, "ok">,
-  dollars: number,
 ): string {
   const workspaceCovered = effectiveBilling(billing)?.owner_kind === "organization";
+  const percent = effectiveUsagePercent(billing);
   if (state === "out") {
+    if (percent !== null) {
+      return workspaceCovered
+        ? `${percent}% of the workspace Clark Code limit used. Workspace billing needs attention.`
+        : `${percent}% of your Clark Code limit used — review billing to keep coding.`;
+    }
     return workspaceCovered
       ? "Your workspace billing needs attention before Clark Code can continue."
-      : "You're out of Clark credits — review billing to keep coding.";
+      : "Clark Code usage limit reached — review billing to keep coding.";
+  }
+  if (percent !== null) {
+    return workspaceCovered
+      ? `Your workspace has used ${percent}% of its Clark Code limit.`
+      : `${percent}% of your Clark Code limit used.`;
   }
   return workspaceCovered
-    ? `Your workspace is running low on Clark credits — about $${dollars.toFixed(2)} left.`
-    : `Running low on Clark credits — about $${dollars.toFixed(2)} left.`;
+    ? "Your workspace is approaching its Clark Code usage limit."
+    : "Approaching your Clark Code usage limit.";
 }
 
 /** Proactive credit warning under the top bar: an amber, dismissible "running
@@ -41,7 +51,6 @@ export function CreditBanner() {
   if (state === "low" && dismissed === "low") return null;
 
   const out = state === "out";
-  const dollars = creditDollars(billing);
 
   return (
     <div
@@ -52,7 +61,7 @@ export function CreditBanner() {
     >
       <CreditCard className={cn("size-4 shrink-0", out ? "text-danger" : "text-warning")} />
       <span className="min-w-0 flex-1 truncate text-ink">
-        {creditBannerMessage(billing, out ? "out" : "low", dollars)}
+        {creditBannerMessage(billing, out ? "out" : "low")}
       </span>
       <button
         onClick={() => void openExternal(clarkBillingUrl())}

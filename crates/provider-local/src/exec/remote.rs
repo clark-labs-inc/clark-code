@@ -5,15 +5,15 @@
 //! One connection is multiplexed: filesystem ops are request/response correlated
 //! by `id`; a command runs as `process/start` then a stream of `process/output`
 //! notifications routed (by `process_id`) into the in-flight [`exec`] call until
-//! its `process/exit`. The server buffers output by sequence number, so a future
-//! reconnect can `process/resume` — that resilience layer lands with the SSH
-//! tunnel (Phase 3); here the connection is single-shot.
+//! its `process/exit`. The server buffers output by sequence number; if the
+//! socket drops, the client reconnects, re-authenticates, and resumes the same
+//! process after the last delivered sequence without rerunning the command.
 
 mod background;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -22,14 +22,15 @@ use exec_core::{
     BackgroundStatus, DirEntry, ExecOutput, ExecResult, Executor, FileMeta, WalkEntry,
 };
 use exec_protocol::{
-    b64_decode, b64_encode, method, AuthParams, AuthResult, MetaResult, Notification, PathParams,
-    ProcessExitParams, ProcessIdParams, ProcessOutputParams, ProcessStartParams, ReadDirResult,
-    ReadResult, Request, Response, Stream, WalkResult, WriteParams, PROTOCOL_VERSION,
+    b64_decode, b64_encode, method, AuthParams, AuthResult, CanonicalizeResult, MetaResult,
+    Notification, PathParams, ProcessExitParams, ProcessIdParams, ProcessOutputParams,
+    ProcessResumeParams, ProcessStartParams, ReadDirResult, ReadResult, RenameParams, Request,
+    Response, Stream, WalkResult, WriteParams, PROTOCOL_VERSION,
 };
 use futures::{SinkExt, StreamExt};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, Mutex as AsyncMutex, RwLock};
 use tokio_tungstenite::tungstenite::Message;
 use tokio_util::sync::CancellationToken;
 
@@ -46,6 +47,8 @@ struct Conn {
     pending: Mutex<HashMap<u64, oneshot::Sender<Response>>>,
     procs: Mutex<HashMap<String, mpsc::UnboundedSender<ProcEvent>>>,
     next_id: AtomicU64,
+    closed: AtomicBool,
+    shutdown: CancellationToken,
 }
 
 impl Conn {
@@ -56,13 +59,17 @@ impl Conn {
         method_name: &str,
         params: serde_json::Value,
     ) -> ExecResult<serde_json::Value> {
+        if self.closed.load(Ordering::Acquire) {
+            return Err("exec-server connection closed".into());
+        }
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let (tx, rx) = oneshot::channel();
         self.pending.lock().unwrap().insert(id, tx);
         let req = Request::new(id, method_name, params);
-        self.outgoing
-            .send(text_msg(&req))
-            .map_err(|_| "exec-server connection closed".to_string())?;
+        if self.outgoing.send(text_msg(&req)).is_err() {
+            self.pending.lock().unwrap().remove(&id);
+            return Err("exec-server connection closed".into());
+        }
         match rx.await {
             Ok(resp) => match resp.error {
                 Some(err) => Err(err.message),
@@ -75,6 +82,7 @@ impl Conn {
     /// Tear down on disconnect: every awaiting caller and exec loop gets a clean
     /// "connection closed" instead of hanging forever.
     fn fail_all(&self) {
+        self.closed.store(true, Ordering::Release);
         self.pending.lock().unwrap().clear();
         self.procs.lock().unwrap().clear();
     }
@@ -93,60 +101,126 @@ impl Drop for ProcGuard {
     }
 }
 
+struct RemoteState {
+    url: String,
+    token: String,
+    conn: RwLock<Arc<Conn>>,
+    reconnecting: AsyncMutex<()>,
+}
+
 /// An [`Executor`] backed by a remote `clark-exec-server`.
+#[derive(Clone)]
 pub struct RemoteExecutor {
-    conn: Arc<Conn>,
+    state: Arc<RemoteState>,
 }
 
 impl RemoteExecutor {
     /// Connect to `url` (`ws://127.0.0.1:<forwarded-port>`) and authenticate with
     /// the session `token`. Fails on a bad token or a protocol-version mismatch.
     pub async fn connect(url: &str, token: &str) -> ExecResult<Self> {
-        let (ws, _resp) = tokio_tungstenite::connect_async(url)
-            .await
-            .map_err(|e| format!("connecting to exec-server {url}: {e}"))?;
-        let (mut sink, mut stream) = ws.split();
+        let conn = open_connection(url, token).await?;
+        Ok(Self {
+            state: Arc::new(RemoteState {
+                url: url.to_string(),
+                token: token.to_string(),
+                conn: RwLock::new(conn),
+                reconnecting: AsyncMutex::new(()),
+            }),
+        })
+    }
 
-        let (otx, mut orx) = mpsc::unbounded_channel::<Message>();
-        tokio::spawn(async move {
-            while let Some(m) = orx.recv().await {
-                if sink.send(m).await.is_err() {
-                    break;
-                }
-            }
-            let _ = sink.close().await;
-        });
+    async fn connection(&self) -> ExecResult<Arc<Conn>> {
+        let current = self.state.conn.read().await.clone();
+        if !current.closed.load(Ordering::Acquire) {
+            return Ok(current);
+        }
+        self.reconnect(&current).await
+    }
 
-        let conn = Arc::new(Conn {
-            outgoing: otx,
-            pending: Mutex::new(HashMap::new()),
-            procs: Mutex::new(HashMap::new()),
-            next_id: AtomicU64::new(1),
-        });
+    async fn reconnect(&self, stale: &Arc<Conn>) -> ExecResult<Arc<Conn>> {
+        let _guard = self.state.reconnecting.lock().await;
+        let current = self.state.conn.read().await.clone();
+        if !Arc::ptr_eq(&current, stale) && !current.closed.load(Ordering::Acquire) {
+            return Ok(current);
+        }
+        let next = open_connection(&self.state.url, &self.state.token).await?;
+        *self.state.conn.write().await = next.clone();
+        Ok(next)
+    }
 
-        let reader_conn = conn.clone();
-        tokio::spawn(async move {
-            while let Some(Ok(msg)) = stream.next().await {
-                if let Message::Text(t) = msg {
-                    route(&reader_conn, t.as_str());
-                }
-            }
-            reader_conn.fail_all();
-        });
-
-        let exec = RemoteExecutor { conn };
-        let auth = AuthParams {
-            token: token.to_string(),
-            protocol_version: PROTOCOL_VERSION,
-        };
-        let result = exec.conn.call(method::AUTH, to_value(&auth)).await?;
-        // Validate the shape (and surface server version on success).
-        let _: AuthResult = from_value(result)?;
-        Ok(exec)
+    #[cfg(test)]
+    async fn disconnect_for_test(&self) {
+        self.state.conn.read().await.shutdown.cancel();
     }
 
     fn path(p: &Path) -> String {
         p.to_string_lossy().to_string()
+    }
+
+    async fn call(
+        &self,
+        method_name: &str,
+        params: serde_json::Value,
+    ) -> ExecResult<serde_json::Value> {
+        self.connection().await?.call(method_name, params).await
+    }
+
+    async fn resume_connection(
+        &self,
+        stale: &Arc<Conn>,
+        process_id: &str,
+        after_seq: u64,
+        timeout: Duration,
+        cancel: &CancellationToken,
+    ) -> ExecResult<(Arc<Conn>, mpsc::UnboundedReceiver<ProcEvent>, ProcGuard)> {
+        let window = timeout.min(Duration::from_secs(5));
+        let deadline = tokio::time::Instant::now() + window;
+        let mut delay = Duration::from_millis(50);
+        let mut previous = stale.clone();
+        loop {
+            if tokio::time::Instant::now() >= deadline {
+                return Err("exec-server connection could not be restored".into());
+            }
+            let attempt = tokio::select! {
+                _ = cancel.cancelled() => return Err("command cancelled".into()),
+                result = self.reconnect(&previous) => result,
+            };
+            if let Ok(conn) = attempt {
+                let (tx, rx) = mpsc::unbounded_channel();
+                conn.procs
+                    .lock()
+                    .unwrap()
+                    .insert(process_id.to_string(), tx);
+                let guard = ProcGuard {
+                    conn: conn.clone(),
+                    process_id: process_id.to_string(),
+                };
+                match conn
+                    .call(
+                        method::PROCESS_RESUME,
+                        to_value(&ProcessResumeParams {
+                            process_id: process_id.to_string(),
+                            after_seq,
+                        }),
+                    )
+                    .await
+                {
+                    Ok(_) => return Ok((conn, rx, guard)),
+                    Err(error)
+                        if error.contains("connection closed")
+                            || error.contains("connecting to exec-server") =>
+                    {
+                        previous = conn;
+                    }
+                    Err(error) => return Err(format!("resuming remote command: {error}")),
+                }
+            }
+            tokio::select! {
+                _ = cancel.cancelled() => return Err("command cancelled".into()),
+                _ = tokio::time::sleep(delay) => {}
+            }
+            delay = (delay * 2).min(Duration::from_millis(800));
+        }
     }
 
     async fn exec_streaming_mode(
@@ -158,47 +232,49 @@ impl RemoteExecutor {
         on_output: exec_core::OnOutput<'_>,
         pty: bool,
     ) -> ExecResult<ExecOutput> {
+        let mut conn = self.connection().await?;
         let process_id = uuid::Uuid::new_v4().to_string();
         let (etx, mut erx) = mpsc::unbounded_channel::<ProcEvent>();
-        self.conn
-            .procs
-            .lock()
-            .unwrap()
-            .insert(process_id.clone(), etx);
-        let _guard = ProcGuard {
-            conn: self.conn.clone(),
+        conn.procs.lock().unwrap().insert(process_id.clone(), etx);
+        let mut _guard = ProcGuard {
+            conn: conn.clone(),
             process_id: process_id.clone(),
         };
 
-        self.conn
-            .call(
-                method::PROCESS_START,
-                to_value(&ProcessStartParams {
-                    process_id: process_id.clone(),
-                    command: command.to_string(),
-                    cwd: Self::path(cwd),
-                    timeout_ms: timeout.as_millis() as u64,
-                    pty,
-                }),
-            )
-            .await?;
+        conn.call(
+            method::PROCESS_START,
+            to_value(&ProcessStartParams {
+                process_id: process_id.clone(),
+                command: command.to_string(),
+                cwd: Self::path(cwd),
+                timeout_ms: timeout.as_millis() as u64,
+                pty,
+            }),
+        )
+        .await?;
 
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
+        let mut last_seq = 0;
         loop {
             tokio::select! {
                 _ = cancel.cancelled() => {
-                    let _ = self
-                        .conn
-                        .call(
-                            method::PROCESS_CANCEL,
-                            to_value(&ProcessIdParams { process_id: process_id.clone() }),
-                        )
-                        .await;
+                    if let Ok(active) = self.connection().await {
+                        let _ = active
+                            .call(
+                                method::PROCESS_CANCEL,
+                                to_value(&ProcessIdParams { process_id: process_id.clone() }),
+                            )
+                            .await;
+                    }
                     return Err("command cancelled".into());
                 }
                 ev = erx.recv() => match ev {
                     Some(ProcEvent::Output(p)) => {
+                        if p.seq <= last_seq {
+                            continue;
+                        }
+                        last_seq = p.seq;
                         let bytes = b64_decode(&p.data).unwrap_or_default();
                         match p.stream {
                             Stream::Stdout => {
@@ -217,11 +293,80 @@ impl RemoteExecutor {
                             None => Ok(ExecOutput { stdout, stderr, code: p.code }),
                         };
                     }
-                    None => return Err("exec-server connection closed".into()),
+                    None => {
+                        let (next, rx, next_guard) = self
+                            .resume_connection(&conn, &process_id, last_seq, timeout, cancel)
+                            .await?;
+                        conn = next;
+                        erx = rx;
+                        _guard = next_guard;
+                    }
                 }
             }
         }
     }
+}
+
+async fn open_connection(url: &str, token: &str) -> ExecResult<Arc<Conn>> {
+    let (ws, _resp) = tokio_tungstenite::connect_async(url)
+        .await
+        .map_err(|e| format!("connecting to exec-server {url}: {e}"))?;
+    let (mut sink, mut stream) = ws.split();
+
+    let (otx, mut orx) = mpsc::unbounded_channel::<Message>();
+    let conn = Arc::new(Conn {
+        outgoing: otx,
+        pending: Mutex::new(HashMap::new()),
+        procs: Mutex::new(HashMap::new()),
+        next_id: AtomicU64::new(1),
+        closed: AtomicBool::new(false),
+        shutdown: CancellationToken::new(),
+    });
+
+    let writer_conn = conn.clone();
+    let writer_shutdown = conn.shutdown.clone();
+    tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                _ = writer_shutdown.cancelled() => break,
+                    message = orx.recv() => match message {
+                        Some(message) => {
+                            if sink.send(message).await.is_err() {
+                                break;
+                            }
+                        }
+                        None => break,
+                    }
+            }
+        }
+        let _ = sink.close().await;
+        writer_conn.fail_all();
+    });
+
+    let reader_conn = conn.clone();
+    let reader_shutdown = conn.shutdown.clone();
+    tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                _ = reader_shutdown.cancelled() => break,
+                message = stream.next() => match message {
+                    Some(Ok(Message::Text(text))) => route(&reader_conn, text.as_str()),
+                    Some(Ok(_)) => {}
+                    _ => break,
+                }
+            }
+        }
+        reader_conn.fail_all();
+    });
+
+    let auth = AuthParams {
+        token: token.to_string(),
+        protocol_version: PROTOCOL_VERSION,
+    };
+    let result = conn.call(method::AUTH, to_value(&auth)).await?;
+    // Validate the shape (and surface server version on success).
+    let _: AuthResult = from_value(result)?;
+    Ok(conn)
 }
 
 /// Demultiplex an incoming frame: a response resolves its pending call; a
@@ -267,7 +412,6 @@ impl Executor for RemoteExecutor {
 
     async fn read(&self, path: &Path) -> ExecResult<Vec<u8>> {
         let v = self
-            .conn
             .call(
                 method::FS_READ,
                 to_value(&PathParams {
@@ -280,57 +424,64 @@ impl Executor for RemoteExecutor {
     }
 
     async fn write(&self, path: &Path, data: &[u8]) -> ExecResult<()> {
-        self.conn
-            .call(
-                method::FS_WRITE,
-                to_value(&WriteParams {
-                    path: Self::path(path),
-                    data: b64_encode(data),
-                }),
-            )
-            .await?;
+        self.call(
+            method::FS_WRITE,
+            to_value(&WriteParams {
+                path: Self::path(path),
+                data: b64_encode(data),
+            }),
+        )
+        .await?;
         Ok(())
     }
 
     async fn create_dir_all(&self, path: &Path) -> ExecResult<()> {
-        self.conn
-            .call(
-                method::FS_CREATE_DIR,
-                to_value(&PathParams {
-                    path: Self::path(path),
-                }),
-            )
-            .await?;
+        self.call(
+            method::FS_CREATE_DIR,
+            to_value(&PathParams {
+                path: Self::path(path),
+            }),
+        )
+        .await?;
         Ok(())
     }
 
     async fn remove_file(&self, path: &Path) -> ExecResult<()> {
-        self.conn
-            .call(
-                method::FS_REMOVE_FILE,
-                to_value(&PathParams {
-                    path: Self::path(path),
-                }),
-            )
-            .await?;
+        self.call(
+            method::FS_REMOVE_FILE,
+            to_value(&PathParams {
+                path: Self::path(path),
+            }),
+        )
+        .await?;
         Ok(())
     }
 
     async fn remove_dir_all(&self, path: &Path) -> ExecResult<()> {
-        self.conn
-            .call(
-                method::FS_REMOVE_DIR,
-                to_value(&PathParams {
-                    path: Self::path(path),
-                }),
-            )
-            .await?;
+        self.call(
+            method::FS_REMOVE_DIR,
+            to_value(&PathParams {
+                path: Self::path(path),
+            }),
+        )
+        .await?;
+        Ok(())
+    }
+
+    async fn rename(&self, from: &Path, to: &Path) -> ExecResult<()> {
+        self.call(
+            method::FS_RENAME,
+            to_value(&RenameParams {
+                from: Self::path(from),
+                to: Self::path(to),
+            }),
+        )
+        .await?;
         Ok(())
     }
 
     async fn read_dir(&self, path: &Path) -> ExecResult<Vec<DirEntry>> {
         let v = self
-            .conn
             .call(
                 method::FS_READ_DIR,
                 to_value(&PathParams {
@@ -344,13 +495,13 @@ impl Executor for RemoteExecutor {
             .map(|e| DirEntry {
                 name: e.name,
                 is_dir: e.is_dir,
+                is_symlink: e.is_symlink,
             })
             .collect())
     }
 
     async fn metadata(&self, path: &Path) -> ExecResult<FileMeta> {
         let v = self
-            .conn
             .call(
                 method::FS_METADATA,
                 to_value(&PathParams {
@@ -367,9 +518,27 @@ impl Executor for RemoteExecutor {
         })
     }
 
+    async fn canonicalize(&self, path: &Path) -> ExecResult<PathBuf> {
+        let value = self
+            .call(
+                method::FS_CANONICALIZE,
+                to_value(&PathParams {
+                    path: Self::path(path),
+                }),
+            )
+            .await?;
+        let result: CanonicalizeResult = from_value(value)?;
+        Ok(PathBuf::from(result.path))
+    }
+
+    async fn home_dir(&self, _cwd: &Path) -> ExecResult<PathBuf> {
+        let value = self.call(method::ENV_HOME, serde_json::json!({})).await?;
+        let result: CanonicalizeResult = from_value(value)?;
+        Ok(PathBuf::from(result.path))
+    }
+
     async fn walk(&self, root: &Path) -> ExecResult<Vec<WalkEntry>> {
         let v = self
-            .conn
             .call(
                 method::FS_WALK,
                 to_value(&PathParams {
@@ -427,7 +596,8 @@ impl Executor for RemoteExecutor {
     }
 
     async fn background_start(&self, command: &str, cwd: &Path) -> ExecResult<String> {
-        background::start(&self.conn, command, cwd).await
+        let conn = self.connection().await?;
+        background::start(&conn, command, cwd).await
     }
 
     async fn background_status(
@@ -435,15 +605,18 @@ impl Executor for RemoteExecutor {
         process_id: &str,
         after_seq: u64,
     ) -> ExecResult<BackgroundStatus> {
-        background::status(&self.conn, process_id, after_seq).await
+        let conn = self.connection().await?;
+        background::status(&conn, process_id, after_seq).await
     }
 
     async fn background_write(&self, process_id: &str, data: &[u8], close: bool) -> ExecResult<()> {
-        background::write(&self.conn, process_id, data, close).await
+        let conn = self.connection().await?;
+        background::write(&conn, process_id, data, close).await
     }
 
     async fn background_kill(&self, process_id: &str) -> ExecResult<()> {
-        background::kill(&self.conn, process_id).await
+        let conn = self.connection().await?;
+        background::kill(&conn, process_id).await
     }
 }
 
@@ -461,4 +634,68 @@ fn from_value<T: DeserializeOwned>(v: serde_json::Value) -> ExecResult<T> {
 
 fn ms_to_time(ms: u64) -> SystemTime {
     UNIX_EPOCH + Duration::from_millis(ms)
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use tokio::sync::Notify;
+
+    #[tokio::test]
+    async fn streaming_command_resumes_without_duplicate_output_after_disconnect() {
+        let dir = tempfile::tempdir().unwrap();
+        let server = exec_server::bind(exec_server::Config {
+            token: "resume-token".into(),
+            root: Some(dir.path().to_path_buf()),
+            home: None,
+            addr: "127.0.0.1:0".into(),
+        })
+        .await
+        .unwrap();
+        let address = server.local_addr().unwrap();
+        tokio::spawn(server.serve());
+
+        let remote = RemoteExecutor::connect(&format!("ws://{address}"), "resume-token")
+            .await
+            .unwrap();
+        let first_chunk = Arc::new(Notify::new());
+        let delivered = Arc::new(Mutex::new(Vec::new()));
+        let running = {
+            let remote = remote.clone();
+            let first_chunk = first_chunk.clone();
+            let delivered = delivered.clone();
+            let root = dir.path().to_path_buf();
+            tokio::spawn(async move {
+                remote
+                    .exec_streaming(
+                        "printf A; sleep 0.25; printf B; sleep 0.25; printf C",
+                        &root,
+                        Duration::from_secs(5),
+                        &CancellationToken::new(),
+                        &|is_stderr, bytes| {
+                            if !is_stderr {
+                                delivered.lock().unwrap().extend_from_slice(bytes);
+                                if bytes.contains(&b'A') {
+                                    first_chunk.notify_one();
+                                }
+                            }
+                        },
+                    )
+                    .await
+            })
+        };
+
+        tokio::time::timeout(Duration::from_secs(2), first_chunk.notified())
+            .await
+            .expect("first output arrives");
+        remote.disconnect_for_test().await;
+
+        let output = tokio::time::timeout(Duration::from_secs(6), running)
+            .await
+            .expect("command resumes")
+            .unwrap()
+            .unwrap();
+        assert_eq!(output.stdout, b"ABC");
+        assert_eq!(*delivered.lock().unwrap(), b"ABC");
+    }
 }

@@ -14,7 +14,7 @@ function WorkBlockImpl({ calls }: { calls: ToolCall[] }) {
       // Containment applied unconditionally (not toggled on settle): the `auto`
       // intrinsic-size keyword stores the real height after first paint, so
       // there's no recalc/jump when a block finishes — and no scrollback jump.
-      className="-my-1 flex flex-col [content-visibility:auto] [contain-intrinsic-size:auto_3rem]"
+      className="flex flex-col gap-1 [content-visibility:auto] [contain-intrinsic-size:auto_3rem]"
     >
       {calls.map((call) => (
         <WorkLine key={call.id} call={call} active={call.status === "in_progress"} />

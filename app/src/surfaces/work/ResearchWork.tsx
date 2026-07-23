@@ -263,10 +263,9 @@ export function ResearchWork({ call, active }: { call: ToolCall; active: boolean
       initial={reduce ? false : { opacity: 0, y: 4 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: DUR.base, ease: EASE.out }}
-      className="my-1 overflow-hidden rounded-xl border border-border bg-bg-secondary/55 shadow-soft"
+      className="mb-1 mt-3 overflow-hidden rounded-xl border border-border-subtle bg-bg-secondary/45"
       aria-label="Clark Cloud Agent"
     >
-      <div className="h-0.5 bg-accent/80" aria-hidden />
       <button
         type="button"
         onClick={() => canOpen && setOpen((value) => !value)}

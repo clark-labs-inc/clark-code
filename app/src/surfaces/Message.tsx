@@ -4,7 +4,7 @@ import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { ChevronRight, Copy, Check, FileText, Pencil } from "lucide-react";
+import { ChevronRight, Copy, Check, FileText, Pencil, Sparkles } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
 import { cn } from "../lib/cn";
 import { DUR, EASE } from "../lib/motion";
@@ -264,6 +264,18 @@ function UserAttachments({ blocks }: { blocks: ContentBlock[] }) {
             >
               <FileText className="size-3.5 shrink-0 text-ink-muted" />
               <span className="max-w-48 truncate">{block.name ?? block.uri}</span>
+            </span>
+          );
+        }
+        if (block.type === "skill_reference") {
+          return (
+            <span
+              key={i}
+              className="flex max-w-full items-center gap-1.5 rounded-lg bg-bg-sunken px-2 py-1 text-xs text-ink-secondary"
+              title={`Pinned skill revision ${block.revision}`}
+            >
+              <Sparkles className="size-3.5 shrink-0 text-ink-muted" />
+              <span className="max-w-48 truncate">{block.name}</span>
             </span>
           );
         }
