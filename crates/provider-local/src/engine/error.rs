@@ -36,6 +36,22 @@ pub(super) fn map_loop_error(error: clark_agent::LoopError) -> MappedLoopError {
     }
 }
 
+pub(super) fn map_loop_error_with_completion_state(
+    error: clark_agent::LoopError,
+    final_answer_committed: bool,
+    unresolved_effects: usize,
+) -> MappedLoopError {
+    let mapped = map_loop_error(error);
+    if mapped.failure_kind == Some(RunFailureKind::EmptyResponse)
+        && final_answer_committed
+        && unresolved_effects > 0
+    {
+        MappedLoopError::verification_incomplete(unresolved_effects)
+    } else {
+        mapped
+    }
+}
+
 fn map_stream_error(error: clark_agent::StreamError) -> MappedLoopError {
     match error {
         clark_agent::StreamError::Fatal(message)
@@ -101,6 +117,15 @@ impl MappedLoopError {
             ui_error: Some((code.to_string(), message)),
         }
     }
+
+    pub(super) fn verification_incomplete(unresolved: usize) -> Self {
+        let effects = if unresolved == 1 { "effect" } else { "effects" };
+        Self::failed(
+            RunFailureKind::VerificationIncomplete,
+            "effect_verification_incomplete",
+            format!("{unresolved} external {effects} remained unverified after the final answer"),
+        )
+    }
 }
 
 #[cfg(test)]
@@ -137,5 +162,39 @@ mod tests {
         for (error, expected) in cases {
             assert_eq!(map_stream_error(error).failure_kind, Some(expected));
         }
+    }
+
+    #[test]
+    fn incomplete_verification_has_its_own_failure_category() {
+        let mapped = map_loop_error_with_completion_state(
+            clark_agent::LoopError::EmptyOutcomeBudgetExhausted {
+                budget: 1,
+                observed: 2,
+            },
+            true,
+            2,
+        );
+        assert_eq!(
+            mapped.failure_kind,
+            Some(RunFailureKind::VerificationIncomplete)
+        );
+        assert_eq!(
+            mapped.ui_error.as_ref().map(|(code, _)| code.as_str()),
+            Some("effect_verification_incomplete")
+        );
+        assert!(mapped.run_error.unwrap().contains("2 external effects"));
+    }
+
+    #[test]
+    fn genuinely_empty_first_answer_stays_an_empty_response() {
+        let mapped = map_loop_error_with_completion_state(
+            clark_agent::LoopError::EmptyOutcomeBudgetExhausted {
+                budget: 1,
+                observed: 2,
+            },
+            false,
+            1,
+        );
+        assert_eq!(mapped.failure_kind, Some(RunFailureKind::EmptyResponse));
     }
 }

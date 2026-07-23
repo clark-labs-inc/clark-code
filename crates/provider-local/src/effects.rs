@@ -9,6 +9,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use agent_core::ids::RunId;
 use clark_agent::{AgentMessage, FollowUpSource, Plugin, PluginCapabilities};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -71,6 +72,10 @@ pub(crate) enum EffectVerification {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct EffectReceipt {
     pub(crate) id: String,
+    /// Run that created this verification obligation. Receipts remain in the
+    /// session ledger for audit and explicit later verification, but only the
+    /// originating run may be held open by them.
+    pub(crate) run: RunId,
     pub(crate) tool_name: String,
     pub(crate) action: EffectAction,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -91,12 +96,14 @@ pub(crate) struct EffectLedger {
 impl EffectLedger {
     pub(crate) fn register(
         &mut self,
+        run: RunId,
         id: impl Into<String>,
         tool_name: impl Into<String>,
         intent: EffectIntent,
     ) -> EffectReceipt {
         let receipt = EffectReceipt {
             id: id.into(),
+            run,
             tool_name: tool_name.into(),
             action: intent.action,
             target_hint: intent.target_hint,
@@ -127,15 +134,16 @@ impl EffectLedger {
         Ok(receipt.clone())
     }
 
-    pub(crate) fn completion_prompt(&mut self) -> Option<String> {
+    pub(crate) fn completion_prompt(&mut self, run: &RunId) -> Option<String> {
         let unresolved = self
             .receipts
             .values_mut()
             .filter(|receipt| {
-                matches!(
-                    receipt.verification,
-                    EffectVerification::Pending | EffectVerification::Mismatch
-                )
+                &receipt.run == run
+                    && matches!(
+                        receipt.verification,
+                        EffectVerification::Pending | EffectVerification::Mismatch
+                    )
             })
             .map(|receipt| {
                 receipt.completion_reminders = receipt.completion_reminders.saturating_add(1);
@@ -162,6 +170,19 @@ impl EffectLedger {
         ))
     }
 
+    pub(crate) fn unresolved_count(&self, run: &RunId) -> usize {
+        self.receipts
+            .values()
+            .filter(|receipt| {
+                &receipt.run == run
+                    && matches!(
+                        receipt.verification,
+                        EffectVerification::Pending | EffectVerification::Mismatch
+                    )
+            })
+            .count()
+    }
+
     #[cfg(test)]
     pub(crate) fn get(&self, id: &str) -> Option<&EffectReceipt> {
         self.receipts.get(id)
@@ -183,11 +204,12 @@ pub(crate) fn attach_pending_receipt(outcome: &mut ToolOutcome, receipt: &Effect
 
 pub(crate) struct EffectCompletionGuard {
     session: Arc<Mutex<SessionState>>,
+    run: RunId,
 }
 
 impl EffectCompletionGuard {
-    pub(crate) fn new(session: Arc<Mutex<SessionState>>) -> Self {
-        Self { session }
+    pub(crate) fn new(session: Arc<Mutex<SessionState>>, run: RunId) -> Self {
+        Self { session, run }
     }
 }
 
@@ -204,7 +226,12 @@ impl Plugin for EffectCompletionGuard {
 #[async_trait::async_trait]
 impl FollowUpSource for EffectCompletionGuard {
     async fn next_follow_up_messages(&self) -> Vec<AgentMessage> {
-        let prompt = self.session.lock().await.effects.completion_prompt();
+        let prompt = self
+            .session
+            .lock()
+            .await
+            .effects
+            .completion_prompt(&self.run);
         prompt
             .map(|content| {
                 vec![AgentMessage::System {
@@ -220,16 +247,23 @@ impl FollowUpSource for EffectCompletionGuard {
 mod tests {
     use super::*;
 
+    fn run(id: &str) -> RunId {
+        RunId::new(id)
+    }
+
     #[test]
     fn successful_execution_stays_pending_until_independent_verification() {
         let mut ledger = EffectLedger::default();
         ledger.register(
+            run("run-1"),
             "call-1",
             "publisher",
             EffectIntent::opaque_external("published a user-facing resource"),
         );
 
-        let prompt = ledger.completion_prompt().expect("completion must block");
+        let prompt = ledger
+            .completion_prompt(&run("run-1"))
+            .expect("completion must block");
         assert!(prompt.contains("call-1"));
         assert!(prompt.contains("canonical state"));
         assert!(prompt.contains("`effect` to `none`"));
@@ -241,13 +275,14 @@ mod tests {
                 "Read the canonical resource and confirmed its complete body".into(),
             )
             .unwrap();
-        assert!(ledger.completion_prompt().is_none());
+        assert!(ledger.completion_prompt(&run("run-1")).is_none());
     }
 
     #[test]
     fn one_character_canonical_result_is_a_mismatch_and_keeps_gate_closed() {
         let mut ledger = EffectLedger::default();
         ledger.register(
+            run("run-1"),
             "call-2",
             "publisher",
             EffectIntent::opaque_external("published a user-facing resource"),
@@ -260,7 +295,9 @@ mod tests {
             )
             .unwrap();
 
-        let prompt = ledger.completion_prompt().expect("mismatch must block");
+        let prompt = ledger
+            .completion_prompt(&run("run-1"))
+            .expect("mismatch must block");
         assert!(prompt.contains("Mismatch"));
         assert_eq!(
             ledger.get("call-2").unwrap().verification,
@@ -272,6 +309,7 @@ mod tests {
     fn explicit_unverifiable_receipt_allows_honest_completion() {
         let mut ledger = EffectLedger::default();
         ledger.register(
+            run("run-1"),
             "call-3",
             "publisher",
             EffectIntent::opaque_external("sent a remote request"),
@@ -283,13 +321,14 @@ mod tests {
                 "Provider exposes no read endpoint; only request id req-7 is available".into(),
             )
             .unwrap();
-        assert!(ledger.completion_prompt().is_none());
+        assert!(ledger.completion_prompt(&run("run-1")).is_none());
     }
 
     #[tokio::test]
     async fn fake_publisher_success_then_one_character_readback_forces_follow_up() {
         let session = Arc::new(Mutex::new(SessionState::default()));
         let receipt = session.lock().await.effects.register(
+            run("run-1"),
             "publish-1",
             "fake_publisher",
             EffectIntent::declared_external(
@@ -315,7 +354,7 @@ mod tests {
             )
             .unwrap();
 
-        let follow_up = EffectCompletionGuard::new(session)
+        let follow_up = EffectCompletionGuard::new(session, run("run-1"))
             .next_follow_up_messages()
             .await;
         assert_eq!(follow_up.len(), 1);
@@ -324,5 +363,34 @@ mod tests {
         };
         assert!(content.contains("cannot finish yet"));
         assert!(content.contains("Repair any mismatch"));
+    }
+
+    #[tokio::test]
+    async fn unresolved_receipts_only_gate_their_originating_run() {
+        let session = Arc::new(Mutex::new(SessionState::default()));
+        session.lock().await.effects.register(
+            run("run-1"),
+            "publish-1",
+            "fake_publisher",
+            EffectIntent::opaque_external("published a user-facing resource"),
+        );
+
+        let original_follow_up = EffectCompletionGuard::new(session.clone(), run("run-1"))
+            .next_follow_up_messages()
+            .await;
+        let later_follow_up = EffectCompletionGuard::new(session.clone(), run("run-2"))
+            .next_follow_up_messages()
+            .await;
+
+        assert_eq!(original_follow_up.len(), 1);
+        assert!(later_follow_up.is_empty());
+        assert_eq!(
+            session.lock().await.effects.unresolved_count(&run("run-1")),
+            1
+        );
+        assert_eq!(
+            session.lock().await.effects.unresolved_count(&run("run-2")),
+            0
+        );
     }
 }

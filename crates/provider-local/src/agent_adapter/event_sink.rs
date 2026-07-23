@@ -139,6 +139,28 @@ impl CompletedRunTranscript {
             .is_empty()
     }
 
+    /// Whether this run already committed a user-visible final answer. A
+    /// later hidden follow-up (for example effect verification) must not turn
+    /// that answer into an "empty model response" if the follow-up itself
+    /// produces no output.
+    pub fn has_final_answer(&self) -> bool {
+        self.messages
+            .lock()
+            .expect("run transcript lock")
+            .iter()
+            .any(|message| {
+                matches!(
+                    message,
+                    ca::AgentMessage::Assistant {
+                        content,
+                        stop_reason: ca::StopReason::EndTurn,
+                        ..
+                    } if !content.plain_text().trim().is_empty()
+                        && content.tool_calls().is_empty()
+                )
+            })
+    }
+
     /// Take everything observed so far, leaving the tracker empty. The
     /// engine's overflow recovery folds progress into the session transcript
     /// mid-run; draining (instead of snapshotting) means a later fold after
@@ -184,6 +206,13 @@ impl ca::EventSink for DesktopEventSink {
                                 "The conversation reached the model's context limit — earlier \
                                  turns were summarized so this task can continue.",
                             ),
+                        })
+                        .await;
+                    let _ = self
+                        .events
+                        .send(desktop::AgentEvent::ContextCompacted {
+                            run: self.run.clone(),
+                            transcript: crate::resume::from_agent_messages(&after),
                         })
                         .await;
                 }

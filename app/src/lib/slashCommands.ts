@@ -37,6 +37,13 @@ export function slashCommands(): SlashCommand[] {
       body: "/goal",
     },
     {
+      name: "compact",
+      hint: "Summarize the conversation to free context space",
+      needsSession: true,
+      localOnly: true,
+      run: () => void s().compactConversation(),
+    },
+    {
       name: "sentry",
       hint: "Inspect current Sentry issues and production errors",
       localOnly: true,
@@ -102,6 +109,11 @@ export function goalCommandObjective(text: string): string | null {
   const rest = command.slice("/goal".length);
   if (rest.length > 0 && !/^\s/.test(rest)) return null;
   return rest.trim();
+}
+
+/** Manual compaction is an exact control command with no inline arguments. */
+export function isCompactCommand(text: string): boolean {
+  return /^\s*\/compact\s*$/.test(text);
 }
 
 /** Expand a directly typed `/sentry …` command to the explicit bundled skill

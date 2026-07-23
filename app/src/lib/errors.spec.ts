@@ -21,6 +21,13 @@ describe("humanizeRunFailure", () => {
       humanizeRunFailure({ error: "model endpoint returned 401 Unauthorized" }),
     ).not.toMatch(/sign-in|access key/i);
   });
+
+  it("distinguishes incomplete post-answer verification from an empty response", () => {
+    const msg = humanizeRunFailure({ failure_kind: "verification_incomplete" });
+    expect(msg).toMatch(/finished its answer/i);
+    expect(msg).toMatch(/verify/i);
+    expect(msg).not.toMatch(/no response/i);
+  });
 });
 
 describe("humanizeError", () => {

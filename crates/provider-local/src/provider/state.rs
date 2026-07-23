@@ -17,6 +17,7 @@ impl LocalAgentProvider {
             background: Arc::new(crate::background::BackgroundTasks::default()),
             cancel: CancellationToken::new(),
             run_cancellations: RunCancellationRegistry::default(),
+            manual_compacting: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             executor: Arc::new(crate::exec::LocalExecutor),
             run_counter: AtomicU64::new(0),
             mcp_status: Vec::new(),

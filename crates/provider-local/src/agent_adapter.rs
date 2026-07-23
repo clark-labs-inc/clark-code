@@ -351,6 +351,7 @@ impl ca::AgentTool for DesktopToolAdapter {
         if !outcome.is_error {
             if let Some(intent) = effect_intent {
                 let receipt = self.ctx.session.lock().await.effects.register(
+                    self.run.clone(),
                     call_id.to_string(),
                     self.exec.name(),
                     intent,

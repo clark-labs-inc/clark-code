@@ -83,14 +83,14 @@ pub struct SessionOptions {
     pub resume: Option<ResumeTranscript>,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct ResumeTranscript {
     pub items: Vec<ResumeItem>,
     #[serde(default)]
     pub truncated: bool,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "item", rename_all = "snake_case")]
 pub enum ResumeItem {
     Message {
@@ -231,6 +231,14 @@ pub trait Provider: Send + Sync {
 
     /// Send a user turn; returns the run's normalized event stream.
     async fn prompt(&mut self, session: &SessionId, input: PromptInput) -> Result<EventStream>;
+
+    /// Compact the provider's model-visible conversation history without
+    /// adding a user message to the visible transcript.
+    async fn compact(&mut self, _session: &SessionId) -> Result<EventStream> {
+        Err(crate::error::Error::Unsupported(
+            "this provider does not support explicit context compaction".into(),
+        ))
+    }
 
     /// Inject a user message into the session's ACTIVE run — it lands between
     /// tool batches (steering) instead of waiting for the run to end. Errors

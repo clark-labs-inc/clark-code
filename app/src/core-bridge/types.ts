@@ -89,6 +89,12 @@ export interface ResumeTranscript {
   truncated: boolean;
 }
 
+export interface ModelContextCheckpoint {
+  transcript: ResumeTranscript;
+  /** Visible timeline length when the replacement context was installed. */
+  timeline_index: number;
+}
+
 export type ChecklistStatus = "pending" | "in_progress" | "completed";
 
 export interface ChecklistStep {
@@ -197,6 +203,7 @@ export type RunFailureKind =
   | "tool_fatal"
   | "local_state"
   | "runtime_interrupted"
+  | "verification_incomplete"
   | "empty_response";
 
 /** Aggregated model usage for one run (the local coding loop surfaces it). */
@@ -354,6 +361,7 @@ export interface Snapshot {
   session?: string;
   runs: Record<string, RunView>;
   timeline: TimelineItem[];
+  model_context_checkpoint?: ModelContextCheckpoint;
   tool_calls: Record<string, ToolCall>;
   execution_checklist?: ExecutionChecklist;
   proposed_plan?: ProposedPlan;

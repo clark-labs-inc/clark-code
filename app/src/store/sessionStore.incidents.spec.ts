@@ -45,4 +45,30 @@ describe("provider incident snapshot boundaries", () => {
     });
     expect(merged.provider_incidents[incident.id]).toEqual(incident);
   });
+
+  it("offsets a live compaction checkpoint across the restored prefix", () => {
+    const prefix = emptySnapshot();
+    prefix.timeline.push({
+      item: "message",
+      run: "old",
+      role: "user",
+      blocks: [{ type: "text", text: "old turn" }],
+    });
+    const live = emptySnapshot();
+    live.timeline.push({
+      item: "message",
+      run: "compact",
+      role: "system",
+      blocks: [{ type: "text", text: "compacted" }],
+    });
+    live.model_context_checkpoint = {
+      timeline_index: 1,
+      transcript: {
+        truncated: false,
+        items: [{ item: "message", role: "user", blocks: [{ type: "text", text: "summary" }] }],
+      },
+    };
+
+    expect(mergeHistory(prefix, live).model_context_checkpoint?.timeline_index).toBe(2);
+  });
 });

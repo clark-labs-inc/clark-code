@@ -8,7 +8,7 @@ mod prompt_input;
 mod state;
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
 use agent_core::domain::AgentEvent;
@@ -79,6 +79,14 @@ impl RunCancellationRegistry {
             .remove(run.as_str());
     }
 
+    fn has_active(&self) -> bool {
+        !self
+            .tokens
+            .lock()
+            .expect("run cancellation registry lock")
+            .is_empty()
+    }
+
     fn cancel_all(&self) {
         let tokens = self
             .tokens
@@ -90,6 +98,19 @@ impl RunCancellationRegistry {
         for token in tokens {
             token.cancel();
         }
+    }
+}
+
+struct ManualCompactionRegistration {
+    registry: RunCancellationRegistry,
+    run: RunId,
+    latch: Arc<AtomicBool>,
+}
+
+impl Drop for ManualCompactionRegistration {
+    fn drop(&mut self) {
+        self.registry.remove(&self.run);
+        self.latch.store(false, Ordering::Release);
     }
 }
 
@@ -110,6 +131,10 @@ pub struct LocalAgentProvider {
     /// cancellation uses `run_cancellations` below.
     cancel: CancellationToken,
     run_cancellations: RunCancellationRegistry,
+    /// Manual compaction is a standalone, non-steerable run. This latch closes
+    /// the gap before its RunStarted event reaches the frontend and prevents a
+    /// normal prompt from racing the history replacement.
+    manual_compacting: Arc<AtomicBool>,
     /// Where this session's tool I/O runs — local today, remote (over the
     /// exec-server) once a remote project is selected. Chosen in `new_session`.
     executor: Arc<dyn crate::exec::Executor>,
@@ -613,6 +638,11 @@ impl Provider for LocalAgentProvider {
     }
 
     async fn prompt(&mut self, _session: &SessionId, input: PromptInput) -> Result<EventStream> {
+        if self.manual_compacting.load(Ordering::Acquire) {
+            return Err(Error::Unsupported(
+                "wait for context compaction to finish before sending a message".into(),
+            ));
+        }
         let llm = self.llm.clone().ok_or(Error::NotConnected)?;
         let registry = self.registry.clone().ok_or(Error::NotConnected)?;
         let sandbox = self.sandbox.clone().ok_or(Error::NotConnected)?;
@@ -806,6 +836,57 @@ impl Provider for LocalAgentProvider {
             },
         };
         tokio::spawn(run_turn(tc, tx, run));
+        Ok(rx.boxed())
+    }
+
+    async fn compact(&mut self, _session: &SessionId) -> Result<EventStream> {
+        if self.run_cancellations.has_active() {
+            return Err(Error::Unsupported(
+                "wait for the active run to finish before compacting context".into(),
+            ));
+        }
+        self.manual_compacting
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .map_err(|_| Error::Unsupported("context compaction is already running".into()))?;
+
+        let llm = match self.llm.clone() {
+            Some(llm) => llm,
+            None => {
+                self.manual_compacting.store(false, Ordering::Release);
+                return Err(Error::NotConnected);
+            }
+        };
+        let config = match self.config.as_ref() {
+            Some(config) => config.compaction.clone(),
+            None => {
+                self.manual_compacting.store(false, Ordering::Release);
+                return Err(Error::NotConnected);
+            }
+        };
+        if self.session.lock().await.transcript.is_empty() {
+            self.manual_compacting.store(false, Ordering::Release);
+            return Err(Error::Unsupported(
+                "this conversation has no model context to compact".into(),
+            ));
+        }
+
+        let run = RunId::new(format!(
+            "run-{}",
+            self.run_counter.fetch_add(1, Ordering::SeqCst) + 1
+        ));
+        let cancel = CancellationToken::new();
+        self.run_cancellations.register(&run, cancel.clone());
+        let registration = ManualCompactionRegistration {
+            registry: self.run_cancellations.clone(),
+            run: run.clone(),
+            latch: self.manual_compacting.clone(),
+        };
+        let session = self.session.clone();
+        let (tx, rx) = async_channel::unbounded::<AgentEvent>();
+        tokio::spawn(async move {
+            let _registration = registration;
+            crate::compaction::run_manual_compaction(llm, config, session, tx, run, cancel).await;
+        });
         Ok(rx.boxed())
     }
 

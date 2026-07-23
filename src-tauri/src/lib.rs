@@ -127,6 +127,7 @@ pub fn run() {
             commands::update_begin_drain,
             commands::update_cancel_drain,
             commands::prompt,
+            commands::compact,
             commands::steer,
             commands::cancel,
             commands::respond,

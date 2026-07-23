@@ -85,10 +85,10 @@ function codeFromPreChild(child: ReactNode): { lang?: string; code: string } | n
   return { lang, code };
 }
 
-/** A fenced code block with syntax highlighting, a language label, and a
- *  hover-reveal copy button. Highlights via the Shiki core singleton (JS regex
- *  engine — no WASM); renders plain monospace while it warms or for an unknown
- *  language, then upgrades in place once the result is ready. */
+/** A fenced code block with syntax highlighting and a hover-reveal copy button.
+ *  Highlights via the Shiki core singleton (JS regex engine — no WASM); renders
+ *  plain monospace while it warms or for an unknown language, then upgrades in
+ *  place once the result is ready. */
 function CodeBlock({ lang, code }: { lang?: string; code: string }) {
   const [copied, copy] = useCopy();
   const resolved = resolveLang(lang);
@@ -116,11 +116,6 @@ function CodeBlock({ lang, code }: { lang?: string; code: string }) {
         />
       ) : (
         <pre>{code}</pre>
-      )}
-      {resolved && (
-        <span className="pointer-events-none absolute left-2.5 top-2 font-mono text-[10px] uppercase tracking-wider text-ink-faint/70">
-          {resolved}
-        </span>
       )}
       <button
         type="button"

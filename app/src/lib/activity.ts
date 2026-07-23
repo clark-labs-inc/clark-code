@@ -46,7 +46,14 @@ export function currentActivity(snapshot: Snapshot): Activity {
   const runs = Object.values(snapshot.runs);
   const busy = runs.some((r) => r.status === "running" || r.status === "queued");
   const interrupted = runs.some((r) => r.outcome?.failure_kind === "runtime_interrupted");
-  const failed = runs.some((r) => r.status === "failed" && r.outcome?.failure_kind !== "runtime_interrupted");
+  const verificationIncomplete = runs.some(
+    (r) => r.outcome?.failure_kind === "verification_incomplete",
+  );
+  const failed = runs.some(
+    (r) => r.status === "failed"
+      && r.outcome?.failure_kind !== "runtime_interrupted"
+      && r.outcome?.failure_kind !== "verification_incomplete",
+  );
 
   let progress: number | undefined;
   let steps: { done: number; total: number } | undefined;
@@ -59,6 +66,9 @@ export function currentActivity(snapshot: Snapshot): Activity {
 
   if (!busy) {
     if (interrupted) return { busy: false, label: "Run interrupted", progress, steps };
+    if (verificationIncomplete) {
+      return { busy: false, label: "Verification incomplete", progress, steps };
+    }
     if (failed) return { busy: false, failed: true, label: "Run failed", progress, steps };
     return { busy: false, label: "Ready", progress, steps };
   }

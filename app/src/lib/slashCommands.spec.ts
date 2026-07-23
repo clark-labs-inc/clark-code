@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   expandPromptSlashCommand,
   goalCommandObjective,
+  isCompactCommand,
   slashCommands,
 } from "./slashCommands";
 
@@ -19,6 +20,25 @@ describe("goal slash command", () => {
     expect(goalCommandObjective("/goal")).toBe("");
     expect(goalCommandObjective("/goals list")).toBeNull();
     expect(goalCommandObjective("please /goal later")).toBeNull();
+  });
+});
+
+describe("compact slash command", () => {
+  it("is a local session action rather than prompt text", () => {
+    expect(slashCommands()).toContainEqual(expect.objectContaining({
+      name: "compact",
+      needsSession: true,
+      localOnly: true,
+      run: expect.any(Function),
+    }));
+  });
+
+  it("matches only the exact command without arguments", () => {
+    expect(isCompactCommand("/compact")).toBe(true);
+    expect(isCompactCommand("  /compact  ")).toBe(true);
+    expect(isCompactCommand("/compact now")).toBe(false);
+    expect(isCompactCommand("/compaction")).toBe(false);
+    expect(isCompactCommand("please /compact")).toBe(false);
   });
 });
 

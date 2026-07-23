@@ -177,8 +177,10 @@ export function buildResumeTranscript(
   snapshot: Snapshot,
   budget = 24000,
 ): ResumeTranscript | null {
+  const checkpoint = snapshot.model_context_checkpoint;
+  const checkpointItems = checkpoint?.transcript.items ?? [];
   const items: ResumeItem[] = [];
-  for (const item of snapshot.timeline) {
+  for (const item of snapshot.timeline.slice(checkpoint?.timeline_index ?? 0)) {
     if (item.item === "message") {
       const blocks = replayBlocks(item.blocks).map((block) =>
         block.type === "text"
@@ -211,7 +213,7 @@ export function buildResumeTranscript(
   ) {
     items.push({ item: "proposed_plan", plan: snapshot.proposed_plan });
   }
-  if (items.length === 0) return null;
+  if (checkpointItems.length === 0 && items.length === 0) return null;
 
   const kept: ResumeItem[] = [];
   let remaining = budget;
@@ -231,7 +233,13 @@ export function buildResumeTranscript(
     break;
   }
   kept.reverse();
-  return { items: kept, truncated: truncated || kept.length < items.length };
+  return {
+    items: [...checkpointItems, ...kept],
+    truncated:
+      (checkpoint?.transcript.truncated ?? false) ||
+      truncated ||
+      kept.length < items.length,
+  };
 }
 
 /** Return the settled conversation prefix before one timeline item. Used by
@@ -279,6 +287,10 @@ export function snapshotBeforeTimelineItem(snapshot: Snapshot, index: number): S
     ...(snapshot.session ? { session: snapshot.session } : {}),
     runs,
     timeline,
+    ...(snapshot.model_context_checkpoint &&
+    index >= snapshot.model_context_checkpoint.timeline_index
+      ? { model_context_checkpoint: snapshot.model_context_checkpoint }
+      : {}),
     tool_calls,
     ...(lastChecklist ? { execution_checklist: lastChecklist } : {}),
     ...(lastProposedPlan ? { proposed_plan: lastProposedPlan } : {}),

@@ -144,6 +144,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let ctx = context(dir.path());
         ctx.session.lock().await.effects.register(
+            agent_core::ids::RunId::new("run-1"),
             "effect-1",
             "fake_publisher",
             crate::effects::EffectIntent::opaque_external("published resource"),
@@ -180,6 +181,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let ctx = context(dir.path());
         ctx.session.lock().await.effects.register(
+            agent_core::ids::RunId::new("run-1"),
             "effect-2",
             "fake_publisher",
             crate::effects::EffectIntent::opaque_external("published resource"),

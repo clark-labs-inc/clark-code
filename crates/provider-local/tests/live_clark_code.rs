@@ -273,6 +273,7 @@ fn event_name(ev: &AgentEvent) -> &'static str {
         AgentEvent::FanOut { .. } => "FanOut",
         AgentEvent::ProviderIncidentUpdated { .. } => "ProviderIncidentUpdated",
         AgentEvent::ModeChanged { .. } => "ModeChanged",
+        AgentEvent::ContextCompacted { .. } => "ContextCompacted",
         AgentEvent::Trace { .. } => "Trace",
         AgentEvent::RunFinished { .. } => "RunFinished",
         AgentEvent::Error { .. } => "Error",

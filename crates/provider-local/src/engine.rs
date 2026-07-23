@@ -20,7 +20,7 @@ use crate::loop_breaker::LoopBreaker;
 use crate::loop_state::{GoalStatus, RunControl, SessionState};
 use crate::root_execution::{RootExecutionConfig, RootExecutionTrace};
 use crate::tools::{ToolCtx, ToolRegistry};
-use error::map_loop_error;
+use error::map_loop_error_with_completion_state;
 
 /// Headroom for graceful wrap-up before the hard iteration cap.
 const GRACE_ITERATIONS: usize = 40;
@@ -304,6 +304,7 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
         .tool_gate_arc(tc.registry.deferred_tool_gate(tc.session.clone()))
         .follow_up(crate::effects::EffectCompletionGuard::new(
             tc.session.clone(),
+            run.clone(),
         ))
         .model_id(tc.model.clone())
         .steering_arc(steering.clone())
@@ -632,6 +633,18 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
             }
         }
         Err(error) => {
+            // A hidden completion follow-up can fail after the model already
+            // committed a valid final answer. Capture that boundary before
+            // draining the transcript so the terminal outcome describes the
+            // unmet verification obligation, not a fictitious empty answer.
+            let final_answer_committed = completed_transcript.has_final_answer();
+            let unresolved_effects = tc.session.lock().await.effects.unresolved_count(&run);
+            let aborted = matches!(&error, clark_agent::LoopError::Aborted);
+            let mapped = map_loop_error_with_completion_state(
+                error,
+                final_answer_committed,
+                unresolved_effects,
+            );
             // The core returns its message tail only on success. Preserve the
             // typed prompt/steering messages and every complete assistant/tool
             // turn observed before the failure so a follow-up continues from
@@ -650,19 +663,23 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
                 if let Some(goal) = session.goal.as_mut() {
                     if goal.status == GoalStatus::Active {
                         goal.status = GoalStatus::Blocked;
-                        goal.blocker_reason =
-                            Some(if matches!(error, clark_agent::LoopError::Aborted) {
-                                "The user stopped the run before it finished".to_string()
-                            } else {
-                                "The provider run failed before the goal finished".to_string()
-                            });
+                        goal.blocker_reason = Some(if aborted {
+                            "The user stopped the run before it finished".to_string()
+                        } else if mapped.failure_kind
+                            == Some(RunFailureKind::VerificationIncomplete)
+                        {
+                            "The answer was produced, but its external effects remain unverified"
+                                .to_string()
+                        } else {
+                            "The provider run failed before the goal finished".to_string()
+                        });
                         goal.touch();
                     }
                 }
                 // Tell the model the turn was cut off and record that marker:
                 // without it, the next turn continues as if the last
                 // one finished cleanly, re-trusting steps that never ran.
-                if matches!(error, clark_agent::LoopError::Aborted) {
+                if aborted {
                     session.transcript.push(clark_agent::AgentMessage::User {
                         content: clark_agent::UserContent::Text(
                             "[runtime note — the user stopped the previous turn before it \
@@ -689,7 +706,6 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
                     })
                     .await;
             }
-            let mapped = map_loop_error(error);
             if let Some((code, message)) = mapped.ui_error.clone() {
                 let _ = tx
                     .send(AgentEvent::Error {

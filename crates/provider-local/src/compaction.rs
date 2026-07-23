@@ -1,5 +1,8 @@
 //! Model-visible context checkpointing; the UI transcript remains untouched.
 
+use agent_core::domain::{AgentEvent, ContentBlock, Role, RunFailureKind, RunOutcome, RunStatus};
+use agent_core::ids::RunId;
+use async_channel::Sender;
 use async_trait::async_trait;
 use clark_agent as ca;
 use clark_agent_compaction as core;
@@ -8,6 +11,7 @@ use sha2::{Digest, Sha256};
 use std::sync::{Arc, Mutex};
 
 use crate::llm::LlmClient;
+use crate::loop_state::SessionState;
 
 pub use core::CompactionConfig;
 
@@ -220,6 +224,21 @@ fn forced(config: &CompactionConfig) -> CompactionConfig {
     }
 }
 
+/// Manual compaction stays available when automatic compaction is disabled.
+/// `disabled()` uses `usize::MAX` for every budget, which is useful for the
+/// automatic gate but unsafe as a request size; restore the library defaults
+/// for those two request-shaping limits while forcing only the threshold.
+fn manual(config: &CompactionConfig) -> CompactionConfig {
+    let mut config = forced(config);
+    if config.compact_request_token_limit == usize::MAX {
+        config.compact_request_token_limit = core::DEFAULT_COMPACT_REQUEST_TOKEN_LIMIT;
+    }
+    if config.recent_user_token_budget == usize::MAX {
+        config.recent_user_token_budget = core::DEFAULT_RECENT_USER_TOKEN_BUDGET;
+    }
+    config
+}
+
 /// One checkpoint-compaction pass over `messages`: summarize via the LLM
 /// (one retry on a transient failure) and rebuild the transcript as
 /// `[summary] + contiguous raw tail`. `None` = nothing to do or the LLM failed.
@@ -311,6 +330,138 @@ pub(crate) async fn force_compact(
     signal: &tokio_util::sync::CancellationToken,
 ) -> Option<Vec<ca::AgentMessage>> {
     compact_once(llm, &forced(config), messages, signal).await
+}
+
+/// Run an explicit, standalone compaction turn. The visible conversation is
+/// left intact; only the provider's canonical model transcript is replaced.
+/// A lineage check makes the replacement fail closed if anything mutated the
+/// session while the summary request was in flight.
+pub(crate) async fn run_manual_compaction(
+    llm: LlmClient,
+    config: CompactionConfig,
+    session: Arc<tokio::sync::Mutex<SessionState>>,
+    tx: Sender<AgentEvent>,
+    run: RunId,
+    signal: tokio_util::sync::CancellationToken,
+) {
+    let _ = tx.send(AgentEvent::RunStarted { run: run.clone() }).await;
+
+    let source = session.lock().await.transcript.clone();
+    let source_len = source.len();
+    let source_fingerprint = lineage_fingerprint(&source, source_len);
+    let Some(next) = compact_once(&llm, &manual(&config), &source, &signal).await else {
+        if signal.is_cancelled() {
+            finish_manual(&tx, &run, RunStatus::Cancelled, None, None).await;
+        } else {
+            let message = "Clark could not summarize this conversation. Your existing context was left unchanged.";
+            let _ = tx
+                .send(AgentEvent::Error {
+                    code: "compaction_failed".into(),
+                    message: message.into(),
+                    run: Some(run.clone()),
+                })
+                .await;
+            finish_manual(
+                &tx,
+                &run,
+                RunStatus::Failed,
+                Some(message.to_string()),
+                Some(RunFailureKind::ProviderError),
+            )
+            .await;
+        }
+        return;
+    };
+
+    let replaced = {
+        let mut state = session.lock().await;
+        if state.transcript.len() != source_len
+            || lineage_fingerprint(&state.transcript, source_len) != source_fingerprint
+        {
+            false
+        } else {
+            state.transcript = next.clone();
+            true
+        }
+    };
+    if !replaced {
+        let message = "The conversation changed while context was being compacted, so Clark kept the newer context unchanged.";
+        let _ = tx
+            .send(AgentEvent::Error {
+                code: "compaction_conflict".into(),
+                message: message.into(),
+                run: Some(run.clone()),
+            })
+            .await;
+        finish_manual(
+            &tx,
+            &run,
+            RunStatus::Failed,
+            Some(message.to_string()),
+            Some(RunFailureKind::LocalState),
+        )
+        .await;
+        return;
+    }
+
+    let _ = tx
+        .send(AgentEvent::Trace {
+            run: Some(run.clone()),
+            source: "clark_code_compaction".into(),
+            payload: serde_json::json!({
+                "trigger": "manual",
+                "before_messages": source_len,
+                "after_messages": next.len(),
+                "before_estimated_tokens": core::estimate_transcript_tokens(
+                    &message_views(&source),
+                    &core::CharHeuristic,
+                ),
+                "after_estimated_tokens": core::estimate_transcript_tokens(
+                    &message_views(&next),
+                    &core::CharHeuristic,
+                ),
+            }),
+        })
+        .await;
+    let _ = tx
+        .send(AgentEvent::MessageChunk {
+            run: run.clone(),
+            role: Role::System,
+            delta: ContentBlock::text(
+                "Earlier turns were summarized to free context space for this conversation.",
+            ),
+        })
+        .await;
+    let _ = tx
+        .send(AgentEvent::ContextCompacted {
+            run: run.clone(),
+            transcript: crate::resume::from_agent_messages(&next),
+        })
+        .await;
+    finish_manual(&tx, &run, RunStatus::Done, Some("compacted".into()), None).await;
+}
+
+async fn finish_manual(
+    tx: &Sender<AgentEvent>,
+    run: &RunId,
+    status: RunStatus,
+    message: Option<String>,
+    failure_kind: Option<RunFailureKind>,
+) {
+    let _ = tx
+        .send(AgentEvent::RunFinished {
+            run: run.clone(),
+            outcome: RunOutcome {
+                status,
+                stop_reason: (status == RunStatus::Done).then_some("compacted".into()),
+                error: message.filter(|_| status == RunStatus::Failed),
+                failure_kind,
+                usage: None,
+                execution: None,
+            },
+        })
+        .await;
+    tx.close();
 }
 
 #[async_trait::async_trait]

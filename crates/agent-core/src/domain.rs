@@ -382,6 +382,9 @@ pub enum RunFailureKind {
     /// The host process ended while a run was live. Distinct from an explicit
     /// user cancellation and safe for recovery surfaces to offer as resumable.
     RuntimeInterrupted,
+    /// A user-visible final answer was committed, but one or more external
+    /// effects from that run could not be independently verified afterward.
+    VerificationIncomplete,
     EmptyResponse,
 }
 
@@ -643,6 +646,12 @@ pub enum AgentEvent {
     ModeChanged {
         session: SessionId,
         mode: String,
+    },
+    /// Durable replacement for the provider's model-visible history. The UI
+    /// timeline stays intact; replay uses this checkpoint plus later items.
+    ContextCompacted {
+        run: RunId,
+        transcript: crate::provider::ResumeTranscript,
     },
     /// Provider-native trajectory detail that does not participate in the
     /// presentation projection. Hosts persist this verbatim for replay and

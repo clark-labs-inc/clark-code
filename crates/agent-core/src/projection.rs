@@ -6,6 +6,8 @@
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
+use crate::provider::ResumeTranscript;
+
 use crate::domain::*;
 use crate::ids::{RunId, SessionId, ToolCallId};
 
@@ -73,6 +75,11 @@ pub struct Snapshot {
     pub session: Option<SessionId>,
     pub runs: IndexMap<RunId, RunView>,
     pub timeline: Vec<TimelineItem>,
+    /// Provider history replacement captured at `timeline_index`. Reopening
+    /// replays it followed by visible timeline items appended after that
+    /// boundary, preserving compaction without hiding the original chat.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_context_checkpoint: Option<ModelContextCheckpoint>,
     pub tool_calls: IndexMap<ToolCallId, ToolCall>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub execution_checklist: Option<ExecutionChecklist>,
@@ -93,6 +100,12 @@ pub struct Snapshot {
     /// so later status updates replace the same card in place.
     #[serde(default)]
     pub provider_incidents: IndexMap<String, crate::recovery::ProviderIncident>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ModelContextCheckpoint {
+    pub transcript: ResumeTranscript,
+    pub timeline_index: usize,
 }
 
 impl Snapshot {
@@ -303,6 +316,13 @@ pub fn apply(snapshot: &mut Snapshot, event: &AgentEvent) {
                     id: incident.id.clone(),
                 });
             }
+        }
+
+        AgentEvent::ContextCompacted { transcript, .. } => {
+            snapshot.model_context_checkpoint = Some(ModelContextCheckpoint {
+                transcript: transcript.clone(),
+                timeline_index: snapshot.timeline.len(),
+            });
         }
 
         AgentEvent::ModeChanged { .. } | AgentEvent::Trace { .. } => {}
@@ -1383,6 +1403,16 @@ mod tests {
                 session: SessionId::new("s"),
                 mode: "plan".into(),
             },
+            AgentEvent::ContextCompacted {
+                run: run(),
+                transcript: ResumeTranscript {
+                    items: vec![crate::provider::ResumeItem::Message {
+                        role: Role::User,
+                        blocks: vec![ContentBlock::text("summary")],
+                    }],
+                    truncated: false,
+                },
+            },
             AgentEvent::Error {
                 code: "boom".into(),
                 message: "failed".into(),
@@ -1407,6 +1437,7 @@ mod tests {
         assert_eq!(once.tool_calls.len(), twice.tool_calls.len());
         assert_eq!(once.artifacts.len(), 1, "artifacts dedupe by id");
         assert_eq!(twice.artifacts.len(), 1, "re-applying keeps one artifact");
+        assert_eq!(once.model_context_checkpoint.unwrap().timeline_index, 5);
         assert_eq!(once.focus.unwrap().surface, WorkspaceSurfaceKind::Browser);
         assert_eq!(once.runs[&run()].status, RunStatus::Done);
         assert!(once.pending_permission.is_none());

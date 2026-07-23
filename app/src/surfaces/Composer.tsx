@@ -30,6 +30,7 @@ import {
 import {
   expandPromptSlashCommand,
   goalCommandObjective,
+  isCompactCommand,
   slashCommands,
   type SlashCommand,
 } from "../lib/slashCommands";
@@ -354,6 +355,7 @@ export function Composer() {
   const projectMode = useSessionStore((s) => s.projectMode);
   const localCwd = useSessionStore((s) => s.localSettings.cwd);
   const send = useSessionStore((s) => s.send);
+  const compactConversation = useSessionStore((s) => s.compactConversation);
   const pickProjectFolder = useSessionStore((s) => s.pickProjectFolder);
   const flashNotice = useSessionStore((s) => s.flashNotice);
   const removeQueued = useSessionStore((s) => s.removeQueued);
@@ -532,6 +534,21 @@ export function Composer() {
       if (useSessionStore.getState().startBlockedReason()) return;
     }
     const t = expandPromptSlashCommand(expandPendingPastes(value, pendingPastes));
+    if (isCompactCommand(t)) {
+      if (!session) {
+        flashNotice("Start a conversation before compacting its context.");
+        return;
+      }
+      if (attachments.length > 0) {
+        flashNotice("Remove attachments before compacting this conversation.");
+        return;
+      }
+      setValue("");
+      setPendingPastes([]);
+      setEditTimelineIndex(null);
+      await compactConversation();
+      return;
+    }
     const goalObjective = goalCommandObjective(t);
     if (goalObjective === "") {
       setValue("/goal ");

@@ -134,6 +134,8 @@ const TRANSIENT_INSTANT = INSTANT;
 // spilling past its right edge.
 const DANGER_BANNER =
   "min-w-0 whitespace-pre-wrap break-words rounded-lg border border-danger/40 bg-danger/8 px-3.5 py-2.5 text-sm text-danger";
+const WARNING_BANNER =
+  "min-w-0 whitespace-pre-wrap break-words rounded-lg border border-warning/30 bg-warning/10 px-3.5 py-2.5 text-sm text-ink-muted";
 const STOPPED_BANNER =
   "min-w-0 whitespace-pre-wrap break-words rounded-lg border border-border bg-bg-secondary px-3.5 py-2.5 text-sm text-ink-muted";
 
@@ -295,6 +297,8 @@ export function Conversation({
       : undefined;
   const outOfCredits = failed?.outcome?.failure_kind === "insufficient_credits";
   const interrupted = failed?.outcome?.failure_kind === "runtime_interrupted" ? failed : undefined;
+  const verificationIncomplete =
+    failed?.outcome?.failure_kind === "verification_incomplete" ? failed : undefined;
 
   const renderBlock = (block: Block | BaseBlock) => {
     if (block.kind === "goal_work") {
@@ -415,7 +419,23 @@ export function Conversation({
               <UpgradePrompt />
             </motion.div>
           )}
-          {failed && !outOfCredits && !interrupted && (
+          {verificationIncomplete && (
+            <motion.div
+              key="verification-incomplete"
+              {...(reduce ? TRANSIENT_INSTANT : TRANSIENT)}
+              className={cn(WARNING_BANNER, "flex items-start gap-2")}
+            >
+              <div className="min-w-0 flex-1">
+                <span className="font-medium text-warning">Verification incomplete.</span>{" "}
+                {humanizeRunFailure(verificationIncomplete.outcome)}
+              </div>
+              <DismissButton
+                muted
+                onClick={() => dismissFailedRun(verificationIncomplete.id)}
+              />
+            </motion.div>
+          )}
+          {failed && !outOfCredits && !interrupted && !verificationIncomplete && (
             <motion.div
               key="failed"
               {...(reduce ? TRANSIENT_INSTANT : TRANSIENT)}

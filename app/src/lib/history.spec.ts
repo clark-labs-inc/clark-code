@@ -238,6 +238,31 @@ describe("buildResumeTranscript", () => {
       plan: snapshot.proposed_plan,
     });
   });
+
+  it("replays a compacted model checkpoint plus only the later visible tail", () => {
+    const snapshot: Snapshot = {
+      runs: {},
+      timeline: [
+        { item: "message", run: "old", role: "user", blocks: [{ type: "text", text: "old turn" }] },
+        { item: "message", run: "compact", role: "system", blocks: [{ type: "text", text: "compacted" }] },
+        { item: "message", run: "new", role: "user", blocks: [{ type: "text", text: "new turn" }] },
+      ],
+      model_context_checkpoint: {
+        timeline_index: 2,
+        transcript: {
+          truncated: false,
+          items: [{ item: "message", role: "user", blocks: [{ type: "text", text: "summary" }] }],
+        },
+      },
+      tool_calls: {}, artifacts: [], provider_incidents: {},
+    };
+
+    const out = buildResumeTranscript(snapshot, 500)!;
+    expect(JSON.stringify(out)).toContain("summary");
+    expect(JSON.stringify(out)).toContain("new turn");
+    expect(JSON.stringify(out)).not.toContain("old turn");
+    expect(JSON.stringify(out)).not.toContain("compacted");
+  });
 });
 
 describe("planning history migration", () => {
@@ -313,5 +338,24 @@ describe("snapshotBeforeTimelineItem", () => {
     expect(prefix.pending_permission).toBeUndefined();
     expect(prefix.focus).toBeUndefined();
     expect(prefix.fan_out).toBeUndefined();
+  });
+
+  it("keeps a checkpoint only when editing a turn after its boundary", () => {
+    const snapshot: Snapshot = {
+      runs: {},
+      timeline: [
+        { item: "message", run: "old", role: "user", blocks: [{ type: "text", text: "old" }] },
+        { item: "message", run: "notice", role: "system", blocks: [{ type: "text", text: "compacted" }] },
+        { item: "message", run: "new", role: "user", blocks: [{ type: "text", text: "new" }] },
+      ],
+      model_context_checkpoint: {
+        timeline_index: 2,
+        transcript: { items: [{ item: "message", role: "user", blocks: [{ type: "text", text: "summary" }] }], truncated: false },
+      },
+      tool_calls: {}, artifacts: [], provider_incidents: {},
+    };
+
+    expect(snapshotBeforeTimelineItem(snapshot, 2).model_context_checkpoint).toBeDefined();
+    expect(snapshotBeforeTimelineItem(snapshot, 0).model_context_checkpoint).toBeUndefined();
   });
 });

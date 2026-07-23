@@ -173,6 +173,13 @@ export function mergeHistory(prefix: Snapshot, live: Snapshot): Snapshot {
     history_checkpoint: live.history_checkpoint ?? prefix.history_checkpoint,
     runs: { ...prefix.runs, ...live.runs },
     timeline: [...prefix.timeline, ...live.timeline],
+    model_context_checkpoint: live.model_context_checkpoint
+      ? {
+          ...live.model_context_checkpoint,
+          timeline_index:
+            prefix.timeline.length + live.model_context_checkpoint.timeline_index,
+        }
+      : prefix.model_context_checkpoint,
     tool_calls: { ...prefix.tool_calls, ...live.tool_calls },
     execution_checklist: live.execution_checklist ?? prefix.execution_checklist,
     proposed_plan: live.proposed_plan ?? prefix.proposed_plan,
@@ -392,6 +399,8 @@ interface SessionState {
   addFiles: (files: File[]) => Promise<void>;
   removeAttachment: (id: string) => void;
   send: (text: string) => Promise<void>;
+  /** Summarize and replace Clark Code's model-visible history without adding a user turn. */
+  compactConversation: () => Promise<void>;
   continueProviderIncident: (incidentId: string) => Promise<void>;
   /** Replace one prior Clark Code user turn and rerun from the retained prefix. */
   resendFrom: (timelineIndex: number, text: string) => Promise<void>;
@@ -2123,6 +2132,28 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         connecting: false,
         composerPrefill: { text, timelineIndex },
       });
+    }
+  },
+
+  compactConversation: async () => {
+    const { attachments, bridge, session, snapshot } = get();
+    if (!bridge || !session) return;
+    if (session.provider !== "local" || !bridge.compact) {
+      get().flashNotice("Context compaction is available only in Clark Code conversations.");
+      return;
+    }
+    if (attachments.length > 0) {
+      get().flashNotice("Remove attachments before compacting this conversation.");
+      return;
+    }
+    if (isBusy(snapshot)) {
+      get().flashNotice("Wait for Clark to finish before compacting this conversation.");
+      return;
+    }
+    try {
+      await bridge.compact(session.id);
+    } catch (error) {
+      set({ error: String(error) });
     }
   },
 

@@ -325,4 +325,74 @@ mod usage_trigger_tests {
         assert!(!applied);
         assert_eq!(projected, different_lineage);
     }
+
+    #[tokio::test]
+    async fn manual_compaction_is_a_standalone_run_and_replaces_only_model_history() {
+        let (base_url, calls) = summary_endpoint().await;
+        let llm =
+            crate::llm::LlmClient::from_parts(&base_url, "fake-model", None, Vec::new(), None)
+                .unwrap();
+        let original = vec![
+            user_message("large original context ".repeat(100)),
+            assistant_tool_call("call_1"),
+            tool_result("call_1"),
+        ];
+        let session = Arc::new(tokio::sync::Mutex::new(SessionState {
+            transcript: original.clone(),
+            ..SessionState::default()
+        }));
+        let (tx, rx) = async_channel::unbounded();
+        let run = RunId::new("compact-1");
+
+        run_manual_compaction(
+            llm,
+            CompactionConfig {
+                auto_compact_token_limit: usize::MAX,
+                compact_request_token_limit: usize::MAX,
+                recent_user_token_budget: 0,
+                ..CompactionConfig::disabled()
+            },
+            session.clone(),
+            tx,
+            run.clone(),
+            CancellationToken::new(),
+        )
+        .await;
+
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        let compacted = session.lock().await.transcript.clone();
+        assert_ne!(compacted, original);
+        assert_eq!(compacted.len(), 1);
+        assert!(rendered(&compacted[0]).contains("checkpoint summary"));
+
+        let mut events = Vec::new();
+        while let Ok(event) = rx.recv().await {
+            events.push(event);
+        }
+        assert!(matches!(
+            events.first(),
+            Some(AgentEvent::RunStarted { run: event_run }) if event_run == &run
+        ));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            AgentEvent::Trace { source, payload, .. }
+                if source == "clark_code_compaction" && payload["trigger"] == "manual"
+        )));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            AgentEvent::MessageChunk {
+                role: Role::System,
+                ..
+            }
+        )));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            AgentEvent::ContextCompacted { transcript, .. }
+                if transcript.items.len() == 1
+        )));
+        assert!(matches!(
+            events.last(),
+            Some(AgentEvent::RunFinished { outcome, .. }) if outcome.status == RunStatus::Done
+        ));
+    }
 }

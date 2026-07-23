@@ -1,6 +1,7 @@
 //! Tauri command surface — the IPC boundary the web UI calls via `invoke`.
 //! These mirror the `agent_core::Provider` trait and drive the live provider.
 
+use agent_core::provider::EventStream;
 use agent_core::{
     apply, ClientResponse, CollaborationMode, ContentBlock, PendingUpload, PromptInput, Provider,
     ProviderConfig, RunId, Session, SessionId, SessionOptions, Snapshot,
@@ -18,7 +19,7 @@ use tauri::{AppHandle, Emitter, State};
 use tokio::sync::Mutex;
 
 use crate::ssh::{self, RemoteSpec};
-use crate::state::HostSession;
+use crate::state::{ActiveRunGuard, HostSession};
 use crate::trajectory::{CloudTrajectoryClient, CloudTrajectoryConfig};
 use crate::{builtin_providers, AppState, ProviderInfo};
 
@@ -33,6 +34,58 @@ fn make_provider(id: &str) -> Result<Box<dyn Provider>, String> {
         "local" => Ok(Box::new(LocalAgentProvider::new())),
         other => Err(format!("unknown provider: {other}")),
     }
+}
+
+/// Persist and project the remainder of one provider-owned run stream. Prompt
+/// and explicit compaction share this boundary so both get identical
+/// write-ahead durability, stale-session rejection, and snapshot emission.
+fn spawn_provider_stream(
+    app: AppHandle,
+    state: AppState,
+    entry: Arc<Mutex<HostSession>>,
+    session_key: String,
+    stream: EventStream,
+    run_guard: ActiveRunGuard,
+) {
+    tokio::spawn(async move {
+        let _run_guard = run_guard;
+        let mut batches = stream.ready_chunks(64);
+        while let Some(events) = batches.next().await {
+            // Stop if this session was closed or superseded by a reopen: the
+            // captured provider must never clobber a newer session with the
+            // same public conversation id.
+            let still_current = state
+                .session_entry(&session_key)
+                .await
+                .is_some_and(|live| Arc::ptr_eq(&live, &entry));
+            if !still_current {
+                break;
+            }
+            let Some(trajectory) = entry.lock().await.trajectory.clone() else {
+                break;
+            };
+            let checkpoint = match trajectory.append(&events).await {
+                Ok(checkpoint) => checkpoint,
+                Err(error) => {
+                    tracing::error!(%error, "local trajectory outbox append failed; interrupting projection");
+                    let _ = app.emit(
+                        "cloud-sync-warning",
+                        "Clark could not safely save the next part of this run, so it stopped at the last saved point.",
+                    );
+                    break;
+                }
+            };
+            let snapshot = {
+                let mut session = entry.lock().await;
+                for event in &events {
+                    apply(&mut session.snapshot, event);
+                }
+                session.snapshot.history_checkpoint = Some(checkpoint);
+                session.snapshot.clone()
+            };
+            let _ = app.emit("snapshot", &snapshot);
+        }
+    });
 }
 
 #[tauri::command]
@@ -545,56 +598,72 @@ pub async fn prompt(
     };
 
     // Fold events into this session's snapshot and push each update to the
-    // webview (tagged by `snapshot.session`, so the UI routes it to the right
-    // conversation). Each session folds independently — parallel runs never
-    // contend or interleave.
-    let state = state.inner().clone();
-    let session_key = sid.as_str().to_string();
-    tokio::spawn(async move {
-        let _run_guard = run_guard;
-        let mut batches = stream.ready_chunks(64);
-        while let Some(events) = batches.next().await {
-            // Stop if this session was closed or superseded by a reopen: the
-            // entry we captured is no longer the live one for this id. Without
-            // this, a closed conversation's provider stays alive (this task
-            // holds an Arc to it) and keeps folding + emitting snapshots tagged
-            // with the same session id, clobbering the reopened conversation.
-            let still_current = state
-                .session_entry(&session_key)
-                .await
-                .is_some_and(|live| Arc::ptr_eq(&live, &entry));
-            if !still_current {
-                break;
-            }
-            let Some(trajectory) = entry.lock().await.trajectory.clone() else {
-                break;
-            };
-            let checkpoint = match trajectory.append(&events).await {
-                Ok(checkpoint) => checkpoint,
-                Err(error) => {
-                    // Do not render state that failed the local write-ahead
-                    // boundary. Dropping the provider stream interrupts the run;
-                    // recovery later projects the typed interruption from the
-                    // last durable prefix.
-                    tracing::error!(%error, "local trajectory outbox append failed; interrupting projection");
-                    let _ = app.emit(
-                        "cloud-sync-warning",
-                        "Clark could not safely save the next part of this run, so it stopped at the last saved point.",
-                    );
-                    break;
-                }
-            };
-            let snapshot = {
-                let mut s = entry.lock().await;
-                for event in &events {
-                    apply(&mut s.snapshot, event);
-                }
-                s.snapshot.history_checkpoint = Some(checkpoint);
-                s.snapshot.clone()
-            };
-            let _ = app.emit("snapshot", &snapshot);
-        }
-    });
+    // webview (tagged by `snapshot.session`, so the UI routes it correctly).
+    spawn_provider_stream(
+        app,
+        state.inner().clone(),
+        entry,
+        sid.as_str().to_string(),
+        stream,
+        run_guard,
+    );
+    Ok(())
+}
+
+/// Explicit Clark Code context compaction. This is a standalone provider run,
+/// not a user prompt: `/compact` never enters the model transcript as a user
+/// instruction. The first lifecycle event is projected before returning so the
+/// composer cannot race a new prompt into the history replacement.
+#[tauri::command]
+pub async fn compact(
+    app: AppHandle,
+    session_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let run_guard = state.try_start_run().ok_or(
+        "Clark Code is finishing active work before an update; wait for the relaunch to compact context",
+    )?;
+    let entry = state
+        .session_entry(&session_id)
+        .await
+        .ok_or("no such session")?;
+    let sid = SessionId::new(session_id);
+    let trajectory = entry
+        .lock()
+        .await
+        .trajectory
+        .clone()
+        .ok_or("Clark cloud trajectory is not configured for this session")?;
+    let mut stream = {
+        let mut session = entry.lock().await;
+        session
+            .provider
+            .compact(&sid)
+            .await
+            .map_err(|error| error.to_string())?
+    };
+
+    let first = stream
+        .next()
+        .await
+        .ok_or("context compaction ended before it started")?;
+    let checkpoint = trajectory.append(std::slice::from_ref(&first)).await?;
+    let snapshot = {
+        let mut session = entry.lock().await;
+        apply(&mut session.snapshot, &first);
+        session.snapshot.history_checkpoint = Some(checkpoint);
+        session.snapshot.clone()
+    };
+    let _ = app.emit("snapshot", &snapshot);
+
+    spawn_provider_stream(
+        app,
+        state.inner().clone(),
+        entry,
+        sid.as_str().to_string(),
+        stream,
+        run_guard,
+    );
     Ok(())
 }
 

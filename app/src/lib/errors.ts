@@ -28,6 +28,8 @@ export function humanizeRunFailure(
       return "Clark Code couldn’t continue this run. Start another run and try again.";
     case "runtime_interrupted":
       return "Clark restarted before this run finished. Continue from the saved history.";
+    case "verification_incomplete":
+      return "Clark finished its answer, but couldn’t independently verify one or more external changes. Review those actions before relying on them.";
     case "empty_response":
       return "The model returned no response. Please try again.";
     default:

@@ -77,6 +77,13 @@ async fn desktop_sink_announces_each_compaction_checkpoint_once() {
             .count(),
         1
     );
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(event, desktop::AgentEvent::ContextCompacted { .. }))
+            .count(),
+        1
+    );
 
     ca::EventSink::emit(
         &sink,
@@ -95,6 +102,9 @@ async fn desktop_sink_announces_each_compaction_checkpoint_once() {
     assert!(new_events
         .iter()
         .any(|event| matches!(event, desktop::AgentEvent::MessageChunk { .. })));
+    assert!(new_events
+        .iter()
+        .any(|event| matches!(event, desktop::AgentEvent::ContextCompacted { .. })));
 }
 
 #[tokio::test]
@@ -217,6 +227,7 @@ async fn desktop_sink_captures_only_canonical_completed_turns() {
     .await;
 
     assert_eq!(completed.snapshot(), vec![user, assistant, tool_result]);
+    assert!(completed.has_final_answer());
 }
 
 #[test]

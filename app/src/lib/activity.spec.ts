@@ -48,6 +48,17 @@ describe("currentActivity", () => {
     expect(a.label).toBe("Run failed");
   });
 
+  it("does not report an incomplete post-answer verification as a failed answer", () => {
+    const snapshot = withRun("failed");
+    snapshot.runs.r1.outcome = {
+      status: "failed",
+      failure_kind: "verification_incomplete",
+    };
+    const activity = currentActivity(snapshot);
+    expect(activity.failed).toBeUndefined();
+    expect(activity.label).toBe("Verification incomplete");
+  });
+
   it("keeps pending visible after commentary while the run continues", () => {
     const beforeResponse = withRun("running");
     beforeResponse.timeline.push({
