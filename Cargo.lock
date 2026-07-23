@@ -30,7 +30,7 @@ dependencies = [
 
 [[package]]
 name = "agent-core"
-version = "0.1.73"
+version = "0.1.74"
 dependencies = [
  "async-channel",
  "async-trait",
@@ -49,7 +49,7 @@ dependencies = [
 
 [[package]]
 name = "agent-orchestration"
-version = "0.1.73"
+version = "0.1.74"
 dependencies = [
  "agent-core",
  "async-channel",
@@ -654,7 +654,7 @@ source = "git+https://github.com/clark-labs-inc/clark-agent-compaction?rev=860f3
 
 [[package]]
 name = "clark-desktop"
-version = "0.1.73"
+version = "0.1.74"
 dependencies = [
  "agent-core",
  "base64 0.22.1",
@@ -696,7 +696,7 @@ dependencies = [
 
 [[package]]
 name = "clark-install-context"
-version = "0.1.73"
+version = "0.1.74"
 dependencies = [
  "tempfile",
 ]
@@ -1019,7 +1019,7 @@ dependencies = [
 
 [[package]]
 name = "devbridge"
-version = "0.1.73"
+version = "0.1.74"
 dependencies = [
  "agent-core",
  "futures",
@@ -1368,7 +1368,7 @@ dependencies = [
 
 [[package]]
 name = "exec-core"
-version = "0.1.73"
+version = "0.1.74"
 dependencies = [
  "async-trait",
  "ignore",
@@ -1382,7 +1382,7 @@ dependencies = [
 
 [[package]]
 name = "exec-protocol"
-version = "0.1.73"
+version = "0.1.74"
 dependencies = [
  "base64 0.22.1",
  "serde",
@@ -1391,7 +1391,7 @@ dependencies = [
 
 [[package]]
 name = "exec-sandbox"
-version = "0.1.73"
+version = "0.1.74"
 dependencies = [
  "async-trait",
  "exec-core",
@@ -1406,7 +1406,7 @@ dependencies = [
 
 [[package]]
 name = "exec-sandbox-protocol"
-version = "0.1.73"
+version = "0.1.74"
 dependencies = [
  "base64 0.22.1",
  "rmp-serde",
@@ -1419,7 +1419,7 @@ dependencies = [
 
 [[package]]
 name = "exec-sandbox-windows"
-version = "0.1.73"
+version = "0.1.74"
 dependencies = [
  "base64 0.22.1",
  "exec-sandbox-protocol",
@@ -1432,7 +1432,7 @@ dependencies = [
 
 [[package]]
 name = "exec-server"
-version = "0.1.73"
+version = "0.1.74"
 dependencies = [
  "exec-core",
  "exec-protocol",
@@ -3853,7 +3853,7 @@ dependencies = [
 
 [[package]]
 name = "provider-acp"
-version = "0.1.73"
+version = "0.1.74"
 dependencies = [
  "agent-core",
  "agent-orchestration",
@@ -3869,7 +3869,7 @@ dependencies = [
 
 [[package]]
 name = "provider-clark"
-version = "0.1.73"
+version = "0.1.74"
 dependencies = [
  "agent-core",
  "async-channel",
@@ -3887,7 +3887,7 @@ dependencies = [
 
 [[package]]
 name = "provider-local"
-version = "0.1.73"
+version = "0.1.74"
 dependencies = [
  "agent-core",
  "agent-orchestration",
