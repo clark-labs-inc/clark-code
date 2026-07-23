@@ -52,6 +52,38 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function waitForExit(child, timeoutMs) {
+  if (child.exitCode !== null) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => resolve(false), timeoutMs);
+    child.once("exit", () => {
+      clearTimeout(timeout);
+      resolve(true);
+    });
+  });
+}
+
+function signalChildTree(child, signal) {
+  if (child.exitCode !== null) return;
+  if (process.platform !== "win32" && child.pid) {
+    try {
+      process.kill(-child.pid, signal);
+      return;
+    } catch {
+      // Fall back to the direct child if its process group has already exited.
+    }
+  }
+  child.kill(signal);
+}
+
+async function stopChildTree(child) {
+  if (child.exitCode !== null) return;
+  signalChildTree(child, "SIGTERM");
+  if (await waitForExit(child, 5_000)) return;
+  signalChildTree(child, "SIGKILL");
+  await waitForExit(child, 5_000);
+}
+
 async function urlReady(url) {
   try {
     const response = await fetch(url);
@@ -77,7 +109,8 @@ async function ensureVite() {
   if (await urlReady(appUrl)) return null;
   const child = spawn("pnpm", ["dev"], {
     cwd: appDir,
-    stdio: ["ignore", "pipe", "pipe"],
+    detached: process.platform !== "win32",
+    stdio: "ignore",
     env: { ...process.env },
   });
   children.push(child);
@@ -314,7 +347,8 @@ async function runLiveControl() {
 
   const devbridge = spawn("cargo", ["run", "-p", "devbridge"], {
     cwd: repoDir,
-    stdio: ["ignore", "pipe", "pipe"],
+    detached: process.platform !== "win32",
+    stdio: "ignore",
     env: {
       ...process.env,
       DEVBRIDGE_ADDR: "127.0.0.1:7878",
@@ -389,7 +423,7 @@ async function runLiveControl() {
     };
   } finally {
     await context.close();
-    devbridge.kill("SIGTERM");
+    await stopChildTree(devbridge);
   }
 }
 
@@ -431,7 +465,7 @@ try {
   await writeFile(path.join(artifactDir, "report.json"), `${JSON.stringify(report, null, 2)}\n`);
   if (browser) await browser.close();
   for (const child of children) {
-    if (child.exitCode === null) child.kill("SIGTERM");
+    await stopChildTree(child);
   }
 }
 

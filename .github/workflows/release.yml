@@ -29,6 +29,7 @@ jobs:
   pre_release_benchmarks:
     name: Pre-release experience benchmark
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     env:
       CLARK_CODE_PRERELEASE_LIVE: ${{ vars.CLARK_CODE_PRERELEASE_LIVE || '0' }}
       CLARK_CODE_PROVIDER: ${{ vars.CLARK_CODE_PRERELEASE_PROVIDER }}
