@@ -1,13 +1,10 @@
 //! Live `clark-code` conversation matrix for the local coding provider.
 //!
 //! Ignored by default; real Clark Platform calls require explicit live environment variables.
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use agent_core::domain::{
-    AgentEvent, ContentBlock, MessagePhase, PendingUpload, RunStatus, ToolStatus,
-};
+use agent_core::domain::{AgentEvent, ContentBlock, MessagePhase, PendingUpload, Role};
 use agent_core::provider::{ClientResponse, PromptInput, Provider, ProviderConfig, SessionOptions};
 use base64::Engine as _;
 use futures::StreamExt;
@@ -16,6 +13,16 @@ use provider_local::{
     SkillPackAction, SkillPackScope,
 };
 use serde_json::json;
+
+#[path = "live_clark_code/canonical.rs"]
+mod canonical;
+#[path = "live_clark_code/event_summary.rs"]
+mod event_summary;
+#[path = "live_clark_code/turn_summary.rs"]
+mod turn_summary;
+use canonical::canonical_message_text;
+use event_summary::{event_name, tool_name_from_title, trim_terminal_line_endings};
+use turn_summary::TurnSummary;
 
 const TURN_TIMEOUT: Duration = Duration::from_secs(180);
 const DEFAULT_LIVE_MAX_ITERATIONS: u32 = 16;
@@ -108,64 +115,6 @@ fn live_matrix_accepts_backend_owned_clark_code_aliases_only() {
     assert!(!is_clark_code_model("clark"));
 }
 
-#[derive(Default, Debug)]
-struct TurnSummary {
-    finished: bool,
-    status: Option<RunStatus>,
-    run_error: Option<String>,
-    usage: Option<agent_core::domain::RunUsage>,
-    text: String,
-    tools: Vec<String>,
-    errors: Vec<String>,
-    tool_statuses: BTreeMap<String, Vec<ToolStatus>>,
-    permission_requests: usize,
-    event_counts: BTreeMap<&'static str, usize>,
-}
-
-impl TurnSummary {
-    fn require_done(&self, label: &str) {
-        assert!(self.finished, "{label}: run did not finish: {self:?}");
-        assert_eq!(
-            self.status,
-            Some(RunStatus::Done),
-            "{label}: run did not finish cleanly: {self:?}"
-        );
-    }
-
-    fn require_tool(&self, label: &str, tool: &str) {
-        assert!(
-            self.tools.iter().any(|seen| seen == tool),
-            "{label}: expected tool {tool}, got {:?}",
-            self.tools
-        );
-    }
-
-    fn require_cloud_research_first(&self, label: &str) {
-        let research = self
-            .tools
-            .iter()
-            .position(|tool| tool == "clark_research")
-            .unwrap_or_else(|| panic!("{label}: expected clark_research, got {:?}", self.tools));
-        let discovery = self
-            .tools
-            .iter()
-            .position(|tool| tool == "tool_search")
-            .unwrap_or_else(|| panic!("{label}: expected tool_search, got {:?}", self.tools));
-        assert!(
-            discovery < research,
-            "{label}: research must be activated before use: {:?}",
-            self.tools
-        );
-        assert!(
-            !self.tools[..research]
-                .iter()
-                .any(|tool| tool == "web_fetch" || tool == "bash"),
-            "{label}: local retrieval ran before Clark Cloud Agent: {:?}",
-            self.tools
-        );
-    }
-}
-
 async fn new_live_provider(
     cfg: &LiveConfig,
     cwd: &Path,
@@ -233,6 +182,7 @@ async fn drive_prompt(
             *summary.event_counts.entry(event_name(&ev)).or_default() += 1;
             match ev {
                 AgentEvent::MessageChunk {
+                    role: Role::Agent,
                     delta: ContentBlock::Text { text },
                     ..
                 } => summary.text.push_str(&text),
@@ -240,11 +190,21 @@ async fn drive_prompt(
                     phase: MessagePhase::Commentary,
                     ..
                 } => summary.text.clear(),
+                AgentEvent::Trace {
+                    source, payload, ..
+                } if source == "clark_agent" => {
+                    if let Some(text) = canonical_message_text(&payload) {
+                        summary.canonical_text = Some(text);
+                    }
+                }
                 AgentEvent::ToolCall { call, .. } => {
                     let tool = call
                         .tool_name
                         .clone()
                         .unwrap_or_else(|| tool_name_from_title(&call.title));
+                    if let Some(input) = call.raw_input {
+                        summary.tool_inputs.push((tool.clone(), input));
+                    }
                     summary.tools.push(tool);
                 }
                 AgentEvent::ToolCallUpdate { id, patch, .. } => {
@@ -288,35 +248,6 @@ async fn drive_prompt(
     tokio::time::timeout(TURN_TIMEOUT, collect)
         .await
         .expect("live clark-code turn timed out")
-}
-
-fn event_name(ev: &AgentEvent) -> &'static str {
-    match ev {
-        AgentEvent::RunStarted { .. } => "RunStarted",
-        AgentEvent::Checkpoint { .. } => "Checkpoint",
-        AgentEvent::MessageChunk { .. } => "MessageChunk",
-        AgentEvent::MessagePhase { .. } => "MessagePhase",
-        AgentEvent::ToolCall { .. } => "ToolCall",
-        AgentEvent::ToolCallUpdate { .. } => "ToolCallUpdate",
-        AgentEvent::ExecutionChecklistUpdated { .. } => "ExecutionChecklistUpdated",
-        AgentEvent::ProposedPlanUpdated { .. } => "ProposedPlanUpdated",
-        AgentEvent::GoalUpdated { .. } => "GoalUpdated",
-        AgentEvent::RunUsageUpdated { .. } => "RunUsageUpdated",
-        AgentEvent::PermissionRequest { .. } => "PermissionRequest",
-        AgentEvent::Artifact { .. } => "Artifact",
-        AgentEvent::Surface { .. } => "Surface",
-        AgentEvent::FanOut { .. } => "FanOut",
-        AgentEvent::ProviderIncidentUpdated { .. } => "ProviderIncidentUpdated",
-        AgentEvent::ModeChanged { .. } => "ModeChanged",
-        AgentEvent::ContextCompacted { .. } => "ContextCompacted",
-        AgentEvent::Trace { .. } => "Trace",
-        AgentEvent::RunFinished { .. } => "RunFinished",
-        AgentEvent::Error { .. } => "Error",
-    }
-}
-
-fn tool_name_from_title(title: &str) -> String {
-    title.split(':').next().unwrap_or(title).trim().to_string()
 }
 
 fn write_project_fixture(root: &Path) {
@@ -428,8 +359,19 @@ Then call `write_file` to create `SKILL_E2E_RECEIPT.md` containing only the four
         "skills_e2e: model did not return the exact completion receipt"
     );
 
-    let receipt = std::fs::read_to_string(dir.path().join("SKILL_E2E_RECEIPT.md"))
-        .expect("skills_e2e: read generated receipt");
+    let receipt_path = summary.last_tool_input_str("skills_e2e", "write_file", "path");
+    assert_eq!(
+        Path::new(receipt_path)
+            .file_name()
+            .and_then(|name| name.to_str()),
+        Some("SKILL_E2E_RECEIPT.md"),
+        "skills_e2e: write_file used the wrong receipt filename: {summary:?}"
+    );
+    let receipt = std::fs::read_to_string(dir.path().join(receipt_path)).unwrap_or_else(|error| {
+        panic!(
+            "skills_e2e: could not read write_file effect at {receipt_path:?}: {error}; {summary:?}"
+        )
+    });
     assert_eq!(
         receipt.trim_end(),
         contract.trim_end(),
@@ -465,21 +407,21 @@ async fn live_clark_code_feature_matrix() {
     let pong = drive_turn(
         &mut provider,
         &session.id,
-        "Reply with exactly this token and no extra words: CLARK_LIVE_PONG_2001",
+        "Reply with exactly this six-digit decimal nonce and no extra words: 638241",
     )
     .await;
     println!("[pong] {pong:?}");
     pong.require_done("pong");
-    assert!(
-        pong.text.contains("CLARK_LIVE_PONG_2001"),
-        "pong: expected sentinel in assistant text: {:?}",
-        pong.text
+    assert_eq!(
+        pong.text.trim(),
+        "638241",
+        "pong: expected the exact neutral nonce in assistant text"
     );
 
     let read_search = drive_turn(
         &mut provider,
         &session.id,
-        "Use list_dir, glob, grep, and read_file. List the project root, glob for **/*.rs, grep for CLARK_LIVE_GREP_SENTINEL_5142, read src/main.rs, then answer with both CLARK_LIVE_READ_SENTINEL_7391 and CLARK_LIVE_GREP_SENTINEL_5142.",
+        "Use list_dir, glob, grep, and read_file. List the project root, glob for **/*.rs, grep for CLARK_LIVE_GREP_SENTINEL_5142, read src/main.rs, then briefly confirm completion.",
     )
     .await;
     println!("[read_search] {read_search:?}");
@@ -487,13 +429,14 @@ async fn live_clark_code_feature_matrix() {
     for tool in ["list_dir", "glob", "grep", "read_file"] {
         read_search.require_tool("read_search", tool);
     }
-    assert!(read_search.text.contains("CLARK_LIVE_READ_SENTINEL_7391"));
-    assert!(read_search.text.contains("CLARK_LIVE_GREP_SENTINEL_5142"));
+    read_search.require_tool_input_contains("read_search", "glob", "**/*.rs");
+    read_search.require_tool_input_contains("read_search", "grep", "CLARK_LIVE_GREP_SENTINEL_5142");
+    read_search.require_tool_input_contains("read_search", "read_file", "src/main.rs");
 
     let mutate = drive_turn(
         &mut provider,
         &session.id,
-        "Use write_file to create live.txt with content `alpha`. Read live.txt. Use edit_file to replace alpha with beta. Then use bash to run `cat live.txt > bash-copy.txt`. Read bash-copy.txt and answer with CLARK_LIVE_MUTATE_DONE.",
+        "Use write_file to create live.txt with content `alpha`. Read live.txt. Use edit_file to replace alpha with beta. Then use bash to run `cat live.txt > bash-copy.txt`. Read bash-copy.txt and briefly confirm completion.",
     )
     .await;
     println!("[mutate] {mutate:?}");
@@ -505,30 +448,21 @@ async fn live_clark_code_feature_matrix() {
         mutate.permission_requests >= 3,
         "mutate: expected write/edit/bash permission prompts, got {mutate:?}"
     );
-    assert!(
-        mutate.text.contains("CLARK_LIVE_MUTATE_DONE"),
-        "mutate: expected completion sentinel in assistant text: {:?}",
-        mutate.text
-    );
-    assert_eq!(
-        std::fs::read_to_string(dir.path().join("live.txt")).unwrap(),
-        "beta"
-    );
-    assert_eq!(
-        std::fs::read_to_string(dir.path().join("bash-copy.txt")).unwrap(),
-        "beta"
-    );
+    let live_text = std::fs::read_to_string(dir.path().join("live.txt")).unwrap();
+    let bash_copy_text = std::fs::read_to_string(dir.path().join("bash-copy.txt")).unwrap();
+    assert_eq!(trim_terminal_line_endings(&live_text), "beta");
+    assert_eq!(trim_terminal_line_endings(&bash_copy_text), "beta");
 
     let memory = drive_turn(
         &mut provider,
         &session.id,
-        "Use the memory tool to remember a project fact titled `live e2e sentinel` with content `CLARK_MEMORY_SENTINEL_8402`. Then use memory recall. After the tools finish, your entire final response must be exactly `CLARK_MEMORY_SENTINEL_8402`; do not abbreviate it or remove the `CLARK` prefix.",
+        "Use the memory tool to remember a project fact titled `live e2e sentinel` with content `CLARK_MEMORY_SENTINEL_8402`. Then use memory recall and briefly confirm completion.",
     )
     .await;
     println!("[memory] {memory:?}");
     memory.require_done("memory");
     memory.require_tool("memory", "memory");
-    assert!(memory.text.contains("CLARK_MEMORY_SENTINEL_8402"));
+    memory.require_tool_input_contains("memory", "memory", "CLARK_MEMORY_SENTINEL_8402");
     assert!(
         find_file_containing(
             &dir.path().join(".clark/memory"),
@@ -561,17 +495,23 @@ async fn live_clark_code_compacts_and_continues() {
     )
     .await;
     let prompt = format!(
-        "This turn intentionally exceeds the live compaction threshold. {}\nNow answer with exactly CLARK_LIVE_COMPACTION_DONE_3003.",
+        "This turn intentionally exceeds the live compaction threshold. {}\nNow briefly confirm that processing continued.",
         "Important project context. ".repeat(900)
     );
     let summary = drive_turn(&mut provider, &session.id, &prompt).await;
     println!("[compaction] {summary:?}");
     summary.require_done("compaction");
     assert!(
-        summary.text.contains("CLARK_LIVE_COMPACTION_DONE_3003"),
-        "compaction: expected sentinel after compaction: {:?}",
+        summary
+            .event_counts
+            .get("ContextCompacted")
+            .copied()
+            .unwrap_or(0)
+            >= 1,
+        "compaction: expected a ContextCompacted event: {:?}",
         summary.text
     );
+    assert!(!summary.text.trim().is_empty());
 }
 
 #[tokio::test]

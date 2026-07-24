@@ -5,7 +5,10 @@ use tauri::Emitter;
 
 fn transient_cloud_read_status(status: StatusCode) -> bool {
     status.is_server_error()
-        || matches!(status, StatusCode::REQUEST_TIMEOUT | StatusCode::TOO_MANY_REQUESTS)
+        || matches!(
+            status,
+            StatusCode::REQUEST_TIMEOUT | StatusCode::TOO_MANY_REQUESTS
+        )
 }
 
 /// List the signed-in user's desktop conversations (metadata only). The cloud

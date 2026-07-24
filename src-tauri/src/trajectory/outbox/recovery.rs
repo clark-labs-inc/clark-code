@@ -45,86 +45,82 @@ pub(super) fn recover_sync(
         base_rev,
         created_at_ms,
         updated_at_ms,
-    ) =
-        match (cloud, cached) {
-            (Some((snapshot, _)), None) => {
-                return Ok(Some(RecoveredSnapshot {
-                    snapshot,
-                    pending: false,
-                    metadata: None,
-                    needs_snapshot_publication: false,
-                }));
-            }
-            (
-                Some((snapshot, cloud_rev)),
-                Some((metadata, _, cached_rev, checkpoint, local_live, created_at_ms, updated_at_ms)),
-            ) if cloud_rev == cached_rev => (
-                metadata,
+    ) = match (cloud, cached) {
+        (Some((snapshot, _)), None) => {
+            return Ok(Some(RecoveredSnapshot {
                 snapshot,
-                checkpoint,
-                true,
-                local_live,
-                cached_rev,
-                created_at_ms,
-                updated_at_ms,
-            ),
-            (
-                Some((snapshot, cloud_rev)),
-                Some((metadata, _, _, _, _, created_at_ms, _)),
-            ) => {
-                // Another device advanced the authority. Preserve this device's
-                // batches for idempotent trajectory delivery, but never overlay the
-                // divergent branch onto the newer cloud snapshot.
-                let tx = conn.transaction().map_err(sql_error)?;
-                let updated_at_ms = super::now_ms();
-                tx.execute(
-                    r#"UPDATE trajectory_outbox SET replayable = 0
+                pending: false,
+                metadata: None,
+                needs_snapshot_publication: false,
+            }));
+        }
+        (
+            Some((snapshot, cloud_rev)),
+            Some((metadata, _, cached_rev, checkpoint, local_live, created_at_ms, updated_at_ms)),
+        ) if cloud_rev == cached_rev => (
+            metadata,
+            snapshot,
+            checkpoint,
+            true,
+            local_live,
+            cached_rev,
+            created_at_ms,
+            updated_at_ms,
+        ),
+        (Some((snapshot, cloud_rev)), Some((metadata, _, _, _, _, created_at_ms, _))) => {
+            // Another device advanced the authority. Preserve this device's
+            // batches for idempotent trajectory delivery, but never overlay the
+            // divergent branch onto the newer cloud snapshot.
+            let tx = conn.transaction().map_err(sql_error)?;
+            let updated_at_ms = super::now_ms();
+            tx.execute(
+                r#"UPDATE trajectory_outbox SET replayable = 0
                    WHERE owner_key = ?1 AND conversation_id = ?2"#,
-                    params![owner, conversation_id],
-                )
-                .map_err(sql_error)?;
-                tx.execute(
-                    r#"UPDATE journal_conversation
+                params![owner, conversation_id],
+            )
+            .map_err(sql_error)?;
+            tx.execute(
+                r#"UPDATE journal_conversation
                    SET base_snapshot_json = ?3, base_rev = ?4, checkpoint_seq = 0,
                        local_live = 0,
                        updated_at_ms = ?5
                    WHERE owner_key = ?1 AND conversation_id = ?2"#,
-                    params![
-                        owner,
-                        conversation_id,
-                        serde_json::to_vec(&snapshot).map_err(|e| e.to_string())?,
-                        cloud_rev,
-                        updated_at_ms
-                    ],
-                )
-                .map_err(sql_error)?;
-                tx.commit().map_err(sql_error)?;
-                (
-                    metadata,
-                    snapshot,
-                    0,
-                    false,
-                    false,
+                params![
+                    owner,
+                    conversation_id,
+                    serde_json::to_vec(&snapshot).map_err(|e| e.to_string())?,
                     cloud_rev,
-                    created_at_ms,
-                    updated_at_ms,
-                )
-            }
+                    updated_at_ms
+                ],
+            )
+            .map_err(sql_error)?;
+            tx.commit().map_err(sql_error)?;
             (
-                None,
-                Some((metadata, bytes, base_rev, checkpoint, local_live, created_at_ms, updated_at_ms)),
-            ) => (
                 metadata,
-                serde_json::from_slice(&bytes).map_err(|e| e.to_string())?,
-                checkpoint,
-                true,
-                local_live,
-                base_rev,
+                snapshot,
+                0,
+                false,
+                false,
+                cloud_rev,
                 created_at_ms,
                 updated_at_ms,
-            ),
-            (None, None) => return Ok(None),
-        };
+            )
+        }
+        (
+            None,
+            Some((metadata, bytes, base_rev, checkpoint, local_live, created_at_ms, updated_at_ms)),
+        ) => (
+            metadata,
+            serde_json::from_slice(&bytes).map_err(|e| e.to_string())?,
+            checkpoint,
+            true,
+            local_live,
+            base_rev,
+            created_at_ms,
+            updated_at_ms,
+        ),
+        (None, None) => return Ok(None),
+    };
 
     let mut query = conn
         .prepare(

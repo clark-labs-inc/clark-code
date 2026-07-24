@@ -6,23 +6,13 @@ use agent_core::domain::{AgentEvent, ContentBlock, RunStatus};
 use agent_core::provider::{PromptInput, Provider, ProviderConfig, SessionOptions};
 use futures::StreamExt;
 use provider_local::LocalAgentProvider;
-use serde_json::{json, Value};
+use serde_json::json;
 
 const SENTINEL: &str = "CLARK_STREAM_FIDELITY_SENTINEL_6621";
 
-fn canonical_message_text(payload: &Value) -> Option<String> {
-    if payload.get("type").and_then(Value::as_str) != Some("message_end") {
-        return None;
-    }
-    let blocks = payload.get("message")?.get("content")?.as_array()?;
-    Some(
-        blocks
-            .iter()
-            .filter(|block| block.get("type").and_then(Value::as_str) == Some("text"))
-            .filter_map(|block| block.get("text").and_then(Value::as_str))
-            .collect::<String>(),
-    )
-}
+#[path = "live_clark_code/canonical.rs"]
+mod canonical;
+use canonical::canonical_message_text;
 
 #[tokio::test]
 #[ignore = "requires explicit live clark-code env; makes one real model call"]

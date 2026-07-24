@@ -280,11 +280,19 @@ mod tests {
         )
         .await;
         refresh_cloud_authority(&state, &refreshed).await.unwrap();
-        assert_eq!(state.cloud_token.read().await.as_deref(), Some(refreshed.as_str()));
-        assert!(refresh_cloud_authority(&state, &unsigned_token("account-b"))
-            .await
-            .is_err());
-        assert_eq!(state.cloud_token.read().await.as_deref(), Some(refreshed.as_str()));
+        assert_eq!(
+            state.cloud_token.read().await.as_deref(),
+            Some(refreshed.as_str())
+        );
+        assert!(
+            refresh_cloud_authority(&state, &unsigned_token("account-b"))
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            state.cloud_token.read().await.as_deref(),
+            Some(refreshed.as_str())
+        );
     }
 
     #[tokio::test]

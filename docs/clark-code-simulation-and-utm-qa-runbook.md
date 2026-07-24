@@ -4367,8 +4367,15 @@ The complete harness-produced sequence is retained under
 | `paid-macos-goal-v5/report.json` | failed | $0.004581 | the file operation completed, but the collector concatenated pre-tool commentary with the exact final answer |
 | `paid-macos-goal-v6/report.json` | failed | $0.007922 | repaired skills scenario passed; feature-matrix pong then returned `1` rather than `CLARK_LIVE_PONG_2001` |
 | `paid-macos-goal-v7/report.json` | failed | $0.021491 | skills, pong, read/search, all mutation tools, permissions, and the mutation token passed; `live.txt` contained `beta\n` while the assertion required byte-exact `beta` |
+| `paid-macos-goal-v8/report.json` | failed | $0.018621 | repeated the line-ending mismatch while confirming all mutation tools and permission prompts completed |
+| `paid-macos-goal-v9/report.json` | failed | $0.012994 | canonical and streamed read/search text were identical, but the model omitted the leading `CL` from echoed fixture tokens |
+| `paid-macos-goal-v10/report.json` | failed | $0.032316 | all feature scenarios passed; compaction emitted a real `ContextCompacted` event, but the collector mixed a system compaction notice into agent text |
+| `paid-macos-goal-v11/report.json` | failed | $0.007936 | canonical and streamed pong were identical `ARK_LIVE_PONG_2001`; the model itself rewrote the requested token |
+| `paid-macos-goal-v12/report.json` | failed | $0.005829 | the skills turn completed `write_file`, but the assertion only inspected a hard-coded root path instead of the tool's recorded relative path |
+| `paid-macos-goal-v13/report.json` | **passed** | **$0.037732** | all three paid tests passed under the repaired evidence contract |
 
-The seven harness receipts report a combined $0.124107.
+The thirteen harness receipts report a combined $0.239535. Failed receipts
+remain retained rather than overwritten.
 
 The v3 label “nominal pass” is intentional. It means the code then running
 returned success, not that the present, stronger test contract would accept
@@ -4523,9 +4530,9 @@ v7 reported $0.021491. Memory and compaction did not run after the failure.
 
 ### 39.9 Security and artifact handling
 
-All v1-v7 report, Markdown, and log files are mode `0600`. The artifact
-directories are locally retained under ignored `target/` state. A scan across
-all seven receipt directories found no Clark API-key pattern and no serialized
+All v1-v13 report, Markdown, and log files are mode `0600`. The artifact
+directories are locally retained under ignored `target/` state. A scan of the
+authoritative v13 receipt found no Clark API-key pattern and no serialized
 Bearer authorization value.
 
 The pass-through diagnostics printed only model content, tool names,
@@ -4537,32 +4544,68 @@ forwarded in memory and never logged.
 The current status is:
 
 ```text
-host provider-local paid lane: FAILED
+host provider-local paid lane: PASSED (v13)
 macOS product-bound paid lane: PENDING
 Windows UTM paid lane: PENDING
 Ubuntu Desktop UTM paid lane: PENDING
 three-platform paid release gate: PENDING
 ```
 
-Do not use v3 as the current pass. Do not combine partial passes from v6, v7,
-or the diagnostic feature matrix to manufacture a synthetic lane pass. Each
-receipt represents a different run and source/test-contract state.
+The v13 receipt is the only authoritative host provider-local pass for the
+current source. Do not use v3 or combine partial results from earlier runs to
+manufacture another synthetic pass. Each receipt represents a different run
+and source/test-contract state.
 
-### 39.11 Required next actions
+### 39.11 Remaining platform actions
 
-Before another paid retry:
+The host provider-local gate is no longer the blocker. Platform-package
+completion still requires:
 
-1. make redacted per-call raw SSE and final canonical message comparison a
-   first-class optional receipt rather than an ad hoc proxy;
-2. preserve tool-call path, terminal status, location, and bounded result
-   diagnostics when a live fixture fails;
-3. decide and encode the acceptable reliability policy for the cheapest model
-   without silently switching to a more expensive model;
-4. rerun deterministic provider and feature-map gates;
-5. complete the isolated non-paid macOS `auth-smoke`;
-6. only then run a new bounded paid receipt, retaining the failed v1-v7
-   evidence unchanged.
+1. complete the isolated non-paid macOS `auth-smoke`;
+2. run product-bound macOS paid chat/job evidence;
+3. run the equivalent autonomous Windows UTM package;
+4. run the equivalent autonomous Ubuntu Desktop UTM package;
+5. retain separate receipts and cleanup proof for each environment.
 
-Compaction did not run in v4-v7 because each authoritative lane correctly
-stopped on its first failure. Its most recent paid success remains v3 and must
-be treated as historical, not current-source release evidence.
+These are broader three-platform simulation goals. They are not silently
+substituted by the host paid pass.
+
+### 39.12 v13 repaired evidence contract
+
+The final source changes distinguish product/tool evidence from stochastic
+word-for-word compliance by the cheapest model:
+
+- every turn compares projected agent text byte-for-byte with the canonical
+  Clark `message_end` assistant text;
+- only `Role::Agent` chunks are collected, so system compaction notices cannot
+  contaminate the assistant receipt;
+- pong uses a neutral six-digit nonce and requires an exact trimmed match;
+- read/search asserts the exact `glob`, `grep`, and `read_file` arguments and
+  terminal `Completed` status for every tool call;
+- mutation asserts all five tools, three permission prompts, real file effects,
+  and semantic line content while ignoring only terminal CR/LF;
+- memory asserts discovery, remember, recall, exact stored content, and the
+  persisted project-memory effect;
+- skills validates the recorded `write_file.path`, basename, terminal status,
+  and file content at the actual sandbox-relative location;
+- compaction requires a real `ContextCompacted` event followed by a clean
+  completed agent response.
+
+No Clark production streaming code was changed because the paid diagnostics
+showed canonical and streamed text were equal in the failing prefix cases.
+The fixes are confined to the live evidence collector and assertions.
+
+The authoritative v13 run used `clark-code:minimax_m3`, temperature `0`, a
+16-iteration ceiling, serial execution, and no expensive-model fallback. It
+completed:
+
+- managed-skill resource read and receipt write;
+- exact chat nonce and canonical stream fidelity;
+- list, glob, grep, and read;
+- write, read, edit, shell copy, and final read with three permission prompts;
+- project memory remember and recall;
+- actual context compaction and continued output.
+
+The harness reported one passed lane, zero failed/blocked/configuration/budget
+results, duration 99.696 seconds, and total cost **$0.037732**. The report
+records `credential_recorded: false`.

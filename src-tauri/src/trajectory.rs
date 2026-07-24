@@ -264,7 +264,8 @@ impl CloudTrajectoryClient {
             }
             let token = self.token.read().await.clone().unwrap_or_default();
             let token_owner = crate::commands::jwt_subject(&token).map_err(|_| {
-                "cloud_account_changed: Clark signed out before this pending run could sync".to_string()
+                "cloud_account_changed: Clark signed out before this pending run could sync"
+                    .to_string()
             })?;
             if token_owner != self.owner_scope {
                 return Err(
