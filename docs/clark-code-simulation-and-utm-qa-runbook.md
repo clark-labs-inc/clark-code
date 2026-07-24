@@ -4657,3 +4657,27 @@ The known-incomplete `v0.1.78` release run `30118855793` was cancelled before
 completion rather than spending further paid calls and build minutes on a tag
 whose main CI was already red. Its tag remains immutable. The next corrected
 candidate is `v0.1.79`.
+
+### 39.15 Native-sandbox paid release gate and v0.1.80
+
+Main CI run `30119672260` confirmed the provider-test correction: Rust and
+frontend passed and all three Tauri build jobs started. Release run
+`30119673339` independently passed the deterministic provider, Tauri-host,
+frontend, sandbox, resilience, real-Superpowers, and remote-workspace
+families. The paid job then failed before its first model request because the
+GitHub Linux host installed bubblewrap but denied creation of its UID
+namespace.
+
+Granting an untrusted live model host execution would make the gate pass by
+removing the safety property it is supposed to test. The release workflow now
+uses two required jobs:
+
+- Ubuntu runs the complete deterministic pre-release benchmark with the
+  explicit `--offline` flag.
+- macOS runs the three bounded cheapest-paid scenarios under the native
+  Seatbelt sandbox and uploads a separate owner-controlled paid receipt.
+
+Both jobs are dependencies of every desktop build and the exec-server build.
+Paid calls therefore remain mandatory and default-on for releases, but they
+execute only on a host where the configured product sandbox is actually
+available. The immutable corrected candidate is `v0.1.80`.
