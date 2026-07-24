@@ -317,6 +317,29 @@ jobs:
           prerelease: false
           args: ${{ matrix.args }}
 
+      - name: Notarize and staple final macOS disk image
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          dmg="$(find target -type f -path '*/bundle/dmg/*.dmg' -print -quit)"
+          test -n "$dmg"
+          # Tauri notarizes and staples the app before it creates the signed
+          # DMG. The outer disk image must be notarized separately so Gatekeeper
+          # can validate the downloaded installer before mounting it.
+          xcrun notarytool submit "$dmg" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait
+          xcrun stapler staple "$dmg"
+          xcrun stapler validate "$dmg"
+          spctl --assess --type open --verbose=4 "$dmg"
+
       - name: Verify packaged macOS runtime layout
         if: runner.os == 'macOS'
         shell: bash
