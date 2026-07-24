@@ -2,26 +2,23 @@ use super::*;
 use agent_core::domain::PendingUpload;
 
 fn provider_test_config() -> ProviderConfig {
-    if cfg!(windows) {
-        ProviderConfig {
-            extra: serde_json::json!({"sandbox_mode": "disabled"}),
-            ..Default::default()
-        }
-    } else {
-        ProviderConfig::default()
+    ProviderConfig {
+        // Session/prompt unit tests do not execute untrusted model-authored
+        // tools. Keep them independent of host sandbox availability; sandbox
+        // selection and fail-closed behavior have dedicated contract tests.
+        extra: serde_json::json!({"sandbox_mode": "disabled"}),
+        ..Default::default()
     }
 }
 
 fn provider_test_config_with_extra(mut extra: serde_json::Value) -> ProviderConfig {
-    if cfg!(windows) {
-        extra
-            .as_object_mut()
-            .expect("test provider extras must be an object")
-            .insert(
-                "sandbox_mode".to_string(),
-                serde_json::Value::String("disabled".to_string()),
-            );
-    }
+    extra
+        .as_object_mut()
+        .expect("test provider extras must be an object")
+        .insert(
+            "sandbox_mode".to_string(),
+            serde_json::Value::String("disabled".to_string()),
+        );
     ProviderConfig {
         extra,
         ..Default::default()
@@ -434,7 +431,14 @@ async fn orchestration_tools_are_default_available_but_can_be_disabled() {
 async fn collaboration_mode_option_controls_plan_mode_independently() {
     let dir = tempfile::tempdir().unwrap();
     let mut p = LocalAgentProvider::new();
-    p.connect(provider_test_config()).await.unwrap();
+    let config = if cfg!(target_os = "macos") {
+        // This one test intentionally exercises the real Plan-mode read-only
+        // containment transition on macOS.
+        ProviderConfig::default()
+    } else {
+        provider_test_config()
+    };
+    p.connect(config).await.unwrap();
 
     let session = p
         .new_session(SessionOptions {

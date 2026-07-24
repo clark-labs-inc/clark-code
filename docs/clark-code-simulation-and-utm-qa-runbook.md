@@ -4636,3 +4636,24 @@ The corrected immutable candidate is `v0.1.78`. It must pass a fresh CI paid
 benchmark, all three native package jobs, final publication, signing and
 notarization inspection, public manifests, and direct artifact probes before
 being called released.
+
+### 39.14 Main-CI provider-test isolation and v0.1.79
+
+The subsequent main CI run `30118854624` exposed a broader version of the same
+host-capability mistake. Nine provider unit tests failed during session
+creation because the CI Rust job does not install bubblewrap. The failing
+tests cover system-prompt caching, resume state, collaboration modes,
+orchestration registration, project settings, and side questions; none
+executes an untrusted model-authored tool.
+
+The shared provider-test configuration now explicitly disables host sandboxing
+on every OS, not only Windows. This does not change product defaults.
+`provider::isolation_setup` tests continue to pin automatic sandbox
+fail-closed behavior, and the dedicated `exec-sandbox` unit and end-to-end
+lanes continue to enforce filesystem, process, network, symlink, and Windows
+setup boundaries.
+
+The known-incomplete `v0.1.78` release run `30118855793` was cancelled before
+completion rather than spending further paid calls and build minutes on a tag
+whose main CI was already red. Its tag remains immutable. The next corrected
+candidate is `v0.1.79`.
