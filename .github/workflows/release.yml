@@ -324,6 +324,7 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           dmg="$(find target -type f -path '*/bundle/dmg/*.dmg' -print -quit)"
@@ -338,7 +339,30 @@ jobs:
             --wait
           xcrun stapler staple "$dmg"
           xcrun stapler validate "$dmg"
-          spctl --assess --type open --verbose=4 "$dmg"
+          # `spctl --type open` does not assess a disk image directly on
+          # current macOS runners (it reports "Insufficient Context" even
+          # after a successful staple). Assess the mounted app instead while
+          # `stapler validate` proves the outer DMG ticket.
+          dmg_mount="$(mktemp -d)"
+          dmg_mounted=0
+          cleanup_dmg_mount() {
+            if [ "$dmg_mounted" -eq 1 ]; then
+              hdiutil detach "$dmg_mount" >/dev/null || true
+            fi
+          }
+          trap cleanup_dmg_mount EXIT
+          hdiutil attach -readonly -nobrowse -mountpoint "$dmg_mount" "$dmg" >/dev/null
+          dmg_mounted=1
+          app="$(find "$dmg_mount" -maxdepth 1 -type d -name '*.app' -print -quit)"
+          test -n "$app"
+          codesign --verify --deep --strict --verbose=4 "$app"
+          spctl --assess --type execute --verbose=4 "$app"
+          hdiutil detach "$dmg_mount" >/dev/null
+          dmg_mounted=0
+          # tauri-action uploads the initial DMG to the draft release before
+          # this step. Replace that draft asset with the stapled installer so
+          # GitHub downloads and the later CDN upload use the same bytes.
+          gh release upload "$GITHUB_REF_NAME" "$dmg#$(basename "$dmg")" --clobber
 
       - name: Verify packaged macOS runtime layout
         if: runner.os == 'macOS'
