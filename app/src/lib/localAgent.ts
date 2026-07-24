@@ -109,13 +109,6 @@ export const CODING_MODELS = [
     reasoningEfforts: ["", "xhigh", "high"],
     defaultReasoningEffort: "",
   },
-  {
-    id: "clark-code:gemini35_flash_lite",
-    label: "Gemini 3.5 Flash-Lite",
-    hint: "Efficient multimodal coding · 1M context",
-    reasoningEfforts: ["high", "medium", "low", "minimal"],
-    defaultReasoningEffort: "low",
-  },
 ] as const satisfies readonly {
   id: string;
   label: string;
@@ -123,6 +116,14 @@ export const CODING_MODELS = [
   reasoningEfforts: readonly ReasoningEffortId[];
   defaultReasoningEffort: ReasoningEffortId;
 }[];
+
+/** Keep local storage, conversation overrides, and direct callers inside the
+ * current picker catalog. Retired choices must not silently reach the provider. */
+export function normalizeCodingModel(model: string): string {
+  return CODING_MODELS.some((candidate) => candidate.id === model)
+    ? model
+    : DEFAULT_LOCAL_SETTINGS.model;
+}
 
 /** Reasoning choices for one model, in OpenRouter's advertised order. */
 export function reasoningEffortsForModel(model: string) {
@@ -146,7 +147,8 @@ export function normalizeReasoningEffort(model: string, effort: string): Reasoni
 
 /** Short display label for the current model id. */
 export function modelLabel(id: string): string {
-  return CODING_MODELS.find((m) => m.id === id)?.label ?? id;
+  const model = normalizeCodingModel(id);
+  return CODING_MODELS.find((candidate) => candidate.id === model)!.label;
 }
 
 export function loadLocalSettings(): LocalAgentSettings {
@@ -171,14 +173,15 @@ export function loadLocalSettings(): LocalAgentSettings {
 }
 
 // Older installs saved a raw OpenRouter model id (e.g. "z-ai/glm-5.2"). The
-// production Clark API only accepts Clark tier ids, which never contain "/", so
-// coerce any such stale value to the coding default — otherwise the request 400s
-// with "Unknown Clark model tier". Same for a stale reasoning effort the models
-// don't actually support (e.g. "low"/"medium" from an early build) → Auto.
+// production Clark API only accepts the current Clark tier catalog, so coerce
+// stale or retired values to the coding default — otherwise a saved selection
+// can reach the provider as an unknown tier. Same for a stale reasoning effort
+// the selected model does not support (e.g. "low"/"medium" from an early build)
+// → that model's default.
 function migrate(s: LocalAgentSettings): LocalAgentSettings {
   const savedModel = typeof s.model === "string" ? s.model : DEFAULT_LOCAL_SETTINGS.model;
   const savedEffort = typeof s.reasoningEffort === "string" ? s.reasoningEffort : "";
-  const model = savedModel.includes("/") ? DEFAULT_LOCAL_SETTINGS.model : savedModel;
+  const model = normalizeCodingModel(savedModel);
   // Return the current schema explicitly. Older builds persisted `baseUrl`
   // (often OpenRouter) and spreading the parsed object kept that misleading,
   // unused field alive forever even though Clark Code always uses Clark's API.
@@ -213,12 +216,37 @@ export interface ChatModelOverride {
   reasoningEffort: string;
 }
 
+function normalizeChatModelOverride(value: unknown): ChatModelOverride {
+  const candidate = value && typeof value === "object"
+    ? value as Partial<ChatModelOverride>
+    : {};
+  const model = normalizeCodingModel(
+    typeof candidate.model === "string" ? candidate.model : DEFAULT_LOCAL_SETTINGS.model,
+  );
+  return {
+    model,
+    reasoningEffort: normalizeReasoningEffort(
+      model,
+      typeof candidate.reasoningEffort === "string" ? candidate.reasoningEffort : "",
+    ),
+  };
+}
+
+function normalizeChatModels(models: Record<string, unknown>): Record<string, ChatModelOverride> {
+  return Object.fromEntries(
+    Object.entries(models).map(([id, value]) => [id, normalizeChatModelOverride(value)]),
+  );
+}
+
 export function loadChatModels(): Record<string, ChatModelOverride> {
   try {
     const raw = localStorage.getItem(CHAT_MODELS_KEY);
     if (!raw) return {};
     const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === "object" ? (parsed as Record<string, ChatModelOverride>) : {};
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    const models = normalizeChatModels(parsed as Record<string, unknown>);
+    if (JSON.stringify(models) !== raw) localStorage.setItem(CHAT_MODELS_KEY, JSON.stringify(models));
+    return models;
   } catch {
     return {};
   }
@@ -226,7 +254,7 @@ export function loadChatModels(): Record<string, ChatModelOverride> {
 
 export function saveChatModels(models: Record<string, ChatModelOverride>): void {
   try {
-    localStorage.setItem(CHAT_MODELS_KEY, JSON.stringify(models));
+    localStorage.setItem(CHAT_MODELS_KEY, JSON.stringify(normalizeChatModels(models)));
   } catch {
     // Non-fatal.
   }
@@ -240,14 +268,23 @@ export function effectiveModelSettings(
   chatModels: Record<string, ChatModelOverride>,
   chatId: string | null,
 ): LocalAgentSettings {
+  const baseModel = normalizeCodingModel(base.model);
   if (!chatId) {
-    return { ...base, reasoningEffort: normalizeReasoningEffort(base.model, base.reasoningEffort) };
+    return {
+      ...base,
+      model: baseModel,
+      reasoningEffort: normalizeReasoningEffort(baseModel, base.reasoningEffort),
+    };
   }
   const ov = chatModels[chatId];
   if (!ov) {
-    return { ...base, reasoningEffort: normalizeReasoningEffort(base.model, base.reasoningEffort) };
+    return {
+      ...base,
+      model: baseModel,
+      reasoningEffort: normalizeReasoningEffort(baseModel, base.reasoningEffort),
+    };
   }
-  const model = ov.model || base.model;
+  const model = normalizeCodingModel(ov.model || baseModel);
   const reasoningEffort = ov.reasoningEffort !== undefined
     ? ov.reasoningEffort
     : base.reasoningEffort;
@@ -333,13 +370,15 @@ export function localConnectConfig(
   // For a remote project the root lives on the remote host; tool I/O runs there
   // over the exec-server. The command policy is still keyed by the project path.
   const project = (remote ? remote.cwd : s.cwd).trim();
+  const model = normalizeCodingModel(s.model);
+  const reasoningEffort = normalizeReasoningEffort(model, s.reasoningEffort);
   return {
     cwd: remote ? undefined : project || undefined,
     auth_token: s.apiKey.trim() || undefined,
     extra: {
-      model: s.model.trim() || "clark-code",
+      model,
       // "" = let the model's server-side default apply.
-      ...(s.reasoningEffort.trim() ? { reasoning_effort: s.reasoningEffort.trim() } : {}),
+      ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
       // Per-project shell-command policy the engine consults to skip / block the gate.
       command_allowlist: loadAllowlist(project),
       command_denylist: loadDenylist(project),

@@ -121,7 +121,7 @@
 :root {
   --text-size-scale: 1;
   --chat-column-max-width: calc(50rem * var(--text-size-scale));
-  --composer-column-max-width: calc(35rem * var(--text-size-scale));
+  --composer-column-max-width: calc(45rem * var(--text-size-scale));
 }
 
 .chat-column-width {

@@ -541,7 +541,7 @@ export function Composer() {
       <ComposerContextBar />
       <div
         className={cn(
-          "composer-column-width relative z-10 mx-auto w-full rounded-[20px] border border-border-subtle bg-composer-surface px-2.5 py-[1.0625rem] shadow-soft transition duration-200 ease-clark",
+          "composer-column-width relative z-10 mx-auto w-full rounded-[20px] border border-border-subtle bg-composer-surface px-2.5 py-[1.375rem] shadow-soft transition duration-200 ease-clark",
           dragging
             ? "ring-2 ring-accent/40"
             : "ring-4 ring-transparent focus-within:border-accent/30 focus-within:ring-accent-subtle",

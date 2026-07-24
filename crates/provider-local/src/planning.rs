@@ -88,6 +88,25 @@ impl PlanningState {
         self.proposed_plan = Some(plan.clone());
         plan
     }
+
+    /// A completed standing goal is authoritative completion for its active
+    /// work. Keep the persisted checklist in sync even if the model omitted a
+    /// redundant final `update_plan` call.
+    pub fn complete_execution_checklist(&mut self) -> Option<ExecutionChecklist> {
+        let checklist = self.execution_checklist.as_mut()?;
+        if checklist
+            .steps
+            .iter()
+            .all(|step| step.status == ChecklistStatus::Completed)
+        {
+            return None;
+        }
+        for step in &mut checklist.steps {
+            step.status = ChecklistStatus::Completed;
+        }
+        checklist.revision = checklist.revision.saturating_add(1);
+        Some(checklist.clone())
+    }
 }
 
 /// Stable planning guidance used in the base prompt. Execution checklists are

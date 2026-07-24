@@ -28,8 +28,12 @@ export function shouldFollowConversation(
   scrollTop: number,
   nearBottom: boolean,
   scrollingToBottom = false,
+  userScrolledUp = false,
 ): boolean {
-  if (isConversationScrollUp(previousScrollTop, scrollTop)) return false;
+  // A scroll container can clamp its offset when surrounding layout changes
+  // (for example, when an in-flow control exits). Only a recorded upward user
+  // gesture should turn that mechanical offset decrease into scrollback intent.
+  if (userScrolledUp && isConversationScrollUp(previousScrollTop, scrollTop)) return false;
   return scrollingToBottom || nearBottom;
 }
 

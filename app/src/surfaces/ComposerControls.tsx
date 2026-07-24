@@ -126,7 +126,7 @@ export function ModelPill() {
       {open && (
         <div
           role="menu"
-          className="popover-surface absolute bottom-full right-0 z-30 mb-2 w-72 rounded-2xl bg-bg-elevated p-1.5 shadow-lifted ring-1 ring-border-subtle"
+          className="popover-surface absolute bottom-full right-0 z-30 mb-2 max-h-[calc(100vh-7rem)] w-72 overflow-y-auto rounded-2xl bg-bg-elevated p-1.5 shadow-lifted ring-1 ring-border-subtle"
         >
           <div className="px-2.5 py-1.5 text-xs font-medium uppercase tracking-wide text-ink-faint">
             Model
@@ -171,7 +171,10 @@ export function ModelPill() {
                   type="button"
                   role="menuitemradio"
                   aria-checked={candidate.id === effort}
-                  onClick={() => void update({ reasoningEffort: candidate.id })}
+                  onClick={() => {
+                    void update({ reasoningEffort: candidate.id });
+                    setOpen(false);
+                  }}
                   className={cn(
                     "min-h-8 flex-1 rounded-lg px-1 py-1 text-xs font-medium transition duration-200 ease-clark",
                     candidate.id === effort

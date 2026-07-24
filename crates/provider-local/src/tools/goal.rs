@@ -197,6 +197,7 @@ impl ToolExecutor for UpdateGoal {
                 );
             }
         };
+        let completes_goal = status == GoalStatus::Complete;
         let mut session = ctx.session.lock().await;
         let Some(goal) = session.goal.as_mut() else {
             return ToolOutcome::error("no goal exists for this session");
@@ -254,6 +255,19 @@ impl ToolExecutor for UpdateGoal {
             _ => unreachable!("update_goal accepts only complete or blocked"),
         };
         let state = goal.state(None);
+        let checklist = completes_goal
+            .then(|| session.planning.complete_execution_checklist())
+            .flatten();
+        let outcome = if let Some(checklist) = checklist {
+            outcome.with_signal(ToolSignal::ExecutionChecklist {
+                checklist,
+                explanation: Some(
+                    "Goal completed; marked the remaining checklist steps complete.".into(),
+                ),
+            })
+        } else {
+            outcome
+        };
         outcome.with_signal(ToolSignal::Goal(state))
     }
 }
@@ -334,6 +348,17 @@ mod tests {
         assert!(duplicate.is_error);
         assert!(duplicate.content.contains("unfinished goal"));
 
+        let checklist = crate::tools::plan::UpdatePlan
+            .invoke(
+                json!({"plan": [
+                    {"step": "Implement the site", "status": "completed"},
+                    {"step": "Verify the site", "status": "in_progress"}
+                ]}),
+                &ctx,
+            )
+            .await;
+        assert!(!checklist.is_error);
+
         let done = UpdateGoal.invoke(json!({"status": "complete"}), &ctx).await;
         assert!(!done.is_error);
         assert!(done.content.contains("UI shows the elapsed time"));
@@ -344,6 +369,28 @@ mod tests {
             ctx.session.lock().await.goal.as_ref().unwrap().status,
             GoalStatus::Complete
         );
+        assert!(matches!(
+            done.signals.as_slice(),
+            [
+                ToolSignal::ExecutionChecklist { checklist, explanation: Some(_) },
+                ToolSignal::Goal(goal),
+            ] if checklist.revision == 2
+                && checklist.steps.iter().all(|step| step.status == agent_core::domain::ChecklistStatus::Completed)
+                && goal.status == GoalStatus::Complete
+        ));
+        let persisted_checklist = ctx
+            .session
+            .lock()
+            .await
+            .planning
+            .execution_checklist
+            .clone()
+            .expect("completed checklist persisted");
+        assert_eq!(persisted_checklist.revision, 2);
+        assert!(persisted_checklist
+            .steps
+            .iter()
+            .all(|step| step.status == agent_core::domain::ChecklistStatus::Completed));
 
         // Once complete, a new goal may replace it.
         let replacement = CreateGoal

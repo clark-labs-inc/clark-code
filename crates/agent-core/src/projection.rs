@@ -3,6 +3,8 @@
 //! old web/mobile apps re-implemented separately in TypeScript — here it lives
 //! once and ships to native and WASM.
 
+mod checklist;
+
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
@@ -261,6 +263,14 @@ pub fn apply(snapshot: &mut Snapshot, event: &AgentEvent) {
                 });
             }
             snapshot.execution_checklist = Some(checklist.clone());
+            // A goal can complete before a provider emits its final checklist
+            // update. Preserve the typed goal-complete contract even when that
+            // update arrives out of order.
+            if snapshot.goal.as_ref().is_some_and(|goal| {
+                goal.status == GoalStatus::Complete && goal.run.as_ref() == Some(run)
+            }) {
+                checklist::complete_run_checklist(snapshot, run);
+            }
         }
 
         AgentEvent::ProposedPlanUpdated { run, plan } => {
@@ -284,6 +294,9 @@ pub fn apply(snapshot: &mut Snapshot, event: &AgentEvent) {
             let mut next = goal.clone();
             next.run = Some(run.clone());
             snapshot.goal = Some(next);
+            if goal.status == GoalStatus::Complete {
+                checklist::complete_run_checklist(snapshot, run);
+            }
         }
 
         AgentEvent::RunUsageUpdated { run, usage } => {

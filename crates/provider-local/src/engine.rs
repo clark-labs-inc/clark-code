@@ -583,16 +583,26 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
             }
         }
         Err(error) => {
-            // A hidden completion follow-up can fail after the model already
-            // committed a valid final answer. Capture that boundary before
-            // draining the transcript so the terminal outcome describes the
-            // unmet verification obligation, not a fictitious empty answer.
+            // A post-tool final-answer request can fail after the model has
+            // already committed a user-visible final answer or explicitly
+            // completed this run's goal. Capture those receipts before
+            // draining the transcript so the empty response is classified
+            // against the completion state it followed.
             let final_answer_committed = completed_transcript.has_final_answer();
-            let unresolved_effects = tc.session.lock().await.effects.unresolved_count(&run);
+            let (unresolved_effects, goal_completed_this_run) = {
+                let session = tc.session.lock().await;
+                (
+                    session.effects.unresolved_count(&run),
+                    session.goal.as_ref().is_some_and(|goal| {
+                        goal.status == GoalStatus::Complete && !is_completed_before_run(goal)
+                    }),
+                )
+            };
             let aborted = matches!(&error, clark_agent::LoopError::Aborted);
             let mapped = map_loop_error_with_completion_state(
                 error,
                 final_answer_committed,
+                goal_completed_this_run,
                 unresolved_effects,
             );
             // The core returns its message tail only on success. Preserve the

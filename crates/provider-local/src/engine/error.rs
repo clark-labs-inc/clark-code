@@ -39,17 +39,30 @@ pub(super) fn map_loop_error(error: clark_agent::LoopError) -> MappedLoopError {
 pub(super) fn map_loop_error_with_completion_state(
     error: clark_agent::LoopError,
     final_answer_committed: bool,
+    goal_completed: bool,
     unresolved_effects: usize,
 ) -> MappedLoopError {
     let mapped = map_loop_error(error);
-    if mapped.failure_kind == Some(RunFailureKind::EmptyResponse)
-        && final_answer_committed
-        && unresolved_effects > 0
-    {
-        MappedLoopError::verification_incomplete(unresolved_effects)
-    } else {
-        mapped
+    if mapped.failure_kind != Some(RunFailureKind::EmptyResponse) {
+        return mapped;
     }
+
+    // A final answer or a typed goal-complete signal means the work itself
+    // has already been delivered. Pending external effects remain a distinct
+    // failure because they still need canonical verification.
+    if unresolved_effects > 0 && (final_answer_committed || goal_completed) {
+        return MappedLoopError::verification_incomplete(unresolved_effects);
+    }
+
+    // `update_goal(complete)` is emitted before the model's final post-tool
+    // response. If that response is structurally empty, the completed goal is
+    // still the authoritative terminal receipt for this run. A final answer
+    // alone is not enough here: it can be followed by a user steering turn.
+    if goal_completed {
+        return MappedLoopError::completed();
+    }
+
+    mapped
 }
 
 fn map_stream_error(error: clark_agent::StreamError) -> MappedLoopError {
@@ -109,6 +122,15 @@ fn map_stream_error(error: clark_agent::StreamError) -> MappedLoopError {
 }
 
 impl MappedLoopError {
+    fn completed() -> Self {
+        Self {
+            status: RunStatus::Done,
+            run_error: None,
+            failure_kind: None,
+            ui_error: None,
+        }
+    }
+
     fn failed(failure_kind: RunFailureKind, code: &str, message: String) -> Self {
         Self {
             status: RunStatus::Failed,
@@ -172,6 +194,7 @@ mod tests {
                 observed: 2,
             },
             true,
+            false,
             2,
         );
         assert_eq!(
@@ -186,12 +209,59 @@ mod tests {
     }
 
     #[test]
+    fn completed_goal_with_pending_effects_stays_verification_incomplete() {
+        let mapped = map_loop_error_with_completion_state(
+            clark_agent::LoopError::Stream(clark_agent::StreamError::ZeroOutputTransport(
+                "provider returned no content".into(),
+            )),
+            false,
+            true,
+            1,
+        );
+        assert_eq!(
+            mapped.failure_kind,
+            Some(RunFailureKind::VerificationIncomplete)
+        );
+    }
+
+    #[test]
+    fn completed_goal_stays_done_when_its_post_tool_response_is_empty() {
+        let mapped = map_loop_error_with_completion_state(
+            clark_agent::LoopError::Stream(clark_agent::StreamError::ZeroOutputTransport(
+                "provider returned no content".into(),
+            )),
+            false,
+            true,
+            0,
+        );
+        assert_eq!(mapped.status, RunStatus::Done);
+        assert_eq!(mapped.failure_kind, None);
+        assert_eq!(mapped.run_error, None);
+        assert_eq!(mapped.ui_error, None);
+    }
+
+    #[test]
+    fn final_answer_alone_does_not_hide_a_later_empty_turn() {
+        let mapped = map_loop_error_with_completion_state(
+            clark_agent::LoopError::EmptyOutcomeBudgetExhausted {
+                budget: 1,
+                observed: 2,
+            },
+            true,
+            false,
+            0,
+        );
+        assert_eq!(mapped.failure_kind, Some(RunFailureKind::EmptyResponse));
+    }
+
+    #[test]
     fn genuinely_empty_first_answer_stays_an_empty_response() {
         let mapped = map_loop_error_with_completion_state(
             clark_agent::LoopError::EmptyOutcomeBudgetExhausted {
                 budget: 1,
                 observed: 2,
             },
+            false,
             false,
             1,
         );

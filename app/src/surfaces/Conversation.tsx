@@ -188,6 +188,7 @@ export function Conversation({
   const contentRef = useRef<HTMLDivElement>(null);
   const lastScrollTop = useRef(0);
   const scrollingToBottom = useRef(false);
+  const upwardWheel = useRef(false);
   const [showAll, setShowAll] = useState(false);
   const activity = currentActivity(snapshot);
   // Collapse history again when switching conversations.
@@ -199,14 +200,18 @@ export function Conversation({
   const onScroll = () => {
     const el = scrollRef.current;
     if (!el) return;
+    const previousScrollTop = lastScrollTop.current;
     const nearBottom = isConversationAtBottom(el.scrollHeight, el.scrollTop, el.clientHeight);
+    const movedUp = isConversationScrollUp(previousScrollTop, el.scrollTop);
+    const userScrolledUp = upwardWheel.current && movedUp;
+    upwardWheel.current = false;
     const following = shouldFollowConversation(
-      lastScrollTop.current,
+      previousScrollTop,
       el.scrollTop,
       nearBottom,
       scrollingToBottom.current,
+      userScrolledUp,
     );
-    const movedUp = isConversationScrollUp(lastScrollTop.current, el.scrollTop);
     lastScrollTop.current = el.scrollTop;
     if (movedUp || nearBottom) scrollingToBottom.current = false;
     stuck.current = following;
@@ -215,20 +220,17 @@ export function Conversation({
     }
     if (following !== atBottom) setAtBottom(following);
   };
-  const stopFollowingOnUpwardWheel = (deltaY: number) => {
-    if (deltaY >= 0) return;
-    const el = scrollRef.current;
-    scrollingToBottom.current = false;
-    stuck.current = false;
-    setAtBottom(false);
-    if (el && sessionId) {
-      scrollByConversation.set(sessionId, { scrollTop: el.scrollTop, atBottom: false });
-    }
+  const noteUpwardWheel = (deltaY: number) => {
+    // Record intent; wait for an actual scroll event before changing state. An
+    // endpoint bounce can emit a negative wheel delta without moving the
+    // transcript, and should not summon a stale "Jump to latest" button.
+    if (deltaY < 0) upwardWheel.current = true;
   };
   const scrollToBottom = () => {
     const el = scrollRef.current;
     if (el) {
       scrollingToBottom.current = true;
+      upwardWheel.current = false;
       stuck.current = true;
       setAtBottom(true);
       el.scrollTo({ top: el.scrollHeight, behavior: reduce ? "auto" : "smooth" });
@@ -408,13 +410,14 @@ export function Conversation({
   };
 
   return (
-    <div
-      ref={scrollRef}
-      onScroll={onScroll}
-      onWheel={(event) => stopFollowingOnUpwardWheel(event.deltaY)}
-      className="flex-1 overflow-y-auto"
-    >
-      <div ref={contentRef} className="chat-column-width mx-auto flex w-full flex-col gap-5 px-5 py-5">
+    <div className="relative flex min-h-0 flex-1">
+      <div
+        ref={scrollRef}
+        onScroll={onScroll}
+        onWheel={(event) => noteUpwardWheel(event.deltaY)}
+        className="min-h-0 flex-1 overflow-y-auto"
+      >
+        <div ref={contentRef} className="chat-column-width mx-auto flex w-full flex-col gap-5 px-5 py-5">
         {visible.length === 0 && !showPending && (
           <p className="py-10 text-center text-sm text-ink-faint">
             Ask Clark anything — file work, web research, and computer use show up here as it works.
@@ -520,10 +523,12 @@ export function Conversation({
             </motion.div>
           )}
         </AnimatePresence>
+        </div>
       </div>
 
-      {/* Jump-to-latest: a sticky pill (stays in the scroll flow — no positioned
-          ancestor) shown only when the user has scrolled up during/after a run. */}
+      {/* Keep this outside the scrollable transcript. Mounting or unmounting a
+          control in that flow changes scrollHeight, which can clamp scrollTop
+          and look like a fresh upward scroll. */}
       <AnimatePresence>
         {!atBottom && visible.length > 0 && (
           <motion.button
@@ -532,7 +537,7 @@ export function Conversation({
             animate={{ opacity: 1, y: 0 }}
             exit={reduce ? { opacity: 0, transition: { duration: 0 } } : { opacity: 0, y: 8 }}
             transition={{ duration: DUR.fast, ease: EASE.out }}
-            className="sticky bottom-4 left-1/2 z-10 mx-auto flex w-fit -translate-x-1/2 items-center gap-1.5 rounded-full bg-bg-elevated px-3 py-1.5 text-xs font-medium text-ink-secondary shadow-lg ring-1 ring-border-subtle transition-colors hover:text-ink"
+            className="absolute bottom-4 left-1/2 z-10 flex w-fit -translate-x-1/2 items-center gap-1.5 rounded-full bg-bg-elevated px-3 py-1.5 text-xs font-medium text-ink-secondary shadow-lg ring-1 ring-border-subtle transition-colors hover:text-ink"
           >
             <ArrowDown className="size-3.5" /> Jump to latest
           </motion.button>

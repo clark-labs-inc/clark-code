@@ -30,6 +30,100 @@ fn execution_checklist_timeline_item_deserializes() {
     }
 }
 
+#[test]
+fn completed_goal_settles_only_its_current_run_checklist() {
+    let active_run = run();
+    let other_run = RunId::new("run-other");
+    let mut snap = reduce_all(&[
+        AgentEvent::ExecutionChecklistUpdated {
+            run: other_run.clone(),
+            checklist: ExecutionChecklist {
+                steps: vec![ChecklistStep {
+                    title: "Wait for input".into(),
+                    status: ChecklistStatus::Pending,
+                    priority: None,
+                }],
+                revision: 1,
+            },
+            explanation: None,
+        },
+        AgentEvent::ExecutionChecklistUpdated {
+            run: active_run.clone(),
+            checklist: ExecutionChecklist {
+                steps: vec![
+                    ChecklistStep {
+                        title: "Implement".into(),
+                        status: ChecklistStatus::Completed,
+                        priority: None,
+                    },
+                    ChecklistStep {
+                        title: "Verify".into(),
+                        status: ChecklistStatus::InProgress,
+                        priority: None,
+                    },
+                ],
+                revision: 1,
+            },
+            explanation: None,
+        },
+    ]);
+
+    let complete = || AgentEvent::GoalUpdated {
+        run: active_run.clone(),
+        goal: GoalState {
+            id: "goal-1".into(),
+            objective: "ship the feature".into(),
+            status: GoalStatus::Complete,
+            run: None,
+            token_budget: None,
+            tokens_used: 0,
+            time_used_seconds: 1,
+            continuations: 0,
+            updated_at_ms: 1,
+            blocker_reason: None,
+        },
+    };
+    apply(&mut snap, &complete());
+    apply(&mut snap, &complete());
+
+    let active = snap
+        .timeline
+        .iter()
+        .find_map(|item| match item {
+            TimelineItem::ExecutionChecklist {
+                run: Some(checklist_run),
+                checklist,
+                ..
+            } if checklist_run == &active_run => Some(checklist),
+            _ => None,
+        })
+        .expect("active checklist");
+    assert_eq!(active.revision, 2);
+    assert!(active
+        .steps
+        .iter()
+        .all(|step| step.status == ChecklistStatus::Completed));
+    assert_eq!(
+        snap.execution_checklist.as_ref(),
+        Some(active),
+        "the current checklist mirrors the matching timeline card"
+    );
+
+    let other = snap
+        .timeline
+        .iter()
+        .find_map(|item| match item {
+            TimelineItem::ExecutionChecklist {
+                run: Some(checklist_run),
+                checklist,
+                ..
+            } if checklist_run == &other_run => Some(checklist),
+            _ => None,
+        })
+        .expect("unrelated checklist");
+    assert_eq!(other.steps[0].status, ChecklistStatus::Pending);
+}
+
 /// Conformance: applying every event variant must never panic and must
 /// settle into a sensible snapshot. This locks the reducer contract every
 /// provider relies on.

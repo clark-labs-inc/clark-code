@@ -24,9 +24,9 @@ describe("conversation scroll state", () => {
     expect(isConversationAtBottom(1_000, 304, 600)).toBe(false);
   });
 
-  it("stops following as soon as the user scrolls upward near the bottom", () => {
-    expect(shouldFollowConversation(400, 380, true)).toBe(false);
-    expect(shouldFollowConversation(400, 380, true, true)).toBe(false);
+  it("stops following as soon as a user scrolls upward near the bottom", () => {
+    expect(shouldFollowConversation(400, 380, true, false, true)).toBe(false);
+    expect(shouldFollowConversation(400, 380, true, true, true)).toBe(false);
   });
 
   it("resumes following after the user scrolls back to the bottom", () => {
@@ -35,5 +35,9 @@ describe("conversation scroll state", () => {
 
   it("keeps an explicit jump-to-latest animation pinned while it travels", () => {
     expect(shouldFollowConversation(200, 300, false, true)).toBe(true);
+  });
+
+  it("keeps following when a layout clamp lowers scrollTop at the bottom", () => {
+    expect(shouldFollowConversation(830, 800, true)).toBe(true);
   });
 });

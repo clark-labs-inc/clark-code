@@ -59,7 +59,6 @@ describe("Clark Code model settings", () => {
       { id: "clark-code:kimi_k27_code", label: "Kimi K2.7 Code" },
       { id: "clark-code:grok45", label: "Grok 4.5" },
       { id: "clark-code:deepseek_v4_pro", label: "DeepSeek V4 Pro" },
-      { id: "clark-code:gemini35_flash_lite", label: "Gemini 3.5 Flash-Lite" },
     ]);
   });
 
@@ -80,8 +79,6 @@ describe("Clark Code model settings", () => {
       .toEqual(["high", "medium", "low"]);
     expect(reasoningEffortsForModel("clark-code:deepseek_v4_pro").map(({ id }) => id))
       .toEqual(["", "xhigh", "high"]);
-    expect(reasoningEffortsForModel("clark-code:gemini35_flash_lite").map(({ id }) => id))
-      .toEqual(["high", "medium", "low", "minimal"]);
   });
 
   it("normalizes stale effort choices when the selected model changes", () => {
@@ -89,7 +86,24 @@ describe("Clark Code model settings", () => {
     expect(normalizeReasoningEffort("clark-code:kimi_k3", "xhigh")).toBe("max");
     expect(normalizeReasoningEffort("clark-code:kimi_k27_code", "high")).toBe("");
     expect(normalizeReasoningEffort("clark-code:grok45", "xhigh")).toBe("high");
-    expect(normalizeReasoningEffort("clark-code:gemini35_flash_lite", "xhigh")).toBe("low");
+  });
+
+  it("retires saved Gemini picker selections to the default model", () => {
+    store.setItem(
+      "clark-desktop:local-agent",
+      JSON.stringify({ ...DEFAULT_LOCAL_SETTINGS, model: "clark-code:gemini35_flash_lite", reasoningEffort: "low" }),
+    );
+    store.setItem(
+      "clark-desktop:chat-models",
+      JSON.stringify({
+        "chat-gemini": { model: "clark-code:gemini35_flash_lite", reasoningEffort: "low" },
+      }),
+    );
+
+    expect(loadLocalSettings()).toMatchObject({ model: "clark-code", reasoningEffort: "" });
+    expect(loadChatModels()).toEqual({
+      "chat-gemini": { model: "clark-code", reasoningEffort: "" },
+    });
   });
 
   it("drops the obsolete OpenRouter endpoint from legacy saved settings", () => {
@@ -138,6 +152,15 @@ describe("effectiveModelSettings (per-conversation model)", () => {
     expect(out.reasoningEffort).toBe("high");
   });
 
+  it("falls back when an un-migrated chat still names a retired picker model", () => {
+    const overrides: Record<string, ChatModelOverride> = {
+      "chat-1": { model: "clark-code:gemini35_flash_lite", reasoningEffort: "low" },
+    };
+
+    expect(effectiveModelSettings(DEFAULT_LOCAL_SETTINGS, overrides, "chat-1"))
+      .toMatchObject({ model: "clark-code", reasoningEffort: "" });
+  });
+
   it("one chat's override does not leak into another", () => {
     const overrides: Record<string, ChatModelOverride> = {
       "chat-1": { model: "clark-code:grok45", reasoningEffort: "" },
@@ -173,6 +196,17 @@ describe("bounded orchestration availability", () => {
       { ...DEFAULT_LOCAL_SETTINGS, cwd: "/repo" },
       { ws_url: "ws://127.0.0.1:1", token: "secret", cwd: "/remote/repo" },
     ).extra).toMatchObject({ orchestration: { enabled: false } });
+  });
+});
+
+describe("retired picker model routing", () => {
+  it("never sends a retired model tier to the provider", () => {
+    expect(localConnectConfig({
+      ...DEFAULT_LOCAL_SETTINGS,
+      cwd: "/repo",
+      model: "clark-code:gemini35_flash_lite",
+      reasoningEffort: "low",
+    }).extra).toMatchObject({ model: "clark-code" });
   });
 });
 

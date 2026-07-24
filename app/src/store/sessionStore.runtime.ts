@@ -59,6 +59,7 @@ import {
   loadChatModels,
   saveChatModels,
   effectiveModelSettings,
+  normalizeCodingModel,
   normalizeReasoningEffort,
   type LocalAgentSettings,
   type ChatModelOverride,
@@ -128,7 +129,7 @@ export {
   fileToAttachment, flushCloudPuts, getBridge, hasContent, hasUnscopedLocalHistory, hostReady, installStagedUpdate,
   latestActivityReward, liveProjectRoot, loadApprovalPolicy, loadAuthSession, loadBrowserEnabled, loadChatModels,
   loadCollaborationMode, loadLocalSettings, loadMemoriesEnabled, loadOrchestrationEnabled, loadOutputStyle, loadRecentProjects,
-  loadSshHosts, localConnectConfig, localSettingsReady, minLoadDuration, nextApprovalPolicy, normalizeReasoningEffort,
+  loadSshHosts, localConnectConfig, localSettingsReady, minLoadDuration, nextApprovalPolicy, normalizeCodingModel, normalizeReasoningEffort,
   notify, onCloudHistoryConflict, onCloudHistoryWarning, onSettingsMenuRequested, onUpdateMenuRequested, pickAllowOption,
   pickFolder, provisionCodeKey, refreshAuthSession, relaunchApp, releaseSnapshotCheckpoints, remoteTarget,
   repositoryFingerprintForRoot, resetCloudHistory, resetFanOut, saveApprovalPolicy, saveBrowserEnabled, saveChatModels, saveCollaborationMode,
@@ -565,11 +566,12 @@ export function pinChatModel(
 ): void {
   const current = get().chatModels;
   if (current[id]) return;
+  const model = normalizeCodingModel(settings.model);
   const next = {
     ...current,
     [id]: {
-      model: settings.model,
-      reasoningEffort: normalizeReasoningEffort(settings.model, settings.reasoningEffort),
+      model,
+      reasoningEffort: normalizeReasoningEffort(model, settings.reasoningEffort),
     },
   };
   saveChatModels(next);

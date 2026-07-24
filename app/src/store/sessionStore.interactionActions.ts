@@ -23,6 +23,7 @@ import {
   localConnectConfig,
   newLiveEntry,
   nextApprovalPolicy,
+  normalizeCodingModel,
   normalizeReasoningEffort,
   notify,
   pickAllowOption,
@@ -97,7 +98,7 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
         model: localSettings.model,
         reasoningEffort: localSettings.reasoningEffort,
       };
-      effectiveModel = model !== undefined ? model : ov.model;
+      effectiveModel = normalizeCodingModel(model !== undefined ? model : ov.model);
       effectiveEffort = normalizeReasoningEffort(
         effectiveModel,
         reasoningEffort !== undefined ? reasoningEffort : ov.reasoningEffort,
@@ -109,7 +110,7 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
       saveChatModels(nextChatModels);
       set({ chatModels: nextChatModels });
     } else {
-      const nextModel = model !== undefined ? model : localSettings.model;
+      const nextModel = normalizeCodingModel(model !== undefined ? model : localSettings.model);
       nextLocal = {
         ...localSettings,
         model: nextModel,
