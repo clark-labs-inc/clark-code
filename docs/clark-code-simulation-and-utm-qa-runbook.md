@@ -4609,3 +4609,30 @@ completed:
 The harness reported one passed lane, zero failed/blocked/configuration/budget
 results, duration 99.696 seconds, and total cost **$0.037732**. The report
 records `credential_recorded: false`.
+
+### 39.13 v0.1.77 release-gate failure and v0.1.78 correction
+
+Tag `v0.1.77` was pushed only after the local paid and deterministic receipts
+passed. Its GitHub release run `30117823012` then failed in the pre-release
+benchmark, so all native build and publish jobs were skipped. It is a retained
+failed tag, not a published release, and must never be moved or reused.
+
+The independent CI receipt exposed two configuration boundaries:
+
+1. The synthetic skill-experience provider-wire test inherited automatic
+   Linux bubblewrap containment. GitHub's hosted runner had bubblewrap
+   installed but denied the required user-namespace UID map. This scripted
+   fixture makes no live model call and executes no model-authored tool call,
+   so its provider configuration now explicitly selects disabled host
+   sandboxing. The separate sandbox contract and end-to-end containment lanes
+   remain unchanged and release-blocking.
+2. `CLARK_CODE_PRERELEASE_LIVE` defaulted to `1`, but the repository had no
+   `CLARK_CODE_PRERELEASE_API_KEY` Actions secret. The already-authorized local
+   Clark eval credential was installed as that encrypted repository secret
+   without printing it or writing it to tracked files. Paid release calls
+   remain enabled by default; the workflow was not weakened to offline mode.
+
+The corrected immutable candidate is `v0.1.78`. It must pass a fresh CI paid
+benchmark, all three native package jobs, final publication, signing and
+notarization inspection, public manifests, and direct artifact probes before
+being called released.

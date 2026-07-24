@@ -43,6 +43,11 @@ pub async fn launch_and_prompt(
         "memories": false,
         "research": false,
         "auto_compact": false,
+        // This benchmark talks only to its in-process scripted model and never
+        // executes a model-authored tool call. Make that host boundary explicit
+        // so a CI host that forbids bubblewrap user namespaces does not turn a
+        // provider-wire contract test into a platform sandbox preflight.
+        "sandbox_mode": "disabled",
         "orchestration": {"enabled": false}
     });
     if let Some(remote) = remote {
