@@ -108,6 +108,9 @@ jobs:
       # shell tools. GitHub's Linux runners block bubblewrap UID namespaces, so
       # this gate runs under the real macOS Seatbelt backend instead of
       # weakening containment or granting host execution.
+      - name: Install Clark Code tool dependencies
+        run: brew install ripgrep
+
       - name: Run cheapest-paid live Clark Code scenarios
         run: |
           node harness/feature-matrix.mjs \

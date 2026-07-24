@@ -4681,3 +4681,18 @@ Both jobs are dependencies of every desktop build and the exec-server build.
 Paid calls therefore remain mandatory and default-on for releases, but they
 execute only on a host where the configured product sandbox is actually
 available. The immutable corrected candidate is `v0.1.80`.
+
+### 39.16 macOS runner tool dependency and v0.1.81
+
+Release run `30120556214` proved that the macOS Seatbelt boundary was active
+and that the paid model could complete the neutral chat probe plus the
+`list_dir`, `glob`, and `read_file` calls. Its `grep` call failed because the
+GitHub macOS runner did not provide the `rg` executable used by Clark Code's
+grep implementation. This was a deterministic runner-dependency failure, not
+a model-quality or sandbox failure.
+
+The paid release job now installs `ripgrep` before invoking the live feature
+matrix. It does not disable or weaken Seatbelt, and the paid scenario still
+requires every model-authored tool call to reach a terminal completed status.
+The incomplete `v0.1.80` run was cancelled to avoid wasting build minutes; its
+tag remains immutable. The corrected candidate is `v0.1.81`.
