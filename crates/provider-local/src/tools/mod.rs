@@ -30,6 +30,7 @@ pub mod apply_patch;
 pub mod browser;
 pub mod clark;
 mod clark_progress;
+pub mod computer_use;
 mod deferred;
 pub mod diagnostics;
 pub mod document;
@@ -106,6 +107,34 @@ pub enum ToolPermissionClass {
     LocalMutation,
     External,
     BrokeredClarkCloud,
+}
+
+/// Invocation-specific permission identity. Most tools are gated by their
+/// static tool name; capabilities that cross a finer trust boundary can bind
+/// remembered decisions to a narrower key (for example one target app).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PermissionScope {
+    pub key: String,
+    pub title: Option<String>,
+    pub always_label: Option<String>,
+    pub reason: Option<String>,
+    /// Optional request risk override. `"confirm"` is reserved for actions
+    /// that must receive an explicit human answer even under Full access.
+    pub risk: Option<String>,
+    /// False for one-off or unusually sensitive actions. The permission UI
+    /// omits its "always" choice and the gate refuses to persist one.
+    pub remember: bool,
+    /// Trusted invocation-specific authorization already exists. This is
+    /// computed by the executor from native state, never accepted from model
+    /// arguments, and bypasses the generic session policy prompt.
+    pub preapproved: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ToolPermissionDecision {
+    AllowOnce,
+    AllowAlways,
+    Denied,
 }
 
 impl ToolPermissionClass {
@@ -355,6 +384,16 @@ pub trait ToolExecutor: Send + Sync {
             ToolPermissionClass::LocalRead
         }
     }
+    /// Optional invocation-specific permission scope. The key is internal
+    /// session policy state; title/labels/reason are presentation only.
+    fn permission_scope(&self, _args: &Value) -> Option<PermissionScope> {
+        None
+    }
+    /// Validate safety-critical arguments before the permission gate can
+    /// display or remember an approval. Tool bodies must validate again.
+    fn permission_preflight(&self, _args: &Value) -> Result<(), String> {
+        Ok(())
+    }
     /// A durable or externally visible effect this invocation may produce.
     /// Authorization and effect verification are deliberately separate: a
     /// user can approve an action without asserting that its final state is
@@ -366,6 +405,17 @@ pub trait ToolExecutor: Send + Sync {
     /// gate so the user reviews edits *before* they touch disk. Default: none.
     fn preview(&self, _args: &Value, _ctx: &ToolCtx) -> Option<String> {
         None
+    }
+    /// Apply a permission answer to a capability whose authorization is owned
+    /// by a trusted backend. Called while the desktop permission queue is
+    /// still held, before a remembered generic policy is made visible.
+    async fn permission_decision(
+        &self,
+        _args: &Value,
+        _decision: ToolPermissionDecision,
+        _ctx: &ToolCtx,
+    ) -> Result<(), String> {
+        Ok(())
     }
     async fn invoke(&self, args: Value, ctx: &ToolCtx) -> ToolOutcome;
 }
@@ -508,6 +558,29 @@ impl ToolRegistry {
         self.register_deferred(Arc::new(browser::BrowserTool::new()));
     }
 
+    /// Register the opt-in desktop observation and input tools. All executors
+    /// share one backend so observation freshness, rate limits, and window
+    /// identity are enforced across calls.
+    pub fn enable_computer_use(&mut self, backend: Arc<dyn computer_use::ComputerBackend>) {
+        for tool in computer_use::executors(backend) {
+            // Perception is the entry point and recovery path for the whole
+            // observe-before-act state machine. Keep it visible whenever the
+            // user has enabled computer use so a resumed session cannot retain
+            // action names from its transcript while losing the only safe way
+            // to mint fresh observation capabilities. Mutating input tools
+            // remain deferred until the model searches for the needed action.
+            match tool.name() {
+                "computer_permissions"
+                | "computer_request_permissions"
+                | "computer_list_windows"
+                | "computer_open_app"
+                | "computer_get_state"
+                | "computer_commit_action" => self.register_eager(tool),
+                _ => self.register_deferred(tool),
+            }
+        }
+    }
+
     /// Register Clark-platform-backed image generation/editing when a signed-in
     /// session has a platform key. The key stays between Desktop and Clark;
     /// the relay owns provider credentials and billing.
@@ -520,9 +593,12 @@ impl ToolRegistry {
     /// mobile SDK or emulator on their SSH host through the remote shell.
     pub fn disable_desktop_mobile_tools(&mut self) {
         self.tools.retain(|tool| {
-            !tool.name().starts_with("android_") && !tool.name().starts_with("ios_")
+            !tool.name().starts_with("android_")
+                && !tool.name().starts_with("ios_")
+                && !tool.name().starts_with("computer_")
         });
-        self.deferred_catalog.remove_prefix(&["android_", "ios_"]);
+        self.deferred_catalog
+            .remove_prefix(&["android_", "ios_", "computer_"]);
     }
 
     /// Register the bounded orchestration tools. Explicitly disabled and

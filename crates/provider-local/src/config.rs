@@ -37,10 +37,24 @@ pub const DEFAULT_AUTO_COMPACT_TOKEN_LIMIT: usize = 300_000;
 /// engine's overflow-recovery path.
 fn model_context_window(model: &str) -> Option<usize> {
     match model {
-        "clark-code" => Some(1_000_000),                 // GLM 5.2
-        "clark-code:kimi_k3" => Some(1_000_000),         // "1M context"
-        "clark-code:grok45" => Some(500_000),            // "500K context"
-        "clark-code:deepseek_v4_pro" => Some(1_000_000), // "1M context"
+        "clark-code" => Some(1_000_000),                     // GLM 5.2
+        "clark-code:minimax_m3" => Some(1_000_000),          // "1M context"
+        "clark-code:kimi_k3" => Some(1_000_000),             // "1M context"
+        "clark-code:kimi_k27_code" => Some(262_144),         // observed provider contract
+        "clark-code:grok45" => Some(500_000),                // "500K context"
+        "clark-code:deepseek_v4_pro" => Some(1_000_000),     // "1M context"
+        "clark-code:gemini35_flash_lite" => Some(1_000_000), // "1M context"
+        _ => None,
+    }
+}
+
+/// Provider-safe output ceilings for models whose upstream default would
+/// otherwise consume the entire context window. Kimi K2.7's provider defaults
+/// to 262,144 output tokens when omitted, which makes every non-empty prompt
+/// invalid against its 262,144-token total context.
+pub(crate) fn model_max_output_tokens(model: &str) -> Option<u32> {
+    match model {
+        "clark-code:kimi_k27_code" => Some(32_768),
         _ => None,
     }
 }
@@ -48,17 +62,20 @@ fn model_context_window(model: &str) -> Option<usize> {
 /// Whether the selected coding tier accepts image content parts directly.
 /// Models not listed here keep using the separate vision-description fallback.
 pub(crate) fn model_supports_images(model: &str) -> bool {
-    matches!(model, "clark-code:kimi_k3")
+    matches!(
+        model,
+        "clark-code:minimax_m3" | "clark-code:kimi_k3" | "clark-code:gemini35_flash_lite"
+    )
 }
 
 /// Effective auto-compaction threshold for `model`: the flat default, lowered
-/// (never raised — 300k on a 1M window is a deliberate cost choice) to 90% of
+/// (never raised — 300k on a 1M window is a deliberate cost choice) to 80% of
 /// the model's known context window when that is smaller. Applied
 /// defensively: a model whose whole window is under the flat default must
 /// compact before it overflows, not after.
 pub(crate) fn default_auto_compact_limit(model: &str) -> usize {
     match model_context_window(model) {
-        Some(window) => DEFAULT_AUTO_COMPACT_TOKEN_LIMIT.min(window / 10 * 9),
+        Some(window) => DEFAULT_AUTO_COMPACT_TOKEN_LIMIT.min(window.saturating_mul(4) / 5),
         None => DEFAULT_AUTO_COMPACT_TOKEN_LIMIT,
     }
 }
@@ -111,9 +128,9 @@ pub struct LocalConfig {
     /// exec-server) rather than locally. The host fills this in after it brings
     /// up the SSH tunnel + server.
     pub remote: Option<RemoteTarget>,
-    /// Local OS containment policy. `Auto` uses a ready backend and otherwise
-    /// reports host execution; `Required` fails session creation if containment
-    /// cannot be established; `Disabled` is an explicit host-capability mode.
+    /// Local OS containment policy. `Auto` and `Required` fail session creation
+    /// when containment cannot be established; `Disabled` is an explicit
+    /// host-capability mode.
     pub sandbox_mode: LocalSandboxMode,
     /// Whether durable memory is enabled — exposes the `memory` tool and injects
     /// the project + global memory into the system prompt. On by default; the
@@ -128,6 +145,12 @@ pub struct LocalConfig {
     /// downloaded on first use). Off by default — the user opts in from
     /// Settings (`extra.browser_enabled = true`).
     pub browser_enabled: bool,
+    /// Opt-in control of ordinary apps on the local Mac. The tool layer still
+    /// enforces per-app permission scopes and macOS TCC independently.
+    pub computer_use_enabled: bool,
+    /// Native in production; the deterministic simulator is accepted only by
+    /// debug builds and test harnesses.
+    pub computer_use_backend: ComputerUseBackend,
     /// Bounded local multi-agent orchestration. Available by default, while its
     /// model-facing policy remains explicit-request-only.
     pub(crate) orchestration: crate::orchestration::OrchestrationConfig,
@@ -141,6 +164,24 @@ pub enum LocalSandboxMode {
     Auto,
     Required,
     Disabled,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ComputerUseBackend {
+    Native,
+    Simulated,
+}
+
+impl ComputerUseBackend {
+    fn from_extra(extra: &Value) -> Self {
+        if cfg!(debug_assertions)
+            && extra.get("computer_use_backend").and_then(Value::as_str) == Some("simulated")
+        {
+            Self::Simulated
+        } else {
+            Self::Native
+        }
+    }
 }
 
 impl LocalSandboxMode {
@@ -291,6 +332,11 @@ impl LocalConfig {
             .get("browser_enabled")
             .and_then(Value::as_bool)
             .unwrap_or(false);
+        let computer_use_enabled = extra
+            .get("computer_use_enabled")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let computer_use_backend = ComputerUseBackend::from_extra(extra);
         let mut orchestration = crate::orchestration::OrchestrationConfig::from_extra(extra);
         let execution = crate::root_execution::RootExecutionConfig::from_extra(extra);
 
@@ -363,6 +409,8 @@ impl LocalConfig {
             project_knowledge_enabled,
             compaction,
             browser_enabled,
+            computer_use_enabled,
+            computer_use_backend,
             orchestration,
             execution,
         }
@@ -411,6 +459,8 @@ mod tests {
             DEFAULT_COMPACT_REQUEST_TOKEN_LIMIT
         );
         assert_eq!(cfg.mode_for("bash"), PermissionMode::Ask);
+        assert!(!cfg.computer_use_enabled);
+        assert_eq!(cfg.computer_use_backend, ComputerUseBackend::Native);
         assert!(cfg.orchestration.enabled);
         assert_eq!(
             cfg.orchestration.mode,
@@ -423,10 +473,23 @@ mod tests {
     }
 
     #[test]
-    fn kimi_k3_supports_native_images_by_default() {
+    fn current_multimodal_model_options_support_native_images() {
+        assert!(model_supports_images("clark-code:minimax_m3"));
         assert!(model_supports_images("clark-code:kimi_k3"));
+        assert!(model_supports_images("clark-code:gemini35_flash_lite"));
         assert!(!model_supports_images("clark-code"));
         assert!(!model_supports_images("clark-code:kimi_k27_code"));
+    }
+
+    #[test]
+    fn new_efficient_options_use_their_product_stated_context_windows() {
+        for model in ["clark-code:minimax_m3", "clark-code:gemini35_flash_lite"] {
+            assert_eq!(model_context_window(model), Some(1_000_000));
+            assert_eq!(
+                default_auto_compact_limit(model),
+                DEFAULT_AUTO_COMPACT_TOKEN_LIMIT
+            );
+        }
     }
 
     #[test]
@@ -438,6 +501,22 @@ mod tests {
         assert_eq!(
             default_auto_compact_limit("clark-code:deepseek_v4_pro"),
             DEFAULT_AUTO_COMPACT_TOKEN_LIMIT
+        );
+    }
+
+    #[test]
+    fn kimi_k27_reserves_context_for_a_bounded_completion() {
+        assert_eq!(
+            model_context_window("clark-code:kimi_k27_code"),
+            Some(262_144)
+        );
+        assert_eq!(
+            model_max_output_tokens("clark-code:kimi_k27_code"),
+            Some(32_768)
+        );
+        assert_eq!(
+            default_auto_compact_limit("clark-code:kimi_k27_code"),
+            209_715
         );
     }
 

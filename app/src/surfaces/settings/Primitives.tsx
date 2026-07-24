@@ -46,7 +46,17 @@ export function Row({
   );
 }
 
-export function Toggle({ on, onClick, label }: { on: boolean; onClick: () => void; label: string }) {
+export function Toggle({
+  on,
+  onClick,
+  label,
+  disabled = false,
+}: {
+  on: boolean;
+  onClick: () => void;
+  label: string;
+  disabled?: boolean;
+}) {
   return (
     <button
       type="button"
@@ -54,7 +64,8 @@ export function Toggle({ on, onClick, label }: { on: boolean; onClick: () => voi
       aria-checked={on}
       aria-label={label}
       onClick={onClick}
-      className="grid size-8 shrink-0 place-items-center rounded-lg outline-none transition hover:bg-bg-hover focus-visible:ring-2 focus-visible:ring-accent/40"
+      disabled={disabled}
+      className="grid size-8 shrink-0 place-items-center rounded-lg outline-none transition hover:bg-bg-hover focus-visible:ring-2 focus-visible:ring-accent/40 disabled:pointer-events-none disabled:opacity-40"
     >
       <span
         className={cn(

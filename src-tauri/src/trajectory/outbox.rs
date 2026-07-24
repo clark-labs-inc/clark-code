@@ -18,6 +18,7 @@ mod recovery;
 mod schema;
 mod storage;
 pub(crate) use barrier::wait_for_acknowledged_prefix;
+pub(crate) use recovery::interrupt_live_runs;
 use storage::{open, owner_key, sql_error};
 
 #[derive(Clone)]
@@ -38,6 +39,16 @@ pub struct PendingBatch {
 pub struct RecoveredSnapshot {
     pub snapshot: Snapshot,
     pub pending: bool,
+    /// Cached conversation metadata used only when the cloud GET is
+    /// temporarily unavailable. It lets the WebView publish a recovered
+    /// terminal snapshot once connectivity returns without inventing a new
+    /// conversation identity.
+    pub metadata: Option<Value>,
+    /// Recovery replayed local events or synthesized an interruption that the
+    /// cloud snapshot has not yet absorbed. Keep this separate from `pending`:
+    /// event delivery can be acknowledged before the corresponding full
+    /// snapshot is published.
+    pub needs_snapshot_publication: bool,
 }
 
 impl TrajectoryOutbox {

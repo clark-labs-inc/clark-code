@@ -1,10 +1,9 @@
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 use futures::{stream, StreamExt, TryStreamExt};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use tokio_util::sync::CancellationToken;
 use url::Url;
 
 use crate::exec::Executor;
@@ -12,9 +11,10 @@ use crate::git_metadata::{
     optional as git_optional, required as git_required, succeeds as git_succeeds,
 };
 
-const DISCOVERY_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_HISTORY_BATCH: usize = 250;
 const MAX_DISCOVERED_REPOSITORIES: usize = 100;
+const MAX_DISCOVERY_DEPTH: usize = 8;
+const MAX_DISCOVERY_DIRECTORIES: usize = 20_000;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RepositoryRemote {
@@ -68,6 +68,7 @@ pub async fn inspect_repository(
         return Ok(None);
     };
     let repo_root = PathBuf::from(top_level.trim());
+    let repo_root = exec.canonicalize(&repo_root).await.unwrap_or(repo_root);
     let head_args = ["rev-parse", "--verify", "HEAD"];
     let branch_args = ["symbolic-ref", "--quiet", "--short", "HEAD"];
     let roots_args = ["rev-list", "--max-parents=0", "--all"];
@@ -217,26 +218,34 @@ pub async fn discover_repositories(
     exec: &dyn Executor,
     root: &Path,
 ) -> Result<Vec<RepositoryIdentity>, String> {
-    let command = r"find . -mindepth 1 -maxdepth 8 \
-        \( -type d \( -name node_modules -o -name target -o -name .cache -o -name .venv \) -prune \) -o \
-        \( \( -type d -o -type f \) -name .git -print \)";
-    let output = exec
-        .exec(command, root, DISCOVERY_TIMEOUT, &CancellationToken::new())
-        .await?;
     let mut candidates = vec![root.to_path_buf()];
-    if output.code == Some(0) {
-        for path in String::from_utf8_lossy(&output.stdout).lines() {
-            let path = path.trim();
-            if path.is_empty() {
-                continue;
-            }
-            let git_path = root.join(path);
-            if let Some(repository_root) = git_path.parent() {
-                candidates.push(repository_root.to_path_buf());
-            }
-            if candidates.len() > MAX_DISCOVERED_REPOSITORIES {
+    let mut pending = VecDeque::from([(root.to_path_buf(), 0usize)]);
+    let mut inspected = 0usize;
+    while let Some((directory, depth)) = pending.pop_front() {
+        if inspected >= MAX_DISCOVERY_DIRECTORIES || candidates.len() >= MAX_DISCOVERED_REPOSITORIES
+        {
+            break;
+        }
+        inspected += 1;
+        let Ok(entries) = exec.read_dir(&directory).await else {
+            continue;
+        };
+        for entry in entries {
+            if entry.name == ".git" {
+                candidates.push(directory.clone());
                 break;
             }
+            if depth >= MAX_DISCOVERY_DEPTH
+                || !entry.is_dir
+                || entry.is_symlink
+                || matches!(
+                    entry.name.as_str(),
+                    "node_modules" | "target" | ".cache" | ".venv"
+                )
+            {
+                continue;
+            }
+            pending.push_back((directory.join(entry.name), depth + 1));
         }
     }
     let linked = stream::iter(candidates.clone())

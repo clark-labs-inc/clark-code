@@ -31,6 +31,7 @@ import {
   SettingsNavigation,
 } from "./settings/SettingsNavigation";
 import { AboutSection } from "./settings/AboutSection";
+import { ComputerUseSection } from "./settings/ComputerUseSection";
 
 const input =
   "w-full rounded-lg border border-border bg-bg px-2.5 py-1.5 text-sm text-ink outline-none transition focus:border-accent placeholder:text-ink-muted";
@@ -733,6 +734,7 @@ export function Settings({
               {section === "integrations" && <IntegrationsSection />}
               {section === "commands" && <CommandsSection />}
               {section === "account" && <AccountSection />}
+              {section === "computer-use" && <ComputerUseSection />}
               {section === "about" && <AboutSection />}
             </div>
           </main>

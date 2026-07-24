@@ -16,6 +16,15 @@ function inTauri(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
 
+async function updatesEnabled(): Promise<boolean> {
+  if (!inTauri()) return false;
+  try {
+    return await invoke<boolean>("app_updates_enabled");
+  } catch {
+    return false;
+  }
+}
+
 export interface StagedUpdate {
   version: string;
   notes?: string;
@@ -47,7 +56,7 @@ let stagedUpdate: Update | null = null;
 export async function checkAndStageUpdate(
   onProgress?: (p: DownloadProgress) => void,
 ): Promise<UpdateCheckResult> {
-  if (!inTauri()) return { status: "unavailable" };
+  if (!(await updatesEnabled())) return { status: "unavailable" };
   let candidate: Update | null = null;
   try {
     const { check } = await import("@tauri-apps/plugin-updater");

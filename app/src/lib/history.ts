@@ -8,8 +8,8 @@
 // This module keeps the small pure helpers the rest of the app still uses
 // (ConversationMeta shape, title derivation, content check, run-settling of a
 // persisted snapshot) plus `drainLocalHistory` — a one-time reader that lifts
-// any chats left behind by prior local-first versions into memory so the store
-// can upload them to the cloud, then deletes the local keys.
+// only chats tied to the authenticated account from prior local-first versions
+// into memory, then deletes just those matching local keys.
 
 import {
   normalizeSnapshot,
@@ -58,10 +58,9 @@ function safeStore(): Storage | null {
   }
 }
 
-/** A persisted transcript is never live: coerce any non-terminal run to a
- *  settled status, settle tool calls the same way, and drop a stale permission
- *  prompt, so a reopened (or reloaded) conversation never shows a stuck
- *  "Thinking…", a spinning tool chip, or a dead prompt. */
+/** Settle a legacy device-local snapshot before one-time migration. Do not use
+ * this for cloud reads: another desktop may still own that live run, and the
+ * service trajectory status is the authoritative lifecycle boundary. */
 export function settleRuns(snapshot: Snapshot): Snapshot {
   snapshot = migratePlanningSnapshot(snapshot);
   let changed = false;
@@ -338,31 +337,41 @@ export interface DrainedConversation {
   archived: boolean;
 }
 
-/** Read every conversation left in localStorage by prior (local-first) versions
- *  — the old global `clark.history.*` keys AND the per-account scoped keys from
- *  v0.1.19 — return them so the store can upload them to the cloud, and delete
- *  every one of those keys. Self-cleaning: once drained, a later launch finds
- *  nothing to migrate. Preferences and the auth session use different keys and
- *  are untouched. */
-export function drainLocalHistory(): DrainedConversation[] {
+/** Whether an old global cache is present. It has no authenticated-account
+ * binding, so it must never be silently claimed by whoever signs in next. */
+export function hasUnscopedLocalHistory(): boolean {
+  return safeStore()?.getItem("clark.history.index.v1") !== null;
+}
+
+/** Read conversations left by prior local-first versions only when their saved
+ * account scope matches an authenticated stable account id or email. An old
+ * global cache has no owner and is deliberately left untouched; deleting or
+ * uploading it during another person's sign-in would leak their history. */
+export function drainLocalHistory(scopes: readonly string[]): DrainedConversation[] {
   const store = safeStore();
   if (!store) return [];
 
-  // Index keys: "clark.history.index.v1" (legacy global) or
-  // "clark.history.index.v1.<scope>" (per-account, v0.1.19).
-  const INDEX_RE = /^clark\.history\.index\.v1(?:\.(.+))?$/;
-  const indexKeys: string[] = [];
+  const acceptedScopes = new Set(
+    scopes.map((scope) => scope.trim().toLowerCase()).filter(Boolean),
+  );
+  if (acceptedScopes.size === 0) return [];
+
+  const indexPrefix = "clark.history.index.v1.";
+  const indexKeys: Array<{ key: string; scope: string }> = [];
   for (let i = 0; i < store.length; i++) {
-    const k = store.key(i);
-    if (k && INDEX_RE.test(k)) indexKeys.push(k);
+    const key = store.key(i);
+    if (!key?.startsWith(indexPrefix)) continue;
+    const scope = key.slice(indexPrefix.length);
+    if (scope && acceptedScopes.has(scope.trim().toLowerCase())) {
+      indexKeys.push({ key, scope });
+    }
   }
 
   const out: DrainedConversation[] = [];
   const remove: string[] = [];
 
-  for (const idxKey of indexKeys) {
+  for (const { key: idxKey, scope } of indexKeys) {
     remove.push(idxKey);
-    const scopeSuffix = idxKey.match(INDEX_RE)?.[1] ? `${idxKey.match(INDEX_RE)![1]}.` : "";
     let list: ConversationMeta[] = [];
     try {
       list = JSON.parse(store.getItem(idxKey) || "[]") as ConversationMeta[];
@@ -370,7 +379,7 @@ export function drainLocalHistory(): DrainedConversation[] {
       list = [];
     }
     for (const meta of list) {
-      const snapKey = `clark.history.snap.v1.${scopeSuffix}${meta.id}`;
+      const snapKey = `clark.history.snap.v1.${scope}.${meta.id}`;
       remove.push(snapKey);
       const raw = store.getItem(snapKey);
       if (!raw) continue;

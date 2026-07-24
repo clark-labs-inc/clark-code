@@ -38,6 +38,25 @@ Render review frames without encoding the videos:
 python3 render_google_ads_videos.py --preview
 ```
 
+## Google Ads image set
+
+| File | Positioning | Format |
+| --- | --- | --- |
+| `clark-code-google-square-01-vs-claude.png` | Direct Claude Code comparison | 1200×1200 |
+| `clark-code-google-square-02-parallel-agents.png` | Thousands of parallel agents | 1200×1200 |
+| `clark-code-google-square-03-persistent-context.png` | Persistent repository context | 1200×1200 |
+| `clark-code-google-vertical-04-outgrow-terminal.png` | Policy-safer native workspace pitch | 960×1200 (4:5) |
+
+The typography and product compositing are deterministic. The product frames
+are unmodified captures of the current Clark Desktop UI; generated artwork is
+used only for the four abstract campaign backplates.
+
+Regenerate the upload-ready images with:
+
+```sh
+python3 render_google_ads_images.py
+```
+
 ## Regenerating the images
 
 The card is a single viewport-filling HTML; render it at each platform size:

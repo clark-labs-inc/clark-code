@@ -1,5 +1,6 @@
 mod support;
 
+use std::path::Path;
 #[cfg(unix)]
 use std::time::Duration;
 
@@ -12,6 +13,24 @@ use provider_local::{
 use serde_json::json;
 
 use support::{canonical, final_body, scripted_model, tool_call_body, GitFixture};
+
+fn contains_path_evidence(text: &str, expected: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        let normalize = |value: &str| {
+            value
+                .replace("\\\\?\\UNC\\", "//")
+                .replace("\\\\?\\", "")
+                .replace('\\', "/")
+                .to_ascii_lowercase()
+        };
+        normalize(text).contains(&normalize(&expected.to_string_lossy()))
+    }
+    #[cfg(not(windows))]
+    {
+        text.contains(expected.to_string_lossy().as_ref())
+    }
+}
 
 #[tokio::test]
 async fn discovers_linked_worktrees_outside_the_selected_checkout() {
@@ -131,12 +150,13 @@ async fn clark_code_runs_real_git_and_edits_only_the_selected_worktree() {
     // Deliberately use plain Git here. The executor must supply the safe
     // optional-lock/fsmonitor environment even when the model omits flags.
     let git_command =
-        "git rev-parse --show-toplevel && git rev-parse --abbrev-ref HEAD && git status --short";
+        "git rev-parse --show-toplevel; git rev-parse --abbrev-ref HEAD; git status --short";
+    let git_timeout_ms = if cfg!(windows) { 30_000 } else { 5_000 };
     let (base_url, captured) = scripted_model(vec![
         tool_call_body(
             "git-state",
             "bash",
-            json!({"command": git_command, "timeout_ms": 5_000}),
+            json!({"command": git_command, "timeout_ms": git_timeout_ms}),
         ),
         tool_call_body(
             "write-marker",
@@ -154,7 +174,8 @@ async fn clark_code_runs_real_git_and_edits_only_the_selected_worktree() {
             extra: json!({
                 "base_url": base_url,
                 "model": "scripted-worktree-model",
-                "memories": false
+                "memories": false,
+                "sandbox_mode": "disabled"
             }),
             ..Default::default()
         })
@@ -237,7 +258,7 @@ async fn clark_code_runs_real_git_and_edits_only_the_selected_worktree() {
     assert_eq!(requests.len(), 3);
     let git_result_request = requests[1].tool_results().join("\n");
     assert!(
-        git_result_request.contains(&fixture.detached.to_string_lossy().to_string()),
+        contains_path_evidence(&git_result_request, &fixture.detached),
         "Git tool result did not report the selected worktree: {git_result_request}"
     );
     assert!(
@@ -246,7 +267,7 @@ async fn clark_code_runs_real_git_and_edits_only_the_selected_worktree() {
     );
     let first_user_context = requests[0].messages_for_role("user").join("\n");
     assert!(
-        first_user_context.contains(&fixture.detached.to_string_lossy().to_string()),
+        contains_path_evidence(&first_user_context, &fixture.detached),
         "first turn did not carry the selected checkout context: {first_user_context}"
     );
 }

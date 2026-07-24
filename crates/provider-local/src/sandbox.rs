@@ -55,7 +55,7 @@ impl Sandbox {
     /// own `--root` confinement and the local safety gate both still apply.
     pub fn new_remote(root: &str) -> Result<Self, String> {
         let p = PathBuf::from(root);
-        if !p.is_absolute() {
+        if !remote_path_is_absolute(root) {
             return Err(format!(
                 "remote project root must be an absolute path: {root}"
             ));
@@ -152,7 +152,7 @@ impl Sandbox {
 
     fn join(&self, path: &str) -> PathBuf {
         let p = Path::new(path);
-        if p.is_absolute() {
+        if p.is_absolute() || (self.mode == Mode::Remote && remote_path_is_absolute(path)) {
             p.to_path_buf()
         } else {
             self.root.join(p)
@@ -190,9 +190,31 @@ impl Sandbox {
 
     /// Render a path relative to the root for display, falling back to absolute.
     pub fn display(&self, path: &Path) -> String {
-        path.strip_prefix(&self.root)
-            .map(|p| p.display().to_string())
-            .unwrap_or_else(|_| path.display().to_string())
+        model_path(
+            path.strip_prefix(&self.root)
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|_| path.display().to_string()),
+        )
+    }
+}
+
+/// Remote execution currently targets POSIX SSH hosts. A leading slash must
+/// therefore remain absolute even when Clark Desktop itself runs on Windows,
+/// where `Path::is_absolute("/home/...")` is false without a drive prefix.
+fn remote_path_is_absolute(path: &str) -> bool {
+    path.starts_with('/') || Path::new(path).is_absolute()
+}
+
+/// Paths shown to the model and sent back through tool arguments use `/`
+/// consistently. Windows filesystem APIs still receive native `PathBuf`s.
+pub(crate) fn model_path(path: String) -> String {
+    #[cfg(windows)]
+    {
+        path.replace('\\', "/")
+    }
+    #[cfg(not(windows))]
+    {
+        path
     }
 }
 

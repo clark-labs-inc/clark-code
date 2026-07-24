@@ -114,11 +114,20 @@ fn validate_user_state_dir(state_dir: &Path) -> Result<(), String> {
     let local_app_data = std::env::var_os("LOCALAPPDATA")
         .map(PathBuf::from)
         .ok_or_else(|| "LOCALAPPDATA is unavailable".to_string())?;
-    let expected = local_app_data.join("Clark Code").join("sandbox");
-    if normalize(state_dir) != normalize(&expected) {
+    validate_user_state_dir_under(&local_app_data, state_dir)
+}
+
+fn validate_user_state_dir_under(local_app_data: &Path, state_dir: &Path) -> Result<(), String> {
+    let allowed = ["Clark Code", "Clark Code Dev"]
+        .map(|product| local_app_data.join(product).join("sandbox"));
+    if !allowed
+        .iter()
+        .any(|expected| normalize(state_dir) == normalize(expected))
+    {
         return Err(format!(
-            "Windows sandbox state directory must be {}",
-            expected.display()
+            "Windows sandbox state directory must be {} or {}",
+            allowed[0].display(),
+            allowed[1].display()
         ));
     }
     Ok(())
@@ -136,4 +145,35 @@ fn normalize(path: &Path) -> String {
         .replace('/', "\\")
         .trim_end_matches('\\')
         .to_ascii_lowercase()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_user_state_dir_under;
+    use std::path::Path;
+
+    #[test]
+    fn accepts_only_production_and_development_state_roots() {
+        let local = Path::new(r"C:\Users\tester\AppData\Local");
+        assert!(validate_user_state_dir_under(
+            local,
+            Path::new(r"C:\Users\tester\AppData\Local\Clark Code\sandbox")
+        )
+        .is_ok());
+        assert!(validate_user_state_dir_under(
+            local,
+            Path::new(r"C:\Users\tester\AppData\Local\Clark Code Dev\sandbox")
+        )
+        .is_ok());
+        assert!(validate_user_state_dir_under(
+            local,
+            Path::new(r"C:\Users\tester\AppData\Local\sandbox")
+        )
+        .is_err());
+        assert!(validate_user_state_dir_under(
+            local,
+            Path::new(r"C:\Users\other\AppData\Local\Clark Code Dev\sandbox")
+        )
+        .is_err());
+    }
 }

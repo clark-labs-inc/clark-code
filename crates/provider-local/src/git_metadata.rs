@@ -10,7 +10,14 @@ use tokio_util::sync::CancellationToken;
 
 use crate::exec::Executor;
 
-const COMMAND_TIMEOUT: Duration = Duration::from_secs(5);
+const COMMAND_TIMEOUT: Duration = if cfg!(windows) {
+    // Windows ARM VMs commonly run Git's x64 distribution under emulation.
+    // Metadata remains bounded, but five seconds is too short under parallel
+    // test/build load and turns valid repositories into false negatives.
+    Duration::from_secs(30)
+} else {
+    Duration::from_secs(5)
+};
 const DISABLED_HOOKS_PATH: &str = if cfg!(windows) { "NUL" } else { "/dev/null" };
 
 pub(crate) async fn optional(
@@ -73,26 +80,69 @@ pub(crate) async fn common_repository_root(
     exec: &dyn Executor,
     root: &Path,
 ) -> Result<Option<PathBuf>, String> {
-    let Some(raw) = optional(
+    let command_result = optional(
         exec,
         root,
         &["rev-parse", "--path-format=absolute", "--git-common-dir"],
     )
-    .await?
-    else {
-        return Ok(None);
-    };
-    let common_dir = PathBuf::from(raw.trim());
-    let common_dir = if common_dir.is_absolute() {
-        common_dir
-    } else {
-        root.join(common_dir)
-    };
-    Ok(common_dir
+    .await;
+    if let Ok(Some(raw)) = &command_result {
+        let common_dir = PathBuf::from(raw.trim());
+        let common_dir = if common_dir.is_absolute() {
+            common_dir
+        } else {
+            root.join(common_dir)
+        };
+        let common_dir = exec.canonicalize(&common_dir).await.unwrap_or(common_dir);
+        if let Some(repository_root) = repository_root_from_common_dir(&common_dir) {
+            return Ok(Some(repository_root));
+        }
+    }
+
+    // If a contained Git process cannot report the common directory, resolve
+    // the standard `.git`/`commondir` files through the same policy-checked
+    // executor instead of dropping repository-family identity from the
+    // session.
+    if let Some(repository_root) = common_repository_root_from_files(exec, root).await {
+        return Ok(Some(repository_root));
+    }
+    command_result.map(|_| None)
+}
+
+fn repository_root_from_common_dir(common_dir: &Path) -> Option<PathBuf> {
+    common_dir
         .file_name()
         .is_some_and(|name| name == ".git")
         .then(|| common_dir.parent().map(Path::to_path_buf))
-        .flatten())
+        .flatten()
+}
+
+async fn common_repository_root_from_files(exec: &dyn Executor, root: &Path) -> Option<PathBuf> {
+    let dot_git = root.join(".git");
+    let metadata = exec.metadata(&dot_git).await.ok()?;
+    let common_dir = if metadata.is_dir {
+        dot_git
+    } else if !metadata.is_symlink {
+        let contents = String::from_utf8(exec.read(&dot_git).await.ok()?).ok()?;
+        let target = contents.trim().strip_prefix("gitdir:")?.trim();
+        let git_dir = if Path::new(target).is_absolute() {
+            PathBuf::from(target)
+        } else {
+            root.join(target)
+        };
+        let common_file = git_dir.join("commondir");
+        let common = String::from_utf8(exec.read(&common_file).await.ok()?).ok()?;
+        let common = common.trim();
+        if Path::new(common).is_absolute() {
+            PathBuf::from(common)
+        } else {
+            git_dir.join(common)
+        }
+    } else {
+        return None;
+    };
+    let common_dir = exec.canonicalize(&common_dir).await.ok()?;
+    repository_root_from_common_dir(&common_dir)
 }
 
 fn parse_linked_worktree_roots(raw: &str) -> Vec<PathBuf> {
@@ -143,6 +193,31 @@ pub(crate) fn protected_git_command(arguments: &str, env: &[(&str, &str)]) -> St
 
 pub(crate) fn shell_word(value: &str) -> String {
     shell_word_for(exec_core::scripted_shell_kind(), value)
+}
+
+/// Quote a host path for Git after removing Windows' verbatim-path prefix.
+///
+/// `std::fs::canonicalize` returns paths such as `\\?\C:\repo` on Windows.
+/// Git for Windows does not recognize that spelling as a local clone source
+/// and instead parses its colon as scp-style remote syntax. Forward slashes
+/// preserve the same path while keeping it unambiguously local to Git.
+pub(crate) fn shell_path_word(path: &Path) -> String {
+    let rendered = path.to_string_lossy();
+    #[cfg(windows)]
+    let rendered = windows_git_path(&rendered);
+    shell_word(&rendered)
+}
+
+#[cfg(any(windows, test))]
+fn windows_git_path(value: &str) -> String {
+    let local = if let Some(rest) = value.strip_prefix("\\\\?\\UNC\\") {
+        format!("//{rest}")
+    } else if let Some(rest) = value.strip_prefix("\\\\?\\") {
+        rest.to_string()
+    } else {
+        value.to_string()
+    };
+    local.replace('\\', "/")
 }
 
 fn shell_word_for(kind: exec_core::ShellKind, value: &str) -> String {
@@ -230,6 +305,19 @@ mod tests {
     }
 
     #[test]
+    fn canonical_windows_paths_are_rendered_as_local_git_paths() {
+        assert_eq!(
+            windows_git_path(r"\\?\C:\Clark QA\repo"),
+            "C:/Clark QA/repo"
+        );
+        assert_eq!(
+            windows_git_path(r"\\?\UNC\server\share\repo"),
+            "//server/share/repo"
+        );
+        assert_eq!(windows_git_path(r"C:\repo"), "C:/repo");
+    }
+
+    #[test]
     fn cmd_prefix_disables_expansion_of_percent_in_environment_values() {
         assert_eq!(
             shell_environment_prefix_for(
@@ -304,6 +392,10 @@ mod tests {
                 .await
                 .unwrap(),
             Some(expected)
+        );
+        assert_eq!(
+            common_repository_root_from_files(&crate::exec::LocalExecutor, &linked).await,
+            Some(main.canonicalize().unwrap())
         );
     }
 }

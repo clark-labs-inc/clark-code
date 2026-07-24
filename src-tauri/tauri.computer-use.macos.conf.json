@@ -1,0 +1,13 @@
+{
+  "bundle": {
+    "externalBin": [
+      "binaries/rg",
+      "binaries/clark-computer-use-helper"
+    ],
+    "macOS": {
+      "frameworks": [
+        "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.5/macosx/libswift_Concurrency.dylib"
+      ]
+    }
+  }
+}

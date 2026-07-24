@@ -27,6 +27,7 @@ fn seed_repository(root: &Path, path: &str, content: &str) {
     std::fs::create_dir_all(root.join(Path::new(path).parent().unwrap())).unwrap();
     std::fs::write(root.join(path), content).unwrap();
     run_git(root, &["init", "--quiet"]);
+    run_git(root, &["config", "core.autocrlf", "false"]);
     run_git(root, &["config", "user.name", "Clark Test"]);
     run_git(root, &["config", "user.email", "test@invalid.local"]);
     run_git(root, &["add", "--all"]);
@@ -98,8 +99,8 @@ fn plan(selection: &RepositorySelection) -> MultiRepoPlan {
         integration_checks: vec![IntegrationCheck {
             id: "api-tests".into(),
             repository_id: RepositoryId::new("api").unwrap(),
-            argv: vec!["python3".into(), "-c".into(), "pass".into()],
-            timeout_ms: 1_000,
+            argv: vec!["git".into(), "diff".into(), "--check".into()],
+            timeout_ms: if cfg!(windows) { 30_000 } else { 1_000 },
         }],
         max_parallel_writers: 2,
         requires_independent_review: false,
@@ -155,6 +156,26 @@ async fn isolated_packages_replay_without_touching_dirty_primary_checkouts() {
         )
         .await
         .unwrap();
+        assert_eq!(
+            git_text(
+                &LocalExecutor,
+                &workspace.root,
+                &["config", "--get", "core.autocrlf"],
+            )
+            .await
+            .unwrap(),
+            "false"
+        );
+        assert_eq!(
+            git_text(
+                &LocalExecutor,
+                &workspace.root,
+                &["config", "--get", "core.eol"],
+            )
+            .await
+            .unwrap(),
+            "lf"
+        );
         LocalExecutor
             .write(&workspace.root.join(path), b"v2\n")
             .await
@@ -267,8 +288,8 @@ async fn fresh_replay_applies_all_disjoint_writers_from_one_repository() {
         integration_checks: vec![IntegrationCheck {
             id: "app-tests".into(),
             repository_id: repository_id.clone(),
-            argv: vec!["python3".into(), "-c".into(), "pass".into()],
-            timeout_ms: 1_000,
+            argv: vec!["git".into(), "diff".into(), "--check".into()],
+            timeout_ms: if cfg!(windows) { 30_000 } else { 1_000 },
         }],
         max_parallel_writers: 2,
         requires_independent_review: false,

@@ -18,6 +18,8 @@ fn safe_commands() {
         "cat src/main.rs",
         "echo hello",
         "rg pattern",
+        "Start-Sleep -Seconds 1",
+        "START-SLEEP -Milliseconds 10",
     ] {
         assert_eq!(risk(c), CommandRisk::Safe, "{c}");
     }
@@ -187,6 +189,7 @@ fn read_only_predicate_accepts_pure_inspection() {
         "wc -l src/main.rs 2>/dev/null",
         "ls > /dev/null 2>&1",
         "tree -L 2",
+        "Start-Sleep -Seconds 1",
     ] {
         assert!(is_read_only_command(c), "{c} should be read-only");
     }

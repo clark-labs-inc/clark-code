@@ -424,8 +424,17 @@ mod tests {
     use super::*;
     use crate::exec::LocalExecutor;
 
+    fn platform_command(posix: &'static str, powershell: &'static str) -> String {
+        if cfg!(windows) {
+            powershell.to_string()
+        } else {
+            posix.to_string()
+        }
+    }
+
     async fn wait_for_finish(tasks: &BackgroundTasks, id: &str) -> TaskStatus {
-        for _ in 0..100 {
+        let attempts = if cfg!(windows) { 500 } else { 100 };
+        for _ in 0..attempts {
             let status = tasks.status(id).await.unwrap();
             if status.exit_code.is_some() {
                 return status;
@@ -442,7 +451,10 @@ mod tests {
         let id = tasks
             .spawn(
                 Arc::new(LocalExecutor),
-                "read value; echo got:$value".to_string(),
+                platform_command(
+                    "read value; echo got:$value",
+                    r#"$value = [Console]::In.ReadLine(); [Console]::Out.Write("got:$value")"#,
+                ),
                 dir.path(),
             )
             .await
@@ -472,8 +484,10 @@ mod tests {
         let id = tasks
             .spawn(
                 Arc::new(LocalExecutor),
-                "i=0; while [ $i -lt 2000 ]; do echo line-$i; i=$((i+1)); done; echo FINAL"
-                    .to_string(),
+                platform_command(
+                    "i=0; while [ $i -lt 2000 ]; do echo line-$i; i=$((i+1)); done; echo FINAL",
+                    r#"[Console]::Out.Write(("line`n" * 2000) + "FINAL")"#,
+                ),
                 dir.path(),
             )
             .await
@@ -487,7 +501,11 @@ mod tests {
         let tasks = BackgroundTasks::default();
         let dir = tempfile::tempdir().unwrap();
         let id = tasks
-            .spawn(Arc::new(LocalExecutor), "sleep 30".to_string(), dir.path())
+            .spawn(
+                Arc::new(LocalExecutor),
+                platform_command("sleep 30", "Start-Sleep -Seconds 30"),
+                dir.path(),
+            )
             .await
             .unwrap();
         tasks.kill(&id).await.unwrap();
@@ -500,7 +518,11 @@ mod tests {
         let tasks = BackgroundTasks::default();
         let dir = tempfile::tempdir().unwrap();
         let id = tasks
-            .spawn(Arc::new(LocalExecutor), "sleep 30".to_string(), dir.path())
+            .spawn(
+                Arc::new(LocalExecutor),
+                platform_command("sleep 30", "Start-Sleep -Seconds 30"),
+                dir.path(),
+            )
             .await
             .unwrap();
         tasks.clear_all().await;

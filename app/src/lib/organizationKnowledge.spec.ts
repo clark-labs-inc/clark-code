@@ -95,7 +95,7 @@ describe("repository-scoped organization contribution", () => {
     });
 
     await syncRepositoryHistory(
-      { endpoint: "https://clark.example", token: "token", ownerScope: "test@example.com" },
+      { endpoint: "https://clark.example", token: "token" },
       repository.root,
     );
 

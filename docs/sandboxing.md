@@ -149,7 +149,7 @@ design; run it only with explicit authorization, an exact model, a cost cap, and
 a dedicated key:
 
 ```bash
-CLARK_SANDBOX_E2E_MODEL=clark-code:kimi_k27_code \
+CLARK_SANDBOX_E2E_MODEL=clark-code:minimax_m3 \
 CLARK_CODE_API_KEY=... \
 cargo test -p provider-local --test sandbox_live \
   paid_cheapest_model_cannot_escape_workspace -- --ignored --nocapture

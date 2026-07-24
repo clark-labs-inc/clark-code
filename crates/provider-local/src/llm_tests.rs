@@ -149,6 +149,29 @@ fn other_models_preserve_the_configured_reasoning_effort() {
 }
 
 #[test]
+fn kimi_k27_caps_output_below_its_total_context_window() {
+    let kimi = LlmClient::from_parts(
+        "https://api.example.test/v1",
+        "clark-code:kimi_k27_code",
+        None,
+        Vec::new(),
+        None,
+    )
+    .unwrap();
+    assert_eq!(kimi.body(&[], &[])["max_tokens"], json!(32_768));
+
+    let default = LlmClient::from_parts(
+        "https://api.example.test/v1",
+        "clark-code",
+        None,
+        Vec::new(),
+        None,
+    )
+    .unwrap();
+    assert!(default.body(&[], &[]).get("max_tokens").is_none());
+}
+
+#[test]
 fn reassembles_fragmented_tool_call() {
     let turn = feed(&[
         r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_a","function":{"name":"read_file","arguments":""}}]}}]}"#,

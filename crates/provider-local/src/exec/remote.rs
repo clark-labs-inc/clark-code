@@ -154,7 +154,23 @@ impl RemoteExecutor {
     }
 
     fn path(p: &Path) -> String {
-        p.to_string_lossy().to_string()
+        let path = p.to_string_lossy().to_string();
+        #[cfg(windows)]
+        {
+            // A Windows desktop can target either a POSIX SSH host or a native
+            // Windows exec server. Preserve drive, UNC, and verbatim paths;
+            // only normalize separator-mixed paths that have no Windows
+            // prefix and therefore belong to the remote POSIX namespace.
+            if matches!(p.components().next(), Some(std::path::Component::Prefix(_))) {
+                windows_native_wire_path(&path)
+            } else {
+                path.replace('\\', "/")
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            path
+        }
     }
 
     async fn call(
@@ -305,6 +321,28 @@ impl RemoteExecutor {
             }
         }
     }
+}
+
+#[cfg(windows)]
+fn windows_native_wire_path(value: &str) -> String {
+    if let Some(rest) = value.strip_prefix("\\\\?\\UNC\\") {
+        format!("\\\\{rest}")
+    } else if let Some(rest) = value.strip_prefix("\\\\?\\") {
+        rest.to_string()
+    } else {
+        value.to_string()
+    }
+}
+
+fn rebase_walk_path(root: &Path, remote_root: &Path, wire_path: &str) -> PathBuf {
+    #[cfg(windows)]
+    let entry = PathBuf::from(windows_native_wire_path(wire_path));
+    #[cfg(not(windows))]
+    let entry = PathBuf::from(wire_path);
+
+    entry
+        .strip_prefix(remote_root)
+        .map_or(entry.clone(), |relative| root.join(relative))
 }
 
 async fn open_connection(url: &str, token: &str) -> ExecResult<Arc<Conn>> {
@@ -538,11 +576,12 @@ impl Executor for RemoteExecutor {
     }
 
     async fn walk(&self, root: &Path) -> ExecResult<Vec<WalkEntry>> {
+        let remote_root = PathBuf::from(Self::path(root));
         let v = self
             .call(
                 method::FS_WALK,
                 to_value(&PathParams {
-                    path: Self::path(root),
+                    path: remote_root.to_string_lossy().into_owned(),
                 }),
             )
             .await?;
@@ -550,7 +589,7 @@ impl Executor for RemoteExecutor {
         Ok(r.entries
             .into_iter()
             .map(|w| WalkEntry {
-                path: PathBuf::from(w.path),
+                path: rebase_walk_path(root, &remote_root, &w.path),
                 modified: w.modified_ms.map(ms_to_time),
                 len: w.len,
             })
@@ -697,5 +736,44 @@ mod tests {
             .unwrap();
         assert_eq!(output.stdout, b"ABC");
         assert_eq!(*delivered.lock().unwrap(), b"ABC");
+    }
+}
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::*;
+
+    #[test]
+    fn wire_paths_preserve_native_windows_prefixes() {
+        assert_eq!(
+            RemoteExecutor::path(Path::new(r"\\?\C:\Clark QA\repo")),
+            r"C:\Clark QA\repo"
+        );
+        assert_eq!(
+            RemoteExecutor::path(Path::new(r"C:\Clark QA\repo")),
+            r"C:\Clark QA\repo"
+        );
+        assert_eq!(
+            RemoteExecutor::path(Path::new(r"\\?\UNC\server\share\repo")),
+            r"\\server\share\repo"
+        );
+    }
+
+    #[test]
+    fn wire_paths_normalize_non_windows_remote_separators() {
+        assert_eq!(
+            RemoteExecutor::path(Path::new(r"/home/clark\repo")),
+            "/home/clark/repo"
+        );
+    }
+
+    #[test]
+    fn walk_paths_keep_the_callers_verbatim_root_identity() {
+        let root = Path::new(r"\\?\C:\Clark QA\repo");
+        let remote_root = Path::new(r"C:\Clark QA\repo");
+        assert_eq!(
+            rebase_walk_path(root, remote_root, r"C:\Clark QA\repo\src\main.rs"),
+            root.join(r"src\main.rs")
+        );
     }
 }

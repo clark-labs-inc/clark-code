@@ -21,6 +21,14 @@ use tokio_util::sync::CancellationToken;
 
 const TOKEN: &str = "test-capability-token";
 
+fn platform_command(posix: &'static str, powershell: &'static str) -> &'static str {
+    if cfg!(windows) {
+        powershell
+    } else {
+        posix
+    }
+}
+
 /// Bind an ephemeral server, run it in the background, return its `ws://` URL.
 async fn start_server(root: Option<PathBuf>) -> String {
     let server = exec_server::bind(exec_server::Config {
@@ -107,7 +115,7 @@ async fn remote_matches_local_for_every_primitive() {
                 p.strip_prefix(dir.path())
                     .unwrap()
                     .to_string_lossy()
-                    .to_string()
+                    .replace('\\', "/")
             })
             .collect();
         v.sort();
@@ -135,7 +143,10 @@ async fn remote_matches_local_for_every_primitive() {
     let cancel = CancellationToken::new();
     let out = remote
         .exec(
-            "echo out; echo err 1>&2; exit 7",
+            platform_command(
+                "echo out; echo err 1>&2; exit 7",
+                r#"[Console]::Out.WriteLine("out"); [Console]::Error.WriteLine("err"); exit 7"#,
+            ),
             dir.path(),
             Duration::from_secs(10),
             &cancel,
@@ -148,7 +159,10 @@ async fn remote_matches_local_for_every_primitive() {
 
     let terminal = remote
         .exec_streaming_pty(
-            "test -t 0 && test -t 1 && printf terminal",
+            platform_command(
+                "test -t 0 && test -t 1 && printf terminal",
+                r#"if (-not [Console]::IsInputRedirected -and -not [Console]::IsOutputRedirected) { [Console]::Out.Write("terminal"); exit 0 }; exit 1"#,
+            ),
             dir.path(),
             Duration::from_secs(10),
             &cancel,
@@ -305,7 +319,13 @@ async fn remote_background_process_accepts_input_and_reports_exit() {
     let url = start_server(Some(dir.path().to_path_buf())).await;
     let remote = RemoteExecutor::connect(&url, TOKEN).await.unwrap();
     let process = remote
-        .background_start("read value; printf 'remote:%s' \"$value\"", dir.path())
+        .background_start(
+            platform_command(
+                "read value; printf 'remote:%s' \"$value\"",
+                r#"$value = [Console]::In.ReadLine(); [Console]::Out.Write("remote:$value")"#,
+            ),
+            dir.path(),
+        )
         .await
         .unwrap();
     remote
@@ -316,7 +336,8 @@ async fn remote_background_process_accepts_input_and_reports_exit() {
     let mut cursor = 0;
     let mut output = Vec::new();
     let mut exit = None;
-    for _ in 0..100 {
+    let attempts = if cfg!(windows) { 500 } else { 100 };
+    for _ in 0..attempts {
         let status = remote.background_status(&process, cursor).await.unwrap();
         cursor = status.cursor;
         for chunk in status.output {
@@ -338,10 +359,17 @@ async fn remote_background_output_is_bounded_and_reports_truncation() {
     let url = start_server(Some(dir.path().to_path_buf())).await;
     let remote = RemoteExecutor::connect(&url, TOKEN).await.unwrap();
     let process = remote
-        .background_start("yes x | head -c 1100000", dir.path())
+        .background_start(
+            platform_command(
+                "yes x | head -c 1100000",
+                r#"[Console]::Out.Write("x" * 1100000)"#,
+            ),
+            dir.path(),
+        )
         .await
         .unwrap();
-    for _ in 0..100 {
+    let attempts = if cfg!(windows) { 500 } else { 100 };
+    for _ in 0..attempts {
         let status = remote.background_status(&process, 0).await.unwrap();
         if status.exit_code.is_some() {
             let bytes = status
@@ -367,7 +395,12 @@ async fn exec_honors_cancel() {
     let cancel = CancellationToken::new();
     cancel.cancel();
     let err = remote
-        .exec("sleep 5", dir.path(), Duration::from_secs(10), &cancel)
+        .exec(
+            platform_command("sleep 5", "Start-Sleep -Seconds 5"),
+            dir.path(),
+            Duration::from_secs(10),
+            &cancel,
+        )
         .await
         .unwrap_err();
     assert!(err.contains("cancel"), "{err}");
@@ -422,7 +455,7 @@ async fn remote_terminal_timeout_returns_a_terminal_error() {
     let err = tokio::time::timeout(
         Duration::from_secs(2),
         remote.exec_streaming_pty(
-            "sleep 30",
+            platform_command("sleep 30", "Start-Sleep -Seconds 30"),
             dir.path(),
             Duration::from_millis(150),
             &CancellationToken::new(),
@@ -486,7 +519,10 @@ async fn output_survives_reconnect_via_resume() {
     let url = start_server(None).await;
     let process_id = "resume-test-proc".to_string();
     // Three chunks separated in time, so they get distinct sequence numbers.
-    let command = "printf 'A\\n'; sleep 0.2; printf 'B\\n'; sleep 0.2; printf 'C\\n'";
+    let command = platform_command(
+        "printf 'A\\n'; sleep 0.2; printf 'B\\n'; sleep 0.2; printf 'C\\n'",
+        r#"[Console]::Out.WriteLine("A"); Start-Sleep -Milliseconds 200; [Console]::Out.WriteLine("B"); Start-Sleep -Milliseconds 200; [Console]::Out.WriteLine("C")"#,
+    );
 
     // --- Connection 1: start the process, read until the first chunk, then drop.
     let last_seq;

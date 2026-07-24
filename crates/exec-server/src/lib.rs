@@ -414,7 +414,7 @@ fn checked_path(path: &str, root: &Option<PathBuf>) -> Result<PathBuf, (i64, Str
     let p = PathBuf::from(path);
     let Some(root) = root else { return Ok(p) };
     let norm = lexically_normalize(&p);
-    if norm.starts_with(root) {
+    if norm.starts_with(root) || resolved_within(&norm, root) {
         Ok(norm)
     } else {
         Err((

@@ -101,7 +101,8 @@ async fn new_provider(
             extra: json!({
                 "base_url": format!("http://{addr}/v1"),
                 "model": "fake-model",
-                "memories": false
+                "memories": false,
+                "sandbox_mode": "disabled"
             }),
             ..Default::default()
         })

@@ -1,22 +1,13 @@
 //! Live `clark-code` conversation matrix for the local coding provider.
 //!
-//! Ignored by default. This makes real Clark Platform model calls and mutates a
-//! temporary project directory only when live env is explicit:
-//!
-//! ```sh
-//! CLARK_CODE_LIVE=1 \
-//! CLARK_CODE_PROVIDER=clark-platform \
-//! CLARK_CODE_BASE_URL=https://api.clarkslabs.com/v1 \
-//! CLARK_CODE_MODEL=clark-code:YOUR_EXPLICIT_TIER \
-//! CLARK_CODE_API_KEY=ck_live_... \
-//!   cargo test -p provider-local --test live_clark_code -- --ignored --nocapture --test-threads=1
-//! ```
-
+//! Ignored by default; real Clark Platform calls require explicit live environment variables.
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use agent_core::domain::{AgentEvent, ContentBlock, PendingUpload, RunStatus, ToolStatus};
+use agent_core::domain::{
+    AgentEvent, ContentBlock, MessagePhase, PendingUpload, RunStatus, ToolStatus,
+};
 use agent_core::provider::{ClientResponse, PromptInput, Provider, ProviderConfig, SessionOptions};
 use base64::Engine as _;
 use futures::StreamExt;
@@ -27,6 +18,8 @@ use provider_local::{
 use serde_json::json;
 
 const TURN_TIMEOUT: Duration = Duration::from_secs(180);
+const DEFAULT_LIVE_MAX_ITERATIONS: u32 = 16;
+const HARD_LIVE_MAX_ITERATIONS: u32 = 64;
 
 #[derive(Clone, Debug)]
 struct LiveConfig {
@@ -42,6 +35,15 @@ fn is_clark_code_provider(value: &str) -> bool {
 
 fn is_clark_code_model(value: &str) -> bool {
     value == "clark-code" || value.starts_with("clark-code:")
+}
+
+fn live_max_iterations() -> u32 {
+    std::env::var("CLARK_CODE_MAX_ITERATIONS")
+        .ok()
+        .and_then(|value| value.parse::<u32>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(DEFAULT_LIVE_MAX_ITERATIONS)
+        .min(HARD_LIVE_MAX_ITERATIONS)
 }
 
 fn live_config() -> Option<LiveConfig> {
@@ -100,6 +102,7 @@ fn live_matrix_accepts_backend_owned_clark_code_aliases_only() {
     assert!(is_clark_code_provider("clark-platform"));
     assert!(!is_clark_code_provider("openrouter"));
     assert!(is_clark_code_model("clark-code"));
+    assert!(is_clark_code_model("clark-code:minimax_m3"));
     assert!(is_clark_code_model("clark-code:deepseek_v4_pro"));
     assert!(!is_clark_code_model("deepseek/deepseek-v4-pro"));
     assert!(!is_clark_code_model("clark"));
@@ -177,6 +180,8 @@ async fn new_live_provider(
                     "base_url": cfg.base_url,
                     "model": cfg.model,
                     "cwd": cwd.to_string_lossy(),
+                    "temperature": 0.0,
+                    "max_iterations": live_max_iterations(),
                 }),
                 extra,
             ),
@@ -231,6 +236,10 @@ async fn drive_prompt(
                     delta: ContentBlock::Text { text },
                     ..
                 } => summary.text.push_str(&text),
+                AgentEvent::MessagePhase {
+                    phase: MessagePhase::Commentary,
+                    ..
+                } => summary.text.clear(),
                 AgentEvent::ToolCall { call, .. } => {
                     let tool = call
                         .tool_name
@@ -351,8 +360,8 @@ description: Produce the paid Clark skill receipt for a live end-to-end validati
 You must call `read_skill` with `skill` set to `paid-receipt` and `resource` set
 to `references/contract.md`. Do not use `read_file` for that resource.
 
-Then call `write_file` to create `SKILL_E2E_RECEIPT.md` containing the resource
-text verbatim, with no fences or extra text. Finally reply with exactly
+Then call `write_file` to create `SKILL_E2E_RECEIPT.md` containing only the four
+`key=value` lines inside `<skill-resource>`, omitting the heading and XML wrapper. Finally reply with exactly
 `CLARK_SKILL_E2E_DONE_9472`.
 "#,
     )
@@ -496,6 +505,11 @@ async fn live_clark_code_feature_matrix() {
         mutate.permission_requests >= 3,
         "mutate: expected write/edit/bash permission prompts, got {mutate:?}"
     );
+    assert!(
+        mutate.text.contains("CLARK_LIVE_MUTATE_DONE"),
+        "mutate: expected completion sentinel in assistant text: {:?}",
+        mutate.text
+    );
     assert_eq!(
         std::fs::read_to_string(dir.path().join("live.txt")).unwrap(),
         "beta"
@@ -508,7 +522,7 @@ async fn live_clark_code_feature_matrix() {
     let memory = drive_turn(
         &mut provider,
         &session.id,
-        "Use the memory tool to remember a project fact titled `live e2e sentinel` with content `CLARK_MEMORY_SENTINEL_8402`. Then use memory recall and answer with CLARK_MEMORY_SENTINEL_8402.",
+        "Use the memory tool to remember a project fact titled `live e2e sentinel` with content `CLARK_MEMORY_SENTINEL_8402`. Then use memory recall. After the tools finish, your entire final response must be exactly `CLARK_MEMORY_SENTINEL_8402`; do not abbreviate it or remove the `CLARK` prefix.",
     )
     .await;
     println!("[memory] {memory:?}");

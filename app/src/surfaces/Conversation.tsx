@@ -9,6 +9,8 @@ import { DUR, EASE, INSTANT } from "../lib/motion";
 import {
   conversationScrollTarget,
   isConversationAtBottom,
+  isConversationScrollUp,
+  shouldFollowConversation,
   type ConversationScrollState,
 } from "../lib/conversationScroll";
 import { Message } from "./Message";
@@ -184,6 +186,8 @@ export function Conversation({
   const sessionId = session?.id;
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
+  const lastScrollTop = useRef(0);
+  const scrollingToBottom = useRef(false);
   const [showAll, setShowAll] = useState(false);
   const activity = currentActivity(snapshot);
   // Collapse history again when switching conversations.
@@ -195,16 +199,36 @@ export function Conversation({
   const onScroll = () => {
     const el = scrollRef.current;
     if (!el) return;
-    const bottom = isConversationAtBottom(el.scrollHeight, el.scrollTop, el.clientHeight);
-    stuck.current = bottom;
+    const nearBottom = isConversationAtBottom(el.scrollHeight, el.scrollTop, el.clientHeight);
+    const following = shouldFollowConversation(
+      lastScrollTop.current,
+      el.scrollTop,
+      nearBottom,
+      scrollingToBottom.current,
+    );
+    const movedUp = isConversationScrollUp(lastScrollTop.current, el.scrollTop);
+    lastScrollTop.current = el.scrollTop;
+    if (movedUp || nearBottom) scrollingToBottom.current = false;
+    stuck.current = following;
     if (sessionId) {
-      scrollByConversation.set(sessionId, { scrollTop: el.scrollTop, atBottom: bottom });
+      scrollByConversation.set(sessionId, { scrollTop: el.scrollTop, atBottom: following });
     }
-    if (bottom !== atBottom) setAtBottom(bottom);
+    if (following !== atBottom) setAtBottom(following);
+  };
+  const stopFollowingOnUpwardWheel = (deltaY: number) => {
+    if (deltaY >= 0) return;
+    const el = scrollRef.current;
+    scrollingToBottom.current = false;
+    stuck.current = false;
+    setAtBottom(false);
+    if (el && sessionId) {
+      scrollByConversation.set(sessionId, { scrollTop: el.scrollTop, atBottom: false });
+    }
   };
   const scrollToBottom = () => {
     const el = scrollRef.current;
     if (el) {
+      scrollingToBottom.current = true;
       stuck.current = true;
       setAtBottom(true);
       el.scrollTo({ top: el.scrollHeight, behavior: reduce ? "auto" : "smooth" });
@@ -234,6 +258,8 @@ export function Conversation({
     const remembered = scrollByConversation.get(sessionId);
     const busy = currentActivity(useSessionStore.getState().snapshot).busy;
     el.scrollTop = conversationScrollTarget(remembered, busy, el.scrollHeight);
+    lastScrollTop.current = el.scrollTop;
+    scrollingToBottom.current = false;
     const bottom = isConversationAtBottom(el.scrollHeight, el.scrollTop, el.clientHeight);
     stuck.current = bottom;
     setAtBottom(bottom);
@@ -244,6 +270,7 @@ export function Conversation({
     const el = scrollRef.current;
     if (el && stuck.current) {
       el.scrollTop = el.scrollHeight;
+      lastScrollTop.current = el.scrollTop;
       if (sessionId) {
         scrollByConversation.set(sessionId, { scrollTop: el.scrollTop, atBottom: true });
       }
@@ -261,6 +288,7 @@ export function Conversation({
     const observer = new ResizeObserver(() => {
       if (!stuck.current) return;
       el.scrollTop = el.scrollHeight;
+      lastScrollTop.current = el.scrollTop;
       scrollByConversation.set(sessionId, { scrollTop: el.scrollTop, atBottom: true });
     });
     observer.observe(content);
@@ -380,7 +408,12 @@ export function Conversation({
   };
 
   return (
-    <div ref={scrollRef} onScroll={onScroll} className="flex-1 overflow-y-auto">
+    <div
+      ref={scrollRef}
+      onScroll={onScroll}
+      onWheel={(event) => stopFollowingOnUpwardWheel(event.deltaY)}
+      className="flex-1 overflow-y-auto"
+    >
       <div ref={contentRef} className="chat-column-width mx-auto flex w-full flex-col gap-5 px-5 py-5">
         {visible.length === 0 && !showPending && (
           <p className="py-10 text-center text-sm text-ink-faint">

@@ -245,6 +245,7 @@ mod tests {
                 .success());
         };
         run(&["init", "-q"]);
+        run(&["config", "core.autocrlf", "false"]);
         std::fs::write(dir.join("keep.txt"), "one\ntwo\n").unwrap();
         run(&["add", "-A"]);
         run(&["commit", "-q", "-m", "init"]);
@@ -326,7 +327,7 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        let renamed = "café name\tnew.txt";
+        let renamed = "café name\u{2003}new.txt";
         std::fs::rename(root.join("keep.txt"), root.join(renamed)).unwrap();
 
         let summary = changes_summary(&LocalExecutor, root, &base).await.unwrap();

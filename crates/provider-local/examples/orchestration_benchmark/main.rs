@@ -169,7 +169,7 @@ async fn run() -> Result<(), String> {
             args.strong_model = "clark-code".into();
         }
         if args.cheap_model == "scripted-cheap" {
-            args.cheap_model = "clark-code:kimi_k27_code".into();
+            args.cheap_model = "clark-code:minimax_m3".into();
         }
     }
     let scenarios = scenarios::catalog();

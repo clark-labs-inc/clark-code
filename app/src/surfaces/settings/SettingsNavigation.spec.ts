@@ -7,13 +7,22 @@ function ids(query: string) {
 
 describe("settings navigation search", () => {
   it("returns every section for an empty query", () => {
-    expect(ids("")).toEqual(["general", "account", "project", "commands", "integrations", "about"]);
+    expect(ids("")).toEqual([
+      "general",
+      "account",
+      "project",
+      "commands",
+      "integrations",
+      "computer-use",
+      "about",
+    ]);
   });
 
   it("matches section content keywords", () => {
     expect(ids("font")).toEqual(["general"]);
     expect(ids("ssh")).toEqual(["integrations"]);
     expect(ids("billing")).toEqual(["account"]);
+    expect(ids("accessibility")).toEqual(["computer-use"]);
   });
 
   it("returns no groups when nothing matches", () => {

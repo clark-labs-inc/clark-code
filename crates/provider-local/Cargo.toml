@@ -19,6 +19,7 @@ exec-core = { path = "../exec-core" }
 exec-sandbox = { path = "../exec-sandbox" }
 exec-protocol = { path = "../exec-protocol" }
 clark-install-context = { path = "../install-context" }
+computer-use = { path = "../computer-use" }
 libreoffice-pure = "0.5.3"
 serde.workspace = true
 serde_json.workspace = true

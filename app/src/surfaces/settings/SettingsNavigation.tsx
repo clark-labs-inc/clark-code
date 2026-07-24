@@ -7,6 +7,7 @@ import {
   Search,
   SlidersHorizontal,
   SquareTerminal,
+  MousePointer2,
   type LucideIcon,
 } from "lucide-react";
 import type { SettingsSection } from "../../store/sessionStore";
@@ -79,6 +80,13 @@ export const SETTINGS_GROUPS: SettingsNavGroup[] = [
   {
     label: "System",
     items: [
+      {
+        id: "computer-use",
+        label: "Computer use",
+        description: "Native helper, macOS privacy, app grants, and receipts",
+        keywords: ["accessibility", "screen recording", "mouse", "keyboard", "approval", "revoke"],
+        icon: MousePointer2,
+      },
       {
         id: "about",
         label: "About & updates",

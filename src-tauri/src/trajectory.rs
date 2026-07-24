@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -13,8 +13,8 @@ use crate::commands::clark_rest_base;
 
 mod outbox;
 pub(crate) use outbox::{
-    checkpoint_snapshot, delete_conversation, merge_local_summaries, quarantine_snapshot_branch,
-    recover_snapshot, set_archived, wait_for_acknowledged_prefix,
+    checkpoint_snapshot, delete_conversation, interrupt_live_runs, merge_local_summaries,
+    quarantine_snapshot_branch, recover_snapshot, set_archived, wait_for_acknowledged_prefix,
 };
 
 pub(crate) fn outbox_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
@@ -37,14 +37,12 @@ pub struct CloudTrajectoryConfig {
     pub mode: Option<String>,
     #[serde(default)]
     pub metadata: Value,
-    /// Stable account scope supplied by the authenticated frontend. It is
-    /// hashed before use as a local SQLite partition key and never uploaded.
-    pub owner_scope: String,
 }
 
 #[derive(Clone)]
 pub struct CloudTrajectoryClient {
     conversation_id: String,
+    owner_scope: String,
     config: CloudTrajectoryConfig,
     /// App-wide Clark JWT (see `AppState::cloud_token`), read per attempt so a
     /// token refreshed mid-session reaches every subsequent request.
@@ -54,6 +52,8 @@ pub struct CloudTrajectoryClient {
     outbox: outbox::TrajectoryOutbox,
     flush_lock: Arc<Mutex<()>>,
     flush_scheduled: Arc<AtomicBool>,
+    flush_retry_scheduled: Arc<AtomicBool>,
+    flush_retry_attempt: Arc<AtomicUsize>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -87,22 +87,25 @@ impl CloudTrajectoryClient {
     pub fn new(
         conversation_id: String,
         config: CloudTrajectoryConfig,
+        owner_scope: String,
         token: Arc<RwLock<Option<String>>>,
         app: AppHandle,
         outbox_path: std::path::PathBuf,
-    ) -> Self {
-        let outbox =
-            outbox::TrajectoryOutbox::new(outbox_path, &config.owner_scope, &conversation_id);
-        Self {
+    ) -> Result<Self, String> {
+        let outbox = outbox::TrajectoryOutbox::new(outbox_path, &owner_scope, &conversation_id);
+        Ok(Self {
             conversation_id,
+            owner_scope: owner_scope.clone(),
             config,
             token,
             app,
-            http: reqwest::Client::new(),
+            http: crate::commands::clark_http_client()?,
             outbox,
             flush_lock: Arc::new(Mutex::new(())),
             flush_scheduled: Arc::new(AtomicBool::new(false)),
-        }
+            flush_retry_scheduled: Arc::new(AtomicBool::new(false)),
+            flush_retry_attempt: Arc::new(AtomicUsize::new(0)),
+        })
     }
 
     pub async fn initialize(
@@ -179,11 +182,49 @@ impl CloudTrajectoryClient {
             client.flush_scheduled.store(false, Ordering::SeqCst);
             if let Err(error) = result {
                 tracing::warn!(%error, "cloud trajectory flush deferred");
-                let _ = client.app.emit(
-                    "cloud-sync-warning",
-                    "Clark saved this run locally and will sync it when the cloud is reachable.",
-                );
+                if error.starts_with("cloud_deleted:") {
+                    let _ = client
+                        .app
+                        .emit("cloud-conversation-deleted", &client.conversation_id);
+                } else {
+                    let _ = client.app.emit(
+                        "cloud-sync-warning",
+                        "Clark saved this run locally and will sync it when the cloud is reachable.",
+                    );
+                }
+                if !error.starts_with("cloud_account_changed:")
+                    && !error.starts_with("cloud_deleted:")
+                {
+                    client.schedule_flush_retry();
+                }
             } else if client
+                .outbox
+                .pending()
+                .await
+                .is_ok_and(|pending| !pending.is_empty())
+            {
+                client.flush_retry_attempt.store(0, Ordering::SeqCst);
+                client.trigger_flush();
+            } else {
+                client.flush_retry_attempt.store(0, Ordering::SeqCst);
+            }
+        });
+    }
+
+    /// A durable batch must eventually retry even when no later provider event
+    /// arrives. Otherwise a recovered terminal snapshot can wait forever at the
+    /// full-snapshot durability barrier after a temporary network outage.
+    fn schedule_flush_retry(&self) {
+        if self.flush_retry_scheduled.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let attempt = self.flush_retry_attempt.fetch_add(1, Ordering::SeqCst);
+        let delay = Duration::from_secs((2_u64.saturating_pow(attempt.min(4) as u32)).min(30));
+        let client = self.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(delay).await;
+            client.flush_retry_scheduled.store(false, Ordering::SeqCst);
+            if client
                 .outbox
                 .pending()
                 .await
@@ -205,7 +246,7 @@ impl CloudTrajectoryClient {
     async fn deliver(&self, request: &AppendRequest) -> Result<(), String> {
         let url = format!(
             "{}/api/desktop/conversations/{}/trajectory",
-            clark_rest_base(&self.config.endpoint),
+            clark_rest_base(&self.config.endpoint)?,
             urlencoding::encode(&self.conversation_id)
         );
 
@@ -222,6 +263,14 @@ impl CloudTrajectoryClient {
                 tokio::time::sleep(Duration::from_millis(delay)).await;
             }
             let token = self.token.read().await.clone().unwrap_or_default();
+            let token_owner = crate::commands::jwt_subject(&token).map_err(|_| {
+                "cloud_account_changed: Clark signed out before this pending run could sync".to_string()
+            })?;
+            if token_owner != self.owner_scope {
+                return Err(
+                    "cloud_account_changed: a different Clark account is now signed in".into(),
+                );
+            }
             match self
                 .http
                 .post(&url)
@@ -243,6 +292,10 @@ impl CloudTrajectoryClient {
                             auth_retry = true;
                             let _ = self.app.emit("cloud-auth-expired", ());
                         }
+                    } else if matches!(status, StatusCode::NOT_FOUND | StatusCode::GONE) {
+                        return Err(
+                            "cloud_deleted: this conversation was deleted on another device".into(),
+                        );
                     } else if status.is_client_error()
                         && status != StatusCode::TOO_MANY_REQUESTS
                         && status != StatusCode::REQUEST_TIMEOUT

@@ -10,16 +10,17 @@ fn prefix_matching_keeps_word_boundary() {
 #[test]
 fn tool_titles_are_user_facing() {
     assert_eq!(
-        permission_title("bash", &bash_gate("cargo test")),
+        permission_title("bash", None, &bash_gate("cargo test")),
         "Run a shell command?"
     );
     assert_eq!(
-        permission_title("bash", &bash_gate("gh pr view 123")),
+        permission_title("bash", None, &bash_gate("gh pr view 123")),
         "Allow this command to use the network?"
     );
     assert_eq!(
         permission_title(
             "bash",
+            None,
             &gate_info(
                 "bash",
                 &serde_json::json!({
@@ -31,27 +32,33 @@ fn tool_titles_are_user_facing() {
         "Run this command outside the project sandbox?"
     );
     assert_eq!(
-        permission_title("write_file", &gate_info("write_file", &Value::Null)),
+        permission_title("write_file", None, &gate_info("write_file", &Value::Null)),
         "Write this file?"
     );
     assert_eq!(
         permission_title(
             "enter_plan_mode",
+            None,
             &gate_info("enter_plan_mode", &Value::Null)
         ),
         "Start with a plan?"
     );
     assert_eq!(
-        permission_title("generate_image", &gate_info("generate_image", &Value::Null)),
+        permission_title(
+            "generate_image",
+            None,
+            &gate_info("generate_image", &Value::Null),
+        ),
         "Generate an image?"
     );
     assert_eq!(
-        permission_title("browser", &gate_info("browser", &Value::Null)),
+        permission_title("browser", None, &gate_info("browser", &Value::Null)),
         "Run this browser action?"
     );
     assert_eq!(
         permission_title(
             "mcp_github_create_issue",
+            None,
             &gate_info("mcp_github_create_issue", &Value::Null)
         ),
         "Run this connected action?"
@@ -59,12 +66,18 @@ fn tool_titles_are_user_facing() {
     assert_eq!(
         permission_title(
             "future_internal_tool",
+            None,
             &gate_info("future_internal_tool", &Value::Null)
         ),
         "Allow this action to run?"
     );
     assert_eq!(
-        permission_options("future_internal_tool")[1].label,
+        permission_options(
+            "future_internal_tool",
+            None,
+            &gate_info("future_internal_tool", &Value::Null)
+        )[1]
+        .label,
         "Always allow similar actions"
     );
 }

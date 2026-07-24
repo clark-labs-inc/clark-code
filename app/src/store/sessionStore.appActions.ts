@@ -11,19 +11,23 @@ import {
   billingMe,
   cancelUpdateDrain,
   checkAndStageUpdate,
+  closeLiveSession,
   cloudCreds,
   cloudList,
   cloudSetArchived,
   codeKeyAccountBinding,
   codeKeyMatchesAccount,
   codeKeyProvisions,
+  configureCloudHistoryCredentials,
   consumeJustUpdated,
   delay,
   deriveTitle,
   drainLocalHistory,
+  emptySnapshot,
   flushCloudPuts,
   getBridge,
   hasContent,
+  hasUnscopedLocalHistory,
   hasSeenActivityReward,
   appInitializationState,
   installStagedUpdate,
@@ -45,6 +49,7 @@ import {
   pickFolder,
   provisionCodeKey,
   refreshAuthSession,
+  resetCloudHistory,
   relaunchApp,
   saveBrowserEnabled,
   saveLocalSettings,
@@ -236,6 +241,7 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
     try {
       const bridge = await getBridge();
       const providers = await bridge.listProviders();
+      configureCloudHistoryCredentials(cloudCreds(get().auth));
       // Native trajectory sync hit a 401 mid-retry: re-mint the Clark JWT from
       // the Google refresh token and push it back down — the retry loop reads
       // the token per attempt, so the run self-heals without any UI. Single-
@@ -250,11 +256,11 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
           try {
             const auth = get().auth;
             const refreshed = auth ? await refreshAuthSession(auth) : null;
-            if (refreshed) {
+            const refreshedToken = refreshed?.clark.token;
+            if (refreshed && refreshedToken && get().auth?.clark.token === auth?.clark.token) {
+              await bridge.refreshCloudSession?.(refreshedToken);
+              configureCloudHistoryCredentials(cloudCreds(refreshed));
               set({ auth: refreshed });
-              if (refreshed.clark.token) {
-                await bridge.updateCloudToken?.(refreshed.clark.token);
-              }
             }
           } finally {
             refreshingCloudToken = false;
@@ -265,7 +271,31 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
       // can continue. A local journal failure is fail-closed by the native
       // bridge at the last durable event and uses this same warning surface.
       bridge.onCloudSyncWarning?.((message) => set({ warning: message }));
-      onCloudHistoryConflict(() => {
+      bridge.onCloudConversationDeleted?.((conversationId) => {
+        closeLiveSession(bridge, conversationId);
+        snapshotCache.delete(conversationId);
+        const active = get().session?.id === conversationId;
+        set((current) => ({
+          conversations: current.conversations.filter((conversation) => conversation.id !== conversationId),
+          runningIds: current.runningIds.filter((id) => id !== conversationId),
+          warning: "This conversation was deleted on another device, so Clark Code stopped it here.",
+          ...(active
+            ? {
+                session: null,
+                snapshot: settleRuns(emptySnapshot()),
+                attachments: [],
+                historyPrefix: null,
+                queued: [],
+                terminalOpen: false,
+                activeRemote: null,
+                activeRemoteHost: null,
+                activeProjectRoot: null,
+              }
+            : {}),
+        }));
+      });
+      onCloudHistoryConflict((conversationId) => {
+        snapshotCache.delete(conversationId);
         set({
           warning: "This conversation changed on another device. Reopen it to continue from Clark cloud’s latest history.",
         });
@@ -538,16 +568,25 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
   },
 
   migrateLocalToCloud: () => {
-    const creds = cloudCreds(get().auth);
-    if (!creds) return; // no cloud target yet — keep local data for a later sign-in
-    const drained = drainLocalHistory();
+    const auth = get().auth;
+    const creds = cloudCreds(auth);
+    if (!creds || !auth) return; // no cloud target yet — keep local data for a later sign-in
+    const scopes = [auth.user.id, auth.user.email]
+      .filter((scope): scope is string => typeof scope === "string" && scope.trim().length > 0);
+    const drained = drainLocalHistory(scopes);
+    if (hasUnscopedLocalHistory()) {
+      set({
+        warning: "Older local Clark Code history could not be matched to this account, so it was not uploaded.",
+      });
+    }
     if (drained.length === 0) return;
     for (const d of drained) {
       // Seed the cache so migrated chats open instantly (settled — a drained
       // transcript may have been persisted mid-run), then upload snapshot +
       // archived state (idempotent; the server's rev guard won't clobber newer).
-      snapshotCache.set(d.meta.id, settleRuns(d.snapshot));
-      scheduleCloudPut(creds, d.meta, d.snapshot);
+      const settled = settleRuns(d.snapshot);
+      snapshotCache.set(d.meta.id, settled);
+      scheduleCloudPut(creds, d.meta, settled);
       if (d.archived) void cloudSetArchived(creds, d.meta.id, true).catch(() => {});
     }
     const existing = new Set(get().conversations.map((c) => c.id));
@@ -596,11 +635,7 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
   },
 
   loadMemory: async () => {
-    const { bridge, localSettings: s, activeProjectRoot, activeRemote } = get();
-    const cwd = activeProjectRoot?.trim() || s.cwd.trim();
-    const remote = activeRemote
-      ? { ws_url: activeRemote.ws_url, token: activeRemote.token }
-      : null;
+    const { bridge, session } = get();
     if (!bridge?.listMemory) {
       set({ memoryOverview: null, globalMemoryOverview: null });
       return;
@@ -613,7 +648,7 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
       // paints the spinner, so the click looks frozen. Slower reads already spin.
       const [memoryOverview, globalMemoryOverview] = await minLoadDuration(
         Promise.all([
-          cwd ? bridge.listMemory(cwd, remote) : Promise.resolve(null),
+          session ? bridge.listMemory(session.id) : Promise.resolve(null),
           bridge.listGlobalMemory?.() ?? Promise.resolve(null),
         ]),
       );
@@ -634,6 +669,10 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
 
   signIn: async () => {
     const auth = await signInWithGoogle();
+    // A new authenticated principal starts with no inherited retry queue or
+    // cached write revision from the prior account.
+    resetCloudHistory();
+    configureCloudHistoryCredentials(cloudCreds(auth));
     // Start from an empty list for the new account; the cloud fetch below is the
     // authoritative source (a different account never inherits the prior list).
     set({ auth, billing: null, activityReward: null, conversations: [], conversationsLoading: true });
@@ -648,8 +687,11 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
   signOutAuth: () => {
     // A Clark Code key is account-scoped. Removing the local binding prevents
     // the next user from silently billing against this account.
+    const cloudToken = get().auth?.clark.token;
     get().setLocalSettings({ apiKey: "", apiKeyOwner: "" });
+    resetCloudHistory();
     authSignOut();
+    if (cloudToken) void get().bridge?.clearCloudSession?.(cloudToken);
     get().endSession({ force: true });
     // Drop the in-memory history entirely so the signed-out (and any next)
     // account starts clean.

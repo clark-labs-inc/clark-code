@@ -1,3 +1,7 @@
+use super::cloud_authority::{
+    clark_auth_base, clear_cloud_authority, install_cloud_authority, jwt_subject,
+    refresh_cloud_authority, require_cloud_access,
+};
 use super::*;
 
 /// Result of exchanging a Google ID token for a Clark session.
@@ -15,16 +19,18 @@ pub struct GoogleAuthResult {
 /// session via Better Auth, then fetch the bearer JWT the gateway expects.
 ///
 /// Done host-side (reqwest) rather than in the WebView so it isn't subject to
-/// browser CORS against the Clark auth origin. No secrets are involved: the
-/// Google ID token is short-lived and the call only reads back Clark's own JWT.
+/// browser CORS. The short-lived Google credential remains native and is sent
+/// only to an exact Clark authentication origin.
 #[tauri::command]
 pub async fn clark_exchange_google_idtoken(
     auth_origin: String,
     id_token: String,
+    state: State<'_, AppState>,
 ) -> Result<GoogleAuthResult, String> {
-    let base = auth_origin.trim_end_matches('/').to_string();
+    let base = clark_auth_base(&auth_origin)?;
     let client = reqwest::Client::builder()
         .cookie_store(true)
+        .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|e| e.to_string())?;
 
@@ -98,13 +104,33 @@ pub async fn clark_exchange_google_idtoken(
             .map(str::to_string)
     };
 
+    let id = str_field(&user, "id")
+        .ok_or_else(|| "Clark sign-in returned no account identity".to_string())?;
+    let subject = jwt_subject(&token)?;
+    if subject != id {
+        return Err("Clark session identity did not match the signed-in account".into());
+    }
+    install_cloud_authority(state.inner(), base, token.clone(), subject).await;
+
     Ok(GoogleAuthResult {
         token,
-        id: str_field(&user, "id").unwrap_or_default(),
+        id,
         email: str_field(&user, "email").unwrap_or_default(),
         name: str_field(&user, "name"),
         image: str_field(&user, "image"),
     })
+}
+
+/// Rotate the native bearer used by existing trajectory clients after the
+/// WebView refreshes its Clark session. The subject must remain the account the
+/// host already validated; a cross-account token is never allowed to inherit
+/// that account's durable outbox.
+#[tauri::command]
+pub async fn clark_refresh_cloud_session(
+    token: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    refresh_cloud_authority(state.inner(), &token).await
 }
 
 // ---------------------------------------------------------------------------
@@ -116,33 +142,6 @@ pub async fn clark_exchange_google_idtoken(
 // JWT. The gateway serves both `/ws` and `/api/...` on one host, so the REST base
 // is the WS endpoint with an http(s) scheme and the `/ws` suffix dropped.
 
-/// Derive the HTTPS REST base from the gateway WS endpoint.
-pub(crate) fn clark_rest_base(endpoint: &str) -> String {
-    let mut base = endpoint.trim().to_string();
-    if let Some(rest) = base.strip_prefix("wss://") {
-        base = format!("https://{rest}");
-    } else if let Some(rest) = base.strip_prefix("ws://") {
-        base = format!("http://{rest}");
-    }
-    let base = base.trim_end_matches('/');
-    base.strip_suffix("/ws").unwrap_or(base).to_string()
-}
-
-/// Shared HTTP client for cloud sync. Built once and reused so connections stay
-/// warm (HTTP keep-alive / HTTP/2): each desktop-conversation write is then a
-/// single round-trip, not a fresh TLS handshake — that per-request rebuild was
-/// what made the REST sync feel slow.
-static CLOUD_HTTP: std::sync::LazyLock<reqwest::Client> = std::sync::LazyLock::new(|| {
-    reqwest::Client::builder()
-        .pool_idle_timeout(std::time::Duration::from_secs(90))
-        .build()
-        .expect("build cloud http client")
-});
-
-pub(crate) fn clark_http_client() -> Result<reqwest::Client, String> {
-    Ok(CLOUD_HTTP.clone())
-}
-
 pub(crate) async fn read_json_or_err(resp: reqwest::Response, what: &str) -> Result<Value, String> {
     let status = resp.status();
     let text = resp.text().await.unwrap_or_default();
@@ -153,232 +152,6 @@ pub(crate) async fn read_json_or_err(resp: reqwest::Response, what: &str) -> Res
         return Ok(Value::Null);
     }
     serde_json::from_str(&text).map_err(|e| format!("{what}: invalid response: {e}"))
-}
-
-/// List the signed-in user's desktop conversations (metadata only). The cloud
-/// response is authoritative; the account-scoped SQLite cache only fills rows
-/// that have not reached the cloud yet or keeps history available offline.
-#[tauri::command]
-pub async fn desktop_conv_list(
-    app: AppHandle,
-    endpoint: String,
-    token: String,
-    owner_scope: String,
-) -> Result<Value, String> {
-    let url = format!("{}/api/desktop/conversations", clark_rest_base(&endpoint));
-    let cloud = clark_http_client()?
-        .get(url)
-        .header("Authorization", format!("Bearer {token}"))
-        .send()
-        .await;
-    let (rows, cloud_available) = match cloud {
-        Ok(response) => match read_json_or_err(response, "desktop list").await {
-            Ok(value) => (value.as_array().cloned().unwrap_or_default(), true),
-            Err(error) => {
-                tracing::warn!(%error, "desktop cloud list unavailable; using local acknowledged cache");
-                (Vec::new(), false)
-            }
-        },
-        Err(error) => {
-            tracing::warn!(%error, "desktop cloud list unavailable; using local acknowledged cache");
-            (Vec::new(), false)
-        }
-    };
-    let merged = crate::trajectory::merge_local_summaries(
-        crate::trajectory::outbox_path(&app)?,
-        owner_scope,
-        rows,
-        cloud_available,
-    )
-    .await?;
-    Ok(Value::Array(merged))
-}
-
-/// Fetch one desktop conversation including its full snapshot blob.
-#[tauri::command]
-pub async fn desktop_conv_get(
-    app: AppHandle,
-    endpoint: String,
-    token: String,
-    id: String,
-    owner_scope: String,
-) -> Result<Value, String> {
-    let url = format!(
-        "{}/api/desktop/conversations/{}",
-        clark_rest_base(&endpoint),
-        urlencoding::encode(&id)
-    );
-    let cloud = clark_http_client()?
-        .get(url)
-        .header("Authorization", format!("Bearer {token}"))
-        .send()
-        .await;
-    let cloud_detail = match cloud {
-        Ok(response) => read_json_or_err(response, "desktop get").await.ok(),
-        Err(error) => {
-            tracing::warn!(%error, conversation_id = %id, "desktop cloud get unavailable; using local acknowledged cache");
-            None
-        }
-    };
-    let cloud_snapshot = cloud_detail.as_ref().and_then(|detail| {
-        let snapshot = serde_json::from_value(detail.get("snapshot")?.clone()).ok()?;
-        let rev = detail
-            .get("rev")
-            .and_then(Value::as_i64)
-            .unwrap_or_default();
-        Some((snapshot, rev))
-    });
-    let recovered = crate::trajectory::recover_snapshot(
-        crate::trajectory::outbox_path(&app)?,
-        owner_scope,
-        id.clone(),
-        cloud_snapshot,
-    )
-    .await?;
-    match (cloud_detail, recovered) {
-        (Some(mut detail), Some(recovered)) => {
-            let mut snapshot =
-                serde_json::to_value(recovered.snapshot).map_err(|e| e.to_string())?;
-            if recovered.pending {
-                snapshot["sync_pending"] = true.into();
-            }
-            detail["snapshot"] = snapshot;
-            detail["syncPending"] = recovered.pending.into();
-            Ok(detail)
-        }
-        (Some(detail), None) => Ok(detail),
-        (None, Some(recovered)) => {
-            let mut snapshot =
-                serde_json::to_value(recovered.snapshot).map_err(|e| e.to_string())?;
-            if recovered.pending {
-                snapshot["sync_pending"] = true.into();
-            }
-            Ok(serde_json::json!({
-                "id": id,
-                "snapshot": snapshot,
-                "syncPending": recovered.pending,
-            }))
-        }
-        (None, None) => Err(format!(
-            "desktop conversation {id} is unavailable locally and in Clark cloud"
-        )),
-    }
-}
-
-/// Insert or replace a desktop conversation snapshot.
-#[tauri::command]
-#[allow(clippy::too_many_arguments)]
-pub async fn desktop_conv_put(
-    app: AppHandle,
-    endpoint: String,
-    token: String,
-    id: String,
-    title: String,
-    provider: String,
-    project: Option<String>,
-    repository_fingerprint: Option<String>,
-    remote_host: Option<String>,
-    mode: Option<String>,
-    title_locked: bool,
-    rev: i64,
-    mut snapshot: Value,
-    status: Option<String>,
-    owner_scope: String,
-    base_rev: Option<i64>,
-    mutation_id: Option<String>,
-) -> Result<Value, String> {
-    let local_live = status.as_deref() == Some("running");
-    let checkpoint_seq = snapshot
-        .get("history_checkpoint")
-        .and_then(Value::as_i64)
-        .unwrap_or_default();
-    // Do not let the cloud read model overtake the append-only history it
-    // represents. This command already runs in the background, so waiting for
-    // the exact covered prefix does not block local rendering or offline work.
-    crate::trajectory::wait_for_acknowledged_prefix(
-        crate::trajectory::outbox_path(&app)?,
-        owner_scope.clone(),
-        id.clone(),
-        checkpoint_seq,
-        std::time::Duration::from_secs(10),
-    )
-    .await?;
-    if let Some(object) = snapshot.as_object_mut() {
-        object.remove("history_checkpoint");
-        object.remove("sync_pending");
-    }
-    let checkpoint_snapshot = snapshot.clone();
-    let checkpoint_metadata = serde_json::json!({
-        "id": id,
-        "title": title,
-        "provider": provider,
-        "project": project,
-        "repositoryFingerprint": repository_fingerprint,
-        "remoteHost": remote_host,
-        "mode": mode,
-        "titleLocked": title_locked,
-        "rev": rev,
-        "archived": false,
-    });
-    let url = format!(
-        "{}/api/desktop/conversations/{}",
-        clark_rest_base(&endpoint),
-        urlencoding::encode(&id)
-    );
-    let resp = clark_http_client()?
-        .put(url)
-        .header("Authorization", format!("Bearer {token}"))
-        .json(&serde_json::json!({
-            "title": title,
-            "provider": provider,
-            "project": project,
-            "repositoryFingerprint": repository_fingerprint,
-            "remoteHost": remote_host,
-            "mode": mode,
-            "titleLocked": title_locked,
-            "rev": rev,
-            "snapshot": snapshot,
-            "status": status,
-            "baseRev": base_rev,
-            "mutationId": mutation_id,
-        }))
-        .send()
-        .await
-        .map_err(|e| format!("desktop put request failed: {e}"))?;
-    if resp.status() == reqwest::StatusCode::CONFLICT {
-        let detail = resp.text().await.unwrap_or_default();
-        crate::trajectory::quarantine_snapshot_branch(
-            crate::trajectory::outbox_path(&app)?,
-            owner_scope,
-            id,
-        )
-        .await?;
-        return Err(format!("desktop put failed (409 Conflict): {detail}"));
-    }
-    let summary = read_json_or_err(resp, "desktop put").await?;
-    let stored_rev = summary
-        .get("rev")
-        .and_then(Value::as_i64)
-        .unwrap_or_default();
-    if stored_rev > rev {
-        return Err(format!(
-            "cloud_conflict: Clark cloud revision {stored_rev} is newer than local revision {rev}"
-        ));
-    }
-    let typed_snapshot: Snapshot = serde_json::from_value(checkpoint_snapshot)
-        .map_err(|error| format!("checkpoint desktop snapshot: {error}"))?;
-    crate::trajectory::checkpoint_snapshot(
-        crate::trajectory::outbox_path(&app)?,
-        owner_scope,
-        id.clone(),
-        checkpoint_metadata,
-        typed_snapshot,
-        stored_rev,
-        checkpoint_seq,
-        local_live,
-    )
-    .await?;
-    Ok(summary)
 }
 
 /// Probe MCP servers — connect each, list its tools, return status — then drop
@@ -429,7 +202,7 @@ pub async fn clark_repository_history(
 /// `ck_live_…` key (shown only at creation — the caller persists it).
 #[tauri::command]
 pub async fn clark_provision_code_key(endpoint: String, token: String) -> Result<String, String> {
-    let url = format!("{}/api/platform/api-keys", clark_rest_base(&endpoint));
+    let url = format!("{}/api/platform/api-keys", clark_rest_base(&endpoint)?);
     let resp = clark_http_client()?
         .post(url)
         .header("Authorization", format!("Bearer {token}"))
@@ -452,7 +225,7 @@ pub async fn clark_provision_code_key(endpoint: String, token: String) -> Result
 /// recent ledger) — `GET /api/billing/me`. Returned verbatim to the UI.
 #[tauri::command]
 pub async fn clark_billing_me(endpoint: String, token: String) -> Result<Value, String> {
-    let url = format!("{}/api/billing/me", clark_rest_base(&endpoint));
+    let url = format!("{}/api/billing/me", clark_rest_base(&endpoint)?);
     let resp = clark_http_client()?
         .get(url)
         .header("Authorization", format!("Bearer {token}"))
@@ -472,7 +245,7 @@ pub async fn desktop_conv_share(
 ) -> Result<Value, String> {
     let url = format!(
         "{}/api/desktop/conversations/{}/share",
-        clark_rest_base(&endpoint),
+        clark_rest_base(&endpoint)?,
         urlencoding::encode(&id)
     );
     let resp = clark_http_client()?
@@ -493,7 +266,7 @@ pub async fn desktop_conv_unshare(
 ) -> Result<(), String> {
     let url = format!(
         "{}/api/desktop/conversations/{}/share",
-        clark_rest_base(&endpoint),
+        clark_rest_base(&endpoint)?,
         urlencoding::encode(&id)
     );
     let resp = clark_http_client()?
@@ -516,11 +289,12 @@ pub async fn desktop_conv_delete(
     endpoint: String,
     token: String,
     id: String,
-    owner_scope: String,
+    state: State<'_, AppState>,
 ) -> Result<(), String> {
+    let access = require_cloud_access(state.inner(), &endpoint, &token).await?;
     let url = format!(
         "{}/api/desktop/conversations/{}",
-        clark_rest_base(&endpoint),
+        access.rest_base,
         urlencoding::encode(&id)
     );
     let resp = clark_http_client()?
@@ -534,8 +308,12 @@ pub async fn desktop_conv_delete(
         let text = resp.text().await.unwrap_or_default();
         return Err(format!("desktop delete failed ({status}): {text}"));
     }
-    crate::trajectory::delete_conversation(crate::trajectory::outbox_path(&app)?, owner_scope, id)
-        .await
+    crate::trajectory::delete_conversation(
+        crate::trajectory::outbox_path(&app)?,
+        access.owner_scope,
+        id,
+    )
+    .await
 }
 
 /// Toggle a desktop conversation's archived flag in the cloud (a snapshot `put`
@@ -548,11 +326,12 @@ pub async fn desktop_conv_set_archived(
     token: String,
     id: String,
     archived: bool,
-    owner_scope: String,
+    state: State<'_, AppState>,
 ) -> Result<Value, String> {
+    let access = require_cloud_access(state.inner(), &endpoint, &token).await?;
     let url = format!(
         "{}/api/desktop/conversations/{}",
-        clark_rest_base(&endpoint),
+        access.rest_base,
         urlencoding::encode(&id)
     );
     let resp = clark_http_client()?
@@ -565,10 +344,20 @@ pub async fn desktop_conv_set_archived(
     let summary = read_json_or_err(resp, "desktop archive").await?;
     crate::trajectory::set_archived(
         crate::trajectory::outbox_path(&app)?,
-        owner_scope,
+        access.owner_scope,
         id,
         archived,
     )
     .await?;
     Ok(summary)
+}
+
+/// Clear native cloud credentials and cache authority during sign-out.
+#[tauri::command]
+pub async fn clark_clear_cloud_session(
+    token: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    clear_cloud_authority(state.inner(), &token).await;
+    Ok(())
 }

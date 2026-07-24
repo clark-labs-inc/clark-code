@@ -1,13 +1,24 @@
 use super::*;
 
+#[cfg(windows)]
+fn windows_sandbox_data_root() -> Result<std::path::PathBuf> {
+    let product_dir = if cfg!(debug_assertions) {
+        "Clark Code Dev"
+    } else {
+        "Clark Code"
+    };
+    std::env::var_os("LOCALAPPDATA")
+        .map(std::path::PathBuf::from)
+        .ok_or_else(|| Error::Io("LOCALAPPDATA is unavailable".to_string()))
+        .map(|root| root.join(product_dir))
+}
+
 pub(super) fn build_local_executor(
     config: &LocalConfig,
     sandbox: &Sandbox,
     preset: exec_sandbox::SandboxPreset,
 ) -> Result<(Arc<dyn Executor>, Option<tempfile::TempDir>)> {
-    if config.sandbox_mode == crate::config::LocalSandboxMode::Disabled
-        || preset == exec_sandbox::SandboxPreset::DangerFullAccess
-    {
+    if explicit_host_execution_allowed(config.sandbox_mode, preset) {
         return Ok((Arc::new(LocalExecutor), None));
     }
 
@@ -21,11 +32,7 @@ pub(super) fn build_local_executor(
     }
     #[cfg(windows)]
     let private_temp = {
-        let base = std::env::var_os("LOCALAPPDATA")
-            .map(std::path::PathBuf::from)
-            .ok_or_else(|| Error::Io("LOCALAPPDATA is unavailable".to_string()))?
-            .join("Clark Code")
-            .join("sandbox-tmp");
+        let base = windows_sandbox_data_root()?.join("sandbox-tmp");
         std::fs::create_dir_all(&base).map_err(|error| Error::Io(error.to_string()))?;
         extra_write_roots.push(base.clone());
         tempfile::Builder::new()
@@ -71,14 +78,18 @@ pub(super) fn build_local_executor(
             Arc::new(exec_sandbox::SandboxedExecutor::with_manager(manager).map_err(Error::Other)?);
         return Ok((executor, Some(private_temp)));
     }
-    if config.sandbox_mode == crate::config::LocalSandboxMode::Required {
-        return Err(Error::Unsupported(format!(
-            "required local sandbox is not ready: {:?}",
-            manager.status()
-        )));
-    }
-    tracing::warn!(status = ?manager.status(), "local sandbox is not ready; using explicit host execution");
-    Ok((Arc::new(LocalExecutor), None))
+    Err(Error::Unsupported(format!(
+        "project sandbox is not ready: {:?}. Set sandbox mode to disabled or choose danger-full-access to run on the host.",
+        manager.status()
+    )))
+}
+
+fn explicit_host_execution_allowed(
+    mode: crate::config::LocalSandboxMode,
+    preset: exec_sandbox::SandboxPreset,
+) -> bool {
+    mode == crate::config::LocalSandboxMode::Disabled
+        || preset == exec_sandbox::SandboxPreset::DangerFullAccess
 }
 
 #[cfg(windows)]
@@ -133,15 +144,38 @@ pub fn local_sandbox_setup_policy(cwd: &std::path::Path) -> Result<exec_sandbox:
         if let Some(docs_root) = crate::workspace::workspace_root() {
             write_roots.push(docs_root);
         }
-        let temp_root = std::env::var_os("LOCALAPPDATA")
-            .map(std::path::PathBuf::from)
-            .ok_or_else(|| Error::Io("LOCALAPPDATA is unavailable".to_string()))?
-            .join("Clark Code")
-            .join("sandbox-tmp");
+        let temp_root = windows_sandbox_data_root()?.join("sandbox-tmp");
         write_roots.push(temp_root);
     }
     Ok(exec_sandbox::SandboxPolicy::workspace_write(
         cwd.to_path_buf(),
         write_roots,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::explicit_host_execution_allowed;
+    use crate::config::LocalSandboxMode;
+    use exec_sandbox::SandboxPreset;
+
+    #[test]
+    fn host_execution_requires_an_explicit_uncontained_mode() {
+        assert!(!explicit_host_execution_allowed(
+            LocalSandboxMode::Auto,
+            SandboxPreset::WorkspaceWrite
+        ));
+        assert!(!explicit_host_execution_allowed(
+            LocalSandboxMode::Required,
+            SandboxPreset::WorkspaceWrite
+        ));
+        assert!(explicit_host_execution_allowed(
+            LocalSandboxMode::Disabled,
+            SandboxPreset::WorkspaceWrite
+        ));
+        assert!(explicit_host_execution_allowed(
+            LocalSandboxMode::Auto,
+            SandboxPreset::DangerFullAccess
+        ));
+    }
 }

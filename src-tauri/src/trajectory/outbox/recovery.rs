@@ -1,8 +1,8 @@
 use std::path::Path;
 
-use agent_core::{apply, AgentEvent, RunFailureKind, RunOutcome, RunStatus, Snapshot};
+use agent_core::{apply, AgentEvent, GoalStatus, RunFailureKind, RunOutcome, RunStatus, Snapshot};
 use rusqlite::{params, OptionalExtension};
-use serde_json::json;
+use serde_json::{json, Value};
 
 use super::{open, owner_key, sql_error, AppendRequest, RecoveredSnapshot, TrajectoryOutbox};
 use crate::trajectory::{event_kind, reserve_timestamps, Conversation, EventRecord};
@@ -17,7 +17,8 @@ pub(super) fn recover_sync(
     let owner = owner_key(owner_scope);
     let cached = conn
         .query_row(
-            r#"SELECT metadata_json, base_snapshot_json, base_rev, checkpoint_seq, local_live
+            r#"SELECT metadata_json, base_snapshot_json, base_rev, checkpoint_seq, local_live,
+                      created_at_ms, updated_at_ms
                FROM journal_conversation WHERE owner_key = ?1 AND conversation_id = ?2"#,
             params![owner, conversation_id],
             |row| {
@@ -27,29 +28,55 @@ pub(super) fn recover_sync(
                     row.get::<_, i64>(2)?,
                     row.get::<_, i64>(3)?,
                     row.get::<_, bool>(4)?,
+                    row.get::<_, i64>(5)?,
+                    row.get::<_, i64>(6)?,
                 ))
             },
         )
         .optional()
         .map_err(sql_error)?;
 
-    let (metadata, mut snapshot, mut checkpoint_seq, allow_recovery, owned_live) =
+    let (
+        metadata,
+        mut snapshot,
+        mut checkpoint_seq,
+        allow_recovery,
+        owned_live,
+        base_rev,
+        created_at_ms,
+        updated_at_ms,
+    ) =
         match (cloud, cached) {
             (Some((snapshot, _)), None) => {
                 return Ok(Some(RecoveredSnapshot {
                     snapshot,
                     pending: false,
+                    metadata: None,
+                    needs_snapshot_publication: false,
                 }));
             }
             (
                 Some((snapshot, cloud_rev)),
-                Some((metadata, _, cached_rev, checkpoint, local_live)),
-            ) if cloud_rev == cached_rev => (metadata, snapshot, checkpoint, true, local_live),
-            (Some((snapshot, cloud_rev)), Some((metadata, _, _, _, _))) => {
+                Some((metadata, _, cached_rev, checkpoint, local_live, created_at_ms, updated_at_ms)),
+            ) if cloud_rev == cached_rev => (
+                metadata,
+                snapshot,
+                checkpoint,
+                true,
+                local_live,
+                cached_rev,
+                created_at_ms,
+                updated_at_ms,
+            ),
+            (
+                Some((snapshot, cloud_rev)),
+                Some((metadata, _, _, _, _, created_at_ms, _)),
+            ) => {
                 // Another device advanced the authority. Preserve this device's
                 // batches for idempotent trajectory delivery, but never overlay the
                 // divergent branch onto the newer cloud snapshot.
                 let tx = conn.transaction().map_err(sql_error)?;
+                let updated_at_ms = super::now_ms();
                 tx.execute(
                     r#"UPDATE trajectory_outbox SET replayable = 0
                    WHERE owner_key = ?1 AND conversation_id = ?2"#,
@@ -67,19 +94,34 @@ pub(super) fn recover_sync(
                         conversation_id,
                         serde_json::to_vec(&snapshot).map_err(|e| e.to_string())?,
                         cloud_rev,
-                        super::now_ms()
+                        updated_at_ms
                     ],
                 )
                 .map_err(sql_error)?;
                 tx.commit().map_err(sql_error)?;
-                (metadata, snapshot, 0, false, false)
+                (
+                    metadata,
+                    snapshot,
+                    0,
+                    false,
+                    false,
+                    cloud_rev,
+                    created_at_ms,
+                    updated_at_ms,
+                )
             }
-            (None, Some((metadata, bytes, _, checkpoint, local_live))) => (
+            (
+                None,
+                Some((metadata, bytes, base_rev, checkpoint, local_live, created_at_ms, updated_at_ms)),
+            ) => (
                 metadata,
                 serde_json::from_slice(&bytes).map_err(|e| e.to_string())?,
                 checkpoint,
                 true,
                 local_live,
+                base_rev,
+                created_at_ms,
+                updated_at_ms,
             ),
             (None, None) => return Ok(None),
         };
@@ -111,9 +153,16 @@ pub(super) fn recover_sync(
     }
     drop(query);
 
+    let mut needs_snapshot_publication = replayed;
     if allow_recovery && (owned_live || replayed) {
-        let events = interrupt_live_runs(&mut snapshot);
+        let events = interrupt_live_runs(
+            &mut snapshot,
+            "desktop_restart",
+            "Clark restarted before this run finished. You can continue from the saved history.",
+            "Clark restarted before the goal finished. Continue from the saved history.",
+        );
         if !events.is_empty() {
+            needs_snapshot_publication = true;
             let conversation: Conversation =
                 serde_json::from_slice(&metadata).map_err(|e| e.to_string())?;
             let first_timestamp = reserve_timestamps(events.len());
@@ -159,11 +208,49 @@ pub(super) fn recover_sync(
             |row| row.get::<_, bool>(0),
         )
         .map_err(sql_error)?;
-    Ok(Some(RecoveredSnapshot { snapshot, pending }))
+    Ok(Some(RecoveredSnapshot {
+        snapshot,
+        pending,
+        metadata: Some(recovered_metadata(
+            &metadata,
+            conversation_id,
+            base_rev,
+            created_at_ms,
+            updated_at_ms,
+        )?),
+        needs_snapshot_publication,
+    }))
 }
 
-fn interrupt_live_runs(snapshot: &mut Snapshot) -> Vec<AgentEvent> {
-    let mut events = snapshot
+fn recovered_metadata(
+    bytes: &[u8],
+    conversation_id: &str,
+    base_rev: i64,
+    created_at_ms: i64,
+    updated_at_ms: i64,
+) -> Result<Value, String> {
+    let mut metadata: Value = serde_json::from_slice(bytes).map_err(|e| e.to_string())?;
+    let object = metadata
+        .as_object_mut()
+        .ok_or("decode cached conversation metadata: expected object")?;
+    object.insert("id".into(), Value::String(conversation_id.into()));
+    object.insert("rev".into(), Value::from(base_rev));
+    object.insert("createdAt".into(), Value::from(created_at_ms));
+    object.insert("updatedAt".into(), Value::from(updated_at_ms));
+    Ok(metadata)
+}
+
+/// Turn any active run (and its active goal) into durable terminal events.
+///
+/// Restart recovery and an explicit host-side close use the same transition so
+/// neither can leave another device rendering a session as still working.
+pub(crate) fn interrupt_live_runs(
+    snapshot: &mut Snapshot,
+    stop_reason: &str,
+    error: &str,
+    goal_blocker_reason: &str,
+) -> Vec<AgentEvent> {
+    let interrupted_runs = snapshot
         .runs
         .iter()
         .filter(|(_, run)| {
@@ -172,18 +259,41 @@ fn interrupt_live_runs(snapshot: &mut Snapshot) -> Vec<AgentEvent> {
                 RunStatus::Queued | RunStatus::Running | RunStatus::AwaitingInput
             )
         })
-        .map(|(run, _)| AgentEvent::RunFinished {
+        .map(|(run, _)| run.clone())
+        .collect::<Vec<_>>();
+    let mut events = interrupted_runs
+        .iter()
+        .cloned()
+        .map(|run| AgentEvent::RunFinished {
             run: run.clone(),
             outcome: RunOutcome {
                 status: RunStatus::Failed,
-                stop_reason: Some("desktop_restart".into()),
-                error: Some("Clark restarted before this run finished. You can continue from the saved history.".into()),
+                stop_reason: Some(stop_reason.into()),
+                error: Some(error.into()),
                 failure_kind: Some(RunFailureKind::RuntimeInterrupted),
                 usage: None,
                 execution: None,
             },
         })
         .collect::<Vec<_>>();
+    let goal_run = snapshot
+        .goal
+        .as_ref()
+        .filter(|goal| goal.status == GoalStatus::Active)
+        .and_then(|goal| {
+            goal.run
+                .as_ref()
+                .filter(|run| interrupted_runs.contains(run))
+                .cloned()
+                .or_else(|| interrupted_runs.last().cloned())
+        });
+    if let Some(run) = goal_run {
+        let mut goal = snapshot.goal.clone().expect("active goal is present");
+        goal.status = GoalStatus::Blocked;
+        goal.blocker_reason = Some(goal_blocker_reason.into());
+        goal.updated_at_ms = reserve_timestamps(1) as u64;
+        events.push(AgentEvent::GoalUpdated { run, goal });
+    }
     for item in snapshot.timeline.clone() {
         let agent_core::TimelineItem::ProviderIncident { run, id } = item else {
             continue;

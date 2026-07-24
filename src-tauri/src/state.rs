@@ -16,6 +16,15 @@ use tokio::sync::{Mutex, RwLock};
 use crate::ssh::RemoteConn;
 use crate::trajectory::CloudTrajectoryClient;
 
+/// Native-owned account binding for Clark cloud access. The WebView may present
+/// credentials, but it never selects the local cache partition after this
+/// authority has been established by Clark.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct CloudAccountAuthority {
+    pub rest_base: String,
+    pub owner_scope: String,
+}
+
 /// One live session: its provider instance, identity, and projected snapshot.
 ///
 /// Each session owns a whole provider (providers are effectively
@@ -26,6 +35,13 @@ pub struct HostSession {
     pub session: Session,
     pub snapshot: Snapshot,
     pub trajectory: Option<CloudTrajectoryClient>,
+    /// Serializes snapshot projection with an explicit close. Without this,
+    /// an asynchronous provider cancellation can append a stale event after a
+    /// terminal close transition has been written.
+    pub projection_gate: Arc<Mutex<()>>,
+    /// A close owns the terminal transition; later provider stream batches must
+    /// be ignored rather than reopening the rendered run.
+    pub closing: bool,
 }
 
 /// Shared, thread-safe host state managed by Tauri.
@@ -44,8 +60,13 @@ pub struct AppState {
     /// tunnel) alive; removing it tears them down.
     pub remotes: Arc<Mutex<HashMap<String, RemoteConn>>>,
     /// The app-wide Clark cloud JWT, shared by every trajectory client so a
-    /// frontend refresh (via `update_cloud_token`) reaches in-flight retries.
+    /// native sign-in refresh reaches in-flight retries.
     pub cloud_token: Arc<RwLock<Option<String>>>,
+    /// Clark-validated account and origin used for every account-scoped local
+    /// cache effect.
+    pub(crate) cloud_authority: Arc<RwLock<Option<CloudAccountAuthority>>>,
+    /// Serializes first-use cloud validation and account switches.
+    pub(crate) cloud_bootstrap: Arc<Mutex<()>>,
     /// Canonical, environment-aware skill catalog shared by native UI commands
     /// and every local provider instance.
     pub skill_catalogs: Arc<provider_local::SkillCatalogService>,
@@ -77,6 +98,8 @@ impl AppState {
             sessions: Arc::new(Mutex::new(HashMap::new())),
             remotes: Arc::new(Mutex::new(HashMap::new())),
             cloud_token: Arc::new(RwLock::new(None)),
+            cloud_authority: Arc::new(RwLock::new(None)),
+            cloud_bootstrap: Arc::new(Mutex::new(())),
             skill_catalogs: Arc::new(provider_local::SkillCatalogService::new()),
             update_draining: Arc::new(AtomicBool::new(false)),
             active_runs: Arc::new(AtomicUsize::new(0)),

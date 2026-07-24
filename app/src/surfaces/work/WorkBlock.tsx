@@ -10,12 +10,7 @@ import type { ToolCall } from "../../core-bridge/types";
 function WorkBlockImpl({ calls }: { calls: ToolCall[] }) {
   const edits = summarizeEdits(calls);
   return (
-    <div
-      // Containment applied unconditionally (not toggled on settle): the `auto`
-      // intrinsic-size keyword stores the real height after first paint, so
-      // there's no recalc/jump when a block finishes — and no scrollback jump.
-      className="flex flex-col gap-1 [content-visibility:auto] [contain-intrinsic-size:auto_3rem]"
-    >
+    <div className="flex flex-col gap-1">
       {calls.map((call) => (
         <WorkLine key={call.id} call={call} active={call.status === "in_progress"} />
       ))}

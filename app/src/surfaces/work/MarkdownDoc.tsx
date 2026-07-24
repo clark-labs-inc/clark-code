@@ -64,7 +64,7 @@ export function MarkdownDoc({
       initial={reduce ? false : { opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: DUR.base, ease: EASE.out }}
-      className={`overflow-hidden rounded-lg border bg-bg-elevated [content-visibility:auto] [contain-intrinsic-size:auto_10rem] ${
+      className={`overflow-hidden rounded-lg border bg-bg-elevated ${
         active ? "border-accent shadow-[inset_3px_0_0_var(--color-accent)]" : "border-border"
       }`}
     >

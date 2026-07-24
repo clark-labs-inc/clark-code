@@ -409,6 +409,9 @@ impl LlmClient {
         if let Some(effort) = reasoning_effort {
             body["reasoning_effort"] = json!(effort);
         }
+        if let Some(max_tokens) = crate::config::model_max_output_tokens(&self.model) {
+            body["max_tokens"] = json!(max_tokens);
+        }
         body
     }
 }

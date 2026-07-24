@@ -84,8 +84,8 @@ cd app && pnpm install && pnpm dev      # http://localhost:1420
 pnpm test                               # vitest
 pnpm typecheck
 
-# Run the desktop app (spawns the Vite dev server automatically)
-cargo tauri dev
+# Run the desktop app with the isolated, stably signed development identity
+./script/build_and_run.sh
 ```
 
 In a plain browser the UI runs against a **mock provider** that plays a scripted
@@ -134,43 +134,146 @@ reported configuration cannot drift from the simulated one.
 ## Pre-release experience benchmark
 
 Every release build is gated on a fast cross-product sample: core event and
-provider contracts; local tools, permissions, memory, planning, and recovery;
-scripted conversations; remote execution, git, and worktrees; frontend state
-and surfaces; an eight-case browser resilience sample; and the full empty-home
-skill experience. The skill lane covers legacy-compatible discovery, managed
-Superpowers install, collision-safe selection, typed history, provider request
-projection, update/stale-binding handling, restart, uninstall, and the same
-lifecycle against a fake remote user home. It runs against both a self-contained
-fixture and a pinned real Superpowers checkout, then uploads one suite receipt,
-the detailed skill receipt, browser screenshots, and per-family logs.
+provider contracts; native desktop commands, account boundaries, and local
+persistence; local tools, permissions, memory, planning, and recovery; scripted
+conversations; remote execution, git, and worktrees; frontend state and surfaces;
+computer-use safety and simulator contracts; macOS, Linux, and Windows sandbox
+contracts; WebKit startup; attachment rendering; an eight-case browser resilience
+sample; and the full empty-home skill experience. The wrapper executes the
+authoritative deterministic lanes from the checked-in feature map first, so a
+new mapped lane cannot remain a documentation-only claim.
+The skill lane covers legacy-compatible discovery, managed Superpowers install,
+collision-safe selection, typed history, provider request projection,
+update/stale-binding handling, restart, uninstall, and the same lifecycle against
+a fake remote user home. It runs against both a self-contained fixture and a
+pinned real Superpowers checkout, then uploads one suite receipt, the detailed
+skill receipt, browser screenshots, and per-family logs.
 
 ```bash
 ./scripts/run-pre-release-benchmarks.sh \
   --superpowers /path/to/obra/superpowers
 ```
 
-A representative real-model lane can be part of the same gate. It exercises a
-managed skill resource, basic response, read/search tools, permissioned
-mutation, and a memory round trip. It is opt-in so a developer or release
-workflow must explicitly name the Clark Platform route, endpoint, model tier,
-and credential:
+A representative paid real-model lane is part of the same gate by default. It
+uses the cheapest supported native tool-calling route, currently MiniMax M3,
+and exercises a managed skill resource, basic response,
+read/search tools, permissioned mutation, a memory round trip, and explicit
+compaction/continuation. Provider, endpoint, and model are pinned; only the
+credential is local. The checked-in pricing snapshot records $0.30/M input and
+$1.20/M output for the benchmark's input-heavy workload:
 
 ```bash
-CLARK_CODE_PROVIDER=clark-platform \
-CLARK_CODE_BASE_URL=https://api.clarkslabs.com/v1 \
-CLARK_CODE_MODEL='clark-code:YOUR_EXPLICIT_TIER' \
 CLARK_CODE_API_KEY=ck_live_... \
   ./scripts/run-pre-release-benchmarks.sh \
-    --superpowers /path/to/obra/superpowers \
-    --live
+    --superpowers /path/to/obra/superpowers
 ```
 
-For tag releases, set `CLARK_CODE_PRERELEASE_LIVE=1` plus
-`CLARK_CODE_PRERELEASE_PROVIDER`, `CLARK_CODE_PRERELEASE_BASE_URL`, and
-`CLARK_CODE_PRERELEASE_MODEL` as repository variables, and store the credential
-as the `CLARK_CODE_PRERELEASE_API_KEY` repository secret. If live validation
-is enabled but any value is absent or invalid, the release fails before builds
-or publishing.
+The runner also reads `CLARK_CODE_API_KEY` from the ignored repository `.env`
+without executing the file. Use `--offline` for an explicit deterministic-only
+run. Tag releases default to the paid lane and require the
+`CLARK_CODE_PRERELEASE_API_KEY` repository secret; set the
+`CLARK_CODE_PRERELEASE_LIVE` repository variable to `0` only for a deliberate
+offline release gate. Missing or invalid live configuration fails before builds
+or publishing instead of silently skipping the paid evidence.
+
+`harness/clark-code-feature-map.json` and
+`harness/clark-code-capability-inventory.json` are the checked-in coverage
+contract. `node harness/feature-matrix.mjs --validate-only` derives model tools,
+native commands, provider operations, models, settings, plugins, workspace
+crates, permission classes, sandbox backends, computer actions, and incident
+states from source; adding an unmapped item makes validation fail. Benchmark
+directories and receipts are created owner-only.
+
+### UTM guest readiness
+
+Windows and Ubuntu Desktop real-use testing uses UTM only. VM provisioning,
+login, guest transport, source staging, native product launch, Clark-owned QA
+authentication, evidence capture, and recovery are autonomous release
+prerequisites: every receipt must report `required_user_vm_actions: 0` and
+`manual_vm_actions_allowed: false`. A physical-human input path is diagnostic
+only and cannot satisfy a release gate.
+
+The deterministic guest path is:
+
+```bash
+node harness/utm-autonomy.mjs ensure --platform all
+node harness/utm-source-stage.mjs stage --platform all
+node harness/utm-guest-provision.mjs ensure --platform all
+node harness/utm-guest-benchmark.mjs run --offline --platform all
+node harness/utm-windows-journey.mjs auth-smoke
+node harness/utm-ubuntu-journey.mjs auth-smoke
+```
+
+The auth journeys mint a short-lived session for the ignored, owner-only
+Clark QA identity, require the `clarkslabs.com` domain, verify that the
+provisioned Clark Code key is bound to the same account, and never write the
+email, password, JWT, or API key into a receipt.
+
+The read-only
+preflight never starts, stops, installs, or changes a VM; it verifies the exact
+checked-in VM identities, guest-agent connectivity, graphical desktop state,
+Clark Code installation, and each platform's sandbox prerequisite:
+
+```bash
+node harness/utm-real-use.mjs \
+  --platform all \
+  --observation-receipt target/utm-real-use-observations/DATE/receipt.json \
+  --out target/utm-real-use/preflight
+```
+
+Pass the same observation receipt to the consolidated gate to make both guests
+release-blocking:
+
+```bash
+./scripts/run-pre-release-benchmarks.sh \
+  --utm-observation-receipt target/utm-real-use-observations/DATE/receipt.json
+```
+
+An environment-ready receipt is only permission to begin guest testing. It does
+not count any Windows or Ubuntu chat, job, computer-control, permission, or
+sandbox scenario as passed; those require separately exported real guest
+receipts. If either guest is unready, the consolidated runner records the exact
+blocker and skips its default cheapest-paid calls so no credits are spent
+against a known-broken environment.
+
+Once a guest is ready, generate its exact observation template inside that
+guest, replace every blocker with fresh GUI assertions and evidence, and run
+the platform benchmark:
+
+```bash
+node harness/platform-real-use.mjs \
+  --write-observation-template target/real-use-observation.json
+
+node harness/platform-real-use.mjs \
+  --observation-receipt target/real-use-observation.json \
+  --out target/platform-real-use
+```
+
+The second command must run on the platform it claims. It validates every
+scenario and evidence hash before spending credits, then runs all applicable
+deterministic lanes plus the cheapest-paid MiniMax M3 route by default. A complete pass requires
+all mapped real-use scenarios, a positive cost below the checked-in ceiling,
+and no stored credential. `--offline` remains useful for diagnosis but cannot
+produce a complete guest pass. Exported packages can be independently verified
+and copied without model calls:
+
+```bash
+node harness/platform-real-use.mjs \
+  --verify-receipt target/platform-real-use/receipt.json \
+  --copy-to target/verified-platform-real-use
+```
+
+To make cross-platform real use part of the single release receipt, pass one
+verified package from each platform. Supplying any package makes the complete
+three-platform set and the current UTM preflight release-blocking:
+
+```bash
+./scripts/run-pre-release-benchmarks.sh \
+  --utm-observation-receipt target/utm-observation/receipt.json \
+  --real-use-receipt target/macos-real-use/receipt.json \
+  --real-use-receipt target/windows-real-use/receipt.json \
+  --real-use-receipt target/ubuntu-real-use/receipt.json
+```
 
 ## Repository Status
 

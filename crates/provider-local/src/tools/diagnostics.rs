@@ -118,6 +118,14 @@ mod tests {
     use std::sync::{Arc, Mutex};
     use tokio_util::sync::CancellationToken;
 
+    fn platform_command(posix: String, powershell: String) -> String {
+        if cfg!(windows) {
+            powershell
+        } else {
+            posix
+        }
+    }
+
     fn ctx(dir: &std::path::Path, check_command: Option<&str>) -> ToolCtx {
         let session = SessionState {
             check_command: check_command.map(String::from),
@@ -149,10 +157,11 @@ mod tests {
     #[tokio::test]
     async fn first_call_captures_baseline_and_reports_everything() {
         let dir = tempfile::tempdir().unwrap();
-        let c = ctx(
-            dir.path(),
-            Some("printf 'a.rs:1: error\\nb.rs:2: error\\n'"),
+        let command = platform_command(
+            "printf 'a.rs:1: error\\nb.rs:2: error\\n'".into(),
+            "Write-Output 'a.rs:1: error'; Write-Output 'b.rs:2: error'".into(),
         );
+        let c = ctx(dir.path(), Some(&command));
         let out = CheckDiagnostics.invoke(json!({}), &c).await;
         assert!(!out.is_error, "{}", out.content);
         assert!(out.content.contains("baseline captured"));
@@ -164,9 +173,15 @@ mod tests {
     async fn second_call_reports_only_new_lines() {
         let dir = tempfile::tempdir().unwrap();
         let flag = dir.path().join("second_run");
-        let command = format!(
-            "if [ -f {0} ]; then printf 'a.rs:1: error\\nc.rs:3: error\\n'; else touch {0}; printf 'a.rs:1: error\\n'; fi",
-            flag.display()
+        let command = platform_command(
+            format!(
+                "if [ -f {0} ]; then printf 'a.rs:1: error\\nc.rs:3: error\\n'; else touch {0}; printf 'a.rs:1: error\\n'; fi",
+                flag.display()
+            ),
+            format!(
+                "if (Test-Path -LiteralPath '{0}') {{ Write-Output 'a.rs:1: error'; Write-Output 'c.rs:3: error' }} else {{ New-Item -ItemType File -Path '{0}' | Out-Null; Write-Output 'a.rs:1: error' }}",
+                flag.display().to_string().replace('\'', "''")
+            ),
         );
         let c = ctx(dir.path(), Some(&command));
         let first = CheckDiagnostics.invoke(json!({}), &c).await;
@@ -188,7 +203,11 @@ mod tests {
     #[tokio::test]
     async fn no_new_problems_is_reported_clearly() {
         let dir = tempfile::tempdir().unwrap();
-        let c = ctx(dir.path(), Some("printf 'a.rs:1: error\\n'"));
+        let command = platform_command(
+            "printf 'a.rs:1: error\\n'".into(),
+            "Write-Output 'a.rs:1: error'".into(),
+        );
+        let c = ctx(dir.path(), Some(&command));
         let _ = CheckDiagnostics.invoke(json!({}), &c).await;
         let second = CheckDiagnostics.invoke(json!({}), &c).await;
         assert!(second.content.contains("no new problems"));

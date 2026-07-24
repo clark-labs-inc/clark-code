@@ -1,0 +1,626 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Clark Code Google Ads static creative</title>
+  <style>
+    :root {
+      --paper: #f7f5f1;
+      --ink: #0d0d0d;
+      --muted: #69645d;
+      --violet: #8b5cf6;
+      --violet-light: #b99aff;
+      --green: #7fbe73;
+      --red: #e58b8b;
+      --serif: "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+      --sans: "DM Sans", "Avenir Next", Avenir, Helvetica, Arial, sans-serif;
+      --mono: "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: var(--paper);
+      color: var(--ink);
+      font-family: var(--sans);
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .ad {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      isolation: isolate;
+    }
+
+    .backdrop {
+      position: absolute;
+      inset: 0;
+      z-index: -3;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .grain {
+      position: absolute;
+      inset: 0;
+      z-index: -1;
+      opacity: .17;
+      pointer-events: none;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.16'/%3E%3C/svg%3E");
+      mix-blend-mode: multiply;
+    }
+
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 15px;
+      font-size: 29px;
+      font-weight: 720;
+      letter-spacing: -.7px;
+    }
+
+    .brand img {
+      width: 48px;
+      height: 48px;
+      border-radius: 12px;
+      box-shadow: 0 10px 26px rgba(13, 13, 13, .14);
+    }
+
+    .eyebrow {
+      font: 700 15px/1 var(--mono);
+      letter-spacing: .12em;
+      text-transform: uppercase;
+      color: var(--violet);
+    }
+
+    h1 {
+      margin: 0;
+      font-family: var(--serif);
+      font-weight: 650;
+      letter-spacing: -.055em;
+      line-height: .92;
+    }
+
+    .subhead {
+      margin: 0;
+      font-size: 26px;
+      line-height: 1.32;
+      letter-spacing: -.026em;
+      color: #393632;
+    }
+
+    .product {
+      position: absolute;
+      overflow: hidden;
+      border: 1px solid rgba(255, 255, 255, .14);
+      border-radius: 25px;
+      background: #0d0d0d;
+      box-shadow:
+        0 35px 80px rgba(13, 13, 13, .31),
+        0 8px 24px rgba(13, 13, 13, .16);
+    }
+
+    .product::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      border-radius: inherit;
+      box-shadow: inset 0 1px rgba(255, 255, 255, .12);
+    }
+
+    .product img {
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .url {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      font: 650 18px/1 var(--mono);
+      letter-spacing: -.02em;
+    }
+
+    .url::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--violet);
+      box-shadow: 0 0 0 5px rgba(139, 92, 246, .14);
+    }
+
+    /* Direct comparison — 1200 × 1200 */
+    .direct {
+      padding: 68px 70px;
+    }
+
+    .direct .backdrop { object-position: center; }
+
+    .direct .brand {
+      position: absolute;
+      top: 63px;
+      left: 70px;
+    }
+
+    .direct .eyebrow {
+      position: absolute;
+      top: 76px;
+      right: 72px;
+      color: #41364f;
+    }
+
+    .direct h1 {
+      position: absolute;
+      top: 158px;
+      left: 67px;
+      width: 1010px;
+      font-size: 94px;
+    }
+
+    .direct h1 .terminal {
+      color: #736f6a;
+      text-decoration: line-through;
+      text-decoration-thickness: 5px;
+      text-decoration-color: rgba(13, 13, 13, .38);
+    }
+
+    .direct h1 .workspace {
+      display: block;
+      color: var(--ink);
+    }
+
+    .direct .comparison {
+      position: absolute;
+      top: 431px;
+      left: 70px;
+      display: flex;
+      align-items: center;
+      gap: 17px;
+      font-size: 22px;
+      font-weight: 650;
+      letter-spacing: -.025em;
+    }
+
+    .direct .comparison .old {
+      padding: 12px 17px;
+      border: 1px solid rgba(13, 13, 13, .14);
+      border-radius: 999px;
+      background: rgba(247, 245, 241, .7);
+      color: #77716a;
+    }
+
+    .direct .comparison .arrow {
+      color: var(--violet);
+      font-size: 27px;
+    }
+
+    .direct .comparison .new {
+      padding: 12px 17px;
+      border-radius: 999px;
+      background: var(--ink);
+      color: white;
+    }
+
+    .direct .product {
+      left: 70px;
+      right: 70px;
+      top: 505px;
+      height: 591px;
+    }
+
+    .direct .product img {
+      object-position: center 18%;
+    }
+
+    .direct .url {
+      position: absolute;
+      left: 82px;
+      bottom: 29px;
+      z-index: 2;
+      color: white;
+      text-shadow: 0 2px 12px #000;
+    }
+
+    /* Parallel agents — 1200 × 1200 */
+    .parallel {
+      color: white;
+      padding: 64px 68px;
+    }
+
+    .parallel .backdrop { object-position: center; }
+
+    .parallel .grain {
+      opacity: .09;
+      mix-blend-mode: screen;
+    }
+
+    .parallel .brand {
+      position: absolute;
+      top: 60px;
+      left: 67px;
+      color: white;
+    }
+
+    .parallel .eyebrow {
+      position: absolute;
+      top: 73px;
+      right: 69px;
+      color: var(--violet-light);
+    }
+
+    .parallel h1 {
+      position: absolute;
+      top: 153px;
+      left: 66px;
+      width: 1040px;
+      font-size: 100px;
+      color: white;
+    }
+
+    .parallel h1 em {
+      font-style: normal;
+      color: var(--violet-light);
+    }
+
+    .parallel .subhead {
+      position: absolute;
+      top: 364px;
+      left: 70px;
+      width: 760px;
+      color: rgba(255, 255, 255, .78);
+    }
+
+    .parallel .agent-count {
+      position: absolute;
+      top: 360px;
+      right: 70px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 13px 17px;
+      border: 1px solid rgba(185, 154, 255, .35);
+      border-radius: 999px;
+      background: rgba(13, 13, 13, .58);
+      backdrop-filter: blur(16px);
+      font: 650 17px/1 var(--mono);
+      color: var(--violet-light);
+    }
+
+    .parallel .agent-count i {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: #79d56c;
+      box-shadow: 0 0 13px #79d56c;
+    }
+
+    .parallel .product {
+      left: 70px;
+      right: 70px;
+      top: 456px;
+      height: 610px;
+      border-color: rgba(185, 154, 255, .28);
+      box-shadow:
+        0 42px 90px rgba(0, 0, 0, .55),
+        0 0 0 1px rgba(139, 92, 246, .08),
+        0 0 80px rgba(139, 92, 246, .14);
+    }
+
+    .parallel .product img {
+      object-position: center 19%;
+    }
+
+    .parallel .url {
+      position: absolute;
+      right: 73px;
+      bottom: 55px;
+      color: rgba(255, 255, 255, .88);
+    }
+
+    /* Persistent context — 1200 × 1200 */
+    .memory {
+      padding: 64px 68px;
+    }
+
+    .memory .backdrop { object-position: center; }
+
+    .memory .brand {
+      position: absolute;
+      top: 61px;
+      left: 68px;
+    }
+
+    .memory .eyebrow {
+      position: absolute;
+      top: 74px;
+      right: 69px;
+      color: #493b5f;
+    }
+
+    .memory h1 {
+      position: absolute;
+      top: 151px;
+      left: 64px;
+      width: 990px;
+      font-size: 91px;
+    }
+
+    .memory h1 em {
+      font-style: normal;
+      color: var(--violet);
+    }
+
+    .memory .subhead {
+      position: absolute;
+      top: 356px;
+      left: 70px;
+      width: 680px;
+      color: #4b4742;
+    }
+
+    .memory .chips {
+      position: absolute;
+      top: 354px;
+      right: 68px;
+      display: grid;
+      gap: 9px;
+    }
+
+    .memory .chips span {
+      padding: 10px 14px;
+      border: 1px solid rgba(13, 13, 13, .12);
+      border-radius: 999px;
+      background: rgba(247, 245, 241, .74);
+      box-shadow: 0 6px 18px rgba(13, 13, 13, .05);
+      font: 650 15px/1 var(--mono);
+      text-align: center;
+      backdrop-filter: blur(12px);
+    }
+
+    .memory .product {
+      left: 70px;
+      right: 70px;
+      top: 462px;
+      height: 614px;
+    }
+
+    .memory .product img {
+      object-position: center 18%;
+    }
+
+    .memory .url {
+      position: absolute;
+      left: 76px;
+      bottom: 58px;
+      color: #302c29;
+    }
+
+    /* Outgrow vertical — 960 × 1200 (4:5) */
+    .outgrow {
+      padding: 48px 53px;
+    }
+
+    .outgrow .backdrop { object-position: center; }
+
+    .outgrow .brand {
+      position: absolute;
+      top: 45px;
+      left: 54px;
+      font-size: 25px;
+    }
+
+    .outgrow .brand img {
+      width: 42px;
+      height: 42px;
+      border-radius: 11px;
+    }
+
+    .outgrow .eyebrow {
+      position: absolute;
+      top: 60px;
+      right: 54px;
+      color: #463855;
+      font-size: 13px;
+    }
+
+    .outgrow h1 {
+      position: absolute;
+      top: 132px;
+      left: 52px;
+      width: 850px;
+      font-size: 102px;
+    }
+
+    .outgrow .subhead {
+      position: absolute;
+      top: 342px;
+      left: 58px;
+      width: 660px;
+      font-size: 24px;
+      color: #47423d;
+    }
+
+    .outgrow .badge {
+      position: absolute;
+      top: 338px;
+      right: 53px;
+      width: 159px;
+      padding: 12px 13px;
+      border-radius: 14px;
+      background: #0d0d0d;
+      color: white;
+      font: 650 13px/1.25 var(--mono);
+      text-align: center;
+      box-shadow: 0 12px 30px rgba(13, 13, 13, .2);
+    }
+
+    .outgrow .product {
+      left: 52px;
+      right: 52px;
+      top: 455px;
+      height: 582px;
+      border-color: rgba(185, 154, 255, .26);
+      box-shadow:
+        0 36px 78px rgba(0, 0, 0, .43),
+        0 0 60px rgba(139, 92, 246, .18);
+    }
+
+    .outgrow .product img {
+      object-position: center 18%;
+    }
+
+    .outgrow .cta {
+      position: absolute;
+      left: 53px;
+      right: 53px;
+      bottom: 43px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 82px;
+      padding: 0 27px;
+      border: 1px solid rgba(185, 154, 255, .28);
+      border-radius: 19px;
+      background: rgba(13, 13, 13, .9);
+      color: white;
+      box-shadow: 0 18px 44px rgba(0, 0, 0, .38);
+      backdrop-filter: blur(16px);
+    }
+
+    .outgrow .cta strong {
+      font-size: 25px;
+      letter-spacing: -.03em;
+    }
+
+    .outgrow .cta span {
+      font: 600 15px/1 var(--mono);
+      color: var(--violet-light);
+    }
+
+    .outgrow .cta b {
+      display: grid;
+      width: 43px;
+      height: 43px;
+      place-items: center;
+      border-radius: 50%;
+      background: var(--violet);
+      font-size: 25px;
+      font-weight: 500;
+    }
+  </style>
+</head>
+<body>
+  <main id="ad" class="ad">
+    <img id="backdrop" class="backdrop" alt="">
+    <div class="grain"></div>
+  </main>
+
+  <script>
+    const params = new URLSearchParams(location.search);
+    const variant = params.get("variant") || "direct";
+    const ad = document.getElementById("ad");
+    const backdrop = document.getElementById("backdrop");
+
+    const sharedBrand = `
+      <div class="brand">
+        <img src="clark-code-app-icon.png" alt="">
+        <span>clark code</span>
+      </div>`;
+
+    const creatives = {
+      direct: {
+        background: "ad-bg-direct-square.png",
+        html: `
+          ${sharedBrand}
+          <div class="eyebrow">Beyond terminal agents</div>
+          <h1><span class="terminal">Claude Code is a terminal.</span><span class="workspace">Clark is a workspace.</span></h1>
+          <div class="comparison">
+            <span class="old">one terminal session</span>
+            <span class="arrow">→</span>
+            <span class="new">projects · memory · agents · local + SSH</span>
+          </div>
+          <div class="product">
+            <img src="source-ui-chat-current.png" alt="">
+            <div class="url">clarkchat.com/clark-code</div>
+          </div>`
+      },
+      parallel: {
+        background: "ad-bg-parallel-square.png",
+        html: `
+          ${sharedBrand}
+          <div class="eyebrow">Parallel by default</div>
+          <h1>One prompt.<br><em>Thousands of agents.</em></h1>
+          <p class="subhead">Research in parallel. Ship from one native workspace.</p>
+          <div class="agent-count"><i></i> agents working</div>
+          <div class="product">
+            <img src="source-ui-research-current.png" alt="">
+          </div>
+          <div class="url">clarkchat.com/clark-code</div>`
+      },
+      memory: {
+        background: "ad-bg-memory-square.png",
+        html: `
+          ${sharedBrand}
+          <div class="eyebrow">Project context that lasts</div>
+          <h1>Your repo context.<br><em>Still here tomorrow.</em></h1>
+          <p class="subhead">Clark keeps the work, research, and decisions together.</p>
+          <div class="chips">
+            <span>persistent context</span>
+            <span>local + SSH</span>
+          </div>
+          <div class="product">
+            <img src="source-ui-chat-current.png" alt="">
+          </div>
+          <div class="url">clarkchat.com/clark-code</div>`
+      },
+      outgrow: {
+        background: "ad-bg-outgrow-vertical.png",
+        html: `
+          ${sharedBrand}
+          <div class="eyebrow">Clark Code</div>
+          <h1>Outgrow<br>the terminal.</h1>
+          <p class="subhead">The native agent workspace for serious code.</p>
+          <div class="badge">Built to go beyond Claude Code</div>
+          <div class="product">
+            <img src="source-ui-chat-current.png" alt="">
+          </div>
+          <div class="cta">
+            <div>
+              <strong>Download Clark Code</strong><br>
+              <span>clarkchat.com/clark-code</span>
+            </div>
+            <b>↓</b>
+          </div>`
+      }
+    };
+
+    const creative = creatives[variant] || creatives.direct;
+    ad.classList.add(variant);
+    backdrop.src = creative.background;
+    ad.insertAdjacentHTML("beforeend", creative.html);
+
+    Promise.all(
+      [...document.images].map((image) => image.complete
+        ? Promise.resolve()
+        : new Promise((resolve) => {
+            image.addEventListener("load", resolve, { once: true });
+            image.addEventListener("error", resolve, { once: true });
+          }))
+    ).then(() => {
+      document.fonts.ready.then(() => { window.__ready = true; });
+    });
+  </script>
+</body>
+</html>

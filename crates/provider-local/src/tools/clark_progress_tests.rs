@@ -268,6 +268,11 @@ async fn cancellation_interrupts_poll_wait() {
 }
 
 fn test_client(base_url: String) -> ClarkResearchClient {
+    let deadline = if cfg!(windows) {
+        Duration::from_secs(15)
+    } else {
+        Duration::from_secs(2)
+    };
     ClarkResearchClient::new(AgenticClarkConfig {
         base_url,
         api_key: Some("ck_test".to_string()),
@@ -277,7 +282,7 @@ fn test_client(base_url: String) -> ClarkResearchClient {
     .with_test_timing(
         Duration::from_millis(2),
         Duration::from_millis(50),
-        Duration::from_secs(2),
+        deadline,
     )
 }
 

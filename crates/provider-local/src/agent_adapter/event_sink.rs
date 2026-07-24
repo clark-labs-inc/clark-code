@@ -173,6 +173,7 @@ impl CompletedRunTranscript {
 #[async_trait]
 impl ca::EventSink for DesktopEventSink {
     async fn emit(&self, event: ca::AgentEvent) {
+        let event = super::redaction::event(event);
         self.completed_transcript.observe(&event);
         if let Ok(payload) = serde_json::to_value(&event) {
             let _ = self

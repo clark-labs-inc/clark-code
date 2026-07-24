@@ -1,8 +1,8 @@
 use super::*;
 use agent_core::{
-    apply, AgentEvent, ProviderFailureClass, ProviderIncident, ProviderIncidentCategory,
-    ProviderIncidentScope, ProviderIncidentStatus, ProviderRequestDiagnostics, ProviderRetryCounts,
-    RunFailureKind, RunId, RunStatus, SessionId,
+    apply, AgentEvent, GoalState, GoalStatus, ProviderFailureClass, ProviderIncident,
+    ProviderIncidentCategory, ProviderIncidentScope, ProviderIncidentStatus,
+    ProviderRequestDiagnostics, ProviderRetryCounts, RunFailureKind, RunId, RunStatus, SessionId,
 };
 use std::time::Duration;
 
@@ -17,7 +17,6 @@ fn config() -> CloudTrajectoryConfig {
         remote_host: None,
         mode: None,
         metadata: Value::Null,
-        owner_scope: "user@example.com".into(),
     }
 }
 
@@ -55,6 +54,18 @@ async fn crash_recovery_replays_uncheckpointed_batches_and_marks_run_interrupted
     let outbox = TrajectoryOutbox::new(path.clone(), "user@example.com", "session-1");
     let mut base = Snapshot::new();
     base.session = Some(SessionId::new("session-1"));
+    base.goal = Some(GoalState {
+        id: "goal-1".into(),
+        objective: "finish the work".into(),
+        status: GoalStatus::Active,
+        run: Some(RunId::new("run-1")),
+        token_budget: None,
+        tokens_used: 0,
+        time_used_seconds: 0,
+        continuations: 0,
+        updated_at_ms: 1,
+        blocker_reason: None,
+    });
     outbox.initialize(&config(), &base, 0).await.unwrap();
     outbox.enqueue(&request("run-1")).await.unwrap();
     let incident = ProviderIncident {
@@ -97,10 +108,15 @@ async fn crash_recovery_replays_uncheckpointed_batches_and_marks_run_interrupted
         .await
         .unwrap();
 
-    let recovered = recover_snapshot(path, "user@example.com".into(), "session-1".into(), None)
-        .await
-        .unwrap()
-        .unwrap();
+    let recovered = recover_snapshot(
+        path.clone(),
+        "user@example.com".into(),
+        "session-1".into(),
+        None,
+    )
+    .await
+    .unwrap()
+    .unwrap();
     let run = &recovered.snapshot.runs[&RunId::new("run-1")];
     assert_eq!(run.status, RunStatus::Failed);
     assert_eq!(
@@ -114,6 +130,20 @@ async fn crash_recovery_replays_uncheckpointed_batches_and_marks_run_interrupted
     );
     assert_eq!(recovered_incident.completed_at_ms, None);
     assert!(recovered.pending);
+    assert!(recovered.needs_snapshot_publication);
+    let recovered_goal = recovered.snapshot.goal.as_ref().unwrap();
+    assert_eq!(recovered_goal.status, GoalStatus::Blocked);
+    assert_eq!(
+        recovered_goal.blocker_reason.as_deref(),
+        Some("Clark restarted before the goal finished. Continue from the saved history.")
+    );
+    let metadata = recovered.metadata.as_ref().unwrap();
+    assert_eq!(metadata["id"], "session-1");
+    assert_eq!(metadata["title"], "Test");
+    assert_eq!(metadata["provider"], "local");
+    assert_eq!(metadata["rev"], 0);
+    assert!(metadata["createdAt"].as_i64().is_some());
+    assert!(metadata["updatedAt"].as_i64().is_some());
 
     let pending = outbox.pending().await.unwrap();
     assert_eq!(pending.len(), 3);
@@ -126,6 +156,29 @@ async fn crash_recovery_replays_uncheckpointed_batches_and_marks_run_interrupted
             if incident.status == ProviderIncidentStatus::Interrupted
                 && incident.completed_at_ms.is_none()
     )));
+    let terminal_events = pending.last().unwrap().request.events.iter().map(|record| {
+        serde_json::from_value::<AgentEvent>(record.payload["event"].clone()).unwrap()
+    });
+    assert!(terminal_events.into_iter().any(|event| matches!(
+        event,
+        AgentEvent::GoalUpdated { goal, .. }
+            if goal.status == GoalStatus::Blocked
+                && goal.blocker_reason.as_deref()
+                    == Some("Clark restarted before the goal finished. Continue from the saved history.")
+    )));
+
+    for batch in &pending {
+        outbox.acknowledge(&batch.batch_id).await.unwrap();
+    }
+    let acknowledged = recover_snapshot(path, "user@example.com".into(), "session-1".into(), None)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(!acknowledged.pending);
+    assert!(
+        acknowledged.needs_snapshot_publication,
+        "event acknowledgement must not hide a terminal snapshot that still needs publishing"
+    );
 }
 
 #[tokio::test]
@@ -291,4 +344,5 @@ async fn cloud_only_live_run_is_not_misclassified_as_a_local_restart() {
         RunStatus::Running
     );
     assert!(!recovered.pending);
+    assert!(!recovered.needs_snapshot_publication);
 }

@@ -342,3 +342,73 @@ fn ios_tools_are_absent_on_non_macos() {
     let reg = ToolRegistry::new(None, None);
     assert!(reg.get("ios_list_simulators").is_none());
 }
+
+#[test]
+fn checked_in_feature_map_matches_every_builtin_model_tool() {
+    use std::collections::{BTreeSet, HashMap};
+
+    let mut registry = ToolRegistry::new(
+        Some(AgenticClarkConfig {
+            base_url: "https://example.invalid/v1".into(),
+            api_key: None,
+            model: "clark".into(),
+        }),
+        Some(memory::MemoryConfig::default()),
+    );
+    registry.enable_skills(Arc::new(crate::skills::SkillCatalog::default()));
+    registry.enable_browser();
+    registry.enable_computer_use(Arc::new(::computer_use::SimulatedComputerBackend::new()));
+    registry.enable_image_generation(image::ImageGenerationConfig {
+        base_url: "https://example.invalid/v1".into(),
+        api_key: "ck_test_manifest".into(),
+    });
+    registry.enable_organization_knowledge(organization_knowledge::OrganizationKnowledgeConfig {
+        base_url: "https://example.invalid/v1".into(),
+        api_key: "ck_test_manifest".into(),
+    });
+    registry.enable_orchestration(crate::orchestration::OrchestrationToolsConfig {
+        policy: crate::orchestration::OrchestrationConfig::default(),
+        base_url: "https://example.invalid/v1".into(),
+        api_key: None,
+        headers: HashMap::new(),
+        root_model: "clark-code".into(),
+        reasoning_effort: None,
+    });
+
+    let manifest: Value = serde_json::from_str(include_str!(
+        "../../../../harness/clark-code-feature-map.json"
+    ))
+    .expect("feature map should be valid JSON");
+    let platform = if cfg!(target_os = "macos") {
+        "macos"
+    } else if cfg!(windows) {
+        "windows"
+    } else {
+        "ubuntu"
+    };
+    let expected = manifest["features"]
+        .as_array()
+        .expect("features should be an array")
+        .iter()
+        .filter(|feature| feature["platform_support"][platform] != "unsupported")
+        .flat_map(|feature| {
+            feature["tools"]
+                .as_array()
+                .expect("feature tools should be an array")
+        })
+        .map(|name| {
+            name.as_str()
+                .expect("tool name should be a string")
+                .to_string()
+        })
+        .collect::<BTreeSet<_>>();
+    let actual = registry
+        .executors()
+        .map(|tool| tool.name().to_string())
+        .collect::<BTreeSet<_>>();
+
+    assert_eq!(
+        actual, expected,
+        "update clark-code-feature-map.json whenever a model tool is added, removed, or changes platform support"
+    );
+}

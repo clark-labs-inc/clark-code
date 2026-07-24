@@ -1,0 +1,35 @@
+{
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Clark Code Dev QA",
+        "width": 1320,
+        "height": 860,
+        "minWidth": 920,
+        "minHeight": 600,
+        "theme": "Dark",
+        "dragDropEnabled": false,
+        "backgroundThrottling": "disabled",
+        "dataStoreIdentifier": [
+          116,
+          150,
+          179,
+          45,
+          188,
+          12,
+          68,
+          3,
+          182,
+          192,
+          198,
+          80,
+          198,
+          95,
+          91,
+          138
+        ]
+      }
+    ]
+  }
+}

@@ -69,6 +69,13 @@ mod tests {
                 .collect::<Vec<_>>();
             assert!(rendered.iter().any(|arg| arg == "/bin/sh"));
             assert!(rendered.iter().any(|arg| arg == "printf sandbox-ok"));
+            if backend == BackendKind::LinuxBubblewrap {
+                assert!(rendered.windows(3).any(|window| {
+                    window[0] == "--dev-bind"
+                        && window[1] == "/dev/null"
+                        && window[2] == "/dev/null"
+                }));
+            }
         }
     }
 

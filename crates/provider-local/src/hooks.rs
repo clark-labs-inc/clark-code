@@ -13,10 +13,10 @@
 //! already wrote (and had to approve as a `write_file`/`edit_file` edit to get
 //! there in the first place), the same trust model Claude Code's own hooks use.
 //!
-//! The JSON payload (`{tool_name, tool_input, ...}`) rides the hook's stdin,
-//! delivered by shelling `printf '%s' <json> | (<hook command>)` through the
-//! same `Executor::exec()` primitive every other tool uses — no new Executor
-//! primitive needed, and it works for remote/SSH projects too.
+//! The JSON payload (`{tool_name, tool_input, ...}`) rides the hook's stdin.
+//! A short-lived, executor-owned input file plus the target shell's native
+//! redirection syntax keeps this contract portable across POSIX and Windows
+//! without interpolating tool input into a command.
 
 use std::path::Path;
 use std::time::Duration;
@@ -162,12 +162,18 @@ async fn run_hook(
     cancel: &CancellationToken,
 ) -> Result<HookDecision, String> {
     let payload_str = serde_json::to_string(payload).map_err(|e| e.to_string())?;
-    let full = format!(
-        "printf '%s' {} | ({})",
-        shell_single_quote(&payload_str),
-        hook_command
+    let payload_path = cwd.join(format!(".clark-hook-{}.json", uuid::Uuid::new_v4()));
+    exec.write(&payload_path, payload_str.as_bytes())
+        .await
+        .map_err(|error| format!("writing hook input: {error}"))?;
+    let full = hook_with_stdin(
+        target_shell_kind(exec, cwd),
+        hook_command,
+        &payload_path.to_string_lossy(),
     );
-    let output = exec.exec(&full, cwd, HOOK_TIMEOUT, cancel).await?;
+    let output = exec.exec(&full, cwd, HOOK_TIMEOUT, cancel).await;
+    let _ = exec.remove_file(&payload_path).await;
+    let output = output?;
 
     // Exit code 2 is Claude Code's own "block" convention — reuse it here so
     // hook authors migrating a `.claude/settings.json` hook don't need to
@@ -189,9 +195,44 @@ async fn run_hook(
     Ok(serde_json::from_str(stdout).unwrap_or_default())
 }
 
+fn target_shell_kind(exec: &dyn Executor, cwd: &Path) -> exec_core::ShellKind {
+    if exec.is_local() {
+        return exec_core::scripted_shell_kind();
+    }
+    let path = cwd.to_string_lossy().as_bytes().to_vec();
+    if path.get(1) == Some(&b':') || path.contains(&b'\\') {
+        exec_core::ShellKind::PowerShell
+    } else {
+        exec_core::ShellKind::Posix
+    }
+}
+
+fn hook_with_stdin(kind: exec_core::ShellKind, hook_command: &str, path: &str) -> String {
+    match kind {
+        exec_core::ShellKind::Posix => {
+            format!("({hook_command}) < {}", shell_single_quote(path))
+        }
+        exec_core::ShellKind::PowerShell => format!(
+            "Get-Content -Raw -LiteralPath {} | & {{ {hook_command} }}",
+            powershell_single_quote(path)
+        ),
+        exec_core::ShellKind::Cmd => {
+            format!("({hook_command}) < {}", cmd_quote(path))
+        }
+    }
+}
+
 /// POSIX single-quote a string for safe embedding in a `/bin/sh -c` command.
 fn shell_single_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
+}
+
+fn powershell_single_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "''"))
+}
+
+fn cmd_quote(s: &str) -> String {
+    format!("\"{}\"", s.replace('^', "^^").replace('%', "%%"))
 }
 
 #[cfg(test)]
@@ -203,6 +244,14 @@ mod tests {
         HookEntry {
             matcher: matcher.to_string(),
             command: command.to_string(),
+        }
+    }
+
+    fn platform_hook(posix: &'static str, powershell: &'static str) -> &'static str {
+        if cfg!(windows) {
+            powershell
+        } else {
+            posix
         }
     }
 
@@ -230,7 +279,13 @@ mod tests {
     async fn exit_code_2_denies_with_stderr_as_reason() {
         let dir = tempfile::tempdir().unwrap();
         // POSIX `sh` (dash on CI) has no `<<<` here-string; use plain redirect.
-        let hooks = vec![hook("*", "echo 'nope, not that' >&2; exit 2")];
+        let hooks = vec![hook(
+            "*",
+            platform_hook(
+                "echo 'nope, not that' >&2; exit 2",
+                "Write-Error 'nope, not that'; exit 2",
+            ),
+        )];
         let result = run_pre_tool_use(
             &LocalExecutor,
             dir.path(),
@@ -251,7 +306,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let hooks = vec![hook(
             "bash",
-            r#"echo '{"decision":"deny","reason":"policy violation"}'"#,
+            platform_hook(
+                r#"echo '{"decision":"deny","reason":"policy violation"}'"#,
+                r#"Write-Output '{"decision":"deny","reason":"policy violation"}'"#,
+            ),
         )];
         let result = run_pre_tool_use(
             &LocalExecutor,
@@ -277,7 +335,10 @@ mod tests {
         // without depending on any particular JSON tool (jq etc.) being present.
         let hooks = vec![hook(
             "bash",
-            r#"cat >/dev/null; echo '{"updated_input":{"command":"echo rewritten"}}'"#,
+            platform_hook(
+                r#"cat >/dev/null; echo '{"updated_input":{"command":"echo rewritten"}}'"#,
+                r#"$null = $input | Out-String; Write-Output '{"updated_input":{"command":"echo rewritten"}}'"#,
+            ),
         )];
         let result = run_pre_tool_use(
             &LocalExecutor,
@@ -320,7 +381,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let hooks = vec![hook(
             "*",
-            r#"grep -q '"tool_response"' && echo '{"additional_context":"formatted with prettier"}'"#,
+            platform_hook(
+                r#"grep -q '"tool_response"' && echo '{"additional_context":"formatted with prettier"}'"#,
+                r#"$payload = $input | Out-String; if ($payload -match '"tool_response"') { Write-Output '{"additional_context":"formatted with prettier"}' }"#,
+            ),
         )];
         let outcome =
             crate::tools::ToolOutcome::ok("wrote 10 lines").with_details(json!({"bytes": 120}));
@@ -350,7 +414,10 @@ mod tests {
             dir.path(),
             &[hook(
                 "publisher",
-                r#"cat >/dev/null; echo '{"feedback_message":"read canonical state before finishing"}'"#,
+                platform_hook(
+                    r#"cat >/dev/null; echo '{"feedback_message":"read canonical state before finishing"}'"#,
+                    r#"$null = $input | Out-String; Write-Output '{"feedback_message":"read canonical state before finishing"}'"#,
+                ),
             )],
             "publisher",
             &json!({"body": "expected"}),
@@ -368,7 +435,10 @@ mod tests {
             dir.path(),
             &[hook(
                 "publisher",
-                r#"cat >/dev/null; echo '{"decision":"deny","reason":"canonical state mismatched"}'"#,
+                platform_hook(
+                    r#"cat >/dev/null; echo '{"decision":"deny","reason":"canonical state mismatched"}'"#,
+                    r#"$null = $input | Out-String; Write-Output '{"decision":"deny","reason":"canonical state mismatched"}'"#,
+                ),
             )],
             "publisher",
             &json!({"body": "expected"}),
@@ -401,5 +471,10 @@ mod tests {
     #[test]
     fn shell_single_quote_escapes_embedded_quotes() {
         assert_eq!(shell_single_quote("it's"), r"'it'\''s'");
+    }
+
+    #[test]
+    fn powershell_single_quote_escapes_embedded_quotes() {
+        assert_eq!(powershell_single_quote("it's"), "'it''s'");
     }
 }

@@ -105,32 +105,72 @@ async function waitForUrl(url, child, timeoutMs = 60_000) {
   throw new Error(`timed out waiting for ${url}`);
 }
 
+function pnpmInvocation(args) {
+  if (process.env.npm_execpath) {
+    return {
+      program: process.execPath,
+      args: [process.env.npm_execpath, ...args],
+    };
+  }
+  if (process.platform === "win32") {
+    return {
+      program: process.env.ComSpec || "C:\\Windows\\System32\\cmd.exe",
+      args: ["/d", "/s", "/c", ["pnpm.cmd", ...args].join(" ")],
+    };
+  }
+  return { program: "pnpm", args };
+}
+
 async function ensureVite() {
   if (await urlReady(appUrl)) return null;
-  const child = spawn("pnpm", ["dev"], {
+  const invocation = pnpmInvocation(["dev"]);
+  const child = spawn(invocation.program, invocation.args, {
     cwd: appDir,
     detached: process.platform !== "win32",
     stdio: "ignore",
     env: { ...process.env },
   });
   children.push(child);
+  await new Promise((resolve, reject) => {
+    child.once("spawn", resolve);
+    child.once("error", reject);
+  });
   await waitForUrl(appUrl, child);
   return child;
 }
 
-function waitForPort(port, timeoutMs = 180_000) {
+function waitForPort(port, child, output, timeoutMs = 180_000) {
   const deadline = Date.now() + timeoutMs;
   return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (callback, value) => {
+      if (settled) return;
+      settled = true;
+      child.off("error", onChildError);
+      callback(value);
+    };
+    const childFailure = (reason) => new Error(
+      `devbridge ${reason}\n${output().slice(-20_000)}`.trim(),
+    );
+    const onChildError = (error) => finish(reject, childFailure(`failed to start: ${error}`));
+    child.once("error", onChildError);
     const probe = () => {
+      if (child.exitCode !== null) {
+        finish(reject, childFailure(`exited early with code ${child.exitCode}`));
+        return;
+      }
+      if (Date.now() >= deadline) {
+        finish(reject, childFailure(`did not listen on port ${port} before the timeout`));
+        return;
+      }
       const socket = createConnection({ host: "127.0.0.1", port });
       socket.once("connect", () => {
         socket.destroy();
-        resolve();
+        finish(resolve);
       });
       socket.once("error", () => {
         socket.destroy();
-        if (Date.now() >= deadline) reject(new Error(`timed out waiting for port ${port}`));
-        else setTimeout(probe, 300);
+        setTimeout(probe, 300);
       });
     };
     probe();
@@ -345,18 +385,24 @@ async function runLiveControl() {
     "# Clark Desktop DeepSeek control\n\nThe verification token is LIVE_DEEPSEEK_OK.\n",
   );
 
+  let devbridgeOutput = "";
   const devbridge = spawn("cargo", ["run", "-p", "devbridge"], {
     cwd: repoDir,
     detached: process.platform !== "win32",
-    stdio: "ignore",
+    stdio: ["ignore", "pipe", "pipe"],
     env: {
       ...process.env,
       DEVBRIDGE_ADDR: "127.0.0.1:7878",
       RUST_LOG: "devbridge=info,provider_local=info",
     },
   });
+  const collectDevbridgeOutput = (chunk) => {
+    devbridgeOutput = `${devbridgeOutput}${chunk}`.slice(-20_000);
+  };
+  devbridge.stdout.on("data", collectDevbridgeOutput);
+  devbridge.stderr.on("data", collectDevbridgeOutput);
   children.push(devbridge);
-  await waitForPort(7878);
+  await waitForPort(7878, devbridge, () => devbridgeOutput);
 
   const context = await browser.newContext({ viewport: VIEWPORT, reducedMotion: "reduce" });
   await context.addInitScript(({ key, cwd, model, storageKey }) => {

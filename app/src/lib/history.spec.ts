@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import {
   buildResumeTranscript,
   drainLocalHistory,
+  hasUnscopedLocalHistory,
   migratePlanningSnapshot,
   settleRuns,
   snapshotBeforeTimelineItem,
@@ -46,49 +47,46 @@ function snap(id: string) {
 
 describe("drainLocalHistory", () => {
   it("returns nothing and no-ops when there is no local history", () => {
-    expect(drainLocalHistory()).toEqual([]);
+    expect(drainLocalHistory(["alice@x.com"])).toEqual([]);
   });
 
-  it("drains legacy global keys and deletes them", () => {
+  it("never lets the next signed-in account claim legacy global keys", () => {
     store.setItem("clark.history.index.v1", JSON.stringify([meta("g1", "Legacy")]));
     store.setItem("clark.history.snap.v1.g1", JSON.stringify(snap("g1")));
 
-    const drained = drainLocalHistory();
-    expect(drained.map((d) => d.meta.id)).toEqual(["g1"]);
-    expect(drained[0].snapshot.timeline.length).toBe(1);
-    // Keys are removed so a later launch finds nothing.
-    expect(store.getItem("clark.history.index.v1")).toBeNull();
-    expect(store.getItem("clark.history.snap.v1.g1")).toBeNull();
-    expect(drainLocalHistory()).toEqual([]);
+    expect(hasUnscopedLocalHistory()).toBe(true);
+    expect(drainLocalHistory(["alice@x.com"])).toEqual([]);
+    expect(store.getItem("clark.history.index.v1")).not.toBeNull();
+    expect(store.getItem("clark.history.snap.v1.g1")).not.toBeNull();
   });
 
   it("normalizes incident storage on legacy local snapshots", () => {
-    store.setItem("clark.history.index.v1", JSON.stringify([meta("g1", "Legacy")]));
-    store.setItem("clark.history.snap.v1.g1", JSON.stringify(snap("g1")));
+    store.setItem("clark.history.index.v1.alice@x.com", JSON.stringify([meta("g1", "Legacy")]));
+    store.setItem("clark.history.snap.v1.alice@x.com.g1", JSON.stringify(snap("g1")));
 
-    expect(drainLocalHistory()[0].snapshot.provider_incidents).toEqual({});
+    expect(drainLocalHistory(["alice@x.com"])[0].snapshot.provider_incidents).toEqual({});
   });
 
-  it("drains per-account scoped keys across accounts and carries archived", () => {
+  it("drains only the matching account scope and carries archived", () => {
     store.setItem("clark.history.index.v1.alice@x.com", JSON.stringify([meta("a1", "Alice", true)]));
     store.setItem("clark.history.snap.v1.alice@x.com.a1", JSON.stringify(snap("a1")));
     store.setItem("clark.history.index.v1.bob@x.com", JSON.stringify([meta("b1", "Bob")]));
     store.setItem("clark.history.snap.v1.bob@x.com.b1", JSON.stringify(snap("b1")));
 
-    const drained = drainLocalHistory();
+    const drained = drainLocalHistory(["Alice@X.com"]);
     const byId = Object.fromEntries(drained.map((d) => [d.meta.id, d]));
-    expect(Object.keys(byId).sort()).toEqual(["a1", "b1"]);
+    expect(Object.keys(byId)).toEqual(["a1"]);
     expect(byId.a1.archived).toBe(true);
-    expect(byId.b1.archived).toBe(false);
-    // Everything removed.
-    expect(store.length).toBe(0);
+    expect(store.getItem("clark.history.index.v1.alice@x.com")).toBeNull();
+    expect(store.getItem("clark.history.index.v1.bob@x.com")).not.toBeNull();
+    expect(drainLocalHistory(["bob@x.com"]).map((d) => d.meta.id)).toEqual(["b1"]);
   });
 
   it("ignores index entries whose snapshot is missing", () => {
-    store.setItem("clark.history.index.v1", JSON.stringify([meta("g1", "no snap")]));
-    const drained = drainLocalHistory();
+    store.setItem("clark.history.index.v1.alice@x.com", JSON.stringify([meta("g1", "no snap")]));
+    const drained = drainLocalHistory(["alice@x.com"]);
     expect(drained).toEqual([]);
-    expect(store.getItem("clark.history.index.v1")).toBeNull();
+    expect(store.getItem("clark.history.index.v1.alice@x.com")).toBeNull();
   });
 });
 
@@ -111,6 +109,15 @@ describe("settleRuns", () => {
       },
       artifacts: [],
       provider_incidents: {},
+      goal: {
+        id: "goal-1",
+        objective: "finish the migration",
+        status: "active",
+        tokens_used: 0,
+        time_used_seconds: 0,
+        continuations: 0,
+        updated_at_ms: 1,
+      },
       pending_permission: { id: "p1", session: "s1", title: "allow?", options: [] },
     };
     const settled = settleRuns(snapshot);
@@ -121,6 +128,10 @@ describe("settleRuns", () => {
     expect(settled.tool_calls.t1.status).toBe("cancelled");
     expect(settled.tool_calls.t2.status).toBe("cancelled");
     expect(settled.tool_calls.t3.status).toBe("failed");
+    expect(settled.goal).toMatchObject({
+      status: "blocked",
+      blocker_reason: "Clark stopped before the goal finished.",
+    });
     expect(settled.pending_permission).toBeUndefined();
   });
 

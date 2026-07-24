@@ -433,9 +433,13 @@ mod tests {
         let exec = LocalExecutor;
         let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::<(bool, Vec<u8>)>::new()));
         let sink = seen.clone();
+        #[cfg(windows)]
+        let command = "[Console]::Out.Write('out'); [Console]::Error.Write('err')";
+        #[cfg(not(windows))]
+        let command = "printf out; printf err 1>&2";
         let out = exec
             .exec_streaming(
-                "printf out; printf err 1>&2",
+                command,
                 dir.path(),
                 Duration::from_secs(10),
                 &CancellationToken::new(),
@@ -532,9 +536,13 @@ mod tests {
         let exec = LocalExecutor;
         let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let sink = seen.clone();
+        #[cfg(windows)]
+        let command = "if ([Console]::IsInputRedirected -or [Console]::IsOutputRedirected) { exit 7 }; [Console]::Out.Write('terminal')";
+        #[cfg(not(windows))]
+        let command = "test -t 0 && test -t 1 && printf terminal";
         let out = exec
             .exec_streaming_pty(
-                "test -t 0 && test -t 1 && printf terminal",
+                command,
                 dir.path(),
                 Duration::from_secs(10),
                 &CancellationToken::new(),
@@ -545,6 +553,16 @@ mod tests {
         assert_eq!(out.code, Some(0));
         assert!(String::from_utf8_lossy(&out.stdout).contains("terminal"));
         assert!(String::from_utf8_lossy(&seen.lock().unwrap()).contains("terminal"));
+    }
+
+    #[test]
+    fn pty_builder_preserves_the_exact_process_path() {
+        let Some(path) = std::env::var_os("PATH") else {
+            return;
+        };
+        let mut command = portable_pty::CommandBuilder::new("unused");
+        crate::process::overlay_process_environment(&mut command);
+        assert_eq!(command.get_env("PATH"), Some(path.as_os_str()));
     }
 
     #[cfg(unix)]
@@ -615,12 +633,18 @@ mod tests {
             .await
             .unwrap()
             .into_iter()
-            .map(|w| w.path.to_string_lossy().to_string())
+            .map(|w| w.path)
             .collect();
-        assert!(files.iter().any(|f| f.ends_with("src/main.rs")));
-        assert!(files.iter().any(|f| f.ends_with("top.rs")));
-        assert!(!files.iter().any(|f| f.contains("node_modules")));
-        assert!(!files.iter().any(|f| f.contains("vendor")));
+        assert!(files
+            .iter()
+            .any(|file| file.ends_with(Path::new("src").join("main.rs"))));
+        assert!(files.iter().any(|file| file.ends_with("top.rs")));
+        assert!(!files
+            .iter()
+            .any(|file| file.to_string_lossy().contains("node_modules")));
+        assert!(!files
+            .iter()
+            .any(|file| file.to_string_lossy().contains("vendor")));
     }
 
     #[tokio::test]

@@ -35,6 +35,7 @@ import {
 } from "../lib/auth";
 import {
   drainLocalHistory,
+  hasUnscopedLocalHistory,
   buildResumeTranscript,
   snapshotBeforeTimelineItem,
   settleRuns,
@@ -84,6 +85,8 @@ import {
   cloudSetArchived,
   cloudShare,
   cloudUnshare,
+  configureCloudHistoryCredentials,
+  resetCloudHistory,
   scheduleCloudPut,
   flushCloudPuts,
   onCloudHistoryConflict,
@@ -120,15 +123,15 @@ import { updateDrainBlockerCount } from "../lib/updateDrain";
 export {
   MAX_ATTACHMENT_BYTES, addRecentProject, authSignOut, beginUpdateDrain, billingMe, buildResumeTranscript,
   cancelUpdateDrain, checkAndStageUpdate, cloudCreds, cloudDelete, cloudGet, cloudList,
-  cloudSetArchived, cloudShare, cloudUnshare, codeKeyAccountBinding, codeKeyMatchesAccount, consumeJustUpdated,
+  cloudSetArchived, cloudShare, cloudUnshare, codeKeyAccountBinding, codeKeyMatchesAccount, configureCloudHistoryCredentials, consumeJustUpdated,
   conversationProjectRoot, copyText, deriveTitle, drainLocalHistory, effectiveModelSettings, emptySnapshot,
-  fileToAttachment, flushCloudPuts, getBridge, hasContent, hostReady, installStagedUpdate,
+  fileToAttachment, flushCloudPuts, getBridge, hasContent, hasUnscopedLocalHistory, hostReady, installStagedUpdate,
   latestActivityReward, liveProjectRoot, loadApprovalPolicy, loadAuthSession, loadBrowserEnabled, loadChatModels,
   loadCollaborationMode, loadLocalSettings, loadMemoriesEnabled, loadOrchestrationEnabled, loadOutputStyle, loadRecentProjects,
   loadSshHosts, localConnectConfig, localSettingsReady, minLoadDuration, nextApprovalPolicy, normalizeReasoningEffort,
   notify, onCloudHistoryConflict, onCloudHistoryWarning, onSettingsMenuRequested, onUpdateMenuRequested, pickAllowOption,
   pickFolder, provisionCodeKey, refreshAuthSession, relaunchApp, releaseSnapshotCheckpoints, remoteTarget,
-  repositoryFingerprintForRoot, resetFanOut, saveApprovalPolicy, saveBrowserEnabled, saveChatModels, saveCollaborationMode,
+  repositoryFingerprintForRoot, resetCloudHistory, resetFanOut, saveApprovalPolicy, saveBrowserEnabled, saveChatModels, saveCollaborationMode,
   saveLocalSettings, saveMemoriesEnabled, saveOrchestrationEnabled, saveOutputStyle, scheduleCloudPut, settleRuns,
   signInWithGoogle, snapshotBeforeTimelineItem, sshConnect, sshDisconnect, syncFanOut, toUpload,
   updateDrainBlockerCount, wouldAutoApprove,
@@ -150,6 +153,7 @@ export type SettingsSection =
   | "project"
   | "integrations"
   | "commands"
+  | "computer-use"
   | "account"
   | "about";
 
@@ -704,13 +708,14 @@ export async function bindCloudTrajectory(
     remoteHost: meta.remoteHost,
     mode: meta.mode,
     metadata,
-    ownerScope: auth?.user.email?.trim().toLowerCase() || auth?.user.name.trim().toLowerCase() || "signed-out",
   };
   await bridge.configureCloudTrajectory(session.id, config, baseSnapshot, meta.rev ?? 0);
 }
 
-/** Cloud-first snapshot lookup: the in-memory cache, else a `cloudGet` (settled
- *  so a persisted mid-run transcript never reopens "Thinking…"), else null. */
+/** Cloud-first snapshot lookup: the in-memory cache, else `cloudGet`, else null.
+ * A cloud snapshot may describe work owned by another currently live desktop;
+ * only native restart recovery is allowed to turn that work into a terminal
+ * interruption. */
 export async function fetchSnapshot(id: string, auth: AuthSession | null): Promise<Snapshot | null> {
   const cached = snapshotCache.get(id);
   if (cached) return cached;
@@ -719,9 +724,8 @@ export async function fetchSnapshot(id: string, auth: AuthSession | null): Promi
   try {
     const cloud = await cloudGet(creds, id);
     if (cloud) {
-      const settled = settleRuns(cloud);
-      snapshotCache.set(id, settled);
-      return settled;
+      snapshotCache.set(id, cloud);
+      return cloud;
     }
   } catch {
     /* offline / backend down — caller falls back to a fresh session */

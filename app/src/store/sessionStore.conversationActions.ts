@@ -436,7 +436,7 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
     }
   },
 
-  archiveConversation: (id) => {
+  archiveConversation: async (id) => {
     // Soft-delete: flag it archived in the cloud (the transcript stays, so it
     // can be restored in full). Optimistic in-memory flag; PATCH to the cloud.
     // Archiving CLOSES the live session (unlike switching) — refuse mid-run.
@@ -444,6 +444,15 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
     if (entry && isBusy(entry.live)) {
       get().flashNotice(BUSY_SESSION_MESSAGE);
       return;
+    }
+    const creds = cloudCreds(get().auth);
+    if (creds) {
+      try {
+        await cloudSetArchived(creds, id, true);
+      } catch (error) {
+        set({ error: `Could not archive this conversation: ${String(error)}` });
+        return;
+      }
     }
     closeLiveSession(get().bridge, id);
     const cleared = get().session?.id === id;
@@ -465,16 +474,21 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
           }
         : {}),
     });
-    const creds = cloudCreds(get().auth);
-    if (creds) void cloudSetArchived(creds, id, true).catch(() => {});
   },
 
-  restoreConversation: (id) => {
+  restoreConversation: async (id) => {
+    const creds = cloudCreds(get().auth);
+    if (creds) {
+      try {
+        await cloudSetArchived(creds, id, false);
+      } catch (error) {
+        set({ error: `Could not restore this conversation: ${String(error)}` });
+        return;
+      }
+    }
     set({
       conversations: get().conversations.map((c) => (c.id === id ? { ...c, archived: false } : c)),
     });
-    const creds = cloudCreds(get().auth);
-    if (creds) void cloudSetArchived(creds, id, false).catch(() => {});
   },
 
   deleteConversation: async (id) => {
@@ -488,6 +502,15 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
     }
     const meta = get().conversations.find((conversation) => conversation.id === id);
     const snapshot = entry ? mergedOf(entry) : await fetchSnapshot(id, get().auth);
+    const creds = cloudCreds(get().auth);
+    if (creds) {
+      try {
+        await cloudDelete(creds, id);
+      } catch (error) {
+        set({ error: `Could not delete this conversation: ${String(error)}` });
+        return;
+      }
+    }
     if (meta?.project && snapshot && (!meta.remoteHost || entry?.remote)) {
       await releaseSnapshotCheckpoints(meta.project, snapshot, entry?.remote ?? null).catch(() => {});
     }
@@ -512,8 +535,6 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
           }
         : {}),
     });
-    const creds = cloudCreds(get().auth);
-    if (creds) void cloudDelete(creds, id).catch(() => {});
   },
 
   renameConversation: async (id, title) => {
@@ -541,7 +562,7 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
 
   setConversationSelection: (ids) => set({ selectedConversationIds: new Set(ids) }),
 
-  archiveSelectedConversations: () => {
+  archiveSelectedConversations: async () => {
     const ids = [...get().selectedConversationIds];
     if (ids.length === 0) return;
     // Skip any that are mid-run — archiving tears down the live session.
@@ -552,14 +573,25 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
     if (busy.length > 0) get().flashNotice(BUSY_SESSION_MESSAGE);
     const targets = ids.filter((id) => !busy.includes(id));
     if (targets.length === 0) return;
-    for (const id of targets) closeLiveSession(get().bridge, id);
-    const activeCleared = targets.includes(get().session?.id ?? "");
+    const creds = cloudCreds(get().auth);
+    const archived: string[] = [];
+    for (const id of targets) {
+      try {
+        if (creds) await cloudSetArchived(creds, id, true);
+        archived.push(id);
+      } catch (error) {
+        set({ error: `Could not archive this conversation: ${String(error)}` });
+      }
+    }
+    if (archived.length === 0) return;
+    for (const id of archived) closeLiveSession(get().bridge, id);
+    const activeCleared = archived.includes(get().session?.id ?? "");
     set((s) => ({
       conversations: s.conversations.map((c) =>
-        targets.includes(c.id) ? { ...c, archived: true } : c,
+        archived.includes(c.id) ? { ...c, archived: true } : c,
       ),
-      runningIds: s.runningIds.filter((r) => !targets.includes(r)),
-      selectedConversationIds: new Set(),
+      runningIds: s.runningIds.filter((r) => !archived.includes(r)),
+      selectedConversationIds: new Set([...s.selectedConversationIds].filter((id) => !archived.includes(id))),
       ...(activeCleared
         ? {
             session: null,
@@ -575,8 +607,6 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
           }
         : {}),
     }));
-    const creds = cloudCreds(get().auth);
-    if (creds) for (const id of targets) void cloudSetArchived(creds, id, true).catch(() => {});
   },
 
   deleteSelectedConversations: async () => {
@@ -589,7 +619,18 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
     if (busy.length > 0) get().flashNotice(BUSY_SESSION_MESSAGE);
     const targets = ids.filter((id) => !busy.includes(id));
     if (targets.length === 0) return;
-    await Promise.all(targets.map(async (id) => {
+    const creds = cloudCreds(get().auth);
+    const deleted: string[] = [];
+    for (const id of targets) {
+      try {
+        if (creds) await cloudDelete(creds, id);
+        deleted.push(id);
+      } catch (error) {
+        set({ error: `Could not delete this conversation: ${String(error)}` });
+      }
+    }
+    if (deleted.length === 0) return;
+    await Promise.all(deleted.map(async (id) => {
       const entry = liveSessions.get(id);
       const meta = get().conversations.find((conversation) => conversation.id === id);
       const snapshot = entry ? mergedOf(entry) : await fetchSnapshot(id, get().auth);
@@ -597,15 +638,15 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
         await releaseSnapshotCheckpoints(meta.project, snapshot, entry?.remote ?? null).catch(() => {});
       }
     }));
-    for (const id of targets) {
+    for (const id of deleted) {
       closeLiveSession(get().bridge, id);
       snapshotCache.delete(id);
     }
-    const activeCleared = targets.includes(get().session?.id ?? "");
+    const activeCleared = deleted.includes(get().session?.id ?? "");
     set((s) => ({
-      conversations: s.conversations.filter((c) => !targets.includes(c.id)),
-      runningIds: s.runningIds.filter((r) => !targets.includes(r)),
-      selectedConversationIds: new Set(),
+      conversations: s.conversations.filter((c) => !deleted.includes(c.id)),
+      runningIds: s.runningIds.filter((r) => !deleted.includes(r)),
+      selectedConversationIds: new Set([...s.selectedConversationIds].filter((id) => !deleted.includes(id))),
       ...(activeCleared
         ? {
             session: null,
@@ -621,8 +662,6 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
           }
         : {}),
     }));
-    const creds = cloudCreds(get().auth);
-    if (creds) for (const id of targets) void cloudDelete(creds, id).catch(() => {});
   },
 
   };

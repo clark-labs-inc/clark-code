@@ -2,12 +2,20 @@
 //! These mirror the `agent_core::Provider` trait and drive the live provider.
 
 mod cloud;
+mod cloud_authority;
+mod cloud_conversations;
+mod computer_use;
 mod local;
 mod project;
+mod session_close;
 mod skills;
 pub use cloud::*;
+pub(crate) use cloud_authority::{clark_http_client, clark_rest_base, jwt_subject};
+pub use cloud_conversations::*;
+pub use computer_use::*;
 pub use local::*;
 use project::project_executor;
+pub use session_close::*;
 pub use skills::*;
 
 use agent_core::provider::EventStream;
@@ -62,6 +70,10 @@ fn spawn_provider_stream(
         let _run_guard = run_guard;
         let mut batches = stream.ready_chunks(64);
         while let Some(events) = batches.next().await {
+            // A forced close owns the same gate, so a late cancellation event
+            // cannot reopen the snapshot after its terminal transition.
+            let projection_gate = entry.lock().await.projection_gate.clone();
+            let _projection = projection_gate.lock().await;
             // Stop if this session was closed or superseded by a reopen: the
             // captured provider must never clobber a newer session with the
             // same public conversation id.
@@ -72,7 +84,14 @@ fn spawn_provider_stream(
             if !still_current {
                 break;
             }
-            let Some(trajectory) = entry.lock().await.trajectory.clone() else {
+            let (trajectory, closing) = {
+                let session = entry.lock().await;
+                (session.trajectory.clone(), session.closing)
+            };
+            if closing {
+                break;
+            }
+            let Some(trajectory) = trajectory else {
                 break;
             };
             let checkpoint = match trajectory.append(&events).await {
@@ -385,6 +404,8 @@ async fn register_session(
         session: session.clone(),
         snapshot: snapshot.clone(),
         trajectory: None,
+        projection_gate: Arc::new(Mutex::new(())),
+        closing: false,
     };
     let replaced = state
         .sessions
@@ -406,30 +427,11 @@ async fn register_session(
     serde_json::to_value(&session).map_err(|e| e.to_string())
 }
 
-/// Drop a live session: its provider (and any agent loop inside it) is
-/// destroyed. Called when a conversation is archived/deleted or on sign-out —
-/// never on a mere switch, so background sessions keep streaming.
-#[tauri::command]
-pub async fn session_close(session_id: String, state: State<'_, AppState>) -> Result<(), String> {
-    tracing::info!(session = %session_id, "session_close");
-    let entry = state.sessions.lock().await.remove(&session_id);
-    if let Some(entry) = entry {
-        let mut entry = entry.lock().await;
-        let id = entry.session.id.clone();
-        entry
-            .provider
-            .close_session(&id)
-            .await
-            .map_err(|error| error.to_string())?;
-    }
-    Ok(())
-}
-
 #[tauri::command]
 pub async fn session_configure_cloud(
     app: AppHandle,
     session_id: String,
-    config: CloudTrajectoryConfig,
+    mut config: CloudTrajectoryConfig,
     base_snapshot: Snapshot,
     base_rev: i64,
     state: State<'_, AppState>,
@@ -438,15 +440,19 @@ pub async fn session_configure_cloud(
         .session_entry(&session_id)
         .await
         .ok_or("no such session")?;
-    *state.cloud_token.write().await = Some(config.token.clone());
+    let access =
+        cloud_authority::require_cloud_access(state.inner(), &config.endpoint, &config.token)
+            .await?;
+    config.endpoint = access.rest_base;
     let outbox_path = crate::trajectory::outbox_path(&app)?;
     let trajectory = CloudTrajectoryClient::new(
         session_id,
         config,
+        access.owner_scope,
         state.cloud_token.clone(),
         app.clone(),
         outbox_path,
-    );
+    )?;
     trajectory.initialize(&base_snapshot, base_rev).await?;
     trajectory
         .append(&[AgentEvent::Trace {
@@ -456,15 +462,6 @@ pub async fn session_configure_cloud(
         }])
         .await?;
     entry.lock().await.trajectory = Some(trajectory);
-    Ok(())
-}
-
-/// Replace the app-wide Clark cloud JWT. Called by the frontend after it
-/// refreshes the sign-in (see the `cloud-auth-expired` event); every trajectory
-/// client reads this cell per request, so in-flight retries pick it up.
-#[tauri::command]
-pub async fn update_cloud_token(token: String, state: State<'_, AppState>) -> Result<(), String> {
-    *state.cloud_token.write().await = Some(token);
     Ok(())
 }
 

@@ -186,9 +186,13 @@ mod tests {
 
     #[tokio::test]
     async fn run_cmd_captures_stdout() {
+        #[cfg(windows)]
+        let (program, args) = ("cmd.exe", &["/D", "/Q", "/C", "echo hello"][..]);
+        #[cfg(not(windows))]
+        let (program, args) = ("echo", &["hello"][..]);
         let out = run_cmd(
-            "echo",
-            &["hello"],
+            program,
+            args,
             Duration::from_secs(5),
             &CancellationToken::new(),
             "",
@@ -201,9 +205,13 @@ mod tests {
 
     #[tokio::test]
     async fn run_cmd_bytes_captures_raw_stdout() {
+        #[cfg(windows)]
+        let (program, args) = ("cmd.exe", &["/D", "/Q", "/C", "echo raw"][..]);
+        #[cfg(not(windows))]
+        let (program, args) = ("printf", &["%s", "\\xff\\xferaw"][..]);
         let (bytes, code) = run_cmd_bytes(
-            "printf",
-            &["%s", "\\xff\\xferaw"],
+            program,
+            args,
             Duration::from_secs(5),
             &CancellationToken::new(),
             "",

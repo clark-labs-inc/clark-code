@@ -16,14 +16,22 @@ pub(super) async fn clone_at_baseline(
     destination: &Path,
     cwd: &Path,
 ) -> Result<(), String> {
-    let source_arg = crate::git_metadata::shell_word(&baseline.checkout_root);
-    let destination_arg = crate::git_metadata::shell_word(&destination.to_string_lossy());
+    let source_arg = crate::git_metadata::shell_path_word(Path::new(&baseline.checkout_root));
+    let destination_arg = crate::git_metadata::shell_path_word(destination);
     git_shell(
         executor,
         cwd,
         &format!("clone --quiet --no-hardlinks --no-checkout -- {source_arg} {destination_arg}"),
     )
     .await?;
+    // Disposable writer/reviewer clones must produce the same byte-level
+    // result tree on every host. A user's global `core.autocrlf=true` would
+    // otherwise turn an LF patch into CRLF during Windows checkout and make a
+    // correct replay fail its content hash. This is local to the disposable
+    // clone; the selected primary checkout and its configuration are never
+    // changed.
+    git_shell(executor, destination, "config --local core.autocrlf false").await?;
+    git_shell(executor, destination, "config --local core.eol lf").await?;
     let baseline_arg = crate::git_metadata::shell_word(&baseline.head_oid);
     git_shell(
         executor,

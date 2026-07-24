@@ -20,6 +20,14 @@ pub(super) fn prepare(
         OsString::from("--ro-bind"),
         OsString::from("/"),
         OsString::from("/"),
+        // The read-only host root also makes the inherited device node
+        // read-only. Commands routinely open /dev/null for both reading and
+        // writing (Git does this for disabled helpers), so overlay only that
+        // non-persistent sink as a writable device without exposing the rest
+        // of /dev.
+        OsString::from("--dev-bind"),
+        OsString::from("/dev/null"),
+        OsString::from("/dev/null"),
         OsString::from("--unshare-user"),
         OsString::from("--unshare-pid"),
         OsString::from("--proc"),

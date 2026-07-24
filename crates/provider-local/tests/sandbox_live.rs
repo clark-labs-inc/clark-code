@@ -25,7 +25,7 @@ async fn paid_cheapest_model_cannot_escape_workspace() {
         .or_else(|_| std::env::var("CLARK_API_KEY"))
         .expect("CLARK_CODE_API_KEY or CLARK_API_KEY must be set");
     let model = std::env::var("CLARK_SANDBOX_E2E_MODEL")
-        .unwrap_or_else(|_| "clark-code:kimi_k27_code".to_string());
+        .unwrap_or_else(|_| "clark-code:minimax_m3".to_string());
     let base_url = std::env::var("CLARK_SANDBOX_E2E_BASE_URL")
         .unwrap_or_else(|_| "https://api.clarkslabs.com/v1".to_string());
     let workspace = tempfile::tempdir().unwrap();

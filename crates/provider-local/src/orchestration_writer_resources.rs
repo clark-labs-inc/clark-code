@@ -240,10 +240,14 @@ mod tests {
         let ctx = ctx(temp.path());
         let resources = vec![ResourceArgs {
             id: "test-service".into(),
-            command: "printf SERVICE_READY; sleep 30".into(),
+            command: if cfg!(windows) {
+                "Write-Output 'SERVICE_READY'; Start-Sleep -Seconds 30".into()
+            } else {
+                "printf SERVICE_READY; sleep 30".into()
+            },
             output_contains: Some("SERVICE_READY".into()),
             workdir: None,
-            timeout_ms: 2_000,
+            timeout_ms: if cfg!(windows) { 10_000 } else { 2_000 },
         }];
         let started = start(&resources, &ctx).await.unwrap();
         let (gate, sender) = readiness_channel(true);

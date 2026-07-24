@@ -43,13 +43,23 @@ async fn remote_checkpoint_review_round_trip() {
         .exec_streaming_pty(
             "git status --short",
             &root,
-            Duration::from_secs(2),
+            if cfg!(windows) {
+                Duration::from_secs(30)
+            } else {
+                Duration::from_secs(2)
+            },
             &CancellationToken::new(),
             &|_, _| {},
         )
         .await
         .expect("plain remote Git must not wait for the configured fsmonitor helper");
-    assert_eq!(status.code, Some(0));
+    assert_eq!(
+        status.code,
+        Some(0),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&status.stdout),
+        String::from_utf8_lossy(&status.stderr)
+    );
     #[cfg(unix)]
     {
         assert!(!helpers.fsmonitor_marker.exists());

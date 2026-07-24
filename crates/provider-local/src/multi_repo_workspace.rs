@@ -261,21 +261,7 @@ impl IsolatedWriterWorkspace {
         if executor.metadata(&root).await.is_ok() {
             return Err("isolated writer destination already exists".into());
         }
-        let source_arg = crate::git_metadata::shell_word(&selected.baseline.checkout_root);
-        let root_arg = crate::git_metadata::shell_word(&root.to_string_lossy());
-        git_shell(
-            executor,
-            scratch_root,
-            &format!("clone --quiet --no-hardlinks --no-checkout -- {source_arg} {root_arg}"),
-        )
-        .await?;
-        let baseline_arg = crate::git_metadata::shell_word(&selected.baseline.head_oid);
-        git_shell(
-            executor,
-            &root,
-            &format!("checkout --quiet --detach {baseline_arg}"),
-        )
-        .await?;
+        clone_at_baseline(executor, &selected.baseline, &root, scratch_root).await?;
         let actual = git_text(executor, &root, &["rev-parse", "--verify", "HEAD"]).await?;
         if actual.trim() != selected.baseline.head_oid {
             return Err("isolated writer clone did not checkout the pinned baseline".into());
@@ -372,7 +358,7 @@ impl IsolatedWriterWorkspace {
             .ok_or_else(|| "isolated workspace has no scratch parent".to_string())?;
         let path = parent.join(format!("candidate-{}.patch", Uuid::new_v4()));
         executor.write(&path, patch).await?;
-        let path_arg = crate::git_metadata::shell_word(&path.to_string_lossy());
+        let path_arg = crate::git_metadata::shell_path_word(&path);
         let check = git_shell(
             executor,
             &self.root,
@@ -433,7 +419,8 @@ impl FreshIntegrationWorkspace {
                 if sha256(&patch) != package.patch_sha256 {
                     return Err(format!("patch digest mismatch for {repository_id}"));
                 }
-                let artifact_arg = crate::git_metadata::shell_word(&package.artifact_path);
+                let artifact_arg =
+                    crate::git_metadata::shell_path_word(Path::new(&package.artifact_path));
                 git_shell(
                     executor,
                     &destination,

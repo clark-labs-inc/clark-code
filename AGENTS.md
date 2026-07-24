@@ -118,8 +118,12 @@ pnpm build
 ### Run the desktop app
 
 ```bash
-cargo tauri dev   # spawns the Vite dev server automatically
+./script/build_and_run.sh
 ```
+
+On macOS, always use this launcher instead of opening a raw debug bundle. It
+assigns the separate `Clark Code Dev` identity and applies a stable development
+signature so TCC privacy grants survive rebuilds.
 
 ## Conventions
 

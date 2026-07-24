@@ -5,15 +5,21 @@
 // `cloudSetArchived` / `cloudDelete`. The Rust bridge maintains an
 // account-scoped SQLite outbox and acknowledged snapshot cache for atomic local
 // writes, offline delivery, and restart recovery; it reconciles against cloud
-// revisions and cannot overwrite a newer cloud snapshot. The Clark JWT scopes
-// server access and `ownerScope` isolates local records, so another account on
-// the same machine cannot see these chats. Cloud sync is available only in the
+// revisions and cannot overwrite a newer cloud snapshot. The native host binds
+// the validated Clark JWT subject to the local records, so the WebView cannot
+// select another account's partition. Cloud sync is available only in the
 // desktop app for a signed-in user with a Clark token.
 
 import { invoke } from "@tauri-apps/api/core";
-import { normalizeSnapshot, type Snapshot, type WireSnapshot } from "../core-bridge/types";
+import { normalizeSnapshot, type Snapshot } from "../core-bridge/types";
 import type { ConversationMeta } from "./history";
 import type { AuthSession } from "./auth";
+import {
+  metaFromDetail,
+  metaFromSummary,
+  type CloudDetail,
+  type CloudSummary,
+} from "./cloudHistoryTypes";
 import { prepareSnapshotForUpload } from "./snapshotUpload";
 import {
   repositoryFingerprintForRoot,
@@ -27,7 +33,6 @@ function isTauri(): boolean {
 export interface CloudCreds {
   endpoint: string;
   token: string;
-  ownerScope: string;
 }
 
 /** Cloud creds, or null when sync isn't possible (browser preview or signed out
@@ -37,43 +42,7 @@ export function cloudCreds(auth: AuthSession | null): CloudCreds | null {
   const endpoint = auth?.clark.endpoint;
   const token = auth?.clark.token;
   if (!endpoint || !token) return null;
-  const ownerScope = auth?.user.id?.trim()
-    || auth?.user.email?.trim().toLowerCase()
-    || auth?.user.name.trim().toLowerCase();
-  if (!ownerScope) return null;
-  return { endpoint, token, ownerScope };
-}
-
-interface CloudSummary {
-  id: string;
-  title: string;
-  provider: string;
-  project?: string;
-  remoteHost?: string;
-  mode?: string;
-  titleLocked?: boolean;
-  archived?: boolean;
-  createdAt: string | number;
-  updatedAt: string | number;
-  rev: number;
-}
-
-function metaFromSummary(r: CloudSummary): ConversationMeta {
-  const timestamp = (value: string | number) =>
-    typeof value === "number" ? value : Date.parse(value) || Date.now();
-  return {
-    id: r.id,
-    title: r.title,
-    provider: r.provider,
-    project: r.project || undefined,
-    remoteHost: r.remoteHost || undefined,
-    mode: r.mode || undefined,
-    titleLocked: r.titleLocked || undefined,
-    archived: r.archived || undefined,
-    createdAt: timestamp(r.createdAt),
-    updatedAt: timestamp(r.updatedAt),
-    rev: r.rev,
-  };
+  return { endpoint, token };
 }
 
 /** List the user's cloud conversations (metadata only). */
@@ -81,7 +50,6 @@ export async function cloudList(c: CloudCreds): Promise<ConversationMeta[]> {
   const rows = await invoke<CloudSummary[] | null>("desktop_conv_list", {
     endpoint: c.endpoint,
     token: c.token,
-    ownerScope: c.ownerScope,
   });
   const summaries = (rows ?? []).map(metaFromSummary);
   for (const summary of summaries) serverRevisions.set(summary.id, summary.rev ?? 0);
@@ -90,17 +58,26 @@ export async function cloudList(c: CloudCreds): Promise<ConversationMeta[]> {
 
 /** Fetch one cloud conversation's snapshot, or null if absent. */
 export async function cloudGet(c: CloudCreds, id: string): Promise<Snapshot | null> {
-  const detail = await invoke<{ snapshot?: WireSnapshot; rev?: number } | null>("desktop_conv_get", {
+  const detail = await invoke<CloudDetail | null>("desktop_conv_get", {
     endpoint: c.endpoint,
     token: c.token,
     id,
-    ownerScope: c.ownerScope,
   });
   if (typeof detail?.rev === "number") {
     serverRevisions.set(id, detail.rev);
     conflicted.delete(id);
   }
-  return detail?.snapshot ? normalizeSnapshot(detail.snapshot) : null;
+  const snapshot = detail?.snapshot ? normalizeSnapshot(detail.snapshot) : null;
+  if (detail?.snapshotRecoveryRequired && snapshot) {
+    const meta = metaFromDetail(detail);
+    if (meta) {
+      // Native recovery already wrote the terminal events to its durable outbox.
+      // Publish the exact recovered projection once that prefix is acknowledged;
+      // otherwise mobile keeps reading the pre-restart running snapshot forever.
+      scheduleCloudPut(c, meta, snapshot, "idle");
+    }
+  }
+  return snapshot;
 }
 
 /** Upsert a conversation snapshot with optimistic concurrency. The stable
@@ -113,10 +90,12 @@ export async function cloudPut(
   status: "running" | "idle",
   baseRev: number,
   mutationId: string,
+  shouldSend: () => boolean = () => true,
 ): Promise<number> {
   const repositoryFingerprint = meta.project
     ? await repositoryFingerprintForRoot(meta.project)
     : null;
+  if (!shouldSend()) throw new CloudWriteCancelled();
   const summary = await invoke<{ rev: number }>("desktop_conv_put", {
     endpoint: c.endpoint,
     token: c.token,
@@ -131,7 +110,6 @@ export async function cloudPut(
     rev,
     snapshot,
     status,
-    ownerScope: c.ownerScope,
     baseRev,
     mutationId,
   });
@@ -141,10 +119,10 @@ export async function cloudPut(
 // --- Single-flight, coalescing write pipeline -----------------------------
 //
 // Per conversation we keep at most one PUT in flight and at most one queued
-// "latest" snapshot. Rapid saves collapse to the newest; a failed send is left
-// queued for the next turn to retry (idempotent on the server, so retries are
-// safe and never duplicate). This keeps writes fast and non-blocking and gives
-// at-most-one in-flight delivery per conversation.
+// "latest" snapshot. Rapid saves collapse to the newest; transient failures
+// retry with bounded backoff (idempotent on the server, so retries are safe and
+// never duplicate). This keeps writes fast and non-blocking and gives at-most-
+// one in-flight delivery per conversation.
 
 interface PendingPush {
   creds: CloudCreds;
@@ -153,6 +131,7 @@ interface PendingPush {
   rev: number;
   status: "running" | "idle";
   mutationId: string;
+  epoch: number;
 }
 
 /** Absolute backstop: even after trimming old tool outputs, skip cloud sync
@@ -171,8 +150,79 @@ const pending = new Map<string, PendingPush>();
 const lastSent = new Map<string, string>();
 const serverRevisions = new Map<string, number>();
 const conflicted = new Set<string>();
+const retryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const retryAttempts = new Map<string, number>();
+const deleting = new Set<string>();
+const deleteGenerations = new Map<string, number>();
+let cloudHistoryEpoch = 0;
+let nextDeleteGeneration = 0;
+let configuredCreds: CloudCreds | null = null;
 let conflictHandler: ((conversationId: string) => void) | null = null;
 let warningHandler: ((message: string) => void) | null = null;
+
+const RETRY_INITIAL_DELAY_MS = 1_000;
+const RETRY_MAX_DELAY_MS = 30_000;
+
+function sameCreds(left: CloudCreds | null, right: CloudCreds | null): boolean {
+  return left?.endpoint === right?.endpoint && left?.token === right?.token;
+}
+
+/** Bind queued snapshot writes to the currently authenticated Desktop account.
+ * Refreshes retain the queue; sign-out and account changes must call
+ * `resetCloudHistory` first so no stale job can inherit another account's JWT. */
+export function configureCloudHistoryCredentials(creds: CloudCreds | null): void {
+  configuredCreds = creds ? { ...creds } : null;
+}
+
+/** Stop all queued retry work at an account boundary. In-flight requests cannot
+ * be cancelled after crossing the native boundary, but their completions are
+ * fenced by this epoch and therefore cannot requeue or repopulate local state. */
+export function resetCloudHistory(): void {
+  cloudHistoryEpoch += 1;
+  configuredCreds = null;
+  for (const timer of retryTimers.values()) clearTimeout(timer);
+  retryTimers.clear();
+  retryAttempts.clear();
+  pending.clear();
+  lastSent.clear();
+  serverRevisions.clear();
+  conflicted.clear();
+  deleting.clear();
+  deleteGenerations.clear();
+}
+
+function jobIsCurrent(id: string, job: PendingPush): boolean {
+  return job.epoch === cloudHistoryEpoch && !deleting.has(id);
+}
+
+class CloudWriteCancelled extends Error {}
+
+function clearRetry(id: string): void {
+  const timer = retryTimers.get(id);
+  if (timer !== undefined) clearTimeout(timer);
+  retryTimers.delete(id);
+}
+
+function retryPendingPush(id: string): void {
+  const job = pending.get(id);
+  if (
+    retryTimers.has(id)
+    || conflicted.has(id)
+    || !job
+    || !jobIsCurrent(id, job)
+    || !configuredCreds
+  ) {
+    return;
+  }
+  const attempts = retryAttempts.get(id) ?? 0;
+  retryAttempts.set(id, attempts + 1);
+  const delay = Math.min(RETRY_INITIAL_DELAY_MS * (2 ** attempts), RETRY_MAX_DELAY_MS);
+  const timer = setTimeout(() => {
+    retryTimers.delete(id);
+    void drainPush(id);
+  }, delay);
+  retryTimers.set(id, timer);
+}
 
 /** The store installs this once so a concurrent-device write conflict is
  * visible and the stale snapshot is not retried forever. */
@@ -227,6 +277,9 @@ export function scheduleCloudPut(
   snapshot: Snapshot,
   status: "running" | "idle" = "idle",
 ): void {
+  // Never let a stale render callback resurrect work after sign-out or switch
+  // an account's queued transcript onto a different account's token.
+  if (!sameCreds(configuredCreds, creds) || deleting.has(meta.id)) return;
   // A stale branch stays read-only until cloudGet reloads its exact base.
   if (conflicted.has(meta.id)) return;
   // Monotonic rev: pushes now also happen mid-run (throttled), where the
@@ -236,7 +289,16 @@ export function scheduleCloudPut(
   // single-flight queue guarantee spacing), survives restarts, and nothing
   // reads the rev back as a length — it is purely an ordering token.
   const rev = Date.now();
-  pending.set(meta.id, { creds, meta, snapshot, rev, status, mutationId: mutationId() });
+  clearRetry(meta.id);
+  pending.set(meta.id, {
+    creds,
+    meta,
+    snapshot,
+    rev,
+    status,
+    mutationId: mutationId(),
+    epoch: cloudHistoryEpoch,
+  });
   void drainPush(meta.id);
 }
 
@@ -255,9 +317,13 @@ export async function flushCloudPuts(timeoutMs = 5000): Promise<boolean> {
 }
 
 async function drainPush(id: string): Promise<void> {
-  if (inflight.has(id)) return; // already sending this conversation
+  if (inflight.has(id) || deleting.has(id)) return; // already sending or deleting this conversation
   const job = pending.get(id);
-  if (!job) return;
+  if (!job || !jobIsCurrent(id, job)) {
+    if (pending.get(id) === job) pending.delete(id);
+    return;
+  }
+  clearRetry(id);
   pending.delete(id);
   inflight.add(id);
   let ok = false;
@@ -270,80 +336,119 @@ async function drainPush(id: string): Promise<void> {
       // Keep the job queued. Marking this successful would let the native
       // trajectory outbox advance its checkpoint while the cloud snapshot
       // stayed stale, permanently losing cross-device reconstruction.
-      if (!pending.has(id)) pending.set(id, job);
+      if (jobIsCurrent(id, job) && !pending.has(id)) pending.set(id, job);
       warningHandler?.(
         "This conversation is too large to sync safely. Its latest history remains on this device; start a new conversation to restore cloud sync.",
       );
       return;
     }
     if (lastSent.get(id) !== mark) {
+      const creds = configuredCreds;
+      if (!creds) throw new CloudWriteCancelled();
       const storedRev = await cloudPut(
-        job.creds,
+        creds,
         job.meta,
         prepared.snapshot,
         job.rev,
         job.status,
         serverRevisions.get(id) ?? job.meta.rev ?? 0,
         job.mutationId,
+        () => jobIsCurrent(id, job) && sameCreds(configuredCreds, creds),
       );
-      serverRevisions.set(id, storedRev);
-      lastSent.set(id, mark);
+      if (jobIsCurrent(id, job)) {
+        serverRevisions.set(id, storedRev);
+        lastSent.set(id, mark);
+      }
     }
-    ok = true;
+    if (jobIsCurrent(id, job)) {
+      ok = true;
+      retryAttempts.delete(id);
+    }
   } catch (error) {
-    if (String(error).includes("cloud_conflict")) {
+    if (!jobIsCurrent(id, job)) {
+      // A sign-out/account switch may have queued fresh work while this older
+      // request was in flight. `finally` below wakes that newer generation.
+    } else if (error instanceof CloudWriteCancelled) {
+      const creds = configuredCreds;
+      if (creds && !pending.has(id)) pending.set(id, { ...job, creds });
+      ok = true;
+    } else if (String(error).includes("cloud_conflict")) {
       conflicted.add(id);
+      pending.delete(id);
+      clearRetry(id);
+      retryAttempts.delete(id);
       conflictHandler?.(id);
       ok = true;
+    } else if (String(error).includes("cloud_deleted:")) {
+      pending.delete(id);
+      clearRetry(id);
+      retryAttempts.delete(id);
+      warningHandler?.(
+        "This conversation was deleted on another device, so Clark Code stopped syncing it here.",
+      );
+      ok = true;
     } else {
-    // Transient (offline / backend not deployed). Requeue unless a newer push
-    // already superseded it; the next turn retries. No tight retry loop.
-      if (!pending.has(id)) pending.set(id, job);
+      // Transient (offline / backend not deployed). Requeue unless a newer push
+      // already superseded it, then retry without needing another user action.
+      const creds = configuredCreds;
+      if (creds && !pending.has(id)) pending.set(id, { ...job, creds });
+      retryPendingPush(id);
     }
   } finally {
     inflight.delete(id);
   }
-  // Only chain-drain on success — a newer snapshot may be waiting.
-  if (ok && pending.has(id)) void drainPush(id);
+  // Chain a newer snapshot after success. An account reset can replace a job
+  // while its old request is still in flight, so it also needs one fresh drain.
+  const next = pending.get(id);
+  if (
+    next
+    && jobIsCurrent(id, next)
+    && (ok || job.epoch !== cloudHistoryEpoch)
+  ) {
+    void drainPush(id);
+  }
 }
 
-/** Delete a conversation from the cloud. */
-export async function cloudDelete(c: CloudCreds, id: string): Promise<void> {
-  await invoke("desktop_conv_delete", {
-    endpoint: c.endpoint,
-    token: c.token,
-    id,
-    ownerScope: c.ownerScope,
-  });
-  // A re-created conversation with the same id must upload fresh.
+async function waitForInflightPush(id: string): Promise<void> {
+  while (inflight.has(id)) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
+function forgetConversationPushState(id: string): void {
+  pending.delete(id);
+  clearRetry(id);
+  retryAttempts.delete(id);
   lastSent.delete(id);
+  serverRevisions.delete(id);
   conflicted.delete(id);
 }
 
-/** Toggle a conversation's archived flag in the cloud (independent of snapshot
- *  sync, so archiving never re-uploads the transcript or gets clobbered by it). */
-export async function cloudSetArchived(c: CloudCreds, id: string, archived: boolean): Promise<void> {
-  await invoke("desktop_conv_set_archived", {
-    endpoint: c.endpoint,
-    token: c.token,
-    id,
-    archived,
-    ownerScope: c.ownerScope,
-  });
+/** Delete a conversation from the cloud. Tombstone local write scheduling first,
+ * then wait for any already-dispatched PUT before issuing DELETE so a retry can
+ * never recreate the conversation behind the user's back. */
+export async function cloudDelete(c: CloudCreds, id: string): Promise<void> {
+  if (!sameCreds(configuredCreds, c)) return;
+  const epoch = cloudHistoryEpoch;
+  const generation = ++nextDeleteGeneration;
+  deleting.add(id);
+  deleteGenerations.set(id, generation);
+  forgetConversationPushState(id);
+  try {
+    await waitForInflightPush(id);
+    const creds = configuredCreds;
+    if (epoch !== cloudHistoryEpoch || !creds) return;
+    await invoke("desktop_conv_delete", {
+      endpoint: creds.endpoint,
+      token: creds.token,
+      id,
+    });
+  } finally {
+    if (deleteGenerations.get(id) === generation) {
+      deleteGenerations.delete(id);
+      deleting.delete(id);
+    }
+  }
 }
 
-/** Create (or fetch) the public share link for a synced conversation. */
-export async function cloudShare(c: CloudCreds, id: string): Promise<string> {
-  const out = await invoke<{ share_url?: string }>("desktop_conv_share", {
-    endpoint: c.endpoint,
-    token: c.token,
-    id,
-  });
-  if (!out.share_url) throw new Error("Clark did not return a share link.");
-  return out.share_url;
-}
-
-/** Stop sharing a conversation (revokes the public link). */
-export async function cloudUnshare(c: CloudCreds, id: string): Promise<void> {
-  await invoke("desktop_conv_unshare", { endpoint: c.endpoint, token: c.token, id });
-}
+export { cloudSetArchived, cloudShare, cloudUnshare } from "./cloudHistoryMutations";

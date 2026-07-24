@@ -31,10 +31,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      CLARK_CODE_PRERELEASE_LIVE: ${{ vars.CLARK_CODE_PRERELEASE_LIVE || '0' }}
-      CLARK_CODE_PROVIDER: ${{ vars.CLARK_CODE_PRERELEASE_PROVIDER }}
-      CLARK_CODE_BASE_URL: ${{ vars.CLARK_CODE_PRERELEASE_BASE_URL }}
-      CLARK_CODE_MODEL: ${{ vars.CLARK_CODE_PRERELEASE_MODEL }}
+      CLARK_CODE_PRERELEASE_LIVE: ${{ vars.CLARK_CODE_PRERELEASE_LIVE || '1' }}
+      CLARK_CODE_PROVIDER: ${{ vars.CLARK_CODE_PRERELEASE_PROVIDER || 'clark-platform' }}
+      CLARK_CODE_BASE_URL: ${{ vars.CLARK_CODE_PRERELEASE_BASE_URL || 'https://api.clarkslabs.com/v1' }}
+      CLARK_CODE_MODEL: ${{ vars.CLARK_CODE_PRERELEASE_MODEL || 'clark-code:minimax_m3' }}
       CLARK_CODE_API_KEY: ${{ secrets.CLARK_CODE_PRERELEASE_API_KEY }}
     steps:
       - uses: actions/checkout@v4
@@ -51,6 +51,18 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+
+      - name: Install native host test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libssl-dev \
+            libxdo-dev \
+            build-essential \
+            pkg-config
 
       - uses: pnpm/action-setup@v4
         with:
@@ -75,8 +87,8 @@ jobs:
             --out target/pre-release-benchmarks/release
             --superpowers "$GITHUB_WORKSPACE/benchmark-fixtures/superpowers"
           )
-          if [ "$CLARK_CODE_PRERELEASE_LIVE" = "1" ]; then
-            args+=(--live)
+          if [ "$CLARK_CODE_PRERELEASE_LIVE" = "0" ]; then
+            args+=(--offline)
           fi
           ./scripts/run-pre-release-benchmarks.sh "${args[@]}"
 
@@ -102,7 +114,7 @@ jobs:
         # updater latest.json is macOS-only (keyed on the .app.tar.gz.sig).
         include:
           - platform: macos-latest
-            args: "--target universal-apple-darwin --config src-tauri/tauri.release.conf.json --config src-tauri/tauri.sandbox.macos.conf.json"
+            args: "--target universal-apple-darwin --config src-tauri/tauri.release.conf.json --config src-tauri/tauri.sandbox.macos.conf.json --config src-tauri/tauri.computer-use.macos.conf.json"
             bundle-target: "universal-apple-darwin"
             rust-targets: "aarch64-apple-darwin,x86_64-apple-darwin"
           - platform: ubuntu-22.04
@@ -161,6 +173,9 @@ jobs:
             # before merging, so each inner build needs its own sidecar.
             python3 scripts/stage-bundled-tools.py --target aarch64-apple-darwin
             python3 scripts/stage-bundled-tools.py --target x86_64-apple-darwin
+            bash scripts/stage-computer-use-helper.sh --target aarch64-apple-darwin --profile release
+            bash scripts/stage-computer-use-helper.sh --target x86_64-apple-darwin --profile release
+            bash scripts/stage-computer-use-helper.sh --target universal-apple-darwin --profile release
           fi
           python3 scripts/stage-bundled-tools.py --target "${{ matrix.bundle-target }}"
           suffix=""
@@ -286,7 +301,12 @@ jobs:
             --platform macos \
             --resource-root "$app/Contents/Resources" \
             --executable-dir "$app/Contents/MacOS"
+          helper="$app/Contents/MacOS/clark-computer-use-helper"
+          otool -l "$helper" | grep -A2 -F 'path @executable_path/../Frameworks'
+          "$helper" --self-test
+          codesign --verify --strict --verbose=2 "$helper"
           codesign --verify --deep --strict --verbose=2 "$app"
+          "$app/Contents/MacOS/clark-desktop" --computer-use-signed-smoke
 
       - name: Verify packaged Linux runtime layout
         if: runner.os == 'Linux'

@@ -56,8 +56,8 @@ fn paid_config() -> (String, String, String) {
     let api_key = std::env::var("CLARK_CODE_API_KEY")
         .or_else(|_| std::env::var("CLARK_API_KEY"))
         .expect("CLARK_CODE_API_KEY or CLARK_API_KEY must be set");
-    let model = std::env::var("CLARK_PAID_EVAL_MODEL")
-        .unwrap_or_else(|_| "clark-code:kimi_k27_code".into());
+    let model =
+        std::env::var("CLARK_PAID_EVAL_MODEL").unwrap_or_else(|_| "clark-code:minimax_m3".into());
     let base_url = std::env::var("CLARK_PAID_EVAL_BASE_URL")
         .unwrap_or_else(|_| crate::config::DEFAULT_BASE_URL.into());
     (api_key, model, base_url)
@@ -75,6 +75,14 @@ fn config() -> OrchestrationToolsConfig {
         headers: HashMap::new(),
         root_model: "strong".into(),
         reasoning_effort: None,
+    }
+}
+
+fn absolute_test_root() -> &'static str {
+    if cfg!(windows) {
+        "C:/clark-test/workspace"
+    } else {
+        "/tmp/workspace"
     }
 }
 
@@ -114,7 +122,7 @@ fn builds_a_parallel_single_repository_plan_with_exact_leases() {
         RepositoryBaseline {
             repository_id: repository_id.clone(),
             repository_fingerprint: "fingerprint".into(),
-            checkout_root: "/tmp/workspace".into(),
+            checkout_root: absolute_test_root().into(),
             checkout_kind: CheckoutKind::Main,
             head_oid: "a".repeat(40),
             current_branch: Some("main".into()),

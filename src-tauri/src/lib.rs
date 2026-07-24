@@ -37,6 +37,69 @@ pub struct ProviderInfo {
     pub capabilities: ProviderCapabilities,
 }
 
+const PRODUCTION_BUNDLE_IDENTIFIER: &str = "com.clark.desktop";
+const SIGNED_COMPUTER_USE_SMOKE_ARG: &str = "--computer-use-signed-smoke";
+
+fn updates_enabled_for(debug_build: bool, identifier: &str) -> bool {
+    !debug_build && identifier == PRODUCTION_BUNDLE_IDENTIFIER
+}
+
+/// Read-only packaged-app probe for the release workflow. Calling
+/// `permissions` forces the real parent/helper handshake and both code-signing
+/// checks, but does not trigger either macOS privacy prompt.
+pub fn run_signed_computer_use_smoke_if_requested() -> bool {
+    if !signed_computer_use_smoke_requested(std::env::args_os().skip(1)) {
+        return false;
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let result = computer_use::native_backend()
+            .and_then(|backend| backend.permissions())
+            .and_then(|permissions| {
+                println!(
+                    "{}",
+                    serde_json::to_string(&permissions).map_err(|error| {
+                        computer_use::ComputerUseError::HelperProtocol(format!(
+                            "could not serialize signed smoke result: {error}"
+                        ))
+                    })?
+                );
+                Ok(())
+            });
+        if let Err(error) = result {
+            eprintln!("signed computer-use smoke failed: {error}");
+            std::process::exit(1);
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        eprintln!("signed computer-use smoke is supported only on macOS");
+        std::process::exit(2);
+    }
+
+    true
+}
+
+fn signed_computer_use_smoke_requested(
+    arguments: impl IntoIterator<Item = impl AsRef<std::ffi::OsStr>>,
+) -> bool {
+    let mut arguments = arguments.into_iter();
+    arguments
+        .next()
+        .is_some_and(|argument| argument.as_ref() == SIGNED_COMPUTER_USE_SMOKE_ARG)
+        && arguments.next().is_none()
+}
+
+/// Only a signed production flavor may consult or install production updates.
+/// Development builds have a distinct bundle identity and must never replace
+/// themselves with a release artifact from the production update channel.
+#[tauri::command]
+fn app_updates_enabled(app: tauri::AppHandle) -> bool {
+    updates_enabled_for(cfg!(debug_assertions), &app.config().identifier)
+}
+
 /// The providers this build ships with. Clark Desktop is a coding client: it
 /// ships the local coding agent only (the model + research route through the
 /// production Clark Platform API).
@@ -126,11 +189,19 @@ pub fn run() {
             commands::skill_packs_list,
             commands::skill_pack_install,
             commands::skill_pack_uninstall,
+            commands::computer_use_platform_status,
+            commands::computer_use_request_permissions,
+            commands::computer_use_approval_snapshot,
+            commands::computer_use_revoke_approval,
+            commands::computer_use_revoke_all_approvals,
+            commands::computer_use_recent_receipts,
             commands::session_new,
             commands::session_load,
             commands::session_close,
             commands::session_configure_cloud,
-            commands::update_cloud_token,
+            commands::clark_clear_cloud_session,
+            commands::clark_refresh_cloud_session,
+            app_updates_enabled,
             commands::update_begin_drain,
             commands::update_cancel_drain,
             commands::prompt,
@@ -226,4 +297,66 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running Clark Code");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        signed_computer_use_smoke_requested, updates_enabled_for, SIGNED_COMPUTER_USE_SMOKE_ARG,
+    };
+    use serde_json::Value;
+
+    #[test]
+    fn updater_is_limited_to_non_debug_production_flavors() {
+        assert!(updates_enabled_for(false, "com.clark.desktop"));
+        assert!(!updates_enabled_for(true, "com.clark.desktop"));
+        assert!(!updates_enabled_for(false, "com.clark.desktop.dev"));
+    }
+
+    #[test]
+    fn development_and_release_bundle_identities_are_distinct() {
+        let development: Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).expect("development config");
+        let release: Value = serde_json::from_str(include_str!("../tauri.release.conf.json"))
+            .expect("release config");
+
+        assert_eq!(development["productName"], "Clark Code Dev");
+        assert_eq!(development["identifier"], "com.clark.desktop.dev");
+        assert_eq!(development["bundle"]["createUpdaterArtifacts"], false);
+        assert_eq!(release["productName"], "Clark Code");
+        assert_eq!(release["identifier"], "com.clark.desktop");
+        assert_eq!(release["bundle"]["createUpdaterArtifacts"], true);
+        assert!(include_str!("../Info.plist").contains("NSDocumentsFolderUsageDescription"));
+    }
+
+    #[test]
+    fn signed_computer_use_smoke_requires_the_exact_standalone_argument() {
+        assert!(signed_computer_use_smoke_requested([
+            SIGNED_COMPUTER_USE_SMOKE_ARG
+        ]));
+        assert!(!signed_computer_use_smoke_requested(
+            std::iter::empty::<&str>()
+        ));
+        assert!(!signed_computer_use_smoke_requested([
+            "--not-the-smoke-flag"
+        ]));
+        assert!(!signed_computer_use_smoke_requested([
+            SIGNED_COMPUTER_USE_SMOKE_ARG,
+            "unexpected-extra-argument",
+        ]));
+    }
+
+    #[test]
+    fn native_computer_use_fixture_is_debug_only_and_never_bundled() {
+        let fixture_info = include_str!("../../harness/fixtures/computer-use-native/Info.plist");
+        assert!(fixture_info.contains("<key>ClarkDebugOnlyFixture</key>"));
+        for production_config in [
+            include_str!("../tauri.conf.json"),
+            include_str!("../tauri.release.conf.json"),
+            include_str!("../tauri.computer-use.macos.conf.json"),
+        ] {
+            assert!(!production_config.contains("computer-use-fixture"));
+            assert!(!production_config.contains("Clark Computer Use Fixture"));
+        }
+    }
 }

@@ -10,7 +10,10 @@ use tokio_util::sync::CancellationToken;
 use crate::loop_state::{Decision, Resolution, RunControl, SessionState};
 use crate::mcp::is_mcp_tool;
 use crate::safety::{classify_command, CommandRisk};
-use crate::tools::{PermissionMode, ToolCtx, ToolExecutor};
+use crate::tools::{
+    PermissionMode, PermissionScope, ToolCtx, ToolExecutor, ToolPermissionClass,
+    ToolPermissionDecision,
+};
 
 #[derive(Clone)]
 pub(crate) struct PermissionGate {
@@ -35,6 +38,17 @@ enum PermissionWaitOutcome {
     Resolved(Resolution),
     Cancelled,
     Failed(String),
+}
+
+struct PermissionAttempt<'a> {
+    tool_id: &'a ToolCallId,
+    tool_name: &'a str,
+    executor: &'a dyn ToolExecutor,
+    args: &'a Value,
+    context: &'a ToolCtx,
+    scope: Option<&'a PermissionScope>,
+    info: &'a GateInfo,
+    signal: &'a CancellationToken,
 }
 
 impl PermissionGate {
@@ -73,6 +87,11 @@ impl PermissionGate {
     ) -> PermissionOutcome {
         if !exec.permission_class().requires_gate() {
             return PermissionOutcome::Allowed;
+        }
+        if let Err(reason) = exec.permission_preflight(args) {
+            return PermissionOutcome::Denied(format!(
+                "Refused: {reason}. The action was not run."
+            ));
         }
 
         if self.session.lock().await.planning.plan_mode() {
@@ -119,13 +138,28 @@ impl PermissionGate {
             );
         }
 
+        let scope = exec.permission_scope(args);
         let mut info = gate_info(tool_name, args);
+        if exec.permission_class() == ToolPermissionClass::External {
+            info.external = true;
+        }
+        if let Some(reason) = scope
+            .as_ref()
+            .and_then(|scope| scope.reason.as_ref())
+            .cloned()
+        {
+            info.reason = Some(reason);
+        }
         if let Some(diff) = exec.preview(args, ctx) {
             info.detail = Some(diff);
         }
 
         if let Some(why) = self.hard_refusal(tool_name, &info).await {
             return PermissionOutcome::Denied(format!("Refused: {why}. The command was not run."));
+        }
+
+        if scope.as_ref().is_some_and(|scope| scope.preapproved) {
+            return PermissionOutcome::Allowed;
         }
 
         if self.command_preapproved(tool_name, &info).await {
@@ -135,22 +169,35 @@ impl PermissionGate {
         // Entering Plan Mode must always get an explicit human answer. Plan
         // proposals themselves use the typed ProposedPlan contract instead.
         let is_plan_gate = tool_name == "enter_plan_mode";
-        let mode = if is_plan_gate {
+        let is_one_off = scope.as_ref().is_some_and(|scope| !scope.remember);
+        let mode = if is_plan_gate || is_one_off {
             PermissionMode::Ask
         } else {
             let s = self.session.lock().await;
             s.policy
-                .get(tool_name)
+                .get(policy_key(tool_name, scope.as_ref()))
                 .copied()
                 .unwrap_or(PermissionMode::Ask)
         };
-        let (approved, _feedback) = match mode {
-            PermissionMode::Allow => (true, None),
-            PermissionMode::Deny => (false, None),
+        let (decision, _feedback) = match mode {
+            PermissionMode::Allow => (Decision::AllowOnce, None),
+            PermissionMode::Deny => (Decision::RejectOnce, None),
             PermissionMode::Ask => {
-                match self.ask_permission(tool_id, tool_name, &info, signal).await {
+                match self
+                    .ask_permission(PermissionAttempt {
+                        tool_id,
+                        tool_name,
+                        executor: exec,
+                        args,
+                        context: ctx,
+                        scope: scope.as_ref(),
+                        info: &info,
+                        signal,
+                    })
+                    .await
+                {
                     PermissionWaitOutcome::Resolved(resolution) => {
-                        (resolution.decision.approved(), resolution.feedback)
+                        (resolution.decision, resolution.feedback)
                     }
                     PermissionWaitOutcome::Cancelled => return PermissionOutcome::Cancelled,
                     PermissionWaitOutcome::Failed(message) => {
@@ -159,6 +206,17 @@ impl PermissionGate {
                 }
             }
         };
+        if mode != PermissionMode::Ask {
+            if let Err(message) = exec
+                .permission_decision(args, tool_permission_decision(decision), ctx)
+                .await
+            {
+                return PermissionOutcome::Failed(format!(
+                    "permission authorization failed for `{tool_name}`: {message}"
+                ));
+            }
+        }
+        let approved = decision.approved();
 
         if tool_name == "enter_plan_mode" && approved {
             let mut s = self.session.lock().await;
@@ -180,13 +238,17 @@ impl PermissionGate {
     }
 
     /// Whether Plan Mode is currently active for this session.
-    async fn ask_permission(
-        &self,
-        tool_id: &ToolCallId,
-        tool_name: &str,
-        info: &GateInfo,
-        signal: &CancellationToken,
-    ) -> PermissionWaitOutcome {
+    async fn ask_permission(&self, attempt: PermissionAttempt<'_>) -> PermissionWaitOutcome {
+        let PermissionAttempt {
+            tool_id,
+            tool_name,
+            executor,
+            args,
+            context,
+            scope,
+            info,
+            signal,
+        } = attempt;
         // clark-agent runs non-mutating tools in parallel, but the desktop UI
         // intentionally presents one permission decision at a time. Queue only
         // this acquisition phase; the guard is released before the tool body
@@ -205,7 +267,8 @@ impl PermissionGate {
         // instead of surfacing a redundant prompt or running against stale
         // authorization state.
         let is_plan_gate = tool_name == "enter_plan_mode";
-        if !is_plan_gate {
+        let is_one_off = scope.is_some_and(|scope| !scope.remember);
+        if !is_plan_gate && !is_one_off {
             if self.command_preapproved(tool_name, info).await {
                 return PermissionWaitOutcome::Resolved(Decision::AllowOnce.into());
             }
@@ -214,7 +277,7 @@ impl PermissionGate {
                 .lock()
                 .await
                 .policy
-                .get(tool_name)
+                .get(policy_key(tool_name, scope))
                 .copied()
                 .unwrap_or(PermissionMode::Ask)
             {
@@ -254,10 +317,12 @@ impl PermissionGate {
                     id: request_id.clone(),
                     session: self.session_id.clone(),
                     tool_call: Some(tool_id.clone()),
-                    title: permission_title(tool_name, info),
-                    options: permission_options(tool_name),
+                    title: permission_title(tool_name, scope, info),
+                    options: permission_options(tool_name, scope, info),
                     detail: info.detail.clone(),
-                    risk: if tool_name == "enter_plan_mode" {
+                    risk: if let Some(risk) = scope.and_then(|scope| scope.risk.as_ref()).cloned() {
+                        Some(risk)
+                    } else if tool_name == "enter_plan_mode" {
                         Some("plan_entry".to_string())
                     } else if tool_name == "generate_image" {
                         // Keep this distinct from generic external/MCP work so
@@ -300,13 +365,25 @@ impl PermissionGate {
                 )),
             },
         };
-        if let PermissionWaitOutcome::Resolved(resolution) = &outcome {
+        let resolved_decision = match &outcome {
+            PermissionWaitOutcome::Resolved(resolution) => Some(resolution.decision),
+            PermissionWaitOutcome::Cancelled | PermissionWaitOutcome::Failed(_) => None,
+        };
+        if let Some(decision) = resolved_decision {
+            if let Err(message) = executor
+                .permission_decision(args, tool_permission_decision(decision), context)
+                .await
+            {
+                self.control.lock().await.clear_if(&request_id);
+                return PermissionWaitOutcome::Failed(format!(
+                    "permission authorization failed for `{tool_name}`: {message}"
+                ));
+            }
             // Apply "always" while this request still owns the queue. The next
             // parallel waiter then observes the updated policy before deciding
             // whether it needs to ask.
             if !is_plan_gate {
-                self.apply_policy(tool_name, info, resolution.decision)
-                    .await;
+                self.apply_policy(tool_name, scope, info, decision).await;
             }
         }
         if let Some(execution) = &self.execution {
@@ -333,15 +410,21 @@ impl PermissionGate {
             );
         }
         let cmd = info.detail.clone().unwrap_or_default();
+        let segments = crate::safety::split_segments(&cmd);
         let s = self.session.lock().await;
         s.deny_commands
             .iter()
-            .any(|d| prefix_match(&cmd, d))
+            .any(|denied| {
+                prefix_match(&cmd, denied)
+                    || segments.iter().any(|segment| prefix_match(segment, denied))
+            })
             .then(|| "on your command denylist".to_string())
     }
 
     async fn command_preapproved(&self, name: &str, info: &GateInfo) -> bool {
         if name != "bash"
+            || info.network
+            || info.requires_elevation
             || !matches!(
                 info.risk,
                 Some(CommandRisk::Safe) | Some(CommandRisk::Caution)
@@ -384,11 +467,30 @@ impl PermissionGate {
         matched_explicit_rule
     }
 
-    async fn apply_policy(&self, tool: &str, info: &GateInfo, decision: Decision) {
+    async fn apply_policy(
+        &self,
+        tool: &str,
+        scope: Option<&PermissionScope>,
+        info: &GateInfo,
+        decision: Decision,
+    ) {
+        if scope.is_some_and(|scope| !scope.remember)
+            && matches!(decision, Decision::AllowAlways | Decision::RejectAlways)
+        {
+            return;
+        }
+        let key = policy_key(tool, scope).to_string();
         let mut s = self.session.lock().await;
         match decision {
             Decision::AllowAlways => {
                 if tool == "bash" {
+                    // Remembered command text is scoped to sandboxed, offline
+                    // execution. Network or host access must be approved for
+                    // each request because those capabilities are not part of
+                    // the original command-string grant.
+                    if info.network || info.requires_elevation {
+                        return;
+                    }
                     if let Some(cmd) = info.detail.as_deref() {
                         let entry = cmd.trim().to_string();
                         if !entry.is_empty() && !s.allow_commands.contains(&entry) {
@@ -396,14 +498,22 @@ impl PermissionGate {
                         }
                     }
                 } else {
-                    s.policy.insert(tool.to_string(), PermissionMode::Allow);
+                    s.policy.insert(key, PermissionMode::Allow);
                 }
             }
             Decision::RejectAlways => {
-                s.policy.insert(tool.to_string(), PermissionMode::Deny);
+                s.policy.insert(key, PermissionMode::Deny);
             }
             _ => {}
         }
+    }
+}
+
+fn tool_permission_decision(decision: Decision) -> ToolPermissionDecision {
+    match decision {
+        Decision::AllowOnce => ToolPermissionDecision::AllowOnce,
+        Decision::AllowAlways => ToolPermissionDecision::AllowAlways,
+        Decision::RejectOnce | Decision::RejectAlways => ToolPermissionDecision::Denied,
     }
 }
 
@@ -551,7 +661,14 @@ fn prefix_match(cmd: &str, entry: &str) -> bool {
     !entry.is_empty() && (cmd == entry || cmd.starts_with(&format!("{entry} ")))
 }
 
-fn permission_title(tool: &str, info: &GateInfo) -> String {
+fn policy_key<'a>(tool: &'a str, scope: Option<&'a PermissionScope>) -> &'a str {
+    scope.map(|scope| scope.key.as_str()).unwrap_or(tool)
+}
+
+fn permission_title(tool: &str, scope: Option<&PermissionScope>, info: &GateInfo) -> String {
+    if let Some(title) = scope.and_then(|scope| scope.title.clone()) {
+        return title;
+    }
     match tool {
         "bash" if info.network => "Allow this command to use the network?".to_string(),
         "bash" if info.requires_elevation => {
@@ -569,7 +686,11 @@ fn permission_title(tool: &str, info: &GateInfo) -> String {
     }
 }
 
-fn permission_options(tool: &str) -> Vec<PermissionOption> {
+fn permission_options(
+    tool: &str,
+    scope: Option<&PermissionScope>,
+    info: &GateInfo,
+) -> Vec<PermissionOption> {
     if tool == "enter_plan_mode" {
         return vec![
             PermissionOption {
@@ -584,12 +705,42 @@ fn permission_options(tool: &str) -> Vec<PermissionOption> {
             },
         ];
     }
+    if scope.is_some_and(|scope| !scope.remember) {
+        return vec![
+            PermissionOption {
+                id: "allow_once".into(),
+                label: "Allow once".into(),
+                kind: PermissionOptionKind::AllowOnce,
+            },
+            PermissionOption {
+                id: "reject_once".into(),
+                label: "Reject".into(),
+                kind: PermissionOptionKind::RejectOnce,
+            },
+        ];
+    }
+    if tool == "bash" && (info.network || info.requires_elevation) {
+        return vec![
+            PermissionOption {
+                id: "allow_once".into(),
+                label: "Allow once".into(),
+                kind: PermissionOptionKind::AllowOnce,
+            },
+            PermissionOption {
+                id: "reject_once".into(),
+                label: "Reject".into(),
+                kind: PermissionOptionKind::RejectOnce,
+            },
+        ];
+    }
     let always = if tool == "bash" {
         "Always allow this command".to_string()
     } else if is_mcp_tool(tool) {
         "Always allow connected actions".to_string()
     } else {
-        "Always allow similar actions".to_string()
+        scope
+            .and_then(|scope| scope.always_label.clone())
+            .unwrap_or_else(|| "Always allow similar actions".to_string())
     };
     vec![
         PermissionOption {

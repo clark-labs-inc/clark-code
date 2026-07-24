@@ -75,18 +75,39 @@ async fn memory_overview(
     }
 }
 
-/// List the project-scoped memory for `cwd` (`<cwd>/.clark/memory/`). Read-only.
+fn session_memory_root(session: &Session) -> Result<std::path::PathBuf, String> {
+    let environment = session
+        .environment
+        .as_ref()
+        .ok_or("this conversation is not bound to a project")?;
+    if environment.remote {
+        return Err(
+            "Project memory preview is unavailable for remote conversations in this version."
+                .into(),
+        );
+    }
+    let root = environment
+        .checkout_root
+        .as_deref()
+        .filter(|root| !root.trim().is_empty())
+        .ok_or("this conversation is not bound to a project")?;
+    Ok(std::path::PathBuf::from(root))
+}
+
+/// List the project-scoped memory for a live conversation's host-owned checkout
+/// root (`<checkout>/.clark/memory/`). Read-only.
 #[tauri::command]
 pub async fn local_list_memory(
-    cwd: String,
-    remote: Option<RemoteArg>,
+    session_id: String,
+    state: State<'_, AppState>,
 ) -> Result<MemoryOverview, String> {
-    if cwd.trim().is_empty() {
-        return Err("choose a project folder first".into());
-    }
-    let mem_dir = provider_local::memory_dir(std::path::Path::new(&cwd));
-    let exec = project_executor(remote).await?;
-    Ok(memory_overview(exec.as_ref(), &mem_dir).await)
+    let entry = state
+        .session_entry(&session_id)
+        .await
+        .ok_or("no such conversation")?;
+    let root = session_memory_root(&entry.lock().await.session)?;
+    let mem_dir = provider_local::memory_dir(&root);
+    Ok(memory_overview(&provider_local::LocalExecutor, &mem_dir).await)
 }
 
 /// List the user's global memory (`~/.clark/memory/`). Read-only.
@@ -230,6 +251,38 @@ fn open_command(path: &str, reveal: bool) -> std::process::Command {
     }
     c.arg(path);
     c
+}
+
+#[cfg(test)]
+mod tests {
+    use super::session_memory_root;
+    use agent_core::provider::SessionEnvironment;
+    use agent_core::{CollaborationMode, ProviderCapabilities, ProviderId, Session, SessionId};
+
+    fn session(root: Option<&str>, remote: bool) -> Session {
+        Session {
+            id: SessionId::new("memory-session"),
+            provider: ProviderId::new("local"),
+            capabilities: ProviderCapabilities::default(),
+            mode: None,
+            collaboration_mode: CollaborationMode::Default,
+            environment: Some(SessionEnvironment {
+                checkout_root: root.map(str::to_string),
+                remote,
+                ..Default::default()
+            }),
+        }
+    }
+
+    #[test]
+    fn project_memory_root_comes_from_the_live_session() {
+        assert_eq!(
+            session_memory_root(&session(Some("/trusted/project"), false)).unwrap(),
+            std::path::PathBuf::from("/trusted/project")
+        );
+        assert!(session_memory_root(&session(None, false)).is_err());
+        assert!(session_memory_root(&session(Some("/remote/project"), true)).is_err());
+    }
 }
 
 #[cfg(target_os = "windows")]

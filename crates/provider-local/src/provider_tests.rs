@@ -1,6 +1,33 @@
 use super::*;
 use agent_core::domain::PendingUpload;
 
+fn provider_test_config() -> ProviderConfig {
+    if cfg!(windows) {
+        ProviderConfig {
+            extra: serde_json::json!({"sandbox_mode": "disabled"}),
+            ..Default::default()
+        }
+    } else {
+        ProviderConfig::default()
+    }
+}
+
+fn provider_test_config_with_extra(mut extra: serde_json::Value) -> ProviderConfig {
+    if cfg!(windows) {
+        extra
+            .as_object_mut()
+            .expect("test provider extras must be an object")
+            .insert(
+                "sandbox_mode".to_string(),
+                serde_json::Value::String("disabled".to_string()),
+            );
+    }
+    ProviderConfig {
+        extra,
+        ..Default::default()
+    }
+}
+
 #[test]
 fn prompt_text_joins_blocks() {
     let input = PromptInput {
@@ -159,22 +186,19 @@ async fn isolated_orchestration_session_has_no_ambient_writable_surfaces() {
     .unwrap();
     let mut provider = LocalAgentProvider::new();
     provider
-        .connect(ProviderConfig {
-            extra: serde_json::json!({
-                "isolated_writer": true,
-                "memories": false,
-                "research": false,
-                "browser_enabled": false,
-                "mcp_servers": [],
-                "permissions": {
-                    "write_file": "allow",
-                    "edit_file": "allow",
-                    "apply_patch": "allow",
-                    "bash": "deny"
-                }
-            }),
-            ..Default::default()
-        })
+        .connect(provider_test_config_with_extra(serde_json::json!({
+            "isolated_writer": true,
+            "memories": false,
+            "research": false,
+            "browser_enabled": false,
+            "mcp_servers": [],
+            "permissions": {
+                "write_file": "allow",
+                "edit_file": "allow",
+                "apply_patch": "allow",
+                "bash": "deny"
+            }
+        })))
         .await
         .unwrap();
     let session = provider
@@ -260,7 +284,7 @@ async fn close_session_stops_session_owned_background_tasks() {
 async fn new_session_seeds_system_prompt_without_history() {
     let dir = tempfile::tempdir().unwrap();
     let mut p = LocalAgentProvider::new();
-    p.connect(ProviderConfig::default()).await.unwrap();
+    p.connect(provider_test_config()).await.unwrap();
     let opts = SessionOptions {
         cwd: Some(dir.path().to_string_lossy().to_string()),
         mode: None,
@@ -284,7 +308,7 @@ async fn cached_system_prompt_excludes_mutable_project_instructions() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("AGENTS.md"), "UNIQUE_PROJECT_RULE").unwrap();
     let mut provider = LocalAgentProvider::new();
-    provider.connect(ProviderConfig::default()).await.unwrap();
+    provider.connect(provider_test_config()).await.unwrap();
     provider
         .new_session(SessionOptions {
             cwd: Some(dir.path().to_string_lossy().into_owned()),
@@ -314,7 +338,7 @@ async fn project_settings_customize_claude_style_commit_attribution() {
     )
     .unwrap();
     let mut provider = LocalAgentProvider::new();
-    provider.connect(ProviderConfig::default()).await.unwrap();
+    provider.connect(provider_test_config()).await.unwrap();
     provider
         .new_session(SessionOptions {
             cwd: Some(dir.path().to_string_lossy().into_owned()),
@@ -367,7 +391,7 @@ async fn remote_connect_hides_desktop_mobile_capabilities() {
 async fn orchestration_tools_are_default_available_but_can_be_disabled() {
     let dir = tempfile::tempdir().unwrap();
     let mut enabled = LocalAgentProvider::new();
-    enabled.connect(ProviderConfig::default()).await.unwrap();
+    enabled.connect(provider_test_config()).await.unwrap();
     let registry = enabled.registry.as_ref().unwrap();
     assert!(registry.get("delegate_read_only").is_some());
     assert!(registry.get("resolve_delegation").is_some());
@@ -410,7 +434,7 @@ async fn orchestration_tools_are_default_available_but_can_be_disabled() {
 async fn collaboration_mode_option_controls_plan_mode_independently() {
     let dir = tempfile::tempdir().unwrap();
     let mut p = LocalAgentProvider::new();
-    p.connect(ProviderConfig::default()).await.unwrap();
+    p.connect(provider_test_config()).await.unwrap();
 
     let session = p
         .new_session(SessionOptions {
@@ -520,7 +544,7 @@ async fn full_access_switches_platform_containment_off_and_default_restores_it()
 async fn set_mode_transitions_queue_the_one_shot_exit_note() {
     let dir = tempfile::tempdir().unwrap();
     let mut p = LocalAgentProvider::new();
-    p.connect(ProviderConfig::default()).await.unwrap();
+    p.connect(provider_test_config()).await.unwrap();
     let session = p
         .new_session(SessionOptions {
             cwd: Some(dir.path().to_string_lossy().to_string()),
@@ -556,7 +580,7 @@ async fn set_mode_transitions_queue_the_one_shot_exit_note() {
 async fn new_session_replays_typed_resume_into_history() {
     let dir = tempfile::tempdir().unwrap();
     let mut p = LocalAgentProvider::new();
-    p.connect(ProviderConfig::default()).await.unwrap();
+    p.connect(provider_test_config()).await.unwrap();
     let opts = SessionOptions {
         cwd: Some(dir.path().to_string_lossy().to_string()),
         mode: None,
@@ -609,9 +633,9 @@ async fn paid_explicit_vs_proactive_delegation_trigger_precision() {
         .or_else(|_| std::env::var("CLARK_API_KEY"))
         .expect("CLARK_CODE_API_KEY or CLARK_API_KEY must be set");
     let root_model = std::env::var("CLARK_PAID_EVAL_ROOT_MODEL")
-        .unwrap_or_else(|_| "clark-code:kimi_k27_code".into());
+        .unwrap_or_else(|_| "clark-code:minimax_m3".into());
     let subagent_model = std::env::var("CLARK_PAID_EVAL_SUBAGENT_MODEL")
-        .unwrap_or_else(|_| "clark-code:kimi_k27_code".into());
+        .unwrap_or_else(|_| "clark-code:minimax_m3".into());
     let base_url = std::env::var("CLARK_PAID_EVAL_BASE_URL")
         .unwrap_or_else(|_| crate::config::DEFAULT_BASE_URL.into());
     let dir = tempfile::tempdir().unwrap();
@@ -753,7 +777,7 @@ async fn side_question_leaves_session_transcript_byte_identical() {
 
     let dir = tempfile::tempdir().unwrap();
     let mut p = LocalAgentProvider::new();
-    p.connect(ProviderConfig::default()).await.unwrap();
+    p.connect(provider_test_config()).await.unwrap();
     p.new_session(SessionOptions {
         cwd: Some(dir.path().to_string_lossy().to_string()),
         mode: None,

@@ -109,6 +109,21 @@ impl Provider for LocalAgentProvider {
         if local.browser_enabled {
             registry.enable_browser();
         }
+        if local.computer_use_enabled
+            && local.remote.is_none()
+            && !self.isolation.disposable_writer()
+        {
+            let backend: Arc<dyn computer_use::ComputerBackend> = match local.computer_use_backend {
+                crate::config::ComputerUseBackend::Native => computer_use::native_backend()
+                    .map_err(|error| {
+                        Error::Unsupported(format!("computer use is unavailable: {error}"))
+                    })?,
+                crate::config::ComputerUseBackend::Simulated => {
+                    Arc::new(computer_use::SimulatedComputerBackend::new())
+                }
+            };
+            registry.enable_computer_use(backend);
+        }
         if local.orchestration.enabled {
             registry.enable_orchestration(
                 crate::orchestration::OrchestrationToolsConfig::from_local(&local),

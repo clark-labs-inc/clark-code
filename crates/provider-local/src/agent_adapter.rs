@@ -1,4 +1,5 @@
 mod event_sink;
+pub(crate) mod redaction;
 mod tool_title;
 mod translate;
 
@@ -297,12 +298,14 @@ impl ca::AgentTool for DesktopToolAdapter {
 
         let hooks = { self.ctx.session.lock().await.hooks.clone() };
         if !hooks.pre_tool_use.is_empty() {
+            let hook_args = redaction::persisted_tool_args(self.exec.name(), &args);
+            let runtime_args = args.clone();
             match crate::hooks::run_pre_tool_use(
                 self.ctx.executor.as_ref(),
                 self.ctx.sandbox.root(),
                 &hooks.pre_tool_use,
                 self.exec.name(),
-                args.clone(),
+                hook_args,
                 &signal,
             )
             .await
@@ -312,7 +315,10 @@ impl ca::AgentTool for DesktopToolAdapter {
                         "Blocked by a PreToolUse hook: {reason}"
                     )));
                 }
-                crate::hooks::PreToolUseResult::Allow { args: updated } => args = updated,
+                crate::hooks::PreToolUseResult::Allow { args: updated } => {
+                    args =
+                        redaction::restore_runtime_payload(self.exec.name(), &runtime_args, updated)
+                }
             }
         }
 
@@ -410,12 +416,13 @@ impl ca::AgentTool for DesktopToolAdapter {
         }
 
         if !hooks.post_tool_use.is_empty() {
+            let hook_args = redaction::persisted_tool_args(self.exec.name(), &args);
             let post = crate::hooks::run_post_tool_use(
                 self.ctx.executor.as_ref(),
                 self.ctx.sandbox.root(),
                 &hooks.post_tool_use,
                 self.exec.name(),
-                &args,
+                &hook_args,
                 &outcome,
                 &signal,
             )

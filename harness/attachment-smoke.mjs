@@ -63,10 +63,14 @@ try {
   await composer.press("Enter");
   await page.waitForTimeout(3500);
 
-  const photo =
-    "/tmp/codex-remote-attachments/019f72ef-b16e-7b53-96c4-1f3e3b9a309b/" +
-    "D96318F6-CC4C-459B-A64C-8D6DBF9CFFC7/1-Photo-1.jpg";
-  await page.setInputFiles('input[type="file"]', photo);
+  await page.setInputFiles('input[type="file"]', {
+    name: "attachment-smoke.png",
+    mimeType: "image/png",
+    buffer: Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+      "base64",
+    ),
+  });
   await page.waitForTimeout(300);
 
   const paste = `LARGE_PASTE_UI_BEGIN-${"x".repeat(1_001)}-LARGE_PASTE_UI_END`;

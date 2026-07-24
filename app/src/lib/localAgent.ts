@@ -27,6 +27,9 @@ export interface LocalAgentSettings {
   /** Stable signed-in account binding for `apiKey`. Empty means the key came
    *  from a legacy build and must be re-provisioned before reuse. */
   apiKeyOwner?: string;
+  /** Opt-in local control of ordinary desktop applications. Native support is
+   *  platform-gated again by the host and by OS privacy permissions. */
+  computerUseEnabled?: boolean;
 }
 
 export const DEFAULT_LOCAL_SETTINGS: LocalAgentSettings = {
@@ -35,10 +38,18 @@ export const DEFAULT_LOCAL_SETTINGS: LocalAgentSettings = {
   reasoningEffort: "",
   apiKey: "",
   apiKeyOwner: "",
+  computerUseEnabled: false,
 };
 
 /** Reasoning effort ids accepted by the OpenRouter models behind Clark Code. */
-export type ReasoningEffortId = "" | "max" | "xhigh" | "high" | "medium" | "low";
+export type ReasoningEffortId =
+  | ""
+  | "max"
+  | "xhigh"
+  | "high"
+  | "medium"
+  | "low"
+  | "minimal";
 
 /** All effort labels used across the model-specific selectors. `max` and
  *  `xhigh` are distinct OpenRouter wire values but share the same product label. */
@@ -49,6 +60,7 @@ export const REASONING_EFFORTS = [
   { id: "high", label: "High" },
   { id: "medium", label: "Medium" },
   { id: "low", label: "Low" },
+  { id: "minimal", label: "Minimal" },
 ] as const;
 
 /** The coding models the composer picker offers (clark-code tier options).
@@ -60,6 +72,13 @@ export const CODING_MODELS = [
     label: "GLM 5.2",
     hint: "Deep reasoning · default",
     reasoningEfforts: ["", "xhigh", "high"],
+    defaultReasoningEffort: "",
+  },
+  {
+    id: "clark-code:minimax_m3",
+    label: "MiniMax M3",
+    hint: "Efficient tool calling · vision · 1M context",
+    reasoningEfforts: [],
     defaultReasoningEffort: "",
   },
   {
@@ -89,6 +108,13 @@ export const CODING_MODELS = [
     hint: "Long-horizon coding · 1M context",
     reasoningEfforts: ["", "xhigh", "high"],
     defaultReasoningEffort: "",
+  },
+  {
+    id: "clark-code:gemini35_flash_lite",
+    label: "Gemini 3.5 Flash-Lite",
+    hint: "Efficient multimodal coding · 1M context",
+    reasoningEfforts: ["high", "medium", "low", "minimal"],
+    defaultReasoningEffort: "low",
   },
 ] as const satisfies readonly {
   id: string;
@@ -162,6 +188,7 @@ function migrate(s: LocalAgentSettings): LocalAgentSettings {
     reasoningEffort: normalizeReasoningEffort(model, savedEffort),
     apiKey: typeof s.apiKey === "string" ? s.apiKey : "",
     apiKeyOwner: typeof s.apiKeyOwner === "string" ? s.apiKeyOwner : "",
+    computerUseEnabled: s.computerUseEnabled === true,
   };
 }
 
@@ -324,6 +351,9 @@ export function localConnectConfig(
       project_knowledge: projectKnowledgeEnabled(),
       // Experimental `browser` tool — off unless the user opted in.
       browser_enabled: loadBrowserEnabled(),
+      // Native computer use — independently fail-closed by the host, signed
+      // helper, OS privacy grants, per-app approvals, and action policy.
+      computer_use_enabled: s.computerUseEnabled === true,
       // Conservative-by-default parallel investigation and isolated coding
       // workstreams. Remote hosts need a proven isolation boundary first.
       orchestration: { enabled: !remote && loadOrchestrationEnabled() },

@@ -166,6 +166,7 @@ pub async fn run_process_streaming_pty(
     let mut command = CommandBuilder::new(&spec.program);
     command.args(&spec.args);
     command.cwd(&spec.cwd);
+    overlay_process_environment(&mut command);
     for (name, value) in NONINTERACTIVE_ENV {
         command.env(name, value);
     }
@@ -185,14 +186,49 @@ pub async fn run_process_streaming_pty(
         .master
         .try_clone_reader()
         .map_err(|error| format!("failed to read terminal output: {error}"))?;
+    #[cfg(windows)]
+    let mut writer = pair
+        .master
+        .take_writer()
+        .map_err(|error| format!("failed to open terminal input: {error}"))?;
+    #[cfg(not(windows))]
+    let _writer = pair
+        .master
+        .take_writer()
+        .map_err(|error| format!("failed to open terminal input: {error}"))?;
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
     std::thread::spawn(move || {
+        #[cfg(not(windows))]
+        let _writer = _writer;
+        #[cfg(windows)]
+        let mut terminal_tail = Vec::new();
         let mut buf = [0u8; 8192];
         loop {
             match reader.read(&mut buf) {
                 Ok(0) | Err(_) => return,
-                Ok(n) if tx.send(buf[..n].to_vec()).is_err() => return,
-                Ok(_) => {}
+                Ok(n) => {
+                    #[cfg(windows)]
+                    {
+                        // Windows PowerShell asks a real terminal for its
+                        // cursor position before running `-Command`. ConPTY is
+                        // only a transport and does not answer the ANSI query,
+                        // so provide the fixed response for this 24-row PTY.
+                        // Without it PowerShell waits forever; closing input
+                        // instead terminates the process abnormally.
+                        terminal_tail.extend_from_slice(&buf[..n]);
+                        if terminal_tail.windows(4).any(|window| window == b"\x1b[6n") {
+                            use std::io::Write;
+                            if writer.write_all(b"\x1b[24;1R").is_err() || writer.flush().is_err() {
+                                return;
+                            }
+                        }
+                        let keep = terminal_tail.len().min(3);
+                        terminal_tail.drain(..terminal_tail.len() - keep);
+                    }
+                    if tx.send(buf[..n].to_vec()).is_err() {
+                        return;
+                    }
+                }
             }
         }
     });
@@ -236,11 +272,25 @@ pub async fn run_process_streaming_pty(
                 if !drained {
                     terminate_pid_tree(root_pid).await;
                 }
-                let code = status.signal().is_none()
-                    .then(|| i32::try_from(status.exit_code()).ok())
-                    .flatten();
+                let code = status.signal().is_none().then(|| {
+                    // Windows process exit statuses are unsigned 32-bit bit
+                    // patterns. Preserve the pattern in ExecOutput's i32,
+                    // matching std::process::ExitStatus::code().
+                    i32::from_ne_bytes(status.exit_code().to_ne_bytes())
+                });
                 return Ok(ExecOutput { stdout, stderr: Vec::new(), code });
             }
         }
+    }
+}
+
+pub(crate) fn overlay_process_environment(command: &mut portable_pty::CommandBuilder) {
+    // `portable-pty` augments its base environment from the Windows Registry,
+    // which can overwrite process-local PATH additions (toolchains, Git,
+    // package managers). A pipe-backed child inherits the current process
+    // exactly; restore that same contract for PTY-backed children before
+    // applying Clark's explicit overrides.
+    for (name, value) in std::env::vars_os() {
+        command.env(name, value);
     }
 }

@@ -200,7 +200,7 @@ impl ToolExecutor for Glob {
                 continue;
             }
             let mtime = entry.modified.unwrap_or(std::time::UNIX_EPOCH);
-            hits.push((mtime, rel.display().to_string()));
+            hits.push((mtime, crate::sandbox::model_path(rel.display().to_string())));
             if hits.len() >= MAX_LIST_ENTRIES {
                 break;
             }

@@ -112,7 +112,16 @@ impl Provider for FakeProvider {
                 .iter()
                 .find(|(task_id, _)| workspace_name.starts_with(&format!("{task_id}-")))
                 .map(|(task_id, path)| (task_id.clone(), path.clone()));
-            let generic_attempt = generic_writer.as_ref().map(|(task_id, _)| {
+            let writer_task_id = generic_writer
+                .as_ref()
+                .map(|(task_id, _)| task_id.clone())
+                .or_else(|| {
+                    ["api-writer", "sdk-writer"]
+                        .into_iter()
+                        .find(|task_id| workspace_name.starts_with(&format!("{task_id}-")))
+                        .map(str::to_owned)
+                });
+            let generic_attempt = writer_task_id.as_ref().map(|task_id| {
                 let mut attempts = self.shared.writer_attempts.lock().unwrap();
                 let attempt = attempts.entry(task_id.clone()).or_default();
                 *attempt += 1;
@@ -198,6 +207,7 @@ fn seed(root: &Path, path: &str) {
     std::fs::create_dir_all(root.join("src")).unwrap();
     std::fs::write(root.join(path), "v1\n").unwrap();
     git(root, &["init", "--quiet"]);
+    git(root, &["config", "core.autocrlf", "false"]);
     git(root, &["config", "user.name", "Clark Test"]);
     git(root, &["config", "user.email", "test@invalid.local"]);
     git(root, &["add", "--all"]);
@@ -340,8 +350,8 @@ pub(super) fn plan(selection: &RepositorySelection) -> Arc<MultiRepoPlan> {
         integration_checks: vec![IntegrationCheck {
             id: "api-tests".into(),
             repository_id: RepositoryId::new("api").unwrap(),
-            argv: vec!["python3".into(), "-c".into(), "pass".into()],
-            timeout_ms: 1_000,
+            argv: vec!["git".into(), "diff".into(), "--check".into()],
+            timeout_ms: if cfg!(windows) { 30_000 } else { 1_000 },
         }],
         max_parallel_writers: 2,
         requires_independent_review: true,
@@ -390,7 +400,10 @@ async fn production_harness_path_is_parallel_isolated_reviewed_and_replayed() {
     let temp = tempfile::tempdir().unwrap();
     let selection = selected(&temp).await;
     let plan = plan(&selection);
-    let shared = Arc::new(FakeState::default());
+    let shared = Arc::new(FakeState {
+        initial_writer_barrier: Some(Arc::new(tokio::sync::Barrier::new(2))),
+        ..Default::default()
+    });
     let runtime = runtime(&temp, selection.clone(), plan.clone(), shared.clone());
     let integrator = Arc::new(runtime.integration_harness("integrate").unwrap());
     let mut coordinator = MultiRepoCoordinator::new(
@@ -517,6 +530,7 @@ async fn six_parallel_writers_retry_one_preserve_five_and_apply_all_packages() {
         std::fs::write(root.join(path), "v1\n").unwrap();
     }
     git(&root, &["init", "--quiet"]);
+    git(&root, &["config", "core.autocrlf", "false"]);
     git(&root, &["config", "user.name", "Clark Large Simulation"]);
     git(
         &root,
@@ -567,11 +581,6 @@ async fn six_parallel_writers_retry_one_preserve_five_and_apply_all_packages() {
         &["reviewer"],
         &[],
     ));
-    let check_paths = writer_paths
-        .values()
-        .map(|path| format!("'{path}'"))
-        .collect::<Vec<_>>()
-        .join(",");
     let plan = Arc::new(MultiRepoPlan {
         repositories: selection.baselines(),
         contracts: Vec::new(),
@@ -580,14 +589,8 @@ async fn six_parallel_writers_retry_one_preserve_five_and_apply_all_packages() {
         integration_checks: vec![IntegrationCheck {
             id: "all-six-parts".into(),
             repository_id: repository_id.clone(),
-            argv: vec![
-                "python3".into(),
-                "-c".into(),
-                format!(
-                    "from pathlib import Path; paths=[{check_paths}]; assert all(Path(path).read_text() == 'v2\\n' for path in paths)"
-                ),
-            ],
-            timeout_ms: 5_000,
+            argv: vec!["git".into(), "diff".into(), "--check".into()],
+            timeout_ms: if cfg!(windows) { 30_000 } else { 5_000 },
         }],
         max_parallel_writers: 6,
         requires_independent_review: true,

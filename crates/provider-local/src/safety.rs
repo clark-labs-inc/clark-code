@@ -120,6 +120,7 @@ const READONLY: &[&str] = &[
     "sha256sum",
     "nproc",
     "sleep",
+    "start-sleep",
     "clear",
 ];
 
@@ -268,7 +269,8 @@ fn classify_segment(segment: &str) -> Classification {
     let Some(first) = tokens.first() else {
         return Classification::safe();
     };
-    let prog = program(first);
+    let normalized_program = program(first).to_ascii_lowercase();
+    let prog = normalized_program.as_str();
     let flags: String = tokens
         .iter()
         .skip(1)
@@ -591,6 +593,7 @@ const READONLY_INSPECT: &[&str] = &[
     "sha256sum",
     "nproc",
     "sleep",
+    "start-sleep",
     "clear",
 ];
 
@@ -631,7 +634,8 @@ fn is_read_only_segment(segment: &str) -> bool {
     let Some(first) = tokens.first() else {
         return false;
     };
-    match program(first) {
+    let normalized_program = program(first).to_ascii_lowercase();
+    match normalized_program.as_str() {
         // Reuses the listing-vs-mutating analysis (`status`/`log`/`diff`/
         // `branch` with no positional args… are Safe; anything that writes is
         // not).

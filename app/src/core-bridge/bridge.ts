@@ -45,8 +45,6 @@ export interface CloudTrajectoryConfig {
   remoteHost?: string;
   mode?: string;
   metadata: Record<string, unknown>;
-  /** Stable signed-in account scope used only to partition the native outbox. */
-  ownerScope: string;
 }
 
 /** Read-only Git identity for the checkout backing the composer. */
@@ -86,6 +84,64 @@ export interface LocalSandboxStatus {
   backend: "macos_seatbelt" | "linux_bubblewrap" | "windows_restricted_token";
   reason?: string | null;
   setup_available: boolean;
+}
+
+export interface ComputerUsePermissionStatus {
+  accessibility: boolean;
+  screen_recording: boolean;
+  screen_recording_restart_required: boolean;
+}
+
+export interface ComputerUsePlatformStatus {
+  supported: boolean;
+  platform: string;
+  helper_ready: boolean;
+  permissions?: ComputerUsePermissionStatus | null;
+  detail?: string | null;
+}
+
+export interface ComputerUseAppApproval {
+  identity_key: string;
+  bundle_id: string;
+  app_name: string;
+  team_identifier?: string | null;
+  granted_at_ms: number;
+  last_used_at_ms: number;
+}
+
+export interface ComputerUseApprovalSnapshot {
+  revision: number;
+  approvals: ComputerUseAppApproval[];
+}
+
+export type ComputerUseActionKind =
+  | "click"
+  | "type_text"
+  | "keypress"
+  | "scroll"
+  | "drag"
+  | "secondary_action"
+  | "select_text"
+  | "set_value";
+
+export interface ComputerUseActionReceipt {
+  receipt_id: string;
+  prepared_action_id: string;
+  application_identity_key: string;
+  bundle_id: string;
+  pid: number;
+  window_id: number;
+  action_kind: ComputerUseActionKind;
+  disposition:
+    | "deny"
+    | "mandatory_handoff"
+    | "action_time_confirmation"
+    | "preapproval_eligible"
+    | "allow";
+  outcome: "succeeded" | "dry_run" | "cancelled" | "user_takeover" | "failed";
+  payload_summary: string;
+  completed_at_ms: number;
+  persisted: boolean;
 }
 
 export interface SkillCatalogEntry {
@@ -193,15 +249,19 @@ export interface CoreBridge {
     baseSnapshot: Snapshot,
     baseRev: number,
   ): Promise<void>;
-  /** Replace the app-wide Clark cloud JWT after a sign-in refresh — in-flight
-   *  trajectory retries read it per request (see `onCloudAuthExpired`). */
-  updateCloudToken?(token: string): Promise<void>;
-  /** The native trajectory sync hit a 401: refresh the sign-in and push the
-   *  new token via `updateCloudToken`. Returns an unsubscribe fn. */
+  /** The native trajectory sync hit a 401. Returns an unsubscribe fn; refreshing
+   *  through native Google exchange rotates the host-owned credential. */
   onCloudAuthExpired?(handler: () => void): () => void;
+  /** Rotate the native credential after a same-account Clark session refresh. */
+  refreshCloudSession?(token: string): Promise<void>;
+  /** Clear the native Clark credential and account binding during sign-out. */
+  clearCloudSession?(token: string): Promise<void>;
   /** Best-effort cloud sync failed for part of a run (the run itself keeps
    *  going) — surface a non-blocking warning. Returns an unsubscribe fn. */
   onCloudSyncWarning?(handler: (message: string) => void): () => void;
+  /** Another device deleted a live conversation. The desktop must stop its
+   * local session rather than recreate that cloud history. */
+  onCloudConversationDeleted?(handler: (conversationId: string) => void): () => void;
   prompt(sessionId: string, blocks: ContentBlock[], attachments?: Upload[]): Promise<void>;
   /** Replace the provider's model-visible history with a compact summary.
    *  This is a standalone control operation, not a user prompt. */
@@ -230,9 +290,9 @@ export interface CoreBridge {
   subscribe(handler: (snapshot: Snapshot) => void): () => void;
   /**
    * List the project-scoped memory (the `MEMORY.md` index plus any per-fact
-   * files) under `<cwd>/.clark/memory/`. Read-only. Native bridge only.
+   * files) for a live conversation's native-bound checkout. Read-only.
    */
-  listMemory?(cwd: string, remote?: RemoteExecutorTarget | null): Promise<MemoryOverview>;
+  listMemory?(sessionId: string): Promise<MemoryOverview>;
   /** List the user's global memory under `~/.clark/memory/`. Native bridge only. */
   listGlobalMemory?(): Promise<MemoryOverview>;
   /** Project-relative file paths under `cwd`, for the `@`-mention picker. */
@@ -290,6 +350,18 @@ export interface CoreBridge {
   localSandboxStatus?(cwd: string): Promise<LocalSandboxStatus>;
   /** Run the explicit, product-owned setup flow (UAC on Windows). */
   setupLocalSandbox?(cwd: string): Promise<LocalSandboxStatus>;
+  /** Native computer-use readiness and OS permission preflight. */
+  computerUsePlatformStatus?(): Promise<ComputerUsePlatformStatus>;
+  /** Explicitly request the OS-level Accessibility and Screen Recording grants. */
+  requestComputerUsePermissions?(): Promise<ComputerUsePermissionStatus>;
+  /** Signer-bound per-app approvals currently stored by the native helper. */
+  computerUseApprovalSnapshot?(): Promise<ComputerUseApprovalSnapshot>;
+  /** Revoke one durable app grant and return the resulting snapshot. */
+  revokeComputerUseApproval?(identityKey: string): Promise<ComputerUseApprovalSnapshot>;
+  /** Revoke all durable app grants and return the resulting snapshot. */
+  revokeAllComputerUseApprovals?(): Promise<ComputerUseApprovalSnapshot>;
+  /** Redacted, bounded native action receipts, newest receipt last. */
+  recentComputerUseReceipts?(): Promise<ComputerUseActionReceipt[]>;
 }
 
 export interface RemoteExecutorTarget {

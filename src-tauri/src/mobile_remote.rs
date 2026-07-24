@@ -45,7 +45,7 @@ pub async fn desktop_code_host_upsert(
 ) -> Result<Value, String> {
     let url = format!(
         "{}/api/desktop/code/hosts/{}",
-        clark_rest_base(&endpoint),
+        clark_rest_base(&endpoint)?,
         urlencoding::encode(&host_id)
     );
     let resp = clark_http_client()?
@@ -77,7 +77,7 @@ pub async fn desktop_code_command_poll(
 ) -> Result<Value, String> {
     let mut url = format!(
         "{}/api/desktop/code/hosts/{}/commands",
-        clark_rest_base(&endpoint),
+        clark_rest_base(&endpoint)?,
         urlencoding::encode(&host_id)
     );
     let limit = limit.unwrap_or(20).clamp(1, 100);
@@ -112,7 +112,7 @@ pub async fn desktop_code_command_ack(
 ) -> Result<Value, String> {
     let url = format!(
         "{}/api/desktop/code/commands/{}/ack",
-        clark_rest_base(&endpoint),
+        clark_rest_base(&endpoint)?,
         urlencoding::encode(&command_id)
     );
     let resp = clark_http_client()?
@@ -140,7 +140,7 @@ pub async fn desktop_code_attachment_download(
 ) -> Result<DownloadedCodeRemoteAttachment, String> {
     let lease_url = format!(
         "{}/api/desktop/code/commands/{}/attachments/{}",
-        clark_rest_base(&endpoint),
+        clark_rest_base(&endpoint)?,
         urlencoding::encode(&command_id),
         urlencoding::encode(&attachment_id),
     );
@@ -197,7 +197,7 @@ pub async fn desktop_code_repository_sync(
 ) -> Result<Value, String> {
     let url = format!(
         "{}/api/desktop/code/repositories",
-        clark_rest_base(&endpoint)
+        clark_rest_base(&endpoint)?
     );
     let resp = clark_http_client()?
         .post(url)
@@ -219,7 +219,7 @@ pub async fn desktop_organization_knowledge_status(
 ) -> Result<Value, String> {
     let url = format!(
         "{}/api/desktop/organization-knowledge",
-        clark_rest_base(&endpoint)
+        clark_rest_base(&endpoint)?
     );
     let resp = clark_http_client()?
         .get(url)
@@ -243,7 +243,7 @@ pub async fn desktop_organization_repository_sync(
 ) -> Result<Value, String> {
     let url = format!(
         "{}/api/desktop/organization-knowledge/repositories",
-        clark_rest_base(&endpoint)
+        clark_rest_base(&endpoint)?
     );
     let resp = clark_http_client()?
         .post(url)

@@ -51,23 +51,26 @@ describe("Clark Code model settings", () => {
     expect(modelLabel(DEFAULT_LOCAL_SETTINGS.model)).toBe("GLM 5.2");
   });
 
-  it("exposes Grok 4.5 and DeepSeek V4 Pro through backend-owned aliases", () => {
+  it("exposes every current Clark Code backend-owned model option", () => {
     expect(CODING_MODELS.map(({ id, label }) => ({ id, label }))).toEqual([
       { id: "clark-code", label: "GLM 5.2" },
+      { id: "clark-code:minimax_m3", label: "MiniMax M3" },
       { id: "clark-code:kimi_k3", label: "Kimi K3" },
       { id: "clark-code:kimi_k27_code", label: "Kimi K2.7 Code" },
       { id: "clark-code:grok45", label: "Grok 4.5" },
       { id: "clark-code:deepseek_v4_pro", label: "DeepSeek V4 Pro" },
+      { id: "clark-code:gemini35_flash_lite", label: "Gemini 3.5 Flash-Lite" },
     ]);
   });
 
   it("keeps a label for every OpenRouter effort used by the model catalog", () => {
     expect(REASONING_EFFORTS.map(({ id }) => id)).toEqual([
-      "", "max", "xhigh", "high", "medium", "low",
+      "", "max", "xhigh", "high", "medium", "low", "minimal",
     ]);
   });
 
   it("exposes each model's current OpenRouter reasoning levels", () => {
+    expect(reasoningEffortsForModel("clark-code:minimax_m3")).toEqual([]);
     expect(reasoningEffortsForModel("clark-code").map(({ id }) => id))
       .toEqual(["", "xhigh", "high"]);
     expect(reasoningEffortsForModel("clark-code:kimi_k3").map(({ id }) => id))
@@ -77,12 +80,16 @@ describe("Clark Code model settings", () => {
       .toEqual(["high", "medium", "low"]);
     expect(reasoningEffortsForModel("clark-code:deepseek_v4_pro").map(({ id }) => id))
       .toEqual(["", "xhigh", "high"]);
+    expect(reasoningEffortsForModel("clark-code:gemini35_flash_lite").map(({ id }) => id))
+      .toEqual(["high", "medium", "low", "minimal"]);
   });
 
   it("normalizes stale effort choices when the selected model changes", () => {
+    expect(normalizeReasoningEffort("clark-code:minimax_m3", "high")).toBe("");
     expect(normalizeReasoningEffort("clark-code:kimi_k3", "xhigh")).toBe("max");
     expect(normalizeReasoningEffort("clark-code:kimi_k27_code", "high")).toBe("");
     expect(normalizeReasoningEffort("clark-code:grok45", "xhigh")).toBe("high");
+    expect(normalizeReasoningEffort("clark-code:gemini35_flash_lite", "xhigh")).toBe("low");
   });
 
   it("drops the obsolete OpenRouter endpoint from legacy saved settings", () => {
@@ -166,5 +173,32 @@ describe("bounded orchestration availability", () => {
       { ...DEFAULT_LOCAL_SETTINGS, cwd: "/repo" },
       { ws_url: "ws://127.0.0.1:1", token: "secret", cwd: "/remote/repo" },
     ).extra).toMatchObject({ orchestration: { enabled: false } });
+  });
+});
+
+describe("computer use opt-in", () => {
+  it("is disabled by default and reaches the provider only after opt-in", () => {
+    expect(DEFAULT_LOCAL_SETTINGS.computerUseEnabled).toBe(false);
+    expect(localConnectConfig({ ...DEFAULT_LOCAL_SETTINGS, cwd: "/repo" }).extra)
+      .toMatchObject({ computer_use_enabled: false });
+    expect(localConnectConfig({
+      ...DEFAULT_LOCAL_SETTINGS,
+      cwd: "/repo",
+      computerUseEnabled: true,
+    }).extra).toMatchObject({ computer_use_enabled: true });
+  });
+
+  it("migrates old saved settings to a disabled computer-use state", () => {
+    store.setItem(
+      "clark-desktop:local-agent",
+      JSON.stringify({
+        cwd: "/repo",
+        model: "clark-code",
+        reasoningEffort: "",
+        apiKey: "",
+      }),
+    );
+
+    expect(loadLocalSettings().computerUseEnabled).toBe(false);
   });
 });

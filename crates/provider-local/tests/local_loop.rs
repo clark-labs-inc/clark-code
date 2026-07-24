@@ -190,7 +190,8 @@ async fn local_loop_reads_file_and_answers() {
             extra: json!({
                 "base_url": format!("http://{addr}/v1"),
                 "model": "fake-model",
-                "memories": false
+                "memories": false,
+                "sandbox_mode": "disabled"
             }),
             ..Default::default()
         })
@@ -295,7 +296,8 @@ async fn local_loop_projects_text_with_tool_as_commentary_then_plain_text_as_fin
             extra: json!({
                 "base_url": format!("http://{addr}/v1"),
                 "model": "fake-model",
-                "memories": false
+                "memories": false,
+                "sandbox_mode": "disabled"
             }),
             ..Default::default()
         })
@@ -379,6 +381,7 @@ async fn local_loop_auto_compacts_large_transcript_before_sampling() {
                 "base_url": format!("http://{addr}/v1"),
                 "model": "fake-model",
                 "memories": false,
+                "sandbox_mode": "disabled",
                 "auto_compact_token_limit": 2_000,
                 "compact_request_token_limit": 1_500,
                 "compact_recent_user_token_budget": 200
@@ -469,7 +472,8 @@ async fn mutating_tool_waits_for_permission_then_writes() {
             extra: json!({
                 "base_url": format!("http://{addr}/v1"),
                 "model": "fake",
-                "memories": false
+                "memories": false,
+                "sandbox_mode": "disabled"
             }),
             ..Default::default()
         })
@@ -581,7 +585,8 @@ async fn image_attachments_are_described_by_vision_fallback_before_the_coding_ca
             extra: json!({
                 "base_url": format!("http://{addr}/v1"),
                 "model": "fake-model",
-                "memories": false
+                "memories": false,
+                "sandbox_mode": "disabled"
             }),
             ..Default::default()
         })
@@ -743,7 +748,8 @@ async fn plan_mode_journey_denies_edits_threads_feedback_and_builds_after_approv
             extra: json!({
                 "base_url": format!("http://{addr}/v1"),
                 "model": "fake-model",
-                "memories": false
+                "memories": false,
+                "sandbox_mode": "disabled"
             }),
             ..Default::default()
         })
@@ -941,7 +947,8 @@ async fn connect_provider(addr: std::net::SocketAddr) -> provider_local::LocalAg
             extra: json!({
                 "base_url": format!("http://{addr}/v1"),
                 "model": "fake-model",
-                "memories": false
+                "memories": false,
+                "sandbox_mode": "disabled"
             }),
             ..Default::default()
         })
@@ -1133,11 +1140,16 @@ async fn steering_message_is_injected_into_the_active_run() {
     let dir = tempfile::tempdir().unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
+    let slow_command = if cfg!(windows) {
+        "Start-Sleep -Seconds 1"
+    } else {
+        "sleep 1"
+    };
     let serve_handle = tokio::spawn(serve(
         listener,
         vec![
             // A slow tool keeps the run alive while the steer lands.
-            tool_call_sse("c1", "bash", json!({"command": "sleep 1"})),
+            tool_call_sse("c1", "bash", json!({"command": slow_command})),
             final_body(),
         ],
     ));

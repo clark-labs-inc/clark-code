@@ -383,16 +383,16 @@ function MessageImpl({
     );
   })();
 
-  // The wrapper is stable across the whole message lifecycle: the agent's
-  // group/copy container and the content-visibility containment are applied
-  // regardless of `streaming`, so nothing remounts or recalculates when the
-  // reply settles. The copy button stays hover-only (invisible mid-stream).
+  // The wrapper is stable across the whole message lifecycle, so the markdown
+  // subtree is not remounted when streaming settles. Avoid content-visibility
+  // here: transcript rows have highly variable heights, and substituting an
+  // intrinsic estimate for an unseen row makes upward scrolling jump when its
+  // real height is first measured.
   return (
     <motion.div
       initial={reduce ? false : { opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: DUR.base, ease: EASE.out }}
-      className="[content-visibility:auto] [contain-intrinsic-size:auto_120px]"
     >
       {role === "agent" ? (
         <div className="group/msg relative">

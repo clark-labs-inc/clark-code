@@ -26,6 +26,27 @@ impl CapturedRequest {
     pub fn tool_results(&self) -> Vec<String> {
         self.messages_for_role("tool")
     }
+
+    pub fn model(&self) -> Option<&str> {
+        self.0.get("model").and_then(Value::as_str)
+    }
+
+    pub fn image_urls(&self) -> Vec<String> {
+        self.0
+            .get("messages")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|message| message.get("content").and_then(Value::as_array))
+            .flatten()
+            .filter_map(|part| {
+                part.get("image_url")?
+                    .get("url")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            })
+            .collect()
+    }
 }
 
 fn message_text(content: &Value) -> Option<String> {
@@ -58,6 +79,8 @@ impl GitFixture {
         std::fs::create_dir_all(&main).expect("create main checkout");
 
         git(&main, &["init", "-q", "--initial-branch=main"]);
+        git(&main, &["config", "core.autocrlf", "false"]);
+        git(&main, &["config", "core.eol", "lf"]);
         git(&main, &["config", "user.name", "Clark Test"]);
         git(&main, &["config", "user.email", "clark@example.com"]);
         std::fs::write(main.join("tracked.txt"), "main\n").expect("seed tracked file");

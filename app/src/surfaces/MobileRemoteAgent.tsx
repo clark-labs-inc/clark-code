@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { useSessionStore } from "../store/sessionStore";
+import { liveSessions, mergedOf } from "../store/sessionStore.runtime";
 import { cloudCreds, type CloudCreds } from "../lib/cloudHistory";
 import {
   ackCodeRemoteCommand,
@@ -157,15 +158,16 @@ function commandRunId(command: CodeRemoteCommand): string | null {
   return commandString(command, "run_id");
 }
 
-function requireActiveDesktop(command: CodeRemoteCommand) {
+function requireLiveDesktop(command: CodeRemoteCommand) {
   if (!command.desktop_id) {
     throw new Error("Clark Code command is not bound to a desktop conversation.");
   }
   const state = useSessionStore.getState();
-  if (!state.session || state.session.id !== command.desktop_id) {
-    throw new Error("Clark Code command is not for the active desktop conversation.");
+  const entry = liveSessions.get(command.desktop_id);
+  if (!entry) {
+    throw new Error("Clark Code is not connected to that desktop conversation.");
   }
-  return state;
+  return { state, entry, snapshot: mergedOf(entry) };
 }
 
 function projectFor(command: CodeRemoteCommand): CodeRemoteProjectRegistration | null {
@@ -234,12 +236,12 @@ async function submitPrompt(
 }
 
 async function resolvePermission(command: CodeRemoteCommand): Promise<void> {
-  const state = requireActiveDesktop(command);
+  const { state, entry, snapshot } = requireLiveDesktop(command);
   const actionId = commandString(command, "action_id");
   const runId = commandRunId(command);
   const approved = commandBool(command, "approved");
-  const pending = state.snapshot.pending_permission;
-  const run = runId ? state.snapshot.runs[runId] : null;
+  const pending = snapshot.pending_permission;
+  const run = runId ? snapshot.runs[runId] : null;
   if (!actionId || !runId || approved === null) {
     throw new Error("Clark Code permission command is incomplete.");
   }
@@ -258,13 +260,20 @@ async function resolvePermission(command: CodeRemoteCommand): Promise<void> {
   if (!option) {
     throw new Error("No matching permission option is available.");
   }
-  await useSessionStore.getState().resolvePermission(option.id);
+  if (!state.bridge) {
+    throw new Error("Clark Code desktop session is not connected.");
+  }
+  await state.bridge.respond(entry.session.id, {
+    kind: "permission",
+    request: pending.id,
+    option: option.id,
+  });
 }
 
 async function cancelRun(command: CodeRemoteCommand): Promise<void> {
-  const state = requireActiveDesktop(command);
+  const { state, entry, snapshot } = requireLiveDesktop(command);
   const runId = commandRunId(command);
-  const run = runId ? state.snapshot.runs[runId] : null;
+  const run = runId ? snapshot.runs[runId] : null;
   if (!runId) {
     throw new Error("Clark Code cancel command is not bound to a run.");
   }
@@ -274,18 +283,26 @@ async function cancelRun(command: CodeRemoteCommand): Promise<void> {
   ) {
     throw new Error("That run is no longer active.");
   }
-  if (!state.bridge || !state.session) {
+  if (!state.bridge) {
     throw new Error("Clark Code desktop session is not connected.");
   }
-  await state.bridge.cancel(state.session.id, runId);
+  await state.bridge.cancel(entry.session.id, runId);
 }
 
-async function runCommand(creds: CloudCreds, hostId: string, command: CodeRemoteCommand): Promise<void> {
+async function runCommand(
+  creds: CloudCreds,
+  hostId: string,
+  command: CodeRemoteCommand,
+  stillCurrent: () => boolean,
+): Promise<void> {
+  const accepted = await ackCodeRemoteCommand(creds, hostId, command.command_id, "accepted", {
+    accepted_at: new Date().toISOString(),
+    command_type: command.command_type,
+  });
+  // A lease can expire while this desktop is recovering. Never execute an
+  // action unless the service still granted this process the accepted claim.
+  if (accepted.command.status !== "accepted" || !stillCurrent()) return;
   try {
-    await ackCodeRemoteCommand(creds, hostId, command.command_id, "accepted", {
-      accepted_at: new Date().toISOString(),
-      command_type: command.command_type,
-    });
     let modelSettings: MobileRemoteModelSettings | null = null;
     if (command.command_type === "start_session" || command.command_type === "send_message") {
       modelSettings = await submitPrompt(creds, command);
@@ -296,8 +313,9 @@ async function runCommand(creds: CloudCreds, hostId: string, command: CodeRemote
     } else {
       throw new Error(`Unsupported Clark Code command: ${command.command_type}`);
     }
-    const sessionId = useSessionStore.getState().session?.id ?? command.desktop_id ?? null;
-    await ackCodeRemoteCommand(creds, hostId, command.command_id, "completed", {
+    if (!stillCurrent()) return;
+    const sessionId = command.desktop_id ?? useSessionStore.getState().session?.id ?? null;
+    const completed = await ackCodeRemoteCommand(creds, hostId, command.command_id, "completed", {
       desktop_id: sessionId,
       submitted_at: new Date().toISOString(),
       ...(modelSettings ? {
@@ -305,12 +323,16 @@ async function runCommand(creds: CloudCreds, hostId: string, command: CodeRemote
         reasoning_effort: modelSettings.reasoningEffort,
       } : {}),
     });
-    void notify("Clark Code", "Mobile command started on this desktop.");
+    if (completed.command.status === "completed") {
+      void notify("Clark Code", "Mobile command started on this desktop.");
+    }
   } catch (error) {
-    await ackCodeRemoteCommand(creds, hostId, command.command_id, "failed", {
-      error: String(error).slice(0, 800),
-      failed_at: new Date().toISOString(),
-    }).catch(() => undefined);
+    if (stillCurrent()) {
+      await ackCodeRemoteCommand(creds, hostId, command.command_id, "failed", {
+        error: String(error).slice(0, 800),
+        failed_at: new Date().toISOString(),
+      }).catch(() => undefined);
+    }
   }
 }
 
@@ -401,7 +423,12 @@ export function MobileRemoteAgent() {
         const response = await pollCodeRemoteCommands(creds, hostId, 20, COMMAND_POLL_WAIT_MS);
         for (const command of response.commands) {
           if (stopped) break;
-          await runCommand(creds, hostId, command);
+          await runCommand(
+            creds,
+            hostId,
+            command,
+            () => !stopped && cloudCreds(useSessionStore.getState().auth)?.token === creds.token,
+          );
         }
         consecutiveFailuresRef.current = 0;
         retryAtRef.current = 0;

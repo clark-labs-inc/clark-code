@@ -339,9 +339,14 @@ fn current_backend(
 
 #[cfg(target_os = "windows")]
 fn default_windows_state_dir() -> Option<PathBuf> {
+    let product_dir = if cfg!(debug_assertions) {
+        "Clark Code Dev"
+    } else {
+        "Clark Code"
+    };
     std::env::var_os("LOCALAPPDATA")
         .map(PathBuf::from)
-        .map(|root| root.join("Clark Code").join("sandbox"))
+        .map(|root| root.join(product_dir).join("sandbox"))
 }
 
 #[cfg(target_os = "linux")]

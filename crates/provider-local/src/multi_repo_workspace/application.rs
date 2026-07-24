@@ -89,8 +89,7 @@ impl RepositorySelection {
         };
 
         for application in &prepared {
-            let patch_arg =
-                crate::git_metadata::shell_word(&application.patch_path.to_string_lossy());
+            let patch_arg = crate::git_metadata::shell_path_word(&application.patch_path);
             if let Err(error) = git_shell(
                 executor,
                 &application.root,
@@ -109,8 +108,7 @@ impl RepositorySelection {
 
         let mut applied = Vec::<&PreparedApplication>::new();
         for application in &prepared {
-            let patch_arg =
-                crate::git_metadata::shell_word(&application.patch_path.to_string_lossy());
+            let patch_arg = crate::git_metadata::shell_path_word(&application.patch_path);
             if let Err(error) = git_shell(
                 executor,
                 &application.root,
@@ -288,7 +286,7 @@ impl RepositorySelection {
 
 async fn rollback(executor: &dyn Executor, applied: &[&PreparedApplication]) -> Result<(), String> {
     for application in applied.iter().rev() {
-        let patch_arg = crate::git_metadata::shell_word(&application.patch_path.to_string_lossy());
+        let patch_arg = crate::git_metadata::shell_path_word(&application.patch_path);
         git_shell(
             executor,
             &application.root,

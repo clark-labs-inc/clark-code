@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   conversationScrollTarget,
   isConversationAtBottom,
+  shouldFollowConversation,
 } from "./conversationScroll";
 
 describe("conversation scroll state", () => {
@@ -21,5 +22,18 @@ describe("conversation scroll state", () => {
   it("uses the same near-bottom threshold as the jump-to-latest control", () => {
     expect(isConversationAtBottom(1_000, 305, 600)).toBe(true);
     expect(isConversationAtBottom(1_000, 304, 600)).toBe(false);
+  });
+
+  it("stops following as soon as the user scrolls upward near the bottom", () => {
+    expect(shouldFollowConversation(400, 380, true)).toBe(false);
+    expect(shouldFollowConversation(400, 380, true, true)).toBe(false);
+  });
+
+  it("resumes following after the user scrolls back to the bottom", () => {
+    expect(shouldFollowConversation(380, 400, true)).toBe(true);
+  });
+
+  it("keeps an explicit jump-to-latest animation pinned while it travels", () => {
+    expect(shouldFollowConversation(200, 300, false, true)).toBe(true);
   });
 });

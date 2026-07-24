@@ -1,19 +1,29 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const check = vi.hoisted(() => vi.fn());
+const invoke = vi.hoisted(() => vi.fn());
 
 vi.mock("@tauri-apps/plugin-updater", () => ({ check }));
+vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 
 import { checkAndStageUpdate } from "./updater";
 
 beforeEach(() => {
   check.mockReset();
+  invoke.mockReset();
+  invoke.mockResolvedValue(true);
   vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
 });
 
 afterEach(() => vi.unstubAllGlobals());
 
 describe("checkAndStageUpdate", () => {
+  it("does not consult the production channel for a development flavor", async () => {
+    invoke.mockResolvedValue(false);
+    await expect(checkAndStageUpdate()).resolves.toEqual({ status: "unavailable" });
+    expect(check).not.toHaveBeenCalled();
+  });
+
   it("reports an actual no-update response as up to date", async () => {
     check.mockResolvedValue(null);
     await expect(checkAndStageUpdate()).resolves.toEqual({ status: "up-to-date" });

@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/agent-core",
     "crates/agent-orchestration",
+    "crates/computer-use",
     "crates/install-context",
     "crates/provider-acp",
     "crates/provider-clark",

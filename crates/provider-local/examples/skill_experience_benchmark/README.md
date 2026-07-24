@@ -78,9 +78,9 @@ cargo run -p provider-local --example skill_experience_benchmark -- \
 ## Pre-release suite
 
 The repository-level entrypoint runs this deep journey as one family inside a
-broader fast sample of core/provider contracts, local capabilities, scripted
-conversations, remote/git/worktree behavior, frontend contracts, and UI
-resilience:
+broader fast sample of core/provider contracts, native desktop/account
+boundaries, local capabilities, scripted conversations, remote/git/worktree
+behavior, frontend contracts, and UI resilience:
 
 ```bash
 ./scripts/run-pre-release-benchmarks.sh \

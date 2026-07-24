@@ -67,8 +67,12 @@ def verify(args: argparse.Namespace) -> dict:
         if executable_dir is None:
             raise RuntimeError("macOS verification requires --executable-dir")
         # Tauri keeps this PATH-visible sidecar in Contents/MacOS so it is
-        # included in nested code signing. macOS has no private sandbox helper.
+        # included in nested code signing. The computer-use helper also lives
+        # beside the parent executable, but is never advertised as a shell
+        # command by the provider.
         require_file(executable_dir / "rg", executable=True)
+        require_file(executable_dir / "clark-computer-use-helper", executable=True)
+        require_file(resource_root.parent / "Frameworks" / "libswift_Concurrency.dylib")
         require_file(private_root / "licenses/ripgrep/LICENSE-MIT")
         require_file(private_root / "licenses/ripgrep/UNLICENSE")
         assert_private_names_absent(executable_dir, private_names)

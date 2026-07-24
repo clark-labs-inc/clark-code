@@ -21,6 +21,7 @@ agent-core = { path = "../crates/agent-core", features = ["native"] }
 provider-acp = { path = "../crates/provider-acp" }
 provider-clark = { path = "../crates/provider-clark" }
 provider-local = { path = "../crates/provider-local" }
+computer-use = { path = "../crates/computer-use" }
 clark-install-context = { path = "../crates/install-context" }
 libreoffice-pure = "0.5.3"
 

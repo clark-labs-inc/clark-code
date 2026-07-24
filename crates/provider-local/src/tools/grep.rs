@@ -78,9 +78,11 @@ impl ToolExecutor for Grep {
         }
 
         let rel = |p: &std::path::Path| -> String {
-            p.strip_prefix(&root)
-                .map(|r| r.display().to_string())
-                .unwrap_or_else(|_| p.display().to_string())
+            crate::sandbox::model_path(
+                p.strip_prefix(&root)
+                    .map(|r| r.display().to_string())
+                    .unwrap_or_else(|_| p.display().to_string()),
+            )
         };
 
         let mut content_lines: Vec<String> = Vec::new();

@@ -383,7 +383,10 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
             Ok(result) if result.outcome.is_complete() => {
                 {
                     let mut session = tc.session.lock().await;
-                    compactor.commit_appended(&mut session.transcript, result.messages);
+                    compactor.commit_appended(
+                        &mut session.transcript,
+                        crate::agent_adapter::redaction::messages(result.messages),
+                    );
                 }
                 // The completed-transcript observer saw the same messages the
                 // loop just returned; reset it so a LATER failed continuation
@@ -478,7 +481,10 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
                 // HitMaxIterations: fold what we have and stop any goal.
                 {
                     let mut session = tc.session.lock().await;
-                    compactor.commit_appended(&mut session.transcript, result.messages);
+                    compactor.commit_appended(
+                        &mut session.transcript,
+                        crate::agent_adapter::redaction::messages(result.messages),
+                    );
                     if let Some(goal) = session
                         .goal
                         .as_mut()

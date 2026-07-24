@@ -7,6 +7,10 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type {
   CloudTrajectoryConfig,
+  ComputerUseActionReceipt,
+  ComputerUseApprovalSnapshot,
+  ComputerUsePermissionStatus,
+  ComputerUsePlatformStatus,
   CoreBridge,
   ConnectConfig,
   ProjectBranch,
@@ -67,10 +71,6 @@ export class TauriBridge implements CoreBridge {
     return invoke("session_configure_cloud", { sessionId, config, baseSnapshot, baseRev });
   }
 
-  updateCloudToken(token: string): Promise<void> {
-    return invoke("update_cloud_token", { token });
-  }
-
   onCloudAuthExpired(handler: () => void): () => void {
     const unlisten = listen("cloud-auth-expired", () => handler());
     return () => {
@@ -78,8 +78,23 @@ export class TauriBridge implements CoreBridge {
     };
   }
 
+  refreshCloudSession(token: string): Promise<void> {
+    return invoke("clark_refresh_cloud_session", { token });
+  }
+
+  clearCloudSession(token: string): Promise<void> {
+    return invoke("clark_clear_cloud_session", { token });
+  }
+
   onCloudSyncWarning(handler: (message: string) => void): () => void {
     const unlisten = listen<string>("cloud-sync-warning", (event) => handler(event.payload));
+    return () => {
+      void unlisten.then((fn) => fn());
+    };
+  }
+
+  onCloudConversationDeleted(handler: (conversationId: string) => void): () => void {
+    const unlisten = listen<string>("cloud-conversation-deleted", (event) => handler(event.payload));
     return () => {
       void unlisten.then((fn) => fn());
     };
@@ -130,8 +145,8 @@ export class TauriBridge implements CoreBridge {
     };
   }
 
-  listMemory(cwd: string, remote?: { ws_url: string; token: string } | null): Promise<MemoryOverview> {
-    return invoke<MemoryOverview>("local_list_memory", { cwd, remote: remote ?? null });
+  listMemory(sessionId: string): Promise<MemoryOverview> {
+    return invoke<MemoryOverview>("local_list_memory", { sessionId });
   }
 
   listGlobalMemory(): Promise<MemoryOverview> {
@@ -252,5 +267,29 @@ export class TauriBridge implements CoreBridge {
 
   setupLocalSandbox(cwd: string): Promise<LocalSandboxStatus> {
     return invoke<LocalSandboxStatus>("local_sandbox_setup", { cwd });
+  }
+
+  computerUsePlatformStatus(): Promise<ComputerUsePlatformStatus> {
+    return invoke<ComputerUsePlatformStatus>("computer_use_platform_status");
+  }
+
+  requestComputerUsePermissions(): Promise<ComputerUsePermissionStatus> {
+    return invoke<ComputerUsePermissionStatus>("computer_use_request_permissions");
+  }
+
+  computerUseApprovalSnapshot(): Promise<ComputerUseApprovalSnapshot> {
+    return invoke<ComputerUseApprovalSnapshot>("computer_use_approval_snapshot");
+  }
+
+  revokeComputerUseApproval(identityKey: string): Promise<ComputerUseApprovalSnapshot> {
+    return invoke<ComputerUseApprovalSnapshot>("computer_use_revoke_approval", { identityKey });
+  }
+
+  revokeAllComputerUseApprovals(): Promise<ComputerUseApprovalSnapshot> {
+    return invoke<ComputerUseApprovalSnapshot>("computer_use_revoke_all_approvals");
+  }
+
+  recentComputerUseReceipts(): Promise<ComputerUseActionReceipt[]> {
+    return invoke<ComputerUseActionReceipt[]>("computer_use_recent_receipts");
   }
 }

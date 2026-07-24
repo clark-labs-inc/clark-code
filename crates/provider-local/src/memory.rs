@@ -571,23 +571,9 @@ pub async fn delete_memory(
         return Ok(None);
     };
     let file = fact.header.file.clone();
-    // The Executor has no remove primitive; empty the file via `rm` through
-    // the exec channel (slugs are shell-safe by construction).
-    let out = exec
-        .exec(
-            &format!("rm -f -- '{file}'"),
-            mem_dir,
-            std::time::Duration::from_secs(10),
-            &tokio_util::sync::CancellationToken::new(),
-        )
+    exec.remove_file(&mem_dir.join(&file))
         .await
         .map_err(|e| format!("removing note: {e}"))?;
-    if out.code != Some(0) {
-        return Err(format!(
-            "removing note failed: {}",
-            String::from_utf8_lossy(&out.stderr)
-        ));
-    }
     // Drop the index line pointing at the removed file.
     let index_path = mem_dir.join(INDEX_FILE);
     if let Some(index) = read_text(exec, &index_path).await {

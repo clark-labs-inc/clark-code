@@ -20,6 +20,14 @@ fn ctx(dir: &std::path::Path) -> ToolCtx {
     }
 }
 
+fn platform_command(posix: &'static str, powershell: &'static str) -> &'static str {
+    if cfg!(windows) {
+        powershell
+    } else {
+        posix
+    }
+}
+
 #[test]
 fn scoped_host_selection_only_crosses_a_managed_boundary() {
     use exec_core::ExecutionContainment::{External, Host, Managed};
@@ -87,7 +95,10 @@ async fn streams_progress_deltas_while_running() {
     ctx.progress = Some(Arc::new(move |d: String| sink.lock().unwrap().push(d)));
     let out = Bash
         .invoke(
-            json!({"command": "printf first; sleep 0.05; printf second"}),
+            json!({"command": platform_command(
+                "printf first; sleep 0.05; printf second",
+                "[Console]::Out.Write('first'); Start-Sleep -Milliseconds 150; [Console]::Out.Write('second')"
+            )}),
             &ctx,
         )
         .await;
@@ -103,7 +114,10 @@ async fn streams_progress_deltas_while_running() {
 async fn runs_command_and_captures_stdout() {
     let dir = tempfile::tempdir().unwrap();
     let out = Bash
-        .invoke(json!({"command": "echo hello"}), &ctx(dir.path()))
+        .invoke(
+            json!({"command": platform_command("echo hello", "Write-Output 'hello'")}),
+            &ctx(dir.path()),
+        )
         .await;
     assert!(!out.is_error, "{}", out.content);
     assert!(out.content.contains("exit_code: 0"));
@@ -167,7 +181,10 @@ async fn ordinary_git_commit_heredoc_preserves_hooks_and_attribution() {
 async fn nonzero_exit_is_flagged_error() {
     let dir = tempfile::tempdir().unwrap();
     let out = Bash
-        .invoke(json!({"command": "exit 3"}), &ctx(dir.path()))
+        .invoke(
+            json!({"command": platform_command("exit 3", "exit 3")}),
+            &ctx(dir.path()),
+        )
         .await;
     assert!(out.is_error);
     assert!(out.content.contains("exit_code: 3"));
@@ -178,7 +195,10 @@ async fn runs_in_project_root() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("marker.txt"), "").unwrap();
     let out = Bash
-        .invoke(json!({"command": "ls"}), &ctx(dir.path()))
+        .invoke(
+            json!({"command": platform_command("ls", "Get-ChildItem -Name")}),
+            &ctx(dir.path()),
+        )
         .await;
     assert!(out.content.contains("marker.txt"));
 }
@@ -190,7 +210,10 @@ async fn honors_a_contained_workdir() {
     std::fs::write(dir.path().join("nested/marker.txt"), "").unwrap();
     let out = Bash
         .invoke(
-            json!({"command": "ls", "workdir": "nested"}),
+            json!({
+                "command": platform_command("ls", "Get-ChildItem -Name"),
+                "workdir": "nested"
+            }),
             &ctx(dir.path()),
         )
         .await;
@@ -203,7 +226,12 @@ async fn cancelled_command_reports_error() {
     let dir = tempfile::tempdir().unwrap();
     let c = ctx(dir.path());
     c.cancel.cancel();
-    let out = Bash.invoke(json!({"command": "sleep 5"}), &c).await;
+    let out = Bash
+        .invoke(
+            json!({"command": platform_command("sleep 5", "Start-Sleep -Seconds 5")}),
+            &c,
+        )
+        .await;
     assert!(out.is_error);
     assert!(out.content.contains("cancel"));
 }
@@ -214,7 +242,10 @@ async fn run_in_background_returns_immediately_and_bash_output_polls_it() {
     let c = ctx(dir.path());
     let started = Bash
         .invoke(
-            json!({"command": "echo bg-hi", "run_in_background": true}),
+            json!({
+                "command": platform_command("echo bg-hi", "Write-Output 'bg-hi'"),
+                "run_in_background": true
+            }),
             &c,
         )
         .await;
@@ -230,7 +261,8 @@ async fn run_in_background_returns_immediately_and_bash_output_polls_it() {
 
     // Poll until finished (background task races the assertion).
     let mut output = String::new();
-    for _ in 0..100 {
+    let attempts = if cfg!(windows) { 500 } else { 100 };
+    for _ in 0..attempts {
         let out = BashOutput.invoke(json!({"task_id": task_id}), &c).await;
         output = out.content;
         if output.contains("finished") {
@@ -248,14 +280,24 @@ async fn bash_wait_blocks_in_the_host_until_background_completion() {
     let c = ctx(dir.path());
     let started = Bash
         .invoke(
-            json!({"command": "sleep 0.05; echo complete", "run_in_background": true}),
+            json!({
+                "command": platform_command(
+                    "sleep 0.05; echo complete",
+                    "Start-Sleep -Milliseconds 50; Write-Output 'complete'"
+                ),
+                "run_in_background": true
+            }),
             &c,
         )
         .await;
     let task_id = started.content.split('`').nth(1).unwrap().to_string();
     let output = BashWait
         .invoke(
-            json!({"task_id": task_id, "timeout_ms": 2_000, "poll_interval_ms": 20}),
+            json!({
+                "task_id": task_id,
+                "timeout_ms": if cfg!(windows) { 10_000 } else { 2_000 },
+                "poll_interval_ms": 20
+            }),
             &c,
         )
         .await;
@@ -274,7 +316,13 @@ async fn bash_wait_can_return_on_readiness_without_stopping_the_process() {
     let c = ctx(dir.path());
     let started = Bash
         .invoke(
-            json!({"command": "echo SERVER_READY; sleep 2", "run_in_background": true}),
+            json!({
+                "command": platform_command(
+                    "echo SERVER_READY; sleep 2",
+                    "Write-Output 'SERVER_READY'; Start-Sleep -Seconds 2"
+                ),
+                "run_in_background": true
+            }),
             &c,
         )
         .await;
@@ -284,7 +332,7 @@ async fn bash_wait_can_return_on_readiness_without_stopping_the_process() {
             json!({
                 "task_id": task_id,
                 "output_contains": "SERVER_READY",
-                "timeout_ms": 1_000
+                "timeout_ms": if cfg!(windows) { 10_000 } else { 1_000 }
             }),
             &c,
         )
@@ -306,7 +354,10 @@ async fn bash_input_writes_and_closes_background_stdin() {
     let started = Bash
         .invoke(
             json!({
-                "command": "read value; printf 'value:%s' \"$value\"",
+                "command": platform_command(
+                    "read value; printf 'value:%s' \"$value\"",
+                    r#"$value = [Console]::In.ReadLine(); [Console]::Out.Write("value:$value")"#
+                ),
                 "run_in_background": true
             }),
             &c,
@@ -321,7 +372,8 @@ async fn bash_input_writes_and_closes_background_stdin() {
         .await;
     assert!(!sent.is_error, "{}", sent.content);
     let mut output = String::new();
-    for _ in 0..100 {
+    let attempts = if cfg!(windows) { 500 } else { 100 };
+    for _ in 0..attempts {
         output = BashOutput
             .invoke(json!({"task_id": task_id}), &c)
             .await
@@ -340,7 +392,10 @@ async fn bash_kill_stops_a_background_task() {
     let c = ctx(dir.path());
     let started = Bash
         .invoke(
-            json!({"command": "sleep 30", "run_in_background": true}),
+            json!({
+                "command": platform_command("sleep 30", "Start-Sleep -Seconds 30"),
+                "run_in_background": true
+            }),
             &c,
         )
         .await;
@@ -369,12 +424,19 @@ async fn bash_output_marks_nonzero_background_exit_as_error() {
     let c = ctx(dir.path());
     let started = Bash
         .invoke(
-            json!({"command": "echo failed; exit 7", "run_in_background": true}),
+            json!({
+                "command": platform_command(
+                    "echo failed; exit 7",
+                    "Write-Output 'failed'; exit 7"
+                ),
+                "run_in_background": true
+            }),
             &c,
         )
         .await;
     let task_id = started.content.split('`').nth(1).unwrap().to_string();
-    for _ in 0..100 {
+    let attempts = if cfg!(windows) { 500 } else { 100 };
+    for _ in 0..attempts {
         let output = BashOutput.invoke(json!({"task_id": task_id}), &c).await;
         if output.content.contains("finished") {
             assert!(output.is_error, "{}", output.content);
