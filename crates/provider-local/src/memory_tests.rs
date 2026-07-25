@@ -2,6 +2,13 @@ use super::*;
 use crate::exec::LocalExecutor;
 
 #[test]
+fn guidance_explains_deferred_memory_activation() {
+    let guidance = memory_guidance();
+    assert!(guidance.contains("call `tool_search` with query `memory`"));
+    assert!(guidance.contains("activated `memory` tool on the next model call"));
+}
+
+#[test]
 fn paths_are_under_dot_clark() {
     let root = Path::new("/proj");
     assert_eq!(memory_dir(root), Path::new("/proj/.clark/memory"));

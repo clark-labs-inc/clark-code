@@ -456,11 +456,12 @@ async fn live_clark_code_feature_matrix() {
     let memory = drive_turn(
         &mut provider,
         &session.id,
-        "Use the memory tool to remember a project fact titled `live e2e sentinel` with content `CLARK_MEMORY_SENTINEL_8402`. Then use memory recall and briefly confirm completion.",
+        "First call tool_search with query `memory`. On the next model call, use the activated memory tool to remember a project fact titled `live e2e sentinel` with content `CLARK_MEMORY_SENTINEL_8402`. Then use memory recall and briefly confirm completion.",
     )
     .await;
     println!("[memory] {memory:?}");
     memory.require_done("memory");
+    memory.require_tool("memory", "tool_search");
     memory.require_tool("memory", "memory");
     memory.require_tool_input_contains("memory", "memory", "CLARK_MEMORY_SENTINEL_8402");
     assert!(

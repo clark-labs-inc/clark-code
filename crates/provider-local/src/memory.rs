@@ -607,7 +607,9 @@ fn slugify(title: &str) -> String {
 
 /// Maintenance instructions for the system prompt (present whenever memory is on).
 pub fn memory_guidance() -> &'static str {
-    "You have a durable memory via the `memory` tool. Use it proactively, not only when asked:\n\
+    "You have a durable memory via the `memory` tool. Its schema is deferred: before the \
+first memory action in a conversation, call `tool_search` with query `memory`; use the \
+activated `memory` tool on the next model call. Use it proactively, not only when asked:\n\
 - When the user tells you who they are, what they're building, who it's for, how they \
 like to work, or vocabulary they want used, save it with `memory` IN THAT SAME TURN — \
 before you finish the coding task — or it is lost when the session ends. Scope \
