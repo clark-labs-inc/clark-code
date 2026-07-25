@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { projectedRunUsage, UsageChipView } from "./ComposerControls";
+import { ModelPriceCue, projectedRunUsage, UsageChipView } from "./ComposerControls";
 
 describe("UsageChip", () => {
   it("prefers cumulative usage while a run is still active", () => {
@@ -42,5 +42,18 @@ describe("UsageChip", () => {
     expect(markup).not.toContain("$");
     expect(markup).not.toContain("75,000");
     expect(markup).not.toContain("tokens");
+  });
+});
+
+describe("ModelPriceCue", () => {
+  it("renders relative price tiers one through five as tiny decorative dollar signs", () => {
+    for (const tier of [1, 2, 3, 4, 5] as const) {
+      const markup = renderToStaticMarkup(<ModelPriceCue tier={tier} />);
+
+      expect(markup).toContain(`>${"$".repeat(tier)}</span>`);
+      expect(markup).toContain('aria-hidden="true"');
+      expect(markup).toContain("text-[8px]");
+      expect(markup).toContain("opacity-60");
+    }
   });
 });

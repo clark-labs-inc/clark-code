@@ -44,6 +44,8 @@ fn model_context_window(model: &str) -> Option<usize> {
         "clark-code:grok45" => Some(500_000),                // "500K context"
         "clark-code:deepseek_v4_pro" => Some(1_000_000),     // "1M context"
         "clark-code:gemini35_flash_lite" => Some(1_000_000), // "1M context"
+        "clark-code:claude_opus_5" => Some(1_000_000),       // "1M context"
+        "clark-code:gpt56_sol" => Some(1_000_000),           // "1M context"
         _ => None,
     }
 }
@@ -64,7 +66,11 @@ pub(crate) fn model_max_output_tokens(model: &str) -> Option<u32> {
 pub(crate) fn model_supports_images(model: &str) -> bool {
     matches!(
         model,
-        "clark-code:minimax_m3" | "clark-code:kimi_k3" | "clark-code:gemini35_flash_lite"
+        "clark-code:minimax_m3"
+            | "clark-code:kimi_k3"
+            | "clark-code:gemini35_flash_lite"
+            | "clark-code:claude_opus_5"
+            | "clark-code:gpt56_sol"
     )
 }
 
@@ -477,6 +483,8 @@ mod tests {
         assert!(model_supports_images("clark-code:minimax_m3"));
         assert!(model_supports_images("clark-code:kimi_k3"));
         assert!(model_supports_images("clark-code:gemini35_flash_lite"));
+        assert!(model_supports_images("clark-code:claude_opus_5"));
+        assert!(model_supports_images("clark-code:gpt56_sol"));
         assert!(!model_supports_images("clark-code"));
         assert!(!model_supports_images("clark-code:kimi_k27_code"));
     }
@@ -502,6 +510,17 @@ mod tests {
             default_auto_compact_limit("clark-code:deepseek_v4_pro"),
             DEFAULT_AUTO_COMPACT_TOKEN_LIMIT
         );
+    }
+
+    #[test]
+    fn new_frontier_options_use_their_product_stated_context_windows() {
+        for model in ["clark-code:claude_opus_5", "clark-code:gpt56_sol"] {
+            assert_eq!(model_context_window(model), Some(1_000_000));
+            assert_eq!(
+                default_auto_compact_limit(model),
+                DEFAULT_AUTO_COMPACT_TOKEN_LIMIT
+            );
+        }
     }
 
     #[test]

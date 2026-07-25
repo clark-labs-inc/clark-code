@@ -36,6 +36,20 @@ describe("mobileRemoteModelSettings", () => {
       model: "clark-code:grok45",
       reasoningEffort: "low",
     });
+    expect(mobileRemoteModelSettings(command({
+      model: "clark-code:claude_opus_5",
+      reasoning_effort: "",
+    }))).toEqual({
+      model: "clark-code:claude_opus_5",
+      reasoningEffort: "",
+    });
+    expect(mobileRemoteModelSettings(command({
+      model: "clark-code:gpt56_sol",
+      reasoning_effort: "",
+    }))).toEqual({
+      model: "clark-code:gpt56_sol",
+      reasoningEffort: "",
+    });
   });
 
   it("rejects stale model ids and unsupported effort choices", () => {

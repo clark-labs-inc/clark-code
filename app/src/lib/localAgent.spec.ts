@@ -59,6 +59,21 @@ describe("Clark Code model settings", () => {
       { id: "clark-code:kimi_k27_code", label: "Kimi K2.7 Code" },
       { id: "clark-code:grok45", label: "Grok 4.5" },
       { id: "clark-code:deepseek_v4_pro", label: "DeepSeek V4 Pro" },
+      { id: "clark-code:claude_opus_5", label: "Claude Opus 5" },
+      { id: "clark-code:gpt56_sol", label: "GPT-5.6 Sol" },
+    ]);
+  });
+
+  it("assigns every coding model a relative price tier from one to five", () => {
+    expect(CODING_MODELS.map(({ id, priceTier }) => ({ id, priceTier }))).toEqual([
+      { id: "clark-code", priceTier: 3 },
+      { id: "clark-code:minimax_m3", priceTier: 1 },
+      { id: "clark-code:kimi_k3", priceTier: 5 },
+      { id: "clark-code:kimi_k27_code", priceTier: 2 },
+      { id: "clark-code:grok45", priceTier: 4 },
+      { id: "clark-code:deepseek_v4_pro", priceTier: 1 },
+      { id: "clark-code:claude_opus_5", priceTier: 5 },
+      { id: "clark-code:gpt56_sol", priceTier: 5 },
     ]);
   });
 
@@ -79,6 +94,8 @@ describe("Clark Code model settings", () => {
       .toEqual(["high", "medium", "low"]);
     expect(reasoningEffortsForModel("clark-code:deepseek_v4_pro").map(({ id }) => id))
       .toEqual(["", "xhigh", "high"]);
+    expect(reasoningEffortsForModel("clark-code:claude_opus_5")).toEqual([]);
+    expect(reasoningEffortsForModel("clark-code:gpt56_sol")).toEqual([]);
   });
 
   it("normalizes stale effort choices when the selected model changes", () => {

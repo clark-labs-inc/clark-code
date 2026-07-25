@@ -71,6 +71,7 @@ export const CODING_MODELS = [
     id: "clark-code",
     label: "GLM 5.2",
     hint: "Deep reasoning · default",
+    priceTier: 3,
     reasoningEfforts: ["", "xhigh", "high"],
     defaultReasoningEffort: "",
   },
@@ -78,6 +79,7 @@ export const CODING_MODELS = [
     id: "clark-code:minimax_m3",
     label: "MiniMax M3",
     hint: "Efficient tool calling · vision · 1M context",
+    priceTier: 1,
     reasoningEfforts: [],
     defaultReasoningEffort: "",
   },
@@ -85,6 +87,7 @@ export const CODING_MODELS = [
     id: "clark-code:kimi_k3",
     label: "Kimi K3",
     hint: "Long-horizon coding · vision · 1M context",
+    priceTier: 5,
     reasoningEfforts: ["max"],
     defaultReasoningEffort: "max",
   },
@@ -92,6 +95,7 @@ export const CODING_MODELS = [
     id: "clark-code:kimi_k27_code",
     label: "Kimi K2.7 Code",
     hint: "Fast agentic coding",
+    priceTier: 2,
     reasoningEfforts: [],
     defaultReasoningEffort: "",
   },
@@ -99,6 +103,7 @@ export const CODING_MODELS = [
     id: "clark-code:grok45",
     label: "Grok 4.5",
     hint: "Frontier coding · 500K context",
+    priceTier: 4,
     reasoningEfforts: ["high", "medium", "low"],
     defaultReasoningEffort: "high",
   },
@@ -106,13 +111,31 @@ export const CODING_MODELS = [
     id: "clark-code:deepseek_v4_pro",
     label: "DeepSeek V4 Pro",
     hint: "Long-horizon coding · 1M context",
+    priceTier: 1,
     reasoningEfforts: ["", "xhigh", "high"],
+    defaultReasoningEffort: "",
+  },
+  {
+    id: "clark-code:claude_opus_5",
+    label: "Claude Opus 5",
+    hint: "Frontier coding · vision · 1M context",
+    priceTier: 5,
+    reasoningEfforts: [],
+    defaultReasoningEffort: "",
+  },
+  {
+    id: "clark-code:gpt56_sol",
+    label: "GPT-5.6 Sol",
+    hint: "Frontier coding · vision · 1M context",
+    priceTier: 5,
+    reasoningEfforts: [],
     defaultReasoningEffort: "",
   },
 ] as const satisfies readonly {
   id: string;
   label: string;
   hint: string;
+  priceTier: 1 | 2 | 3 | 4 | 5;
   reasoningEfforts: readonly ReasoningEffortId[];
   defaultReasoningEffort: ReasoningEffortId;
 }[];

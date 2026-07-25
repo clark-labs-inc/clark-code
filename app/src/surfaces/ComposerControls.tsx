@@ -91,6 +91,17 @@ export function UsageChipView({
   );
 }
 
+export function ModelPriceCue({ tier }: { tier: 1 | 2 | 3 | 4 | 5 }) {
+  return (
+    <span
+      aria-hidden="true"
+      className="text-[8px] font-normal leading-none tracking-[-0.08em] text-ink-faint opacity-60"
+    >
+      {"$".repeat(tier)}
+    </span>
+  );
+}
+
 export function ModelPill() {
   const sessionId = useSessionStore((state) => state.session?.id ?? null);
   const model = useSessionStore(
@@ -150,7 +161,10 @@ export function ModelPill() {
               )}
             >
               <span className="min-w-0 flex-1">
-                <span className="block text-sm text-ink">{candidate.label}</span>
+                <span className="flex items-center gap-1 text-sm text-ink">
+                  <span>{candidate.label}</span>
+                  <ModelPriceCue tier={candidate.priceTier} />
+                </span>
                 <span className="block text-xs leading-snug text-ink-muted">
                   {candidate.hint}
                 </span>
