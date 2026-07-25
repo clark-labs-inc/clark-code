@@ -297,7 +297,9 @@
             "clark-code:kimi_k3",
             "clark-code:kimi_k27_code",
             "clark-code:grok45",
-            "clark-code:deepseek_v4_pro"
+            "clark-code:deepseek_v4_pro",
+            "clark-code:claude_opus_5",
+            "clark-code:gpt56_sol"
           ]
         }
       ]
