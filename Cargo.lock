@@ -3965,6 +3965,7 @@ dependencies = [
  "agent-orchestration",
  "async-channel",
  "async-trait",
+ "exec-core",
  "futures",
  "serde",
  "serde_json",

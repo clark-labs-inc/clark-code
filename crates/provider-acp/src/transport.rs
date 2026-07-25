@@ -180,8 +180,9 @@ impl Peer {
     }
 }
 
-/// Spawn an agent CLI as a child process and return its stdio as boxed streams.
-/// stderr is inherited so the agent's logs land in our console.
+/// Spawn an agent CLI as a background child and return its stdio as boxed
+/// streams. stderr may use an already-attached developer console, but spawning
+/// the child must never create an OS terminal window.
 pub fn spawn_child(command: &[String], cwd: Option<&str>) -> Result<(BoxRead, BoxWrite, Child)> {
     let (program, args) = command
         .split_first()
@@ -195,6 +196,7 @@ pub fn spawn_child(command: &[String], cwd: Option<&str>) -> Result<(BoxRead, Bo
     if let Some(dir) = cwd {
         cmd.current_dir(dir);
     }
+    exec_core::suppress_console_window(&mut cmd);
     let mut child = cmd
         .spawn()
         .map_err(|e| Error::Io(format!("failed to spawn `{program}`: {e}")))?;

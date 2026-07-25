@@ -67,6 +67,7 @@ async fn git_output(cwd: &Path, args: Vec<OsString>, action: &str) -> Result<Str
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
+    exec_core::isolate_process_group(&mut command);
     let child = command
         .spawn()
         .map_err(|error| format!("{action}: failed to start git: {error}"))?;

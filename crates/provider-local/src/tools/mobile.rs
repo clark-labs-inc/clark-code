@@ -83,19 +83,20 @@ fn spawn(
     args: &[&str],
     install_hint: &str,
 ) -> Result<tokio::process::Child, String> {
-    tokio::process::Command::new(program)
+    let mut command = tokio::process::Command::new(program);
+    command
         .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                format!("{program} is not installed. {install_hint}")
-            } else {
-                format!("failed to spawn {program}: {e}")
-            }
-        })
+        .stderr(Stdio::piped());
+    exec_core::suppress_console_window(&mut command);
+    command.spawn().map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            format!("{program} is not installed. {install_hint}")
+        } else {
+            format!("failed to spawn {program}: {e}")
+        }
+    })
 }
 
 /// A short, monotonically-increasing slug for uniquely naming a screenshot

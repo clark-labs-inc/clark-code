@@ -167,7 +167,8 @@ async fn start_browser(
     // property of the machine running Clark Desktop's own GUI, not of
     // whichever project executor is active (same reasoning `tools/mobile.rs`
     // already documents for simulators/emulators).
-    let child = Command::new(&binary)
+    let mut command = Command::new(&binary);
+    command
         .arg("--headless=new")
         .arg("--no-sandbox")
         .arg(format!("--remote-debugging-port={port}"))
@@ -176,7 +177,9 @@ async fn start_browser(
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .kill_on_drop(true)
+        .kill_on_drop(true);
+    exec_core::suppress_console_window(&mut command);
+    let child = command
         .spawn()
         .map_err(|e| format!("failed to start clark-browser: {e}"))?;
     let process_fence = exec_core::ProcessFence::attach(child.id());

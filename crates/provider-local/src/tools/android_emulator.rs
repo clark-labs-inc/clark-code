@@ -133,14 +133,16 @@ impl ToolExecutor for BootEmulator {
         // Spawn detached: this is a long-running GUI process, not a one-shot
         // command. We don't wait on it or pipe its output — `adb` polling
         // below is the actual "is it ready" signal.
-        let spawn = tokio::process::Command::new("emulator")
+        let mut command = tokio::process::Command::new("emulator");
+        command
             .arg("-avd")
             .arg(&avd)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
-            .kill_on_drop(false)
-            .spawn();
+            .kill_on_drop(false);
+        exec_core::suppress_console_window(&mut command);
+        let spawn = command.spawn();
         if let Err(e) = spawn {
             return if e.kind() == std::io::ErrorKind::NotFound {
                 ToolOutcome::error(EMULATOR_HINT)

@@ -40,6 +40,12 @@ const SSH_CONNECT_TIMEOUT: &str = "10";
 /// HTTPS; see [`fetch_from_cdn`].
 const EXEC_SERVER_CDN_BASE: &str = "https://downloads.clarkchat.com/exec-server";
 
+fn background_command(program: &str) -> Command {
+    let mut command = Command::new(program);
+    exec_core::suppress_console_window(&mut command);
+    command
+}
+
 /// What the caller asks to connect to.
 pub struct RemoteSpec {
     /// SSH destination passed verbatim to `ssh` — a `~/.ssh/config` alias or
@@ -292,7 +298,7 @@ async fn start_server(
     // Deliberately NOT kill_on_drop: shutdown is via stdin-EOF → the remote
     // watchdog (a SIGKILLed ssh client wouldn't cleanly close its channel). The
     // local ssh process exits on its own once the remote command finishes.
-    let mut child = Command::new("ssh")
+    let mut child = background_command("ssh")
         .args(["-o", &connect_timeout(), host, &remote_cmd])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -331,7 +337,7 @@ async fn start_server(
 
 async fn open_tunnel(host: &str, local_port: u16, remote_port: u16) -> Result<Child, String> {
     let forward = format!("127.0.0.1:{local_port}:127.0.0.1:{remote_port}");
-    Command::new("ssh")
+    background_command("ssh")
         .args([
             "-N",
             "-o",
@@ -374,7 +380,7 @@ fn connect_timeout() -> String {
 
 /// Run a remote command and return its stdout, erroring on non-zero exit.
 async fn ssh_capture(host: &str, remote_cmd: &str) -> Result<String, String> {
-    let out = Command::new("ssh")
+    let out = background_command("ssh")
         .args(["-o", &connect_timeout(), host, remote_cmd])
         .stdin(Stdio::null())
         .output()
@@ -391,7 +397,7 @@ async fn ssh_capture(host: &str, remote_cmd: &str) -> Result<String, String> {
 
 /// True iff a remote command exits 0 (used for existence/`test` checks).
 async fn ssh_ok(host: &str, remote_cmd: &str) -> bool {
-    Command::new("ssh")
+    background_command("ssh")
         .args(["-o", &connect_timeout(), host, remote_cmd])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -403,7 +409,7 @@ async fn ssh_ok(host: &str, remote_cmd: &str) -> bool {
 }
 
 async fn scp(local: &Path, remote_dest: &str) -> Result<(), String> {
-    let status = Command::new("scp")
+    let status = background_command("scp")
         .args(["-o", &connect_timeout()])
         .arg(local)
         .arg(remote_dest)

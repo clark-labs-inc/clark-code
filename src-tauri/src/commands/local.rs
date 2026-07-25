@@ -240,6 +240,7 @@ pub fn open_path(path: String, reveal: bool) -> Result<(), String> {
         return Err("empty path".into());
     }
     let mut cmd = open_command(p, reveal);
+    exec_core::suppress_std_console_window(&mut cmd);
     cmd.spawn().map(|_| ()).map_err(|e| e.to_string())
 }
 

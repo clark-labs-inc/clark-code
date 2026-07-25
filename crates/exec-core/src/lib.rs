@@ -182,11 +182,32 @@ pub fn configure_noninteractive(command: &mut tokio::process::Command) {
     command.envs(NONINTERACTIVE_ENV.iter().copied());
 }
 
+/// Keep a background child attached only to Clark's product-owned surfaces.
+///
+/// On Windows a GUI parent that starts a console program without this flag can
+/// make Windows Terminal create a visible tab. Unix does not need an equivalent
+/// visibility flag.
+pub fn suppress_console_window(command: &mut tokio::process::Command) {
+    suppress_std_console_window(command.as_std_mut());
+}
+
+/// `std::process::Command` counterpart to [`suppress_console_window`].
+pub fn suppress_std_console_window(command: &mut std::process::Command) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    #[cfg(not(windows))]
+    let _ = command;
+}
+
 pub fn isolate_process_group(command: &mut tokio::process::Command) {
     #[cfg(unix)]
     command.process_group(0);
-    #[cfg(not(unix))]
-    let _ = command;
+    suppress_console_window(command);
 }
 
 pub async fn terminate_pid_tree(root_pid: Option<u32>) {
@@ -199,13 +220,14 @@ pub async fn terminate_pid_tree(root_pid: Option<u32>) {
 
     #[cfg(windows)]
     if let Some(pid) = root_pid {
-        let _ = tokio::process::Command::new("taskkill")
+        let mut command = tokio::process::Command::new("taskkill");
+        command
             .args(["/PID", &pid.to_string(), "/T", "/F"])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .await;
+            .stderr(Stdio::null());
+        suppress_console_window(&mut command);
+        let _ = command.status().await;
     }
 }
 
