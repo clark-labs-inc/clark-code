@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const updater = vi.hoisted(() => ({
   checkAndStageUpdate: vi.fn(),
+  refreshStagedUpdate: vi.fn(),
   installStagedUpdate: vi.fn(async () => {}),
   beginUpdateDrain: vi.fn(async () => 0),
   cancelUpdateDrain: vi.fn(async () => {}),
@@ -25,6 +26,10 @@ import { useSessionStore } from "./sessionStore";
 beforeEach(() => {
   vi.clearAllMocks();
   updater.installStagedUpdate.mockResolvedValue(undefined);
+  updater.refreshStagedUpdate.mockResolvedValue({
+    status: "ready",
+    update: { version: "0.1.65" },
+  });
   updater.beginUpdateDrain.mockResolvedValue(0);
   updater.cancelUpdateDrain.mockResolvedValue(undefined);
   updater.relaunchApp.mockResolvedValue(undefined);
@@ -97,11 +102,47 @@ describe("update coordinator", () => {
 
     await vi.waitFor(() => expect(updater.relaunchApp).toHaveBeenCalledOnce());
     expect(updater.beginUpdateDrain).toHaveBeenCalledOnce();
+    expect(updater.refreshStagedUpdate).toHaveBeenCalledOnce();
     expect(flushCloudPuts).toHaveBeenCalledOnce();
     expect(updater.installStagedUpdate).toHaveBeenCalledOnce();
     expect(useSessionStore.getState()).toMatchObject({
       updateWaiting: false,
       updateApplying: true,
+    });
+  });
+
+  it("replaces a superseded staged release before installing", async () => {
+    updater.refreshStagedUpdate.mockResolvedValue({
+      status: "ready",
+      update: { version: "0.1.88" },
+    });
+    updater.relaunchApp.mockImplementation(() => new Promise(() => {}));
+    useSessionStore.setState({ update: { version: "0.1.65" } });
+
+    void useSessionStore.getState().applyUpdate();
+
+    await vi.waitFor(() => expect(updater.installStagedUpdate).toHaveBeenCalledOnce());
+    expect(updater.refreshStagedUpdate).toHaveBeenCalledBefore(updater.installStagedUpdate);
+    expect(useSessionStore.getState().update).toEqual({ version: "0.1.88" });
+  });
+
+  it("fails closed when the latest release cannot be confirmed", async () => {
+    updater.refreshStagedUpdate.mockResolvedValue({
+      status: "error",
+      message: "update channel did not stabilize",
+    });
+    useSessionStore.setState({ update: { version: "0.1.65" } });
+
+    await useSessionStore.getState().applyUpdate();
+
+    expect(updater.installStagedUpdate).not.toHaveBeenCalled();
+    expect(updater.cancelUpdateDrain).toHaveBeenCalledOnce();
+    expect(useSessionStore.getState()).toMatchObject({
+      update: { version: "0.1.65" },
+      updateWaiting: false,
+      updateApplying: false,
+      updateProgress: null,
+      error: "Error: update channel did not stabilize",
     });
   });
 });

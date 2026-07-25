@@ -109,6 +109,7 @@ import { conversationProjectRoot, liveProjectRoot } from "../lib/sessionEnvironm
 import { releaseSnapshotCheckpoints } from "../lib/checkpointRefs";
 import {
   checkAndStageUpdate,
+  refreshStagedUpdate,
   installStagedUpdate,
   beginUpdateDrain,
   cancelUpdateDrain,
@@ -131,7 +132,7 @@ export {
   loadCollaborationMode, loadLocalSettings, loadMemoriesEnabled, loadOrchestrationEnabled, loadOutputStyle, loadRecentProjects,
   loadSshHosts, localConnectConfig, localSettingsReady, minLoadDuration, nextApprovalPolicy, normalizeCodingModel, normalizeReasoningEffort,
   notify, onCloudHistoryConflict, onCloudHistoryWarning, onSettingsMenuRequested, onUpdateMenuRequested, pickAllowOption,
-  pickFolder, provisionCodeKey, refreshAuthSession, relaunchApp, releaseSnapshotCheckpoints, remoteTarget,
+  pickFolder, provisionCodeKey, refreshAuthSession, refreshStagedUpdate, relaunchApp, releaseSnapshotCheckpoints, remoteTarget,
   repositoryFingerprintForRoot, resetCloudHistory, resetFanOut, saveApprovalPolicy, saveBrowserEnabled, saveChatModels, saveCollaborationMode,
   saveLocalSettings, saveMemoriesEnabled, saveOrchestrationEnabled, saveOutputStyle, scheduleCloudPut, settleRuns,
   signInWithGoogle, snapshotBeforeTimelineItem, sshConnect, sshDisconnect, syncFanOut, toUpload,

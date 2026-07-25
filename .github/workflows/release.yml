@@ -524,10 +524,10 @@ jobs:
             esac
           }
 
-          # Stable, human-facing CDN names — what clarkchat.com/download and the
-          # in-app updater link to — independent of tauri's versioned bundle
-          # filenames. Used for BOTH the versioned and the latest/ keys so the two
-          # never diverge (the bug that forced a manual publish through v0.1.6).
+          # Stable, human-facing filenames under an immutable version directory.
+          # The download manifest and updater latest.json point to these exact
+          # keys. Never overwrite payloads under latest/: an older cached
+          # latest.json must continue to resolve to bytes matching its signature.
           canonical_for() {
             case "$1" in
               *.dmg) echo "ClarkCode.dmg" ;;
@@ -557,10 +557,6 @@ jobs:
               --content-type "$content_type" \
               --cache-control "$IMM" \
               --metadata "sha256=$sha,clark-version=$tag"
-            aws s3 cp "$file" "s3://$bucket/desktop/latest/$canonical" \
-              --content-type "$content_type" \
-              --cache-control "public, max-age=300" \
-              --metadata "sha256=$sha,clark-version=$tag"
 
             if in_download_manifest "$file"; then
               node -e '
@@ -586,32 +582,33 @@ jobs:
           # only produces its own updater artifact + detached .sig, so no single
           # leg can write the whole latest.json — this emits just this leg's
           # platform entries and the publish job merges all three. Map each
-          # updater artifact's .sig → its tauri platform key(s) + canonical CDN
-          # url (macOS: universal .app.tar.gz for both arches; Windows: the NSIS
-          # -setup.exe; Linux: the .AppImage). tauri.conf.json's updater endpoint
-          # is desktop/latest/latest.json.
+          # updater artifact's .sig → its tauri platform key(s) + immutable,
+          # versioned CDN URL (macOS: universal .app.tar.gz for both arches;
+          # Windows: the NSIS -setup.exe; Linux: the .AppImage).
+          # tauri.conf.json's updater endpoint is desktop/latest/latest.json.
           find_sig() { find target -type f -path "*/bundle/*" -name "$1" | head -1; }
           mac_sig="$(find_sig '*.app.tar.gz.sig')"
           win_sig="$(find_sig '*-setup.exe.sig')"
           linux_sig="$(find_sig '*.AppImage.sig')"
           node -e '
             const fs = require("fs");
-            const [base, macSig, winSig, linuxSig, out] = process.argv.slice(1);
+            const [base, tag, macSig, winSig, linuxSig, out] = process.argv.slice(1);
             const read = (p) => (p ? fs.readFileSync(p, "utf8").trim() : "");
+            const releaseBase = `${base}/releases/${tag}`;
             const platforms = {};
             if (macSig) {
-              const e = { signature: read(macSig), url: `${base}/latest/ClarkCode.app.tar.gz` };
+              const e = { signature: read(macSig), url: `${releaseBase}/ClarkCode.app.tar.gz` };
               platforms["darwin-aarch64"] = e;
               platforms["darwin-x86_64"] = e;
             }
             if (winSig) {
-              platforms["windows-x86_64"] = { signature: read(winSig), url: `${base}/latest/ClarkCode_x64-setup.exe` };
+              platforms["windows-x86_64"] = { signature: read(winSig), url: `${releaseBase}/ClarkCode_x64-setup.exe` };
             }
             if (linuxSig) {
-              platforms["linux-x86_64"] = { signature: read(linuxSig), url: `${base}/latest/ClarkCode_amd64.AppImage` };
+              platforms["linux-x86_64"] = { signature: read(linuxSig), url: `${releaseBase}/ClarkCode_amd64.AppImage` };
             }
             fs.writeFileSync(out, JSON.stringify({ platforms }, null, 2) + "\n");
-          ' "$base_url" "$mac_sig" "$win_sig" "$linux_sig" "$records_dir/updater-${RUNNER_OS}.json"
+          ' "$base_url" "$tag" "$mac_sig" "$win_sig" "$linux_sig" "$records_dir/updater-${RUNNER_OS}.json"
 
       - name: Upload public download asset records
         uses: actions/upload-artifact@v4
@@ -630,15 +627,10 @@ jobs:
     # when connecting to a remote host before those binaries finish uploading.
     needs: [build, exec-server]
     runs-on: ubuntu-latest
+    concurrency:
+      group: clark-desktop-release-publish
+      cancel-in-progress: false
     steps:
-      - name: Publish the release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release edit "${{ github.ref_name }}" \
-            --repo "${{ github.repository }}" \
-            --draft=false --latest
-
       - name: Configure AWS credentials for public manifest upload
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -661,6 +653,11 @@ jobs:
           bucket="${CLARK_DESKTOP_DOWNLOAD_BUCKET}"
           base_url="${CLARK_DESKTOP_DOWNLOAD_BASE_URL%/}"
           manifest="$(mktemp)"
+          pointer_cache="no-store, no-cache, must-revalidate, max-age=0"
+          if ! [[ "$tag" =~ ^v[0-9]+(\.[0-9]+)+$ ]]; then
+            echo "Release ref must be a stable numeric version tag, got: $tag" >&2
+            exit 1
+          fi
 
           node -e '
             const fs = require("fs");
@@ -689,7 +686,7 @@ jobs:
             --cache-control "public, max-age=31536000, immutable"
           aws s3 cp "$manifest" "s3://$bucket/desktop/latest/manifest.json" \
             --content-type "application/json" \
-            --cache-control "public, max-age=60"
+            --cache-control "$pointer_cache"
 
           # Merge every leg's updater fragment into one cross-platform latest.json
           # (the updater endpoint pinned in tauri.conf.json). This is what lets
@@ -698,11 +695,23 @@ jobs:
           node -e '
             const fs = require("fs");
             const path = require("path");
-            const [root, tag, repo, out] = process.argv.slice(1);
+            const [root, tag, repo, baseUrl, out] = process.argv.slice(1);
             const platforms = {};
             for (const f of fs.readdirSync(root).filter((n) => n.startsWith("updater-") && n.endsWith(".json"))) {
               const frag = JSON.parse(fs.readFileSync(path.join(root, f), "utf8"));
               Object.assign(platforms, frag.platforms || {});
+            }
+            const expected = ["darwin-aarch64", "darwin-x86_64", "linux-x86_64", "windows-x86_64"];
+            for (const platform of expected) {
+              if (!platforms[platform]) throw new Error(`Missing updater entry for ${platform}`);
+            }
+            const releasePrefix = `${baseUrl.replace(/\/$/, "")}/releases/${tag}/`;
+            for (const [platform, entry] of Object.entries(platforms)) {
+              if (!expected.includes(platform)) throw new Error(`Unexpected updater entry for ${platform}`);
+              if (!entry.signature) throw new Error(`Missing updater signature for ${platform}`);
+              if (!entry.url.startsWith(releasePrefix)) {
+                throw new Error(`Updater URL for ${platform} is not immutable: ${entry.url}`);
+              }
             }
             const doc = {
               version: tag.replace(/^v/, ""),
@@ -711,18 +720,114 @@ jobs:
               platforms,
             };
             fs.writeFileSync(out, JSON.stringify(doc, null, 2) + "\n");
-          ' release-records "$tag" "$GITHUB_REPOSITORY" "$latest"
+          ' release-records "$tag" "$GITHUB_REPOSITORY" "$base_url" "$latest"
 
-          aws s3 cp "$latest" "s3://$bucket/desktop/latest/latest.json" \
-            --content-type "application/json" --cache-control "public, max-age=60"
+          # Publish and validate the immutable snapshot first. latest.json is the
+          # only mutable updater object and is written last as the atomic pointer.
           aws s3 cp "$latest" "s3://$bucket/desktop/releases/$tag/latest.json" \
             --content-type "application/json" --cache-control "public, max-age=31536000, immutable"
 
-          if [ -n "${CLARK_DESKTOP_DOWNLOAD_DISTRIBUTION_ID}" ]; then
-            aws cloudfront create-invalidation \
-              --distribution-id "${CLARK_DESKTOP_DOWNLOAD_DISTRIBUTION_ID}" \
-              --paths "/desktop/latest/*"
+          # Publish jobs are serialized above. Keep this monotonic guard as a
+          # second line of defense against a delayed/retried older workflow
+          # moving the channel backward after a newer tag is already live.
+          current_pointer="$(mktemp)"
+          aws s3 cp "s3://$bucket/desktop/latest/latest.json" "$current_pointer"
+          node -e '
+            const fs = require("fs");
+            const [file, incoming] = process.argv.slice(1);
+            const current = JSON.parse(fs.readFileSync(file, "utf8")).version;
+            const parts = (version) => {
+              if (!/^\d+(?:\.\d+)+$/.test(version)) throw new Error(`Invalid release version: ${version}`);
+              return version.split(".").map(Number);
+            };
+            const a = parts(current);
+            const b = parts(incoming);
+            const width = Math.max(a.length, b.length);
+            for (let i = 0; i < width; i += 1) {
+              const delta = (a[i] || 0) - (b[i] || 0);
+              if (delta > 0) {
+                throw new Error(`Refusing to move latest backward from ${current} to ${incoming}`);
+              }
+              if (delta < 0) break;
+            }
+          ' "$current_pointer" "${tag#v}"
+
+          aws s3 cp "$latest" "s3://$bucket/desktop/latest/latest.json" \
+            --content-type "application/json" --cache-control "$pointer_cache"
+
+          observed_s3="$(mktemp)"
+          aws s3 cp "s3://$bucket/desktop/latest/latest.json" "$observed_s3"
+          cmp -s "$latest" "$observed_s3" || {
+            echo "Published updater pointer does not match the assembled manifest" >&2
+            exit 1
+          }
+          actual_cache="$(aws s3api head-object \
+            --bucket "$bucket" \
+            --key "desktop/latest/latest.json" \
+            --query 'CacheControl' \
+            --output text)"
+          if [ "$actual_cache" != "$pointer_cache" ]; then
+            echo "Updater pointer has unsafe cache policy: $actual_cache" >&2
+            exit 1
           fi
+
+          if [ -n "${CLARK_DESKTOP_DOWNLOAD_DISTRIBUTION_ID}" ]; then
+            invalidation_id="$(aws cloudfront create-invalidation \
+              --distribution-id "${CLARK_DESKTOP_DOWNLOAD_DISTRIBUTION_ID}" \
+              --paths "/desktop/latest/*" \
+              --query 'Invalidation.Id' \
+              --output text)"
+            aws cloudfront wait invalidation-completed \
+              --distribution-id "${CLARK_DESKTOP_DOWNLOAD_DISTRIBUTION_ID}" \
+              --id "$invalidation_id"
+          fi
+
+          # Do not make the GitHub release public until the CDN repeatedly
+          # serves this exact version and only immutable updater payload URLs.
+          observed_cdn="$(mktemp)"
+          observed_headers="$(mktemp)"
+          cdn_ready=0
+          cdn_confirmations=0
+          for _attempt in $(seq 1 24); do
+            if curl -fsS \
+              -H "Cache-Control: no-cache, no-store, max-age=0" \
+              -H "Pragma: no-cache" \
+              -D "$observed_headers" \
+              "$base_url/latest/latest.json" \
+              -o "$observed_cdn" &&
+              tr -d '\r' < "$observed_headers" | grep -qi '^cache-control:.*no-store' &&
+              node -e '
+                const fs = require("fs");
+                const [file, version, prefix] = process.argv.slice(1);
+                const doc = JSON.parse(fs.readFileSync(file, "utf8"));
+                if (doc.version !== version) process.exit(1);
+                const entries = Object.values(doc.platforms || {});
+                if (entries.length !== 4 || entries.some((entry) => !entry.url.startsWith(prefix))) {
+                  process.exit(1);
+                }
+              ' "$observed_cdn" "${tag#v}" "$base_url/releases/$tag/"; then
+              cdn_confirmations=$((cdn_confirmations + 1))
+              if [ "$cdn_confirmations" -ge 2 ]; then
+                cdn_ready=1
+                break
+              fi
+            else
+              cdn_confirmations=0
+            fi
+            sleep 5
+          done
+          if [ "$cdn_ready" -ne 1 ]; then
+            echo "CDN did not converge on updater version ${tag#v}" >&2
+            exit 1
+          fi
+
+      - name: Publish the release after updater convergence
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release edit "${{ github.ref_name }}" \
+            --repo "${{ github.repository }}" \
+            --draft=false --latest
 
   # The remote-projects feature (SSH) fetches a per-arch clark-exec-server from
   # the CDN onto the remote host. Build all four targets on one macOS runner

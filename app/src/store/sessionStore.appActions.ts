@@ -49,6 +49,7 @@ import {
   pickFolder,
   provisionCodeKey,
   refreshAuthSession,
+  refreshStagedUpdate,
   resetCloudHistory,
   relaunchApp,
   saveBrowserEnabled,
@@ -129,6 +130,20 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
         await delay(UPDATE_DRAIN_POLL_MS);
       }
 
+      // A release may have landed while the update prompt was waiting. Keep
+      // the native no-new-runs latch held, revalidate the latest pointer, and
+      // replace a superseded staged payload before saving and installing.
+      const refreshed = await refreshStagedUpdate((progress) => set({ updateProgress: progress }));
+      set({ updateProgress: null });
+      if (refreshed.status !== "ready") {
+        throw new Error(
+          refreshed.status === "error"
+            ? refreshed.message
+            : "Clark Code could not confirm the latest update; try again.",
+        );
+      }
+      set({ update: refreshed.update });
+
       if (!(await flushCloudPuts())) {
         throw new Error("Clark Code could not save the final conversation state; update postponed.");
       }
@@ -146,6 +161,7 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
       set({
         updateWaiting: false,
         updateApplying: false,
+        updateProgress: null,
         ...(installed ? { update: null } : {}),
         error: String(error),
       });

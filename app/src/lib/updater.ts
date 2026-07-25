@@ -49,6 +49,72 @@ export interface DownloadProgress {
 // needs serializable metadata while this handle waits for the drain gate.
 let stagedUpdate: Update | null = null;
 
+// latest.json is the sole mutable object in the update channel. Ask every check
+// to revalidate it so a long-lived CDN/browser cache cannot pin an older release
+// after the user has already chosen "Restart to update".
+function revalidateOptions() {
+  // The Tauri JS plugin normalizes headers by mutating the supplied options
+  // object, so return a fresh object for every request.
+  return {
+    headers: {
+      "Cache-Control": "no-cache, no-store, max-age=0",
+      Pragma: "no-cache",
+    },
+    timeout: 30_000,
+  };
+}
+
+// If releases land while a large updater payload is downloading, follow the
+// channel forward a bounded number of times. A final equal-version check is
+// required before install; continuously moving channels fail closed and let the
+// user retry instead of knowingly installing a superseded build.
+const MAX_SUPERSEDED_DOWNLOADS = 3;
+
+function metadata(update: Update): StagedUpdate {
+  return { version: update.version, notes: update.body || undefined };
+}
+
+function numericReleaseParts(version: string): number[] | null {
+  const normalized = version.trim().replace(/^v/, "");
+  if (!/^\d+(?:\.\d+)*$/.test(normalized)) return null;
+  return normalized.split(".").map(Number);
+}
+
+/** Compare the stable numeric versions used by Clark's production channel. */
+function compareReleaseVersions(left: string, right: string): number | null {
+  const a = numericReleaseParts(left);
+  const b = numericReleaseParts(right);
+  if (!a || !b) return null;
+  for (let i = 0; i < Math.max(a.length, b.length); i += 1) {
+    const delta = (a[i] ?? 0) - (b[i] ?? 0);
+    if (delta !== 0) return Math.sign(delta);
+  }
+  return 0;
+}
+
+async function closeQuietly(update: Update | null): Promise<void> {
+  if (update) await update.close().catch(() => {});
+}
+
+async function downloadUpdate(
+  update: Update,
+  onProgress?: (p: DownloadProgress) => void,
+): Promise<void> {
+  let total: number | null = null;
+  let downloaded = 0;
+  await update.download((e) => {
+    if (e.event === "Started") {
+      total = e.data.contentLength ?? null;
+      downloaded = 0;
+    } else if (e.event === "Progress") {
+      downloaded += e.data.chunkLength;
+    } else if (e.event === "Finished") {
+      downloaded = total ?? downloaded;
+    }
+    onProgress?.({ downloaded, total });
+  });
+}
+
 /** Check for an update and, if one exists, download + verify + stage it,
  *  reporting byte progress via `onProgress`. The result keeps "up to date"
  *  distinct from transport/signature failures so manual checks never report a
@@ -60,30 +126,103 @@ export async function checkAndStageUpdate(
   let candidate: Update | null = null;
   try {
     const { check } = await import("@tauri-apps/plugin-updater");
-    candidate = await check();
+    candidate = await check(revalidateOptions());
     if (!candidate) return { status: "up-to-date" };
+
+    if (stagedUpdate) {
+      const comparison = compareReleaseVersions(candidate.version, stagedUpdate.version);
+      if (comparison === null) {
+        throw new Error(
+          `Cannot safely compare update versions ${candidate.version} and ${stagedUpdate.version}.`,
+        );
+      }
+      if (comparison <= 0) {
+        await closeQuietly(candidate);
+        candidate = null;
+        return { status: "ready", update: metadata(stagedUpdate) };
+      }
+    }
+
     // Download + verify only. `install()` is deferred because it forcibly exits
     // on Windows and must therefore sit behind the active-run drain.
-    let total: number | null = null;
-    let downloaded = 0;
-    await candidate.download((e) => {
-      if (e.event === "Started") {
-        total = e.data.contentLength ?? null;
-        downloaded = 0;
-      } else if (e.event === "Progress") {
-        downloaded += e.data.chunkLength;
-      } else if (e.event === "Finished") {
-        downloaded = total ?? downloaded;
-      }
-      onProgress?.({ downloaded, total });
-    });
+    await downloadUpdate(candidate, onProgress);
+    const previous = stagedUpdate;
     stagedUpdate = candidate;
-    return {
-      status: "ready",
-      update: { version: candidate.version, notes: candidate.body || undefined },
-    };
+    candidate = null;
+    await closeQuietly(previous);
+    return { status: "ready", update: metadata(stagedUpdate) };
   } catch (error) {
-    if (candidate) void candidate.close().catch(() => {});
+    await closeQuietly(candidate);
+    return {
+      status: "error",
+      message: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/** Revalidate the mutable latest pointer and replace a superseded staged
+ *  download. Call only after the native update drain has reached zero; this
+ *  function may download a newer payload and intentionally keeps the latch
+ *  held until the caller installs or cancels. */
+export async function refreshStagedUpdate(
+  onProgress?: (p: DownloadProgress) => void,
+): Promise<UpdateCheckResult> {
+  if (!inTauri()) return { status: "unavailable" };
+  if (!stagedUpdate) {
+    return {
+      status: "error",
+      message: "The downloaded update is no longer available; check again.",
+    };
+  }
+
+  try {
+    const { check } = await import("@tauri-apps/plugin-updater");
+    for (let superseded = 0; superseded <= MAX_SUPERSEDED_DOWNLOADS; superseded += 1) {
+      let candidate: Update | null = null;
+      try {
+        candidate = await check(revalidateOptions());
+        if (!candidate) {
+          throw new Error("The latest update manifest no longer offers the staged version.");
+        }
+
+        const comparison = compareReleaseVersions(candidate.version, stagedUpdate.version);
+        if (comparison === null) {
+          throw new Error(
+            `Cannot safely compare update versions ${candidate.version} and ${stagedUpdate.version}.`,
+          );
+        }
+        if (comparison === 0) {
+          await closeQuietly(candidate);
+          return { status: "ready", update: metadata(stagedUpdate) };
+        }
+        if (comparison < 0) {
+          await closeQuietly(candidate);
+          if (superseded === MAX_SUPERSEDED_DOWNLOADS) {
+            throw new Error(
+              `The update channel returned older version ${candidate.version} after ${stagedUpdate.version}; retry after the CDN refreshes.`,
+            );
+          }
+          continue;
+        }
+        if (superseded === MAX_SUPERSEDED_DOWNLOADS) {
+          await closeQuietly(candidate);
+          throw new Error("The update channel changed repeatedly; retry to install the latest release.");
+        }
+
+        await downloadUpdate(candidate, onProgress);
+        const previous = stagedUpdate;
+        stagedUpdate = candidate;
+        candidate = null;
+        await closeQuietly(previous);
+        // Check once more. Installation is allowed only when the mutable pointer
+        // returns the exact version whose signed bytes are currently staged.
+      } catch (error) {
+        await closeQuietly(candidate);
+        throw error;
+      }
+    }
+    throw new Error("The update channel did not stabilize.");
+  } catch (error) {
     return {
       status: "error",
       message: error instanceof Error ? error.message : String(error),
