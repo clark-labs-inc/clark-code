@@ -14,6 +14,7 @@ mod multi_repo;
 mod policy;
 mod provider_harness;
 mod runtime;
+mod scout;
 
 pub use budget::{BudgetConfig, BudgetReservation, BudgetSnapshot, SharedBudget, UsageCharge};
 pub use contract::{
@@ -50,4 +51,20 @@ pub use provider_harness::{
 pub use runtime::{
     Coordinator, CoordinatorError, CoordinatorEvent, CoordinatorEventSink, FanOutRequest,
     FanOutResult,
+};
+pub use scout::{
+    compute_measurement as compute_scout_measurement, Adjudication as ScoutAdjudication,
+    AssignmentRecord as ScoutAssignmentRecord, AssignmentStatus as ScoutAssignmentStatus,
+    ClaimId as ScoutClaimId, ClaimProposal as ScoutClaimProposal, ClaimRecord as ScoutClaimRecord,
+    ClaimStatus as ScoutClaimStatus, ClaimUpdate as ScoutClaimUpdate,
+    CompletionCheck as ScoutCompletionCheck, ConfidenceInterval as ScoutConfidenceInterval,
+    EvidenceArtifact as ScoutEvidenceArtifact, EvidenceCheck as ScoutEvidenceCheck,
+    EvidenceId as ScoutEvidenceId, EvidenceKind as ScoutEvidenceKind, EvidenceProducer,
+    EvidenceRecord as ScoutEvidenceRecord, Measurement as ScoutMeasurement,
+    MeasurementComputation as ScoutMeasurementComputation,
+    MeasurementMethod as ScoutMeasurementMethod, OfflinePocControls, ProofTier,
+    RunnerId as ScoutRunnerId, ScoutActor, ScoutAssignment, ScoutCapabilities, ScoutCharter,
+    ScoutEvent, ScoutEventKind, ScoutLedger, ScoutLimits, ScoutPhase, ScoutRole, ScoutRunId,
+    ScoutSnapshot, ScoutVerdict, SealDisposition, VerificationOutcome,
+    WorkerAssignmentId as ScoutWorkerAssignmentId, WorkerEnvelope as ScoutWorkerEnvelope,
 };

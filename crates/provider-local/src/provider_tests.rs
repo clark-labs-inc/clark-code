@@ -394,6 +394,10 @@ async fn orchestration_tools_are_default_available_but_can_be_disabled() {
     assert!(registry.get("resolve_delegation").is_some());
     assert!(registry.get("delegate_coding_workstreams").is_some());
     assert!(registry.get("resolve_coding_workstreams").is_some());
+    assert!(registry.get("scout_capabilities").is_some());
+    assert!(registry.get("scout_ledger").is_some());
+    assert!(registry.get("scout_probe").is_some());
+    assert!(registry.get("scout_measure").is_some());
     enabled
         .new_session(SessionOptions {
             cwd: Some(dir.path().to_string_lossy().into_owned()),
@@ -424,6 +428,12 @@ async fn orchestration_tools_are_default_available_but_can_be_disabled() {
         .as_ref()
         .unwrap()
         .get("delegate_coding_workstreams")
+        .is_none());
+    assert!(disabled
+        .registry
+        .as_ref()
+        .unwrap()
+        .get("scout_capabilities")
         .is_none());
 }
 

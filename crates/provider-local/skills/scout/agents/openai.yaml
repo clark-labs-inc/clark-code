@@ -1,0 +1,20 @@
+interface:
+  display_name: "Scout"
+  short_description: "Exhaustively map systems with verified evidence"
+  default_prompt: "Use $scout to exhaust every discovered safe read-only system surface with bounded agents, verified artifacts, and an adjudicated claim ledger."
+dependencies:
+  tools:
+    - type: tool
+      value: scout_capabilities
+    - type: tool
+      value: scout_ledger
+    - type: tool
+      value: scout_probe
+    - type: tool
+      value: scout_measure
+    - type: tool
+      value: delegate_read_only
+    - type: tool
+      value: resolve_delegation
+policy:
+  allow_implicit_invocation: true

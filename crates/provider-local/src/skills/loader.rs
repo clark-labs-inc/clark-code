@@ -397,31 +397,42 @@ async fn load_metadata(exec: &dyn Executor, skill_path: &Path) -> Result<LoadedM
     })
 }
 
-pub(super) fn parse_bundled_skill(
-    namespace: &str,
-    locator: &'static str,
-    contents: &'static str,
-) -> Skill {
-    let frontmatter = frontmatter(contents).expect("bundled skill must have frontmatter");
+pub(super) struct BundledSkillSpec {
+    pub namespace: &'static str,
+    pub locator: &'static str,
+    pub contents: &'static str,
+    pub required_tools: &'static [&'static str],
+    pub allow_implicit_invocation: bool,
+}
+
+pub(super) fn parse_bundled_skill(spec: BundledSkillSpec) -> Skill {
+    let frontmatter = frontmatter(spec.contents).expect("bundled skill must have frontmatter");
     let parsed = parse_frontmatter(frontmatter).expect("bundled skill frontmatter must be valid");
     let base_name = parsed.name.as_deref().unwrap_or("skill").trim().to_string();
     assert!(
         valid_skill_name(&base_name),
         "bundled skill name must be valid"
     );
-    let name = format!("{namespace}:{base_name}");
+    let name = format!("{}:{base_name}", spec.namespace);
     Skill {
-        id: skill_identity(locator),
-        revision: skill_revision(contents.as_bytes()),
+        id: skill_identity(spec.locator),
+        revision: skill_revision(spec.contents.as_bytes()),
         invocation_name: name.clone(),
         name,
         base_name,
         description: sanitize(&parsed.description, MAX_DESCRIPTION_CHARS),
         scope: SkillScope::Bundled,
         origin: SkillOrigin::Clark,
-        resource: SkillResource::Embedded { locator, contents },
-        required_tools: vec!["bash".to_string()],
-        allow_implicit_invocation: true,
+        resource: SkillResource::Embedded {
+            locator: spec.locator,
+            contents: spec.contents,
+        },
+        required_tools: spec
+            .required_tools
+            .iter()
+            .map(|tool| (*tool).to_string())
+            .collect(),
+        allow_implicit_invocation: spec.allow_implicit_invocation,
         enabled: true,
         missing_tools: Vec::new(),
         disabled_reason: None,

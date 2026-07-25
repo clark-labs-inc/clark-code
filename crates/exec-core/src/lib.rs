@@ -21,9 +21,11 @@ use std::time::{Duration, SystemTime};
 use async_trait::async_trait;
 use tokio_util::sync::CancellationToken;
 
+mod capabilities;
 mod local;
 mod process;
 mod process_fence;
+pub use capabilities::{collect_system_capabilities, SystemCapabilityCensus};
 pub use local::LocalExecutor;
 pub use process::{run_process_streaming, run_process_streaming_pty, spawn_process, ProcessSpec};
 pub use process_fence::ProcessFence;
@@ -302,6 +304,13 @@ pub fn is_ignored(path: &Path) -> bool {
 /// local machine ([`LocalExecutor`]) or a remote host.
 #[async_trait]
 pub trait Executor: Send + Sync {
+    /// Enumerate executable names, environment-variable names, and known
+    /// credential surfaces without executing discovered programs or reading
+    /// credential values.
+    async fn system_capability_census(&self) -> ExecResult<SystemCapabilityCensus> {
+        Ok(collect_system_capabilities(None))
+    }
+
     /// Read a file's bytes.
     async fn read(&self, path: &Path) -> ExecResult<Vec<u8>>;
     /// Write bytes to a file, creating parent directories as needed.

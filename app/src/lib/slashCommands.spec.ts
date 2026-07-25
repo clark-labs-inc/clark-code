@@ -58,3 +58,20 @@ describe("sentry slash command", () => {
     expect(expandPromptSlashCommand("inspect /sentry APP-123")).toBe("inspect /sentry APP-123");
   });
 });
+
+describe("scout slash command", () => {
+  it("is discoverable as a local prompt command using the collision-safe skill name", () => {
+    expect(slashCommands()).toContainEqual(expect.objectContaining({
+      name: "scout",
+      body: "$scout:scout",
+      localOnly: true,
+    }));
+  });
+
+  it("expands direct command input without matching lookalike commands", () => {
+    expect(expandPromptSlashCommand("/scout")).toBe("$scout:scout");
+    expect(expandPromptSlashCommand("  /scout map AWS")).toBe("  $scout:scout map AWS");
+    expect(expandPromptSlashCommand("/scouting")).toBe("/scouting");
+    expect(expandPromptSlashCommand("please /scout")).toBe("please /scout");
+  });
+});

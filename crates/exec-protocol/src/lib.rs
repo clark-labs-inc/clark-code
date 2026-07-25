@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 
 /// Bumped on any breaking change to the methods/params below. The server
 /// refuses to serve a client advertising a different major value.
-pub const PROTOCOL_VERSION: u32 = 5;
+pub const PROTOCOL_VERSION: u32 = 6;
 
 /// Method names. String constants (not an enum) so unknown methods round-trip to
 /// a clean "method not found" error instead of a deserialize failure.
@@ -40,6 +40,7 @@ pub mod method {
     pub const FS_CANONICALIZE: &str = "fs/canonicalize";
     pub const FS_WALK: &str = "fs/walk";
     pub const ENV_HOME: &str = "environment/home";
+    pub const ENV_CAPABILITY_CENSUS: &str = "environment/capabilityCensus";
     pub const PROCESS_START: &str = "process/start";
     pub const PROCESS_RESUME: &str = "process/resume";
     pub const PROCESS_STATUS: &str = "process/status";
@@ -227,6 +228,17 @@ pub struct MetaResult {
 pub struct CanonicalizeResult {
     /// Absolute path on the target machine after resolving symlinks.
     pub path: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SystemCapabilityCensusResult {
+    pub platform: String,
+    pub architecture: String,
+    pub executable_names: Vec<String>,
+    pub environment_variable_names: Vec<String>,
+    pub credential_surfaces: Vec<String>,
+    pub executables_truncated: bool,
+    pub environment_names_truncated: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

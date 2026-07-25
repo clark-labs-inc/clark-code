@@ -26,11 +26,12 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use exec_core::{Executor, LocalExecutor};
+use exec_core::{collect_system_capabilities, Executor, LocalExecutor};
 use exec_protocol::{
     b64_decode, b64_encode, error_code, method, AuthParams, AuthResult, CanonicalizeResult,
-    MetaResult, PathParams, ReadDirResult, ReadResult, RenameParams, Request, Response, WalkResult,
-    WireDirEntry, WireWalkEntry, WriteParams, PROTOCOL_VERSION,
+    MetaResult, PathParams, ReadDirResult, ReadResult, RenameParams, Request, Response,
+    SystemCapabilityCensusResult, WalkResult, WireDirEntry, WireWalkEntry, WriteParams,
+    PROTOCOL_VERSION,
 };
 use futures::{SinkExt, StreamExt};
 use serde::de::DeserializeOwned;
@@ -236,7 +237,8 @@ async fn handle_request(
         | method::FS_METADATA
         | method::FS_CANONICALIZE
         | method::FS_WALK
-        | method::ENV_HOME => {
+        | method::ENV_HOME
+        | method::ENV_CAPABILITY_CENSUS => {
             let resp = match fs_dispatch(&req.method, req.params, fs, &shared.config).await {
                 Ok(v) => Response::ok(id, v),
                 Err((code, msg)) => Response::err(id, code, msg),
@@ -265,6 +267,18 @@ async fn fs_dispatch(
     config: &Config,
 ) -> Result<serde_json::Value, (i64, String)> {
     match method_name {
+        method::ENV_CAPABILITY_CENSUS => {
+            let census = collect_system_capabilities(config.home.as_deref());
+            Ok(to_value(&SystemCapabilityCensusResult {
+                platform: census.platform,
+                architecture: census.architecture,
+                executable_names: census.executable_names,
+                environment_variable_names: census.environment_variable_names,
+                credential_surfaces: census.credential_surfaces,
+                executables_truncated: census.executables_truncated,
+                environment_names_truncated: census.environment_names_truncated,
+            }))
+        }
         method::ENV_HOME => {
             let home = config
                 .home

@@ -281,6 +281,60 @@ async fn bundled_sentry_skill_is_read_only_and_resolves_through_its_alias() {
 }
 
 #[tokio::test]
+async fn bundled_scout_skill_requires_the_typed_evidence_toolchain() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut catalog = discover_catalog_with_home(&LocalExecutor, temp.path(), None).await;
+    catalog.resolve_capabilities(&HashSet::from(["bash".to_string()]), &[]);
+    assert!(catalog.resolve_name("scout").is_err());
+
+    catalog.resolve_capabilities(
+        &HashSet::from([
+            "scout_capabilities".to_string(),
+            "scout_ledger".to_string(),
+            "scout_probe".to_string(),
+            "scout_measure".to_string(),
+            "delegate_read_only".to_string(),
+            "resolve_delegation".to_string(),
+        ]),
+        &[],
+    );
+    let scout = catalog.resolve_name("scout").unwrap();
+    assert_eq!(scout.name, "scout:scout");
+    let body = catalog.read(&LocalExecutor, scout).await.unwrap();
+    assert!(body.contains("Never print, return, hash, or persist secret values"));
+    assert!(body.contains("Call `scout_capabilities`"));
+    assert!(body.contains("Workers propose"));
+    assert!(body.contains("independently checked reproduction"));
+    assert!(
+        body.contains("Exhaust every discovered capability family and safe authentication context")
+    );
+    assert!(body.contains("Every pinned manifest row has a terminal status"));
+}
+
+#[test]
+fn bundled_scout_openai_metadata_matches_runtime_dependencies() {
+    let metadata: serde_yaml::Value =
+        serde_yaml::from_str(include_str!("../../skills/scout/agents/openai.yaml")).unwrap();
+    let tools = metadata["dependencies"]["tools"]
+        .as_sequence()
+        .unwrap()
+        .iter()
+        .map(|tool| tool["value"].as_str().unwrap())
+        .collect::<HashSet<_>>();
+    assert_eq!(
+        tools,
+        HashSet::from([
+            "scout_capabilities",
+            "scout_ledger",
+            "scout_probe",
+            "scout_measure",
+            "delegate_read_only",
+            "resolve_delegation",
+        ])
+    );
+}
+
+#[tokio::test]
 async fn skill_resources_are_relative_text_and_cannot_escape_or_follow_symlinks() {
     let temp = tempfile::tempdir().unwrap();
     let project = temp.path().join("repo");

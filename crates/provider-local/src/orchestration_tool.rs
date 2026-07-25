@@ -26,6 +26,8 @@ use crate::tools::{ToolCtx, ToolExecutor, ToolOutcome};
 mod resolution;
 #[path = "orchestration_tool_schema.rs"]
 mod schema;
+#[path = "orchestration_scout/mod.rs"]
+mod scout;
 #[path = "orchestration_tool_support.rs"]
 mod support;
 #[path = "orchestration_writer_tool.rs"]
@@ -50,6 +52,7 @@ pub(super) struct SharedState {
 
 pub(crate) fn orchestration_tools(config: OrchestrationToolsConfig) -> Vec<Arc<dyn ToolExecutor>> {
     let writer_config = config.clone();
+    let scout_max_parallel_agents = config.policy.max_agents;
     let shared = Arc::new(SharedState {
         execution_slots: Arc::new(Semaphore::new(config.policy.max_agents)),
         config,
@@ -62,6 +65,7 @@ pub(crate) fn orchestration_tools(config: OrchestrationToolsConfig) -> Vec<Arc<d
         resolution::tool(shared),
     ];
     tools.extend(writer::tools(writer_config));
+    tools.extend(scout::tools(scout_max_parallel_agents));
     tools
 }
 

@@ -7,6 +7,7 @@ import { useSessionStore } from "../store/sessionStore";
 import { conversationMarkdown } from "./transcript";
 
 const SENTRY_SKILL = "$sentry:sentry";
+const SCOUT_SKILL = "$scout:scout";
 
 export interface SlashCommand {
   /** Command word, without the leading slash. */
@@ -48,6 +49,12 @@ export function slashCommands(): SlashCommand[] {
       hint: "Browse, select, install, and inspect skills",
       localOnly: true,
       body: "/skills",
+    },
+    {
+      name: "scout",
+      hint: "Map a system with agents and verified evidence",
+      localOnly: true,
+      body: SCOUT_SKILL,
     },
     {
       name: "sentry",
@@ -122,14 +129,21 @@ export function isCompactCommand(text: string): boolean {
   return /^\s*\/compact\s*$/.test(text);
 }
 
-/** Expand a directly typed `/sentry …` command to the explicit bundled skill
- * mention. Autocomplete already inserts this form; normalizing submit makes
- * typing the whole command by hand behave identically. */
+/** Expand directly typed prompt commands to collision-safe bundled skill
+ * mentions. Autocomplete already inserts these forms; normalizing submit makes
+ * typing a whole command by hand behave identically. */
 export function expandPromptSlashCommand(text: string): string {
   const command = text.trimStart();
-  if (!command.startsWith("/sentry")) return text;
-  const rest = command.slice("/sentry".length);
-  if (rest.length > 0 && !/^\s/.test(rest)) return text;
-  const leading = text.slice(0, text.length - command.length);
-  return `${leading}${SENTRY_SKILL}${rest}`;
+  const mappings = [
+    { command: "/sentry", skill: SENTRY_SKILL },
+    { command: "/scout", skill: SCOUT_SKILL },
+  ];
+  for (const mapping of mappings) {
+    if (!command.startsWith(mapping.command)) continue;
+    const rest = command.slice(mapping.command.length);
+    if (rest.length > 0 && !/^\s/.test(rest)) return text;
+    const leading = text.slice(0, text.length - command.length);
+    return `${leading}${mapping.skill}${rest}`;
+  }
+  return text;
 }

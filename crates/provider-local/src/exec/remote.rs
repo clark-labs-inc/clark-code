@@ -19,13 +19,14 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use exec_core::{
-    BackgroundStatus, DirEntry, ExecOutput, ExecResult, Executor, FileMeta, WalkEntry,
+    BackgroundStatus, DirEntry, ExecOutput, ExecResult, Executor, FileMeta, SystemCapabilityCensus,
+    WalkEntry,
 };
 use exec_protocol::{
     b64_decode, b64_encode, method, AuthParams, AuthResult, CanonicalizeResult, MetaResult,
     Notification, PathParams, ProcessExitParams, ProcessIdParams, ProcessOutputParams,
     ProcessResumeParams, ProcessStartParams, ReadDirResult, ReadResult, RenameParams, Request,
-    Response, Stream, WalkResult, WriteParams, PROTOCOL_VERSION,
+    Response, Stream, SystemCapabilityCensusResult, WalkResult, WriteParams, PROTOCOL_VERSION,
 };
 use futures::{SinkExt, StreamExt};
 use serde::de::DeserializeOwned;
@@ -440,6 +441,22 @@ fn route(conn: &Conn, text: &str) {
 
 #[async_trait]
 impl Executor for RemoteExecutor {
+    async fn system_capability_census(&self) -> ExecResult<SystemCapabilityCensus> {
+        let value = self
+            .call(method::ENV_CAPABILITY_CENSUS, serde_json::json!({}))
+            .await?;
+        let census: SystemCapabilityCensusResult = from_value(value)?;
+        Ok(SystemCapabilityCensus {
+            platform: census.platform,
+            architecture: census.architecture,
+            executable_names: census.executable_names,
+            environment_variable_names: census.environment_variable_names,
+            credential_surfaces: census.credential_surfaces,
+            executables_truncated: census.executables_truncated,
+            environment_names_truncated: census.environment_names_truncated,
+        })
+    }
+
     fn containment(&self) -> exec_core::ExecutionContainment {
         exec_core::ExecutionContainment::External
     }
@@ -679,6 +696,36 @@ fn ms_to_time(ms: u64) -> SystemTime {
 mod tests {
     use super::*;
     use tokio::sync::Notify;
+
+    #[tokio::test]
+    async fn capability_census_round_trips_names_without_values() {
+        let dir = tempfile::tempdir().unwrap();
+        let server = exec_server::bind(exec_server::Config {
+            token: "census-token".into(),
+            root: Some(dir.path().to_path_buf()),
+            home: Some(dir.path().to_path_buf()),
+            addr: "127.0.0.1:0".into(),
+        })
+        .await
+        .unwrap();
+        let address = server.local_addr().unwrap();
+        tokio::spawn(server.serve());
+
+        let remote = RemoteExecutor::connect(&format!("ws://{address}"), "census-token")
+            .await
+            .unwrap();
+        let census = remote.system_capability_census().await.unwrap();
+        assert_eq!(census.platform, std::env::consts::OS);
+        assert_eq!(census.architecture, std::env::consts::ARCH);
+        assert!(census
+            .environment_variable_names
+            .iter()
+            .all(|name| !name.contains('=')));
+        assert!(census
+            .executable_names
+            .windows(2)
+            .all(|pair| pair[0] < pair[1]));
+    }
 
     #[tokio::test]
     async fn streaming_command_resumes_without_duplicate_output_after_disconnect() {

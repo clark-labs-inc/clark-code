@@ -212,6 +212,10 @@
     "read_skill",
     "resolve_coding_workstreams",
     "resolve_delegation",
+    "scout_capabilities",
+    "scout_ledger",
+    "scout_measure",
+    "scout_probe",
     "tool_search",
     "update_goal",
     "update_plan",
@@ -370,6 +374,18 @@
       "platform_support": {"macos": "supported", "windows": "supported", "ubuntu": "supported"}
     },
     {
+      "id": "scout_system_cartography",
+      "surface": "model_tools",
+      "tools": [
+        "scout_capabilities",
+        "scout_ledger",
+        "scout_probe",
+        "scout_measure"
+      ],
+      "lanes": ["rust_contract", "frontend_contract"],
+      "platform_support": {"macos": "supported", "windows": "supported", "ubuntu": "supported"}
+    },
+    {
       "id": "computer_use_perception",
       "surface": "model_tools",
       "tools": [
@@ -481,9 +497,10 @@
           "durable_memory",
           "organization_knowledge",
           "bounded_orchestration",
+          "scout_system_cartography",
           "mcp_and_remote_ssh"
         ],
-        "expected": "Signed Clark Code Dev starts, retains its TCC identity, opens a disposable project, and completes cheapest-paid MiniMax M3 chat and job turns."
+        "expected": "Signed Clark Code Dev starts, retains its TCC identity, opens a disposable project, completes a names-only Scout census, and completes cheapest-paid MiniMax M3 chat and job turns."
       },
       {
         "id": "mac_computer_use_safety",
@@ -542,9 +559,10 @@
           "image_generation",
           "organization_knowledge",
           "bounded_orchestration",
+          "scout_system_cartography",
           "cloud_auth_history_sync_and_share"
         ],
-        "expected": "The cheapest-paid MiniMax M3 route reads a disposable fixture, performs one approved edit, verifies the diff, and never escapes the fixture."
+        "expected": "The cheapest-paid MiniMax M3 route reads and Scouts a disposable fixture without secret values, performs one approved edit, verifies the diff, and never escapes the fixture."
       },
       {
         "id": "windows_platform_exclusions",
@@ -590,9 +608,10 @@
           "external_research",
           "deferred_tool_discovery",
           "image_generation",
-          "integrated_terminal"
+          "integrated_terminal",
+          "scout_system_cartography"
         ],
-        "expected": "The cheapest-paid MiniMax M3 route reads a disposable fixture and bubblewrap confines an approved mutation and cancelled background process."
+        "expected": "The cheapest-paid MiniMax M3 route reads and Scouts a disposable fixture without secret values, and bubblewrap confines an approved mutation and cancelled background process."
       },
       {
         "id": "ubuntu_feature_surface",

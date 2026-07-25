@@ -77,6 +77,10 @@ pub(super) fn tool_title(name: &str, args: &Value) -> String {
         "resolve_delegation" => "Reviewing delegated results".to_string(),
         "delegate_coding_workstreams" => "parallel coding workstreams".to_string(),
         "resolve_coding_workstreams" => "coding workstream resolution".to_string(),
+        "scout_capabilities" => "Surveying system capabilities".to_string(),
+        "scout_ledger" => "Updating the Scout evidence ledger".to_string(),
+        "scout_probe" => "Running a verified Scout probe".to_string(),
+        "scout_measure" => "Measuring Scout evidence".to_string(),
         "view_image" => argument(args, "path")
             .map(|path| format!("View image: {}", snippet(path)))
             .unwrap_or_else(|| "View image".to_string()),
