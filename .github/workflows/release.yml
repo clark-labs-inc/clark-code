@@ -759,14 +759,13 @@ jobs:
             --content-type "application/json" --cache-control "$pointer_cache"
 
           if [ -n "${CLARK_DESKTOP_DOWNLOAD_DISTRIBUTION_ID}" ]; then
-            invalidation_id="$(aws cloudfront create-invalidation \
+            # The narrowly scoped upload role may create invalidations but
+            # cannot read them back. Public CDN convergence below is the
+            # client-boundary receipt and does not require GetInvalidation.
+            aws cloudfront create-invalidation \
               --distribution-id "${CLARK_DESKTOP_DOWNLOAD_DISTRIBUTION_ID}" \
               --paths "/desktop/latest/*" \
-              --query 'Invalidation.Id' \
-              --output text)"
-            aws cloudfront wait invalidation-completed \
-              --distribution-id "${CLARK_DESKTOP_DOWNLOAD_DISTRIBUTION_ID}" \
-              --id "$invalidation_id"
+              >/dev/null
           fi
 
           # Do not make the GitHub release public until the CDN repeatedly
