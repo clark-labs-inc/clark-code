@@ -684,9 +684,6 @@ jobs:
           aws s3 cp "$manifest" "s3://$bucket/desktop/releases/$tag/manifest.json" \
             --content-type "application/json" \
             --cache-control "public, max-age=31536000, immutable"
-          aws s3 cp "$manifest" "s3://$bucket/desktop/latest/manifest.json" \
-            --content-type "application/json" \
-            --cache-control "$pointer_cache"
 
           # Merge every leg's updater fragment into one cross-platform latest.json
           # (the updater endpoint pinned in tauri.conf.json). This is what lets
@@ -731,7 +728,11 @@ jobs:
           # second line of defense against a delayed/retried older workflow
           # moving the channel backward after a newer tag is already live.
           current_pointer="$(mktemp)"
-          aws s3 cp "s3://$bucket/desktop/latest/latest.json" "$current_pointer"
+          curl -fsS \
+            -H "Cache-Control: no-cache, no-store, max-age=0" \
+            -H "Pragma: no-cache" \
+            "$base_url/latest/latest.json" \
+            -o "$current_pointer"
           node -e '
             const fs = require("fs");
             const [file, incoming] = process.argv.slice(1);
@@ -754,22 +755,8 @@ jobs:
 
           aws s3 cp "$latest" "s3://$bucket/desktop/latest/latest.json" \
             --content-type "application/json" --cache-control "$pointer_cache"
-
-          observed_s3="$(mktemp)"
-          aws s3 cp "s3://$bucket/desktop/latest/latest.json" "$observed_s3"
-          cmp -s "$latest" "$observed_s3" || {
-            echo "Published updater pointer does not match the assembled manifest" >&2
-            exit 1
-          }
-          actual_cache="$(aws s3api head-object \
-            --bucket "$bucket" \
-            --key "desktop/latest/latest.json" \
-            --query 'CacheControl' \
-            --output text)"
-          if [ "$actual_cache" != "$pointer_cache" ]; then
-            echo "Updater pointer has unsafe cache policy: $actual_cache" >&2
-            exit 1
-          fi
+          aws s3 cp "$manifest" "s3://$bucket/desktop/latest/manifest.json" \
+            --content-type "application/json" --cache-control "$pointer_cache"
 
           if [ -n "${CLARK_DESKTOP_DOWNLOAD_DISTRIBUTION_ID}" ]; then
             invalidation_id="$(aws cloudfront create-invalidation \
