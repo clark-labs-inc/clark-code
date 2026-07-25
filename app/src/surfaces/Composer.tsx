@@ -178,11 +178,7 @@ export function Composer() {
   const { dragging, handlers } = useFileDrop((files) => void addFiles(files));
   usePaste((files) => void addFiles(files), !connecting);
 
-  useComposerAutosize(
-    taRef,
-    value,
-    attachments.length > 0 || pendingPastes.length > 0,
-  );
+  useComposerAutosize(taRef, value);
 
   // "Edit & resend" staged text from a sent message: load it and focus.
   useEffect(() => {
