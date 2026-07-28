@@ -604,7 +604,7 @@ jobs:
           pnpm --dir harness test:webkit
 
       - name: Import Apple Developer ID for nested Computer Use service
-        if: runner.os == 'macOS' && secrets.APPLE_CERTIFICATE != ''
+        if: runner.os == 'macOS'
         shell: bash
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
@@ -612,6 +612,10 @@ jobs:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
         run: |
           set -euo pipefail
+          if [[ -z "$APPLE_CERTIFICATE" ]]; then
+            echo "APPLE_CERTIFICATE is unset; building macOS release unsigned"
+            exit 0
+          fi
           certificate_path="$(mktemp "$RUNNER_TEMP/clark-apple-certificate.XXXXXX")"
           keychain_path="$RUNNER_TEMP/clark-release-signing.keychain-db"
           keychain_password="$(openssl rand -hex 32)"
