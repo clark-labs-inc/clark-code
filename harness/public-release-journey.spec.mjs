@@ -104,7 +104,11 @@ test("Windows release identity is live-gated through Azure Artifact Signing", ()
   );
   assert.match(
     workflow,
-    /Build installers \(tauri-action\)[\s\S]*?uses: tauri-apps\/tauri-action@v0[\s\S]*?with:\s*\n\s*args:/,
+    /Build installers \(unsigned or non-macOS\)[\s\S]*?uses: tauri-apps\/tauri-action@v0[\s\S]*?with:\s*\n\s*args:/,
+  );
+  assert.match(
+    workflow,
+    /Build installers \(signed macOS\)[\s\S]*?signing_enabled == 'true'[\s\S]*?APPLE_CERTIFICATE: \$\{\{ secrets\.APPLE_CERTIFICATE \}\}/,
   );
   assert.doesNotMatch(workflow, /\b(?:tagName|releaseName|releaseBody|releaseDraft):/);
   assert.doesNotMatch(workflow, /\bgh release\b/);

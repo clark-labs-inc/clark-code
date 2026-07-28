@@ -652,19 +652,16 @@ jobs:
       # The action then produces bundles and updater signatures without calling
       # the GitHub Releases API; the custom records below publish the exact
       # same bytes to Clark-owned download hosting.
-      - name: Build installers (tauri-action)
+      - name: Build installers (signed macOS)
+        if: runner.os == 'macOS' && steps.macos_signing.outputs.signing_enabled == 'true'
         uses: tauri-apps/tauri-action@v0
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Only enable macOS signing after this job has imported and verified
-          # the identity. A malformed or expired Apple certificate must not
-          # block the independent macOS release lane.
-          APPLE_CERTIFICATE: ${{ steps.macos_signing.outputs.signing_enabled == 'true' && secrets.APPLE_CERTIFICATE || '' }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ steps.macos_signing.outputs.signing_enabled == 'true' && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
-          APPLE_SIGNING_IDENTITY: ${{ steps.macos_signing.outputs.signing_enabled == 'true' && secrets.APPLE_SIGNING_IDENTITY || '' }}
-          APPLE_ID: ${{ steps.macos_signing.outputs.signing_enabled == 'true' && secrets.APPLE_ID || '' }}
-          APPLE_PASSWORD: ${{ steps.macos_signing.outputs.signing_enabled == 'true' && secrets.APPLE_PASSWORD || '' }}
-          APPLE_TEAM_ID: ${{ steps.macos_signing.outputs.signing_enabled == 'true' && secrets.APPLE_TEAM_ID || '' }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           # Auto-update signing: the Ed25519 key whose public half is pinned in
           # tauri.conf.json. tauri-action signs the updater bundle (.app.tar.gz)
           # with it and emits the .sig that goes into latest.json.
@@ -682,6 +679,24 @@ jobs:
           # distributed binary either way); the Clark backend separately
           # trusts this exact client id's audience via its own
           # GOOGLE_DESKTOP_CLIENT_ID server config.
+          VITE_GOOGLE_DESKTOP_CLIENT_ID: ${{ secrets.VITE_GOOGLE_DESKTOP_CLIENT_ID }}
+          VITE_GOOGLE_DESKTOP_CLIENT_SECRET: ${{ secrets.VITE_GOOGLE_DESKTOP_CLIENT_SECRET }}
+        with:
+          args: ${{ matrix.windows_signing && format('{0} --config src-tauri/tauri.windows-signing.conf.json', matrix.args) || matrix.args }}
+
+      # Tauri treats even an empty APPLE_CERTIFICATE variable as an instruction
+      # to import a certificate. Keep every Apple signing variable absent from
+      # this branch so an unavailable identity produces a real unsigned DMG.
+      - name: Build installers (unsigned or non-macOS)
+        if: runner.os != 'macOS' || steps.macos_signing.outputs.signing_enabled != 'true'
+        uses: tauri-apps/tauri-action@v0
+        env:
+          # Auto-update signing: the Ed25519 key whose public half is pinned in
+          # tauri.conf.json. tauri-action signs the updater bundle (.app.tar.gz)
+          # with it and emits the .sig that goes into latest.json.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # Native (Tauri) Google sign-in — the "Desktop app" OAuth client.
           VITE_GOOGLE_DESKTOP_CLIENT_ID: ${{ secrets.VITE_GOOGLE_DESKTOP_CLIENT_ID }}
           VITE_GOOGLE_DESKTOP_CLIENT_SECRET: ${{ secrets.VITE_GOOGLE_DESKTOP_CLIENT_SECRET }}
         with:
