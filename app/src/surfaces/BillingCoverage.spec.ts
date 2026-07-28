@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { creditState, type BillingSummary } from "../lib/account";
+import { isIncludedCodingModel } from "../lib/localAgent";
 import { creditBannerMessage } from "./CreditBanner";
 import { upgradePromptCopy } from "./UpgradePrompt";
 
@@ -43,15 +44,21 @@ describe("Clark Code billing coverage copy", () => {
     const banner = creditBannerMessage(billing, "out");
 
     expect(prompt.title).toContain("Workspace billing needs attention");
-    expect(prompt.detail).toContain("100% of the workspace limit used");
+    expect(prompt.detail).toContain("no Clark Code usage available");
     expect(prompt.detail).toContain("assigned workspace seat");
     expect(prompt.detail).not.toContain("choose a plan");
-    expect(banner).toContain("100% of the workspace Clark Code limit used");
+    expect(banner).toContain("workspace has no available usage");
     expect(banner).toContain("Workspace billing needs attention");
     expect(`${prompt.detail} ${banner}`).not.toContain("credits");
   });
 
   it("uses the effective workspace balance instead of the empty personal wallet", () => {
     expect(creditState(workspaceBilling(7_577))).toBe("ok");
+  });
+
+  it("treats only the managed Free alias as included", () => {
+    expect(isIncludedCodingModel("clark-code:free")).toBe(true);
+    expect(isIncludedCodingModel("qwen/qwen3.7-flash")).toBe(false);
+    expect(isIncludedCodingModel("clark-code")).toBe(false);
   });
 });

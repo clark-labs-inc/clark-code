@@ -9,6 +9,16 @@ import { invoke } from "@tauri-apps/api/core";
 import type { CloudCreds } from "./cloudHistory";
 
 export type CodeRemoteProjectKind = "local" | "ssh";
+export const CODE_REMOTE_PROTOCOL_VERSION = 2;
+export const CODE_REMOTE_CAPABILITIES: CodeRemoteCommand["command_type"][] = [
+  "start_session",
+  "send_message",
+  "cancel_run",
+  "resolve_permission",
+  "steer_run",
+  "compact_conversation",
+  "edit_and_resend",
+];
 
 export interface CodeRemoteProjectRegistration {
   id: string;
@@ -26,6 +36,8 @@ export interface CodeRemoteHostRegistration {
   os: string;
   arch: string;
   appVersion: string;
+  protocolVersion: number;
+  capabilities: CodeRemoteCommand["command_type"][];
   projects: CodeRemoteProjectRegistration[];
 }
 
@@ -34,15 +46,35 @@ export interface CodeRemoteCommand {
   host_id: string;
   project_id?: string | null;
   desktop_id?: string | null;
-  command_type: "start_session" | "send_message" | "cancel_run" | "resolve_permission";
+  command_type:
+    | "start_session"
+    | "send_message"
+    | "cancel_run"
+    | "resolve_permission"
+    | "steer_run"
+    | "compact_conversation"
+    | "edit_and_resend";
   request: Record<string, unknown>;
   response?: Record<string, unknown> | null;
   status: "pending" | "delivered" | "accepted" | "completed" | "failed" | "rejected";
   base_rev?: number | null;
   delivered_at?: string | null;
   acked_at?: string | null;
+  accepted_at?: string | null;
+  settled_at?: string | null;
+  claim_instance_id?: string | null;
+  claim_token?: string | null;
+  claim_expires_at?: string | null;
   created_at: string;
   updated_at: string;
+  timing?: {
+    delivery_ms?: number;
+    acceptance_ms?: number;
+    execution_receipt_ms?: number;
+    total_receipt_ms?: number;
+    delivery_slo_met?: boolean;
+    execution_receipt_slo_met?: boolean;
+  };
 }
 
 export interface PollCodeRemoteCommandsResponse {
@@ -74,6 +106,8 @@ export async function registerCodeRemoteHost(
     osName: registration.os,
     arch: registration.arch,
     appVersion: registration.appVersion,
+    protocolVersion: registration.protocolVersion,
+    capabilities: registration.capabilities,
     projects: registration.projects,
   });
 }
@@ -81,6 +115,7 @@ export async function registerCodeRemoteHost(
 export async function pollCodeRemoteCommands(
   creds: CloudCreds,
   hostId: string,
+  instanceId: string,
   limit = 20,
   waitMs = 0,
 ): Promise<PollCodeRemoteCommandsResponse> {
@@ -88,6 +123,7 @@ export async function pollCodeRemoteCommands(
     endpoint: creds.endpoint,
     token: creds.token,
     hostId,
+    instanceId,
     limit,
     waitMs,
   });
@@ -96,6 +132,8 @@ export async function pollCodeRemoteCommands(
 export async function ackCodeRemoteCommand(
   creds: CloudCreds,
   hostId: string,
+  instanceId: string,
+  claimToken: string,
   commandId: string,
   status: "accepted" | "completed" | "failed" | "rejected",
   response: Record<string, unknown> = {},
@@ -105,6 +143,8 @@ export async function ackCodeRemoteCommand(
     token: creds.token,
     commandId,
     hostId,
+    instanceId,
+    claimToken,
     status,
     response,
   });

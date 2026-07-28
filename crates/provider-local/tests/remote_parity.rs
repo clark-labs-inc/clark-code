@@ -6,6 +6,9 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
+use agent_orchestration::{
+    EnterpriseId, EnterpriseSigningKey, EnterpriseTrustChain, EnterpriseTrustManifest,
+};
 use exec_protocol::{
     method, AuthParams, Notification, ProcessResumeParams, ProcessStartParams, Request, Response,
     Stream as WireStream, PROTOCOL_VERSION,
@@ -16,6 +19,11 @@ use provider_local::{
     InstallSkillPackRequest, SkillPackAction, SkillPackScope,
 };
 use provider_local::{Executor, LocalExecutor, RemoteExecutor};
+use scout_adapter_runtime::{
+    CensusRequest as AdapterCensusRequest, CensusResponse as AdapterCensusResponse,
+    ScoutAdapterRequest, ScoutAdapterResponse, SERVICE_NAME as SCOUT_ADAPTER_SERVICE,
+};
+use scout_store::{ScoutStoreRequest, ScoutStoreResponse, SERVICE_NAME as SCOUT_STORE_SERVICE};
 use tokio_tungstenite::tungstenite::Message;
 use tokio_util::sync::CancellationToken;
 
@@ -57,6 +65,91 @@ async fn remote_matches_local_for_every_primitive() {
     remote.write(&file, &bytes).await.unwrap();
     assert_eq!(remote.read(&file).await.unwrap(), bytes);
     assert_eq!(local.read(&file).await.unwrap(), bytes, "landed on disk");
+    remote.sync_file(&file).await.unwrap();
+    remote.sync_directory(file.parent().unwrap()).await.unwrap();
+
+    let private = dir.path().join("private/signing.key");
+    remote
+        .write_private(&private, b"host-held-seed")
+        .await
+        .unwrap();
+    assert!(!remote
+        .write_private_new(&private, b"replacement")
+        .await
+        .unwrap());
+    assert_eq!(local.read(&private).await.unwrap(), b"host-held-seed");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        assert_eq!(
+            std::fs::metadata(&private).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+    }
+
+    let service_error = remote
+        .target_service_call("unsupported-test-service", dir.path(), b"{}")
+        .await
+        .unwrap_err();
+    assert!(service_error.contains("unsupported target service"));
+
+    let scout_root = dir.path().join("scout-index");
+    std::fs::create_dir_all(scout_root.join("trust")).unwrap();
+    std::fs::create_dir_all(scout_root.join("batches")).unwrap();
+    std::fs::create_dir_all(scout_root.join("private")).unwrap();
+    let enterprise = EnterpriseId::new("remote-parity-enterprise").unwrap();
+    let coordinator = EnterpriseSigningKey::from_seed([0x55; 32]);
+    let root = EnterpriseTrustManifest::initial(
+        enterprise.clone(),
+        "trust:00000000-0000-4000-8000-000000000055".into(),
+        1,
+        1_000_000,
+        &coordinator,
+    )
+    .unwrap();
+    let chain = EnterpriseTrustChain {
+        anchor_manifest_id: root.manifest_id.clone(),
+        manifests: vec![root],
+    };
+    std::fs::write(
+        scout_root.join("trust/chain.json"),
+        serde_json::to_vec(&chain).unwrap(),
+    )
+    .unwrap();
+    std::fs::write(
+        scout_root.join("private/anchor-manifest-id"),
+        chain.anchor_manifest_id.as_bytes(),
+    )
+    .unwrap();
+    let request = serde_json::to_vec(&ScoutStoreRequest::Rebuild {
+        enterprise_id: enterprise,
+    })
+    .unwrap();
+    let response = remote
+        .target_service_call(SCOUT_STORE_SERVICE, &scout_root, &request)
+        .await
+        .unwrap();
+    let response: ScoutStoreResponse = serde_json::from_slice(&response).unwrap();
+    let ScoutStoreResponse::Rebuilt(receipt) = response else {
+        panic!("wrong remote Scout index response");
+    };
+    assert!(receipt.rebuilt);
+
+    let adapter_root = dir.path().join("scout-adapter-private");
+    let request =
+        serde_json::to_vec(&ScoutAdapterRequest::Census(AdapterCensusRequest::default())).unwrap();
+    let response = remote
+        .target_service_call(SCOUT_ADAPTER_SERVICE, &adapter_root, &request)
+        .await
+        .unwrap();
+    let response: ScoutAdapterResponse = serde_json::from_slice(&response).unwrap();
+    let ScoutAdapterResponse::Census(AdapterCensusResponse::Succeeded { target, .. }) = response
+    else {
+        panic!("wrong remote Scout adapter response");
+    };
+    assert!(target.target_id.as_str().starts_with("target:"));
+    assert!(adapter_root.join("vault.json").is_file());
 
     // metadata parity.
     let rm = remote.metadata(&file).await.unwrap();

@@ -1,0 +1,128 @@
+:root {
+  color: #24231f;
+  background: #f7f5f1;
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  --page: #f7f5f1;
+  --surface: #fffefc;
+  --surface-soft: #f2f0eb;
+  --surface-violet: #f2f0ff;
+  --line: #e4e1db;
+  --line-strong: #d6d1c9;
+  --text: #24231f;
+  --muted: #706c65;
+  --muted-2: #979187;
+  --purple: #6252db;
+  --purple-dark: #4d3fc1;
+  --purple-soft: #ebe8ff;
+  --green: #327b4a;
+  --green-soft: #e8f2e7;
+  --amber: #a66f04;
+  --amber-soft: #fff3d9;
+  --red: #be473c;
+  --red-soft: #fff0ee;
+  --blue: #316bb5;
+  --blue-soft: #eaf2ff;
+  --shadow: 0 10px 28px rgba(39, 34, 26, 0.08);
+  --sidebar-width: 230px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-width: 320px;
+  min-height: 100%;
+  background: var(--page);
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  color: inherit;
+}
+
+button:not(:disabled),
+select,
+input[type="checkbox"] {
+  cursor: pointer;
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid rgba(98, 82, 219, 0.42);
+  outline-offset: 2px;
+}
+
+h1,
+h2,
+h3,
+p {
+  margin: 0;
+}
+
+h1,
+h2,
+h3 {
+  color: var(--text);
+}
+
+small {
+  color: var(--muted);
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  letter-spacing: -0.02em;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.good-text {
+  color: var(--green);
+}
+
+.amber-text {
+  color: var(--amber);
+}
+
+.red-text {
+  color: var(--red);
+}
+
+.eyebrow {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

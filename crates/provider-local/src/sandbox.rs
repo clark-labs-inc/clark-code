@@ -97,6 +97,11 @@ impl Sandbox {
     /// lexically-normalized path must lie within the root.
     pub fn resolve_existing(&self, path: &str) -> Result<PathBuf, String> {
         let joined = self.join(path);
+        if is_host_private(&lexically_normalize(&joined)) {
+            return Err(format!(
+                "{path}: path is reserved for host-private Clark state"
+            ));
+        }
         match self.mode {
             Mode::Local => {
                 let canon = joined.canonicalize().map_err(|e| format!("{path}: {e}"))?;
@@ -118,6 +123,11 @@ impl Sandbox {
     pub fn resolve_for_write(&self, path: &str) -> Result<PathBuf, String> {
         let joined = self.join(path);
         let normalized = lexically_normalize(&joined);
+        if is_host_private(&normalized) {
+            return Err(format!(
+                "{path}: path is reserved for host-private Clark state"
+            ));
+        }
         if self.mode == Mode::Local {
             // Walk up to the first existing ancestor and canonicalize it.
             let mut ancestor = normalized.as_path();
@@ -144,6 +154,39 @@ impl Sandbox {
                 if meta.file_type().is_symlink() {
                     return Err(format!("{path}: refusing to write through a symlink"));
                 }
+            }
+        }
+        self.ensure_contained_lexical(&normalized)?;
+        Ok(normalized)
+    }
+
+    /// Resolve a Clark-owned path for an internal host tool. Model-facing file
+    /// tools must use `resolve_for_write`, which rejects this namespace.
+    pub(crate) fn resolve_host_managed(&self, path: &str) -> Result<PathBuf, String> {
+        let joined = self.join(path);
+        let normalized = lexically_normalize(&joined);
+        if !is_host_private(&normalized) {
+            return Err(format!("{path}: path is not in host-managed Clark state"));
+        }
+        if self.mode == Mode::Local {
+            let mut ancestor = normalized.as_path();
+            loop {
+                match ancestor.parent() {
+                    Some(parent) if parent.exists() => {
+                        let canonical = parent
+                            .canonicalize()
+                            .map_err(|error| format!("{}: {error}", parent.display()))?;
+                        self.ensure_contained(&canonical)?;
+                        break;
+                    }
+                    Some(parent) => ancestor = parent,
+                    None => return Err(format!("{path}: no existing parent directory")),
+                }
+            }
+            if std::fs::symlink_metadata(&normalized)
+                .is_ok_and(|metadata| metadata.file_type().is_symlink())
+            {
+                return Err(format!("{path}: refusing a host-managed symlink"));
             }
         }
         self.ensure_contained_lexical(&normalized)?;
@@ -236,6 +279,25 @@ fn lexically_normalize(path: &Path) -> PathBuf {
     out
 }
 
+fn is_host_private(path: &Path) -> bool {
+    let components = path
+        .components()
+        .filter_map(|component| match component {
+            Component::Normal(value) => value.to_str(),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    components
+        .windows(3)
+        .any(|window| window == [".clark", "scout", "enterprises"])
+        || components
+            .windows(4)
+            .any(|window| window == [".clark", "scout", "adapters", "private"])
+        || components
+            .windows(4)
+            .any(|window| window == [".clark", "scout", "capsules", "private"])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -262,6 +324,46 @@ mod tests {
         let sb = Sandbox::new(dir.path()).unwrap();
         let err = sb.resolve_existing("../etc/passwd").unwrap_err();
         assert!(err.contains("escapes") || err.contains("No such") || err.contains("passwd"));
+    }
+
+    #[test]
+    fn host_private_scout_state_is_not_model_readable_or_writable() {
+        let dir = temp_root();
+        let private = dir.path().join(".clark/scout/enterprises/v3-test/private");
+        std::fs::create_dir_all(&private).unwrap();
+        std::fs::write(private.join("signing-bootstrap"), b"secret").unwrap();
+        let trust = dir.path().join(".clark/scout/enterprises/v3-test/trust");
+        std::fs::create_dir_all(&trust).unwrap();
+        std::fs::write(trust.join("chain.json"), b"{}").unwrap();
+        let adapter_private = dir.path().join(".clark/scout/adapters/private");
+        std::fs::create_dir_all(&adapter_private).unwrap();
+        std::fs::write(adapter_private.join("vault.key"), b"secret").unwrap();
+        let capsule_private = dir.path().join(".clark/scout/capsules/private");
+        std::fs::create_dir_all(&capsule_private).unwrap();
+        std::fs::write(capsule_private.join("registry-v1.json"), b"secret").unwrap();
+        let sandbox = Sandbox::new(dir.path()).unwrap();
+
+        assert!(sandbox
+            .resolve_existing(".clark/scout/enterprises/v3-test/private/signing-bootstrap")
+            .is_err());
+        assert!(sandbox
+            .resolve_for_write(".clark/scout/enterprises/v3-test/private/replacement")
+            .is_err());
+        assert!(sandbox
+            .resolve_existing(".clark/scout/enterprises/v3-test/trust/chain.json")
+            .is_err());
+        assert!(sandbox
+            .resolve_for_write(".clark/scout/enterprises/v3-test/batches/forged.json")
+            .is_err());
+        assert!(sandbox
+            .resolve_existing(".clark/scout/adapters/private/vault.key")
+            .is_err());
+        assert!(sandbox
+            .resolve_existing(".clark/scout/capsules/private/registry-v1.json")
+            .is_err());
+        assert!(sandbox
+            .resolve_for_write(".clark/scout/capsules/private/replacement")
+            .is_err());
     }
 
     #[test]

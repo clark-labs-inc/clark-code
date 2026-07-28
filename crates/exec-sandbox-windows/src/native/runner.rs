@@ -32,6 +32,7 @@ use super::transport::{ParentTransport, WorkerTransport};
 
 const INFINITE: u32 = u32::MAX;
 const WORKER_SWITCH: &str = "--restricted-worker";
+const CHILD_CREATION_FLAGS: u32 = CREATE_UNICODE_ENVIRONMENT | CREATE_NO_WINDOW;
 
 pub struct WindowsLaunchHost {
     state_dir: std::path::PathBuf,
@@ -184,7 +185,7 @@ fn spawn_inner(
             ptr::null(),
             ptr::null(),
             1,
-            CREATE_UNICODE_ENVIRONMENT,
+            CHILD_CREATION_FLAGS,
             environment.as_mut_ptr().cast(),
             cwd_w.as_ptr(),
             &startup,
@@ -420,5 +421,16 @@ impl Drop for OwnedHandle {
         if !self.0.is_null() {
             unsafe { CloseHandle(self.0) };
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn restricted_children_never_request_a_visible_console() {
+        assert_ne!(CHILD_CREATION_FLAGS & CREATE_NO_WINDOW, 0);
+        assert_ne!(CHILD_CREATION_FLAGS & CREATE_UNICODE_ENVIRONMENT, 0);
     }
 }

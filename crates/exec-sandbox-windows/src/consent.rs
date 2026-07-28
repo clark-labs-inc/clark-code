@@ -3,6 +3,11 @@ use std::path::{Path, PathBuf};
 
 use exec_sandbox_protocol::{decode_request, WindowsSetupRequest};
 
+// Windows `SW_HIDE`. Keep the setup helper invisible; the UAC consent surface
+// is intentionally the only window in this flow.
+#[cfg(any(windows, test))]
+const SETUP_WINDOW_VISIBILITY: i32 = 0;
+
 /// Launch the product-owned setup helper through Windows' `runas` consent UI.
 /// Proof files are always removed when the prompt is cancelled, the helper
 /// fails, or setup succeeds.
@@ -115,7 +120,6 @@ fn native_runas(program: &Path, parameters: &str) -> Result<(), String> {
     use windows_sys::Win32::UI::Shell::{
         ShellExecuteExW, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW,
     };
-    use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 
     let verb = wide("runas");
     let program = program
@@ -130,7 +134,10 @@ fn native_runas(program: &Path, parameters: &str) -> Result<(), String> {
     execute.lpVerb = verb.as_ptr();
     execute.lpFile = program.as_ptr();
     execute.lpParameters = parameters.as_ptr();
-    execute.nShow = SW_SHOWNORMAL;
+    // UAC owns the only user-visible surface. The signed helper is a
+    // short-lived console-subsystem executable, so showing it would flash a
+    // second PowerShell/CMD-like window after consent.
+    execute.nShow = SETUP_WINDOW_VISIBILITY;
     if unsafe { ShellExecuteExW(&mut execute) } == 0 {
         return Err(format!(
             "Windows sandbox setup was cancelled or could not start: {}",
@@ -197,6 +204,11 @@ mod tests {
             validate_args(&args).unwrap(),
             "--request-b64 Zmlyc3Q --request-b64 c2Vjb25k"
         );
+    }
+
+    #[test]
+    fn elevated_setup_helper_is_hidden_behind_the_uac_surface() {
+        assert_eq!(SETUP_WINDOW_VISIBILITY, 0);
     }
 
     #[cfg(not(windows))]

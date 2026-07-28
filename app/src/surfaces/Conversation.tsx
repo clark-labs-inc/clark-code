@@ -25,6 +25,8 @@ import { SideQuestionCard } from "./SideQuestionCard";
 import { GoalWorkSummary } from "./GoalWorkSummary";
 import { ProviderIncidentCard } from "./ProviderIncidentCard";
 import type { Artifact, GoalState, TimelineItem, ToolCall } from "../core-bridge/types";
+import { effectiveModelSettings, isIncludedCodingModel } from "../lib/localAgent";
+import { isIncludedWeeklyAllowanceExhausted } from "../lib/errors";
 
 /** A row of pulsing dots — the model is generating. Memoized so its animation
  *  isn't re-evaluated on every streamed-token re-render of the parent. */
@@ -179,6 +181,11 @@ export function Conversation({
   const reduce = useReducedMotion();
   const snapshot = useSessionStore((s) => s.snapshot);
   const session = useSessionStore((s) => s.session);
+  const includedModel = useSessionStore((s) =>
+    isIncludedCodingModel(
+      effectiveModelSettings(s.localSettings, s.chatModels, s.session?.id ?? null).model,
+    ),
+  );
   const error = useSessionStore((s) => s.error);
   const dismissError = useSessionStore((s) => s.dismissError);
   const dismissFailedRun = useSessionStore((s) => s.dismissFailedRun);
@@ -328,6 +335,7 @@ export function Conversation({
       ? latestRun
       : undefined;
   const outOfCredits = failed?.outcome?.failure_kind === "insufficient_credits";
+  const includedWeeklyAllowanceExhausted = isIncludedWeeklyAllowanceExhausted(failed?.outcome);
   const interrupted = failed?.outcome?.failure_kind === "runtime_interrupted" ? failed : undefined;
   const verificationIncomplete =
     failed?.outcome?.failure_kind === "verification_incomplete" ? failed : undefined;
@@ -452,9 +460,16 @@ export function Conversation({
               <PermissionGate req={pending_permission} />
             </motion.div>
           )}
-          {failed && outOfCredits && (
+          {failed && outOfCredits && !includedModel && (
             <motion.div key="upgrade" {...(reduce ? TRANSIENT_INSTANT : TRANSIENT)}>
               <UpgradePrompt />
+            </motion.div>
+          )}
+          {failed && includedModel && includedWeeklyAllowanceExhausted && (
+            <motion.div key="included-weekly-usage" {...(reduce ? TRANSIENT_INSTANT : TRANSIENT)}>
+              <div className="rounded-xl border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-ink">
+                Your included weekly usage is used up. It resets on Monday.
+              </div>
             </motion.div>
           )}
           {verificationIncomplete && (

@@ -53,6 +53,9 @@ mod resume;
 mod root_execution;
 mod safety;
 mod sandbox;
+pub mod scout_census {
+    pub use scout_capability_census::*;
+}
 mod skills;
 mod tools;
 mod truncation;
@@ -62,7 +65,7 @@ pub use changes::{changes_diff, changes_revert, changes_summary, ChangedFile};
 pub use checkpoint::{create_checkpoint, is_git_repo, release_checkpoints};
 // Discover compatible setup from other coding agents without mutating it.
 pub use commands::{discover_commands, CustomCommand};
-pub use config::{LocalConfig, DEFAULT_BASE_URL, DEFAULT_RESEARCH_MODEL};
+pub use config::{LocalConfig, DEFAULT_BASE_URL, DEFAULT_RESEARCH_MODEL, SCOUT_MODEL};
 pub use external_import::{
     discover_agent_setups, discover_agent_setups_with_home, AgentMigrationDiscovery,
     MigratedInstruction, MigratedSkill, MigrationSource,

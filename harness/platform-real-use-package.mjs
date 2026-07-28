@@ -87,6 +87,16 @@ function validatePreExecutionBlockedReceipt(raw, receiptPath) {
   if (raw.status !== "blocked") {
     throw new Error(`pre-execution guest receipt must be blocked, got ${raw.status}`);
   }
+  if (
+    typeof raw.source_revision !== "string"
+    || !/^[0-9a-f]{40}$/.test(raw.source_revision)
+  ) {
+    throw new Error("blocked guest receipt source_revision must be one clean Git commit");
+  }
+  const expectedRevision = process.env.CLARK_EXPECTED_SOURCE_REVISION;
+  if (expectedRevision && raw.source_revision !== expectedRevision) {
+    throw new Error("blocked guest receipt does not match the candidate source revision");
+  }
   const expectedVirtualization = raw.platform === "macos" ? "native" : "utm";
   if (raw.virtualization !== expectedVirtualization) {
     throw new Error(`${raw.platform} guest receipt must use ${expectedVirtualization}`);

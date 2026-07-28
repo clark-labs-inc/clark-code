@@ -20,6 +20,7 @@ fn context(root: &Path) -> ToolCtx {
         progress: None,
         agent_progress: None,
         call_progress: None,
+        model_override: None,
     }
 }
 
@@ -43,8 +44,12 @@ fn capability_fingerprint_excludes_random_census_id() {
         platform: "linux".into(),
         architecture: "x86_64".into(),
         scope: ".".into(),
-        executable_names: vec!["git".into()],
+        adapter_executable_names: vec!["git".into()],
+        path_executable_count: 2,
+        path_executable_names_sha256: "b".repeat(64),
         environment: Vec::new(),
+        environment_name_count: 0,
+        environment_names_sha256: "c".repeat(64),
         dotenv_files: Vec::new(),
         credential_surfaces: Vec::new(),
         routing: BTreeMap::new(),
@@ -58,7 +63,47 @@ fn capability_fingerprint_excludes_random_census_id() {
     };
     let first = safe_fingerprint(&report);
     report.id = "two".into();
+    report.path_executable_count = 99;
+    report.path_executable_names_sha256 = "d".repeat(64);
+    report.environment_name_count = 42;
+    report.environment_names_sha256 = "e".repeat(64);
     assert_eq!(safe_fingerprint(&report), first);
+}
+
+#[test]
+fn adapter_bootstrap_hides_unrelated_path_and_environment_names() {
+    let executables = vec![
+        "aws".to_string(),
+        "custom-business-binary".to_string(),
+        "git".to_string(),
+    ];
+    assert_eq!(
+        adapter_executables(&executables),
+        vec!["git".to_string(), "aws".to_string()]
+    );
+    assert!(adapter_environment_name("AWS_PROFILE"));
+    assert!(adapter_environment_name("OTEL_EXPORTER_OTLP_ENDPOINT"));
+    assert!(!adapter_environment_name("DESKTOP_SESSION"));
+    assert!(!adapter_environment_name("RANDOM_APP_SETTING"));
+}
+
+#[test]
+fn cloud_routes_report_candidates_without_claiming_authorization() {
+    let environment = vec![NamedCapability {
+        name: "CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE".to_owned(),
+        credential_candidate: true,
+    }];
+    let routes = routing_capabilities(
+        &["gcloud".to_owned()],
+        &environment,
+        &["gcloud_config".to_owned()],
+        &[],
+    );
+    assert_eq!(routes["gcloud"].state, "present");
+    assert_eq!(routes["gcp_api"].state, "auth_candidate_unverified");
+    assert!(rust_fallbacks()
+        .iter()
+        .any(|fallback| fallback.capability == "gcp_control_plane"));
 }
 
 #[tokio::test]
@@ -79,6 +124,7 @@ async fn capability_tool_finds_gitignored_dotenv_but_never_returns_values() {
     let state = Arc::new(ScoutToolState {
         censuses: Mutex::new(HashMap::new()),
         ledgers: Mutex::new(HashMap::new()),
+        target: Mutex::new(None),
         max_parallel_agents: 3,
     });
     let outcome = ScoutCapabilitiesTool { state }
@@ -93,4 +139,7 @@ async fn capability_tool_finds_gitignored_dotenv_but_never_returns_values() {
     assert!(!serialized.contains("do-not-leak"));
     assert!(!serialized.contains("production-name"));
     assert_eq!(outcome.details["dotenv_files"].as_array().unwrap().len(), 2);
+    assert!(outcome.details["path_executable_count"].is_number());
+    assert!(outcome.details["path_executable_names_sha256"].is_string());
+    assert!(outcome.details["adapter_executable_names"].is_array());
 }

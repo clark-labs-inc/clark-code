@@ -26,7 +26,7 @@ const repoDir = path.resolve(harnessDir, "..");
 const VM_NAME = "Clark QA - Windows 11 ARM";
 const QMP_PORT = 47_111;
 const QA_ROOT = String.raw`C:\Users\home\ClarkCodeQA`;
-const QA_MODEL = "clark-code:minimax_m3";
+const QA_MODEL = "clark-code:free";
 
 function sleep(milliseconds) {
   if (milliseconds > 0) {

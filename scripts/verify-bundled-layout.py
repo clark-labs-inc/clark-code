@@ -52,6 +52,31 @@ def assert_private_names_absent(directory: Path | None, names: list[str]) -> Non
             raise RuntimeError(f"private helper leaked into a public command directory: {candidate}")
 
 
+def assert_windows_posix_toolchain_absent(*roots: Path | None) -> None:
+    forbidden_files = {
+        "bash.exe",
+        "sh.exe",
+        "mintty.exe",
+        "msys-2.0.dll",
+        "gcc.exe",
+        "g++.exe",
+    }
+    forbidden_components = {"mingw", "mingw64", "msys", "msys2", "git-bash"}
+    for root in roots:
+        if root is None or not root.exists():
+            continue
+        for candidate in root.rglob("*"):
+            components = {part.lower() for part in candidate.relative_to(root).parts}
+            if (
+                candidate.name.lower() in forbidden_files
+                or components.intersection(forbidden_components)
+            ):
+                raise RuntimeError(
+                    "Windows package unexpectedly bundles a POSIX shell/toolchain: "
+                    f"{candidate}"
+                )
+
+
 def verify(args: argparse.Namespace) -> dict:
     resource_root = args.resource_root.resolve()
     executable_dir = args.executable_dir.resolve() if args.executable_dir else None
@@ -59,6 +84,8 @@ def verify(args: argparse.Namespace) -> dict:
     private_root = resource_root / "clark-resources"
     private_names = [
         "bwrap",
+        "clark-computer-use-helper",
+        "clark-computer-use-helper.exe",
         "clark-command-runner.exe",
         "clark-windows-sandbox-setup.exe",
     ]
@@ -66,18 +93,28 @@ def verify(args: argparse.Namespace) -> dict:
     if args.platform == "macos":
         if executable_dir is None:
             raise RuntimeError("macOS verification requires --executable-dir")
-        # Tauri keeps this PATH-visible sidecar in Contents/MacOS so it is
-        # included in nested code signing. The computer-use helper also lives
-        # beside the parent executable, but is never advertised as a shell
-        # command by the provider.
+        # Tauri keeps rg PATH-visible in Contents/MacOS. Computer Use is a
+        # separately identified nested app so its macOS privacy grants remain
+        # bound to a durable service identity across Clark host updates.
         require_file(executable_dir / "rg", executable=True)
-        require_file(executable_dir / "clark-computer-use-helper", executable=True)
-        require_file(resource_root.parent / "Frameworks" / "libswift_Concurrency.dylib")
+        service = resource_root / "Clark Computer Use.app"
+        require_file(
+            service / "Contents" / "MacOS" / "clark-computer-use-helper",
+            executable=True,
+        )
+        require_file(
+            service / "Contents" / "Frameworks" / "libswift_Concurrency.dylib"
+        )
+        require_file(service / "Contents" / "Info.plist")
         require_file(private_root / "licenses/ripgrep/LICENSE-MIT")
         require_file(private_root / "licenses/ripgrep/UNLICENSE")
         assert_private_names_absent(executable_dir, private_names)
     elif args.platform == "linux":
         require_file(public_dir / "rg", executable=True)
+        computer_use_service = (
+            private_root / "computer-use/clark-computer-use-helper"
+        )
+        require_file(computer_use_service, executable=True)
         packaged_bwrap = private_root / "sandbox/linux/bwrap"
         require_file(packaged_bwrap, executable=True)
         if args.staged_bwrap is None:
@@ -117,12 +154,16 @@ def verify(args: argparse.Namespace) -> dict:
         assert_private_names_absent(executable_dir, private_names)
     else:
         require_file(public_dir / "rg.exe")
+        require_file(
+            private_root / "computer-use/clark-computer-use-helper.exe"
+        )
         require_file(private_root / "sandbox/windows/clark-command-runner.exe")
         require_file(private_root / "sandbox/windows/clark-windows-sandbox-setup.exe")
         require_file(private_root / "licenses/ripgrep/LICENSE-MIT")
         require_file(private_root / "licenses/ripgrep/UNLICENSE")
         assert_private_names_absent(public_dir, private_names)
         assert_private_names_absent(executable_dir, private_names)
+        assert_windows_posix_toolchain_absent(resource_root, executable_dir)
 
     receipt = {
         "platform": args.platform,
@@ -135,6 +176,16 @@ def verify(args: argparse.Namespace) -> dict:
         receipt["bwrap_sha256"] = sha256(
             resource_root / "clark-resources/sandbox/linux/bwrap"
         )
+        receipt["computer_use_service_sha256"] = sha256(
+            resource_root
+            / "clark-resources/computer-use/clark-computer-use-helper"
+        )
+    elif args.platform == "windows":
+        receipt["computer_use_service_sha256"] = sha256(
+            resource_root
+            / "clark-resources/computer-use/clark-computer-use-helper.exe"
+        )
+        receipt["shell_runtime"] = "native_windows_only"
     return receipt
 
 

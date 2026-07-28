@@ -23,7 +23,7 @@ function stubBridge(overrides: Partial<CoreBridge> = {}): CoreBridge {
     connect: vi.fn(async () => {}),
     newSession: vi.fn(async () => localSession),
     loadSession: async () => localSession,
-    prompt: vi.fn(async () => {}),
+    prompt: vi.fn(async () => ({ runId: "run-stub" })),
     cancel: vi.fn(async () => {}),
     respond: vi.fn(async () => {}),
     steer: vi.fn(async () => {}),
@@ -121,9 +121,10 @@ describe("queued follow-ups and explicit steering", () => {
       snapshot: emptySnapshot(),
     });
 
-    await useSessionStore.getState().send("fresh turn");
+    const receipt = await useSessionStore.getState().send("fresh turn");
 
     expect(bridge.prompt).toHaveBeenCalled();
     expect(bridge.steer).not.toHaveBeenCalled();
+    expect(receipt).toEqual({ runId: "run-stub" });
   });
 });

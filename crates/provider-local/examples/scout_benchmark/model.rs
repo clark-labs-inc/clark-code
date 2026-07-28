@@ -106,7 +106,13 @@ impl Recorder {
 fn canonical_hash(cases: &[CaseReceipt]) -> String {
     let canonical = cases
         .iter()
-        .map(|case| (&case.id, case.status))
+        .map(|case| {
+            (
+                &case.id,
+                case.status,
+                case.evidence.get("semantic_sha256").and_then(Value::as_str),
+            )
+        })
         .collect::<Vec<_>>();
     let encoded = serde_json::to_vec(&canonical).unwrap_or_default();
     format!("{:x}", Sha256::digest(encoded))
@@ -134,8 +140,9 @@ pub fn write_artifacts(output: &Path, receipt: &BenchmarkReceipt) -> Result<(), 
         ));
     }
     report.push_str(
-        "\nThe canonical hash covers ordered case ids and pass/fail states only. \
-         Host identity, paths, timestamps, timing, and capability counts are excluded.\n",
+        "\nThe canonical hash covers ordered case ids, pass/fail states, and \
+         deterministic per-case semantic hashes when present. Host identity, paths, \
+         timestamps, timing, and capability counts are excluded.\n",
     );
     std::fs::write(output.join("report.md"), report).map_err(|error| error.to_string())
 }

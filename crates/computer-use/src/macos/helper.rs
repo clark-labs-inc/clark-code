@@ -1,5 +1,7 @@
-use std::os::fd::{FromRawFd, RawFd};
-use std::os::unix::net::UnixStream;
+use std::fs;
+use std::os::fd::AsRawFd;
+use std::os::unix::fs::PermissionsExt;
+use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -22,10 +24,10 @@ const MAX_TEXT_INPUT_CHARS: usize = 20_000;
 const MAX_ACTION_ID_CHARS: usize = 128;
 const MAX_SECONDARY_ACTION_CHARS: usize = 128;
 
-pub fn run(ipc_fd: RawFd, control_fd: RawFd, data_dir: PathBuf) -> Result<(), ComputerUseError> {
-    if ipc_fd < 3 || control_fd < 3 || ipc_fd == control_fd {
+pub fn run(socket_path: PathBuf, data_dir: PathBuf) -> Result<(), ComputerUseError> {
+    if !socket_path.is_absolute() {
         return Err(ComputerUseError::HelperProtocol(
-            "IPC descriptors must be distinct and must not overlap standard streams".to_string(),
+            "computer-use service socket path must be absolute".to_string(),
         ));
     }
     if !data_dir.is_absolute() {
@@ -33,8 +35,46 @@ pub fn run(ipc_fd: RawFd, control_fd: RawFd, data_dir: PathBuf) -> Result<(), Co
             "computer-use data directory must be absolute".to_string(),
         ));
     }
-    super::auth::verify_helper_signature().map_err(ComputerUseError::HelperRejected)?;
-    let mut stream = unsafe { UnixStream::from_raw_fd(ipc_fd) };
+    super::auth::verify_service_signature().map_err(ComputerUseError::HelperRejected)?;
+    if socket_path.exists() {
+        fs::remove_file(&socket_path).map_err(|error| {
+            ComputerUseError::HelperUnavailable(format!(
+                "could not remove stale service socket {}: {error}",
+                socket_path.display()
+            ))
+        })?;
+    }
+    let listener = UnixListener::bind(&socket_path).map_err(|error| {
+        ComputerUseError::HelperUnavailable(format!(
+            "could not bind service socket {}: {error}",
+            socket_path.display()
+        ))
+    })?;
+    fs::set_permissions(&socket_path, fs::Permissions::from_mode(0o600)).map_err(|error| {
+        ComputerUseError::HelperUnavailable(format!(
+            "could not restrict service socket {}: {error}",
+            socket_path.display()
+        ))
+    })?;
+    let _cleanup = SocketCleanup(socket_path);
+    let (stream, _) = listener.accept().map_err(|error| {
+        ComputerUseError::HelperUnavailable(format!(
+            "could not accept primary service connection: {error}"
+        ))
+    })?;
+    let (control, _) = listener.accept().map_err(|error| {
+        ComputerUseError::HelperUnavailable(format!(
+            "could not accept control service connection: {error}"
+        ))
+    })?;
+    run_session(stream, control, data_dir)
+}
+
+fn run_session(
+    mut stream: UnixStream,
+    control: UnixStream,
+    data_dir: PathBuf,
+) -> Result<(), ComputerUseError> {
     stream
         .set_write_timeout(Some(WRITE_TIMEOUT))
         .map_err(|error| ComputerUseError::HelperProtocol(error.to_string()))?;
@@ -47,7 +87,7 @@ pub fn run(ipc_fd: RawFd, control_fd: RawFd, data_dir: PathBuf) -> Result<(), Co
         ));
     };
     let session_id = hello.session_id.clone();
-    if let Err(message) = super::auth::verify_parent(parent_pid, ipc_fd) {
+    if let Err(message) = super::auth::verify_client_peer(parent_pid, stream.as_raw_fd()) {
         let _ = write_response(
             &mut stream,
             &ResponseFrame {
@@ -64,17 +104,10 @@ pub fn run(ipc_fd: RawFd, control_fd: RawFd, data_dir: PathBuf) -> Result<(), Co
     let backend = MacServiceBackend::new(crate::ApprovalStore::new(data_dir));
     let control_backend = backend.clone();
     let control_session = session_id.clone();
-    let control = unsafe { UnixStream::from_raw_fd(control_fd) };
     std::thread::Builder::new()
         .name("clark-computer-use-control".to_string())
         .spawn(move || {
-            let _ = run_control(
-                control,
-                control_backend,
-                control_session,
-                parent_pid,
-                control_fd,
-            );
+            let _ = run_control(control, control_backend, control_session, parent_pid);
         })
         .map_err(|error| {
             ComputerUseError::HelperUnavailable(format!(
@@ -128,6 +161,14 @@ pub fn run(ipc_fd: RawFd, control_fd: RawFd, data_dir: PathBuf) -> Result<(), Co
             },
         )
         .map_err(protocol_error)?;
+    }
+}
+
+struct SocketCleanup(PathBuf);
+
+impl Drop for SocketCleanup {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.0);
     }
 }
 
@@ -445,7 +486,6 @@ fn run_control(
     backend: MacServiceBackend,
     expected_session: String,
     expected_parent_pid: u32,
-    control_fd: RawFd,
 ) -> Result<(), ComputerUseError> {
     stream
         .set_write_timeout(Some(WRITE_TIMEOUT))
@@ -462,7 +502,8 @@ fn run_control(
             "control channel parent identity changed".to_string(),
         ));
     }
-    super::auth::verify_parent(parent_pid, control_fd).map_err(ComputerUseError::HelperRejected)?;
+    super::auth::verify_client_peer(parent_pid, stream.as_raw_fd())
+        .map_err(ComputerUseError::HelperRejected)?;
     write_control_response(
         &mut stream,
         &ControlResponseFrame {

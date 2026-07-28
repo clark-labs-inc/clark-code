@@ -26,8 +26,10 @@ mod terminal;
 mod trajectory;
 #[cfg(desktop)]
 mod updater_menu;
+mod windows_release_smoke;
 
 pub use state::AppState;
+pub use windows_release_smoke::run_windows_sandbox_smoke_if_requested;
 
 /// Metadata for a provider the UI can offer. Mirrors the frontend `ProviderInfo`.
 #[derive(Clone, Debug, Serialize)]
@@ -39,6 +41,7 @@ pub struct ProviderInfo {
 
 const PRODUCTION_BUNDLE_IDENTIFIER: &str = "com.clark.desktop";
 const SIGNED_COMPUTER_USE_SMOKE_ARG: &str = "--computer-use-signed-smoke";
+const WINDOWS_CONSOLE_SMOKE_ARG: &str = "--windows-console-smoke";
 
 fn updates_enabled_for(debug_build: bool, identifier: &str) -> bool {
     !debug_build && identifier == PRODUCTION_BUNDLE_IDENTIFIER
@@ -82,6 +85,96 @@ pub fn run_signed_computer_use_smoke_if_requested() -> bool {
     true
 }
 
+/// Packaged Windows release probe for process-launch visibility. It exercises
+/// the same pipe-backed ordinary executor, ConPTY executor, and portable
+/// Computer Use child used by the app, then writes a private machine-readable
+/// receipt for the UTM monitor. The caller owns visible-window observation.
+pub fn run_windows_console_smoke_if_requested() -> bool {
+    let Some(output) = windows_console_smoke_output(std::env::args_os().skip(1)) else {
+        return false;
+    };
+
+    #[cfg(windows)]
+    {
+        use exec_core::{Executor, ShellKind};
+        use serde_json::json;
+        use std::time::Duration;
+        use tokio_util::sync::CancellationToken;
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap_or_else(|error| {
+                eprintln!("Windows console smoke runtime failed: {error}");
+                std::process::exit(1);
+            });
+        let cwd = std::env::current_dir().unwrap_or_else(|error| {
+            eprintln!("Windows console smoke cwd failed: {error}");
+            std::process::exit(1);
+        });
+        let command = match exec_core::scripted_shell_kind() {
+            ShellKind::PowerShell => "Write-Output CLARK_PIPE_OK; Start-Sleep -Milliseconds 750",
+            ShellKind::Cmd => "echo CLARK_PIPE_OK & ping -n 2 127.0.0.1 >NUL",
+            ShellKind::Posix => unreachable!(),
+        };
+        let result = runtime.block_on(async {
+            let executor = exec_core::LocalExecutor;
+            let ordinary = executor
+                .exec_streaming(
+                    command,
+                    &cwd,
+                    Duration::from_secs(10),
+                    &CancellationToken::new(),
+                    &|_, _| {},
+                )
+                .await?;
+            let terminal = executor
+                .exec_streaming_pty(
+                    command,
+                    &cwd,
+                    Duration::from_secs(10),
+                    &CancellationToken::new(),
+                    &|_, _| {},
+                )
+                .await?;
+            let permissions = computer_use::native_backend()
+                .and_then(|backend| backend.permissions())
+                .map_err(|error| error.to_string())?;
+            Ok::<_, String>((ordinary, terminal, permissions))
+        });
+        let receipt = match result {
+            Ok((ordinary, terminal, permissions)) => json!({
+                "status": "passed",
+                "ordinary_exit_code": ordinary.code,
+                "ordinary_output_seen": String::from_utf8_lossy(&ordinary.stdout)
+                    .contains("CLARK_PIPE_OK"),
+                "pty_exit_code": terminal.code,
+                "pty_output_seen": String::from_utf8_lossy(&terminal.stdout)
+                    .contains("CLARK_PIPE_OK"),
+                "computer_use_permissions": permissions,
+            }),
+            Err(error) => json!({ "status": "failed", "error": error }),
+        };
+        if let Err(error) =
+            std::fs::write(&output, serde_json::to_vec(&receipt).unwrap_or_default())
+        {
+            eprintln!("Windows console smoke receipt failed: {error}");
+            std::process::exit(1);
+        }
+        if receipt["status"] != "passed" {
+            std::process::exit(1);
+        }
+        true
+    }
+
+    #[cfg(not(windows))]
+    {
+        let _ = output;
+        eprintln!("Windows console smoke is supported only on Windows");
+        std::process::exit(2);
+    }
+}
+
 fn signed_computer_use_smoke_requested(
     arguments: impl IntoIterator<Item = impl AsRef<std::ffi::OsStr>>,
 ) -> bool {
@@ -90,6 +183,21 @@ fn signed_computer_use_smoke_requested(
         .next()
         .is_some_and(|argument| argument.as_ref() == SIGNED_COMPUTER_USE_SMOKE_ARG)
         && arguments.next().is_none()
+}
+
+fn windows_console_smoke_output(
+    arguments: impl IntoIterator<Item = impl AsRef<std::ffi::OsStr>>,
+) -> Option<std::path::PathBuf> {
+    let mut arguments = arguments.into_iter();
+    let first = arguments.next()?;
+    if first.as_ref() != WINDOWS_CONSOLE_SMOKE_ARG {
+        return None;
+    }
+    let output = arguments.next()?;
+    if arguments.next().is_some() {
+        return None;
+    }
+    Some(std::path::PathBuf::from(output.as_ref()))
 }
 
 /// Only a signed production flavor may consult or install production updates.
@@ -302,7 +410,8 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        signed_computer_use_smoke_requested, updates_enabled_for, SIGNED_COMPUTER_USE_SMOKE_ARG,
+        signed_computer_use_smoke_requested, updates_enabled_for, windows_console_smoke_output,
+        SIGNED_COMPUTER_USE_SMOKE_ARG, WINDOWS_CONSOLE_SMOKE_ARG,
     };
     use serde_json::Value;
 
@@ -326,6 +435,39 @@ mod tests {
         assert_eq!(release["productName"], "Clark Code");
         assert_eq!(release["identifier"], "com.clark.desktop");
         assert_eq!(release["bundle"]["createUpdaterArtifacts"], true);
+        assert_eq!(
+            release["bundle"]["windows"]["nsis"]["installerHooks"],
+            "./windows/preserve-sandbox-state.nsh",
+        );
+        let windows_hooks = include_str!("../windows/preserve-sandbox-state.nsh");
+        assert!(windows_hooks.contains("NSIS_HOOK_PREINSTALL"));
+        assert!(windows_hooks.contains("NSIS_HOOK_PREUNINSTALL"));
+        assert!(windows_hooks.contains(r"$LOCALAPPDATA\Clark Code\sandbox"));
+        assert!(windows_hooks.contains(r"$LOCALAPPDATA\Clark\Code\sandbox"));
+        let windows_signing: Value =
+            serde_json::from_str(include_str!("../tauri.windows-signing.conf.json"))
+                .expect("Windows signing config");
+        let sign_command = &windows_signing["bundle"]["windows"]["signCommand"];
+        assert_eq!(sign_command["cmd"], "powershell.exe");
+        assert_eq!(
+            sign_command["args"],
+            serde_json::json!([
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                "sign-windows-artifact.ps1",
+                "-FilePath",
+                "%1",
+            ])
+        );
+        let signing_script = include_str!("../sign-windows-artifact.ps1");
+        assert!(signing_script.contains("http://timestamp.acs.microsoft.com"));
+        assert!(signing_script.contains("/dlib"));
+        assert!(signing_script.contains("/dmdf"));
+        assert!(signing_script.contains("verify /v /pa /all"));
         assert!(include_str!("../Info.plist").contains("NSDocumentsFolderUsageDescription"));
     }
 
@@ -344,6 +486,29 @@ mod tests {
             SIGNED_COMPUTER_USE_SMOKE_ARG,
             "unexpected-extra-argument",
         ]));
+    }
+
+    #[test]
+    fn windows_console_smoke_requires_one_explicit_output_path() {
+        assert_eq!(
+            windows_console_smoke_output([
+                WINDOWS_CONSOLE_SMOKE_ARG,
+                r"C:\Users\Public\console-smoke.json",
+            ]),
+            Some(std::path::PathBuf::from(
+                r"C:\Users\Public\console-smoke.json",
+            )),
+        );
+        assert_eq!(
+            windows_console_smoke_output([WINDOWS_CONSOLE_SMOKE_ARG]),
+            None,
+        );
+        assert_eq!(
+            windows_console_smoke_output(
+                [WINDOWS_CONSOLE_SMOKE_ARG, "receipt.json", "unexpected",]
+            ),
+            None,
+        );
     }
 
     #[test]

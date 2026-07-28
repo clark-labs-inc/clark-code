@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { Message } from "./Message";
 
 describe("assistant message actions", () => {
-  it("places Copy as Markdown in a footer action row after the response", () => {
+  it("overlays Copy as Markdown without adding a footer row", () => {
     const body = "A response with a normal footer action.";
     const markup = renderToStaticMarkup(
       <Message
@@ -13,8 +13,8 @@ describe("assistant message actions", () => {
       />,
     );
 
-    expect(markup.indexOf(body)).toBeLessThan(markup.indexOf('aria-label="Copy as Markdown"'));
-    expect(markup).toContain("mt-1 flex justify-end");
-    expect(markup).not.toContain("absolute -top-1");
+    expect(markup).toContain("group/msg relative");
+    expect(markup).toContain("absolute -top-1 right-0");
+    expect(markup).not.toContain("mt-1 flex justify-end");
   });
 });

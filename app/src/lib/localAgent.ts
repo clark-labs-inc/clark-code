@@ -63,6 +63,10 @@ export const REASONING_EFFORTS = [
   { id: "minimal", label: "Minimal" },
 ] as const;
 
+/** The single Clark Code choice that is included with the product rather than
+ * charged against the signed-in account's prepaid balance. */
+export const INCLUDED_CODING_MODEL_ID = "clark-code:free";
+
 /** The coding models the composer picker offers (clark-code tier options).
  *  `reasoningEfforts` mirrors OpenRouter's `GET /api/v1/models` reasoning
  *  metadata. An empty list means the model reasons but exposes no effort knob. */
@@ -76,10 +80,10 @@ export const CODING_MODELS = [
     defaultReasoningEffort: "",
   },
   {
-    id: "clark-code:minimax_m3",
-    label: "MiniMax M3",
-    hint: "Efficient tool calling · vision · 1M context",
-    priceTier: 1,
+    id: INCLUDED_CODING_MODEL_ID,
+    label: "Free",
+    hint: "Included · fast coding · vision · 1M context",
+    priceTier: 0,
     reasoningEfforts: [],
     defaultReasoningEffort: "",
   },
@@ -91,54 +95,21 @@ export const CODING_MODELS = [
     reasoningEfforts: ["max"],
     defaultReasoningEffort: "max",
   },
-  {
-    id: "clark-code:kimi_k27_code",
-    label: "Kimi K2.7 Code",
-    hint: "Fast agentic coding",
-    priceTier: 2,
-    reasoningEfforts: [],
-    defaultReasoningEffort: "",
-  },
-  {
-    id: "clark-code:grok45",
-    label: "Grok 4.5",
-    hint: "Frontier coding · 500K context",
-    priceTier: 4,
-    reasoningEfforts: ["high", "medium", "low"],
-    defaultReasoningEffort: "high",
-  },
-  {
-    id: "clark-code:deepseek_v4_pro",
-    label: "DeepSeek V4 Pro",
-    hint: "Long-horizon coding · 1M context",
-    priceTier: 1,
-    reasoningEfforts: ["", "xhigh", "high"],
-    defaultReasoningEffort: "",
-  },
-  {
-    id: "clark-code:claude_opus_5",
-    label: "Claude Opus 5",
-    hint: "Frontier coding · vision · 1M context",
-    priceTier: 5,
-    reasoningEfforts: [],
-    defaultReasoningEffort: "",
-  },
-  {
-    id: "clark-code:gpt56_sol",
-    label: "GPT-5.6 Sol",
-    hint: "Frontier coding · vision · 1M context",
-    priceTier: 5,
-    reasoningEfforts: [],
-    defaultReasoningEffort: "",
-  },
 ] as const satisfies readonly {
   id: string;
   label: string;
   hint: string;
-  priceTier: 1 | 2 | 3 | 4 | 5;
+  /** Zero is included with Clark Code and renders without a dollar cue. */
+  priceTier: 0 | 1 | 2 | 3 | 4 | 5;
   reasoningEfforts: readonly ReasoningEffortId[];
   defaultReasoningEffort: ReasoningEffortId;
 }[];
+
+/** Keep billing UI gated on the selected managed lane, never on a raw model
+ * name that happens to resolve to the same upstream provider. */
+export function isIncludedCodingModel(model: string): boolean {
+  return model === INCLUDED_CODING_MODEL_ID;
+}
 
 /** Keep local storage, conversation overrides, and direct callers inside the
  * current picker catalog. Retired choices must not silently reach the provider. */
@@ -205,13 +176,16 @@ function migrate(s: LocalAgentSettings): LocalAgentSettings {
   const savedModel = typeof s.model === "string" ? s.model : DEFAULT_LOCAL_SETTINGS.model;
   const savedEffort = typeof s.reasoningEffort === "string" ? s.reasoningEffort : "";
   const model = normalizeCodingModel(savedModel);
+  const reasoningEffort = model === savedModel
+    ? normalizeReasoningEffort(model, savedEffort)
+    : DEFAULT_LOCAL_SETTINGS.reasoningEffort;
   // Return the current schema explicitly. Older builds persisted `baseUrl`
   // (often OpenRouter) and spreading the parsed object kept that misleading,
   // unused field alive forever even though Clark Code always uses Clark's API.
   return {
     cwd: typeof s.cwd === "string" ? s.cwd : "",
     model,
-    reasoningEffort: normalizeReasoningEffort(model, savedEffort),
+    reasoningEffort,
     apiKey: typeof s.apiKey === "string" ? s.apiKey : "",
     apiKeyOwner: typeof s.apiKeyOwner === "string" ? s.apiKeyOwner : "",
     computerUseEnabled: s.computerUseEnabled === true,
@@ -243,15 +217,18 @@ function normalizeChatModelOverride(value: unknown): ChatModelOverride {
   const candidate = value && typeof value === "object"
     ? value as Partial<ChatModelOverride>
     : {};
-  const model = normalizeCodingModel(
-    typeof candidate.model === "string" ? candidate.model : DEFAULT_LOCAL_SETTINGS.model,
-  );
+  const savedModel = typeof candidate.model === "string"
+    ? candidate.model
+    : DEFAULT_LOCAL_SETTINGS.model;
+  const model = normalizeCodingModel(savedModel);
   return {
     model,
-    reasoningEffort: normalizeReasoningEffort(
-      model,
-      typeof candidate.reasoningEffort === "string" ? candidate.reasoningEffort : "",
-    ),
+    reasoningEffort: model === savedModel
+      ? normalizeReasoningEffort(
+        model,
+        typeof candidate.reasoningEffort === "string" ? candidate.reasoningEffort : "",
+      )
+      : DEFAULT_LOCAL_SETTINGS.reasoningEffort,
   };
 }
 

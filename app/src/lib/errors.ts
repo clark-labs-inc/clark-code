@@ -3,6 +3,13 @@ import type { RunOutcome } from "../core-bridge/types";
 // Run failures use the typed provider contract below. `humanizeError` remains
 // only for non-run errors and legacy records that predate `failure_kind`.
 
+export function isIncludedWeeklyAllowanceExhausted(
+  outcome?: Pick<RunOutcome, "failure_kind" | "error">,
+): boolean {
+  return outcome?.failure_kind === "insufficient_credits"
+    && outcome.error?.toLowerCase().includes("included weekly usage") === true;
+}
+
 /** Map a typed terminal run failure to product language. */
 export function humanizeRunFailure(
   outcome?: Pick<RunOutcome, "failure_kind" | "error">,
@@ -21,6 +28,9 @@ export function humanizeRunFailure(
     case "context_overflow":
       return "This conversation is too long for the model’s context window. Start a new session.";
     case "insufficient_credits":
+      if (isIncludedWeeklyAllowanceExhausted(outcome)) {
+        return "Your included weekly usage is used up. It resets on Monday.";
+      }
       return "Clark Code’s usage limit has been reached.";
     case "tool_fatal":
       return "A coding action failed unexpectedly. Review the last step and try again.";

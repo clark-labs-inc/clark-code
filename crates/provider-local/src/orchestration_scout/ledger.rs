@@ -382,8 +382,12 @@ mod tests {
             platform: "linux".into(),
             architecture: "x86_64".into(),
             scope: ".".into(),
-            executable_names: Vec::new(),
+            adapter_executable_names: Vec::new(),
+            path_executable_count: 0,
+            path_executable_names_sha256: "b".repeat(64),
             environment: Vec::new(),
+            environment_name_count: 0,
+            environment_names_sha256: "c".repeat(64),
             dotenv_files: Vec::new(),
             credential_surfaces: Vec::new(),
             routing: BTreeMap::new(),
@@ -401,6 +405,7 @@ mod tests {
                 census,
             )])),
             ledgers: std::sync::Mutex::new(std::collections::HashMap::new()),
+            target: std::sync::Mutex::new(None),
             max_parallel_agents: 3,
         })
     }

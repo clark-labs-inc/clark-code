@@ -27,7 +27,7 @@ use futures::StreamExt;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
-use crate::config::LocalConfig;
+use crate::config::{is_free_model, LocalConfig};
 use crate::engine::{run_turn, TurnContext};
 use crate::exec::{Executor, LocalExecutor, RemoteExecutor};
 use crate::llm::LlmClient;
@@ -87,7 +87,11 @@ impl Provider for LocalAgentProvider {
                 }),
             });
         let mut registry = ToolRegistry::new(local.clark.clone(), memory);
-        if let Some(api_key) = local.api_key.clone() {
+        if let Some(api_key) = local
+            .api_key
+            .clone()
+            .filter(|_| !is_free_model(&local.model))
+        {
             registry.enable_image_generation(crate::tools::image::ImageGenerationConfig {
                 base_url: local.base_url.clone(),
                 api_key,
@@ -128,6 +132,10 @@ impl Provider for LocalAgentProvider {
             registry.enable_orchestration(
                 crate::orchestration::OrchestrationToolsConfig::from_local(&local),
             );
+        } else if !self.isolation.disposable_writer() {
+            if let Some(policy) = local.scout_capsules.clone() {
+                registry.enable_scout_capsules(policy);
+            }
         }
         self.llm = Some(llm);
         self.registry = Some(Arc::new(registry));
@@ -490,13 +498,28 @@ impl Provider for LocalAgentProvider {
         )
         .await
         .map_err(Error::Other)?;
+        let scout_turn =
+            crate::skills::invokes_skill(&run_skills, &input.blocks, &user_request, "scout:scout");
+        let model_override = scout_turn.then_some(crate::tools::TurnModelOverride {
+            model: crate::config::SCOUT_MODEL,
+            reasoning_effort: crate::config::SCOUT_REASONING_EFFORT,
+        });
+        let effective_model = model_override
+            .map(|policy| policy.model)
+            .unwrap_or(config.model.as_str());
+        let llm = match model_override {
+            Some(policy) => llm
+                .with_model(policy.model)
+                .with_reasoning_effort(policy.reasoning_effort),
+            None => llm,
+        };
         let goal_command = goal_command_objective(&user_request);
         if let Some(objective) = goal_command.as_ref() {
             let mut session = self.session.lock().await;
             crate::tools::goal::start_goal(&mut session, objective.clone(), None)
                 .map_err(Error::Other)?;
         }
-        let native_image_support = crate::config::model_supports_images(&config.model);
+        let native_image_support = crate::config::model_supports_images(effective_model);
         let mut context_sections = Vec::new();
         if config.orchestration.enabled {
             context_sections.push(
@@ -639,13 +662,14 @@ impl Provider for LocalAgentProvider {
                 progress: None,
                 agent_progress: None,
                 call_progress: None,
+                model_override,
             },
             session: self.session.clone(),
             control: self.control.clone(),
             session_id,
             max_iterations,
             compaction: config.compaction,
-            model: config.model,
+            model: effective_model.to_string(),
             temperature: config.temperature,
             user_text: text,
             user_content,

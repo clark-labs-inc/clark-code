@@ -6,9 +6,9 @@ use crate::exec::LocalExecutor;
 
 use super::loader::discover_catalog_with_home;
 use super::{
-    bound_skill_injections, explicit_skill_injections, install_skill_pack, render_catalog,
-    uninstall_skill_pack, InstallSkillPackRequest, SkillOrigin, SkillPackAction, SkillPackScope,
-    SkillScope,
+    bound_skill_injections, explicit_skill_injections, install_skill_pack, invokes_skill,
+    render_catalog, uninstall_skill_pack, InstallSkillPackRequest, SkillOrigin, SkillPackAction,
+    SkillPackScope, SkillScope,
 };
 use agent_core::domain::ContentBlock;
 
@@ -290,7 +290,10 @@ async fn bundled_scout_skill_requires_the_typed_evidence_toolchain() {
     catalog.resolve_capabilities(
         &HashSet::from([
             "scout_capabilities".to_string(),
+            "scout_adapter".to_string(),
             "scout_ledger".to_string(),
+            "scout_enterprise".to_string(),
+            "scout_enterprise_query".to_string(),
             "scout_probe".to_string(),
             "scout_measure".to_string(),
             "delegate_read_only".to_string(),
@@ -300,15 +303,48 @@ async fn bundled_scout_skill_requires_the_typed_evidence_toolchain() {
     );
     let scout = catalog.resolve_name("scout").unwrap();
     assert_eq!(scout.name, "scout:scout");
+    assert!(
+        !scout.allow_implicit_invocation,
+        "Scout must be explicitly selected so its host-pinned model applies before the first turn"
+    );
+    assert!(invokes_skill(
+        &catalog,
+        &[ContentBlock::text("$scout:scout map AWS")],
+        "$scout:scout map AWS",
+        "scout:scout",
+    ));
+    assert!(invokes_skill(
+        &catalog,
+        &[ContentBlock::skill_reference(
+            &scout.id,
+            &scout.revision,
+            "Scout",
+        )],
+        "map AWS",
+        "scout:scout",
+    ));
+    assert!(!invokes_skill(
+        &catalog,
+        &[ContentBlock::text("$github:github inspect AWS")],
+        "$github:github inspect AWS",
+        "scout:scout",
+    ));
     let body = catalog.read(&LocalExecutor, scout).await.unwrap();
+    assert!(body.contains("Scout's model is not user-configurable"));
     assert!(body.contains("Never print, return, hash, or persist secret values"));
     assert!(body.contains("Call `scout_capabilities`"));
+    assert!(body.contains("Call `scout_enterprise\n   enroll`"));
+    assert!(body.contains("`scout_enterprise submit_adapter_receipt`"));
+    assert!(body.contains("with only that retained `task_id`\n   and `receipt_id`"));
+    assert!(body.contains("Concurrent collectors share nothing directly"));
+    assert!(body.contains("Private key bytes never enter tool"));
+    assert!(body.contains("Warm reads report an index receipt"));
+    assert!(body.contains("Use `scout_enterprise_query snapshot`"));
     assert!(body.contains("Workers propose"));
     assert!(body.contains("independently checked reproduction"));
-    assert!(
-        body.contains("Exhaust every discovered capability family and safe authentication context")
-    );
-    assert!(body.contains("Every pinned manifest row has a terminal status"));
+    assert!(body.contains("Exhaust the declared business-system graph, not the host filesystem"));
+    assert!(body.contains("Stop only when every frontier row is terminal"));
+    assert!(body.contains("The simulation model must name business actors"));
 }
 
 #[test]
@@ -325,7 +361,10 @@ fn bundled_scout_openai_metadata_matches_runtime_dependencies() {
         tools,
         HashSet::from([
             "scout_capabilities",
+            "scout_adapter",
             "scout_ledger",
+            "scout_enterprise",
+            "scout_enterprise_query",
             "scout_probe",
             "scout_measure",
             "delegate_read_only",

@@ -81,7 +81,7 @@ The paid model receipt is separately ignored and cost-capped:
 
 ```bash
 CLARK_CODE_API_KEY=... \
-CLARK_SANDBOX_E2E_MODEL=clark-code:minimax_m3 \
+CLARK_SANDBOX_E2E_MODEL=clark-code:free \
 cargo test -p provider-local --test sandbox_live \
   paid_cheapest_model_cannot_escape_workspace -- --ignored --exact --nocapture
 ```

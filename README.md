@@ -117,7 +117,7 @@ node resilience-benchmark.mjs --smoke
 ```
 
 A separate control drives the real local provider through `devbridge` using
-the Clark-managed `clark-code:deepseek_v4_pro` route. It is intentionally
+the Clark-managed `clark-code:free` route. It is intentionally
 opt-in because it spends live model credits. Set `CLARK_CODE_API_KEY` (or keep
 it in the repository's gitignored `.env`) and run:
 

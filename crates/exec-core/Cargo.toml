@@ -4,18 +4,23 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "The Executor abstraction (filesystem + process primitives) shared by clark-desktop's local provider and the remote exec-server. Deliberately tiny — no HTTP, no agent-core — so the remote binary stays lean."
+description = "The Executor abstraction for filesystem, process, and bounded target-native services shared by Clark Desktop and the remote exec-server."
 
 [dependencies]
 async-trait.workspace = true
+exec-private-fs = { path = "private-fs" }
 libc = "0.2"
 portable-pty = "0.9"
 tokio = { workspace = true }
 tokio-util = { version = "0.7", default-features = false }
 ignore = "0.4"
+scout-capability-census = { path = "../scout-capability-census" }
+scout-store = { path = "../scout-store" }
+scout-adapter-runtime = { path = "../scout-adapter-runtime" }
+scout-capsule-host = { path = "../scout-capsule-host" }
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_JobObjects", "Win32_System_Threading"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_JobObjects", "Win32_System_Threading"] }
 
 [dev-dependencies]
 tempfile = "3"

@@ -2,7 +2,7 @@
   "schema_version": 2,
   "product": "Clark Code",
   "live_model": {
-    "id": "clark-code:minimax_m3",
+    "id": "clark-code:free",
     "label": "MiniMax M3",
     "upstream_id": "minimax/minimax-m3",
     "provider": "clark-platform",
@@ -212,7 +212,10 @@
     "read_skill",
     "resolve_coding_workstreams",
     "resolve_delegation",
+    "scout_adapter",
     "scout_capabilities",
+    "scout_enterprise",
+    "scout_enterprise_query",
     "scout_ledger",
     "scout_measure",
     "scout_probe",
@@ -377,7 +380,10 @@
       "id": "scout_system_cartography",
       "surface": "model_tools",
       "tools": [
+        "scout_adapter",
         "scout_capabilities",
+        "scout_enterprise",
+        "scout_enterprise_query",
         "scout_ledger",
         "scout_probe",
         "scout_measure"

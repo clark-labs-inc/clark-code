@@ -54,26 +54,16 @@ describe("Clark Code model settings", () => {
   it("exposes every current Clark Code backend-owned model option", () => {
     expect(CODING_MODELS.map(({ id, label }) => ({ id, label }))).toEqual([
       { id: "clark-code", label: "GLM 5.2" },
-      { id: "clark-code:minimax_m3", label: "MiniMax M3" },
+      { id: "clark-code:free", label: "Free" },
       { id: "clark-code:kimi_k3", label: "Kimi K3" },
-      { id: "clark-code:kimi_k27_code", label: "Kimi K2.7 Code" },
-      { id: "clark-code:grok45", label: "Grok 4.5" },
-      { id: "clark-code:deepseek_v4_pro", label: "DeepSeek V4 Pro" },
-      { id: "clark-code:claude_opus_5", label: "Claude Opus 5" },
-      { id: "clark-code:gpt56_sol", label: "GPT-5.6 Sol" },
     ]);
   });
 
-  it("assigns every coding model a relative price tier from one to five", () => {
+  it("marks Free as included and keeps relative price tiers for paid models", () => {
     expect(CODING_MODELS.map(({ id, priceTier }) => ({ id, priceTier }))).toEqual([
       { id: "clark-code", priceTier: 3 },
-      { id: "clark-code:minimax_m3", priceTier: 1 },
+      { id: "clark-code:free", priceTier: 0 },
       { id: "clark-code:kimi_k3", priceTier: 5 },
-      { id: "clark-code:kimi_k27_code", priceTier: 2 },
-      { id: "clark-code:grok45", priceTier: 4 },
-      { id: "clark-code:deepseek_v4_pro", priceTier: 1 },
-      { id: "clark-code:claude_opus_5", priceTier: 5 },
-      { id: "clark-code:gpt56_sol", priceTier: 5 },
     ]);
   });
 
@@ -84,42 +74,33 @@ describe("Clark Code model settings", () => {
   });
 
   it("exposes each model's current OpenRouter reasoning levels", () => {
-    expect(reasoningEffortsForModel("clark-code:minimax_m3")).toEqual([]);
     expect(reasoningEffortsForModel("clark-code").map(({ id }) => id))
       .toEqual(["", "xhigh", "high"]);
+    expect(reasoningEffortsForModel("clark-code:free")).toEqual([]);
     expect(reasoningEffortsForModel("clark-code:kimi_k3").map(({ id }) => id))
       .toEqual(["max"]);
-    expect(reasoningEffortsForModel("clark-code:kimi_k27_code")).toEqual([]);
-    expect(reasoningEffortsForModel("clark-code:grok45").map(({ id }) => id))
-      .toEqual(["high", "medium", "low"]);
-    expect(reasoningEffortsForModel("clark-code:deepseek_v4_pro").map(({ id }) => id))
-      .toEqual(["", "xhigh", "high"]);
-    expect(reasoningEffortsForModel("clark-code:claude_opus_5")).toEqual([]);
-    expect(reasoningEffortsForModel("clark-code:gpt56_sol")).toEqual([]);
   });
 
   it("normalizes stale effort choices when the selected model changes", () => {
-    expect(normalizeReasoningEffort("clark-code:minimax_m3", "high")).toBe("");
+    expect(normalizeReasoningEffort("clark-code:free", "high")).toBe("");
     expect(normalizeReasoningEffort("clark-code:kimi_k3", "xhigh")).toBe("max");
-    expect(normalizeReasoningEffort("clark-code:kimi_k27_code", "high")).toBe("");
-    expect(normalizeReasoningEffort("clark-code:grok45", "xhigh")).toBe("high");
   });
 
-  it("retires saved Gemini picker selections to the default model", () => {
+  it("retires saved removed picker selections to the default model", () => {
     store.setItem(
       "clark-desktop:local-agent",
-      JSON.stringify({ ...DEFAULT_LOCAL_SETTINGS, model: "clark-code:gemini35_flash_lite", reasoningEffort: "low" }),
+      JSON.stringify({ ...DEFAULT_LOCAL_SETTINGS, model: "clark-code:grok45", reasoningEffort: "high" }),
     );
     store.setItem(
       "clark-desktop:chat-models",
       JSON.stringify({
-        "chat-gemini": { model: "clark-code:gemini35_flash_lite", reasoningEffort: "low" },
+        "chat-retired": { model: "clark-code:claude_opus_5", reasoningEffort: "" },
       }),
     );
 
     expect(loadLocalSettings()).toMatchObject({ model: "clark-code", reasoningEffort: "" });
     expect(loadChatModels()).toEqual({
-      "chat-gemini": { model: "clark-code", reasoningEffort: "" },
+      "chat-retired": { model: "clark-code", reasoningEffort: "" },
     });
   });
 
@@ -162,11 +143,11 @@ describe("effectiveModelSettings (per-conversation model)", () => {
 
   it("uses the per-chat override when one is set", () => {
     const overrides: Record<string, ChatModelOverride> = {
-      "chat-1": { model: "clark-code:grok45", reasoningEffort: "high" },
+      "chat-1": { model: "clark-code:free", reasoningEffort: "" },
     };
     const out = effectiveModelSettings(DEFAULT_LOCAL_SETTINGS, overrides, "chat-1");
-    expect(out.model).toBe("clark-code:grok45");
-    expect(out.reasoningEffort).toBe("high");
+    expect(out.model).toBe("clark-code:free");
+    expect(out.reasoningEffort).toBe("");
   });
 
   it("falls back when an un-migrated chat still names a retired picker model", () => {
@@ -180,7 +161,7 @@ describe("effectiveModelSettings (per-conversation model)", () => {
 
   it("one chat's override does not leak into another", () => {
     const overrides: Record<string, ChatModelOverride> = {
-      "chat-1": { model: "clark-code:grok45", reasoningEffort: "" },
+      "chat-1": { model: "clark-code:free", reasoningEffort: "" },
     };
     expect(effectiveModelSettings(DEFAULT_LOCAL_SETTINGS, overrides, "chat-2").model)
       .toBe(DEFAULT_LOCAL_SETTINGS.model);
@@ -189,9 +170,9 @@ describe("effectiveModelSettings (per-conversation model)", () => {
 
 describe("chat model overrides round-trip localStorage", () => {
   it("persists and reloads per-chat models", () => {
-    saveChatModels({ "chat-a": { model: "clark-code:grok45", reasoningEffort: "high" } });
+    saveChatModels({ "chat-a": { model: "clark-code:free", reasoningEffort: "" } });
     expect(loadChatModels()).toEqual({
-      "chat-a": { model: "clark-code:grok45", reasoningEffort: "high" },
+      "chat-a": { model: "clark-code:free", reasoningEffort: "" },
     });
     saveChatModels({});
     expect(loadChatModels()).toEqual({});

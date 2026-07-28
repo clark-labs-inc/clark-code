@@ -200,31 +200,31 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
   resendFrom: async (timelineIndex, text, skills = []) => {
     let state = get();
     const { bridge, session, snapshot } = state;
-    if (!bridge || !session) return;
+    if (!bridge || !session) return null;
     if (state.updateWaiting || state.updateApplying) {
       get().flashNotice("Clark Code is finishing active work before updating; edit after it relaunches.");
-      return;
+      return null;
     }
     const rejectEdit = (error: string) =>
       set({ error, composerPrefill: { text, timelineIndex } });
     if (session.provider !== "local") {
       rejectEdit("Editing earlier turns is currently available in Clark Code only.");
-      return;
+      return null;
     }
-    if (!text.trim() && state.attachments.length === 0) return;
+    if (!text.trim() && state.attachments.length === 0) return null;
     if (isBusy(snapshot)) {
       rejectEdit("Stop the current run before editing an earlier message.");
-      return;
+      return null;
     }
     const target = snapshot.timeline[timelineIndex];
     if (target?.item !== "message" || target.role !== "user") {
       rejectEdit("That message changed before it could be edited. Try again.");
-      return;
+      return null;
     }
     const previousEntry = liveSessions.get(session.id);
     if (!previousEntry) {
       rejectEdit("This conversation is no longer live. Reopen it and try again.");
-      return;
+      return null;
     }
 
     await get().ensureCodeKey();
@@ -232,7 +232,7 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
     const projectRoot = previousEntry.projectRoot || state.activeProjectRoot;
     if (!projectRoot) {
       rejectEdit("This conversation has no project folder to resume from.");
-      return;
+      return null;
     }
 
     const prefix = snapshotBeforeTimelineItem(snapshot, timelineIndex);
@@ -314,7 +314,7 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
       ready = true;
       nextEntry.starting = true;
       try {
-        await bridge.prompt(
+        return await bridge.prompt(
           session.id,
           [{ type: "text", text }, ...skills],
           uploads,
@@ -325,7 +325,7 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
     } catch (error) {
       if (ready) {
         set({ error: String(error), connecting: false });
-        return;
+        return null;
       }
       if (detached && !replaced) liveSessions.set(session.id, previousEntry);
       if (replaced) {
@@ -346,6 +346,7 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
         connecting: false,
         composerPrefill: { text, timelineIndex },
       });
+      return null;
     }
   },
 
@@ -373,12 +374,12 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
 
   send: async (text, skills: SkillReferenceBlock[] = []) => {
     const { bridge, session, attachments, snapshot } = get();
-    if (!bridge || !session) return;
+    if (!bridge || !session) return null;
     if (get().updateWaiting || get().updateApplying) {
       get().flashNotice("Clark Code is finishing active work before updating; send after it relaunches.");
-      return;
+      return null;
     }
-    if (!text.trim() && attachments.length === 0 && skills.length === 0) return;
+    if (!text.trim() && attachments.length === 0 && skills.length === 0) return null;
     const uploads = attachments.map(toUpload);
     for (const a of attachments) if (a.previewUrl) URL.revokeObjectURL(a.previewUrl);
     set({ attachments: [], error: null });
@@ -390,19 +391,20 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
       const entry = liveSessions.get(session.id);
       if (entry) entry.queued = [...entry.queued, queuedMessage];
       set((s) => ({ queued: [...s.queued, queuedMessage] }));
-      return;
+      return null;
     }
     try {
       const entry = liveSessions.get(session.id);
       if (entry) entry.starting = true;
       try {
-        await bridge.prompt(session.id, [{ type: "text", text }, ...skills], uploads);
+        return await bridge.prompt(session.id, [{ type: "text", text }, ...skills], uploads);
       } finally {
         if (entry) entry.starting = false;
       }
     } catch (e) {
       // Surface the failure instead of silently doing nothing.
       set({ error: String(e) });
+      return null;
     }
   },
 

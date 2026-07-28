@@ -1,0 +1,23 @@
+[package]
+name = "scout-platform-client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Portable signed sensor client for Clark's authoritative system-cartography API."
+
+[dependencies]
+getrandom = "0.2"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+scout-ingest-protocol = { path = "../scout-ingest-protocol" }
+scout-machine-identity = { path = "../scout-machine-identity" }
+serde.workspace = true
+serde_ignored = "0.1"
+serde_json.workspace = true
+sha2 = "0.10"
+uuid = { version = "1", features = ["serde"] }
+
+[dev-dependencies]
+tempfile = "3"
+tokio.workspace = true
+uuid = { version = "1", features = ["v4"] }

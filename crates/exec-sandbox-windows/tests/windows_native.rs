@@ -25,7 +25,7 @@ fn native_windows_sandbox_enforces_filesystem_process_and_network_boundaries() {
     let setup = required_helper("CLARK_WINDOWS_SANDBOX_SETUP");
     assert_eq!(runner.parent(), setup.parent(), "helpers must be siblings");
     let local_app_data = PathBuf::from(std::env::var_os("LOCALAPPDATA").unwrap());
-    let state_dir = local_app_data.join("Clark Code").join("sandbox");
+    let state_dir = local_app_data.join("Clark").join("Code").join("sandbox");
     let workspace = tempfile::tempdir().unwrap();
     let outside = tempfile::tempdir().unwrap();
     let process_temp_guard = tempfile::tempdir().unwrap();

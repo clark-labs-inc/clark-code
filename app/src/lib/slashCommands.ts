@@ -52,7 +52,7 @@ export function slashCommands(): SlashCommand[] {
     },
     {
       name: "scout",
-      hint: "Map a system with agents and verified evidence",
+      hint: "Map a business system with fixed GLM 5.2",
       localOnly: true,
       body: SCOUT_SKILL,
     },
@@ -105,7 +105,7 @@ export function slashCommands(): SlashCommand[] {
     {
       name: "btw",
       hint: "Ask a side question without interrupting the run",
-      needsSession: true,
+      localOnly: true,
       // Not a run-action: the composer intercepts `/btw <question>` on submit
       // and routes it to `askSideQuestion`. Insert the prefix so the user keeps
       // typing their question after the space.
@@ -127,6 +127,16 @@ export function goalCommandObjective(text: string): string | null {
 /** Manual compaction is an exact control command with no inline arguments. */
 export function isCompactCommand(text: string): boolean {
   return /^\s*\/compact\s*$/.test(text);
+}
+
+/** Return the question for an exact `/btw` command, or `null` for ordinary
+ * text. An empty string means the command is valid but still needs a question. */
+export function sideQuestionCommandQuestion(text: string): string | null {
+  const command = text.trimStart();
+  if (!command.startsWith("/btw")) return null;
+  const rest = command.slice("/btw".length);
+  if (rest.length > 0 && !/^\s/.test(rest)) return null;
+  return rest.trim();
 }
 
 /** Expand directly typed prompt commands to collision-safe bundled skill

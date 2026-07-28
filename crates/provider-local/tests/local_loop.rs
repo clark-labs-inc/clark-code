@@ -174,6 +174,59 @@ fn request_json(raw: &[u8]) -> serde_json::Value {
 }
 
 #[tokio::test]
+async fn scout_uses_host_pinned_glm_instead_of_conversation_model_settings() {
+    let dir = tempfile::tempdir().unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let captured = tokio::spawn(serve(listener, vec![final_body()]));
+
+    let mut provider = provider_local::LocalAgentProvider::new();
+    provider
+        .connect(ProviderConfig {
+            auth_token: Some("test-key".into()),
+            extra: json!({
+                "base_url": format!("http://{addr}/v1"),
+                "model": "clark-code:kimi_k3",
+                "reasoning_effort": "max",
+                "memories": false,
+                "sandbox_mode": "disabled"
+            }),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let session = provider
+        .new_session(SessionOptions {
+            cwd: Some(dir.path().to_string_lossy().to_string()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+    let mut stream = provider
+        .prompt(
+            &session.id,
+            PromptInput::text("$scout:scout map this business system"),
+        )
+        .await
+        .unwrap();
+    while let Some(event) = stream.next().await {
+        if matches!(event, AgentEvent::RunFinished { .. }) {
+            break;
+        }
+    }
+
+    let requests = captured.await.unwrap();
+    assert_eq!(requests.len(), 1);
+    let request = request_json(&requests[0]);
+    assert_eq!(request["model"], provider_local::SCOUT_MODEL);
+    assert!(
+        request.get("reasoning_effort").is_none(),
+        "Scout must not inherit another model's reasoning configuration"
+    );
+}
+
+#[tokio::test]
 async fn local_loop_reads_file_and_answers() {
     // A real project dir with a real file the tool will read.
     let dir = tempfile::tempdir().unwrap();
@@ -645,7 +698,7 @@ async fn image_attachments_are_described_by_vision_fallback_before_the_coding_ca
     // First request: the vision fallback, hitting the stateless multimodal
     // model with BOTH images batched into one content-parts array.
     let vision_req = request_json(&captured[0]);
-    assert_eq!(vision_req["model"], "google/gemini-3.1-flash-lite");
+    assert_eq!(vision_req["model"], "qwen/qwen3.7-flash");
     let vision_content = &vision_req["messages"]
         .as_array()
         .unwrap()

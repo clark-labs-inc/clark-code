@@ -5,6 +5,7 @@ import {
   codeKeyMatchesAccount,
   creditState,
   effectiveBalance,
+  effectiveLimitLabel,
   effectiveUsagePercent,
   latestActivityReward,
   type BillingSummary,
@@ -132,6 +133,37 @@ describe("creditState", () => {
       effective: undefined,
     }))).toBe(42);
     expect(effectiveUsagePercent(null)).toBeNull();
+  });
+
+  it("shows exhausted spendable credits instead of a stale cycle percentage", () => {
+    const summary = billing(0, {
+      effective: {
+        owner_kind: "organization",
+        display_name: "Clark Labs",
+        access_state: "usage_limited",
+        credit_usage: { percent_used: 21 },
+        coverage_status: "action_needed",
+        balance: { available_credits: 0, is_unlimited: false },
+      },
+    });
+
+    expect(effectiveUsagePercent(summary)).toBe(21);
+    expect(effectiveLimitLabel(summary)).toBe("Out of credits");
+  });
+
+  it("keeps percentage and unlimited labels for accounts that can run", () => {
+    expect(effectiveLimitLabel(billing(10_000, {
+      credit_usage: { percent_used: 42 },
+      effective: undefined,
+    }))).toBe("42%");
+    expect(effectiveLimitLabel(billing(0, {
+      effective: {
+        owner_kind: "user",
+        display_name: "Personal",
+        access_state: "unlimited",
+        balance: { available_credits: 0, is_unlimited: true },
+      },
+    }))).toBe("No limit");
   });
 });
 

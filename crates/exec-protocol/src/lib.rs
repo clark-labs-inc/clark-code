@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 
 /// Bumped on any breaking change to the methods/params below. The server
 /// refuses to serve a client advertising a different major value.
-pub const PROTOCOL_VERSION: u32 = 6;
+pub const PROTOCOL_VERSION: u32 = 9;
 
 /// Method names. String constants (not an enum) so unknown methods round-trip to
 /// a clean "method not found" error instead of a deserialize failure.
@@ -31,6 +31,11 @@ pub mod method {
     pub const AUTH: &str = "auth";
     pub const FS_READ: &str = "fs/read";
     pub const FS_WRITE: &str = "fs/write";
+    pub const FS_WRITE_PRIVATE: &str = "fs/writePrivate";
+    pub const FS_WRITE_PRIVATE_NEW: &str = "fs/writePrivateNew";
+    pub const FS_SYNC_FILE: &str = "fs/syncFile";
+    pub const FS_SYNC_DIRECTORY: &str = "fs/syncDirectory";
+    pub const TARGET_SERVICE_CALL: &str = "targetService/call";
     pub const FS_CREATE_DIR: &str = "fs/createDir";
     pub const FS_REMOVE_FILE: &str = "fs/removeFile";
     pub const FS_REMOVE_DIR: &str = "fs/removeDir";
@@ -195,6 +200,23 @@ pub struct WriteParams {
     pub path: String,
     /// Bytes to write, base64.
     pub data: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct WriteNewResult {
+    pub created: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TargetServiceParams {
+    pub service: String,
+    pub root: String,
+    pub request: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TargetServiceResult {
+    pub response: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

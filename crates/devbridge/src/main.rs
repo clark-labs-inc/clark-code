@@ -275,10 +275,39 @@ async fn handle_cmd(cmd: Value, conn: &SharedConn, sink: &SharedSink) {
                 }
             };
 
+            let mut stream = stream;
+            let Some(first) = stream.next().await else {
+                return send(
+                    sink,
+                    json!({ "type": "error", "id": id, "message": "prompt ended before it allocated a run" }),
+                )
+                .await;
+            };
+            let run_id = match &first {
+                AgentEvent::RunStarted { run } => run.as_str().to_string(),
+                _ => {
+                    return send(
+                        sink,
+                        json!({ "type": "error", "id": id, "message": "prompt did not begin with a run identity" }),
+                    )
+                    .await
+                }
+            };
+            let snapshot = {
+                let mut c = conn.lock().await;
+                apply(&mut c.snapshot, &first);
+                c.snapshot.clone()
+            };
+            send(sink, json!({ "type": "snapshot", "snapshot": snapshot })).await;
+            send(
+                sink,
+                json!({ "type": "prompt_receipt", "id": id, "runId": run_id }),
+            )
+            .await;
+
             let conn2 = conn.clone();
             let sink2 = sink.clone();
             tokio::spawn(async move {
-                let mut stream = stream;
                 while let Some(ev) = stream.next().await {
                     let snapshot = {
                         let mut c = conn2.lock().await;

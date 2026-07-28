@@ -3,7 +3,12 @@
 // (for headless UI testing and video capture) with zero logic duplicated in TS —
 // it only relays commands and renders the Snapshots the engine produces.
 
-import type { CoreBridge, ConnectConfig, SessionOptions } from "./bridge";
+import type {
+  CoreBridge,
+  ConnectConfig,
+  PromptReceipt,
+  SessionOptions,
+} from "./bridge";
 import type { Upload } from "../lib/attachments";
 import {
   emptySnapshot,
@@ -98,8 +103,15 @@ export class DevBridge implements CoreBridge {
     sessionId: string,
     blocks: ContentBlock[],
     attachments: Upload[] = [],
-  ): Promise<void> {
-    await this.fire({ cmd: "prompt", session: sessionId, blocks, attachments });
+  ): Promise<PromptReceipt> {
+    const response = await this.call({
+      cmd: "prompt",
+      session: sessionId,
+      blocks,
+      attachments,
+    });
+    if (response.type === "error") throw new Error(String(response.message));
+    return { runId: String(response.runId) };
   }
 
   async cancel(sessionId: string, runId: string): Promise<void> {

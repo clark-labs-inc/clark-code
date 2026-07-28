@@ -443,7 +443,10 @@ export interface SessionState {
   unshareConversation: () => Promise<void>;
   addFiles: (files: File[]) => Promise<void>;
   removeAttachment: (id: string) => void;
-  send: (text: string, skills?: SkillReferenceBlock[]) => Promise<void>;
+  send: (
+    text: string,
+    skills?: SkillReferenceBlock[],
+  ) => Promise<import("../core-bridge/bridge").PromptReceipt | null>;
   /** Summarize and replace Clark Code's model-visible history without adding a user turn. */
   compactConversation: () => Promise<void>;
   continueProviderIncident: (incidentId: string) => Promise<void>;
@@ -452,7 +455,7 @@ export interface SessionState {
     timelineIndex: number,
     text: string,
     skills?: SkillReferenceBlock[],
-  ) => Promise<void>;
+  ) => Promise<import("../core-bridge/bridge").PromptReceipt | null>;
   /** Explicitly inject one queued text-only message into the active local run. */
   steerQueued: (id: string) => Promise<void>;
   removeQueued: (id: string) => void;

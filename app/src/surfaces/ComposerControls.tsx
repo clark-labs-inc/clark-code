@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { Check, ChevronDown } from "lucide-react";
 
-import type { RunUsage, RunView } from "../core-bridge/types";
 import { cn } from "../lib/cn";
 import {
   CODING_MODELS,
@@ -31,67 +30,8 @@ function useOutsideClose(ref: RefObject<HTMLElement | null>, onClose: () => void
   }, [ref]);
 }
 
-const CONTEXT_BUDGET_FALLBACK = 300_000;
-
-/** Prefer a run's live cumulative usage while retaining compatibility with
- * snapshots that only carry usage in the terminal outcome. */
-export function projectedRunUsage(run: RunView): RunUsage | undefined {
-  return run.usage ?? run.outcome?.usage;
-}
-
-export function UsageChip() {
-  const contextTokens = useSessionStore((state) => {
-    const runs = Object.values(state.snapshot.runs);
-    for (let index = runs.length - 1; index >= 0; index -= 1) {
-      const usage = projectedRunUsage(runs[index]);
-      if (usage) return usage.context_tokens;
-    }
-    return 0;
-  });
-  const contextLimit = useSessionStore((state) => {
-    const runs = Object.values(state.snapshot.runs);
-    for (let index = runs.length - 1; index >= 0; index -= 1) {
-      const limit = projectedRunUsage(runs[index])?.context_limit;
-      if (limit) return limit;
-    }
-    return CONTEXT_BUDGET_FALLBACK;
-  });
-  return <UsageChipView contextTokens={contextTokens} contextLimit={contextLimit} />;
-}
-
-export function UsageChipView({
-  contextTokens,
-  contextLimit,
-}: {
-  contextTokens: number;
-  contextLimit: number;
-}) {
-  if (contextTokens <= 0 || contextLimit <= 0) return null;
-  const percent = Math.min(100, Math.round((contextTokens / contextLimit) * 100));
-  const high = percent >= 75;
-
-  return (
-    <span
-      title={`${percent}% of context limit used`}
-      className="hidden items-center gap-1.5 font-mono text-xs tabular-nums text-ink-faint sm:flex"
-    >
-      <span className="flex items-center gap-1">
-        <span className="relative h-1 w-7 overflow-hidden rounded-full bg-bg-tertiary">
-          <span
-            className={cn(
-              "absolute inset-y-0 left-0 rounded-full",
-              high ? "bg-warning" : "bg-ink-faint",
-            )}
-            style={{ width: `${Math.max(6, percent)}%` }}
-          />
-        </span>
-        {percent}% of limit used
-      </span>
-    </span>
-  );
-}
-
-export function ModelPriceCue({ tier }: { tier: 1 | 2 | 3 | 4 | 5 }) {
+export function ModelPriceCue({ tier }: { tier: 0 | 1 | 2 | 3 | 4 | 5 }) {
+  if (tier === 0) return null;
   return (
     <span
       aria-hidden="true"

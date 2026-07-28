@@ -24,9 +24,8 @@ async fn live_minimax_streamed_text_matches_canonical_final() {
     let api_key = std::env::var("CLARK_CODE_API_KEY").expect("CLARK_CODE_API_KEY");
     let base_url = std::env::var("CLARK_CODE_BASE_URL")
         .unwrap_or_else(|_| "https://api.clarkslabs.com/v1".to_string());
-    let model =
-        std::env::var("CLARK_CODE_MODEL").unwrap_or_else(|_| "clark-code:minimax_m3".to_string());
-    assert_eq!(model, "clark-code:minimax_m3");
+    let model = std::env::var("CLARK_CODE_MODEL").unwrap_or_else(|_| "clark-code:free".to_string());
+    assert_eq!(model, "clark-code:free");
 
     let project = tempfile::tempdir().expect("temporary project");
     let mut provider = LocalAgentProvider::new();

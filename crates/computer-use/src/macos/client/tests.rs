@@ -62,7 +62,8 @@ fn broken_helper_is_not_retried_and_next_explicit_call_restarts_cleanly() {
         Ok(RawConnection {
             stream: client,
             control_stream: None,
-            child: None,
+            managed_service: false,
+            socket_path: None,
         })
     });
     let backend = MacHelperBackend::with_connector(connector);
@@ -97,7 +98,8 @@ fn replayed_or_cross_session_response_fails_closed() {
         Ok(RawConnection {
             stream: client,
             control_stream: None,
-            child: None,
+            managed_service: false,
+            socket_path: None,
         })
     });
     let backend = MacHelperBackend::with_connector(connector);
@@ -122,7 +124,8 @@ fn stalled_helper_hits_the_deadline_without_an_automatic_retry() {
         Ok(RawConnection {
             stream: client,
             control_stream: None,
-            child: None,
+            managed_service: false,
+            socket_path: None,
         })
     });
     let backend = MacHelperBackend::with_connector(connector);
@@ -168,7 +171,8 @@ fn cancellation_channel_is_not_blocked_by_a_stalled_primary_request() {
         Ok(RawConnection {
             stream: client,
             control_stream: Some(control_client),
-            child: None,
+            managed_service: false,
+            socket_path: None,
         })
     });
     let backend = Arc::new(MacHelperBackend::with_connector(connector));
@@ -193,21 +197,31 @@ fn cancellation_channel_is_not_blocked_by_a_stalled_primary_request() {
 }
 
 #[test]
-fn release_helper_path_cannot_escape_the_executable_directory() {
-    let executable_directory = tempfile::tempdir().unwrap();
-    let helper = executable_directory.path().join(HELPER_EXECUTABLE);
-    File::create(&helper).unwrap();
-    let expected_directory = executable_directory.path().canonicalize().unwrap();
+fn release_service_path_cannot_escape_the_resources_directory() {
+    let resources_directory = tempfile::tempdir().unwrap();
+    let service = resources_directory.path().join(SERVICE_APP_NAME);
+    let executable = service
+        .join("Contents")
+        .join("MacOS")
+        .join(SERVICE_EXECUTABLE);
+    std::fs::create_dir_all(executable.parent().unwrap()).unwrap();
+    File::create(&executable).unwrap();
+    let expected_directory = resources_directory.path().canonicalize().unwrap();
     assert_eq!(
-        validate_helper_path(helper, Some(&expected_directory)).unwrap(),
-        expected_directory.join(HELPER_EXECUTABLE)
+        validate_service_app_path(service, Some(&expected_directory)).unwrap(),
+        expected_directory.join(SERVICE_APP_NAME)
     );
 
     let outside = tempfile::tempdir().unwrap();
-    let outside_helper = outside.path().join(HELPER_EXECUTABLE);
-    File::create(&outside_helper).unwrap();
+    let outside_service = outside.path().join(SERVICE_APP_NAME);
+    let outside_executable = outside_service
+        .join("Contents")
+        .join("MacOS")
+        .join(SERVICE_EXECUTABLE);
+    std::fs::create_dir_all(outside_executable.parent().unwrap()).unwrap();
+    File::create(outside_executable).unwrap();
     assert!(matches!(
-        validate_helper_path(outside_helper, Some(&expected_directory)),
+        validate_service_app_path(outside_service, Some(&expected_directory)),
         Err(ComputerUseError::HelperRejected(_))
     ));
 }

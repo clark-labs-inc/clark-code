@@ -5,30 +5,87 @@ import type {
   ComputerUseAppApproval,
 } from "../../core-bridge/bridge";
 import {
+  computerUseRepairMessage,
   computerUseSupportMessage,
   ComputerUseApprovalRows,
   ComputerUseReceiptRows,
 } from "./ComputerUseSection";
 
 describe("ComputerUseSection", () => {
-  it("distinguishes unsupported, rejected-helper, and ready boundaries", () => {
-    expect(computerUseSupportMessage(null)).toContain("Checking native helper");
+  it("distinguishes unsupported, rejected-service, permission, and ready boundaries", () => {
+    expect(computerUseSupportMessage(null)).toContain("native service");
     expect(computerUseSupportMessage({
       supported: false,
       platform: "windows",
-      helper_ready: false,
+      service_ready: false,
+      readiness: "unsupported",
     })).toBe("Native computer use is unavailable on windows.");
     expect(computerUseSupportMessage({
       supported: true,
       platform: "macos",
-      helper_ready: false,
-      detail: "helper signature rejected",
-    })).toBe("helper signature rejected");
+      service_ready: false,
+      readiness: "service_unavailable",
+      detail: "service signature rejected",
+    })).toBe("service signature rejected");
     expect(computerUseSupportMessage({
       supported: true,
       platform: "macos",
-      helper_ready: true,
-    })).toBe("The signed helper is ready.");
+      service_ready: true,
+      readiness: "needs_permission",
+      permission_owner: {
+        display_name: "Clark Computer Use",
+        bundle_id: "com.clark.computer-use",
+      },
+    })).toBe("Clark Computer Use needs macOS privacy access.");
+    expect(computerUseSupportMessage({
+      supported: true,
+      platform: "linux",
+      service_ready: true,
+      readiness: "needs_permission",
+      permission_owner: {
+        display_name: "Clark Computer Use Service",
+        bundle_id: "com.clark.ComputerUse",
+      },
+    })).toBe("Clark Computer Use Service needs desktop capture and input access.");
+    expect(computerUseSupportMessage({
+      supported: true,
+      platform: "macos",
+      service_ready: true,
+      readiness: "ready",
+    })).toBe("The signed computer-use service is ready.");
+    expect(computerUseSupportMessage({
+      supported: true,
+      platform: "windows",
+      service_ready: true,
+      readiness: "ready",
+    })).toBe("The isolated computer-use service is ready.");
+  });
+
+  it("gives platform-specific repair guidance for the permission-owning service", () => {
+    expect(computerUseRepairMessage({
+      supported: true,
+      platform: "macos",
+      service_ready: true,
+      readiness: "needs_permission",
+      permission_owner: {
+        display_name: "Clark Computer Use Dev",
+        bundle_id: "com.clark.computer-use.dev",
+      },
+    })).toBe(
+      "Grant access to Clark Computer Use Dev. Existing Clark Code privacy grants do not transfer to the separately identified service.",
+    );
+    expect(computerUseRepairMessage({
+      supported: true,
+      platform: "windows",
+      service_ready: true,
+      readiness: "needs_permission",
+    })).toContain("signed-in desktop session");
+    expect(computerUseRepairMessage({
+      supported: true,
+      platform: "linux",
+      service_ready: true,
+      readiness: "needs_permission",
+    })).toContain("X11 or XWayland");
   });
 
   it("shows signer-bound approvals with an exact revocation target", () => {

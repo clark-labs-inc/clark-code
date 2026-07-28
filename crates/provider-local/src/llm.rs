@@ -282,6 +282,14 @@ impl LlmClient {
         self
     }
 
+    /// Same endpoint/auth, different reasoning policy. `None` deliberately
+    /// clears a conversation-level override instead of inheriting a value that
+    /// may be invalid for a host-pinned model.
+    pub fn with_reasoning_effort(mut self, reasoning_effort: Option<&str>) -> Self {
+        self.reasoning_effort = reasoning_effort.map(str::to_string);
+        self
+    }
+
     /// Bind subsequent model calls to one Clark conversation.
     pub fn with_session_id(mut self, session_id: &str) -> Self {
         self.session_id = Some(session_id.to_string());

@@ -5,6 +5,7 @@ import {
 } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
 import { slashCommands } from "../lib/slashCommands";
+import { paletteCommandPresentation } from "../lib/commandPalette";
 import { fuzzyFilter } from "../lib/fuzzy";
 import { projectName } from "../lib/localAgent";
 import { cn } from "../lib/cn";
@@ -16,6 +17,7 @@ interface PaletteItem {
   hint?: string;
   icon: typeof Plus;
   group: "Actions" | "Conversations";
+  searchText: string;
   run: () => void;
 }
 
@@ -47,9 +49,11 @@ export function CommandPalette({
   // Instant, no opacity fade under Reduced Motion — see Settings for why.
   const reduce = useReducedMotion();
   const session = useSessionStore((s) => s.session);
+  const activeProvider = useSessionStore((s) => s.activeProvider);
   const activeRemote = useSessionStore((s) => s.activeRemote);
   const conversations = useSessionStore((s) => s.conversations);
   const openConversation = useSessionStore((s) => s.openConversation);
+  const localTarget = session ? session.provider === "local" : activeProvider === "local";
 
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
@@ -58,25 +62,34 @@ export function CommandPalette({
 
   const items = useMemo<PaletteItem[]>(() => {
     const actions: PaletteItem[] = slashCommands()
-      .filter((c) => (!c.needsSession || session) && (c.name !== "terminal" || !activeRemote))
-      .map((c) => ({
-        id: `action:${c.name}`,
-        // Each command's hint already reads as an action ("Copy the conversation
-        // as Markdown"); LABELS only overrides the ones that read better short.
-        // Skip the hint when it would just repeat the label.
-        label: LABELS[c.name] ?? c.hint,
-        hint: LABELS[c.name] && LABELS[c.name] !== c.hint ? c.hint : undefined,
-        icon: ICON[c.name] ?? Plus,
-        group: "Actions",
-        // All built-ins from `slashCommands()` set `run`; `body`-only entries
-        // (user-authored commands) never reach the palette.
-        run: c.run ?? (() => {}),
-      }));
+      .filter(
+        (c) =>
+          (!c.needsSession || session)
+          && (!c.localOnly || localTarget)
+          && (c.name !== "terminal" || !activeRemote),
+      )
+      .map((c) => {
+        const presentation = paletteCommandPresentation(c, LABELS[c.name]);
+        return {
+          id: `action:${c.name}`,
+          label: presentation.label,
+          hint: presentation.hint,
+          icon: ICON[c.name] ?? Plus,
+          group: "Actions",
+          searchText: presentation.searchText,
+          run: c.run ?? (() => {
+            if (presentation.prefill !== null) {
+              useSessionStore.getState().setComposerPrefill(presentation.prefill);
+            }
+          }),
+        };
+      });
     actions.push({
       id: "action:theme",
       label: dark ? "Switch to light theme" : "Switch to dark theme",
       icon: dark ? Sun : Moon,
       group: "Actions",
+      searchText: `theme ${dark ? "light" : "dark"}`,
       run: onToggleTheme,
     });
     const convos: PaletteItem[] = conversations.map((c) => ({
@@ -85,13 +98,22 @@ export function CommandPalette({
       hint: c.project ? projectName(c.project) : undefined,
       icon: MessageSquare,
       group: "Conversations",
+      searchText: `${c.title} ${c.project ? projectName(c.project) : ""}`,
       run: () => void openConversation(c.id),
     }));
     return [...actions, ...convos];
-  }, [session, activeRemote, conversations, dark, onToggleTheme, openConversation]);
+  }, [
+    session,
+    localTarget,
+    activeRemote,
+    conversations,
+    dark,
+    onToggleTheme,
+    openConversation,
+  ]);
 
   const matches = useMemo(
-    () => fuzzyFilter(items, query, (i) => `${i.label} ${i.hint ?? ""}`, 40).map((m) => m.item),
+    () => fuzzyFilter(items, query, (i) => i.searchText, 40).map((m) => m.item),
     [items, query],
   );
 

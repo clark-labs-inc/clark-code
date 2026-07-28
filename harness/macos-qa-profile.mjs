@@ -26,7 +26,7 @@ export const MACOS_QA_DATA_STORE_BYTES = [
   116, 150, 179, 45, 188, 12, 68, 3,
   182, 192, 198, 80, 198, 95, 91, 138,
 ];
-export const MACOS_QA_MODEL = "clark-code:minimax_m3";
+export const MACOS_QA_MODEL = "clark-code:free";
 export const MACOS_QA_WINDOW_TITLE = "Clark Code Dev QA";
 export const MACOS_APP_BUNDLE = path.join(
   repoDir,

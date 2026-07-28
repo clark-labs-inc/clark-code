@@ -30,7 +30,7 @@ function bridgeStub(): CoreBridge {
     connect: vi.fn(async () => {}),
     newSession: vi.fn(async () => session),
     loadSession: vi.fn(async () => session),
-    prompt: vi.fn(async () => {}),
+    prompt: vi.fn(async () => ({ runId: "run-stub" })),
     cancel: vi.fn(async () => {}),
     respond: vi.fn(async () => {}),
     subscribe: () => () => {},
@@ -52,8 +52,8 @@ beforeEach(() => {
     conversations: [],
     localSettings: {
       cwd: "/tmp/project",
-      model: "clark-code:grok45",
-      reasoningEffort: "high",
+      model: "clark-code:free",
+      reasoningEffort: "",
       apiKey: "test-key",
     },
   });

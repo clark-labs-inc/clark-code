@@ -217,8 +217,8 @@ async function validateContracts() {
   if (missingTools.length) errors.push(`declared model tools without a feature: ${missingTools.join(", ")}`);
   if (unknownTools.length) errors.push(`feature tools absent from model_tools: ${unknownTools.join(", ")}`);
 
-  if (manifest.live_model.id !== "clark-code:minimax_m3") {
-    errors.push(`default live model must be clark-code:minimax_m3, got ${manifest.live_model.id}`);
+  if (manifest.live_model.id !== "clark-code:free") {
+    errors.push(`default live model must be clark-code:free, got ${manifest.live_model.id}`);
   }
   if (manifest.live_model.default_paid !== true) {
     errors.push("live_model.default_paid must be true");

@@ -82,14 +82,18 @@ fn turn_prompt_keeps_context_and_attachments_before_the_user_request() {
 }
 
 #[test]
-fn kimi_native_images_are_forwarded_before_the_user_request() {
+fn native_coding_images_are_forwarded_before_the_user_request() {
     let attachments = vec![PendingUpload {
         filename: "design.png".into(),
         content_type: "image/png".into(),
         data_base64: "QUJD".into(),
     }];
 
-    let content = model_user_content("review the design".into(), &attachments, true);
+    let content = model_user_content(
+        "review the design".into(),
+        &attachments,
+        crate::config::model_supports_images("clark-code:free"),
+    );
     let clark_agent::UserContent::Blocks(blocks) = content else {
         panic!("expected multimodal user content");
     };
@@ -395,7 +399,10 @@ async fn orchestration_tools_are_default_available_but_can_be_disabled() {
     assert!(registry.get("delegate_coding_workstreams").is_some());
     assert!(registry.get("resolve_coding_workstreams").is_some());
     assert!(registry.get("scout_capabilities").is_some());
+    assert!(registry.get("scout_adapter").is_some());
     assert!(registry.get("scout_ledger").is_some());
+    assert!(registry.get("scout_enterprise").is_some());
+    assert!(registry.get("scout_enterprise_query").is_some());
     assert!(registry.get("scout_probe").is_some());
     assert!(registry.get("scout_measure").is_some());
     enabled
@@ -646,10 +653,10 @@ async fn paid_explicit_vs_proactive_delegation_trigger_precision() {
     let api_key = std::env::var("CLARK_CODE_API_KEY")
         .or_else(|_| std::env::var("CLARK_API_KEY"))
         .expect("CLARK_CODE_API_KEY or CLARK_API_KEY must be set");
-    let root_model = std::env::var("CLARK_PAID_EVAL_ROOT_MODEL")
-        .unwrap_or_else(|_| "clark-code:minimax_m3".into());
+    let root_model =
+        std::env::var("CLARK_PAID_EVAL_ROOT_MODEL").unwrap_or_else(|_| "clark-code:free".into());
     let subagent_model = std::env::var("CLARK_PAID_EVAL_SUBAGENT_MODEL")
-        .unwrap_or_else(|_| "clark-code:minimax_m3".into());
+        .unwrap_or_else(|_| "clark-code:free".into());
     let base_url = std::env::var("CLARK_PAID_EVAL_BASE_URL")
         .unwrap_or_else(|_| crate::config::DEFAULT_BASE_URL.into());
     let dir = tempfile::tempdir().unwrap();

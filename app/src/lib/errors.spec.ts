@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { humanizeError, humanizeRunFailure } from "./errors";
+import {
+  humanizeError,
+  humanizeRunFailure,
+  isIncludedWeeklyAllowanceExhausted,
+} from "./errors";
 
 describe("humanizeRunFailure", () => {
   it("keeps session expiry and platform-key rejection distinct", () => {
@@ -27,6 +31,15 @@ describe("humanizeRunFailure", () => {
     expect(msg).toMatch(/finished its answer/i);
     expect(msg).toMatch(/verify/i);
     expect(msg).not.toMatch(/no response/i);
+  });
+
+  it("keeps the included weekly allowance distinct from paid credits", () => {
+    const outcome = {
+      failure_kind: "insufficient_credits" as const,
+      error: "Your included weekly usage is used up. It resets on Monday.",
+    };
+    expect(isIncludedWeeklyAllowanceExhausted(outcome)).toBe(true);
+    expect(humanizeRunFailure(outcome)).toMatch(/resets on Monday/i);
   });
 });
 

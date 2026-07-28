@@ -15,10 +15,13 @@
 //! tunnel drops mid-build the desktop can reconnect, re-`auth`, and
 //! `process/resume` from the last `seq` it saw — no lost output, no rerun.
 //!
-//! The crate is intentionally dependency-light (no HTTP client, no `agent-core`)
-//! so the cross-compiled remote binary stays small.
+//! Target-native services (currently Scout's authenticated derived index) run
+//! here as bounded typed calls, so remote state is never opened piecemeal by
+//! the desktop. The server still contains no HTTP client.
 
 mod process;
+#[cfg(test)]
+mod tests;
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -26,18 +29,22 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use exec_core::{collect_system_capabilities, Executor, LocalExecutor};
+use exec_core::{
+    collect_system_capabilities, Executor, LocalExecutor, MAX_EXEC_PROTOCOL_MESSAGE_BYTES,
+    MAX_TARGET_SERVICE_REQUEST_BYTES,
+};
 use exec_protocol::{
     b64_decode, b64_encode, error_code, method, AuthParams, AuthResult, CanonicalizeResult,
     MetaResult, PathParams, ReadDirResult, ReadResult, RenameParams, Request, Response,
-    SystemCapabilityCensusResult, WalkResult, WireDirEntry, WireWalkEntry, WriteParams,
-    PROTOCOL_VERSION,
+    SystemCapabilityCensusResult, TargetServiceParams, TargetServiceResult, WalkResult,
+    WireDirEntry, WireWalkEntry, WriteNewResult, WriteParams, PROTOCOL_VERSION,
 };
 use futures::{SinkExt, StreamExt};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
+use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::WebSocketStream;
 use tokio_util::sync::CancellationToken;
@@ -113,7 +120,11 @@ impl Server {
 }
 
 async fn handle_conn(stream: TcpStream, shared: Arc<Shared>) {
-    let ws = match tokio_tungstenite::accept_async(stream).await {
+    let websocket_config =
+        WebSocketConfig::default().max_message_size(Some(MAX_EXEC_PROTOCOL_MESSAGE_BYTES));
+    let websocket_config = websocket_config.max_frame_size(Some(MAX_EXEC_PROTOCOL_MESSAGE_BYTES));
+    let ws = match tokio_tungstenite::accept_async_with_config(stream, Some(websocket_config)).await
+    {
         Ok(w) => w,
         Err(_) => return,
     };
@@ -229,6 +240,11 @@ async fn handle_request(
         }
         method::FS_READ
         | method::FS_WRITE
+        | method::FS_WRITE_PRIVATE
+        | method::FS_WRITE_PRIVATE_NEW
+        | method::FS_SYNC_FILE
+        | method::FS_SYNC_DIRECTORY
+        | method::TARGET_SERVICE_CALL
         | method::FS_CREATE_DIR
         | method::FS_REMOVE_FILE
         | method::FS_REMOVE_DIR
@@ -309,6 +325,53 @@ async fn fs_dispatch(
             let data = b64_decode(&p.data).map_err(|e| (error_code::INVALID_PARAMS, e))?;
             fs.write(&path, &data).await.map_err(exec_err)?;
             Ok(serde_json::json!({}))
+        }
+        method::FS_WRITE_PRIVATE => {
+            let p: WriteParams = parse(params)?;
+            let path = checked_fs_path(&p.path, config)?;
+            let data = b64_decode(&p.data).map_err(|e| (error_code::INVALID_PARAMS, e))?;
+            fs.write_private(&path, &data).await.map_err(exec_err)?;
+            Ok(serde_json::json!({}))
+        }
+        method::FS_WRITE_PRIVATE_NEW => {
+            let p: WriteParams = parse(params)?;
+            let path = checked_fs_path(&p.path, config)?;
+            let data = b64_decode(&p.data).map_err(|e| (error_code::INVALID_PARAMS, e))?;
+            let created = fs.write_private_new(&path, &data).await.map_err(exec_err)?;
+            Ok(to_value(&WriteNewResult { created }))
+        }
+        method::FS_SYNC_FILE => {
+            let p: PathParams = parse(params)?;
+            let path = checked_fs_path(&p.path, config)?;
+            fs.sync_file(&path).await.map_err(exec_err)?;
+            Ok(serde_json::json!({}))
+        }
+        method::FS_SYNC_DIRECTORY => {
+            let p: PathParams = parse(params)?;
+            let path = checked_fs_path(&p.path, config)?;
+            fs.sync_directory(&path).await.map_err(exec_err)?;
+            Ok(serde_json::json!({}))
+        }
+        method::TARGET_SERVICE_CALL => {
+            let p: TargetServiceParams = parse(params)?;
+            let root = checked_fs_path(&p.root, config)?;
+            if !target_service_request_encoded_len_allowed(p.request.len()) {
+                return Err((
+                    error_code::INVALID_PARAMS,
+                    format!(
+                        "target service request exceeds the {}-byte decoded limit",
+                        MAX_TARGET_SERVICE_REQUEST_BYTES
+                    ),
+                ));
+            }
+            let request = b64_decode(&p.request).map_err(|e| (error_code::INVALID_PARAMS, e))?;
+            let response = fs
+                .target_service_call(&p.service, &root, &request)
+                .await
+                .map_err(exec_err)?;
+            Ok(to_value(&TargetServiceResult {
+                response: b64_encode(&response),
+            }))
         }
         method::FS_CREATE_DIR => {
             let p: PathParams = parse(params)?;
@@ -428,7 +491,7 @@ fn checked_path(path: &str, root: &Option<PathBuf>) -> Result<PathBuf, (i64, Str
     let p = PathBuf::from(path);
     let Some(root) = root else { return Ok(p) };
     let norm = lexically_normalize(&p);
-    if norm.starts_with(root) || resolved_within(&norm, root) {
+    if lexically_matches_root(&norm, root) && resolved_within(&norm, root) {
         Ok(norm)
     } else {
         Err((
@@ -438,21 +501,19 @@ fn checked_path(path: &str, root: &Option<PathBuf>) -> Result<PathBuf, (i64, Str
     }
 }
 
+fn target_service_request_encoded_len_allowed(encoded_len: usize) -> bool {
+    encoded_len <= MAX_TARGET_SERVICE_REQUEST_BYTES.div_ceil(3) * 4
+}
+
 fn checked_fs_path(path: &str, config: &Config) -> Result<PathBuf, (i64, String)> {
     let normalized = lexically_normalize(&PathBuf::from(path));
-    if config.root.is_none() && config.home.is_none()
-        || config
-            .root
-            .as_ref()
-            .is_some_and(|root| normalized.starts_with(root))
-        || config
-            .home
-            .as_ref()
-            .is_some_and(|home| normalized.starts_with(home))
-        || [config.root.as_ref(), config.home.as_ref()]
-            .into_iter()
-            .flatten()
-            .any(|root| resolved_within(&normalized, root))
+    if config.root.is_none() && config.home.is_none() {
+        return Ok(normalized);
+    }
+    if [config.root.as_ref(), config.home.as_ref()]
+        .into_iter()
+        .flatten()
+        .any(|root| lexically_matches_root(&normalized, root) && resolved_within(&normalized, root))
     {
         return Ok(normalized);
     }
@@ -460,6 +521,11 @@ fn checked_fs_path(path: &str, config: &Config) -> Result<PathBuf, (i64, String)
         error_code::EXEC_FAILED,
         format!("path escapes project root or target home: {path}"),
     ))
+}
+
+fn lexically_matches_root(path: &Path, root: &Path) -> bool {
+    path.starts_with(root)
+        || std::fs::canonicalize(root).is_ok_and(|canonical_root| path.starts_with(canonical_root))
 }
 
 fn resolved_within(path: &Path, root: &Path) -> bool {

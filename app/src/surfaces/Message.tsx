@@ -395,15 +395,13 @@ function MessageImpl({
       transition={{ duration: DUR.base, ease: EASE.out }}
     >
       {role === "agent" ? (
-        <div>
+        <div className="group/msg relative">
           {inner}
-          <div className="mt-1 flex justify-end">
-            <CopyButton
-              text={body}
-              label="Copy as Markdown"
-              className="size-7 opacity-60 transition-opacity hover:opacity-100 focus-visible:opacity-100"
-            />
-          </div>
+          <CopyButton
+            text={body}
+            label="Copy as Markdown"
+            className="absolute -top-1 right-0 size-7 bg-bg-elevated opacity-0 ring-1 ring-border-subtle transition-opacity group-hover/msg:opacity-100 focus-visible:opacity-100"
+          />
         </div>
       ) : (
         inner

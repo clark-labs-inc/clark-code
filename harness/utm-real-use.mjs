@@ -45,6 +45,45 @@ export function parseUtmList(source) {
   return guests;
 }
 
+function sleep(milliseconds) {
+  if (milliseconds > 0) {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
+  }
+}
+
+export function ensureUtmVmStarted({
+  vmName,
+  run = result,
+  pollAttempts = 60,
+  pollDelayMs = 1_000,
+}) {
+  safeVmName(vmName);
+  if (!Number.isInteger(pollAttempts) || pollAttempts < 1) {
+    throw new Error("UTM start poll attempts must be a positive integer");
+  }
+  const inspect = () => {
+    const listed = run("utmctl", ["list"]);
+    if (!listed.ok) {
+      throw new Error(listed.stderr || "utmctl list failed");
+    }
+    const guest = parseUtmList(listed.stdout).find((item) => item.name === vmName);
+    if (!guest) throw new Error(`required UTM VM is not registered: ${vmName}`);
+    return guest;
+  };
+  let guest = inspect();
+  if (guest.status === "started") return guest;
+  const started = run("utmctl", ["start", vmName], { timeout_ms: 30_000 });
+  if (!started.ok) {
+    throw new Error(started.stderr || `could not start required UTM VM: ${vmName}`);
+  }
+  for (let attempt = 0; attempt < pollAttempts; attempt += 1) {
+    if (attempt > 0) sleep(pollDelayMs);
+    guest = inspect();
+    if (guest.status === "started") return guest;
+  }
+  throw new Error(`required UTM VM did not reach started state: ${vmName}`);
+}
+
 export function parseJsonTail(source) {
   const lines = String(source).trim().split(/\r?\n/).reverse();
   for (const line of lines) {
@@ -202,6 +241,27 @@ $clarkExecutables = @(
 )
 $clarkProcesses = @(Get-Process -ErrorAction SilentlyContinue |
   Where-Object { $_.ProcessName -eq "clark-desktop" })
+$sandboxStatePaths = @(
+  "$env:LOCALAPPDATA\Clark\Code\sandbox",
+  "$env:LOCALAPPDATA\Clark Code\sandbox"
+)
+$sandboxIdentity = Get-CimInstance Win32_UserAccount -Filter "LocalAccount=True AND Name='ClarkSandboxOffline'" -ErrorAction SilentlyContinue
+$sandboxFirewallRules = @(
+  Get-NetFirewallRule -ErrorAction SilentlyContinue |
+    Where-Object {
+      $_.Name -in @(
+        "clark_sandbox_offline_block_outbound",
+        "clark_sandbox_offline_block_loopback",
+        "clark_sandbox_offline_block_loopback_tcp",
+        "clark_sandbox_offline_block_loopback_udp"
+      )
+    } |
+    Select-Object -ExpandProperty Name
+)
+$webViewStatePaths = @(
+  "$env:APPDATA\com.clark.desktop",
+  "$env:LOCALAPPDATA\com.clark.desktop"
+)
 $computerSystem = Get-CimInstance Win32_ComputerSystem
 $winlogon = Get-ItemProperty "HKLM:\Software\Microsoft\Windows NT\CurrentVersion\Winlogon"
 $payload = [ordered]@{
@@ -220,6 +280,14 @@ $payload = [ordered]@{
   clark_code_executables = @($clarkExecutables)
   clark_code_running = [bool]$clarkProcesses
   clark_code_process_count = $clarkProcesses.Count
+  sandbox_state_present = [bool](
+    $sandboxStatePaths | Where-Object { Test-Path -LiteralPath $_ }
+  )
+  sandbox_identity_present = $null -ne $sandboxIdentity
+  sandbox_firewall_rules = @($sandboxFirewallRules)
+  webview_state_present = [bool](
+    $webViewStatePaths | Where-Object { Test-Path -LiteralPath $_ }
+  )
   clark_code_file_version = if ($clarkExecutables) {
     (Get-Item $clarkExecutables[0]).VersionInfo.FileVersion
   } else {
@@ -249,6 +317,7 @@ export function evaluateGuest({
   configuration,
   probe,
   observation,
+  requirePristine = false,
 }) {
   const config = configuration?.config || {};
   const diskBytes = (configuration?.disks || []).reduce(
@@ -307,8 +376,43 @@ export function evaluateGuest({
       check("windows_11_os", /Windows 11/i.test(probe.data.os_caption || ""), probe.data.os_caption),
       check("windows_desktop_shell", probe.data.desktop_shell_running === true, probe.data.desktop_shell_running),
       check("qemu_guest_agent_active", probe.data.qemu_ga_service === "Running", probe.data.qemu_ga_service),
+      check("uac_enabled", probe.data.uac_enable_lua === 1, probe.data.uac_enable_lua),
       check("tpm_configured", config.QEMU?.TPMDevice === true, config.QEMU?.TPMDevice),
     );
+    if (requirePristine) {
+      checks.push(
+        check(
+          "pristine_no_clark_install",
+          probe.data.clark_code_installed === false
+            && probe.data.clark_code_running === false,
+          {
+            installed: probe.data.clark_code_installed,
+            running: probe.data.clark_code_running,
+          },
+        ),
+        check(
+          "pristine_no_sandbox_state",
+          probe.data.sandbox_state_present === false,
+          probe.data.sandbox_state_present,
+        ),
+        check(
+          "pristine_no_sandbox_identity",
+          probe.data.sandbox_identity_present === false,
+          probe.data.sandbox_identity_present,
+        ),
+        check(
+          "pristine_no_sandbox_firewall",
+          Array.isArray(probe.data.sandbox_firewall_rules)
+            && probe.data.sandbox_firewall_rules.length === 0,
+          probe.data.sandbox_firewall_rules,
+        ),
+        check(
+          "pristine_no_webview_state",
+          probe.data.webview_state_present === false,
+          probe.data.webview_state_present,
+        ),
+      );
+    }
   }
   const environmentReady = checks.every((item) => item.status === "passed");
   return {
@@ -343,15 +447,17 @@ async function runCli() {
 
 Usage:
   node harness/utm-real-use.mjs [--platform all|windows|ubuntu] [--out PATH]
-    [--observation-receipt PATH] [--allow-blocked]
+    [--observation-receipt PATH] [--ensure-started] [--require-pristine]
+    [--allow-blocked]
 
-This command is read-only apart from waking a display with localhost-only QMP.
-It autonomously captures the exact UTM windows, verifies the checked-in guest
-contract, and writes an owner-only receipt. Real product scenarios remain
-not_run until this preflight is ready.`);
+Without --ensure-started this command is read-only apart from waking a display
+with localhost-only QMP. The release runner uses --ensure-started to start an
+already-registered QA VM before capturing the exact UTM window, verifying the
+checked-in guest contract, and writing an owner-only receipt. Real product
+scenarios remain not_run until this preflight is ready.`);
     return;
   }
-  const knownFlags = new Set(["--allow-blocked", "--help", "-h"]);
+  const knownFlags = new Set(["--allow-blocked", "--require-pristine", "--help", "-h"]);
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     if (knownFlags.has(arg)) continue;
@@ -359,7 +465,11 @@ not_run until this preflight is ready.`);
       index += 1;
       continue;
     }
-    if (["--platform=", "--out=", "--observation-receipt="].some((prefix) => arg.startsWith(prefix))) continue;
+    if (
+      ["--platform=", "--out=", "--observation-receipt="]
+        .some((prefix) => arg.startsWith(prefix))
+    ) continue;
+    if (arg === "--ensure-started") continue;
     throw new Error(`unknown argument ${JSON.stringify(arg)}`);
   }
 
@@ -369,6 +479,12 @@ not_run until this preflight is ready.`);
   const platforms = selected === "all" ? ["windows", "ubuntu"] : [selected];
   if (platforms.some((platform) => !["windows", "ubuntu"].includes(platform))) {
     throw new Error("--platform must be all, windows, or ubuntu");
+  }
+  if (args.includes("--ensure-started")) {
+    for (const platform of platforms) {
+      const environment = inventory.real_use_environments[platform];
+      ensureUtmVmStarted({ vmName: environment.vm_name });
+    }
   }
   const outputArg = valueArg(args, "--out");
   const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
@@ -427,6 +543,7 @@ not_run until this preflight is ready.`);
       configuration,
       probe,
       observation: observations[platform],
+      requirePristine: args.includes("--require-pristine"),
     });
     return {
       ...evaluated,

@@ -1,3 +1,4 @@
+import { deferredSnapshotPersistIsCurrent } from "../lib/snapshotPersistence";
 import {
   type SessionState,
   type ConversationMeta,
@@ -383,6 +384,11 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
             entry.lastPersist = now;
             const persistPrefixLen = entry.historyPrefix?.timeline.length ?? 0;
             const persist = () => {
+              // Busy snapshots are deferred to a macrotask so streaming never
+              // blocks the render frame. A terminal event can arrive before
+              // that task runs; never let the older "running" projection land
+              // after the newer idle snapshot and resurrect mobile activity.
+              if (busyNow && !deferredSnapshotPersistIsCurrent(entry.live, live)) return;
               // Cache the latest snapshot in memory (never to disk); the cloud
               // push below is the durable copy.
               snapshotCache.set(id, snapshot);

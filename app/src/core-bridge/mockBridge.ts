@@ -6,6 +6,7 @@
 import type {
   CoreBridge,
   ConnectConfig,
+  PromptReceipt,
   ProjectBranch,
   ProjectContext,
   SessionOptions,
@@ -86,11 +87,13 @@ export class MockBridge implements CoreBridge {
     _sessionId: string,
     blocks: ContentBlock[],
     _attachments: import("../lib/attachments").Upload[] = [],
-  ): Promise<void> {
+  ): Promise<PromptReceipt> {
     const userText = blocks
       .map((b) => (b.type === "text" ? b.text : "[attachment]"))
       .join(" ");
-    void this.playRun(userText);
+    const runId = `run-${Date.now()}`;
+    void this.playRun(userText, runId);
+    return { runId };
   }
 
   async steer(_sessionId: string, blocks: ContentBlock[]): Promise<void> {
@@ -226,8 +229,7 @@ export class MockBridge implements CoreBridge {
 
   /** Simulate a realistic streaming run: user turn → plan → tool call →
    *  permission gate → streamed answer → done. */
-  private async playRun(userText: string) {
-    const run = `run-${Date.now()}`;
+  private async playRun(userText: string, run: string) {
     const parallelDemo = userText.toLowerCase().includes("parallel");
     this.snapshot.runs[run] = { id: run, status: "running", checkpoint: "mock-checkpoint-sha" };
     this.snapshot.timeline.push({

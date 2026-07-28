@@ -16,7 +16,7 @@ use crate::LocalAgentProvider;
 #[path = "orchestration_tool.rs"]
 mod tool;
 
-pub(crate) use tool::orchestration_tools;
+pub(crate) use tool::{orchestration_tools, scout_capsule_tools};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum DelegationMode {
@@ -158,6 +158,89 @@ pub(crate) struct OrchestrationToolsConfig {
     pub headers: std::collections::HashMap<String, String>,
     pub root_model: String,
     pub reasoning_effort: Option<String>,
+    pub scout_capsules: Option<ScoutCapsulePolicyConfig>,
+    pub scout_cartography: Option<ScoutCartographyHostConfig>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct ScoutCartographyHostConfig {
+    pub organization_id: uuid::Uuid,
+    pub workspace_id: uuid::Uuid,
+    pub identity_root: PathBuf,
+    pub platform: String,
+    pub architecture: String,
+}
+
+impl ScoutCartographyHostConfig {
+    pub(crate) fn from_extra(extra: &Value) -> Option<Self> {
+        let value = extra.get("scout_cartography")?.as_object()?;
+        let organization_id = value
+            .get("organization_id")?
+            .as_str()?
+            .parse::<uuid::Uuid>()
+            .ok()
+            .filter(|value| !value.is_nil())?;
+        let workspace_id = value
+            .get("workspace_id")?
+            .as_str()?
+            .parse::<uuid::Uuid>()
+            .ok()
+            .filter(|value| !value.is_nil())?;
+        let identity_root = PathBuf::from(value.get("identity_root")?.as_str()?);
+        if !identity_root.is_absolute() {
+            return None;
+        }
+        let platform = portable_namespace(value.get("platform")?.as_str()?)?;
+        let architecture = portable_namespace(value.get("architecture")?.as_str()?)?;
+        Some(Self {
+            organization_id,
+            workspace_id,
+            identity_root,
+            platform,
+            architecture,
+        })
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct ScoutCapsulePolicyConfig {
+    pub authorized_tenant_id: String,
+    pub trusted_admin_key_sha256: String,
+    pub minimum_registry_generation: u64,
+}
+
+impl ScoutCapsulePolicyConfig {
+    pub(crate) fn from_extra(extra: &Value) -> Option<Self> {
+        let value = extra.get("scout_capsules")?.as_object()?;
+        let authorized_tenant_id = value
+            .get("authorized_tenant_id")?
+            .as_str()?
+            .trim()
+            .to_owned();
+        let trusted_admin_key_sha256 = value
+            .get("trusted_admin_key_sha256")?
+            .as_str()?
+            .trim()
+            .to_owned();
+        let minimum_registry_generation = value.get("minimum_registry_generation")?.as_u64()?;
+        if authorized_tenant_id.is_empty()
+            || authorized_tenant_id.len() > 256
+            || authorized_tenant_id.trim() != authorized_tenant_id
+            || authorized_tenant_id.chars().any(char::is_control)
+            || minimum_registry_generation == 0
+            || trusted_admin_key_sha256.len() != 64
+            || !trusted_admin_key_sha256
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
+        {
+            return None;
+        }
+        Some(Self {
+            authorized_tenant_id,
+            trusted_admin_key_sha256,
+            minimum_registry_generation,
+        })
+    }
 }
 
 impl OrchestrationToolsConfig {
@@ -169,8 +252,22 @@ impl OrchestrationToolsConfig {
             headers: config.headers.clone(),
             root_model: config.model.clone(),
             reasoning_effort: config.reasoning_effort.clone(),
+            scout_capsules: config.scout_capsules.clone(),
+            scout_cartography: config.scout_cartography.clone(),
         }
     }
+}
+
+fn portable_namespace(value: &str) -> Option<String> {
+    (!value.is_empty()
+        && value.len() <= 128
+        && value.trim() == value
+        && value.bytes().all(|byte| {
+            byte.is_ascii_lowercase()
+                || byte.is_ascii_digit()
+                || matches!(byte, b'-' | b'_' | b'.' | b':' | b'/')
+        }))
+    .then(|| value.to_owned())
 }
 
 fn integer(object: &Map<String, Value>, key: &str, default: u64) -> u64 {

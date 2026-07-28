@@ -413,9 +413,7 @@ export function validateGuestReceipt(raw, receiptPath, requirePassed = true) {
   ) {
     throw new Error("guest receipt does not prove a fully autonomous execution");
   }
-  if (!raw.source_revision || typeof raw.source_revision !== "string") {
-    throw new Error("guest receipt requires a source_revision");
-  }
+  validateSourceRevision(raw.source_revision);
   if (raw.environment?.gui_visible !== true) {
     throw new Error("passed guest receipt requires a visible GUI environment");
   }
@@ -426,6 +424,9 @@ export function validateGuestReceipt(raw, receiptPath, requirePassed = true) {
   const expectedVirtualization = raw.platform === "macos" ? "native" : "utm";
   if (raw.virtualization !== expectedVirtualization) {
     throw new Error(`${raw.platform} guest receipt must use ${expectedVirtualization}`);
+  }
+  if (raw.platform === "windows" && requirePassed) {
+    validateWindowsReleaseCandidate(raw);
   }
   const baseDir = path.dirname(path.resolve(receiptPath));
   const matrixFile = evidenceFile(baseDir, raw.matrix?.report);
@@ -528,6 +529,80 @@ export function validateGuestReceipt(raw, receiptPath, requirePassed = true) {
     reported_cost_usd: matrix.reported_cost_usd,
     receipt_sha256: sha256File(receiptPath),
   };
+}
+
+export const WINDOWS_RELEASE_ASSERTIONS = [
+  "candidate_installer_identity",
+  "uac_enabled",
+  "inline_sandbox_setup",
+  "sandbox_state_outside_install_root",
+  "sandbox_enforced_after_restart",
+  "project_write_allowed",
+  "outside_write_blocked",
+  "network_blocked",
+  "no_visible_console_windows",
+  "integrated_terminal_uses_hidden_conpty",
+  "ordinary_pty_and_child_processes_hidden",
+  "packaged_sandbox_command_execution",
+  "full_access_labeled_unsandboxed",
+];
+
+function validateSourceRevision(sourceRevision) {
+  if (typeof sourceRevision !== "string" || !/^[0-9a-f]{40}$/.test(sourceRevision)) {
+    throw new Error("guest receipt source_revision must be one clean 40-character Git commit");
+  }
+  const expected = process.env.CLARK_EXPECTED_SOURCE_REVISION;
+  if (expected && sourceRevision !== expected) {
+    throw new Error(
+      `guest receipt source_revision ${sourceRevision} does not match candidate ${expected}`,
+    );
+  }
+}
+
+function validateWindowsReleaseCandidate(raw) {
+  const candidate = raw.environment?.release_candidate;
+  if (
+    typeof candidate !== "object"
+    || candidate === null
+    || !/^[0-9a-f]{64}$/.test(candidate.installer_sha256 ?? "")
+    || !/^\d+\.\d+\.\d+$/.test(candidate.expected_version ?? "")
+    || candidate.installed_version !== candidate.expected_version
+    || candidate.tag !== `v${candidate.expected_version}`
+    || candidate.immutable_url
+      !== `https://downloads.clarkchat.com/desktop/releases/${candidate.tag}/ClarkCode_x64-setup.exe`
+    || !Number.isSafeInteger(candidate.downloaded_size)
+    || candidate.downloaded_size <= 0
+    || !/^[0-9a-f]{64}$/.test(candidate.download_receipt_sha256 ?? "")
+    || !/^[0-9a-f]{64}$/.test(candidate.build_receipt_sha256 ?? "")
+    || candidate.source_revision !== raw.source_revision
+    || candidate.fresh_install !== true
+    || candidate.fresh_sandbox_state !== true
+    || candidate.sandbox_state_outside_install_root !== true
+    || candidate.uac_enabled !== true
+    || candidate.signature_status !== "Valid"
+    || candidate.installed_signature_status !== "Valid"
+    || typeof candidate.signer_subject !== "string"
+    || candidate.signer_subject.trim().length === 0
+    || /[\r\n]/.test(candidate.signer_subject)
+    || candidate.signer_subject !== candidate.expected_signer_subject
+    || !/^[0-9A-F]{40}$/.test(candidate.signer_thumbprint ?? "")
+    || candidate.signer_thumbprint !== candidate.expected_signer_thumbprint
+  ) {
+    throw new Error(
+      "passed Windows receipt must identify the exact public candidate download, valid signed install, fresh state, and enabled UAC",
+    );
+  }
+  const observedAssertions = new Set(
+    raw.scenarios.flatMap((scenario) => (
+      (scenario.observation?.assertions ?? [])
+        .filter((assertion) => assertion.status === "passed")
+        .map((assertion) => assertion.id)
+    )),
+  );
+  const missing = WINDOWS_RELEASE_ASSERTIONS.filter((id) => !observedAssertions.has(id));
+  if (missing.length > 0) {
+    throw new Error(`passed Windows receipt lacks release assertions: ${missing.join(", ")}`);
+  }
 }
 
 function valueArg(args, name) {

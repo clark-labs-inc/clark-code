@@ -10,7 +10,7 @@ use crate::{
     WindowFilter, WindowInfo, WindowTarget,
 };
 
-pub const PROTOCOL_VERSION: u16 = 2;
+pub const PROTOCOL_VERSION: u16 = 3;
 pub const MAX_REQUEST_BYTES: usize = 1_048_576;
 pub const MAX_RESPONSE_BYTES: usize = 64 * 1_048_576;
 

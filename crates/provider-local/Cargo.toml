@@ -18,6 +18,13 @@ clark-agent-compaction = { git = "https://github.com/clark-labs-inc/clark-agent-
 exec-core = { path = "../exec-core" }
 exec-sandbox = { path = "../exec-sandbox" }
 exec-protocol = { path = "../exec-protocol" }
+scout-adapter-protocol = { path = "../scout-adapter-protocol" }
+scout-adapter-runtime = { path = "../scout-adapter-runtime" }
+scout-cartography-adapter = { path = "../scout-cartography-adapter" }
+scout-capsule-host = { path = "../scout-capsule-host" }
+scout-capability-census = { path = "../scout-capability-census" }
+scout-ingest-protocol = { path = "../scout-ingest-protocol" }
+scout-platform-client = { path = "../scout-platform-client" }
 clark-install-context = { path = "../install-context" }
 computer-use = { path = "../computer-use" }
 libreoffice-pure = "0.5.3"
@@ -41,6 +48,7 @@ tokio-util = { version = "0.7", default-features = false }
 # RemoteExecutor's transport to clark-exec-server (plaintext ws over the SSH tunnel).
 tokio-tungstenite = "0.29"
 glob = "0.3"
+getrandom = "0.2"
 walkdir = "2"
 grep-searcher = "0.1"
 grep-regex = "0.1"
@@ -66,6 +74,10 @@ exec-sandbox-windows = { path = "../exec-sandbox-windows" }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util", "net"] }
+scout-coordinator = { path = "../scout-coordinator" }
+scout-accumulator = { path = "../scout-accumulator" }
+scout-store = { path = "../scout-store" }
+rusqlite = { version = "0.32", features = ["bundled"] }
 # Spin up a real clark-exec-server in-process to test RemoteExecutor parity.
 exec-server = { path = "../exec-server" }
 exec-protocol = { path = "../exec-protocol" }

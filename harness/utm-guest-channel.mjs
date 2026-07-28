@@ -53,7 +53,7 @@ export function buildGuestProbe({
 }) {
   safeToken(marker, "probe marker");
   safeToken(basename, "probe basename");
-  if (platform === "ubuntu") {
+  if (platform === "ubuntu" || platform === "macos") {
     const outputPath = `/var/tmp/${basename}.json`;
     const scriptPath = `/var/tmp/${basename}.py`;
     const logPath = `/var/tmp/${basename}.log`;

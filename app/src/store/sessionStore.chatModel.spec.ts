@@ -62,9 +62,9 @@ describe("per-conversation model", () => {
     const bridge = stubBridge();
     useSessionStore.setState({ bridge, localSettings: { ...baseSettings }, chatModels: {} });
 
-    // Chat A: switch to Grok 4.5.
+    // Chat A: switch to the included model.
     useSessionStore.setState({ session: sessionA });
-    await useSessionStore.getState().updateModelSettings({ model: "clark-code:grok45" });
+    await useSessionStore.getState().updateModelSettings({ model: "clark-code:free" });
 
     // Chat B never diverges: its effective model is still the global default.
     useSessionStore.setState({ session: sessionB });
@@ -75,7 +75,7 @@ describe("per-conversation model", () => {
     // Chat A keeps its own choice.
     expect(
       effectiveModelSettings(useSessionStore.getState().localSettings, useSessionStore.getState().chatModels, sessionA.id).model,
-    ).toBe("clark-code:grok45");
+    ).toBe("clark-code:free");
 
     // The global default the start screen shows is untouched — only the chat
     // override moved.
@@ -144,7 +144,7 @@ describe("per-conversation model", () => {
     });
 
     useSessionStore.getState().endSession();
-    await useSessionStore.getState().updateModelSettings({ model: "clark-code:grok45" });
+    await useSessionStore.getState().updateModelSettings({ model: "clark-code:free" });
     const state = useSessionStore.getState();
     expect(effectiveModelSettings(state.localSettings, state.chatModels, legacyId).model).toBe(
       "clark-code",
@@ -156,16 +156,15 @@ describe("per-conversation model", () => {
     useSessionStore.setState({ bridge, localSettings: { ...baseSettings }, chatModels: {} });
 
     useSessionStore.setState({ session: sessionA });
-    await useSessionStore.getState().updateModelSettings({ model: "clark-code:grok45" });
-    await useSessionStore.getState().updateModelSettings({ reasoningEffort: "high" });
+    await useSessionStore.getState().updateModelSettings({ model: "clark-code:free" });
 
     useSessionStore.setState({ session: sessionB });
     await useSessionStore.getState().updateModelSettings({ model: "clark-code:kimi_k3" });
 
     const { chatModels, localSettings } = useSessionStore.getState();
     expect(effectiveModelSettings(localSettings, chatModels, sessionA.id)).toMatchObject({
-      model: "clark-code:grok45",
-      reasoningEffort: "high",
+      model: "clark-code:free",
+      reasoningEffort: "",
     });
     expect(effectiveModelSettings(localSettings, chatModels, sessionB.id).model).toBe("clark-code:kimi_k3");
     expect(effectiveModelSettings(localSettings, chatModels, sessionB.id).reasoningEffort).toBe("max");
@@ -198,11 +197,11 @@ describe("per-conversation model", () => {
     const bridge = stubBridge();
     useSessionStore.setState({ bridge, session: null, localSettings: { ...baseSettings }, chatModels: {} });
 
-    await useSessionStore.getState().updateModelSettings({ model: "clark-code:grok45" });
+    await useSessionStore.getState().updateModelSettings({ model: "clark-code:free" });
 
     // Start-screen picker (no chat) edits the default new chats seed from — no
     // per-chat override is written.
-    expect(useSessionStore.getState().localSettings.model).toBe("clark-code:grok45");
+    expect(useSessionStore.getState().localSettings.model).toBe("clark-code:free");
     expect(Object.keys(useSessionStore.getState().chatModels)).toHaveLength(0);
   });
 
@@ -212,11 +211,11 @@ describe("per-conversation model", () => {
     useSessionStore.setState({ bridge, localSettings: { ...baseSettings }, chatModels: {} });
 
     useSessionStore.setState({ session: sessionA });
-    await useSessionStore.getState().updateModelSettings({ model: "clark-code:grok45" });
+    await useSessionStore.getState().updateModelSettings({ model: "clark-code:free" });
 
     expect(reconfigure).toHaveBeenCalledTimes(1);
     const calls = vi.mocked(reconfigure).mock.calls as unknown as [string, { extra?: unknown }][];
     const configArg = calls[0]?.[1];
-    expect(configArg?.extra).toMatchObject({ model: "clark-code:grok45" });
+    expect(configArg?.extra).toMatchObject({ model: "clark-code:free" });
   });
 });

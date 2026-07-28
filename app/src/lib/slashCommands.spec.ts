@@ -3,6 +3,7 @@ import {
   expandPromptSlashCommand,
   goalCommandObjective,
   isCompactCommand,
+  sideQuestionCommandQuestion,
   slashCommands,
 } from "./slashCommands";
 
@@ -64,6 +65,7 @@ describe("scout slash command", () => {
     expect(slashCommands()).toContainEqual(expect.objectContaining({
       name: "scout",
       body: "$scout:scout",
+      hint: "Map a business system with fixed GLM 5.2",
       localOnly: true,
     }));
   });
@@ -73,5 +75,25 @@ describe("scout slash command", () => {
     expect(expandPromptSlashCommand("  /scout map AWS")).toBe("  $scout:scout map AWS");
     expect(expandPromptSlashCommand("/scouting")).toBe("/scouting");
     expect(expandPromptSlashCommand("please /scout")).toBe("please /scout");
+  });
+});
+
+describe("btw slash command", () => {
+  it("stays discoverable before a session and is limited to the local provider", () => {
+    const command = slashCommands().find((candidate) => candidate.name === "btw");
+    expect(command).toEqual(expect.objectContaining({
+      name: "btw",
+      body: "/btw",
+      localOnly: true,
+    }));
+    expect(command).not.toHaveProperty("needsSession");
+  });
+
+  it("matches only the exact command prefix and extracts its question", () => {
+    expect(sideQuestionCommandQuestion("/btw what changed?")).toBe("what changed?");
+    expect(sideQuestionCommandQuestion("  /btw   why?  ")).toBe("why?");
+    expect(sideQuestionCommandQuestion("/btw")).toBe("");
+    expect(sideQuestionCommandQuestion("/btwister")).toBeNull();
+    expect(sideQuestionCommandQuestion("please /btw later")).toBeNull();
   });
 });

@@ -339,14 +339,43 @@ fn current_backend(
 
 #[cfg(target_os = "windows")]
 fn default_windows_state_dir() -> Option<PathBuf> {
-    let product_dir = if cfg!(debug_assertions) {
+    let local_app_data = std::env::var_os("LOCALAPPDATA").map(PathBuf::from)?;
+    let durable =
+        windows_product_data_root_from(&local_app_data, cfg!(debug_assertions)).join("sandbox");
+    migrate_legacy_windows_state(&local_app_data, &durable);
+    Some(durable)
+}
+
+#[cfg(target_os = "windows")]
+fn migrate_legacy_windows_state(local_app_data: &Path, durable: &Path) {
+    if durable.exists() {
+        return;
+    }
+    let legacy_product = if cfg!(debug_assertions) {
         "Clark Code Dev"
     } else {
         "Clark Code"
     };
-    std::env::var_os("LOCALAPPDATA")
-        .map(PathBuf::from)
-        .map(|root| root.join(product_dir).join("sandbox"))
+    let legacy = local_app_data.join(legacy_product).join("sandbox");
+    let Ok(metadata) = std::fs::symlink_metadata(&legacy) else {
+        return;
+    };
+    if !metadata.is_dir() || metadata.file_type().is_symlink() {
+        return;
+    }
+    let Some(parent) = durable.parent() else {
+        return;
+    };
+    if std::fs::create_dir_all(parent).is_ok() {
+        let _ = std::fs::rename(legacy, durable);
+    }
+}
+
+#[cfg(any(target_os = "windows", test))]
+pub(crate) fn windows_product_data_root_from(local_app_data: &Path, debug_build: bool) -> PathBuf {
+    local_app_data
+        .join("Clark")
+        .join(if debug_build { "Code Dev" } else { "Code" })
 }
 
 #[cfg(target_os = "linux")]

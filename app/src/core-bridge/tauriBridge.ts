@@ -16,6 +16,7 @@ import type {
   ProjectBranch,
   ProjectContext,
   LocalSandboxStatus,
+  PromptReceipt,
   ProjectInstructions,
   InstalledSkillPack,
   SkillPackOperationResult,
@@ -100,7 +101,11 @@ export class TauriBridge implements CoreBridge {
     };
   }
 
-  prompt(sessionId: string, blocks: ContentBlock[], attachments: Upload[] = []): Promise<void> {
+  prompt(
+    sessionId: string,
+    blocks: ContentBlock[],
+    attachments: Upload[] = [],
+  ): Promise<PromptReceipt> {
     return invoke("prompt", { sessionId, blocks, attachments });
   }
 

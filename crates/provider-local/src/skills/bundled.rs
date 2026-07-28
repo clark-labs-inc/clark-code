@@ -11,7 +11,10 @@ const SCOUT: &str = include_str!("../../skills/scout/SKILL.md");
 const BASH: &[&str] = &["bash"];
 const SCOUT_TOOLS: &[&str] = &[
     "scout_capabilities",
+    "scout_adapter",
     "scout_ledger",
+    "scout_enterprise",
+    "scout_enterprise_query",
     "scout_probe",
     "scout_measure",
     "delegate_read_only",
@@ -30,7 +33,11 @@ pub(super) fn skills() -> Vec<Skill> {
         bundled("github", "clark://skills/github/gh-fix-ci", FIX_CI, BASH),
         bundled("github", "clark://skills/github/yeet", YEET, BASH),
         bundled("sentry", "clark://skills/sentry", SENTRY, BASH),
-        bundled("scout", "clark://skills/scout", SCOUT, SCOUT_TOOLS),
+        {
+            let mut scout = bundled("scout", "clark://skills/scout", SCOUT, SCOUT_TOOLS);
+            scout.allow_implicit_invocation = false;
+            scout
+        },
     ]
 }
 

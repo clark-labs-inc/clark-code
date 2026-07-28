@@ -20,6 +20,7 @@ import {
   validateGuestReceipt,
   validateMatrixReport,
   validateObservation,
+  WINDOWS_RELEASE_ASSERTIONS,
 } from "./platform-real-use.mjs";
 import { validateAnyGuestReceipt } from "./platform-real-use-package.mjs";
 import { isOwnerOnlyFile } from "./owner-only-file.mjs";
@@ -34,6 +35,7 @@ const runnerPath = fileURLToPath(new URL("./platform-real-use.mjs", import.meta.
 const packageRunnerPath = fileURLToPath(
   new URL("./platform-real-use-package.mjs", import.meta.url),
 );
+const SOURCE_REVISION = "0123456789abcdef0123456789abcdef01234567";
 
 function fixture(platform = "windows", scenarioStatus = "observed") {
   const root = mkdtempSync(path.join(tmpdir(), "clark-platform-real-use-"));
@@ -47,7 +49,7 @@ function fixture(platform = "windows", scenarioStatus = "observed") {
     benchmark: "clark_code_real_use_observation",
     platform,
     generated_at: "2026-07-24T00:00:00Z",
-    source_revision: "0123456789abcdef-dirty",
+    source_revision: SOURCE_REVISION,
     credential_recorded: false,
     required_user_vm_actions: 0,
     manual_vm_actions_allowed: false,
@@ -55,13 +57,48 @@ function fixture(platform = "windows", scenarioStatus = "observed") {
     environment: {
       gui_visible: scenarioStatus === "observed",
       ...(environmentNames[platform] ? { vm_name: environmentNames[platform] } : {}),
+      ...(platform === "windows"
+        ? {
+            release_candidate: {
+              installer_sha256: "a".repeat(64),
+              expected_version: "0.1.91",
+              installed_version: "0.1.91",
+              tag: "v0.1.91",
+              immutable_url:
+                "https://downloads.clarkchat.com/desktop/releases/v0.1.91/ClarkCode_x64-setup.exe",
+              downloaded_size: 123,
+              download_receipt_sha256: "b".repeat(64),
+              build_receipt_sha256: "c".repeat(64),
+              source_revision: SOURCE_REVISION,
+              fresh_install: true,
+              fresh_sandbox_state: true,
+              sandbox_state_outside_install_root: true,
+              uac_enabled: true,
+              signature_status: "Valid",
+              installed_signature_status: "Valid",
+              signer_subject: "CN=Clark Labs Inc., O=Clark Labs Inc., C=US",
+              expected_signer_subject: "CN=Clark Labs Inc., O=Clark Labs Inc., C=US",
+              signer_thumbprint: "A".repeat(40),
+              expected_signer_thumbprint: "A".repeat(40),
+            },
+          }
+        : {}),
     },
     scenarios: expectedScenarios(platform).map((scenario) => ({
       id: scenario.id,
       status: scenarioStatus,
       ...(scenarioStatus === "observed"
         ? {
-            assertions: [{ id: "visible_result", status: "passed", evidence: "fresh UI state" }],
+            assertions: [
+              { id: "visible_result", status: "passed", evidence: "fresh UI state" },
+              ...(platform === "windows"
+                ? WINDOWS_RELEASE_ASSERTIONS.map((id) => ({
+                    id,
+                    status: "passed",
+                    evidence: `verified ${id}`,
+                  }))
+                : []),
+            ],
             evidence: [{
               id: "desktop",
               kind: "screenshot",
@@ -340,6 +377,62 @@ test("CLI consolidates a supplied paid matrix into a self-contained pass", () =>
       path.join(copied, "receipt.json"),
     ).status,
     "passed",
+  );
+});
+
+test("passed Windows receipts reject dirty or stale source revisions", () => {
+  const item = fixture();
+  const observation = validateObservation(item.observation, "windows", item.receiptPath);
+  const matrix = validateMatrixReport(matrixReport(), "windows", false);
+  const receipt = buildConsolidatedReceipt(
+    "windows",
+    observation,
+    matrix,
+    "matrix/report.json",
+  );
+  receipt.source_revision = `${SOURCE_REVISION}-dirty`;
+  assert.throws(
+    () => validateGuestReceipt(receipt, path.join(item.root, "receipt.json")),
+    /one clean 40-character Git commit/,
+  );
+
+  receipt.source_revision = SOURCE_REVISION;
+  process.env.CLARK_EXPECTED_SOURCE_REVISION = "f".repeat(40);
+  try {
+    assert.throws(
+      () => validateGuestReceipt(receipt, path.join(item.root, "receipt.json")),
+      /does not match candidate/,
+    );
+  } finally {
+    delete process.env.CLARK_EXPECTED_SOURCE_REVISION;
+  }
+});
+
+test("passed Windows receipts require candidate, UAC, containment, and no-popup evidence", () => {
+  const item = fixture();
+  const observation = validateObservation(item.observation, "windows", item.receiptPath);
+  const matrix = validateMatrixReport(matrixReport(), "windows", false);
+  const receipt = buildConsolidatedReceipt(
+    "windows",
+    observation,
+    matrix,
+    "matrix/report.json",
+  );
+  receipt.environment.release_candidate.uac_enabled = false;
+  assert.throws(
+    () => validateGuestReceipt(receipt, path.join(item.root, "receipt.json")),
+    /enabled UAC/,
+  );
+
+  receipt.environment.release_candidate.uac_enabled = true;
+  for (const scenario of receipt.scenarios) {
+    scenario.observation.assertions = scenario.observation.assertions.filter(
+      (assertion) => assertion.id !== "no_visible_console_windows",
+    );
+  }
+  assert.throws(
+    () => validateGuestReceipt(receipt, path.join(item.root, "receipt.json")),
+    /no_visible_console_windows/,
   );
 });
 

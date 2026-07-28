@@ -56,6 +56,28 @@ pub(crate) async fn explicit_skill_injections(
     sections
 }
 
+pub(crate) fn invokes_skill(
+    catalog: &SkillCatalog,
+    blocks: &[ContentBlock],
+    user_request: &str,
+    canonical_name: &str,
+) -> bool {
+    let bound = blocks.iter().any(|block| {
+        let ContentBlock::SkillReference { id, revision, .. } = block else {
+            return false;
+        };
+        catalog
+            .resolve_id(id, Some(revision))
+            .is_ok_and(|skill| skill.name.eq_ignore_ascii_case(canonical_name))
+    });
+    bound
+        || explicit_names(user_request).into_iter().any(|requested| {
+            catalog
+                .resolve_name(&requested)
+                .is_ok_and(|skill| skill.name.eq_ignore_ascii_case(canonical_name))
+        })
+}
+
 fn explicit_names(text: &str) -> Vec<String> {
     let mut names = Vec::new();
     let chars = text.char_indices().collect::<Vec<_>>();

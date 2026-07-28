@@ -56,6 +56,10 @@ FIXTURE_APP="$(
 HOST_APP="$OUTPUT_DIR/Clark Code Native Fixture Smoke.app"
 HOST_MACOS="$HOST_APP/Contents/MacOS"
 HOST_FRAMEWORKS="$HOST_APP/Contents/Frameworks"
+HOST_RESOURCES="$HOST_APP/Contents/Resources"
+SERVICE_APP="$HOST_RESOURCES/Clark Computer Use.app"
+SERVICE_BINARY="$SERVICE_APP/Contents/MacOS/clark-computer-use-helper"
+SERVICE_SWIFT_CONCURRENCY="$SERVICE_APP/Contents/Frameworks/libswift_Concurrency.dylib"
 SWIFT_CONCURRENCY="/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.5/macosx/libswift_Concurrency.dylib"
 HELPER_RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=-Wl,-rpath,/usr/lib/swift -C link-arg=-Wl,-rpath,@executable_path/../Frameworks"
 
@@ -66,23 +70,19 @@ HELPER_RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=-Wl,-rpath,/usr/lib/swift -C link-a
     -p computer-use \
     --features helper-service \
     --example signed_helper_smoke
-  RUSTFLAGS="$HELPER_RUSTFLAGS" cargo build \
-    --target "$TARGET" \
-    -p computer-use \
-    --features helper-service \
-    --bin clark-computer-use-helper
 )
+bash "$ROOT_DIR/scripts/stage-computer-use-helper.sh" \
+  --target "$TARGET" \
+  --profile debug
 
-mkdir -p "$HOST_MACOS" "$HOST_FRAMEWORKS"
+mkdir -p "$HOST_MACOS" "$HOST_FRAMEWORKS" "$HOST_RESOURCES"
 cp \
   "$ROOT_DIR/harness/fixtures/computer-use-native/HostInfo.plist" \
   "$HOST_APP/Contents/Info.plist"
 install -m 755 \
   "$ROOT_DIR/target/$TARGET/debug/examples/signed_helper_smoke" \
   "$HOST_MACOS/clark-desktop"
-install -m 755 \
-  "$ROOT_DIR/target/$TARGET/debug/clark-computer-use-helper" \
-  "$HOST_MACOS/clark-computer-use-helper"
+/usr/bin/ditto "$ROOT_DIR/src-tauri/binaries/Clark Computer Use.app" "$SERVICE_APP"
 cp "$SWIFT_CONCURRENCY" "$HOST_FRAMEWORKS/libswift_Concurrency.dylib"
 
 /usr/bin/codesign \
@@ -96,7 +96,13 @@ cp "$SWIFT_CONCURRENCY" "$HOST_FRAMEWORKS/libswift_Concurrency.dylib"
   --options runtime \
   --timestamp=none \
   --sign "$SIGNING_IDENTITY" \
-  "$HOST_MACOS/clark-computer-use-helper"
+  "$SERVICE_SWIFT_CONCURRENCY"
+/usr/bin/codesign \
+  --force \
+  --options runtime \
+  --timestamp=none \
+  --sign "$SIGNING_IDENTITY" \
+  "$SERVICE_APP"
 /usr/bin/codesign \
   --force \
   --options runtime \
@@ -105,7 +111,7 @@ cp "$SWIFT_CONCURRENCY" "$HOST_FRAMEWORKS/libswift_Concurrency.dylib"
   "$HOST_APP"
 
 /usr/bin/codesign --verify --deep --strict --verbose=2 "$HOST_APP"
-"$HOST_MACOS/clark-computer-use-helper" --self-test
+"$SERVICE_BINARY" --self-test
 
 FIXTURE_EXECUTABLE="$FIXTURE_APP/Contents/MacOS/clark-computer-use-fixture"
 
@@ -173,7 +179,7 @@ python3 - \
   "$RECEIPT_PATH" \
   "$OUTPUT_DIR/smoke.log" \
   "$HOST_MACOS/clark-desktop" \
-  "$HOST_MACOS/clark-computer-use-helper" \
+  "$SERVICE_BINARY" \
   "$FIXTURE_EXECUTABLE" \
   "$TARGET" \
   "$SOURCE_REVISION" \

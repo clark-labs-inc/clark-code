@@ -35,6 +35,11 @@ export interface SessionOptions {
   resume?: ResumeTranscript;
 }
 
+/** Authoritative identity allocated by the provider for one submitted turn. */
+export interface PromptReceipt {
+  runId: string;
+}
+
 export interface CloudTrajectoryConfig {
   endpoint: string;
   token: string;
@@ -95,7 +100,12 @@ export interface ComputerUsePermissionStatus {
 export interface ComputerUsePlatformStatus {
   supported: boolean;
   platform: string;
-  helper_ready: boolean;
+  service_ready: boolean;
+  readiness: "unsupported" | "service_unavailable" | "needs_permission" | "restart_required" | "ready";
+  permission_owner?: {
+    display_name: string;
+    bundle_id: string;
+  } | null;
   permissions?: ComputerUsePermissionStatus | null;
   detail?: string | null;
 }
@@ -262,7 +272,11 @@ export interface CoreBridge {
   /** Another device deleted a live conversation. The desktop must stop its
    * local session rather than recreate that cloud history. */
   onCloudConversationDeleted?(handler: (conversationId: string) => void): () => void;
-  prompt(sessionId: string, blocks: ContentBlock[], attachments?: Upload[]): Promise<void>;
+  prompt(
+    sessionId: string,
+    blocks: ContentBlock[],
+    attachments?: Upload[],
+  ): Promise<PromptReceipt>;
   /** Replace the provider's model-visible history with a compact summary.
    *  This is a standalone control operation, not a user prompt. */
   compact?(sessionId: string): Promise<void>;

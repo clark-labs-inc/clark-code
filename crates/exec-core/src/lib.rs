@@ -21,14 +21,13 @@ use std::time::{Duration, SystemTime};
 use async_trait::async_trait;
 use tokio_util::sync::CancellationToken;
 
-mod capabilities;
 mod local;
 mod process;
 mod process_fence;
-pub use capabilities::{collect_system_capabilities, SystemCapabilityCensus};
 pub use local::LocalExecutor;
 pub use process::{run_process_streaming, run_process_streaming_pty, spawn_process, ProcessSpec};
 pub use process_fence::ProcessFence;
+pub use scout_capability_census::{collect_system_capabilities, SystemCapabilityCensus};
 
 pub const NONINTERACTIVE_ENV: &[(&str, &str)] = &[
     ("PAGER", "cat"),
@@ -240,6 +239,18 @@ pub async fn terminate_process_tree(child: &mut tokio::process::Child, root_pid:
 /// Tool-facing result: the error is already a model-readable message.
 pub type ExecResult<T> = Result<T, String>;
 
+/// Upper bound for a decoded target-native service request. Scout batches are
+/// independently capped at 64 MiB; the small allowance covers their typed
+/// envelope without permitting an unbounded RPC allocation.
+pub const MAX_TARGET_SERVICE_REQUEST_BYTES: usize = 72 * 1024 * 1024;
+/// Symmetric decoded response ceiling before base64/WebSocket framing.
+pub const MAX_TARGET_SERVICE_RESPONSE_BYTES: usize = 72 * 1024 * 1024;
+
+/// WebSocket message bound needed to carry the largest target-service request
+/// after base64 plus its JSON-RPC envelope. Both peers opt into this finite
+/// limit instead of relying on tungstenite's smaller default.
+pub const MAX_EXEC_PROTOCOL_MESSAGE_BYTES: usize = 100 * 1024 * 1024;
+
 /// One entry returned by [`Executor::read_dir`].
 #[derive(Clone, Debug)]
 pub struct DirEntry {
@@ -337,6 +348,38 @@ pub trait Executor: Send + Sync {
     async fn read(&self, path: &Path) -> ExecResult<Vec<u8>>;
     /// Write bytes to a file, creating parent directories as needed.
     async fn write(&self, path: &Path, data: &[u8]) -> ExecResult<()>;
+    /// Write private bytes with target-native owner-only protection where the
+    /// platform exposes it, and flush the file before returning.
+    ///
+    /// This is for host-held credentials such as signing seeds. Callers must
+    /// never return the bytes through a tool result.
+    async fn write_private(&self, _path: &Path, _data: &[u8]) -> ExecResult<()> {
+        Err("private durable writes are not supported by this executor".into())
+    }
+    /// Create a new private file without replacing an existing path. Returns
+    /// `false` when another process already created the path.
+    async fn write_private_new(&self, _path: &Path, _data: &[u8]) -> ExecResult<bool> {
+        Err("exclusive private writes are not supported by this executor".into())
+    }
+    /// Flush one file's content and metadata to stable storage.
+    async fn sync_file(&self, _path: &Path) -> ExecResult<()> {
+        Err("file synchronization is not supported by this executor".into())
+    }
+    /// Flush a directory entry update after an atomic rename.
+    async fn sync_directory(&self, _path: &Path) -> ExecResult<()> {
+        Err("directory synchronization is not supported by this executor".into())
+    }
+    /// Invoke a target-native bounded service against state rooted on the
+    /// execution target. Request and response schemas belong to the named
+    /// service; private target state never transits as individual file calls.
+    async fn target_service_call(
+        &self,
+        _service: &str,
+        _root: &Path,
+        _request: &[u8],
+    ) -> ExecResult<Vec<u8>> {
+        Err("target services are not supported by this executor".into())
+    }
     /// Create a directory and all missing parents.
     async fn create_dir_all(&self, path: &Path) -> ExecResult<()>;
     /// Remove one file or symlink. Missing paths are treated as success.

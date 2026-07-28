@@ -56,8 +56,7 @@ fn paid_config() -> (String, String, String) {
     let api_key = std::env::var("CLARK_CODE_API_KEY")
         .or_else(|_| std::env::var("CLARK_API_KEY"))
         .expect("CLARK_CODE_API_KEY or CLARK_API_KEY must be set");
-    let model =
-        std::env::var("CLARK_PAID_EVAL_MODEL").unwrap_or_else(|_| "clark-code:minimax_m3".into());
+    let model = std::env::var("CLARK_PAID_EVAL_MODEL").unwrap_or_else(|_| "clark-code:free".into());
     let base_url = std::env::var("CLARK_PAID_EVAL_BASE_URL")
         .unwrap_or_else(|_| crate::config::DEFAULT_BASE_URL.into());
     (api_key, model, base_url)
@@ -75,6 +74,8 @@ fn config() -> OrchestrationToolsConfig {
         headers: HashMap::new(),
         root_model: "strong".into(),
         reasoning_effort: None,
+        scout_capsules: None,
+        scout_cartography: None,
     }
 }
 
@@ -196,6 +197,8 @@ async fn paid_single_repo_workstreams_complete_and_apply() {
             headers: HashMap::new(),
             root_model: model.clone(),
             reasoning_effort: Some("low".into()),
+            scout_capsules: None,
+            scout_cartography: None,
         },
         pending: Mutex::new(HashMap::new()),
     });
@@ -209,6 +212,7 @@ async fn paid_single_repo_workstreams_complete_and_apply() {
         progress: None,
         agent_progress: None,
         call_progress: None,
+        model_override: None,
     };
     let started = Instant::now();
     let outcome = run_workstreams(

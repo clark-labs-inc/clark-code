@@ -39,6 +39,38 @@ use support::{event_sink, role_for_purpose};
 const ACP_TIMEOUT: Duration = Duration::from_secs(20 * 60);
 const LOCAL_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 
+#[derive(Debug, PartialEq, Eq)]
+struct DelegationModelPolicy {
+    root_model: String,
+    child_model: String,
+    harness: String,
+    reasoning_effort: Option<String>,
+}
+
+fn delegation_model_policy(
+    config: &OrchestrationToolsConfig,
+    model_override: Option<crate::tools::TurnModelOverride>,
+) -> DelegationModelPolicy {
+    match model_override {
+        Some(policy) => DelegationModelPolicy {
+            root_model: policy.model.to_string(),
+            child_model: policy.model.to_string(),
+            harness: "local".to_string(),
+            reasoning_effort: policy.reasoning_effort.map(str::to_string),
+        },
+        None => DelegationModelPolicy {
+            root_model: config.root_model.clone(),
+            child_model: config
+                .policy
+                .subagent_model
+                .clone()
+                .unwrap_or_else(|| config.root_model.clone()),
+            harness: config.policy.read_only_harness.clone(),
+            reasoning_effort: config.reasoning_effort.clone(),
+        },
+    }
+}
+
 pub(super) struct StoredOrchestration {
     pub coordinator: Arc<Coordinator>,
     pub parent_context: String,
@@ -62,11 +94,21 @@ pub(crate) fn orchestration_tools(config: OrchestrationToolsConfig) -> Vec<Arc<d
         Arc::new(DelegateReadOnly {
             shared: shared.clone(),
         }),
-        resolution::tool(shared),
+        resolution::tool(shared.clone()),
     ];
     tools.extend(writer::tools(writer_config));
-    tools.extend(scout::tools(scout_max_parallel_agents));
+    tools.extend(scout::tools(
+        scout_max_parallel_agents,
+        shared.config.scout_capsules.clone(),
+        shared.config.clone(),
+    ));
     tools
+}
+
+pub(crate) fn scout_capsule_tools(
+    policy: crate::orchestration::ScoutCapsulePolicyConfig,
+) -> Vec<Arc<dyn ToolExecutor>> {
+    scout::capsule_tools(policy)
 }
 
 struct DelegateReadOnly {
@@ -171,20 +213,16 @@ async fn run_delegation(
         ),
         ..RiskSignals::default()
     };
-    let child_model = shared
-        .config
-        .policy
-        .subagent_model
-        .clone()
-        .unwrap_or_else(|| shared.config.root_model.clone());
+    let model_policy = delegation_model_policy(&shared.config, ctx.model_override);
     let mut tasks = Vec::with_capacity(args.workstreams.len());
     let mut estimates = Vec::with_capacity(args.workstreams.len());
     for workstream in args.workstreams {
         let task_id = TaskId::new(workstream.id)?;
         let scopes = resolve_scopes(ctx, &workstream.scopes)?;
         let context_tokens = estimate_context_tokens(&entries, &scopes);
-        let harness = &shared.config.policy.read_only_harness;
-        let (harness_kind, model, rate) = harness_metadata(shared, harness, &child_model)?;
+        let harness = &model_policy.harness;
+        let (harness_kind, model, rate) =
+            harness_metadata(shared, harness, &model_policy.child_model)?;
         estimates.push(WorkstreamEstimate {
             task_id: task_id.clone(),
             scopes: workstream.scopes.clone(),
@@ -211,7 +249,7 @@ async fn run_delegation(
         authorization: Authorization::UserRequested,
         purpose: args.purpose,
         workstreams: estimates,
-        root_model: shared.config.root_model.clone(),
+        root_model: model_policy.root_model.clone(),
         root_model_rate: shared.config.policy.root_model_rate,
         root_estimated_output_tokens: default_output_tokens(),
         risk,
@@ -249,7 +287,13 @@ async fn run_delegation(
         budget,
     )?;
     let mut coordinator = Coordinator::new(policy, control);
-    register_harnesses(&mut coordinator, shared, ctx, &child_model)?;
+    register_harnesses(
+        &mut coordinator,
+        shared,
+        ctx,
+        &model_policy.child_model,
+        model_policy.reasoning_effort.as_deref(),
+    )?;
     let coordinator = Arc::new(coordinator);
     let root_execution = ctx.session.lock().await.active_execution.clone();
     if let Some(execution) = &root_execution {
@@ -357,6 +401,7 @@ fn register_harnesses(
     shared: &SharedState,
     ctx: &ToolCtx,
     local_model: &str,
+    reasoning_effort: Option<&str>,
 ) -> Result<(), String> {
     let root = ctx.sandbox.root().to_string_lossy().into_owned();
     let workspace = Arc::new(WorkspaceDigestGuard::new(
@@ -366,7 +411,7 @@ fn register_harnesses(
     let extra = json!({
         "base_url": shared.config.base_url,
         "model": local_model,
-        "reasoning_effort": shared.config.reasoning_effort,
+        "reasoning_effort": reasoning_effort,
         "temperature": 0.0
     });
     coordinator.register_harness(Arc::new(local_read_only_harness(

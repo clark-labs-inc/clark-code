@@ -141,6 +141,7 @@ mod tests {
             progress: None,
             agent_progress: None,
             call_progress: None,
+            model_override: None,
         }
     }
 

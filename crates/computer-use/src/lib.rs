@@ -16,6 +16,23 @@ mod types;
 
 #[cfg(target_os = "macos")]
 mod macos;
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+mod portable;
+
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+fn suppress_portable_console_window(command: &mut std::process::Command) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+
+        command.creation_flags(PORTABLE_CHILD_CREATION_FLAGS);
+    }
+    #[cfg(not(windows))]
+    let _ = command;
+}
+
+#[cfg(windows)]
+const PORTABLE_CHILD_CREATION_FLAGS: u32 = 0x0800_0000;
 
 pub use action::{
     ActionAuthorization, ActionDisposition, ActionKind, ActionLocation, ActionReceipt, AppApproval,
@@ -42,7 +59,13 @@ pub fn native_backend() -> Result<std::sync::Arc<dyn ComputerBackend>, ComputerU
     {
         Ok(std::sync::Arc::new(macos::client::MacHelperBackend::new()?))
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    {
+        Ok(std::sync::Arc::new(
+            portable::client::PortableServiceBackend::new()?,
+        ))
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
     {
         Err(ComputerUseError::UnsupportedPlatform(
             std::env::consts::OS.to_string(),
@@ -53,17 +76,38 @@ pub fn native_backend() -> Result<std::sync::Arc<dyn ComputerBackend>, ComputerU
 #[doc(hidden)]
 #[cfg(all(target_os = "macos", feature = "helper-service"))]
 pub fn run_native_helper(
-    ipc_fd: i32,
-    control_fd: i32,
+    socket_path: std::path::PathBuf,
     data_dir: std::path::PathBuf,
 ) -> Result<(), ComputerUseError> {
-    macos::helper::run(ipc_fd, control_fd, data_dir)
+    macos::helper::run(socket_path, data_dir)
 }
 
 #[doc(hidden)]
 #[cfg(all(target_os = "macos", feature = "helper-service"))]
 pub fn native_helper_self_test() -> Result<(), ComputerUseError> {
-    macos::auth::verify_helper_signature().map_err(ComputerUseError::HelperRejected)
+    macos::auth::verify_service_signature().map_err(ComputerUseError::HelperRejected)
+}
+
+#[doc(hidden)]
+#[cfg(all(
+    any(target_os = "linux", target_os = "windows"),
+    feature = "helper-service"
+))]
+pub fn run_portable_service(
+    socket_name: String,
+    data_dir: std::path::PathBuf,
+    client_pid: u32,
+) -> Result<(), ComputerUseError> {
+    portable::service::run(socket_name, data_dir, client_pid)
+}
+
+#[doc(hidden)]
+#[cfg(all(
+    any(target_os = "linux", target_os = "windows"),
+    feature = "helper-service"
+))]
+pub fn portable_service_self_test() -> Result<(), ComputerUseError> {
+    portable::auth::verify_own_executable()
 }
 
 pub(crate) fn encode_rgba_png(

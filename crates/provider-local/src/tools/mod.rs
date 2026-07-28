@@ -155,6 +155,12 @@ impl PermissionMode {
 }
 
 /// Per-invocation context handed to every tool.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct TurnModelOverride {
+    pub model: &'static str,
+    pub reasoning_effort: Option<&'static str>,
+}
+
 #[derive(Clone)]
 pub struct ToolCtx {
     /// Project-root containment for file tools.
@@ -184,6 +190,10 @@ pub struct ToolCtx {
     /// tool call. Kept separate from text output so UI state never depends on
     /// parsing human narration.
     pub call_progress: Option<CallProgressFn>,
+    /// Host-owned per-turn model policy. Skill and prompt arguments cannot
+    /// supply or modify it; orchestration uses it to keep delegated model
+    /// execution on the same fixed policy as the root.
+    pub(crate) model_override: Option<TurnModelOverride>,
 }
 
 /// A tool's live-progress callback — each call appends a text delta to the
@@ -605,6 +615,18 @@ impl ToolRegistry {
     /// fail-closed child configurations never advertise them.
     pub fn enable_orchestration(&mut self, config: crate::orchestration::OrchestrationToolsConfig) {
         for tool in crate::orchestration::orchestration_tools(config) {
+            self.register_deferred(tool);
+        }
+    }
+
+    /// Register only the target-local adapter census and signed capsule client.
+    /// This remains available for remote execution targets without enabling
+    /// nested child-process orchestration on those targets.
+    pub fn enable_scout_capsules(
+        &mut self,
+        policy: crate::orchestration::ScoutCapsulePolicyConfig,
+    ) {
+        for tool in crate::orchestration::scout_capsule_tools(policy) {
             self.register_deferred(tool);
         }
     }

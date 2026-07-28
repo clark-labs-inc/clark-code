@@ -117,6 +117,14 @@ fn manager(policy: exec_sandbox::SandboxPolicy) -> Result<exec_sandbox::SandboxM
     )
 }
 
+pub(crate) fn release_smoke_executor(
+    cwd: &Path,
+) -> Result<exec_sandbox::SandboxedExecutor, String> {
+    let policy =
+        provider_local::local_sandbox_setup_policy(cwd).map_err(|error| error.to_string())?;
+    exec_sandbox::SandboxedExecutor::with_manager(manager(policy)?)
+}
+
 fn backend_name(backend: exec_sandbox::BackendKind) -> &'static str {
     match backend {
         exec_sandbox::BackendKind::MacosSeatbelt => "macos_seatbelt",

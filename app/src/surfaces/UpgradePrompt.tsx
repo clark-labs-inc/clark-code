@@ -2,7 +2,6 @@ import { CreditCard, ArrowUpRight } from "lucide-react";
 import {
   clarkBillingUrl,
   effectiveBilling,
-  effectiveUsagePercent,
   openExternal,
   type BillingSummary,
 } from "../lib/account";
@@ -13,16 +12,14 @@ export function upgradePromptCopy(billing: BillingSummary | null): {
   detail: string;
 } {
   if (effectiveBilling(billing)?.owner_kind === "organization") {
-    const percent = effectiveUsagePercent(billing);
     return {
       title: "Workspace billing needs attention",
-      detail: `${percent !== null ? `${percent}% of the workspace limit used. ` : ""}Clark Code uses your assigned workspace seat. Ask a workspace owner to review its billing, then retry this run.`,
+      detail: "The workspace has no Clark Code usage available. Clark Code uses your assigned workspace seat. Ask a workspace owner to review its billing, then retry this run.",
     };
   }
-  const percent = effectiveUsagePercent(billing);
   return {
     title: "Clark Code usage limit reached",
-    detail: `${percent !== null ? `${percent}% of the current limit used. ` : ""}Review your Clark billing account, then retry this run. Your work stays here.`,
+    detail: "This account is out of Clark Code credits. Review your Clark billing account, then retry this run. Your work stays here.",
   };
 }
 

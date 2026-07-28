@@ -26,7 +26,8 @@ use exec_protocol::{
     b64_decode, b64_encode, method, AuthParams, AuthResult, CanonicalizeResult, MetaResult,
     Notification, PathParams, ProcessExitParams, ProcessIdParams, ProcessOutputParams,
     ProcessResumeParams, ProcessStartParams, ReadDirResult, ReadResult, RenameParams, Request,
-    Response, Stream, SystemCapabilityCensusResult, WalkResult, WriteParams, PROTOCOL_VERSION,
+    Response, Stream, SystemCapabilityCensusResult, TargetServiceParams, TargetServiceResult,
+    WalkResult, WriteNewResult, WriteParams, PROTOCOL_VERSION,
 };
 use futures::{SinkExt, StreamExt};
 use serde::de::DeserializeOwned;
@@ -347,9 +348,13 @@ fn rebase_walk_path(root: &Path, remote_root: &Path, wire_path: &str) -> PathBuf
 }
 
 async fn open_connection(url: &str, token: &str) -> ExecResult<Arc<Conn>> {
-    let (ws, _resp) = tokio_tungstenite::connect_async(url)
-        .await
-        .map_err(|e| format!("connecting to exec-server {url}: {e}"))?;
+    let websocket_config = tokio_tungstenite::tungstenite::protocol::WebSocketConfig::default()
+        .max_message_size(Some(exec_core::MAX_EXEC_PROTOCOL_MESSAGE_BYTES))
+        .max_frame_size(Some(exec_core::MAX_EXEC_PROTOCOL_MESSAGE_BYTES));
+    let (ws, _resp) =
+        tokio_tungstenite::connect_async_with_config(url, Some(websocket_config), false)
+            .await
+            .map_err(|e| format!("connecting to exec-server {url}: {e}"))?;
     let (mut sink, mut stream) = ws.split();
 
     let (otx, mut orx) = mpsc::unbounded_channel::<Message>();
@@ -488,6 +493,74 @@ impl Executor for RemoteExecutor {
         )
         .await?;
         Ok(())
+    }
+
+    async fn write_private(&self, path: &Path, data: &[u8]) -> ExecResult<()> {
+        self.call(
+            method::FS_WRITE_PRIVATE,
+            to_value(&WriteParams {
+                path: Self::path(path),
+                data: b64_encode(data),
+            }),
+        )
+        .await?;
+        Ok(())
+    }
+
+    async fn write_private_new(&self, path: &Path, data: &[u8]) -> ExecResult<bool> {
+        let value = self
+            .call(
+                method::FS_WRITE_PRIVATE_NEW,
+                to_value(&WriteParams {
+                    path: Self::path(path),
+                    data: b64_encode(data),
+                }),
+            )
+            .await?;
+        let result: WriteNewResult = from_value(value)?;
+        Ok(result.created)
+    }
+
+    async fn sync_file(&self, path: &Path) -> ExecResult<()> {
+        self.call(
+            method::FS_SYNC_FILE,
+            to_value(&PathParams {
+                path: Self::path(path),
+            }),
+        )
+        .await?;
+        Ok(())
+    }
+
+    async fn sync_directory(&self, path: &Path) -> ExecResult<()> {
+        self.call(
+            method::FS_SYNC_DIRECTORY,
+            to_value(&PathParams {
+                path: Self::path(path),
+            }),
+        )
+        .await?;
+        Ok(())
+    }
+
+    async fn target_service_call(
+        &self,
+        service: &str,
+        root: &Path,
+        request: &[u8],
+    ) -> ExecResult<Vec<u8>> {
+        let value = self
+            .call(
+                method::TARGET_SERVICE_CALL,
+                to_value(&TargetServiceParams {
+                    service: service.to_owned(),
+                    root: Self::path(root),
+                    request: b64_encode(request),
+                }),
+            )
+            .await?;
+        let result: TargetServiceResult = from_value(value)?;
+        b64_decode(&result.response)
     }
 
     async fn create_dir_all(&self, path: &Path) -> ExecResult<()> {

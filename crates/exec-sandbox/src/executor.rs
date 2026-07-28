@@ -70,6 +70,37 @@ impl Executor for SandboxedExecutor {
         self.local.write(&self.write_path(path)?, data).await
     }
 
+    async fn write_private(&self, path: &Path, data: &[u8]) -> ExecResult<()> {
+        self.local
+            .write_private(&self.write_path(path)?, data)
+            .await
+    }
+
+    async fn write_private_new(&self, path: &Path, data: &[u8]) -> ExecResult<bool> {
+        self.local
+            .write_private_new(&self.write_path(path)?, data)
+            .await
+    }
+
+    async fn sync_file(&self, path: &Path) -> ExecResult<()> {
+        self.local.sync_file(&self.write_path(path)?).await
+    }
+
+    async fn sync_directory(&self, path: &Path) -> ExecResult<()> {
+        self.local.sync_directory(&self.write_path(path)?).await
+    }
+
+    async fn target_service_call(
+        &self,
+        service: &str,
+        root: &Path,
+        request: &[u8],
+    ) -> ExecResult<Vec<u8>> {
+        self.local
+            .target_service_call(service, &self.write_path(root)?, request)
+            .await
+    }
+
     async fn create_dir_all(&self, path: &Path) -> ExecResult<()> {
         self.local.create_dir_all(&self.write_path(path)?).await
     }
@@ -181,8 +212,29 @@ mod tests {
             .write(&workspace.path().join("inside.txt"), b"ok")
             .await
             .unwrap();
+        executor
+            .write_private(&workspace.path().join("private.key"), b"private")
+            .await
+            .unwrap();
+        assert!(!executor
+            .write_private_new(&workspace.path().join("private.key"), b"replacement")
+            .await
+            .unwrap());
+        executor
+            .sync_file(&workspace.path().join("inside.txt"))
+            .await
+            .unwrap();
+        executor.sync_directory(workspace.path()).await.unwrap();
         assert!(executor
             .write(&outside.path().join("outside.txt"), b"bad")
+            .await
+            .is_err());
+        assert!(executor
+            .write_private(&outside.path().join("outside.key"), b"bad")
+            .await
+            .is_err());
+        assert!(executor
+            .write_private_new(&outside.path().join("outside-new.key"), b"bad")
             .await
             .is_err());
     }

@@ -24,7 +24,7 @@ pub use managed::{
     InstalledSkillPack, SkillPackAction, SkillPackReceipt, SkillPackScope,
 };
 pub(crate) use render::{render_catalog, replace_catalog_section};
-pub(crate) use selection::{bound_skill_injections, explicit_skill_injections};
+pub(crate) use selection::{bound_skill_injections, explicit_skill_injections, invokes_skill};
 pub use service::{skill_environment_id, SkillCatalogService};
 
 const MAX_SKILL_BODY_BYTES: usize = 48 * 1024;

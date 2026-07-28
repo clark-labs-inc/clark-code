@@ -6,5 +6,11 @@ fn main() {
     if clark_desktop_lib::run_signed_computer_use_smoke_if_requested() {
         return;
     }
+    if clark_desktop_lib::run_windows_console_smoke_if_requested() {
+        return;
+    }
+    if clark_desktop_lib::run_windows_sandbox_smoke_if_requested() {
+        return;
+    }
     clark_desktop_lib::run();
 }

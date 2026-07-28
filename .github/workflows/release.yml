@@ -24,10 +24,204 @@ env:
   CLARK_DESKTOP_DOWNLOAD_BASE_URL: ${{ vars.CLARK_DESKTOP_DOWNLOAD_BASE_URL || 'https://downloads.clarkchat.com/desktop' }}
   CLARK_DESKTOP_DOWNLOAD_UPLOAD_ROLE_ARN: ${{ vars.CLARK_DESKTOP_DOWNLOAD_UPLOAD_ROLE_ARN || 'arn:aws:iam::293723385520:role/clark-desktop-downloads-prod-upload' }}
   CLARK_DESKTOP_DOWNLOAD_DISTRIBUTION_ID: ${{ vars.CLARK_DESKTOP_DOWNLOAD_DISTRIBUTION_ID || '' }}
+  # Clark's Authenticode private key is held by Azure Artifact Signing and is
+  # never exported as a PFX. These public identity coordinates are deliberately
+  # separate from the OIDC application credentials below.
+  AZURE_ARTIFACT_SIGNING_ENDPOINT: ${{ vars.AZURE_ARTIFACT_SIGNING_ENDPOINT || 'https://eus.codesigning.azure.net' }}
+  AZURE_ARTIFACT_SIGNING_ACCOUNT: ${{ vars.AZURE_ARTIFACT_SIGNING_ACCOUNT || 'clarkcodesigning' }}
+  AZURE_ARTIFACT_SIGNING_RESOURCE_GROUP: ${{ vars.AZURE_ARTIFACT_SIGNING_RESOURCE_GROUP || '' }}
+  AZURE_ARTIFACT_SIGNING_PROFILE: ${{ vars.AZURE_ARTIFACT_SIGNING_PROFILE || '' }}
+  CLARK_WINDOWS_SIGNER_SUBJECT: ${{ vars.CLARK_WINDOWS_SIGNER_SUBJECT || '' }}
+  CLARK_WINDOWS_QA_BASE_VM: Clark QA - Windows 11 ARM
+  CLARK_WINDOWS_QA_VM_NAME: Clark QA Release ${{ github.run_id }}-${{ github.run_attempt }}
 
 jobs:
+  release_prerequisites:
+    name: Live release identity preflight
+    runs-on: windows-latest
+    # The protected environment gives Entra one stable OIDC subject across
+    # release tags. Its deployment policy must allow only stable vX.Y.Z tags.
+    environment: release
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Require an exact mainline tag, bundle version, and every identity coordinate
+        shell: pwsh
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          if (
+            $env:GITHUB_REF_TYPE -ne "tag" -or
+            $env:GITHUB_REF_NAME -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+$'
+          ) {
+            throw "Release must run from a stable vX.Y.Z tag, got $($env:GITHUB_REF_TYPE)/$($env:GITHUB_REF_NAME)"
+          }
+          if ($env:GITHUB_SHA -notmatch '^[0-9a-f]{40}$') {
+            throw "Release source revision is not one exact Git commit"
+          }
+          $declaredVersion = (
+            Get-Content -LiteralPath src-tauri/tauri.conf.json -Raw |
+              ConvertFrom-Json
+          ).version
+          $tagVersion = $env:GITHUB_REF_NAME -replace '^v', ''
+          if ($declaredVersion -ne $tagVersion) {
+            throw "Release tag $($env:GITHUB_REF_NAME) does not match bundle version $declaredVersion"
+          }
+          git merge-base --is-ancestor $env:GITHUB_SHA origin/main
+          if ($LASTEXITCODE -ne 0) {
+            throw "Release tag commit is not contained in origin/main"
+          }
+          $required = @{
+            AZURE_CLIENT_ID = $env:AZURE_CLIENT_ID
+            AZURE_TENANT_ID = $env:AZURE_TENANT_ID
+            AZURE_SUBSCRIPTION_ID = $env:AZURE_SUBSCRIPTION_ID
+            AZURE_ARTIFACT_SIGNING_RESOURCE_GROUP = $env:AZURE_ARTIFACT_SIGNING_RESOURCE_GROUP
+            AZURE_ARTIFACT_SIGNING_PROFILE = $env:AZURE_ARTIFACT_SIGNING_PROFILE
+            CLARK_WINDOWS_SIGNER_SUBJECT = $env:CLARK_WINDOWS_SIGNER_SUBJECT
+            CLARK_DESKTOP_DOWNLOAD_UPLOAD_ROLE_ARN = $env:CLARK_DESKTOP_DOWNLOAD_UPLOAD_ROLE_ARN
+            TAURI_SIGNING_PRIVATE_KEY = $env:TAURI_SIGNING_PRIVATE_KEY
+            TAURI_SIGNING_PRIVATE_KEY_PASSWORD = $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+          }
+          foreach ($entry in $required.GetEnumerator()) {
+            if ([string]::IsNullOrWhiteSpace($entry.Value)) {
+              throw "$($entry.Key) is required before release work can start"
+            }
+          }
+
+      - name: Authenticate the release workload with Azure OIDC
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Install and bind the official Artifact Signing client
+        shell: pwsh
+        run: |
+          scripts/prepare-windows-artifact-signing.ps1 `
+            -Endpoint $env:AZURE_ARTIFACT_SIGNING_ENDPOINT `
+            -AccountName $env:AZURE_ARTIFACT_SIGNING_ACCOUNT `
+            -ResourceGroup $env:AZURE_ARTIFACT_SIGNING_RESOURCE_GROUP `
+            -CertificateProfileName $env:AZURE_ARTIFACT_SIGNING_PROFILE `
+            -ExpectedSignerSubject $env:CLARK_WINDOWS_SIGNER_SUBJECT `
+            -CorrelationId "release-preflight-$($env:GITHUB_RUN_ID)-$($env:GITHUB_RUN_ATTEMPT)"
+
+      - name: Sign and verify a disposable PE through the production boundary
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory -Force -Path target/artifact-signing | Out-Null
+          $probe = (Resolve-Path target/artifact-signing).Path + "\clark-signing-probe.exe"
+          Add-Type `
+            -TypeDefinition 'public static class Program { public static int Main() { return 0; } }' `
+            -OutputAssembly $probe `
+            -OutputType ConsoleApplication
+          src-tauri/sign-windows-artifact.ps1 -FilePath $probe
+          $signature = Get-AuthenticodeSignature -LiteralPath $probe
+          if (
+            $signature.Status -ne [Management.Automation.SignatureStatus]::Valid -or
+            $signature.SignerCertificate.Subject -ne $env:CLARK_WINDOWS_SIGNER_SUBJECT
+          ) {
+            throw "Artifact Signing returned the wrong Clark publisher identity"
+          }
+          @{
+            schema_version = 1
+            source_revision = $env:GITHUB_SHA
+            signer_subject = $signature.SignerCertificate.Subject
+            signer_thumbprint = $signature.SignerCertificate.Thumbprint
+          } |
+            ConvertTo-Json |
+            Set-Content -LiteralPath target/artifact-signing/signer-receipt.json -Encoding utf8
+
+      - name: Authenticate the release workload with AWS OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.CLARK_DESKTOP_DOWNLOAD_UPLOAD_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Verify the exact CDN upload account
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $roleParts = $env:CLARK_DESKTOP_DOWNLOAD_UPLOAD_ROLE_ARN.Split(":")
+          if (
+            $roleParts.Length -lt 6 -or
+            $roleParts[0] -ne "arn" -or
+            $roleParts[2] -ne "iam" -or
+            $roleParts[4] -notmatch '^[0-9]{12}$'
+          ) {
+            throw "CLARK_DESKTOP_DOWNLOAD_UPLOAD_ROLE_ARN is not an IAM role ARN"
+          }
+          $identity = aws sts get-caller-identity --output json | ConvertFrom-Json
+          if ($identity.Account -ne $roleParts[4]) {
+            throw "AWS OIDC authenticated the wrong CDN upload account"
+          }
+          $signer = Get-Content -LiteralPath target/artifact-signing/signer-receipt.json -Raw |
+            ConvertFrom-Json
+          @{
+            schema_version = 1
+            status = "passed"
+            source_revision = $signer.source_revision
+            signer_subject = $signer.signer_subject
+            signer_thumbprint = $signer.signer_thumbprint
+            aws_account = $identity.Account
+            aws_arn = $identity.Arn
+          } |
+            ConvertTo-Json |
+            Set-Content -LiteralPath target/artifact-signing/preflight-receipt.json -Encoding utf8
+
+      - name: Upload release identity preflight receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-identity-preflight
+          path: target/artifact-signing/preflight-receipt.json
+          if-no-files-found: error
+
+  windows_utm_runner_preflight:
+    name: UAC-enabled Windows UTM runner preflight
+    needs: [release_prerequisites]
+    runs-on: [self-hosted, macOS, ARM64, clark-utm-qa]
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Start and verify the exact Windows 11 QA guest
+        run: |
+          node harness/utm-real-use.mjs \
+            --platform windows \
+            --ensure-started \
+            --require-pristine \
+            --out target/windows-release-runner-preflight
+
+      - name: Upload Windows runner readiness receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-release-runner-preflight
+          path: target/windows-release-runner-preflight
+          if-no-files-found: error
+
+      - name: Stop the verified pristine base before cloning
+        run: |
+          node harness/utm-windows-release-vm.mjs \
+            --action prepare-base \
+            --base "$CLARK_WINDOWS_QA_BASE_VM"
+
   pre_release_benchmarks:
     name: Deterministic pre-release experience benchmark
+    needs: [windows_utm_runner_preflight]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -54,7 +248,12 @@ jobs:
             libayatana-appindicator3-dev \
             librsvg2-dev \
             libssl-dev \
-            libxdo-dev \
+            libpipewire-0.3-dev \
+            libwayland-dev \
+            libxcb1-dev \
+            libgbm-dev \
+            libegl1-mesa-dev \
+            clang \
             build-essential \
             pkg-config
 
@@ -92,6 +291,7 @@ jobs:
 
   paid_release_benchmark:
     name: Paid release benchmark (macOS sandbox)
+    needs: [windows_utm_runner_preflight]
     runs-on: macos-latest
     timeout-minutes: 15
     env:
@@ -132,12 +332,12 @@ jobs:
       fail-fast: false
       matrix:
         # One native runner per OS — cross-compiling a Tauri app isn't viable.
-        # macOS: one signed + notarized universal build. Windows: unsigned
-        # per-user NSIS installer (SmartScreen warns). We intentionally do not ship an MSI:
+        # macOS: one signed + notarized universal build. Windows: Authenticode-
+        # signed per-user NSIS installer and signed private helpers. We intentionally do not ship an MSI:
         # its machine-wide installation model adds an avoidable UAC prompt.
         # Linux: .deb + .rpm + .AppImage. Each
-        # leg uploads its installers under canonical ClarkCode.* names; the
-        # updater latest.json is macOS-only (keyed on the .app.tar.gz.sig).
+        # leg uploads its installers under canonical ClarkCode.* names and an
+        # updater fragment. The serialized metadata job merges all platforms.
         include:
           - platform: macos-latest
             args: "--target universal-apple-darwin --config src-tauri/tauri.release.conf.json --config src-tauri/tauri.sandbox.macos.conf.json --config src-tauri/tauri.computer-use.macos.conf.json"
@@ -148,10 +348,13 @@ jobs:
             bundle-target: "x86_64-unknown-linux-gnu"
             rust-targets: ""
           - platform: windows-latest
-            args: "--bundles nsis --config src-tauri/tauri.release.conf.json --config src-tauri/tauri.sandbox.windows.conf.json"
+            args: "--bundles nsis --config src-tauri/tauri.release.conf.json --config src-tauri/tauri.sandbox.windows.conf.json --config src-tauri/tauri.windows-signing.conf.json"
             bundle-target: "x86_64-pc-windows-msvc"
             rust-targets: ""
     runs-on: ${{ matrix.platform }}
+    # Keep every native package in the same protected release deployment. The
+    # Windows leg also needs this stable subject for Azure OIDC signing.
+    environment: release
     steps:
       - uses: actions/checkout@v4
 
@@ -172,7 +375,6 @@ jobs:
             libayatana-appindicator3-dev \
             librsvg2-dev \
             libssl-dev \
-            libxdo-dev \
             build-essential \
             file \
             patchelf \
@@ -210,6 +412,11 @@ jobs:
           if [ "${{ runner.os }}" = "Linux" ]; then
             "src-tauri/binaries/bwrap-${{ matrix.bundle-target }}" --version
           fi
+          if [ "${{ runner.os }}" != "macOS" ]; then
+            bash scripts/stage-portable-computer-use-service.sh \
+              --target "${{ matrix.bundle-target }}" \
+              --profile release
+          fi
 
       - name: Install WebKit smoke dependencies
         if: matrix.platform == 'macos-latest'
@@ -234,6 +441,26 @@ jobs:
           if (-not $dumpbin) { throw "dumpbin.exe was not found" }
           $dumpbin.Directory.FullName >> $env:GITHUB_PATH
 
+      - name: Authenticate the Windows build with Azure OIDC
+        if: runner.os == 'Windows'
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Install and bind the official Artifact Signing client
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          scripts/prepare-windows-artifact-signing.ps1 `
+            -Endpoint $env:AZURE_ARTIFACT_SIGNING_ENDPOINT `
+            -AccountName $env:AZURE_ARTIFACT_SIGNING_ACCOUNT `
+            -ResourceGroup $env:AZURE_ARTIFACT_SIGNING_RESOURCE_GROUP `
+            -CertificateProfileName $env:AZURE_ARTIFACT_SIGNING_PROFILE `
+            -ExpectedSignerSubject $env:CLARK_WINDOWS_SIGNER_SUBJECT `
+            -CorrelationId "release-build-$($env:GITHUB_RUN_ID)-$($env:GITHUB_RUN_ATTEMPT)"
+
       - name: Build private Windows sandbox helpers
         if: runner.os == 'Windows'
         shell: pwsh
@@ -254,6 +481,56 @@ jobs:
           Copy-Item target/release/clark-windows-sandbox-setup.exe src-tauri/binaries/clark-windows-sandbox-setup-x86_64-pc-windows-msvc.exe
           src-tauri/binaries/clark-command-runner-x86_64-pc-windows-msvc.exe --self-test
           src-tauri/binaries/clark-windows-sandbox-setup-x86_64-pc-windows-msvc.exe --self-test
+
+      - name: Prove native Windows filesystem and network containment
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          node harness/windows-native-containment.mjs `
+            --runner target/release/clark-command-runner.exe `
+            --setup target/release/clark-windows-sandbox-setup.exe `
+            --source-revision $env:GITHUB_SHA `
+            --out target/windows-native-containment
+
+      - name: Upload native Windows containment receipt
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-native-containment
+          path: target/windows-native-containment
+          if-no-files-found: error
+
+      - name: Sign every bundled Windows executable before packaging
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $executables = @(
+            "src-tauri/binaries/rg-x86_64-pc-windows-msvc.exe"
+            "src-tauri/binaries/clark-command-runner-x86_64-pc-windows-msvc.exe"
+            "src-tauri/binaries/clark-windows-sandbox-setup-x86_64-pc-windows-msvc.exe"
+            "src-tauri/binaries/clark-computer-use-helper-x86_64-pc-windows-msvc.exe"
+          )
+          foreach ($executable in $executables) {
+            if (-not (Test-Path -LiteralPath $executable -PathType Leaf)) {
+              throw "Windows bundled executable is missing: $executable"
+            }
+            src-tauri/sign-windows-artifact.ps1 -FilePath $executable
+            $signature = Get-AuthenticodeSignature -LiteralPath $executable
+            if (
+              $signature.Status -ne [Management.Automation.SignatureStatus]::Valid -or
+              $signature.SignerCertificate.Subject -ne $env:CLARK_WINDOWS_SIGNER_SUBJECT
+            ) {
+              throw "Bundled executable did not retain the Clark release signature: $executable"
+            }
+            if ([string]::IsNullOrWhiteSpace($env:WINDOWS_RELEASE_SIGNER_THUMBPRINT)) {
+              "WINDOWS_RELEASE_SIGNER_THUMBPRINT=$($signature.SignerCertificate.Thumbprint)" >> $env:GITHUB_ENV
+              $env:WINDOWS_RELEASE_SIGNER_THUMBPRINT = $signature.SignerCertificate.Thumbprint
+            } elseif (
+              $signature.SignerCertificate.Thumbprint -ne $env:WINDOWS_RELEASE_SIGNER_THUMBPRINT
+            ) {
+              throw "Bundled executable was signed by a different Artifact Signing certificate: $executable"
+            }
+          }
 
       - name: Smoke production frontend in WebKit
         if: matrix.platform == 'macos-latest'
@@ -306,8 +583,9 @@ jobs:
             Inc.) and notarized by Apple — drag Clark Code into Applications
             and open it, no Gatekeeper workaround needed.
 
-            **Windows** uses a per-user NSIS installer. SmartScreen may warn
-            because this release is unsigned; choose **More info → Run anyway**.
+            **Windows** uses an Authenticode-signed per-user NSIS installer.
+            Clark's application and elevated sandbox helper carry the same
+            publisher identity.
 
             **Linux** — `.AppImage` (portable, `chmod +x` and run), `.deb`
             (Debian/Ubuntu), or `.rpm` (Fedora/RHEL).
@@ -374,10 +652,25 @@ jobs:
             --platform macos \
             --resource-root "$app/Contents/Resources" \
             --executable-dir "$app/Contents/MacOS"
-          helper="$app/Contents/MacOS/clark-computer-use-helper"
+          service="$app/Contents/Resources/Clark Computer Use.app"
+          helper="$service/Contents/MacOS/clark-computer-use-helper"
           otool -l "$helper" | grep -A2 -F 'path @executable_path/../Frameworks'
-          "$helper" --self-test
-          codesign --verify --strict --verbose=2 "$helper"
+          update_probe_root="$(mktemp -d)"
+          previous_service="$update_probe_root/Clark Computer Use.app"
+          ditto "$service" "$previous_service"
+          plutil -replace CFBundleVersion -string 999999 \
+            "$previous_service/Contents/Info.plist"
+          codesign \
+            --force \
+            --options runtime \
+            --timestamp=none \
+            --sign "Developer ID Application: Clark Labs Inc. (TZWY28WKAP)" \
+            "$previous_service"
+          scripts/verify-computer-use-service-identity.sh \
+            --service-app "$service" \
+            --previous-app "$previous_service" \
+            --expected-id com.clark.computer-use \
+            --expected-team TZWY28WKAP
           codesign --verify --deep --strict --verbose=2 "$app"
           "$app/Contents/MacOS/clark-desktop" --computer-use-signed-smoke
 
@@ -396,6 +689,8 @@ jobs:
             --resource-root "$(dirname "$path_dir")" \
             --executable-dir "$extracted/usr/bin" \
             --staged-bwrap src-tauri/binaries/bwrap-x86_64-unknown-linux-gnu
+          service="$(dirname "$path_dir")/clark-resources/computer-use/clark-computer-use-helper"
+          "$service" --self-test
 
       - name: Verify packaged Windows runtime layout
         if: runner.os == 'Windows'
@@ -405,6 +700,14 @@ jobs:
             Where-Object { $_.FullName -match '[\\/]bundle[\\/]nsis[\\/]' } |
             Select-Object -First 1
           if (-not $nsis) { throw "packaged NSIS installer was not found" }
+          $installerSignature = Get-AuthenticodeSignature -LiteralPath $nsis.FullName
+          if (
+            $installerSignature.Status -ne [Management.Automation.SignatureStatus]::Valid -or
+            $installerSignature.SignerCertificate.Subject -ne $env:CLARK_WINDOWS_SIGNER_SUBJECT -or
+            $installerSignature.SignerCertificate.Thumbprint -ne $env:WINDOWS_RELEASE_SIGNER_THUMBPRINT
+          ) {
+            throw "NSIS installer is not signed by the Clark release identity"
+          }
           $unexpectedMsi = Get-ChildItem target -Recurse -File -Filter *.msi |
             Where-Object { $_.FullName -match '[\\/]bundle[\\/]msi[\\/]' }
           if ($unexpectedMsi) { throw "Windows release must not publish an elevation-prone MSI" }
@@ -430,6 +733,7 @@ jobs:
             Join-Path $installRoot "clark-path/rg.exe"
             Join-Path $installRoot "clark-resources/sandbox/windows/clark-command-runner.exe"
             Join-Path $installRoot "clark-resources/sandbox/windows/clark-windows-sandbox-setup.exe"
+            Join-Path $installRoot "clark-resources/computer-use/clark-computer-use-helper.exe"
           )
           $dumpbin = Get-Command dumpbin.exe -ErrorAction Stop
           foreach ($executable in $packagedExecutables) {
@@ -440,12 +744,55 @@ jobs:
             if ($imports -match '(?im)^\s*(?:vcruntime|msvcp)[^\s]*\.dll\s*$') {
               throw "Packaged executable imports a VC++ runtime DLL: ${executable}`n$imports"
             }
+            $signature = Get-AuthenticodeSignature -LiteralPath $executable
+            if (
+              $signature.Status -ne [Management.Automation.SignatureStatus]::Valid -or
+              $signature.SignerCertificate.Subject -ne $env:CLARK_WINDOWS_SIGNER_SUBJECT -or
+              $signature.SignerCertificate.Thumbprint -ne $env:WINDOWS_RELEASE_SIGNER_THUMBPRINT
+            ) {
+              throw "Packaged executable is not signed by the Clark release identity: $executable"
+            }
           }
+
+          $expectedVersion = $env:GITHUB_REF_NAME -replace '^v', ''
+          $installedVersion = (
+            Get-Item -LiteralPath (Join-Path $installRoot "clark-desktop.exe")
+          ).VersionInfo.ProductVersion
+          if ($installedVersion -ne $expectedVersion) {
+            throw "Packaged executable version $installedVersion does not match $expectedVersion"
+          }
+          $buildReceiptRoot = "target/windows-release-build"
+          New-Item -ItemType Directory -Force -Path $buildReceiptRoot | Out-Null
+          @{
+            schema_version = 1
+            receipt_type = "clark_code_windows_release_build"
+            status = "passed"
+            source_revision = $env:GITHUB_SHA
+            tag = $env:GITHUB_REF_NAME
+            version = $expectedVersion
+            signer_subject = $installerSignature.SignerCertificate.Subject
+            signer_thumbprint = $installerSignature.SignerCertificate.Thumbprint
+            artifact = @{
+              asset = "ClarkCode_x64-setup.exe"
+              url = (
+                $env:CLARK_DESKTOP_DOWNLOAD_BASE_URL.TrimEnd("/") +
+                "/releases/$($env:GITHUB_REF_NAME)/ClarkCode_x64-setup.exe"
+              )
+              sha256 = (
+                Get-FileHash -Algorithm SHA256 -LiteralPath $nsis.FullName
+              ).Hash.ToLowerInvariant()
+              size = (Get-Item -LiteralPath $nsis.FullName).Length
+            }
+          } |
+            ConvertTo-Json -Depth 4 |
+            Set-Content -LiteralPath "$buildReceiptRoot/receipt.json" -Encoding utf8
 
           & (Join-Path $installRoot "clark-resources/sandbox/windows/clark-command-runner.exe") --self-test
           if ($LASTEXITCODE -ne 0) { throw "Installed Windows sandbox runner self-test failed" }
           & (Join-Path $installRoot "clark-resources/sandbox/windows/clark-windows-sandbox-setup.exe") --self-test
           if ($LASTEXITCODE -ne 0) { throw "Installed Windows sandbox setup self-test failed" }
+          & (Join-Path $installRoot "clark-resources/computer-use/clark-computer-use-helper.exe") --self-test
+          if ($LASTEXITCODE -ne 0) { throw "Installed Windows Computer Use service self-test failed" }
 
           $app = Start-Process (Join-Path $installRoot "clark-desktop.exe") -PassThru
           Start-Sleep -Seconds 5
@@ -461,6 +808,22 @@ jobs:
             throw "NSIS uninstall timed out"
           }
           if ($uninstall.ExitCode -ne 0) { throw "NSIS uninstall failed with $($uninstall.ExitCode)" }
+
+      - name: Upload exact Windows release candidate for packaged journey
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-release-candidate
+          path: target/**/bundle/nsis/*-setup.exe
+          if-no-files-found: error
+
+      - name: Upload source-bound Windows release build receipt
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-release-build-receipt
+          path: target/windows-release-build/receipt.json
+          if-no-files-found: error
 
       - name: Configure AWS credentials for public download upload
         uses: aws-actions/configure-aws-credentials@v4
@@ -526,8 +889,8 @@ jobs:
 
           # Stable, human-facing filenames under an immutable version directory.
           # The download manifest and updater latest.json point to these exact
-          # keys. Never overwrite payloads under latest/: an older cached
-          # latest.json must continue to resolve to bytes matching its signature.
+          # keys. The serialized publish job copies only user-download installers
+          # to latest/; updater payloads remain immutable and versioned.
           canonical_for() {
             case "$1" in
               *.dmg) echo "ClarkCode.dmg" ;;
@@ -546,6 +909,71 @@ jobs:
             case "$1" in *.app.tar.gz) return 1 ;; *) return 0 ;; esac
           }
 
+          verify_immutable_head() {
+            node --input-type=module -e '
+              import fs from "node:fs";
+              import { validateS3HeadObject } from "./harness/public-release-journey.mjs";
+              const [headFile, tag, sha256, size, contentType, cacheControl] =
+                process.argv.slice(1);
+              validateS3HeadObject(JSON.parse(fs.readFileSync(headFile, "utf8")), {
+                tag,
+                sha256,
+                size: Number(size),
+                contentType,
+                cacheControl,
+                sourceRevision: process.env.GITHUB_SHA,
+              });
+            ' "$1" "$tag" "$2" "$3" "$4" "$IMM"
+          }
+
+          put_immutable() {
+            file="$1"
+            key="$2"
+            sha="$3"
+            size="$4"
+            content_type="$5"
+            head_json="$(mktemp)"
+            head_error="$(mktemp)"
+
+            if aws s3api head-object \
+              --bucket "$bucket" \
+              --key "$key" \
+              >"$head_json" 2>"$head_error"; then
+              verify_immutable_head "$head_json" "$sha" "$size" "$content_type"
+              echo "Reusing byte-identical immutable object s3://$bucket/$key"
+              return
+            fi
+            if ! grep -Eq '(^|[^0-9])404([^0-9]|$)|Not Found|NoSuchKey' "$head_error"; then
+              cat "$head_error" >&2
+              echo "Could not establish absence of immutable object s3://$bucket/$key" >&2
+              exit 1
+            fi
+
+            if ! aws s3api put-object \
+              --bucket "$bucket" \
+              --key "$key" \
+              --body "$file" \
+              --if-none-match '*' \
+              --content-type "$content_type" \
+              --cache-control "$IMM" \
+              --metadata "sha256=$sha,clark-version=$tag,source-revision=$GITHUB_SHA" \
+              >/dev/null; then
+              # A concurrent identical release job may have won the conditional
+              # create. It is safe only if the resulting object is byte-for-byte
+              # and metadata-identical to this build.
+              aws s3api head-object \
+                --bucket "$bucket" \
+                --key "$key" \
+                >"$head_json"
+              verify_immutable_head "$head_json" "$sha" "$size" "$content_type"
+            fi
+            aws s3api head-object \
+              --bucket "$bucket" \
+              --key "$key" \
+              >"$head_json"
+            verify_immutable_head "$head_json" "$sha" "$size" "$content_type"
+          }
+
           jsonl="$(mktemp)"
           for file in "${files[@]}"; do
             canonical="$(canonical_for "$file")"
@@ -553,10 +981,12 @@ jobs:
             sha="$(sha256_file "$file")"
             content_type="$(content_type_for "$file")"
 
-            aws s3 cp "$file" "s3://$bucket/desktop/releases/$tag/$canonical" \
-              --content-type "$content_type" \
-              --cache-control "$IMM" \
-              --metadata "sha256=$sha,clark-version=$tag"
+            put_immutable \
+              "$file" \
+              "desktop/releases/$tag/$canonical" \
+              "$sha" \
+              "$size" \
+              "$content_type"
 
             if in_download_manifest "$file"; then
               node -e '
@@ -617,6 +1047,194 @@ jobs:
           path: public-release-records/*.json
           if-no-files-found: error
 
+      - name: Publish immutable Windows candidate updater channel
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          bucket="${CLARK_DESKTOP_DOWNLOAD_BUCKET}"
+          base_url="${CLARK_DESKTOP_DOWNLOAD_BASE_URL%/}"
+          published_at="$(
+            git show -s --format=%cI "$GITHUB_SHA" |
+              node -e 'process.stdin.once("data", (v) => console.log(new Date(String(v).trim()).toISOString()))'
+          )"
+          out="target/windows-update-candidate"
+          node harness/windows-update-candidate.mjs \
+            --tag "$tag" \
+            --base-url "$base_url" \
+            --source-revision "$GITHUB_SHA" \
+            --published-at "$published_at" \
+            --updater-fragment public-release-records/updater-Windows.json \
+            --out "$out"
+
+          manifest="$out/windows-update.json"
+          key="desktop/releases/$tag/windows-update.json"
+          sha="$(sha256sum "$manifest" | awk '{print $1}')"
+          size="$(wc -c < "$manifest" | tr -d '[:space:]')"
+          head_json="$(mktemp)"
+          head_error="$(mktemp)"
+          verify_head() {
+            node --input-type=module -e '
+              import fs from "node:fs";
+              import { validateS3HeadObject } from "./harness/public-release-journey.mjs";
+              const [file, tag, sha256, size] = process.argv.slice(1);
+              const head = JSON.parse(fs.readFileSync(file, "utf8"));
+              validateS3HeadObject(head, {
+                tag,
+                sha256,
+                size: Number(size),
+                contentType: "application/json",
+                cacheControl: "public, max-age=31536000, immutable",
+              });
+              if (head.Metadata?.["source-revision"] !== process.env.GITHUB_SHA) {
+                throw new Error("Windows update manifest source revision mismatch");
+              }
+            ' "$head_json" "$tag" "$sha" "$size"
+          }
+
+          if aws s3api head-object \
+            --bucket "$bucket" --key "$key" \
+            >"$head_json" 2>"$head_error"; then
+            verify_head
+          else
+            if ! grep -Eq '(^|[^0-9])404([^0-9]|$)|Not Found|NoSuchKey' "$head_error"; then
+              cat "$head_error" >&2
+              exit 1
+            fi
+            if ! aws s3api put-object \
+              --bucket "$bucket" \
+              --key "$key" \
+              --body "$manifest" \
+              --if-none-match '*' \
+              --content-type "application/json" \
+              --cache-control "public, max-age=31536000, immutable" \
+              --metadata "sha256=$sha,clark-version=$tag,source-revision=$GITHUB_SHA" \
+              >/dev/null; then
+              echo "Conditional create raced; accepting only an exact object" >&2
+            fi
+            aws s3api head-object \
+              --bucket "$bucket" --key "$key" >"$head_json"
+            verify_head
+          fi
+
+      - name: Build signed Windows updater seed
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          VITE_GOOGLE_DESKTOP_CLIENT_ID: ${{ secrets.VITE_GOOGLE_DESKTOP_CLIENT_ID }}
+          VITE_GOOGLE_DESKTOP_CLIENT_SECRET: ${{ secrets.VITE_GOOGLE_DESKTOP_CLIENT_SECRET }}
+        run: |
+          cargo tauri build `
+            --bundles nsis `
+            --config src-tauri/tauri.release.conf.json `
+            --config src-tauri/tauri.sandbox.windows.conf.json `
+            --config src-tauri/tauri.windows-signing.conf.json `
+            --config target/windows-update-candidate/seed-tauri.conf.json
+          $seed = Get-ChildItem target -Recurse -File -Filter *0.0.0*-setup.exe |
+            Where-Object { $_.FullName -match '[\\/]bundle[\\/]nsis[\\/]' } |
+            Select-Object -First 1
+          if (-not $seed) { throw "signed Windows updater seed installer was not built" }
+          $signature = Get-AuthenticodeSignature -LiteralPath $seed.FullName
+          if (
+            $signature.Status -ne [Management.Automation.SignatureStatus]::Valid -or
+            $signature.SignerCertificate.Subject -ne $env:CLARK_WINDOWS_SIGNER_SUBJECT -or
+            $signature.SignerCertificate.Thumbprint -ne $env:WINDOWS_RELEASE_SIGNER_THUMBPRINT
+          ) {
+            throw "Windows updater seed does not share the Clark release identity"
+          }
+          Copy-Item $seed.FullName target/windows-update-candidate/ClarkCode_update-seed.exe
+
+      - name: Upload signed Windows updater seed
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-update-seed
+          path: |
+            target/windows-update-candidate/ClarkCode_update-seed.exe
+            target/windows-update-candidate/receipt.json
+          if-no-files-found: error
+
+  windows_packaged_journey:
+    name: Clean packaged Windows first-run journey
+    needs: [build]
+    runs-on: [self-hosted, macOS, ARM64, clark-utm-qa]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Create a disposable pristine Windows release VM
+        run: |
+          node harness/utm-windows-release-vm.mjs \
+            --action create-clone \
+            --base "$CLARK_WINDOWS_QA_BASE_VM" \
+            --clone "$CLARK_WINDOWS_QA_VM_NAME"
+      - name: Download native Windows containment receipt
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-native-containment
+          path: target/windows-native-containment
+
+      - name: Download signed Windows updater seed
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-update-seed
+          path: target/windows-update-seed
+
+      - name: Download source-bound Windows release build receipt
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-release-build-receipt
+          path: target/windows-release-build
+
+      - name: Download the post-upload immutable Windows candidate
+        run: |
+          node harness/download-release-candidate.mjs \
+            --tag "$GITHUB_REF_NAME" \
+            --base-url "$CLARK_DESKTOP_DOWNLOAD_BASE_URL" \
+            --source-revision "$GITHUB_SHA" \
+            --build-receipt target/windows-release-build/receipt.json \
+            --out target/windows-release-candidate
+
+      - name: Install CDN candidate into a clean UAC-enabled Windows guest
+        run: |
+          node harness/utm-windows-release-install.mjs \
+            --candidate-receipt target/windows-release-candidate/receipt.json \
+            --source-revision "$GITHUB_SHA" \
+            --out target/windows-release-install
+
+      - name: Verify inline setup, trusted UAC, restart persistence, and no consoles
+        run: |
+          node harness/utm-windows-release-journey.mjs \
+            --install-receipt target/windows-release-install/receipt.json \
+            --native-receipt target/windows-native-containment/receipt.json \
+            --out target/windows-release-journey
+
+      - name: Verify signed installed update and sandbox persistence
+        run: |
+          node harness/utm-windows-update-journey.mjs \
+            --seed-installer target/windows-update-seed/ClarkCode_update-seed.exe \
+            --install-receipt target/windows-release-install/receipt.json \
+            --update-candidate-receipt target/windows-update-seed/receipt.json \
+            --out target/windows-update-journey
+
+      - name: Upload packaged Windows journey receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-packaged-journey
+          path: |
+            target/windows-release-install
+            target/windows-release-journey
+            target/windows-native-containment
+            target/windows-release-candidate
+            target/windows-release-build
+            target/windows-update-seed
+            target/windows-update-journey
+          if-no-files-found: error
+
   # Publish the draft once all platform builds have uploaded their installers,
   # so no public manifest points at an incomplete platform set.
   publish:
@@ -625,12 +1243,27 @@ jobs:
     # not run until the per-arch clark-exec-server prebuilts are on the CDN.
     # Otherwise a freshly-updated app can hit "not on the CDN for v<version>"
     # when connecting to a remote host before those binaries finish uploading.
-    needs: [build, exec-server]
-    runs-on: ubuntu-latest
+    needs: [build, exec-server, windows_packaged_journey]
+    runs-on: [self-hosted, macOS, ARM64, clark-utm-qa]
+    environment: release
     concurrency:
       group: clark-desktop-release-publish
       cancel-in-progress: false
     steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: harness/pnpm-lock.yaml
+      - name: Install public release browser verifier
+        run: |
+          pnpm --dir harness install --frozen-lockfile
+          pnpm --dir harness exec playwright install chromium
+
       - name: Configure AWS credentials for public manifest upload
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -644,6 +1277,12 @@ jobs:
           path: release-records
           merge-multiple: true
 
+      - name: Download packaged Windows journey receipts
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-packaged-journey
+          path: target/windows-packaged-receipts
+
       - name: Publish public download manifest
         shell: bash
         run: |
@@ -654,6 +1293,11 @@ jobs:
           base_url="${CLARK_DESKTOP_DOWNLOAD_BASE_URL%/}"
           manifest="$(mktemp)"
           pointer_cache="no-store, no-cache, must-revalidate, max-age=0"
+          immutable_cache="public, max-age=31536000, immutable"
+          published_at="$(
+            git show -s --format=%cI "$GITHUB_SHA" |
+              node -e 'process.stdin.once("data", (v) => console.log(new Date(String(v).trim()).toISOString()))'
+          )"
           if ! [[ "$tag" =~ ^v[0-9]+(\.[0-9]+)+$ ]]; then
             echo "Release ref must be a stable numeric version tag, got: $tag" >&2
             exit 1
@@ -665,6 +1309,8 @@ jobs:
             const root = process.argv[1];
             const tag = process.argv[2];
             const baseUrl = process.argv[3].replace(/\/$/, "");
+            const sourceRevision = process.argv[4];
+            const publishedAt = process.argv[5];
             const assetsByName = new Map();
             for (const file of fs.readdirSync(root).filter((name) => name.startsWith("assets-") && name.endsWith(".json")).sort()) {
               const records = JSON.parse(fs.readFileSync(path.join(root, file), "utf8"));
@@ -674,16 +1320,72 @@ jobs:
             const manifest = {
               tag_name: tag,
               version: tag.replace(/^v/, ""),
-              generated_at: new Date().toISOString(),
+              source_revision: sourceRevision,
+              generated_at: publishedAt,
               base_url: baseUrl,
               assets,
             };
-            fs.writeFileSync(process.argv[4], JSON.stringify(manifest, null, 2) + "\n");
-          ' release-records "$tag" "$base_url" "$manifest"
+            fs.writeFileSync(process.argv[6], JSON.stringify(manifest, null, 2) + "\n");
+          ' release-records "$tag" "$base_url" "$GITHUB_SHA" "$published_at" "$manifest"
 
-          aws s3 cp "$manifest" "s3://$bucket/desktop/releases/$tag/manifest.json" \
-            --content-type "application/json" \
-            --cache-control "public, max-age=31536000, immutable"
+          sha256_file() {
+            if command -v sha256sum >/dev/null 2>&1; then
+              sha256sum "$1" | awk '{print $1}'
+            else
+              shasum -a 256 "$1" | awk '{print $1}'
+            fi
+          }
+          put_immutable_json() {
+            file="$1"
+            key="$2"
+            sha="$(sha256_file "$file")"
+            size="$(wc -c < "$file" | tr -d '[:space:]')"
+            head_json="$(mktemp)"
+            head_error="$(mktemp)"
+            verify_json_head() {
+              node --input-type=module -e '
+                import fs from "node:fs";
+                import { validateS3HeadObject } from "./harness/public-release-journey.mjs";
+                const [file, tag, sha256, size, revision, cache] = process.argv.slice(1);
+                const head = JSON.parse(fs.readFileSync(file, "utf8"));
+                validateS3HeadObject(head, {
+                  tag,
+                  sha256,
+                  size: Number(size),
+                  contentType: "application/json",
+                  cacheControl: cache,
+                });
+                if (head.Metadata?.["source-revision"] !== revision) {
+                  throw new Error("immutable release document source revision mismatch");
+                }
+              ' "$head_json" "$tag" "$sha" "$size" "$GITHUB_SHA" "$immutable_cache"
+            }
+            if aws s3api head-object \
+              --bucket "$bucket" --key "$key" \
+              >"$head_json" 2>"$head_error"; then
+              verify_json_head
+              return
+            fi
+            if ! grep -Eq '(^|[^0-9])404([^0-9]|$)|Not Found|NoSuchKey' "$head_error"; then
+              cat "$head_error" >&2
+              exit 1
+            fi
+            if ! aws s3api put-object \
+              --bucket "$bucket" \
+              --key "$key" \
+              --body "$file" \
+              --if-none-match '*' \
+              --content-type "application/json" \
+              --cache-control "$immutable_cache" \
+              --metadata "sha256=$sha,clark-version=$tag,source-revision=$GITHUB_SHA" \
+              >/dev/null; then
+              echo "Conditional create raced for $key; accepting only an exact object" >&2
+            fi
+            aws s3api head-object \
+              --bucket "$bucket" --key "$key" >"$head_json"
+            verify_json_head
+          }
+          put_immutable_json "$manifest" "desktop/releases/$tag/manifest.json"
 
           # Merge every leg's updater fragment into one cross-platform latest.json
           # (the updater endpoint pinned in tauri.conf.json). This is what lets
@@ -692,7 +1394,8 @@ jobs:
           node -e '
             const fs = require("fs");
             const path = require("path");
-            const [root, tag, repo, baseUrl, out] = process.argv.slice(1);
+            const [root, tag, repo, baseUrl, sourceRevision, publishedAt, out] =
+              process.argv.slice(1);
             const platforms = {};
             for (const f of fs.readdirSync(root).filter((n) => n.startsWith("updater-") && n.endsWith(".json"))) {
               const frag = JSON.parse(fs.readFileSync(path.join(root, f), "utf8"));
@@ -712,50 +1415,159 @@ jobs:
             }
             const doc = {
               version: tag.replace(/^v/, ""),
+              source_revision: sourceRevision,
               notes: `See the release notes at https://github.com/${repo}/releases/tag/${tag}`,
-              pub_date: new Date().toISOString(),
+              pub_date: publishedAt,
               platforms,
             };
             fs.writeFileSync(out, JSON.stringify(doc, null, 2) + "\n");
-          ' release-records "$tag" "$GITHUB_REPOSITORY" "$base_url" "$latest"
+          ' release-records "$tag" "$GITHUB_REPOSITORY" "$base_url" "$GITHUB_SHA" "$published_at" "$latest"
 
           # Publish and validate the immutable snapshot first. latest.json is the
           # only mutable updater object and is written last as the atomic pointer.
-          aws s3 cp "$latest" "s3://$bucket/desktop/releases/$tag/latest.json" \
-            --content-type "application/json" --cache-control "public, max-age=31536000, immutable"
+          put_immutable_json "$latest" "desktop/releases/$tag/latest.json"
 
           # Publish jobs are serialized above. Keep this monotonic guard as a
           # second line of defense against a delayed/retried older workflow
           # moving the channel backward after a newer tag is already live.
           current_pointer="$(mktemp)"
-          curl -fsS \
-            -H "Cache-Control: no-cache, no-store, max-age=0" \
-            -H "Pragma: no-cache" \
-            "$base_url/latest/latest.json" \
-            -o "$current_pointer"
+          aws s3api get-object \
+            --bucket "$bucket" \
+            --key "desktop/latest/latest.json" \
+            "$current_pointer" \
+            >/dev/null
+          node --input-type=module -e '
+            import fs from "node:fs";
+            const { validateChannelAdvance } =
+              await import("./harness/public-release-journey.mjs");
+            const [file, incoming, incomingRevision] = process.argv.slice(1);
+            const document = JSON.parse(fs.readFileSync(file, "utf8"));
+            validateChannelAdvance(document, incoming, incomingRevision);
+          ' "$current_pointer" "${tag#v}" "$GITHUB_SHA"
+
+          # clarkchat.com intentionally uses stable, no-JS installer links. Move
+          # those aliases only after the monotonic version guard and while this
+          # publish job holds the serialized release lock. The updater bundle
+          # (.app.tar.gz) is absent from the download manifest, so it can never
+          # be copied to latest/ and invalidate an older cached signature.
           node -e '
             const fs = require("fs");
-            const [file, incoming] = process.argv.slice(1);
-            const current = JSON.parse(fs.readFileSync(file, "utf8")).version;
-            const parts = (version) => {
-              if (!/^\d+(?:\.\d+)+$/.test(version)) throw new Error(`Invalid release version: ${version}`);
-              return version.split(".").map(Number);
-            };
-            const a = parts(current);
-            const b = parts(incoming);
-            const width = Math.max(a.length, b.length);
-            for (let i = 0; i < width; i += 1) {
-              const delta = (a[i] || 0) - (b[i] || 0);
-              if (delta > 0) {
-                throw new Error(`Refusing to move latest backward from ${current} to ${incoming}`);
-              }
-              if (delta < 0) break;
+            const manifest = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+            const expected = new Set([
+              "ClarkCode.dmg",
+              "ClarkCode_x64-setup.exe",
+              "ClarkCode_amd64.AppImage",
+              "ClarkCode_amd64.deb",
+              "ClarkCode_x86_64.rpm",
+            ]);
+            if (manifest.assets.length !== expected.size) {
+              throw new Error(`Expected ${expected.size} download assets, got ${manifest.assets.length}`);
             }
-          ' "$current_pointer" "${tag#v}"
+            for (const asset of manifest.assets) {
+              if (!expected.delete(asset.name)) throw new Error(`Unexpected download asset: ${asset.name}`);
+              if (!/^sha256:[0-9a-f]{64}$/.test(asset.digest)) {
+                throw new Error(`Invalid digest for ${asset.name}`);
+              }
+              if (!Number.isSafeInteger(asset.size) || asset.size <= 0) {
+                throw new Error(`Invalid size for ${asset.name}`);
+              }
+              process.stdout.write(
+                `${asset.name}\t${asset.digest.slice("sha256:".length)}\t${asset.size}\n`,
+              );
+            }
+            if (expected.size) throw new Error(`Missing download assets: ${[...expected].join(", ")}`);
+          ' "$manifest" > latest-aliases.tsv
 
-          aws s3 cp "$latest" "s3://$bucket/desktop/latest/latest.json" \
-            --content-type "application/json" --cache-control "$pointer_cache"
+          # S3 has no multi-object transaction. Snapshot the entire mutable
+          # channel before the first write so any later browser, packaged-client,
+          # or GitHub-release failure can restore one coherent prior generation.
+          transaction_dir="target/public-channel-transaction"
+          backup_prefix="desktop/releases/$tag/_channel-rollback/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          mkdir -p "$transaction_dir"
+          printf '%s\n' "$backup_prefix" > "$transaction_dir/backup-prefix"
+          : > "$transaction_dir/prior-keys.tsv"
+          while IFS= read -r key; do
+            source_key="desktop/latest/$key"
+            if aws s3api head-object \
+              --bucket "$bucket" \
+              --key "$source_key" \
+              >"$transaction_dir/source-head.json" 2>"$transaction_dir/source-head.err"; then
+              aws s3api copy-object \
+                --bucket "$bucket" \
+                --copy-source "$bucket/$source_key" \
+                --key "$backup_prefix/$key" \
+                --metadata-directive COPY \
+                >/dev/null
+              aws s3api head-object \
+                --bucket "$bucket" \
+                --key "$backup_prefix/$key" \
+                >"$transaction_dir/backup-head.json"
+              node -e '
+                const fs = require("fs");
+                const [sourcePath, backupPath, key] = process.argv.slice(1);
+                const source = JSON.parse(fs.readFileSync(sourcePath, "utf8"));
+                const backup = JSON.parse(fs.readFileSync(backupPath, "utf8"));
+                for (const field of ["ContentLength", "ContentType", "CacheControl", "ETag"]) {
+                  if (source[field] !== backup[field]) {
+                    throw new Error(`Rollback snapshot ${key} changed ${field}`);
+                  }
+                }
+                if (source.ChecksumSHA256 &&
+                    source.ChecksumSHA256 !== backup.ChecksumSHA256) {
+                  throw new Error(`Rollback snapshot ${key} changed ChecksumSHA256`);
+                }
+                const metadata = (value) => JSON.stringify(
+                  Object.fromEntries(Object.entries(value.Metadata || {}).sort()),
+                );
+                if (metadata(source) !== metadata(backup)) {
+                  throw new Error(`Rollback snapshot ${key} changed metadata`);
+                }
+              ' "$transaction_dir/source-head.json" "$transaction_dir/backup-head.json" "$key"
+              cp \
+                "$transaction_dir/backup-head.json" \
+                "$transaction_dir/backup-$key.head.json"
+              printf 'present\t%s\n' "$key" >> "$transaction_dir/prior-keys.tsv"
+            elif grep -Eq '(^|[^0-9])404([^0-9]|$)|Not Found|NoSuchKey' \
+              "$transaction_dir/source-head.err"; then
+              printf 'absent\t%s\n' "$key" >> "$transaction_dir/prior-keys.tsv"
+            else
+              cat "$transaction_dir/source-head.err" >&2
+              exit 1
+            fi
+          done < <(
+            cut -f1 latest-aliases.tsv
+            printf '%s\n' latest.json manifest.json
+          )
+          [ "$(wc -l < "$transaction_dir/prior-keys.tsv" | tr -d '[:space:]')" -eq 7 ]
+          touch "$transaction_dir/backup-ready"
+
+          while IFS=$'\t' read -r alias sha size; do
+            case "$alias" in
+              *.dmg) content_type="application/x-apple-diskimage" ;;
+              *.exe) content_type="application/vnd.microsoft.portable-executable" ;;
+              *.AppImage) content_type="application/octet-stream" ;;
+              *.deb) content_type="application/vnd.debian.binary-package" ;;
+              *.rpm) content_type="application/x-rpm" ;;
+              *) echo "Unexpected latest download alias: $alias" >&2; exit 1 ;;
+            esac
+            aws s3api copy-object \
+              --bucket "$bucket" \
+              --copy-source "$bucket/desktop/releases/$tag/$alias" \
+              --key "desktop/latest/$alias" \
+              --content-type "$content_type" \
+              --cache-control "public, max-age=300" \
+              --metadata-directive REPLACE \
+              --metadata "sha256=$sha,clark-version=$tag,source-revision=$GITHUB_SHA" \
+              >/dev/null
+          done < latest-aliases.tsv
+
+          # The website manifest is written before the updater pointer.
+          # latest.json is the final channel mutation and therefore never
+          # advertises a generation whose other mutable documents were not
+          # already written.
           aws s3 cp "$manifest" "s3://$bucket/desktop/latest/manifest.json" \
+            --content-type "application/json" --cache-control "$pointer_cache"
+          aws s3 cp "$latest" "s3://$bucket/desktop/latest/latest.json" \
             --content-type "application/json" --cache-control "$pointer_cache"
 
           if [ -n "${CLARK_DESKTOP_DOWNLOAD_DISTRIBUTION_ID}" ]; then
@@ -769,29 +1581,64 @@ jobs:
           fi
 
           # Do not make the GitHub release public until the CDN repeatedly
-          # serves this exact version and only immutable updater payload URLs.
+          # serves this exact version, every human installer alias has advanced,
+          # and updater payload URLs are immutable and versioned.
           observed_cdn="$(mktemp)"
+          observed_manifest="$(mktemp)"
           observed_headers="$(mktemp)"
+          observed_alias_headers="$(mktemp)"
           cdn_ready=0
           cdn_confirmations=0
           for _attempt in $(seq 1 24); do
-            if curl -fsS \
+            aliases_ready=1
+            while IFS=$'\t' read -r alias sha size; do
+              if ! curl -fsSI \
+                -H "Cache-Control: no-cache, no-store, max-age=0" \
+                -H "Pragma: no-cache" \
+                "$base_url/latest/$alias" \
+                -o "$observed_alias_headers" ||
+                ! tr -d '\r' < "$observed_alias_headers" |
+                  grep -Fqi "x-amz-meta-clark-version: $tag" ||
+                ! tr -d '\r' < "$observed_alias_headers" |
+                  grep -Fqi "x-amz-meta-sha256: $sha" ||
+                ! tr -d '\r' < "$observed_alias_headers" |
+                  grep -Fqi "content-length: $size"; then
+                aliases_ready=0
+                break
+              fi
+            done < latest-aliases.tsv
+            if [ "$aliases_ready" -eq 1 ] &&
+              curl -fsS \
               -H "Cache-Control: no-cache, no-store, max-age=0" \
               -H "Pragma: no-cache" \
               -D "$observed_headers" \
               "$base_url/latest/latest.json" \
               -o "$observed_cdn" &&
+              curl -fsS \
+              -H "Cache-Control: no-cache, no-store, max-age=0" \
+              -H "Pragma: no-cache" \
+              "$base_url/latest/manifest.json" \
+              -o "$observed_manifest" &&
               tr -d '\r' < "$observed_headers" | grep -qi '^cache-control:.*no-store' &&
               node -e '
                 const fs = require("fs");
-                const [file, version, prefix] = process.argv.slice(1);
-                const doc = JSON.parse(fs.readFileSync(file, "utf8"));
-                if (doc.version !== version) process.exit(1);
+                const [latestFile, manifestFile, version, revision, prefix] =
+                  process.argv.slice(1);
+                const doc = JSON.parse(fs.readFileSync(latestFile, "utf8"));
+                if (doc.version !== version || doc.source_revision !== revision) process.exit(1);
                 const entries = Object.values(doc.platforms || {});
                 if (entries.length !== 4 || entries.some((entry) => !entry.url.startsWith(prefix))) {
                   process.exit(1);
                 }
-              ' "$observed_cdn" "${tag#v}" "$base_url/releases/$tag/"; then
+                const manifest = JSON.parse(fs.readFileSync(manifestFile, "utf8"));
+                if (manifest.version !== version ||
+                    manifest.tag_name !== `v${version}` ||
+                    manifest.source_revision !== revision) process.exit(1);
+                if (manifest.assets?.length !== 5 ||
+                    manifest.assets.some((asset) => !asset.browser_download_url.startsWith(prefix))) {
+                  process.exit(1);
+                }
+              ' "$observed_cdn" "$observed_manifest" "${tag#v}" "$GITHUB_SHA" "$base_url/releases/$tag/"; then
               cdn_confirmations=$((cdn_confirmations + 1))
               if [ "$cdn_confirmations" -ge 2 ]; then
                 cdn_ready=1
@@ -803,17 +1650,254 @@ jobs:
             sleep 5
           done
           if [ "$cdn_ready" -ne 1 ]; then
-            echo "CDN did not converge on updater version ${tag#v}" >&2
+            echo "CDN did not converge on release version ${tag#v} and its installer aliases" >&2
             exit 1
           fi
+
+      - name: Verify rendered public download journey
+        run: |
+          node harness/public-release-journey.mjs \
+            --tag "$GITHUB_REF_NAME" \
+            --base-url "$CLARK_DESKTOP_DOWNLOAD_BASE_URL" \
+            --site-url "https://www.clarkchat.com/" \
+            --source-revision "$GITHUB_SHA" \
+            --out target/public-release-journey
+
+      - name: Upload public release journey receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: public-release-journey
+          path: target/public-release-journey
+          if-no-files-found: error
+
+      - name: Verify the promoted channel in the packaged Windows client
+        run: |
+          node harness/utm-windows-post-publish-journey.mjs \
+            --update-receipt target/windows-packaged-receipts/windows-update-journey/receipt.json \
+            --public-receipt target/public-release-journey/receipt.json \
+            --source-revision "$GITHUB_SHA" \
+            --out target/windows-post-publish-journey
+
+      - name: Upload packaged post-publish journey receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-post-publish-journey
+          path: target/windows-post-publish-journey
+          if-no-files-found: error
 
       - name: Publish the release after updater convergence
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -euo pipefail
           gh release edit "${{ github.ref_name }}" \
             --repo "${{ github.repository }}" \
             --draft=false --latest
+          node -e '
+            const fs = require("fs");
+            fs.writeFileSync(
+              "target/public-channel-transaction/commit-receipt.json",
+              JSON.stringify({
+                schema_version: 1,
+                receipt_type: "clark_code_public_channel_transaction",
+                status: "committed",
+                tag: process.env.GITHUB_REF_NAME,
+                source_revision: process.env.GITHUB_SHA,
+                run_id: process.env.GITHUB_RUN_ID,
+                run_attempt: process.env.GITHUB_RUN_ATTEMPT,
+                generated_at: new Date().toISOString(),
+              }, null, 2) + "\n",
+            );
+          '
+
+      - name: Restore the prior public channel after a failed release
+        if: ${{ failure() || cancelled() }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          transaction_dir="target/public-channel-transaction"
+          if [ ! -f "$transaction_dir/backup-ready" ]; then
+            echo "No completed mutable-channel snapshot exists; no channel write was authorized" >&2
+            exit 1
+          fi
+
+          # A cancellation can race the final gh command. Never roll back a
+          # channel after its GitHub release has already become public.
+          is_draft="$(
+            gh release view "$GITHUB_REF_NAME" \
+              --repo "$GITHUB_REPOSITORY" \
+              --json isDraft \
+              --jq '.isDraft'
+          )"
+          if [ "$is_draft" != "true" ]; then
+            echo "Release is already public; preserving its verified channel generation"
+            node -e '
+              const fs = require("fs");
+              fs.writeFileSync(
+                "target/public-channel-transaction/rollback-receipt.json",
+                JSON.stringify({
+                  schema_version: 1,
+                  receipt_type: "clark_code_public_channel_rollback",
+                  status: "not_needed_release_public",
+                  tag: process.env.GITHUB_REF_NAME,
+                  source_revision: process.env.GITHUB_SHA,
+                  generated_at: new Date().toISOString(),
+                }, null, 2) + "\n",
+              );
+            '
+            exit 0
+          fi
+
+          bucket="${CLARK_DESKTOP_DOWNLOAD_BUCKET}"
+          backup_prefix="$(<"$transaction_dir/backup-prefix")"
+          while IFS=$'\t' read -r disposition key; do
+            case "$disposition" in
+              present)
+                aws s3api copy-object \
+                  --bucket "$bucket" \
+                  --copy-source "$bucket/$backup_prefix/$key" \
+                  --key "desktop/latest/$key" \
+                  --metadata-directive COPY \
+                  >/dev/null
+                aws s3api head-object \
+                  --bucket "$bucket" \
+                  --key "desktop/latest/$key" \
+                  >"$transaction_dir/restored-$key.head.json"
+                node -e '
+                  const fs = require("fs");
+                  const [expectedPath, actualPath, key] = process.argv.slice(1);
+                  const expected = JSON.parse(fs.readFileSync(expectedPath, "utf8"));
+                  const actual = JSON.parse(fs.readFileSync(actualPath, "utf8"));
+                  for (const field of ["ContentLength", "ContentType", "CacheControl", "ETag"]) {
+                    if (expected[field] !== actual[field]) {
+                      throw new Error(`Restored ${key} changed ${field}`);
+                    }
+                  }
+                  if (expected.ChecksumSHA256 &&
+                      expected.ChecksumSHA256 !== actual.ChecksumSHA256) {
+                    throw new Error(`Restored ${key} changed ChecksumSHA256`);
+                  }
+                  const metadata = (value) => JSON.stringify(
+                    Object.fromEntries(Object.entries(value.Metadata || {}).sort()),
+                  );
+                  if (metadata(expected) !== metadata(actual)) {
+                    throw new Error(`Restored ${key} changed metadata`);
+                  }
+                ' \
+                  "$transaction_dir/backup-$key.head.json" \
+                  "$transaction_dir/restored-$key.head.json" \
+                  "$key"
+                ;;
+              absent)
+                aws s3api delete-object \
+                  --bucket "$bucket" \
+                  --key "desktop/latest/$key" \
+                  >/dev/null
+                if aws s3api head-object \
+                  --bucket "$bucket" \
+                  --key "desktop/latest/$key" \
+                  >/dev/null 2>&1; then
+                  echo "Rollback expected desktop/latest/$key to be absent" >&2
+                  exit 1
+                fi
+                ;;
+              *)
+                echo "Invalid rollback disposition for $key: $disposition" >&2
+                exit 1
+                ;;
+            esac
+          done < "$transaction_dir/prior-keys.tsv"
+
+          if [ -n "${CLARK_DESKTOP_DOWNLOAD_DISTRIBUTION_ID}" ]; then
+            aws cloudfront create-invalidation \
+              --distribution-id "${CLARK_DESKTOP_DOWNLOAD_DISTRIBUTION_ID}" \
+              --paths "/desktop/latest/*" \
+              >/dev/null
+          fi
+          node -e '
+            const fs = require("fs");
+            fs.writeFileSync(
+              "target/public-channel-transaction/rollback-receipt.json",
+              JSON.stringify({
+                schema_version: 1,
+                receipt_type: "clark_code_public_channel_rollback",
+                status: "passed",
+                tag: process.env.GITHUB_REF_NAME,
+                source_revision: process.env.GITHUB_SHA,
+                objects_restored: 7,
+                generated_at: new Date().toISOString(),
+              }, null, 2) + "\n",
+            );
+          '
+          echo "Restored the complete prior mutable desktop channel generation"
+
+      - name: Delete rollback snapshot after committed release
+        if: ${{ success() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          transaction_dir="target/public-channel-transaction"
+          [ -f "$transaction_dir/backup-ready" ]
+          backup_prefix="$(<"$transaction_dir/backup-prefix")"
+          case "$backup_prefix" in
+            desktop/releases/"$GITHUB_REF_NAME"/_channel-rollback/"${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}") ;;
+            *)
+              echo "Refusing to delete unexpected rollback prefix: $backup_prefix" >&2
+              exit 1
+              ;;
+          esac
+          if aws s3 rm \
+            "s3://${CLARK_DESKTOP_DOWNLOAD_BUCKET}/$backup_prefix/" \
+            --recursive; then
+            cleanup_status="deleted"
+          else
+            cleanup_status="retained"
+            echo "::warning::Committed release rollback snapshot was retained for lifecycle cleanup"
+          fi
+          node -e '
+            const fs = require("fs");
+            fs.writeFileSync(
+              "target/public-channel-transaction/cleanup-receipt.json",
+              JSON.stringify({
+                schema_version: 1,
+                receipt_type: "clark_code_public_channel_snapshot_cleanup",
+                status: process.argv[1],
+                tag: process.env.GITHUB_REF_NAME,
+                source_revision: process.env.GITHUB_SHA,
+                generated_at: new Date().toISOString(),
+              }, null, 2) + "\n",
+            );
+          ' "$cleanup_status"
+
+      - name: Upload public channel transaction receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: public-channel-transaction
+          path: target/public-channel-transaction
+          if-no-files-found: warn
+
+  windows_release_vm_cleanup:
+    name: Delete disposable Windows release VM
+    if: always()
+    needs: [windows_packaged_journey, publish]
+    runs-on: [self-hosted, macOS, ARM64, clark-utm-qa]
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Stop and delete only this release run's clone
+        run: |
+          node harness/utm-windows-release-vm.mjs \
+            --action delete-clone \
+            --clone "$CLARK_WINDOWS_QA_VM_NAME"
 
   # The remote-projects feature (SSH) fetches a per-arch clark-exec-server from
   # the CDN onto the remote host. Build all four targets on one macOS runner
@@ -823,6 +1907,7 @@ jobs:
   exec-server:
     needs: [pre_release_benchmarks, paid_release_benchmark]
     runs-on: macos-latest
+    environment: release
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable

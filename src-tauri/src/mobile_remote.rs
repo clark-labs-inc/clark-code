@@ -12,6 +12,68 @@ const ATTACHMENT_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(120);
 const COMMAND_POLL_TIMEOUT_SLACK_MS: u64 = 10_000;
 const MAX_CODE_REMOTE_ATTACHMENT_BYTES: usize = 12 * 1024 * 1024;
 
+fn trace_command_receipt(command: &Value, boundary: &str) {
+    let response = command.get("response");
+    let timing = command.get("timing");
+    tracing::info!(
+        boundary,
+        command_id = command
+            .get("command_id")
+            .and_then(|value| value.as_str())
+            .unwrap_or(""),
+        host_id = command
+            .get("host_id")
+            .and_then(|value| value.as_str())
+            .unwrap_or(""),
+        instance_id = command
+            .get("claim_instance_id")
+            .and_then(|value| value.as_str())
+            .unwrap_or(""),
+        desktop_id = response
+            .and_then(|value| value.get("desktop_id"))
+            .and_then(|value| value.as_str())
+            .or_else(|| {
+                command
+                    .get("desktop_id")
+                    .and_then(|value| value.as_str())
+            })
+            .unwrap_or(""),
+        run_id = response
+            .and_then(|value| value.get("run_id"))
+            .and_then(|value| value.as_str())
+            .unwrap_or(""),
+        command_type = command
+            .get("command_type")
+            .and_then(|value| value.as_str())
+            .unwrap_or(""),
+        command_status = command
+            .get("status")
+            .and_then(|value| value.as_str())
+            .unwrap_or(""),
+        delivery_ms = ?timing
+            .and_then(|value| value.get("delivery_ms"))
+            .and_then(|value| value.as_i64()),
+        acceptance_ms = ?timing
+            .and_then(|value| value.get("acceptance_ms"))
+            .and_then(|value| value.as_i64()),
+        execution_receipt_ms = ?timing
+            .and_then(|value| value.get("execution_receipt_ms"))
+            .and_then(|value| value.as_i64()),
+        total_receipt_ms = ?timing
+            .and_then(|value| value.get("total_receipt_ms"))
+            .and_then(|value| value.as_i64()),
+        failure_code = response
+            .and_then(|value| {
+                value
+                    .get("error_code")
+                    .or_else(|| value.get("failure_code"))
+            })
+            .and_then(|value| value.as_str())
+            .unwrap_or(""),
+        "Clark Code remote command receipt"
+    );
+}
+
 #[derive(Debug, Deserialize)]
 struct CodeRemoteAttachmentDownloadLease {
     url: String,
@@ -41,6 +103,8 @@ pub async fn desktop_code_host_upsert(
     os_name: String,
     arch: String,
     app_version: String,
+    protocol_version: i64,
+    capabilities: Value,
     projects: Value,
 ) -> Result<Value, String> {
     let url = format!(
@@ -57,6 +121,8 @@ pub async fn desktop_code_host_upsert(
             "os": os_name,
             "arch": arch,
             "app_version": app_version,
+            "protocol_version": protocol_version,
+            "capabilities": capabilities,
             "projects": projects,
         }))
         .send()
@@ -72,6 +138,7 @@ pub async fn desktop_code_command_poll(
     endpoint: String,
     token: String,
     host_id: String,
+    instance_id: String,
     limit: Option<i64>,
     wait_ms: Option<i64>,
 ) -> Result<Value, String> {
@@ -81,7 +148,10 @@ pub async fn desktop_code_command_poll(
         urlencoding::encode(&host_id)
     );
     let limit = limit.unwrap_or(20).clamp(1, 100);
-    let mut params = vec![format!("limit={limit}")];
+    let mut params = vec![
+        format!("instance_id={}", urlencoding::encode(&instance_id)),
+        format!("limit={limit}"),
+    ];
     let wait_ms = wait_ms.map(|value| value.clamp(0, 25_000));
     if let Some(wait_ms) = wait_ms {
         params.push(format!("wait_ms={wait_ms}"));
@@ -96,7 +166,13 @@ pub async fn desktop_code_command_poll(
         .send()
         .await
         .map_err(|e| format!("Clark Code command poll request failed: {e}"))?;
-    read_json_or_err(resp, "Clark Code command poll").await
+    let value = read_json_or_err(resp, "Clark Code command poll").await?;
+    if let Some(commands) = value.get("commands").and_then(Value::as_array) {
+        for command in commands {
+            trace_command_receipt(command, "desktop_claim");
+        }
+    }
+    Ok(value)
 }
 
 /// Record a host-side command receipt so mobile can reconcile retries,
@@ -107,6 +183,8 @@ pub async fn desktop_code_command_ack(
     token: String,
     command_id: String,
     host_id: String,
+    instance_id: String,
+    claim_token: String,
     status: String,
     response: Value,
 ) -> Result<Value, String> {
@@ -120,13 +198,19 @@ pub async fn desktop_code_command_ack(
         .header("Authorization", format!("Bearer {token}"))
         .json(&serde_json::json!({
             "host_id": host_id,
+            "instance_id": instance_id,
+            "claim_token": claim_token,
             "status": status,
             "response": response,
         }))
         .send()
         .await
         .map_err(|e| format!("Clark Code command ack request failed: {e}"))?;
-    read_json_or_err(resp, "Clark Code command ack").await
+    let value = read_json_or_err(resp, "Clark Code command ack").await?;
+    if let Some(command) = value.get("command") {
+        trace_command_receipt(command, "desktop_ack");
+    }
+    Ok(value)
 }
 
 /// Fetch one command-bound attachment through a fresh authenticated lease.
@@ -293,6 +377,8 @@ mod tests {
             "macOS".into(),
             "arm64".into(),
             "test".into(),
+            2,
+            serde_json::json!(["send_message"]),
             serde_json::json!([]),
         )
         .await;
@@ -306,6 +392,8 @@ mod tests {
             "macOS".into(),
             "arm64".into(),
             "test".into(),
+            2,
+            serde_json::json!(["send_message"]),
             serde_json::json!([]),
         )
         .await;

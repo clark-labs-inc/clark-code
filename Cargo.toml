@@ -14,12 +14,27 @@ members = [
     "crates/exec-sandbox-windows",
     "crates/exec-protocol",
     "crates/exec-server",
+    "crates/scout-adapter-protocol",
+    "crates/scout-adapter-runtime",
+    "crates/scout-accumulator",
+    "crates/scout-capsule-core",
+    "crates/scout-capsule-guest",
+    "crates/scout-capsule-host",
+    "crates/scout-capability-census",
+    "crates/scout-cartography-adapter",
+    "crates/scout-ingest-client",
+    "crates/scout-ingest-protocol",
+    "crates/scout-machine-identity",
+    "crates/scout-platform-client",
+    "crates/scout-coordinator",
+    "crates/scout-scheduler",
+    "crates/scout-store",
     "crates/devbridge",
     "src-tauri",
 ]
 
 [workspace.package]
-version = "0.1.91"
+version = "0.1.92"
 edition = "2021"
 license = "Apache-2.0"
 repository = "https://github.com/clark/clark-desktop"

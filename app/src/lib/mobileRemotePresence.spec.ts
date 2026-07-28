@@ -61,6 +61,26 @@ describe("MobileRemotePresenceLoop", () => {
     loop.stop();
   });
 
+  it("republishes immediately after wake even when the pre-sleep request was frozen", async () => {
+    let finishRefresh: () => void = () => undefined;
+    const refresh = vi.fn(() => new Promise<void>((resolve) => {
+      finishRefresh = resolve;
+    }));
+    const loop = new MobileRemotePresenceLoop(refresh);
+
+    loop.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(refresh).toHaveBeenCalledTimes(1);
+
+    // A macOS wake/focus signal arrives while the old network future is still
+    // frozen. It must become an immediate pending refresh, not wait 30 seconds.
+    loop.refreshNow();
+    finishRefresh();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(refresh).toHaveBeenCalledTimes(2);
+    loop.stop();
+  });
+
   it("stops scheduled refreshes", async () => {
     const refresh = vi.fn(async () => undefined);
     const loop = new MobileRemotePresenceLoop(refresh);

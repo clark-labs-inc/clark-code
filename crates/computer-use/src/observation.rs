@@ -119,7 +119,7 @@ pub(crate) fn diff_elements(
     }
 }
 
-#[cfg(any(feature = "helper-service", test))]
+#[cfg(any(all(feature = "helper-service", target_os = "macos"), test))]
 pub(crate) fn settlement_fingerprint(elements: &[crate::ElementInfo]) -> String {
     let mut output = String::new();
     for element in elements {

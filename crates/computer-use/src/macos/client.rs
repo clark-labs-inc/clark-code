@@ -1,12 +1,11 @@
+use std::fs;
 use std::io;
-use std::os::fd::AsRawFd;
 use std::os::unix::net::UnixStream;
-use std::os::unix::process::CommandExt;
-use std::path::PathBuf;
-use std::process::{Child, Command, Stdio};
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::{
     ActionAuthorization, ActionReceipt, CancelAck, ClickRequest, ComputerBackend, ComputerUseError,
@@ -23,9 +22,9 @@ use super::protocol::{
 mod action_gate;
 use action_gate::ActionGate;
 
-const HELPER_EXECUTABLE: &str = "clark-computer-use-helper";
-const CHILD_IPC_FD: libc::c_int = 3;
-const CHILD_CONTROL_FD: libc::c_int = 4;
+const SERVICE_APP_NAME: &str = "Clark Computer Use.app";
+const SERVICE_EXECUTABLE: &str = "clark-computer-use-helper";
+const SERVICE_STARTUP_TIMEOUT: Duration = Duration::from_secs(5);
 #[cfg(not(test))]
 const CALL_TIMEOUT: Duration = Duration::from_secs(30);
 #[cfg(test)]
@@ -315,13 +314,15 @@ impl ConnectionManager {
 struct RawConnection {
     stream: UnixStream,
     control_stream: Option<UnixStream>,
-    child: Option<Child>,
+    managed_service: bool,
+    socket_path: Option<PathBuf>,
 }
 
 struct Connection {
     primary: Mutex<PrimaryChannel>,
     control: Mutex<Option<ControlChannel>>,
-    child: Mutex<Option<Child>>,
+    service_pid: Mutex<Option<u32>>,
+    socket_path: Option<PathBuf>,
     session_id: String,
     action_in_flight: AtomicBool,
 }
@@ -338,27 +339,22 @@ struct ControlChannel {
 
 impl Connection {
     fn establish(mut raw: RawConnection) -> Result<Self, ComputerUseError> {
-        let (session_id, next_request_id) = match handshake(&mut raw.stream) {
-            Ok(value) => value,
-            Err(error) => {
-                terminate_child(&mut raw.child);
-                return Err(error);
-            }
-        };
+        let (session_id, next_request_id, service_pid) = handshake(&mut raw.stream)?;
+        if raw.managed_service {
+            super::auth::verify_service_pid(service_pid)
+                .map_err(ComputerUseError::HelperRejected)?;
+        }
         let control = match raw.control_stream.as_mut() {
-            Some(stream) => match handshake_control(stream, &session_id) {
-                Ok(next_request_id) => Some(ControlChannel {
+            Some(stream) => {
+                let next_request_id = handshake_control(stream, &session_id)?;
+                Some(ControlChannel {
                     stream: raw
                         .control_stream
                         .take()
                         .expect("control stream was present above"),
                     next_request_id,
-                }),
-                Err(error) => {
-                    terminate_child(&mut raw.child);
-                    return Err(error);
-                }
-            },
+                })
+            }
             None => None,
         };
         Ok(Self {
@@ -367,7 +363,8 @@ impl Connection {
                 next_request_id,
             }),
             control: Mutex::new(control),
-            child: Mutex::new(raw.child),
+            service_pid: Mutex::new(raw.managed_service.then_some(service_pid)),
+            socket_path: raw.socket_path,
             session_id,
             action_in_flight: AtomicBool::new(false),
         })
@@ -378,28 +375,15 @@ impl Connection {
             &self.action_in_flight,
             matches!(&body, Request::CommitAction { .. }),
         );
-        if let Some(child) = self
-            .child
-            .lock()
-            .map_err(|_| {
-                CallError::Transport(ComputerUseError::HelperUnavailable(
-                    "helper process lock was poisoned".to_string(),
-                ))
-            })?
-            .as_mut()
-        {
-            match child.try_wait() {
-                Ok(Some(status)) => {
-                    return Err(CallError::Transport(ComputerUseError::HelperUnavailable(
-                        format!("helper exited before request with {status}"),
-                    )))
-                }
-                Ok(None) => {}
-                Err(error) => {
-                    return Err(CallError::Transport(ComputerUseError::HelperUnavailable(
-                        format!("could not inspect helper process: {error}"),
-                    )))
-                }
+        if let Some(service_pid) = *self.service_pid.lock().map_err(|_| {
+            CallError::Transport(ComputerUseError::HelperUnavailable(
+                "service process lock was poisoned".to_string(),
+            ))
+        })? {
+            if unsafe { libc::kill(service_pid as libc::pid_t, 0) } != 0 {
+                return Err(CallError::Transport(ComputerUseError::HelperUnavailable(
+                    "computer-use service exited before request".to_string(),
+                )));
             }
         }
         let mut primary = self.primary.lock().map_err(|_| {
@@ -473,31 +457,22 @@ impl Connection {
     }
 
     fn force_terminate(&self) -> Result<bool, ComputerUseError> {
-        let mut child = self.child.lock().map_err(|_| {
-            ComputerUseError::HelperUnavailable("helper process lock was poisoned".to_string())
+        let mut service_pid = self.service_pid.lock().map_err(|_| {
+            ComputerUseError::HelperUnavailable("service process lock was poisoned".to_string())
         })?;
-        let Some(mut child) = child.take() else {
+        let Some(pid) = service_pid.take() else {
             return Ok(false);
         };
-        match child.try_wait() {
-            Ok(Some(_)) => return Ok(true),
-            Ok(None) => {}
-            Err(error) => {
-                return Err(ComputerUseError::HelperUnavailable(format!(
-                    "could not inspect helper before termination: {error}"
-                )))
-            }
+        if unsafe { libc::kill(pid as libc::pid_t, 0) } != 0 {
+            return Ok(true);
         }
-        child.kill().map_err(|error| {
-            ComputerUseError::HelperUnavailable(format!(
-                "could not terminate helper after cancellation failure: {error}"
-            ))
-        })?;
-        child.wait().map_err(|error| {
-            ComputerUseError::HelperUnavailable(format!(
-                "could not wait for helper termination: {error}"
-            ))
-        })?;
+        super::auth::verify_service_pid(pid).map_err(ComputerUseError::HelperRejected)?;
+        if unsafe { libc::kill(pid as libc::pid_t, libc::SIGKILL) } != 0 {
+            return Err(ComputerUseError::HelperUnavailable(format!(
+                "could not terminate service after cancellation failure: {}",
+                io::Error::last_os_error()
+            )));
+        }
         Ok(true)
     }
 }
@@ -525,7 +500,7 @@ impl Drop for ActionInFlightGuard<'_> {
     }
 }
 
-fn handshake(stream: &mut UnixStream) -> Result<(String, u64), ComputerUseError> {
+fn handshake(stream: &mut UnixStream) -> Result<(String, u64, u32), ComputerUseError> {
     stream
         .set_read_timeout(Some(CALL_TIMEOUT))
         .map_err(transport_error)?;
@@ -545,7 +520,7 @@ fn handshake(stream: &mut UnixStream) -> Result<(String, u64), ComputerUseError>
     let response = read_response(stream).map_err(transport_error)?;
     validate_response(&response, &session_id, 0)?;
     match response.body {
-        Ok(Response::Hello { helper_pid }) if helper_pid > 1 => Ok((session_id, 1)),
+        Ok(Response::Hello { helper_pid }) if helper_pid > 1 => Ok((session_id, 1, helper_pid)),
         Ok(response) => Err(unexpected("Hello", response)),
         Err(error) => Err(ComputerUseError::HelperRejected(error.message)),
     }
@@ -580,16 +555,18 @@ fn handshake_control(stream: &mut UnixStream, session_id: &str) -> Result<u64, C
 
 impl Drop for Connection {
     fn drop(&mut self) {
-        if let Ok(child) = self.child.get_mut() {
-            terminate_child(child);
+        if let Ok(service_pid) = self.service_pid.get_mut() {
+            if let Some(pid) = service_pid.take() {
+                if super::auth::verify_service_pid(pid).is_ok() {
+                    unsafe {
+                        libc::kill(pid as libc::pid_t, libc::SIGTERM);
+                    }
+                }
+            }
         }
-    }
-}
-
-fn terminate_child(child: &mut Option<Child>) {
-    if let Some(mut child) = child.take() {
-        let _ = child.kill();
-        let _ = child.wait();
+        if let Some(socket_path) = self.socket_path.as_ref() {
+            let _ = fs::remove_file(socket_path);
+        }
     }
 }
 
@@ -599,86 +576,82 @@ enum CallError {
 }
 
 fn spawn_helper() -> Result<RawConnection, ComputerUseError> {
-    let path = helper_path()?;
+    let service_app = service_app_path()?;
     let data_dir = crate::default_approval_store()?.root().to_path_buf();
-    super::auth::verify_helper_at_path(&path).map_err(ComputerUseError::HelperRejected)?;
-    let (parent, child_stream) = UnixStream::pair().map_err(transport_error)?;
-    let (control_parent, control_child) = UnixStream::pair().map_err(transport_error)?;
-    let child_fd = child_stream.as_raw_fd();
-    let control_fd = control_child.as_raw_fd();
-    let mut command = Command::new(&path);
+    super::auth::verify_service_at_path(&service_app).map_err(ComputerUseError::HelperRejected)?;
+    let socket_path = service_socket_path()?;
+    let mut command = Command::new("/usr/bin/open");
     command
-        .arg("--ipc-fd")
-        .arg(CHILD_IPC_FD.to_string())
-        .arg("--control-fd")
-        .arg(CHILD_CONTROL_FD.to_string())
+        .arg("-n")
+        .arg(&service_app)
+        .arg("--args")
+        .arg("--socket")
+        .arg(&socket_path)
         .arg("--data-dir")
-        .arg(data_dir)
-        .env_clear()
+        .arg(&data_dir)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-    unsafe {
-        command.pre_exec(move || remap_child_descriptors(child_fd, control_fd));
-    }
-    let child = command.spawn().map_err(|error| {
+    let status = command.status().map_err(|error| {
         ComputerUseError::HelperUnavailable(format!(
-            "could not launch signed helper at {}: {error}",
-            path.display()
+            "could not launch signed service at {}: {error}",
+            service_app.display()
         ))
     })?;
-    drop(child_stream);
-    drop(control_child);
+    if !status.success() {
+        return Err(ComputerUseError::HelperUnavailable(format!(
+            "LaunchServices rejected the signed computer-use service with {status}"
+        )));
+    }
+    let deadline = Instant::now() + SERVICE_STARTUP_TIMEOUT;
+    let parent = connect_service(&socket_path, deadline)?;
+    let control_parent = connect_service(&socket_path, deadline)?;
     Ok(RawConnection {
         stream: parent,
         control_stream: Some(control_parent),
-        child: Some(child),
+        managed_service: true,
+        socket_path: Some(socket_path),
     })
 }
 
-unsafe fn remap_child_descriptors(
-    ipc_source: libc::c_int,
-    control_source: libc::c_int,
-) -> io::Result<()> {
-    let mut ipc_source = ipc_source;
-    let mut control_source = control_source;
-    if ipc_source == CHILD_CONTROL_FD && control_source != CHILD_CONTROL_FD {
-        ipc_source = libc::fcntl(ipc_source, libc::F_DUPFD_CLOEXEC, 5);
-        if ipc_source == -1 {
-            return Err(io::Error::last_os_error());
+fn connect_service(path: &Path, deadline: Instant) -> Result<UnixStream, ComputerUseError> {
+    let mut last_error = None;
+    while Instant::now() < deadline {
+        match UnixStream::connect(path) {
+            Ok(stream) => return Ok(stream),
+            Err(error) => last_error = Some(error),
         }
+        std::thread::sleep(Duration::from_millis(25));
     }
-    if control_source == CHILD_IPC_FD && ipc_source != CHILD_IPC_FD {
-        control_source = libc::fcntl(control_source, libc::F_DUPFD_CLOEXEC, 5);
-        if control_source == -1 {
-            return Err(io::Error::last_os_error());
-        }
-    }
-    for (source, target) in [
-        (ipc_source, CHILD_IPC_FD),
-        (control_source, CHILD_CONTROL_FD),
-    ] {
-        if source != target && libc::dup2(source, target) == -1 {
-            return Err(io::Error::last_os_error());
-        }
-    }
-    for source in [ipc_source, control_source] {
-        if source != CHILD_IPC_FD && source != CHILD_CONTROL_FD {
-            libc::close(source);
-        }
-    }
-    for target in [CHILD_IPC_FD, CHILD_CONTROL_FD] {
-        if libc::fcntl(target, libc::F_SETFD, 0) == -1 {
-            return Err(io::Error::last_os_error());
-        }
-    }
-    Ok(())
+    let _ = fs::remove_file(path);
+    Err(ComputerUseError::HelperUnavailable(format!(
+        "computer-use service did not open its authenticated socket within {} seconds: {}",
+        SERVICE_STARTUP_TIMEOUT.as_secs(),
+        last_error
+            .map(|error| error.to_string())
+            .unwrap_or_else(|| "no connection attempt completed".to_string())
+    )))
 }
 
-fn helper_path() -> Result<PathBuf, ComputerUseError> {
+fn service_socket_path() -> Result<PathBuf, ComputerUseError> {
+    let path = PathBuf::from("/tmp").join(format!(
+        "clark-cua-{}-{}.sock",
+        unsafe { libc::geteuid() },
+        uuid::Uuid::new_v4()
+    ));
+    if path.as_os_str().as_encoded_bytes().len() >= 100 {
+        return Err(ComputerUseError::HelperUnavailable(format!(
+            "computer-use service socket path is too long: {}",
+            path.display()
+        )));
+    }
+    Ok(path)
+}
+
+fn service_app_path() -> Result<PathBuf, ComputerUseError> {
     #[cfg(debug_assertions)]
-    if let Some(path) = std::env::var_os("CLARK_COMPUTER_USE_HELPER_PATH") {
-        return validate_helper_path(PathBuf::from(path), None);
+    if let Some(path) = std::env::var_os("CLARK_COMPUTER_USE_SERVICE_APP_PATH") {
+        return validate_service_app_path(PathBuf::from(path), None);
     }
     let executable = std::env::current_exe().map_err(|error| {
         ComputerUseError::HelperUnavailable(format!("could not locate Clark executable: {error}"))
@@ -686,40 +659,58 @@ fn helper_path() -> Result<PathBuf, ComputerUseError> {
     let directory = executable.parent().ok_or_else(|| {
         ComputerUseError::HelperUnavailable("Clark executable has no parent directory".to_string())
     })?;
-    let expected_directory = directory.canonicalize().map_err(|error| {
+    let contents = directory.parent().ok_or_else(|| {
+        ComputerUseError::HelperUnavailable(
+            "Clark executable is not inside a macOS app Contents directory".to_string(),
+        )
+    })?;
+    let expected_resources = contents.join("Resources").canonicalize().map_err(|error| {
         ComputerUseError::HelperUnavailable(format!(
-            "could not resolve Clark executable directory {}: {error}",
-            directory.display()
+            "could not resolve Clark app resources {}: {error}",
+            contents.join("Resources").display()
         ))
     })?;
-    validate_helper_path(directory.join(HELPER_EXECUTABLE), Some(&expected_directory))
+    validate_service_app_path(
+        expected_resources.join(SERVICE_APP_NAME),
+        Some(&expected_resources),
+    )
 }
 
-fn validate_helper_path(
+fn validate_service_app_path(
     path: PathBuf,
     expected_directory: Option<&std::path::Path>,
 ) -> Result<PathBuf, ComputerUseError> {
     let canonical = path.canonicalize().map_err(|error| {
         ComputerUseError::HelperUnavailable(format!(
-            "helper is missing at {}: {error}",
+            "computer-use service app is missing at {}: {error}",
             path.display()
         ))
     })?;
-    if canonical.file_name().and_then(|name| name.to_str()) != Some(HELPER_EXECUTABLE) {
+    if canonical.file_name().and_then(|name| name.to_str()) != Some(SERVICE_APP_NAME) {
         return Err(ComputerUseError::HelperRejected(format!(
-            "helper path must end with {HELPER_EXECUTABLE}"
+            "service app path must end with {SERVICE_APP_NAME}"
         )));
     }
-    if !canonical.is_file() {
+    if !canonical.is_dir() {
         return Err(ComputerUseError::HelperRejected(format!(
-            "helper path is not a regular file: {}",
+            "service app path is not a directory: {}",
             canonical.display()
         )));
     }
     if expected_directory.is_some_and(|directory| canonical.parent() != Some(directory)) {
         return Err(ComputerUseError::HelperRejected(
-            "release helper must be a real file beside the Clark executable".to_string(),
+            "release service must be a real nested app in Clark's Resources directory".to_string(),
         ));
+    }
+    let executable = canonical
+        .join("Contents")
+        .join("MacOS")
+        .join(SERVICE_EXECUTABLE);
+    if !executable.is_file() {
+        return Err(ComputerUseError::HelperRejected(format!(
+            "service app is missing its executable at {}",
+            executable.display()
+        )));
     }
     Ok(canonical)
 }

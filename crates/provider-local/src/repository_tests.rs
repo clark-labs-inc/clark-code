@@ -41,6 +41,28 @@ async fn identifies_clone_equivalent_repository_by_remote() {
     );
     assert!(identity.fingerprint.starts_with("git:"));
     assert_eq!(identity.commit_count, 1);
+
+    let relocated = tempfile::tempdir().unwrap();
+    git(relocated.path(), "init").await;
+    git(relocated.path(), "config user.name Clark").await;
+    git(relocated.path(), "config user.email clark@example.com").await;
+    tokio::fs::write(relocated.path().join("README.md"), "hello elsewhere")
+        .await
+        .unwrap();
+    git(relocated.path(), "add README.md").await;
+    git(relocated.path(), "commit -m relocated").await;
+    git(
+        relocated.path(),
+        "remote add origin https://github.com/clark-labs-inc/clark.git",
+    )
+    .await;
+
+    let relocated_identity = inspect_repository(&LocalExecutor, relocated.path())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_ne!(identity.root, relocated_identity.root);
+    assert_eq!(identity.fingerprint, relocated_identity.fingerprint);
 }
 
 #[tokio::test]

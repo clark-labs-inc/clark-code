@@ -242,6 +242,7 @@ fn test_ctx(dir: &std::path::Path) -> ToolCtx {
         progress: None,
         agent_progress: None,
         call_progress: None,
+        model_override: None,
     }
 }
 

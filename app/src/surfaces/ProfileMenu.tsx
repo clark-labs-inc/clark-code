@@ -7,7 +7,7 @@ import {
   billingPlanLabel,
   clarkBillingUrl,
   effectiveBilling,
-  effectiveUsagePercent,
+  effectiveLimitLabel,
   openExternal,
 } from "../lib/account";
 import { cn } from "../lib/cn";
@@ -82,7 +82,7 @@ export function ProfileMenu({ variant = "topbar" }: { variant?: "topbar" | "rail
       : statusTone(sub?.status);
   const planLabel = activeBilling?.plan?.name
     ?? (isTeamBilling ? "Workspace coverage" : billingPlanLabel(sub?.plan_key));
-  const usagePercent = effectiveUsagePercent(billing);
+  const limitLabel = effectiveLimitLabel(billing);
   const renews = formatDate(sub?.current_period_end);
   const firstLoad = loading && !billing;
   return (
@@ -165,11 +165,7 @@ export function ProfileMenu({ variant = "topbar" }: { variant?: "topbar" | "rail
               <div className={ROW}>
                 <span className="text-xs text-ink-muted">Limit used</span>
                 <span className="text-sm font-medium tabular-nums text-ink">
-                  {usagePercent !== null
-                    ? `${usagePercent}%`
-                    : activeBilling?.access_state === "unlimited"
-                      ? "No limit"
-                      : "—"}
+                  {limitLabel}
                 </span>
               </div>
               {isTeamBilling && activeBilling?.seat && (

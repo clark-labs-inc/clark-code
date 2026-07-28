@@ -30,7 +30,7 @@ function bridgeStub(): CoreBridge {
     newSession: vi.fn(async () => session),
     loadSession: vi.fn(async () => session),
     closeSession: vi.fn(async () => {}),
-    prompt: vi.fn(async () => {}),
+    prompt: vi.fn(async () => ({ runId: "run-stub" })),
     cancel: vi.fn(async () => {}),
     respond: vi.fn(async () => {}),
     subscribe: () => () => {},
@@ -52,8 +52,8 @@ beforeEach(() => {
     conversations: [],
     localSettings: {
       cwd: "/tmp/project",
-      model: "clark-code:grok45",
-      reasoningEffort: "high",
+      model: "clark-code:free",
+      reasoningEffort: "",
       apiKey: "test-key",
     },
     chatModels: {},
@@ -95,8 +95,7 @@ describe("edit and resend", () => {
       collaboration_mode: "default",
     });
     expect(vi.mocked(bridge.connect).mock.calls[1]?.[1].extra).toMatchObject({
-      model: "clark-code:grok45",
-      reasoning_effort: "high",
+      model: "clark-code:free",
     });
     const resume = newSession.mock.calls[1]?.[1].resume;
     expect(JSON.stringify(resume)).toContain("first reply");

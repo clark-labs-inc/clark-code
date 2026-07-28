@@ -30,31 +30,17 @@ describe("mobileRemoteModelSettings", () => {
       reasoningEffort: "xhigh",
     });
     expect(mobileRemoteModelSettings(command({
-      model: "clark-code:grok45",
-      reasoning_effort: "low",
-    }))).toEqual({
-      model: "clark-code:grok45",
-      reasoningEffort: "low",
-    });
-    expect(mobileRemoteModelSettings(command({
-      model: "clark-code:claude_opus_5",
+      model: "clark-code:free",
       reasoning_effort: "",
     }))).toEqual({
-      model: "clark-code:claude_opus_5",
-      reasoningEffort: "",
-    });
-    expect(mobileRemoteModelSettings(command({
-      model: "clark-code:gpt56_sol",
-      reasoning_effort: "",
-    }))).toEqual({
-      model: "clark-code:gpt56_sol",
+      model: "clark-code:free",
       reasoningEffort: "",
     });
   });
 
   it("rejects stale model ids and unsupported effort choices", () => {
     expect(() => mobileRemoteModelSettings(command({
-      model: "clark-code:retired",
+      model: "clark-code:grok45",
       reasoning_effort: "",
     }))).toThrow("not available");
     expect(() => mobileRemoteModelSettings(command({

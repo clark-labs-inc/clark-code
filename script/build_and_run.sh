@@ -46,8 +46,9 @@ esac
 
 APP_BUNDLE="$ROOT_DIR/target/$PROFILE/bundle/macos/$APP_NAME.app"
 APP_BINARY="$APP_BUNDLE/Contents/MacOS/$PROCESS_NAME"
-HELPER_BINARY="$APP_BUNDLE/Contents/MacOS/clark-computer-use-helper"
-SWIFT_CONCURRENCY="$APP_BUNDLE/Contents/Frameworks/libswift_Concurrency.dylib"
+SERVICE_APP="$APP_BUNDLE/Contents/Resources/Clark Computer Use.app"
+SERVICE_BINARY="$SERVICE_APP/Contents/MacOS/clark-computer-use-helper"
+SERVICE_SWIFT_CONCURRENCY="$SERVICE_APP/Contents/Frameworks/libswift_Concurrency.dylib"
 BUILD_CONFIGS=(
   --config src-tauri/tauri.sandbox.macos.conf.json
   --config src-tauri/tauri.computer-use.macos.conf.json
@@ -70,23 +71,23 @@ fi
 if [[ "$(uname -s)" == "Darwin" ]]; then
   SIGNING_IDENTITY="${APPLE_SIGNING_IDENTITY:-$DEFAULT_SIGNING_IDENTITY}"
   if security find-identity -v -p codesigning | grep -Fq "$SIGNING_IDENTITY"; then
-    if [[ ! -x "$HELPER_BINARY" ]]; then
-      echo "error: bundled computer-use helper is missing at $HELPER_BINARY" >&2
+    if [[ ! -x "$SERVICE_BINARY" ]]; then
+      echo "error: bundled computer-use service is missing at $SERVICE_BINARY" >&2
       exit 1
     fi
-    if [[ ! -f "$SWIFT_CONCURRENCY" ]]; then
-      echo "error: bundled Swift concurrency runtime is missing at $SWIFT_CONCURRENCY" >&2
+    if [[ ! -f "$SERVICE_SWIFT_CONCURRENCY" ]]; then
+      echo "error: service Swift concurrency runtime is missing at $SERVICE_SWIFT_CONCURRENCY" >&2
       exit 1
     fi
     if [[ "$BUILD_REQUIRED" == true ]]; then
-      # Sign nested code first. The helper and its direct parent mutually verify
-      # exact Clark identities before opening either IPC channel.
-      codesign --force --options runtime --timestamp=none --sign "$SIGNING_IDENTITY" "$SWIFT_CONCURRENCY"
-      codesign --force --options runtime --timestamp=none --sign "$SIGNING_IDENTITY" "$HELPER_BINARY"
+      # The independently launched service owns macOS privacy grants. Sign its
+      # nested runtime and app identity before sealing the Clark host bundle.
+      codesign --force --options runtime --timestamp=none --sign "$SIGNING_IDENTITY" "$SERVICE_SWIFT_CONCURRENCY"
+      codesign --force --options runtime --timestamp=none --sign "$SIGNING_IDENTITY" "$SERVICE_APP"
       codesign --force --options runtime --timestamp=none --sign "$SIGNING_IDENTITY" "$APP_BUNDLE"
     fi
     codesign --verify --deep --strict --verbose=2 "$APP_BUNDLE"
-    "$HELPER_BINARY" --self-test
+    "$SERVICE_BINARY" --self-test
   else
     echo "error: no stable macOS signing identity found; refusing to launch an identity that would lose privacy grants after the next rebuild" >&2
     echo "set APPLE_SIGNING_IDENTITY to an installed development certificate and retry" >&2

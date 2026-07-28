@@ -8,6 +8,13 @@ pub use backend::{
 pub use executor::SandboxedExecutor;
 pub use policy::{NetworkPolicy, SandboxPolicy, SandboxPreset};
 
+#[cfg(target_os = "windows")]
+pub fn windows_product_data_root() -> Option<std::path::PathBuf> {
+    std::env::var_os("LOCALAPPDATA")
+        .map(std::path::PathBuf::from)
+        .map(|root| backend::windows_product_data_root_from(&root, cfg!(debug_assertions)))
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
@@ -26,6 +33,23 @@ mod tests {
         } else {
             PathBuf::from("/workspace")
         }
+    }
+
+    #[test]
+    fn windows_product_data_is_separate_from_the_nsis_install_root() {
+        let local = std::path::Path::new(r"C:\Users\tester\AppData\Local");
+        assert_eq!(
+            crate::backend::windows_product_data_root_from(local, false),
+            local.join("Clark").join("Code"),
+        );
+        assert_eq!(
+            crate::backend::windows_product_data_root_from(local, true),
+            local.join("Clark").join("Code Dev"),
+        );
+        assert_ne!(
+            crate::backend::windows_product_data_root_from(local, false),
+            local.join("Clark Code"),
+        );
     }
 
     #[test]

@@ -43,6 +43,12 @@ use crate::{builtin_providers, AppState, ProviderInfo};
 /// Synthetic run id used to attribute the user's own message in the timeline.
 const USER_RUN: &str = "user";
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PromptReceipt {
+    run_id: String,
+}
+
 /// Construct a provider instance by id.
 fn make_provider(id: &str, state: &AppState) -> Result<Box<dyn Provider>, String> {
     match id {
@@ -550,7 +556,7 @@ pub async fn prompt(
     blocks: Vec<ContentBlock>,
     attachments: Vec<PendingUpload>,
     state: State<'_, AppState>,
-) -> Result<(), String> {
+) -> Result<PromptReceipt, String> {
     let run_guard = state.try_start_run().ok_or(
         "Clark Code is finishing active work before an update; wait for the relaunch to send another message",
     )?;
@@ -596,7 +602,7 @@ pub async fn prompt(
 
     // Show the user's message immediately (providers don't reliably echo it),
     // then lock the session to obtain the run's event stream and release.
-    let stream = {
+    let mut stream = {
         let mut s = entry.lock().await;
         for block in &echo_blocks {
             apply(
@@ -623,6 +629,26 @@ pub async fn prompt(
             .map_err(|e| e.to_string())?
     };
 
+    // Submission is not complete until the provider has allocated the run.
+    // Persist and project that first lifecycle fact before returning its ID so
+    // mobile command receipts and the trajectory can share one identity.
+    let first = stream
+        .next()
+        .await
+        .ok_or("Clark Code prompt ended before it allocated a run")?;
+    let run_id = match &first {
+        AgentEvent::RunStarted { run } => run.as_str().to_string(),
+        _ => return Err("Clark Code prompt did not begin with a run identity".into()),
+    };
+    let checkpoint = trajectory.append(std::slice::from_ref(&first)).await?;
+    let snapshot = {
+        let mut session = entry.lock().await;
+        apply(&mut session.snapshot, &first);
+        session.snapshot.history_checkpoint = Some(checkpoint);
+        session.snapshot.clone()
+    };
+    let _ = app.emit("snapshot", &snapshot);
+
     // Fold events into this session's snapshot and push each update to the
     // webview (tagged by `snapshot.session`, so the UI routes it correctly).
     spawn_provider_stream(
@@ -633,7 +659,7 @@ pub async fn prompt(
         stream,
         run_guard,
     );
-    Ok(())
+    Ok(PromptReceipt { run_id })
 }
 
 /// Explicit Clark Code context compaction. This is a standalone provider run,

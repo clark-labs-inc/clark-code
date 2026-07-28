@@ -1,7 +1,7 @@
 {
   "version": 1,
   "storageKey": "clark-desktop:resilience-benchmark",
-  "model": "clark-code:deepseek_v4_pro",
+  "model": "clark-code:free",
   "modelLabel": "DeepSeek V4 Pro",
   "provider": "clark-managed",
   "faults": [

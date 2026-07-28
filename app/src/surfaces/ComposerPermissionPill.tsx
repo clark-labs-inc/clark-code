@@ -16,7 +16,7 @@ const MODE_ICON: Record<ApprovalPolicy, typeof Shield> = {
   full: ShieldAlert,
 };
 
-/** Approval policy selector. Full access is the default. */
+/** Approval policy selector. Sandboxed "Approve for me" is the default. */
 export function ComposerPermissionPill() {
   const mode = useSessionStore((s) => s.approvalPolicy);
   const setMode = useSessionStore((s) => s.setApprovalPolicy);

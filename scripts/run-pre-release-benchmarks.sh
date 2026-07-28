@@ -20,7 +20,7 @@ usage() {
   echo "          [--computer-use-signing-identity IDENTITY]"
   echo
   echo "Without --superpowers, the receipt-producing journey uses its built-in fixture."
-  echo "The default paid lane uses clark-platform / clark-code:minimax_m3 and"
+  echo "The default paid lane uses clark-platform / clark-code:free and"
   echo "requires CLARK_CODE_API_KEY (environment or the ignored repository .env)."
   echo "--offline explicitly disables all paid/network model calls."
   echo "--utm-preflight autonomously provisions, logs in, reboots, and verifies"
@@ -139,6 +139,7 @@ if [[ -n "$utm_observation_receipt" ]]; then
   fi
 fi
 resolved_real_use_receipts=()
+expected_source_revision="$(git -C "$repo_root" rev-parse HEAD)"
 if [[ "$real_use_receipt_count" -gt 0 ]]; then
   for real_use_receipt in "${real_use_receipts[@]}"; do
     if [[ "$real_use_receipt" != /* ]]; then
@@ -199,7 +200,7 @@ if [[ "$run_native_computer_use" == "1" ]]; then
 fi
 export CLARK_CODE_PROVIDER="${CLARK_CODE_PROVIDER:-clark-platform}"
 export CLARK_CODE_BASE_URL="${CLARK_CODE_BASE_URL:-https://api.clarkslabs.com/v1}"
-export CLARK_CODE_MODEL="${CLARK_CODE_MODEL:-clark-code:minimax_m3}"
+export CLARK_CODE_MODEL="${CLARK_CODE_MODEL:-clark-code:free}"
 export CLARK_CODE_MAX_ITERATIONS="${CLARK_CODE_MAX_ITERATIONS:-16}"
 export CLARK_CODE_MAX_LIVE_COST_USD="${CLARK_CODE_MAX_LIVE_COST_USD:-0.50}"
 if [[ ! "$CLARK_CODE_MAX_ITERATIONS" =~ ^[1-9][0-9]*$ ]]; then
@@ -349,7 +350,8 @@ PY
     fi
     real_use_platforms_seen+="$real_use_platform "
     verified_real_use_platform_count=$((verified_real_use_platform_count + 1))
-    if node harness/platform-real-use-package.mjs \
+    if CLARK_EXPECTED_SOURCE_REVISION="$expected_source_revision" \
+      node harness/platform-real-use-package.mjs \
       --verify-receipt "$real_use_receipt" \
       --copy-to "$output/real-use/$real_use_platform" \
       2>&1 | tee "$output/real-use-$real_use_platform.log"; then
@@ -501,8 +503,8 @@ if [[ "$run_live" == "1" ]]; then
     echo "Live benchmark requires CLARK_CODE_PROVIDER=clark-platform." >&2
   elif [[ "$CLARK_CODE_BASE_URL" != "https://api.clarkslabs.com/v1" ]]; then
     echo "Live benchmark requires CLARK_CODE_BASE_URL=https://api.clarkslabs.com/v1." >&2
-  elif [[ "$CLARK_CODE_MODEL" != "clark-code:minimax_m3" ]]; then
-    echo "Live benchmark requires CLARK_CODE_MODEL=clark-code:minimax_m3." >&2
+  elif [[ "$CLARK_CODE_MODEL" != "clark-code:free" ]]; then
+    echo "Live benchmark requires CLARK_CODE_MODEL=clark-code:free." >&2
   elif [[ "$deterministic_passed" != "1" ]]; then
     live_status="blocked"
     echo "Skipping paid validation because the deterministic contract is already broken." >&2

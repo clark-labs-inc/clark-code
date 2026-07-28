@@ -11,6 +11,10 @@ import {
   type CreditState,
 } from "../lib/account";
 import { cn } from "../lib/cn";
+import {
+  effectiveModelSettings,
+  isIncludedCodingModel,
+} from "../lib/localAgent";
 
 export function creditBannerMessage(
   billing: BillingSummary | null,
@@ -19,14 +23,9 @@ export function creditBannerMessage(
   const workspaceCovered = effectiveBilling(billing)?.owner_kind === "organization";
   const percent = effectiveUsagePercent(billing);
   if (state === "out") {
-    if (percent !== null) {
-      return workspaceCovered
-        ? `${percent}% of the workspace Clark Code limit used. Workspace billing needs attention.`
-        : `${percent}% of your Clark Code limit used — review billing to keep coding.`;
-    }
     return workspaceCovered
-      ? "Your workspace billing needs attention before Clark Code can continue."
-      : "Clark Code usage limit reached — review billing to keep coding.";
+      ? "Clark Code is paused because the workspace has no available usage. Workspace billing needs attention."
+      : "Clark Code is out of credits — review billing to keep coding.";
   }
   if (percent !== null) {
     return workspaceCovered
@@ -44,9 +43,17 @@ export function creditBannerMessage(
  *  moment a specific run is refused for credits.) */
 export function CreditBanner() {
   const billing = useSessionStore((s) => s.billing);
+  const includedModel = useSessionStore((s) =>
+    isIncludedCodingModel(
+      effectiveModelSettings(s.localSettings, s.chatModels, s.session?.id ?? null).model,
+    ),
+  );
   const [dismissed, setDismissed] = useState<CreditState | null>(null);
   const state = creditState(billing);
 
+  // The selected Free lane never performs paid billing admission or debits,
+  // so a stale personal/workspace balance must not interrupt the composer.
+  if (includedModel) return null;
   if (state === "ok") return null;
   if (state === "low" && dismissed === "low") return null;
 

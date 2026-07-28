@@ -373,6 +373,8 @@ fn checked_in_feature_map_matches_every_builtin_model_tool() {
         headers: HashMap::new(),
         root_model: "clark-code".into(),
         reasoning_effort: None,
+        scout_capsules: None,
+        scout_cartography: None,
     });
 
     let manifest: Value = serde_json::from_str(include_str!(

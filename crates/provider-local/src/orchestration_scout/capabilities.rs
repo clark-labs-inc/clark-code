@@ -1,11 +1,10 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use agent_core::domain::ToolKind;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use super::ScoutToolState;
@@ -17,32 +16,13 @@ mod dotenv;
 use dotenv::dotenv_keys;
 use dotenv::scan_dotenv;
 
-const ROUTING_TOOLS: &[&str] = &[
-    "git",
-    "gh",
-    "aws",
-    "rg",
-    "fd",
-    "jq",
-    "curl",
-    "wget",
-    "ssh",
-    "cargo",
-    "rustc",
-    "node",
-    "npm",
-    "pnpm",
-    "python3",
-    "python",
-    "docker",
-    "podman",
-    "kubectl",
-    "helm",
-    "terraform",
-    "pulumi",
-    "bwrap",
-    "wasmtime",
-];
+#[path = "capabilities_registry.rs"]
+mod registry;
+
+use registry::{
+    adapter_environment_name, adapter_executables, named_capability, routing_capabilities,
+    rust_fallbacks, safe_fingerprint, safe_names_hash,
+};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(super) struct CapabilityReport {
@@ -51,8 +31,12 @@ pub(super) struct CapabilityReport {
     pub platform: String,
     pub architecture: String,
     pub scope: String,
-    pub executable_names: Vec<String>,
+    pub adapter_executable_names: Vec<String>,
+    pub path_executable_count: usize,
+    pub path_executable_names_sha256: String,
     pub environment: Vec<NamedCapability>,
+    pub environment_name_count: usize,
+    pub environment_names_sha256: String,
     pub dotenv_files: Vec<DotenvFile>,
     pub credential_surfaces: Vec<String>,
     pub routing: BTreeMap<String, RoutingCapability>,
@@ -115,7 +99,7 @@ impl ToolExecutor for ScoutCapabilitiesTool {
     }
 
     fn description(&self) -> &str {
-        "Run Scout's mandatory secret-safe capability census before starting a Scout ledger. Enumerates executable names, environment-variable names, known credential surfaces, and .env file key names without executing discovered binaries or returning any environment/.env values. Returns a census id required by scout_ledger start."
+        "Run Scout's secret-safe adapter bootstrap before starting a Scout ledger. Reports curated DevOps/cloud adapter executables, relevant environment-variable names, known credential surfaces, and scoped .env key schemas without executing discovered binaries or returning values. Other PATH entries contribute only a count and digest. This is not a host or business-system map."
     }
 
     fn parameters(&self) -> Value {
@@ -124,7 +108,7 @@ impl ToolExecutor for ScoutCapabilitiesTool {
             "properties": {
                 "scope": {
                     "type": "string",
-                    "description": "Directory to inspect for .env files, relative to the project root. Use \".\" for the full project."
+                    "description": "Declared workspace or graph-discovered component root to inspect for configuration schemas, relative to the project root. Do not use an unrelated home or system root."
                 }
             },
             "required": ["scope"],
@@ -163,9 +147,16 @@ impl ToolExecutor for ScoutCapabilitiesTool {
             }
         };
         let id = format!("census-{}", Uuid::new_v4());
+        let path_executable_count = system.executable_names.len();
+        let path_executable_names_sha256 = safe_names_hash(&system.executable_names);
+        let adapter_executable_names = adapter_executables(&system.executable_names);
+        let environment_name_count = system.environment_variable_names.len();
+        let environment_names_sha256 = safe_names_hash(&system.environment_variable_names);
         let environment = system
             .environment_variable_names
-            .into_iter()
+            .iter()
+            .filter(|name| adapter_environment_name(name))
+            .cloned()
             .map(named_capability)
             .collect::<Vec<_>>();
         let routing = routing_capabilities(
@@ -176,12 +167,16 @@ impl ToolExecutor for ScoutCapabilitiesTool {
         );
         let mut report = CapabilityReport {
             id: id.clone(),
-            schema_version: "scout-capability-census-v1".into(),
+            schema_version: "scout-adapter-census-v2".into(),
             platform: system.platform,
             architecture: system.architecture,
             scope,
-            executable_names: system.executable_names,
+            adapter_executable_names,
+            path_executable_count,
+            path_executable_names_sha256,
             environment,
+            environment_name_count,
+            environment_names_sha256,
             dotenv_files,
             credential_surfaces: system.credential_surfaces,
             routing,
@@ -209,179 +204,13 @@ impl ToolExecutor for ScoutCapabilitiesTool {
             .insert(id.clone(), report);
 
         ToolOutcome::ok(format!(
-            "Scout capability census `{id}` recorded: {} executable names, {} environment-variable names, and {} .env files. Values were not read into the report. Use this census id when starting scout_ledger.",
-            details["executable_names"].as_array().map_or(0, Vec::len),
+            "Scout adapter census `{id}` recorded: {} curated adapter executables, {} relevant environment-variable names, and {} scoped .env schemas. Other PATH entries were retained only as a count and digest. Values were not returned. Use this census id when starting scout_ledger.",
+            details["adapter_executable_names"].as_array().map_or(0, Vec::len),
             details["environment"].as_array().map_or(0, Vec::len),
             details["dotenv_files"].as_array().map_or(0, Vec::len),
         ))
         .with_details(details)
     }
-}
-
-fn named_capability(name: String) -> NamedCapability {
-    NamedCapability {
-        credential_candidate: credential_candidate(&name),
-        name,
-    }
-}
-
-fn credential_candidate(name: &str) -> bool {
-    let upper = name.to_ascii_uppercase();
-    [
-        "TOKEN",
-        "SECRET",
-        "PASSWORD",
-        "PASSWD",
-        "CREDENTIAL",
-        "PRIVATE_KEY",
-        "ACCESS_KEY",
-        "API_KEY",
-        "AUTH",
-        "COOKIE",
-        "SESSION",
-    ]
-    .iter()
-    .any(|marker| upper.contains(marker))
-}
-
-fn safe_fingerprint(report: &CapabilityReport) -> String {
-    let mut clone = report.clone();
-    clone.id.clear();
-    clone.fingerprint.clear();
-    let encoded = serde_json::to_vec(&clone).unwrap_or_default();
-    format!("{:x}", Sha256::digest(encoded))
-}
-
-fn routing_capabilities(
-    executables: &[String],
-    environment: &[NamedCapability],
-    credential_surfaces: &[String],
-    dotenv_files: &[DotenvFile],
-) -> BTreeMap<String, RoutingCapability> {
-    let executable_set = executables
-        .iter()
-        .map(String::as_str)
-        .collect::<BTreeSet<_>>();
-    let env_set = environment
-        .iter()
-        .map(|entry| entry.name.as_str())
-        .chain(
-            dotenv_files
-                .iter()
-                .flat_map(|file| file.keys.iter().map(|entry| entry.name.as_str())),
-        )
-        .collect::<BTreeSet<_>>();
-    let mut routing = ROUTING_TOOLS
-        .iter()
-        .map(|tool| {
-            let present = executable_set.contains(tool);
-            (
-                (*tool).to_string(),
-                RoutingCapability {
-                    state: if present { "present" } else { "missing" }.into(),
-                    evidence: if present {
-                        vec![format!("executable:{tool}")]
-                    } else {
-                        Vec::new()
-                    },
-                },
-            )
-        })
-        .collect::<BTreeMap<_, _>>();
-
-    let aws_auth = [
-        "AWS_ACCESS_KEY_ID",
-        "AWS_PROFILE",
-        "AWS_WEB_IDENTITY_TOKEN_FILE",
-    ]
-    .iter()
-    .any(|name| env_set.contains(name))
-        || credential_surfaces
-            .iter()
-            .any(|surface| surface.starts_with("aws_"));
-    routing.insert(
-        "aws_secrets_manager".into(),
-        RoutingCapability {
-            state: if aws_auth {
-                "auth_candidate_unverified"
-            } else {
-                "missing_auth_candidate"
-            }
-            .into(),
-            evidence: if aws_auth {
-                vec!["credential_source:name_only".into()]
-            } else {
-                Vec::new()
-            },
-        },
-    );
-    let github_auth = ["GH_TOKEN", "GITHUB_TOKEN"]
-        .iter()
-        .any(|name| env_set.contains(name))
-        || credential_surfaces
-            .iter()
-            .any(|surface| surface == "github_cli_hosts");
-    routing.insert(
-        "github_api".into(),
-        RoutingCapability {
-            state: if github_auth {
-                "auth_candidate_unverified"
-            } else {
-                "missing_auth_candidate"
-            }
-            .into(),
-            evidence: if github_auth {
-                vec!["credential_source:name_only".into()]
-            } else {
-                Vec::new()
-            },
-        },
-    );
-    routing
-}
-
-fn rust_fallbacks() -> Vec<RustFallback> {
-    vec![
-        RustFallback {
-            capability: "dotenv_and_environment_inventory".into(),
-            implementation: "scout_capabilities".into(),
-            state: "available".into(),
-            constraints: vec!["names and locations only; values are never returned".into()],
-        },
-        RustFallback {
-            capability: "json_query_and_measurement".into(),
-            implementation: "serde_json plus Scout's typed measurement runner".into(),
-            state: "available".into(),
-            constraints: vec!["bounded project-scope inputs".into()],
-        },
-        RustFallback {
-            capability: "github_api".into(),
-            implementation: "reqwest GitHub REST adapter".into(),
-            state: "design_ready_not_enabled".into(),
-            constraints: vec![
-                "requires an authorized token source".into(),
-                "requires explicit network authorization".into(),
-            ],
-        },
-        RustFallback {
-            capability: "aws_secrets_manager".into(),
-            implementation: "AWS SDK for Rust adapter".into(),
-            state: "design_ready_not_enabled".into(),
-            constraints: vec![
-                "census may test identity/authorization but never fetch secret payloads".into(),
-                "secret reads require a separate explicit user-authorized tool".into(),
-            ],
-        },
-        RustFallback {
-            capability: "shell_process_isolation".into(),
-            implementation: "capability-attested native runner".into(),
-            state: "unavailable_without_os_boundary".into(),
-            constraints: vec![
-                "WASM is suitable for pure transforms, not ambient host inspection".into(),
-                "remote shell execution is not treated as isolated".into(),
-            ],
-        },
-    ]
 }
 
 impl PartialEq for NamedCapability {

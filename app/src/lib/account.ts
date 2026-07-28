@@ -220,3 +220,15 @@ export function creditState(billing: BillingSummary | null): CreditState {
   if (!perDollar || !Number.isFinite(perDollar)) return "ok";
   return c.available_credits < perDollar * LOW_CREDIT_DOLLARS ? "low" : "ok";
 }
+
+/** User-facing value for the effective account's usage row. Spendable access
+ * wins over the cycle percentage: the latter is based on nominal period
+ * allowance and can remain below 100 after the actual balance reaches zero. */
+export function effectiveLimitLabel(billing: BillingSummary | null): string {
+  if (creditState(billing) === "out") return "Out of credits";
+  const effective = effectiveBilling(billing);
+  const balance = effectiveBalance(billing);
+  if (effective?.access_state === "unlimited" || balance?.is_unlimited) return "No limit";
+  const percent = effectiveUsagePercent(billing);
+  return percent === null ? "—" : `${percent}%`;
+}

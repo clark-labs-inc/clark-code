@@ -130,11 +130,13 @@ impl ToolExecutor for Bash {
             .unwrap_or(DEFAULT_TIMEOUT_MS)
             .min(MAX_TIMEOUT_MS);
 
-        // Runs on the local machine, or on the remote host for a remote project —
-        // the executor decides. `cwd` is the project root either way. Output
-        // chunks stream to the UI's tool row as the command produces them.
+        // Agent-authored commands are non-interactive. Keep them on the
+        // pipe-backed streaming path so GUI-hosted Windows runs cannot create a
+        // visible console or Windows Terminal tab. Interactive terminal
+        // consumers use `exec_streaming_pty` explicitly at their own boundary.
+        // The executor still decides whether this runs locally or remotely.
         let output = match executor
-            .exec_streaming_pty(
+            .exec_streaming(
                 &command,
                 &cwd,
                 Duration::from_millis(timeout_ms),

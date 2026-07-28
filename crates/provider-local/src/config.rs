@@ -19,13 +19,18 @@ pub const DEFAULT_BASE_URL: &str = "https://api.clarkslabs.com/v1";
 /// Default coding model: the passthrough tool-calling tier (native tool_calls,
 /// no internal sandbox loop), which the local loop drives with its own tools.
 pub const DEFAULT_MODEL: &str = "clark-code";
+/// Scout's host-pinned model. The Clark `clark-code` tier is GLM 5.2; Scout
+/// ignores conversation and orchestration model selections so one evidence
+/// workflow cannot silently change models between root and delegated turns.
+pub const SCOUT_MODEL: &str = "clark-code";
+/// Scout uses GLM 5.2's provider default reasoning policy rather than
+/// inheriting a reasoning value selected for another conversation model.
+pub const SCOUT_REASONING_EFFORT: Option<&str> = None;
 /// Agentic Clark model used for research / memory extraction (no client tools).
 pub const DEFAULT_RESEARCH_MODEL: &str = "clark";
-/// Stateless multimodal model used to describe image attachments that the
-/// active coding model cannot see. Keep this on the provider-qualified
-/// passthrough path: agentic Clark tiers own a sandbox/session and may answer
-/// the user's task instead of returning a grounded pixel description.
-pub const DEFAULT_VISION_MODEL: &str = "google/gemini-3.1-flash-lite";
+/// GLM 5.2 is the sole supported coding selection without native image input.
+/// Its image fallback is Qwen; Qwen and Kimi receive image blocks directly.
+pub const DEFAULT_VISION_MODEL: &str = "qwen/qwen3.7-flash";
 /// Approximate transcript-token threshold where the local loop checkpoints old
 /// context before the next model request. GLM 5.2 gives us a 1M-token window, so
 /// leave plenty of room for the next turn instead of compacting early.
@@ -37,41 +42,28 @@ pub const DEFAULT_AUTO_COMPACT_TOKEN_LIMIT: usize = 300_000;
 /// engine's overflow-recovery path.
 fn model_context_window(model: &str) -> Option<usize> {
     match model {
-        "clark-code" => Some(1_000_000),                     // GLM 5.2
-        "clark-code:minimax_m3" => Some(1_000_000),          // "1M context"
-        "clark-code:kimi_k3" => Some(1_000_000),             // "1M context"
-        "clark-code:kimi_k27_code" => Some(262_144),         // observed provider contract
-        "clark-code:grok45" => Some(500_000),                // "500K context"
-        "clark-code:deepseek_v4_pro" => Some(1_000_000),     // "1M context"
-        "clark-code:gemini35_flash_lite" => Some(1_000_000), // "1M context"
-        "clark-code:claude_opus_5" => Some(1_000_000),       // "1M context"
-        "clark-code:gpt56_sol" => Some(1_000_000),           // "1M context"
+        "clark-code" => Some(1_000_000),         // GLM 5.2
+        "clark-code:free" => Some(1_000_000),    // backend-owned free model
+        "clark-code:kimi_k3" => Some(1_000_000), // "1M context"
         _ => None,
     }
 }
 
-/// Provider-safe output ceilings for models whose upstream default would
-/// otherwise consume the entire context window. Kimi K2.7's provider defaults
-/// to 262,144 output tokens when omitted, which makes every non-empty prompt
-/// invalid against its 262,144-token total context.
-pub(crate) fn model_max_output_tokens(model: &str) -> Option<u32> {
-    match model {
-        "clark-code:kimi_k27_code" => Some(32_768),
-        _ => None,
-    }
+/// Provider-safe output ceilings for any Clark Code option that needs a client
+/// override. The current three-option catalog uses backend-owned defaults.
+pub(crate) fn model_max_output_tokens(_model: &str) -> Option<u32> {
+    None
 }
 
-/// Whether the selected coding tier accepts image content parts directly.
-/// Models not listed here keep using the separate vision-description fallback.
+/// Qwen and Kimi are native image-capable coding models. GLM is intentionally
+/// excluded so its image attachments take the Qwen fallback path.
 pub(crate) fn model_supports_images(model: &str) -> bool {
-    matches!(
-        model,
-        "clark-code:minimax_m3"
-            | "clark-code:kimi_k3"
-            | "clark-code:gemini35_flash_lite"
-            | "clark-code:claude_opus_5"
-            | "clark-code:gpt56_sol"
-    )
+    matches!(model, "clark-code:free" | "clark-code:kimi_k3")
+}
+
+/// Whether the coding selection consumes Clark's included Free allowance.
+pub(crate) fn is_free_model(model: &str) -> bool {
+    model.trim().eq_ignore_ascii_case("clark-code:free")
 }
 
 /// Effective auto-compaction threshold for `model`: the flat default, lowered
@@ -160,6 +152,8 @@ pub struct LocalConfig {
     /// Bounded local multi-agent orchestration. Available by default, while its
     /// model-facing policy remains explicit-request-only.
     pub(crate) orchestration: crate::orchestration::OrchestrationConfig,
+    pub(crate) scout_capsules: Option<crate::orchestration::ScoutCapsulePolicyConfig>,
+    pub(crate) scout_cartography: Option<crate::orchestration::ScoutCartographyHostConfig>,
     /// Universal root execution lifecycle. This is always present; its limits
     /// control bounded recovery and accounting rather than tool permissions.
     pub(crate) execution: crate::root_execution::RootExecutionConfig,
@@ -261,7 +255,7 @@ impl LocalConfig {
     ///
     /// Recognized `extra` keys: `model`, `temperature`, `max_iterations`,
     /// `permissions` (map of tool→`allow|ask|deny`), `research` (bool, default
-    /// true), `research_model`, `vision_model`, `auto_compact` (bool),
+    /// true), `research_model`, `auto_compact` (bool),
     /// `auto_compact_token_limit`, `compact_request_token_limit`,
     /// `compact_recent_user_token_budget`, and `base_url` (tests only). The key
     /// rides on `auth_token`.
@@ -317,8 +311,7 @@ impl LocalConfig {
         let vision = api_key.is_some().then(|| AgenticClarkConfig {
             base_url: base_url.clone(),
             api_key: api_key.clone(),
-            model: str_field(extra, "vision_model")
-                .unwrap_or_else(|| DEFAULT_VISION_MODEL.to_string()),
+            model: DEFAULT_VISION_MODEL.to_string(),
         });
 
         let cwd = config.cwd.clone().or_else(|| str_field(extra, "cwd"));
@@ -344,6 +337,8 @@ impl LocalConfig {
             .unwrap_or(false);
         let computer_use_backend = ComputerUseBackend::from_extra(extra);
         let mut orchestration = crate::orchestration::OrchestrationConfig::from_extra(extra);
+        let scout_capsules = crate::orchestration::ScoutCapsulePolicyConfig::from_extra(extra);
+        let scout_cartography = crate::orchestration::ScoutCartographyHostConfig::from_extra(extra);
         let execution = crate::root_execution::RootExecutionConfig::from_extra(extra);
 
         let compaction = if extra
@@ -418,6 +413,8 @@ impl LocalConfig {
             computer_use_enabled,
             computer_use_backend,
             orchestration,
+            scout_capsules,
+            scout_cartography,
             execution,
         }
     }
@@ -479,63 +476,26 @@ mod tests {
     }
 
     #[test]
-    fn current_multimodal_model_options_support_native_images() {
-        assert!(model_supports_images("clark-code:minimax_m3"));
+    fn only_glm_52_uses_the_qwen_vision_fallback() {
+        assert!(model_supports_images("clark-code:free"));
         assert!(model_supports_images("clark-code:kimi_k3"));
-        assert!(model_supports_images("clark-code:gemini35_flash_lite"));
-        assert!(model_supports_images("clark-code:claude_opus_5"));
-        assert!(model_supports_images("clark-code:gpt56_sol"));
         assert!(!model_supports_images("clark-code"));
-        assert!(!model_supports_images("clark-code:kimi_k27_code"));
     }
 
     #[test]
-    fn new_efficient_options_use_their_product_stated_context_windows() {
-        for model in ["clark-code:minimax_m3", "clark-code:gemini35_flash_lite"] {
-            assert_eq!(model_context_window(model), Some(1_000_000));
-            assert_eq!(
-                default_auto_compact_limit(model),
-                DEFAULT_AUTO_COMPACT_TOKEN_LIMIT
-            );
-        }
+    fn free_product_identity_does_not_match_raw_qwen_proxy_traffic() {
+        assert!(is_free_model("clark-code:free"));
+        assert!(is_free_model(" CLARK-CODE:FREE "));
+        assert!(!is_free_model("qwen/qwen3.7-flash"));
+        assert!(!is_free_model("clark-code"));
     }
 
     #[test]
-    fn deepseek_v4_pro_uses_its_product_stated_context_window() {
+    fn free_uses_its_backend_owned_context_window() {
+        assert_eq!(model_context_window("clark-code:free"), Some(1_000_000));
         assert_eq!(
-            model_context_window("clark-code:deepseek_v4_pro"),
-            Some(1_000_000)
-        );
-        assert_eq!(
-            default_auto_compact_limit("clark-code:deepseek_v4_pro"),
+            default_auto_compact_limit("clark-code:free"),
             DEFAULT_AUTO_COMPACT_TOKEN_LIMIT
-        );
-    }
-
-    #[test]
-    fn new_frontier_options_use_their_product_stated_context_windows() {
-        for model in ["clark-code:claude_opus_5", "clark-code:gpt56_sol"] {
-            assert_eq!(model_context_window(model), Some(1_000_000));
-            assert_eq!(
-                default_auto_compact_limit(model),
-                DEFAULT_AUTO_COMPACT_TOKEN_LIMIT
-            );
-        }
-    }
-
-    #[test]
-    fn kimi_k27_reserves_context_for_a_bounded_completion() {
-        assert_eq!(
-            model_context_window("clark-code:kimi_k27_code"),
-            Some(262_144)
-        );
-        assert_eq!(
-            model_max_output_tokens("clark-code:kimi_k27_code"),
-            Some(32_768)
-        );
-        assert_eq!(
-            default_auto_compact_limit("clark-code:kimi_k27_code"),
-            209_715
         );
     }
 
@@ -567,7 +527,7 @@ mod tests {
         assert_eq!(vision.base_url, DEFAULT_BASE_URL);
         assert_eq!(vision.api_key.as_deref(), Some("ck_live_abc"));
         assert_eq!(vision.model, DEFAULT_VISION_MODEL);
-        assert_eq!(vision.model, "google/gemini-3.1-flash-lite");
+        assert_eq!(vision.model, "qwen/qwen3.7-flash");
     }
 
     #[test]
@@ -586,18 +546,6 @@ mod tests {
             cfg.vision.is_some(),
             "vision fallback is core functionality, not gated by the research toggle"
         );
-    }
-
-    #[test]
-    fn vision_model_override_uses_its_own_extra_key() {
-        let pc = ProviderConfig {
-            auth_token: Some("ck_live_abc".into()),
-            extra: json!({ "vision_model": "clark_max", "research_model": "clark" }),
-            ..Default::default()
-        };
-        let cfg = LocalConfig::from_provider_config(&pc);
-        assert_eq!(cfg.vision.expect("vision enabled").model, "clark_max");
-        assert_eq!(cfg.clark.expect("research enabled").model, "clark");
     }
 
     #[test]
@@ -630,6 +578,50 @@ mod tests {
             ..Default::default()
         };
         assert!(LocalConfig::from_provider_config(&pc).remote.is_none());
+    }
+
+    #[test]
+    fn scout_cartography_binding_is_exact_and_host_owned() {
+        let organization_id = uuid::Uuid::new_v4();
+        let workspace_id = uuid::Uuid::new_v4();
+        let pc = ProviderConfig {
+            auth_token: Some("ck_live_abc".into()),
+            extra: json!({
+                "scout_cartography": {
+                    "organization_id": organization_id,
+                    "workspace_id": workspace_id,
+                    "identity_root": "/host-private/clark/scout",
+                    "platform": "linux",
+                    "architecture": "x86_64"
+                }
+            }),
+            ..Default::default()
+        };
+        let binding = LocalConfig::from_provider_config(&pc)
+            .scout_cartography
+            .expect("complete host binding");
+        assert_eq!(binding.organization_id, organization_id);
+        assert_eq!(binding.workspace_id, workspace_id);
+        assert_eq!(
+            binding.identity_root,
+            std::path::PathBuf::from("/host-private/clark/scout")
+        );
+
+        let relative = ProviderConfig {
+            extra: json!({
+                "scout_cartography": {
+                    "organization_id": organization_id,
+                    "workspace_id": workspace_id,
+                    "identity_root": ".clark/scout",
+                    "platform": "linux",
+                    "architecture": "x86_64"
+                }
+            }),
+            ..Default::default()
+        };
+        assert!(LocalConfig::from_provider_config(&relative)
+            .scout_cartography
+            .is_none());
     }
 
     #[test]

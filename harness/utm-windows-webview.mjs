@@ -9,7 +9,8 @@ import { assertClarkOwnedQaEmail } from "./clark-qa-auth.mjs";
 import { executeGuestJson } from "./utm-guest-channel.mjs";
 import { QmpClient } from "./utm-qmp.mjs";
 
-const DEFAULT_VM_NAME = "Clark QA - Windows 11 ARM";
+const DEFAULT_VM_NAME =
+  process.env.CLARK_WINDOWS_QA_VM_NAME || "Clark QA - Windows 11 ARM";
 const DEFAULT_QMP_PORT = 47_111;
 const DEFAULT_CDP_PORT = 9_222;
 const DEFAULT_EXECUTABLE =
@@ -44,7 +45,7 @@ function powershellString(value) {
   return `'${String(value).replaceAll("'", "''")}'`;
 }
 
-function windowsGuestProbe({
+export function windowsGuestProbe({
   probeSource,
   vmName = DEFAULT_VM_NAME,
   run = defaultRun,
@@ -238,7 +239,7 @@ export function evaluateWindowsClarkWebView({
 
 export function qaStorageExpression({
   cwd = String.raw`C:\Users\home\ClarkCodeQA`,
-  model = "clark-code:minimax_m3",
+  model = "clark-code:free",
   apiKey = "",
 }) {
   const auth = {
@@ -277,7 +278,7 @@ export function qaStorageExpression({
 export function qaAuthenticatedStorageExpression({
   authSession,
   cwd = String.raw`C:\Users\home\ClarkCodeQA`,
-  model = "clark-code:minimax_m3",
+  model = "clark-code:free",
 }) {
   const id = authSession?.user?.id?.trim();
   const name = authSession?.user?.name?.trim();

@@ -1,0 +1,23 @@
+{
+  "name": "clark-code-flagship-film",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "studio": "remotion studio src/index.tsx",
+    "render": "remotion render src/index.tsx ClarkCodeFlagship out/clark-code-flagship-silent.mp4 --codec=h264 --crf=16",
+    "still": "remotion still src/index.tsx ClarkCodeFlagship out/poster.png --frame=1170",
+    "render:v2": "remotion render src/index.tsx ClarkCodeProductCut out/clark-code-product-cut-v2-silent.mp4 --codec=h264 --crf=16",
+    "still:v2": "remotion still src/index.tsx ClarkCodeProductCut out/poster-v2.png --frame=30"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.499",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "remotion": "4.0.499"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.2",
+    "@types/react-dom": "19.2.2",
+    "typescript": "5.9.3"
+  }
+}

@@ -5,7 +5,7 @@ import { executeGuestJson } from "./utm-guest-channel.mjs";
 
 const DEFAULT_VM_NAME = "Clark QA - Ubuntu 24.04 Desktop";
 const DEFAULT_FIXTURE = "/home/home/ClarkCodeQA";
-const DEFAULT_MODEL = "clark-code:minimax_m3";
+const DEFAULT_MODEL = "clark-code:free";
 
 function pythonString(value) {
   return JSON.stringify(String(value));

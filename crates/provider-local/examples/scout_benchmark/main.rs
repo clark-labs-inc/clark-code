@@ -1,3 +1,10 @@
+mod accumulator_eval;
+mod affected_append_eval;
+mod cartography_eval;
+mod central_ingest_eval;
+mod conflict_append_eval;
+mod enterprise_eval;
+mod high_fan_in_eval;
 mod model;
 mod scenarios;
 
@@ -15,6 +22,12 @@ struct Args {
     host_label: String,
     containment: String,
     denied_write: Option<PathBuf>,
+    enterprise_services: usize,
+    enterprise_machines: usize,
+    enterprise_conflicts: usize,
+    enterprise_fan_in: usize,
+    enterprise_fan_in_sweep: bool,
+    high_fan_in_only: bool,
 }
 
 impl Args {
@@ -24,6 +37,12 @@ impl Args {
             host_label: "local".into(),
             containment: "external".into(),
             denied_write: None,
+            enterprise_services: 1_200,
+            enterprise_machines: 8,
+            enterprise_conflicts: 1_000,
+            enterprise_fan_in: 64,
+            enterprise_fan_in_sweep: false,
+            high_fan_in_only: false,
         };
         let mut input = std::env::args().skip(1);
         while let Some(argument) = input.next() {
@@ -42,10 +61,43 @@ impl Args {
                         input.next().ok_or("--denied-write requires a path")?,
                     ))
                 }
+                "--enterprise-services" => {
+                    args.enterprise_services = input
+                        .next()
+                        .ok_or("--enterprise-services requires a value")?
+                        .parse()
+                        .map_err(|_| "--enterprise-services must be an integer")?
+                }
+                "--enterprise-machines" => {
+                    args.enterprise_machines = input
+                        .next()
+                        .ok_or("--enterprise-machines requires a value")?
+                        .parse()
+                        .map_err(|_| "--enterprise-machines must be an integer")?
+                }
+                "--enterprise-conflicts" => {
+                    args.enterprise_conflicts = input
+                        .next()
+                        .ok_or("--enterprise-conflicts requires a value")?
+                        .parse()
+                        .map_err(|_| "--enterprise-conflicts must be an integer")?
+                }
+                "--enterprise-fan-in" => {
+                    args.enterprise_fan_in = input
+                        .next()
+                        .ok_or("--enterprise-fan-in requires a value")?
+                        .parse()
+                        .map_err(|_| "--enterprise-fan-in must be an integer")?
+                }
+                "--enterprise-fan-in-sweep" => args.enterprise_fan_in_sweep = true,
+                "--high-fan-in-only" => args.high_fan_in_only = true,
                 "--help" | "-h" => {
                     println!(
                         "scout_benchmark [--out PATH] [--host-label LABEL] \
-                         [--containment external|bwrap] [--denied-write PATH]"
+                         [--containment external|bwrap] [--denied-write PATH] \
+                         [--enterprise-services COUNT] [--enterprise-machines COUNT] \
+                         [--enterprise-conflicts COUNT] [--enterprise-fan-in COUNT] \
+                         [--enterprise-fan-in-sweep] [--high-fan-in-only]"
                     );
                     std::process::exit(0);
                 }
@@ -62,6 +114,18 @@ impl Args {
         }
         if !matches!(args.containment.as_str(), "external" | "bwrap") {
             return Err("containment must be external or bwrap".into());
+        }
+        if !(1..=100_000).contains(&args.enterprise_services) {
+            return Err("enterprise services must be in 1..=100000".into());
+        }
+        if !(1..=256).contains(&args.enterprise_machines) {
+            return Err("enterprise machines must be in 1..=256".into());
+        }
+        if !(64..=100_000).contains(&args.enterprise_conflicts) {
+            return Err("enterprise conflicts must be in 64..=100000".into());
+        }
+        if !(1..=100_000).contains(&args.enterprise_fan_in) {
+            return Err("enterprise fan-in must be in 1..=100000".into());
         }
         Ok(args)
     }
@@ -103,41 +167,70 @@ async fn run() -> Result<(), String> {
     };
 
     let mut recorder = Recorder::new();
-    let skill_result = skill_contract().await;
-    recorder.case("bundled_skill_contract", || skill_result);
-    recorder.case("complete_ledger_replay", scenarios::complete_replay);
-    recorder.case(
-        "unissued_assignment_rejected",
-        scenarios::unissued_assignment_rejected,
-    );
-    recorder.case(
-        "worker_self_certification_rejected",
-        scenarios::worker_self_certification_rejected,
-    );
-    recorder.case(
-        "missing_replay_recipe_rejected",
-        scenarios::missing_replay_recipe_rejected,
-    );
-    recorder.case(
-        "unverified_failed_test_rejected",
-        scenarios::unverified_failed_test_rejected,
-    );
-    recorder.case("t3_controls_required", scenarios::t3_controls_required);
-    recorder.case(
-        "underpowered_null_rejected",
-        scenarios::underpowered_null_rejected,
-    );
-    recorder.case(
-        "partial_seal_requires_gap",
-        scenarios::partial_requires_limit,
-    );
-    recorder.case("forged_actor_rejected", scenarios::forged_actor_rejected);
-    recorder.case("wilson_reference", scenarios::wilson_reference);
-    recorder.case(
-        "seeded_bootstrap_determinism",
-        scenarios::seeded_bootstrap_determinism,
-    );
-    recorder.case("containment_controls", || containment_contract(&args));
+    if !args.high_fan_in_only {
+        let skill_result = skill_contract().await;
+        recorder.case("bundled_skill_contract", || skill_result);
+        recorder.case(
+            "business_system_simulation_contract",
+            cartography_eval::business_system_contract,
+        );
+        recorder.case("enterprise_multi_machine_scale", || {
+            enterprise_eval::multi_machine_scale(args.enterprise_services, args.enterprise_machines)
+        });
+        recorder.case("enterprise_central_ingestion", || {
+            central_ingest_eval::central_ingestion(
+                args.enterprise_services,
+                args.enterprise_machines,
+            )
+        });
+        recorder.case("enterprise_incremental_accumulator", || {
+            accumulator_eval::incremental_accumulator(args.enterprise_services)
+        });
+        recorder.case("enterprise_affected_row_append_scaling", || {
+            affected_append_eval::affected_row_append_scaling(args.enterprise_services)
+        });
+        recorder.case("enterprise_conflict_append_scaling", || {
+            conflict_append_eval::conflict_append_scaling(args.enterprise_conflicts)
+        });
+    }
+    recorder.case("enterprise_high_fan_in_baseline", || {
+        high_fan_in_eval::high_fan_in_baseline(args.enterprise_fan_in, args.enterprise_fan_in_sweep)
+    });
+    if !args.high_fan_in_only {
+        recorder.case("complete_ledger_replay", scenarios::complete_replay);
+        recorder.case(
+            "unissued_assignment_rejected",
+            scenarios::unissued_assignment_rejected,
+        );
+        recorder.case(
+            "worker_self_certification_rejected",
+            scenarios::worker_self_certification_rejected,
+        );
+        recorder.case(
+            "missing_replay_recipe_rejected",
+            scenarios::missing_replay_recipe_rejected,
+        );
+        recorder.case(
+            "unverified_failed_test_rejected",
+            scenarios::unverified_failed_test_rejected,
+        );
+        recorder.case("t3_controls_required", scenarios::t3_controls_required);
+        recorder.case(
+            "underpowered_null_rejected",
+            scenarios::underpowered_null_rejected,
+        );
+        recorder.case(
+            "partial_seal_requires_gap",
+            scenarios::partial_requires_limit,
+        );
+        recorder.case("forged_actor_rejected", scenarios::forged_actor_rejected);
+        recorder.case("wilson_reference", scenarios::wilson_reference);
+        recorder.case(
+            "seeded_bootstrap_determinism",
+            scenarios::seeded_bootstrap_determinism,
+        );
+        recorder.case("containment_controls", || containment_contract(&args));
+    }
 
     let receipt = recorder.finish(args.host_label, capabilities, args.containment);
     let passed = receipt.status == "passed";
@@ -154,8 +247,14 @@ async fn run() -> Result<(), String> {
 async fn skill_contract() -> Result<(String, serde_json::Value), String> {
     let skill_body = include_str!("../../skills/scout/SKILL.md");
     for required_rule in [
-        "Exhaust every discovered capability family and safe authentication context",
-        "Every pinned manifest row has a terminal status",
+        "Exhaust the declared business-system graph, not the host filesystem",
+        "Stop only when every frontier row is terminal",
+        "initialize `scout_enterprise`",
+        "scout_adapter exhaust_and_append",
+        "scout_enterprise_query status",
+        "Commit a terminal page only through the coordinator's atomic page boundary",
+        "scout-capsule-core",
+        "The simulation model must name business actors",
     ] {
         if !skill_body.contains(required_rule) {
             return Err(format!(
@@ -166,7 +265,10 @@ async fn skill_contract() -> Result<(String, serde_json::Value), String> {
     let project = tempfile::tempdir().map_err(|error| error.to_string())?;
     let tools = HashSet::from([
         "scout_capabilities".to_string(),
+        "scout_adapter".to_string(),
         "scout_ledger".to_string(),
+        "scout_enterprise".to_string(),
+        "scout_enterprise_query".to_string(),
         "scout_probe".to_string(),
         "scout_measure".to_string(),
         "delegate_read_only".to_string(),

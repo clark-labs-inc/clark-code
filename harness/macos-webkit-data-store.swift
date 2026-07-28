@@ -154,7 +154,7 @@ private func validatedSeedPayload(at path: String) throws -> SeedPayload {
     else {
         throw ToolFailure.message("bootstrap project is outside the macOS QA workspace root")
     }
-    guard payload.model == "clark-code:minimax_m3" else {
+    guard payload.model == "clark-code:free" else {
         throw ToolFailure.message("bootstrap model is not the bounded cheapest-paid route")
     }
     guard UUID(uuidString: payload.marker) != nil else {

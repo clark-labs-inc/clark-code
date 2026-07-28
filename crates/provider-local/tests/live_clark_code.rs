@@ -41,7 +41,10 @@ fn is_clark_code_provider(value: &str) -> bool {
 }
 
 fn is_clark_code_model(value: &str) -> bool {
-    value == "clark-code" || value.starts_with("clark-code:")
+    matches!(
+        value,
+        "clark-code" | "clark-code:free" | "clark-code:kimi_k3"
+    )
 }
 
 fn live_max_iterations() -> u32 {
@@ -109,8 +112,9 @@ fn live_matrix_accepts_backend_owned_clark_code_aliases_only() {
     assert!(is_clark_code_provider("clark-platform"));
     assert!(!is_clark_code_provider("openrouter"));
     assert!(is_clark_code_model("clark-code"));
-    assert!(is_clark_code_model("clark-code:minimax_m3"));
-    assert!(is_clark_code_model("clark-code:deepseek_v4_pro"));
+    assert!(is_clark_code_model("clark-code:free"));
+    assert!(is_clark_code_model("clark-code:kimi_k3"));
+    assert!(!is_clark_code_model("clark-code:grok45"));
     assert!(!is_clark_code_model("deepseek/deepseek-v4-pro"));
     assert!(!is_clark_code_model("clark"));
 }

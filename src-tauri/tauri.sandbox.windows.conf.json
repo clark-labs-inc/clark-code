@@ -4,6 +4,7 @@
       "binaries/rg-x86_64-pc-windows-msvc.exe": "clark-path/rg.exe",
       "binaries/clark-command-runner-x86_64-pc-windows-msvc.exe": "clark-resources/sandbox/windows/clark-command-runner.exe",
       "binaries/clark-windows-sandbox-setup-x86_64-pc-windows-msvc.exe": "clark-resources/sandbox/windows/clark-windows-sandbox-setup.exe",
+      "binaries/clark-computer-use-helper-x86_64-pc-windows-msvc.exe": "clark-resources/computer-use/clark-computer-use-helper.exe",
       "binaries/rg-LICENSE-MIT": "clark-resources/licenses/ripgrep/LICENSE-MIT",
       "binaries/rg-UNLICENSE": "clark-resources/licenses/ripgrep/UNLICENSE"
     },

@@ -31,7 +31,7 @@ export const APPROVAL_POLICIES: ApprovalPolicyInfo[] = [
   {
     id: "full",
     label: "Full access",
-    description: "Run all actions, including websites and external tools; hard blocks still apply",
+    description: "Run directly on your machine without Clark’s command sandbox or action approvals",
   },
 ];
 

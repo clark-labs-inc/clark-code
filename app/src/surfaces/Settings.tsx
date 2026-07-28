@@ -19,7 +19,7 @@ import {
   billingPlanLabel,
   clarkBillingUrl,
   effectiveBilling,
-  effectiveUsagePercent,
+  effectiveLimitLabel,
   openExternal,
 } from "../lib/account";
 import { stepTextSize, TEXT_SIZES, type TextSize } from "../lib/useTextSize";
@@ -556,7 +556,7 @@ function AccountSection() {
       : statusTone(sub?.status);
   const planLabel = activeBilling?.plan?.name
     ?? (isTeamBilling ? "Workspace coverage" : billingPlanLabel(sub?.plan_key));
-  const usagePercent = effectiveUsagePercent(billing);
+  const limitLabel = effectiveLimitLabel(billing);
   const renews = formatDate(sub?.current_period_end);
   const firstLoad = loading && !billing;
 
@@ -603,11 +603,7 @@ function AccountSection() {
           </Row>
           <Row name="Limit used">
             <span className="text-sm font-medium tabular-nums text-ink">
-              {usagePercent !== null
-                ? `${usagePercent}%`
-                : activeBilling?.access_state === "unlimited"
-                  ? "No limit"
-                  : "—"}
+              {limitLabel}
             </span>
           </Row>
           {isTeamBilling && activeBilling?.seat && (

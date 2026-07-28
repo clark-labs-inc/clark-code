@@ -9,8 +9,8 @@ mod takeover;
 use computer_use::{
     native_backend, ActionAuthorization, ActionDisposition, ActionIntent, ActionLocation,
     ActionRisk, ClickRequest, ComputerAction, ComputerBackend, ComputerUseError, MouseButton,
-    PermissionStatus, Point, PrepareActionRequest, ReceiptOutcome, SimulatedComputerBackend,
-    WindowFilter, WindowInfo,
+    PermissionRequest, PermissionStatus, Point, PrepareActionRequest, ReceiptOutcome,
+    SimulatedComputerBackend, WindowFilter, WindowInfo,
 };
 
 #[cfg(target_os = "macos")]
@@ -64,11 +64,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         approval_root.path().join("computer-use"),
     );
     let backend = native_backend()?;
-    let status = backend.permissions()?;
+    let mut status = backend.permissions()?;
     println!(
         "helper_permissions=accessibility:{} screen_recording:{}",
         status.accessibility, status.screen_recording
     );
+    if std::env::var_os("CLARK_COMPUTER_USE_REQUEST_PERMISSIONS").is_some() {
+        status = backend.request_permissions(PermissionRequest {
+            accessibility: true,
+            screen_recording: true,
+        })?;
+        println!(
+            "helper_permission_request=issued accessibility:{} screen_recording:{}",
+            status.accessibility, status.screen_recording
+        );
+    }
 
     let forbidden = backend
         .launch_application("com.apple.Terminal")
@@ -436,8 +446,7 @@ fn wait_for_window(
                 title_contains: Some("Clark Computer Use Fixture".to_string()),
             })?
             .into_iter()
-            .filter(|window| expected_pid.is_none_or(|pid| window.target.pid == pid))
-            .next()
+            .find(|window| expected_pid.is_none_or(|pid| window.target.pid == pid))
         {
             return Ok(window);
         }

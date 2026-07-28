@@ -27,6 +27,30 @@ import {
   buildWindowsOneShotAutologon,
 } from "./utm-unattended-config.mjs";
 import { ubuntuBuildInstallLaunchProbe } from "./utm-ubuntu-journey-probe.mjs";
+import { windowsReleaseInstallProbe } from "./utm-windows-release-install.mjs";
+import {
+  createReleaseClone,
+  deleteReleaseClone,
+  validateReleaseVmNames,
+} from "./utm-windows-release-vm.mjs";
+import {
+  firstRunObservationExpression,
+  fullAccessObservationExpression,
+  openIntegratedTerminalExpression,
+  packagedConsoleSmokeProbe,
+  packagedSandboxSmokeProbe,
+  validateWindowsInstallReceipt,
+  WINDOWS_FIRST_RUN_ASSERTIONS,
+} from "./utm-windows-release-journey.mjs";
+import {
+  seedInstallProbe,
+  validateWindowsUpdateJourneyReceipt,
+  WINDOWS_UPDATE_ASSERTIONS,
+} from "./utm-windows-update-journey.mjs";
+import {
+  NATIVE_CONTAINMENT_ASSERTIONS,
+  validateNativeContainmentReceipt,
+} from "./windows-native-containment.mjs";
 import {
   buildUbuntuAuthenticatedWorkspaceProbe,
 } from "./utm-ubuntu-webview.mjs";
@@ -45,6 +69,7 @@ import {
   qaStorageExpression,
 } from "./utm-windows-webview.mjs";
 import {
+  ensureUtmVmStarted,
   evaluateGuest,
   parseJsonTail,
   parseUtmList,
@@ -90,6 +115,127 @@ F7B555EF-F2BB-463D-9702-9C8BA84C446A stopped  Clark QA - Ubuntu 24.04 Desktop
   ]);
 });
 
+test("UTM runner preflight starts the exact registered VM and waits for readiness", () => {
+  let listCount = 0;
+  const calls = [];
+  const guest = ensureUtmVmStarted({
+    vmName: environments.windows.vm_name,
+    pollDelayMs: 0,
+    run(command, args) {
+      calls.push([command, ...args]);
+      if (args[0] === "start") {
+        return { ok: true, exit_code: 0, stdout: "", stderr: "" };
+      }
+      listCount += 1;
+      const status = listCount >= 3 ? "started" : "stopped";
+      return {
+        ok: true,
+        exit_code: 0,
+        stdout: `UUID                                 Status   Name
+95A632BC-CCB1-4EE4-95F0-8AD7609DECF6 ${status}  ${environments.windows.vm_name}
+`,
+        stderr: "",
+      };
+    },
+  });
+  assert.equal(guest.status, "started");
+  assert.equal(
+    calls.some((call) => call[1] === "start" && call[2] === environments.windows.vm_name),
+    true,
+  );
+});
+
+test("UTM runner preflight rejects a missing exact Windows VM", () => {
+  assert.throws(
+    () => ensureUtmVmStarted({
+      vmName: environments.windows.vm_name,
+      run() {
+        return {
+          ok: true,
+          exit_code: 0,
+          stdout: "UUID                                 Status   Name\n",
+          stderr: "",
+        };
+      },
+    }),
+    /not registered/,
+  );
+});
+
+test("release VM lifecycle is constrained to one pristine base and per-run clone", () => {
+  assert.deepEqual(
+    validateReleaseVmNames({
+      base: "Clark QA - Windows 11 ARM",
+      clone: "Clark QA Release 123-2",
+    }),
+    {
+      base: "Clark QA - Windows 11 ARM",
+      clone: "Clark QA Release 123-2",
+    },
+  );
+  assert.throws(
+    () => validateReleaseVmNames({ clone: "Clark QA - Windows 11 ARM" }),
+    /outside the per-run Clark QA namespace/,
+  );
+
+  const base = {
+    uuid: "95A632BC-CCB1-4EE4-95F0-8AD7609DECF6",
+    status: "stopped",
+    name: "Clark QA - Windows 11 ARM",
+  };
+  const clone = {
+    uuid: "11111111-2222-3333-4444-555555555555",
+    status: "absent",
+    name: "Clark QA Release 123-2",
+  };
+  const calls = [];
+  const list = () => {
+    const rows = [base, ...(clone.status === "absent" ? [] : [clone])]
+      .map((item) => `${item.uuid} ${item.status}  ${item.name}`)
+      .join("\n");
+    return {
+      ok: true,
+      exit_code: 0,
+      stdout: `UUID                                 Status   Name\n${rows}\n`,
+      stderr: "",
+    };
+  };
+  const run = (command, args) => {
+    calls.push([command, ...args]);
+    if (args[0] === "list") return list();
+    if (args[0] === "clone") {
+      clone.status = "stopped";
+      return { ok: true, exit_code: 0, stdout: "", stderr: "" };
+    }
+    if (args[0] === "start") {
+      clone.status = "started";
+      return { ok: true, exit_code: 0, stdout: "", stderr: "" };
+    }
+    if (args[0] === "stop") {
+      clone.status = "stopped";
+      return { ok: true, exit_code: 0, stdout: "", stderr: "" };
+    }
+    if (args[0] === "delete") {
+      clone.status = "absent";
+      return { ok: true, exit_code: 0, stdout: "", stderr: "" };
+    }
+    throw new Error(`unexpected mock command ${command} ${args.join(" ")}`);
+  };
+  assert.equal(
+    createReleaseClone({
+      base: base.name,
+      clone: clone.name,
+      run,
+    }).status,
+    "started",
+  );
+  assert.equal(deleteReleaseClone(clone.name, run).status, "deleted");
+  assert.equal(
+    calls.some((call) => call[1] === "delete" && call.includes(clone.name)),
+    true,
+  );
+});
+
 test("guest JSON is recovered from a diagnostic-prefixed UTM response", () => {
   assert.deepEqual(
     parseJsonTail("diagnostic line\n{\"os_id\":\"ubuntu\",\"live_session\":false}\n"),
@@ -121,6 +267,16 @@ test("guest probe paths and commands are platform-scoped and contain no credenti
   assert.equal(ubuntu.command[0], "/usr/bin/python3");
   assert.equal(ubuntu.detachedCommand[0], "/bin/sh");
   assert.match(ubuntu.detachedCommand.at(-1), /nohup \/usr\/bin\/python3/);
+
+  const macos = buildGuestProbe({
+    platform: "macos",
+    probeSource: "payload = {}",
+    marker: "marker",
+    basename: "probe",
+  });
+  assert.equal(macos.outputPath, "/var/tmp/probe.json");
+  assert.equal(macos.scriptPath, "/var/tmp/probe.py");
+  assert.equal(macos.command[0], "/usr/bin/python3");
 
   const windows = buildGuestProbe({
     platform: "windows",
@@ -425,6 +581,229 @@ test("Ubuntu product journey builds embedded ARM assets and launches without a u
   assert.doesNotMatch(probe, /CLARK_QA_VM_PASSWORD|customer\.example/i);
 });
 
+test("Windows release install journey requires an exact clean candidate and UAC", () => {
+  const probe = windowsReleaseInstallProbe({
+    expectedVersion: "0.1.91",
+    expectedSha256: "a".repeat(64),
+    expectedSignerSubject: "CN=Clark Labs Inc., O=Clark Labs Inc., C=US",
+    expectedSignerThumbprint: "A".repeat(40),
+    sourceRevision: "b".repeat(40),
+  });
+  assert.match(probe, /Get-FileHash -Algorithm SHA256/);
+  assert.match(probe, /Get-AuthenticodeSignature/);
+  assert.match(probe, /installed app does not share the valid installer Authenticode identity/);
+  assert.match(probe, /EnableLUA/);
+  assert.match(probe, /freshSandboxState/);
+  assert.match(probe, /requires the verified pristine Windows clone/);
+  assert.match(probe, /uninstallRegistrations/);
+  assert.match(probe, /ClarkSandboxOffline/);
+  assert.match(probe, /clark_sandbox_offline_block_outbound/);
+  assert.doesNotMatch(probe, /existing Clark Code uninstall failed/);
+  assert.match(probe, /ProductVersion/);
+  assert.match(probe, /required_user_vm_actions = 0/);
+  assert.doesNotMatch(probe, /CLARK_QA_VM_PASSWORD|customer\.example/i);
+  assert.throws(() => windowsReleaseInstallProbe({
+    expectedVersion: "0.1.91-dirty",
+    expectedSha256: "a".repeat(64),
+    expectedSignerSubject: "CN=Clark Labs Inc., O=Clark Labs Inc., C=US",
+    expectedSignerThumbprint: "A".repeat(40),
+    sourceRevision: "b".repeat(40),
+  }));
+});
+
+test("Windows packaged first-run gate requires inline setup and explicit Full Access copy", () => {
+  const firstRun = firstRunObservationExpression();
+  const fullAccess = fullAccessObservationExpression();
+  assert.match(firstRun, /Enable the Windows command sandbox/);
+  assert.match(firstRun, /local_sandbox_status/);
+  assert.match(firstRun, /send_disabled/);
+  assert.match(
+    fullAccess,
+    /without Clark’s command sandbox or action approvals/,
+  );
+  assert.doesNotMatch(firstRun, /danger-full-access/);
+  const terminal = openIntegratedTerminalExpression();
+  assert.match(terminal, /terminal_open/);
+  assert.match(terminal, /terminal_write/);
+  assert.match(terminal, /ConPTY/);
+  const packaged = packagedConsoleSmokeProbe.toString();
+  assert.match(packaged, /--windows-console-smoke/);
+  assert.match(packaged, /ordinary_output_seen/);
+  assert.match(packaged, /computer_use_permissions_observed/);
+  const sandboxed = packagedSandboxSmokeProbe.toString();
+  assert.match(sandboxed, /--windows-sandbox-smoke/);
+  assert.match(sandboxed, /outside_write_blocked/);
+  assert.match(sandboxed, /containment/);
+  assert.equal(
+    WINDOWS_FIRST_RUN_ASSERTIONS.includes("trusted_uac_consent_observed"),
+    true,
+  );
+});
+
+test("Windows packaged journey rejects stale or non-fresh install receipts", () => {
+  const valid = {
+    receipt_type: "clark_code_windows_release_install",
+    status: "passed",
+    required_user_vm_actions: 0,
+    source_revision: "a".repeat(40),
+    release_candidate: {
+      installer_sha256: "b".repeat(64),
+      expected_version: "0.1.92",
+      installed_version: "0.1.92",
+      tag: "v0.1.92",
+      immutable_url:
+        "https://downloads.clarkchat.com/desktop/releases/v0.1.92/ClarkCode_x64-setup.exe",
+      downloaded_size: 123,
+      download_receipt_sha256: "f".repeat(64),
+      build_receipt_sha256: "e".repeat(64),
+      source_revision: "a".repeat(40),
+      fresh_install: true,
+      fresh_sandbox_state: true,
+      sandbox_state_outside_install_root: true,
+      uac_enabled: true,
+      signature_status: "Valid",
+      installed_signature_status: "Valid",
+      signer_subject: "CN=Clark Labs Inc., O=Clark Labs Inc., C=US",
+      expected_signer_subject: "CN=Clark Labs Inc., O=Clark Labs Inc., C=US",
+      signer_thumbprint: "A".repeat(40),
+      expected_signer_thumbprint: "A".repeat(40),
+    },
+  };
+  assert.equal(validateWindowsInstallReceipt(valid), valid);
+  assert.throws(() => validateWindowsInstallReceipt({
+    ...valid,
+    release_candidate: { ...valid.release_candidate, fresh_sandbox_state: false },
+  }));
+});
+
+test("Windows installed-update receipts require the signed relaunch and persisted sandbox", () => {
+  const revision = "c".repeat(40);
+  const version = "0.1.92";
+  const signer = "A".repeat(40);
+  const tag = `v${version}`;
+  const releaseCandidate = {
+    installer_sha256: "b".repeat(64),
+    expected_version: version,
+    installed_version: version,
+    tag,
+    immutable_url:
+      `https://downloads.clarkchat.com/desktop/releases/${tag}/ClarkCode_x64-setup.exe`,
+    downloaded_size: 123,
+    download_receipt_sha256: "f".repeat(64),
+    build_receipt_sha256: "e".repeat(64),
+    source_revision: revision,
+    fresh_install: true,
+    fresh_sandbox_state: true,
+    sandbox_state_outside_install_root: true,
+    uac_enabled: true,
+    signature_status: "Valid",
+    installed_signature_status: "Valid",
+    signer_subject: "CN=Clark Labs Inc., O=Clark Labs Inc., C=US",
+    expected_signer_subject: "CN=Clark Labs Inc., O=Clark Labs Inc., C=US",
+    signer_thumbprint: signer,
+    expected_signer_thumbprint: signer,
+  };
+  const updateCandidate = {
+    receipt_type: "clark_code_windows_update_candidate",
+    status: "passed",
+    source_revision: revision,
+    tag,
+    version,
+    seed_version: "0.0.0",
+    endpoint:
+      `https://downloads.clarkchat.com/desktop/releases/${tag}/windows-update.json`,
+    artifact_url: releaseCandidate.immutable_url,
+    manifest_sha256: "d".repeat(64),
+    signer: "tauri_ed25519",
+  };
+  const receipt = {
+    receipt_type: "clark_code_windows_installed_update",
+    status: "passed",
+    source_revision: revision,
+    required_user_vm_actions: 0,
+    human_input_observed: false,
+    paid_calls_made: false,
+    release_candidate: releaseCandidate,
+    update_candidate: updateCandidate,
+    update_endpoint: {
+      url: updateCandidate.endpoint,
+      sha256: updateCandidate.manifest_sha256,
+      version,
+    },
+    seed: {
+      version: "0.0.0",
+      sha256: "e".repeat(64),
+      install: { status: "passed" },
+    },
+    assertions: WINDOWS_UPDATE_ASSERTIONS.map((id) => ({
+      id,
+      status: "passed",
+    })),
+    final_boundary: {
+      installed_version: version,
+      signature_status: "Valid",
+      signer_thumbprint: signer,
+      sandbox_marker_exists: true,
+      sandbox_state_outside_install_root: true,
+      visible_console_processes: [],
+    },
+    console_monitor: { observations: [] },
+    uac_observation: {
+      gui_visible: true,
+      capture_transport: "macos_window_id",
+      screenshot_sha256: "f".repeat(64),
+    },
+    uac_boundary: {
+      uac_consent_process_present: true,
+    },
+    updated_webview: {
+      value: {
+        text: `Updated to v${version}`,
+        sandbox: { state: "enforced" },
+      },
+    },
+  };
+  assert.equal(validateWindowsUpdateJourneyReceipt(receipt, revision), receipt);
+  receipt.final_boundary.sandbox_marker_exists = false;
+  assert.throws(
+    () => validateWindowsUpdateJourneyReceipt(receipt, revision),
+    /lacks exact passing evidence/,
+  );
+  receipt.final_boundary.sandbox_marker_exists = true;
+  receipt.uac_boundary.uac_consent_process_present = false;
+  assert.throws(
+    () => validateWindowsUpdateJourneyReceipt(receipt, revision),
+    /lacks exact passing evidence/,
+  );
+});
+
+test("Windows updater seed probe requires the production signing identity", () => {
+  const probe = seedInstallProbe({
+    seedVersion: "0.0.0",
+    expectedSignerThumbprint: "A".repeat(40),
+    sourceRevision: "c".repeat(40),
+  });
+  assert.match(probe, /Get-AuthenticodeSignature/);
+  assert.match(probe, /updater seed does not share the release Authenticode identity/);
+  assert.match(probe, /fresh_sandbox_state/);
+});
+
+test("Windows native containment receipt is revision-bound and exhaustive", () => {
+  const revision = "c".repeat(40);
+  const receipt = {
+    receipt_type: "clark_code_windows_native_containment",
+    status: "passed",
+    source_revision: revision,
+    assertions: NATIVE_CONTAINMENT_ASSERTIONS.map((id) => ({
+      id,
+      status: "passed",
+    })),
+    evidence: { log_sha256: "d".repeat(64) },
+  };
+  assert.equal(validateNativeContainmentReceipt(receipt, revision), receipt);
+  assert.throws(() => validateNativeContainmentReceipt(receipt, "e".repeat(40)));
+});
+
 test("Ubuntu authenticated journey seeds only Clark-owned state and erases its transfer", () => {
   const authSession = {
     user: {
@@ -442,7 +821,7 @@ test("Ubuntu authenticated journey seeds only Clark-owned state and erases its t
   assert.match(probe, /tauri_localhost_0\.localstorage/);
   assert.match(probe, /utf-16-le/);
   assert.match(probe, /provider_key_owner_bound/);
-  assert.match(probe, /clark-code:minimax_m3/);
+  assert.match(probe, /clark-code:free/);
   assert.match(probe, /loginctl", "unlock-session"/);
   assert.match(probe, /required_user_vm_actions": 0/);
   assert.doesNotMatch(probe, /customer\.example|CLARK_QA_AUTH_PASSWORD/i);
@@ -566,10 +945,10 @@ test("Windows WebView control is loopback-only, temporary, and CDP-encoded", () 
 test("Windows QA storage fixture has local auth but no Clark cloud token", () => {
   const expression = qaStorageExpression({
     cwd: String.raw`C:\Users\home\ClarkCodeQA`,
-    model: "clark-code:minimax_m3",
+    model: "clark-code:free",
   });
   assert.match(expression, /local_only_no_cloud_token/);
-  assert.match(expression, /clark-code:minimax_m3/);
+  assert.match(expression, /clark-code:free/);
   assert.doesNotMatch(expression, /ck_live_/);
   assert.doesNotMatch(expression, /"token"/);
 });
@@ -793,12 +1172,69 @@ test("a visible Windows 11 desktop with the command channel is ready", () => {
         os_caption: "Microsoft Windows 11 Pro",
         desktop_shell_running: true,
         qemu_ga_service: "Running",
+        uac_enable_lua: 1,
         clark_code_installed: false,
       },
     },
   });
   assert.equal(evaluated.status, "ready");
   assert.equal(evaluated.product_installed, false);
+});
+
+test("the release preflight rejects residual Windows sandbox identity", () => {
+  const base = {
+    os_caption: "Microsoft Windows 11 Pro",
+    desktop_shell_running: true,
+    qemu_ga_service: "Running",
+    uac_enable_lua: 1,
+    clark_code_installed: false,
+    clark_code_running: false,
+    sandbox_state_present: false,
+    sandbox_identity_present: false,
+    sandbox_firewall_rules: [],
+    webview_state_present: false,
+  };
+  const evaluate = (data) => evaluateGuest({
+    platform: "windows",
+    environment: environments.windows,
+    registration: { uuid: "windows-id", status: "started" },
+    configuration: configuration("windows", 35 * 1024 * 1024 * 1024),
+    observation: { gui_visible: true, finding: "pristine Windows 11 desktop verified" },
+    probe: { ok: true, data },
+    requirePristine: true,
+  });
+  assert.equal(evaluate(base).status, "ready");
+  const contaminated = evaluate({ ...base, sandbox_identity_present: true });
+  assert.equal(contaminated.status, "blocked");
+  assert.equal(
+    contaminated.checks.find((item) => item.id === "pristine_no_sandbox_identity").status,
+    "failed",
+  );
+});
+
+test("a Windows desktop with UAC disabled is blocked before release work", () => {
+  const evaluated = evaluateGuest({
+    platform: "windows",
+    environment: environments.windows,
+    registration: { uuid: "windows-id", status: "started" },
+    configuration: configuration("windows", 35 * 1024 * 1024 * 1024),
+    observation: { gui_visible: true, finding: "Windows 11 desktop verified" },
+    probe: {
+      ok: true,
+      data: {
+        os_caption: "Microsoft Windows 11 Pro",
+        desktop_shell_running: true,
+        qemu_ga_service: "Running",
+        uac_enable_lua: 0,
+        clark_code_installed: false,
+      },
+    },
+  });
+  assert.equal(evaluated.status, "blocked");
+  assert.equal(
+    evaluated.checks.find((item) => item.id === "uac_enabled").status,
+    "failed",
+  );
 });
 
 test("receipt diagnostics redact provider keys", () => {

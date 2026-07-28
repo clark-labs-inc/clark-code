@@ -1,8 +1,12 @@
 import { useEffect, useRef } from "react";
+import { getVersion } from "@tauri-apps/api/app";
 import { useSessionStore } from "../store/sessionStore";
-import { liveSessions, mergedOf } from "../store/sessionStore.runtime";
+import { isBusy, liveSessions, mergedOf } from "../store/sessionStore.runtime";
+import type { PromptReceipt } from "../core-bridge/bridge";
 import { cloudCreds, type CloudCreds } from "../lib/cloudHistory";
 import {
+  CODE_REMOTE_CAPABILITIES,
+  CODE_REMOTE_PROTOCOL_VERSION,
   ackCodeRemoteCommand,
   downloadCodeRemoteAttachment,
   pollCodeRemoteCommands,
@@ -22,19 +26,73 @@ import {
   repositoriesUnderRoot,
   syncRepositoriesUnderRoot,
 } from "../lib/repositoryKnowledge";
-import { desktopHostId } from "../lib/desktopHost";
+import { desktopHostId, desktopInstanceId } from "../lib/desktopHost";
 import { mobileRemoteRetryDelayMs } from "../lib/mobileRemoteRetry";
 import {
   mobileRemoteModelSettings,
   type MobileRemoteModelSettings,
 } from "../lib/mobileRemoteModelSettings";
 import {
+  ensureMobileRemoteLiveTarget,
+  inspectMobileRemoteTarget,
+} from "../lib/mobileRemoteLiveTarget";
+import {
   MobileRemotePresenceLoop,
   publishMobileRemotePresence,
 } from "../lib/mobileRemotePresence";
+import { mobileRemoteCommandWaitsForIdle } from "../lib/mobileRemoteCommandScheduling";
 
 const LOOP_INTERVAL_MS = 500;
 const COMMAND_POLL_WAIT_MS = 25_000;
+
+type MobileRemoteFailureCode =
+  | "invalid_command"
+  | "invalid_claim"
+  | "desktop_unavailable"
+  | "project_unavailable"
+  | "conversation_busy"
+  | "stale_run"
+  | "stale_edit"
+  | "stale_permission"
+  | "submission_failed"
+  | "command_failed";
+
+export class MobileRemoteFailure extends Error {
+  constructor(
+    readonly code: MobileRemoteFailureCode,
+    message: string,
+    readonly retryable = false,
+  ) {
+    super(message);
+  }
+}
+
+function remoteFailure(
+  code: MobileRemoteFailureCode,
+  message: string,
+  retryable = false,
+): never {
+  throw new MobileRemoteFailure(code, message, retryable);
+}
+
+export function remoteFailureReceipt(error: unknown): {
+  error: string;
+  error_code: MobileRemoteFailureCode;
+  retryable: boolean;
+} {
+  if (error instanceof MobileRemoteFailure) {
+    return {
+      error: error.message.slice(0, 800),
+      error_code: error.code,
+      retryable: error.retryable,
+    };
+  }
+  return {
+    error: String(error).slice(0, 800),
+    error_code: "command_failed",
+    retryable: false,
+  };
+}
 
 function leaf(path: string): string {
   return path.split(/[\\/]/).filter(Boolean).pop() || path || "Project";
@@ -127,10 +185,16 @@ async function commandAttachments(
   }));
 }
 
-async function sendRemotePrompt(text: string, attachments: PendingAttachment[]): Promise<void> {
+async function sendRemotePrompt(
+  text: string,
+  attachments: PendingAttachment[],
+): Promise<PromptReceipt> {
   if (attachments.length === 0) {
-    await useSessionStore.getState().send(text);
-    return;
+    const receipt = await useSessionStore.getState().send(text);
+    if (!receipt) {
+      remoteFailure("submission_failed", "Clark Code did not start the mobile prompt.");
+    }
+    return receipt;
   }
   // `send` owns the queue/busy semantics but normally consumes the visible
   // composer attachments. Stage only the remote batch for that synchronous
@@ -141,7 +205,11 @@ async function sendRemotePrompt(text: string, attachments: PendingAttachment[]):
   useSessionStore.setState((current) => ({
     attachments: [...preserved, ...current.attachments],
   }));
-  await submission;
+  const receipt = await submission;
+  if (!receipt) {
+    remoteFailure("submission_failed", "Clark Code did not start the mobile prompt.");
+  }
+  return receipt;
 }
 
 function commandBool(command: CodeRemoteCommand, key: string): boolean | null {
@@ -158,16 +226,80 @@ function commandRunId(command: CodeRemoteCommand): string | null {
   return commandString(command, "run_id");
 }
 
-function requireLiveDesktop(command: CodeRemoteCommand) {
+function commandPayload(command: CodeRemoteCommand): Record<string, unknown> {
+  const payload = command.request.payload;
+  return payload && typeof payload === "object" && !Array.isArray(payload)
+    ? payload as Record<string, unknown>
+    : {};
+}
+
+function messageTextAt(snapshot: ReturnType<typeof mergedOf>, timelineIndex: number): string | null {
+  const item = snapshot.timeline[timelineIndex];
+  if (item?.item !== "message" || item.role !== "user") return null;
+  return item.blocks
+    .filter((block) => block.type === "text")
+    .map((block) => block.text)
+    .join("\n");
+}
+
+async function requireLiveDesktop(command: CodeRemoteCommand) {
   if (!command.desktop_id) {
-    throw new Error("Clark Code command is not bound to a desktop conversation.");
+    remoteFailure("invalid_command", "Clark Code command is not bound to a desktop conversation.");
   }
   const state = useSessionStore.getState();
-  const entry = liveSessions.get(command.desktop_id);
+  const entry = await ensureMobileRemoteLiveTarget(command.desktop_id);
   if (!entry) {
-    throw new Error("Clark Code is not connected to that desktop conversation.");
+    remoteFailure(
+      "desktop_unavailable",
+      "Clark Code is not connected to that desktop conversation.",
+      true,
+    );
   }
   return { state, entry, snapshot: mergedOf(entry) };
+}
+
+async function requireActiveRunDesktop(command: CodeRemoteCommand) {
+  if (!command.desktop_id) {
+    remoteFailure("invalid_command", "Clark Code command is not bound to a desktop conversation.");
+  }
+  const runId = commandRunId(command);
+  if (!runId) {
+    remoteFailure("invalid_command", "Clark Code command is not bound to a run.");
+  }
+  const inspected = await inspectMobileRemoteTarget(command.desktop_id);
+  const inspectedRun = inspected.snapshot?.runs[runId];
+  if (
+    inspected.snapshot
+    && (
+      !inspectedRun
+      || !["running", "queued", "awaiting_input"].includes(inspectedRun.status)
+    )
+  ) {
+    remoteFailure("stale_run", "That run is no longer active.");
+  }
+  const target = inspected.entry
+    ? {
+        state: useSessionStore.getState(),
+        entry: inspected.entry,
+        snapshot: inspected.snapshot!,
+      }
+    : await requireLiveDesktop(command);
+  const run = target.snapshot.runs[runId];
+  if (
+    !run
+    || !["running", "queued", "awaiting_input"].includes(run.status)
+  ) {
+    remoteFailure("stale_run", "That run is no longer active.");
+  }
+  return { ...target, runId };
+}
+
+function commandWaitsForTargetIdle(command: CodeRemoteCommand): boolean {
+  const entry = command.desktop_id ? liveSessions.get(command.desktop_id) : null;
+  return mobileRemoteCommandWaitsForIdle(
+    command,
+    entry ? isBusy(mergedOf(entry)) : false,
+  );
 }
 
 function projectFor(command: CodeRemoteCommand): CodeRemoteProjectRegistration | null {
@@ -178,7 +310,7 @@ function projectFor(command: CodeRemoteCommand): CodeRemoteProjectRegistration |
 async function applyProject(command: CodeRemoteCommand): Promise<void> {
   const project = projectFor(command);
   if (!project) {
-    throw new Error("Project is not available on this desktop host.");
+    remoteFailure("project_unavailable", "Project is not available on this desktop host.");
   }
   const state = useSessionStore.getState();
   state.selectProvider("local");
@@ -189,7 +321,10 @@ async function applyProject(command: CodeRemoteCommand): Promise<void> {
   }
   const host = loadSshHosts().find((item) => sshProjectId(item.id, item.remoteRoot.trim()) === project.id);
   if (!host) {
-    throw new Error("SSH project is no longer configured on this desktop host.");
+    remoteFailure(
+      "project_unavailable",
+      "SSH project is no longer configured on this desktop host.",
+    );
   }
   state.setProjectMode("remote");
   state.setSelectedHostId(host.id);
@@ -198,12 +333,15 @@ async function applyProject(command: CodeRemoteCommand): Promise<void> {
 async function submitPrompt(
   creds: CloudCreds,
   command: CodeRemoteCommand,
-): Promise<MobileRemoteModelSettings | null> {
+): Promise<{
+  modelSettings: MobileRemoteModelSettings | null;
+  promptReceipt: PromptReceipt;
+}> {
   const text = commandText(command);
   const attachments = await commandAttachments(creds, command);
   const modelSettings = mobileRemoteModelSettings(command);
   if (!text && attachments.length === 0) {
-    throw new Error("Clark Code command has no prompt or attachments.");
+    remoteFailure("invalid_command", "Clark Code command has no prompt or attachments.");
   }
   await applyProject(command);
   const state = useSessionStore.getState();
@@ -211,14 +349,17 @@ async function submitPrompt(
     state.endSession();
     await useSessionStore.getState().startSession();
   } else if (!command.desktop_id) {
-    throw new Error("Clark Code follow-up is not bound to a desktop conversation.");
+    remoteFailure(
+      "invalid_command",
+      "Clark Code follow-up is not bound to a desktop conversation.",
+    );
   } else if (command.desktop_id && useSessionStore.getState().session?.id !== command.desktop_id) {
     await useSessionStore.getState().openConversation(command.desktop_id);
   } else if (!useSessionStore.getState().session) {
     await useSessionStore.getState().startSession();
   }
   if (!useSessionStore.getState().session) {
-    throw new Error("Clark Code session did not start.");
+    remoteFailure("desktop_unavailable", "Clark Code session did not start.", true);
   }
   if (
     command.command_type === "send_message" &&
@@ -226,42 +367,49 @@ async function submitPrompt(
   ) {
     // Sessions run in parallel now, so an open should always bind; reaching
     // here means the open itself failed (e.g. its SSH host is gone).
-    throw new Error("Could not open the target conversation on the desktop.");
+    remoteFailure(
+      "desktop_unavailable",
+      "Could not open the target conversation on the desktop.",
+      true,
+    );
   }
   if (modelSettings) {
     await useSessionStore.getState().updateModelSettings(modelSettings);
   }
-  await sendRemotePrompt(text, attachments);
-  return modelSettings;
+  const promptReceipt = await sendRemotePrompt(text, attachments);
+  return { modelSettings, promptReceipt };
 }
 
 async function resolvePermission(command: CodeRemoteCommand): Promise<void> {
-  const { state, entry, snapshot } = requireLiveDesktop(command);
+  const { state, entry, snapshot } = await requireLiveDesktop(command);
   const actionId = commandString(command, "action_id");
   const runId = commandRunId(command);
   const approved = commandBool(command, "approved");
   const pending = snapshot.pending_permission;
   const run = runId ? snapshot.runs[runId] : null;
   if (!actionId || !runId || approved === null) {
-    throw new Error("Clark Code permission command is incomplete.");
+    remoteFailure("invalid_command", "Clark Code permission command is incomplete.");
   }
   if (!run || run.status !== "awaiting_input") {
-    throw new Error("That run is not waiting for mobile approval.");
+    remoteFailure("stale_permission", "That run is not waiting for mobile approval.");
   }
   if (pending?.session !== command.desktop_id) {
-    throw new Error("That permission request belongs to another desktop conversation.");
+    remoteFailure(
+      "invalid_command",
+      "That permission request belongs to another desktop conversation.",
+    );
   }
   if (!pending || pending.id !== actionId) {
-    throw new Error("That permission request is no longer pending.");
+    remoteFailure("stale_permission", "That permission request is no longer pending.");
   }
   const option = approved
     ? pickAllowOption(pending)
     : pending.options.find((item) => item.kind === "reject_once" || item.kind === "reject_always");
   if (!option) {
-    throw new Error("No matching permission option is available.");
+    remoteFailure("invalid_command", "No matching permission option is available.");
   }
   if (!state.bridge) {
-    throw new Error("Clark Code desktop session is not connected.");
+    remoteFailure("desktop_unavailable", "Clark Code desktop session is not connected.", true);
   }
   await state.bridge.respond(entry.session.id, {
     kind: "permission",
@@ -270,68 +418,168 @@ async function resolvePermission(command: CodeRemoteCommand): Promise<void> {
   });
 }
 
-async function cancelRun(command: CodeRemoteCommand): Promise<void> {
-  const { state, entry, snapshot } = requireLiveDesktop(command);
-  const runId = commandRunId(command);
-  const run = runId ? snapshot.runs[runId] : null;
-  if (!runId) {
-    throw new Error("Clark Code cancel command is not bound to a run.");
-  }
-  if (
-    !run ||
-    (run.status !== "running" && run.status !== "queued" && run.status !== "awaiting_input")
-  ) {
-    throw new Error("That run is no longer active.");
-  }
+export async function cancelRun(command: CodeRemoteCommand): Promise<void> {
+  const { state, entry, runId } = await requireActiveRunDesktop(command);
   if (!state.bridge) {
-    throw new Error("Clark Code desktop session is not connected.");
+    remoteFailure("desktop_unavailable", "Clark Code desktop session is not connected.", true);
   }
   await state.bridge.cancel(entry.session.id, runId);
+}
+
+export async function steerRun(command: CodeRemoteCommand): Promise<void> {
+  const text = commandText(command);
+  if (!text) {
+    remoteFailure("invalid_command", "Clark Code steer command is incomplete.");
+  }
+  const { state, entry } = await requireActiveRunDesktop(command);
+  if (!state.bridge?.steer) {
+    remoteFailure("desktop_unavailable", "This Clark Code session cannot accept steering.", true);
+  }
+  await state.bridge.steer(entry.session.id, [{ type: "text", text }]);
+}
+
+export async function compactConversation(command: CodeRemoteCommand): Promise<void> {
+  const { state, entry, snapshot } = await requireLiveDesktop(command);
+  if (isBusy(snapshot)) {
+    remoteFailure(
+      "conversation_busy",
+      "Clark Code is still working; compaction will retry when the run finishes.",
+      true,
+    );
+  }
+  if (!state.bridge?.compact) {
+    remoteFailure("desktop_unavailable", "This Clark Code session cannot compact context.", true);
+  }
+  await state.bridge.compact(entry.session.id);
+}
+
+export async function editAndResend(command: CodeRemoteCommand): Promise<PromptReceipt> {
+  const desktopId = command.desktop_id;
+  if (!desktopId) {
+    remoteFailure("invalid_command", "Clark Code edit command is not bound to a conversation.");
+  }
+  await applyProject(command);
+  if (useSessionStore.getState().session?.id !== desktopId) {
+    await useSessionStore.getState().openConversation(desktopId);
+  }
+  const { snapshot } = await requireLiveDesktop(command);
+  if (isBusy(snapshot)) {
+    remoteFailure(
+      "conversation_busy",
+      "Clark Code is still working; the edit will retry when the run finishes.",
+      true,
+    );
+  }
+  const payload = commandPayload(command);
+  const timelineIndex = payload.timeline_index;
+  const expectedText = payload.expected_text;
+  if (
+    typeof timelineIndex !== "number"
+    || !Number.isSafeInteger(timelineIndex)
+    || timelineIndex < 0
+    || typeof expectedText !== "string"
+  ) {
+    remoteFailure("invalid_command", "Clark Code edit target is incomplete.");
+  }
+  if (messageTextAt(snapshot, timelineIndex) !== expectedText) {
+    remoteFailure(
+      "stale_edit",
+      "That message changed on another device. Refresh the conversation before editing it.",
+    );
+  }
+  const receipt = await useSessionStore.getState().resendFrom(
+    timelineIndex,
+    commandText(command),
+  );
+  if (!receipt) {
+    remoteFailure("submission_failed", "Clark Code did not restart from the edited message.");
+  }
+  return receipt;
 }
 
 async function runCommand(
   creds: CloudCreds,
   hostId: string,
+  instanceId: string,
   command: CodeRemoteCommand,
   stillCurrent: () => boolean,
 ): Promise<void> {
-  const accepted = await ackCodeRemoteCommand(creds, hostId, command.command_id, "accepted", {
-    accepted_at: new Date().toISOString(),
-    command_type: command.command_type,
-  });
+  if (!command.claim_token) {
+    remoteFailure("invalid_claim", "Clark Code command has no execution claim.");
+  }
+  const accepted = await ackCodeRemoteCommand(
+    creds,
+    hostId,
+    instanceId,
+    command.claim_token,
+    command.command_id,
+    "accepted",
+    {
+      accepted_at: new Date().toISOString(),
+      command_type: command.command_type,
+    },
+  );
   // A lease can expire while this desktop is recovering. Never execute an
   // action unless the service still granted this process the accepted claim.
   if (accepted.command.status !== "accepted" || !stillCurrent()) return;
   try {
     let modelSettings: MobileRemoteModelSettings | null = null;
+    let runId: string | null = null;
     if (command.command_type === "start_session" || command.command_type === "send_message") {
-      modelSettings = await submitPrompt(creds, command);
+      const submitted = await submitPrompt(creds, command);
+      modelSettings = submitted.modelSettings;
+      runId = submitted.promptReceipt.runId;
     } else if (command.command_type === "cancel_run") {
       await cancelRun(command);
     } else if (command.command_type === "resolve_permission") {
       await resolvePermission(command);
+    } else if (command.command_type === "steer_run") {
+      await steerRun(command);
+    } else if (command.command_type === "compact_conversation") {
+      await compactConversation(command);
+    } else if (command.command_type === "edit_and_resend") {
+      const receipt = await editAndResend(command);
+      runId = receipt.runId;
     } else {
-      throw new Error(`Unsupported Clark Code command: ${command.command_type}`);
+      remoteFailure("invalid_command", `Unsupported Clark Code command: ${command.command_type}`);
     }
     if (!stillCurrent()) return;
     const sessionId = command.desktop_id ?? useSessionStore.getState().session?.id ?? null;
-    const completed = await ackCodeRemoteCommand(creds, hostId, command.command_id, "completed", {
-      desktop_id: sessionId,
-      submitted_at: new Date().toISOString(),
-      ...(modelSettings ? {
-        model: modelSettings.model,
-        reasoning_effort: modelSettings.reasoningEffort,
-      } : {}),
-    });
+    const completed = await ackCodeRemoteCommand(
+      creds,
+      hostId,
+      instanceId,
+      command.claim_token,
+      command.command_id,
+      "completed",
+      {
+        desktop_id: sessionId,
+        ...(runId ? { run_id: runId } : {}),
+        submitted_at: new Date().toISOString(),
+        ...(modelSettings ? {
+          model: modelSettings.model,
+          reasoning_effort: modelSettings.reasoningEffort,
+        } : {}),
+      },
+    );
     if (completed.command.status === "completed") {
       void notify("Clark Code", "Mobile command started on this desktop.");
     }
   } catch (error) {
     if (stillCurrent()) {
-      await ackCodeRemoteCommand(creds, hostId, command.command_id, "failed", {
-        error: String(error).slice(0, 800),
-        failed_at: new Date().toISOString(),
-      }).catch(() => undefined);
+      const failure = remoteFailureReceipt(error);
+      await ackCodeRemoteCommand(
+        creds,
+        hostId,
+        instanceId,
+        command.claim_token,
+        command.command_id,
+        "failed",
+        {
+          ...failure,
+          failed_at: new Date().toISOString(),
+        },
+      ).catch(() => undefined);
     }
   }
 }
@@ -347,8 +595,10 @@ export function MobileRemoteAgent() {
   useEffect(() => {
     if (!auth) return;
     const hostId = desktopHostId();
+    const instanceId = desktopInstanceId();
     let stopped = false;
     let authRefresh: Promise<void> | null = null;
+    let appVersion: Promise<string> | null = null;
     consecutiveFailuresRef.current = 0;
     retryAtRef.current = 0;
 
@@ -395,12 +645,15 @@ export function MobileRemoteAgent() {
       try {
         await publishMobileRemotePresence(
           async () => {
+            appVersion ??= getVersion();
             await registerCodeRemoteHost(creds, {
               hostId,
               displayName: `${auth.user.name || "Clark"} desktop`,
               os: navigator.platform || "desktop",
               arch: "",
-              appVersion: "desktop",
+              appVersion: await appVersion,
+              protocolVersion: CODE_REMOTE_PROTOCOL_VERSION,
+              capabilities: CODE_REMOTE_CAPABILITIES,
               projects: currentProjects(),
             });
           },
@@ -420,12 +673,23 @@ export function MobileRemoteAgent() {
       if (!creds) return;
       commandBusyRef.current = true;
       try {
-        const response = await pollCodeRemoteCommands(creds, hostId, 20, COMMAND_POLL_WAIT_MS);
+        const response = await pollCodeRemoteCommands(
+          creds,
+          hostId,
+          instanceId,
+          1,
+          COMMAND_POLL_WAIT_MS,
+        );
         for (const command of response.commands) {
           if (stopped) break;
+          // Leave a busy follow-up in `delivered`, where it survives a desktop
+          // restart. Acknowledging it and handing it to `send()` would put it
+          // in the process-local queue and falsely report completion to mobile.
+          if (commandWaitsForTargetIdle(command)) continue;
           await runCommand(
             creds,
             hostId,
+            instanceId,
             command,
             () => !stopped && cloudCreds(useSessionStore.getState().auth)?.token === creds.token,
           );
@@ -452,12 +716,19 @@ export function MobileRemoteAgent() {
       presenceLoop.refreshNow();
       void pollCommands();
     };
+    const resumeWhenVisible = () => {
+      if (document.visibilityState === "visible") resumeAfterOutage();
+    };
     window.addEventListener("online", resumeAfterOutage);
+    window.addEventListener("focus", resumeAfterOutage);
+    document.addEventListener("visibilitychange", resumeWhenVisible);
     return () => {
       stopped = true;
       presenceLoop.stop();
       window.clearInterval(timer);
       window.removeEventListener("online", resumeAfterOutage);
+      window.removeEventListener("focus", resumeAfterOutage);
+      document.removeEventListener("visibilitychange", resumeWhenVisible);
     };
   }, [auth, cwd]);
 

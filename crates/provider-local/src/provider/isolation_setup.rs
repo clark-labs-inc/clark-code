@@ -2,15 +2,8 @@ use super::*;
 
 #[cfg(windows)]
 fn windows_sandbox_data_root() -> Result<std::path::PathBuf> {
-    let product_dir = if cfg!(debug_assertions) {
-        "Clark Code Dev"
-    } else {
-        "Clark Code"
-    };
-    std::env::var_os("LOCALAPPDATA")
-        .map(std::path::PathBuf::from)
+    exec_sandbox::windows_product_data_root()
         .ok_or_else(|| Error::Io("LOCALAPPDATA is unavailable".to_string()))
-        .map(|root| root.join(product_dir))
 }
 
 pub(super) fn build_local_executor(

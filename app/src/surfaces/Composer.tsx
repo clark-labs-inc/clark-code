@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -12,7 +13,11 @@ import {
 } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
 import type { QueuedMessage, SkillReferenceBlock } from "../store/sessionStore";
-import type { SkillCatalogEntry } from "../core-bridge/bridge";
+import {
+  getBridge,
+  type LocalSandboxStatus,
+  type SkillCatalogEntry,
+} from "../core-bridge/bridge";
 import { useFileDrop, usePaste } from "../lib/attachmentSources";
 import { projectFiles } from "../lib/projectFiles";
 import {
@@ -24,6 +29,7 @@ import {
   expandPromptSlashCommand,
   goalCommandObjective,
   isCompactCommand,
+  sideQuestionCommandQuestion,
   slashCommands,
   type SlashCommand,
 } from "../lib/slashCommands";
@@ -40,7 +46,14 @@ import { ComposerAttachmentMenu } from "./ComposerAttachmentMenu";
 import { ComposerAutocomplete } from "./ComposerAutocomplete";
 import { ComposerPermissionPill } from "./ComposerPermissionPill";
 import { ComposerCollaborationPill } from "./ComposerCollaborationPill";
-import { ModelPill, UsageChip } from "./ComposerControls";
+import { ModelPill } from "./ComposerControls";
+import {
+  SandboxSetupCard,
+  sandboxBlocksSubmission,
+  sandboxGateRequired,
+  sandboxStatusForCwd,
+  type LocalSandboxObservation,
+} from "./SandboxSetupCard";
 import { SkillsPanel } from "./SkillsPanel";
 import {
   createPendingPaste,
@@ -133,6 +146,7 @@ export function Composer() {
   const session = useSessionStore((s) => s.session);
   const bridge = useSessionStore((s) => s.bridge);
   const activeProvider = useSessionStore((s) => s.activeProvider);
+  const approvalPolicy = useSessionStore((s) => s.approvalPolicy);
   const projectMode = useSessionStore((s) => s.projectMode);
   const localCwd = useSessionStore((s) => s.localSettings.cwd);
   const send = useSessionStore((s) => s.send);
@@ -149,6 +163,15 @@ export function Composer() {
     [activeRemote],
   );
   const localTarget = session ? session.provider === "local" : activeProvider === "local";
+  const [sandboxObservation, setSandboxObservation] =
+    useState<LocalSandboxObservation | null>(null);
+  const sandboxStatus = sandboxStatusForCwd(sandboxObservation, cwd);
+  const updateSandboxStatus = useCallback(
+    (status: LocalSandboxStatus | null) => {
+      setSandboxObservation({ cwd, status });
+    },
+    [cwd],
+  );
   const {
     catalog: skillCatalog,
     setCatalog: setSkillCatalog,
@@ -238,7 +261,16 @@ export function Composer() {
     startBlocked,
     canPickProjectFolder: inTauri(),
   });
-  const canSend = submission.canSubmit;
+  const sandboxCheckRequired = sandboxGateRequired({
+    localTarget,
+    remoteTarget: remote !== null,
+    fullAccess: approvalPolicy === "full",
+    cwd,
+    nativeHost: inTauri(),
+    statusSupported: bridge?.localSandboxStatus !== undefined,
+  });
+  const sandboxBlocked = sandboxBlocksSubmission(sandboxCheckRequired, sandboxStatus);
+  const canSend = submission.canSubmit && !sandboxBlocked;
 
   // --- @-file / slash autocomplete ----------------------------------------
   const trigger = useMemo(() => detectComposerTrigger(value, caret), [value, caret]);
@@ -386,6 +418,28 @@ export function Composer() {
     if (submission.shouldPickProjectFolder) {
       await pickProjectFolder();
       if (useSessionStore.getState().startBlockedReason()) return;
+      const current = useSessionStore.getState();
+      const selectedCwd = current.activeProjectRoot ?? current.localSettings.cwd;
+      const gateSelectedFolder = sandboxGateRequired({
+        localTarget,
+        remoteTarget: remote !== null,
+        fullAccess: approvalPolicy === "full",
+        cwd: selectedCwd,
+        nativeHost: inTauri(),
+        statusSupported: bridge?.localSandboxStatus !== undefined,
+      });
+      if (gateSelectedFolder) {
+        let selectedStatus: LocalSandboxStatus | null = null;
+        try {
+          const selectedBridge = bridge ?? await getBridge();
+          selectedStatus = await selectedBridge.localSandboxStatus?.(selectedCwd) ?? null;
+        } catch {
+          // Fail closed. The inline card performs its own query and renders the
+          // actionable setup or repair error after the selected cwd propagates.
+        }
+        setSandboxObservation({ cwd: selectedCwd, status: selectedStatus });
+        if (sandboxBlocksSubmission(true, selectedStatus)) return;
+      }
     }
     const t = expandPromptSlashCommand(expandPendingPastes(value, pendingPastes));
     if (/^\s*\/skills\s*$/.test(t)) {
@@ -419,6 +473,29 @@ export function Composer() {
       });
       return;
     }
+    const sideQuestion = sideQuestionCommandQuestion(t);
+    if (sideQuestion !== null) {
+      if (sideQuestion === "") {
+        setValue("/btw ");
+        flashNotice("Ask a question after /btw.");
+        requestAnimationFrame(() => {
+          taRef.current?.focus();
+          taRef.current?.setSelectionRange(5, 5);
+          setCaret(5);
+        });
+        return;
+      }
+      if (!session) {
+        flashNotice("Start a conversation before asking a side question.");
+        return;
+      }
+      setValue("");
+      setPendingPastes([]);
+      setEditTimelineIndex(null);
+      setSelectedSkills([]);
+      await askSideQuestion(sideQuestion);
+      return;
+    }
     const editIndex = editTimelineIndex;
     const staleSkill = selectedSkills.find((selected) => {
       const current = skillCatalog?.skills.find((skill) => skill.id === selected.id);
@@ -438,15 +515,6 @@ export function Composer() {
     setPendingPastes([]);
     setEditTimelineIndex(null);
     setSelectedSkills([]);
-    // `/btw <question>` — a forked side question that never interrupts the
-    // active run. Needs an open session (the fork reads its transcript), so
-    // route it only once a session exists; otherwise let the normal start
-    // flow open one and the user re-sends. Takes precedence over edit/resend.
-    const btw = t.match(/^\s*\/btw\s+(\S[\s\S]*)/);
-    if (btw && session) {
-      await askSideQuestion(btw[1].trim());
-      return;
-    }
     // No session yet → start one on the selected environment, then send. If the
     // connect fails (SSH down, bad folder…) the composer has remounted by then —
     // stage the text as a prefill so the user's task is never lost.
@@ -519,6 +587,13 @@ export function Composer() {
   return (
     <div className="bg-bg px-6 pb-4 pt-2.5" {...handlers}>
       <QueuedMessages onEdit={editQueued} />
+      {sandboxCheckRequired && (
+        <SandboxSetupCard
+          compact
+          cwd={cwd}
+          onStatusChange={updateSandboxStatus}
+        />
+      )}
       {/* Keep suggestions in normal layout flow. The old absolute menu was
           trapped below the context bar's stacking layer and visibly painted
           through the checkout chips at compact window heights. */}
@@ -650,7 +725,6 @@ export function Composer() {
           </div>
 
           <div className="flex min-w-0 items-center gap-2.5">
-            <UsageChip />
             <ModelPill />
             {busy && !hasContent ? (
               <button

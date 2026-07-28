@@ -49,7 +49,7 @@ impl Default for StoreState {
 /// Shared lock held for the complete input lease. Revocation takes the
 /// exclusive side of the same lock and therefore cannot acknowledge until all
 /// earlier synthesized or Accessibility input has quiesced.
-#[cfg(any(feature = "helper-service", test))]
+#[cfg(any(all(feature = "helper-service", target_os = "macos"), test))]
 pub(crate) struct ApprovalActionGuard {
     _lock: File,
     pub revision: u64,
@@ -214,7 +214,7 @@ impl ApprovalStore {
         self.write_state(&state)
     }
 
-    #[cfg(any(feature = "helper-service", test))]
+    #[cfg(any(all(feature = "helper-service", target_os = "macos"), test))]
     pub(crate) fn begin_action(
         &self,
         identity: &ApplicationIdentity,
@@ -385,6 +385,8 @@ fn secure_file_mode(file: &File) -> Result<(), ComputerUseError> {
         file.set_permissions(fs::Permissions::from_mode(0o600))
             .map_err(store_error)?;
     }
+    #[cfg(not(unix))]
+    let _ = file;
     Ok(())
 }
 
