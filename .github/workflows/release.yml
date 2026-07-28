@@ -8,6 +8,12 @@ on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      run_paid_benchmark:
+        description: Run the separately authorized paid model benchmark
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -36,11 +42,13 @@ env:
   CLARK_WINDOWS_QA_VM_NAME: Clark QA Release ${{ github.run_id }}-${{ github.run_attempt }}
 
 jobs:
-  release_prerequisites:
-    name: Live release identity preflight
-    runs-on: windows-latest
-    # The protected environment gives Entra one stable OIDC subject across
-    # release tags. Its deployment policy must allow only stable vX.Y.Z tags.
+  release_source_prerequisites:
+    name: Release source and download-channel preflight
+    runs-on: ubuntu-latest
+    # Every platform shares this protected deployment identity for source,
+    # updater-key, and downloads-CDN validation. Windows publisher validation is
+    # deliberately isolated below: an external verification delay must not hold
+    # back signed macOS or Linux installers.
     environment: release
     timeout-minutes: 15
     steps:
@@ -48,37 +56,95 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Require an exact mainline tag, bundle version, and every identity coordinate
+      - name: Require an exact mainline tag, bundle version, and shared release identities
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF_TYPE" != "tag" || ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Release must run from a stable vX.Y.Z tag, got $GITHUB_REF_TYPE/$GITHUB_REF_NAME" >&2
+            exit 1
+          fi
+          if [[ ! "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Release source revision is not one exact Git commit" >&2
+            exit 1
+          fi
+          declared_version="$(jq -r '.version' src-tauri/tauri.conf.json)"
+          if [[ "$declared_version" != "${GITHUB_REF_NAME#v}" ]]; then
+            echo "Release tag $GITHUB_REF_NAME does not match bundle version $declared_version" >&2
+            exit 1
+          fi
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+          for name in \
+            CLARK_DESKTOP_DOWNLOAD_UPLOAD_ROLE_ARN \
+            TAURI_SIGNING_PRIVATE_KEY \
+            TAURI_SIGNING_PRIVATE_KEY_PASSWORD; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "$name is required before macOS or Linux release work can start" >&2
+              exit 1
+            fi
+          done
+
+      - name: Authenticate the release workload with AWS OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.CLARK_DESKTOP_DOWNLOAD_UPLOAD_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Verify the exact CDN upload account and record the source boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          role="$CLARK_DESKTOP_DOWNLOAD_UPLOAD_ROLE_ARN"
+          if [[ ! "$role" =~ ^arn:aws:iam::([0-9]{12}):role/.+$ ]]; then
+            echo "CLARK_DESKTOP_DOWNLOAD_UPLOAD_ROLE_ARN is not an IAM role ARN" >&2
+            exit 1
+          fi
+          expected_account="${BASH_REMATCH[1]}"
+          identity="$(aws sts get-caller-identity --output json)"
+          actual_account="$(jq -r '.Account' <<<"$identity")"
+          if [[ "$actual_account" != "$expected_account" ]]; then
+            echo "AWS OIDC authenticated the wrong CDN upload account" >&2
+            exit 1
+          fi
+          mkdir -p target/release-source-preflight
+          jq -n \
+            --arg source_revision "$GITHUB_SHA" \
+            --arg aws_account "$actual_account" \
+            --arg aws_arn "$(jq -r '.Arn' <<<"$identity")" \
+            '{schema_version: 1, status: "passed", source_revision: $source_revision, aws_account: $aws_account, aws_arn: $aws_arn}' \
+            > target/release-source-preflight/receipt.json
+
+      - name: Upload shared release preflight receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-source-preflight
+          path: target/release-source-preflight/receipt.json
+          if-no-files-found: error
+
+  windows_release_prerequisites:
+    name: Windows publisher identity preflight
+    needs: [release_source_prerequisites]
+    if: ${{ vars.CLARK_WINDOWS_RELEASE_MODE == 'signed' }}
+    runs-on: windows-latest
+    # This is intentionally a Windows-only release gate. Microsoft or Azure
+    # verification must never gate the independently signed macOS/Linux lanes.
+    environment: release
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Require the Windows signing identity coordinates
         shell: pwsh
         env:
           AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           $ErrorActionPreference = "Stop"
-          if (
-            $env:GITHUB_REF_TYPE -ne "tag" -or
-            $env:GITHUB_REF_NAME -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+$'
-          ) {
-            throw "Release must run from a stable vX.Y.Z tag, got $($env:GITHUB_REF_TYPE)/$($env:GITHUB_REF_NAME)"
-          }
-          if ($env:GITHUB_SHA -notmatch '^[0-9a-f]{40}$') {
-            throw "Release source revision is not one exact Git commit"
-          }
-          $declaredVersion = (
-            Get-Content -LiteralPath src-tauri/tauri.conf.json -Raw |
-              ConvertFrom-Json
-          ).version
-          $tagVersion = $env:GITHUB_REF_NAME -replace '^v', ''
-          if ($declaredVersion -ne $tagVersion) {
-            throw "Release tag $($env:GITHUB_REF_NAME) does not match bundle version $declaredVersion"
-          }
-          git merge-base --is-ancestor $env:GITHUB_SHA origin/main
-          if ($LASTEXITCODE -ne 0) {
-            throw "Release tag commit is not contained in origin/main"
-          }
           $required = @{
             AZURE_CLIENT_ID = $env:AZURE_CLIENT_ID
             AZURE_TENANT_ID = $env:AZURE_TENANT_ID
@@ -86,17 +152,14 @@ jobs:
             AZURE_ARTIFACT_SIGNING_RESOURCE_GROUP = $env:AZURE_ARTIFACT_SIGNING_RESOURCE_GROUP
             AZURE_ARTIFACT_SIGNING_PROFILE = $env:AZURE_ARTIFACT_SIGNING_PROFILE
             CLARK_WINDOWS_SIGNER_SUBJECT = $env:CLARK_WINDOWS_SIGNER_SUBJECT
-            CLARK_DESKTOP_DOWNLOAD_UPLOAD_ROLE_ARN = $env:CLARK_DESKTOP_DOWNLOAD_UPLOAD_ROLE_ARN
-            TAURI_SIGNING_PRIVATE_KEY = $env:TAURI_SIGNING_PRIVATE_KEY
-            TAURI_SIGNING_PRIVATE_KEY_PASSWORD = $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD
           }
           foreach ($entry in $required.GetEnumerator()) {
             if ([string]::IsNullOrWhiteSpace($entry.Value)) {
-              throw "$($entry.Key) is required before release work can start"
+              throw "$($entry.Key) is required before Windows release work can start"
             }
           }
 
-      - name: Authenticate the release workload with Azure OIDC
+      - name: Authenticate the Windows release workload with Azure OIDC
         uses: azure/login@v3
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
@@ -112,7 +175,7 @@ jobs:
             -ResourceGroup $env:AZURE_ARTIFACT_SIGNING_RESOURCE_GROUP `
             -CertificateProfileName $env:AZURE_ARTIFACT_SIGNING_PROFILE `
             -ExpectedSignerSubject $env:CLARK_WINDOWS_SIGNER_SUBJECT `
-            -CorrelationId "release-preflight-$($env:GITHUB_RUN_ID)-$($env:GITHUB_RUN_ATTEMPT)"
+            -CorrelationId "release-windows-preflight-$($env:GITHUB_RUN_ID)-$($env:GITHUB_RUN_ATTEMPT)"
 
       - name: Sign and verify a disposable PE through the production boundary
         shell: pwsh
@@ -134,61 +197,25 @@ jobs:
           }
           @{
             schema_version = 1
+            status = "passed"
             source_revision = $env:GITHUB_SHA
             signer_subject = $signature.SignerCertificate.Subject
             signer_thumbprint = $signature.SignerCertificate.Thumbprint
           } |
             ConvertTo-Json |
-            Set-Content -LiteralPath target/artifact-signing/signer-receipt.json -Encoding utf8
-
-      - name: Authenticate the release workload with AWS OIDC
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ env.CLARK_DESKTOP_DOWNLOAD_UPLOAD_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Verify the exact CDN upload account
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          $roleParts = $env:CLARK_DESKTOP_DOWNLOAD_UPLOAD_ROLE_ARN.Split(":")
-          if (
-            $roleParts.Length -lt 6 -or
-            $roleParts[0] -ne "arn" -or
-            $roleParts[2] -ne "iam" -or
-            $roleParts[4] -notmatch '^[0-9]{12}$'
-          ) {
-            throw "CLARK_DESKTOP_DOWNLOAD_UPLOAD_ROLE_ARN is not an IAM role ARN"
-          }
-          $identity = aws sts get-caller-identity --output json | ConvertFrom-Json
-          if ($identity.Account -ne $roleParts[4]) {
-            throw "AWS OIDC authenticated the wrong CDN upload account"
-          }
-          $signer = Get-Content -LiteralPath target/artifact-signing/signer-receipt.json -Raw |
-            ConvertFrom-Json
-          @{
-            schema_version = 1
-            status = "passed"
-            source_revision = $signer.source_revision
-            signer_subject = $signer.signer_subject
-            signer_thumbprint = $signer.signer_thumbprint
-            aws_account = $identity.Account
-            aws_arn = $identity.Arn
-          } |
-            ConvertTo-Json |
             Set-Content -LiteralPath target/artifact-signing/preflight-receipt.json -Encoding utf8
 
-      - name: Upload release identity preflight receipt
+      - name: Upload Windows publisher preflight receipt
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: release-identity-preflight
+          name: windows-release-identity-preflight
           path: target/artifact-signing/preflight-receipt.json
           if-no-files-found: error
 
   windows_utm_runner_preflight:
     name: UAC-enabled Windows UTM runner preflight
-    needs: [release_prerequisites]
+    needs: [windows_release_prerequisites]
     runs-on: [self-hosted, macOS, ARM64, clark-utm-qa]
     timeout-minutes: 10
     steps:
@@ -221,7 +248,7 @@ jobs:
 
   pre_release_benchmarks:
     name: Deterministic pre-release experience benchmark
-    needs: [windows_utm_runner_preflight]
+    needs: [release_source_prerequisites]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -291,7 +318,11 @@ jobs:
 
   paid_release_benchmark:
     name: Paid release benchmark (macOS sandbox)
-    needs: [windows_utm_runner_preflight]
+    needs: [release_source_prerequisites]
+    # Model execution is opt-in and never spends provider credits merely because
+    # a version tag was pushed. It remains available as a separately authorized
+    # release-environment check from workflow_dispatch.
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_paid_benchmark }}
     runs-on: macos-latest
     timeout-minutes: 15
     env:
@@ -327,13 +358,14 @@ jobs:
           if-no-files-found: warn
 
   build:
-    needs: [pre_release_benchmarks, paid_release_benchmark]
+    needs: [pre_release_benchmarks]
     strategy:
       fail-fast: false
       matrix:
         # One native runner per OS — cross-compiling a Tauri app isn't viable.
-        # macOS: one signed + notarized universal build. Windows: Authenticode-
-        # signed per-user NSIS installer and signed private helpers. We intentionally do not ship an MSI:
+        # macOS: one signed + notarized universal build. Windows: a per-user
+        # NSIS installer; `CLARK_WINDOWS_RELEASE_MODE=signed` restores the
+        # Authenticode/UTM gate once Microsoft verification is complete. We intentionally do not ship an MSI:
         # its machine-wide installation model adds an avoidable UAC prompt.
         # Linux: .deb + .rpm + .AppImage. Each
         # leg uploads its installers under canonical ClarkCode.* names and an
@@ -343,20 +375,49 @@ jobs:
             args: "--target universal-apple-darwin --config src-tauri/tauri.release.conf.json --config src-tauri/tauri.sandbox.macos.conf.json --config src-tauri/tauri.computer-use.macos.conf.json"
             bundle-target: "universal-apple-darwin"
             rust-targets: "aarch64-apple-darwin,x86_64-apple-darwin"
+            windows_signing: false
           - platform: ubuntu-22.04
             args: "--config src-tauri/tauri.release.conf.json --config src-tauri/tauri.sandbox.linux.conf.json"
             bundle-target: "x86_64-unknown-linux-gnu"
             rust-targets: ""
+            windows_signing: false
           - platform: windows-latest
-            args: "--bundles nsis --config src-tauri/tauri.release.conf.json --config src-tauri/tauri.sandbox.windows.conf.json --config src-tauri/tauri.windows-signing.conf.json"
+            args: "--bundles nsis --config src-tauri/tauri.release.conf.json --config src-tauri/tauri.sandbox.windows.conf.json"
             bundle-target: "x86_64-pc-windows-msvc"
             rust-targets: ""
+            windows_signing: ${{ vars.CLARK_WINDOWS_RELEASE_MODE == 'signed' }}
     runs-on: ${{ matrix.platform }}
     # Keep every native package in the same protected release deployment. The
-    # Windows leg also needs this stable subject for Azure OIDC signing.
+    # Windows leg consumes Azure only when its explicit signed mode is enabled.
     environment: release
     steps:
       - uses: actions/checkout@v4
+
+      - name: Require the isolated Windows publisher preflight
+        if: runner.os == 'Windows' && matrix.windows_signing
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $deadline = (Get-Date).AddMinutes(20)
+          do {
+            $response = gh api `
+              "/repos/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID/jobs?per_page=100" |
+              ConvertFrom-Json
+            $preflight = @($response.jobs | Where-Object {
+              $_.name -eq "Windows publisher identity preflight"
+            }) | Select-Object -First 1
+            if ($preflight -and $preflight.status -eq "completed") {
+              if ($preflight.conclusion -eq "success") {
+                Write-Host "Windows publisher preflight passed"
+                exit 0
+              }
+              throw "Windows publisher preflight concluded $($preflight.conclusion); Windows packaging is intentionally blocked"
+            }
+            Start-Sleep -Seconds 15
+          } while ((Get-Date) -lt $deadline)
+          throw "Timed out waiting for the isolated Windows publisher preflight"
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -442,7 +503,7 @@ jobs:
           $dumpbin.Directory.FullName >> $env:GITHUB_PATH
 
       - name: Authenticate the Windows build with Azure OIDC
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && matrix.windows_signing
         uses: azure/login@v3
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
@@ -450,7 +511,7 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Install and bind the official Artifact Signing client
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && matrix.windows_signing
         shell: pwsh
         run: |
           scripts/prepare-windows-artifact-signing.ps1 `
@@ -501,7 +562,7 @@ jobs:
           if-no-files-found: error
 
       - name: Sign every bundled Windows executable before packaging
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && matrix.windows_signing
         shell: pwsh
         run: |
           $executables = @(
@@ -583,17 +644,18 @@ jobs:
             Inc.) and notarized by Apple — drag Clark Code into Applications
             and open it, no Gatekeeper workaround needed.
 
-            **Windows** uses an Authenticode-signed per-user NSIS installer.
-            Clark's application and elevated sandbox helper carry the same
-            publisher identity.
+            **Windows** uses a per-user NSIS installer. Until publisher
+            verification passes, Windows builds are limited to managed preview
+            users and SmartScreen may require an explicit opt-in.
 
             **Linux** — `.AppImage` (portable, `chmod +x` and run), `.deb`
             (Debian/Ubuntu), or `.rpm` (Fedora/RHEL).
-          # Each matrix leg uploads into the same draft release; the `publish`
-          # job below flips it public only after every platform has uploaded.
+          # Each matrix leg uploads into the same draft release. Independent
+          # platform publishing makes macOS/Linux available without waiting for
+          # Windows publisher verification; the full channel still requires it.
           releaseDraft: true
-          prerelease: false
-          args: ${{ matrix.args }}
+          prerelease: ${{ vars.CLARK_WINDOWS_RELEASE_MODE != 'signed' }}
+          args: ${{ matrix.windows_signing && format('{0} --config src-tauri/tauri.windows-signing.conf.json', matrix.args) || matrix.args }}
 
       - name: Notarize and staple final macOS disk image
         if: runner.os == 'macOS'
@@ -695,18 +757,24 @@ jobs:
       - name: Verify packaged Windows runtime layout
         if: runner.os == 'Windows'
         shell: pwsh
+        env:
+          WINDOWS_SIGNING: ${{ matrix.windows_signing }}
         run: |
           $nsis = Get-ChildItem target -Recurse -File -Filter *-setup.exe |
             Where-Object { $_.FullName -match '[\\/]bundle[\\/]nsis[\\/]' } |
             Select-Object -First 1
           if (-not $nsis) { throw "packaged NSIS installer was not found" }
           $installerSignature = Get-AuthenticodeSignature -LiteralPath $nsis.FullName
-          if (
-            $installerSignature.Status -ne [Management.Automation.SignatureStatus]::Valid -or
-            $installerSignature.SignerCertificate.Subject -ne $env:CLARK_WINDOWS_SIGNER_SUBJECT -or
-            $installerSignature.SignerCertificate.Thumbprint -ne $env:WINDOWS_RELEASE_SIGNER_THUMBPRINT
-          ) {
-            throw "NSIS installer is not signed by the Clark release identity"
+          if ($env:WINDOWS_SIGNING -eq "true") {
+            if (
+              $installerSignature.Status -ne [Management.Automation.SignatureStatus]::Valid -or
+              $installerSignature.SignerCertificate.Subject -ne $env:CLARK_WINDOWS_SIGNER_SUBJECT -or
+              $installerSignature.SignerCertificate.Thumbprint -ne $env:WINDOWS_RELEASE_SIGNER_THUMBPRINT
+            ) {
+              throw "NSIS installer is not signed by the Clark release identity"
+            }
+          } elseif ($installerSignature.Status -ne [Management.Automation.SignatureStatus]::NotSigned) {
+            throw "Windows preview must not claim an unexpected publisher identity"
           }
           $unexpectedMsi = Get-ChildItem target -Recurse -File -Filter *.msi |
             Where-Object { $_.FullName -match '[\\/]bundle[\\/]msi[\\/]' }
@@ -745,12 +813,14 @@ jobs:
               throw "Packaged executable imports a VC++ runtime DLL: ${executable}`n$imports"
             }
             $signature = Get-AuthenticodeSignature -LiteralPath $executable
-            if (
-              $signature.Status -ne [Management.Automation.SignatureStatus]::Valid -or
-              $signature.SignerCertificate.Subject -ne $env:CLARK_WINDOWS_SIGNER_SUBJECT -or
-              $signature.SignerCertificate.Thumbprint -ne $env:WINDOWS_RELEASE_SIGNER_THUMBPRINT
-            ) {
-              throw "Packaged executable is not signed by the Clark release identity: $executable"
+            if ($env:WINDOWS_SIGNING -eq "true") {
+              if (
+                $signature.Status -ne [Management.Automation.SignatureStatus]::Valid -or
+                $signature.SignerCertificate.Subject -ne $env:CLARK_WINDOWS_SIGNER_SUBJECT -or
+                $signature.SignerCertificate.Thumbprint -ne $env:WINDOWS_RELEASE_SIGNER_THUMBPRINT
+              ) {
+                throw "Packaged executable is not signed by the Clark release identity: $executable"
+              }
             }
           }
 
@@ -761,31 +831,33 @@ jobs:
           if ($installedVersion -ne $expectedVersion) {
             throw "Packaged executable version $installedVersion does not match $expectedVersion"
           }
-          $buildReceiptRoot = "target/windows-release-build"
-          New-Item -ItemType Directory -Force -Path $buildReceiptRoot | Out-Null
-          @{
-            schema_version = 1
-            receipt_type = "clark_code_windows_release_build"
-            status = "passed"
-            source_revision = $env:GITHUB_SHA
-            tag = $env:GITHUB_REF_NAME
-            version = $expectedVersion
-            signer_subject = $installerSignature.SignerCertificate.Subject
-            signer_thumbprint = $installerSignature.SignerCertificate.Thumbprint
-            artifact = @{
-              asset = "ClarkCode_x64-setup.exe"
-              url = (
-                $env:CLARK_DESKTOP_DOWNLOAD_BASE_URL.TrimEnd("/") +
-                "/releases/$($env:GITHUB_REF_NAME)/ClarkCode_x64-setup.exe"
-              )
-              sha256 = (
-                Get-FileHash -Algorithm SHA256 -LiteralPath $nsis.FullName
-              ).Hash.ToLowerInvariant()
-              size = (Get-Item -LiteralPath $nsis.FullName).Length
-            }
-          } |
-            ConvertTo-Json -Depth 4 |
-            Set-Content -LiteralPath "$buildReceiptRoot/receipt.json" -Encoding utf8
+          if ($env:WINDOWS_SIGNING -eq "true") {
+            $buildReceiptRoot = "target/windows-release-build"
+            New-Item -ItemType Directory -Force -Path $buildReceiptRoot | Out-Null
+            @{
+              schema_version = 1
+              receipt_type = "clark_code_windows_release_build"
+              status = "passed"
+              source_revision = $env:GITHUB_SHA
+              tag = $env:GITHUB_REF_NAME
+              version = $expectedVersion
+              signer_subject = $installerSignature.SignerCertificate.Subject
+              signer_thumbprint = $installerSignature.SignerCertificate.Thumbprint
+              artifact = @{
+                asset = "ClarkCode_x64-setup.exe"
+                url = (
+                  $env:CLARK_DESKTOP_DOWNLOAD_BASE_URL.TrimEnd("/") +
+                  "/releases/$($env:GITHUB_REF_NAME)/ClarkCode_x64-setup.exe"
+                )
+                sha256 = (
+                  Get-FileHash -Algorithm SHA256 -LiteralPath $nsis.FullName
+                ).Hash.ToLowerInvariant()
+                size = (Get-Item -LiteralPath $nsis.FullName).Length
+              }
+            } |
+              ConvertTo-Json -Depth 4 |
+              Set-Content -LiteralPath "$buildReceiptRoot/receipt.json" -Encoding utf8
+          }
 
           & (Join-Path $installRoot "clark-resources/sandbox/windows/clark-command-runner.exe") --self-test
           if ($LASTEXITCODE -ne 0) { throw "Installed Windows sandbox runner self-test failed" }
@@ -810,7 +882,7 @@ jobs:
           if ($uninstall.ExitCode -ne 0) { throw "NSIS uninstall failed with $($uninstall.ExitCode)" }
 
       - name: Upload exact Windows release candidate for packaged journey
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && matrix.windows_signing
         uses: actions/upload-artifact@v4
         with:
           name: windows-release-candidate
@@ -818,7 +890,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload source-bound Windows release build receipt
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && matrix.windows_signing
         uses: actions/upload-artifact@v4
         with:
           name: windows-release-build-receipt
@@ -1015,7 +1087,9 @@ jobs:
           # updater artifact's .sig → its tauri platform key(s) + immutable,
           # versioned CDN URL (macOS: universal .app.tar.gz for both arches;
           # Windows: the NSIS -setup.exe; Linux: the .AppImage).
-          # tauri.conf.json's updater endpoint is desktop/latest/latest.json.
+          # New clients resolve target-specific documents under
+          # desktop/latest/updater/; the full channel also retains legacy
+          # latest.json for older installed clients.
           find_sig() { find target -type f -path "*/bundle/*" -name "$1" | head -1; }
           mac_sig="$(find_sig '*.app.tar.gz.sig')"
           win_sig="$(find_sig '*-setup.exe.sig')"
@@ -1048,7 +1122,7 @@ jobs:
           if-no-files-found: error
 
       - name: Publish immutable Windows candidate updater channel
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && matrix.windows_signing
         shell: bash
         run: |
           set -euo pipefail
@@ -1119,7 +1193,7 @@ jobs:
           fi
 
       - name: Build signed Windows updater seed
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && matrix.windows_signing
         shell: pwsh
         env:
           VITE_GOOGLE_DESKTOP_CLIENT_ID: ${{ secrets.VITE_GOOGLE_DESKTOP_CLIENT_ID }}
@@ -1146,7 +1220,7 @@ jobs:
           Copy-Item $seed.FullName target/windows-update-candidate/ClarkCode_update-seed.exe
 
       - name: Upload signed Windows updater seed
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && matrix.windows_signing
         uses: actions/upload-artifact@v4
         with:
           name: windows-update-seed
@@ -1157,7 +1231,7 @@ jobs:
 
   windows_packaged_journey:
     name: Clean packaged Windows first-run journey
-    needs: [build]
+    needs: [build, windows_utm_runner_preflight]
     runs-on: [self-hosted, macOS, ARM64, clark-utm-qa]
     timeout-minutes: 30
     steps:
@@ -1233,6 +1307,303 @@ jobs:
             target/windows-release-build
             target/windows-update-seed
             target/windows-update-journey
+          if-no-files-found: error
+
+  # Each platform has its own website aliases and updater document. This lane
+  # publishes every complete platform build when Windows is intentionally in
+  # preview mode, or when Windows signing fails while macOS/Linux pass. It does
+  # not touch legacy latest.json or manifest.json: those stay an all-platform
+  # compatibility channel until the signed Windows journey passes.
+  publish_independent_platforms:
+    name: Publish independently verified platform downloads
+    needs: [build, exec-server]
+    if: >-
+      ${{ always() && needs.exec-server.result == 'success' &&
+          (needs.build.result == 'success' || needs.build.result == 'failure') &&
+          (vars.CLARK_WINDOWS_RELEASE_MODE != 'signed' || needs.build.result == 'failure') }}
+    runs-on: ubuntu-latest
+    environment: release
+    concurrency:
+      group: clark-desktop-release-publish
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: harness/pnpm-lock.yaml
+      - name: Install platform release browser verifier
+        run: |
+          pnpm --dir harness install --frozen-lockfile
+          pnpm --dir harness exec playwright install --with-deps chromium
+
+      - name: Configure AWS credentials for platform download publication
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.CLARK_DESKTOP_DOWNLOAD_UPLOAD_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Download complete platform release records
+        uses: actions/download-artifact@v4
+        with:
+          pattern: desktop-download-records-*
+          path: release-records
+          merge-multiple: true
+
+      - name: Prepare complete platform aliases and updater documents
+        shell: bash
+        run: |
+          set -euo pipefail
+          published_at="$(
+            git show -s --format=%cI "$GITHUB_SHA" |
+              node -e 'process.stdin.once("data", (v) => console.log(new Date(String(v).trim()).toISOString()))'
+          )"
+          export RELEASE_PUBLISHED_AT="$published_at"
+          node --input-type=module <<'NODE'
+          import fs from "node:fs";
+          import path from "node:path";
+          import {
+            PLATFORM_RELEASES,
+            createPlatformUpdaterDocuments,
+            platformAliases,
+            validatePlatformReleaseAssets,
+          } from "./harness/public-release-journey.mjs";
+
+          const root = "release-records";
+          const out = "target/independent-platform-release";
+          const assetsByName = new Map();
+          const updaterFragments = [];
+          for (const name of fs.readdirSync(root).sort()) {
+            const file = path.join(root, name);
+            if (name.startsWith("assets-") && name.endsWith(".json")) {
+              for (const asset of JSON.parse(fs.readFileSync(file, "utf8"))) {
+                if (assetsByName.has(asset.name)) {
+                  throw new Error(`duplicate platform asset: ${asset.name}`);
+                }
+                assetsByName.set(asset.name, asset);
+              }
+            }
+            if (name.startsWith("updater-") && name.endsWith(".json")) {
+              updaterFragments.push(JSON.parse(fs.readFileSync(file, "utf8")));
+            }
+          }
+          const platforms = [];
+          for (const platform of Object.keys(PLATFORM_RELEASES)) {
+            const aliases = PLATFORM_RELEASES[platform].aliases;
+            const found = aliases.filter((alias) => assetsByName.has(alias));
+            if (found.length !== 0 && found.length !== aliases.length) {
+              throw new Error(`incomplete ${platform} platform artifacts: ${found.join(", ")}`);
+            }
+            if (found.length === aliases.length) platforms.push(platform);
+          }
+          if (platforms.length === 0) throw new Error("no complete platform release artifacts were uploaded");
+          const aliases = platformAliases(platforms);
+          const assets = aliases.map((alias) => assetsByName.get(alias));
+          const tag = process.env.GITHUB_REF_NAME;
+          const baseUrl = process.env.CLARK_DESKTOP_DOWNLOAD_BASE_URL.replace(/\/+$/, "");
+          validatePlatformReleaseAssets({
+            assets,
+            tag,
+            baseUrl,
+            sourceRevision: process.env.GITHUB_SHA,
+            platforms,
+          });
+          const documents = createPlatformUpdaterDocuments({
+            updaterFragments,
+            tag,
+            baseUrl,
+            sourceRevision: process.env.GITHUB_SHA,
+            platforms,
+            repository: process.env.GITHUB_REPOSITORY,
+            publishedAt: process.env.RELEASE_PUBLISHED_AT,
+          });
+          fs.mkdirSync(path.join(out, "updater"), { recursive: true, mode: 0o700 });
+          fs.writeFileSync(path.join(out, "assets.json"), `${JSON.stringify(assets, null, 2)}\n`);
+          fs.writeFileSync(path.join(out, "platforms.csv"), `${platforms.join(",")}\n`);
+          fs.writeFileSync(
+            path.join(out, "aliases.tsv"),
+            assets.map((asset) => `${asset.name}\t${asset.digest.slice("sha256:".length)}\t${asset.size}`).join("\n") + "\n",
+          );
+          for (const [target, document] of Object.entries(documents)) {
+            fs.writeFileSync(
+              path.join(out, "updater", `${target}.json`),
+              `${JSON.stringify(document, null, 2)}\n`,
+            );
+          }
+          NODE
+
+      - name: Promote independent website aliases and updater documents
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+          bucket="$CLARK_DESKTOP_DOWNLOAD_BUCKET"
+          base_url="${CLARK_DESKTOP_DOWNLOAD_BASE_URL%/}"
+          release_dir="target/independent-platform-release"
+          transaction_dir="$release_dir/transaction"
+          backup_prefix="desktop/releases/$tag/_platform-rollback/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          mkdir -p "$transaction_dir"
+
+          # An older platform lane must never overwrite an independently newer
+          # platform document, even when a delayed workflow reaches this lock.
+          for document in "$release_dir"/updater/*.json; do
+            target="$(basename "$document" .json)"
+            current="$(mktemp)"
+            current_err="$(mktemp)"
+            if aws s3api get-object \
+              --bucket "$bucket" \
+              --key "desktop/latest/updater/$target.json" \
+              "$current" > /dev/null 2>"$current_err"; then
+              node --input-type=module -e '
+                import fs from "node:fs";
+                import { validateChannelAdvance } from "./harness/public-release-journey.mjs";
+                const [file, incoming, revision] = process.argv.slice(1);
+                validateChannelAdvance(JSON.parse(fs.readFileSync(file, "utf8")), incoming, revision);
+              ' "$current" "${tag#v}" "$GITHUB_SHA"
+            elif ! grep -Eq "(^|[^0-9])404([^0-9]|$)|Not Found|NoSuchKey" "$current_err"; then
+              cat "$current_err" >&2
+              exit 1
+            fi
+          done
+
+          : > "$transaction_dir/prior-keys.tsv"
+          {
+            cut -f1 "$release_dir/aliases.tsv" | sed "s#^#desktop/latest/#"
+            for document in "$release_dir"/updater/*.json; do
+              printf 'desktop/latest/updater/%s\n' "$(basename "$document")"
+            done
+          } > "$transaction_dir/keys.txt"
+          while IFS= read -r key; do
+            head="$(mktemp)"
+            head_err="$(mktemp)"
+            if aws s3api head-object --bucket "$bucket" --key "$key" >"$head" 2>"$head_err"; then
+              aws s3api copy-object \
+                --bucket "$bucket" \
+                --copy-source "$bucket/$key" \
+                --key "$backup_prefix/${key#desktop/latest/}" \
+                --metadata-directive COPY > /dev/null
+              printf 'present\t%s\n' "$key" >> "$transaction_dir/prior-keys.tsv"
+            elif grep -Eq "(^|[^0-9])404([^0-9]|$)|Not Found|NoSuchKey" "$head_err"; then
+              printf 'absent\t%s\n' "$key" >> "$transaction_dir/prior-keys.tsv"
+            else
+              cat "$head_err" >&2
+              exit 1
+            fi
+          done < "$transaction_dir/keys.txt"
+          touch "$transaction_dir/backup-ready"
+
+          while IFS=$'\t' read -r alias sha size; do
+            case "$alias" in
+              *.dmg) content_type="application/x-apple-diskimage" ;;
+              *.exe) content_type="application/vnd.microsoft.portable-executable" ;;
+              *.AppImage) content_type="application/octet-stream" ;;
+              *.deb) content_type="application/vnd.debian.binary-package" ;;
+              *.rpm) content_type="application/x-rpm" ;;
+              *) echo "Unexpected website alias: $alias" >&2; exit 1 ;;
+            esac
+            aws s3api copy-object \
+              --bucket "$bucket" \
+              --copy-source "$bucket/desktop/releases/$tag/$alias" \
+              --key "desktop/latest/$alias" \
+              --content-type "$content_type" \
+              --cache-control "public, max-age=300" \
+              --metadata-directive REPLACE \
+              --metadata "sha256=$sha,clark-version=$tag,source-revision=$GITHUB_SHA" > /dev/null
+          done < "$release_dir/aliases.tsv"
+
+          for document in "$release_dir"/updater/*.json; do
+            target="$(basename "$document")"
+            sha="$(sha256sum "$document" | awk '{print $1}')"
+            aws s3 cp "$document" "s3://$bucket/desktop/latest/updater/$target" \
+              --content-type "application/json" \
+              --cache-control "no-store, no-cache, must-revalidate, max-age=0" \
+              --metadata "sha256=$sha,clark-version=$tag,source-revision=$GITHUB_SHA"
+          done
+
+          if [ -n "${CLARK_DESKTOP_DOWNLOAD_DISTRIBUTION_ID}" ]; then
+            aws cloudfront create-invalidation \
+              --distribution-id "${CLARK_DESKTOP_DOWNLOAD_DISTRIBUTION_ID}" \
+              --paths "/desktop/latest/*" > /dev/null
+          fi
+
+      - name: Verify website-visible independent platform release
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_dir="target/independent-platform-release"
+          confirmations=0
+          for _attempt in $(seq 1 24); do
+            if node harness/public-release-journey.mjs \
+              --tag "$GITHUB_REF_NAME" \
+              --base-url "$CLARK_DESKTOP_DOWNLOAD_BASE_URL" \
+              --site-url "https://www.clarkchat.com/" \
+              --source-revision "$GITHUB_SHA" \
+              --platforms "$(<"$release_dir/platforms.csv")" \
+              --assets "$release_dir/assets.json" \
+              --out "$release_dir/journey"; then
+              confirmations=$((confirmations + 1))
+              if [ "$confirmations" -ge 2 ]; then
+                exit 0
+              fi
+            else
+              confirmations=0
+            fi
+            sleep 5
+          done
+          echo "Independent platform release did not converge at the public website boundary" >&2
+          exit 1
+
+      - name: Publish the independently verified release notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release edit "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --draft=false --prerelease
+
+      - name: Restore independent platform pointers after failure
+        if: ${{ failure() || cancelled() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          transaction_dir="target/independent-platform-release/transaction"
+          if [ ! -f "$transaction_dir/backup-ready" ]; then
+            echo "No independent platform pointers were mutated"
+            exit 0
+          fi
+          bucket="$CLARK_DESKTOP_DOWNLOAD_BUCKET"
+          backup_prefix="desktop/releases/$GITHUB_REF_NAME/_platform-rollback/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          while IFS=$'\t' read -r disposition key; do
+            case "$disposition" in
+              present)
+                aws s3api copy-object \
+                  --bucket "$bucket" \
+                  --copy-source "$bucket/$backup_prefix/${key#desktop/latest/}" \
+                  --key "$key" \
+                  --metadata-directive COPY > /dev/null
+                ;;
+              absent)
+                aws s3api delete-object --bucket "$bucket" --key "$key" > /dev/null
+                ;;
+              *) echo "Invalid independent platform rollback disposition: $disposition" >&2; exit 1 ;;
+            esac
+          done < "$transaction_dir/prior-keys.tsv"
+          if [ -n "${CLARK_DESKTOP_DOWNLOAD_DISTRIBUTION_ID}" ]; then
+            aws cloudfront create-invalidation \
+              --distribution-id "${CLARK_DESKTOP_DOWNLOAD_DISTRIBUTION_ID}" \
+              --paths "/desktop/latest/*" > /dev/null
+          fi
+
+      - name: Upload independent platform release receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: independent-platform-release
+          path: target/independent-platform-release
           if-no-files-found: error
 
   # Publish the draft once all platform builds have uploaded their installers,
@@ -1427,6 +1798,39 @@ jobs:
           # only mutable updater object and is written last as the atomic pointer.
           put_immutable_json "$latest" "desktop/releases/$tag/latest.json"
 
+          # New desktop builds resolve one updater document per native target,
+          # allowing a healthy macOS or Linux lane to advance independently of
+          # an unavailable Windows publisher. Keep the legacy aggregate document
+          # for already-installed clients that still request latest.json.
+          platform_updater_dir="$(mktemp -d)"
+          node --input-type=module -e '
+            import fs from "node:fs";
+            import path from "node:path";
+            import { createPlatformUpdaterDocuments } from "./harness/public-release-journey.mjs";
+            const [root, out, tag, baseUrl, revision, repository, publishedAt] = process.argv.slice(1);
+            const fragments = fs.readdirSync(root)
+              .filter((name) => name.startsWith("updater-") && name.endsWith(".json"))
+              .sort()
+              .map((name) => JSON.parse(fs.readFileSync(path.join(root, name), "utf8")));
+            const documents = createPlatformUpdaterDocuments({
+              updaterFragments: fragments,
+              tag,
+              baseUrl,
+              sourceRevision: revision,
+              platforms: ["macos", "linux", "windows"],
+              repository,
+              publishedAt,
+            });
+            for (const [target, document] of Object.entries(documents)) {
+              fs.writeFileSync(path.join(out, `${target}.json`), `${JSON.stringify(document, null, 2)}\n`);
+            }
+          ' release-records "$platform_updater_dir" "$tag" "$base_url" "$GITHUB_SHA" "$GITHUB_REPOSITORY" "$published_at"
+          for document in "$platform_updater_dir"/*.json; do
+            put_immutable_json \
+              "$document" \
+              "desktop/releases/$tag/updater/$(basename "$document")"
+          done
+
           # Publish jobs are serialized above. Keep this monotonic guard as a
           # second line of defense against a delayed/retried older workflow
           # moving the channel backward after a newer tag is already live.
@@ -1537,8 +1941,11 @@ jobs:
           done < <(
             cut -f1 latest-aliases.tsv
             printf '%s\n' latest.json manifest.json
+            for document in "$platform_updater_dir"/*.json; do
+              printf 'updater/%s\n' "$(basename "$document")"
+            done
           )
-          [ "$(wc -l < "$transaction_dir/prior-keys.tsv" | tr -d '[:space:]')" -eq 7 ]
+          [ "$(wc -l < "$transaction_dir/prior-keys.tsv" | tr -d '[:space:]')" -eq 11 ]
           touch "$transaction_dir/backup-ready"
 
           while IFS=$'\t' read -r alias sha size; do
@@ -1567,6 +1974,13 @@ jobs:
           # already written.
           aws s3 cp "$manifest" "s3://$bucket/desktop/latest/manifest.json" \
             --content-type "application/json" --cache-control "$pointer_cache"
+          for document in "$platform_updater_dir"/*.json; do
+            doc_sha="$(sha256_file "$document")"
+            aws s3 cp "$document" "s3://$bucket/desktop/latest/updater/$(basename "$document")" \
+              --content-type "application/json" \
+              --cache-control "$pointer_cache" \
+              --metadata "sha256=$doc_sha,clark-version=$tag,source-revision=$GITHUB_SHA"
+          done
           aws s3 cp "$latest" "s3://$bucket/desktop/latest/latest.json" \
             --content-type "application/json" --cache-control "$pointer_cache"
 
@@ -1587,6 +2001,7 @@ jobs:
           observed_manifest="$(mktemp)"
           observed_headers="$(mktemp)"
           observed_alias_headers="$(mktemp)"
+          observed_platform_updater="$(mktemp)"
           cdn_ready=0
           cdn_confirmations=0
           for _attempt in $(seq 1 24); do
@@ -1607,7 +2022,31 @@ jobs:
                 break
               fi
             done < latest-aliases.tsv
-            if [ "$aliases_ready" -eq 1 ] &&
+            platform_updaters_ready=1
+            for document in "$platform_updater_dir"/*.json; do
+              target="$(basename "$document" .json)"
+              if ! curl -fsS \
+                -H "Cache-Control: no-cache, no-store, max-age=0" \
+                -H "Pragma: no-cache" \
+                "$base_url/latest/updater/$target.json" \
+                -o "$observed_platform_updater" ||
+                ! node --input-type=module -e '
+                  import fs from "node:fs";
+                  import { validatePlatformUpdaterDocument } from "./harness/public-release-journey.mjs";
+                  const [file, target, tag, baseUrl, revision] = process.argv.slice(1);
+                  validatePlatformUpdaterDocument({
+                    document: JSON.parse(fs.readFileSync(file, "utf8")),
+                    target,
+                    tag,
+                    baseUrl,
+                    sourceRevision: revision,
+                  });
+                ' "$observed_platform_updater" "$target" "$tag" "$base_url" "$GITHUB_SHA"; then
+                platform_updaters_ready=0
+                break
+              fi
+            done
+            if [ "$aliases_ready" -eq 1 ] && [ "$platform_updaters_ready" -eq 1 ] &&
               curl -fsS \
               -H "Cache-Control: no-cache, no-store, max-age=0" \
               -H "Pragma: no-cache" \
@@ -1829,7 +2268,7 @@ jobs:
                 status: "passed",
                 tag: process.env.GITHUB_REF_NAME,
                 source_revision: process.env.GITHUB_SHA,
-                objects_restored: 7,
+                objects_restored: 11,
                 generated_at: new Date().toISOString(),
               }, null, 2) + "\n",
             );
@@ -1884,7 +2323,7 @@ jobs:
 
   windows_release_vm_cleanup:
     name: Delete disposable Windows release VM
-    if: always()
+    if: ${{ always() && needs.windows_packaged_journey.result != 'skipped' }}
     needs: [windows_packaged_journey, publish]
     runs-on: [self-hosted, macOS, ARM64, clark-utm-qa]
     timeout-minutes: 10
@@ -1905,7 +2344,7 @@ jobs:
   # publish them under exec-server/<tag>/ — see scripts/publish-exec-server.sh
   # and src-tauri/src/ssh.rs `fetch_from_cdn`.
   exec-server:
-    needs: [pre_release_benchmarks, paid_release_benchmark]
+    needs: [pre_release_benchmarks]
     runs-on: macos-latest
     environment: release
     steps:

@@ -8,8 +8,12 @@ import test from "node:test";
 import {
   validatePublicReleaseJourneyReceipt,
   validateChannelAdvance,
+  createPlatformUpdaterDocuments,
+  PLATFORM_RELEASES,
   validateS3HeadObject,
   validateReleaseDocuments,
+  validatePlatformReleaseAssets,
+  validatePlatformUpdaterDocument,
   validateRenderedDownloadLinks,
   verifyArtifact,
 } from "./public-release-journey.mjs";
@@ -55,7 +59,11 @@ test("Windows release identity is live-gated through Azure Artifact Signing", ()
   assert.doesNotMatch(workflow, /WINDOWS_CERTIFICATE(?:_PASSWORD|_THUMBPRINT)?/);
   assert.match(
     workflow,
-    /release_prerequisites:[\s\S]*?runs-on: windows-latest[\s\S]*?environment: release/,
+    /release_source_prerequisites:[\s\S]*?runs-on: ubuntu-latest[\s\S]*?environment: release/,
+  );
+  assert.match(
+    workflow,
+    /windows_release_prerequisites:[\s\S]*?runs-on: windows-latest[\s\S]*?vars\.CLARK_WINDOWS_RELEASE_MODE == 'signed'/,
   );
   assert.match(
     workflow,
@@ -67,7 +75,7 @@ test("Windows release identity is live-gated through Azure Artifact Signing", ()
   );
   assert.match(
     workflow,
-    /fetch-depth: 0[\s\S]*?tauri\.conf\.json[\s\S]*?declaredVersion -ne \$tagVersion[\s\S]*?merge-base --is-ancestor \$env:GITHUB_SHA origin\/main/,
+    /fetch-depth: 0[\s\S]*?tauri\.conf\.json[\s\S]*?declared_version[\s\S]*?merge-base --is-ancestor "\$GITHUB_SHA" origin\/main/,
   );
   assert.match(
     workflow,
@@ -76,15 +84,23 @@ test("Windows release identity is live-gated through Azure Artifact Signing", ()
   assert.match(workflow, /uses: azure\/login@v3/g);
   assert.match(
     workflow,
-    /release_prerequisites:[\s\S]*?sign-windows-artifact\.ps1[\s\S]*?SignerCertificate\.Subject/,
+    /windows_release_prerequisites:[\s\S]*?sign-windows-artifact\.ps1[\s\S]*?SignerCertificate\.Subject/,
   );
   assert.match(
     workflow,
-    /release_prerequisites:[\s\S]*?aws-actions\/configure-aws-credentials@v4[\s\S]*?aws sts get-caller-identity/,
+    /release_source_prerequisites:[\s\S]*?aws-actions\/configure-aws-credentials@v4[\s\S]*?aws sts get-caller-identity/,
   );
   assert.match(
     workflow,
-    /windows_utm_runner_preflight:[\s\S]*?needs: \[release_prerequisites\]/,
+    /windows_utm_runner_preflight:[\s\S]*?needs: \[windows_release_prerequisites\]/,
+  );
+  assert.match(
+    workflow,
+    /pre_release_benchmarks:[\s\S]*?needs: \[release_source_prerequisites\]/,
+  );
+  assert.match(
+    workflow,
+    /publish_independent_platforms:[\s\S]*?Publish independently verified platform downloads[\s\S]*?desktop\/latest\/updater\//,
   );
   assert.match(
     workflow,
@@ -108,7 +124,7 @@ test("Windows release identity is live-gated through Azure Artifact Signing", ()
   );
   assert.match(
     workflow,
-    /Restored \$\{key\} changed \$\{field\}[\s\S]*?clark_code_public_channel_rollback[\s\S]*?objects_restored: 7/,
+    /Restored \$\{key\} changed \$\{field\}[\s\S]*?clark_code_public_channel_rollback[\s\S]*?objects_restored: 11/,
   );
   assert.match(
     workflow,
@@ -120,9 +136,16 @@ test("Windows release identity is live-gated through Azure Artifact Signing", ()
   );
   assert.match(
     workflow,
-    /windows_release_vm_cleanup:[\s\S]*?if: always\(\)[\s\S]*?--action delete-clone/,
+    /windows_release_vm_cleanup:[\s\S]*?if: \$\{\{ always\(\) && needs\.windows_packaged_journey\.result != 'skipped' \}\}[\s\S]*?--action delete-clone/,
   );
   assert.match(workflow, /src-tauri\/tauri\.windows-signing\.conf\.json/g);
+  const desktopConfig = JSON.parse(readFileSync(
+    new URL("../src-tauri/tauri.conf.json", import.meta.url),
+    "utf8",
+  ));
+  assert.deepEqual(desktopConfig.plugins.updater.endpoints, [
+    "https://downloads.clarkchat.com/desktop/latest/updater/{{target}}-{{arch}}.json",
+  ]);
   const parsedSigningConfig = JSON.parse(signingConfig);
   assert.deepEqual(
     parsedSigningConfig.bundle.windows.signCommand,
@@ -219,6 +242,79 @@ function documents() {
     },
   };
 }
+
+test("independent platform release documents preserve exact platform boundaries", () => {
+  const independentAliases = [
+    ...PLATFORM_RELEASES.macos.aliases,
+    ...PLATFORM_RELEASES.linux.aliases,
+  ];
+  const assets = independentAliases.map((name) => ({
+    name,
+    browser_download_url: `${baseUrl}/releases/${tag}/${name}`,
+    digest: `sha256:${"b".repeat(64)}`,
+    size: 42,
+  }));
+  const validated = validatePlatformReleaseAssets({
+    assets,
+    tag,
+    baseUrl,
+    sourceRevision,
+    platforms: ["macos", "linux"],
+  });
+  assert.deepEqual(validated.aliases, independentAliases);
+  assert.throws(
+    () => validatePlatformReleaseAssets({
+      assets: assets.slice(1),
+      tag,
+      baseUrl,
+      sourceRevision,
+      platforms: ["macos", "linux"],
+    }),
+    /unexpected set of website installers/,
+  );
+
+  const updater = createPlatformUpdaterDocuments({
+    updaterFragments: [{
+      platforms: {
+        "darwin-aarch64": {
+          signature: "mac-signature",
+          url: `${baseUrl}/releases/${tag}/ClarkCode.app.tar.gz`,
+        },
+        "darwin-x86_64": {
+          signature: "mac-signature",
+          url: `${baseUrl}/releases/${tag}/ClarkCode.app.tar.gz`,
+        },
+        "linux-x86_64": {
+          signature: "linux-signature",
+          url: `${baseUrl}/releases/${tag}/ClarkCode_amd64.AppImage`,
+        },
+      },
+    }],
+    tag,
+    baseUrl,
+    sourceRevision,
+    platforms: ["macos", "linux"],
+    repository: "clark-labs-inc/clark-desktop",
+    publishedAt: "2026-07-28T00:00:00.000Z",
+  });
+  assert.deepEqual(Object.keys(updater).sort(), [
+    "darwin-aarch64",
+    "darwin-x86_64",
+    "linux-x86_64",
+  ]);
+  for (const [target, document] of Object.entries(updater)) {
+    assert.equal(
+      validatePlatformUpdaterDocument({
+        document,
+        target,
+        tag,
+        baseUrl,
+        sourceRevision,
+      }),
+      document.platforms[target],
+    );
+  }
+});
 
 test("release documents require exact immutable platform and installer identities", () => {
   const value = documents();

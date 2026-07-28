@@ -1,18 +1,63 @@
 #!/usr/bin/env node
 
 import { createHash } from "node:crypto";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { pathToFileURL } from "node:url";
 
-const EXPECTED_ALIASES = [
+export const EXPECTED_ALIASES = [
   "ClarkCode.dmg",
   "ClarkCode_x64-setup.exe",
   "ClarkCode_amd64.AppImage",
   "ClarkCode_amd64.deb",
   "ClarkCode_x86_64.rpm",
 ];
+
+export const PLATFORM_RELEASES = Object.freeze({
+  macos: {
+    aliases: ["ClarkCode.dmg"],
+    updaterTargets: ["darwin-aarch64", "darwin-x86_64"],
+  },
+  linux: {
+    aliases: [
+      "ClarkCode_amd64.AppImage",
+      "ClarkCode_amd64.deb",
+      "ClarkCode_x86_64.rpm",
+    ],
+    updaterTargets: ["linux-x86_64"],
+  },
+  windows: {
+    aliases: ["ClarkCode_x64-setup.exe"],
+    updaterTargets: ["windows-x86_64"],
+  },
+});
+
+export function releasePlatforms(value) {
+  const platforms = typeof value === "string" ? value.split(",") : value;
+  if (!Array.isArray(platforms) || platforms.length === 0) {
+    throw new Error("at least one release platform is required");
+  }
+  const normalized = [...new Set(platforms.map((platform) => platform.trim()))];
+  for (const platform of normalized) {
+    if (!Object.hasOwn(PLATFORM_RELEASES, platform)) {
+      throw new Error(`unknown release platform: ${platform}`);
+    }
+  }
+  return normalized;
+}
+
+export function platformAliases(platforms) {
+  return releasePlatforms(platforms).flatMap(
+    (platform) => PLATFORM_RELEASES[platform].aliases,
+  );
+}
+
+export function platformUpdaterTargets(platforms) {
+  return releasePlatforms(platforms).flatMap(
+    (platform) => PLATFORM_RELEASES[platform].updaterTargets,
+  );
+}
 
 function valueArg(args, name) {
   const inline = args.find((arg) => arg.startsWith(`${name}=`));
@@ -128,6 +173,116 @@ export function validateReleaseDocuments({
     }
   }
   return { version, byName };
+}
+
+export function validatePlatformReleaseAssets({
+  assets,
+  tag,
+  baseUrl,
+  sourceRevision,
+  platforms,
+}) {
+  const version = tag.replace(/^v/, "");
+  const expectedAliases = platformAliases(platforms);
+  const releasePrefix = `${baseUrl}/releases/${tag}/`;
+  if (
+    !/^v\d+\.\d+\.\d+$/.test(tag)
+    || !/^\d+\.\d+\.\d+$/.test(version)
+    || !/^[0-9a-f]{40}$/.test(sourceRevision || "")
+    || !Array.isArray(assets)
+  ) {
+    throw new Error("platform release input is malformed");
+  }
+  const byName = new Map(assets.map((asset) => [asset?.name, asset]));
+  if (byName.size !== expectedAliases.length || assets.length !== expectedAliases.length) {
+    throw new Error("platform release has an unexpected set of website installers");
+  }
+  for (const alias of expectedAliases) {
+    const asset = byName.get(alias);
+    if (
+      !asset
+      || asset.browser_download_url !== `${releasePrefix}${alias}`
+      || !/^sha256:[0-9a-f]{64}$/.test(asset.digest ?? "")
+      || !Number.isSafeInteger(asset.size)
+      || asset.size <= 0
+    ) {
+      throw new Error(`platform release has an invalid ${alias} record`);
+    }
+  }
+  return { version, byName, aliases: expectedAliases };
+}
+
+export function createPlatformUpdaterDocuments({
+  updaterFragments,
+  tag,
+  baseUrl,
+  sourceRevision,
+  platforms,
+  repository,
+  publishedAt,
+}) {
+  const targets = platformUpdaterTargets(platforms);
+  const releasePrefix = `${baseUrl}/releases/${tag}/`;
+  if (
+    !Array.isArray(updaterFragments)
+    || !/^v\d+\.\d+\.\d+$/.test(tag)
+    || !/^[0-9a-f]{40}$/.test(sourceRevision || "")
+    || typeof repository !== "string"
+    || !repository
+    || Number.isNaN(Date.parse(publishedAt))
+  ) {
+    throw new Error("platform updater input is malformed");
+  }
+  const entries = {};
+  for (const fragment of updaterFragments) {
+    for (const [target, entry] of Object.entries(fragment?.platforms ?? {})) {
+      if (Object.hasOwn(entries, target)) {
+        throw new Error(`duplicate platform updater entry: ${target}`);
+      }
+      entries[target] = entry;
+    }
+  }
+  const documents = {};
+  for (const target of targets) {
+    const entry = entries[target];
+    if (
+      !entry
+      || typeof entry.signature !== "string"
+      || !entry.signature.trim()
+      || typeof entry.url !== "string"
+      || !entry.url.startsWith(releasePrefix)
+    ) {
+      throw new Error(`platform updater is missing a signed ${target} artifact`);
+    }
+    documents[target] = {
+      version: tag.slice(1),
+      source_revision: sourceRevision,
+      notes: `See the release notes at https://github.com/${repository}/releases/tag/${tag}`,
+      pub_date: publishedAt,
+      platforms: { [target]: entry },
+    };
+  }
+  return documents;
+}
+
+export function validatePlatformUpdaterDocument({
+  document,
+  target,
+  tag,
+  baseUrl,
+  sourceRevision,
+}) {
+  const entry = document?.platforms?.[target];
+  if (
+    document?.version !== tag.replace(/^v/, "")
+    || document?.source_revision !== sourceRevision
+    || Object.keys(document?.platforms ?? {}).length !== 1
+    || !entry?.signature
+    || !entry.url?.startsWith(`${baseUrl}/releases/${tag}/`)
+  ) {
+    throw new Error(`platform updater document for ${target} is invalid`);
+  }
+  return entry;
 }
 
 export function validateRenderedDownloadLinks({ hrefs, baseUrl }) {
@@ -383,18 +538,126 @@ export async function runPublicReleaseJourney({
   return receipt;
 }
 
+export async function runPlatformReleaseJourney({
+  tag,
+  baseUrl,
+  siteUrl,
+  sourceRevision,
+  platforms,
+  assets,
+  outputDir,
+}) {
+  const normalizedBase = normalizeBase(baseUrl);
+  const normalizedSite = new URL(siteUrl).href;
+  const normalizedPlatforms = releasePlatforms(platforms);
+  const { version, byName, aliases } = validatePlatformReleaseAssets({
+    assets,
+    tag,
+    baseUrl: normalizedBase,
+    sourceRevision,
+    platforms: normalizedPlatforms,
+  });
+  const updaterTargets = platformUpdaterTargets(normalizedPlatforms);
+  const updaterDocuments = Object.fromEntries(await Promise.all(
+    updaterTargets.map(async (target) => [
+      target,
+      await fetchJson(`${normalizedBase}/latest/updater/${target}.json`),
+    ]),
+  ));
+  for (const target of updaterTargets) {
+    validatePlatformUpdaterDocument({
+      document: updaterDocuments[target],
+      target,
+      tag,
+      baseUrl: normalizedBase,
+      sourceRevision,
+    });
+  }
+
+  const { chromium } = await import("playwright");
+  const browser = await chromium.launch({ headless: true });
+  const rendered = [];
+  try {
+    const page = await browser.newPage();
+    for (const url of [normalizedSite, new URL("/clark-code", normalizedSite).href]) {
+      await page.goto(url, { waitUntil: "domcontentloaded" });
+      const hrefs = await page.locator("a[href]").evaluateAll((links) =>
+        links.map((link) => link.href),
+      );
+      const missing = aliases.filter(
+        (alias) => !hrefs.includes(`${normalizedBase}/latest/${alias}`),
+      );
+      if (missing.length) {
+        throw new Error(`website does not expose platform installers: ${missing.join(", ")}`);
+      }
+      rendered.push({ url, links: aliases.map((alias) => `${normalizedBase}/latest/${alias}`) });
+    }
+  } finally {
+    await browser.close();
+  }
+
+  const artifacts = [];
+  for (const alias of aliases) {
+    const asset = byName.get(alias);
+    const identity = {
+      tag,
+      sha256: asset.digest.slice("sha256:".length),
+      size: asset.size,
+      sourceRevision,
+    };
+    artifacts.push({
+      alias,
+      immutable_url: asset.browser_download_url,
+      immutable: await verifyArtifact(asset.browser_download_url, identity),
+      publicAlias: await verifyArtifact(`${normalizedBase}/latest/${alias}`, identity),
+    });
+  }
+
+  const receipt = {
+    schema_version: 1,
+    benchmark: "clark_code_platform_release_journey",
+    status: "passed",
+    generated_at: new Date().toISOString(),
+    source_revision: sourceRevision,
+    tag,
+    version,
+    platforms: normalizedPlatforms,
+    site_url: normalizedSite,
+    base_url: normalizedBase,
+    rendered,
+    updater_targets: updaterTargets,
+    artifacts,
+  };
+  if (outputDir) {
+    mkdirSync(outputDir, { recursive: true, mode: 0o700 });
+    writeFileSync(
+      path.join(outputDir, "receipt.json"),
+      `${JSON.stringify(receipt, null, 2)}\n`,
+      { mode: 0o600 },
+    );
+  }
+  return receipt;
+}
+
 async function runCli() {
   const args = process.argv.slice(2);
   const tag = valueArg(args, "--tag");
   if (!/^v\d+\.\d+\.\d+$/.test(tag)) throw new Error("--tag must be a stable vX.Y.Z tag");
   const output = valueArg(args, "--out");
-  const receipt = await runPublicReleaseJourney({
+  const common = {
     tag,
     baseUrl: valueArg(args, "--base-url"),
     siteUrl: valueArg(args, "--site-url"),
     sourceRevision: valueArg(args, "--source-revision"),
     outputDir: path.resolve(output),
-  });
+  };
+  const receipt = args.includes("--platforms") || args.some((arg) => arg.startsWith("--platforms="))
+    ? await runPlatformReleaseJourney({
+      ...common,
+      platforms: valueArg(args, "--platforms"),
+      assets: JSON.parse(readFileSync(valueArg(args, "--assets"), "utf8")),
+    })
+    : await runPublicReleaseJourney(common);
   console.log(JSON.stringify({ status: receipt.status, version: receipt.version }));
   console.log(`RECEIPT=${path.resolve(output, "receipt.json")}`);
 }

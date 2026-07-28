@@ -117,15 +117,16 @@ previously enrolled ACLs are inert unless that exact root is active in the
 current token. Plan/read-only mode omits the project SID while retaining only
 the already enrolled Clark document/temp roots.
 
-Windows release builds fail closed unless Azure Artifact Signing can sign a
-disposable PE through the production SignTool/dlib boundary before any
-benchmark starts. GitHub authenticates with Azure through OIDC; no exportable
-PFX or long-lived client secret is used. Tauri's structured `signCommand`
-signs the main executable and NSIS installer while the bundle is being
-created, and Clark signs every private helper before packaging. The release
-then requires each installed executable to have a valid Authenticode
-signature with the configured Clark publisher subject and the same
-short-lived Artifact Signing certificate used for that release run.
+macOS and Linux releases share a source/CDN prerequisite and publish their
+website aliases plus target-specific updater documents independently. Windows
+publisher verification is a distinct release mode: the default preview mode
+creates an unsigned per-user installer only for the two managed preview users;
+it must never be described as a trusted Windows release. Setting
+`CLARK_WINDOWS_RELEASE_MODE=signed` restores the full Azure Artifact Signing
+gate. That mode signs a disposable PE through the production SignTool/dlib
+boundary, requires the configured publisher subject on the installer and every
+private helper, and enables the signed Windows UTM journey. GitHub uses Azure
+OIDC in signed mode; no exportable PFX or long-lived client secret is used.
 
 The per-user NSIS installer is also checked for no VC++ runtime dependency,
 silent install/start/uninstall behavior, and Tauri updater integrity under the
@@ -140,6 +141,7 @@ The external release identity prerequisites are:
 | Secrets `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` | Entra workload identity used by `azure/login` through GitHub OIDC. |
 | Variables `AZURE_ARTIFACT_SIGNING_RESOURCE_GROUP`, `AZURE_ARTIFACT_SIGNING_PROFILE` | Exact live Clark certificate-profile resource. |
 | Variable `CLARK_WINDOWS_SIGNER_SUBJECT` | Exact subject expected on every released executable. |
+| Variable `CLARK_WINDOWS_RELEASE_MODE=signed` | Opt into the signed Windows publisher/UTM gate after Microsoft verification completes. Any other value keeps Windows in managed unsigned preview mode. |
 | Optional variables `AZURE_ARTIFACT_SIGNING_ENDPOINT`, `AZURE_ARTIFACT_SIGNING_ACCOUNT` | Override the East US endpoint and `clarkcodesigning` account defaults. |
 | Variable `CLARK_DESKTOP_DOWNLOAD_UPLOAD_ROLE_ARN` | AWS role that writes immutable candidates and advances the public channel. |
 | Secrets `TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Detached updater-artifact signing identity. |
@@ -149,9 +151,10 @@ allows only stable `vX.Y.Z` tags. The Entra principal must have a federated
 credential for that environment's exact OIDC subject (rather than one
 credential per tag) and the Artifact Signing Certificate Profile Signer role
 on the profile. The AWS upload role must trust the same environment subject.
-Both cloud identities are exercised by the live prerequisite job before
-benchmarks or native builds begin. The profile itself cannot exist until Azure
-identity validation succeeds.
+The AWS identity is exercised before macOS/Linux benchmarks and native builds.
+Azure is exercised only by the signed Windows prerequisite; an incomplete
+publisher profile therefore cannot block the macOS/Linux website release. The
+profile itself cannot exist until Azure identity validation succeeds.
 
 The AWS role needs `GetObject`, `HeadObject`-equivalent read access,
 `PutObject`/server-side copy access under `desktop/releases/*` and
@@ -227,17 +230,16 @@ only when they match the signed Windows build receipt's hash and size. UAC
 enrollment requires both a fresh exact-UTM-window screenshot and an observed
 Windows `consent.exe` process before the autonomous consent input is sent.
 
-Public channel publication snapshots all seven mutable objects before its first
-write. Stable installer aliases and `manifest.json` advance before
-`latest.json`, which is the final updater pointer. Rendered-site and packaged
-post-publish journeys run before the draft GitHub release becomes public. Any
-failure restores the complete prior object generation with its original
-metadata and invalidates the CDN; a failed rollback snapshot is retained for
-operator recovery. The snapshot is deleted only after the GitHub release is
-successfully committed. Snapshot and restore validation includes ETag and any
-available S3 SHA-256 checksum. The monotonic guard reads the authoritative S3
-pointer, and the public journey streams and hashes the real bytes behind every
-immutable installer URL and every stable website alias before publication.
+The full signed compatibility channel snapshots eleven mutable objects before
+its first write: five website aliases, `manifest.json`, legacy `latest.json`,
+and four target-specific updater documents. Stable aliases and the target
+documents advance before legacy `latest.json`, the final compatibility pointer.
+The independent lane snapshots and promotes only the complete platform's
+aliases and target documents; it never changes legacy `latest.json` or
+`manifest.json`. That lets `clarkchat.com/clark-code` serve a new macOS/Linux
+file while older Windows clients remain on the prior signed channel. Both
+paths hash the immutable bytes and the website-visible aliases before making
+the draft GitHub release public, and restore their own snapshots on failure.
 
 The paid model test is ignored and environment-gated by design; run it only
 with explicit authorization, an exact model, a cost cap, and a dedicated key:
