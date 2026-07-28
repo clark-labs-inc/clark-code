@@ -189,7 +189,16 @@ async function extractInventoryItems(spec) {
     const assignment = contents[0].indexOf("=", declaration + name.length);
     if (assignment < 0) throw new Error(`cannot find assignment for TypeScript constant ${name}`);
     const body = findBalanced(contents[0].slice(assignment), "=", "[", "]");
-    return [...body.matchAll(/\bid:\s*"([^"]+)"/g)].map((match) => match[1]);
+    const stringConstants = new Map(
+      [...contents[0].matchAll(/(?:export\s+)?const\s+([A-Za-z_$][\w$]*)\s*=\s*"([^"]+)"/g)]
+        .map((match) => [match[1], match[2]]),
+    );
+    return [...body.matchAll(/\bid:\s*(?:"([^"]+)"|([A-Za-z_$][\w$]*))/g)].map((match) => {
+      if (match[1]) return match[1];
+      const id = stringConstants.get(match[2]);
+      if (!id) throw new Error(`cannot resolve TypeScript model id ${match[2]}`);
+      return id;
+    });
   }
   throw new Error(`unknown inventory extractor ${JSON.stringify(extractor)}`);
 }

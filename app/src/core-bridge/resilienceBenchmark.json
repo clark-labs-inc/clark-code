@@ -2,7 +2,7 @@
   "version": 1,
   "storageKey": "clark-desktop:resilience-benchmark",
   "model": "clark-code:free",
-  "modelLabel": "DeepSeek V4 Pro",
+  "modelLabel": "Free",
   "provider": "clark-managed",
   "faults": [
     "rate_limit",

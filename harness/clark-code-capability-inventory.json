@@ -442,6 +442,28 @@
             "crates/devbridge",
             "src-tauri"
           ]
+        },
+        {
+          "id": "scout_system_cartography",
+          "features": ["scout_system_cartography"],
+          "lanes": ["rust_contract", "frontend_contract"],
+          "items": [
+            "crates/scout-adapter-protocol",
+            "crates/scout-adapter-runtime",
+            "crates/scout-accumulator",
+            "crates/scout-capsule-core",
+            "crates/scout-capsule-guest",
+            "crates/scout-capsule-host",
+            "crates/scout-capability-census",
+            "crates/scout-cartography-adapter",
+            "crates/scout-ingest-client",
+            "crates/scout-ingest-protocol",
+            "crates/scout-machine-identity",
+            "crates/scout-platform-client",
+            "crates/scout-coordinator",
+            "crates/scout-scheduler",
+            "crates/scout-store"
+          ]
         }
       ]
     },
@@ -961,7 +983,7 @@
       "lane": "computer_use_contract",
       "evidence": {
         "path": "crates/computer-use/src/macos/auth.rs",
-        "contains": "HELPER_SIGNER_REQUIREMENT"
+        "contains": "SERVICE_SIGNER_REQUIREMENT"
       }
     },
     {
