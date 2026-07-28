@@ -1,4 +1,7 @@
 {
+  "build": {
+    "beforeBundleCommand": "bash ../scripts/sign-macos-computer-use-service.sh"
+  },
   "bundle": {
     "externalBin": [
       "binaries/rg"

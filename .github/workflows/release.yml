@@ -555,7 +555,10 @@ jobs:
             --out target/windows-native-containment
 
       - name: Upload native Windows containment receipt
-        if: runner.os == 'Windows'
+        # Preserve the test log when the required sandbox boundary fails so the
+        # next release diagnosis names the exact failed assertion. This does
+        # not soften the gate: the preceding proof still fails the build.
+        if: always() && runner.os == 'Windows'
         uses: actions/upload-artifact@v4
         with:
           name: windows-native-containment
