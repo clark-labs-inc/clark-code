@@ -9,17 +9,21 @@ use crate::state::write_json_atomic;
 
 pub struct WindowsProvisioningHost {
     state_dir: PathBuf,
+    setup_helper: PathBuf,
 }
 
 impl WindowsProvisioningHost {
-    pub fn new(state_dir: PathBuf) -> Self {
-        Self { state_dir }
+    pub fn new(state_dir: PathBuf, setup_helper: PathBuf) -> Self {
+        Self {
+            state_dir,
+            setup_helper,
+        }
     }
 }
 
 impl ProvisioningHost for WindowsProvisioningHost {
     fn validate_bootstrap(&mut self, request: &WindowsSetupRequest) -> Result<(), String> {
-        validate_private_runner(&request.runner_path)?;
+        validate_private_runner(&request.runner_path, &self.setup_helper)?;
         validate_user_state_dir(&request.state_dir)?;
         Ok(())
     }
@@ -47,7 +51,7 @@ impl ProvisioningHost for WindowsProvisioningHost {
 
 impl EnrollmentHost for WindowsProvisioningHost {
     fn validate_enrollment(&mut self, request: &WindowsSetupRequest) -> Result<(), String> {
-        validate_private_runner(&request.runner_path)?;
+        validate_private_runner(&request.runner_path, &self.setup_helper)?;
         validate_user_state_dir(&request.state_dir)?;
         crate::ownership::verify_and_consume(request)?;
         for denied in &request.policy.deny_write {
@@ -96,14 +100,15 @@ impl EnrollmentHost for WindowsProvisioningHost {
     }
 }
 
-fn validate_private_runner(runner: &Path) -> Result<(), String> {
+fn validate_private_runner(runner: &Path, setup: &Path) -> Result<(), String> {
     if runner.file_name().and_then(|name| name.to_str()) != Some("clark-command-runner.exe") {
         return Err("Windows sandbox runner has an unexpected filename".into());
     }
-    let setup = std::env::current_exe()
-        .map_err(|error| format!("resolve Windows sandbox setup executable: {error}"))?;
+    if setup.file_name().and_then(|name| name.to_str()) != Some("clark-windows-sandbox-setup.exe") {
+        return Err("Windows sandbox setup helper has an unexpected filename".into());
+    }
     let runner_parent = canonical_parent(runner)?;
-    let setup_parent = canonical_parent(&setup)?;
+    let setup_parent = canonical_parent(setup)?;
     if runner_parent != setup_parent {
         return Err("Windows sandbox runner is not beside the setup helper".into());
     }

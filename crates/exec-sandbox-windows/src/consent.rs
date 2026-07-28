@@ -36,7 +36,7 @@ pub fn run_setup_action(
         return native_runas(program, &parameters);
     }
     for request in decode_requests(args)? {
-        crate::native_enroll(request)?;
+        crate::native_enroll(request, program)?;
     }
     Ok(())
 }

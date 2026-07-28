@@ -280,7 +280,11 @@ fn native_worker_requested(_args: &[OsString]) -> bool {
 
 #[cfg(windows)]
 fn native_setup(request: WindowsSetupRequest) -> i32 {
-    let mut host = native::WindowsProvisioningHost::new(request.state_dir.clone());
+    let setup_helper = match current_setup_helper() {
+        Ok(path) => path,
+        Err(error) => return fail(EXIT_CONTAINMENT_FAILED, error),
+    };
+    let mut host = native::WindowsProvisioningHost::new(request.state_dir.clone(), setup_helper);
     let result = provision(&request, &mut host);
     match result {
         Ok(_) => 0,
@@ -289,25 +293,47 @@ fn native_setup(request: WindowsSetupRequest) -> i32 {
 }
 
 #[cfg(windows)]
-fn native_enroll(request: WindowsSetupRequest) -> Result<(), String> {
+fn native_enroll(
+    request: WindowsSetupRequest,
+    setup_helper: &std::path::Path,
+) -> Result<(), String> {
     static ENROLLMENT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
     let _guard = ENROLLMENT_LOCK
         .lock()
         .map_err(|_| "Windows sandbox enrollment lock is poisoned".to_string())?;
-    let mut host = native::WindowsProvisioningHost::new(request.state_dir.clone());
+    let mut host =
+        native::WindowsProvisioningHost::new(request.state_dir.clone(), setup_helper.to_path_buf());
     enroll(&request, &mut host).map(|_| ())
 }
 
 #[cfg(not(windows))]
-fn native_enroll(_request: WindowsSetupRequest) -> Result<(), String> {
+fn native_enroll(
+    _request: WindowsSetupRequest,
+    _setup_helper: &std::path::Path,
+) -> Result<(), String> {
     Err("native Windows workspace enrollment is not available on this host".to_string())
 }
 
 fn native_enroll_code(request: WindowsSetupRequest) -> i32 {
-    match native_enroll(request) {
+    let setup_helper = match current_setup_helper() {
+        Ok(path) => path,
+        Err(error) => return fail(EXIT_CONTAINMENT_FAILED, error),
+    };
+    match native_enroll(request, &setup_helper) {
         Ok(()) => 0,
         Err(error) => fail(EXIT_CONTAINMENT_FAILED, error),
     }
+}
+
+#[cfg(windows)]
+fn current_setup_helper() -> Result<std::path::PathBuf, String> {
+    std::env::current_exe()
+        .map_err(|error| format!("resolve Windows sandbox setup executable: {error}"))
+}
+
+#[cfg(not(windows))]
+fn current_setup_helper() -> Result<std::path::PathBuf, String> {
+    Err("native Windows sandbox setup is not available on this host".into())
 }
 
 #[cfg(not(windows))]
