@@ -133,7 +133,7 @@ function workspaceObservationExpression() {
       project_configured: settings.cwd === ${JSON.stringify(QA_ROOT)},
       model_configured: settings.model === ${JSON.stringify(QA_MODEL)},
       project_visible: text.includes("ClarkCodeQA"),
-      model_visible: text.includes("MiniMax M3") || text.includes("minimax_m3"),
+      model_visible: text.includes("Free"),
       account_visible: Boolean(auth?.user?.name && text.includes(auth.user.name))
     };
   })()`;

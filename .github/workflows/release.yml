@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       run_paid_benchmark:
-        description: Run the separately authorized paid model benchmark
+        description: Run the separately authorized managed Qwen 3.7 Flash benchmark
         required: false
         default: false
         type: boolean
@@ -317,7 +317,7 @@ jobs:
           if-no-files-found: warn
 
   paid_release_benchmark:
-    name: Paid release benchmark (macOS sandbox)
+    name: Managed Qwen 3.7 Flash release benchmark (macOS sandbox)
     needs: [release_source_prerequisites]
     # Model execution is opt-in and never spends provider credits merely because
     # a version tag was pushed. It remains available as a separately authorized
@@ -328,7 +328,7 @@ jobs:
     env:
       CLARK_CODE_PROVIDER: ${{ vars.CLARK_CODE_PRERELEASE_PROVIDER || 'clark-platform' }}
       CLARK_CODE_BASE_URL: ${{ vars.CLARK_CODE_PRERELEASE_BASE_URL || 'https://api.clarkslabs.com/v1' }}
-      CLARK_CODE_MODEL: ${{ vars.CLARK_CODE_PRERELEASE_MODEL || 'clark-code:minimax_m3' }}
+      CLARK_CODE_MODEL: clark-code:free
       CLARK_CODE_API_KEY: ${{ secrets.CLARK_CODE_PRERELEASE_API_KEY }}
     steps:
       - uses: actions/checkout@v4
@@ -342,7 +342,7 @@ jobs:
       - name: Install Clark Code tool dependencies
         run: brew install ripgrep
 
-      - name: Run cheapest-paid live Clark Code scenarios
+      - name: Run managed Qwen 3.7 Flash live Clark Code scenarios
         run: |
           node harness/feature-matrix.mjs \
             --live-only \

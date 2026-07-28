@@ -238,8 +238,8 @@ async function validateContracts() {
   ) {
     errors.push("live_model.selection_policy must pin the input-heavy cheapest-paid policy");
   }
-  if (manifest.live_model.upstream_id !== "minimax/minimax-m3") {
-    errors.push(`live_model.upstream_id must be minimax/minimax-m3, got ${manifest.live_model.upstream_id}`);
+  if (manifest.live_model.upstream_id !== "qwen/qwen3.7-flash") {
+    errors.push(`live_model.upstream_id must be qwen/qwen3.7-flash, got ${manifest.live_model.upstream_id}`);
   }
   if (manifest.live_model.temperature !== 0) {
     errors.push("live_model.temperature must be 0 for reproducible paid benchmark turns");
@@ -525,7 +525,7 @@ function livePreflight() {
   }
   if (process.env.CLARK_CODE_MODEL !== manifest.live_model.id) {
     errors.push(
-      `CLARK_CODE_MODEL must be ${manifest.live_model.id} for the default cheapest-paid control`,
+      `CLARK_CODE_MODEL must be ${manifest.live_model.id} for the managed Qwen 3.7 Flash control`,
     );
   }
   if (process.env.CLARK_CODE_BASE_URL !== manifest.live_model.base_url) {

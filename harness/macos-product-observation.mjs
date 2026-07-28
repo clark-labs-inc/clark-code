@@ -142,7 +142,7 @@ export function captureMacosProductWindow(outputDir) {
     brand_visible: text.includes("clark code"),
     workspace_visible: text.includes("new session"),
     project_visible: text.includes("clarkcodeqa"),
-    model_visible: text.includes("minimax") && text.includes("m3"),
+    model_visible: text.includes("free"),
     execution_control_visible: text.includes("execute"),
     sign_in_absent: !text.includes("continue with google"),
   };

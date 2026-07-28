@@ -522,7 +522,7 @@ if [[ "$run_live" == "1" ]]; then
           --ignored --exact --nocapture --test-threads=1 \
           2>&1 | tee "$output/live-feature-matrix.log"; then
           if live_cost_below_cap; then
-            echo "Running real compaction and continuation through the cheapest-paid MiniMax M3 route..."
+            echo "Running real compaction and continuation through the managed Qwen 3.7 Flash route..."
             if CLARK_CODE_LIVE=1 cargo test -p provider-local --test live_clark_code \
               live_clark_code_compacts_and_continues -- \
               --ignored --exact --nocapture --test-threads=1 \
@@ -864,7 +864,7 @@ pathlib.Path(report_path).write_text(
     f"**Read/Superpowers journey:** {journey}  \n"
     f"**UI resilience sample:** {ui}  \n"
     f"**Journey source:** `{source}`  \n"
-    f"**Cheapest-paid MiniMax M3 chats/jobs:** {live}{live_identity}\n\n"
+    f"**Managed Qwen 3.7 Flash chats/jobs:** {live}{live_identity}\n\n"
     "The live credential is never written to benchmark artifacts.\n"
 )
 PY

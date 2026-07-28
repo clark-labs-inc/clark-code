@@ -3,26 +3,26 @@
   "product": "Clark Code",
   "live_model": {
     "id": "clark-code:free",
-    "label": "MiniMax M3",
-    "upstream_id": "minimax/minimax-m3",
+    "label": "Qwen 3.7 Flash",
+    "upstream_id": "qwen/qwen3.7-flash",
     "provider": "clark-platform",
     "base_url": "https://api.clarkslabs.com/v1",
     "credential": "CLARK_CODE_API_KEY",
     "default_paid": true,
     "selection_policy": "lowest_expected_cost_for_input_heavy_tool_calling_tests",
     "pricing_snapshot": {
-      "as_of": "2026-07-23",
+      "as_of": "2026-07-28",
       "source": "https://openrouter.ai/api/v1/models",
-      "input_usd_per_million_tokens": 0.3,
-      "output_usd_per_million_tokens": 1.2,
-      "cached_input_usd_per_million_tokens": 0.06
+      "input_usd_per_million_tokens": 0.03,
+      "output_usd_per_million_tokens": 0.13,
+      "cached_input_usd_per_million_tokens": 0.006
     },
     "offline_flag": "--offline",
     "max_live_tests": 3,
     "max_iterations_per_turn": 16,
     "temperature": 0.0,
     "inter_test_cost_ceiling_usd": 0.5,
-    "rule": "The consolidated benchmark requires paid live lanes by default. --offline is the explicit opt-out. Credentials must never be printed or persisted."
+    "rule": "The consolidated benchmark uses the managed Qwen 3.7 Flash lane by default. --offline is the explicit opt-out. Credentials must never be printed or persisted."
   },
   "platforms": ["macos", "windows", "ubuntu"],
   "support_states": [
@@ -506,7 +506,7 @@
           "scout_system_cartography",
           "mcp_and_remote_ssh"
         ],
-        "expected": "Signed Clark Code Dev starts, retains its TCC identity, opens a disposable project, completes a names-only Scout census, and completes cheapest-paid MiniMax M3 chat and job turns."
+        "expected": "Signed Clark Code Dev starts, retains its TCC identity, opens a disposable project, completes a names-only Scout census, and completes managed Qwen 3.7 Flash chat and job turns."
       },
       {
         "id": "mac_computer_use_safety",
@@ -568,7 +568,7 @@
           "scout_system_cartography",
           "cloud_auth_history_sync_and_share"
         ],
-        "expected": "The cheapest-paid MiniMax M3 route reads and Scouts a disposable fixture without secret values, performs one approved edit, verifies the diff, and never escapes the fixture."
+        "expected": "The managed Qwen 3.7 Flash route reads and Scouts a disposable fixture without secret values, performs one approved edit, verifies the diff, and never escapes the fixture."
       },
       {
         "id": "windows_platform_exclusions",
@@ -617,7 +617,7 @@
           "integrated_terminal",
           "scout_system_cartography"
         ],
-        "expected": "The cheapest-paid MiniMax M3 route reads and Scouts a disposable fixture without secret values, and bubblewrap confines an approved mutation and cancelled background process."
+        "expected": "The managed Qwen 3.7 Flash route reads and Scouts a disposable fixture without secret values, and bubblewrap confines an approved mutation and cancelled background process."
       },
       {
         "id": "ubuntu_feature_surface",
