@@ -603,6 +603,36 @@ jobs:
           pnpm --dir app build
           pnpm --dir harness test:webkit
 
+      - name: Import Apple Developer ID for nested Computer Use service
+        if: runner.os == 'macOS' && secrets.APPLE_CERTIFICATE != ''
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: |
+          set -euo pipefail
+          certificate_path="$(mktemp "$RUNNER_TEMP/clark-apple-certificate.XXXXXX")"
+          keychain_path="$RUNNER_TEMP/clark-release-signing.keychain-db"
+          keychain_password="$(openssl rand -hex 32)"
+          cleanup() { rm -f "$certificate_path"; }
+          trap cleanup EXIT
+
+          printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > "$certificate_path" \
+            || printf '%s' "$APPLE_CERTIFICATE" | base64 -D > "$certificate_path"
+          security create-keychain -p "$keychain_password" "$keychain_path"
+          security default-keychain -s "$keychain_path"
+          security unlock-keychain -p "$keychain_password" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          security import "$certificate_path" -k "$keychain_path" \
+            -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s \
+            -k "$keychain_password" "$keychain_path"
+          if ! security find-identity -v -p codesigning "$keychain_path" | grep -F -- "$APPLE_SIGNING_IDENTITY" > /dev/null; then
+            echo "Apple Developer ID certificate is unavailable after import" >&2
+            exit 1
+          fi
+
       - name: Build + publish (tauri-action)
         uses: tauri-apps/tauri-action@v0
         env:

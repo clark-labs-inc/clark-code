@@ -581,6 +581,18 @@ export async function runPlatformReleaseJourney({
     const page = await browser.newPage();
     for (const url of [normalizedSite, new URL("/clark-code", normalizedSite).href]) {
       await page.goto(url, { waitUntil: "domcontentloaded" });
+      const expectedLinks = aliases.map((alias) => `${normalizedBase}/latest/${alias}`);
+      // The public site is a client-rendered React app. `domcontentloaded`
+      // only establishes that its shell arrived; wait for the download cards
+      // to hydrate before treating their links as absent.
+      await page.waitForFunction(
+        (expected) => {
+          const hrefs = Array.from(document.querySelectorAll("a[href]"), (link) => link.href);
+          return expected.every((href) => hrefs.includes(href));
+        },
+        expectedLinks,
+        { timeout: 30_000 },
+      );
       const hrefs = await page.locator("a[href]").evaluateAll((links) =>
         links.map((link) => link.href),
       );
