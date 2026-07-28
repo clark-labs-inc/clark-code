@@ -621,10 +621,11 @@ jobs:
               exit 1
             fi
           done
-          certificate_path="$(mktemp "$RUNNER_TEMP/clark-apple-certificate.XXXXXX")"
+          certificate_dir="$(mktemp -d "$RUNNER_TEMP/clark-apple-certificate.XXXXXX")"
+          certificate_path="$certificate_dir/cert.p12"
           keychain_path="$RUNNER_TEMP/clark-release-signing.keychain-db"
           keychain_password="$(openssl rand -hex 32)"
-          cleanup() { rm -f "$certificate_path"; }
+          cleanup() { rm -f "$certificate_path"; rmdir "$certificate_dir"; }
           trap cleanup EXIT
 
           printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > "$certificate_path" \

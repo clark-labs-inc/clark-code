@@ -112,6 +112,10 @@ test("Windows release identity is live-gated through Azure Artifact Signing", ()
   );
   assert.match(
     workflow,
+    /certificate_path="\$certificate_dir\/cert\.p12"[\s\S]*?security import "\$certificate_path"/,
+  );
+  assert.match(
+    workflow,
     /Build installers \(signed macOS\)[\s\S]*?if: runner\.os == 'macOS'[\s\S]*?APPLE_CERTIFICATE: \$\{\{ secrets\.APPLE_CERTIFICATE \}\}/,
   );
   assert.match(
