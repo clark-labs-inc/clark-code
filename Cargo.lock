@@ -49,7 +49,7 @@ dependencies = [
 
 [[package]]
 name = "agent-core"
-version = "0.1.94"
+version = "0.1.95"
 dependencies = [
  "async-channel",
  "async-trait",
@@ -68,7 +68,7 @@ dependencies = [
 
 [[package]]
 name = "agent-orchestration"
-version = "0.1.94"
+version = "0.1.95"
 dependencies = [
  "agent-core",
  "async-channel",
@@ -810,7 +810,7 @@ source = "git+https://github.com/clark-labs-inc/clark-agent-compaction?rev=860f3
 
 [[package]]
 name = "clark-desktop"
-version = "0.1.94"
+version = "0.1.95"
 dependencies = [
  "agent-core",
  "base64 0.22.1",
@@ -853,7 +853,7 @@ dependencies = [
 
 [[package]]
 name = "clark-install-context"
-version = "0.1.94"
+version = "0.1.95"
 dependencies = [
  "tempfile",
 ]
@@ -870,7 +870,7 @@ dependencies = [
 
 [[package]]
 name = "computer-use"
-version = "0.1.94"
+version = "0.1.95"
 dependencies = [
  "accessibility-sys",
  "core-foundation",
@@ -1266,7 +1266,7 @@ dependencies = [
 
 [[package]]
 name = "devbridge"
-version = "0.1.94"
+version = "0.1.95"
 dependencies = [
  "agent-core",
  "futures",
@@ -1746,7 +1746,7 @@ dependencies = [
 
 [[package]]
 name = "exec-core"
-version = "0.1.94"
+version = "0.1.95"
 dependencies = [
  "async-trait",
  "exec-private-fs",
@@ -1765,7 +1765,7 @@ dependencies = [
 
 [[package]]
 name = "exec-private-fs"
-version = "0.1.94"
+version = "0.1.95"
 dependencies = [
  "libc",
  "tempfile",
@@ -1774,7 +1774,7 @@ dependencies = [
 
 [[package]]
 name = "exec-protocol"
-version = "0.1.94"
+version = "0.1.95"
 dependencies = [
  "base64 0.22.1",
  "serde",
@@ -1783,7 +1783,7 @@ dependencies = [
 
 [[package]]
 name = "exec-sandbox"
-version = "0.1.94"
+version = "0.1.95"
 dependencies = [
  "async-trait",
  "exec-core",
@@ -1798,7 +1798,7 @@ dependencies = [
 
 [[package]]
 name = "exec-sandbox-protocol"
-version = "0.1.94"
+version = "0.1.95"
 dependencies = [
  "base64 0.22.1",
  "rmp-serde",
@@ -1811,7 +1811,7 @@ dependencies = [
 
 [[package]]
 name = "exec-sandbox-windows"
-version = "0.1.94"
+version = "0.1.95"
 dependencies = [
  "base64 0.22.1",
  "exec-sandbox-protocol",
@@ -1824,7 +1824,7 @@ dependencies = [
 
 [[package]]
 name = "exec-server"
-version = "0.1.94"
+version = "0.1.95"
 dependencies = [
  "exec-core",
  "exec-protocol",
@@ -4659,7 +4659,7 @@ dependencies = [
 
 [[package]]
 name = "provider-acp"
-version = "0.1.94"
+version = "0.1.95"
 dependencies = [
  "agent-core",
  "agent-orchestration",
@@ -4676,7 +4676,7 @@ dependencies = [
 
 [[package]]
 name = "provider-clark"
-version = "0.1.94"
+version = "0.1.95"
 dependencies = [
  "agent-core",
  "async-channel",
@@ -4694,7 +4694,7 @@ dependencies = [
 
 [[package]]
 name = "provider-local"
-version = "0.1.94"
+version = "0.1.95"
 dependencies = [
  "agent-core",
  "agent-orchestration",
@@ -5430,7 +5430,7 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
 name = "scout-accumulator"
-version = "0.1.94"
+version = "0.1.95"
 dependencies = [
  "serde",
  "serde_json",
@@ -5439,7 +5439,7 @@ dependencies = [
 
 [[package]]
 name = "scout-adapter-protocol"
-version = "0.1.94"
+version = "0.1.95"
 dependencies = [
  "serde",
  "serde_json",
@@ -5450,7 +5450,7 @@ dependencies = [
 
 [[package]]
 name = "scout-adapter-runtime"
-version = "0.1.94"
+version = "0.1.95"
 dependencies = [
  "base64 0.22.1",
  "chacha20poly1305",
@@ -5473,7 +5473,7 @@ dependencies = [
 
 [[package]]
 name = "scout-capability-census"
-version = "0.1.94"
+version = "0.1.95"
 dependencies = [
  "serde",
  "serde_json",
@@ -5484,7 +5484,7 @@ dependencies = [
 
 [[package]]
 name = "scout-capsule-core"
-version = "0.1.94"
+version = "0.1.95"
 dependencies = [
  "scout-adapter-protocol",
  "serde",
@@ -5495,14 +5495,14 @@ dependencies = [
 
 [[package]]
 name = "scout-capsule-guest"
-version = "0.1.94"
+version = "0.1.95"
 dependencies = [
  "scout-capsule-core",
 ]
 
 [[package]]
 name = "scout-capsule-host"
-version = "0.1.94"
+version = "0.1.95"
 dependencies = [
  "base64 0.22.1",
  "ed25519-dalek",
@@ -5518,7 +5518,7 @@ dependencies = [
 
 [[package]]
 name = "scout-cartography-adapter"
-version = "0.1.94"
+version = "0.1.95"
 dependencies = [
  "scout-adapter-protocol",
  "scout-ingest-protocol",
@@ -5529,7 +5529,7 @@ dependencies = [
 
 [[package]]
 name = "scout-coordinator"
-version = "0.1.94"
+version = "0.1.95"
 dependencies = [
  "agent-orchestration",
  "exec-private-fs",
@@ -5546,7 +5546,7 @@ dependencies = [
 
 [[package]]
 name = "scout-ingest-client"
-version = "0.1.94"
+version = "0.1.95"
 dependencies = [
  "agent-orchestration",
  "async-trait",
@@ -5562,7 +5562,7 @@ dependencies = [
 
 [[package]]
 name = "scout-ingest-protocol"
-version = "0.1.94"
+version = "0.1.95"
 dependencies = [
  "agent-orchestration",
  "ed25519-dalek",
@@ -5574,7 +5574,7 @@ dependencies = [
 
 [[package]]
 name = "scout-machine-identity"
-version = "0.1.94"
+version = "0.1.95"
 dependencies = [
  "exec-private-fs",
  "getrandom 0.2.17",
@@ -5586,7 +5586,7 @@ dependencies = [
 
 [[package]]
 name = "scout-platform-client"
-version = "0.1.94"
+version = "0.1.95"
 dependencies = [
  "getrandom 0.2.17",
  "reqwest 0.12.28",
@@ -5603,7 +5603,7 @@ dependencies = [
 
 [[package]]
 name = "scout-scheduler"
-version = "0.1.94"
+version = "0.1.95"
 dependencies = [
  "scout-adapter-protocol",
  "serde",
@@ -5613,7 +5613,7 @@ dependencies = [
 
 [[package]]
 name = "scout-store"
-version = "0.1.94"
+version = "0.1.95"
 dependencies = [
  "agent-orchestration",
  "base64 0.22.1",

@@ -18,7 +18,6 @@ src-tauri/gen
 src-tauri/icon-source.png
 # Release-only sidecars are fetched from the pinned manifest in CI.
 src-tauri/binaries/
-src-tauri/tauri.windows-signing.conf.json
 
 # Env / secrets — never commit
 .env
