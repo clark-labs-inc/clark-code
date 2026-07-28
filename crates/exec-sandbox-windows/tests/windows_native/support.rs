@@ -1,6 +1,8 @@
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use exec_sandbox_protocol::{
     encode_request, WindowsRootProof, WindowsRunnerRequest, WindowsSetupRequest, WireOsString,
@@ -43,6 +45,8 @@ pub fn run_process(
     program: &Path,
     args: &[&str],
 ) -> Output {
+    const COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
+    const TIMEOUT_MARKER: &str = "clark Windows sandbox test command timed out";
     let request = WindowsRunnerRequest {
         protocol_version: RUNNER_PROTOCOL_VERSION,
         request_id: format!("native-run-{}", std::process::id()),
@@ -71,10 +75,34 @@ pub fn run_process(
             ],
         },
     };
-    Command::new(runner)
+    let mut child = Command::new(runner)
         .args(["--request-b64", &encode_request(&request).unwrap()])
-        .output()
-        .unwrap()
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let started = Instant::now();
+    loop {
+        if child.try_wait().unwrap().is_some() {
+            return child.wait_with_output().unwrap();
+        }
+        if started.elapsed() >= COMMAND_TIMEOUT {
+            child.kill().unwrap();
+            let mut output = child.wait_with_output().unwrap();
+            output.stderr.extend_from_slice(
+                format!(
+                    "{TIMEOUT_MARKER} after {}s: runner={} program={} cwd={}\\n",
+                    COMMAND_TIMEOUT.as_secs(),
+                    runner.display(),
+                    program.display(),
+                    cwd.display(),
+                )
+                .as_bytes(),
+            );
+            return output;
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
 }
 
 pub fn required_helper(name: &str) -> PathBuf {
@@ -179,7 +207,9 @@ pub fn assert_success(label: &str, output: &Output) {
 
 pub fn assert_failure(label: &str, output: &Output) {
     assert!(
-        !output.status.success(),
+        !output.status.success()
+            && !String::from_utf8_lossy(&output.stderr)
+                .contains("clark Windows sandbox test command timed out"),
         "{label} unexpectedly succeeded\nstdout={}\nstderr={}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
