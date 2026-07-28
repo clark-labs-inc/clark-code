@@ -110,6 +110,10 @@ test("Windows release identity is live-gated through Azure Artifact Signing", ()
     workflow,
     /Build installers \(signed macOS\)[\s\S]*?signing_enabled == 'true'[\s\S]*?APPLE_CERTIFICATE: \$\{\{ secrets\.APPLE_CERTIFICATE \}\}/,
   );
+  assert.match(
+    workflow,
+    /Verify packaged macOS runtime layout[\s\S]*?if \[\[ "\$\{\{ steps\.macos_signing\.outputs\.signing_enabled \}\}" == "true" \]\]; then[\s\S]*?"\$helper" --self-test/,
+  );
   assert.doesNotMatch(workflow, /\b(?:tagName|releaseName|releaseBody|releaseDraft):/);
   assert.doesNotMatch(workflow, /\bgh release\b/);
   assert.match(

@@ -759,7 +759,15 @@ jobs:
           service="$app/Contents/Resources/Clark Computer Use.app"
           helper="$service/Contents/MacOS/clark-computer-use-helper"
           otool -l "$helper" | grep -A2 -F 'path @executable_path/../Frameworks'
-          "$helper" --self-test
+          # This binary self-test validates the service's Developer ID
+          # requirement. Keep it in the signed release lane; an unsigned
+          # installer still proves the packaged layout above and intentionally
+          # has no Computer Use signing authority.
+          if [[ "${{ steps.macos_signing.outputs.signing_enabled }}" == "true" ]]; then
+            "$helper" --self-test
+          else
+            test -x "$helper"
+          fi
 
       - name: Verify signed macOS Computer Use service identity
         if: runner.os == 'macOS' && steps.macos_signing.outputs.signing_enabled == 'true'
