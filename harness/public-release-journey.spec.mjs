@@ -104,16 +104,21 @@ test("Windows release identity is live-gated through Azure Artifact Signing", ()
   );
   assert.match(
     workflow,
-    /Build installers \(unsigned or non-macOS\)[\s\S]*?uses: tauri-apps\/tauri-action@v0[\s\S]*?with:\s*\n\s*args:/,
+    /Build installers \(non-macOS\)[\s\S]*?if: runner\.os != 'macOS'[\s\S]*?uses: tauri-apps\/tauri-action@v0[\s\S]*?with:\s*\n\s*args:/,
   );
   assert.match(
     workflow,
-    /Build installers \(signed macOS\)[\s\S]*?signing_enabled == 'true'[\s\S]*?APPLE_CERTIFICATE: \$\{\{ secrets\.APPLE_CERTIFICATE \}\}/,
+    /for secret_name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY; do[\s\S]*?::error::\$secret_name is required for every macOS release[\s\S]*?security import/,
   );
   assert.match(
     workflow,
-    /Verify packaged macOS runtime layout[\s\S]*?if \[\[ "\$\{\{ steps\.macos_signing\.outputs\.signing_enabled \}\}" == "true" \]\]; then[\s\S]*?"\$helper" --self-test/,
+    /Build installers \(signed macOS\)[\s\S]*?if: runner\.os == 'macOS'[\s\S]*?APPLE_CERTIFICATE: \$\{\{ secrets\.APPLE_CERTIFICATE \}\}/,
   );
+  assert.match(
+    workflow,
+    /Verify packaged macOS runtime layout[\s\S]*?Every macOS release has a Developer ID-signed Computer Use service\.[\s\S]*?"\$helper" --self-test/,
+  );
+  assert.doesNotMatch(workflow, /building macOS release unsigned|unsigned or non-macOS|signing_enabled != 'true'/);
   assert.doesNotMatch(workflow, /\b(?:tagName|releaseName|releaseBody|releaseDraft):/);
   assert.doesNotMatch(workflow, /\bgh release\b/);
   assert.match(
