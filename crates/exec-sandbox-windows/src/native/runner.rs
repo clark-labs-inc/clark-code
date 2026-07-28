@@ -150,7 +150,12 @@ pub fn run_restricted_worker(
     if !actual_sid.eq_ignore_ascii_case(expected_sid) {
         return Err("restricted worker is not running as the attested offline identity".into());
     }
-    super::firewall::verify_network_denied(expected_sid)?;
+    // `launch` already verifies the offline identity's firewall rules before
+    // this worker is created. Reopening the Firewall COM server from the
+    // profile-less, noninteractive offline account can block indefinitely on
+    // hosted Windows, while adding no protection against a post-verification
+    // change (that would require administrator authority). Keep the check at
+    // the parent boundary and proceed directly to the WRITE_RESTRICTED token.
     let restricted = restricted_write_token(base_token.0, &request.policy.write_capability_sids())?;
     if unsafe { IsTokenRestricted(restricted.0) } == 0 {
         return Err("CreateRestrictedToken returned an unrestricted token".into());
