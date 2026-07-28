@@ -2,8 +2,10 @@ name: Release
 
 # Builds native installers for macOS, Windows, and Linux on GitHub's native
 # runners (cross-compiling a Tauri app from one OS to the others is not viable),
-# keeps an operator copy in a private GitHub Release, and publishes public
-# binaries to Clark-owned download hosting. Triggered by a version tag.
+# publishes immutable binaries and mutable platform pointers to Clark-owned
+# download hosting. GitHub Releases are deliberately not a release dependency:
+# the public installer source of truth is clarkchat.com/clark-code. Triggered
+# by a version tag.
 on:
   push:
     tags: ["v*"]
@@ -646,7 +648,11 @@ jobs:
           fi
           echo "signing_enabled=true" >> "$GITHUB_OUTPUT"
 
-      - name: Build + publish (tauri-action)
+      # Omitting tauri-action's tag/release inputs selects its build-only mode.
+      # The action then produces bundles and updater signatures without calling
+      # the GitHub Releases API; the custom records below publish the exact
+      # same bytes to Clark-owned download hosting.
+      - name: Build installers (tauri-action)
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -679,26 +685,6 @@ jobs:
           VITE_GOOGLE_DESKTOP_CLIENT_ID: ${{ secrets.VITE_GOOGLE_DESKTOP_CLIENT_ID }}
           VITE_GOOGLE_DESKTOP_CLIENT_SECRET: ${{ secrets.VITE_GOOGLE_DESKTOP_CLIENT_SECRET }}
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: "Clark Code ${{ github.ref_name }}"
-          releaseBody: |
-            Download the installer for your platform from the assets below.
-
-            **macOS** builds use a standard DMG. Valid Developer ID credentials
-            enable Apple signing and notarization; unsigned preview builds may
-            require an explicit Gatekeeper opt-in.
-
-            **Windows** uses a per-user NSIS installer. Until publisher
-            verification passes, Windows builds are limited to managed preview
-            users and SmartScreen may require an explicit opt-in.
-
-            **Linux** — `.AppImage` (portable, `chmod +x` and run), `.deb`
-            (Debian/Ubuntu), or `.rpm` (Fedora/RHEL).
-          # Each matrix leg uploads into the same draft release. Independent
-          # platform publishing makes macOS/Linux available without waiting for
-          # Windows publisher verification; the full channel still requires it.
-          releaseDraft: true
-          prerelease: ${{ vars.CLARK_WINDOWS_RELEASE_MODE != 'signed' }}
           args: ${{ matrix.windows_signing && format('{0} --config src-tauri/tauri.windows-signing.conf.json', matrix.args) || matrix.args }}
 
       - name: Notarize and staple final macOS disk image
@@ -708,7 +694,6 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           dmg="$(find target -type f -path '*/bundle/dmg/*.dmg' -print -quit)"
@@ -743,10 +728,8 @@ jobs:
           spctl --assess --type execute --verbose=4 "$app"
           hdiutil detach "$dmg_mount" >/dev/null
           dmg_mounted=0
-          # tauri-action uploads the initial DMG to the draft release before
-          # this step. Replace that draft asset with the stapled installer so
-          # GitHub downloads and the later CDN upload use the same bytes.
-          gh release upload "$GITHUB_REF_NAME" "$dmg#$(basename "$dmg")" --clobber
+          # The custom public-download step runs after notarization, so the
+          # immutable CDN asset is the final stapled installer.
 
       - name: Verify packaged macOS runtime layout
         if: runner.os == 'macOS'
@@ -1610,13 +1593,21 @@ jobs:
           echo "Independent platform release did not converge at the public website boundary" >&2
           exit 1
 
-      - name: Publish the independently verified release notes
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Record independently verified public release
         run: |
-          gh release edit "$GITHUB_REF_NAME" \
-            --repo "$GITHUB_REPOSITORY" \
-            --draft=false --prerelease
+          node -e '
+            const fs = require("fs");
+            fs.writeFileSync(
+              "target/independent-platform-release/publication-receipt.json",
+              JSON.stringify({
+                schema_version: 1,
+                status: "published",
+                tag: process.env.GITHUB_REF_NAME,
+                source_revision: process.env.GITHUB_SHA,
+                published_at: new Date().toISOString(),
+              }, null, 2) + "\\n",
+            );
+          '
 
       - name: Restore independent platform pointers after failure
         if: ${{ failure() || cancelled() }}
@@ -1659,11 +1650,12 @@ jobs:
           path: target/independent-platform-release
           if-no-files-found: error
 
-  # Publish the draft once all platform builds have uploaded their installers,
-  # so no public manifest points at an incomplete platform set.
+  # Publish the aggregate updater channel once all platform builds have
+  # uploaded their installers, so no public manifest points at an incomplete
+  # platform set.
   publish:
-    # Also wait for exec-server: publishing flips the GH release public AND
-    # writes the aggregated latest.json (the auto-update trigger), so it must
+    # Also wait for exec-server: publishing writes the aggregated latest.json
+    # (the auto-update trigger), so it must
     # not run until the per-arch clark-exec-server prebuilts are on the CDN.
     # Otherwise a freshly-updated app can hit "not on the CDN for v<version>"
     # when connecting to a remote host before those binaries finish uploading.
@@ -2179,14 +2171,9 @@ jobs:
           path: target/windows-post-publish-journey
           if-no-files-found: error
 
-      - name: Publish the release after updater convergence
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Commit the release after updater convergence
         run: |
           set -euo pipefail
-          gh release edit "${{ github.ref_name }}" \
-            --repo "${{ github.repository }}" \
-            --draft=false --latest
           node -e '
             const fs = require("fs");
             fs.writeFileSync(
@@ -2207,8 +2194,6 @@ jobs:
       - name: Restore the prior public channel after a failed release
         if: ${{ failure() || cancelled() }}
         shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
 
@@ -2218,16 +2203,10 @@ jobs:
             exit 1
           fi
 
-          # A cancellation can race the final gh command. Never roll back a
-          # channel after its GitHub release has already become public.
-          is_draft="$(
-            gh release view "$GITHUB_REF_NAME" \
-              --repo "$GITHUB_REPOSITORY" \
-              --json isDraft \
-              --jq '.isDraft'
-          )"
-          if [ "$is_draft" != "true" ]; then
-            echo "Release is already public; preserving its verified channel generation"
+          # A cancellation can race the final receipt write. Once the verified
+          # public channel is committed, preserve it rather than rolling back.
+          if [ -f "$transaction_dir/commit-receipt.json" ]; then
+            echo "Public channel is already committed; preserving its verified generation"
             node -e '
               const fs = require("fs");
               fs.writeFileSync(
@@ -2235,7 +2214,7 @@ jobs:
                 JSON.stringify({
                   schema_version: 1,
                   receipt_type: "clark_code_public_channel_rollback",
-                  status: "not_needed_release_public",
+                  status: "not_needed_channel_committed",
                   tag: process.env.GITHUB_REF_NAME,
                   source_revision: process.env.GITHUB_SHA,
                   generated_at: new Date().toISOString(),

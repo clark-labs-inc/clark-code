@@ -104,6 +104,12 @@ test("Windows release identity is live-gated through Azure Artifact Signing", ()
   );
   assert.match(
     workflow,
+    /Build installers \(tauri-action\)[\s\S]*?uses: tauri-apps\/tauri-action@v0[\s\S]*?with:\s*\n\s*args:/,
+  );
+  assert.doesNotMatch(workflow, /\b(?:tagName|releaseName|releaseBody|releaseDraft):/);
+  assert.doesNotMatch(workflow, /\bgh release\b/);
+  assert.match(
+    workflow,
     /windows-release-build-receipt[\s\S]*?--build-receipt target\/windows-release-build\/receipt\.json/,
   );
   assert.match(
@@ -120,7 +126,7 @@ test("Windows release identity is live-gated through Azure Artifact Signing", ()
   );
   assert.match(
     workflow,
-    /Restore the prior public channel after a failed release[\s\S]*?failure\(\) \|\| cancelled\(\)[\s\S]*?isDraft[\s\S]*?metadata-directive COPY/,
+    /Restore the prior public channel after a failed release[\s\S]*?failure\(\) \|\| cancelled\(\)[\s\S]*?commit-receipt\.json[\s\S]*?metadata-directive COPY/,
   );
   assert.match(
     workflow,
