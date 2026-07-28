@@ -44,10 +44,16 @@ pub(super) fn inner_environment(request: &WindowsRunnerRequest) -> Vec<u16> {
 
 fn windows_noninteractive_environment() -> impl Iterator<Item = (OsString, OsString)> {
     [
-        ("PAGER", "more.com"),
-        ("GIT_PAGER", "more.com"),
+        // `more.com` needs a console and can leave a hidden sandbox child
+        // waiting forever. Git documents `cat` as the non-pager value; it
+        // also overrides any machine-wide `core.pager` configuration.
+        ("PAGER", "cat"),
+        ("GIT_PAGER", "cat"),
         ("GIT_OPTIONAL_LOCKS", "0"),
         ("GIT_TERMINAL_PROMPT", "0"),
+        // Do not let a machine-wide Git config select a pager, credential
+        // helper, or other host-integrated behavior for the offline worker.
+        ("GIT_CONFIG_NOSYSTEM", "1"),
         ("GIT_CONFIG_COUNT", "1"),
         ("GIT_CONFIG_KEY_0", "core.fsmonitor"),
         ("GIT_CONFIG_VALUE_0", "false"),
@@ -174,5 +180,22 @@ mod tests {
         assert_eq!(block[block.len() - 2], 0);
         let text = String::from_utf16_lossy(&block);
         assert!(text.find("Alpha=1").unwrap() < text.find("zeta=2").unwrap());
+    }
+
+    #[test]
+    fn noninteractive_git_environment_cannot_spawn_a_pager_or_system_helper() {
+        let values = windows_noninteractive_environment().collect::<BTreeMap<_, _>>();
+        assert_eq!(
+            values.get(&OsString::from("PAGER")),
+            Some(&OsString::from("cat"))
+        );
+        assert_eq!(
+            values.get(&OsString::from("GIT_PAGER")),
+            Some(&OsString::from("cat"))
+        );
+        assert_eq!(
+            values.get(&OsString::from("GIT_CONFIG_NOSYSTEM")),
+            Some(&OsString::from("1"))
+        );
     }
 }
