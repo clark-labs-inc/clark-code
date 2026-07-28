@@ -62,7 +62,41 @@ pub fn enroll(request: &WindowsSetupRequest, sid: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Permit the restricted offline worker to re-read the non-secret setup
+/// attestation before it creates the sandboxed child. The state directory only
+/// grants traversal and the marker only grants read; credentials remain
+/// inaccessible. Both the offline account and the stable device capability are
+/// required because a `WRITE_RESTRICTED` token must satisfy each SID set.
+pub fn grant_setup_marker_read(
+    state_dir: &Path,
+    marker_path: &Path,
+    offline_sid: &str,
+) -> Result<(), String> {
+    let device_capability = exec_sandbox_protocol::WireSandboxPolicy::device_capability_sid();
+    for sid in [offline_sid, device_capability.as_str()] {
+        set_path_ace_with_inheritance(state_dir, sid, FILE_GENERIC_EXECUTE, SET_ACCESS, 0)?;
+        set_path_ace_with_inheritance(marker_path, sid, FILE_GENERIC_READ, SET_ACCESS, 0)?;
+    }
+    Ok(())
+}
+
 fn set_path_ace(path: &Path, sid: &str, permissions: u32, mode: i32) -> Result<(), String> {
+    set_path_ace_with_inheritance(
+        path,
+        sid,
+        permissions,
+        mode,
+        OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE,
+    )
+}
+
+fn set_path_ace_with_inheritance(
+    path: &Path,
+    sid: &str,
+    permissions: u32,
+    mode: i32,
+    inheritance: u32,
+) -> Result<(), String> {
     let path_wide = path
         .as_os_str()
         .encode_wide()
@@ -92,7 +126,7 @@ fn set_path_ace(path: &Path, sid: &str, permissions: u32, mode: i32) -> Result<(
         sid,
         permissions,
         mode,
-        OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE,
+        inheritance,
         &format!("sandbox ACL root {}", path.display()),
     );
     unsafe { CloseHandle(handle) };

@@ -45,7 +45,7 @@ impl ProvisioningHost for WindowsProvisioningHost {
     }
 
     fn commit_marker(&mut self, marker: &WindowsSetupMarker) -> Result<(), String> {
-        write_json_atomic(&setup_marker_path(&self.state_dir), marker)
+        commit_marker(&self.state_dir, marker)
     }
 }
 
@@ -96,8 +96,14 @@ impl EnrollmentHost for WindowsProvisioningHost {
     }
 
     fn commit_marker(&mut self, marker: &WindowsSetupMarker) -> Result<(), String> {
-        write_json_atomic(&setup_marker_path(&self.state_dir), marker)
+        commit_marker(&self.state_dir, marker)
     }
+}
+
+fn commit_marker(state_dir: &Path, marker: &WindowsSetupMarker) -> Result<(), String> {
+    let marker_path = setup_marker_path(state_dir);
+    write_json_atomic(&marker_path, marker)?;
+    super::acl::grant_setup_marker_read(state_dir, &marker_path, &marker.offline_identity_sid)
 }
 
 fn validate_private_runner(runner: &Path, setup: &Path) -> Result<(), String> {
