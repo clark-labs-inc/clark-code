@@ -27,24 +27,6 @@ use windows_sys::Win32::System::Threading::{STARTF_USESTDHANDLES, STARTUPINFOW};
 const STDOUT_PIPE_SWITCH: &str = "--stdout-pipe";
 const STDERR_PIPE_SWITCH: &str = "--stderr-pipe";
 const PIPE_BUFFER_SIZE: u32 = 64 * 1024;
-const INTERACTIVE_DESKTOP: [u16; 16] = [
-    b'w' as u16,
-    b'i' as u16,
-    b'n' as u16,
-    b's' as u16,
-    b't' as u16,
-    b'a' as u16,
-    b'0' as u16,
-    b'\\' as u16,
-    b'd' as u16,
-    b'e' as u16,
-    b'f' as u16,
-    b'a' as u16,
-    b'u' as u16,
-    b'l' as u16,
-    b't' as u16,
-    0,
-];
 static PIPE_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
 /// Parent half of Clark's process transport. The offline worker receives only
@@ -120,9 +102,12 @@ impl WorkerTransport {
     pub fn startup_info(&self) -> STARTUPINFOW {
         let mut startup: STARTUPINFOW = unsafe { zeroed() };
         startup.cb = size_of::<STARTUPINFOW>() as u32;
-        // Restricted GUI-subsystem programs such as PowerShell require an
-        // explicit desktop even when Clark launches them without a window.
-        startup.lpDesktop = INTERACTIVE_DESKTOP.as_ptr() as *mut u16;
+        // These children are created with CREATE_NO_WINDOW and must stay on
+        // CreateProcessAsUserW's noninteractive window station. Requesting
+        // `winsta0\default` requires explicit window-station and desktop DACL
+        // grants for the restricted logon session; without them, console
+        // applications can remain blocked in their conhost LPC handshake
+        // before their runtime initializes.
         startup.dwFlags = STARTF_USESTDHANDLES;
         startup.hStdInput = self.stdin.0;
         startup.hStdOutput = self.stdout.0;
@@ -398,5 +383,21 @@ impl Drop for OwnedHandle {
         if !self.0.is_null() && self.0 != INVALID_HANDLE_VALUE {
             unsafe { CloseHandle(self.0) };
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pipe_backed_children_do_not_request_the_interactive_desktop() {
+        let transport = WorkerTransport {
+            stdin: OwnedHandle(ptr::null_mut()),
+            stdout: OwnedHandle(ptr::null_mut()),
+            stderr: OwnedHandle(ptr::null_mut()),
+        };
+
+        assert!(transport.startup_info().lpDesktop.is_null());
     }
 }
