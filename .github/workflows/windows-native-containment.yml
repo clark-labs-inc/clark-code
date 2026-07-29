@@ -21,6 +21,7 @@ jobs:
     timeout-minutes: 20
     env:
       CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS: "-C target-feature=+crt-static"
+      CLARK_WINDOWS_SANDBOX_GIT_REQUIRED: "1"
       CLARK_WINDOWS_SANDBOX_TRACE: "1"
     steps:
       - uses: actions/checkout@v4

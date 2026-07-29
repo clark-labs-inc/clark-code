@@ -1,7 +1,7 @@
 use std::ffi::{OsStr, OsString};
 use std::mem::{size_of, zeroed};
 use std::os::windows::ffi::OsStringExt;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::ptr;
 
 use exec_sandbox_protocol::{decode_request, encode_request, WindowsRunnerRequest};
@@ -193,21 +193,17 @@ fn spawn_inner(
 ) -> Result<i32, String> {
     transport.write_trace("inner:begin");
     let process = &request.process;
-    let requested_program = process.program.to_os_string();
-    let program = direct_git_for_windows_program(Path::new(&requested_program));
-    if program != Path::new(&requested_program) {
-        transport.write_trace(&format!("inner:git_wrapper_bypassed:{}", program.display()));
-    }
+    let program = process.program.to_os_string();
     let args = git_args_without_optional_locks(
-        &program,
+        Path::new(&program),
         process
             .args
             .iter()
             .map(|argument| argument.to_os_string())
             .collect(),
     );
-    let mut command_line = command_line(&program, &args);
-    let mut program_w = wide_os(program.as_os_str());
+    let mut command_line = command_line(Path::new(&program), &args);
+    let mut program_w = wide_os(&program);
     let cwd = process.cwd.to_os_string();
     let cwd_w = wide_os(&cwd);
     let mut environment = inner_environment(request);
@@ -235,39 +231,6 @@ fn spawn_inner(
     let result = wait_process(info);
     transport.write_trace("inner:exited");
     result
-}
-
-/// Git for Windows exposes compatibility wrappers at `<Git>\bin\git.exe` and
-/// `<Git>\cmd\git.exe`. Those wrappers initialize a normal interactive-user
-/// environment before spawning the real native Git binary. Under Clark's
-/// deliberately WRITE_RESTRICTED offline token, the wrapper can block before
-/// Git initializes at all. Git for Windows explicitly supports launching its
-/// architecture-specific binary by absolute path, so use that binary when the
-/// requested program is one of the standard wrappers.
-fn direct_git_for_windows_program(program: &Path) -> PathBuf {
-    let is_git = program
-        .file_name()
-        .and_then(|name| name.to_str())
-        .is_some_and(|name| name.eq_ignore_ascii_case("git.exe"));
-    let is_wrapper_directory = program
-        .parent()
-        .and_then(Path::file_name)
-        .and_then(OsStr::to_str)
-        .is_some_and(|name| name.eq_ignore_ascii_case("bin") || name.eq_ignore_ascii_case("cmd"));
-    let Some(install_root) = program
-        .parent()
-        .filter(|_| is_git && is_wrapper_directory)
-        .and_then(Path::parent)
-    else {
-        return program.to_path_buf();
-    };
-    for architecture in ["mingw64", "clangarm64", "ucrt64", "mingw32"] {
-        let candidate = install_root.join(architecture).join("bin").join("git.exe");
-        if candidate.is_file() {
-            return candidate;
-        }
-    }
-    program.to_path_buf()
 }
 
 fn trace(message: &str) {
@@ -551,27 +514,6 @@ mod tests {
                 OsString::from("status"),
                 OsString::from("--short"),
             ],
-        );
-    }
-
-    #[test]
-    fn git_for_windows_wrapper_resolves_to_supported_direct_binary() {
-        let root = tempfile::tempdir().unwrap();
-        let wrapper = root.path().join("bin").join("git.exe");
-        let direct = root.path().join("mingw64").join("bin").join("git.exe");
-        std::fs::create_dir_all(wrapper.parent().unwrap()).unwrap();
-        std::fs::create_dir_all(direct.parent().unwrap()).unwrap();
-        std::fs::write(&wrapper, b"wrapper").unwrap();
-        std::fs::write(&direct, b"direct").unwrap();
-
-        assert_eq!(direct_git_for_windows_program(&wrapper), direct);
-    }
-
-    #[test]
-    fn unrelated_git_path_is_not_rewritten() {
-        assert_eq!(
-            direct_git_for_windows_program(Path::new(r"C:\Tools\git.exe")),
-            PathBuf::from(r"C:\Tools\git.exe"),
         );
     }
 

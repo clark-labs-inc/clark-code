@@ -88,8 +88,15 @@ export function runNativeContainment({
   const log = `${completed.stdout || ""}${completed.stderr || completed.error?.message || ""}`;
   const logPath = path.join(outputDir, "cargo-test.log");
   writeFileSync(logPath, log, { encoding: "utf8", mode: 0o600 });
+  const corePassed = /clark_windows_core_containment=passed/.test(log);
   const passed = completed.status === 0
+    && corePassed
     && /native_windows_sandbox_enforces_filesystem_process_and_network_boundaries \.\.\. ok/.test(log);
+  const gitCompatibility = /clark_windows_git_compatibility=passed/.test(log)
+    ? "passed"
+    : /clark_windows_git_compatibility=failed_(?:optional|required)/.test(log)
+      ? "failed"
+      : "not_run";
   const receipt = {
     schema_version: 1,
     receipt_type: "clark_code_windows_native_containment",
@@ -100,13 +107,14 @@ export function runNativeContainment({
     required_user_actions: 0,
     assertions: NATIVE_CONTAINMENT_ASSERTIONS.map((id) => ({
       id,
-      status: passed ? "passed" : "failed",
+      status: corePassed ? "passed" : "failed",
     })),
     evidence: {
       log: path.basename(logPath),
       log_sha256: createHash("sha256").update(log).digest("hex"),
       exit_code: completed.status,
       timed_out: completed.signal === "SIGTERM" && completed.error?.code === "ETIMEDOUT",
+      git_compatibility: gitCompatibility,
     },
   };
   const receiptPath = path.join(outputDir, "receipt.json");
