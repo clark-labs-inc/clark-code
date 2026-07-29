@@ -69,6 +69,27 @@ The simulations were not useless; they were answering narrower questions than
 their release-gate names implied. The first broken contract was at the packaged
 first-run boundary, which none of them exercised.
 
+## July 29 native containment release failure
+
+The unsigned Windows release lane later stopped in
+`native_windows_sandbox_enforces_filesystem_process_and_network_boundaries`.
+Its aggregate receipt marked the project-write, outside-write, and network
+assertions failed, but the test had not reached any of them. The first actual
+failure was a quiet `git status --short` whose Clark runner timed out after 60
+seconds.
+
+The command root had already completed. The parent then waited for stdout and
+stderr pipe EOF while it still owned a kill-on-close Windows Job Object. A Git
+descendant inherited a pipe writer and could outlive the command root, so the
+pipe could not reach EOF; conversely, the descendant could not be terminated
+until the job handle was closed after the pipe drain. That lifecycle ordering
+formed a deadlock.
+
+The runner now closes the kill-on-close job immediately after the command root
+exits and before draining output. This terminates any surviving descendants,
+closes their inherited pipe writers, preserves already-written output, and
+makes the process-tree boundary match the documented no-orphan contract.
+
 ## Corrections
 
 - The composer now fails closed on an exact cwd-scoped sandbox status and shows

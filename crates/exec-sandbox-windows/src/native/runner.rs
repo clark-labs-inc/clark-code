@@ -138,6 +138,14 @@ fn spawn_worker(
     }
     let drain = transport.begin_drain();
     let process_result = wait_process(process);
+    // The job is the process-tree lifetime boundary, while the transport is
+    // only the root command's output boundary. A descendant may inherit a pipe
+    // writer and outlive the root (Git for Windows can do this even for a
+    // read-only status). Waiting for pipe EOF while the kill-on-close job is
+    // still alive deadlocks the caller: the descendant keeps the pipe open and
+    // the job is not closed until after the drain. Close the job first so every
+    // surviving descendant is terminated, then drain the already-written bytes.
+    drop(job);
     let drain_result = drain.finish();
     match (process_result, drain_result) {
         (Ok(code), Ok(())) => Ok(code),
