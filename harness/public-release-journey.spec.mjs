@@ -60,6 +60,13 @@ test("candidate release is parallel, supply-chain bound, and platform independen
     "utf8",
   );
 
+  const pinnedActions = [...workflow.matchAll(/uses:\s+\S+@([0-9a-f]+)/g)];
+  assert.ok(pinnedActions.length > 0);
+  assert.deepEqual(
+    pinnedActions.filter((match) => match[1].length !== 40),
+    [],
+    "every release action must use a full 40-character commit SHA",
+  );
   assert.doesNotMatch(workflow, /WINDOWS_CERTIFICATE(?:_PASSWORD|_THUMBPRINT)?/);
   assert.match(
     workflow,
