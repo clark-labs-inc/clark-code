@@ -26,7 +26,8 @@ use windows_sys::Win32::System::Threading::{
 use crate::launch::LaunchHost;
 
 use super::process::{
-    command_line, inner_environment, wide_os, wide_str, worker_environment, WORKER_REQUEST_ENV,
+    command_line, inner_environment, wide_os, wide_str, worker_environment, TRACE_ENV,
+    WORKER_REQUEST_ENV,
 };
 use super::transport::{ParentTransport, WorkerTransport};
 
@@ -99,6 +100,7 @@ fn spawn_worker(
     username: &str,
     password: &str,
 ) -> Result<i32, String> {
+    trace("spawn_worker:begin");
     let executable = std::env::current_exe()
         .map_err(|error| format!("resolve Windows sandbox runner: {error}"))?;
     let encoded = encode_request(request)?;
@@ -123,6 +125,7 @@ fn spawn_worker(
             &environment,
         )?
     };
+    trace(&format!("spawn_worker:created:pid={}", process.dwProcessId));
     let job = OwnedHandle::new(
         unsafe { CreateJobObjectW(ptr::null(), ptr::null()) },
         "CreateJobObjectW",
@@ -136,8 +139,11 @@ fn spawn_worker(
         unsafe { terminate_process_info(&mut process) };
         return Err(last_error("ResumeThread"));
     }
+    trace("spawn_worker:resumed");
     let drain = transport.begin_drain();
+    trace("spawn_worker:wait_worker");
     let process_result = wait_process(process);
+    trace("spawn_worker:worker_exited");
     // The job is the process-tree lifetime boundary, while the transport is
     // only the root command's output boundary. A descendant may inherit a pipe
     // writer and outlive the root (Git for Windows can do this even for a
@@ -146,7 +152,9 @@ fn spawn_worker(
     // the job is not closed until after the drain. Close the job first so every
     // surviving descendant is terminated, then drain the already-written bytes.
     drop(job);
+    trace("spawn_worker:job_closed");
     let drain_result = drain.finish();
+    trace("spawn_worker:drain_finished");
     match (process_result, drain_result) {
         (Ok(code), Ok(())) => Ok(code),
         (Err(error), _) | (_, Err(error)) => Err(error),
@@ -158,6 +166,7 @@ pub fn run_restricted_worker(
     expected_sid: &str,
     transport: &WorkerTransport,
 ) -> Result<i32, String> {
+    transport.write_trace("restricted_worker:begin");
     let base_token = current_process_token()?;
     let actual_sid = token_user_sid(base_token.0)?;
     if !actual_sid.eq_ignore_ascii_case(expected_sid) {
@@ -173,6 +182,7 @@ pub fn run_restricted_worker(
     if unsafe { IsTokenRestricted(restricted.0) } == 0 {
         return Err("CreateRestrictedToken returned an unrestricted token".into());
     }
+    transport.write_trace("restricted_worker:token_ready");
     spawn_inner(request, restricted.0, transport)
 }
 
@@ -181,6 +191,7 @@ fn spawn_inner(
     token: HANDLE,
     transport: &WorkerTransport,
 ) -> Result<i32, String> {
+    transport.write_trace("inner:begin");
     let process = &request.process;
     let program = process.program.to_os_string();
     let args = git_args_without_optional_locks(
@@ -216,7 +227,19 @@ fn spawn_inner(
     if created == 0 {
         return Err(last_error("CreateProcessAsUserW"));
     }
-    wait_process(info)
+    transport.write_trace(&format!("inner:created:pid={}", info.dwProcessId));
+    let result = wait_process(info);
+    transport.write_trace("inner:exited");
+    result
+}
+
+fn trace(message: &str) {
+    if std::env::var_os(TRACE_ENV).is_some() {
+        eprintln!(
+            "clark Windows sandbox trace: {message}; pid={}",
+            std::process::id()
+        );
+    }
 }
 
 /// Git status normally refreshes the index as a side effect.  That refresh

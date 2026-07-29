@@ -134,6 +134,16 @@ impl WorkerTransport {
         let rendered = format!("clark Windows sandbox: {message}\r\n");
         let _ = write_handle(self.stderr.0, rendered.as_bytes());
     }
+
+    pub fn write_trace(&self, message: &str) {
+        if std::env::var_os(super::process::TRACE_ENV).is_some() {
+            let rendered = format!(
+                "clark Windows sandbox trace: {message}; pid={}\r\n",
+                std::process::id()
+            );
+            let _ = write_handle(self.stderr.0, rendered.as_bytes());
+        }
+    }
 }
 
 struct ServerPipe {

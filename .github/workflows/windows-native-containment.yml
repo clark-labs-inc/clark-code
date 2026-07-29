@@ -1,0 +1,51 @@
+name: Windows native containment
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/windows-native-containment.yml"
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "crates/exec-sandbox-protocol/**"
+      - "crates/exec-sandbox-windows/**"
+      - "harness/windows-native-containment.mjs"
+
+permissions:
+  contents: read
+
+jobs:
+  containment:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    env:
+      CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS: "-C target-feature=+crt-static"
+      CLARK_WINDOWS_SANDBOX_TRACE: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: false
+
+      - name: Build native Windows sandbox helpers
+        shell: pwsh
+        run: cargo build --release -p exec-sandbox-windows --bins
+
+      - name: Prove native Windows filesystem and network containment
+        shell: pwsh
+        run: |
+          node harness/windows-native-containment.mjs `
+            --runner target/release/clark-command-runner.exe `
+            --setup target/release/clark-windows-sandbox-setup.exe `
+            --source-revision $env:GITHUB_SHA `
+            --out target/windows-native-containment
+
+      - name: Upload native Windows containment receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-native-containment
+          path: target/windows-native-containment
+          if-no-files-found: error

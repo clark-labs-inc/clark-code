@@ -6,12 +6,18 @@ use std::path::Path;
 use exec_sandbox_protocol::WindowsRunnerRequest;
 
 pub(super) const WORKER_REQUEST_ENV: &str = "CLARK_WINDOWS_SANDBOX_WORKER_REQUEST_B64";
+pub(super) const TRACE_ENV: &str = "CLARK_WINDOWS_SANDBOX_TRACE";
 
 pub(super) fn worker_environment(encoded_request: &str) -> Vec<u16> {
-    environment_block(windows_noninteractive_environment().chain([(
+    let mut overrides = windows_noninteractive_environment().collect::<Vec<_>>();
+    overrides.push((
         OsString::from(WORKER_REQUEST_ENV),
         OsString::from(encoded_request),
-    )]))
+    ));
+    if let Some(value) = std::env::var_os(TRACE_ENV) {
+        overrides.push((OsString::from(TRACE_ENV), value));
+    }
+    environment_block(overrides)
 }
 
 pub(super) fn inner_environment(request: &WindowsRunnerRequest) -> Vec<u16> {
