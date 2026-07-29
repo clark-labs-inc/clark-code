@@ -47,6 +47,27 @@ pub fn run_process(
 ) -> Output {
     const COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
     const TIMEOUT_MARKER: &str = "clark Windows sandbox test command timed out";
+    let trace_paths = git_trace_paths(policy, program);
+    let mut env = vec![
+        (
+            WireOsString::from_os(OsStr::new("TMP")),
+            WireOsString::from_os(policy.process_temp_root.as_ref().unwrap().as_os_str()),
+        ),
+        (
+            WireOsString::from_os(OsStr::new("TEMP")),
+            WireOsString::from_os(policy.process_temp_root.as_ref().unwrap().as_os_str()),
+        ),
+        (
+            WireOsString::from_os(OsStr::new("CLARK_SANDBOX_TEST_EXPLICIT")),
+            WireOsString::from_os(OsStr::new("preserved")),
+        ),
+    ];
+    for (name, path) in &trace_paths {
+        env.push((
+            WireOsString::from_os(OsStr::new(name)),
+            WireOsString::from_os(path.as_os_str()),
+        ));
+    }
     let request = WindowsRunnerRequest {
         protocol_version: RUNNER_PROTOCOL_VERSION,
         request_id: format!("native-run-{}", std::process::id()),
@@ -59,20 +80,7 @@ pub fn run_process(
                 .map(|argument| WireOsString::from_os(OsStr::new(argument)))
                 .collect(),
             cwd: WireOsString::from_os(cwd.as_os_str()),
-            env: vec![
-                (
-                    WireOsString::from_os(OsStr::new("TMP")),
-                    WireOsString::from_os(policy.process_temp_root.as_ref().unwrap().as_os_str()),
-                ),
-                (
-                    WireOsString::from_os(OsStr::new("TEMP")),
-                    WireOsString::from_os(policy.process_temp_root.as_ref().unwrap().as_os_str()),
-                ),
-                (
-                    WireOsString::from_os(OsStr::new("CLARK_SANDBOX_TEST_EXPLICIT")),
-                    WireOsString::from_os(OsStr::new("preserved")),
-                ),
-            ],
+            env,
         },
     };
     let mut child = Command::new(runner)
@@ -87,6 +95,7 @@ pub fn run_process(
             return child.wait_with_output().unwrap();
         }
         if started.elapsed() >= COMMAND_TIMEOUT {
+            let process_tree = process_tree_snapshot(child.id());
             child.kill().unwrap();
             let mut output = child.wait_with_output().unwrap();
             output.stderr.extend_from_slice(
@@ -99,9 +108,103 @@ pub fn run_process(
                 )
                 .as_bytes(),
             );
+            output.stderr.extend_from_slice(b"process_tree=");
+            output.stderr.extend_from_slice(&process_tree);
+            output.stderr.push(b'\n');
+            append_git_traces(&mut output.stderr, &trace_paths);
             return output;
         }
         thread::sleep(Duration::from_millis(100));
+    }
+}
+
+fn git_trace_paths(policy: &WireSandboxPolicy, program: &Path) -> Vec<(&'static str, PathBuf)> {
+    if std::env::var_os("CLARK_WINDOWS_SANDBOX_TRACE").is_none()
+        || !program
+            .file_stem()
+            .is_some_and(|stem| stem.eq_ignore_ascii_case("git"))
+    {
+        return Vec::new();
+    }
+    let temp = policy.process_temp_root.as_ref().unwrap();
+    vec![
+        ("GIT_TRACE2_EVENT", temp.join("git-trace2-event.json")),
+        ("GIT_TRACE2_PERF", temp.join("git-trace2-perf.txt")),
+    ]
+}
+
+fn append_git_traces(stderr: &mut Vec<u8>, trace_paths: &[(&str, PathBuf)]) {
+    for (name, path) in trace_paths {
+        stderr.extend_from_slice(format!("{name}={}:\n", path.display()).as_bytes());
+        match std::fs::read(path) {
+            Ok(contents) => stderr.extend_from_slice(&contents),
+            Err(error) => stderr.extend_from_slice(format!("<unavailable: {error}>").as_bytes()),
+        }
+        stderr.push(b'\n');
+    }
+}
+
+fn process_tree_snapshot(root_pid: u32) -> Vec<u8> {
+    const SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(5);
+    let powershell = PathBuf::from(std::env::var_os("WINDIR").unwrap())
+        .join("System32")
+        .join("WindowsPowerShell")
+        .join("v1.0")
+        .join("powershell.exe");
+    let script = format!(
+        "$all = @(Get-CimInstance Win32_Process); \
+         $pending = @([uint32]{root_pid}); $seen = @{{}}; $rows = @(); \
+         while ($pending.Count -gt 0) {{ \
+           $parent = $pending[0]; \
+           if ($pending.Count -eq 1) {{ $pending = @() }} else {{ $pending = @($pending[1..($pending.Count - 1)]) }}; \
+           foreach ($item in @($all | Where-Object {{ $_.ParentProcessId -eq $parent }})) {{ \
+             if (-not $seen.ContainsKey([string]$item.ProcessId)) {{ \
+               $seen[[string]$item.ProcessId] = $true; $pending += [uint32]$item.ProcessId; $rows += $item \
+             }} \
+           }} \
+         }}; \
+         $rows | Select-Object ProcessId, ParentProcessId, Name, ExecutablePath | ConvertTo-Json -Compress"
+    );
+    let mut child = match Command::new(powershell)
+        .args([
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            &script,
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(error) => return format!("<snapshot spawn failed: {error}>").into_bytes(),
+    };
+    let started = Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => {
+                return child
+                    .wait_with_output()
+                    .map(|output| output.stdout)
+                    .unwrap_or_else(|error| {
+                        format!("<snapshot collection failed: {error}>").into_bytes()
+                    });
+            }
+            Ok(None) if started.elapsed() < SNAPSHOT_TIMEOUT => {
+                thread::sleep(Duration::from_millis(50));
+            }
+            Ok(None) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return b"<snapshot timed out>".to_vec();
+            }
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return format!("<snapshot wait failed: {error}>").into_bytes();
+            }
+        }
     }
 }
 
