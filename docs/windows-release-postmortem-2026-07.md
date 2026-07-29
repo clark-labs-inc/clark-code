@@ -100,12 +100,18 @@ handles, which removes a separate process-tree lifecycle hazard. That ordering
 did not, however, explain the observed startup timeout because the command root
 never exited.
 
-For v0.1.117 the Windows project sandbox reports `Unavailable` and fails closed
+For v0.1.118 the Windows project sandbox reports `Unavailable` and fails closed
 unless a QA environment explicitly enables the experimental backend. Full
 Access remains an explicit user choice. Native containment and Git
 compatibility continue in a separate strict diagnostic workflow, while Windows
 installer and updater publication depend only on package, launch, artifact,
 and public-channel verification.
+
+The release fan-out also waits for the ordinary CI run for the exact tagged
+mainline revision. That CI matrix includes a native Windows Tauri build, so
+Windows-only `#[cfg(windows)]` compilation failures stop the release before the
+long installer jobs begin instead of surfacing after macOS and Linux have
+already produced candidates.
 
 ## Corrections
 

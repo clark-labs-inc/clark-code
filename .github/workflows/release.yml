@@ -18,6 +18,7 @@ on:
         type: boolean
 
 permissions:
+  actions: read
   contents: write
   id-token: write
 
@@ -248,6 +249,57 @@ jobs:
             --action prepare-base \
             --base "$CLARK_WINDOWS_QA_BASE_VM"
 
+  release_source_ci:
+    name: Exact source CI gate
+    needs: [release_source_prerequisites]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Require successful CI for the exact mainline source revision
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          deadline=$((SECONDS + 25 * 60))
+          while (( SECONDS < deadline )); do
+            runs="$(
+              gh run list \
+                --repo "$GITHUB_REPOSITORY" \
+                --workflow ci.yml \
+                --commit "$GITHUB_SHA" \
+                --event push \
+                --limit 10 \
+                --json databaseId,status,conclusion,headSha,event,url
+            )"
+            exact_run="$(
+              jq -c --arg sha "$GITHUB_SHA" \
+                '[.[] | select(.headSha == $sha and .event == "push")]
+                 | sort_by(.databaseId)
+                 | last // empty' \
+                <<<"$runs"
+            )"
+            if [[ -n "$exact_run" ]]; then
+              run_state="$(jq -r '.status' <<<"$exact_run")"
+              run_url="$(jq -r '.url' <<<"$exact_run")"
+              if [[ "$run_state" == "completed" ]]; then
+                run_conclusion="$(jq -r '.conclusion' <<<"$exact_run")"
+                if [[ "$run_conclusion" == "success" ]]; then
+                  echo "Exact source CI passed: $run_url"
+                  exit 0
+                fi
+                echo "Exact source CI concluded $run_conclusion: $run_url" >&2
+                exit 1
+              fi
+              echo "Waiting for exact source CI ($run_state): $run_url"
+            else
+              echo "Waiting for the main push CI run for $GITHUB_SHA"
+            fi
+            sleep 15
+          done
+          echo "Timed out waiting for successful CI on $GITHUB_SHA" >&2
+          exit 1
+
   pre_release_benchmarks:
     name: Deterministic pre-release experience benchmark
     needs: [release_source_prerequisites]
@@ -360,7 +412,7 @@ jobs:
           if-no-files-found: warn
 
   build:
-    needs: [pre_release_benchmarks]
+    needs: [pre_release_benchmarks, release_source_ci]
     strategy:
       fail-fast: false
       matrix:
@@ -2443,7 +2495,7 @@ jobs:
   # publish them under exec-server/<tag>/ — see scripts/publish-exec-server.sh
   # and src-tauri/src/ssh.rs `fetch_from_cdn`.
   exec-server:
-    needs: [pre_release_benchmarks]
+    needs: [pre_release_benchmarks, release_source_ci]
     runs-on: macos-latest
     environment: release
     steps:

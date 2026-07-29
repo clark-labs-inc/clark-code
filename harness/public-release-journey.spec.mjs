@@ -102,6 +102,19 @@ test("Windows release identity is live-gated through Azure Artifact Signing", ()
     workflow,
     /pre_release_benchmarks:[\s\S]*?needs: \[release_source_prerequisites\]/,
   );
+  assert.match(workflow, /permissions:[\s\S]*?actions: read/);
+  assert.match(
+    workflow,
+    /release_source_ci:[\s\S]*?needs: \[release_source_prerequisites\][\s\S]*?--workflow ci\.yml[\s\S]*?--commit "\$GITHUB_SHA"[\s\S]*?run_conclusion[\s\S]*?success/,
+  );
+  assert.match(
+    workflow,
+    /\n  build:[\s\S]*?needs: \[pre_release_benchmarks, release_source_ci\]/,
+  );
+  assert.match(
+    workflow,
+    /\n  exec-server:[\s\S]*?needs: \[pre_release_benchmarks, release_source_ci\]/,
+  );
   assert.match(
     workflow,
     /publish_independent_platforms:[\s\S]*?Publish independently verified platform downloads[\s\S]*?desktop\/latest\/updater\//,

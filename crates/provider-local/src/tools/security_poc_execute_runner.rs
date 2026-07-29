@@ -1,3 +1,5 @@
+#[cfg(any(windows, test))]
+use std::ffi::OsString;
 use std::path::{Component, Path};
 use std::process::Stdio;
 use std::time::Duration;
@@ -16,6 +18,17 @@ const MAX_FILE_BYTES: u64 = 32 * 1024 * 1024;
 const MAX_WORKSPACE_BYTES: u64 = 256 * 1024 * 1024;
 pub(super) const MAX_OUTPUT_BYTES: usize = 1024 * 1024;
 const MAX_OUTPUT_PREVIEW_BYTES: usize = 8 * 1024;
+
+#[cfg(any(windows, test))]
+fn powershell_script_args(script_path: &Path) -> [OsString; 5] {
+    [
+        OsString::from("-NoLogo"),
+        OsString::from("-NoProfile"),
+        OsString::from("-NonInteractive"),
+        OsString::from("-File"),
+        script_path.as_os_str().to_os_string(),
+    ]
+}
 
 pub(super) async fn copy_inventory(
     ctx: &ToolCtx,
@@ -71,13 +84,8 @@ pub(super) fn process_spec(
         PocLanguage::Shell => {
             #[cfg(windows)]
             {
-                ProcessSpec::argv("powershell.exe", workspace).args([
-                    "-NoLogo",
-                    "-NoProfile",
-                    "-NonInteractive",
-                    "-File",
-                    script_path.as_os_str(),
-                ])
+                ProcessSpec::argv("powershell.exe", workspace)
+                    .args(powershell_script_args(script_path))
             }
             #[cfg(not(windows))]
             {
@@ -266,5 +274,20 @@ mod tests {
     #[test]
     fn timeout_cap_stays_bounded() {
         assert_eq!(MAX_TIMEOUT_SECONDS, 60);
+    }
+
+    #[test]
+    fn powershell_script_arguments_preserve_the_path_as_an_os_string() {
+        let script = Path::new(r"C:\Clark Code\control.ps1");
+        assert_eq!(
+            powershell_script_args(script),
+            [
+                OsString::from("-NoLogo"),
+                OsString::from("-NoProfile"),
+                OsString::from("-NonInteractive"),
+                OsString::from("-File"),
+                script.as_os_str().to_os_string(),
+            ]
+        );
     }
 }
