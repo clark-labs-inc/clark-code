@@ -20,16 +20,16 @@ export function TextSizeToast({ textSize, signal }: { textSize: TextSize; signal
   }, [signal]);
 
   return (
-    <AnimatePresence>
+    <AnimatePresence initial={false}>
       {visible && (
         <motion.div
-          initial={reduce ? { opacity: 0 } : { opacity: 0, y: -4, scale: 0.96 }}
-          animate={{ opacity: 1, y: 0, scale: 1 }}
-          exit={reduce ? { opacity: 0 } : { opacity: 0, y: -4, scale: 0.96 }}
-          transition={{ duration: DUR.fast, ease: EASE.out }}
+          initial={reduce ? false : { opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0, transition: { duration: reduce ? 0 : DUR.fast } }}
+          transition={{ duration: reduce ? 0 : DUR.fast, ease: EASE.out }}
           role="status"
           aria-live="polite"
-          className="pointer-events-none fixed right-4 top-4 z-[90] rounded-lg border border-border-subtle bg-bg-elevated/95 px-3 py-1.5 font-mono text-sm tabular-nums text-ink shadow-lg backdrop-blur-sm"
+          className="popover-surface pointer-events-none fixed right-4 top-4 z-[90] rounded-lg border border-border-subtle bg-bg-elevated/95 px-3 py-1.5 font-mono text-sm tabular-nums text-ink shadow-lg backdrop-blur-sm"
         >
           {textSize}%
         </motion.div>
@@ -54,16 +54,16 @@ export function NoticeToast() {
   }, [notice, dismiss]);
 
   return (
-    <AnimatePresence>
+    <AnimatePresence initial={false}>
       {notice && (
         <motion.div
           key="notice"
-          initial={reduce ? { opacity: 0 } : { opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={reduce ? { opacity: 0 } : { opacity: 0, y: 12 }}
-          transition={{ duration: DUR.base, ease: EASE.out }}
+          initial={reduce ? false : { opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0, transition: { duration: reduce ? 0 : DUR.base } }}
+          transition={{ duration: reduce ? 0 : DUR.base, ease: EASE.out }}
           role="status"
-          className="fixed bottom-4 left-1/2 z-[90] flex max-w-[calc(100vw-2rem)] -translate-x-1/2 items-center gap-2.5 rounded-xl border border-border-subtle bg-bg-elevated px-3.5 py-2.5 shadow-lg"
+          className="popover-surface fixed bottom-4 left-1/2 z-[90] flex max-w-[calc(100vw-2rem)] -translate-x-1/2 items-center gap-2.5 rounded-xl border border-border-subtle bg-bg-elevated px-3.5 py-2.5 shadow-lg"
         >
           <CheckCircle2 className="size-4 shrink-0 text-success" />
           <span className="min-w-0 text-sm text-ink">{notice}</span>
@@ -95,16 +95,16 @@ export function WarningToast() {
   }, [warning, dismiss]);
 
   return (
-    <AnimatePresence>
+    <AnimatePresence initial={false}>
       {warning && (
         <motion.div
           key="warning"
-          initial={reduce ? { opacity: 0 } : { opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={reduce ? { opacity: 0 } : { opacity: 0, y: 12 }}
-          transition={{ duration: DUR.base, ease: EASE.out }}
+          initial={reduce ? false : { opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0, transition: { duration: reduce ? 0 : DUR.base } }}
+          transition={{ duration: reduce ? 0 : DUR.base, ease: EASE.out }}
           role="status"
-          className="fixed bottom-4 left-1/2 z-[90] flex max-w-[calc(100vw-2rem)] -translate-x-1/2 items-center gap-2.5 rounded-xl border border-border-subtle bg-bg-elevated px-3.5 py-2.5 shadow-lg"
+          className="popover-surface fixed bottom-4 left-1/2 z-[90] flex max-w-[calc(100vw-2rem)] -translate-x-1/2 items-center gap-2.5 rounded-xl border border-border-subtle bg-bg-elevated px-3.5 py-2.5 shadow-lg"
         >
           <AlertTriangle className="size-4 shrink-0 text-warning" />
           <span className="min-w-0 text-sm text-ink">{warning}</span>

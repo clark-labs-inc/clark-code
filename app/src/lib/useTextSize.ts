@@ -1,12 +1,13 @@
 import { useCallback, useLayoutEffect, useState } from "react";
 
 /** Familiar browser-style stops: precise around the default, faster at the
- * extremes so repeated shortcuts do not become tedious. */
-export const TEXT_SIZES = [75, 80, 90, 100, 110, 125, 150, 175, 200] as const;
+ * high end so repeated shortcuts do not become tedious. Reading type starts at
+ * its designed 100% size; compact UI has separate bounded tokens in CSS. */
+export const TEXT_SIZES = [100, 110, 125, 150, 175, 200] as const;
 export type TextSize = (typeof TEXT_SIZES)[number];
 
 const LEGACY_TEXT_SIZES: Record<string, TextSize> = {
-  compact: 90,
+  compact: 100,
   default: 100,
   large: 110,
 };

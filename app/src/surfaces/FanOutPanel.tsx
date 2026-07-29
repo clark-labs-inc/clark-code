@@ -78,10 +78,10 @@ export function FanOutCard({
       id="fan-out-panel"
       tabIndex={-1}
       aria-label="Parallel subagent work"
-      initial={reduce ? { opacity: 0 } : { opacity: 0, y: 6 }}
+      initial={reduce ? false : { opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
-      exit={reduce ? { opacity: 0 } : { opacity: 0, y: -4 }}
-      transition={{ duration: DUR.base, ease: EASE.out }}
+      exit={reduce ? { opacity: 0, transition: { duration: 0 } } : { opacity: 0, y: -4 }}
+      transition={{ duration: reduce ? 0 : DUR.base, ease: EASE.out }}
       className="scroll-mt-6"
     >
       <div className="mb-2 flex min-w-0 items-center gap-2 text-xs text-ink-muted">

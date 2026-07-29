@@ -45,6 +45,8 @@ pub mod memory;
 pub mod mobile;
 pub mod organization_knowledge;
 pub mod plan;
+pub mod security_poc_execute;
+pub mod security_scan_contract;
 pub mod shell;
 pub mod skill;
 pub mod web_fetch;
@@ -478,6 +480,8 @@ impl ToolRegistry {
             Arc::new(goal::GetGoal),
             Arc::new(effect::VerifyEffect),
             Arc::new(document::DocumentConvert),
+            Arc::new(security_poc_execute::SecurityPocExecute),
+            Arc::new(security_scan_contract::SecurityScanContract),
             Arc::new(web_fetch::WebFetchTool::new(clark.clone())),
             Arc::new(android_emulator::ListDevices),
             Arc::new(android_emulator::BootEmulator),

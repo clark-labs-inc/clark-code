@@ -2,7 +2,8 @@
   "schema_version": 2,
   "product": "Clark Code",
   "live_model": {
-    "id": "clark-code:free",
+    "id": "qwen/qwen3.7-flash",
+    "product_alias": "clark-code:free",
     "label": "Qwen 3.7 Flash",
     "upstream_id": "qwen/qwen3.7-flash",
     "provider": "clark-platform",
@@ -212,6 +213,7 @@
     "read_skill",
     "resolve_coding_workstreams",
     "resolve_delegation",
+    "security_scan_contract",
     "scout_adapter",
     "scout_capabilities",
     "scout_enterprise",
@@ -295,6 +297,34 @@
       "id": "skills",
       "surface": "model_tools",
       "tools": ["read_skill"],
+      "lanes": ["rust_contract", "frontend_contract"],
+      "platform_support": {"macos": "supported", "windows": "supported", "ubuntu": "supported"}
+    },
+    {
+      "id": "security_scanning",
+      "surface": "model_tools",
+      "tools": ["security_scan_contract"],
+      "lanes": ["rust_contract", "frontend_contract"],
+      "platform_support": {"macos": "supported", "windows": "supported", "ubuntu": "supported"}
+    },
+    {
+      "id": "security_diff_scanning",
+      "surface": "model_tools",
+      "tools": [],
+      "lanes": ["rust_contract", "frontend_contract"],
+      "platform_support": {"macos": "supported", "windows": "supported", "ubuntu": "supported"}
+    },
+    {
+      "id": "security_deep_scanning",
+      "surface": "model_tools",
+      "tools": [],
+      "lanes": ["rust_contract", "frontend_contract"],
+      "platform_support": {"macos": "supported", "windows": "supported", "ubuntu": "supported"}
+    },
+    {
+      "id": "security_scan_history",
+      "surface": "desktop",
+      "tools": [],
       "lanes": ["rust_contract", "frontend_contract"],
       "platform_support": {"macos": "supported", "windows": "supported", "ubuntu": "supported"}
     },
@@ -500,6 +530,10 @@
           "external_research",
           "deferred_tool_discovery",
           "skills",
+          "security_scanning",
+          "security_diff_scanning",
+          "security_deep_scanning",
+          "security_scan_history",
           "durable_memory",
           "organization_knowledge",
           "bounded_orchestration",
@@ -561,6 +595,10 @@
           "external_research",
           "deferred_tool_discovery",
           "skills",
+          "security_scanning",
+          "security_diff_scanning",
+          "security_deep_scanning",
+          "security_scan_history",
           "durable_memory",
           "image_generation",
           "organization_knowledge",
@@ -594,6 +632,10 @@
           "planning",
           "persistent_goals",
           "skills",
+          "security_scanning",
+          "security_diff_scanning",
+          "security_deep_scanning",
+          "security_scan_history",
           "durable_memory",
           "organization_knowledge",
           "bounded_orchestration"

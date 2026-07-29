@@ -34,7 +34,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.113"
+version = "0.1.114"
 edition = "2021"
 license = "Apache-2.0"
 repository = "https://github.com/clark/clark-desktop"
@@ -60,6 +60,15 @@ async-channel = "2"
 # Full debuginfo dominates dev build + link time on macOS; line tables keep
 # panic backtraces mapped to file:line at a fraction of the cost.
 debug = "line-tables-only"
+
+[profile.test]
+debug = "line-tables-only"
+
+# CI and one-off clean builds should not retain incremental state. Local
+# development keeps incremental compilation for fast edit-check loops.
+[profile.ci]
+inherits = "dev"
+incremental = false
 
 [profile.release]
 opt-level = 3

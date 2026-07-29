@@ -120,7 +120,7 @@ export function SandboxSetupCard({
       disabled={busy}
       onClick={runSetup}
       className={cn(
-        "flex shrink-0 items-center gap-1.5 rounded-lg bg-accent px-2.5 py-1.5 text-xs font-medium text-white transition hover:brightness-110 disabled:opacity-60",
+        "flex shrink-0 items-center gap-1.5 rounded-lg bg-accent px-2.5 py-1.5 text-xs font-medium text-on-accent transition hover:brightness-110 disabled:opacity-60",
         compact && "self-start",
       )}
     >

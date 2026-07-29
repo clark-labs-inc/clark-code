@@ -4,6 +4,35 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <meta name="theme-color" content="#F7F5F1" />
+    <script>
+      /* Apply persisted appearance and reading scale before the stylesheet's
+         first paint. React reconciles this state later; doing it here avoids a
+         light frame or a text-size jump in a native window. */
+      (() => {
+        try {
+          const root = document.documentElement;
+          const dark = localStorage.getItem("clark.theme") === "dark";
+          const colorblind = localStorage.getItem("clark.colorblind") === "1";
+          const savedTextSize = localStorage.getItem("clark.text-size");
+          const textSize = savedTextSize === "large"
+            ? 110
+            : /^(100|110|125|150|175|200)$/.test(savedTextSize ?? "")
+              ? Number(savedTextSize)
+              : 100;
+          root.classList.toggle("dark", dark);
+          root.classList.toggle("colorblind", colorblind);
+          root.dataset.textSize = String(textSize);
+          root.style.setProperty("--text-size-scale", String(textSize / 100));
+          document.querySelector('meta[name="theme-color"]')?.setAttribute(
+            "content",
+            dark ? "#0D0D0D" : "#F7F5F1",
+          );
+        } catch {
+          // Storage can be unavailable in a restricted webview; light is the
+          // deterministic fallback declared by the document.
+        }
+      })();
+    </script>
     <title>Clark Code</title>
     <link
       rel="icon"

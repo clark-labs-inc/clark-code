@@ -134,6 +134,22 @@ pub async fn local_list_files(
     Ok(provider_local::list_project_files(exec.as_ref(), &root).await)
 }
 
+/// Read sealed and in-progress Clark Security artifacts from the selected
+/// checkout. The provider owns parsing and bounds; the desktop receives only
+/// canonical scan records, never arbitrary project files.
+#[tauri::command]
+pub async fn local_list_security_scans(
+    cwd: String,
+    remote: Option<RemoteArg>,
+) -> Result<Vec<provider_local::SecurityScanRecord>, String> {
+    if cwd.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+    let root = std::path::PathBuf::from(cwd);
+    let exec = project_executor(remote).await?;
+    provider_local::list_security_scans(exec.as_ref(), &root).await
+}
+
 /// Read an agent-authored document (Markdown) so the UI can render it inline.
 /// Confined to the app-managed workspace (`~/.clark/workspace`) — it never reads
 /// arbitrary files — and capped so a pathological file can't be slurped whole.

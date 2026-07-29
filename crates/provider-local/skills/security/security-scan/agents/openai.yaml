@@ -1,0 +1,20 @@
+interface:
+  display_name: "Security"
+  short_description: "Scan code with complete coverage and sealed evidence"
+  default_prompt: "Use $security:security-scan to run an evidence-backed security scan over this repository. The workflow runs on host-pinned GLM 5.2."
+dependencies:
+  tools:
+    - type: tool
+      value: security_scan_contract
+    - type: tool
+      value: security_poc_execute
+    - type: tool
+      value: read_file
+    - type: tool
+      value: grep
+    - type: tool
+      value: glob
+    - type: tool
+      value: bash
+policy:
+  allow_implicit_invocation: false

@@ -9,9 +9,12 @@ use std::{
 use serde::Serialize;
 use tokio::{process::Command, time::timeout};
 
+pub(crate) mod managed;
+
 const GIT_TIMEOUT: Duration = Duration::from_secs(30);
 const DEFAULT_REMOTE: &str = "origin";
 const DEFAULT_BRANCH: &str = "main";
+const DISABLED_HOOKS_PATH: &str = if cfg!(windows) { "NUL" } else { "/dev/null" };
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -51,16 +54,31 @@ fn destination_for(repo_root: &Path, name: &str) -> Result<PathBuf, String> {
 }
 
 async fn git_output(cwd: &Path, args: Vec<OsString>, action: &str) -> Result<String, String> {
+    git_output_with_timeout(cwd, args, action, GIT_TIMEOUT).await
+}
+
+/// Run Git with the same non-interactive, hook-free containment as every other
+/// project action, but let latency-sensitive discovery use a shorter deadline.
+/// A stale remote must never make opening a new session feel hung.
+async fn git_output_with_timeout(
+    cwd: &Path,
+    args: Vec<OsString>,
+    action: &str,
+    deadline: Duration,
+) -> Result<String, String> {
     let mut command = Command::new("git");
+    let hooks_path = format!("core.hooksPath={DISABLED_HOOKS_PATH}");
     command
         .current_dir(cwd)
         .args([
+            "--no-optional-locks",
             "-c",
             "core.fsmonitor=false",
             "-c",
-            "core.hooksPath=/dev/null",
+            &hooks_path,
         ])
         .args(args)
+        .env("GIT_OPTIONAL_LOCKS", "0")
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("LC_ALL", "C")
         .stdin(Stdio::null())
@@ -71,9 +89,14 @@ async fn git_output(cwd: &Path, args: Vec<OsString>, action: &str) -> Result<Str
     let child = command
         .spawn()
         .map_err(|error| format!("{action}: failed to start git: {error}"))?;
-    let output = timeout(GIT_TIMEOUT, child.wait_with_output())
+    let output = timeout(deadline, child.wait_with_output())
         .await
-        .map_err(|_| format!("{action}: git timed out after 30 seconds"))?
+        .map_err(|_| {
+            format!(
+                "{action}: git timed out after {} seconds",
+                deadline.as_secs()
+            )
+        })?
         .map_err(|error| format!("{action}: failed to wait for git: {error}"))?;
     if !output.status.success() {
         let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
@@ -246,7 +269,12 @@ pub async fn project_branch_switch(project_path: String, branch: String) -> Resu
     }
 
     if let Some(owner) = target.checkout_path.as_deref() {
-        if Path::new(owner).canonicalize().ok().as_ref() != Some(&repo_root) {
+        let owner_path = Path::new(owner).canonicalize().map_err(|_| {
+            format!(
+                "Branch {branch} is registered to unavailable checkout {owner}. Resolve that Git worktree record before switching."
+            )
+        })?;
+        if owner_path != repo_root {
             return Err(format!(
                 "Branch {branch} is already checked out at {owner}. Open that checkout instead."
             ));

@@ -8,7 +8,11 @@ import {
   Loader2,
   Search,
 } from "lucide-react";
-import type { ProjectBranch, ProjectContext } from "../core-bridge/bridge";
+import type {
+  ProjectBranch,
+  ProjectContext,
+  ProjectWorktreeTransitionPlan,
+} from "../core-bridge/bridge";
 import { getBridge } from "../core-bridge/bridge";
 import { resolveBranchSelection } from "../lib/projectBranches";
 
@@ -34,14 +38,20 @@ export function BranchPicker({
   cwd,
   context,
   disabledReason,
+  allowPreserveChanges = false,
   onSwitched,
   onOpenCheckout,
+  onTransitionPlan,
 }: {
   cwd: string;
   context: ProjectContext;
   disabledReason?: string;
+  /** Dirty source changes may be preserved in place while a new detached
+   * continuation starts from the requested branch. Active agents still block. */
+  allowPreserveChanges?: boolean;
   onSwitched: () => void;
   onOpenCheckout: (path: string) => void;
+  onTransitionPlan?: (plan: ProjectWorktreeTransitionPlan) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [branches, setBranches] = useState<ProjectBranch[]>([]);
@@ -108,19 +118,44 @@ export function BranchPicker({
       setOpen(false);
       return;
     }
-    if (selection.action === "open") {
-      onOpenCheckout(selection.path);
-      setOpen(false);
-      return;
-    }
-    if (disabledReason) {
-      setError(disabledReason);
-      return;
-    }
     setSwitching(branch.name);
     setError(null);
     try {
       const bridge = await getBridge();
+      const plan = bridge.planProjectWorktree
+        ? await bridge.planProjectWorktree(cwd, branch.name)
+        : null;
+      if (plan?.action === "open_owner" && plan.targetCheckoutPath) {
+        onOpenCheckout(plan.targetCheckoutPath);
+        setOpen(false);
+        return;
+      }
+      if (plan?.action === "preserve_changes") {
+        if (!allowPreserveChanges) {
+          throw new Error(
+            disabledReason
+              ?? "Wait for the active agent before starting an isolated branch continuation.",
+          );
+        }
+        if (!onTransitionPlan) {
+          throw new Error("Preserving changes in an isolated continuation is available in the desktop app.");
+        }
+        onTransitionPlan(plan);
+        setOpen(false);
+        return;
+      }
+      if (selection.action === "open") {
+        onOpenCheckout(selection.path);
+        setOpen(false);
+        return;
+      }
+      if (disabledReason) {
+        setError(disabledReason);
+        return;
+      }
+      if (plan && plan.action !== "switch_clean") {
+        throw new Error("This branch transition needs a different checkout choice.");
+      }
       if (!bridge.switchProjectBranch) {
         throw new Error("Branch switching is available in the desktop app.");
       }
@@ -187,7 +222,12 @@ export function BranchPicker({
                 branch.checkoutPath
                 && normalizedPath(branch.checkoutPath) !== normalizedPath(cwd),
               );
-              const switchBlocked = Boolean(disabledReason && !current && !ownedElsewhere);
+              const switchBlocked = Boolean(
+                disabledReason
+                && !current
+                && !ownedElsewhere
+                && !allowPreserveChanges,
+              );
               return (
                 <button
                   key={branch.name}
@@ -234,7 +274,9 @@ export function BranchPicker({
           {!error && (
             <p className="border-t border-border-subtle px-3 py-2 text-[11px] text-ink-faint">
               {disabledReason
-                ? `${disabledReason} Owned branches can still be opened.`
+                ? allowPreserveChanges
+                  ? "Local changes can stay here while an isolated continuation starts from another branch."
+                  : disabledReason + " Owned branches can still be opened."
                 : "Owned branches open their existing checkout. Switching requires a clean tree."}
             </p>
           )}

@@ -383,9 +383,13 @@ pub(super) fn markdown_artifact(
         .and_then(|n| n.to_str())
         .unwrap_or("document.md")
         .to_string();
+    let relative = canon.strip_prefix(docs).ok()?.to_string_lossy();
     let uri = canon.to_string_lossy().to_string();
     Some(desktop::Artifact {
-        id: format!("doc:{uri}"),
+        // Identity is workspace-relative so a snapshot/artifact ID never embeds
+        // the user's home directory. The local-only URI remains absolute for
+        // immediate preview and is replaced before cloud persistence.
+        id: format!("doc:{}", relative.replace('\\', "/")),
         title,
         kind: desktop::ArtifactKind::File,
         mime_type: Some("text/markdown".to_string()),

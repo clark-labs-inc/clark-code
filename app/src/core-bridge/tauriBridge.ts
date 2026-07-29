@@ -13,8 +13,13 @@ import type {
   ComputerUsePlatformStatus,
   CoreBridge,
   ConnectConfig,
+  ManagedWorktree,
+  ManagedWorktreeBranchReceipt,
+  ManagedWorktreeCleanupReceipt,
+  ManagedWorktreeRequest,
   ProjectBranch,
   ProjectContext,
+  ProjectWorktreeTransitionPlan,
   LocalSandboxStatus,
   PromptReceipt,
   ProjectInstructions,
@@ -35,6 +40,7 @@ import {
   type Session,
   type Snapshot,
   type MemoryOverview,
+  type SecurityScanRecord,
   type CollaborationMode,
 } from "./types";
 
@@ -162,6 +168,16 @@ export class TauriBridge implements CoreBridge {
     return invoke<string[]>("local_list_files", { cwd, remote: remote ?? null });
   }
 
+  listSecurityScans(
+    cwd: string,
+    remote?: { ws_url: string; token: string } | null,
+  ): Promise<SecurityScanRecord[]> {
+    return invoke<SecurityScanRecord[]>("local_list_security_scans", {
+      cwd,
+      remote: remote ?? null,
+    });
+  }
+
   listSkills(
     cwd: string,
     remote?: { ws_url: string; token: string } | null,
@@ -264,6 +280,47 @@ export class TauriBridge implements CoreBridge {
 
   createPermanentWorktree(projectPath: string, name: string): Promise<string> {
     return invoke<string>("project_worktree_create", { projectPath, name });
+  }
+
+  planProjectWorktree(
+    projectPath: string,
+    targetBranch?: string | null,
+  ): Promise<ProjectWorktreeTransitionPlan> {
+    return invoke<ProjectWorktreeTransitionPlan>("project_worktree_transition_plan", {
+      projectPath,
+      targetBranch: targetBranch ?? null,
+    });
+  }
+
+  createManagedWorktree(
+    projectPath: string,
+    request: ManagedWorktreeRequest,
+  ): Promise<ManagedWorktree> {
+    return invoke<ManagedWorktree>("project_managed_worktree_create", { projectPath, request });
+  }
+
+  listManagedWorktrees(projectPath: string): Promise<ManagedWorktree[]> {
+    return invoke<ManagedWorktree[]>("project_managed_worktree_list", { projectPath });
+  }
+
+  cleanupManagedWorktree(
+    projectPath: string,
+    id: string,
+  ): Promise<ManagedWorktreeCleanupReceipt> {
+    return invoke<ManagedWorktreeCleanupReceipt>("project_managed_worktree_cleanup", {
+      projectPath,
+      id,
+    });
+  }
+
+  saveManagedWorktreeBranch(
+    projectPath: string,
+    id: string,
+  ): Promise<ManagedWorktreeBranchReceipt> {
+    return invoke<ManagedWorktreeBranchReceipt>("project_managed_worktree_save_branch", {
+      projectPath,
+      id,
+    });
   }
 
   localSandboxStatus(cwd: string): Promise<LocalSandboxStatus> {

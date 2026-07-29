@@ -1,5 +1,7 @@
 @import "@fontsource-variable/dm-sans/wght.css";
+@import "@fontsource-variable/dm-sans/wght-italic.css";
 @import "@fontsource-variable/newsreader/wght.css";
+@import "@fontsource-variable/newsreader/wght-italic.css";
 @import "katex/dist/katex.min.css";
 @import "tailwindcss";
 
@@ -17,6 +19,22 @@
   font-display: swap;
   font-weight: 500;
   src: url("@fontsource/jetbrains-mono/files/jetbrains-mono-latin-500-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: italic;
+  font-display: swap;
+  font-weight: 400;
+  src: url("@fontsource/jetbrains-mono/files/jetbrains-mono-latin-400-italic.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: italic;
+  font-display: swap;
+  font-weight: 500;
+  src: url("@fontsource/jetbrains-mono/files/jetbrains-mono-latin-500-italic.woff2") format("woff2");
 }
 
 /* ----------------------------------------------------------------------------
@@ -83,15 +101,15 @@
   --font-mono: "JetBrains Mono", "SF Mono", ui-monospace, "Menlo", monospace;
   --font-display: "Newsreader Variable", Newsreader, Georgia, serif;
 
-  /* Settings and keyboard shortcuts scale semantic type without magnifying
-     layout chrome. The scale is set on <html> by useTextSize. */
-  --text-xs: calc(0.75rem * var(--text-size-scale));     /* 12px at 100% */
-  --text-sm: calc(0.8125rem * var(--text-size-scale));   /* 13px at 100% */
-  --text-base: calc(0.9375rem * var(--text-size-scale)); /* 15px at 100% */
-  --text-lg: calc(1.0625rem * var(--text-size-scale));   /* 17px at 100% */
-  --text-xl: calc(1.25rem * var(--text-size-scale));     /* 20px at 100% */
-  --text-2xl: calc(1.5rem * var(--text-size-scale));     /* 24px at 100% */
-  --text-3xl: calc(1.875rem * var(--text-size-scale));   /* 30px at 100% */
+  /* Settings and keyboard shortcuts grow semantic type. A floor protects
+     against stale compact preferences and keeps small labels readable. */
+  --text-xs: max(0.75rem, calc(0.75rem * var(--text-size-scale)));     /* 12px at 100% */
+  --text-sm: max(0.8125rem, calc(0.8125rem * var(--text-size-scale))); /* 13px at 100% */
+  --text-base: max(0.9375rem, calc(0.9375rem * var(--text-size-scale))); /* 15px at 100% */
+  --text-lg: max(1.0625rem, calc(1.0625rem * var(--text-size-scale))); /* 17px at 100% */
+  --text-xl: max(1.25rem, calc(1.25rem * var(--text-size-scale)));     /* 20px at 100% */
+  --text-2xl: max(1.5rem, calc(1.5rem * var(--text-size-scale)));      /* 24px at 100% */
+  --text-3xl: max(1.875rem, calc(1.875rem * var(--text-size-scale)));  /* 30px at 100% */
 
   --radius-sm: 8px;
   --radius-md: 12px;
@@ -119,10 +137,39 @@
    default is intentionally wider than Tailwind's 42rem `max-w-2xl`; text-size
    shortcuts scale the rail with the type so line length stays balanced. */
 :root {
+  color-scheme: light;
   --text-size-scale: 1;
   --chat-column-max-width: calc(50rem * var(--text-size-scale));
   --composer-column-max-width: calc(45rem * var(--text-size-scale));
+
+  /* Transitional bridge for compact UI labels written before the semantic type
+     scale. They grow enough to remain readable, then cap so fixed chrome can
+     stay compact at the largest reading sizes. New code should use --text-*.
+  */
+  --text-ui-8: clamp(0.625rem, calc(0.5rem * var(--text-size-scale)), 1rem);
+  --text-ui-10: clamp(0.75rem, calc(0.625rem * var(--text-size-scale)), 1rem);
+  --text-ui-11: clamp(0.75rem, calc(0.6875rem * var(--text-size-scale)), 1rem);
+  --text-ui-13: clamp(0.8125rem, calc(0.8125rem * var(--text-size-scale)), 1rem);
 }
+
+/* Tailwind arbitrary pixel text utilities bypass --text-size-scale. These
+   exact legacy sizes occur in dense metadata and status labels; keep their
+   intended hierarchy without leaving them at 8–11px when reading type grows. */
+[class~="text-[8px]"] { font-size: var(--text-ui-8); }
+[class~="text-[10px]"] { font-size: var(--text-ui-10); }
+[class~="text-[11px]"],
+[class~="text-[0.6875rem]"] { font-size: var(--text-ui-11); }
+[class~="text-[13px]"] { font-size: var(--text-ui-13); }
+
+/* Tailwind's numeric leading utilities are fixed spacing lengths. Preserve
+   their 100% rhythm while scaling explicit dense copy with the reading size. */
+.leading-4 { line-height: max(1rem, calc(1rem * var(--text-size-scale))); }
+.leading-5 { line-height: max(1.25rem, calc(1.25rem * var(--text-size-scale))); }
+.leading-6 { line-height: max(1.5rem, calc(1.5rem * var(--text-size-scale))); }
+
+/* Legacy primary actions still compose `bg-accent text-white`. Use the
+   theme-aware foreground token so the lighter dark-theme violet stays legible. */
+.bg-accent.text-white { color: var(--color-on-accent); }
 
 .chat-column-width {
   max-width: var(--chat-column-max-width);
@@ -211,11 +258,8 @@ body {
   font-weight: 400;
   line-height: 1.55;
   letter-spacing: 0;
-  /* Real weights only, with stable grayscale rasterization across the macOS and
-     Windows webviews. */
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  text-rendering: optimizeLegibility;
+  /* Use real weights, but leave glyph rasterization to the native webview.
+     Forced grayscale makes small fractional type too light on macOS. */
   font-synthesis: none;
   font-feature-settings: "kern" 1, "calt" 1;
   font-optical-sizing: auto;
@@ -308,8 +352,7 @@ html.dark .shiki-inline span {
 .diff-body .diff-gutter-new {
   text-align: right;
   padding-right: 0.5ch;
-  color: var(--color-ink-faint);
-  opacity: 0.6;
+  color: var(--color-ink-muted);
   user-select: none;
 }
 .diff-body .diff-sign {
@@ -476,22 +519,29 @@ svg.lucide {
 }
 .stream-caret { animation: caret-blink 1s ease-in-out infinite; }
 
-/* Skeleton shimmer for render previews while content loads. */
+/* Skeleton shimmer for render previews while content loads. Translate the
+   highlight on its own layer instead of repainting background-position. */
 @keyframes shimmer {
-  0% { background-position: 200% 0; }
-  100% { background-position: -200% 0; }
+  from { transform: translateX(-100%); }
+  to { transform: translateX(100%); }
 }
 .skeleton {
+  position: relative;
+  overflow: hidden;
   border-radius: var(--radius-sm);
   background-color: var(--color-bg-hover);
-  background-image: linear-gradient(
+}
+.skeleton::after {
+  position: absolute;
+  inset: 0;
+  content: "";
+  background: linear-gradient(
     90deg,
     transparent 0%,
     color-mix(in oklab, var(--color-ink) 7%, transparent) 50%,
     transparent 100%
   );
-  background-size: 200% 100%;
-  background-repeat: no-repeat;
+  transform: translateX(-100%);
   animation: shimmer 1.5s ease-in-out infinite;
 }
 
@@ -506,9 +556,9 @@ svg.lucide {
    slow (SSH) connect fades it in smoothly. */
 .appear-delayed { animation: fade-in 0.2s ease 0.15s both; }
 
-/* Respect reduced-motion for layout transitions, but keep essential progress
-   feedback (spinners, the "working" dots) gently animating — a frozen spinner
-   reads as broken. */
+/* Respect reduced-motion across both bespoke effects and Tailwind's animation
+   utilities. Loading state is still conveyed by the visible control and its
+   semantic status text; it must not require perpetual visual motion. */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     transition-duration: 0.001ms !important;
@@ -516,15 +566,19 @@ svg.lucide {
   }
 
   .breathe,
+  .clark-bootstrap-mark,
   .fade-in,
   .appear-delayed,
   .skeleton,
-  .stream-caret {
+  .skeleton::after,
+  .stream-caret,
+  [class*="animate-"] {
     animation: none !important;
   }
 
   [class*="hover:-translate"],
   [class*="group-hover:translate"] {
     transform: none !important;
+    translate: none !important;
   }
 }

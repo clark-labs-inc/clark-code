@@ -1,4 +1,4 @@
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { WifiOff } from "lucide-react";
 import { useOnline } from "../lib/online";
 import { DUR, EASE } from "../lib/motion";
@@ -7,14 +7,15 @@ import { DUR, EASE } from "../lib/motion";
  *  from the local cache; new runs need the connection back. */
 export function OfflineBanner() {
   const online = useOnline();
+  const reduce = useReducedMotion();
   return (
-    <AnimatePresence>
+    <AnimatePresence initial={false}>
       {!online && (
         <motion.div
-          initial={{ height: 0, opacity: 0 }}
+          initial={reduce ? false : { height: 0, opacity: 0 }}
           animate={{ height: "auto", opacity: 1 }}
-          exit={{ height: 0, opacity: 0 }}
-          transition={{ duration: DUR.fast, ease: EASE.out }}
+          exit={reduce ? { opacity: 0, transition: { duration: 0 } } : { height: 0, opacity: 0 }}
+          transition={{ duration: reduce ? 0 : DUR.fast, ease: EASE.out }}
           className="overflow-hidden border-b border-border bg-bg-secondary"
         >
           <div className="flex items-center gap-2 px-4 py-1.5 text-xs text-ink-muted">

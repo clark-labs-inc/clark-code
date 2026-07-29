@@ -7,7 +7,7 @@ import {
   type ClipboardEvent,
   type KeyboardEvent,
 } from "react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
   ArrowUp, Square, X, CornerDownRight, Pencil, Target, Sparkles,
 } from "lucide-react";
@@ -64,6 +64,7 @@ import {
 /** Messages typed while a run is active. They send automatically, in order,
  *  when the run finishes — no interruption. Each can be edited or dropped. */
 function QueuedMessages({ onEdit }: { onEdit: (q: QueuedMessage) => void }) {
+  const reduce = useReducedMotion();
   const queued = useSessionStore((s) => s.queued);
   const session = useSessionStore((s) => s.session);
   const busy = useSessionStore((s) =>
@@ -82,11 +83,11 @@ function QueuedMessages({ onEdit }: { onEdit: (q: QueuedMessage) => void }) {
           {queued.map((q) => (
             <motion.div
               key={q.id}
-              layout
-              initial={{ opacity: 0, height: 0 }}
+              layout={!reduce}
+              initial={reduce ? false : { opacity: 0, height: 0 }}
               animate={{ opacity: 1, height: "auto" }}
-              exit={{ opacity: 0, height: 0 }}
-              transition={{ duration: DUR.base, ease: EASE.out }}
+              exit={reduce ? { opacity: 0, transition: { duration: 0 } } : { opacity: 0, height: 0 }}
+              transition={{ duration: reduce ? 0 : DUR.base, ease: EASE.out }}
               className="group flex items-center gap-2 overflow-hidden rounded-xl bg-accent-subtle py-2 pl-3 pr-2"
             >
               <CornerDownRight className="size-3.5 shrink-0 text-ink-faint" />

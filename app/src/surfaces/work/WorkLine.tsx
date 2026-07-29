@@ -268,7 +268,7 @@ function WorkLineImpl({ call, active }: { call: ToolCall; active: boolean }) {
       tabIndex={-1}
       initial={reduce ? false : { opacity: 0, y: 4 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: DUR.base, ease: EASE.out }}
+      transition={{ duration: reduce ? 0 : DUR.base, ease: EASE.out }}
       className={cn(
         "outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent",
         active && "bg-bg-hover/40",
@@ -325,7 +325,7 @@ function WorkLineImpl({ call, active }: { call: ToolCall; active: boolean }) {
             initial={reduce ? false : { height: 0, opacity: 0 }}
             animate={{ height: "auto", opacity: 1 }}
             exit={reduce ? { opacity: 0, transition: { duration: 0 } } : { height: 0, opacity: 0 }}
-            transition={{ duration: DUR.fast, ease: EASE.inOut }}
+            transition={{ duration: reduce ? 0 : DUR.fast, ease: EASE.inOut }}
             className="ml-[0.55rem] overflow-hidden border-l border-border-subtle"
           >
             {target && <FileActions path={target} />}

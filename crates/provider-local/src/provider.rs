@@ -500,10 +500,31 @@ impl Provider for LocalAgentProvider {
         .map_err(Error::Other)?;
         let scout_turn =
             crate::skills::invokes_skill(&run_skills, &input.blocks, &user_request, "scout:scout");
-        let model_override = scout_turn.then_some(crate::tools::TurnModelOverride {
-            model: crate::config::SCOUT_MODEL,
-            reasoning_effort: crate::config::SCOUT_REASONING_EFFORT,
-        });
+        let security_deep_turn = crate::skills::invokes_skill(
+            &run_skills,
+            &input.blocks,
+            &user_request,
+            "security:security-deep",
+        );
+        let security_turn = security_deep_turn
+            || ["security:security-scan", "security:security-diff"]
+                .into_iter()
+                .any(|skill| {
+                    crate::skills::invokes_skill(&run_skills, &input.blocks, &user_request, skill)
+                });
+        let model_override = if scout_turn {
+            Some(crate::tools::TurnModelOverride {
+                model: crate::config::SCOUT_MODEL,
+                reasoning_effort: crate::config::SCOUT_REASONING_EFFORT,
+            })
+        } else if security_turn {
+            Some(crate::tools::TurnModelOverride {
+                model: crate::config::SECURITY_MODEL,
+                reasoning_effort: crate::config::SECURITY_REASONING_EFFORT,
+            })
+        } else {
+            None
+        };
         let effective_model = model_override
             .map(|policy| policy.model)
             .unwrap_or(config.model.as_str());
@@ -513,6 +534,17 @@ impl Provider for LocalAgentProvider {
                 .with_reasoning_effort(policy.reasoning_effort),
             None => llm,
         };
+        if security_turn {
+            let mut session = self.session.lock().await;
+            session
+                .deferred_tools
+                .insert("security_scan_contract".into());
+            session.deferred_tools.insert("security_poc_execute".into());
+            if security_deep_turn {
+                session.deferred_tools.insert("delegate_read_only".into());
+                session.deferred_tools.insert("resolve_delegation".into());
+            }
+        }
         let goal_command = goal_command_objective(&user_request);
         if let Some(objective) = goal_command.as_ref() {
             let mut session = self.session.lock().await;

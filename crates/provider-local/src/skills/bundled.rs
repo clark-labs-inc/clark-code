@@ -7,6 +7,9 @@ const FIX_CI: &str = include_str!("../../skills/github/gh-fix-ci/SKILL.md");
 const YEET: &str = include_str!("../../skills/github/yeet/SKILL.md");
 const SENTRY: &str = include_str!("../../skills/sentry/SKILL.md");
 const SCOUT: &str = include_str!("../../skills/scout/SKILL.md");
+const SECURITY_SCAN: &str = include_str!("../../skills/security/security-scan/SKILL.md");
+const SECURITY_DIFF: &str = include_str!("../../skills/security/security-diff/SKILL.md");
+const SECURITY_DEEP: &str = include_str!("../../skills/security/security-deep/SKILL.md");
 
 const BASH: &[&str] = &["bash"];
 const SCOUT_TOOLS: &[&str] = &[
@@ -19,6 +22,24 @@ const SCOUT_TOOLS: &[&str] = &[
     "scout_measure",
     "delegate_read_only",
     "resolve_delegation",
+];
+const SECURITY_TOOLS: &[&str] = &[
+    "security_scan_contract",
+    "security_poc_execute",
+    "read_file",
+    "grep",
+    "glob",
+    "bash",
+];
+const SECURITY_DEEP_TOOLS: &[&str] = &[
+    "security_scan_contract",
+    "security_poc_execute",
+    "delegate_read_only",
+    "resolve_delegation",
+    "read_file",
+    "grep",
+    "glob",
+    "bash",
 ];
 
 pub(super) fn skills() -> Vec<Skill> {
@@ -37,6 +58,36 @@ pub(super) fn skills() -> Vec<Skill> {
             let mut scout = bundled("scout", "clark://skills/scout", SCOUT, SCOUT_TOOLS);
             scout.allow_implicit_invocation = false;
             scout
+        },
+        {
+            let mut security = bundled(
+                "security",
+                "clark://skills/security/security-scan",
+                SECURITY_SCAN,
+                SECURITY_TOOLS,
+            );
+            security.allow_implicit_invocation = false;
+            security
+        },
+        {
+            let mut security = bundled(
+                "security",
+                "clark://skills/security/security-diff",
+                SECURITY_DIFF,
+                SECURITY_TOOLS,
+            );
+            security.allow_implicit_invocation = false;
+            security
+        },
+        {
+            let mut security = bundled(
+                "security",
+                "clark://skills/security/security-deep",
+                SECURITY_DEEP,
+                SECURITY_DEEP_TOOLS,
+            );
+            security.allow_implicit_invocation = false;
+            security
         },
     ]
 }

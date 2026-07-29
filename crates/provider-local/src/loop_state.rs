@@ -53,6 +53,13 @@ pub(crate) struct SessionState {
     /// Root execution ledger for the active run. A normal single-agent turn
     /// owns `/root`; optional read-only children attach beneath this identity.
     pub active_execution: Option<crate::root_execution::RootExecutionTrace>,
+    /// Host-owned receipts for an active deep Security workflow. Accepted
+    /// read-only orchestrations are recorded here before the scan contract can
+    /// claim independent passes or saturation.
+    pub security_deep: crate::security::SecurityDeepLedger,
+    /// Host-issued PoC execution receipts for the active Security workflow.
+    /// Model-authored scan JSON can reference these ids, but cannot mint them.
+    pub security_poc: crate::security::SecurityPocLedger,
     /// Standing objective the session pursues autonomously: while `Active`, the
     /// engine keeps continuing the run
     /// with goal-continuation turns after each clean completion, until the

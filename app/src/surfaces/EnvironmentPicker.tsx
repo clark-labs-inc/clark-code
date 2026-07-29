@@ -11,7 +11,7 @@ import { cn } from "../lib/cn";
 const CHIP =
   "flex min-h-8 items-center gap-1.5 rounded-xl border border-accent/10 bg-accent-subtle px-2.5 py-1.5 text-sm font-medium text-ink-secondary transition duration-200 ease-clark hover:bg-accent-soft hover:text-ink";
 const COMPACT_CHIP =
-  "flex h-[22px] items-center gap-1 rounded-md bg-composer-context px-1.5 text-[11px] font-medium leading-none text-ink-secondary transition duration-200 ease-clark hover:bg-bg-hover hover:text-ink";
+  "flex min-h-7 items-center gap-1 rounded-md bg-composer-context px-1.5 text-xs font-medium leading-none text-ink-secondary transition duration-200 ease-clark hover:bg-bg-hover hover:text-ink";
 
 /** The "Local · Select folder…" control that sits above the start-screen
  *  composer. It maps the target machine (Local / a Cloud provider / an SSH host)

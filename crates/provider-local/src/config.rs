@@ -26,6 +26,11 @@ pub const SCOUT_MODEL: &str = "clark-code";
 /// Scout uses GLM 5.2's provider default reasoning policy rather than
 /// inheriting a reasoning value selected for another conversation model.
 pub const SCOUT_REASONING_EFFORT: Option<&str> = None;
+/// Clark Security scans use the exact production GLM 5.2 model id across
+/// discovery, validation, and reporting even when the surrounding conversation
+/// selected another coding model.
+pub const SECURITY_MODEL: &str = "z-ai/glm-5.2";
+pub const SECURITY_REASONING_EFFORT: Option<&str> = None;
 /// Agentic Clark model used for research / memory extraction (no client tools).
 pub const DEFAULT_RESEARCH_MODEL: &str = "clark";
 /// GLM 5.2 is the sole supported coding selection without native image input.
@@ -45,6 +50,7 @@ fn model_context_window(model: &str) -> Option<usize> {
         "clark-code" => Some(1_000_000),         // GLM 5.2
         "clark-code:free" => Some(1_000_000),    // backend-owned free model
         "clark-code:kimi_k3" => Some(1_000_000), // "1M context"
+        "z-ai/glm-5.2" => Some(1_000_000),       // Clark Security policy
         _ => None,
     }
 }
@@ -480,6 +486,13 @@ mod tests {
         assert!(model_supports_images("clark-code:free"));
         assert!(model_supports_images("clark-code:kimi_k3"));
         assert!(!model_supports_images("clark-code"));
+        assert!(!model_supports_images(SECURITY_MODEL));
+    }
+
+    #[test]
+    fn clark_security_uses_the_exact_production_model_id() {
+        assert_eq!(SECURITY_MODEL, "z-ai/glm-5.2");
+        assert_eq!(model_context_window(SECURITY_MODEL), Some(1_000_000));
     }
 
     #[test]

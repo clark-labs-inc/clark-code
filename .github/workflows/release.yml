@@ -1361,7 +1361,8 @@ jobs:
   # publishes every complete platform build when Windows is intentionally in
   # preview mode, or when Windows signing fails while macOS/Linux pass. It also
   # advances legacy latest.json for installed clients that predate per-target
-  # updater documents. The website manifest remains the full-platform channel.
+  # updater documents and manifest.json for legacy website clients. Each
+  # mutable document describes precisely the platform artifacts that passed.
   publish_independent_platforms:
     name: Publish independently verified platform downloads
     needs: [build, exec-server]
@@ -1402,7 +1403,7 @@ jobs:
           path: release-records
           merge-multiple: true
 
-      - name: Prepare complete platform aliases and updater documents
+      - name: Prepare complete platform aliases and legacy/current manifests
         shell: bash
         run: |
           set -euo pipefail
@@ -1417,6 +1418,7 @@ jobs:
           import {
             PLATFORM_RELEASES,
             createLegacyUpdaterDocument,
+            createPlatformDownloadManifest,
             createPlatformUpdaterDocuments,
             platformAliases,
             validatePlatformReleaseAssets,
@@ -1477,6 +1479,18 @@ jobs:
             path.join(out, "aliases.tsv"),
             assets.map((asset) => `${asset.name}\t${asset.digest.slice("sha256:".length)}\t${asset.size}`).join("\n") + "\n",
           );
+          const downloadManifest = createPlatformDownloadManifest({
+            assets,
+            tag,
+            baseUrl,
+            sourceRevision: process.env.GITHUB_SHA,
+            platforms,
+            publishedAt: process.env.RELEASE_PUBLISHED_AT,
+          });
+          fs.writeFileSync(
+            path.join(out, "manifest.json"),
+            `${JSON.stringify(downloadManifest, null, 2)}\n`,
+          );
           const legacyDocument = createLegacyUpdaterDocument({
             updaterDocuments: documents,
             tag,
@@ -1496,7 +1510,7 @@ jobs:
           }
           NODE
 
-      - name: Promote independent website aliases and updater documents
+      - name: Promote independent website aliases and manifests
         shell: bash
         run: |
           set -euo pipefail
@@ -1534,6 +1548,7 @@ jobs:
             guard_channel_advance "desktop/latest/updater/$target.json"
           done
           guard_channel_advance "desktop/latest/latest.json"
+          guard_channel_advance "desktop/latest/manifest.json"
 
           : > "$transaction_dir/prior-keys.tsv"
           {
@@ -1542,6 +1557,7 @@ jobs:
               printf 'desktop/latest/updater/%s\n' "$(basename "$document")"
             done
             printf 'desktop/latest/latest.json\n'
+            printf 'desktop/latest/manifest.json\n'
           } > "$transaction_dir/keys.txt"
           while IFS= read -r key; do
             head="$(mktemp)"
@@ -1580,6 +1596,16 @@ jobs:
               --metadata-directive REPLACE \
               --metadata "sha256=$sha,clark-version=$tag,source-revision=$GITHUB_SHA" > /dev/null
           done < "$release_dir/aliases.tsv"
+
+          # Legacy website clients discover the current installers through this
+          # document. The aliases now point to immutable release objects, so
+          # this manifest may safely advance before the updater pointers.
+          manifest_sha="$(sha256sum "$release_dir/manifest.json" | awk '{print $1}')"
+          aws s3 cp "$release_dir/manifest.json" \
+            "s3://$bucket/desktop/latest/manifest.json" \
+            --content-type "application/json" \
+            --cache-control "no-store, no-cache, must-revalidate, max-age=0" \
+            --metadata "sha256=$manifest_sha,clark-version=$tag,source-revision=$GITHUB_SHA"
 
           for document in "$release_dir"/updater/*.json; do
             target="$(basename "$document")"

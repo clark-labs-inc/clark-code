@@ -105,6 +105,40 @@ fn schema_property_order_survives_serialization() {
         &["effect_id", "status", "evidence", "expected", "observed"],
     );
     wire_order(&reg, "document_convert", &["path", "to", "output_path"]);
+    wire_order(
+        &reg,
+        "security_poc_execute",
+        &[
+            "scan_id",
+            "candidate_id",
+            "inventory_id",
+            "scope",
+            "control",
+            "language",
+            "expected_observation",
+            "script",
+            "expected_exit_code",
+            "timeout_seconds",
+        ],
+    );
+    wire_order(
+        &reg,
+        "security_scan_contract",
+        &[
+            "action",
+            "scope",
+            "diff_kind",
+            "base",
+            "head",
+            "scan_id",
+            "deep_run_id",
+            "orchestration_id",
+            "candidate_ids",
+            "cursor",
+            "page_size",
+            "path",
+        ],
+    );
 
     let mut image_registry = ToolRegistry::new(None, None);
     image_registry.enable_image_generation(image::ImageGenerationConfig {
@@ -187,6 +221,7 @@ async fn runtime_catalog_keeps_core_eager_and_defers_specialized_tools() {
     for name in [
         "create_goal",
         "document_convert",
+        "security_poc_execute",
         "web_fetch",
         "android_list_devices",
         "android_tap",

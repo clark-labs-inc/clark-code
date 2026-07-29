@@ -6,9 +6,14 @@
 import type {
   CoreBridge,
   ConnectConfig,
+  ManagedWorktree,
+  ManagedWorktreeBranchReceipt,
+  ManagedWorktreeCleanupReceipt,
+  ManagedWorktreeRequest,
   PromptReceipt,
   ProjectBranch,
   ProjectContext,
+  ProjectWorktreeTransitionPlan,
   SessionOptions,
 } from "./bridge";
 import {
@@ -16,6 +21,7 @@ import {
   type ClientResponse,
   type ContentBlock,
   type ProviderInfo,
+  type SecurityScanRecord,
   type Session,
   type Snapshot,
 } from "./types";
@@ -41,10 +47,128 @@ const PROVIDERS: ProviderInfo[] = [
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
+export const SECURITY_SIMULATION_STORAGE_KEY =
+  "clark-desktop:security-simulation";
+/** Preview-only lifecycle state for the isolated-worktree manager. */
+export const MANAGED_WORKTREE_SIMULATION_STORAGE_KEY =
+  "clark-desktop:managed-worktree-simulation";
+
+function managedWorktreeSimulation(): "ready" | "dirty" | "committed" {
+  const value = localStorage.getItem(MANAGED_WORKTREE_SIMULATION_STORAGE_KEY);
+  return value === "dirty" || value === "committed" ? value : "ready";
+}
+
+const simulatedFindings: NonNullable<SecurityScanRecord["seal"]>["findings"] = [
+  ["SEC-ADMIN", "critical", "src/api/admin.ts", "Request body controls administrative access."],
+  ["SEC-SQL", "critical", "src/db/search.ts", "Tenant input reaches an executable SQL string."],
+  ["SEC-CMD", "critical", "src/jobs/export.ts", "Request fields reach a shell command."],
+  ["SEC-SSRF", "high", "src/network/fetch.ts", "Tenant chooses a server-side network destination."],
+].map(([candidateId, severity, sourcePath, impact], index) => ({
+  findingId: `SEC-${String(index + 1).padStart(3, "0")}`,
+  candidateId,
+  severity: severity as "critical" | "high",
+  sourcePath,
+  impact,
+}));
+
+export function securitySimulationRecords(): SecurityScanRecord[] {
+  const now = Date.UTC(2026, 6, 29, 12);
+  return [
+    {
+      path: ".clark/security-scans/adversarial-standard/scan.json",
+      modifiedAtMs: now,
+      pocReceipts: [],
+      bundle: {
+        scanId: "adversarial-standard",
+        mode: "standard",
+        model: "clark-code",
+        scope: ".",
+        inventoryId: "fixture-inventory",
+        phase: "reporting",
+        coverage: Array.from({ length: 21 }, (_, index) => ({
+          path: `fixture/file-${index + 1}`,
+          status: index === 20 ? "excluded" as const : "reviewed" as const,
+          reason: index === 20 ? "Generated vendor code" : null,
+        })),
+        supportingCoverage: [],
+        candidates: [],
+      },
+      seal: {
+        scanId: "adversarial-standard",
+        bundleDigest: "fixture-standard-digest",
+        reviewedFiles: 20,
+        excludedFiles: 1,
+        supportingFiles: 0,
+        findings: simulatedFindings,
+      },
+    },
+    {
+      path: ".clark/security-scans/adversarial-diff/scan.json",
+      modifiedAtMs: now - 1_000,
+      pocReceipts: [],
+      bundle: {
+        scanId: "adversarial-diff",
+        mode: "diff",
+        model: "clark-code",
+        scope: ".",
+        inventoryId: "fixture-diff-inventory",
+        phase: "reporting",
+        coverage: [
+          { path: "src/network/fetch.ts", status: "reviewed" },
+          { path: "src/api/new-upload.ts", status: "reviewed" },
+        ],
+        supportingCoverage: [
+          { path: "SECURITY.md", status: "reviewed" },
+        ],
+        candidates: [],
+      },
+      seal: {
+        scanId: "adversarial-diff",
+        bundleDigest: "fixture-diff-digest",
+        reviewedFiles: 2,
+        excludedFiles: 0,
+        supportingFiles: 1,
+        findings: simulatedFindings.slice(2),
+      },
+    },
+    {
+      path: ".clark/security-scans/adversarial-deep/scan.json",
+      modifiedAtMs: now - 2_000,
+      pocReceipts: [],
+      bundle: {
+        scanId: "adversarial-deep",
+        mode: "deep",
+        model: "clark-code",
+        scope: ".",
+        inventoryId: "fixture-deep-inventory",
+        phase: "reporting",
+        coverage: Array.from({ length: 21 }, (_, index) => ({
+          path: `fixture/file-${index + 1}`,
+          status: "reviewed" as const,
+        })),
+        supportingCoverage: [],
+        candidates: [],
+      },
+      seal: {
+        scanId: "adversarial-deep",
+        bundleDigest: "fixture-deep-digest",
+        reviewedFiles: 21,
+        excludedFiles: 0,
+        supportingFiles: 0,
+        deepPasses: 4,
+        findings: simulatedFindings,
+      },
+    },
+  ];
+}
+
 export class MockBridge implements CoreBridge {
   private snapshot: Snapshot = emptySnapshot();
   private handlers = new Set<(s: Snapshot) => void>();
   private branch = "main";
+  private managedWorktrees: ManagedWorktree[] = [];
+  private managedSequence = 0;
+  private sessionSequence = 0;
 
   async listProviders(): Promise<ProviderInfo[]> {
     return PROVIDERS;
@@ -58,7 +182,11 @@ export class MockBridge implements CoreBridge {
     bindId?: string,
   ): Promise<Session> {
     const provider = PROVIDERS.find((p) => p.id === providerId) ?? PROVIDERS[0];
-    const id = bindId ?? "mock-session";
+    // Browser fixtures need a real list of distinct conversations. Keep the
+    // original first id for existing demos, then make every new mock chat a
+    // durable-looking sibling instead of silently replacing the first row.
+    const id = bindId ?? (this.sessionSequence === 0 ? "mock-session" : `mock-session-${this.sessionSequence + 1}`);
+    if (!bindId) this.sessionSequence += 1;
     this.snapshot = { ...emptySnapshot(), session: id };
     this.emit();
     return {
@@ -154,14 +282,27 @@ export class MockBridge implements CoreBridge {
     ];
   }
 
+  async listSecurityScans(): Promise<SecurityScanRecord[]> {
+    const mode =
+      typeof localStorage === "undefined"
+        ? "empty"
+        : localStorage.getItem(SECURITY_SIMULATION_STORAGE_KEY) ?? "empty";
+    if (mode === "error") {
+      throw new Error("Simulated unreadable Security artifact");
+    }
+    return mode === "populated" ? securitySimulationRecords() : [];
+  }
+
   async projectContext(cwd: string): Promise<ProjectContext | null> {
     if (!cwd.trim()) return null;
+    const root = cwd.trim();
+    const managed = this.managedWorktrees.find((worktree) => worktree.path === root);
     const sessionActive = Boolean(this.snapshot.session);
     return {
-      branch: this.branch,
-      detached: false,
-      isWorktree: false,
-      worktreeRoot: cwd.trim(),
+      branch: managed?.preservedBranch || this.branch,
+      detached: managed?.state === "committed",
+      isWorktree: Boolean(managed),
+      worktreeRoot: root,
       activity: {
         changedFiles: sessionActive ? 2 : 0,
         untrackedFiles: sessionActive ? 1 : 0,
@@ -203,6 +344,134 @@ export class MockBridge implements CoreBridge {
     this.branch = branch;
   }
 
+  async planProjectWorktree(
+    projectPath: string,
+    targetBranch?: string | null,
+  ): Promise<ProjectWorktreeTransitionPlan> {
+    const root = projectPath.trim();
+    const target = targetBranch?.trim() || null;
+    const managed = this.managedWorktrees.find((worktree) => worktree.path === root);
+    const repositoryRoot = managed?.sourceRoot ?? root;
+    const owner = target && target === this.branch && !managed ? root : null;
+    return {
+      sourceRoot: root,
+      sourceBranch: this.branch,
+      sourceRevision: "0123456789abcdef0123456789abcdef01234567",
+      sourceChanges: { changedFiles: 0, untrackedFiles: 0, conflictedFiles: 0 },
+      sourceIsManaged: Boolean(managed),
+      targetBranch: target,
+      targetCheckoutPath: owner,
+      action: target && target !== this.branch ? "switch_clean" : "create_isolated",
+      preservation: "clean",
+      requiresConfirmation: false,
+      baseOptions: [
+        {
+          id: "current",
+          label: "Current checkout (" + this.branch + ")",
+          reference: this.branch,
+          revision: "0123456789abcdef0123456789abcdef01234567",
+          fallback: false,
+        },
+        {
+          id: "default",
+          label: "Fresh default branch (origin/main)",
+          reference: "origin/main",
+          revision: "0123456789abcdef0123456789abcdef01234567",
+          fallback: false,
+        },
+      ],
+      managedLocation: repositoryRoot + ".clark-worktrees",
+    };
+  }
+
+  async createManagedWorktree(
+    projectPath: string,
+    request: ManagedWorktreeRequest,
+  ): Promise<ManagedWorktree> {
+    const sourceRoot = projectPath.trim();
+    if (this.managedWorktrees.some((worktree) => worktree.path === sourceRoot)) {
+      throw new Error(
+        "This checkout is already a Clark-managed isolated worktree. Reuse it instead of nesting another checkout.",
+      );
+    }
+    const id = "session-" + ++this.managedSequence;
+    const managedBranch = `clark/${id}`;
+    const simulation = managedWorktreeSimulation();
+    const baseRevision = "0123456789abcdef0123456789abcdef01234567";
+    const privateHead = "fedcba9876543210fedcba9876543210fedcba98";
+    const created: ManagedWorktree = {
+      id,
+      label: request.label?.trim() || "session",
+      path: sourceRoot + ".clark-worktrees/" + id,
+      sourceRoot,
+      base: request.base,
+      baseReference: request.targetBranch?.trim() || (request.base === "default" ? "origin/main" : this.branch),
+      baseRevision,
+      headRevision: simulation === "committed" ? privateHead : baseRevision,
+      preservedBranch: managedBranch,
+      createdAtMs: Date.now(),
+      state: simulation,
+      changes: simulation === "dirty"
+        ? { changedFiles: 1, untrackedFiles: 0, conflictedFiles: 0 }
+        : { changedFiles: 0, untrackedFiles: 0, conflictedFiles: 0 },
+    };
+    this.managedWorktrees.unshift(created);
+    return created;
+  }
+
+  async listManagedWorktrees(projectPath: string): Promise<ManagedWorktree[]> {
+    const sourceRoot = this.managedRepositoryRoot(projectPath);
+    return this.managedWorktrees.filter((worktree) => worktree.sourceRoot === sourceRoot);
+  }
+
+  async cleanupManagedWorktree(
+    projectPath: string,
+    id: string,
+  ): Promise<ManagedWorktreeCleanupReceipt> {
+    const sourceRoot = this.managedRepositoryRoot(projectPath);
+    const worktree = this.managedWorktrees.find(
+      (candidate) => candidate.sourceRoot === sourceRoot && candidate.id === id,
+    );
+    if (!worktree) throw new Error("That managed worktree is not registered for this repository.");
+    if (worktree.state !== "ready" && worktree.state !== "saved") {
+      throw new Error(
+        worktree.state === "committed"
+          ? "Managed worktree has commits that are not protected by a branch."
+          : "Managed worktree has local changes.",
+      );
+    }
+    this.managedWorktrees = this.managedWorktrees.filter((candidate) => candidate !== worktree);
+    return { id, path: worktree.path, removed: true };
+  }
+
+  async saveManagedWorktreeBranch(
+    projectPath: string,
+    id: string,
+  ): Promise<ManagedWorktreeBranchReceipt> {
+    const sourceRoot = this.managedRepositoryRoot(projectPath);
+    const worktree = this.managedWorktrees.find(
+      (candidate) => candidate.sourceRoot === sourceRoot && candidate.id === id,
+    );
+    if (!worktree) throw new Error("That managed worktree is not registered for this repository.");
+    if (worktree.state === "dirty") {
+      throw new Error("Managed worktree still has local changes.");
+    }
+    if (worktree.state !== "committed" && worktree.state !== "saved") {
+      throw new Error("This managed worktree has no new commits to save as a branch.");
+    }
+    const branch = worktree.state === "committed" && worktree.preservedBranch
+      ? `${worktree.preservedBranch}-saved`
+      : worktree.preservedBranch || `clark/${worktree.id}`;
+    worktree.preservedBranch = branch;
+    worktree.state = "saved";
+    return {
+      id: worktree.id,
+      path: worktree.path,
+      branch,
+      headRevision: worktree.headRevision || worktree.baseRevision,
+    };
+  }
+
   // `/btw` in the browser preview: a scripted answer after a short delay so
   // the overlay is demoable without a native provider. Never throws — a mock
   // failure would be indistinguishable from a real one in the UI.
@@ -216,6 +485,11 @@ export class MockBridge implements CoreBridge {
   }
 
   // --- internals -----------------------------------------------------------
+
+  private managedRepositoryRoot(projectPath: string): string {
+    const root = projectPath.trim();
+    return this.managedWorktrees.find((worktree) => worktree.path === root)?.sourceRoot ?? root;
+  }
 
   private lastRunId(): string | undefined {
     const ids = Object.keys(this.snapshot.runs);

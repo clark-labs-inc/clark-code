@@ -343,6 +343,7 @@ fn markdown_artifact_only_for_md_inside_the_workspace() {
     assert_eq!(art.mime_type.as_deref(), Some("text/markdown"));
     assert_eq!(art.uri.as_deref(), Some(md.to_str().unwrap()));
     assert_eq!(art.title, "report.md");
+    assert_eq!(art.id, "doc:report.md");
 
     // A non-markdown file in the workspace → no artifact.
     let txt = docs_canon.join("notes.txt");

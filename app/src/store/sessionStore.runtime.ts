@@ -1,8 +1,11 @@
 import type { StoreApi } from "zustand";
+import type { SidebarConversationMutation } from "../lib/sidebarConversationInteractions";
 import {
   getBridge,
   type CloudTrajectoryConfig,
   type CoreBridge,
+  type ManagedWorktreeBase,
+  type ProjectWorktreeTransitionPlan,
   type SessionOptions,
 } from "../core-bridge/bridge";
 import { syncFanOut, resetFanOut } from "./fanOutStore";
@@ -141,7 +144,8 @@ export {
 export type {
   ActivityReward, ApprovalPolicy, AuthMethod, AuthSession, BillingSummary, ChatModelOverride,
   ClientResponse, CloudTrajectoryConfig, CollaborationMode, ConversationMeta, CoreBridge, DownloadProgress,
-  LocalAgentSettings, MemoryOverview, PendingAttachment, PlanImplementationContext, ProviderInfo, RemoteInfo,
+  LocalAgentSettings, ManagedWorktreeBase, MemoryOverview, PendingAttachment, PlanImplementationContext,
+  ProjectWorktreeTransitionPlan, ProviderInfo, RemoteInfo,
   Session, SessionOptions, Snapshot, SshHost, StagedUpdate, UpdateCheckResult,
   Upload,
   ContentBlock,
@@ -275,6 +279,12 @@ export interface SessionState {
    *  right-click bulk actions (archive / delete all selected). A fresh Set
    *  on every mutation so zustand re-renders. */
   selectedConversationIds: Set<string>;
+  /** Conversations currently awaiting a durable archive, delete, or restore
+   * acknowledgement. Rows stay visible and explicitly busy until it arrives. */
+  mutatingConversationIds: Set<string>;
+  /** Sidebar bulk/single-item operation progress, kept briefly after completion
+   * so visual and screen-reader feedback never disappears abruptly. */
+  conversationMutation: SidebarConversationMutation | null;
   /** A session connect is in flight — drives the "Opening…" loading screen (and
    *  the sidebar row spinner) so the UI never looks frozen: remote connects
    *  bring up an SSH tunnel, which can take 10–20s. `kind` picks the copy
@@ -291,6 +301,14 @@ export interface SessionState {
   composerPrefill: ComposerPrefill | null;
   /** Config for the "Local coding" provider (persisted to localStorage). */
   localSettings: LocalAgentSettings;
+  /** Preferred immutable base for newly created managed worktrees. */
+  managedWorktreeBase: ManagedWorktreeBase;
+  /** A dirty-source isolation choice awaiting explicit user confirmation. */
+  worktreeTransition: ProjectWorktreeTransitionPlan | null;
+  /** A managed checkout already created for a start that can be retried. */
+  pendingManagedWorktreePath: string | null;
+  /** True while the host prepares a managed checkout for the next session. */
+  worktreePreparing: boolean;
   /** Per-conversation model + reasoning-effort settings, keyed by conversation
    *  id and pinned when the chat is created or first reopened. Legacy chats
    *  fall back to `localSettings` only until that first open. Persisted to
@@ -379,6 +397,7 @@ export interface SessionState {
   loadBilling: () => Promise<void>;
   selectProvider: (id: string) => void;
   setLocalSettings: (patch: Partial<LocalAgentSettings>) => void;
+  setManagedWorktreeBase: (base: ManagedWorktreeBase) => void;
   setProjectMode: (mode: "local" | "remote") => void;
   setSelectedHostId: (id: string | null) => void;
   setProjectFolder: (path: string) => void;
@@ -403,6 +422,10 @@ export interface SessionState {
    *  submit with the same logic the start screen uses. */
   startBlockedReason: () => string | null;
   startSession: () => Promise<void>;
+  /** Create the explicitly approved isolated checkout, then start the chat in it. */
+  confirmManagedWorktreeStart: () => Promise<void>;
+  /** Leave the source checkout untouched and close the preservation decision. */
+  dismissManagedWorktreeStart: () => void;
   /** Detach from the current conversation (→ welcome screen). Its live session
    *  keeps running in the background pool — reopening reattaches instantly.
    *  `force` (sign-out) tears down every live session instead. */
@@ -410,11 +433,11 @@ export interface SessionState {
   openConversation: (id: string) => Promise<void>;
   /** Soft-delete: hide from the main list but keep the transcript locally and in
    *  the cloud so it can be restored. Clears the view if it's the open chat. */
-  archiveConversation: (id: string) => void;
+  archiveConversation: (id: string) => Promise<void>;
   /** Bring an archived conversation back into the active list. */
-  restoreConversation: (id: string) => void;
+  restoreConversation: (id: string) => Promise<void>;
   /** Permanently delete a conversation — local cache AND the cloud copy. */
-  deleteConversation: (id: string) => void;
+  deleteConversation: (id: string) => Promise<void>;
   /** Rename a conversation; the manual title stops auto-derivation clobbering it. */
   renameConversation: (id: string, title: string) => void;
   /** Toggle one conversation in the sidebar's Shift-click selection. */
@@ -423,11 +446,11 @@ export interface SessionState {
   setConversationSelection: (ids: Set<string>) => void;
   /** Archive every selected conversation at once. Busy ones are skipped (a
    *  notice is flashed); the rest are closed + flagged archived in the cloud. */
-  archiveSelectedConversations: () => void;
+  archiveSelectedConversations: () => Promise<void>;
   /** Permanently delete every selected conversation at once. Busy ones are
    *  skipped (a notice is flashed); the rest are closed + deleted from the
    *  cloud. Selection is cleared afterwards. */
-  deleteSelectedConversations: () => void;
+  deleteSelectedConversations: () => Promise<void>;
   /** Change the coding model / reasoning effort for the ACTIVE conversation.
    *  Writes a per-chat override (so other chats keep their own model), persists
    *  it, and — when a local session is live — hot-swaps that session's provider

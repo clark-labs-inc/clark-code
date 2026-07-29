@@ -78,6 +78,55 @@ describe("scout slash command", () => {
   });
 });
 
+describe("security slash command", () => {
+  it("selects the collision-safe bundled Security workflow", () => {
+    expect(slashCommands()).toContainEqual(expect.objectContaining({
+      name: "security",
+      body: "$security:security-scan",
+      hint: "Scan this repository with fixed GLM 5.2",
+      localOnly: true,
+    }));
+  });
+
+  it("expands only the exact command prefix", () => {
+    expect(expandPromptSlashCommand("/security")).toBe("$security:security-scan");
+    expect(expandPromptSlashCommand("  /security crates/auth"))
+      .toBe("  $security:security-scan crates/auth");
+    expect(expandPromptSlashCommand("/securityish")).toBe("/securityish");
+    expect(expandPromptSlashCommand("please /security")).toBe("please /security");
+  });
+
+  it("offers a distinct exact-diff workflow", () => {
+    expect(slashCommands()).toContainEqual(expect.objectContaining({
+      name: "security-diff",
+      body: "$security:security-diff",
+      hint: "Review this exact Git diff with fixed GLM 5.2",
+      localOnly: true,
+    }));
+    expect(expandPromptSlashCommand("/security-diff"))
+      .toBe("$security:security-diff");
+    expect(expandPromptSlashCommand("  /security-diff src"))
+      .toBe("  $security:security-diff src");
+    expect(expandPromptSlashCommand("/security-different"))
+      .toBe("/security-different");
+  });
+
+  it("offers a distinct bounded deep workflow", () => {
+    expect(slashCommands()).toContainEqual(expect.objectContaining({
+      name: "security-deep",
+      body: "$security:security-deep",
+      hint: "Scan deeply with independent GLM 5.2 passes",
+      localOnly: true,
+    }));
+    expect(expandPromptSlashCommand("/security-deep"))
+      .toBe("$security:security-deep");
+    expect(expandPromptSlashCommand("  /security-deep crates"))
+      .toBe("  $security:security-deep crates");
+    expect(expandPromptSlashCommand("/security-deeper"))
+      .toBe("/security-deeper");
+  });
+});
+
 describe("btw slash command", () => {
   it("stays discoverable before a session and is limited to the local provider", () => {
     const command = slashCommands().find((candidate) => candidate.name === "btw");

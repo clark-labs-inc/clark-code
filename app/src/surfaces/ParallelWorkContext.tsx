@@ -15,7 +15,7 @@ interface ParallelWorkContextProps {
 }
 
 const ITEM =
-  "flex h-[22px] min-w-0 items-center gap-1 rounded-md bg-composer-context px-1.5 text-[11px] font-medium leading-none";
+  "flex min-h-7 min-w-0 items-center gap-1 rounded-md bg-composer-context px-1.5 text-xs font-medium leading-none";
 
 export function activityAge(updatedAtMs: number, now = Date.now()): string {
   const seconds = Math.max(0, Math.round((now - updatedAtMs) / 1_000));
@@ -151,7 +151,7 @@ function Stat({ value, label, active = false }: { value: number; label: string; 
   return (
     <div className="bg-bg-elevated px-3 py-2 text-center">
       <div className={cn("text-sm font-semibold tabular-nums", active ? "text-accent" : "text-ink")}>{value}</div>
-      <div className="text-[10px] uppercase tracking-wide text-ink-faint">{label}</div>
+      <div className="text-xs uppercase tracking-wide text-ink-faint">{label}</div>
     </div>
   );
 }
@@ -159,14 +159,14 @@ function Stat({ value, label, active = false }: { value: number; label: string; 
 function AgentRow({ label, title, status }: { label: string; title: string; status: string }) {
   return (
     <div className="flex items-start gap-2.5 rounded-xl px-2 py-2 hover:bg-bg-hover">
-      <span className="relative mt-0.5 grid size-7 shrink-0 place-items-center rounded-full bg-accent-subtle text-[10px] font-semibold uppercase text-accent">
+      <span className="relative mt-0.5 grid aspect-square min-h-7 min-w-7 shrink-0 place-items-center rounded-full bg-accent-subtle text-xs font-semibold uppercase text-accent">
         {label.slice(0, 1)}
         <span className="absolute -bottom-0.5 -right-0.5 size-2 rounded-full border-2 border-bg-elevated bg-success" />
       </span>
       <span className="min-w-0 flex-1">
         <span className="flex items-baseline gap-1.5">
           <span className="text-xs font-medium text-ink-secondary">{label}</span>
-          <span className="text-[10px] text-ink-faint">{status}</span>
+          <span className="text-xs text-ink-faint">{status}</span>
         </span>
         <span className="mt-0.5 block truncate text-xs text-ink-muted" title={title}>{title}</span>
       </span>

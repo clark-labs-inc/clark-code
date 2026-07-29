@@ -13,7 +13,7 @@ describe("ModelPriceCue", () => {
 
       expect(markup).toContain(`>${"$".repeat(tier)}</span>`);
       expect(markup).toContain('aria-hidden="true"');
-      expect(markup).toContain("text-[8px]");
+      expect(markup).toContain("text-xs");
       expect(markup).toContain("opacity-60");
     }
   });

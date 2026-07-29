@@ -1,4 +1,4 @@
-import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { ArrowDown, X } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
@@ -31,14 +31,15 @@ import { isIncludedWeeklyAllowanceExhausted } from "../lib/errors";
 /** A row of pulsing dots — the model is generating. Memoized so its animation
  *  isn't re-evaluated on every streamed-token re-render of the parent. */
 const Dots = memo(function Dots() {
+  const reduce = useReducedMotion();
   return (
     <span className="flex items-center gap-[3px]" aria-hidden>
       {[0, 1, 2].map((i) => (
         <motion.span
           key={i}
           className="size-1.5 rounded-full bg-accent"
-          animate={{ opacity: [0.3, 1, 0.3] }}
-          transition={{ duration: 1.1, repeat: Infinity, delay: i * 0.18 }}
+          animate={reduce ? undefined : { opacity: [0.3, 1, 0.3] }}
+          transition={reduce ? { duration: 0 } : { duration: 1.1, repeat: Infinity, delay: i * 0.18 }}
         />
       ))}
     </span>
@@ -194,6 +195,7 @@ export function Conversation({
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const lastScrollTop = useRef(0);
+  const scrollFrameRef = useRef<number | null>(null);
   const scrollingToBottom = useRef(false);
   const upwardWheel = useRef(false);
   const [showAll, setShowAll] = useState(false);
@@ -204,6 +206,34 @@ export function Conversation({
   // while they're reading scrollback. Instant (not smooth) keeps streaming stable.
   const stuck = useRef(true);
   const [atBottom, setAtBottom] = useState(true);
+  const cancelPinnedScroll = useCallback(() => {
+    if (scrollFrameRef.current === null) return;
+    cancelAnimationFrame(scrollFrameRef.current);
+    scrollFrameRef.current = null;
+  }, []);
+  const schedulePinnedScroll = useCallback(() => {
+    if (!sessionId || !stuck.current || scrollFrameRef.current !== null) return;
+
+    const scroll = () => {
+      scrollFrameRef.current = null;
+      if (!stuck.current) return;
+      const el = scrollRef.current;
+      if (!el) return;
+
+      const target = Math.max(0, el.scrollHeight - el.clientHeight);
+      if (Math.abs(el.scrollTop - target) < 0.5) return;
+      el.scrollTop = target;
+      lastScrollTop.current = el.scrollTop;
+      scrollByConversation.set(sessionId, { scrollTop: el.scrollTop, atBottom: true });
+    };
+
+    if (typeof requestAnimationFrame === "undefined") {
+      scroll();
+      return;
+    }
+    scrollFrameRef.current = requestAnimationFrame(scroll);
+  }, [sessionId]);
+  useEffect(() => () => cancelPinnedScroll(), [cancelPinnedScroll]);
   const onScroll = () => {
     const el = scrollRef.current;
     if (!el) return;
@@ -220,6 +250,7 @@ export function Conversation({
       userScrolledUp,
     );
     lastScrollTop.current = el.scrollTop;
+    if (movedUp) cancelPinnedScroll();
     if (movedUp || nearBottom) scrollingToBottom.current = false;
     stuck.current = following;
     if (sessionId) {
@@ -236,6 +267,7 @@ export function Conversation({
   const scrollToBottom = () => {
     const el = scrollRef.current;
     if (el) {
+      cancelPinnedScroll();
       scrollingToBottom.current = true;
       upwardWheel.current = false;
       stuck.current = true;
@@ -262,6 +294,7 @@ export function Conversation({
   // Restore after React has committed the target transcript but before paint,
   // avoiding a frame at the previous conversation's unrelated scrollTop.
   useLayoutEffect(() => {
+    cancelPinnedScroll();
     const el = scrollRef.current;
     if (!el || !sessionId) return;
     const remembered = scrollByConversation.get(sessionId);
@@ -273,18 +306,11 @@ export function Conversation({
     stuck.current = bottom;
     setAtBottom(bottom);
     scrollByConversation.set(sessionId, { scrollTop: el.scrollTop, atBottom: bottom });
-  }, [sessionId]);
+  }, [cancelPinnedScroll, sessionId]);
 
   useEffect(() => {
-    const el = scrollRef.current;
-    if (el && stuck.current) {
-      el.scrollTop = el.scrollHeight;
-      lastScrollTop.current = el.scrollTop;
-      if (sessionId) {
-        scrollByConversation.set(sessionId, { scrollTop: el.scrollTop, atBottom: true });
-      }
-    }
-  }, [sessionId, timeline, toolCalls]);
+    schedulePinnedScroll();
+  }, [schedulePinnedScroll, sessionId, timeline, toolCalls]);
 
   // Timeline rows, images, and animated pending/permission banners can change
   // height after their snapshot render. Follow the actual content box while
@@ -294,15 +320,10 @@ export function Conversation({
     const el = scrollRef.current;
     const content = contentRef.current;
     if (!el || !content || !sessionId || typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(() => {
-      if (!stuck.current) return;
-      el.scrollTop = el.scrollHeight;
-      lastScrollTop.current = el.scrollTop;
-      scrollByConversation.set(sessionId, { scrollTop: el.scrollTop, atBottom: true });
-    });
+    const observer = new ResizeObserver(schedulePinnedScroll);
     observer.observe(content);
     return () => observer.disconnect();
-  }, [sessionId]);
+  }, [schedulePinnedScroll, sessionId]);
 
   if (!session) return null;
 
@@ -548,11 +569,11 @@ export function Conversation({
         {!atBottom && visible.length > 0 && (
           <motion.button
             onClick={scrollToBottom}
-            initial={reduce ? false : { opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={reduce ? { opacity: 0, transition: { duration: 0 } } : { opacity: 0, y: 8 }}
-            transition={{ duration: DUR.fast, ease: EASE.out }}
-            className="absolute bottom-4 left-1/2 z-10 flex w-fit -translate-x-1/2 items-center gap-1.5 rounded-full bg-bg-elevated px-3 py-1.5 text-xs font-medium text-ink-secondary shadow-lg ring-1 ring-border-subtle transition-colors hover:text-ink"
+            initial={reduce ? false : { opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0, transition: { duration: reduce ? 0 : DUR.fast } }}
+            transition={{ duration: reduce ? 0 : DUR.fast, ease: EASE.out }}
+            className="popover-surface absolute bottom-4 left-1/2 z-10 flex w-fit -translate-x-1/2 items-center gap-1.5 rounded-full bg-bg-elevated px-3 py-1.5 text-xs font-medium text-ink-secondary shadow-lg ring-1 ring-border-subtle transition-colors hover:text-ink"
           >
             <ArrowDown className="size-3.5" /> Jump to latest
           </motion.button>

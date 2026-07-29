@@ -212,6 +212,60 @@ export function validatePlatformReleaseAssets({
   return { version, byName, aliases: expectedAliases };
 }
 
+export function createPlatformDownloadManifest({
+  assets,
+  tag,
+  baseUrl,
+  sourceRevision,
+  platforms,
+  publishedAt,
+}) {
+  const { version } = validatePlatformReleaseAssets({
+    assets,
+    tag,
+    baseUrl,
+    sourceRevision,
+    platforms,
+  });
+  if (Number.isNaN(Date.parse(publishedAt))) {
+    throw new Error("platform download manifest requires a valid publication time");
+  }
+  return {
+    tag_name: tag,
+    version,
+    source_revision: sourceRevision,
+    generated_at: publishedAt,
+    base_url: baseUrl,
+    assets,
+  };
+}
+
+export function validatePlatformDownloadManifest({
+  manifest,
+  tag,
+  baseUrl,
+  sourceRevision,
+  platforms,
+}) {
+  const validated = validatePlatformReleaseAssets({
+    assets: manifest?.assets,
+    tag,
+    baseUrl,
+    sourceRevision,
+    platforms,
+  });
+  if (
+    manifest?.tag_name !== tag
+    || manifest?.version !== validated.version
+    || manifest?.source_revision !== sourceRevision
+    || manifest?.base_url !== baseUrl
+    || Number.isNaN(Date.parse(manifest?.generated_at))
+  ) {
+    throw new Error("platform download manifest does not identify the complete platform release");
+  }
+  return { ...validated, manifest };
+}
+
 export function createPlatformUpdaterDocuments({
   updaterFragments,
   tag,
@@ -628,6 +682,14 @@ export async function runPlatformReleaseJourney({
     sourceRevision,
     platforms: normalizedPlatforms,
   });
+  const legacyDownloadManifest = await fetchJson(`${normalizedBase}/latest/manifest.json`);
+  validatePlatformDownloadManifest({
+    manifest: legacyDownloadManifest,
+    tag,
+    baseUrl: normalizedBase,
+    sourceRevision,
+    platforms: normalizedPlatforms,
+  });
   const updaterTargets = platformUpdaterTargets(normalizedPlatforms);
   const updaterDocuments = Object.fromEntries(await Promise.all(
     updaterTargets.map(async (target) => [
@@ -719,6 +781,7 @@ export async function runPlatformReleaseJourney({
     rendered,
     updater_targets: updaterTargets,
     legacy_updater_targets: Object.keys(legacyUpdaterDocument.platforms),
+    legacy_download_aliases: legacyDownloadManifest.assets.map((asset) => asset.name),
     artifacts,
   };
   if (outputDir) {

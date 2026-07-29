@@ -92,12 +92,12 @@ export function ProfileMenu({ variant = "topbar" }: { variant?: "topbar" | "rail
           onClick={() => setOpen((o) => !o)}
           aria-label="Account"
           title={user.email ?? user.name}
-          className="flex h-9 w-full items-center gap-2 rounded-lg px-2 text-left transition hover:bg-bg-hover"
+          className="flex min-h-9 w-full items-center gap-2 rounded-lg px-2 text-left transition hover:bg-bg-hover"
         >
           {user.avatar ? (
             <img src={user.avatar} alt="" className="size-5 shrink-0 rounded-full" />
           ) : (
-            <span className="grid size-5 shrink-0 place-items-center rounded-full bg-bg-tertiary text-[10px] font-medium text-ink-secondary">
+            <span className="grid aspect-square min-h-5 min-w-5 shrink-0 place-items-center rounded-full bg-bg-tertiary text-xs font-medium text-ink-secondary">
               {user.name.charAt(0).toUpperCase()}
             </span>
           )}
@@ -114,7 +114,7 @@ export function ProfileMenu({ variant = "topbar" }: { variant?: "topbar" | "rail
           {user.avatar ? (
             <img src={user.avatar} alt="" className="size-7 rounded-full" />
           ) : (
-            <span className="grid size-7 shrink-0 place-items-center rounded-full bg-bg-tertiary text-[11px] font-semibold text-ink-secondary transition hover:bg-bg-hover">
+            <span className="grid aspect-square min-h-7 min-w-7 shrink-0 place-items-center rounded-full bg-bg-tertiary text-xs font-semibold text-ink-secondary transition hover:bg-bg-hover">
               {user.name.charAt(0).toUpperCase()}
             </span>
           )}
@@ -253,8 +253,8 @@ function Toggle({ on }: { on: boolean }) {
     >
       <span
         className={cn(
-          "absolute top-0.5 size-[14px] rounded-full bg-white shadow-sm transition-all",
-          on ? "left-[15px]" : "left-0.5",
+          "absolute left-0.5 top-0.5 size-[14px] rounded-full bg-white shadow-sm transition-transform",
+          on ? "translate-x-[13px]" : "translate-x-0",
         )}
       />
     </span>

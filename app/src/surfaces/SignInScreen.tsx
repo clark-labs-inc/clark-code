@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { motion } from "motion/react";
+import { motion, useReducedMotion } from "motion/react";
 import { Loader2, Download, RotateCw, Check, AlertCircle } from "lucide-react";
 import { ClarkMark } from "./ClarkMark";
 import { useSessionStore } from "../store/sessionStore";
@@ -111,6 +111,7 @@ export function SignInScreen() {
   const signIn = useSessionStore((s) => s.signIn);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const reduce = useReducedMotion() ?? false;
 
   const go = async () => {
     setBusy(true);
@@ -126,9 +127,9 @@ export function SignInScreen() {
   return (
     <div className="flex h-screen w-screen items-center justify-center bg-bg px-6">
       <motion.div
-        initial={{ opacity: 0, y: 10 }}
+        initial={reduce ? false : { opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: DUR.slow, ease: EASE.out }}
+        transition={{ duration: reduce ? 0 : DUR.slow, ease: EASE.out }}
         className="w-full max-w-sm text-center"
       >
         <div className="mb-6 flex justify-center">

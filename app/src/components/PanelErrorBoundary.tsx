@@ -58,7 +58,7 @@ export class PanelErrorBoundary extends Component<Props, State> {
             Your conversation is still saved. Retry this panel without restarting the rest of Clark.
           </p>
           {this.state.reference && (
-            <p className="mt-2 text-[11px] text-ink-faint">Reference {this.state.reference}</p>
+            <p className="mt-2 text-xs text-ink-faint">Reference {this.state.reference}</p>
           )}
           <div className="mt-4 flex justify-center gap-2">
             {this.props.onDismiss && (
@@ -73,7 +73,7 @@ export class PanelErrorBoundary extends Component<Props, State> {
             <button
               type="button"
               onClick={this.reset}
-              className="rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover"
+              className="rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-on-accent hover:bg-accent-hover"
             >
               Retry
             </button>

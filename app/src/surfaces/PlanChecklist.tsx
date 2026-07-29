@@ -47,9 +47,9 @@ function ExecutionChecklistImpl({ checklist }: { checklist?: ExecutionChecklist 
 
   return (
     <motion.div
-      initial={reduce ? { opacity: 0 } : { opacity: 0, y: 8 }}
+      initial={reduce ? false : { opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: DUR.base, ease: EASE.out }}
+      transition={{ duration: reduce ? 0 : DUR.base, ease: EASE.out }}
       className="rounded-lg border border-border-subtle bg-bg-elevated px-3 py-2.5"
     >
       <button

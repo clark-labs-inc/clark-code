@@ -12,6 +12,7 @@ use provider_local::{
     install_skill_pack, InstallSkillPackRequest, LocalAgentProvider, LocalExecutor,
     SkillPackAction, SkillPackScope,
 };
+use serde::Deserialize;
 use serde_json::json;
 
 #[path = "live_clark_code/canonical.rs"]
@@ -43,7 +44,7 @@ fn is_clark_code_provider(value: &str) -> bool {
 fn is_clark_code_model(value: &str) -> bool {
     matches!(
         value,
-        "clark-code" | "clark-code:free" | "clark-code:kimi_k3"
+        "clark-code" | "clark-code:free" | "clark-code:kimi_k3" | "qwen/qwen3.7-flash"
     )
 }
 
@@ -108,12 +109,13 @@ fn live_config() -> Option<LiveConfig> {
 }
 
 #[test]
-fn live_matrix_accepts_backend_owned_clark_code_aliases_only() {
+fn live_matrix_accepts_product_routes_and_the_paid_qwen_eval_model() {
     assert!(is_clark_code_provider("clark-platform"));
     assert!(!is_clark_code_provider("openrouter"));
     assert!(is_clark_code_model("clark-code"));
     assert!(is_clark_code_model("clark-code:free"));
     assert!(is_clark_code_model("clark-code:kimi_k3"));
+    assert!(is_clark_code_model("qwen/qwen3.7-flash"));
     assert!(!is_clark_code_model("clark-code:grok45"));
     assert!(!is_clark_code_model("deepseek/deepseek-v4-pro"));
     assert!(!is_clark_code_model("clark"));
@@ -267,6 +269,197 @@ fn write_project_fixture(root: &Path) {
         "alpha note with CLARK_LIVE_GREP_SENTINEL_5142\n",
     )
     .unwrap();
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PaidSecurityEval {
+    #[serde(default)]
+    findings: Vec<PaidSecurityFinding>,
+    #[serde(default)]
+    safe_controls: Vec<PaidSecurityControl>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PaidSecurityFinding {
+    path: String,
+    cwe: String,
+    severity: String,
+    title: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct PaidSecurityControl {
+    path: String,
+    reason: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PaidSecurityOracle {
+    expected_findings: Vec<PaidSecurityOracleFinding>,
+    safe_control_paths: Vec<String>,
+}
+
+#[derive(Deserialize)]
+struct PaidSecurityOracleFinding {
+    path: String,
+}
+
+fn paid_security_fixture_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../harness/fixtures/security-vulnerable-repo")
+}
+
+fn parse_paid_security_eval(text: &str) -> PaidSecurityEval {
+    let start = text
+        .find('{')
+        .unwrap_or_else(|| panic!("security eval response has no JSON object: {text:?}"));
+    let end = text
+        .rfind('}')
+        .unwrap_or_else(|| panic!("security eval response has no JSON terminator: {text:?}"));
+    serde_json::from_str(&text[start..=end]).unwrap_or_else(|error| {
+        panic!("security eval response is not valid JSON: {error}: {text:?}")
+    })
+}
+
+fn normalized_eval_path(path: &str) -> &str {
+    path.trim().trim_start_matches("./")
+}
+
+#[tokio::test]
+#[ignore = "requires explicit paid Qwen 3.7 Flash authorization and Clark Platform credentials"]
+async fn live_qwen_37_flash_security_adversarial_simulation() {
+    let Some(cfg) = live_config() else {
+        return;
+    };
+    assert_eq!(
+        cfg.model, "qwen/qwen3.7-flash",
+        "paid Security simulations must use the advertised Qwen 3.7 Flash model"
+    );
+    let root = paid_security_fixture_root();
+    let oracle: PaidSecurityOracle = serde_json::from_str(include_str!(
+        "../../../harness/security-vulnerable-oracle.json"
+    ))
+    .expect("valid paid Security oracle");
+    let (mut provider, session) = new_live_provider(
+        &cfg,
+        &root,
+        json!({
+            "max_iterations": 32,
+            "research": false,
+            "memories": false,
+            "sandbox_mode": "disabled",
+            "permissions": {
+                "bash": "ask",
+                "write_file": "deny",
+                "edit_file": "deny"
+            }
+        }),
+    )
+    .await;
+
+    let summary = drive_turn(
+        &mut provider,
+        &session.id,
+        r#"Run a read-only adversarial security audit of this entire fixture repository.
+Read SECURITY.md first, inventory every first-party file in src/, trace realistic
+attacker-controlled sources through missing or broken controls to sensitive sinks,
+and actively challenge likely false positives in src/safe/. Do not edit files and
+do not read any path outside this repository.
+
+Your final response must contain exactly one JSON object with this shape:
+{"findings":[{"path":"repository-relative path","cwe":"CWE-NNN","severity":"low|medium|high|critical","title":"concise issue"}],"safeControls":[{"path":"repository-relative path","reason":"why the apparent path is blocked"}]}
+Use one finding per independently exploitable file. Do not include prose outside
+the JSON object."#,
+    )
+    .await;
+    println!(
+        "[security_adversarial] provider={} alias={} upstream=qwen/qwen3.7-flash tools={} usage={:?}",
+        cfg.provider,
+        cfg.model,
+        summary.tools.len(),
+        summary.usage
+    );
+    summary.require_done("security_adversarial");
+    assert!(
+        !summary
+            .tools
+            .iter()
+            .any(|tool| matches!(tool.as_str(), "write_file" | "edit_file")),
+        "security_adversarial: read-only eval attempted a mutation: {summary:?}"
+    );
+
+    let eval = parse_paid_security_eval(&summary.text);
+    let expected = oracle
+        .expected_findings
+        .iter()
+        .map(|finding| finding.path.as_str())
+        .collect::<std::collections::BTreeSet<_>>();
+    let observed = eval
+        .findings
+        .iter()
+        .map(|finding| normalized_eval_path(&finding.path))
+        .collect::<std::collections::BTreeSet<_>>();
+    let matched = expected.intersection(&observed).count();
+    let safe_false_positives = oracle
+        .safe_control_paths
+        .iter()
+        .filter(|path| observed.contains(path.as_str()))
+        .cloned()
+        .collect::<Vec<_>>();
+    let safe_controls = eval
+        .safe_controls
+        .iter()
+        .map(|control| normalized_eval_path(&control.path))
+        .collect::<std::collections::BTreeSet<_>>();
+    let safe_recognized = oracle
+        .safe_control_paths
+        .iter()
+        .filter(|path| safe_controls.contains(path.as_str()))
+        .count();
+    let unmatched = observed.difference(&expected).copied().collect::<Vec<_>>();
+    println!(
+        "[security_adversarial score] recall={matched}/{} safe_controls={safe_recognized}/{} safe_false_positives={safe_false_positives:?} unmatched={unmatched:?}",
+        expected.len(),
+        oracle.safe_control_paths.len()
+    );
+    for finding in &eval.findings {
+        assert!(!finding.cwe.trim().is_empty(), "missing CWE: {finding:?}");
+        assert!(
+            matches!(
+                finding.severity.as_str(),
+                "low" | "medium" | "high" | "critical"
+            ),
+            "invalid severity: {finding:?}"
+        );
+        assert!(
+            !finding.title.trim().is_empty(),
+            "missing title: {finding:?}"
+        );
+    }
+    assert!(
+        eval.safe_controls
+            .iter()
+            .all(|control| !control.reason.trim().is_empty()),
+        "safe controls require evidence: {:?}",
+        eval.safe_controls
+    );
+    assert!(
+        matched * 100 >= expected.len() * 70,
+        "Qwen Security recall below 70%: matched {matched}/{}; response={:?}",
+        expected.len(),
+        eval.findings
+    );
+    assert!(
+        safe_false_positives.is_empty(),
+        "Qwen reported protected controls as vulnerabilities: {safe_false_positives:?}"
+    );
+    assert!(
+        safe_recognized >= 2,
+        "Qwen recognized fewer than two explicit safe controls: {:?}",
+        eval.safe_controls
+    );
 }
 
 #[tokio::test]

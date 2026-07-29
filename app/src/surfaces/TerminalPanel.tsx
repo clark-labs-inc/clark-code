@@ -44,17 +44,18 @@ type TermTab = { id: string; n: number; cwd?: string };
 function TerminalInstance({ id, cwd, active }: { id: string; cwd?: string; active: boolean }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<XTerm | null>(null);
-  const fitRef = useRef<FitAddon | null>(null);
+  const refitRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
 
+    const motionMedia = window.matchMedia?.("(prefers-reduced-motion: reduce)");
     const term = new XTerm({
       fontFamily: MONO,
       fontSize: terminalFontSize(documentTextSize()),
       lineHeight: 1.2,
-      cursorBlink: true,
+      cursorBlink: !motionMedia?.matches,
       scrollback: 5000,
       theme: readTheme(),
     });
@@ -62,18 +63,43 @@ function TerminalInstance({ id, cwd, active }: { id: string; cwd?: string; activ
     term.loadAddon(fit);
     term.open(host);
     termRef.current = term;
-    fitRef.current = fit;
-    try {
-      fit.fit();
-    } catch {
-      /* host not laid out yet — the active-effect re-fits */
-    }
-
+    const syncCursorBlink = () => {
+      term.options.cursorBlink = !motionMedia?.matches;
+    };
+    motionMedia?.addEventListener("change", syncCursorBlink);
     let disposed = false;
+    let ptyOpened = false;
     const unlisten: Array<() => void> = [];
+
+    const refit = () => {
+      try {
+        fit.fit();
+        if (ptyOpened) void resizeTerminal(id, term.cols, term.rows);
+      } catch {
+        /* host hidden or not laid out */
+      }
+    };
+    refitRef.current = refit;
+
+    refit();
+    // A cold webview may measure the fallback monospace face first. Refit once
+    // the bundled face is ready so its cell width and the PTY dimensions agree.
+    const fonts = document.fonts;
+    if (fonts) {
+      void fonts.load(`${terminalFontSize(documentTextSize())}px "JetBrains Mono"`).then(
+        () => {
+          if (!disposed) refit();
+        },
+        () => {
+          /* Keep the system monospace fallback if the bundled font cannot load. */
+        },
+      );
+    }
 
     void openTerminal(id, cwd || undefined, term.cols, term.rows).then(async () => {
       if (disposed) return;
+      ptyOpened = true;
+      void resizeTerminal(id, term.cols, term.rows);
       unlisten.push(await onTerminalData(id, (bytes) => term.write(bytes)));
       unlisten.push(
         await onTerminalExit(id, () =>
@@ -97,24 +123,14 @@ function TerminalInstance({ id, cwd, active }: { id: string; cwd?: string; activ
     document.addEventListener("mousedown", clearOnOutsidePress);
 
     const ro = new ResizeObserver(() => {
-      try {
-        fit.fit();
-        void resizeTerminal(id, term.cols, term.rows);
-      } catch {
-        /* host hidden or not laid out */
-      }
+      refit();
     });
     ro.observe(host);
 
     const mo = new MutationObserver(() => {
       term.options.theme = readTheme();
       term.options.fontSize = terminalFontSize(documentTextSize());
-      try {
-        fit.fit();
-        void resizeTerminal(id, term.cols, term.rows);
-      } catch {
-        /* host hidden or not laid out */
-      }
+      refit();
     });
     mo.observe(document.documentElement, {
       attributes: true,
@@ -124,6 +140,7 @@ function TerminalInstance({ id, cwd, active }: { id: string; cwd?: string; activ
     return () => {
       disposed = true;
       document.removeEventListener("mousedown", clearOnOutsidePress);
+      motionMedia?.removeEventListener("change", syncCursorBlink);
       ro.disconnect();
       mo.disconnect();
       dataSub.dispose();
@@ -131,7 +148,7 @@ function TerminalInstance({ id, cwd, active }: { id: string; cwd?: string; activ
       void closeTerminal(id);
       term.dispose();
       termRef.current = null;
-      fitRef.current = null;
+      refitRef.current = null;
     };
     // Created once per tab; `id`/`cwd` are captured at mount and never change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -142,10 +159,9 @@ function TerminalInstance({ id, cwd, active }: { id: string; cwd?: string; activ
     // Defer to after the host is visible (display flips this same frame).
     const t = window.setTimeout(() => {
       try {
-        fitRef.current?.fit();
         const term = termRef.current;
+        refitRef.current?.();
         if (term) {
-          void resizeTerminal(id, term.cols, term.rows);
           term.focus();
         }
       } catch {

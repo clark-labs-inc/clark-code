@@ -11,15 +11,15 @@ import { Md } from "./Message";
 import { DUR, EASE } from "../lib/motion";
 
 /** A short spinner — three pulsing dots, matching the conversation pending row. */
-function Spinner() {
+function Spinner({ reduce }: { reduce: boolean | null }) {
   return (
     <span className="flex items-center gap-[3px]" aria-hidden>
       {[0, 1, 2].map((i) => (
         <motion.span
           key={i}
           className="size-1.5 rounded-full bg-accent"
-          animate={{ opacity: [0.3, 1, 0.3] }}
-          transition={{ duration: 1.1, repeat: Infinity, delay: i * 0.18 }}
+          animate={reduce ? undefined : { opacity: [0.3, 1, 0.3] }}
+          transition={reduce ? { duration: 0 } : { duration: 1.1, repeat: Infinity, delay: i * 0.18 }}
         />
       ))}
     </span>
@@ -68,16 +68,12 @@ export function SideQuestionCard() {
           transition={{ duration: reduce ? 0 : DUR.fast, ease: EASE.out }}
           onMouseDown={(e) => e.target === e.currentTarget && dismiss()}
         >
-          <motion.div
+          <div
             ref={cardRef}
             tabIndex={-1}
             role="dialog"
             aria-modal="true"
             aria-label="Side question"
-            initial={reduce ? false : { opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={reduce ? { opacity: 0, transition: { duration: 0 } } : { opacity: 0, y: 8 }}
-            transition={{ duration: reduce ? 0 : DUR.fast, ease: EASE.out }}
             className="popover-surface flex max-h-[70vh] w-full max-w-xl flex-col overflow-hidden rounded-[22px] bg-bg-elevated shadow-lifted ring-1 ring-border-subtle outline-none"
           >
             {/* Header: `/btw` accent + the question + a visible Close button. */}
@@ -106,7 +102,7 @@ export function SideQuestionCard() {
                 <Md>{sideQuestion.answer}</Md>
               ) : (
                 <div className="flex items-center gap-2.5 text-ink-muted">
-                  <Spinner />
+                  <Spinner reduce={reduce} />
                   <span>Answering…</span>
                 </div>
               )}
@@ -120,7 +116,7 @@ export function SideQuestionCard() {
                 Press <kbd className="font-sans font-medium text-ink-muted">Esc</kbd> to close
               </span>
             </div>
-          </motion.div>
+          </div>
         </motion.div>
       )}
     </AnimatePresence>

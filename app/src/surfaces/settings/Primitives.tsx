@@ -35,13 +35,13 @@ export function Row({
   children?: React.ReactNode;
 }) {
   return (
-    <div className="flex min-h-14 items-center gap-3 px-3.5 py-2.5">
+    <div className="flex min-h-14 flex-wrap items-center gap-x-3 gap-y-2 px-3.5 py-2.5">
       {icon && <span className="grid size-4 shrink-0 place-items-center text-ink-muted">{icon}</span>}
       <div className="min-w-0 flex-1">
-        <div className="text-sm leading-5 text-ink">{name}</div>
-        {sub && <div className="mt-0.5 text-xs leading-4 text-ink-faint">{sub}</div>}
+        <div className="text-sm leading-snug text-ink">{name}</div>
+        {sub && <div className="mt-0.5 text-xs leading-snug text-ink-faint">{sub}</div>}
       </div>
-      {children}
+      {children && <div className="ml-auto max-w-full shrink-0">{children}</div>}
     </div>
   );
 }
@@ -75,8 +75,8 @@ export function Toggle({
       >
         <span
           className={cn(
-            "absolute top-0.5 size-[14px] rounded-full bg-white shadow-sm transition-all",
-            on ? "left-[15px]" : "left-0.5",
+            "absolute left-0.5 top-0.5 size-[14px] rounded-full bg-white shadow-sm transition-transform",
+            on ? "translate-x-[13px]" : "translate-x-0",
           )}
         />
       </span>

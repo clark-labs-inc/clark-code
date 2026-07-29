@@ -7,12 +7,14 @@ import test from "node:test";
 
 import {
   createLegacyUpdaterDocument,
+  createPlatformDownloadManifest,
   validatePublicReleaseJourneyReceipt,
   validateChannelAdvance,
   createPlatformUpdaterDocuments,
   PLATFORM_RELEASES,
   validateS3HeadObject,
   validateReleaseDocuments,
+  validatePlatformDownloadManifest,
   validatePlatformReleaseAssets,
   validateLegacyUpdaterDocument,
   validatePlatformUpdaterDocument,
@@ -107,6 +109,10 @@ test("Windows release identity is live-gated through Azure Artifact Signing", ()
   assert.match(
     workflow,
     /publish_independent_platforms:[\s\S]*?desktop\/latest\/latest\.json[\s\S]*?aws s3 cp "\$release_dir\/latest\.json"/,
+  );
+  assert.match(
+    workflow,
+    /publish_independent_platforms:[\s\S]*?desktop\/latest\/manifest\.json[\s\S]*?aws s3 cp "\$release_dir\/manifest\.json"/,
   );
   assert.match(
     workflow,
@@ -300,6 +306,36 @@ test("independent platform release documents preserve exact platform boundaries"
       platforms: ["macos", "linux"],
     }),
     /unexpected set of website installers/,
+  );
+  const manifest = createPlatformDownloadManifest({
+    assets,
+    tag,
+    baseUrl,
+    sourceRevision,
+    platforms: ["macos", "linux"],
+    publishedAt: "2026-07-29T00:00:00.000Z",
+  });
+  assert.deepEqual(
+    validatePlatformDownloadManifest({
+      manifest,
+      tag,
+      baseUrl,
+      sourceRevision,
+      platforms: ["macos", "linux"],
+    }).aliases,
+    independentAliases,
+  );
+  const staleManifest = structuredClone(manifest);
+  staleManifest.version = "1.2.2";
+  assert.throws(
+    () => validatePlatformDownloadManifest({
+      manifest: staleManifest,
+      tag,
+      baseUrl,
+      sourceRevision,
+      platforms: ["macos", "linux"],
+    }),
+    /complete platform release/,
   );
 
   const updater = createPlatformUpdaterDocuments({

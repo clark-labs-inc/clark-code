@@ -41,5 +41,7 @@ describe("privacySafePanelReference", () => {
     expect(html).toContain("DESKTOP-1234ABCD");
     expect(html).not.toContain("token=secret");
     expect(html).not.toContain("provider=private");
+    expect(html).toContain("text-on-accent");
+    expect(html).not.toContain("text-white");
   });
 });

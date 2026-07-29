@@ -1,4 +1,5 @@
 import { deferredSnapshotPersistIsCurrent } from "../lib/snapshotPersistence";
+import { sidebarFixtureConversations, sidebarFixtureEnabled } from "../lib/sidebarFixture";
 import {
   type SessionState,
   type ConversationMeta,
@@ -519,6 +520,15 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
         providers,
         activeProvider: providers[0]?.id ?? null,
       });
+      // Browser QA needs a stable long list, but it must never touch real cloud
+      // history. This is development-only and requires an explicit query flag.
+      if (sidebarFixtureEnabled()) {
+        set({
+          conversations: sidebarFixtureConversations(),
+          conversationsLoading: false,
+        });
+        return;
+      }
       // Best-effort: ensure a Clark Code key exists, migrate any residual local
       // chats into the cloud (one-time), pull cloud history, and load the credit
       // balance. All no-op offline / signed out.
@@ -619,12 +629,33 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
   selectProvider: (id) => set({ activeProvider: id }),
 
   setLocalSettings: (patch) => {
-    const next = { ...get().localSettings, ...patch };
+    const current = get().localSettings;
+    const next = { ...current, ...patch };
     saveLocalSettings(next);
-    set({ localSettings: next });
+    const changedProject = patch.cwd !== undefined && patch.cwd.trim() !== current.cwd.trim();
+    set({
+      localSettings: next,
+      ...(changedProject
+        ? {
+            pendingManagedWorktreePath: null,
+            worktreeTransition: null,
+            worktreePreparing: false,
+          }
+        : {}),
+    });
   },
 
-  setProjectMode: (mode) => set({ projectMode: mode, error: null }),
+  setProjectMode: (mode) => set({
+    projectMode: mode,
+    error: null,
+    ...(mode === "remote"
+      ? {
+          pendingManagedWorktreePath: null,
+          worktreeTransition: null,
+          worktreePreparing: false,
+        }
+      : {}),
+  }),
   setSelectedHostId: (id) => set({ selectedHostId: id }),
 
   setProjectFolder: (path) => {

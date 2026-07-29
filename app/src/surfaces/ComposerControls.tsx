@@ -35,7 +35,7 @@ export function ModelPriceCue({ tier }: { tier: 0 | 1 | 2 | 3 | 4 | 5 }) {
   return (
     <span
       aria-hidden="true"
-      className="text-[8px] font-normal leading-none tracking-[-0.08em] text-ink-faint opacity-60"
+      className="text-xs font-normal leading-none tracking-[-0.08em] text-ink-faint opacity-60"
     >
       {"$".repeat(tier)}
     </span>

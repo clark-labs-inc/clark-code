@@ -4,6 +4,7 @@ import {
   FileText, ExternalLink, ArrowUpRight,
 } from "lucide-react";
 import type { Artifact } from "../../core-bridge/types";
+import { isCloudArtifactUri, isWorkspaceArtifactUri } from "../../lib/cloudArtifacts";
 import { readDocText, isLocalDocUri } from "../../lib/docs";
 import { DUR, EASE } from "../../lib/motion";
 
@@ -57,13 +58,16 @@ export function MarkdownDoc({
   }, [uri]);
 
   const preview = useMemo(() => (text ? excerpt(text) : ""), [text]);
-  const external = !!uri && !isLocalDocUri(uri);
+  const external = !!uri
+    && !isLocalDocUri(uri)
+    && !isCloudArtifactUri(uri)
+    && !isWorkspaceArtifactUri(uri);
 
   return (
     <motion.div
       initial={reduce ? false : { opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: DUR.base, ease: EASE.out }}
+      transition={{ duration: reduce ? 0 : DUR.base, ease: EASE.out }}
       className={`overflow-hidden rounded-lg border bg-bg-elevated ${
         active ? "border-accent shadow-[inset_3px_0_0_var(--color-accent)]" : "border-border"
       }`}

@@ -463,3 +463,113 @@ export interface MemoryOverview {
   /** Per-fact memory files (newest first). */
   facts: MemoryFactView[];
 }
+
+export type SecurityScanMode = "standard" | "diff" | "deep";
+export type SecuritySeverity = "low" | "medium" | "high" | "critical";
+export type SecurityConfidence = "low" | "medium" | "high";
+
+export interface SecurityScanRecord {
+  path: string;
+  modifiedAtMs?: number | null;
+  pocReceipts: Array<{
+    contractVersion: number;
+    receiptId: string;
+    scanId: string;
+    candidateId: string;
+    inventoryId: string;
+    control: "positive" | "negative";
+    language: string;
+    scriptSha256: string;
+    expectedObservationSha256: string;
+    workspaceSha256: string;
+    stdoutSha256: string;
+    stderrSha256: string;
+    expectedExitCode: number;
+    exitCode?: number | null;
+    passed: boolean;
+    containment: string;
+    artifactPath: string;
+    execution?: {
+      expectedObservation: string;
+      startedAtMs: number;
+      completedAtMs: number;
+      timeoutMs: number;
+      outputLimitBytes: number;
+      sandboxProvider: string;
+      sandboxProfileSha256: string;
+      scriptPath: string;
+      stdoutPath: string;
+      stderrPath: string;
+    } | null;
+  }>;
+  bundle: {
+    scanId: string;
+    mode: SecurityScanMode;
+    model: string;
+    scope: string;
+    inventoryId: string;
+    phase: string;
+    coverage: Array<{ path: string; status: "reviewed" | "excluded"; reason?: string | null }>;
+    supportingCoverage: Array<{
+      path: string;
+      status: "reviewed" | "excluded";
+      reason?: string | null;
+    }>;
+    candidates: Array<{
+      candidateId: string;
+      ruleId: string;
+      identityAnchor: string;
+      identityInstance?: string | null;
+      title: string;
+      summary: string;
+      category: string;
+      cwe: string[];
+      severity: SecuritySeverity;
+      confidence: SecurityConfidence;
+      impact: string;
+      source: { path: string; line?: number | null; description: string };
+      control: { path: string; line?: number | null; description: string };
+      sink: { path: string; line?: number | null; description: string };
+      remediation: string;
+      validation: {
+        disposition: "reportable" | "suppressed" | "not_applicable" | "deferred";
+        evidence: string;
+        counterevidence: string[];
+      };
+      poc: {
+        goal: string;
+        outcome:
+          | "reproduced"
+          | "partially_reproduced"
+          | "not_reproduced"
+          | "blocked"
+          | "unsafe_to_execute";
+        positiveReceiptId?: string | null;
+        negativeReceiptId?: string | null;
+        limitations: string[];
+      };
+      attackPath?: {
+        attacker: string;
+        entrypoint: string;
+        preconditions: string[];
+        path: string[];
+        likelihood: string;
+      } | null;
+    }>;
+  };
+  seal?: {
+    scanId: string;
+    bundleDigest: string;
+    reviewedFiles: number;
+    excludedFiles: number;
+    supportingFiles: number;
+    deepPasses?: number | null;
+    findings: Array<{
+      findingId: string;
+      candidateId: string;
+      severity: SecuritySeverity;
+      sourcePath: string;
+      impact: string;
+    }>;
+  } | null;
+}

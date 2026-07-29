@@ -226,8 +226,8 @@ async function validateContracts() {
   if (missingTools.length) errors.push(`declared model tools without a feature: ${missingTools.join(", ")}`);
   if (unknownTools.length) errors.push(`feature tools absent from model_tools: ${unknownTools.join(", ")}`);
 
-  if (manifest.live_model.id !== "clark-code:free") {
-    errors.push(`default live model must be clark-code:free, got ${manifest.live_model.id}`);
+  if (manifest.live_model.id !== "qwen/qwen3.7-flash") {
+    errors.push(`default live model must be qwen/qwen3.7-flash, got ${manifest.live_model.id}`);
   }
   if (manifest.live_model.default_paid !== true) {
     errors.push("live_model.default_paid must be true");
@@ -265,9 +265,12 @@ async function validateContracts() {
     const declared = spec.groups.flatMap((group) => group.items);
     const actual = await extractInventoryItems(spec);
     inventoryCounts[inventoryId] = actual.length;
-    if (inventoryId === "coding_models" && !actual.includes(manifest.live_model.id)) {
+    if (
+      inventoryId === "coding_models"
+      && !actual.includes(manifest.live_model.product_alias)
+    ) {
       errors.push(
-        `coding_models: default live model is absent from the product picker: ${manifest.live_model.id}`,
+        `coding_models: paid model product alias is absent from the picker: ${manifest.live_model.product_alias}`,
       );
     }
     const repeated = duplicates(declared);

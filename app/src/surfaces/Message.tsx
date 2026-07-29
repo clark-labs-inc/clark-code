@@ -194,14 +194,19 @@ function splitStable(text: string): [string, string] {
 }
 
 /** Render markdown while it streams in: the completed-block prefix is memoized
- *  (parsed once), only the trailing in-progress block re-parses each frame. This
- *  turns an O(n²) per-token re-parse of a long answer into ~O(n). */
-function StreamingMd({ text }: { text: string }) {
+ *  (parsed once), while the in-progress tail stays as pre-wrapped text until a
+ *  block boundary arrives. That avoids reparsing a growing paragraph on every
+ *  reveal frame, which otherwise dominates typing smoothness on long replies. */
+function StreamingMd({ text, streaming }: { text: string; streaming: boolean }) {
   const [prefix, tail] = splitStable(text);
   return (
     <>
       {prefix && <StableMd>{prefix}</StableMd>}
-      <Md>{tail}</Md>
+      {streaming ? (
+        <div className="whitespace-pre-wrap">{tail}</div>
+      ) : (
+        <Md>{tail}</Md>
+      )}
     </>
   );
 }
@@ -227,7 +232,7 @@ function ThinkingBlock({ text }: { text: string }) {
             initial={reduce ? false : { height: 0, opacity: 0 }}
             animate={{ height: "auto", opacity: 1 }}
             exit={reduce ? { opacity: 0, transition: { duration: 0 } } : { height: 0, opacity: 0 }}
-            transition={{ duration: DUR.base, ease: EASE.inOut }}
+            transition={{ duration: reduce ? 0 : DUR.base, ease: EASE.inOut }}
             className="overflow-hidden"
           >
             <div className={cn("mt-1 max-h-52 overflow-auto border-l border-border-subtle pl-3 text-xs leading-relaxed text-ink-muted", MD_CLASSES)}>
@@ -348,11 +353,9 @@ function MessageImpl({
       );
     }
     // Assistant: full-width text (no avatar), split into answer / narration /
-    // thinking spans. Always render through `StreamingMd` — the SAME component
-    // type whether streaming or settled — so when `streaming` flips off the
-    // markdown subtree is NOT unmounted and rebuilt (which flashed a re-parse).
-    // `StreamingMd` renders identical DOM to a bare `<Md>` once the text is
-    // whole, so the last streamed frame and the settled frame are the same.
+    // thinking spans. Completed markdown blocks stay mounted while the active
+    // tail is plain pre-wrapped text; one final parse upgrades that tail when
+    // the stream settles instead of reparsing it on every visible character.
     const spans = parseNarration(streaming ? smoothed : body);
     return (
       <div className="min-w-0 space-y-1.5">
@@ -369,7 +372,7 @@ function MessageImpl({
                 kind === "narrate" && "text-ink-secondary",
               )}
             >
-              <StreamingMd text={span.text} />
+              <StreamingMd text={span.text} streaming={streaming} />
               {streaming && lastSpan && (
                 <span
                   aria-hidden
@@ -392,7 +395,7 @@ function MessageImpl({
     <motion.div
       initial={reduce ? false : { opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: DUR.base, ease: EASE.out }}
+      transition={{ duration: reduce ? 0 : DUR.base, ease: EASE.out }}
     >
       {role === "agent" ? (
         <div className="group/msg relative">

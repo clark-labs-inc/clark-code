@@ -2,7 +2,6 @@ import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from "react";
 import { useSessionStore } from "./store/sessionStore";
 import { useFanOutStore } from "./store/fanOutStore";
-import { useTheme } from "./lib/useTheme";
 import { useHotkeys } from "./lib/hotkeys";
 import type { TextSize } from "./lib/useTextSize";
 import { TopBar } from "./surfaces/TopBar";
@@ -16,6 +15,7 @@ import { ActivityRewardToast } from "./surfaces/ActivityRewardToast";
 import { OfflineBanner } from "./surfaces/OfflineBanner";
 import { CommandPalette } from "./surfaces/CommandPalette";
 import { MobileRemoteAgent } from "./surfaces/MobileRemoteAgent";
+import { ManagedWorktreeTransitionDialog } from "./surfaces/ManagedWorktreeJourney";
 import { PanelErrorBoundary } from "./components/PanelErrorBoundary";
 import type { Artifact } from "./core-bridge/types";
 import {
@@ -52,9 +52,17 @@ const Settings = lazy(() =>
 export default function AuthenticatedWorkspace({
   textSize,
   onTextSizeChange,
+  dark,
+  onToggleTheme,
+  colorblind,
+  onToggleColorblind,
 }: {
   textSize: TextSize;
   onTextSizeChange: (size: TextSize) => void;
+  dark: boolean;
+  onToggleTheme: () => void;
+  colorblind: boolean;
+  onToggleColorblind: () => void;
 }) {
   const session = useSessionStore((state) => state.session);
   const openingScreen = useSessionStore((state) => state.opening !== null);
@@ -85,7 +93,6 @@ export default function AuthenticatedWorkspace({
   const artifactResizeCleanupRef = useRef<(() => void) | null>(null);
   const terminalTouched = useRef(false);
   if (terminalOpen) terminalTouched.current = true;
-  const { dark, toggle, colorblind, toggleColorblind } = useTheme();
   const sidePanelOpen = subagentsOpen || activeArtifactId !== null;
   const sidePanelWidth = subagentsOpen ? subagentsPanelWidth : artifactPanelWidth;
 
@@ -198,7 +205,8 @@ export default function AuthenticatedWorkspace({
     setActiveArtifactId(null);
     requestAnimationFrame(() => {
       const target = document.getElementById(targetId);
-      target?.scrollIntoView({ behavior: "smooth", block: "center" });
+      const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+      target?.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "center" });
       target?.focus({ preventScroll: true });
     });
   };
@@ -225,7 +233,7 @@ export default function AuthenticatedWorkspace({
       <ActivityRewardToast />
       <Sidebar artifactCount={artifactCount} onOpenArtifacts={openArtifacts} />
       <div className="flex min-w-0 flex-1 flex-col">
-        <TopBar dark={dark} onToggleTheme={toggle} />
+        <TopBar dark={dark} onToggleTheme={onToggleTheme} />
         <OfflineBanner />
         <CreditBanner />
         {/* The opening screen takes priority over a still-mounted previous
@@ -372,16 +380,17 @@ export default function AuthenticatedWorkspace({
           <Suspense fallback={null}>
             <Settings
               dark={dark}
-              onToggleTheme={toggle}
+              onToggleTheme={onToggleTheme}
               colorblind={colorblind}
-              onToggleColorblind={toggleColorblind}
+              onToggleColorblind={onToggleColorblind}
               textSize={textSize}
               onTextSizeChange={onTextSizeChange}
             />
           </Suspense>
         </PanelErrorBoundary>
       )}
-      <CommandPalette dark={dark} onToggleTheme={toggle} />
+      <ManagedWorktreeTransitionDialog />
+      <CommandPalette dark={dark} onToggleTheme={onToggleTheme} />
     </div>
   );
 }

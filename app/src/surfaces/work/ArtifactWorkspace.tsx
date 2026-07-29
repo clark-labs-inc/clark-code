@@ -349,7 +349,7 @@ function ContextPopover({
               {availability === "unavailable" ? "Unavailable" : "Ready"}
             </dd>
           </div>
-          {location && <div className="max-h-24 overflow-auto break-all border-t border-border-subtle pt-3 font-mono text-[11px] leading-relaxed text-ink-faint">{location}</div>}
+          {location && <div className="max-h-24 overflow-auto break-all border-t border-border-subtle pt-3 font-mono text-xs leading-relaxed text-ink-faint">{location}</div>}
         </dl>
       )}
       {panel === "versions" && (
@@ -626,7 +626,7 @@ export function ArtifactWorkspace({
                   >
                     <Icon className="size-3.5 shrink-0 text-ink-faint" />
                     <span className="min-w-0 flex-1 truncate">{artifact.title}</span>
-                    <span className="text-[11px] text-ink-faint">{KIND_LABEL[artifact.kind]}</span>
+                    <span className="text-xs text-ink-faint">{KIND_LABEL[artifact.kind]}</span>
                   </button>
                 );
               })}
@@ -716,7 +716,7 @@ export function ArtifactWorkspace({
         >
           <ArtifactPreview artifact={active} text={text} loading={loadingText} presenting={presenting} />
         </div>
-        <nav aria-label="Artifact context" className={cn("flex w-14 shrink-0 flex-col items-center gap-1 border-l border-border-subtle bg-bg-primary py-2", presenting && "hidden")}>
+        <nav aria-label="Artifact context" className={cn("flex min-w-14 shrink-0 flex-col items-center gap-1 border-l border-border-subtle bg-bg-primary py-2", presenting && "hidden")}>
           {([
             ["details", Info, "Details"],
             ["versions", Clock3, "Versions"],
@@ -729,7 +729,7 @@ export function ArtifactWorkspace({
               onClick={() => setContextPanel((current) => current === value ? null : value)}
               aria-pressed={contextPanel === value}
               className={cn(
-                "flex w-12 flex-col items-center gap-1 rounded-lg py-2 text-[10px] leading-none transition",
+                "flex min-h-10 min-w-12 flex-col items-center gap-1 rounded-lg px-1 py-2 text-xs leading-none transition",
                 contextPanel === value ? "bg-accent-soft text-accent" : "text-ink-faint hover:bg-bg-hover hover:text-ink-secondary",
               )}
             >

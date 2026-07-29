@@ -1,0 +1,217 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { useSessionStore } from "./sessionStore";
+import type {
+  CoreBridge,
+  ProjectWorktreeTransitionPlan,
+  SessionOptions,
+} from "../core-bridge/bridge";
+import { emptySnapshot, type Session } from "../core-bridge/types";
+
+const sourceRoot = "/tmp/project";
+const managedRoot = "/tmp/project.clark-worktrees/session-1";
+const session = { id: "managed-chat", provider: "local" } as unknown as Session;
+
+const baseSettings = {
+  cwd: sourceRoot,
+  model: "clark-code",
+  reasoningEffort: "",
+  apiKey: "",
+};
+
+function plan(overrides: Partial<ProjectWorktreeTransitionPlan> = {}): ProjectWorktreeTransitionPlan {
+  return {
+    sourceRoot,
+    sourceBranch: "main",
+    sourceRevision: "0123456789abcdef0123456789abcdef01234567",
+    sourceChanges: { changedFiles: 0, untrackedFiles: 0, conflictedFiles: 0 },
+    sourceIsManaged: false,
+    targetBranch: null,
+    targetCheckoutPath: null,
+    action: "create_isolated",
+    preservation: "clean",
+    requiresConfirmation: false,
+    baseOptions: [
+      {
+        id: "current",
+        label: "Current checkout (main)",
+        reference: "main",
+        revision: "0123456789abcdef0123456789abcdef01234567",
+        fallback: false,
+      },
+      {
+        id: "default",
+        label: "Default branch (origin/main)",
+        reference: "origin/main",
+        revision: "0123456789abcdef0123456789abcdef01234567",
+        fallback: false,
+      },
+    ],
+    managedLocation: "/tmp/project.clark-worktrees",
+    ...overrides,
+  };
+}
+
+function bridgeFor(nextPlan: ProjectWorktreeTransitionPlan): CoreBridge {
+  return {
+    listProviders: async () => [{
+      id: "local",
+      label: "Local",
+      capabilities: {
+        streaming: true,
+        permissions: true,
+        fs: true,
+        terminal: true,
+        load_session: false,
+        modes: [],
+      },
+    }],
+    connect: vi.fn(async () => {}),
+    newSession: vi.fn(async (_providerId: string, _options: SessionOptions) => session),
+    loadSession: async () => session,
+    prompt: async () => ({ runId: "run" }),
+    cancel: vi.fn(async () => {}),
+    respond: vi.fn(async () => {}),
+    subscribe: () => () => {},
+    projectContext: vi.fn(async () => ({
+      branch: "main",
+      detached: false,
+      isWorktree: false,
+      worktreeRoot: sourceRoot,
+      activity: {
+        changedFiles: 0,
+        untrackedFiles: 0,
+        conflictedFiles: 0,
+        externalAgents: [],
+        detectedAtMs: 1,
+      },
+    })),
+    planProjectWorktree: vi.fn(async () => nextPlan),
+    createManagedWorktree: vi.fn(async (_root, request) => ({
+      id: "session-1",
+      label: "session",
+      path: managedRoot,
+      sourceRoot,
+      base: request.base,
+      baseReference: request.targetBranch || "main",
+      baseRevision: "0123456789abcdef0123456789abcdef01234567",
+      createdAtMs: 1,
+      state: "ready",
+      changes: { changedFiles: 0, untrackedFiles: 0, conflictedFiles: 0 },
+    })),
+  } as unknown as CoreBridge;
+}
+
+beforeEach(() => {
+  useSessionStore.getState().endSession({ force: true });
+  useSessionStore.setState({
+    bridge: null,
+    session: null,
+    snapshot: emptySnapshot(),
+    activeProvider: "local",
+    providers: [],
+    auth: null,
+    connecting: false,
+    opening: null,
+    conversations: [],
+    localSettings: { ...baseSettings },
+    projectMode: "local",
+    activeRemote: null,
+    activeRemoteHost: null,
+    activeProjectRoot: null,
+    managedWorktreeBase: "current",
+    worktreeTransition: null,
+    pendingManagedWorktreePath: null,
+    worktreePreparing: false,
+  });
+});
+
+describe("managed worktree session journeys", () => {
+  it("starts a clean Git project in a detached managed checkout by default", async () => {
+    const bridge = bridgeFor(plan());
+    useSessionStore.setState({ bridge, providers: await bridge.listProviders() });
+
+    await useSessionStore.getState().startSession();
+
+    expect(vi.mocked(bridge.createManagedWorktree)).toHaveBeenCalledWith(sourceRoot, {
+      base: "current",
+    });
+    expect(vi.mocked(bridge.newSession).mock.calls[0]?.[1]).toMatchObject({
+      cwd: managedRoot,
+    });
+    expect(useSessionStore.getState().localSettings.cwd).toBe(sourceRoot);
+    expect(useSessionStore.getState().activeProjectRoot).toBe(managedRoot);
+    expect(useSessionStore.getState().conversations[0]?.project).toBe(managedRoot);
+  });
+
+  it("requires an explicit dirty-source preservation choice before creating anything", async () => {
+    const bridge = bridgeFor(plan({
+      sourceChanges: { changedFiles: 2, untrackedFiles: 1, conflictedFiles: 0 },
+      preservation: "changes_remain_in_source",
+      requiresConfirmation: true,
+    }));
+    useSessionStore.setState({ bridge, providers: await bridge.listProviders() });
+
+    await useSessionStore.getState().startSession();
+
+    expect(useSessionStore.getState().worktreeTransition?.requiresConfirmation).toBe(true);
+    expect(vi.mocked(bridge.createManagedWorktree)).not.toHaveBeenCalled();
+    expect(vi.mocked(bridge.newSession)).not.toHaveBeenCalled();
+
+    useSessionStore.getState().setManagedWorktreeBase("default");
+    await useSessionStore.getState().confirmManagedWorktreeStart();
+
+    expect(vi.mocked(bridge.createManagedWorktree)).toHaveBeenCalledWith(sourceRoot, {
+      base: "default",
+      targetBranch: null,
+    });
+    expect(vi.mocked(bridge.newSession).mock.calls[0]?.[1]).toMatchObject({
+      cwd: managedRoot,
+    });
+  });
+
+  it("reuses a selected managed checkout instead of nesting another one", async () => {
+    const bridge = bridgeFor(plan({
+      sourceRoot: managedRoot,
+      sourceIsManaged: true,
+      sourceChanges: { changedFiles: 1, untrackedFiles: 0, conflictedFiles: 0 },
+      preservation: "changes_remain_in_source",
+      requiresConfirmation: true,
+    }));
+    useSessionStore.setState({
+      bridge,
+      providers: await bridge.listProviders(),
+      localSettings: { ...baseSettings, cwd: managedRoot },
+    });
+
+    await useSessionStore.getState().startSession();
+
+    expect(vi.mocked(bridge.createManagedWorktree)).not.toHaveBeenCalled();
+    expect(vi.mocked(bridge.newSession).mock.calls[0]?.[1]).toMatchObject({
+      cwd: managedRoot,
+    });
+    expect(useSessionStore.getState().worktreeTransition).toBeNull();
+  });
+
+  it("preserves a dirty source while starting a requested-branch continuation", async () => {
+    const bridge = bridgeFor(plan({
+      action: "preserve_changes",
+      preservation: "changes_remain_in_source",
+      requiresConfirmation: true,
+      targetBranch: "feature/target",
+    }));
+    useSessionStore.setState({
+      bridge,
+      providers: await bridge.listProviders(),
+      worktreeTransition: await bridge.planProjectWorktree!(sourceRoot, "feature/target"),
+    });
+
+    await useSessionStore.getState().confirmManagedWorktreeStart();
+
+    expect(vi.mocked(bridge.createManagedWorktree)).toHaveBeenCalledWith(sourceRoot, {
+      base: "current",
+      targetBranch: "feature/target",
+    });
+    expect(useSessionStore.getState().localSettings.cwd).toBe(sourceRoot);
+    expect(useSessionStore.getState().activeProjectRoot).toBe(managedRoot);
+  });
+});

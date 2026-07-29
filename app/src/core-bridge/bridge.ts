@@ -13,6 +13,7 @@ import type {
   ContentBlock,
   ResumeTranscript,
   MemoryOverview,
+  SecurityScanRecord,
   CollaborationMode,
 } from "./types";
 import type { Upload } from "../lib/attachments";
@@ -65,6 +66,80 @@ export interface ProjectBranch {
   name: string;
   /** Absolute checkout root when this branch is already attached to a worktree. */
   checkoutPath?: string | null;
+}
+
+export type ManagedWorktreeBase = "current" | "default";
+export type WorktreeTransitionAction =
+  | "create_isolated"
+  | "open_owner"
+  | "switch_clean"
+  | "preserve_changes";
+export type WorktreePreservation = "clean" | "changes_remain_in_source" | "owner_checkout";
+export type ManagedWorktreeState = "ready" | "dirty" | "committed" | "saved" | "missing";
+
+export interface WorktreeChangeSummary {
+  changedFiles: number;
+  untrackedFiles: number;
+  conflictedFiles: number;
+}
+
+export interface ManagedWorktreeBaseOption {
+  id: ManagedWorktreeBase;
+  label: string;
+  reference: string;
+  revision: string;
+  fallback: boolean;
+}
+
+/** Native, non-mutating decision record for a branch or isolation journey. */
+export interface ProjectWorktreeTransitionPlan {
+  sourceRoot: string;
+  sourceBranch?: string | null;
+  sourceRevision: string;
+  sourceChanges: WorktreeChangeSummary;
+  sourceIsManaged: boolean;
+  targetBranch?: string | null;
+  targetCheckoutPath?: string | null;
+  action: WorktreeTransitionAction;
+  preservation: WorktreePreservation;
+  requiresConfirmation: boolean;
+  baseOptions: ManagedWorktreeBaseOption[];
+  managedLocation: string;
+}
+
+export interface ManagedWorktreeRequest {
+  base: ManagedWorktreeBase;
+  label?: string | null;
+  targetBranch?: string | null;
+}
+
+export interface ManagedWorktree {
+  id: string;
+  label: string;
+  path: string;
+  sourceRoot: string;
+  base: ManagedWorktreeBase;
+  baseReference: string;
+  baseRevision: string;
+  headRevision?: string | null;
+  /** Local branch Clark created to protect detached commits before archival. */
+  preservedBranch?: string | null;
+  createdAtMs: number;
+  state: ManagedWorktreeState;
+  changes: WorktreeChangeSummary;
+}
+
+export interface ManagedWorktreeCleanupReceipt {
+  id: string;
+  path: string;
+  removed: boolean;
+}
+
+export interface ManagedWorktreeBranchReceipt {
+  id: string;
+  path: string;
+  branch: string;
+  headRevision: string;
 }
 
 export interface ProjectActivity {
@@ -311,6 +386,11 @@ export interface CoreBridge {
   listGlobalMemory?(): Promise<MemoryOverview>;
   /** Project-relative file paths under `cwd`, for the `@`-mention picker. */
   listFiles?(cwd: string, remote?: RemoteExecutorTarget | null): Promise<string[]>;
+  /** Canonical Clark Security bundles and seals under the selected checkout. */
+  listSecurityScans?(
+    cwd: string,
+    remote?: RemoteExecutorTarget | null,
+  ): Promise<SecurityScanRecord[]>;
   /** Current canonical skill catalog for this local or remote environment. */
   listSkills?(
     cwd: string,
@@ -360,6 +440,28 @@ export interface CoreBridge {
   switchProjectBranch?(projectPath: string, branch: string): Promise<void>;
   /** Create a named sibling worktree from the latest advertised origin/main. */
   createPermanentWorktree?(projectPath: string, name: string): Promise<string>;
+  /** Plan a branch/worktree move without touching Git state. */
+  planProjectWorktree?(
+    projectPath: string,
+    targetBranch?: string | null,
+  ): Promise<ProjectWorktreeTransitionPlan>;
+  /** Create a branch-backed Clark-managed worktree from the selected base. */
+  createManagedWorktree?(
+    projectPath: string,
+    request: ManagedWorktreeRequest,
+  ): Promise<ManagedWorktree>;
+  /** List only Clark-managed worktrees for a repository. */
+  listManagedWorktrees?(projectPath: string): Promise<ManagedWorktree[]>;
+  /** Explicitly remove one clean Clark-managed worktree. */
+  cleanupManagedWorktree?(
+    projectPath: string,
+    id: string,
+  ): Promise<ManagedWorktreeCleanupReceipt>;
+  /** Save a detached managed checkout's commits under a durable local branch. */
+  saveManagedWorktreeBranch?(
+    projectPath: string,
+    id: string,
+  ): Promise<ManagedWorktreeBranchReceipt>;
   /** Inspect the platform sandbox without prompting or changing privilege. */
   localSandboxStatus?(cwd: string): Promise<LocalSandboxStatus>;
   /** Run the explicit, product-owned setup flow (UAC on Windows). */

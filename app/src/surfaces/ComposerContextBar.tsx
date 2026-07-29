@@ -6,6 +6,7 @@ import { loadProjectContext } from "../lib/projectContext";
 import { useSessionStore } from "../store/sessionStore";
 import { BranchPicker } from "./BranchPicker";
 import { EnvironmentPicker } from "./EnvironmentPicker";
+import { ManagedWorktreeBasePicker } from "./ManagedWorktreeJourney";
 import { ParallelWorkContext } from "./ParallelWorkContext";
 
 const ITEM =
@@ -143,8 +144,12 @@ export function ComposerContextBar() {
             cwd={checkoutRoot}
             context={context}
             disabledReason={branchSwitchDisabledReason}
+            allowPreserveChanges={workingFiles > 0 && otherAgentCount === 0}
             onSwitched={() => setRefreshTick((tick) => tick + 1)}
             onOpenCheckout={(path) => setProjectFolder(path)}
+            onTransitionPlan={(plan) => {
+              useSessionStore.setState({ worktreeTransition: plan, error: null });
+            }}
           />
         ) : context ? (
           <span
@@ -163,6 +168,7 @@ export function ComposerContextBar() {
             </span>
           </span>
         ) : null}
+        {context && canSwitchBranch && <ManagedWorktreeBasePicker />}
         {context && (
           <ParallelWorkContext
             activity={context.activity}

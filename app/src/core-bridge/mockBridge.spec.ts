@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { MockBridge } from "./mockBridge";
+import {
+  MockBridge,
+  MANAGED_WORKTREE_SIMULATION_STORAGE_KEY,
+  SECURITY_SIMULATION_STORAGE_KEY,
+  securitySimulationRecords,
+} from "./mockBridge";
 import type { Snapshot } from "./types";
 
 function waitFor(predicate: (s: Snapshot) => boolean, bridge: MockBridge, ms = 4000) {
@@ -25,6 +30,21 @@ function waitFor(predicate: (s: Snapshot) => boolean, bridge: MockBridge, ms = 4
 }
 
 describe("MockBridge", () => {
+  it("simulates populated, empty, and failed Security history journeys", async () => {
+    const bridge = new MockBridge();
+    localStorage.setItem(SECURITY_SIMULATION_STORAGE_KEY, "populated");
+    expect(await bridge.listSecurityScans()).toEqual(securitySimulationRecords());
+
+    localStorage.setItem(SECURITY_SIMULATION_STORAGE_KEY, "empty");
+    expect(await bridge.listSecurityScans()).toEqual([]);
+
+    localStorage.setItem(SECURITY_SIMULATION_STORAGE_KEY, "error");
+    await expect(bridge.listSecurityScans()).rejects.toThrow(
+      "Simulated unreadable Security artifact",
+    );
+    localStorage.removeItem(SECURITY_SIMULATION_STORAGE_KEY);
+  });
+
   it("exposes the local coding provider", async () => {
     const b = new MockBridge();
     const providers = await b.listProviders();
@@ -64,6 +84,55 @@ describe("MockBridge", () => {
     await expect(
       bridge.switchProjectBranch("/tmp/clark-desktop", "missing"),
     ).rejects.toThrow("Local branch missing no longer exists.");
+  });
+
+  it("models a managed worktree lifecycle without nesting it in preview", async () => {
+    const bridge = new MockBridge();
+    const source = "/tmp/clark-desktop";
+    const created = await bridge.createManagedWorktree(source, {
+      base: "default",
+      label: "review",
+    });
+
+    expect(await bridge.projectContext(created.path)).toMatchObject({
+      detached: false,
+      isWorktree: true,
+      worktreeRoot: created.path,
+    });
+    await expect(bridge.createManagedWorktree(created.path, { base: "current" })).rejects.toThrow(
+      "already a Clark-managed isolated worktree",
+    );
+    expect((await bridge.planProjectWorktree(created.path)).sourceIsManaged).toBe(true);
+    expect(await bridge.listManagedWorktrees(created.path)).toEqual([created]);
+
+    await expect(bridge.cleanupManagedWorktree(created.path, created.id)).resolves.toEqual({
+      id: created.id,
+      path: created.path,
+      removed: true,
+    });
+    expect(await bridge.listManagedWorktrees(source)).toEqual([]);
+  });
+
+  it("simulates the save-commits-before-archive worktree journey", async () => {
+    localStorage.setItem(MANAGED_WORKTREE_SIMULATION_STORAGE_KEY, "committed");
+    const bridge = new MockBridge();
+    const source = "/tmp/clark-desktop";
+    const created = await bridge.createManagedWorktree(source, { base: "default", label: "review" });
+
+    expect(created).toMatchObject({ state: "committed", preservedBranch: `clark/${created.id}` });
+    await expect(bridge.cleanupManagedWorktree(source, created.id)).rejects.toThrow(
+      "not protected by a branch",
+    );
+
+    const saved = await bridge.saveManagedWorktreeBranch(source, created.id);
+    expect(saved.branch).toBe(`clark/${created.id}-saved`);
+    expect(await bridge.listManagedWorktrees(source)).toMatchObject([
+      { id: created.id, state: "saved", preservedBranch: saved.branch },
+    ]);
+    await expect(bridge.cleanupManagedWorktree(source, created.id)).resolves.toMatchObject({
+      removed: true,
+    });
+    localStorage.removeItem(MANAGED_WORKTREE_SIMULATION_STORAGE_KEY);
   });
 
   it("produces a streaming run with user + agent messages, a tool call and a plan", async () => {

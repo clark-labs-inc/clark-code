@@ -347,6 +347,78 @@ async fn bundled_scout_skill_requires_the_typed_evidence_toolchain() {
     assert!(body.contains("The simulation model must name business actors"));
 }
 
+#[tokio::test]
+async fn bundled_security_skill_requires_its_contract_tool_and_explicit_selection() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut catalog = discover_catalog_with_home(&LocalExecutor, temp.path(), None).await;
+    let common = HashSet::from([
+        "read_file".to_string(),
+        "grep".to_string(),
+        "glob".to_string(),
+        "bash".to_string(),
+    ]);
+    catalog.resolve_capabilities(&common, &[]);
+    assert!(catalog.resolve_name("security-scan").is_err());
+
+    let mut tools = common;
+    tools.insert("security_scan_contract".to_string());
+    tools.insert("security_poc_execute".to_string());
+    catalog.resolve_capabilities(&tools, &[]);
+    let security = catalog.resolve_name("security-scan").unwrap();
+    let security_diff = catalog.resolve_name("security-diff").unwrap();
+    assert_eq!(security.name, "security:security-scan");
+    assert_eq!(security_diff.name, "security:security-diff");
+    assert!(!security.allow_implicit_invocation);
+    assert!(!security_diff.allow_implicit_invocation);
+    assert!(invokes_skill(
+        &catalog,
+        &[ContentBlock::text("$security:security-scan scan this repo")],
+        "$security:security-scan scan this repo",
+        "security:security-scan",
+    ));
+    let body = catalog.read(&LocalExecutor, security).await.unwrap();
+    assert!(body.contains("Never claim a clean or completed scan"));
+    assert!(body.contains("source → nearest control → sink or broken control → impact"));
+    assert!(body.contains("exact `z-ai/glm-5.2` production model"));
+    assert!(body.contains("positive control"));
+    assert!(body.contains("host-issued receipt ids"));
+    let diff_body = catalog.read(&LocalExecutor, security_diff).await.unwrap();
+    assert!(diff_body.contains("staged, unstaged, untracked, renamed, and deleted"));
+    assert!(diff_body.contains("Every candidate must touch at least one changed"));
+    assert!(diff_body.contains("exact `z-ai/glm-5.2` production model"));
+
+    tools.insert("delegate_read_only".to_string());
+    tools.insert("resolve_delegation".to_string());
+    catalog.resolve_capabilities(&tools, &[]);
+    let security_deep = catalog.resolve_name("security-deep").unwrap();
+    assert_eq!(security_deep.name, "security:security-deep");
+    assert!(!security_deep.allow_implicit_invocation);
+    let deep_body = catalog.read(&LocalExecutor, security_deep).await.unwrap();
+    assert!(deep_body.contains("explicitly authorizes bounded read-only delegation"));
+    assert!(deep_body.contains("two consecutive passes that add no new candidate ids"));
+    assert!(deep_body.contains("exact `z-ai/glm-5.2` production model"));
+}
+
+#[test]
+fn bundled_security_diff_openai_metadata_matches_runtime_dependency() {
+    let metadata: serde_yaml::Value = serde_yaml::from_str(include_str!(
+        "../../skills/security/security-diff/agents/openai.yaml"
+    ))
+    .unwrap();
+    let tools = metadata["dependencies"]["tools"]
+        .as_sequence()
+        .unwrap()
+        .iter()
+        .map(|tool| tool["value"].as_str().unwrap())
+        .collect::<HashSet<_>>();
+    assert!(tools.contains("security_scan_contract"));
+    assert!(tools.contains("security_poc_execute"));
+    assert_eq!(
+        metadata["policy"]["allow_implicit_invocation"].as_bool(),
+        Some(false)
+    );
+}
+
 #[test]
 fn bundled_scout_openai_metadata_matches_runtime_dependencies() {
     let metadata: serde_yaml::Value =

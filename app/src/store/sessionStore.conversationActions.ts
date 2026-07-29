@@ -6,21 +6,17 @@ import {
   type SessionGet,
   type SessionOptions,
   type SessionSet,
-  BUSY_SESSION_MESSAGE,
   addRecentProject,
   bindCloudTrajectory,
   buildResumeTranscript,
   closeLiveSession,
   cloudCreds,
-  cloudDelete,
-  cloudSetArchived,
   conversationProjectRoot,
   effectiveModelSettings,
   emptySnapshot,
   epochStale,
   fetchSnapshot,
   hostReady,
-  isBusy,
   liveProjectRoot,
   liveSessions,
   loadSshHosts,
@@ -31,19 +27,22 @@ import {
   nextSessionEpoch,
   openRemote,
   pinChatModel,
-  releaseSnapshotCheckpoints,
   remoteTarget,
   resetFanOut,
   scheduleCloudPut,
-  snapshotCache,
   sshDisconnect,
   syncFanOut,
 } from "./sessionStore.runtime";
+import { saveManagedWorktreeBase } from "../lib/managedWorktreeSettings";
+import { createSidebarConversationActions } from "./sessionStore.sidebarConversationActions";
 
 type ConversationActions = Pick<
   SessionState,
   | "startBlockedReason"
   | "startSession"
+  | "setManagedWorktreeBase"
+  | "confirmManagedWorktreeStart"
+  | "dismissManagedWorktreeStart"
   | "endSession"
   | "openConversation"
   | "archiveConversation"
@@ -71,6 +70,51 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
     return localSettingsReady(localSettings);
   },
 
+  setManagedWorktreeBase: (base) => {
+    saveManagedWorktreeBase(base);
+    set({ managedWorktreeBase: base });
+  },
+
+  confirmManagedWorktreeStart: async () => {
+    const { bridge, worktreeTransition, managedWorktreeBase } = get();
+    if (!bridge?.createManagedWorktree || !worktreeTransition) return;
+    if (
+      worktreeTransition.action !== "create_isolated"
+      && worktreeTransition.action !== "preserve_changes"
+    ) {
+      set({
+        error: "This branch transition needs a different checkout choice before starting a session.",
+      });
+      return;
+    }
+    const targetBranch = worktreeTransition.action === "preserve_changes"
+      ? worktreeTransition.targetBranch ?? null
+      : null;
+    if (worktreeTransition.action === "preserve_changes" && !targetBranch) {
+      set({ error: "The requested branch is no longer available for an isolated continuation." });
+      return;
+    }
+    set({ worktreePreparing: true, error: null });
+    try {
+      const created = await bridge.createManagedWorktree(worktreeTransition.sourceRoot, {
+        base: managedWorktreeBase,
+        targetBranch,
+      });
+      set({
+        pendingManagedWorktreePath: created.path,
+        worktreeTransition: null,
+        worktreePreparing: false,
+      });
+      await get().startSession();
+    } catch (error) {
+      set({ error: String(error), worktreePreparing: false });
+    }
+  },
+
+  dismissManagedWorktreeStart: () => {
+    set({ worktreeTransition: null, worktreePreparing: false });
+  },
+
   startSession: async () => {
     const { bridge, activeProvider, auth } = get();
     if (!bridge || !activeProvider) return;
@@ -93,6 +137,50 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
       // in flight or failed).
       if (isLocal) await get().ensureCodeKey();
       const localSettings = get().localSettings;
+      let localSessionPath = localSettings.cwd.trim();
+      if (isLocal && !isRemote) {
+        const pendingManagedWorktreePath = get().pendingManagedWorktreePath;
+        if (pendingManagedWorktreePath) {
+          localSessionPath = pendingManagedWorktreePath;
+        } else if (
+          bridge.projectContext
+          && bridge.planProjectWorktree
+          && bridge.createManagedWorktree
+        ) {
+          const context = await bridge.projectContext(localSessionPath);
+          if (epochStale(epoch)) return;
+          if (context) {
+            const plan = await bridge.planProjectWorktree(localSessionPath);
+            if (epochStale(epoch)) return;
+            if (plan.action !== "create_isolated") {
+              throw new Error(
+                "This checkout needs a safe branch transition before Clark can start an isolated session.",
+              );
+            }
+            if (!plan.sourceIsManaged && plan.requiresConfirmation) {
+              set({
+                connecting: false,
+                opening: null,
+                worktreeTransition: plan,
+                worktreePreparing: false,
+              });
+              return;
+            }
+            if (!plan.sourceIsManaged) {
+              set({ worktreePreparing: true });
+              const created = await bridge.createManagedWorktree(localSessionPath, {
+                base: get().managedWorktreeBase,
+              });
+              if (epochStale(epoch)) return;
+              localSessionPath = created.path;
+              set({
+                pendingManagedWorktreePath: created.path,
+                worktreePreparing: false,
+              });
+            }
+          }
+        }
+      }
 
       // Remote: bring up the exec-server + tunnel, then connect the provider to
       // run its tools there. Local: run the loop on this machine. Other
@@ -110,8 +198,9 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
         config = localConnectConfig(localSettings, remoteTarget(remote));
         options = { cwd: remote.cwd, mode, collaboration_mode };
       } else if (isLocal) {
-        config = localConnectConfig(localSettings);
-        options = { cwd: localSettings.cwd.trim(), mode, collaboration_mode };
+        const sessionSettings = { ...localSettings, cwd: localSessionPath };
+        config = localConnectConfig(sessionSettings);
+        options = { cwd: localSessionPath, mode, collaboration_mode };
       } else {
         config = { endpoint: auth?.clark.endpoint, auth_token: auth?.clark.token };
         options = {};
@@ -132,7 +221,7 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
         return;
       }
       const project = isLocal
-        ? (isRemote ? remote?.cwd : localSettings.cwd.trim()) || undefined
+        ? (isRemote ? remote?.cwd : localSessionPath) || undefined
         : undefined;
       const projectRoot = liveProjectRoot(session, project ?? null);
       const now = Date.now();
@@ -192,13 +281,16 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
         activeRemote: remote,
         activeRemoteHost: remoteHost,
         activeProjectRoot: projectRoot,
+        pendingManagedWorktreePath: null,
+        worktreePreparing: false,
+        worktreeTransition: null,
       });
     } catch (e) {
       // Brought up a tunnel but failed afterward → tear it back down.
       if (nativeSession) void bridge.closeSession?.(nativeSession.id);
       if (remote) void sshDisconnect(remote.id);
       if (epochStale(epoch)) return;
-      set({ error: String(e), connecting: false, opening: null });
+      set({ error: String(e), connecting: false, opening: null, worktreePreparing: false });
     }
   },
 
@@ -234,6 +326,8 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
       activeRemote: null,
       activeRemoteHost: null,
       activeProjectRoot: null,
+      worktreeTransition: null,
+      worktreePreparing: false,
       selectedConversationIds: new Set(),
     });
   },
@@ -436,107 +530,6 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
     }
   },
 
-  archiveConversation: async (id) => {
-    // Soft-delete: flag it archived in the cloud (the transcript stays, so it
-    // can be restored in full). Optimistic in-memory flag; PATCH to the cloud.
-    // Archiving CLOSES the live session (unlike switching) — refuse mid-run.
-    const entry = liveSessions.get(id);
-    if (entry && isBusy(entry.live)) {
-      get().flashNotice(BUSY_SESSION_MESSAGE);
-      return;
-    }
-    const creds = cloudCreds(get().auth);
-    if (creds) {
-      try {
-        await cloudSetArchived(creds, id, true);
-      } catch (error) {
-        set({ error: `Could not archive this conversation: ${String(error)}` });
-        return;
-      }
-    }
-    closeLiveSession(get().bridge, id);
-    const cleared = get().session?.id === id;
-    set({
-      conversations: get().conversations.map((c) => (c.id === id ? { ...c, archived: true } : c)),
-      runningIds: get().runningIds.filter((r) => r !== id),
-      ...(cleared
-        ? {
-            session: null,
-            snapshot: emptySnapshot(),
-            error: null,
-            attachments: [],
-            historyPrefix: null,
-            queued: [],
-            terminalOpen: false,
-            activeRemote: null,
-            activeRemoteHost: null,
-            activeProjectRoot: null,
-          }
-        : {}),
-    });
-  },
-
-  restoreConversation: async (id) => {
-    const creds = cloudCreds(get().auth);
-    if (creds) {
-      try {
-        await cloudSetArchived(creds, id, false);
-      } catch (error) {
-        set({ error: `Could not restore this conversation: ${String(error)}` });
-        return;
-      }
-    }
-    set({
-      conversations: get().conversations.map((c) => (c.id === id ? { ...c, archived: false } : c)),
-    });
-  },
-
-  deleteConversation: async (id) => {
-    // Hard delete: remove from the in-memory list + snapshot cache and delete the
-    // cloud copy (best-effort — the list removal is what the user sees).
-    // Deleting CLOSES the live session (unlike switching) — refuse mid-run.
-    const entry = liveSessions.get(id);
-    if (entry && isBusy(entry.live)) {
-      get().flashNotice(BUSY_SESSION_MESSAGE);
-      return;
-    }
-    const meta = get().conversations.find((conversation) => conversation.id === id);
-    const snapshot = entry ? mergedOf(entry) : await fetchSnapshot(id, get().auth);
-    const creds = cloudCreds(get().auth);
-    if (creds) {
-      try {
-        await cloudDelete(creds, id);
-      } catch (error) {
-        set({ error: `Could not delete this conversation: ${String(error)}` });
-        return;
-      }
-    }
-    if (meta?.project && snapshot && (!meta.remoteHost || entry?.remote)) {
-      await releaseSnapshotCheckpoints(meta.project, snapshot, entry?.remote ?? null).catch(() => {});
-    }
-    closeLiveSession(get().bridge, id);
-    snapshotCache.delete(id);
-    const cleared = get().session?.id === id;
-    set({
-      conversations: get().conversations.filter((c) => c.id !== id),
-      runningIds: get().runningIds.filter((r) => r !== id),
-      ...(cleared
-        ? {
-            session: null,
-            snapshot: emptySnapshot(),
-            error: null,
-            attachments: [],
-            historyPrefix: null,
-            queued: [],
-            terminalOpen: false,
-            activeRemote: null,
-            activeRemoteHost: null,
-            activeProjectRoot: null,
-          }
-        : {}),
-    });
-  },
-
   renameConversation: async (id, title) => {
     const clean = title.trim();
     const prev = get().conversations.find((c) => c.id === id);
@@ -552,117 +545,7 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
     if (snap) scheduleCloudPut(creds, updated, snap);
   },
 
-  toggleConversationSelection: (id) =>
-    set((s) => {
-      const next = new Set(s.selectedConversationIds);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return { selectedConversationIds: next };
-    }),
-
-  setConversationSelection: (ids) => set({ selectedConversationIds: new Set(ids) }),
-
-  archiveSelectedConversations: async () => {
-    const ids = [...get().selectedConversationIds];
-    if (ids.length === 0) return;
-    // Skip any that are mid-run — archiving tears down the live session.
-    const busy = ids.filter((id) => {
-      const entry = liveSessions.get(id);
-      return entry && isBusy(entry.live);
-    });
-    if (busy.length > 0) get().flashNotice(BUSY_SESSION_MESSAGE);
-    const targets = ids.filter((id) => !busy.includes(id));
-    if (targets.length === 0) return;
-    const creds = cloudCreds(get().auth);
-    const archived: string[] = [];
-    for (const id of targets) {
-      try {
-        if (creds) await cloudSetArchived(creds, id, true);
-        archived.push(id);
-      } catch (error) {
-        set({ error: `Could not archive this conversation: ${String(error)}` });
-      }
-    }
-    if (archived.length === 0) return;
-    for (const id of archived) closeLiveSession(get().bridge, id);
-    const activeCleared = archived.includes(get().session?.id ?? "");
-    set((s) => ({
-      conversations: s.conversations.map((c) =>
-        archived.includes(c.id) ? { ...c, archived: true } : c,
-      ),
-      runningIds: s.runningIds.filter((r) => !archived.includes(r)),
-      selectedConversationIds: new Set([...s.selectedConversationIds].filter((id) => !archived.includes(id))),
-      ...(activeCleared
-        ? {
-            session: null,
-            snapshot: emptySnapshot(),
-            error: null,
-            attachments: [],
-            historyPrefix: null,
-            queued: [],
-            terminalOpen: false,
-            activeRemote: null,
-            activeRemoteHost: null,
-            activeProjectRoot: null,
-          }
-        : {}),
-    }));
-  },
-
-  deleteSelectedConversations: async () => {
-    const ids = [...get().selectedConversationIds];
-    if (ids.length === 0) return;
-    const busy = ids.filter((id) => {
-      const entry = liveSessions.get(id);
-      return entry && isBusy(entry.live);
-    });
-    if (busy.length > 0) get().flashNotice(BUSY_SESSION_MESSAGE);
-    const targets = ids.filter((id) => !busy.includes(id));
-    if (targets.length === 0) return;
-    const creds = cloudCreds(get().auth);
-    const deleted: string[] = [];
-    for (const id of targets) {
-      try {
-        if (creds) await cloudDelete(creds, id);
-        deleted.push(id);
-      } catch (error) {
-        set({ error: `Could not delete this conversation: ${String(error)}` });
-      }
-    }
-    if (deleted.length === 0) return;
-    await Promise.all(deleted.map(async (id) => {
-      const entry = liveSessions.get(id);
-      const meta = get().conversations.find((conversation) => conversation.id === id);
-      const snapshot = entry ? mergedOf(entry) : await fetchSnapshot(id, get().auth);
-      if (meta?.project && snapshot && (!meta.remoteHost || entry?.remote)) {
-        await releaseSnapshotCheckpoints(meta.project, snapshot, entry?.remote ?? null).catch(() => {});
-      }
-    }));
-    for (const id of deleted) {
-      closeLiveSession(get().bridge, id);
-      snapshotCache.delete(id);
-    }
-    const activeCleared = deleted.includes(get().session?.id ?? "");
-    set((s) => ({
-      conversations: s.conversations.filter((c) => !deleted.includes(c.id)),
-      runningIds: s.runningIds.filter((r) => !deleted.includes(r)),
-      selectedConversationIds: new Set([...s.selectedConversationIds].filter((id) => !deleted.includes(id))),
-      ...(activeCleared
-        ? {
-            session: null,
-            snapshot: emptySnapshot(),
-            error: null,
-            attachments: [],
-            historyPrefix: null,
-            queued: [],
-            terminalOpen: false,
-            activeRemote: null,
-            activeRemoteHost: null,
-            activeProjectRoot: null,
-          }
-        : {}),
-    }));
-  },
+  ...createSidebarConversationActions(set, get),
 
   };
 }

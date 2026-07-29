@@ -99,7 +99,7 @@ export function ComposerPermissionPill() {
           }}
           className="popover-surface absolute bottom-full left-0 z-30 mb-2 w-72 max-w-[calc(100vw-1.5rem)] rounded-xl bg-bg-elevated p-1.5 shadow-lifted ring-1 ring-border-subtle"
         >
-          <div className="px-2.5 pb-1.5 pt-1 text-[11px] font-semibold text-ink-muted">
+          <div className="px-2.5 pb-1.5 pt-1 text-xs font-semibold text-ink-muted">
             Approval mode
           </div>
           {APPROVAL_POLICIES.map((item, index) => {
@@ -130,10 +130,10 @@ export function ComposerPermissionPill() {
                   )}
                 />
                 <span className="min-w-0 flex-1">
-                  <span className="block text-[13px] font-medium leading-5 text-ink">
+                  <span className="block text-sm font-medium leading-5 text-ink">
                     {item.label}
                   </span>
-                  <span className="block text-[11px] leading-4 text-ink-muted">
+                  <span className="block text-xs leading-4 text-ink-muted">
                     {item.description}
                   </span>
                 </span>

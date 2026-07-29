@@ -7,6 +7,7 @@ import { cn } from "../lib/cn";
 import { DUR, EASE } from "../lib/motion";
 import { ChangesButton } from "./ChangesPanel";
 import { MemoryButton } from "./MemoryPanel";
+import { SecurityButton } from "./SecurityPanel";
 
 /** Update affordance in the top bar. While a new version downloads in the
  *  background it shows live progress; once staged it becomes a non-blocking
@@ -176,6 +177,7 @@ export function TopBar({ dark, onToggleTheme }: { dark: boolean; onToggleTheme: 
         <UpdatePill />
         {session && signedIn && <ShareButton onShare={shareConversation} />}
         {session && isLocal && <ChangesButton />}
+        {session && isLocal && !activeRemote && projectCwd && <SecurityButton />}
         {session && isLocal && projectCwd && <MemoryButton />}
         <button
           onClick={() => setSettingsOpen(true)}

@@ -4,14 +4,8 @@ use provider_local::Executor;
 use serde::Serialize;
 use tokio_util::sync::CancellationToken;
 
-const GIT_CONTEXT_TIMEOUT: Duration = Duration::from_secs(5);
 const ACTIVITY_TIMEOUT: Duration = Duration::from_secs(3);
 const AGENT_ACTIVITY_WINDOW_SECONDS: u64 = 5 * 60;
-const GIT_CONTEXT_COMMAND: &str = "git rev-parse --is-inside-work-tree && \
-git rev-parse --show-toplevel && \
-(git symbolic-ref --quiet --short HEAD || { printf 'detached:'; git rev-parse --short HEAD; }) && \
-git rev-parse --path-format=absolute --git-dir && \
-git rev-parse --path-format=absolute --git-common-dir";
 
 #[derive(Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -46,46 +40,22 @@ pub async fn inspect_project_context(
     executor: &dyn Executor,
     cwd: &Path,
 ) -> Result<Option<ProjectContext>, String> {
-    let output = executor
-        .exec(
-            GIT_CONTEXT_COMMAND,
-            cwd,
-            GIT_CONTEXT_TIMEOUT,
-            &CancellationToken::new(),
-        )
-        .await?;
-    if output.code != Some(0) {
-        return Ok(None);
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let mut lines = stdout.lines();
-    if lines.next() != Some("true") {
-        return Ok(None);
-    }
-    let Some(worktree_root) = lines.next().filter(|line| !line.is_empty()) else {
+    let Some(checkout) = provider_local::inspect_git_checkout(executor, cwd).await? else {
         return Ok(None);
     };
-    let Some(branch_line) = lines.next().filter(|line| !line.is_empty()) else {
-        return Ok(None);
-    };
-    let Some(git_dir) = lines.next().filter(|line| !line.is_empty()) else {
-        return Ok(None);
-    };
-    let Some(git_common_dir) = lines.next().filter(|line| !line.is_empty()) else {
-        return Ok(None);
-    };
-    let (detached, branch) = branch_line
-        .strip_prefix("detached:")
-        .map_or((false, branch_line), |commit| (true, commit));
-
-    let activity = inspect_activity(executor, Path::new(worktree_root), branch, detached).await;
+    let activity = inspect_activity(
+        executor,
+        &checkout.worktree_root,
+        &checkout.branch,
+        checkout.detached,
+    )
+    .await;
 
     Ok(Some(ProjectContext {
-        branch: branch.to_string(),
-        detached,
-        is_worktree: git_dir != git_common_dir,
-        worktree_root: worktree_root.to_string(),
+        branch: checkout.branch,
+        detached: checkout.detached,
+        is_worktree: checkout.is_worktree,
+        worktree_root: checkout.worktree_root.to_string_lossy().into_owned(),
         activity,
     }))
 }
@@ -97,20 +67,15 @@ async fn inspect_activity(
     detached: bool,
 ) -> ProjectActivity {
     let cancel = CancellationToken::new();
-    let tree = executor.exec(
-        "git status --porcelain=v1 --untracked-files=normal",
-        worktree_root,
-        ACTIVITY_TIMEOUT,
-        &cancel,
-    );
+    let tree = provider_local::git_working_tree_status(executor, worktree_root);
     let agent_command = external_agent_activity_command(worktree_root, branch, detached);
     let agents = executor.exec(&agent_command, worktree_root, ACTIVITY_TIMEOUT, &cancel);
     let (tree, agents) = tokio::join!(tree, agents);
 
     let (changed_files, untracked_files, conflicted_files) = tree
         .ok()
-        .filter(|output| output.code == Some(0))
-        .map(|output| parse_git_status(&String::from_utf8_lossy(&output.stdout)))
+        .flatten()
+        .map(|status| parse_git_status(&status))
         .unwrap_or_default();
     let external_agents = agents
         .ok()

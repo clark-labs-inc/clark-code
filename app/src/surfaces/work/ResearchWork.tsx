@@ -262,7 +262,7 @@ export function ResearchWork({ call, active }: { call: ToolCall; active: boolean
       data-tool-call-id={call.id}
       initial={reduce ? false : { opacity: 0, y: 4 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: DUR.base, ease: EASE.out }}
+      transition={{ duration: reduce ? 0 : DUR.base, ease: EASE.out }}
       className="mb-1 mt-3 overflow-hidden rounded-xl border border-border-subtle bg-bg-secondary/45"
       aria-label="Clark Cloud Agent"
     >
@@ -296,8 +296,8 @@ export function ResearchWork({ call, active }: { call: ToolCall; active: boolean
           <motion.div
             initial={reduce ? false : { height: 0, opacity: 0 }}
             animate={{ height: "auto", opacity: 1 }}
-            exit={reduce ? { opacity: 0 } : { height: 0, opacity: 0 }}
-            transition={{ duration: DUR.fast, ease: EASE.inOut }}
+            exit={reduce ? { opacity: 0, transition: { duration: 0 } } : { height: 0, opacity: 0 }}
+            transition={{ duration: reduce ? 0 : DUR.fast, ease: EASE.inOut }}
             className="overflow-hidden border-t border-border-subtle"
           >
             <div className="space-y-2 px-3 py-2.5">
@@ -323,8 +323,8 @@ export function ResearchWork({ call, active }: { call: ToolCall; active: boolean
                           <motion.div
                             initial={reduce ? false : { height: 0, opacity: 0 }}
                             animate={{ height: "auto", opacity: 1 }}
-                            exit={reduce ? { opacity: 0 } : { height: 0, opacity: 0 }}
-                            transition={{ duration: DUR.fast, ease: EASE.inOut }}
+                            exit={reduce ? { opacity: 0, transition: { duration: 0 } } : { height: 0, opacity: 0 }}
+                            transition={{ duration: reduce ? 0 : DUR.fast, ease: EASE.inOut }}
                             className="overflow-hidden pt-2"
                           >
                             <ResearchOutline progress={call.progress} />

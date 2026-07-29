@@ -15,6 +15,7 @@ import {
   X,
 } from "lucide-react";
 import type { ProjectGroup } from "../lib/projectSidebar";
+import { ManagedWorktreeManager } from "./ManagedWorktreeManager";
 
 export interface ProjectMenuPosition {
   left: number;
@@ -120,6 +121,11 @@ export function ProjectActionsMenu({
   onPin,
   onReveal,
   onCreateWorktree,
+  onListManagedWorktrees,
+  onUseManagedWorktree,
+  onSaveManagedWorktreeBranch,
+  onCleanupManagedWorktree,
+  activeWorktreePaths,
   onRename,
   onArchive,
   onRemove,
@@ -131,11 +137,17 @@ export function ProjectActionsMenu({
   onPin: (pinned: boolean) => void;
   onReveal: () => void;
   onCreateWorktree: (name: string) => Promise<void>;
+  onListManagedWorktrees: () => Promise<import("../core-bridge/bridge").ManagedWorktree[]>;
+  onUseManagedWorktree: (path: string) => void;
+  onSaveManagedWorktreeBranch: (id: string) => Promise<{ branch: string }>;
+  onCleanupManagedWorktree: (id: string) => Promise<void>;
+  /** Current/streaming Clark sessions must keep their checkout intact. */
+  activeWorktreePaths: string[];
   onRename: (name: string) => void;
   onArchive: () => void;
   onRemove: () => void;
 }) {
-  const [mode, setMode] = useState<"menu" | "rename" | "worktree" | "remove">("menu");
+  const [mode, setMode] = useState<"menu" | "rename" | "worktree" | "managed" | "remove">("menu");
   const [name, setName] = useState(group.label);
   const [worktreeName, setWorktreeName] = useState("");
   const [creating, setCreating] = useState(false);
@@ -176,7 +188,9 @@ export function ProjectActionsMenu({
       role="menu"
       aria-label={`Project actions for ${group.label}`}
       style={{ left: position.left, top: position.top }}
-      className="popover-surface fixed z-50 w-60 rounded-xl bg-bg-elevated p-1.5 shadow-lifted ring-1 ring-border-subtle"
+      className={"popover-surface fixed z-50 rounded-xl bg-bg-elevated p-1.5 shadow-lifted ring-1 ring-border-subtle " + (
+        mode === "managed" ? "w-[23rem] max-w-[calc(100vw-1rem)]" : "w-60"
+      )}
     >
       {mode === "menu" && (
         <>
@@ -202,6 +216,14 @@ export function ProjectActionsMenu({
               </MenuItem>
               <MenuItem icon={GitBranchPlus} onClick={() => setMode("worktree")}>
                 Create permanent worktree
+              </MenuItem>
+              <MenuItem
+                icon={FolderOpen}
+                onClick={() => {
+                  setMode("managed");
+                }}
+              >
+                Manage isolated worktrees
               </MenuItem>
             </>
           )}
@@ -291,6 +313,20 @@ export function ProjectActionsMenu({
             </button>
           </div>
         </form>
+      )}
+
+      {mode === "managed" && (
+        <ManagedWorktreeManager
+          loadWorktrees={onListManagedWorktrees}
+          onUseWorktree={(path) => {
+            onUseManagedWorktree(path);
+            onClose();
+          }}
+          onSaveBranch={onSaveManagedWorktreeBranch}
+          onArchiveCheckout={onCleanupManagedWorktree}
+          activeWorktreePaths={activeWorktreePaths}
+          onBack={() => setMode("menu")}
+        />
       )}
 
       {mode === "remove" && (

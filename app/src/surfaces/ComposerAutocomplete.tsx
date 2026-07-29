@@ -1,5 +1,5 @@
 import { FileText, Slash, Sparkles } from "lucide-react";
-import { motion } from "motion/react";
+import { motion, useReducedMotion } from "motion/react";
 import { cn } from "../lib/cn";
 import type { ComposerSuggestion } from "../lib/composerInput";
 import { DUR, EASE } from "../lib/motion";
@@ -16,13 +16,15 @@ export function ComposerAutocomplete({
   onPick: (suggestion: ComposerSuggestion) => void;
   onHover: (index: number) => void;
 }) {
+  const reduce = useReducedMotion() ?? false;
+
   return (
     <motion.div
       // Appear instantly: fading a shadowed popover in WKWebView reads as flicker.
       initial={false}
       animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      transition={{ duration: DUR.fast, ease: EASE.out }}
+      exit={reduce ? { opacity: 0, transition: { duration: 0 } } : { opacity: 0 }}
+      transition={{ duration: reduce ? 0 : DUR.fast, ease: EASE.out }}
       className="popover-surface max-h-64 w-full overflow-y-auto rounded-2xl bg-bg-elevated p-1.5 shadow-lifted ring-1 ring-border-subtle sm:w-80"
     >
       {suggestions.map((suggestion, index) => {

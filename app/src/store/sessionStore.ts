@@ -16,6 +16,7 @@ import {
   loadRecentProjects,
   loadSshHosts,
 } from "./sessionStore.runtime";
+import { loadManagedWorktreeBase } from "../lib/managedWorktreeSettings";
 
 export {
   latestRunFailed,
@@ -48,9 +49,15 @@ export const useSessionStore = create<import("./sessionStore.runtime").SessionSt
   historyPrefix: null,
   runningIds: [],
   selectedConversationIds: new Set<string>(),
+  mutatingConversationIds: new Set<string>(),
+  conversationMutation: null,
   opening: null,
   composerPrefill: null,
   localSettings: loadLocalSettings(),
+  managedWorktreeBase: loadManagedWorktreeBase(),
+  worktreeTransition: null,
+  pendingManagedWorktreePath: null,
+  worktreePreparing: false,
   chatModels: loadChatModels(),
   projectMode: "local",
   selectedHostId: loadSshHosts()[0]?.id ?? null,

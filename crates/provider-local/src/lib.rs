@@ -53,6 +53,9 @@ mod resume;
 mod root_execution;
 mod safety;
 mod sandbox;
+pub mod security;
+mod security_export;
+mod security_history;
 pub mod scout_census {
     pub use scout_capability_census::*;
 }
@@ -65,7 +68,9 @@ pub use changes::{changes_diff, changes_revert, changes_summary, ChangedFile};
 pub use checkpoint::{create_checkpoint, is_git_repo, release_checkpoints};
 // Discover compatible setup from other coding agents without mutating it.
 pub use commands::{discover_commands, CustomCommand};
-pub use config::{LocalConfig, DEFAULT_BASE_URL, DEFAULT_RESEARCH_MODEL, SCOUT_MODEL};
+pub use config::{
+    LocalConfig, DEFAULT_BASE_URL, DEFAULT_RESEARCH_MODEL, SCOUT_MODEL, SECURITY_MODEL,
+};
 pub use external_import::{
     discover_agent_setups, discover_agent_setups_with_home, AgentMigrationDiscovery,
     MigratedInstruction, MigratedSkill, MigrationSource,
@@ -74,6 +79,7 @@ pub use external_import::{
 // (over clark-exec-server) is selected per session once remote projects land.
 pub use exec::{Executor, LocalExecutor, RemoteExecutor};
 pub use files::list_project_files;
+pub use git_metadata::{git_working_tree_status, inspect_git_checkout, GitCheckoutContext};
 pub use instructions::{
     load as discover_instructions, InstructionOrigin, InstructionProvenance, InstructionScope,
     ProjectInstructions,
@@ -102,11 +108,17 @@ pub use repository::{
     discover_repositories, inspect_repository, load_git_history, GitCommitEvidence,
     GitHistoryBatch, RepositoryIdentity, RepositoryRemote,
 };
+pub use security_export::{
+    build_clark_security_cloud_export, clark_security_cloud_identity, ClarkSecurityCloudExport,
+    ClarkSecurityCloudIdentity, ClarkSecurityCoverageSurfaceDraft,
+    ClarkSecurityFindingIdentityDraft, ClarkSecurityLocationDraft, ClarkSecurityOccurrenceDraft,
+};
+pub use security_history::{list_security_scans, SecurityScanRecord};
 pub use skills::{
     discover_skill_catalog_snapshot, install_skill_pack, list_skill_packs, skill_environment_id,
     uninstall_skill_pack, InstallSkillPackRequest, InstalledSkillPack, SkillCatalogEntry,
     SkillCatalogService, SkillCatalogSnapshot, SkillDiagnostic, SkillDiagnosticSeverity,
     SkillOrigin, SkillPackAction, SkillPackReceipt, SkillPackScope, SkillScope,
 };
-// The app-managed document workspace root, so the host can confine `read_doc_text`.
-pub use workspace::workspace_root;
+// The app-managed document workspace, so the host can confine artifact reads.
+pub use workspace::{is_markdown, session_workspace, workspace_root};

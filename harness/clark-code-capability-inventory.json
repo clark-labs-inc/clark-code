@@ -119,6 +119,7 @@
           "features": [
             "filesystem_read_search",
             "durable_memory",
+            "security_scan_history",
             "local_project_context_and_memory_views"
           ],
           "lanes": ["rust_contract", "frontend_contract"],
@@ -126,6 +127,7 @@
             "commands::local_list_memory",
             "commands::local_list_global_memory",
             "commands::local_list_files",
+            "commands::local_list_security_scans",
             "commands::project_context"
           ]
         },

@@ -6,6 +6,7 @@
 // snapshot, is the source of truth) and degrades gracefully everywhere else.
 
 import { invoke } from "@tauri-apps/api/core";
+import { isCloudArtifactUri, isWorkspaceArtifactUri } from "./cloudArtifacts";
 
 function isTauri(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -69,6 +70,20 @@ export async function cleanupDocumentPreview(previewId: string): Promise<void> {
  *  caller falls back to an "Open" link. */
 export async function readDocText(uri?: string): Promise<string | null> {
   if (!uri) return null;
+  if (isTauri() && isCloudArtifactUri(uri)) {
+    try {
+      return await invoke<string>("desktop_artifact_read", { uri });
+    } catch {
+      return null;
+    }
+  }
+  if (isTauri() && isWorkspaceArtifactUri(uri)) {
+    try {
+      return await invoke<string>("desktop_artifact_read_workspace", { uri });
+    } catch {
+      return null;
+    }
+  }
   if (!isLocalDocUri(uri)) {
     try {
       const response = await fetch(uri);

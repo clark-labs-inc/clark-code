@@ -1,4 +1,4 @@
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { FileText, X } from "lucide-react";
 import type { PendingPaste } from "../lib/attachments";
 import { DUR, EASE } from "../lib/motion";
@@ -12,6 +12,7 @@ export function AttachmentChips({
   pastes: PendingPaste[];
   onRemovePaste: (id: string) => void;
 }) {
+  const reduce = useReducedMotion();
   const attachments = useSessionStore((state) => state.attachments);
   const remove = useSessionStore((state) => state.removeAttachment);
   if (attachments.length === 0 && pastes.length === 0) return null;
@@ -28,11 +29,11 @@ export function AttachmentChips({
             <motion.div
               role="listitem"
               key={attachment.id}
-              layout
-              initial={{ opacity: 0, scale: 0.96, y: 3 }}
+              layout={!reduce}
+              initial={reduce ? false : { opacity: 0, scale: 0.96, y: 3 }}
               animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.96, y: 2 }}
-              transition={{ duration: DUR.base, ease: EASE.out }}
+              exit={reduce ? { opacity: 0, transition: { duration: 0 } } : { opacity: 0, scale: 0.96, y: 2 }}
+              transition={{ duration: reduce ? 0 : DUR.base, ease: EASE.out }}
               className="group flex h-10 shrink-0 items-center gap-1.5 rounded-xl bg-bg-tertiary p-1 pr-1.5"
               title={attachment.filename}
             >
@@ -64,11 +65,11 @@ export function AttachmentChips({
             <motion.div
               role="listitem"
               key={paste.id}
-              layout
-              initial={{ opacity: 0, scale: 0.96, y: 3 }}
+              layout={!reduce}
+              initial={reduce ? false : { opacity: 0, scale: 0.96, y: 3 }}
               animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.96, y: 2 }}
-              transition={{ duration: DUR.base, ease: EASE.out }}
+              exit={reduce ? { opacity: 0, transition: { duration: 0 } } : { opacity: 0, scale: 0.96, y: 2 }}
+              transition={{ duration: reduce ? 0 : DUR.base, ease: EASE.out }}
               className="group flex h-10 shrink-0 items-center gap-1.5 rounded-xl bg-bg-tertiary p-1 pr-1.5"
               title={paste.placeholder}
             >

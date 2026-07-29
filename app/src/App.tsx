@@ -3,6 +3,7 @@ import { useSessionStore } from "./store/sessionStore";
 import { useWindowFileDropGuard } from "./lib/attachmentSources";
 import { useHotkeys } from "./lib/hotkeys";
 import { useTextSize } from "./lib/useTextSize";
+import { useTheme } from "./lib/useTheme";
 import { SignInScreen } from "./surfaces/SignInScreen";
 import { UpdateStatus } from "./surfaces/UpdateStatus";
 import { NoticeToast, TextSizeToast, WarningToast } from "./surfaces/Toast";
@@ -24,6 +25,7 @@ export default function App() {
   const auth = useSessionStore((s) => s.auth);
   const addFiles = useSessionStore((s) => s.addFiles);
   const { textSize, setTextSize, increaseTextSize, decreaseTextSize, resetTextSize } = useTextSize();
+  const { dark, toggle, colorblind, toggleColorblind } = useTheme();
   const [textSizeToastSignal, setTextSizeToastSignal] = useState(0);
 
   const runTextSizeShortcut = (action: () => void) => {
@@ -63,7 +65,14 @@ export default function App() {
   return (
     <>
       <Suspense fallback={<WorkspaceLoadingScreen />}>
-        <AuthenticatedWorkspace textSize={textSize} onTextSizeChange={setTextSize} />
+        <AuthenticatedWorkspace
+          textSize={textSize}
+          onTextSizeChange={setTextSize}
+          dark={dark}
+          onToggleTheme={toggle}
+          colorblind={colorblind}
+          onToggleColorblind={toggleColorblind}
+        />
       </Suspense>
       <UpdateStatus />
       <NoticeToast />

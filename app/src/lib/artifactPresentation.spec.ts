@@ -37,4 +37,16 @@ describe("artifact presentation metadata", () => {
     expect(readableArtifactLocation(remote)).toBe("example.com/reports/report.md");
     expect(canOpenArtifactExternally(remote)).toBe(true);
   });
+
+  it("labels Clark cloud and pending workspace artifacts without unsafe external links", () => {
+    const cloud = artifact("/api/desktop/conversations/desk-1/artifacts/deskart-1");
+    expect(artifactLocationLabel(cloud)).toBe("Clark cloud");
+    expect(readableArtifactLocation(cloud)).toBe("Saved securely in Clark cloud");
+    expect(canOpenArtifactExternally(cloud)).toBe(false);
+
+    const pending = artifact("clark-workspace://desk-1/report.md");
+    expect(artifactAvailability(pending)).toBe("saved");
+    expect(artifactLocationLabel(pending)).toBe("Local");
+    expect(canOpenArtifactExternally(pending)).toBe(false);
+  });
 });

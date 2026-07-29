@@ -20,6 +20,19 @@ const COMMAND_TIMEOUT: Duration = if cfg!(windows) {
 };
 const DISABLED_HOOKS_PATH: &str = if cfg!(windows) { "NUL" } else { "/dev/null" };
 
+/// Read-only identity for the checkout selected by a local or remote executor.
+///
+/// This deliberately exposes only Git-derived metadata. Callers that need
+/// product-specific activity signals can compose those independently without
+/// rebuilding an unprotected shell pipeline around Git.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GitCheckoutContext {
+    pub branch: String,
+    pub detached: bool,
+    pub is_worktree: bool,
+    pub worktree_root: PathBuf,
+}
+
 pub(crate) async fn optional(
     exec: &dyn Executor,
     root: &Path,
@@ -71,6 +84,90 @@ pub(crate) async fn linked_worktree_roots(
         return Ok(None);
     };
     Ok(Some(parse_linked_worktree_roots(&raw)))
+}
+
+/// Inspect a checkout through the same bounded, hook-free Git profile used by
+/// repository discovery. A non-Git directory is normal and returns `None`.
+pub async fn inspect_git_checkout(
+    exec: &dyn Executor,
+    root: &Path,
+) -> Result<Option<GitCheckoutContext>, String> {
+    let Some(inside) = optional(exec, root, &["rev-parse", "--is-inside-work-tree"]).await? else {
+        return Ok(None);
+    };
+    if inside != "true" {
+        return Ok(None);
+    }
+
+    let (worktree_root, branch, git_dir, common_dir) = tokio::try_join!(
+        optional(exec, root, &["rev-parse", "--show-toplevel"]),
+        optional(exec, root, &["symbolic-ref", "--quiet", "--short", "HEAD"]),
+        optional(
+            exec,
+            root,
+            &["rev-parse", "--path-format=absolute", "--git-dir"],
+        ),
+        optional(
+            exec,
+            root,
+            &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+        ),
+    )?;
+    let (Some(worktree_root), Some(git_dir), Some(common_dir)) =
+        (worktree_root, git_dir, common_dir)
+    else {
+        return Ok(None);
+    };
+
+    let worktree_root = PathBuf::from(worktree_root.trim());
+    let worktree_root = exec
+        .canonicalize(&worktree_root)
+        .await
+        .unwrap_or(worktree_root);
+    let git_dir = canonical_git_path(exec, root, &git_dir).await;
+    let common_dir = canonical_git_path(exec, root, &common_dir).await;
+    let branch = branch.filter(|value| !value.is_empty());
+    let detached = branch.is_none();
+    let branch = if let Some(branch) = branch {
+        branch
+    } else {
+        let Some(revision) = optional(exec, root, &["rev-parse", "--short", "HEAD"]).await? else {
+            return Ok(None);
+        };
+        revision
+    };
+
+    Ok(Some(GitCheckoutContext {
+        branch,
+        detached,
+        is_worktree: git_dir != common_dir,
+        worktree_root,
+    }))
+}
+
+/// Read a porcelain working-tree snapshot under the protected Git profile.
+/// The distinction between a clean tree (`Some("")`) and an unavailable Git
+/// checkout (`None`) is retained for activity callers.
+pub async fn git_working_tree_status(
+    exec: &dyn Executor,
+    root: &Path,
+) -> Result<Option<String>, String> {
+    optional(
+        exec,
+        root,
+        &["status", "--porcelain=v1", "--untracked-files=normal"],
+    )
+    .await
+}
+
+async fn canonical_git_path(exec: &dyn Executor, root: &Path, value: &str) -> PathBuf {
+    let candidate = PathBuf::from(value.trim());
+    let candidate = if candidate.is_absolute() {
+        candidate
+    } else {
+        root.join(candidate)
+    };
+    exec.canonicalize(&candidate).await.unwrap_or(candidate)
 }
 
 /// Main repository root shared by a checkout and all of its linked worktrees.

@@ -13,21 +13,18 @@ function UpdateOverlay() {
   const version = useSessionStore((s) => s.update?.version);
   const reduce = useReducedMotion();
   return (
-    <AnimatePresence>
+    <AnimatePresence initial={false}>
       {applying && (
         <motion.div
           key="update-overlay"
-          initial={{ opacity: 0 }}
+          initial={reduce ? false : { opacity: 0 }}
           animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: DUR.base, ease: EASE.out }}
+          exit={reduce ? { opacity: 0, transition: { duration: 0 } } : { opacity: 0 }}
+          transition={{ duration: reduce ? 0 : DUR.base, ease: EASE.out }}
           className="fixed inset-0 z-[100] grid place-items-center bg-bg/80 backdrop-blur-sm"
         >
-          <motion.div
-            initial={reduce ? false : { opacity: 0, y: 8, scale: 0.98 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            transition={{ duration: DUR.base, ease: EASE.out }}
-            className="flex w-72 flex-col items-center gap-3 rounded-2xl border border-border-subtle bg-bg-elevated p-6 text-center shadow-xl"
+          <div
+            className="popover-surface flex w-72 flex-col items-center gap-3 rounded-2xl border border-border-subtle bg-bg-elevated p-6 text-center shadow-xl"
           >
             <ClarkMark size={40} className="rounded-xl" />
             <div>
@@ -39,11 +36,11 @@ function UpdateOverlay() {
             <div className="relative h-1 w-full overflow-hidden rounded-full bg-bg-tertiary">
               <motion.span
                 className="absolute inset-y-0 left-0 w-1/3 rounded-full bg-accent"
-                animate={reduce ? undefined : { left: ["-33%", "100%"] }}
-                transition={{ duration: 1.1, repeat: Infinity, ease: "easeInOut" }}
+                animate={reduce ? { x: 0 } : { x: ["-100%", "300%"] }}
+                transition={reduce ? { duration: 0 } : { duration: 1.1, repeat: Infinity, ease: "easeInOut" }}
               />
             </div>
-          </motion.div>
+          </div>
         </motion.div>
       )}
     </AnimatePresence>
@@ -64,29 +61,34 @@ function JustUpdatedToast() {
   }, [version, dismiss]);
 
   return (
-    <AnimatePresence>
+    <AnimatePresence initial={false}>
       {version && (
-        <motion.div
-          key="just-updated"
-          initial={reduce ? { opacity: 0 } : { opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={reduce ? { opacity: 0 } : { opacity: 0, y: 12 }}
-          transition={{ duration: DUR.base, ease: EASE.out }}
-          role="status"
-          className="fixed bottom-4 left-1/2 z-[90] flex -translate-x-1/2 items-center gap-2.5 rounded-xl border border-border-subtle bg-bg-elevated px-3.5 py-2.5 shadow-lg"
-        >
-          <CheckCircle2 className="size-4 shrink-0 text-success" />
-          <span className="text-sm text-ink">
-            Updated to <span className="font-semibold">v{version}</span>
-          </span>
-          <button
-            onClick={dismiss}
-            aria-label="Dismiss"
-            className="grid size-8 place-items-center rounded-md text-ink-faint transition hover:bg-bg-hover hover:text-ink"
+        <div className="fixed bottom-4 left-1/2 z-[90] -translate-x-1/2">
+          <motion.div
+            key="just-updated"
+            initial={reduce ? false : { opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={reduce ? { opacity: 0, transition: { duration: 0 } } : { opacity: 0, y: 12 }}
+            transition={{ duration: reduce ? 0 : DUR.base, ease: EASE.out }}
           >
-            <X className="size-3.5" />
-          </button>
-        </motion.div>
+            <div
+              role="status"
+              className="popover-surface flex items-center gap-2.5 rounded-xl border border-border-subtle bg-bg-elevated px-3.5 py-2.5 shadow-lg"
+            >
+              <CheckCircle2 className="size-4 shrink-0 text-success" />
+              <span className="text-sm text-ink">
+                Updated to <span className="font-semibold">v{version}</span>
+              </span>
+              <button
+                onClick={dismiss}
+                aria-label="Dismiss"
+                className="grid size-8 place-items-center rounded-md text-ink-faint transition hover:bg-bg-hover hover:text-ink"
+              >
+                <X className="size-3.5" />
+              </button>
+            </div>
+          </motion.div>
+        </div>
       )}
     </AnimatePresence>
   );

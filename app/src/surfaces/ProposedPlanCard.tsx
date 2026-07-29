@@ -63,7 +63,7 @@ export function ProposedPlanCard({ plan }: { plan: ProposedPlan }) {
                   type="button"
                   disabled={submitting || !feedback.trim()}
                   onClick={() => void decide({ action: "continue_planning", feedback: feedback.trim() })}
-                  className="rounded-lg bg-accent px-3 py-2 text-xs font-semibold text-white disabled:opacity-40"
+                  className="rounded-lg bg-accent px-3 py-2 text-xs font-semibold text-on-accent disabled:opacity-40"
                 >
                   Continue planning
                 </button>
@@ -75,7 +75,7 @@ export function ProposedPlanCard({ plan }: { plan: ProposedPlan }) {
                 type="button"
                 disabled={submitting}
                 onClick={() => void decide({ action: "implement", context: "current" })}
-                className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-xs font-semibold text-white disabled:opacity-40"
+                className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-xs font-semibold text-on-accent disabled:opacity-40"
               >
                 <Play className="size-3.5" /> Implement
               </button>

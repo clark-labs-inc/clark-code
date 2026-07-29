@@ -184,11 +184,11 @@ export function SkillsPanel(props: SkillsPanelProps) {
                   <span className="min-w-0 flex-1">
                     <span className="flex flex-wrap items-center gap-1.5">
                       <span className="font-mono text-xs text-ink">${skill.invocationName}</span>
-                      <span className="rounded bg-chip px-1.5 py-0.5 text-[10px] text-ink-faint">
+                      <span className="rounded bg-chip px-1.5 py-0.5 text-xs text-ink-faint">
                         {skill.scope} · {skill.origin}
                       </span>
                       {skill.hasNameCollision && (
-                        <span className="rounded bg-warning/12 px-1.5 py-0.5 text-[10px] text-warning">
+                        <span className="rounded bg-warning/12 px-1.5 py-0.5 text-xs text-warning">
                           collision preserved
                         </span>
                       )}
@@ -196,7 +196,7 @@ export function SkillsPanel(props: SkillsPanelProps) {
                     <span className="mt-1 block text-xs leading-relaxed text-ink-muted">
                       {skill.description}
                     </span>
-                    <span className="mt-1 block truncate font-mono text-[10px] text-ink-faint">
+                    <span className="mt-1 block truncate font-mono text-xs text-ink-faint">
                       {skill.source}
                     </span>
                     {!skill.enabled && (
@@ -258,7 +258,7 @@ export function SkillsPanel(props: SkillsPanelProps) {
                   <Check className="size-3.5" />
                   {receipt.action} {receipt.packId}
                 </span>
-                <span className="mt-1 block font-mono text-[10px] text-ink-faint">
+                <span className="mt-1 block font-mono text-xs text-ink-faint">
                   {receipt.revision ?? receipt.previousRevision}
                 </span>
               </div>
@@ -273,7 +273,7 @@ export function SkillsPanel(props: SkillsPanelProps) {
                   <Package className="size-4 text-ink-faint" />
                   <span className="min-w-0 flex-1">
                     <span className="block text-xs text-ink">{pack.packId}</span>
-                    <span className="block truncate text-[10px] text-ink-faint">
+                    <span className="block truncate text-xs text-ink-faint">
                       {pack.scope} · {pack.skillCount} skills
                     </span>
                   </span>
@@ -301,7 +301,7 @@ export function SkillsPanel(props: SkillsPanelProps) {
                       {source.truncated && <AlertTriangle className="size-3 text-warning" />}
                       {source.scope} · {source.origin} · precedence {source.precedence}
                     </span>
-                    <span className="mt-1 block truncate font-mono text-[10px] text-ink-faint">
+                    <span className="mt-1 block truncate font-mono text-xs text-ink-faint">
                       {source.path}
                     </span>
                   </div>

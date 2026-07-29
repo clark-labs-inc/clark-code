@@ -25,6 +25,14 @@ import {
   repositoryFingerprintForRoot,
   repositoryIdentityForRoot,
 } from "./repositoryKnowledge";
+import {
+  configureArtifactCloudCredentials,
+  flushArtifactCloudSync,
+  forgetArtifactCloudConversation,
+  resetArtifactCloudSync,
+  scheduleArtifactCloudSync,
+  snapshotForArtifactCloud,
+} from "./cloudArtifacts";
 
 function isTauri(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -172,6 +180,7 @@ function sameCreds(left: CloudCreds | null, right: CloudCreds | null): boolean {
  * `resetCloudHistory` first so no stale job can inherit another account's JWT. */
 export function configureCloudHistoryCredentials(creds: CloudCreds | null): void {
   configuredCreds = creds ? { ...creds } : null;
+  configureArtifactCloudCredentials(configuredCreds);
 }
 
 /** Stop all queued retry work at an account boundary. In-flight requests cannot
@@ -189,6 +198,7 @@ export function resetCloudHistory(): void {
   conflicted.clear();
   deleting.clear();
   deleteGenerations.clear();
+  resetArtifactCloudSync();
 }
 
 function jobIsCurrent(id: string, job: PendingPush): boolean {
@@ -289,11 +299,16 @@ export function scheduleCloudPut(
   // single-flight queue guarantee spacing), survives restarts, and nothing
   // reads the rev back as a length — it is purely an ordering token.
   const rev = Date.now();
+  scheduleArtifactCloudSync(creds, meta.id, snapshot, () => {
+    const current = configuredCreds;
+    if (current) scheduleCloudPut(current, meta, snapshot, status);
+  }, warningHandler ?? undefined);
+  const cloudSafeSnapshot = snapshotForArtifactCloud(meta.id, snapshot);
   clearRetry(meta.id);
   pending.set(meta.id, {
     creds,
     meta,
-    snapshot,
+    snapshot: cloudSafeSnapshot,
     rev,
     status,
     mutationId: mutationId(),
@@ -307,8 +322,10 @@ export function scheduleCloudPut(
  *  snapshots should appear. Returns false on a failed or timed-out delivery;
  *  callers can keep the app running and retry instead of losing the final tail. */
 export async function flushCloudPuts(timeoutMs = 5000): Promise<boolean> {
+  const startedAt = Date.now();
+  if (!(await flushArtifactCloudSync(timeoutMs))) return false;
   for (const id of [...pending.keys()]) void drainPush(id);
-  const deadline = Date.now() + timeoutMs;
+  const deadline = startedAt + timeoutMs;
   while (inflight.size > 0) {
     if (Date.now() >= deadline) return false;
     await new Promise((resolve) => setTimeout(resolve, 25));
@@ -432,6 +449,7 @@ export async function cloudDelete(c: CloudCreds, id: string): Promise<void> {
   const epoch = cloudHistoryEpoch;
   const generation = ++nextDeleteGeneration;
   deleting.add(id);
+  forgetArtifactCloudConversation(id);
   deleteGenerations.set(id, generation);
   forgetConversationPushState(id);
   try {

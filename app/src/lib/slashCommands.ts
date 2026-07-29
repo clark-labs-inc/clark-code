@@ -8,6 +8,9 @@ import { conversationMarkdown } from "./transcript";
 
 const SENTRY_SKILL = "$sentry:sentry";
 const SCOUT_SKILL = "$scout:scout";
+const SECURITY_SKILL = "$security:security-scan";
+const SECURITY_DIFF_SKILL = "$security:security-diff";
+const SECURITY_DEEP_SKILL = "$security:security-deep";
 
 export interface SlashCommand {
   /** Command word, without the leading slash. */
@@ -55,6 +58,24 @@ export function slashCommands(): SlashCommand[] {
       hint: "Map a business system with fixed GLM 5.2",
       localOnly: true,
       body: SCOUT_SKILL,
+    },
+    {
+      name: "security",
+      hint: "Scan this repository with fixed GLM 5.2",
+      localOnly: true,
+      body: SECURITY_SKILL,
+    },
+    {
+      name: "security-diff",
+      hint: "Review this exact Git diff with fixed GLM 5.2",
+      localOnly: true,
+      body: SECURITY_DIFF_SKILL,
+    },
+    {
+      name: "security-deep",
+      hint: "Scan deeply with independent GLM 5.2 passes",
+      localOnly: true,
+      body: SECURITY_DEEP_SKILL,
     },
     {
       name: "sentry",
@@ -147,6 +168,9 @@ export function expandPromptSlashCommand(text: string): string {
   const mappings = [
     { command: "/sentry", skill: SENTRY_SKILL },
     { command: "/scout", skill: SCOUT_SKILL },
+    { command: "/security-deep", skill: SECURITY_DEEP_SKILL },
+    { command: "/security-diff", skill: SECURITY_DIFF_SKILL },
+    { command: "/security", skill: SECURITY_SKILL },
   ];
   for (const mapping of mappings) {
     if (!command.startsWith(mapping.command)) continue;

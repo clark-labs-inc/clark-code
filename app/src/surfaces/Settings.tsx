@@ -82,16 +82,16 @@ function GeneralSection({
         <GroupLabel>Appearance</GroupLabel>
         <Card>
           <Row name="Theme" sub="Violet Paper light · warm graphite dark">
-            <div className="inline-flex shrink-0 rounded-lg border border-border-subtle bg-bg-sunken p-0.5 text-xs">
+            <div className="flex max-w-full flex-wrap justify-end rounded-lg border border-border-subtle bg-bg-sunken p-0.5 text-xs">
               {themeBtn(false, Sun, "Light")}
               {themeBtn(true, Moon, "Dark")}
             </div>
           </Row>
-          <Row name="Text size" sub="Messages, code, terminal · 75–200% · Ctrl/⌘ +/− · Ctrl/⌘ 0 resets">
+          <Row name="Text size" sub="Messages, code, terminal · 100–200% · Ctrl/⌘ +/− · Ctrl/⌘ 0 resets">
             <div
               role="group"
               aria-label="Text size"
-              className="inline-flex shrink-0 rounded-lg border border-border-subtle bg-bg-sunken p-0.5 text-xs"
+              className="flex max-w-full flex-wrap justify-end rounded-lg border border-border-subtle bg-bg-sunken p-0.5 text-xs"
             >
               <button
                 type="button"

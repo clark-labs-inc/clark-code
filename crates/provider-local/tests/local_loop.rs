@@ -227,6 +227,228 @@ async fn scout_uses_host_pinned_glm_instead_of_conversation_model_settings() {
 }
 
 #[tokio::test]
+async fn security_uses_host_pinned_glm_instead_of_conversation_model_settings() {
+    let dir = tempfile::tempdir().unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let captured = tokio::spawn(serve(listener, vec![final_body()]));
+
+    let mut provider = provider_local::LocalAgentProvider::new();
+    provider
+        .connect(ProviderConfig {
+            auth_token: Some("test-key".into()),
+            extra: json!({
+                "base_url": format!("http://{addr}/v1"),
+                "model": "clark-code:kimi_k3",
+                "reasoning_effort": "max",
+                "memories": false,
+                "sandbox_mode": "disabled"
+            }),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let session = provider
+        .new_session(SessionOptions {
+            cwd: Some(dir.path().to_string_lossy().to_string()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+    let mut stream = provider
+        .prompt(
+            &session.id,
+            PromptInput::text("$security:security-deep scan this repository deeply"),
+        )
+        .await
+        .unwrap();
+    while let Some(event) = stream.next().await {
+        if matches!(event, AgentEvent::RunFinished { .. }) {
+            break;
+        }
+    }
+
+    let requests = captured.await.unwrap();
+    assert_eq!(requests.len(), 1);
+    let request = request_json(&requests[0]);
+    assert_eq!(provider_local::SECURITY_MODEL, "z-ai/glm-5.2");
+    assert_eq!(request["model"], "z-ai/glm-5.2");
+    assert!(
+        request.get("reasoning_effort").is_none(),
+        "Security must not inherit another model's reasoning configuration"
+    );
+    assert!(
+        request["tools"].as_array().is_some_and(|tools| tools
+            .iter()
+            .any(|tool| tool["function"]["name"] == "security_scan_contract")),
+        "selecting Security must expose its deterministic contract on the first model turn"
+    );
+    for name in ["delegate_read_only", "resolve_delegation"] {
+        assert!(
+            request["tools"]
+                .as_array()
+                .is_some_and(|tools| tools.iter().any(|tool| tool["function"]["name"] == name)),
+            "selecting deep Security must expose {name} on the first model turn"
+        );
+    }
+}
+
+#[tokio::test]
+async fn security_skill_fake_provider_seals_artifact_and_exposes_history() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("src")).unwrap();
+    std::fs::create_dir_all(dir.path().join(".clark/security-scans/fake-e2e")).unwrap();
+    std::fs::write(
+        dir.path().join("SECURITY.md"),
+        "Review src/. This is a deterministic fake-provider fixture.\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("src/handler.rs"),
+        "pub fn handler() -> bool { true }\n",
+    )
+    .unwrap();
+    let inventory = provider_local::security::collect_security_inventory(
+        &provider_local::LocalExecutor,
+        dir.path(),
+        dir.path(),
+    )
+    .await
+    .unwrap();
+    let bundle = json!({
+        "contractVersion": provider_local::security::SECURITY_SCAN_CONTRACT_VERSION,
+        "scanId": "fake-e2e",
+        "mode": "standard",
+        "model": provider_local::SECURITY_MODEL,
+        "scope": ".",
+        "inventoryId": inventory.inventory_id,
+        "phase": "reporting",
+        "threatModel": {
+            "assets": ["Fixture state"],
+            "trustBoundaries": ["Caller to fixture handler"],
+            "attackerInputs": ["Fixture request"],
+            "invariants": ["The deterministic fixture has no reportable sink"]
+        },
+        "coverage": inventory.paths.iter().map(|path| json!({
+            "path": path,
+            "status": "reviewed",
+            "reason": null
+        })).collect::<Vec<_>>(),
+        "supportingCoverage": [],
+        "diffTarget": null,
+        "deepRunId": null,
+        "candidates": []
+    });
+    let scan_path = ".clark/security-scans/fake-e2e/scan.json";
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let served = tokio::spawn(serve(
+        listener,
+        vec![
+            tool_call_sse(
+                "sec-schema",
+                "security_scan_contract",
+                json!({"action": "schema"}),
+            ),
+            tool_call_sse(
+                "sec-inventory",
+                "security_scan_contract",
+                json!({"action": "inventory", "scope": "."}),
+            ),
+            tool_call_sse(
+                "sec-write",
+                "write_file",
+                json!({
+                    "path": scan_path,
+                    "content": serde_json::to_string_pretty(&bundle).unwrap()
+                }),
+            ),
+            tool_call_sse(
+                "sec-finalize",
+                "security_scan_contract",
+                json!({"action": "finalize", "path": scan_path}),
+            ),
+            text_body("Security scan sealed with zero reportable findings."),
+        ],
+    ));
+
+    let mut provider = provider_local::LocalAgentProvider::new();
+    provider
+        .connect(ProviderConfig {
+            auth_token: Some("test-key".into()),
+            extra: json!({
+                "base_url": format!("http://{addr}/v1"),
+                "model": "clark-code:kimi_k3",
+                "memories": false,
+                "sandbox_mode": "disabled",
+                "permissions": {"write_file": "allow"}
+            }),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let session = provider
+        .new_session(SessionOptions {
+            cwd: Some(dir.path().to_string_lossy().to_string()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+    let mut stream = provider
+        .prompt(
+            &session.id,
+            PromptInput::text("$security:security-scan scan this deterministic fixture"),
+        )
+        .await
+        .unwrap();
+    let mut tools = Vec::new();
+    let mut status = None;
+    while let Some(event) = stream.next().await {
+        match event {
+            AgentEvent::ToolCall { call, .. } => {
+                if let Some(name) = call.tool_name {
+                    tools.push(name);
+                }
+            }
+            AgentEvent::RunFinished { outcome, .. } => {
+                status = Some(outcome.status);
+                break;
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(status, Some(RunStatus::Done));
+    assert_eq!(
+        tools,
+        [
+            "security_scan_contract",
+            "security_scan_contract",
+            "write_file",
+            "security_scan_contract"
+        ]
+    );
+    assert!(dir
+        .path()
+        .join(".clark/security-scans/fake-e2e/seal.json")
+        .is_file());
+    let history = provider_local::list_security_scans(&provider_local::LocalExecutor, dir.path())
+        .await
+        .unwrap();
+    assert_eq!(history.len(), 1);
+    assert_eq!(history[0].bundle.scan_id, "fake-e2e");
+    assert!(history[0].seal.is_some());
+
+    let requests = served.await.unwrap();
+    assert_eq!(requests.len(), 5);
+    assert!(requests
+        .iter()
+        .all(|request| request_json(request)["model"] == provider_local::SECURITY_MODEL));
+}
+
+#[tokio::test]
 async fn local_loop_reads_file_and_answers() {
     // A real project dir with a real file the tool will read.
     let dir = tempfile::tempdir().unwrap();

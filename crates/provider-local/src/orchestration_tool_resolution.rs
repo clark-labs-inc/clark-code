@@ -147,6 +147,30 @@ impl ToolExecutor for ResolveDelegation {
                 ReportStatus::Accepted | ReportStatus::Failed
             )
         });
+        let accepted = !snapshot.agents.is_empty()
+            && snapshot
+                .agents
+                .values()
+                .all(|agent| agent.report_status == ReportStatus::Accepted);
+        if accepted {
+            let tasks = snapshot
+                .agents
+                .values()
+                .map(|agent| crate::security::SecurityDeepTaskReceipt {
+                    task_id: agent.task.id.0.clone(),
+                    attempt: agent.attempt,
+                    claim_count: agent
+                        .report
+                        .as_ref()
+                        .map_or(0, |report| report.claims.len()),
+                })
+                .collect();
+            ctx.session.lock().await.security_deep.record_orchestration(
+                &args.orchestration_id,
+                &stored.parent_context,
+                tasks,
+            );
+        }
         if settled {
             self.shared
                 .orchestrations
