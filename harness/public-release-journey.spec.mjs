@@ -147,6 +147,14 @@ test("candidate release is parallel, supply-chain bound, and platform independen
     workflow,
     /publish_independent_platforms:[\s\S]*?desktop\/latest\/manifest\.json[\s\S]*?aws s3 cp "\$release_dir\/manifest\.json"/,
   );
+  assert.ok(
+    workflow.includes('}, null, 2) + "\\n",'),
+    "publication receipts must end with an actual newline",
+  );
+  assert.ok(
+    !workflow.includes('}, null, 2) + "\\\\n",'),
+    "publication receipts must not append a literal backslash-n",
+  );
   assert.match(
     workflow,
     /Build installers \(non-macOS\)[\s\S]*?if: runner\.os != 'macOS'[\s\S]*?uses: tauri-apps\/tauri-action@[0-9a-f]{40}[\s\S]*?with:\s*\n\s*args:/,

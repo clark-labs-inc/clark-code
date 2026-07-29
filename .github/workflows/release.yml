@@ -1787,7 +1787,7 @@ jobs:
                 tag: process.env.CLARK_RELEASE_TAG,
                 source_revision: process.env.GITHUB_SHA,
                 published_at: new Date().toISOString(),
-              }, null, 2) + "\\n",
+              }, null, 2) + "\n",
             );
           '
 
