@@ -5,24 +5,31 @@ use std::path::Path;
 use std::ptr;
 
 use exec_sandbox_protocol::{decode_request, encode_request, WindowsRunnerRequest};
-use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, HANDLE, WAIT_FAILED};
-use windows_sys::Win32::Security::Authorization::{ConvertSidToStringSidW, ConvertStringSidToSidW};
+use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, LocalFree, HANDLE, WAIT_FAILED};
+use windows_sys::Win32::Security::Authorization::{
+    ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW,
+    ConvertStringSidToSidW, SDDL_REVISION_1,
+};
 use windows_sys::Win32::Security::{
     CreateRestrictedToken, GetTokenInformation, IsTokenRestricted, TokenUser,
-    DISABLE_MAX_PRIVILEGE, LUA_TOKEN, SID_AND_ATTRIBUTES, TOKEN_ALL_ACCESS, TOKEN_USER,
-    WRITE_RESTRICTED,
+    DISABLE_MAX_PRIVILEGE, LUA_TOKEN, PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES,
+    SID_AND_ATTRIBUTES, TOKEN_ALL_ACCESS, TOKEN_USER, WRITE_RESTRICTED,
 };
 use windows_sys::Win32::System::JobObjects::{
     AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
     SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
     JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
 };
+use windows_sys::Win32::System::StationsAndDesktops::{
+    CloseDesktop, CloseWindowStation, CreateDesktopW, CreateWindowStationW,
+    GetProcessWindowStation, SetProcessWindowStation, HDESK, HWINSTA,
+};
 use windows_sys::Win32::System::Threading::{
     CreateProcessAsUserW, CreateProcessWithLogonW, GetCurrentProcess, GetExitCodeProcess,
     OpenProcessToken, ResumeThread, WaitForSingleObject, CREATE_NO_WINDOW, CREATE_SUSPENDED,
-    CREATE_UNICODE_ENVIRONMENT, DETACHED_PROCESS, LOGON_WITH_PROFILE, PROCESS_INFORMATION,
-    STARTUPINFOW,
+    CREATE_UNICODE_ENVIRONMENT, LOGON_WITH_PROFILE, PROCESS_INFORMATION, STARTUPINFOW,
 };
+use windows_sys::Win32::UI::WindowsAndMessaging::WINSTA_ALL_ACCESS;
 
 use crate::launch::LaunchHost;
 
@@ -34,7 +41,8 @@ use super::transport::{ParentTransport, WorkerTransport};
 
 const INFINITE: u32 = u32::MAX;
 const WORKER_SWITCH: &str = "--restricted-worker";
-const CHILD_CREATION_FLAGS: u32 = CREATE_UNICODE_ENVIRONMENT | DETACHED_PROCESS;
+const CHILD_CREATION_FLAGS: u32 = CREATE_UNICODE_ENVIRONMENT | CREATE_NO_WINDOW;
+const DESKTOP_ALL_ACCESS: u32 = 0x01ff;
 // Git for Windows and other normal desktop CLIs consult HKCU during startup.
 // `CreateProcessWithLogonW` leaves that hive unloaded by default; load only
 // the offline worker's profile, then replace its child environment explicitly
@@ -179,18 +187,22 @@ pub fn run_restricted_worker(
     // hosted Windows, while adding no protection against a post-verification
     // change (that would require administrator authority). Keep the check at
     // the parent boundary and proceed directly to the WRITE_RESTRICTED token.
-    let restricted = restricted_write_token(base_token.0, &request.policy.write_capability_sids())?;
+    let capability_sids = request.policy.write_capability_sids();
+    let restricted = restricted_write_token(base_token.0, &capability_sids)?;
     if unsafe { IsTokenRestricted(restricted.0) } == 0 {
         return Err("CreateRestrictedToken returned an unrestricted token".into());
     }
     transport.write_trace("restricted_worker:token_ready");
-    spawn_inner(request, restricted.0, transport)
+    let desktop = PrivateDesktop::create(expected_sid, &capability_sids)?;
+    transport.write_trace("restricted_worker:desktop_ready");
+    spawn_inner(request, restricted.0, transport, &desktop)
 }
 
 fn spawn_inner(
     request: &WindowsRunnerRequest,
     token: HANDLE,
     transport: &WorkerTransport,
+    desktop: &PrivateDesktop,
 ) -> Result<i32, String> {
     transport.write_trace("inner:begin");
     let process = &request.process;
@@ -208,7 +220,7 @@ fn spawn_inner(
     let cwd = process.cwd.to_os_string();
     let cwd_w = wide_os(&cwd);
     let mut environment = inner_environment(request);
-    let startup = transport.startup_info();
+    let startup = transport.startup_info(desktop.path());
     let mut info: PROCESS_INFORMATION = unsafe { zeroed() };
     let created = unsafe {
         CreateProcessAsUserW(
@@ -232,6 +244,124 @@ fn spawn_inner(
     let result = wait_process(info);
     transport.write_trace("inner:exited");
     result
+}
+
+struct PrivateDesktop {
+    original_station: HWINSTA,
+    station: HWINSTA,
+    desktop: HDESK,
+    path: Vec<u16>,
+}
+
+impl PrivateDesktop {
+    fn create(user_sid: &str, capability_sids: &[String]) -> Result<Self, String> {
+        let security = DesktopSecurity::new(user_sid, capability_sids)?;
+        let station_name = format!("ClarkSandbox-{}", std::process::id());
+        let desktop_name = "Default";
+        let station_w = wide_str(&station_name);
+        let desktop_w = wide_str(desktop_name);
+        let original_station = unsafe { GetProcessWindowStation() };
+        if original_station.is_null() {
+            return Err(last_error("GetProcessWindowStation"));
+        }
+        let station = unsafe {
+            CreateWindowStationW(
+                station_w.as_ptr(),
+                0,
+                WINSTA_ALL_ACCESS as u32,
+                &security.attributes,
+            )
+        };
+        if station.is_null() {
+            return Err(last_error("CreateWindowStationW"));
+        }
+        if unsafe { SetProcessWindowStation(station) } == 0 {
+            unsafe { CloseWindowStation(station) };
+            return Err(last_error("SetProcessWindowStation(private)"));
+        }
+        let desktop = unsafe {
+            CreateDesktopW(
+                desktop_w.as_ptr(),
+                ptr::null(),
+                ptr::null(),
+                0,
+                DESKTOP_ALL_ACCESS,
+                &security.attributes,
+            )
+        };
+        if desktop.is_null() {
+            unsafe {
+                SetProcessWindowStation(original_station);
+                CloseWindowStation(station);
+            }
+            return Err(last_error("CreateDesktopW"));
+        }
+        Ok(Self {
+            original_station,
+            station,
+            desktop,
+            path: wide_str(&format!("{station_name}\\{desktop_name}")),
+        })
+    }
+
+    fn path(&self) -> &[u16] {
+        &self.path
+    }
+}
+
+impl Drop for PrivateDesktop {
+    fn drop(&mut self) {
+        unsafe {
+            SetProcessWindowStation(self.original_station);
+            CloseDesktop(self.desktop);
+            CloseWindowStation(self.station);
+        }
+    }
+}
+
+struct DesktopSecurity {
+    descriptor: PSECURITY_DESCRIPTOR,
+    attributes: SECURITY_ATTRIBUTES,
+}
+
+impl DesktopSecurity {
+    fn new(user_sid: &str, capability_sids: &[String]) -> Result<Self, String> {
+        let mut sddl = format!("D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GA;;;{user_sid})");
+        for sid in capability_sids {
+            sddl.push_str(&format!("(A;;GA;;;{sid})"));
+        }
+        let sddl = wide_str(&sddl);
+        let mut descriptor = ptr::null_mut();
+        let converted = unsafe {
+            ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                sddl.as_ptr(),
+                SDDL_REVISION_1,
+                &mut descriptor,
+                ptr::null_mut(),
+            )
+        };
+        if converted == 0 {
+            return Err(last_error(
+                "ConvertStringSecurityDescriptorToSecurityDescriptorW(desktop)",
+            ));
+        }
+        Ok(Self {
+            descriptor,
+            attributes: SECURITY_ATTRIBUTES {
+                nLength: size_of::<SECURITY_ATTRIBUTES>() as u32,
+                lpSecurityDescriptor: descriptor,
+                bInheritHandle: 0,
+            },
+        })
+    }
+}
+
+impl Drop for DesktopSecurity {
+    fn drop(&mut self) {
+        if !self.descriptor.is_null() {
+            unsafe { LocalFree(self.descriptor.cast()) };
+        }
+    }
 }
 
 fn trace(message: &str) {
@@ -494,8 +624,7 @@ mod tests {
 
     #[test]
     fn restricted_children_never_request_a_visible_console() {
-        assert_ne!(CHILD_CREATION_FLAGS & DETACHED_PROCESS, 0);
-        assert_eq!(CHILD_CREATION_FLAGS & CREATE_NO_WINDOW, 0);
+        assert_ne!(CHILD_CREATION_FLAGS & CREATE_NO_WINDOW, 0);
         assert_ne!(CHILD_CREATION_FLAGS & CREATE_UNICODE_ENVIRONMENT, 0);
     }
 

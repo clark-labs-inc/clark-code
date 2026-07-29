@@ -99,15 +99,14 @@ impl WorkerTransport {
         })
     }
 
-    pub fn startup_info(&self) -> STARTUPINFOW {
+    pub fn startup_info(&self, desktop: &[u16]) -> STARTUPINFOW {
         let mut startup: STARTUPINFOW = unsafe { zeroed() };
         startup.cb = size_of::<STARTUPINFOW>() as u32;
-        // These children are detached from a console and must stay on
-        // CreateProcessAsUserW's noninteractive window station. Requesting
-        // `winsta0\default` requires explicit window-station and desktop DACL
-        // grants for the restricted logon session; without them, console
-        // applications can remain blocked in their conhost LPC handshake
-        // before their runtime initializes.
+        // Restricted processes must run on a separately ACL'd desktop. The
+        // caller owns this null-terminated path for the duration of process
+        // creation and keeps the station and desktop handles alive until the
+        // process tree exits.
+        startup.lpDesktop = desktop.as_ptr() as *mut u16;
         startup.dwFlags = STARTF_USESTDHANDLES;
         startup.hStdInput = self.stdin.0;
         startup.hStdOutput = self.stdout.0;
@@ -398,6 +397,17 @@ mod tests {
             stderr: OwnedHandle(ptr::null_mut()),
         };
 
-        assert!(transport.startup_info().lpDesktop.is_null());
+        let desktop = [
+            b'C' as u16,
+            b'l' as u16,
+            b'a' as u16,
+            b'r' as u16,
+            b'k' as u16,
+            b'\\' as u16,
+            b'D' as u16,
+            0,
+        ];
+        let startup = transport.startup_info(&desktop);
+        assert_eq!(startup.lpDesktop, desktop.as_ptr() as *mut u16);
     }
 }
