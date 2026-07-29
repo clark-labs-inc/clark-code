@@ -164,19 +164,18 @@ fn process_tree_snapshot(root_pid: u32) -> Vec<u8> {
            }} \
          }}; \
          $details = foreach ($item in $rows) {{ \
-           $threads = @(); $modules = @(); \
+           $threads = @(); \
            try {{ \
              $process = Get-Process -Id $item.ProcessId -ErrorAction Stop; \
              $threads = @($process.Threads | ForEach-Object {{ \
                $reason = $null; try {{ $reason = [string]$_.WaitReason }} catch {{}}; \
                [pscustomobject]@{{ Id = $_.Id; State = [string]$_.ThreadState; WaitReason = $reason; StartAddress = [string]$_.StartAddress }} \
-             }}); \
-             $modules = @($process.Modules | ForEach-Object {{ $_.FileName }}) \
+             }}) \
            }} catch {{}}; \
            [pscustomobject]@{{ \
              ProcessId = $item.ProcessId; ParentProcessId = $item.ParentProcessId; \
              Name = $item.Name; ExecutablePath = $item.ExecutablePath; \
-             Threads = $threads; Modules = $modules \
+             Threads = $threads \
            }} \
          }}; \
          $details | ConvertTo-Json -Depth 5 -Compress"

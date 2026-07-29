@@ -102,7 +102,7 @@ impl WorkerTransport {
     pub fn startup_info(&self) -> STARTUPINFOW {
         let mut startup: STARTUPINFOW = unsafe { zeroed() };
         startup.cb = size_of::<STARTUPINFOW>() as u32;
-        // These children are created with CREATE_NO_WINDOW and must stay on
+        // These children are detached from a console and must stay on
         // CreateProcessAsUserW's noninteractive window station. Requesting
         // `winsta0\default` requires explicit window-station and desktop DACL
         // grants for the restricted logon session; without them, console
