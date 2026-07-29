@@ -6,6 +6,7 @@ import { createServer } from "node:http";
 import test from "node:test";
 
 import {
+  createLegacyUpdaterDocument,
   validatePublicReleaseJourneyReceipt,
   validateChannelAdvance,
   createPlatformUpdaterDocuments,
@@ -13,6 +14,7 @@ import {
   validateS3HeadObject,
   validateReleaseDocuments,
   validatePlatformReleaseAssets,
+  validateLegacyUpdaterDocument,
   validatePlatformUpdaterDocument,
   validateRenderedDownloadLinks,
   verifyArtifact,
@@ -101,6 +103,10 @@ test("Windows release identity is live-gated through Azure Artifact Signing", ()
   assert.match(
     workflow,
     /publish_independent_platforms:[\s\S]*?Publish independently verified platform downloads[\s\S]*?desktop\/latest\/updater\//,
+  );
+  assert.match(
+    workflow,
+    /publish_independent_platforms:[\s\S]*?desktop\/latest\/latest\.json[\s\S]*?aws s3 cp "\$release_dir\/latest\.json"/,
   );
   assert.match(
     workflow,
@@ -337,6 +343,42 @@ test("independent platform release documents preserve exact platform boundaries"
       document.platforms[target],
     );
   }
+  const legacy = createLegacyUpdaterDocument({
+    updaterDocuments: updater,
+    tag,
+    baseUrl,
+    sourceRevision,
+    platforms: ["macos", "linux"],
+  });
+  assert.deepEqual(Object.keys(legacy.platforms), [
+    "darwin-aarch64",
+    "darwin-x86_64",
+    "linux-x86_64",
+  ]);
+  assert.equal(
+    validateLegacyUpdaterDocument({
+      document: legacy,
+      platformDocuments: updater,
+      tag,
+      baseUrl,
+      sourceRevision,
+      platforms: ["macos", "linux"],
+    }),
+    legacy,
+  );
+  const staleLegacy = structuredClone(legacy);
+  staleLegacy.version = "1.2.2";
+  assert.throws(
+    () => validateLegacyUpdaterDocument({
+      document: staleLegacy,
+      platformDocuments: updater,
+      tag,
+      baseUrl,
+      sourceRevision,
+      platforms: ["macos", "linux"],
+    }),
+    /complete platform release/,
+  );
 });
 
 test("release documents require exact immutable platform and installer identities", () => {

@@ -265,6 +265,43 @@ export function createPlatformUpdaterDocuments({
   return documents;
 }
 
+export function createLegacyUpdaterDocument({
+  updaterDocuments,
+  tag,
+  baseUrl,
+  sourceRevision,
+  platforms,
+}) {
+  const targets = platformUpdaterTargets(platforms);
+  const entries = {};
+  let metadata;
+  for (const target of targets) {
+    const document = updaterDocuments?.[target];
+    validatePlatformUpdaterDocument({
+      document,
+      target,
+      tag,
+      baseUrl,
+      sourceRevision,
+    });
+    const observedMetadata = {
+      version: document.version,
+      source_revision: document.source_revision,
+      notes: document.notes,
+      pub_date: document.pub_date,
+    };
+    if (
+      metadata
+      && JSON.stringify(observedMetadata) !== JSON.stringify(metadata)
+    ) {
+      throw new Error("platform updater documents do not share one release identity");
+    }
+    metadata = observedMetadata;
+    entries[target] = document.platforms[target];
+  }
+  return { ...metadata, platforms: entries };
+}
+
 export function validatePlatformUpdaterDocument({
   document,
   target,
@@ -283,6 +320,40 @@ export function validatePlatformUpdaterDocument({
     throw new Error(`platform updater document for ${target} is invalid`);
   }
   return entry;
+}
+
+export function validateLegacyUpdaterDocument({
+  document,
+  platformDocuments,
+  tag,
+  baseUrl,
+  sourceRevision,
+  platforms,
+}) {
+  const targets = platformUpdaterTargets(platforms);
+  const observedTargets = Object.keys(document?.platforms ?? {});
+  if (
+    document?.version !== tag.replace(/^v/, "")
+    || document?.source_revision !== sourceRevision
+    || observedTargets.length !== targets.length
+    || targets.some((target) => !observedTargets.includes(target))
+  ) {
+    throw new Error("legacy updater document does not identify the complete platform release");
+  }
+  for (const target of targets) {
+    const entry = document.platforms[target];
+    if (
+      !entry?.signature
+      || !entry.url?.startsWith(`${baseUrl}/releases/${tag}/`)
+      || (
+        platformDocuments
+        && JSON.stringify(entry) !== JSON.stringify(platformDocuments[target]?.platforms?.[target])
+      )
+    ) {
+      throw new Error(`legacy updater document has an invalid ${target} entry`);
+    }
+  }
+  return document;
 }
 
 export function validateRenderedDownloadLinks({ hrefs, baseUrl }) {
@@ -573,6 +644,15 @@ export async function runPlatformReleaseJourney({
       sourceRevision,
     });
   }
+  const legacyUpdaterDocument = await fetchJson(`${normalizedBase}/latest/latest.json`);
+  validateLegacyUpdaterDocument({
+    document: legacyUpdaterDocument,
+    platformDocuments: updaterDocuments,
+    tag,
+    baseUrl: normalizedBase,
+    sourceRevision,
+    platforms: normalizedPlatforms,
+  });
 
   const { chromium } = await import("playwright");
   const browser = await chromium.launch({ headless: true });
@@ -638,6 +718,7 @@ export async function runPlatformReleaseJourney({
     base_url: normalizedBase,
     rendered,
     updater_targets: updaterTargets,
+    legacy_updater_targets: Object.keys(legacyUpdaterDocument.platforms),
     artifacts,
   };
   if (outputDir) {

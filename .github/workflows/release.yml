@@ -1359,9 +1359,9 @@ jobs:
 
   # Each platform has its own website aliases and updater document. This lane
   # publishes every complete platform build when Windows is intentionally in
-  # preview mode, or when Windows signing fails while macOS/Linux pass. It does
-  # not touch legacy latest.json or manifest.json: those stay an all-platform
-  # compatibility channel until the signed Windows journey passes.
+  # preview mode, or when Windows signing fails while macOS/Linux pass. It also
+  # advances legacy latest.json for installed clients that predate per-target
+  # updater documents. The website manifest remains the full-platform channel.
   publish_independent_platforms:
     name: Publish independently verified platform downloads
     needs: [build, exec-server]
@@ -1416,6 +1416,7 @@ jobs:
           import path from "node:path";
           import {
             PLATFORM_RELEASES,
+            createLegacyUpdaterDocument,
             createPlatformUpdaterDocuments,
             platformAliases,
             validatePlatformReleaseAssets,
@@ -1476,6 +1477,17 @@ jobs:
             path.join(out, "aliases.tsv"),
             assets.map((asset) => `${asset.name}\t${asset.digest.slice("sha256:".length)}\t${asset.size}`).join("\n") + "\n",
           );
+          const legacyDocument = createLegacyUpdaterDocument({
+            updaterDocuments: documents,
+            tag,
+            baseUrl,
+            sourceRevision: process.env.GITHUB_SHA,
+            platforms,
+          });
+          fs.writeFileSync(
+            path.join(out, "latest.json"),
+            `${JSON.stringify(legacyDocument, null, 2)}\n`,
+          );
           for (const [target, document] of Object.entries(documents)) {
             fs.writeFileSync(
               path.join(out, "updater", `${target}.json`),
@@ -1497,14 +1509,14 @@ jobs:
           mkdir -p "$transaction_dir"
 
           # An older platform lane must never overwrite an independently newer
-          # platform document, even when a delayed workflow reaches this lock.
-          for document in "$release_dir"/updater/*.json; do
-            target="$(basename "$document" .json)"
+          # updater document, even when a delayed workflow reaches this lock.
+          guard_channel_advance() {
+            key="$1"
             current="$(mktemp)"
             current_err="$(mktemp)"
             if aws s3api get-object \
               --bucket "$bucket" \
-              --key "desktop/latest/updater/$target.json" \
+              --key "$key" \
               "$current" > /dev/null 2>"$current_err"; then
               node --input-type=module -e '
                 import fs from "node:fs";
@@ -1516,7 +1528,12 @@ jobs:
               cat "$current_err" >&2
               exit 1
             fi
+          }
+          for document in "$release_dir"/updater/*.json; do
+            target="$(basename "$document" .json)"
+            guard_channel_advance "desktop/latest/updater/$target.json"
           done
+          guard_channel_advance "desktop/latest/latest.json"
 
           : > "$transaction_dir/prior-keys.tsv"
           {
@@ -1524,6 +1541,7 @@ jobs:
             for document in "$release_dir"/updater/*.json; do
               printf 'desktop/latest/updater/%s\n' "$(basename "$document")"
             done
+            printf 'desktop/latest/latest.json\n'
           } > "$transaction_dir/keys.txt"
           while IFS= read -r key; do
             head="$(mktemp)"
@@ -1571,6 +1589,16 @@ jobs:
               --cache-control "no-store, no-cache, must-revalidate, max-age=0" \
               --metadata "sha256=$sha,clark-version=$tag,source-revision=$GITHUB_SHA"
           done
+
+          # Legacy clients request this aggregate document. Write it after every
+          # target document and installer alias so it remains the atomic update
+          # trigger for that installed population.
+          legacy_sha="$(sha256sum "$release_dir/latest.json" | awk '{print $1}')"
+          aws s3 cp "$release_dir/latest.json" \
+            "s3://$bucket/desktop/latest/latest.json" \
+            --content-type "application/json" \
+            --cache-control "no-store, no-cache, must-revalidate, max-age=0" \
+            --metadata "sha256=$legacy_sha,clark-version=$tag,source-revision=$GITHUB_SHA"
 
           if [ -n "${CLARK_DESKTOP_DOWNLOAD_DISTRIBUTION_ID}" ]; then
             aws cloudfront create-invalidation \
