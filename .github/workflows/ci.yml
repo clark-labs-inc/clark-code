@@ -5,43 +5,54 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
 
 jobs:
   rust:
-    name: Rust (core + providers)
+    name: Rust core and providers
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
         with:
+          toolchain: 1.97.1
           components: clippy, rustfmt
           targets: wasm32-unknown-unknown
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
       - name: Format
         run: cargo fmt --all --check
-      - name: Clippy (core + providers + devbridge)
+      - name: Clippy core and providers
         run: cargo clippy -p agent-core -p provider-acp -p provider-clark -p provider-local -p devbridge --all-targets -- -D warnings
-      - name: Test
-        run: cargo test -p agent-core -p provider-acp -p provider-clark -p provider-local
+      - name: Test core and providers
+        run: cargo test -p agent-core -p provider-acp -p provider-clark -p provider-local --no-fail-fast
       - name: WASM build (agent-core)
         run: cargo check -p agent-core --target wasm32-unknown-unknown
 
   frontend:
     name: Frontend
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: app
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
         with:
-          version: 10
-      - uses: actions/setup-node@v4
+          version: 10.34.5
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
+          node-version: 24.18.0
           cache: pnpm
           cache-dependency-path: app/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
@@ -51,31 +62,69 @@ jobs:
 
   tauri:
     name: Tauri build (${{ matrix.os }})
-    needs: [rust, frontend]
     strategy:
       fail-fast: false
       matrix:
         os: [macos-latest, ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
         with:
-          workspaces: "src-tauri -> target"
+          toolchain: 1.97.1
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          workspaces: ". -> target"
       - name: Install Linux deps
         if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: pnpm
-          cache-dependency-path: app/pnpm-lock.yaml
-      - run: pnpm --dir app install --frozen-lockfile
       - name: Build app (no bundle on CI)
         run: cargo build -p clark-desktop
+
+  release-contracts:
+    name: Release and model contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.18.0
+      - name: Validate release shell and public updater lifecycle
+        run: |
+          bash -n scripts/run-pre-release-benchmarks.sh
+          node --test harness/public-release-journey.spec.mjs
+      - name: Validate Qwen feature and capability contracts
+        run: node harness/feature-matrix.mjs --validate-only
+
+  required:
+    name: CI required
+    if: always()
+    needs: [rust, frontend, tauri, release-contracts]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Require every CI lane
+        env:
+          RUST_RESULT: ${{ needs.rust.result }}
+          FRONTEND_RESULT: ${{ needs.frontend.result }}
+          TAURI_RESULT: ${{ needs.tauri.result }}
+          RELEASE_RESULT: ${{ needs.release-contracts.result }}
+        run: |
+          test "$RUST_RESULT" = success
+          test "$FRONTEND_RESULT" = success
+          test "$TAURI_RESULT" = success
+          test "$RELEASE_RESULT" = success
+          {
+            echo "## CI receipt"
+            echo
+            echo "| Lane | Result |"
+            echo "| --- | --- |"
+            echo "| Rust core and providers | $RUST_RESULT |"
+            echo "| Frontend | $FRONTEND_RESULT |"
+            echo "| Native Tauri matrix | $TAURI_RESULT |"
+            echo "| Release and model contracts | $RELEASE_RESULT |"
+          } >> "$GITHUB_STEP_SUMMARY"

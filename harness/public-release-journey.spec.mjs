@@ -42,7 +42,7 @@ const aliases = [
   "ClarkCode_x86_64.rpm",
 ];
 
-test("Windows release identity is live-gated through Azure Artifact Signing", () => {
+test("candidate release is parallel, supply-chain bound, and platform independent", () => {
   const workflow = readFileSync(
     new URL("../.github/workflows/release.yml", import.meta.url),
     "utf8",
@@ -63,6 +63,15 @@ test("Windows release identity is live-gated through Azure Artifact Signing", ()
   assert.doesNotMatch(workflow, /WINDOWS_CERTIFICATE(?:_PASSWORD|_THUMBPRINT)?/);
   assert.match(
     workflow,
+    /workflow_dispatch:[\s\S]*?version:[\s\S]*?run_paid_benchmark:/,
+  );
+  assert.doesNotMatch(workflow, /\n\s+push:\s*\n\s+tags:/);
+  assert.match(
+    workflow,
+    /concurrency:[\s\S]*?group: clark-desktop-release-candidate[\s\S]*?cancel-in-progress: false/,
+  );
+  assert.match(
+    workflow,
     /release_source_prerequisites:[\s\S]*?runs-on: ubuntu-latest[\s\S]*?environment: release/,
   );
   assert.match(
@@ -79,20 +88,20 @@ test("Windows release identity is live-gated through Azure Artifact Signing", ()
   );
   assert.match(
     workflow,
-    /fetch-depth: 0[\s\S]*?tauri\.conf\.json[\s\S]*?declared_version[\s\S]*?merge-base --is-ancestor "\$GITHUB_SHA" origin\/main/,
+    /fetch-depth: 0[\s\S]*?tauri\.conf\.json[\s\S]*?declared_version[\s\S]*?git rev-parse origin\/main\)" != "\$GITHUB_SHA"/,
   );
   assert.match(
     workflow,
     /\n  build:[\s\S]*?runs-on: \$\{\{ matrix\.platform \}\}[\s\S]*?environment: release/,
   );
-  assert.match(workflow, /uses: azure\/login@v3/g);
+  assert.match(workflow, /uses: azure\/login@[0-9a-f]{40}/g);
   assert.match(
     workflow,
     /windows_release_prerequisites:[\s\S]*?sign-windows-artifact\.ps1[\s\S]*?SignerCertificate\.Subject/,
   );
   assert.match(
     workflow,
-    /release_source_prerequisites:[\s\S]*?aws-actions\/configure-aws-credentials@v4[\s\S]*?aws sts get-caller-identity/,
+    /release_source_prerequisites:[\s\S]*?aws-actions\/configure-aws-credentials@[0-9a-f]{40}[\s\S]*?aws sts get-caller-identity/,
   );
   assert.match(
     workflow,
@@ -109,11 +118,15 @@ test("Windows release identity is live-gated through Azure Artifact Signing", ()
   );
   assert.match(
     workflow,
-    /\n  build:[\s\S]*?needs: \[pre_release_benchmarks, release_source_ci\]/,
+    /\n  build:\s*\n\s+needs: \[release_source_prerequisites\]/,
   );
   assert.match(
     workflow,
-    /\n  exec-server:[\s\S]*?needs: \[pre_release_benchmarks, release_source_ci\]/,
+    /\n  exec-server:\s*\n\s+needs: \[release_source_prerequisites\]/,
+  );
+  assert.match(
+    workflow,
+    /publish_independent_platforms:[\s\S]*?needs: \[build, exec-server, pre_release_benchmarks, release_source_ci\]/,
   );
   assert.match(
     workflow,
@@ -129,7 +142,7 @@ test("Windows release identity is live-gated through Azure Artifact Signing", ()
   );
   assert.match(
     workflow,
-    /Build installers \(non-macOS\)[\s\S]*?if: runner\.os != 'macOS'[\s\S]*?uses: tauri-apps\/tauri-action@v0[\s\S]*?with:\s*\n\s*args:/,
+    /Build installers \(non-macOS\)[\s\S]*?if: runner\.os != 'macOS'[\s\S]*?uses: tauri-apps\/tauri-action@[0-9a-f]{40}[\s\S]*?with:\s*\n\s*args:/,
   );
   assert.match(
     workflow,
@@ -150,6 +163,14 @@ test("Windows release identity is live-gated through Azure Artifact Signing", ()
   assert.doesNotMatch(workflow, /building macOS release unsigned|unsigned or non-macOS|signing_enabled != 'true'/);
   assert.doesNotMatch(workflow, /\b(?:tagName|releaseName|releaseBody|releaseDraft):/);
   assert.doesNotMatch(workflow, /\bgh release\b/);
+  assert.match(
+    workflow,
+    /Generate platform SPDX SBOM[\s\S]*?anchore\/sbom-action@[0-9a-f]{40}[\s\S]*?actions\/attest@[0-9a-f]{40}/,
+  );
+  assert.match(
+    workflow,
+    /finalize_release_tag:[\s\S]*?Reverify public generation and create the stable tag[\s\S]*?ClarkCode_x64-setup\.exe[\s\S]*?windows-x86_64[\s\S]*?git tag -a "\$CLARK_RELEASE_TAG"[\s\S]*?git push origin/,
+  );
   assert.match(
     workflow,
     /windows-release-build-receipt[\s\S]*?--build-receipt target\/windows-release-build\/receipt\.json/,

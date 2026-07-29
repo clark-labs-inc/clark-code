@@ -4,13 +4,16 @@ name: Release
 # runners (cross-compiling a Tauri app from one OS to the others is not viable),
 # publishes immutable binaries and mutable platform pointers to Clark-owned
 # download hosting. GitHub Releases are deliberately not a release dependency:
-# the public installer source of truth is clarkchat.com/clark-code. Triggered
-# by a version tag.
+# the public installer source of truth is clarkchat.com/clark-code. A candidate
+# runs from exact main, and the stable tag is created only after public
+# verification succeeds.
 on:
-  push:
-    tags: ["v*"]
   workflow_dispatch:
     inputs:
+      version:
+        description: Exact semver already declared in Cargo and Tauri metadata
+        required: true
+        type: string
       run_paid_benchmark:
         description: Run the separately authorized managed Qwen 3.7 Flash benchmark
         required: false
@@ -19,11 +22,17 @@ on:
 
 permissions:
   actions: read
-  contents: write
+  attestations: write
+  contents: read
   id-token: write
+
+concurrency:
+  group: clark-desktop-release-candidate
+  cancel-in-progress: false
 
 env:
   AWS_REGION: us-west-2
+  CLARK_RELEASE_TAG: ${{ format('v{0}', inputs.version) }}
   # Rust's MSVC target dynamically links vcruntime by default. The app and its
   # private helpers must also start on a clean Windows profile, before any
   # machine-wide VC++ redistributable has been installed.
@@ -55,31 +64,42 @@ jobs:
     environment: release
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
-      - name: Require an exact mainline tag, bundle version, and shared release identities
+      - name: Require exact mainline source, bundle version, and shared release identities
         shell: bash
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           set -euo pipefail
-          if [[ "$GITHUB_REF_TYPE" != "tag" || ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Release must run from a stable vX.Y.Z tag, got $GITHUB_REF_TYPE/$GITHUB_REF_NAME" >&2
+          if [[ "$GITHUB_REF_TYPE" != "branch" || "$GITHUB_REF_NAME" != "main" ]]; then
+            echo "Release candidates must run from main, got $GITHUB_REF_TYPE/$GITHUB_REF_NAME" >&2
             exit 1
           fi
           if [[ ! "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]; then
             echo "Release source revision is not one exact Git commit" >&2
             exit 1
           fi
-          declared_version="$(jq -r '.version' src-tauri/tauri.conf.json)"
-          if [[ "$declared_version" != "${GITHUB_REF_NAME#v}" ]]; then
-            echo "Release tag $GITHUB_REF_NAME does not match bundle version $declared_version" >&2
+          if [[ ! "$CLARK_RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Release version must be exact semver, got $CLARK_RELEASE_TAG" >&2
             exit 1
           fi
-          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+          declared_version="$(jq -r '.version' src-tauri/tauri.conf.json)"
+          if [[ "$declared_version" != "${CLARK_RELEASE_TAG#v}" ]]; then
+            echo "Release candidate $CLARK_RELEASE_TAG does not match bundle version $declared_version" >&2
+            exit 1
+          fi
+          if [[ "$(git rev-parse origin/main)" != "$GITHUB_SHA" ]]; then
+            echo "Release source is not the exact current origin/main revision" >&2
+            exit 1
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/$CLARK_RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Stable release tag already exists: $CLARK_RELEASE_TAG" >&2
+            exit 1
+          fi
           for name in \
             CLARK_DESKTOP_DOWNLOAD_UPLOAD_ROLE_ARN \
             TAURI_SIGNING_PRIVATE_KEY \
@@ -91,7 +111,7 @@ jobs:
           done
 
       - name: Authenticate the release workload with AWS OIDC
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
         with:
           role-to-assume: ${{ env.CLARK_DESKTOP_DOWNLOAD_UPLOAD_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
@@ -122,11 +142,12 @@ jobs:
 
       - name: Upload shared release preflight receipt
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0 # v7.0.1
         with:
           name: release-source-preflight
           path: target/release-source-preflight/receipt.json
           if-no-files-found: error
+          retention-days: 90
 
   windows_release_prerequisites:
     name: Windows publisher identity preflight
@@ -138,7 +159,7 @@ jobs:
     environment: release
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Require the Windows signing identity coordinates
         shell: pwsh
@@ -163,7 +184,7 @@ jobs:
           }
 
       - name: Authenticate the Windows release workload with Azure OIDC
-        uses: azure/login@v3
+        uses: azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43 # v3.0.0
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
@@ -210,7 +231,7 @@ jobs:
 
       - name: Upload Windows publisher preflight receipt
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0 # v7.0.1
         with:
           name: windows-release-identity-preflight
           path: target/artifact-signing/preflight-receipt.json
@@ -222,10 +243,10 @@ jobs:
     runs-on: [self-hosted, macOS, ARM64, clark-utm-qa]
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
+          node-version: 24.18.0
 
       - name: Start and verify the exact Windows 11 QA guest
         run: |
@@ -237,7 +258,7 @@ jobs:
 
       - name: Upload Windows runner readiness receipt
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0 # v7.0.1
         with:
           name: windows-release-runner-preflight
           path: target/windows-release-runner-preflight
@@ -306,20 +327,22 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
       # Pin the external fixture so a release is reproducible. Override the
       # repository variable deliberately when validating a newer Superpowers
       # revision; never float this release gate on upstream main.
       - name: Checkout pinned Superpowers benchmark fixture
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: obra/superpowers
           ref: ${{ vars.CLARK_SUPERPOWERS_BENCHMARK_REF || 'd884ae04edebef577e82ff7c4e143debd0bbec99' }}
           path: benchmark-fixtures/superpowers
 
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
+        with:
+          toolchain: 1.97.1
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
 
       - name: Install native host test dependencies
         run: |
@@ -338,12 +361,12 @@ jobs:
             build-essential \
             pkg-config
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271
         with:
-          version: 10
-      - uses: actions/setup-node@v4
+          version: 10.34.5
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
-          node-version: 24
+          node-version: 24.18.0
           cache: pnpm
           cache-dependency-path: |
             app/pnpm-lock.yaml
@@ -364,7 +387,7 @@ jobs:
 
       - name: Upload benchmark receipts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: pre-release-benchmark
           path: target/pre-release-benchmarks/release
@@ -374,20 +397,22 @@ jobs:
     name: Managed Qwen 3.7 Flash release benchmark (macOS sandbox)
     needs: [release_source_prerequisites]
     # Model execution is opt-in and never spends provider credits merely because
-    # a version tag was pushed. It remains available as a separately authorized
-    # release-environment check from workflow_dispatch.
+    # a release candidate was dispatched. It remains available as a separately
+    # authorized release-environment check from workflow_dispatch.
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_paid_benchmark }}
     runs-on: macos-latest
     timeout-minutes: 15
     env:
       CLARK_CODE_PROVIDER: ${{ vars.CLARK_CODE_PRERELEASE_PROVIDER || 'clark-platform' }}
       CLARK_CODE_BASE_URL: ${{ vars.CLARK_CODE_PRERELEASE_BASE_URL || 'https://api.clarkslabs.com/v1' }}
-      CLARK_CODE_MODEL: clark-code:free
+      CLARK_CODE_MODEL: qwen/qwen3.7-flash
       CLARK_CODE_API_KEY: ${{ secrets.CLARK_CODE_PRERELEASE_API_KEY }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
+        with:
+          toolchain: 1.97.1
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
 
       # The live provider-local scenarios execute model-authored filesystem and
       # shell tools. GitHub's Linux runners block bubblewrap UID namespaces, so
@@ -405,14 +430,15 @@ jobs:
 
       - name: Upload paid benchmark receipts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: paid-release-benchmark
           path: target/pre-release-benchmarks/paid
           if-no-files-found: warn
 
   build:
-    needs: [pre_release_benchmarks, release_source_ci]
+    needs: [release_source_prerequisites]
+    timeout-minutes: 55
     strategy:
       fail-fast: false
       matrix:
@@ -445,7 +471,7 @@ jobs:
     # Windows leg consumes Azure only when its explicit signed mode is enabled.
     environment: release
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
       - name: Require the isolated Windows publisher preflight
         if: runner.os == 'Windows' && matrix.windows_signing
@@ -473,12 +499,13 @@ jobs:
           } while ((Get-Date) -lt $deadline)
           throw "Timed out waiting for the isolated Windows publisher preflight"
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
         with:
+          toolchain: 1.97.1
           targets: ${{ matrix.rust-targets }}
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
         with:
-          workspaces: "src-tauri -> target"
+          workspaces: ". -> target"
 
       - name: Install Linux deps
         if: matrix.platform == 'ubuntu-22.04'
@@ -499,12 +526,12 @@ jobs:
             pkg-config \
             libcap-dev
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271
         with:
-          version: 10
-      - uses: actions/setup-node@v4
+          version: 10.34.5
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
-          node-version: 24
+          node-version: 24.18.0
           cache: pnpm
           cache-dependency-path: app/pnpm-lock.yaml
       - run: pnpm --dir app install --frozen-lockfile
@@ -559,7 +586,7 @@ jobs:
 
       - name: Authenticate the Windows build with Azure OIDC
         if: runner.os == 'Windows' && matrix.windows_signing
-        uses: azure/login@v3
+        uses: azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
@@ -598,9 +625,8 @@ jobs:
           src-tauri/binaries/clark-command-runner-x86_64-pc-windows-msvc.exe --self-test
           src-tauri/binaries/clark-windows-sandbox-setup-x86_64-pc-windows-msvc.exe --self-test
 
-      - name: Probe experimental native Windows containment
-        if: runner.os == 'Windows'
-        continue-on-error: true
+      - name: Require native containment for signed Windows releases
+        if: runner.os == 'Windows' && matrix.windows_signing
         shell: pwsh
         run: |
           node harness/windows-native-containment.mjs `
@@ -609,16 +635,14 @@ jobs:
             --source-revision $env:GITHUB_SHA `
             --out target/windows-native-containment
 
-      - name: Upload native Windows containment receipt
-        # Preserve the advisory test log without coupling the experimental
-        # local-command sandbox to installer publication. Production reports
-        # this backend unavailable unless it is explicitly enabled for QA.
-        if: always() && runner.os == 'Windows'
-        uses: actions/upload-artifact@v4
+      - name: Upload signed-mode native Windows containment receipt
+        if: runner.os == 'Windows' && matrix.windows_signing
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: windows-native-containment
           path: target/windows-native-containment
           if-no-files-found: error
+          retention-days: 90
 
       - name: Sign every bundled Windows executable before packaging
         if: runner.os == 'Windows' && matrix.windows_signing
@@ -700,7 +724,7 @@ jobs:
       # same bytes to Clark-owned download hosting.
       - name: Build installers (signed macOS)
         if: runner.os == 'macOS'
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -732,7 +756,7 @@ jobs:
 
       - name: Build installers (non-macOS)
         if: runner.os != 'macOS'
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5
         env:
           # Auto-update signing: the Ed25519 key whose public half is pinned in
           # tauri.conf.json. tauri-action signs the updater bundle (.app.tar.gz)
@@ -925,7 +949,7 @@ jobs:
             }
           }
 
-          $expectedVersion = $env:GITHUB_REF_NAME -replace '^v', ''
+          $expectedVersion = $env:CLARK_RELEASE_TAG -replace '^v', ''
           $installedVersion = (
             Get-Item -LiteralPath (Join-Path $installRoot "clark-desktop.exe")
           ).VersionInfo.ProductVersion
@@ -940,7 +964,7 @@ jobs:
               receipt_type = "clark_code_windows_release_build"
               status = "passed"
               source_revision = $env:GITHUB_SHA
-              tag = $env:GITHUB_REF_NAME
+              tag = $env:CLARK_RELEASE_TAG
               version = $expectedVersion
               signer_subject = $installerSignature.SignerCertificate.Subject
               signer_thumbprint = $installerSignature.SignerCertificate.Thumbprint
@@ -948,7 +972,7 @@ jobs:
                 asset = "ClarkCode_x64-setup.exe"
                 url = (
                   $env:CLARK_DESKTOP_DOWNLOAD_BASE_URL.TrimEnd("/") +
-                  "/releases/$($env:GITHUB_REF_NAME)/ClarkCode_x64-setup.exe"
+                  "/releases/$($env:CLARK_RELEASE_TAG)/ClarkCode_x64-setup.exe"
                 )
                 sha256 = (
                   Get-FileHash -Algorithm SHA256 -LiteralPath $nsis.FullName
@@ -982,9 +1006,46 @@ jobs:
           }
           if ($uninstall.ExitCode -ne 0) { throw "NSIS uninstall failed with $($uninstall.ExitCode)" }
 
+      - name: Generate platform SPDX SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610
+        with:
+          path: .
+          format: spdx-json
+          artifact-name: release-sbom-${{ matrix.platform }}
+          output-file: target/release-sbom-${{ runner.os }}.spdx.json
+          upload-artifact: true
+          upload-artifact-retention: 90
+          upload-release-assets: false
+
+      - name: Attest macOS installers and updater payload
+        if: runner.os == 'macOS'
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d
+        with:
+          subject-path: |
+            target/**/bundle/dmg/*.dmg
+            target/**/bundle/macos/*.app.tar.gz
+          sbom-path: target/release-sbom-macOS.spdx.json
+
+      - name: Attest Windows installer
+        if: runner.os == 'Windows'
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d
+        with:
+          subject-path: target/**/bundle/nsis/*-setup.exe
+          sbom-path: target/release-sbom-Windows.spdx.json
+
+      - name: Attest Linux installers and updater payload
+        if: runner.os == 'Linux'
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d
+        with:
+          subject-path: |
+            target/**/bundle/appimage/*.AppImage
+            target/**/bundle/deb/*.deb
+            target/**/bundle/rpm/*.rpm
+          sbom-path: target/release-sbom-Linux.spdx.json
+
       - name: Upload exact Windows release candidate for packaged journey
         if: runner.os == 'Windows' && matrix.windows_signing
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: windows-release-candidate
           path: target/**/bundle/nsis/*-setup.exe
@@ -992,14 +1053,14 @@ jobs:
 
       - name: Upload source-bound Windows release build receipt
         if: runner.os == 'Windows' && matrix.windows_signing
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: windows-release-build-receipt
           path: target/windows-release-build/receipt.json
           if-no-files-found: error
 
       - name: Configure AWS credentials for public download upload
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c
         with:
           role-to-assume: ${{ env.CLARK_DESKTOP_DOWNLOAD_UPLOAD_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
@@ -1009,7 +1070,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          tag="${GITHUB_REF_NAME}"
+          tag="${CLARK_RELEASE_TAG}"
           version="${tag#v}"
           bucket="${CLARK_DESKTOP_DOWNLOAD_BUCKET}"
           base_url="${CLARK_DESKTOP_DOWNLOAD_BASE_URL%/}"
@@ -1216,7 +1277,7 @@ jobs:
           ' "$base_url" "$tag" "$mac_sig" "$win_sig" "$linux_sig" "$records_dir/updater-${RUNNER_OS}.json"
 
       - name: Upload public download asset records
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: desktop-download-records-${{ matrix.platform }}
           path: public-release-records/*.json
@@ -1227,7 +1288,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          tag="${GITHUB_REF_NAME}"
+          tag="${CLARK_RELEASE_TAG}"
           bucket="${CLARK_DESKTOP_DOWNLOAD_BUCKET}"
           base_url="${CLARK_DESKTOP_DOWNLOAD_BASE_URL%/}"
           published_at="$(
@@ -1322,7 +1383,7 @@ jobs:
 
       - name: Upload signed Windows updater seed
         if: runner.os == 'Windows' && matrix.windows_signing
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: windows-update-seed
           path: |
@@ -1336,10 +1397,10 @@ jobs:
     runs-on: [self-hosted, macOS, ARM64, clark-utm-qa]
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
-          node-version: 24
+          node-version: 24.18.0
       - name: Create a disposable pristine Windows release VM
         run: |
           node harness/utm-windows-release-vm.mjs \
@@ -1347,19 +1408,19 @@ jobs:
             --base "$CLARK_WINDOWS_QA_BASE_VM" \
             --clone "$CLARK_WINDOWS_QA_VM_NAME"
       - name: Download native Windows containment receipt
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: windows-native-containment
           path: target/windows-native-containment
 
       - name: Download signed Windows updater seed
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: windows-update-seed
           path: target/windows-update-seed
 
       - name: Download source-bound Windows release build receipt
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: windows-release-build-receipt
           path: target/windows-release-build
@@ -1367,7 +1428,7 @@ jobs:
       - name: Download the post-upload immutable Windows candidate
         run: |
           node harness/download-release-candidate.mjs \
-            --tag "$GITHUB_REF_NAME" \
+            --tag "$CLARK_RELEASE_TAG" \
             --base-url "$CLARK_DESKTOP_DOWNLOAD_BASE_URL" \
             --source-revision "$GITHUB_SHA" \
             --build-receipt target/windows-release-build/receipt.json \
@@ -1397,7 +1458,7 @@ jobs:
 
       - name: Upload packaged Windows journey receipts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: windows-packaged-journey
           path: |
@@ -1418,9 +1479,11 @@ jobs:
   # mutable document describes precisely the platform artifacts that passed.
   publish_independent_platforms:
     name: Publish independently verified platform downloads
-    needs: [build, exec-server]
+    needs: [build, exec-server, pre_release_benchmarks, release_source_ci]
     if: >-
-      ${{ always() && needs.exec-server.result == 'success' &&
+      ${{ always() && needs.release_source_ci.result == 'success' &&
+          needs.pre_release_benchmarks.result == 'success' &&
+          needs.exec-server.result == 'success' &&
           (needs.build.result == 'success' || needs.build.result == 'failure') &&
           (vars.CLARK_WINDOWS_RELEASE_MODE != 'signed' || needs.build.result == 'failure') }}
     runs-on: ubuntu-latest
@@ -1429,13 +1492,13 @@ jobs:
       group: clark-desktop-release-publish
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271
         with:
-          version: 10
-      - uses: actions/setup-node@v4
+          version: 10.34.5
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
-          node-version: 24
+          node-version: 24.18.0
           cache: pnpm
           cache-dependency-path: harness/pnpm-lock.yaml
       - name: Install platform release browser verifier
@@ -1444,13 +1507,13 @@ jobs:
           pnpm --dir harness exec playwright install --with-deps chromium
 
       - name: Configure AWS credentials for platform download publication
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c
         with:
           role-to-assume: ${{ env.CLARK_DESKTOP_DOWNLOAD_UPLOAD_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Download complete platform release records
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           pattern: desktop-download-records-*
           path: release-records
@@ -1507,7 +1570,7 @@ jobs:
           if (platforms.length === 0) throw new Error("no complete platform release artifacts were uploaded");
           const aliases = platformAliases(platforms);
           const assets = aliases.map((alias) => assetsByName.get(alias));
-          const tag = process.env.GITHUB_REF_NAME;
+          const tag = process.env.CLARK_RELEASE_TAG;
           const baseUrl = process.env.CLARK_DESKTOP_DOWNLOAD_BASE_URL.replace(/\/+$/, "");
           validatePlatformReleaseAssets({
             assets,
@@ -1567,7 +1630,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          tag="$GITHUB_REF_NAME"
+          tag="$CLARK_RELEASE_TAG"
           bucket="$CLARK_DESKTOP_DOWNLOAD_BUCKET"
           base_url="${CLARK_DESKTOP_DOWNLOAD_BASE_URL%/}"
           release_dir="target/independent-platform-release"
@@ -1693,7 +1756,7 @@ jobs:
           confirmations=0
           for _attempt in $(seq 1 24); do
             if node harness/public-release-journey.mjs \
-              --tag "$GITHUB_REF_NAME" \
+              --tag "$CLARK_RELEASE_TAG" \
               --base-url "$CLARK_DESKTOP_DOWNLOAD_BASE_URL" \
               --site-url "https://www.clarkchat.com/" \
               --source-revision "$GITHUB_SHA" \
@@ -1721,7 +1784,7 @@ jobs:
               JSON.stringify({
                 schema_version: 1,
                 status: "published",
-                tag: process.env.GITHUB_REF_NAME,
+                tag: process.env.CLARK_RELEASE_TAG,
                 source_revision: process.env.GITHUB_SHA,
                 published_at: new Date().toISOString(),
               }, null, 2) + "\\n",
@@ -1739,7 +1802,7 @@ jobs:
             exit 0
           fi
           bucket="$CLARK_DESKTOP_DOWNLOAD_BUCKET"
-          backup_prefix="desktop/releases/$GITHUB_REF_NAME/_platform-rollback/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          backup_prefix="desktop/releases/$CLARK_RELEASE_TAG/_platform-rollback/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           while IFS=$'\t' read -r disposition key; do
             case "$disposition" in
               present)
@@ -1763,7 +1826,7 @@ jobs:
 
       - name: Upload independent platform release receipt
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: independent-platform-release
           path: target/independent-platform-release
@@ -1778,20 +1841,21 @@ jobs:
     # not run until the per-arch clark-exec-server prebuilts are on the CDN.
     # Otherwise a freshly-updated app can hit "not on the CDN for v<version>"
     # when connecting to a remote host before those binaries finish uploading.
-    needs: [build, exec-server, windows_packaged_journey]
+    needs:
+      [build, exec-server, windows_packaged_journey, pre_release_benchmarks, release_source_ci]
     runs-on: [self-hosted, macOS, ARM64, clark-utm-qa]
     environment: release
     concurrency:
       group: clark-desktop-release-publish
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271
         with:
-          version: 10
-      - uses: actions/setup-node@v4
+          version: 10.34.5
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
-          node-version: 24
+          node-version: 24.18.0
           cache: pnpm
           cache-dependency-path: harness/pnpm-lock.yaml
       - name: Install public release browser verifier
@@ -1800,20 +1864,20 @@ jobs:
           pnpm --dir harness exec playwright install chromium
 
       - name: Configure AWS credentials for public manifest upload
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c
         with:
           role-to-assume: ${{ env.CLARK_DESKTOP_DOWNLOAD_UPLOAD_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Download public download asset records
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           pattern: desktop-download-records-*
           path: release-records
           merge-multiple: true
 
       - name: Download packaged Windows journey receipts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: windows-packaged-journey
           path: target/windows-packaged-receipts
@@ -1823,7 +1887,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          tag="${GITHUB_REF_NAME}"
+          tag="${CLARK_RELEASE_TAG}"
           bucket="${CLARK_DESKTOP_DOWNLOAD_BUCKET}"
           base_url="${CLARK_DESKTOP_DOWNLOAD_BASE_URL%/}"
           manifest="$(mktemp)"
@@ -2260,7 +2324,7 @@ jobs:
       - name: Verify rendered public download journey
         run: |
           node harness/public-release-journey.mjs \
-            --tag "$GITHUB_REF_NAME" \
+            --tag "$CLARK_RELEASE_TAG" \
             --base-url "$CLARK_DESKTOP_DOWNLOAD_BASE_URL" \
             --site-url "https://www.clarkchat.com/" \
             --source-revision "$GITHUB_SHA" \
@@ -2268,7 +2332,7 @@ jobs:
 
       - name: Upload public release journey receipt
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: public-release-journey
           path: target/public-release-journey
@@ -2284,7 +2348,7 @@ jobs:
 
       - name: Upload packaged post-publish journey receipt
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: windows-post-publish-journey
           path: target/windows-post-publish-journey
@@ -2301,7 +2365,7 @@ jobs:
                 schema_version: 1,
                 receipt_type: "clark_code_public_channel_transaction",
                 status: "committed",
-                tag: process.env.GITHUB_REF_NAME,
+                tag: process.env.CLARK_RELEASE_TAG,
                 source_revision: process.env.GITHUB_SHA,
                 run_id: process.env.GITHUB_RUN_ID,
                 run_attempt: process.env.GITHUB_RUN_ATTEMPT,
@@ -2334,7 +2398,7 @@ jobs:
                   schema_version: 1,
                   receipt_type: "clark_code_public_channel_rollback",
                   status: "not_needed_channel_committed",
-                  tag: process.env.GITHUB_REF_NAME,
+                  tag: process.env.CLARK_RELEASE_TAG,
                   source_revision: process.env.GITHUB_SHA,
                   generated_at: new Date().toISOString(),
                 }, null, 2) + "\n",
@@ -2417,7 +2481,7 @@ jobs:
                 schema_version: 1,
                 receipt_type: "clark_code_public_channel_rollback",
                 status: "passed",
-                tag: process.env.GITHUB_REF_NAME,
+                tag: process.env.CLARK_RELEASE_TAG,
                 source_revision: process.env.GITHUB_SHA,
                 objects_restored: 11,
                 generated_at: new Date().toISOString(),
@@ -2435,7 +2499,7 @@ jobs:
           [ -f "$transaction_dir/backup-ready" ]
           backup_prefix="$(<"$transaction_dir/backup-prefix")"
           case "$backup_prefix" in
-            desktop/releases/"$GITHUB_REF_NAME"/_channel-rollback/"${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}") ;;
+            desktop/releases/"$CLARK_RELEASE_TAG"/_channel-rollback/"${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}") ;;
             *)
               echo "Refusing to delete unexpected rollback prefix: $backup_prefix" >&2
               exit 1
@@ -2457,7 +2521,7 @@ jobs:
                 schema_version: 1,
                 receipt_type: "clark_code_public_channel_snapshot_cleanup",
                 status: process.argv[1],
-                tag: process.env.GITHUB_REF_NAME,
+                tag: process.env.CLARK_RELEASE_TAG,
                 source_revision: process.env.GITHUB_SHA,
                 generated_at: new Date().toISOString(),
               }, null, 2) + "\n",
@@ -2466,11 +2530,80 @@ jobs:
 
       - name: Upload public channel transaction receipt
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: public-channel-transaction
           path: target/public-channel-transaction
           if-no-files-found: warn
+
+  finalize_release_tag:
+    name: Finalize stable release tag
+    if: >-
+      ${{ always() &&
+          (needs.publish_independent_platforms.result == 'success' ||
+           needs.publish.result == 'success') }}
+    needs: [publish_independent_platforms, publish]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+
+      - name: Reverify public generation and create the stable tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main --tags
+          if [[ "$(git rev-parse origin/main)" != "$GITHUB_SHA" ]]; then
+            echo "Main advanced after candidate validation; refusing to tag stale source" >&2
+            exit 1
+          fi
+          if git show-ref --verify --quiet "refs/tags/$CLARK_RELEASE_TAG"; then
+            echo "Stable tag already exists: $CLARK_RELEASE_TAG" >&2
+            exit 1
+          fi
+          manifest="$(curl -fsSL "$CLARK_DESKTOP_DOWNLOAD_BASE_URL/latest/manifest.json")"
+          legacy="$(curl -fsSL "$CLARK_DESKTOP_DOWNLOAD_BASE_URL/latest/latest.json")"
+          expected_version="${CLARK_RELEASE_TAG#v}"
+          for document in "$manifest" "$legacy"; do
+            test "$(jq -r '.version' <<<"$document")" = "$expected_version"
+            test "$(jq -r '.source_revision' <<<"$document")" = "$GITHUB_SHA"
+          done
+          test "$(jq -r '.tag_name' <<<"$manifest")" = "$CLARK_RELEASE_TAG"
+          for asset in \
+            ClarkCode.dmg \
+            ClarkCode_x64-setup.exe \
+            ClarkCode_amd64.AppImage \
+            ClarkCode_amd64.deb \
+            ClarkCode_x86_64.rpm; do
+            jq -e --arg asset "$asset" \
+              'any(.assets[]; .name == $asset)' <<<"$manifest" >/dev/null
+          done
+          for target in \
+            darwin-aarch64 \
+            darwin-x86_64 \
+            linux-x86_64 \
+            windows-x86_64; do
+            jq -e --arg target "$target" \
+              '.platforms[$target].url and .platforms[$target].signature' \
+              <<<"$legacy" >/dev/null
+          done
+
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git tag -a "$CLARK_RELEASE_TAG" "$GITHUB_SHA" \
+            -m "Clark Code $CLARK_RELEASE_TAG"
+          git push origin "refs/tags/$CLARK_RELEASE_TAG"
+          {
+            echo "## Stable release finalized"
+            echo
+            echo "- Tag: \`$CLARK_RELEASE_TAG\`"
+            echo "- Source: \`$GITHUB_SHA\`"
+            echo "- Current and legacy manifests were verified before the tag was created."
+          } >> "$GITHUB_STEP_SUMMARY"
 
   windows_release_vm_cleanup:
     name: Delete disposable Windows release VM
@@ -2479,10 +2612,10 @@ jobs:
     runs-on: [self-hosted, macOS, ARM64, clark-utm-qa]
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
-          node-version: 24
+          node-version: 24.18.0
       - name: Stop and delete only this release run's clone
         run: |
           node harness/utm-windows-release-vm.mjs \
@@ -2495,15 +2628,17 @@ jobs:
   # publish them under exec-server/<tag>/ — see scripts/publish-exec-server.sh
   # and src-tauri/src/ssh.rs `fetch_from_cdn`.
   exec-server:
-    needs: [pre_release_benchmarks, release_source_ci]
+    needs: [release_source_prerequisites]
     runs-on: macos-latest
+    timeout-minutes: 30
     environment: release
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
         with:
+          toolchain: 1.97.1
           targets: x86_64-unknown-linux-musl,aarch64-unknown-linux-musl,aarch64-apple-darwin,x86_64-apple-darwin
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
         with:
           workspaces: ". -> target"
       - name: Install zig + cargo-zigbuild
@@ -2517,12 +2652,12 @@ jobs:
           cargo build --release -p exec-server --bin clark-exec-server \
             --target aarch64-apple-darwin --target x86_64-apple-darwin
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c
         with:
           role-to-assume: ${{ env.CLARK_DESKTOP_DOWNLOAD_UPLOAD_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
       - name: Publish to the downloads CDN
-        run: ./scripts/publish-exec-server.sh "${{ github.ref_name }}"
+        run: ./scripts/publish-exec-server.sh "$CLARK_RELEASE_TAG"
 
 # The public download page lives in clark-ui (clarkchat.com/download) and
 # resolves public CDN assets via https://downloads.clarkchat.com/desktop/latest/manifest.json.

@@ -20,7 +20,7 @@ usage() {
   echo "          [--computer-use-signing-identity IDENTITY]"
   echo
   echo "Without --superpowers, the receipt-producing journey uses its built-in fixture."
-  echo "The default paid lane uses clark-platform / clark-code:free and"
+  echo "The default paid lane uses clark-platform / qwen/qwen3.7-flash and"
   echo "requires CLARK_CODE_API_KEY (environment or the ignored repository .env)."
   echo "--offline explicitly disables all paid/network model calls."
   echo "--utm-preflight autonomously provisions, logs in, reboots, and verifies"
@@ -200,7 +200,7 @@ if [[ "$run_native_computer_use" == "1" ]]; then
 fi
 export CLARK_CODE_PROVIDER="${CLARK_CODE_PROVIDER:-clark-platform}"
 export CLARK_CODE_BASE_URL="${CLARK_CODE_BASE_URL:-https://api.clarkslabs.com/v1}"
-export CLARK_CODE_MODEL="${CLARK_CODE_MODEL:-clark-code:free}"
+export CLARK_CODE_MODEL="${CLARK_CODE_MODEL:-qwen/qwen3.7-flash}"
 export CLARK_CODE_MAX_ITERATIONS="${CLARK_CODE_MAX_ITERATIONS:-16}"
 export CLARK_CODE_MAX_LIVE_COST_USD="${CLARK_CODE_MAX_LIVE_COST_USD:-0.50}"
 if [[ ! "$CLARK_CODE_MAX_ITERATIONS" =~ ^[1-9][0-9]*$ ]]; then
@@ -503,8 +503,8 @@ if [[ "$run_live" == "1" ]]; then
     echo "Live benchmark requires CLARK_CODE_PROVIDER=clark-platform." >&2
   elif [[ "$CLARK_CODE_BASE_URL" != "https://api.clarkslabs.com/v1" ]]; then
     echo "Live benchmark requires CLARK_CODE_BASE_URL=https://api.clarkslabs.com/v1." >&2
-  elif [[ "$CLARK_CODE_MODEL" != "clark-code:free" ]]; then
-    echo "Live benchmark requires CLARK_CODE_MODEL=clark-code:free." >&2
+  elif [[ "$CLARK_CODE_MODEL" != "qwen/qwen3.7-flash" ]]; then
+    echo "Live benchmark requires CLARK_CODE_MODEL=qwen/qwen3.7-flash." >&2
   elif [[ "$deterministic_passed" != "1" ]]; then
     live_status="blocked"
     echo "Skipping paid validation because the deterministic contract is already broken." >&2
