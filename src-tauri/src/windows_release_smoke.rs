@@ -5,6 +5,11 @@ use std::path::PathBuf;
 
 const WINDOWS_SANDBOX_SMOKE_ARG: &str = "--windows-sandbox-smoke";
 
+#[cfg(any(windows, test))]
+fn exit_succeeded(code: Option<i32>) -> bool {
+    code == Some(0)
+}
+
 pub fn run_windows_sandbox_smoke_if_requested() -> bool {
     let Some((output, cwd)) = windows_sandbox_smoke_paths(std::env::args_os().skip(1)) else {
         return false;
@@ -103,9 +108,9 @@ fn run_windows_sandbox_smoke(output: &Path, cwd: &Path) {
             let terminal_output = String::from_utf8_lossy(&terminal.stdout);
             let inside_written = std::fs::read_to_string(&inside)
                 .is_ok_and(|value| value.contains("CLARK_SANDBOX_OK"));
-            let outside_write_blocked = escape.code != 0 && !outside.exists();
-            let passed = ordinary.code == 0
-                && terminal.code == 0
+            let outside_write_blocked = !exit_succeeded(escape.code) && !outside.exists();
+            let passed = exit_succeeded(ordinary.code)
+                && exit_succeeded(terminal.code)
                 && ordinary_output.contains("CLARK_SANDBOX_OK")
                 && terminal_output.contains("CLARK_SANDBOX_OK")
                 && inside_written
@@ -173,7 +178,14 @@ fn fail(message: &str) -> ! {
 
 #[cfg(test)]
 mod tests {
-    use super::{windows_sandbox_smoke_paths, WINDOWS_SANDBOX_SMOKE_ARG};
+    use super::{exit_succeeded, windows_sandbox_smoke_paths, WINDOWS_SANDBOX_SMOKE_ARG};
+
+    #[test]
+    fn successful_exit_requires_an_explicit_zero_code() {
+        assert!(exit_succeeded(Some(0)));
+        assert!(!exit_succeeded(Some(1)));
+        assert!(!exit_succeeded(None));
+    }
 
     #[test]
     fn sandbox_smoke_requires_exact_absolute_output_and_cwd() {
