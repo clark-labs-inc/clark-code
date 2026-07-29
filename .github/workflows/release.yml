@@ -724,7 +724,7 @@ jobs:
       # same bytes to Clark-owned download hosting.
       - name: Build installers (signed macOS)
         if: runner.os == 'macOS'
-        uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5
+        uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -756,7 +756,7 @@ jobs:
 
       - name: Build installers (non-macOS)
         if: runner.os != 'macOS'
-        uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5
+        uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f
         env:
           # Auto-update signing: the Ed25519 key whose public half is pinned in
           # tauri.conf.json. tauri-action signs the updater bundle (.app.tar.gz)
