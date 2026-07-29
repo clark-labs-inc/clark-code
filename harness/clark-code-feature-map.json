@@ -213,6 +213,7 @@
     "read_skill",
     "resolve_coding_workstreams",
     "resolve_delegation",
+    "security_poc_execute",
     "security_scan_contract",
     "scout_adapter",
     "scout_capabilities",
@@ -303,7 +304,7 @@
     {
       "id": "security_scanning",
       "surface": "model_tools",
-      "tools": ["security_scan_contract"],
+      "tools": ["security_scan_contract", "security_poc_execute"],
       "lanes": ["rust_contract", "frontend_contract"],
       "platform_support": {"macos": "supported", "windows": "supported", "ubuntu": "supported"}
     },

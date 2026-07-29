@@ -132,6 +132,22 @@
           ]
         },
         {
+          "id": "cloud_security_scans",
+          "features": [
+            "security_scanning",
+            "security_scan_history"
+          ],
+          "lanes": [
+            "rust_contract",
+            "frontend_contract"
+          ],
+          "items": [
+            "commands::desktop_security_organizations",
+            "commands::desktop_security_register_repository",
+            "commands::desktop_security_sync_scans"
+          ]
+        },
+        {
           "id": "documents_and_artifacts",
           "features": [
             "document_conversion",
@@ -152,6 +168,23 @@
           ]
         },
         {
+          "id": "cloud_artifact_transport",
+          "features": [
+            "attachments_artifacts_and_previews",
+            "document_image_artifact_export"
+          ],
+          "lanes": [
+            "rust_contract",
+            "frontend_contract",
+            "attachment_contract"
+          ],
+          "items": [
+            "commands::desktop_artifact_upload",
+            "commands::desktop_artifact_read",
+            "commands::desktop_artifact_read_workspace"
+          ]
+        },
+        {
           "id": "git_worktrees_and_checkpoints",
           "features": [
             "git_changes_checkpoints_and_worktrees",
@@ -166,6 +199,24 @@
             "commands::changes_diff",
             "commands::changes_revert",
             "commands::changes_release_checkpoints"
+          ]
+        },
+        {
+          "id": "managed_worktree_lifecycle",
+          "features": [
+            "git_changes_checkpoints_and_worktrees",
+            "branch_worktree_diff_and_checkpoint_management"
+          ],
+          "lanes": [
+            "rust_contract",
+            "frontend_contract"
+          ],
+          "items": [
+            "project_worktree::managed::project_worktree_transition_plan",
+            "project_worktree::managed::project_managed_worktree_create",
+            "project_worktree::managed::project_managed_worktree_list",
+            "project_worktree::managed::project_managed_worktree_cleanup",
+            "project_worktree::managed::project_managed_worktree_save_branch"
           ]
         },
         {
