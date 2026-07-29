@@ -175,11 +175,14 @@ fn spawn_inner(
 ) -> Result<i32, String> {
     let process = &request.process;
     let program = process.program.to_os_string();
-    let args = process
-        .args
-        .iter()
-        .map(|argument| argument.to_os_string())
-        .collect::<Vec<_>>();
+    let args = git_args_without_optional_locks(
+        Path::new(&program),
+        process
+            .args
+            .iter()
+            .map(|argument| argument.to_os_string())
+            .collect(),
+    );
     let mut command_line = command_line(Path::new(&program), &args);
     let mut program_w = wide_os(&program);
     let cwd = process.cwd.to_os_string();
@@ -206,6 +209,28 @@ fn spawn_inner(
         return Err(last_error("CreateProcessAsUserW"));
     }
     wait_process(info)
+}
+
+/// Git status normally refreshes the index as a side effect.  That refresh
+/// needs an index lock, while Clark intentionally denies writes below `.git`
+/// for restricted children.  `GIT_OPTIONAL_LOCKS=0` is a useful fallback for
+/// shell-launched Git, but direct Git children need the command-line contract
+/// too: Git documents this exact global option for background status calls.
+fn git_args_without_optional_locks(program: &Path, mut args: Vec<OsString>) -> Vec<OsString> {
+    let is_git = program
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| {
+            name.eq_ignore_ascii_case("git") || name.eq_ignore_ascii_case("git.exe")
+        });
+    if is_git
+        && !args
+            .iter()
+            .any(|argument| argument == "--no-optional-locks")
+    {
+        args.insert(0, OsString::from("--no-optional-locks"));
+    }
+    args
 }
 
 unsafe fn create_with_logon(
@@ -444,5 +469,37 @@ mod tests {
     #[test]
     fn worker_loads_its_offline_profile_before_starting_restricted_children() {
         assert_eq!(WORKER_LOGON_FLAGS & LOGON_WITH_PROFILE, LOGON_WITH_PROFILE);
+    }
+
+    #[test]
+    fn direct_git_commands_disable_optional_index_locks() {
+        assert_eq!(
+            git_args_without_optional_locks(
+                Path::new(r"C:\\Program Files\\Git\\bin\\git.exe"),
+                vec![OsString::from("status"), OsString::from("--short")],
+            ),
+            vec![
+                OsString::from("--no-optional-locks"),
+                OsString::from("status"),
+                OsString::from("--short"),
+            ],
+        );
+    }
+
+    #[test]
+    fn git_lock_override_is_not_duplicated() {
+        assert_eq!(
+            git_args_without_optional_locks(
+                Path::new("git"),
+                vec![
+                    OsString::from("--no-optional-locks"),
+                    OsString::from("status")
+                ],
+            ),
+            vec![
+                OsString::from("--no-optional-locks"),
+                OsString::from("status")
+            ],
+        );
     }
 }
