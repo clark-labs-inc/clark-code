@@ -83,4 +83,5 @@ jobs:
           $env:CLARK_WINDOWS_SANDBOX_SETUP = (Resolve-Path "target/release/clark-windows-sandbox-setup.exe")
           cargo test -p exec-sandbox-windows --release --test windows_native -- --nocapture
           $env:CLARK_SANDBOX_E2E_REQUIRED = "1"
+          $env:CLARK_WINDOWS_SANDBOX_EXPERIMENTAL = "1"
           cargo test -p exec-sandbox --release --test sandbox_e2e -- --nocapture

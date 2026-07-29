@@ -302,7 +302,14 @@ fn current_backend(
             .or_else(|| std::env::var_os("CLARK_WINDOWS_SANDBOX_STATE_DIR").map(PathBuf::from))
             .or_else(default_windows_state_dir);
         let policy_validation = windows::wire_policy(policy).validate_windows_enforceable();
-        let status = if let Err(reason) = policy_validation {
+        let experimental_enabled = std::env::var_os("CLARK_WINDOWS_SANDBOX_EXPERIMENTAL")
+            .is_some_and(|value| value == "1");
+        let status = if !experimental_enabled {
+            SandboxStatus::Unavailable {
+                backend,
+                reason: "Windows project sandbox is temporarily unavailable while its restricted-token process startup boundary is under validation; choose Full Access explicitly to run host commands".to_string(),
+            }
+        } else if let Err(reason) = policy_validation {
             SandboxStatus::Unavailable { backend, reason }
         } else if !helper.is_file() || !setup.is_file() {
             SandboxStatus::SetupRequired {

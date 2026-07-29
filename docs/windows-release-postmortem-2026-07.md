@@ -75,20 +75,37 @@ The unsigned Windows release lane later stopped in
 `native_windows_sandbox_enforces_filesystem_process_and_network_boundaries`.
 Its aggregate receipt marked the project-write, outside-write, and network
 assertions failed, but the test had not reached any of them. The first actual
-failure was a quiet `git status --short` whose Clark runner timed out after 60
-seconds.
+failure appeared to be a quiet `git status --short` whose Clark runner timed
+out after 60 seconds. A dedicated Windows-only workflow and gated trace then
+proved that the worker account, restricted token, and `CreateProcessAsUserW`
+call all succeeded.
 
-The command root had already completed. The parent then waited for stdout and
-stderr pipe EOF while it still owned a kill-on-close Windows Job Object. A Git
-descendant inherited a pipe writer and could outlive the command root, so the
-pipe could not reach EOF; conversely, the descendant could not be terminated
-until the job handle was closed after the pipe drain. That lifecycle ordering
-formed a deadlock.
+Git was not the cause. The same timeout occurred with the real
+`mingw64\bin\git.exe` and, after moving the optional Git probe behind the core
+assertions, with Windows PowerShell before any script executed. The child had
+loaded only `ntdll.dll`; its initial thread waited on an LPC reply while a
+`conhost.exe` sibling waited for input. The restricted-token implementation had
+never proven the Windows station/desktop objects needed to finish hidden
+console-process initialization. Filesystem capability ACLs alone were
+insufficient for that process-creation boundary.
 
-The runner now closes the kill-on-close job immediately after the command root
-exits and before draining output. This terminates any surviving descendants,
-closes their inherited pipe writers, preserves already-written output, and
-makes the process-tree boundary match the documented no-orphan contract.
+This subsystem was also incorrectly coupled to installer publication. Git is
+not bundled, and neither Git nor the local project sandbox is required to
+build, install, launch, download, or update Clark Code. Older Windows packages
+published because their workflow did not make this newly added experimental
+capability a distribution gate.
+
+The parent still closes its kill-on-close job before draining inherited output
+handles, which removes a separate process-tree lifecycle hazard. That ordering
+did not, however, explain the observed startup timeout because the command root
+never exited.
+
+For v0.1.117 the Windows project sandbox reports `Unavailable` and fails closed
+unless a QA environment explicitly enables the experimental backend. Full
+Access remains an explicit user choice. Native containment and Git
+compatibility continue in a separate strict diagnostic workflow, while Windows
+installer and updater publication depend only on package, launch, artifact,
+and public-channel verification.
 
 ## Corrections
 
@@ -110,11 +127,10 @@ makes the process-tree boundary match the documented no-orphan contract.
   clone, and deletes the clone afterward. The candidate installer refuses to
   clean up or mask an existing install, registry entry, sandbox directory,
   offline identity, or Clark firewall rule.
-- Required receipts prove inline setup, Full Access warning copy, real
-  pipe/PTY commands through the enrolled sandbox, inside write, blocked outside
-  write, a fresh exact-VM screenshot while Windows `consent.exe` is active,
-  native containment, no console windows, restart persistence, update, public
-  CDN identity, and source revision.
+- Signed production mode retains the packaged UAC, identity, update, and native
+  containment receipts. Unsigned preview mode publishes package/update
+  artifacts independently and treats the disabled Windows sandbox as a
+  separately tracked capability instead of fabricating a passing receipt.
 - Mutable public objects are snapshotted before the first write. Installer
   aliases and `manifest.json` advance before `latest.json`; browser and packaged
   post-publish checks run before the GitHub draft becomes public. A failure
@@ -125,9 +141,10 @@ makes the process-tree boundary match the documented no-orphan contract.
   The tag must be stable, match `tauri.conf.json`, and point to a commit contained
   in `origin/main`.
 
-## Release-blocking external readiness
+## Signed-mode external readiness
 
-The code intentionally cannot turn these infrastructure gaps into a pass:
+These infrastructure gaps still block a future signed Windows mode, but no
+longer block the explicitly unsigned preview release:
 
 - GitHub needs a protected `release` environment, Azure OIDC secrets and
   Artifact Signing variables, and a registered online self-hosted runner with
@@ -141,6 +158,7 @@ The code intentionally cannot turn these infrastructure gaps into a pass:
   sandbox state, offline identity, firewall rule, or Clark WebView profile.
 
 As of the dated audit, the VM still contained Clark Code `0.1.91` and the
-`ClarkSandboxOffline` identity, so the new pristine preflight correctly returned
-`blocked`. No release should be published until a signed packaged journey
-produces passing receipts on a remediated golden base.
+`ClarkSandboxOffline` identity, so the signed-mode pristine preflight correctly
+returned `blocked`. The unsigned preview lane must not claim those signed-mode
+receipts; it publishes and verifies its installer and updater channels
+independently.

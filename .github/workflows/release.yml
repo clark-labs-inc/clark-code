@@ -546,8 +546,9 @@ jobs:
           src-tauri/binaries/clark-command-runner-x86_64-pc-windows-msvc.exe --self-test
           src-tauri/binaries/clark-windows-sandbox-setup-x86_64-pc-windows-msvc.exe --self-test
 
-      - name: Prove native Windows filesystem and network containment
+      - name: Probe experimental native Windows containment
         if: runner.os == 'Windows'
+        continue-on-error: true
         shell: pwsh
         run: |
           node harness/windows-native-containment.mjs `
@@ -557,9 +558,9 @@ jobs:
             --out target/windows-native-containment
 
       - name: Upload native Windows containment receipt
-        # Preserve the test log when the required sandbox boundary fails so the
-        # next release diagnosis names the exact failed assertion. This does
-        # not soften the gate: the preceding proof still fails the build.
+        # Preserve the advisory test log without coupling the experimental
+        # local-command sandbox to installer publication. Production reports
+        # this backend unavailable unless it is explicitly enabled for QA.
         if: always() && runner.os == 'Windows'
         uses: actions/upload-artifact@v4
         with:
