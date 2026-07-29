@@ -20,16 +20,12 @@ use windows_sys::Win32::System::JobObjects::{
     SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
     JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
 };
-use windows_sys::Win32::System::StationsAndDesktops::{
-    CloseDesktop, CloseWindowStation, CreateDesktopW, CreateWindowStationW,
-    GetProcessWindowStation, SetProcessWindowStation, HDESK, HWINSTA,
-};
+use windows_sys::Win32::System::StationsAndDesktops::{CloseDesktop, CreateDesktopW, HDESK};
 use windows_sys::Win32::System::Threading::{
     CreateProcessAsUserW, CreateProcessWithLogonW, GetCurrentProcess, GetExitCodeProcess,
     OpenProcessToken, ResumeThread, WaitForSingleObject, CREATE_NO_WINDOW, CREATE_SUSPENDED,
     CREATE_UNICODE_ENVIRONMENT, LOGON_WITH_PROFILE, PROCESS_INFORMATION, STARTUPINFOW,
 };
-use windows_sys::Win32::UI::WindowsAndMessaging::WINSTA_ALL_ACCESS;
 
 use crate::launch::LaunchHost;
 
@@ -247,8 +243,6 @@ fn spawn_inner(
 }
 
 struct PrivateDesktop {
-    original_station: HWINSTA,
-    station: HWINSTA,
     desktop: HDESK,
     path: Vec<u16>,
 }
@@ -256,29 +250,8 @@ struct PrivateDesktop {
 impl PrivateDesktop {
     fn create(user_sid: &str, capability_sids: &[String]) -> Result<Self, String> {
         let security = DesktopSecurity::new(user_sid, capability_sids)?;
-        let station_name = format!("ClarkSandbox-{}", std::process::id());
-        let desktop_name = "Default";
-        let station_w = wide_str(&station_name);
-        let desktop_w = wide_str(desktop_name);
-        let original_station = unsafe { GetProcessWindowStation() };
-        if original_station.is_null() {
-            return Err(last_error("GetProcessWindowStation"));
-        }
-        let station = unsafe {
-            CreateWindowStationW(
-                station_w.as_ptr(),
-                0,
-                WINSTA_ALL_ACCESS as u32,
-                &security.attributes,
-            )
-        };
-        if station.is_null() {
-            return Err(last_error("CreateWindowStationW"));
-        }
-        if unsafe { SetProcessWindowStation(station) } == 0 {
-            unsafe { CloseWindowStation(station) };
-            return Err(last_error("SetProcessWindowStation(private)"));
-        }
+        let desktop_name = format!("ClarkSandbox-{}", std::process::id());
+        let desktop_w = wide_str(&desktop_name);
         let desktop = unsafe {
             CreateDesktopW(
                 desktop_w.as_ptr(),
@@ -290,17 +263,13 @@ impl PrivateDesktop {
             )
         };
         if desktop.is_null() {
-            unsafe {
-                SetProcessWindowStation(original_station);
-                CloseWindowStation(station);
-            }
             return Err(last_error("CreateDesktopW"));
         }
         Ok(Self {
-            original_station,
-            station,
             desktop,
-            path: wide_str(&format!("{station_name}\\{desktop_name}")),
+            // A desktop name without a backslash resolves inside the worker's
+            // existing noninteractive window station.
+            path: desktop_w,
         })
     }
 
@@ -311,11 +280,7 @@ impl PrivateDesktop {
 
 impl Drop for PrivateDesktop {
     fn drop(&mut self) {
-        unsafe {
-            SetProcessWindowStation(self.original_station);
-            CloseDesktop(self.desktop);
-            CloseWindowStation(self.station);
-        }
+        unsafe { CloseDesktop(self.desktop) };
     }
 }
 

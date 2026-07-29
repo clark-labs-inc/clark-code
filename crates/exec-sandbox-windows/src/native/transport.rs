@@ -104,8 +104,8 @@ impl WorkerTransport {
         startup.cb = size_of::<STARTUPINFOW>() as u32;
         // Restricted processes must run on a separately ACL'd desktop. The
         // caller owns this null-terminated path for the duration of process
-        // creation and keeps the station and desktop handles alive until the
-        // process tree exits.
+        // creation and keeps the desktop handle alive until the process tree
+        // exits.
         startup.lpDesktop = desktop.as_ptr() as *mut u16;
         startup.dwFlags = STARTF_USESTDHANDLES;
         startup.hStdInput = self.stdin.0;
