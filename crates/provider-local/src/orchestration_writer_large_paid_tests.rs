@@ -181,6 +181,7 @@ async fn paid_large_four_writer_workstreams() {
             reasoning_effort: Some("low".into()),
             scout_capsules: None,
             scout_cartography: None,
+            remote: None,
         },
         pending: Mutex::new(HashMap::new()),
     });

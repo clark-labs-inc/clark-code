@@ -21,6 +21,7 @@ fn tools_config() -> OrchestrationToolsConfig {
         reasoning_effort: None,
         scout_capsules: None,
         scout_cartography: None,
+        remote: None,
     }
 }
 

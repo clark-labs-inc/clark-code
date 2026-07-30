@@ -160,6 +160,10 @@ pub(crate) struct OrchestrationToolsConfig {
     pub reasoning_effort: Option<String>,
     pub scout_capsules: Option<ScoutCapsulePolicyConfig>,
     pub scout_cartography: Option<ScoutCartographyHostConfig>,
+    /// The remote execution target of the parent session, when any. Delegated
+    /// read-only children must reconnect to the same exec-server so their reads
+    /// and the workspace-digest guard stay on the remote host.
+    pub remote: Option<crate::config::RemoteTarget>,
 }
 
 #[derive(Clone, Debug)]
@@ -254,6 +258,7 @@ impl OrchestrationToolsConfig {
             reasoning_effort: config.reasoning_effort.clone(),
             scout_capsules: config.scout_capsules.clone(),
             scout_cartography: config.scout_cartography.clone(),
+            remote: config.remote.clone(),
         }
     }
 }
@@ -384,10 +389,21 @@ pub fn local_read_only_harness(
 }
 
 fn read_only_provider_config(mut config: ProviderConfig) -> ProviderConfig {
+    // A delegated child of a remote session must keep reading the same remote
+    // host. Carry the parent's `extra.remote` target forward so the child builds
+    // its own RemoteExecutor instead of silently reading the local filesystem.
+    let remote = config
+        .extra
+        .get("remote")
+        .filter(|value| !value.is_null())
+        .cloned();
     let mut extra = match config.extra {
         Value::Object(map) => map,
         _ => Map::new(),
     };
+    if let Some(remote) = remote {
+        extra.insert("remote".to_string(), remote);
+    }
     extra.insert(
         "permissions".to_string(),
         json!({
@@ -478,6 +494,33 @@ mod tests {
         assert!(!local.browser_enabled);
         assert!(!local.memories_enabled);
         assert!(local.mcp_servers.is_empty());
+        assert!(!local.orchestration.enabled);
+    }
+
+    #[test]
+    fn nested_remote_child_keeps_the_parent_remote_target() {
+        let remote = json!({
+            "ws_url": "ws://127.0.0.1:54321",
+            "token": "cap-token",
+            "cwd": "/home/me/project"
+        });
+        let sanitized = read_only_provider_config(ProviderConfig {
+            extra: json!({ "remote": remote }),
+            ..Default::default()
+        });
+        let local = LocalConfig::from_provider_config(&sanitized);
+        let target = local
+            .remote
+            .as_ref()
+            .expect("delegated child keeps the parent's remote target");
+        assert_eq!(target.ws_url, "ws://127.0.0.1:54321");
+        assert_eq!(target.token, "cap-token");
+        assert_eq!(target.cwd, "/home/me/project");
+        // Read-only enforcement still holds on the remote target.
+        assert_eq!(
+            local.mode_for("write_file"),
+            crate::tools::PermissionMode::Deny
+        );
         assert!(!local.orchestration.enabled);
     }
 

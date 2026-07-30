@@ -82,6 +82,49 @@ impl LocalAgentProvider {
         &self.mcp_status
     }
 
+    /// Names of every tool currently registered for this session. Used by tests
+    /// to assert which capabilities (e.g. the Scout toolchain) are exposed for a
+    /// given target without paying for a model call.
+    pub fn tool_names(&self) -> Vec<String> {
+        self.registry
+            .as_ref()
+            .map(|registry| registry.tool_names().into_iter().collect())
+            .unwrap_or_default()
+    }
+
+    /// The executor this session's tool I/O runs through — local, or a remote
+    /// host (over the exec-server) for a remote project. Tests use it to prove a
+    /// remote session's reads resolve to the remote host, not the local disk.
+    pub fn session_executor(&self) -> Arc<dyn crate::exec::Executor> {
+        self.executor.clone()
+    }
+
+    /// Look up a registered tool by name. Combined with [`Self::tool_ctx`], this
+    /// lets tests drive a tool directly through a live session (local or remote)
+    /// without paying for a model call.
+    pub fn tool(&self, name: &str) -> Option<Arc<dyn crate::tools::ToolExecutor>> {
+        self.registry.as_ref().and_then(|r| r.get(name))
+    }
+
+    /// A `ToolCtx` bound to this session's sandbox, executor, read-tracker, and
+    /// session state — the same wiring a real tool call gets. `None` until a
+    /// session has been started (`new_session`).
+    pub fn tool_ctx(&self) -> Option<crate::tools::ToolCtx> {
+        let sandbox = self.sandbox.clone()?;
+        Some(crate::tools::ToolCtx {
+            sandbox,
+            executor: self.executor.clone(),
+            reads: self.reads.clone(),
+            cancel: CancellationToken::new(),
+            background: self.background.clone(),
+            session: self.session.clone(),
+            progress: None,
+            agent_progress: None,
+            call_progress: None,
+            model_override: None,
+        })
+    }
+
     pub fn with_skill_catalog_service(
         mut self,
         service: Arc<crate::skills::SkillCatalogService>,

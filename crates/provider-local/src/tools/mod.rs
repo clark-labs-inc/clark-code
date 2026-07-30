@@ -179,6 +179,7 @@ pub struct ToolCtx {
     /// Session state — `check_diagnostics` reads `check_command` and the
     /// stored baseline from here. `tokio::sync::Mutex` (not the `std` one
     /// aliased above for `ReadTracker`) since it's held across `.await` points.
+    #[allow(private_interfaces)]
     pub session: Arc<tokio::sync::Mutex<crate::loop_state::SessionState>>,
     /// Per-call live-progress sink: long tools (shell, grep) push text deltas
     /// here and they stream to the UI's tool row while the call runs. `None`
@@ -410,6 +411,7 @@ pub trait ToolExecutor: Send + Sync {
     /// Authorization and effect verification are deliberately separate: a
     /// user can approve an action without asserting that its final state is
     /// correct.
+    #[allow(private_interfaces)]
     fn effect_intent(&self, _args: &Value) -> Option<crate::effects::EffectIntent> {
         None
     }

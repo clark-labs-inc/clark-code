@@ -1,0 +1,22 @@
+[package]
+name = "security-poc-runner"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Bounded, network-denied, disposable-workspace security PoC runner. Seals `managed_disposable` receipts identically for the local tool path and the remote exec-server target service."
+
+[dependencies]
+async-trait.workspace = true
+exec-core = { path = "../exec-core" }
+exec-sandbox = { path = "../exec-sandbox" }
+serde.workspace = true
+serde_json.workspace = true
+serde_bytes = "0.11"
+sha2 = "0.10"
+tokio.workspace = true
+tokio-util = { version = "0.7", default-features = false }
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+tempfile = "3"

@@ -29,6 +29,7 @@ members = [
     "crates/scout-coordinator",
     "crates/scout-scheduler",
     "crates/scout-store",
+    "crates/security-poc-runner",
     "crates/devbridge",
     "src-tauri",
 ]

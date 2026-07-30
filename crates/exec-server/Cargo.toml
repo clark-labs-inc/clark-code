@@ -17,6 +17,7 @@ path = "src/bin/clark-exec-server.rs"
 [dependencies]
 exec-core = { path = "../exec-core" }
 exec-protocol = { path = "../exec-protocol" }
+security-poc-runner = { path = "../security-poc-runner" }
 serde.workspace = true
 serde_json.workspace = true
 futures.workspace = true

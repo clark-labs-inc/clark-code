@@ -76,6 +76,7 @@ fn config() -> OrchestrationToolsConfig {
         reasoning_effort: None,
         scout_capsules: None,
         scout_cartography: None,
+        remote: None,
     }
 }
 
@@ -199,6 +200,7 @@ async fn paid_single_repo_workstreams_complete_and_apply() {
             reasoning_effort: Some("low".into()),
             scout_capsules: None,
             scout_cartography: None,
+            remote: None,
         },
         pending: Mutex::new(HashMap::new()),
     });
