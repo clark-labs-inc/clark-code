@@ -384,11 +384,14 @@ impl LocalConfig {
             })
         });
         let sandbox_mode = LocalSandboxMode::from_extra(extra);
-        // The first orchestration boundary launches nested local/ACP processes.
-        // A remote project needs a remote-aware child transport and read-only
-        // enforcement on that host, neither of which this adapter can prove yet.
+        // Orchestration's in-process read-only harness reconnects to the remote
+        // exec-server through `extra.remote` (see orchestration), so delegation
+        // and Scout stay available on remote targets. ACP harnesses spawn local
+        // child processes and cannot reach that target, so they are dropped here
+        // rather than registered against the wrong host.
         if remote.is_some() {
-            orchestration.enabled = false;
+            orchestration.acp_harnesses.clear();
+            orchestration.read_only_harness = "local".to_string();
         }
 
         Self {
@@ -571,12 +574,25 @@ mod tests {
                     "token": "cap-token",
                     "cwd": "/home/me/project"
                 },
-                "orchestration": {"enabled": true}
+                "orchestration": {
+                    "enabled": true,
+                    "read_only_harness": "sandboxed",
+                    "acp_harnesses": [{
+                        "id": "sandboxed",
+                        "model": "codex",
+                        "command": ["codex", "acp"],
+                        "enforcement": "os_sandbox"
+                    }]
+                }
             }),
             ..Default::default()
         };
         let cfg = LocalConfig::from_provider_config(&pc);
-        assert!(!cfg.orchestration.enabled);
+        // Orchestration stays enabled on remote; delegated children reconnect
+        // through `extra.remote`. ACP harnesses are local-only and dropped.
+        assert!(cfg.orchestration.enabled);
+        assert!(cfg.orchestration.acp_harnesses.is_empty());
+        assert_eq!(cfg.orchestration.read_only_harness, "local");
         let remote = cfg.remote.expect("remote target parsed");
         assert_eq!(remote.ws_url, "ws://127.0.0.1:54321");
         assert_eq!(remote.token, "cap-token");

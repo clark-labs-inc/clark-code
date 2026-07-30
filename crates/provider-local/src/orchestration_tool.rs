@@ -13,7 +13,7 @@ use agent_orchestration::{
 };
 use async_trait::async_trait;
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 use tokio::sync::Semaphore;
 use uuid::Uuid;
 
@@ -96,7 +96,15 @@ pub(crate) fn orchestration_tools(config: OrchestrationToolsConfig) -> Vec<Arc<d
         }),
         resolution::tool(shared.clone()),
     ];
-    tools.extend(writer::tools(writer_config));
+    // The read-only harness reconnects children to the remote exec-server via
+    // `extra.remote`, so `delegate_read_only` (Scout) is remote-safe. The coding
+    // writer builds its child provider and scratch workspace on the *local*
+    // host and does not propagate the remote target, so it stays local-only
+    // until it gets the same treatment — registering it on remote would let a
+    // "delegated writer" silently run on the wrong host.
+    if shared.config.remote.is_none() {
+        tools.extend(writer::tools(writer_config));
+    }
     tools.extend(scout::tools(
         scout_max_parallel_agents,
         shared.config.scout_capsules.clone(),
@@ -408,12 +416,25 @@ fn register_harnesses(
         ctx.sandbox.root(),
         ctx.executor.clone(),
     ));
-    let extra = json!({
-        "base_url": shared.config.base_url,
-        "model": local_model,
-        "reasoning_effort": reasoning_effort,
-        "temperature": 0.0
+    // When the parent session runs on a remote host, the read-only child must
+    // reconnect to the same exec-server; otherwise it would read the local
+    // filesystem at the same path and break read-only enforcement.
+    let remote = shared.config.remote.as_ref().map(|remote| {
+        json!({
+            "ws_url": remote.ws_url,
+            "token": remote.token,
+            "cwd": remote.cwd,
+        })
     });
+    let mut extra = Map::new();
+    extra.insert("base_url".to_string(), json!(shared.config.base_url));
+    extra.insert("model".to_string(), json!(local_model));
+    extra.insert("reasoning_effort".to_string(), json!(reasoning_effort));
+    extra.insert("temperature".to_string(), json!(0.0));
+    if let Some(remote) = remote {
+        extra.insert("remote".to_string(), remote);
+    }
+    let extra = Value::Object(extra);
     coordinator.register_harness(Arc::new(local_read_only_harness(
         agent_orchestration::ProviderHarnessConfig {
             id: "local".to_string(),
@@ -433,8 +454,12 @@ fn register_harnesses(
         },
         workspace.clone(),
     )?))?;
-    for acp in &shared.config.policy.acp_harnesses {
-        coordinator.register_harness(Arc::new(acp_harness(acp, &root, workspace.clone())?))?;
+    // ACP harnesses spawn local child processes; they cannot reach a remote
+    // execution target, so only the in-process `local` harness is valid there.
+    if shared.config.remote.is_none() {
+        for acp in &shared.config.policy.acp_harnesses {
+            coordinator.register_harness(Arc::new(acp_harness(acp, &root, workspace.clone())?))?;
+        }
     }
     Ok(())
 }

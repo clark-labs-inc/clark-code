@@ -18,6 +18,7 @@ clark-agent-compaction = { git = "https://github.com/clark-labs-inc/clark-agent-
 exec-core = { path = "../exec-core" }
 exec-sandbox = { path = "../exec-sandbox" }
 exec-protocol = { path = "../exec-protocol" }
+security-poc-runner = { path = "../security-poc-runner" }
 scout-adapter-protocol = { path = "../scout-adapter-protocol" }
 scout-adapter-runtime = { path = "../scout-adapter-runtime" }
 scout-cartography-adapter = { path = "../scout-cartography-adapter" }

@@ -365,10 +365,18 @@ async fn fs_dispatch(
                 ));
             }
             let request = b64_decode(&p.request).map_err(|e| (error_code::INVALID_PARAMS, e))?;
-            let response = fs
-                .target_service_call(&p.service, &root, &request)
-                .await
-                .map_err(exec_err)?;
+            // The security PoC runner needs exec-core's process primitives, so it
+            // can't live in exec-core (a dependency cycle); it is dispatched here
+            // instead of through `LocalExecutor::target_service_call`.
+            let response = if p.service == security_poc_runner::SERVICE_NAME {
+                security_poc_runner::dispatch(&p.service, &root, &request)
+                    .await
+                    .map_err(exec_err)?
+            } else {
+                fs.target_service_call(&p.service, &root, &request)
+                    .await
+                    .map_err(exec_err)?
+            };
             Ok(to_value(&TargetServiceResult {
                 response: b64_encode(&response),
             }))

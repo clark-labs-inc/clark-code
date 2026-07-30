@@ -410,6 +410,7 @@ fn checked_in_feature_map_matches_every_builtin_model_tool() {
         reasoning_effort: None,
         scout_capsules: None,
         scout_cartography: None,
+        remote: None,
     });
 
     let manifest: Value = serde_json::from_str(include_str!(

@@ -394,8 +394,9 @@ export function localConnectConfig(
       // helper, OS privacy grants, per-app approvals, and action policy.
       computer_use_enabled: s.computerUseEnabled === true,
       // Conservative-by-default parallel investigation and isolated coding
-      // workstreams. Remote hosts need a proven isolation boundary first.
-      orchestration: { enabled: !remote && loadOrchestrationEnabled() },
+      // workstreams. The engine keeps delegated read-only children on the remote
+      // host by reconnecting through the same exec-server (see extra.remote).
+      orchestration: { enabled: loadOrchestrationEnabled() },
       // When present, the provider runs this session's tools on the remote host.
       ...(remote ? { remote } : {}),
     },
