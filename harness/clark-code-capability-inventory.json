@@ -479,7 +479,8 @@
             "crates/exec-sandbox-protocol",
             "crates/exec-sandbox-windows",
             "crates/exec-protocol",
-            "crates/exec-server"
+            "crates/exec-server",
+            "crates/security-poc-runner"
           ]
         },
         {

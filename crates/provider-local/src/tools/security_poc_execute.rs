@@ -791,6 +791,17 @@ mod tests {
 
     #[tokio::test]
     async fn remote_executor_routes_poc_through_the_target_service() {
+        // The shared runner seals only inside a locally enforced OS sandbox;
+        // minimal CI hosts (e.g. ubuntu without bubblewrap) omit it. Skip there
+        // exactly like the local-path test does — production refuses in this
+        // state, and the live e2e exercises the real sandboxed path on a host
+        // that has containment.
+        let probe_root = tempfile::tempdir().unwrap();
+        let probe_policy = SandboxPolicy::read_only().with_write_roots([probe_root.path().into()]);
+        if SandboxedExecutor::new(probe_policy).is_err() {
+            return;
+        }
+
         let root = tempfile::tempdir().unwrap();
         std::fs::write(root.path().join("source.txt"), "REMOTE VULNERABLE\n").unwrap();
         let mut ctx = context(root.path());
