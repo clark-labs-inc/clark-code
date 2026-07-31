@@ -34,6 +34,7 @@ import {
   syncFanOut,
 } from "./sessionStore.runtime";
 import { saveManagedWorktreeBase } from "../lib/managedWorktreeSettings";
+import { composerDraftRef } from "../lib/composerDraft";
 import { createSidebarConversationActions } from "./sessionStore.sidebarConversationActions";
 
 type ConversationActions = Pick<
@@ -311,6 +312,13 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
       for (const id of [...liveSessions.keys()]) closeLiveSession(bridge, id);
       set({ runningIds: [] });
     }
+    // Starting a new session unmounts the active-session composer and mounts a
+    // fresh start-screen one, which would drop a half-typed draft (the text
+    // lives in the composer's local state). Stage the mirrored draft as a
+    // prefill so the new composer restores it. Sign-out (force) discards it for
+    // a clean slate — the next account starts with an empty composer.
+    const preservedDraft = opts?.force ? "" : composerDraftRef.current;
+    if (opts?.force) composerDraftRef.current = "";
     set({
       session: null,
       snapshot: emptySnapshot(),
@@ -319,7 +327,7 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
       attachments: [],
       historyPrefix: null,
       opening: null,
-      composerPrefill: null,
+      composerPrefill: preservedDraft.trim() ? { text: preservedDraft } : null,
       queued: [],
       terminalOpen: false,
       sideQuestion: null,

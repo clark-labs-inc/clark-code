@@ -39,6 +39,7 @@ import { cn } from "../lib/cn";
 import { DUR, EASE } from "../lib/motion";
 import { inTauri } from "../lib/pickFolder";
 import { useComposerAutosize } from "../lib/composerAutosize";
+import { composerDraftRef } from "../lib/composerDraft";
 import { useSkillCatalog } from "../lib/useSkillCatalog";
 import { AttachmentChips } from "./ComposerAttachments";
 import { ComposerContextBar } from "./ComposerContextBar";
@@ -203,6 +204,14 @@ export function Composer() {
   usePaste((files) => void addFiles(files), !connecting);
 
   useComposerAutosize(taRef, value);
+
+  // Mirror the draft into a non-reactive ref so store actions can read the
+  // unsent text without making the textarea value reactive (typing must not
+  // re-render the store). `endSession` stages this as a prefill to carry a
+  // half-typed message across the composer remount a new session forces.
+  useEffect(() => {
+    composerDraftRef.current = value;
+  }, [value]);
 
   // "Edit & resend" staged text from a sent message: load it and focus.
   useEffect(() => {
