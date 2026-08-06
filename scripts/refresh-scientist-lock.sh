@@ -46,10 +46,25 @@ fi
 # Bind the exact local Autoresearch checkout while refreshing only the lock
 # entries needed by the Desktop path dependencies; the subsequent worker
 # build remains --locked and therefore deterministic.
-GIT_CONFIG_COUNT=2 \
-  GIT_CONFIG_KEY_0="url.file://$AUTORESEARCH_SOURCE.insteadOf" \
-  GIT_CONFIG_VALUE_0="https://github.com/clark-labs-inc/clark-autoresearch" \
-  GIT_CONFIG_KEY_1="protocol.file.allow" \
-  GIT_CONFIG_VALUE_1="always" \
-  CARGO_NET_GIT_FETCH_WITH_CLI=true \
-  cargo update --manifest-path "$SOURCE_DIR/Cargo.toml" --workspace
+run_cargo() {
+  GIT_CONFIG_COUNT=2 \
+    GIT_CONFIG_KEY_0="url.file://$AUTORESEARCH_SOURCE.insteadOf" \
+    GIT_CONFIG_VALUE_0="https://github.com/clark-labs-inc/clark-autoresearch" \
+    GIT_CONFIG_KEY_1="protocol.file.allow" \
+    GIT_CONFIG_VALUE_1="always" \
+    CARGO_NET_GIT_FETCH_WITH_CLI=true \
+    cargo "$@"
+}
+
+run_cargo update --manifest-path "$SOURCE_DIR/Cargo.toml" --workspace
+
+# Fail here, before any ordinary or Scientist worker compilation, if the
+# refreshed graph cannot be consumed with the release build's --locked rule.
+run_cargo metadata \
+  --manifest-path "$SOURCE_DIR/Cargo.toml" \
+  --locked \
+  --format-version 1 \
+  --no-deps \
+  >/dev/null
+
+echo "validated Clark Scientist's locked dependency graph"
