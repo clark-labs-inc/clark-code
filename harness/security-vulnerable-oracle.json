@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "fixture": "harness/fixtures/security-vulnerable-repo",
+  "expectedFindings": [
+    {"id": "AUTH-BODY-ADMIN", "path": "src/api/admin.ts", "cwe": "CWE-807", "severity": "critical"},
+    {"id": "IDOR-USER", "path": "src/api/users.ts", "cwe": "CWE-639", "severity": "high"},
+    {"id": "ZIP-SLIP", "path": "src/archive/extract.py", "cwe": "CWE-22", "severity": "high"},
+    {"id": "JWT-NO-VERIFY", "path": "src/auth/jwt.ts", "cwe": "CWE-347", "severity": "critical"},
+    {"id": "HARDCODED-SECRET", "path": "src/config/secrets.ts", "cwe": "CWE-798", "severity": "high"},
+    {"id": "SQL-INJECTION", "path": "src/db/search.ts", "cwe": "CWE-89", "severity": "critical"},
+    {"id": "PATH-TRAVERSAL", "path": "src/files/download.ts", "cwe": "CWE-22", "severity": "high"},
+    {"id": "COMMAND-INJECTION", "path": "src/jobs/export.ts", "cwe": "CWE-78", "severity": "critical"},
+    {"id": "SSRF", "path": "src/network/fetch.ts", "cwe": "CWE-918", "severity": "high"},
+    {"id": "INSECURE-COOKIE", "path": "src/session/cookies.ts", "cwe": "CWE-614", "severity": "medium"},
+    {"id": "TENANT-REPORT-IDOR", "path": "src/tenant/report.ts", "cwe": "CWE-639", "severity": "high"},
+    {"id": "OPEN-REDIRECT", "path": "src/web/redirect.ts", "cwe": "CWE-601", "severity": "medium"},
+    {"id": "STORED-XSS", "path": "src/web/render.ts", "cwe": "CWE-79", "severity": "high"},
+    {"id": "WEBHOOK-FAIL-OPEN", "path": "src/webhooks/github.py", "cwe": "CWE-345", "severity": "critical"}
+  ],
+  "safeControlPaths": [
+    "src/safe/archive.py",
+    "src/safe/fetch.ts",
+    "src/safe/queries.ts"
+  ],
+  "excludedPaths": [
+    "vendor/generated.js"
+  ]
+}

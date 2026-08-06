@@ -1,0 +1,695 @@
+{
+  "schema_version": 2,
+  "product": "Clark Code",
+  "live_model": {
+    "id": "qwen/qwen3.7-flash",
+    "product_alias": null,
+    "catalog_required": false,
+    "label": "Qwen 3.7 Flash",
+    "upstream_id": "qwen/qwen3.7-flash",
+    "provider": "clark-platform",
+    "base_url": "https://api.clarkslabs.com/v1",
+    "credential": "CLARK_CODE_API_KEY",
+    "default_paid": true,
+    "selection_policy": "lowest_expected_cost_for_input_heavy_tool_calling_tests",
+    "pricing_snapshot": {
+      "as_of": "2026-07-28",
+      "source": "https://openrouter.ai/api/v1/models",
+      "input_usd_per_million_tokens": 0.03,
+      "output_usd_per_million_tokens": 0.13,
+      "cached_input_usd_per_million_tokens": 0.006
+    },
+    "offline_flag": "--offline",
+    "max_live_tests": 3,
+    "max_iterations_per_turn": 16,
+    "temperature": 0.0,
+    "inter_test_cost_ceiling_usd": 0.5,
+    "rule": "The consolidated benchmark uses the managed Qwen 3.7 Flash lane by default. --offline is the explicit opt-out. Credentials must never be printed or persisted."
+  },
+  "platforms": ["macos", "windows", "ubuntu"],
+  "support_states": [
+    "supported",
+    "simulated",
+    "platform_specific",
+    "unsupported"
+  ],
+  "test_lanes": {
+    "frontend_contract": {
+      "kind": "simulated",
+      "platforms": ["macos", "windows", "ubuntu"],
+      "steps": [
+        ["corepack", "pnpm@10", "--dir", "app", "typecheck"],
+        ["corepack", "pnpm@10", "--dir", "app", "test"],
+        ["corepack", "pnpm@10", "--dir", "app", "build"]
+      ]
+    },
+    "rust_contract": {
+      "kind": "simulated",
+      "platforms": ["macos", "windows", "ubuntu"],
+      "steps": [
+        ["cargo", "test", "-p", "agent-core", "-p", "provider-acp", "-p", "provider-clark", "-p", "provider-local"],
+        ["cargo", "test", "-p", "code-host", "-p", "code-worker", "-p", "code-remote"]
+      ]
+    },
+    "computer_use_contract": {
+      "kind": "simulated",
+      "platforms": ["macos", "windows", "ubuntu"],
+      "macos_dyld_swift_runtime": true,
+      "steps": [
+        ["cargo", "test", "-p", "computer-use", "--features", "helper-service"],
+        ["cargo", "test", "-p", "provider-local", "--test", "computer_use"]
+      ]
+    },
+    "sandbox_contract": {
+      "kind": "simulated",
+      "platforms": ["macos", "windows", "ubuntu"],
+      "steps": [
+        ["cargo", "test", "-p", "exec-core", "-p", "exec-sandbox", "-p", "exec-sandbox-windows"]
+      ]
+    },
+    "webkit_contract": {
+      "kind": "simulated",
+      "platforms": ["macos"],
+      "steps": [
+        ["corepack", "pnpm@10", "--dir", "harness", "test:webkit"]
+      ]
+    },
+    "attachment_contract": {
+      "kind": "simulated",
+      "platforms": ["macos"],
+      "steps": [
+        ["corepack", "pnpm@10", "--dir", "harness", "test:attachments"]
+      ]
+    },
+    "resilience_contract": {
+      "kind": "simulated",
+      "platforms": ["macos", "windows", "ubuntu"],
+      "steps": [
+        ["corepack", "pnpm@10", "--dir", "harness", "benchmark:resilience:smoke"]
+      ]
+    },
+    "utm_harness_contract": {
+      "kind": "simulated",
+      "platforms": ["macos"],
+      "steps": [
+        ["node", "--test", "harness/utm-real-use.spec.mjs"]
+      ]
+    },
+    "platform_real_use_contract": {
+      "kind": "simulated",
+      "platforms": ["macos", "windows", "ubuntu"],
+      "steps": [
+        ["node", "--test", "harness/platform-real-use.spec.mjs"]
+      ]
+    },
+    "cheapest_paid_live_chat_jobs": {
+      "kind": "live_paid",
+      "platforms": ["macos", "windows", "ubuntu"],
+      "steps": [
+        [
+          "cargo",
+          "test",
+          "-p",
+          "provider-local",
+          "--test",
+          "live_clark_code",
+          "live_clark_code_skills_end_to_end",
+          "--",
+          "--ignored",
+          "--exact",
+          "--nocapture",
+          "--test-threads=1"
+        ],
+        [
+          "cargo",
+          "test",
+          "-p",
+          "provider-local",
+          "--test",
+          "live_clark_code",
+          "live_clark_code_feature_matrix",
+          "--",
+          "--ignored",
+          "--exact",
+          "--nocapture",
+          "--test-threads=1"
+        ],
+        [
+          "cargo",
+          "test",
+          "-p",
+          "provider-local",
+          "--test",
+          "live_clark_code",
+          "live_clark_code_compacts_and_continues",
+          "--",
+          "--ignored",
+          "--exact",
+          "--nocapture",
+          "--test-threads=1"
+        ]
+      ]
+    }
+  },
+  "model_tools": [
+    "android_boot_emulator",
+    "android_install_app",
+    "android_launch_app",
+    "android_list_devices",
+    "android_press_button",
+    "android_screenshot",
+    "android_shutdown_emulator",
+    "android_swipe",
+    "android_tap",
+    "android_type_text",
+    "android_uninstall_app",
+    "apply_patch",
+    "bash",
+    "bash_input",
+    "bash_kill",
+    "bash_output",
+    "bash_wait",
+    "browser",
+    "check_diagnostics",
+    "cloud_advisor",
+    "cloud_advisor_feedback",
+    "clark_research",
+    "computer_click",
+    "computer_commit_action",
+    "computer_drag",
+    "computer_get_state",
+    "computer_keypress",
+    "computer_list_windows",
+    "computer_open_app",
+    "computer_permissions",
+    "computer_request_permissions",
+    "computer_scroll",
+    "computer_secondary_action",
+    "computer_select_text",
+    "computer_set_value",
+    "computer_type_text",
+    "create_goal",
+    "delegate_coding_workstreams",
+    "delegate_read_only",
+    "document_convert",
+    "edit_file",
+    "enter_plan_mode",
+    "generate_image",
+    "get_goal",
+    "glob",
+    "grep",
+    "ios_boot_simulator",
+    "ios_install_app",
+    "ios_launch_app",
+    "ios_list_simulators",
+    "ios_press_button",
+    "ios_screenshot",
+    "ios_shutdown_simulator",
+    "ios_swipe",
+    "ios_tap",
+    "ios_type_text",
+    "ios_uninstall_app",
+    "list_dir",
+    "memory",
+    "memory_recall",
+    "organization_knowledge",
+    "propose_plan",
+    "read_file",
+    "read_skill",
+    "resolve_coding_workstreams",
+    "resolve_delegation",
+    "security_poc_execute",
+    "security_scan_contract",
+    "scout_adapter",
+    "scout_capabilities",
+    "scout_enterprise",
+    "scout_enterprise_query",
+    "scout_ledger",
+    "scout_measure",
+    "scout_probe",
+    "tool_search",
+    "update_goal",
+    "update_plan",
+    "verify_effect",
+    "view_image",
+    "web_fetch",
+    "write_file"
+  ],
+  "features": [
+    {
+      "id": "filesystem_read_search",
+      "surface": "model_tools",
+      "tools": ["read_file", "list_dir", "glob", "grep", "view_image", "check_diagnostics"],
+      "lanes": ["rust_contract"],
+      "platform_support": {"macos": "supported", "windows": "supported", "ubuntu": "supported"}
+    },
+    {
+      "id": "filesystem_mutation",
+      "surface": "model_tools",
+      "tools": ["write_file", "edit_file", "apply_patch"],
+      "lanes": ["rust_contract", "sandbox_contract"],
+      "platform_support": {"macos": "supported", "windows": "supported", "ubuntu": "supported"}
+    },
+    {
+      "id": "shell_process_lifecycle",
+      "surface": "model_tools",
+      "tools": ["bash", "bash_output", "bash_wait", "bash_input", "bash_kill"],
+      "lanes": ["rust_contract", "sandbox_contract"],
+      "platform_support": {"macos": "supported", "windows": "supported", "ubuntu": "supported"}
+    },
+    {
+      "id": "planning",
+      "surface": "model_tools",
+      "tools": ["propose_plan", "enter_plan_mode", "update_plan"],
+      "lanes": ["rust_contract", "frontend_contract"],
+      "platform_support": {"macos": "supported", "windows": "supported", "ubuntu": "supported"}
+    },
+    {
+      "id": "persistent_goals",
+      "surface": "model_tools",
+      "tools": ["create_goal", "get_goal", "update_goal"],
+      "lanes": ["rust_contract", "frontend_contract"],
+      "platform_support": {"macos": "supported", "windows": "supported", "ubuntu": "supported"}
+    },
+    {
+      "id": "effect_verification",
+      "surface": "model_tools",
+      "tools": ["verify_effect"],
+      "lanes": ["rust_contract"],
+      "platform_support": {"macos": "supported", "windows": "supported", "ubuntu": "supported"}
+    },
+    {
+      "id": "document_conversion",
+      "surface": "model_tools",
+      "tools": ["document_convert"],
+      "lanes": ["rust_contract", "attachment_contract"],
+      "platform_support": {"macos": "supported", "windows": "supported", "ubuntu": "supported"}
+    },
+    {
+      "id": "external_research",
+      "surface": "model_tools",
+      "tools": ["web_fetch", "clark_research"],
+      "lanes": ["rust_contract", "cheapest_paid_live_chat_jobs"],
+      "platform_support": {"macos": "supported", "windows": "supported", "ubuntu": "supported"}
+    },
+    {
+      "id": "cloud_advisor_guidance_and_feedback",
+      "surface": "model_tools",
+      "tools": ["cloud_advisor", "cloud_advisor_feedback"],
+      "lanes": ["rust_contract", "frontend_contract"],
+      "platform_support": {"macos": "supported", "windows": "supported", "ubuntu": "supported"}
+    },
+    {
+      "id": "deferred_tool_discovery",
+      "surface": "model_tools",
+      "tools": ["tool_search"],
+      "lanes": ["rust_contract"],
+      "platform_support": {"macos": "supported", "windows": "supported", "ubuntu": "supported"}
+    },
+    {
+      "id": "skills",
+      "surface": "model_tools",
+      "tools": ["read_skill"],
+      "lanes": ["rust_contract", "frontend_contract"],
+      "platform_support": {"macos": "supported", "windows": "supported", "ubuntu": "supported"}
+    },
+    {
+      "id": "security_scanning",
+      "surface": "model_tools",
+      "tools": ["security_scan_contract", "security_poc_execute"],
+      "lanes": ["rust_contract", "frontend_contract"],
+      "platform_support": {"macos": "supported", "windows": "supported", "ubuntu": "supported"}
+    },
+    {
+      "id": "security_diff_scanning",
+      "surface": "model_tools",
+      "tools": [],
+      "lanes": ["rust_contract", "frontend_contract"],
+      "platform_support": {"macos": "supported", "windows": "supported", "ubuntu": "supported"}
+    },
+    {
+      "id": "security_deep_scanning",
+      "surface": "model_tools",
+      "tools": [],
+      "lanes": ["rust_contract", "frontend_contract"],
+      "platform_support": {"macos": "supported", "windows": "supported", "ubuntu": "supported"}
+    },
+    {
+      "id": "security_scan_history",
+      "surface": "desktop",
+      "tools": [],
+      "lanes": ["rust_contract", "frontend_contract"],
+      "platform_support": {"macos": "supported", "windows": "supported", "ubuntu": "supported"}
+    },
+    {
+      "id": "durable_memory",
+      "surface": "model_tools",
+      "tools": ["memory", "memory_recall"],
+      "lanes": ["rust_contract", "frontend_contract"],
+      "platform_support": {"macos": "supported", "windows": "supported", "ubuntu": "supported"}
+    },
+    {
+      "id": "browser_automation",
+      "surface": "model_tools",
+      "tools": ["browser"],
+      "lanes": ["rust_contract", "webkit_contract"],
+      "platform_support": {"macos": "supported", "windows": "supported", "ubuntu": "supported"}
+    },
+    {
+      "id": "image_generation",
+      "surface": "model_tools",
+      "tools": ["generate_image"],
+      "lanes": ["rust_contract"],
+      "platform_support": {"macos": "supported", "windows": "supported", "ubuntu": "supported"}
+    },
+    {
+      "id": "organization_knowledge",
+      "surface": "model_tools",
+      "tools": ["organization_knowledge"],
+      "lanes": ["rust_contract", "frontend_contract"],
+      "platform_support": {"macos": "supported", "windows": "supported", "ubuntu": "supported"}
+    },
+    {
+      "id": "android_emulator",
+      "surface": "model_tools",
+      "tools": [
+        "android_list_devices",
+        "android_boot_emulator",
+        "android_shutdown_emulator",
+        "android_install_app",
+        "android_uninstall_app",
+        "android_launch_app",
+        "android_screenshot",
+        "android_tap",
+        "android_swipe",
+        "android_type_text",
+        "android_press_button"
+      ],
+      "lanes": ["rust_contract"],
+      "platform_support": {"macos": "supported", "windows": "supported", "ubuntu": "supported"}
+    },
+    {
+      "id": "ios_simulator",
+      "surface": "model_tools",
+      "tools": [
+        "ios_list_simulators",
+        "ios_boot_simulator",
+        "ios_shutdown_simulator",
+        "ios_install_app",
+        "ios_uninstall_app",
+        "ios_launch_app",
+        "ios_screenshot",
+        "ios_tap",
+        "ios_swipe",
+        "ios_type_text",
+        "ios_press_button"
+      ],
+      "lanes": ["rust_contract"],
+      "platform_support": {"macos": "supported", "windows": "unsupported", "ubuntu": "unsupported"}
+    },
+    {
+      "id": "bounded_orchestration",
+      "surface": "model_tools",
+      "tools": [
+        "delegate_read_only",
+        "resolve_delegation",
+        "delegate_coding_workstreams",
+        "resolve_coding_workstreams"
+      ],
+      "lanes": ["rust_contract"],
+      "platform_support": {"macos": "supported", "windows": "supported", "ubuntu": "supported"}
+    },
+    {
+      "id": "scout_system_cartography",
+      "surface": "model_tools",
+      "tools": [
+        "scout_adapter",
+        "scout_capabilities",
+        "scout_enterprise",
+        "scout_enterprise_query",
+        "scout_ledger",
+        "scout_probe",
+        "scout_measure"
+      ],
+      "lanes": ["rust_contract", "frontend_contract"],
+      "platform_support": {"macos": "supported", "windows": "supported", "ubuntu": "supported"}
+    },
+    {
+      "id": "computer_use_perception",
+      "surface": "model_tools",
+      "tools": [
+        "computer_permissions",
+        "computer_request_permissions",
+        "computer_list_windows",
+        "computer_open_app",
+        "computer_get_state"
+      ],
+      "lanes": ["computer_use_contract"],
+      "platform_support": {"macos": "supported", "windows": "simulated", "ubuntu": "simulated"}
+    },
+    {
+      "id": "computer_use_prepare_commit",
+      "surface": "model_tools",
+      "tools": [
+        "computer_click",
+        "computer_type_text",
+        "computer_keypress",
+        "computer_scroll",
+        "computer_drag",
+        "computer_secondary_action",
+        "computer_select_text",
+        "computer_set_value",
+        "computer_commit_action"
+      ],
+      "lanes": ["computer_use_contract"],
+      "platform_support": {"macos": "supported", "windows": "simulated", "ubuntu": "simulated"}
+    },
+    {
+      "id": "conversation_streaming_and_control",
+      "surface": "desktop",
+      "tools": [],
+      "lanes": ["frontend_contract", "rust_contract", "resilience_contract"],
+      "platform_support": {"macos": "supported", "windows": "supported", "ubuntu": "supported"}
+    },
+    {
+      "id": "permissions_and_sandbox",
+      "surface": "desktop",
+      "tools": [],
+      "lanes": ["frontend_contract", "rust_contract", "sandbox_contract"],
+      "platform_support": {"macos": "supported", "windows": "supported", "ubuntu": "supported"}
+    },
+    {
+      "id": "attachments_artifacts_and_previews",
+      "surface": "desktop",
+      "tools": [],
+      "lanes": ["frontend_contract", "attachment_contract"],
+      "platform_support": {"macos": "supported", "windows": "supported", "ubuntu": "supported"}
+    },
+    {
+      "id": "git_changes_checkpoints_and_worktrees",
+      "surface": "desktop",
+      "tools": [],
+      "lanes": ["frontend_contract", "rust_contract"],
+      "platform_support": {"macos": "supported", "windows": "supported", "ubuntu": "supported"}
+    },
+    {
+      "id": "integrated_terminal",
+      "surface": "desktop",
+      "tools": [],
+      "lanes": ["frontend_contract", "rust_contract"],
+      "platform_support": {"macos": "supported", "windows": "supported", "ubuntu": "supported"}
+    },
+    {
+      "id": "mcp_and_remote_ssh",
+      "surface": "desktop",
+      "tools": [],
+      "lanes": ["frontend_contract", "rust_contract"],
+      "platform_support": {"macos": "supported", "windows": "supported", "ubuntu": "supported"}
+    },
+    {
+      "id": "cloud_auth_history_sync_and_share",
+      "surface": "desktop",
+      "tools": [],
+      "lanes": ["frontend_contract", "rust_contract", "resilience_contract"],
+      "platform_support": {"macos": "supported", "windows": "supported", "ubuntu": "supported"}
+    },
+    {
+      "id": "updates_packaging_and_single_instance",
+      "surface": "desktop",
+      "tools": [],
+      "lanes": ["frontend_contract", "rust_contract"],
+      "platform_support": {"macos": "platform_specific", "windows": "platform_specific", "ubuntu": "platform_specific"}
+    },
+    {
+      "id": "cheapest_paid_live_chat_and_job_round_trip",
+      "surface": "desktop",
+      "tools": [],
+      "lanes": ["cheapest_paid_live_chat_jobs"],
+      "platform_support": {"macos": "supported", "windows": "supported", "ubuntu": "supported"}
+    }
+  ],
+  "real_use_scenarios": {
+    "macos": [
+      {
+        "id": "mac_app_startup_auth_and_project",
+        "covers": [
+          "cloud_auth_history_sync_and_share",
+          "conversation_streaming_and_control",
+          "git_changes_checkpoints_and_worktrees",
+          "cheapest_paid_live_chat_and_job_round_trip",
+          "planning",
+          "persistent_goals",
+          "effect_verification",
+          "cloud_advisor_guidance_and_feedback",
+          "external_research",
+          "deferred_tool_discovery",
+          "skills",
+          "security_scanning",
+          "security_diff_scanning",
+          "security_deep_scanning",
+          "security_scan_history",
+          "durable_memory",
+          "organization_knowledge",
+          "bounded_orchestration",
+          "scout_system_cartography",
+          "mcp_and_remote_ssh"
+        ],
+        "expected": "Signed Clark Code Dev starts, retains its TCC identity, opens a disposable project, completes a names-only Scout census, and completes managed Qwen 3.7 Flash chat and job turns."
+      },
+      {
+        "id": "mac_computer_use_safety",
+        "covers": [
+          "computer_use_perception",
+          "computer_use_prepare_commit",
+          "permissions_and_sandbox",
+          "android_emulator",
+          "ios_simulator"
+        ],
+        "expected": "A fresh observation drives routine actions in a disposable TextEdit document; stale, forged, sensitive, and takeover cases fail closed; Stop quiesces before acknowledgement."
+      },
+      {
+        "id": "mac_terminal_browser_attachments",
+        "covers": [
+          "integrated_terminal",
+          "browser_automation",
+          "attachments_artifacts_and_previews",
+          "filesystem_read_search",
+          "filesystem_mutation",
+          "shell_process_lifecycle",
+          "document_conversion",
+          "image_generation",
+          "updates_packaging_and_single_instance"
+        ],
+        "expected": "Terminal lifecycle, localhost browser navigation, and a disposable attachment render without console or projection errors."
+      }
+    ],
+    "windows": [
+      {
+        "id": "windows_clean_start_and_sandbox",
+        "covers": [
+          "updates_packaging_and_single_instance",
+          "permissions_and_sandbox",
+          "integrated_terminal",
+          "shell_process_lifecycle",
+          "conversation_streaming_and_control"
+        ],
+        "expected": "Windows build starts in the UTM VM, the restricted-token/UAC state is visible, and shell cancellation leaves no child process."
+      },
+      {
+        "id": "windows_paid_model_and_project_tools",
+        "covers": [
+          "cheapest_paid_live_chat_and_job_round_trip",
+          "filesystem_read_search",
+          "filesystem_mutation",
+          "git_changes_checkpoints_and_worktrees",
+          "planning",
+          "persistent_goals",
+          "effect_verification",
+          "document_conversion",
+          "cloud_advisor_guidance_and_feedback",
+          "external_research",
+          "deferred_tool_discovery",
+          "skills",
+          "security_scanning",
+          "security_diff_scanning",
+          "security_deep_scanning",
+          "security_scan_history",
+          "durable_memory",
+          "image_generation",
+          "organization_knowledge",
+          "bounded_orchestration",
+          "scout_system_cartography",
+          "cloud_auth_history_sync_and_share"
+        ],
+        "expected": "The managed Qwen 3.7 Flash route reads and Scouts a disposable fixture without secret values, performs one approved edit, verifies the diff, and never escapes the fixture."
+      },
+      {
+        "id": "windows_platform_exclusions",
+        "covers": [
+          "ios_simulator",
+          "computer_use_perception",
+          "computer_use_prepare_commit",
+          "android_emulator",
+          "browser_automation",
+          "attachments_artifacts_and_previews",
+          "mcp_and_remote_ssh"
+        ],
+        "expected": "iOS and native computer use are not advertised; the deterministic computer-use simulator still passes its contract lane."
+      }
+    ],
+    "ubuntu": [
+      {
+        "id": "ubuntu_install_and_desktop_start",
+        "covers": [
+          "updates_packaging_and_single_instance",
+          "cloud_auth_history_sync_and_share",
+          "conversation_streaming_and_control",
+          "planning",
+          "persistent_goals",
+          "skills",
+          "security_scanning",
+          "security_diff_scanning",
+          "security_deep_scanning",
+          "security_scan_history",
+          "durable_memory",
+          "organization_knowledge",
+          "bounded_orchestration"
+        ],
+        "expected": "The UTM Ubuntu VM boots into a graphical desktop with the UTM guest agent and SPICE integration, launches Clark Code, and preserves an ordinary GUI session across restart."
+      },
+      {
+        "id": "ubuntu_paid_model_and_bubblewrap",
+        "covers": [
+          "cheapest_paid_live_chat_and_job_round_trip",
+          "permissions_and_sandbox",
+          "shell_process_lifecycle",
+          "filesystem_read_search",
+          "filesystem_mutation",
+          "git_changes_checkpoints_and_worktrees",
+          "effect_verification",
+          "document_conversion",
+          "cloud_advisor_guidance_and_feedback",
+          "external_research",
+          "deferred_tool_discovery",
+          "image_generation",
+          "integrated_terminal",
+          "scout_system_cartography"
+        ],
+        "expected": "The managed Qwen 3.7 Flash route reads and Scouts a disposable fixture without secret values, and bubblewrap confines an approved mutation and cancelled background process."
+      },
+      {
+        "id": "ubuntu_feature_surface",
+        "covers": [
+          "browser_automation",
+          "attachments_artifacts_and_previews",
+          "mcp_and_remote_ssh",
+          "computer_use_perception",
+          "computer_use_prepare_commit",
+          "android_emulator",
+          "ios_simulator"
+        ],
+        "expected": "Linux-supported surfaces work in the GUI; native computer use is explicitly unavailable while its simulator remains green."
+      }
+    ]
+  }
+}

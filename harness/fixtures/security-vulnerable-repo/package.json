@@ -1,0 +1,7 @@
+{
+  "name": "intentionally-vulnerable-security-fixture",
+  "private": true,
+  "scripts": {
+    "test": "echo fixture-only"
+  }
+}

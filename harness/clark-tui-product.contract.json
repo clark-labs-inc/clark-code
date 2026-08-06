@@ -1,0 +1,206 @@
+{
+  "schema_version": 3,
+  "evidence_class": "deterministic local Clark product contract",
+  "implementation_boundary": {
+    "owner": "Clark Labs",
+    "rule": "The Clark TUI is original Clark code. It shares Clark domain and provider contracts with Desktop and does not load, invoke, vendor, or test against another TUI implementation.",
+    "manifest": "crates/clark-cli/Cargo.toml",
+    "source_root": "crates/clark-cli/src",
+    "allowed_terminal_crates": ["crossterm", "ratatui"],
+    "forbidden_source_terms": ["codex"]
+  },
+  "features": [
+    {
+      "id": "clark_product_shell",
+      "title": "Clark authentication, organization resolution, workspace selection, and initialization",
+      "expected_state": "implemented",
+      "commands": ["init"],
+      "behaviors": [
+        "Interactive startup offers browser, device-code, and API-key authentication without requiring Clark Desktop",
+        "The Clark credential resolves account, organization choices, project, plan, and specialist entitlements server-side",
+        "Code and all four paid specialists are workspace choices rather than slash commands"
+      ],
+      "probes": [
+        { "kind": "file_contains", "path": "crates/clark-cli/src/tui.rs", "contains": "Sign in with Device Code" },
+        { "kind": "file_contains", "path": "crates/clark-cli/src/main.rs", "contains": "tui::select_workspace" },
+        { "kind": "file_contains", "path": "crates/clark-cli/src/cloud.rs", "contains": "subscription_required" },
+        { "kind": "file_contains", "path": "crates/clark-cli/src/tui/workspace.rs", "contains": "AGENTS.md" }
+      ]
+    },
+    {
+      "id": "minimal_tui_surface",
+      "title": "Deliberately small Clark-owned human terminal surface",
+      "expected_state": "implemented",
+      "commands": ["clear", "quit"],
+      "behaviors": [
+        "The public palette contains exactly eight Clark commands",
+        "Unknown imported commands fail locally instead of becoming model prompts",
+        "The renderer has no Vim mode, themes, pets, background-terminal console, review console, or side-chat command surface"
+      ],
+      "probes": [
+        { "kind": "file_contains", "path": "crates/clark-cli/src/tui/command_palette.rs", "contains": "assert_eq!(COMMANDS.len(), 8)" },
+        { "kind": "file_contains", "path": "crates/clark-cli/src/tui/command_runtime.rs", "contains": "Unknown Clark command" },
+        {
+          "kind": "commands",
+          "steps": [
+            { "program": "node", "args": ["harness/run-clark-tui-provider-event-tests.mjs"] }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "conversation_and_provider_events",
+      "title": "Shared Provider contract, typed events, streaming, steering, and transcript rendering",
+      "expected_state": "implemented",
+      "commands": [],
+      "behaviors": [
+        "The TUI consumes agent_core Provider events without a terminal-specific provider protocol",
+        "Streaming, structured specialist output, artifacts, goals, usage, errors, cancel, and steering remain typed",
+        "The composer supports multiline human input, paste, history, selection, and bounded terminal layout"
+      ],
+      "probes": [
+        { "kind": "file_contains", "path": "crates/agent-core/src/provider.rs", "contains": "pub trait Provider" },
+        { "kind": "file_contains", "path": "crates/clark-cli/src/tui/provider_events.rs", "contains": "pub(crate) struct ProviderEventState" },
+        { "kind": "file_contains", "path": "crates/clark-cli/src/tui/session.rs", "contains": "interaction.resolve_steering" },
+        {
+          "kind": "commands",
+          "steps": [
+            { "program": "node", "args": ["harness/run-clark-tui-provider-event-tests.mjs"] }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "permissions",
+      "title": "Fail-closed provider permissions and persistent Clark profiles",
+      "expected_state": "implemented",
+      "commands": ["permissions"],
+      "behaviors": [
+        "Provider-authored choices, risks, reasons, and consequences remain visible",
+        "Missing choices fail closed and persistent profiles never silently widen the current session"
+      ],
+      "probes": [
+        { "kind": "file_contains", "path": "crates/clark-cli/src/tui/permissions.rs", "contains": "pub(crate) struct PermissionPicker" },
+        { "kind": "file_contains", "path": "crates/clark-cli/src/tui/permission_profiles.rs", "contains": "pub(crate) enum PermissionProfile" },
+        { "kind": "file_contains", "path": "crates/clark-cli/src/tui/command_runtime.rs", "contains": "command_name(line).is_some_and(|name| name != \"permissions\")" }
+      ]
+    },
+    {
+      "id": "attachments",
+      "title": "One structured attachment command for files and editor context",
+      "expected_state": "implemented",
+      "commands": ["attach"],
+      "behaviors": [
+        "Exact and fuzzy files retain filename, MIME type, and byte-exact payloads",
+        "Editor context uses /attach --ide and multi-file context is staged atomically",
+        "Unsupported media fails before a provider turn starts"
+      ],
+      "probes": [
+        { "kind": "file_contains", "path": "crates/clark-cli/src/tui/attachments.rs", "contains": "name != \"attach\"" },
+        { "kind": "file_contains", "path": "crates/clark-cli/src/tui/attachments.rs", "contains": "strip_prefix(\"--ide \"" },
+        { "kind": "file_contains", "path": "crates/clark-cli/src/tui/session.rs", "contains": "clear_after_start" },
+        {
+          "kind": "commands",
+          "steps": [
+            { "program": "node", "args": ["harness/run-clark-tui-provider-event-tests.mjs"] }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "model_goal_status",
+      "title": "Provider-owned model choice, durable goal state, and sourced status",
+      "expected_state": "implemented",
+      "commands": ["model", "goal", "status"],
+      "behaviors": [
+        "Model choices come from the active Clark provider and specialist-owned models stay locked",
+        "Durable goal state is typed provider state rather than transcript inference",
+        "Status attributes authentication, organization, plan, workspace, provider, sync, configuration, and usage to their source"
+      ],
+      "probes": [
+        { "kind": "file_contains", "path": "crates/clark-cli/src/tui/settings.rs", "contains": "command == \"model\"" },
+        { "kind": "file_contains", "path": "crates/clark-cli/src/tui/goals.rs", "contains": "pub(crate) enum PlanGoalCommand" },
+        { "kind": "file_contains", "path": "crates/clark-cli/src/tui/status.rs", "contains": "Clark cloud synchronization receipt" },
+        {
+          "kind": "commands",
+          "steps": [
+            { "program": "node", "args": ["harness/run-clark-tui-provider-event-tests.mjs"] }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "typed_specialist_workspaces",
+      "title": "Distinct Scientist, RSI, Scout, and Security workflows",
+      "expected_state": "implemented",
+      "commands": [],
+      "behaviors": [
+        "Each paid specialist has its own workspace modes and typed provider outputs",
+        "Specialist selection is entitlement-gated before a worker or model starts",
+        "The common TUI renders specialist events without flattening specialists into generic commands"
+      ],
+      "probes": [
+        { "kind": "file_contains", "path": "crates/clark-cli/src/runtime.rs", "contains": "ScientistDiscover" },
+        { "kind": "file_contains", "path": "crates/clark-cli/src/runtime.rs", "contains": "RsiCreateEvals" },
+        { "kind": "file_contains", "path": "crates/clark-cli/src/runtime.rs", "contains": "SecurityDeep" },
+        { "kind": "file_contains", "path": "crates/clark-cli/src/tui/specialists.rs", "contains": "CloudContinuity" }
+      ]
+    },
+    {
+      "id": "specialist_cloud_continuity",
+      "title": "Mandatory cloud continuity for every paid specialist",
+      "expected_state": "implemented",
+      "commands": [],
+      "behaviors": [
+        "Scientist journals, experiments, evidence, and artifacts require verified Clark Cloud receipts",
+        "RSI research and world artifacts, Scout workspace state, and Security scan state use their authoritative cloud paths",
+        "Headless work fails loudly before execution when authentication, entitlement, preflight synchronization, or required completion synchronization fails"
+      ],
+      "probes": [
+        { "kind": "file_contains", "path": "crates/clark-cli/src/runtime.rs", "contains": "sync_before_start" },
+        { "kind": "file_contains", "path": "crates/clark-cli/src/science_cloud.rs", "contains": "science/access" },
+        { "kind": "file_contains", "path": "crates/clark-cli/src/science_cloud.rs", "contains": "No worker or model was started" },
+        { "kind": "file_contains", "path": "crates/clark-cli/src/runtime.rs", "contains": "sync_after_finish" },
+        { "kind": "file_contains", "path": "crates/clark-cli/src/cloud.rs", "contains": "No worker or model was started" },
+        { "kind": "file_contains", "path": "crates/provider-specialist/src/provider.rs", "contains": "validate_cloud_sync_receipt" },
+        { "kind": "file_contains", "path": "crates/clark-cli/src/output.rs", "contains": "required_from_projection" }
+      ]
+    },
+    {
+      "id": "shared_gui_cli_conversation_continuity",
+      "title": "One account-scoped conversation service shared by GUI, TUI, and headless Clark",
+      "expected_state": "implemented",
+      "commands": [],
+      "behaviors": [
+        "Desktop, TUI, and headless Clark reopen the same cloud-backed conversation and specialist state",
+        "The shared service owns account isolation, provider binding, resume transcripts, and sync receipts",
+        "The TUI does not introduce a separate local JSON session database"
+      ],
+      "probes": [
+        { "kind": "file_contains", "path": "crates/conversation-cloud/src/lib.rs", "contains": "pub enum CredentialSurface" },
+        { "kind": "file_contains", "path": "crates/conversation-cloud/src/lib.rs", "contains": "CliApiKey => \"/v1/cli/conversations\"" },
+        { "kind": "file_contains", "path": "crates/clark-cli/Cargo.toml", "contains": "conversation-cloud" },
+        { "kind": "file_contains", "path": "src-tauri/Cargo.toml", "contains": "conversation-cloud" },
+        { "kind": "file_contains", "path": "crates/agent-core/src/projection.rs", "contains": "pub fn resume_transcript" },
+        { "kind": "file_contains", "path": "crates/clark-cli/src/main.rs", "contains": "tui::select_conversation" },
+        { "kind": "file_contains", "path": "crates/clark-cli/src/conversation.rs", "contains": "mandatory conversation synchronization failed" }
+      ]
+    },
+    {
+      "id": "standalone_headless_packaging",
+      "title": "Standalone Clark CLI installation and update",
+      "expected_state": "implemented",
+      "commands": [],
+      "behaviors": [
+        "The clark executable contains the human TUI and does not require Clark Desktop",
+        "Checksum-verified CLI and headless artifacts are released for supported platforms"
+      ],
+      "probes": [
+        { "kind": "file_contains", "path": ".github/workflows/release.yml", "contains": "clark-cli" },
+        { "kind": "file_contains", "path": "scripts/stage-cli-release.sh", "contains": "clark-code-headless" },
+        { "kind": "file_contains", "path": "scripts/install.sh", "contains": "checksum mismatch" },
+        { "kind": "file_contains", "path": "README.md", "contains": "Clark Desktop is not required" }
+      ]
+    }
+  ]
+}

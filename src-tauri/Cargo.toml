@@ -1,0 +1,115 @@
+[package]
+name = "clark-desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Clark Code — local AI coding agent."
+default-run = "clark-desktop"
+
+[lib]
+name = "clark_desktop_lib"
+# staticlib/cdylib are only needed for iOS/Android embeddings; desktop builds
+# link the rlib into the binary, so skip the two extra codegen passes.
+crate-type = ["rlib"]
+
+[features]
+default = []
+# Owner-local Sentry-like capture and JSONL tracing are development-only.
+# diagnostics.rs rejects this feature in any profile without debug assertions.
+debug-diagnostics = [
+    "dep:clark-capture",
+    "dep:tracing-appender",
+    "tracing-subscriber/json",
+]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+sha2 = "0.10"
+
+[dependencies]
+agent-core = { path = "../crates/agent-core", features = ["native"] }
+code-host = { path = "../crates/code-host" }
+code-remote = { path = "../crates/code-remote" }
+provider-acp = { path = "../crates/provider-acp" }
+provider-clark = { path = "../crates/provider-clark" }
+provider-local = { path = "../crates/provider-local" }
+provider-remote-worker = { path = "../crates/provider-remote-worker" }
+provider-specialist = { path = "../crates/provider-specialist" }
+computer-use = { path = "../crates/computer-use" }
+clark-install-context = { path = "../crates/install-context" }
+clark-http = { path = "../crates/clark-http" }
+conversation-cloud = { path = "../crates/conversation-cloud" }
+clark-capture = { path = "../vendor/clark-capture", features = ["tracing"], optional = true }
+libreoffice-pure = "0.5.4"
+
+tauri = { version = "2", features = [] }
+tauri-plugin-shell = "2"
+# Fast, interactive in-app terminal: a real PTY (colors, resize, interactive
+# programs) streamed to an xterm.js view in the chat.
+portable-pty = "0.9"
+exec-core = { path = "../crates/exec-core" }
+exec-protocol = { path = "../crates/exec-protocol" }
+exec-private-fs = { path = "../crates/exec-core/private-fs" }
+exec-sandbox = { path = "../crates/exec-sandbox" }
+exec-sandbox-windows = { path = "../crates/exec-sandbox-windows" }
+base64 = "0.23"
+# Native folder picker for selecting the local coding project root.
+tauri-plugin-dialog = "2"
+# Native OS notifications — fire when a run finishes/fails or blocks on a
+# permission gate while the window is in the background.
+tauri-plugin-notification = "2"
+# Secure in-app auto-update: checks a signed manifest on the downloads CDN,
+# verifies the Ed25519 signature, swaps the bundle, and relaunches.
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
+# Native Google sign-in (system browser + localhost loopback). Returns a Google
+# ID token we exchange with Clark's Better Auth backend.
+tauri-plugin-google-auth = "0.5"
+# Custom `clark://` URL scheme. The Google sign-in success page redirects here so
+# the OS hands focus back to Clark instead of stranding the user on the loopback
+# tab in their browser.
+tauri-plugin-deep-link = "2"
+# Server-to-server token exchange against Clark's auth API (no browser CORS).
+reqwest = { version = "0.13", default-features = false, features = ["http2", "json", "query", "cookies", "rustls"] }
+# Percent-encode desktop conversation ids in REST sync URLs.
+urlencoding = "2"
+# Ids for live remote-project connections + capability tokens (SSH orchestration).
+uuid = { version = "1", features = ["v4"] }
+# Crash-safe local trajectory outbox. SQLite gives us transactional enqueue,
+# acknowledgement, and checkpoint updates without making local disk a second
+# conversation authority.
+rusqlite = { version = "0.32", features = ["bundled"] }
+sha2 = "0.10"
+hex = "0.4"
+ed25519-dalek = "=3.0.0"
+getrandom = "0.4"
+zeroize = "1"
+chacha20poly1305 = "0.11"
+
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tokio-util = { version = "0.7", default-features = false }
+futures.workspace = true
+async-trait.workspace = true
+tracing.workspace = true
+tracing-appender = { version = "0.2", optional = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Route a second launch (e.g. Windows/Linux opening a `clark://` URL) into the
+# already-running process instead of spawning a new window; the `deep-link`
+# feature re-emits the URL to the running instance so `on_open_url` still fires.
+# macOS delivers deep links to the running app natively, so this is desktop-only.
+[target."cfg(any(target_os = \"macos\", windows, target_os = \"linux\"))".dependencies]
+tauri-plugin-autostart = "2"
+tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
+
+[dev-dependencies]
+tempfile = "3"

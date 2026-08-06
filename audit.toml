@@ -1,0 +1,37 @@
+# cargo-audit configuration.
+#
+# Real vulnerabilities are fixed by upgrading (e.g. quinn-proto -> 0.11.15 for
+# RUSTSEC-2026-0185). The advisories ignored below have NO upstream fix
+# available: they are transitive dependencies pulled in by Tauri's build- and
+# Linux-runtime stack, and clear themselves once Tauri moves off the GTK3
+# bindings. Each is reviewed and accepted, not silenced blindly. Re-audit when
+# bumping `tauri`.
+
+[advisories]
+ignore = [
+  # --- Tauri's Linux WebKitGTK backend (gtk-rs 0.18, the last GTK3 bindings) ---
+  # Linux-only: every crate below is cfg-gated to target_os = "linux" and is not
+  # compiled into the macOS/Windows builds. Pinned transitively by tauri 2.11
+  # (gtk 0.18 requires glib ^0.18); no release on the tauri 2.x line ships a
+  # newer gtk. These resolve when Tauri migrates its Linux webview off GTK3.
+  "RUSTSEC-2024-0429", # glib: unsoundness in VariantStrIter Iterator impls (not exercised by the webview path)
+  "RUSTSEC-2024-0411", # gdkwayland-sys: GTK3 bindings unmaintained
+  "RUSTSEC-2024-0412", # gdk: GTK3 bindings unmaintained
+  "RUSTSEC-2024-0413", # atk: GTK3 bindings unmaintained
+  "RUSTSEC-2024-0414", # gdkx11-sys: GTK3 bindings unmaintained
+  "RUSTSEC-2024-0415", # gtk: GTK3 bindings unmaintained
+  "RUSTSEC-2024-0416", # atk-sys: GTK3 bindings unmaintained
+  "RUSTSEC-2024-0417", # gdkx11: GTK3 bindings unmaintained
+  "RUSTSEC-2024-0418", # gdk-sys: GTK3 bindings unmaintained
+  "RUSTSEC-2024-0419", # gtk3-macros: GTK3 bindings unmaintained
+  "RUSTSEC-2024-0420", # gtk-sys: GTK3 bindings unmaintained
+
+  # --- Build-time transitive deps (not shipped in the binary) ---
+  # urlpattern -> tauri-utils -> tauri-build; unmaintained, no fix published.
+  "RUSTSEC-2025-0075", # unic-char-range: unmaintained
+  "RUSTSEC-2025-0080", # unic-common: unmaintained
+  "RUSTSEC-2025-0081", # unic-char-property: unmaintained
+  "RUSTSEC-2025-0098", # unic-ucd-version: unmaintained
+  "RUSTSEC-2025-0100", # unic-ucd-ident: unmaintained
+  "RUSTSEC-2024-0370", # proc-macro-error: unmaintained (transitive proc-macro dep)
+]

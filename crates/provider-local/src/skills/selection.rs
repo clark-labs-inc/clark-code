@@ -1,0 +1,142 @@
+use std::collections::HashSet;
+
+use agent_core::domain::ContentBlock;
+
+use super::{render_injection, SkillCatalog};
+use crate::exec::Executor;
+
+pub(crate) async fn bound_skill_injections(
+    exec: &dyn Executor,
+    catalog: &SkillCatalog,
+    blocks: &[ContentBlock],
+) -> Result<Vec<String>, String> {
+    let mut sections = Vec::new();
+    let mut seen = HashSet::new();
+    for block in blocks {
+        let ContentBlock::SkillReference {
+            id,
+            revision,
+            name: _,
+        } = block
+        else {
+            continue;
+        };
+        if !seen.insert(id.clone()) {
+            continue;
+        }
+        let skill = catalog.resolve_id(id, Some(revision))?;
+        let contents = catalog.read(exec, skill).await?;
+        sections.push(render_injection(skill, &contents));
+    }
+    Ok(sections)
+}
+
+pub(crate) async fn explicit_skill_injections(
+    exec: &dyn Executor,
+    catalog: &SkillCatalog,
+    user_request: &str,
+) -> Vec<String> {
+    let mut sections = Vec::new();
+    let mut seen = HashSet::new();
+    for requested in explicit_names(user_request) {
+        let Ok(skill) = catalog.resolve_name(&requested) else {
+            continue;
+        };
+        if !seen.insert(skill.id.clone()) {
+            continue;
+        }
+        match catalog.read(exec, skill).await {
+            Ok(contents) => sections.push(render_injection(skill, &contents)),
+            Err(error) => sections.push(format!(
+                "[runtime skill error]\nClark could not load explicitly requested skill `{}`: {error}",
+                skill.name
+            )),
+        }
+    }
+    sections
+}
+
+pub(crate) fn invokes_skill(
+    catalog: &SkillCatalog,
+    blocks: &[ContentBlock],
+    user_request: &str,
+    canonical_name: &str,
+) -> bool {
+    let bound = blocks.iter().any(|block| {
+        let ContentBlock::SkillReference { id, revision, .. } = block else {
+            return false;
+        };
+        catalog
+            .resolve_id(id, Some(revision))
+            .is_ok_and(|skill| skill.name.eq_ignore_ascii_case(canonical_name))
+    });
+    bound
+        || slash_invocation(user_request, canonical_name)
+        || explicit_names(user_request).into_iter().any(|requested| {
+            catalog
+                .resolve_name(&requested)
+                .is_ok_and(|skill| skill.name.eq_ignore_ascii_case(canonical_name))
+        })
+}
+
+fn slash_invocation(text: &str, canonical_name: &str) -> bool {
+    let Some(alias) = canonical_name.rsplit(':').next() else {
+        return false;
+    };
+    let value = text.trim_start();
+    let prefix = format!("/{alias}");
+    value
+        .strip_prefix(&prefix)
+        .is_some_and(|remainder| remainder.is_empty() || remainder.starts_with(char::is_whitespace))
+}
+
+fn explicit_names(text: &str) -> Vec<String> {
+    let mut names = Vec::new();
+    let chars = text.char_indices().collect::<Vec<_>>();
+    let mut index = 0usize;
+    while index < chars.len() {
+        let (start, character) = chars[index];
+        if character != '$' {
+            index += 1;
+            continue;
+        }
+        let mut end = start + character.len_utf8();
+        let mut cursor = index + 1;
+        while cursor < chars.len() {
+            let (offset, candidate) = chars[cursor];
+            if candidate.is_ascii_alphanumeric() || matches!(candidate, '-' | '_' | ':') {
+                end = offset + candidate.len_utf8();
+                cursor += 1;
+            } else {
+                break;
+            }
+        }
+        if end > start + 1 {
+            names.push(text[start + 1..end].to_string());
+        }
+        index = cursor.max(index + 1);
+    }
+    names
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{explicit_names, slash_invocation};
+
+    #[test]
+    fn finds_qualified_mentions_and_ignores_bare_dollars() {
+        assert_eq!(
+            explicit_names("Use $github:gh-fix-ci, then $review_agent. Cost is $5."),
+            vec!["github:gh-fix-ci", "review_agent", "5"]
+        );
+        assert!(explicit_names("$ is not a skill").is_empty());
+    }
+
+    #[test]
+    fn recognizes_exact_slash_aliases_without_matching_lookalikes() {
+        assert!(slash_invocation("/scout map AWS", "scout:scout"));
+        assert!(slash_invocation("  /scout", "scout:scout"));
+        assert!(!slash_invocation("/scouting map AWS", "scout:scout"));
+        assert!(!slash_invocation("please /scout", "scout:scout"));
+    }
+}

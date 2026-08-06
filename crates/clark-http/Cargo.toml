@@ -1,0 +1,10 @@
+[package]
+name = "clark-http"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Shared HTTP transport policy for Clark desktop clients."
+
+[dependencies]
+reqwest = { version = "0.13", default-features = false, features = ["cookies", "http2", "rustls"] }

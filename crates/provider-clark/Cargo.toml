@@ -1,0 +1,30 @@
+[package]
+name = "provider-clark"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Clark provider for clark-desktop: clean-room WebSocket + MessagePack client for the Clark gateway."
+
+[dependencies]
+agent-core = { path = "../agent-core", features = ["native"] }
+clark-http = { path = "../clark-http" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+futures.workspace = true
+async-trait.workspace = true
+tracing.workspace = true
+tokio.workspace = true
+async-channel.workspace = true
+# `rustls-tls-webpki-roots` enables `wss://` (e.g. the hosted Clark gateway)
+# without an OpenSSL/system-cert dependency; `ws://localhost` still works.
+tokio-tungstenite = { version = "0.30", features = ["rustls-tls-webpki-roots"] }
+uuid = { version = "1", features = ["v4"] }
+# Resumable SSE event stream (the gateway's `/api/conversations/{id}/events/stream`),
+# which auto-reconnects and replays from `after_seq` — the reliable event channel
+# clark-ui/clark-mobile use. `stream` exposes the chunked body reader.
+reqwest = { version = "0.13", default-features = false, features = ["http2", "stream", "rustls"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }

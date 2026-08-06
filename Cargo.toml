@@ -1,0 +1,89 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/agent-core",
+    "crates/agent-orchestration",
+    "crates/computer-use",
+    "crates/clark-http",
+    "crates/conversation-cloud",
+    "crates/clark-cli",
+    "crates/security-cloud-sync",
+    "crates/install-context",
+    "crates/provider-acp",
+    "crates/provider-clark",
+    "crates/provider-local",
+    "crates/provider-specialist",
+    "crates/provider-remote-worker",
+    "crates/code-host",
+    "crates/code-worker",
+    "crates/code-remote",
+    "crates/exec-core",
+    "crates/exec-sandbox",
+    "crates/exec-sandbox-protocol",
+    "crates/exec-sandbox-windows",
+    "crates/exec-protocol",
+    "crates/scout-adapter-protocol",
+    "crates/scout-adapter-runtime",
+    "crates/scout-accumulator",
+    "crates/scout-capsule-core",
+    "crates/scout-capsule-guest",
+    "crates/scout-capsule-host",
+    "crates/scout-capability-census",
+    "crates/scout-cartography-adapter",
+    "crates/scout-ingest-client",
+    "crates/scout-ingest-protocol",
+    "crates/scout-machine-identity",
+    "crates/scout-platform-client",
+    "crates/scout-coordinator",
+    "crates/scout-scheduler",
+    "crates/scout-store",
+    "crates/security-poc-runner",
+    "crates/devbridge",
+    "src-tauri",
+]
+exclude = ["vendor/clark-capture"]
+
+[workspace.package]
+version = "0.1.129"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/clark-labs-inc/clark-desktop"
+rust-version = "1.85"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+# preserve_order: tool-call schemas are autoregressive prompts — the model
+# generates arguments in the property order it sees, so authored order
+# (path -> old_string -> new_string, action -> scope -> title -> content)
+# must survive serialization instead of being alphabetized.
+serde_json = { version = "1", features = ["preserve_order"] }
+thiserror = "2"
+indexmap = { version = "2", features = ["serde"] }
+futures = "0.3"
+async-trait = "0.1"
+tracing = "0.1"
+rmp-serde = "1.3"
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "sync", "io-util", "process", "time", "fs"] }
+async-channel = "2"
+serde_ignored = "0.1"
+
+[profile.dev]
+# Full debuginfo dominates dev build + link time on macOS; line tables keep
+# panic backtraces mapped to file:line at a fraction of the cost.
+debug = "line-tables-only"
+
+[profile.test]
+debug = "line-tables-only"
+
+# CI and one-off clean builds should not retain incremental state. Local
+# development keeps incremental compilation for fast edit-check loops.
+[profile.ci]
+inherits = "dev"
+incremental = false
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true
+panic = "abort"

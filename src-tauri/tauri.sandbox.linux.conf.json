@@ -1,0 +1,23 @@
+{
+  "bundle": {
+    "externalBin": ["binaries/clark-code-headless"],
+    "resources": {
+      "binaries/rg-x86_64-unknown-linux-gnu": "clark-path/rg",
+      "binaries/bwrap-x86_64-unknown-linux-gnu": "clark-resources/sandbox/linux/bwrap",
+      "binaries/clark-computer-use-helper-x86_64-unknown-linux-gnu": "clark-resources/computer-use/clark-computer-use-helper",
+      "binaries/rg-LICENSE-MIT": "clark-resources/licenses/ripgrep/LICENSE-MIT",
+      "binaries/rg-UNLICENSE": "clark-resources/licenses/ripgrep/UNLICENSE",
+      "binaries/bwrap-COPYING": "clark-resources/licenses/bubblewrap/COPYING",
+      "binaries/bwrap-LICENSE": "clark-resources/licenses/bubblewrap/LICENSE",
+      "binaries/bwrap-0.11.2-source.tar.xz": "clark-resources/licenses/bubblewrap/bubblewrap-0.11.2.tar.xz"
+    },
+    "linux": {
+      "deb": {
+        "depends": ["bubblewrap"]
+      },
+      "rpm": {
+        "depends": ["bubblewrap"]
+      }
+    }
+  }
+}

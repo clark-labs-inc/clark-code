@@ -1,0 +1,1439 @@
+{
+  "schema_version": 1,
+  "product": "Clark Code",
+  "purpose": "Authoritative non-model-tool inventory for the consolidated simulation and real-use benchmark.",
+  "inventories": {
+    "native_commands": {
+      "source": "src-tauri/src/lib.rs",
+      "extractor": "tauri_generate_handler",
+      "groups": [
+        {
+          "id": "provider_and_session_lifecycle",
+          "features": [
+            "provider_backends_and_capabilities",
+            "session_lifecycle_and_environment_binding"
+          ],
+          "lanes": ["rust_contract", "frontend_contract"],
+          "items": [
+            "commands::provider_list",
+            "commands::provider_reconfigure",
+            "commands::session_open::session_open",
+            "commands::session_close",
+            "commands::session_configure_cloud",
+            "commands::clark_sign_out",
+            "commands::clark_refresh_cloud_session"
+          ]
+        },
+        {
+          "id": "active_run_control",
+          "features": [
+            "conversation_streaming_and_control",
+            "active_run_controls_compaction_steering"
+          ],
+          "lanes": ["rust_contract", "frontend_contract", "resilience_contract"],
+          "items": [
+            "commands::prompt",
+            "commands::compact",
+            "commands::steer",
+            "commands::cancel",
+            "commands::respond",
+            "commands::set_mode",
+            "commands::set_collaboration_mode",
+            "commands::set_output_style",
+            "commands::side_question",
+            "diagnostics::capture_frontend_diagnostic"
+          ]
+        },
+        {
+          "id": "remote_and_external_integrations",
+          "features": ["mcp_and_remote_ssh"],
+          "lanes": ["rust_contract", "frontend_contract"],
+          "items": [
+            "commands::ssh_probe",
+            "commands::ssh_list_directories",
+            "commands::external_agent_discover",
+            "commands::clark_mcp_probe",
+            "commands::clark_mcp_credentials_sync",
+            "commands::remote_worker_connect"
+          ]
+        },
+        {
+          "id": "commands_instructions_and_skills",
+          "features": [
+            "skills",
+            "command_instruction_and_skill_pack_management"
+          ],
+          "lanes": ["rust_contract", "frontend_contract"],
+          "items": [
+            "commands::list_commands",
+            "commands::skills_list",
+            "commands::skills_reload",
+            "commands::skills_changes",
+            "commands::instructions_list",
+            "commands::skill_packs_list",
+            "commands::skill_pack_install",
+            "commands::skill_pack_uninstall"
+          ]
+        },
+        {
+          "id": "computer_use_authority",
+          "features": [
+            "computer_use_perception",
+            "computer_use_prepare_commit",
+            "desktop_computer_use_permissions_and_receipts"
+          ],
+          "lanes": ["computer_use_contract", "frontend_contract"],
+          "items": [
+            "commands::computer_use_platform_status",
+            "commands::computer_use_request_permissions",
+            "commands::computer_use_approval_snapshot",
+            "commands::computer_use_revoke_approval",
+            "commands::computer_use_revoke_all_approvals",
+            "commands::computer_use_recent_receipts"
+          ]
+        },
+        {
+          "id": "updates",
+          "features": ["updates_packaging_and_single_instance"],
+          "lanes": ["rust_contract", "frontend_contract"],
+          "items": [
+            "app_updates_enabled",
+            "commands::update_begin_drain",
+            "commands::update_cancel_drain"
+          ]
+        },
+        {
+          "id": "sandbox_setup",
+          "features": [
+            "permissions_and_sandbox",
+            "native_sandbox_setup_and_platform_containment"
+          ],
+          "lanes": ["sandbox_contract", "frontend_contract"],
+          "items": [
+            "sandbox_setup::local_sandbox_status",
+            "sandbox_setup::local_sandbox_setup"
+          ]
+        },
+        {
+          "id": "local_context",
+          "features": [
+            "filesystem_read_search",
+            "durable_memory",
+            "security_scan_history",
+            "local_project_context_and_memory_views"
+          ],
+          "lanes": ["rust_contract", "frontend_contract"],
+          "items": [
+            "commands::local_list_memory",
+            "commands::local_list_global_memory",
+            "commands::local_list_files",
+            "commands::local_list_security_scans",
+            "commands::project_context",
+            "commands::prepare_quick_chat_workspace"
+          ]
+        },
+        {
+          "id": "cloud_security_scans",
+          "features": [
+            "security_scanning",
+            "security_scan_history"
+          ],
+          "lanes": [
+            "rust_contract",
+            "frontend_contract"
+          ],
+          "items": [
+            "commands::desktop_security_organizations",
+            "commands::desktop_security_register_repository",
+            "commands::desktop_security_sync_scans",
+            "commands::desktop_specialist_create_security_campaign"
+          ]
+        },
+        {
+          "id": "documents_and_artifacts",
+          "features": [
+            "document_conversion",
+            "attachments_artifacts_and_previews",
+            "document_image_artifact_export"
+          ],
+          "lanes": ["rust_contract", "frontend_contract", "attachment_contract"],
+          "items": [
+            "commands::read_doc_text",
+            "commands::read_image_data_url",
+            "document_preview::render_document_preview",
+            "document_preview::read_document_preview_page",
+            "document_preview::cleanup_document_preview",
+            "commands::save_doc_text",
+            "file_actions::copy_local_file",
+            "markdown_export::export_markdown_pdf",
+            "security_report::export_security_scan_pdf",
+            "commands::open_path"
+          ]
+        },
+        {
+          "id": "cloud_artifact_transport",
+          "features": [
+            "attachments_artifacts_and_previews",
+            "document_image_artifact_export"
+          ],
+          "lanes": [
+            "rust_contract",
+            "frontend_contract",
+            "attachment_contract"
+          ],
+          "items": [
+            "commands::desktop_artifact_upload",
+            "commands::desktop_artifact_read",
+            "commands::desktop_artifact_read_workspace"
+          ]
+        },
+        {
+          "id": "git_worktrees_and_checkpoints",
+          "features": [
+            "git_changes_checkpoints_and_worktrees",
+            "branch_worktree_diff_and_checkpoint_management"
+          ],
+          "lanes": ["rust_contract", "frontend_contract"],
+          "items": [
+            "project_worktree::project_branch_list",
+            "project_worktree::project_branch_switch",
+            "project_worktree::project_worktree_create",
+            "commands::changes_summary",
+            "commands::changes_diff",
+            "commands::changes_revert",
+            "commands::changes_release_checkpoints"
+          ]
+        },
+        {
+          "id": "managed_worktree_lifecycle",
+          "features": [
+            "git_changes_checkpoints_and_worktrees",
+            "branch_worktree_diff_and_checkpoint_management"
+          ],
+          "lanes": [
+            "rust_contract",
+            "frontend_contract"
+          ],
+          "items": [
+            "project_worktree::managed::project_worktree_transition_plan",
+            "project_worktree::managed::project_managed_worktree_create",
+            "project_worktree::managed::project_managed_worktree_list",
+            "project_worktree::managed::project_managed_worktree_cleanup",
+            "project_worktree::managed::project_managed_worktree_save_branch"
+          ]
+        },
+        {
+          "id": "account_billing_and_repository_knowledge",
+          "features": [
+            "cloud_auth_history_sync_and_share",
+            "account_key_billing_and_repository_knowledge"
+          ],
+          "lanes": ["rust_contract", "frontend_contract"],
+          "items": [
+            "commands::clark_google_sign_in",
+            "commands::clark_account_load",
+            "commands::clark_provision_code_key",
+            "commands::clark_billing_me",
+            "commands::clark_repository_inspect",
+            "commands::clark_repository_discover",
+            "commands::clark_repository_history"
+          ]
+        },
+        {
+          "id": "cloud_conversations",
+          "features": [
+            "cloud_auth_history_sync_and_share",
+            "cloud_conversation_crud_sync_share_archive"
+          ],
+          "lanes": ["rust_contract", "frontend_contract", "resilience_contract"],
+          "items": [
+            "commands::desktop_conv_list",
+            "commands::desktop_conv_get",
+            "commands::desktop_conv_put",
+            "commands::desktop_conv_share",
+            "commands::desktop_conv_unshare",
+            "commands::desktop_conv_delete",
+            "commands::desktop_conv_set_archived",
+            "commands::desktop_draft_get",
+            "commands::desktop_draft_put"
+          ]
+        },
+        {
+          "id": "specialist_runtime_and_projections",
+          "features": [
+            "provider_backends_and_capabilities",
+            "cloud_auth_history_sync_and_share"
+          ],
+          "lanes": ["rust_contract", "frontend_contract", "resilience_contract"],
+          "items": [
+            "commands::desktop_specialist_organizations",
+            "commands::desktop_specialist_catalog",
+            "commands::desktop_specialist_entitlement",
+            "commands::desktop_specialist_query",
+            "commands::desktop_specialist_publish",
+            "commands::desktop_specialist_create_workspace"
+          ]
+        },
+        {
+          "id": "mobile_remote",
+          "features": ["mobile_remote_control_attachments_repository_sync"],
+          "lanes": ["rust_contract", "frontend_contract"],
+          "items": [
+            "mobile_remote::desktop_code_host_upsert",
+            "mobile_remote::desktop_code_command_poll",
+            "mobile_remote::desktop_code_command_ack",
+            "mobile_remote::desktop_code_attachment_download",
+            "mobile_remote::desktop_code_repository_sync",
+            "mobile_remote::desktop_organization_knowledge_status",
+            "mobile_remote::desktop_organization_repository_sync"
+          ]
+        },
+        {
+          "id": "terminal_pty",
+          "features": [
+            "integrated_terminal",
+            "terminal_pty_lifecycle"
+          ],
+          "lanes": ["rust_contract", "frontend_contract"],
+          "items": [
+            "terminal::terminal_open",
+            "terminal::terminal_write",
+            "terminal::terminal_resize",
+            "terminal::terminal_close"
+          ]
+        }
+      ]
+    },
+    "provider_operations": {
+      "source": "crates/agent-core/src/provider.rs",
+      "extractor": "rust_trait_methods:Provider",
+      "groups": [
+        {
+          "id": "identity_and_capabilities",
+          "features": ["provider_backends_and_capabilities"],
+          "lanes": ["rust_contract"],
+          "items": ["id", "capabilities", "connect", "configuration", "configure"]
+        },
+        {
+          "id": "session_and_prompt",
+          "features": ["session_lifecycle_and_environment_binding"],
+          "lanes": ["rust_contract", "frontend_contract"],
+          "items": [
+            "new_session",
+            "load_session",
+            "session_transcript",
+            "validate_prompt",
+            "prompt",
+            "close_session"
+          ]
+        },
+        {
+          "id": "run_controls",
+          "features": [
+            "conversation_streaming_and_control",
+            "active_run_controls_compaction_steering"
+          ],
+          "lanes": ["rust_contract", "frontend_contract", "resilience_contract"],
+          "items": ["compact", "steer", "cancel", "respond"]
+        },
+        {
+          "id": "mode_and_side_channel",
+          "features": ["modes_personas_and_side_questions"],
+          "lanes": ["rust_contract", "frontend_contract"],
+          "items": [
+            "set_mode",
+            "set_collaboration_mode",
+            "set_output_style",
+            "side_question",
+            "start_side_question"
+          ]
+        },
+        {
+          "id": "background_tasks",
+          "features": ["integrated_terminal", "terminal_pty_lifecycle"],
+          "lanes": ["rust_contract", "frontend_contract"],
+          "items": ["background_tasks", "stop_background_task", "clean_background_tasks"]
+        },
+        {
+          "id": "persistent_goal_controls",
+          "features": ["persistent_goals"],
+          "lanes": ["rust_contract", "frontend_contract"],
+          "items": ["goal_state", "resume_goal"]
+        }
+      ]
+    },
+    "provider_implementations": {
+      "sources": [
+        "crates/provider-acp/src/provider.rs",
+        "crates/provider-clark/src/provider.rs",
+        "crates/provider-local/src/provider.rs"
+      ],
+      "extractor": "rust_provider_impls",
+      "groups": [
+        {
+          "id": "shipped_providers",
+          "features": ["provider_backends_and_capabilities"],
+          "lanes": ["rust_contract"],
+          "items": ["AcpProvider", "ClarkProvider", "LocalAgentProvider"]
+        }
+      ]
+    },
+    "coding_models": {
+      "source": "app/src/lib/localAgent.ts",
+      "extractor": "typescript_const_ids:CODING_MODELS",
+      "groups": [
+        {
+          "id": "composer_model_catalog",
+          "features": ["model_catalog_and_per_chat_selection"],
+          "lanes": ["frontend_contract", "cheapest_paid_live_chat_jobs"],
+          "items": [
+            "clark-code:free",
+            "clark-code:glm52",
+            "clark-code:kimi_k3"
+          ]
+        }
+      ]
+    },
+    "settings_sections": {
+      "source": "app/src/surfaces/settings/SettingsNavigation.tsx",
+      "extractor": "typescript_const_ids:SETTINGS_GROUPS",
+      "groups": [
+        {
+          "id": "personal_settings",
+          "features": ["settings_accessibility_and_preferences"],
+          "lanes": ["frontend_contract"],
+          "items": ["general"]
+        },
+        {
+          "id": "account_settings",
+          "features": ["account_key_billing_and_repository_knowledge"],
+          "lanes": ["frontend_contract"],
+          "items": ["account"]
+        },
+        {
+          "id": "project_settings",
+          "features": [
+            "model_catalog_and_per_chat_selection",
+            "local_project_context_and_memory_views"
+          ],
+          "lanes": ["frontend_contract"],
+          "items": ["project"]
+        },
+        {
+          "id": "command_settings",
+          "features": ["permissions_and_sandbox"],
+          "lanes": ["frontend_contract", "sandbox_contract"],
+          "items": ["commands"]
+        },
+        {
+          "id": "integration_settings",
+          "features": ["mcp_and_remote_ssh"],
+          "lanes": ["frontend_contract"],
+          "items": ["integrations"]
+        },
+        {
+          "id": "computer_use_settings",
+          "features": ["desktop_computer_use_permissions_and_receipts"],
+          "lanes": ["frontend_contract", "computer_use_contract"],
+          "items": ["computer-use"]
+        },
+        {
+          "id": "about_settings",
+          "features": ["updates_packaging_and_single_instance"],
+          "lanes": ["frontend_contract"],
+          "items": ["about"]
+        }
+      ]
+    },
+    "desktop_plugins": {
+      "source": "src-tauri/src/lib.rs",
+      "extractor": "tauri_plugins",
+      "groups": [
+        {
+          "id": "application_lifecycle",
+          "features": ["app_lifecycle_autostart_single_instance_deep_link_notifications"],
+          "lanes": ["rust_contract", "frontend_contract"],
+          "items": ["autostart", "single_instance", "deep_link", "notification"]
+        },
+        {
+          "id": "native_desktop_services",
+          "features": ["document_image_artifact_export", "integrated_terminal"],
+          "lanes": ["rust_contract", "frontend_contract"],
+          "items": ["shell", "dialog", "process"]
+        },
+        {
+          "id": "account_and_updates",
+          "features": [
+            "account_key_billing_and_repository_knowledge",
+            "updates_packaging_and_single_instance"
+          ],
+          "lanes": ["rust_contract", "frontend_contract"],
+          "items": ["google_auth", "updater"]
+        }
+      ]
+    },
+    "workspace_crates": {
+      "source": "Cargo.toml",
+      "extractor": "cargo_workspace_members",
+      "groups": [
+        {
+          "id": "core_and_providers",
+          "features": ["provider_backends_and_capabilities"],
+          "lanes": ["rust_contract"],
+          "items": [
+            "crates/agent-core",
+            "crates/clark-http",
+            "crates/provider-acp",
+            "crates/provider-clark",
+            "crates/provider-local",
+            "crates/provider-specialist"
+          ]
+        },
+        {
+          "id": "orchestration",
+          "features": [
+            "bounded_orchestration",
+            "multi_repo_orchestration_benchmarks",
+            "work_graph_orchestration_benchmarks"
+          ],
+          "lanes": ["rust_contract"],
+          "items": ["crates/agent-orchestration"]
+        },
+        {
+          "id": "computer_control",
+          "features": [
+            "computer_use_perception",
+            "computer_use_prepare_commit",
+            "desktop_computer_use_permissions_and_receipts"
+          ],
+          "lanes": ["computer_use_contract"],
+          "items": ["crates/computer-use"]
+        },
+        {
+          "id": "containment_and_remote_execution",
+          "features": [
+            "permissions_and_sandbox",
+            "native_sandbox_setup_and_platform_containment",
+            "mcp_and_remote_ssh"
+          ],
+          "lanes": ["sandbox_contract", "rust_contract"],
+          "items": [
+            "crates/exec-core",
+            "crates/exec-sandbox",
+            "crates/exec-sandbox-protocol",
+            "crates/exec-sandbox-windows",
+            "crates/exec-protocol",
+            "crates/security-poc-runner",
+            "crates/code-host",
+            "crates/code-worker",
+            "crates/code-remote",
+            "crates/provider-remote-worker"
+          ]
+        },
+        {
+          "id": "host_install_and_development",
+          "features": [
+            "install_context_and_bundled_tools",
+            "developer_bridge_and_fixture_harnesses",
+            "packaging_signing_updater_and_release_artifacts"
+          ],
+          "lanes": ["rust_contract", "frontend_contract"],
+          "items": [
+            "crates/clark-cli",
+            "crates/install-context",
+            "crates/devbridge",
+            "src-tauri"
+          ]
+        },
+        {
+          "id": "cloud_and_terminal_clients",
+          "features": [
+            "cloud_auth_history_sync_and_share",
+            "cloud_conversation_crud_sync_share_archive",
+            "provider_backends_and_capabilities",
+            "security_scanning",
+            "security_scan_history"
+          ],
+          "lanes": ["rust_contract", "frontend_contract"],
+          "items": [
+            "crates/conversation-cloud",
+            "crates/security-cloud-sync"
+          ]
+        },
+        {
+          "id": "scout_system_cartography",
+          "features": ["scout_system_cartography"],
+          "lanes": ["rust_contract", "frontend_contract"],
+          "items": [
+            "crates/scout-adapter-protocol",
+            "crates/scout-adapter-runtime",
+            "crates/scout-accumulator",
+            "crates/scout-capsule-core",
+            "crates/scout-capsule-guest",
+            "crates/scout-capsule-host",
+            "crates/scout-capability-census",
+            "crates/scout-cartography-adapter",
+            "crates/scout-ingest-client",
+            "crates/scout-ingest-protocol",
+            "crates/scout-machine-identity",
+            "crates/scout-platform-client",
+            "crates/scout-coordinator",
+            "crates/scout-scheduler",
+            "crates/scout-store"
+          ]
+        }
+      ]
+    },
+    "permission_modes": {
+      "source": "crates/provider-local/src/tools/mod.rs",
+      "extractor": "rust_enum_variants:PermissionMode",
+      "groups": [
+        {
+          "id": "tool_permission_modes",
+          "features": ["permissions_and_sandbox"],
+          "lanes": ["rust_contract", "frontend_contract", "sandbox_contract"],
+          "items": ["Allow", "Ask", "Deny"]
+        }
+      ]
+    },
+    "permission_classes": {
+      "source": "crates/provider-local/src/tools/mod.rs",
+      "extractor": "rust_enum_variants:ToolPermissionClass",
+      "groups": [
+        {
+          "id": "tool_permission_classes",
+          "features": ["permissions_and_sandbox"],
+          "lanes": ["rust_contract", "sandbox_contract"],
+          "items": [
+            "LocalRead",
+            "LocalMutation",
+            "External",
+            "BrokeredClarkCloud"
+          ]
+        }
+      ]
+    },
+    "sandbox_backends": {
+      "source": "crates/exec-sandbox/src/backend/mod.rs",
+      "extractor": "rust_enum_variants:BackendKind",
+      "groups": [
+        {
+          "id": "native_containment_backends",
+          "features": ["native_sandbox_setup_and_platform_containment"],
+          "lanes": ["sandbox_contract"],
+          "items": [
+            "MacosSeatbelt",
+            "LinuxBubblewrap",
+            "WindowsRestrictedToken"
+          ]
+        }
+      ]
+    },
+    "computer_action_kinds": {
+      "source": "crates/computer-use/src/action.rs",
+      "extractor": "rust_enum_variants:ActionKind",
+      "groups": [
+        {
+          "id": "trusted_computer_actions",
+          "features": ["computer_use_prepare_commit"],
+          "lanes": ["computer_use_contract"],
+          "items": [
+            "Click",
+            "TypeText",
+            "Keypress",
+            "Scroll",
+            "Drag",
+            "SecondaryAction",
+            "SelectText",
+            "SetValue"
+          ]
+        }
+      ]
+    },
+    "computer_action_risks": {
+      "source": "crates/computer-use/src/types.rs",
+      "extractor": "rust_enum_variants:ActionRisk",
+      "groups": [
+        {
+          "id": "trusted_computer_action_risks",
+          "features": [
+            "computer_use_prepare_commit",
+            "desktop_computer_use_permissions_and_receipts"
+          ],
+          "lanes": ["computer_use_contract"],
+          "items": [
+            "Routine",
+            "Destructive",
+            "Financial",
+            "ExternalCommunication",
+            "Credential",
+            "SecuritySensitive",
+            "Ambiguous"
+          ]
+        }
+      ]
+    },
+    "provider_incident_scopes": {
+      "source": "crates/agent-core/src/recovery.rs",
+      "extractor": "rust_enum_variants:ProviderIncidentScope",
+      "groups": [
+        {
+          "id": "incident_boundaries",
+          "features": ["provider_incidents_retries_and_resilience"],
+          "lanes": ["rust_contract", "frontend_contract", "resilience_contract"],
+          "items": [
+            "ModelRequest",
+            "ProviderEventStream",
+            "ProviderProcess",
+            "CloudHistorySync",
+            "ToolExecutionHost"
+          ]
+        }
+      ]
+    },
+    "provider_incident_categories": {
+      "source": "crates/agent-core/src/recovery.rs",
+      "extractor": "rust_enum_variants:ProviderIncidentCategory",
+      "groups": [
+        {
+          "id": "incident_categories",
+          "features": ["provider_incidents_retries_and_resilience"],
+          "lanes": ["rust_contract", "frontend_contract", "resilience_contract"],
+          "items": [
+            "Timeout",
+            "RateLimit",
+            "UpstreamUnavailable",
+            "ConnectionLost"
+          ]
+        }
+      ]
+    },
+    "provider_incident_statuses": {
+      "source": "crates/agent-core/src/recovery.rs",
+      "extractor": "rust_enum_variants:ProviderIncidentStatus",
+      "groups": [
+        {
+          "id": "incident_lifecycle",
+          "features": ["provider_incidents_retries_and_resilience"],
+          "lanes": ["rust_contract", "frontend_contract", "resilience_contract"],
+          "items": ["Observed", "Retrying", "Recovered", "Failed", "Interrupted"]
+        }
+      ]
+    }
+  },
+  "additional_features": [
+    {
+      "id": "provider_backends_and_capabilities",
+      "surface": "runtime",
+      "lanes": ["rust_contract"],
+      "platform_support": {
+        "macos": "supported",
+        "windows": "supported",
+        "ubuntu": "supported"
+      }
+    },
+    {
+      "id": "session_lifecycle_and_environment_binding",
+      "surface": "runtime",
+      "lanes": ["rust_contract", "frontend_contract"],
+      "platform_support": {
+        "macos": "supported",
+        "windows": "supported",
+        "ubuntu": "supported"
+      }
+    },
+    {
+      "id": "active_run_controls_compaction_steering",
+      "surface": "runtime",
+      "lanes": ["rust_contract", "frontend_contract", "resilience_contract", "cheapest_paid_live_chat_jobs"],
+      "platform_support": {
+        "macos": "supported",
+        "windows": "supported",
+        "ubuntu": "supported"
+      }
+    },
+    {
+      "id": "modes_personas_and_side_questions",
+      "surface": "runtime",
+      "lanes": ["rust_contract", "frontend_contract"],
+      "platform_support": {
+        "macos": "supported",
+        "windows": "supported",
+        "ubuntu": "supported"
+      }
+    },
+    {
+      "id": "command_instruction_and_skill_pack_management",
+      "surface": "desktop",
+      "lanes": ["rust_contract", "frontend_contract", "cheapest_paid_live_chat_jobs"],
+      "platform_support": {
+        "macos": "supported",
+        "windows": "supported",
+        "ubuntu": "supported"
+      }
+    },
+    {
+      "id": "desktop_computer_use_permissions_and_receipts",
+      "surface": "desktop",
+      "lanes": ["computer_use_contract", "frontend_contract"],
+      "platform_support": {
+        "macos": "supported",
+        "windows": "simulated",
+        "ubuntu": "simulated"
+      }
+    },
+    {
+      "id": "native_sandbox_setup_and_platform_containment",
+      "surface": "security",
+      "lanes": ["sandbox_contract", "rust_contract", "frontend_contract"],
+      "platform_support": {
+        "macos": "supported",
+        "windows": "platform_specific",
+        "ubuntu": "supported"
+      }
+    },
+    {
+      "id": "local_project_context_and_memory_views",
+      "surface": "desktop",
+      "lanes": ["rust_contract", "frontend_contract"],
+      "platform_support": {
+        "macos": "supported",
+        "windows": "supported",
+        "ubuntu": "supported"
+      }
+    },
+    {
+      "id": "document_image_artifact_export",
+      "surface": "desktop",
+      "lanes": ["rust_contract", "frontend_contract", "attachment_contract"],
+      "platform_support": {
+        "macos": "supported",
+        "windows": "supported",
+        "ubuntu": "supported"
+      }
+    },
+    {
+      "id": "branch_worktree_diff_and_checkpoint_management",
+      "surface": "desktop",
+      "lanes": ["rust_contract", "frontend_contract"],
+      "platform_support": {
+        "macos": "supported",
+        "windows": "supported",
+        "ubuntu": "supported"
+      }
+    },
+    {
+      "id": "account_key_billing_and_repository_knowledge",
+      "surface": "cloud",
+      "lanes": ["rust_contract", "frontend_contract", "cheapest_paid_live_chat_jobs"],
+      "platform_support": {
+        "macos": "supported",
+        "windows": "supported",
+        "ubuntu": "supported"
+      }
+    },
+    {
+      "id": "cloud_conversation_crud_sync_share_archive",
+      "surface": "cloud",
+      "lanes": ["rust_contract", "frontend_contract", "resilience_contract"],
+      "platform_support": {
+        "macos": "supported",
+        "windows": "supported",
+        "ubuntu": "supported"
+      }
+    },
+    {
+      "id": "mobile_remote_control_attachments_repository_sync",
+      "surface": "remote",
+      "lanes": ["rust_contract", "frontend_contract"],
+      "platform_support": {
+        "macos": "supported",
+        "windows": "supported",
+        "ubuntu": "supported"
+      }
+    },
+    {
+      "id": "terminal_pty_lifecycle",
+      "surface": "desktop",
+      "lanes": ["rust_contract", "frontend_contract"],
+      "platform_support": {
+        "macos": "supported",
+        "windows": "supported",
+        "ubuntu": "supported"
+      }
+    },
+    {
+      "id": "app_lifecycle_autostart_single_instance_deep_link_notifications",
+      "surface": "desktop",
+      "lanes": ["rust_contract", "frontend_contract"],
+      "platform_support": {
+        "macos": "platform_specific",
+        "windows": "platform_specific",
+        "ubuntu": "platform_specific"
+      }
+    },
+    {
+      "id": "settings_accessibility_and_preferences",
+      "surface": "frontend",
+      "lanes": ["frontend_contract"],
+      "platform_support": {
+        "macos": "supported",
+        "windows": "supported",
+        "ubuntu": "supported"
+      }
+    },
+    {
+      "id": "model_catalog_and_per_chat_selection",
+      "surface": "frontend",
+      "lanes": ["frontend_contract", "cheapest_paid_live_chat_jobs"],
+      "platform_support": {
+        "macos": "supported",
+        "windows": "supported",
+        "ubuntu": "supported"
+      }
+    },
+    {
+      "id": "provider_incidents_retries_and_resilience",
+      "surface": "runtime",
+      "lanes": ["rust_contract", "frontend_contract", "resilience_contract"],
+      "platform_support": {
+        "macos": "supported",
+        "windows": "supported",
+        "ubuntu": "supported"
+      }
+    },
+    {
+      "id": "developer_bridge_and_fixture_harnesses",
+      "surface": "development",
+      "lanes": [
+        "rust_contract",
+        "resilience_contract",
+        "utm_harness_contract",
+        "platform_real_use_contract"
+      ],
+      "platform_support": {
+        "macos": "supported",
+        "windows": "supported",
+        "ubuntu": "supported"
+      }
+    },
+    {
+      "id": "packaging_signing_updater_and_release_artifacts",
+      "surface": "release",
+      "lanes": ["rust_contract", "frontend_contract"],
+      "platform_support": {
+        "macos": "platform_specific",
+        "windows": "platform_specific",
+        "ubuntu": "platform_specific"
+      }
+    },
+    {
+      "id": "multi_repo_orchestration_benchmarks",
+      "surface": "benchmark",
+      "lanes": ["rust_contract"],
+      "platform_support": {
+        "macos": "supported",
+        "windows": "simulated",
+        "ubuntu": "simulated"
+      }
+    },
+    {
+      "id": "work_graph_orchestration_benchmarks",
+      "surface": "benchmark",
+      "lanes": ["rust_contract"],
+      "platform_support": {
+        "macos": "supported",
+        "windows": "simulated",
+        "ubuntu": "simulated"
+      }
+    },
+    {
+      "id": "install_context_and_bundled_tools",
+      "surface": "release",
+      "lanes": ["rust_contract"],
+      "platform_support": {
+        "macos": "platform_specific",
+        "windows": "platform_specific",
+        "ubuntu": "platform_specific"
+      }
+    }
+  ],
+  "security_controls": [
+    {
+      "id": "project_root_containment",
+      "feature": "permissions_and_sandbox",
+      "lane": "sandbox_contract",
+      "evidence": {
+        "path": "crates/provider-local/src/sandbox.rs",
+        "contains": "rejected if it escapes"
+      }
+    },
+    {
+      "id": "read_before_mutation_and_stale_read_rejection",
+      "feature": "filesystem_mutation",
+      "lane": "rust_contract",
+      "evidence": {
+        "path": "crates/provider-local/src/tools/mod.rs",
+        "contains": "read-before-edit/write invariant"
+      }
+    },
+    {
+      "id": "allow_ask_deny_tool_policy",
+      "feature": "permissions_and_sandbox",
+      "lane": "rust_contract",
+      "evidence": {
+        "path": "crates/provider-local/src/tools/mod.rs",
+        "contains": "pub enum PermissionMode"
+      }
+    },
+    {
+      "id": "local_external_and_brokered_permission_classes",
+      "feature": "permissions_and_sandbox",
+      "lane": "rust_contract",
+      "evidence": {
+        "path": "crates/provider-local/src/tools/mod.rs",
+        "contains": "pub enum ToolPermissionClass"
+      }
+    },
+    {
+      "id": "scoped_remembered_command_authority",
+      "feature": "permissions_and_sandbox",
+      "lane": "rust_contract",
+      "evidence": {
+        "path": "crates/provider-local/src/permissions_tests/command_scope.rs",
+        "contains": "remembered_command_does_not_authorize_network_or_host_execution"
+      }
+    },
+    {
+      "id": "network_commands_require_separate_authority",
+      "feature": "permissions_and_sandbox",
+      "lane": "sandbox_contract",
+      "evidence": {
+        "path": "crates/provider-local/src/permissions_tests/command_scope.rs",
+        "contains": "github_command_requests_scoped_network_permission"
+      }
+    },
+    {
+      "id": "native_network_denial",
+      "feature": "native_sandbox_setup_and_platform_containment",
+      "lane": "sandbox_contract",
+      "evidence": {
+        "path": "crates/exec-sandbox/tests/sandbox_e2e.rs",
+        "contains": "sandboxed child unexpectedly connected to host listener"
+      }
+    },
+    {
+      "id": "seatbelt_bubblewrap_and_restricted_token_backends",
+      "feature": "native_sandbox_setup_and_platform_containment",
+      "lane": "sandbox_contract",
+      "evidence": {
+        "path": "crates/exec-sandbox/src/backend/mod.rs",
+        "contains": "WindowsRestrictedToken"
+      }
+    },
+    {
+      "id": "windows_setup_requires_explicit_elevation",
+      "feature": "native_sandbox_setup_and_platform_containment",
+      "lane": "sandbox_contract",
+      "evidence": {
+        "path": "crates/exec-sandbox-windows/src/lib.rs",
+        "contains": "requires explicit administrator consent"
+      }
+    },
+    {
+      "id": "remote_execution_capability_token",
+      "feature": "mcp_and_remote_ssh",
+      "lane": "rust_contract",
+      "evidence": {
+        "path": "src-tauri/src/runtime_registry/claims.rs",
+        "contains": "pub(crate) async fn store_command_claim"
+      }
+    },
+    {
+      "id": "live_receipt_secret_redaction",
+      "feature": "provider_incidents_retries_and_resilience",
+      "lane": "resilience_contract",
+      "evidence": {
+        "path": "harness/feature-matrix.mjs",
+        "contains": "REDACTED"
+      }
+    },
+    {
+      "id": "bounded_web_fetch_size_timeout_and_redirects",
+      "feature": "external_research",
+      "lane": "rust_contract",
+      "evidence": {
+        "path": "crates/provider-local/src/tools/web_fetch.rs",
+        "contains": "MAX_REDIRECTS"
+      }
+    },
+    {
+      "id": "computer_use_requires_accessibility_and_screen_recording",
+      "feature": "desktop_computer_use_permissions_and_receipts",
+      "lane": "computer_use_contract",
+      "evidence": {
+        "path": "crates/computer-use/src/macos/service.rs",
+        "contains": "PermissionMissing(\"Screen Recording\")"
+      }
+    },
+    {
+      "id": "signed_parent_and_helper_authentication",
+      "feature": "desktop_computer_use_permissions_and_receipts",
+      "lane": "computer_use_contract",
+      "evidence": {
+        "path": "crates/computer-use/src/macos/auth.rs",
+        "contains": "SERVICE_SIGNER_REQUIREMENT"
+      }
+    },
+    {
+      "id": "fresh_single_use_observation_binding",
+      "feature": "computer_use_perception",
+      "lane": "computer_use_contract",
+      "evidence": {
+        "path": "crates/computer-use/src/types.rs",
+        "contains": "A newer observation or a successful action revokes it"
+      }
+    },
+    {
+      "id": "trusted_action_risk_reclassification",
+      "feature": "computer_use_prepare_commit",
+      "lane": "computer_use_contract",
+      "evidence": {
+        "path": "crates/computer-use/src/action.rs",
+        "contains": "model_underclassified"
+      }
+    },
+    {
+      "id": "browser_targets_fail_closed_in_generic_accessibility",
+      "feature": "computer_use_prepare_commit",
+      "lane": "computer_use_contract",
+      "evidence": {
+        "path": "crates/computer-use/src/policy.rs",
+        "contains": "origin-aware browser control"
+      }
+    },
+    {
+      "id": "credential_and_protected_text_detection",
+      "feature": "computer_use_perception",
+      "lane": "computer_use_contract",
+      "evidence": {
+        "path": "crates/computer-use/src/macos/accessibility.rs",
+        "contains": "AXContainsProtectedContent"
+      }
+    },
+    {
+      "id": "prepare_commit_expiry_and_approval_revision",
+      "feature": "computer_use_prepare_commit",
+      "lane": "computer_use_contract",
+      "evidence": {
+        "path": "crates/computer-use/src/macos/service/prepared.rs",
+        "contains": "PREPARED_TTL_MS"
+      }
+    },
+    {
+      "id": "physical_user_takeover_cancels_input",
+      "feature": "computer_use_prepare_commit",
+      "lane": "computer_use_contract",
+      "evidence": {
+        "path": "crates/computer-use/src/types.rs",
+        "contains": "physical user input took over"
+      }
+    },
+    {
+      "id": "computer_input_rate_and_payload_limits",
+      "feature": "computer_use_prepare_commit",
+      "lane": "computer_use_contract",
+      "evidence": {
+        "path": "crates/computer-use/src/macos/service.rs",
+        "contains": "MAX_INPUTS_PER_WINDOW"
+      }
+    },
+    {
+      "id": "durable_app_approval_and_bounded_receipts",
+      "feature": "desktop_computer_use_permissions_and_receipts",
+      "lane": "computer_use_contract",
+      "evidence": {
+        "path": "crates/computer-use/src/approval_store.rs",
+        "contains": "MAX_RECEIPTS"
+      }
+    },
+    {
+      "id": "cancel_waits_for_input_quiescence",
+      "feature": "computer_use_prepare_commit",
+      "lane": "computer_use_contract",
+      "evidence": {
+        "path": "crates/computer-use/src/lease.rs",
+        "contains": "CANCEL_QUIESCE_TIMEOUT"
+      }
+    },
+    {
+      "id": "account_partitioned_cloud_history",
+      "feature": "cloud_conversation_crud_sync_share_archive",
+      "lane": "frontend_contract",
+      "evidence": {
+        "path": "app/src/lib/cloudHistory.ts",
+        "contains": "account-scoped SQLite outbox"
+      }
+    },
+    {
+      "id": "updater_signature_and_safe_drain",
+      "feature": "updates_packaging_and_single_instance",
+      "lane": "frontend_contract",
+      "evidence": {
+        "path": "app/src/lib/updater.ts",
+        "contains": "Ed25519 public key"
+      }
+    },
+    {
+      "id": "development_and_release_identity_separation",
+      "feature": "packaging_signing_updater_and_release_artifacts",
+      "lane": "rust_contract",
+      "evidence": {
+        "path": "src-tauri/src/lib.rs",
+        "contains": "development_and_release_bundle_identities_are_distinct"
+      }
+    },
+    {
+      "id": "provider_incidents_are_boundary_specific_and_redacted",
+      "feature": "provider_incidents_retries_and_resilience",
+      "lane": "resilience_contract",
+      "evidence": {
+        "path": "crates/agent-core/src/recovery.rs",
+        "contains": "Durable, redacted lifecycle"
+      }
+    },
+    {
+      "id": "update_drain_preserves_active_and_permission_waiting_runs",
+      "feature": "updates_packaging_and_single_instance",
+      "lane": "frontend_contract",
+      "evidence": {
+        "path": "app/src/lib/updateDrain.spec.ts",
+        "contains": "treats permission waits as active"
+      }
+    },
+    {
+      "id": "windows_evidence_uses_owner_only_acl",
+      "feature": "permissions_and_sandbox",
+      "lane": "platform_real_use_contract",
+      "evidence": {
+        "path": "harness/owner-only-file.mjs",
+        "contains": "icacls.exe"
+      }
+    }
+  ],
+  "real_use_runner": {
+    "host_platform": "macos",
+    "command": ["node", "harness/utm-real-use.mjs"],
+    "phase": "environment_preflight",
+    "receipt_schema_version": 1,
+    "ready_status": "ready",
+    "blocked_status": "blocked",
+    "guest_platforms": ["macos", "windows", "ubuntu"],
+    "guest_command": ["node", "harness/platform-real-use.mjs"],
+    "guest_package_verifier_command": ["node", "harness/platform-real-use-package.mjs"],
+    "guest_phase": "guest_execution",
+    "guest_receipt_schema_version": 1,
+    "guest_default_paid": true,
+    "guest_offline_flag": "--offline",
+    "evidence_integrity": "sha256",
+    "guest_source_stage_command": ["node", "harness/utm-source-stage.mjs", "stage", "--platform", "all"],
+    "guest_provision_command": ["node", "harness/utm-guest-provision.mjs", "ensure", "--platform", "all"],
+    "guest_deterministic_command": ["node", "harness/utm-guest-benchmark.mjs", "run", "--offline", "--platform", "all"],
+    "guest_product_commands": {
+      "windows": ["node", "harness/utm-windows-journey.mjs", "auth-smoke"],
+      "ubuntu": ["node", "harness/utm-ubuntu-journey.mjs", "auth-smoke"]
+    },
+    "guest_qa_auth": {
+      "credential_source": ".env",
+      "required_email_domain": "clarkslabs.com",
+      "session_kind": "short_lived_jwt",
+      "provider_key_binding": "same_account",
+      "transient_secret_transfer_erased": true,
+      "credential_values_in_receipts": false
+    },
+    "guest_deterministic_integrity": "sha256",
+    "guest_long_job_transport": "detached_authenticated_file_channel",
+    "guest_source_includes_dirty_worktree": true,
+    "guest_source_ignored_env_included": false,
+    "guest_source_integrity": "sha256",
+    "consolidated_command": ["bash", "scripts/run-pre-release-benchmarks.sh"],
+    "guest_receipt_flag": "--real-use-receipt",
+    "complete_platform_set_required": true,
+    "blocked_package_status_preserved": true,
+    "vm_autonomy": {
+      "required_user_vm_actions": 0,
+      "manual_vm_actions_allowed": false,
+      "release_requires_human_vm_action": false,
+      "virtualization": "utm",
+      "forbidden_virtualization": ["parallels"],
+      "command": ["node", "harness/utm-autonomy.mjs", "ensure", "--platform", "all"],
+      "audit_command": ["node", "harness/utm-autonomy.mjs", "audit", "--platform", "all"],
+      "observation_command": ["node", "harness/utm-window-observation.mjs", "--platform", "all"],
+      "credential_source": ".env",
+      "credential_keys": ["CLARK_QA_VM_USERNAME", "CLARK_QA_VM_PASSWORD"],
+      "credential_values_in_receipts": false,
+      "guest_transport": "qemu_guest_agent_file_channel",
+      "guest_probe_authentication": "per_run_random_marker",
+      "qmp_bind": "127.0.0.1",
+      "qmp_scope": "bootstrap_wake_and_recovery_only",
+      "physical_input": "optional_non_release_diagnostic_only",
+      "rule": "Provisioning, OS installation, login, guest-agent bootstrap, recovery, scenario execution, and evidence capture are harness-owned. A manual VM step is a benchmark failure, never a user instruction."
+    },
+    "rule": "Environment readiness never counts as a real feature or user-journey pass. Each scenario requires a guest-produced receipt with complete fresh observations, assertions, and SHA-256-pinned evidence. The cheapest supported paid tool-calling route is the default after evidence preflight; --offline cannot produce a complete real-use pass."
+  },
+  "real_use_environments": {
+    "macos": {
+      "kind": "native",
+      "gui_required": true,
+      "computer_use": "native",
+      "required_evidence": [
+        "signed development identity",
+        "Accessibility status",
+        "Screen Recording status",
+        "fresh before and after observations",
+        "action receipts"
+      ]
+    },
+    "windows": {
+      "kind": "virtual_machine",
+      "virtualization": "utm",
+      "vm_name": "Clark QA - Windows 11 ARM",
+      "gui_required": true,
+      "computer_use": "unsupported_native",
+      "autonomy": {
+        "qmp_port": 47111,
+        "boot_login": "one_shot_autologon_with_guest_cleanup",
+        "guest_agent_bootstrap": "official_utm_qemu_ga_msi_over_host_only_http",
+        "recovery_input": "localhost_qmp",
+        "required_user_vm_actions": 0
+      },
+      "required_evidence": [
+        "Windows desktop screenshot",
+        "installer identity",
+        "restricted-token sandbox status",
+        "UAC outcome",
+        "test receipt copied from guest"
+      ]
+    },
+    "ubuntu": {
+      "kind": "virtual_machine",
+      "virtualization": "utm",
+      "vm_name": "Clark QA - Ubuntu 24.04 Desktop",
+      "gui_required": true,
+      "desktop_required": true,
+      "computer_use": "unsupported_native",
+      "autonomy": {
+        "qmp_port": 47112,
+        "os_install": "canonical_desktop_autoinstall_with_nocloud_cidata_iso",
+        "boot_login": "gdm_disposable_qa_autologin",
+        "guest_agent_bootstrap": "autoinstall_packages",
+        "post_install_setup": "authenticated_guest_channel_suppresses_gnome_initial_setup",
+        "installer_media_cleanup": "utm_accessibility_api_eject_then_clean_reboot",
+        "recovery_input": "localhost_qmp",
+        "required_user_vm_actions": 0
+      },
+      "required_evidence": [
+        "graphical desktop screenshot",
+        "UTM guest integration status",
+        "bubblewrap sandbox status",
+        "desktop app launch receipt",
+        "test receipt copied from guest"
+      ]
+    }
+  },
+  "real_use_scenarios": {
+    "macos": [
+      {
+        "id": "mac_full_product_journey",
+        "covers": [
+          "provider_backends_and_capabilities",
+          "session_lifecycle_and_environment_binding",
+          "active_run_controls_compaction_steering",
+          "modes_personas_and_side_questions",
+          "command_instruction_and_skill_pack_management",
+          "local_project_context_and_memory_views",
+          "document_image_artifact_export",
+          "branch_worktree_diff_and_checkpoint_management",
+          "account_key_billing_and_repository_knowledge",
+          "cloud_conversation_crud_sync_share_archive",
+          "mobile_remote_control_attachments_repository_sync",
+          "terminal_pty_lifecycle",
+          "app_lifecycle_autostart_single_instance_deep_link_notifications",
+          "settings_accessibility_and_preferences",
+          "model_catalog_and_per_chat_selection",
+          "provider_incidents_retries_and_resilience",
+          "developer_bridge_and_fixture_harnesses",
+          "packaging_signing_updater_and_release_artifacts",
+          "multi_repo_orchestration_benchmarks",
+          "work_graph_orchestration_benchmarks",
+          "install_context_and_bundled_tools"
+        ],
+        "expected": "The signed development app completes account, project, cheapest-paid chat/job, tools, history, terminal, worktree, update-drain, resilience, and artifact flows in disposable state with retained receipts."
+      },
+      {
+        "id": "mac_native_computer_use_journey",
+        "covers": [
+          "desktop_computer_use_permissions_and_receipts",
+          "native_sandbox_setup_and_platform_containment"
+        ],
+        "expected": "A signed helper controls only an approved disposable app after fresh observation; browser, protected, stale, forged, takeover, and cancellation cases fail closed with receipts."
+      }
+    ],
+    "windows": [
+      {
+        "id": "windows_utm_full_product_journey",
+        "covers": [
+          "provider_backends_and_capabilities",
+          "session_lifecycle_and_environment_binding",
+          "active_run_controls_compaction_steering",
+          "modes_personas_and_side_questions",
+          "command_instruction_and_skill_pack_management",
+          "local_project_context_and_memory_views",
+          "document_image_artifact_export",
+          "branch_worktree_diff_and_checkpoint_management",
+          "account_key_billing_and_repository_knowledge",
+          "cloud_conversation_crud_sync_share_archive",
+          "mobile_remote_control_attachments_repository_sync",
+          "terminal_pty_lifecycle",
+          "app_lifecycle_autostart_single_instance_deep_link_notifications",
+          "settings_accessibility_and_preferences",
+          "model_catalog_and_per_chat_selection",
+          "provider_incidents_retries_and_resilience",
+          "developer_bridge_and_fixture_harnesses",
+          "packaging_signing_updater_and_release_artifacts",
+          "install_context_and_bundled_tools",
+          "native_sandbox_setup_and_platform_containment"
+        ],
+        "expected": "A Windows GUI guest in UTM installs and launches Clark Code, completes bounded cheapest-paid chat/job flows, verifies restricted-token containment and UAC behavior, and exports the guest receipt."
+      }
+    ],
+    "ubuntu": [
+      {
+        "id": "ubuntu_utm_desktop_full_product_journey",
+        "covers": [
+          "provider_backends_and_capabilities",
+          "session_lifecycle_and_environment_binding",
+          "active_run_controls_compaction_steering",
+          "modes_personas_and_side_questions",
+          "command_instruction_and_skill_pack_management",
+          "local_project_context_and_memory_views",
+          "document_image_artifact_export",
+          "branch_worktree_diff_and_checkpoint_management",
+          "account_key_billing_and_repository_knowledge",
+          "cloud_conversation_crud_sync_share_archive",
+          "mobile_remote_control_attachments_repository_sync",
+          "terminal_pty_lifecycle",
+          "app_lifecycle_autostart_single_instance_deep_link_notifications",
+          "settings_accessibility_and_preferences",
+          "model_catalog_and_per_chat_selection",
+          "provider_incidents_retries_and_resilience",
+          "developer_bridge_and_fixture_harnesses",
+          "packaging_signing_updater_and_release_artifacts",
+          "install_context_and_bundled_tools",
+          "native_sandbox_setup_and_platform_containment"
+        ],
+        "expected": "An Ubuntu Desktop GUI guest in UTM launches Clark Code, completes bounded cheapest-paid chat/job flows, verifies bubblewrap containment, and exports the guest receipt."
+      }
+    ]
+  }
+}

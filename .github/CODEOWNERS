@@ -1,0 +1,9 @@
+# Every change needs review from the repository maintainer. Keep this file
+# intentionally small: a public repository must not silently accept changes
+# to CI, release automation, sandbox policy, or credential handling.
+* @skirdey
+
+.github/** @skirdey
+scripts/** @skirdey
+src-tauri/** @skirdey
+crates/** @skirdey

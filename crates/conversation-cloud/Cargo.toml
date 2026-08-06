@@ -1,0 +1,23 @@
+[package]
+name = "conversation-cloud"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Account-scoped Clark Cloud conversation client shared by Desktop and terminal hosts."
+
+[dependencies]
+agent-core = { path = "../agent-core" }
+clark-http = { path = "../clark-http" }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+url = "2"
+urlencoding = "2"
+uuid = { version = "1", features = ["serde", "v4"] }
+zeroize = "1"
+
+[dev-dependencies]
+tokio.workspace = true

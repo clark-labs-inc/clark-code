@@ -1,0 +1,31 @@
+[package]
+name = "code-worker"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Standalone JSONL headless Clark Code worker."
+
+[[bin]]
+name = "clark-code-worker"
+path = "src/main.rs"
+
+[dependencies]
+agent-core = { path = "../agent-core", features = ["native"] }
+async-trait.workspace = true
+code-host = { path = "../code-host" }
+exec-core = { path = "../exec-core" }
+exec-protocol = { path = "../exec-protocol" }
+base64 = "0.23"
+futures.workspace = true
+provider-local = { path = "../provider-local" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["io-std"] }
+tokio-util = { version = "0.7", default-features = false }
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+tempfile = "3"

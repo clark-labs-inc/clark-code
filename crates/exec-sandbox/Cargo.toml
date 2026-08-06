@@ -1,0 +1,24 @@
+[package]
+name = "exec-sandbox"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Platform-neutral sandbox policy plus macOS, Linux, and Windows process adapters for Clark executors."
+
+[dependencies]
+async-trait.workspace = true
+exec-core = { path = "../exec-core" }
+exec-sandbox-protocol = { path = "../exec-sandbox-protocol" }
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tokio-util = { version = "0.7", default-features = false }
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[[example]]
+name = "sandbox_benchmark"
+path = "examples/sandbox_benchmark.rs"

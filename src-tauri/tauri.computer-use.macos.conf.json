@@ -1,0 +1,14 @@
+{
+  "build": {
+    "beforeBundleCommand": "bash ../scripts/sign-macos-computer-use-service.sh"
+  },
+  "bundle": {
+    "externalBin": [
+      "binaries/rg",
+      "binaries/clark-code-headless"
+    ],
+    "resources": {
+      "binaries/Clark Computer Use.app": "Clark Computer Use.app"
+    }
+  }
+}

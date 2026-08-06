@@ -1,0 +1,61 @@
+name: Windows native containment
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 9 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  containment:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    env:
+      CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS: "-C target-feature=+crt-static"
+      CLARK_WINDOWS_SANDBOX_GIT_REQUIRED: "1"
+      CLARK_WINDOWS_SANDBOX_TRACE: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
+        with:
+          toolchain: 1.97.1
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          cache-on-failure: false
+
+      - name: Build native Windows sandbox helpers
+        shell: pwsh
+        run: cargo build --release -p exec-sandbox-windows --bins
+
+      - name: Prove native Windows filesystem and network containment
+        id: containment
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          node harness/windows-native-containment.mjs `
+            --runner target/release/clark-command-runner.exe `
+            --setup target/release/clark-windows-sandbox-setup.exe `
+            --source-revision $env:GITHUB_SHA `
+            --out "$env:RUNNER_TEMP/clark-windows-native-containment-$env:GITHUB_RUN_ID"
+
+      - name: Upload native Windows containment receipt
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-native-containment
+          path: ${{ runner.temp }}/clark-windows-native-containment-${{ github.run_id }}
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Summarize advisory containment state
+        if: always()
+        shell: pwsh
+        run: |
+          $receipt = Get-Content "$env:RUNNER_TEMP/clark-windows-native-containment-$env:GITHUB_RUN_ID/receipt.json" | ConvertFrom-Json
+          "## Experimental Windows containment" >> $env:GITHUB_STEP_SUMMARY
+          "" >> $env:GITHUB_STEP_SUMMARY
+          "- Status: ``$($receipt.status)``" >> $env:GITHUB_STEP_SUMMARY
+          "- Source: ``$($receipt.source_revision)``" >> $env:GITHUB_STEP_SUMMARY
+          "- This workflow is diagnostic; production remains unavailable unless explicitly enabled for QA." >> $env:GITHUB_STEP_SUMMARY

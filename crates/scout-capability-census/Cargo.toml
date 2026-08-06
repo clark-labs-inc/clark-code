@@ -1,0 +1,20 @@
+[package]
+name = "scout-capability-census"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Portable secret-safe capability census for Clark Scout sensors."
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+sha2 = "0.10"
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
+
+[[bin]]
+name = "scout_capability_census"
+path = "src/main.rs"

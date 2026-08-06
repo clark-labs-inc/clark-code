@@ -1,0 +1,38 @@
+[package]
+name = "agent-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Provider-agnostic engine for clark-desktop: domain model, event projection, and the Provider abstraction. Compiles to native and WASM."
+
+[lib]
+crate-type = ["rlib"]
+
+[features]
+default = []
+# Native host (desktop/mobile via Tauri): real transports + tokio.
+native = ["dep:tokio", "dep:async-channel"]
+# Browser build: exposes the engine to JS via wasm-bindgen.
+wasm = ["dep:wasm-bindgen", "dep:wasm-bindgen-futures", "dep:serde-wasm-bindgen"]
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+indexmap.workspace = true
+futures.workspace = true
+async-trait.workspace = true
+tracing.workspace = true
+rmp-serde.workspace = true
+
+tokio = { workspace = true, optional = true }
+async-channel = { workspace = true, optional = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = { version = "0.2", optional = true }
+wasm-bindgen-futures = { version = "0.4", optional = true }
+serde-wasm-bindgen = { version = "0.6", optional = true }
+
+[dev-dependencies]
+serde_json.workspace = true

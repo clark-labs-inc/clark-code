@@ -1,0 +1,13 @@
+[package]
+name = "scout-scheduler"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Deterministic, WASM-clean enterprise Scout scheduling state machine."
+
+[dependencies]
+scout-adapter-protocol = { path = "../scout-adapter-protocol" }
+serde.workspace = true
+serde_json.workspace = true
+sha2 = "0.10"

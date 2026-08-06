@@ -1,0 +1,33 @@
+[package]
+name = "scout-adapter-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Bounded target-side runtime for Clark Scout enterprise adapters."
+
+[dependencies]
+base64 = "0.23"
+chacha20poly1305 = "0.11"
+clark-http = { path = "../clark-http" }
+exec-private-fs = { path = "../exec-core/private-fs" }
+fs2 = "0.4"
+futures.workspace = true
+getrandom = "0.4"
+reqwest = { version = "0.13", default-features = false, features = ["http2", "stream", "rustls"] }
+scout-adapter-protocol = { path = "../scout-adapter-protocol" }
+serde.workspace = true
+serde_json.workspace = true
+sha2 = "0.10"
+thiserror.workspace = true
+tokio.workspace = true
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

@@ -1,0 +1,26 @@
+{
+  "productName": "Clark Code",
+  "identifier": "com.clark.desktop",
+  "app": {
+    "windows": [
+      {
+        "title": "Clark Code",
+        "width": 1320,
+        "height": 860,
+        "minWidth": 920,
+        "minHeight": 600,
+        "theme": "Dark",
+        "dragDropEnabled": false,
+        "backgroundThrottling": "disabled"
+      }
+    ]
+  },
+  "bundle": {
+    "createUpdaterArtifacts": true,
+    "windows": {
+      "nsis": {
+        "installerHooks": "./windows/preserve-sandbox-state.nsh"
+      }
+    }
+  }
+}

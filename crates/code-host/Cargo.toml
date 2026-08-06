@@ -1,0 +1,21 @@
+[package]
+name = "code-host"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Provider-neutral control plane for reusable headless Clark Code workers."
+
+[dependencies]
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_ignored.workspace = true
+sha2 = "0.10"
+thiserror.workspace = true
+tokio = { workspace = true, features = ["fs", "io-util", "sync"] }
+tokio-util = { version = "0.7", default-features = false }
+
+[dev-dependencies]
+tempfile = "3"
