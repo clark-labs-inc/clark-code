@@ -229,6 +229,25 @@ export function latestRunFailed(snap: Snapshot): boolean {
   return runs[runs.length - 1]?.status === "failed";
 }
 
+/** A background run that just finished in a conversation the user isn't
+ * looking at earns a blue "finished, not yet visited" sidebar marker. Only
+ * active-screen or archived conversations are excluded; re-marking an id that
+ * is already marked is a no-op so a repeat turn keeps the marker until opened. */
+export function markUnseenFinished(
+  current: readonly string[],
+  id: string,
+  activeId: string | null,
+  archived: boolean,
+): string[] {
+  if (archived || id === activeId || current.includes(id)) return [...current];
+  return [...current, id];
+}
+
+/** Visiting (opening) a conversation clears its finished-not-yet-visited marker. */
+export function clearUnseenFinished(current: readonly string[], id: string): string[] {
+  return current.filter((entry) => entry !== id);
+}
+
 /** Past transcript (prefix) + live resumed turns → one displayed snapshot. */
 export function mergeHistory(prefix: Snapshot, live: Snapshot): Snapshot {
   const artifacts = [...prefix.artifacts];
@@ -300,6 +319,11 @@ export interface SessionState {
    *  the per-row "Working…" indicator in the sidebar. Any number of sessions
    *  can stream at once; switching between them never cancels a run. */
   runningIds: string[];
+  /** Conversation ids whose background run finished while the user was in
+   *  another conversation — a blue "finished, not yet visited" marker in the
+   *  sidebar until the user opens it. In-memory only; cleared on visit or when
+   *  the conversation is archived/deleted. */
+  unseenWorkIds: string[];
   /** Conversation ids selected in the sidebar (Shift-click). Drives the
    *  right-click bulk actions (archive / delete all selected). A fresh Set
    *  on every mutation so zustand re-renders. */

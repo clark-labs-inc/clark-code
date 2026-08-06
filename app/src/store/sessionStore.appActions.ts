@@ -48,6 +48,7 @@ import {
   liveSessions,
   liveUpdateBlockerCount,
   markActivityRewardSeen,
+  markUnseenFinished,
   mergeConversations,
   mergeHistory,
   minLoadDuration,
@@ -686,6 +687,17 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
             void notify("Clark finished", title ? `“${title}” is ready for review.` : "Your task is ready for review.");
           }
         }
+        // A run that just finished in a conversation the user isn't looking at
+        // earns a blue "finished, not yet visited" dot in the sidebar until it's
+        // opened. Neither the chat on screen nor an archived row gets the marker
+        // (the first is being viewed, the second is hidden from the list).
+        if (justSettled && !isActive) {
+          const archived =
+            get().conversations.find((conversation) => conversation.id === id)?.archived ?? false;
+          const unseen = get().unseenWorkIds;
+          const marked = markUnseenFinished(unseen, id, get().session?.id ?? null, archived);
+          if (marked !== unseen) set({ unseenWorkIds: marked });
+        }
         entry.prevBusy = busyNow;
 
         // Refresh the credit balance shortly after a turn settles so the credit
@@ -987,6 +999,7 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
       conversations: [],
       conversationsLoading: true,
       runningIds: [],
+      unseenWorkIds: [],
       selectedConversationIds: new Set(),
       mutatingConversationIds: new Set(),
       conversationMutation: null,
@@ -1047,6 +1060,7 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
       activityReward: null,
       conversations: [],
       conversationsLoading: false,
+      unseenWorkIds: [],
       selectedConversationIds: new Set(),
       mutatingConversationIds: new Set(),
       conversationMutation: null,

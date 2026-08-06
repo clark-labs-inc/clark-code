@@ -53,6 +53,7 @@ export const useSessionStore = create<import("./sessionStore.runtime").SessionSt
   conversationsLoading: !!bootAuth,
   historyPrefix: null,
   runningIds: [],
+  unseenWorkIds: [],
   selectedConversationIds: new Set<string>(),
   mutatingConversationIds: new Set<string>(),
   conversationMutation: null,
