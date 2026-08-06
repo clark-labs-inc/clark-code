@@ -33,8 +33,10 @@ pub const SCOUT_REASONING_EFFORT: Option<&str> = Some("max");
 /// selected another coding model.
 pub const SECURITY_MODEL: &str = "~deepseek/deepseek-v4-flash-latest";
 pub const SECURITY_REASONING_EFFORT: Option<&str> = Some("max");
-/// Agentic Clark model used for research / memory extraction (no client tools).
-pub const DEFAULT_RESEARCH_MODEL: &str = "clark";
+/// First-party Free managed agent used for research (no client tools). The
+/// `openrouter:qwen37_flash` selection keeps Clark's server-side research
+/// tools while routing usage through the included weekly allowance.
+pub const DEFAULT_RESEARCH_MODEL: &str = "openrouter:qwen37_flash";
 /// Clark Code keeps image understanding on the dedicated Qwen vision model;
 /// the selectable coding tiers themselves receive the resulting description.
 pub const DEFAULT_VISION_MODEL: &str = "qwen/qwen3.7-flash";
@@ -615,7 +617,7 @@ mod tests {
         let clark = cfg.clark.expect("research enabled when a key is present");
         assert_eq!(clark.base_url, DEFAULT_BASE_URL);
         assert_eq!(clark.api_key.as_deref(), Some("ck_live_abc"));
-        assert_eq!(clark.model, DEFAULT_RESEARCH_MODEL);
+        assert_eq!(clark.model, "openrouter:qwen37_flash");
     }
 
     #[test]
