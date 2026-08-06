@@ -12,13 +12,6 @@
     "credential": "CLARK_CODE_API_KEY",
     "default_paid": true,
     "selection_policy": "lowest_expected_cost_for_input_heavy_tool_calling_tests",
-    "pricing_snapshot": {
-      "as_of": "2026-07-28",
-      "source": "https://openrouter.ai/api/v1/models",
-      "input_usd_per_million_tokens": 0.03,
-      "output_usd_per_million_tokens": 0.13,
-      "cached_input_usd_per_million_tokens": 0.006
-    },
     "offline_flag": "--offline",
     "max_live_tests": 3,
     "max_iterations_per_turn": 16,

@@ -69,13 +69,13 @@ Upgrade the verified paired binaries with `clark update`.
 
 ## Why
 
-- **Most performant.** Tauri 2 (native WebView, ~10MB binaries, ~50% less RAM
-  than Electron) + a Rust core. No bundled Chromium.
+- **Lean by construction.** Tauri 2 (native WebView, no bundled Chromium) + a
+  Rust core.
 - **One engine, three targets.** Transport codec, event projection, and run
   lifecycle live once in the `agent-core` Rust crate and compile to native
   (desktop/mobile) and WASM (web) — instead of being re-implemented per platform.
 - **Agent-agnostic, Clark-focused.** A trait-based `Provider` abstraction fronts
-  every backend. ACP-first; the Clark adapter rides the same trait.
+  every backend; the ACP and Clark adapters ride the same trait.
 - **Beautiful & complete.** React 19 + Tailwind v4 UI: streaming chat, tool-call
   timeline, plan, permission gates, and an agent "computer" surface.
 
@@ -228,7 +228,8 @@ node resilience-benchmark.mjs --smoke
 
 A separate control drives the real local provider through `devbridge` using
 the included Clark-managed `clark-code:free` route backed by DeepSeek V4 Flash Latest. It is intentionally
-opt-in because it spends live model credits. Set `CLARK_CODE_API_KEY` (or keep
+opt-in because it makes live model calls against the account's included weekly
+allowance. Set `CLARK_CODE_API_KEY` (or keep
 it in the repository's gitignored `.env`) and run:
 
 ```bash
@@ -268,8 +269,7 @@ A representative paid real-model lane is part of the same gate by default. It
 uses the pinned Clark Platform Qwen 3.7 Flash route and exercises a managed skill resource, basic response,
 read/search tools, permissioned mutation, a memory round trip, and explicit
 compaction/continuation. Provider, endpoint, and model are pinned; only the
-credential is local. The checked-in pricing snapshot records $0.30/M input and
-$1.20/M output for the benchmark's input-heavy workload:
+credential is local:
 
 ```bash
 ./scripts/run-pre-release-benchmarks.sh \
