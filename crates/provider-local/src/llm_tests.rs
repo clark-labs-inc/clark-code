@@ -219,6 +219,29 @@ fn openrouter_uses_unified_reasoning_and_strict_response_contracts() {
 }
 
 #[test]
+fn required_tool_choice_is_explicit_on_the_wire() {
+    let client = LlmClient::from_parts(
+        "https://api.example.test/v1",
+        "test-model",
+        None,
+        Vec::new(),
+        None,
+    )
+    .unwrap();
+    let tools = [ToolSchema::function(
+        "final_answer",
+        "Deliver the answer.",
+        json!({"type": "object"}),
+    )];
+
+    assert_eq!(client.body(&[], &tools)["tool_choice"], json!("auto"));
+    assert_eq!(
+        client.body_requiring_tool(&[], &tools)["tool_choice"],
+        json!("required")
+    );
+}
+
+#[test]
 fn reassembles_fragmented_tool_call() {
     let turn = feed(&[
         r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_a","function":{"name":"read_file","arguments":""}}]}}]}"#,

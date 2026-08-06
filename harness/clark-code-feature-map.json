@@ -194,6 +194,7 @@
     "document_convert",
     "edit_file",
     "enter_plan_mode",
+    "final_answer",
     "generate_image",
     "get_goal",
     "glob",
@@ -467,7 +468,7 @@
     {
       "id": "conversation_streaming_and_control",
       "surface": "desktop",
-      "tools": [],
+      "tools": ["final_answer"],
       "lanes": ["frontend_contract", "rust_contract", "resilience_contract"],
       "platform_support": {"macos": "supported", "windows": "supported", "ubuntu": "supported"}
     },

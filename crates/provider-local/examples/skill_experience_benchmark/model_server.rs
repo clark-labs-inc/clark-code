@@ -10,10 +10,14 @@ pub async fn one_shot(
 ) -> Result<(String, JoinHandle<Result<Value, DynError>>), DynError> {
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let address = listener.local_addr()?;
-    let body = final_body(response_text);
+    let response_text = response_text.to_string();
     let handle = tokio::spawn(async move {
         let (mut socket, _) = listener.accept().await?;
         let request = read_request_json(&mut socket).await?;
+        let body = final_body(
+            &response_text,
+            request.get("tool_choice").and_then(Value::as_str) == Some("required"),
+        );
         let response = format!(
             "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
             body.len(),
@@ -52,7 +56,35 @@ fn message_text(content: &Value) -> Option<String> {
     )
 }
 
-fn final_body(text: &str) -> String {
+fn final_body(text: &str, required_tool: bool) -> String {
+    if required_tool {
+        return [
+            format!(
+                "data: {}\n\n",
+                json!({
+                    "choices": [{
+                        "delta": {
+                            "tool_calls": [{
+                                "index": 0,
+                                "id": "call_final_answer",
+                                "type": "function",
+                                "function": {
+                                    "name": "final_answer",
+                                    "arguments": json!({"content": text}).to_string()
+                                }
+                            }]
+                        }
+                    }]
+                })
+            ),
+            format!(
+                "data: {}\n\n",
+                json!({"choices": [{"delta": {}, "finish_reason": "tool_calls"}]})
+            ),
+            "data: [DONE]\n\n".to_string(),
+        ]
+        .concat();
+    }
     [
         format!(
             "data: {}\n\n",

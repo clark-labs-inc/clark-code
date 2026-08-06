@@ -42,7 +42,7 @@ Additional operating rules:
 
 | Surface | Primary entrypoint | Evidence class | Current retained state |
 | --- | --- | --- | --- |
-| Consolidated pre-release | `scripts/run-pre-release-benchmarks.sh` | deterministic plus opt-out live paid | Latest local rerun passed; a separate bounded Qwen live lane passed |
+| Consolidated pre-release | `scripts/run-pre-release-benchmarks.sh` | deterministic plus opt-out live paid | 2026-08-06 offline receipt passed all release-blocking deterministic families; a separate bounded Qwen live lane passed |
 | Release environment preflight | `harness/release-environment-preflight.mjs` | local redacted readiness contract | Discovers Desktop/Clark/Scientist ignored env files, validates secure modes, exact UTM guests, SSH reachability, worker paths, and Clark/OpenRouter route readiness without persisting secrets |
 | Scientist and RSI product runtime | `../clark-scientist/script/run_qwen_specialist_product_eval.sh` | explicit paid Qwen plus deterministic simulation oracles | Two consecutive post-repair paid runs passed; one exercised bounded semantic correction and one passed every proposal on its first attempt |
 | Planning and context | `planning_eval` | offline fixture gate plus live Qwen A/B and Qwen judge | Latest comparative run says plan delivery and extra context were beneficial in one scenario |
@@ -55,7 +55,7 @@ Additional operating rules:
 | Scout trust and scale | `scout_benchmark` and related scale gates | deterministic, UTM, optional live adapter qualification | Fresh local 25,000-service, 1,000/10,000/100,000 fan-in, million-event, and 100,000-task gates passed with explicit cost caveats |
 | Skill lifecycle | `skill_experience_benchmark` plus durable worker provider/project contracts | deterministic local lifecycle plus typed worker boundary | The local 10-stage fixture covers catalog lifecycle; worker confinement and provider translation cover the sole remote runtime, while a fresh packaged receipt remains required |
 | Security | `harness/security-simulation.mjs` | deterministic/rendered plus explicit paid Qwen lane | Fresh paid Qwen lane passed 14/14 vulnerable fixtures and 3/3 protected controls with zero false positives |
-| UI resilience | `harness/resilience-benchmark.mjs` | simulated browser matrix plus optional live | Full 64-case simulated matrix passed; the attempted live Free-route control failed and is not a live success |
+| UI resilience | `harness/resilience-benchmark.mjs` | simulated browser matrix plus optional live | 2026-08-06 release smoke passed 8/8 cases; full 64-case simulated matrix passed; the attempted live Free-route control failed and is not a live success |
 | Cross-platform/UTM | `docs/clark-code-simulation-and-utm-qa-runbook.md` | deterministic guests, authenticated products, optional paid real use | Fresh Ubuntu ARM product build/install/auth/key-binding/visual journey passed; a current exact-source three-platform run remains open |
 | Attachments | `src-tauri/tests/attachment_benchmark.rs` plus worker protocol/provider tests | scripted local plus typed worker transport | Local model-visible ingestion remains deterministic; obsolete exec-server transport fixtures were removed, and a packaged worker attachment receipt remains required |
 | Durable remote worker | `crates/code-worker::project`, `crates/code-host/tests/idempotency.rs`, `crates/code-remote/tests/live_cpu.rs`, and `provider-remote-worker` | deterministic project confinement/streaming plus ignored real SSH/paid CPU lanes | The sole remote path pins ordered progress, one terminal response, bounded backpressure, sequence-gap rejection, durable same-request replay, ambiguous/conflicting retry refusal, native capability translation, project-root and symlink confinement, and fresh CPU residency; a fresh packaged receipt remains required |
@@ -275,6 +275,10 @@ This supersedes older prose that describes live as an opt-in `--live` flag.
 
 Latest retained local receipts:
 
+- `target/pre-release-benchmarks/20260806T201921Z-10902/`: the v0.1.130
+  offline release receipt passed the full deterministic suite, including the
+  required final-answer tool boundary, attachment smoke, and eight-case UI
+  resilience sample; no live model calls were made.
 - `target/pre-release-benchmarks/20260804-full-offline-r4/`: the current
   deterministic consolidated suite passed all release families (95 core,
   128 native, 613 local, 20 conversation, 5 remote, 614 frontend, and all

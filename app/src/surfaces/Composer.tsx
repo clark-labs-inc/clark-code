@@ -520,6 +520,10 @@ export function Composer() {
       // Clear the start-screen draft first; if session creation stops or
       // fails, the prefill below restores the user's text.
       draft.acceptSubmitted(submittedDraftText);
+      // `startSession` can carry a non-reactive draft across the Composer
+      // remount. This prompt is already being submitted, so clear that mirror
+      // before opening the session or it would reappear in the new composer.
+      composerDraftRef.current = "";
       await start();
       const startedSession = useSessionStore.getState().session;
       if (!startedSession) {

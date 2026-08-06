@@ -200,6 +200,11 @@ impl ToolSchema {
     }
 }
 
+pub(crate) struct StreamChatOptions<'a> {
+    pub(crate) cancel: &'a CancellationToken,
+    pub(crate) force_tool_call: bool,
+}
+
 /// Token/cost accounting from the final streamed chunk (OpenRouter shape,
 /// forwarded verbatim by the Clark passthrough).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -495,10 +500,21 @@ impl LlmClient {
 
     #[cfg(test)]
     fn body(&self, messages: &[ChatMessage], tools: &[ToolSchema]) -> Value {
-        self.body_for_model(&self.model, messages, tools)
+        self.body_for_model(&self.model, messages, tools, false)
     }
 
-    fn body_for_model(&self, model: &str, messages: &[ChatMessage], tools: &[ToolSchema]) -> Value {
+    #[cfg(test)]
+    fn body_requiring_tool(&self, messages: &[ChatMessage], tools: &[ToolSchema]) -> Value {
+        self.body_for_model(&self.model, messages, tools, true)
+    }
+
+    fn body_for_model(
+        &self,
+        model: &str,
+        messages: &[ChatMessage],
+        tools: &[ToolSchema],
+        force_tool_call: bool,
+    ) -> Value {
         let mut body = json!({
             "model": model,
             "messages": messages,
@@ -506,7 +522,7 @@ impl LlmClient {
         });
         if !tools.is_empty() {
             body["tools"] = serde_json::to_value(tools).unwrap_or(Value::Null);
-            body["tool_choice"] = json!("auto");
+            body["tool_choice"] = json!(if force_tool_call { "required" } else { "auto" });
         }
         if let Some(t) = self.temperature {
             body["temperature"] = json!(t);

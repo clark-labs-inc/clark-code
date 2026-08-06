@@ -151,6 +151,7 @@ fn schema_property_order_survives_serialization() {
     wire_order(&reg, "tool_search", &["query"]);
     wire_order(&reg, "grep", &["pattern", "path"]);
     wire_order(&reg, "view_image", &["path"]);
+    wire_order(&reg, "final_answer", &["content"]);
     wire_order(
         &reg,
         "verify_effect",

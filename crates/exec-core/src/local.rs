@@ -40,7 +40,10 @@ impl Executor for LocalExecutor {
     async fn sync_file(&self, path: &Path) -> ExecResult<()> {
         let path = path.to_path_buf();
         tokio::task::spawn_blocking(move || {
-            std::fs::File::open(path)
+            // Windows FlushFileBuffers rejects a read-only handle.
+            std::fs::OpenOptions::new()
+                .write(true)
+                .open(path)
                 .and_then(|file| file.sync_all())
                 .map_err(|error| error.to_string())
         })
@@ -408,5 +411,19 @@ mod shell_tests {
             .await
             .expect("exclusive private write"));
         assert_eq!(tokio::fs::read(&path).await.expect("read key"), b"private");
+    }
+
+    #[tokio::test]
+    async fn file_sync_opens_the_file_with_write_access() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let path = temp.path().join("durable.txt");
+        tokio::fs::write(&path, b"durable")
+            .await
+            .expect("write test file");
+
+        LocalExecutor
+            .sync_file(&path)
+            .await
+            .expect("sync writable file");
     }
 }

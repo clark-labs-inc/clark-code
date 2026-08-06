@@ -7,7 +7,7 @@ use agent_core::provider::{PromptInput, Provider, ProviderConfig, SessionOptions
 use futures::StreamExt;
 use serde_json::json;
 
-use support::{scripted_model, tool_call_body};
+use support::{plain_body, scripted_model, tool_call_body};
 
 fn empty_sse_body() -> String {
     "data: [DONE]\n\n".to_string()
@@ -26,7 +26,7 @@ async fn completed_goal_is_not_reclassified_as_an_empty_response_failure() {
             "create_goal",
             json!({"objective": "finish the requested work"}),
         ),
-        support::final_body("Goal created — starting."),
+        plain_body("Goal created — starting."),
         tool_call_body(
             "complete-goal",
             "update_goal",

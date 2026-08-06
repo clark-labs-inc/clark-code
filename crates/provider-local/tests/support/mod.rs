@@ -237,6 +237,10 @@ pub fn tool_call_body(id: &str, name: &str, arguments: Value) -> String {
 }
 
 pub fn final_body(text: &str) -> String {
+    tool_call_body("final-answer", "final_answer", json!({"content": text}))
+}
+
+pub fn plain_body(text: &str) -> String {
     sse([
         json!({"choices": [{"delta": {"content": text}}]}).to_string(),
         json!({"choices": [{"delta": {}, "finish_reason": "stop"}]}).to_string(),

@@ -656,6 +656,7 @@ async fn request_deadline_bounds_a_stalled_provider() {
             tools: &[],
             cancel: &CancellationToken::new(),
             request_model: "fake-model",
+            force_tool_call: false,
             idempotency_key: "deadline-test",
             on_text: &mut on_text,
             on_reasoning: &mut on_reasoning,
