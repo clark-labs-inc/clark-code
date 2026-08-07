@@ -17,7 +17,7 @@ export function ComposerQueuedMessages({ onEdit }: { onEdit: (q: QueuedMessage) 
   const removeQueued = useSessionStore((s) => s.removeQueued);
   if (queued.length === 0) return null;
   return (
-    <div className="composer-column-width mx-auto mb-2 w-full">
+    <div className="conversation-column-width mx-auto mb-2 w-full">
       <div className="mb-1 px-1 text-xs font-medium uppercase tracking-wide text-ink-faint">
         Queued · sends when Clark finishes
       </div>

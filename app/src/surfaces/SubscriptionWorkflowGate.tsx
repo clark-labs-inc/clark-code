@@ -28,7 +28,7 @@ export function SubscriptionWorkflowGate({
       role="region"
       aria-live="polite"
       aria-label={`${workflow.label} access`}
-      className="composer-column-width mx-auto mb-2 w-full rounded-2xl border border-accent/20 bg-accent-subtle px-4 py-3 shadow-soft"
+      className="conversation-column-width mx-auto mb-2 w-full rounded-2xl border border-accent/20 bg-accent-subtle px-4 py-3 shadow-soft"
     >
       <div className="flex items-start gap-3">
         <span className="grid size-8 shrink-0 place-items-center rounded-xl bg-accent/12 text-accent">

@@ -75,7 +75,7 @@ export function SideQuestionCard() {
             role="dialog"
             aria-modal="true"
             aria-label="Side question"
-            className="popover-surface flex max-h-[70vh] w-full max-w-xl flex-col overflow-hidden rounded-[22px] bg-bg-elevated shadow-lifted ring-1 ring-border-subtle outline-none"
+            className="popover-surface flex max-h-[70vh] w-full max-w-xl flex-col overflow-hidden rounded-2xl bg-bg-elevated shadow-lifted ring-1 ring-border-subtle outline-none"
           >
             {/* Header: `/btw` accent + the question + a visible Close button. */}
             <div className="flex items-start gap-3 border-b border-border-subtle px-5 py-3.5">

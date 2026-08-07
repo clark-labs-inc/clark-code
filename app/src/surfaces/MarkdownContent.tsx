@@ -129,6 +129,7 @@ export function MarkdownContent({
   math = false,
   diagrams = false,
   mode = "static",
+  repairIncomplete = false,
   animated = false,
   isAnimating = false,
 }: {
@@ -137,18 +138,20 @@ export function MarkdownContent({
   math?: boolean;
   diagrams?: boolean;
   mode?: "static" | "streaming";
+  /** Best-effort rendering for truncated or otherwise unfinished Markdown. */
+  repairIncomplete?: boolean;
   animated?: StreamdownProps["animated"];
   isAnimating?: boolean;
 }) {
   return (
     <Streamdown
-      mode={mode}
+      mode={repairIncomplete ? "streaming" : mode}
       className={className}
       animated={animated}
       components={diagrams ? DIAGRAM_COMPONENTS : STATIC_COMPONENTS}
       controls={false}
       isAnimating={isAnimating}
-      parseIncompleteMarkdown={mode === "streaming"}
+      parseIncompleteMarkdown={mode === "streaming" || repairIncomplete}
       rehypePlugins={math ? [rehypeKatex] : undefined}
       remarkPlugins={math ? [remarkMath] : undefined}
       skipHtml

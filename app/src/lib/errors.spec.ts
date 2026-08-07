@@ -35,6 +35,14 @@ describe("humanizeRunFailure", () => {
     expect(msg).not.toMatch(/no response/i);
   });
 
+  it("presents an iteration limit as resumable saved work", () => {
+    const msg = humanizeRunFailure({ failure_kind: "iteration_limit" });
+
+    expect(msg).toMatch(/step limit/i);
+    expect(msg).toMatch(/continue in this task/i);
+    expect(msg).not.toMatch(/start another run/i);
+  });
+
   it("keeps the included weekly allowance distinct from paid credits", () => {
     const outcome = {
       failure_kind: "insufficient_credits" as const,

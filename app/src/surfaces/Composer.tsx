@@ -614,7 +614,7 @@ export function Composer() {
           through the checkout chips at compact window heights. */}
       <AnimatePresence>
         {suggestions.length > 0 && (
-          <div className="composer-column-width relative z-30 mx-auto mb-2 w-full">
+          <div className="conversation-column-width relative z-30 mx-auto mb-2 w-full">
             <ComposerAutocomplete
               suggestions={suggestions}
               selectedIndex={sel}
@@ -627,8 +627,8 @@ export function Composer() {
       <ComposerContextBar />
       <div
         className={cn(
-          "composer-column-width relative z-10 mx-auto w-full border-t px-2.5 py-[1.375rem] transition duration-200 ease-clark",
-          "border-border bg-bg-secondary/45 shadow-none",
+          "conversation-column-width relative z-10 mx-auto w-full rounded-lg border px-2.5 py-[1.375rem] transition duration-200 ease-clark",
+          "border-border bg-composer-surface shadow-none",
           dragging
             ? "border-accent bg-accent-subtle"
             : "focus-within:border-accent/50",
@@ -790,7 +790,7 @@ export function Composer() {
       {!session && (startError || startBlocked) && (
         <p
           className={cn(
-            "composer-column-width mx-auto mt-2 w-full px-1 text-xs",
+            "conversation-column-width mx-auto mt-2 w-full px-1 text-xs",
             startError ? "text-danger" : "text-ink-faint",
           )}
         >

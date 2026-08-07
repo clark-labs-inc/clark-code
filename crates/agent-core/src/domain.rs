@@ -478,6 +478,10 @@ pub enum RunFailureKind {
     InsufficientCredits,
     ToolFatal,
     LocalState,
+    /// The provider exhausted an explicitly configured model/tool step budget
+    /// before producing a terminal answer. The saved conversation can be
+    /// continued; this is not corrupt local state.
+    IterationLimit,
     /// The host process ended while a run was live. Distinct from an explicit
     /// user cancellation and safe for recovery surfaces to offer as resumable.
     RuntimeInterrupted,

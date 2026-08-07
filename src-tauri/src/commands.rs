@@ -16,6 +16,7 @@ mod security_cloud;
 mod session_close;
 mod skills;
 mod specialists;
+mod stream_batch;
 pub use auth::*;
 pub use cloud::*;
 pub(crate) use cloud_authority::{
@@ -401,8 +402,8 @@ fn spawn_provider_stream(
 ) {
     tokio::spawn(async move {
         let _run_guard = run_guard;
-        let mut batches = stream.ready_chunks(64);
-        while let Some(events) = batches.next().await {
+        let mut stream = stream;
+        while let Some(events) = stream_batch::next_event_batch(&mut stream).await {
             let _account_lifecycle = state.account_lifecycle.read().await;
             record_conversation_diagnostics(session_key.as_str(), &events);
             let specialist_projections = events

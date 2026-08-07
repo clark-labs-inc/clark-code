@@ -1,5 +1,7 @@
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::{Connection, Error, ErrorCode};
@@ -7,6 +9,12 @@ use rusqlite::{Connection, Error, ErrorCode};
 use super::schema::SCHEMA;
 
 const BACKUP_DIR_NAME: &str = "cloud-history-outbox-backups";
+const INCREMENTAL_VACUUM_PAGES: i64 = 4096;
+
+fn initialized_databases() -> &'static Mutex<HashSet<PathBuf>> {
+    static INITIALIZED: OnceLock<Mutex<HashSet<PathBuf>>> = OnceLock::new();
+    INITIALIZED.get_or_init(|| Mutex::new(HashSet::new()))
+}
 
 pub(super) fn open(path: &Path) -> Result<Connection, String> {
     match open_once(path) {
@@ -30,24 +38,55 @@ fn open_once(path: &Path) -> Result<Connection, Error> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|error| Error::ToSqlConversionFailure(error.into()))?;
     }
+    let is_new = fs::metadata(path).map_or(true, |metadata| metadata.len() == 0);
     let conn = Connection::open(path)?;
+    // Auto-vacuum is a database-header choice and must precede WAL mode and
+    // the first table creation or SQLite silently leaves the mode disabled.
+    if is_new {
+        conn.execute_batch("PRAGMA auto_vacuum=INCREMENTAL;")?;
+    }
     conn.execute_batch(
         "PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;",
     )?;
-    conn.execute_batch(SCHEMA)?;
-    let _ = conn.execute(
-        "ALTER TABLE trajectory_outbox ADD COLUMN replayable INTEGER NOT NULL DEFAULT 1",
-        [],
-    );
-    let _ = conn.execute(
-        "ALTER TABLE journal_conversation ADD COLUMN checkpoint_seq INTEGER NOT NULL DEFAULT 0",
-        [],
-    );
-    let _ = conn.execute(
-        "ALTER TABLE journal_conversation ADD COLUMN local_live INTEGER NOT NULL DEFAULT 0",
-        [],
-    );
+    // Schema discovery and compatibility ALTERs used to run on every event
+    // batch. A streaming session can open this boundary many times per second;
+    // initialize each database path once per process instead.
+    let mut initialized = initialized_databases()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if is_new || !initialized.contains(path) {
+        // Incremental auto-vacuum must be selected before the first table is
+        // created. Existing databases keep their current mode and are never
+        // subjected to a surprise multi-gigabyte VACUUM on the render path.
+        conn.execute_batch(SCHEMA)?;
+        let _ = conn.execute(
+            "ALTER TABLE trajectory_outbox ADD COLUMN replayable INTEGER NOT NULL DEFAULT 1",
+            [],
+        );
+        let _ = conn.execute(
+            "ALTER TABLE journal_conversation ADD COLUMN checkpoint_seq INTEGER NOT NULL DEFAULT 0",
+            [],
+        );
+        let _ = conn.execute(
+            "ALTER TABLE journal_conversation ADD COLUMN local_live INTEGER NOT NULL DEFAULT 0",
+            [],
+        );
+        initialized.insert(path.to_path_buf());
+    }
     Ok(conn)
+}
+
+pub(super) fn reclaim_free_pages(conn: &Connection) -> Result<(), String> {
+    let auto_vacuum: i64 = conn
+        .query_row("PRAGMA auto_vacuum", [], |row| row.get(0))
+        .map_err(sql_error)?;
+    if auto_vacuum == 2 {
+        conn.execute_batch(&format!(
+            "PRAGMA incremental_vacuum({INCREMENTAL_VACUUM_PAGES}); PRAGMA optimize;"
+        ))
+        .map_err(sql_error)?;
+    }
+    Ok(())
 }
 
 fn is_corruption(error: &Error) -> bool {
@@ -123,6 +162,29 @@ pub(super) fn sql_error(error: Error) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn new_database_uses_incremental_auto_vacuum() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("outbox.sqlite3");
+
+        let conn = open(&path).unwrap();
+        let mode: i64 = conn
+            .query_row("PRAGMA auto_vacuum", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(mode, 2);
+
+        drop(conn);
+        let reopened = open(&path).unwrap();
+        let table_count: i64 = reopened
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'trajectory_outbox'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(table_count, 1);
+    }
 
     #[test]
     fn corrupt_database_is_quarantined_and_rebuilt_without_touching_siblings() {

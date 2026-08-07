@@ -42,8 +42,15 @@ pub(super) fn map_loop_error_with_completion_state(
     goal_completed: bool,
     unresolved_effects: &[String],
 ) -> MappedLoopError {
+    let completion_delivery_failed = matches!(
+        &error,
+        clark_agent::LoopError::Stream(clark_agent::StreamError::Fatal(message))
+            if message
+                .strip_prefix("provider_error:")
+                .is_some_and(|message| message.starts_with(crate::llm::REQUIRED_TOOL_CONTRACT_VIOLATION))
+    );
     let mapped = map_loop_error(error);
-    if mapped.failure_kind != Some(RunFailureKind::EmptyResponse) {
+    if mapped.failure_kind != Some(RunFailureKind::EmptyResponse) && !completion_delivery_failed {
         return mapped;
     }
 
@@ -55,9 +62,9 @@ pub(super) fn map_loop_error_with_completion_state(
     }
 
     // `update_goal(complete)` is emitted before the model's final post-tool
-    // response. If that response is structurally empty, the completed goal is
-    // still the authoritative terminal receipt for this run. A final answer
-    // alone is not enough here: it can be followed by a user steering turn.
+    // delivery. If that response is empty or exhausts required-tool repair,
+    // the completed goal is still the authoritative terminal receipt. A final
+    // answer alone is not enough: it can be followed by a user steering turn.
     if goal_completed {
         return MappedLoopError::completed();
     }
@@ -90,9 +97,11 @@ fn map_stream_error(error: clark_agent::StreamError) -> MappedLoopError {
             )
         }
         clark_agent::StreamError::Fatal(message) if message.starts_with("provider_error:") => {
+            let message = message.strip_prefix("provider_error:").unwrap_or(&message);
             let message = message
-                .strip_prefix("provider_error:")
-                .unwrap_or(&message)
+                .strip_prefix(crate::llm::REQUIRED_TOOL_CONTRACT_VIOLATION)
+                .unwrap_or(message)
+                .trim()
                 .to_string();
             MappedLoopError::failed(RunFailureKind::ProviderError, "provider_error", message)
         }
@@ -258,6 +267,23 @@ mod tests {
             clark_agent::LoopError::Stream(clark_agent::StreamError::ZeroOutputTransport(
                 "provider returned no content".into(),
             )),
+            false,
+            true,
+            &[],
+        );
+        assert_eq!(mapped.status, RunStatus::Done);
+        assert_eq!(mapped.failure_kind, None);
+        assert_eq!(mapped.run_error, None);
+        assert_eq!(mapped.ui_error, None);
+    }
+
+    #[test]
+    fn completed_goal_stays_done_when_required_tool_repair_is_exhausted() {
+        let mapped = map_loop_error_with_completion_state(
+            clark_agent::LoopError::Stream(clark_agent::StreamError::Fatal(format!(
+                "provider_error:{} provider ignored required tool choice",
+                crate::llm::REQUIRED_TOOL_CONTRACT_VIOLATION
+            ))),
             false,
             true,
             &[],

@@ -126,7 +126,7 @@ export function SkillsPanel(props: SkillsPanelProps) {
         role="dialog"
         aria-modal="true"
         aria-label="Skills"
-        className="popover-surface flex max-h-[86vh] w-full max-w-4xl flex-col overflow-hidden rounded-3xl bg-bg-elevated"
+        className="popover-surface flex max-h-[86vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl bg-bg-elevated"
       >
         <header className="flex items-center gap-3 px-5 py-4">
           <Sparkles className="size-5 text-accent" />

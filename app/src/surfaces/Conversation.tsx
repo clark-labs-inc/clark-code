@@ -21,10 +21,10 @@ import {
   conversationScrollTarget,
   isConversationAtBottom,
   isConversationScrollUp,
-  nextPinnedScrollTop,
   shouldFollowConversation,
   type ConversationScrollState,
 } from "../lib/conversationScroll";
+import { conversationBlockWindow, type ConversationBlock } from "../lib/conversationBlocks";
 import { Message } from "./Message";
 import { WorkBlock } from "./work/WorkBlock";
 import { ArtifactCard } from "./work/ArtifactCard";
@@ -37,7 +37,7 @@ import { SideQuestionCard } from "./SideQuestionCard";
 import { GoalWorkSummary } from "./GoalWorkSummary";
 import { ProviderIncidentCard } from "./ProviderIncidentCard";
 import { SpecialistConversationPresentationCard } from "./specialists/SpecialistConversationShowcase";
-import type { Artifact, GoalState, TimelineItem, ToolCall } from "../core-bridge/types";
+import type { Artifact, ToolCall } from "../core-bridge/types";
 import { effectiveModelSettings, isIncludedCodingModel } from "../lib/localAgent";
 import { specialistPresentationFromPayload } from "../lib/specialistPresentation";
 
@@ -85,48 +85,6 @@ function Pending({ label, detail, skeleton }: { label: string; detail?: string; 
       {skeleton && <ReplySkeleton />}
     </div>
   );
-}
-
-/** Group consecutive tool-call lines so agent "work" reads as a dense block. */
-type BaseBlock =
-  | { kind: "item"; item: TimelineItem; timelineIndex: number; key: string }
-  | { kind: "work"; ids: string[]; run?: string; key: string };
-type Block = BaseBlock | { kind: "goal_work"; blocks: BaseBlock[]; key: string };
-
-function group(timeline: TimelineItem[], goal?: GoalState): Block[] {
-  const base: BaseBlock[] = [];
-  timeline.forEach((item, i) => {
-    if (item.item === "tool_call") {
-      const last = base[base.length - 1];
-      if (last && last.kind === "work" && last.run === item.run) last.ids.push(item.id);
-      else base.push({ kind: "work", ids: [item.id], run: item.run, key: `w${i}` });
-    } else {
-      base.push({ kind: "item", item, timelineIndex: i, key: `i${i}` });
-    }
-  });
-
-  if (!goal?.run) return base;
-  const blocks: Block[] = [];
-  for (const block of base) {
-    const belongsToGoal = block.kind === "work"
-      ? block.run === goal.run
-      : block.item.item === "execution_checklist" || block.item.item === "proposed_plan"
-        ? block.item.run === goal.run
-        : block.item.item === "message"
-          ? block.item.run === goal.run && (
-              block.item.role === "system" ||
-              (block.item.role === "agent" && block.item.phase !== "final_answer")
-            )
-          : false;
-    if (!belongsToGoal) {
-      blocks.push(block);
-      continue;
-    }
-    const last = blocks[blocks.length - 1];
-    if (last?.kind === "goal_work") last.blocks.push(block);
-    else blocks.push({ kind: "goal_work", blocks: [block], key: `g${block.key}` });
-  }
-  return blocks;
 }
 
 // `min-w-0` lets this flex child shrink to the column width (flex items default
@@ -233,28 +191,17 @@ export function Conversation({
       }
 
       const target = Math.max(0, el.scrollHeight - el.clientHeight);
-      const canAnimate = !reduce && typeof requestAnimationFrame !== "undefined";
-      const next = canAnimate ? nextPinnedScrollTop(el.scrollTop, target) : target;
-      if (Math.abs(el.scrollTop - next) < 0.5) {
+      if (Math.abs(el.scrollTop - target) < 0.5) {
         pinnedScrollActive.current = false;
         return;
       }
-      el.scrollTop = next;
+      // One frame is enough to coalesce layout changes. Chasing the target with
+      // recursive easing keeps WebKit's scrolling/compositing tree active for
+      // many frames after every streamed update and makes input feel sticky.
+      el.scrollTop = target;
       lastScrollTop.current = el.scrollTop;
       scrollByConversation.set(sessionId, { scrollTop: el.scrollTop, atBottom: true });
-
-      // Re-read the bottom on the next frame: the content may grow again while
-      // this animation is in flight. This keeps one coherent chase instead of
-      // starting a stack of native smooth-scroll animations for every token.
-      if (
-        canAnimate
-        && el.scrollTop < target - 0.5
-        && stuck.current
-      ) {
-        scrollFrameRef.current = requestAnimationFrame(scroll);
-      } else {
-        pinnedScrollActive.current = false;
-      }
+      pinnedScrollActive.current = false;
     };
 
     if (typeof requestAnimationFrame === "undefined") {
@@ -262,7 +209,7 @@ export function Conversation({
       return;
     }
     scrollFrameRef.current = requestAnimationFrame(scroll);
-  }, [reduce, sessionId]);
+  }, [sessionId]);
   useEffect(() => () => cancelPinnedScroll(), [cancelPinnedScroll]);
   const onScroll = () => {
     const el = scrollRef.current;
@@ -332,13 +279,11 @@ export function Conversation({
       )
     : false;
   const showPermissionGate = !!pending_permission && !permissionAutoGranted;
-  const allBlocks = useMemo(() => group(timeline, goal), [timeline, goal]);
-  const rowKeys = useMemo(
-    () => allBlocks.flatMap((block) =>
-      block.kind === "goal_work" ? block.blocks.map((child) => child.key) : [block.key]
-    ),
-    [allBlocks],
+  const blockWindow = useMemo(
+    () => conversationBlockWindow(timeline, goal, showAll, TIMELINE_WINDOW),
+    [goal, showAll, timeline],
   );
+  const { blocks, rowKeys, windowed } = blockWindow;
   const enteringRows = enteringChatRowKeys(rowMotionRef.current, sessionId, rowKeys);
   useLayoutEffect(() => {
     commitChatRowKeys(rowMotionRef.current, sessionId, rowKeys);
@@ -385,9 +330,6 @@ export function Conversation({
   // Long transcripts: render only the recent window. A 400-item DOM makes every
   // style/layout pass (and each streamed frame) pay for history the user isn't
   // reading — the dominant cost on slower machines. "Show earlier" reveals all.
-  const windowed = !showAll && allBlocks.length > TIMELINE_WINDOW;
-  const blocks = windowed ? allBlocks.slice(allBlocks.length - TIMELINE_WINDOW) : allBlocks;
-  const hiddenCount = allBlocks.length - blocks.length;
   const last = visible[visible.length - 1];
   const awaitingReply = !last || (last.item === "message" && last.role === "user");
   // Tool rows and actively streaming unphased responses own their live state;
@@ -418,7 +360,7 @@ export function Conversation({
   const verificationIncomplete =
     failed?.outcome?.failure_kind === "verification_incomplete" ? failed : undefined;
 
-  const renderBlock = (block: Block | BaseBlock) => {
+  const renderBlock = (block: ConversationBlock) => {
     if (block.kind === "goal_work") {
       return goal ? (
         <GoalWorkSummary key={block.key} goal={goal} runActive={goalRunActive}>
@@ -516,7 +458,7 @@ export function Conversation({
         aria-label="Conversation"
         className="min-h-0 flex-1 overflow-y-auto"
       >
-        <div ref={contentRef} className="chat-column-width mx-auto flex w-full flex-col gap-5 px-5 py-5">
+        <div ref={contentRef} className="conversation-column-width mx-auto flex w-full flex-col gap-3 px-5 py-5">
         {visible.length === 0 && !showPending && (
           <p className="py-10 text-center text-sm text-ink-faint">
             Ask Clark anything — file work, web research, and computer use show up here as it works.
@@ -528,7 +470,7 @@ export function Conversation({
             onClick={() => setShowAll(true)}
             className="mx-auto rounded-full border border-border-subtle bg-bg-elevated px-3.5 py-1.5 text-xs font-medium text-ink-muted transition hover:bg-bg-hover hover:text-ink-secondary"
           >
-            Show {hiddenCount} earlier item{hiddenCount === 1 ? "" : "s"}
+            Show earlier history
           </button>
         )}
 

@@ -35,8 +35,8 @@ impl ToolExecutor for VerifyEffect {
                     "type": "string",
                     "description": "Concrete read-back evidence or the concrete reason canonical verification is unavailable."
                 },
-                "expected": {"type": "string", "description": "Optional exact expected value for a deterministic comparison."},
-                "observed": {"type": "string", "description": "Optional exact canonical value observed. Required when expected is supplied."}
+                "expected": {"type": "string", "description": "Optional exact scalar expected value for deterministic byte-for-byte comparison. Omit both comparison fields when evidence summarizes multiple facts."},
+                "observed": {"type": "string", "description": "Optional exact scalar copied from canonical state. Must be byte-identical to expected for verified, different for mismatch. Omit both fields for summary evidence."}
             },
             "required": ["effect_id", "status", "evidence"]
         })
@@ -70,17 +70,33 @@ impl ToolExecutor for VerifyEffect {
                 "evidence must be a concrete observation or reason, not a placeholder",
             );
         }
-        let status = match (expected, observed, status) {
+        match (expected, observed, status) {
+            (Some(_), None, _) | (None, Some(_), _) => {
+                return ToolOutcome::error(
+                    "expected and observed must be supplied together, or both omitted for summary evidence",
+                )
+            }
             (Some(expected), Some(observed), EffectVerification::Verified)
                 if expected != observed =>
             {
-                EffectVerification::Mismatch
+                return ToolOutcome::error(
+                    "cannot record verified: expected and observed are not byte-identical; if they are human-readable summaries, omit both fields and provide concrete evidence",
+                )
             }
-            (Some(_), None, _) => {
-                return ToolOutcome::error("observed is required when expected is supplied")
+            (Some(expected), Some(observed), EffectVerification::Mismatch)
+                if expected == observed =>
+            {
+                return ToolOutcome::error(
+                    "cannot record mismatch: expected and observed are byte-identical",
+                )
             }
-            _ => status,
-        };
+            (Some(_), Some(_), EffectVerification::Unverifiable) => {
+                return ToolOutcome::error(
+                    "unverifiable cannot include canonical comparison values; provide the concrete reason read-back is unavailable",
+                )
+            }
+            _ => {}
+        }
 
         let receipt = {
             let mut session = ctx.session.lock().await;
@@ -141,7 +157,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn exact_comparison_downgrades_false_verified_claim_to_mismatch() {
+    async fn malformed_exact_comparison_does_not_create_a_false_mismatch() {
         let dir = tempfile::tempdir().unwrap();
         let ctx = context(dir.path());
         ctx.session.lock().await.effects.register(
@@ -165,6 +181,7 @@ mod tests {
             .await;
 
         assert!(outcome.is_error);
+        assert!(outcome.content.contains("not byte-identical"));
         assert_eq!(
             ctx.session
                 .lock()
@@ -173,7 +190,42 @@ mod tests {
                 .get("effect-1")
                 .unwrap()
                 .verification,
-            EffectVerification::Mismatch
+            EffectVerification::Pending
+        );
+    }
+
+    #[tokio::test]
+    async fn summary_evidence_can_verify_without_fake_exact_values() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = context(dir.path());
+        ctx.session.lock().await.effects.register(
+            agent_core::ids::RunId::new("run-1"),
+            "effect-1",
+            "fake_publisher",
+            crate::effects::EffectIntent::opaque_external("published resource"),
+        );
+
+        let outcome = VerifyEffect
+            .invoke(
+                json!({
+                    "effect_id": "effect-1",
+                    "status": "verified",
+                    "evidence": "Canonical refs, branch, and working tree all match the requested state."
+                }),
+                &ctx,
+            )
+            .await;
+
+        assert!(!outcome.is_error, "{}", outcome.content);
+        assert_eq!(
+            ctx.session
+                .lock()
+                .await
+                .effects
+                .get("effect-1")
+                .unwrap()
+                .verification,
+            EffectVerification::Verified
         );
     }
 

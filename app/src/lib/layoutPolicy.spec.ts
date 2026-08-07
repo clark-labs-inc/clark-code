@@ -44,7 +44,8 @@ describe("responsive GUI layout policy", () => {
     expect(welcome).not.toContain("border-b border-border-subtle");
     expect(primitives).not.toContain("border border-border-subtle");
     expect(primitives).not.toContain("shadow-sm");
-    expect(composer).toContain('"border-border bg-bg-secondary/45 shadow-none"');
+    expect(composer).toContain('"border-border bg-composer-surface shadow-none"');
+    expect(composer).toContain("rounded-lg border px-2.5");
     expect(composer).not.toContain("rounded-[20px] border");
   });
 
@@ -60,7 +61,9 @@ describe("responsive GUI layout policy", () => {
     expect(sidebar).not.toContain("flex w-[17rem] shrink-0 flex-col border-r");
     expect(settingsNavigation).not.toContain("flex w-64 shrink-0 flex-col border-r");
     expect(settingsPrimitives).not.toContain("[&>*+*]:border-t");
+    expect(settingsPrimitives).not.toContain("rounded-xl bg-bg-secondary/55");
     expect(commandPalette).not.toContain("border-b border-border-subtle bg-transparent");
     expect(startCard).not.toContain("divide-y divide-border-subtle");
+    expect(startCard).not.toContain("rounded-2xl bg-bg-secondary/55");
   });
 });

@@ -168,6 +168,11 @@ const pending = new Map<string, PendingPush>();
 // because rev is a timestamp (always "newer"), a no-op PUT would also make
 // every mobile/web poller re-download the full snapshot it already has.
 const lastSent = new Map<string, string>();
+// Once a running transcript crosses the server-safe snapshot limit, repeatedly
+// serializing the same multi-megabyte history every two seconds only blocks the
+// UI; it cannot possibly succeed. Keep trajectory events syncing and retry the
+// full snapshot once at the terminal/idle boundary (or after compaction).
+const oversized = new Set<string>();
 const serverRevisions = new Map<string, number>();
 const conflicted = new Set<string>();
 const retryTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -212,6 +217,7 @@ export function resetCloudHistory(): void {
   lastSent.clear();
   serverRevisions.clear();
   conflicted.clear();
+  oversized.clear();
   deleting.clear();
   deleteGenerations.clear();
   resetArtifactCloudSync();
@@ -308,6 +314,7 @@ export function scheduleCloudPut(
   if (!sameCreds(configuredCreds, creds) || deleting.has(meta.id)) return;
   // A stale branch stays read-only until cloudGet reloads its exact base.
   if (conflicted.has(meta.id)) return;
+  if (status === "running" && oversized.has(meta.id)) return;
   // Monotonic rev: pushes now also happen mid-run (throttled), where the
   // timeline length is stable while message text grows — so a length-based
   // rev would make the server drop streamed updates as stale. A millisecond
@@ -365,6 +372,7 @@ async function drainPush(id: string): Promise<void> {
     const prepared = prepareSnapshotForUpload(job.snapshot);
     const mark = fingerprint(job, prepared.json);
     if (prepared.bytes > MAX_SNAPSHOT_BYTES) {
+      oversized.add(id);
       // Keep the job queued. Marking this successful would let the native
       // trajectory outbox advance its checkpoint while the cloud snapshot
       // stayed stale, permanently losing cross-device reconstruction.
@@ -374,6 +382,7 @@ async function drainPush(id: string): Promise<void> {
       );
       return;
     }
+    oversized.delete(id);
     if (lastSent.get(id) !== mark) {
       const creds = configuredCreds;
       if (!creds) throw new CloudWriteCancelled();
@@ -454,6 +463,7 @@ function forgetConversationPushState(id: string): void {
   lastSent.delete(id);
   serverRevisions.delete(id);
   conflicted.delete(id);
+  oversized.delete(id);
 }
 
 /** Delete a conversation from the cloud. Tombstone local write scheduling first,

@@ -483,7 +483,7 @@ function Popover({
         {trigger}
       </button>
       {open && (
-        <div className="popover-surface absolute bottom-full left-0 z-30 mb-2 rounded-[22px] bg-bg-elevated p-1.5 shadow-lifted ring-1 ring-border-subtle">
+        <div className="popover-surface absolute bottom-full left-0 z-30 mb-2 rounded-2xl bg-bg-elevated p-1.5 shadow-lifted ring-1 ring-border-subtle">
           {children(() => setOpen(false))}
         </div>
       )}

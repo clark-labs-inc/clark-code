@@ -70,7 +70,7 @@ export function GoalStatusRail() {
   ) : null;
 
   return (
-    <div className="chat-column-width relative z-20 mx-auto w-full shrink-0 px-3 pb-2 sm:px-5">
+    <div className="conversation-column-width relative z-20 mx-auto w-full shrink-0 px-3 pb-2 sm:px-5">
       {receipt && (
         <div className="absolute inset-x-3 bottom-full mb-2 rounded-xl border border-border bg-bg-elevated p-4 shadow-lifted sm:inset-x-5">
           <button type="button" onClick={() => setOpen(null)} aria-label="Close receipt" className="absolute right-2 top-2 grid size-7 place-items-center rounded-md text-ink-faint hover:bg-bg-hover hover:text-ink">

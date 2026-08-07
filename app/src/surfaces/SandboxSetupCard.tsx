@@ -134,7 +134,7 @@ export function SandboxSetupCard({
       <div
         role="status"
         aria-live="polite"
-        className="composer-column-width mx-auto mb-2 flex w-full items-start gap-3 rounded-xl border border-warning/25 bg-warning/10 px-3.5 py-3"
+        className="conversation-column-width mx-auto mb-2 flex w-full items-start gap-3 rounded-xl border border-warning/25 bg-warning/10 px-3.5 py-3"
       >
         {canSetup
           ? <ShieldCheck className="mt-0.5 size-4 shrink-0 text-accent" />

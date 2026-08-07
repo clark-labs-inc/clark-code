@@ -1,5 +1,10 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { stableOrderIds, stableRankMap, __resetStableOrderForTests } from "./stableOrder";
+import {
+  stableOrderIds,
+  stableProjectOrder,
+  stableRankMap,
+  __resetStableOrderForTests,
+} from "./stableOrder";
 
 interface Row {
   id: string;
@@ -75,5 +80,47 @@ describe("stableRankMap", () => {
     // "b" overtakes in updatedAt and is re-prepended by the store.
     const after = stableRankMap([row("b", 99), row("a")]).get("b");
     expect(after).toBe(before);
+  });
+});
+
+describe("stableProjectOrder", () => {
+  const project = (key: string) => ({ key });
+
+  it("does not move a project when its remaining conversation changes its derived rank", () => {
+    stableProjectOrder([project("project-a"), project("project-b"), project("project-c")]);
+
+    expect(
+      stableProjectOrder([project("project-b"), project("project-a"), project("project-c")])
+        .map((item) => item.key),
+    ).toEqual(["project-a", "project-b", "project-c"]);
+  });
+
+  it("keeps a temporarily empty project in its original slot", () => {
+    stableProjectOrder([project("project-a"), project("project-b"), project("project-c")]);
+    stableProjectOrder([project("project-a"), project("project-c")]);
+
+    expect(
+      stableProjectOrder([project("project-a"), project("project-b"), project("project-c")])
+        .map((item) => item.key),
+    ).toEqual(["project-a", "project-b", "project-c"]);
+  });
+
+  it("places a genuinely new project above existing projects", () => {
+    stableProjectOrder([project("project-a"), project("project-b")]);
+
+    expect(
+      stableProjectOrder([project("project-new"), project("project-a"), project("project-b")])
+        .map((item) => item.key),
+    ).toEqual(["project-new", "project-a", "project-b"]);
+  });
+
+  it("allows pinned-project priority to override stable position", () => {
+    const initial = [project("project-a"), project("project-b")];
+    stableProjectOrder(initial);
+
+    expect(
+      stableProjectOrder(initial, (item) => item.key === "project-b" ? 0 : 1)
+        .map((item) => item.key),
+    ).toEqual(["project-b", "project-a"]);
   });
 });

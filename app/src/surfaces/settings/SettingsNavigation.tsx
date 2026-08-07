@@ -135,7 +135,7 @@ export function SettingsNavigation({
         <button
           type="button"
           onClick={onClose}
-          className="flex min-h-8 w-full items-center gap-2 rounded-lg px-2 text-sm text-ink-muted transition hover:bg-bg-hover hover:text-ink"
+          className="flex min-h-8 w-full items-center gap-2 rounded-md px-2 text-sm text-ink-muted transition hover:bg-bg-hover hover:text-ink"
         >
           <ArrowLeft className="size-3.5" />
           Back to app
@@ -151,7 +151,7 @@ export function SettingsNavigation({
             value={query}
             onChange={(event) => onQueryChange(event.target.value)}
             placeholder="Search settings"
-            className="h-8 w-full rounded-lg bg-bg-sunken pl-8 pr-2.5 text-sm text-ink outline-none transition placeholder:text-ink-faint focus:ring-2 focus:ring-accent/20"
+            className="h-8 w-full rounded-md bg-bg-sunken pl-8 pr-2.5 text-sm text-ink outline-none transition placeholder:text-ink-faint focus:ring-2 focus:ring-accent/20"
           />
         </label>
       </div>
@@ -169,7 +169,7 @@ export function SettingsNavigation({
                     type="button"
                     onClick={() => onSelect(item.id)}
                     className={cn(
-                      "flex min-h-9 w-full items-center gap-2.5 rounded-lg px-2 text-left text-sm transition",
+                      "flex min-h-9 w-full items-center gap-2.5 rounded-md px-2 text-left text-sm transition",
                       selected
                         ? "bg-bg-tertiary text-ink"
                         : "text-ink-secondary hover:bg-bg-hover hover:text-ink",

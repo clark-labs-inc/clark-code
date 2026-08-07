@@ -373,6 +373,12 @@ The repaired contracts are narrow:
 - final-answer publication is denied while the originating run has unresolved
   effect receipts, and the denial plus any terminal fallback identifies the
   exact receipt, tool, description, and verification state; and
+- `verify_effect` rejects internally inconsistent exact-comparison arguments
+  without mutating the receipt to a false mismatch; summary evidence omits the
+  exact fields. A provider response that ignores a required tool call is kept
+  out of UI/history and receives one fresh, explicitly corrected request. A
+  second violation is a provider-contract failure, not an empty response, and
+  usage from the discarded attempt remains in the run total; and
 - provider-output quarantine recognizes both ASCII protocol markers and the
   Unicode tokenizer-boundary form observed in persisted conversations.
 
@@ -380,7 +386,12 @@ The deterministic production composition test completes 160 consecutive
 model/tool iterations, proving there is no 128-iteration product cutoff. Its
 paired regressions prove that a genuinely unresolved external effect cannot
 publish a final answer and that a configured cumulative-token ceiling stops
-before another provider request rather than consuming unbounded work.
+before another provider request rather than consuming unbounded work. The
+termination suite also replays the 0.1.130 reasoning-only required-tool miss:
+the first response stays invisible, the corrected request carries the required
+tool contract, the structured answer completes, and both calls' token usage is
+retained. A paired two-miss control terminates as a provider error after exactly
+two requests.
 
 Retained live host evidence:
 
@@ -845,6 +856,16 @@ after callers finish. A bounded 128-entry circuit opens for ten seconds after
 three failed connect operations, while successful connection or account
 teardown removes its state. This prevents repeated failures and arbitrary
 worker specs from leaking registry coordination state.
+
+Remote coding turns default to 64 model/tool exchanges, while retaining the
+15-minute turn timeout, cumulative-token circuit breaker, and explicit maximum
+of 256. The former 12-step default could terminate a productive repository
+investigation immediately after a recoverable tool error. Exhausting an
+explicit step budget is now a typed `iteration_limit`, so the UI directs the
+user to continue from saved work instead of misreporting corrupt local state.
+The non-login SSH worker launch also pins conventional user-local and system
+binary directories in `PATH`, so project commands resolve tools installed
+under `~/.local/bin` without sourcing mutable shell profiles.
 
 Live `HostSession` entries, their providers, projections, and trajectory
 clients now live in `RuntimeRegistry`; the parallel `AppState.sessions` map was

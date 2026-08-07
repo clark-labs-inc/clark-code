@@ -119,13 +119,16 @@
   --text-2xl: max(1.5rem, calc(1.5rem * var(--text-size-scale)));      /* 24px at 100% */
   --text-3xl: max(1.875rem, calc(1.875rem * var(--text-size-scale)));  /* 30px at 100% */
 
-  --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 16px;
-  --radius-xl: 22px;
-  --radius-2xl: 22px;
+  /* Three visible corner tiers: compact controls, standard controls, and
+     floating overlays. Structural content stays flat instead of becoming a
+     stack of cards. */
+  --radius-sm: 6px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 8px;
+  --radius-2xl: 12px;
 
-  --shadow-soft: 0 4px 14px rgba(55, 48, 42, 0.045);
+  --shadow-soft: none;
   --shadow-lifted: 0 10px 32px rgba(48, 40, 35, 0.09);
 
   /* ── Motion tokens ───────────────────────────────────────────────
@@ -147,8 +150,7 @@
 :root {
   color-scheme: light;
   --text-size-scale: 1;
-  --chat-column-max-width: calc(50rem * var(--text-size-scale));
-  --composer-column-max-width: calc(45rem * var(--text-size-scale));
+  --conversation-column-max-width: calc(50rem * var(--text-size-scale));
 
   /* Transitional bridge for compact UI labels written before the semantic type
      scale. They grow enough to remain readable, then cap so fixed chrome can
@@ -179,12 +181,8 @@
    theme-aware foreground token so the lighter dark-theme violet stays legible. */
 .bg-accent.text-white { color: var(--color-on-accent); }
 
-.chat-column-width {
-  max-width: var(--chat-column-max-width);
-}
-
-.composer-column-width {
-  max-width: var(--composer-column-max-width);
+.conversation-column-width {
+  max-width: var(--conversation-column-max-width);
 }
 
 /* Dark keeps the same violet interaction contract on a warm graphite canvas. */
@@ -225,7 +223,7 @@ html.dark {
   --color-border-subtle: rgba(255, 255, 255, 0.045);
   --color-border-strong: rgba(255, 255, 255, 0.24);
 
-  --shadow-soft: 0 4px 14px rgba(0, 0, 0, 0.16);
+  --shadow-soft: none;
   --shadow-lifted: 0 10px 32px rgba(0, 0, 0, 0.26);
 }
 

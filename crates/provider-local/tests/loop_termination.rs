@@ -92,6 +92,29 @@ fn plain_text_body(text: &str) -> String {
     .join("\n\n")
 }
 
+fn reasoning_body_with_usage(text: &str, prompt_tokens: u64, completion_tokens: u64) -> String {
+    [
+        format!(
+            "data: {}",
+            json!({"choices": [{"delta": {"reasoning": text}}]})
+        ),
+        format!(
+            "data: {}",
+            json!({
+                "choices": [{"delta": {}, "finish_reason": "stop"}],
+                "usage": {
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "total_tokens": prompt_tokens + completion_tokens
+                }
+            })
+        ),
+        "data: [DONE]".to_string(),
+        String::new(),
+    ]
+    .join("\n\n")
+}
+
 fn http_response(body: &str) -> Vec<u8> {
     format!(
         "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
@@ -244,6 +267,91 @@ async fn structured_final_answer_is_terminal_after_one_model_response() {
 }
 
 #[tokio::test]
+async fn required_tool_contract_violation_gets_one_isolated_repair() {
+    const DISCARDED: &str = "I am done, but I forgot the final-answer tool.";
+    const DELIVERED: &str = "The structured final answer was repaired.";
+    let root = tempfile::tempdir().expect("temporary project");
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind model endpoint");
+    let address = listener.local_addr().expect("model endpoint address");
+    let server = tokio::spawn(serve(
+        listener,
+        vec![
+            reasoning_body_with_usage(DISCARDED, 100, 5),
+            tool_call_body_with_usage(
+                "final-answer",
+                "final_answer",
+                json!({"content": DELIVERED}),
+                110,
+                6,
+            ),
+        ],
+    ));
+    let mut provider = connect(address, root.path(), json!({})).await;
+    let session = new_session(&mut provider, root.path()).await;
+    let mut stream = provider
+        .prompt(
+            &session.id,
+            PromptInput::text("Return a structured answer."),
+        )
+        .await
+        .expect("start prompt");
+    let mut visible_text = String::new();
+    let outcome = loop {
+        match stream.next().await.expect("run reaches terminal event") {
+            AgentEvent::MessageChunk {
+                delta: ContentBlock::Text { text },
+                ..
+            } => visible_text.push_str(&text),
+            AgentEvent::MessageChunk {
+                delta: ContentBlock::Thinking { text },
+                ..
+            } => visible_text.push_str(&text),
+            AgentEvent::RunFinished { outcome, .. } => break outcome,
+            _ => {}
+        }
+    };
+
+    assert_eq!(outcome.status, RunStatus::Done, "{outcome:?}");
+    let usage = outcome.usage.expect("repair usage is retained");
+    assert_eq!(usage.input_tokens, 210, "{outcome:?}");
+    assert_eq!(usage.output_tokens, 11, "{outcome:?}");
+    assert_eq!(usage.context_tokens, 110, "{outcome:?}");
+    assert!(!visible_text.contains(DISCARDED), "{visible_text}");
+    assert!(visible_text.contains(DELIVERED), "{visible_text}");
+    let requests = server.await.expect("model server task");
+    assert_eq!(requests.len(), 2);
+    let request_text = requests
+        .iter()
+        .map(|request| String::from_utf8_lossy(request))
+        .collect::<Vec<_>>();
+    for request in &requests {
+        assert!(
+            String::from_utf8_lossy(request).contains(r#""tool_choice":"required""#),
+            "required tool choice missing"
+        );
+    }
+    let idempotency_key = |request: &str| {
+        request.lines().find_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            name.eq_ignore_ascii_case("idempotency-key")
+                .then(|| value.trim().to_string())
+        })
+    };
+    assert_ne!(
+        idempotency_key(&request_text[0]),
+        idempotency_key(&request_text[1]),
+        "a corrected request must not replay the invalid body's idempotency identity"
+    );
+    assert!(
+        request_text[1]
+            .contains("previous response violated the required structured-tool boundary"),
+        "repair request lacked a precise contract correction"
+    );
+}
+
+#[tokio::test]
 async fn unstructured_provider_output_is_quarantined_before_visible_history() {
     const MALFORMED: &str = "?: yes please -> @9ff4... drawn.";
     let root = tempfile::tempdir().expect("temporary project");
@@ -289,9 +397,15 @@ async fn unstructured_provider_output_is_quarantined_before_visible_history() {
         event,
         AgentEvent::RunFinished { outcome, .. }
             if outcome.status == RunStatus::Failed
-                && outcome.failure_kind == Some(RunFailureKind::EmptyResponse)
+                && outcome.failure_kind == Some(RunFailureKind::ProviderError)
     )));
-    assert_eq!(server.await.expect("model server task").len(), 2);
+    let requests = server.await.expect("model server task");
+    assert_eq!(requests.len(), 2);
+    assert!(
+        String::from_utf8_lossy(&requests[1])
+            .contains("previous response violated the required structured-tool boundary"),
+        "second provider request was not an isolated contract repair"
+    );
 }
 
 #[tokio::test]
@@ -339,6 +453,49 @@ async fn productive_turn_runs_past_128_model_tool_iterations_without_global_cap(
     );
     let requests = server.await.expect("model server task");
     assert_eq!(requests.len(), PRODUCTIVE_STEPS + 1);
+}
+
+#[tokio::test]
+async fn configured_iteration_ceiling_is_typed_as_resumable_limit() {
+    let root = tempfile::tempdir().expect("temporary project");
+    std::fs::write(root.path().join("receipt.txt"), "bounded").expect("write fixture");
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind model endpoint");
+    let address = listener.local_addr().expect("model endpoint address");
+    let server = tokio::spawn(serve(
+        listener,
+        vec![tool_call_body(
+            "read-once",
+            "read_file",
+            json!({"path": "receipt.txt"}),
+        )],
+    ));
+    let mut provider = connect(address, root.path(), json!({"max_iterations": 1})).await;
+    let session = new_session(&mut provider, root.path()).await;
+
+    let (outcome, tool_calls) = terminal_outcome(
+        &mut provider,
+        &session,
+        "Read the fixture and keep investigating.",
+    )
+    .await;
+
+    assert_eq!(tool_calls, 1);
+    assert_eq!(outcome.status, RunStatus::Failed, "{outcome:?}");
+    assert_eq!(
+        outcome.failure_kind,
+        Some(RunFailureKind::IterationLimit),
+        "{outcome:?}"
+    );
+    assert!(
+        outcome
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("configured safety limit of 1 steps")),
+        "{outcome:?}"
+    );
+    assert_eq!(server.await.expect("model server task").len(), 1);
 }
 
 #[tokio::test]

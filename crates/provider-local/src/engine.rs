@@ -613,10 +613,8 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
                 .await;
             } else {
                 // Only `HitMaxIterations` lands here — a natural finish and
-                // the graceful wrap-up both count as complete above. So this
-                // is specifically "ran out of steps without wrapping up",
-                // which almost always means a stuck approach. Say that, and
-                // point at the saved transcript, instead of a bare count.
+                // the graceful wrap-up both count as complete above. This is
+                // resumable saved work, not corrupt provider or local state.
                 finish_root(
                     &tx,
                     &run,
@@ -625,15 +623,14 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
                     RunStatus::Failed,
                     Some(outcome.label().to_string()),
                     Some(format!(
-                        "I hit my configured safety limit of {} steps before finishing — usually a sign I \
-                         got stuck repeating an approach that wasn't working. Everything so far is \
-                         saved above; send a follow-up to continue, or nudge me toward a different \
-                         approach.",
+                        "This run reached its configured safety limit of {} steps before finishing. \
+                         Everything so far is saved above; continue in this task to resume from that \
+                         work.",
                         tc.max_iterations
                             .map(|limit| limit.to_string())
                             .unwrap_or_else(|| "unknown".to_string())
                     )),
-                    Some(RunFailureKind::LocalState),
+                    Some(RunFailureKind::IterationLimit),
                     with_limit(final_usage, context_limit),
                 )
                 .await;

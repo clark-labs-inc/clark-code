@@ -27,6 +27,14 @@ const ranks = new Map<string, number>();
 let initialized = false;
 let newSeen = 0;
 
+// Project groups need their own rank table. Reusing conversation ranks would
+// make a coincidentally identical project key and conversation id share a
+// slot, and—more importantly—removing a project's first conversation must not
+// change the position of the whole project.
+const projectRanks = new Map<string, number>();
+let projectsInitialized = false;
+let newProjectsSeen = 0;
+
 function assignRanks(items: { id: string }[]): void {
   if (!initialized) {
     // First sight = session history, already newest-first from the store.
@@ -69,11 +77,39 @@ export function stableRankMap<T extends { id: string }>(items: T[]): Map<string,
   return m;
 }
 
+/** Keep project groups in their first-seen session order. New projects land at
+ * the top, while removing or archiving conversations inside an existing
+ * project cannot move the project itself. */
+export function stableProjectOrder<T extends { key: string }>(
+  items: T[],
+  priority: (item: T) => number = () => 0,
+): T[] {
+  if (!projectsInitialized) {
+    items.forEach((item, index) => {
+      if (!projectRanks.has(item.key)) projectRanks.set(item.key, index);
+    });
+    projectsInitialized = true;
+  } else {
+    for (const item of items) {
+      if (!projectRanks.has(item.key)) {
+        projectRanks.set(item.key, -(++newProjectsSeen));
+      }
+    }
+  }
+  return [...items].sort((a, b) => {
+    const priorityDelta = priority(a) - priority(b);
+    return priorityDelta || projectRanks.get(a.key)! - projectRanks.get(b.key)!;
+  });
+}
+
 /** Reset process-local ordering at an authenticated-account boundary. */
 export function resetStableOrder(): void {
   initialized = false;
   newSeen = 0;
   ranks.clear();
+  projectsInitialized = false;
+  newProjectsSeen = 0;
+  projectRanks.clear();
 }
 
 /** Test-only alias retained for the focused ordering suite. */

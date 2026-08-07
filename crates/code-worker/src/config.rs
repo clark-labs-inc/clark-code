@@ -287,7 +287,11 @@ fn default_key_env() -> String {
 }
 
 fn default_iterations() -> u32 {
-    12
+    // Remote turns are already bounded by the turn timeout and the provider's
+    // cumulative-token circuit breaker. Twelve model/tool exchanges is too
+    // small for ordinary repository diagnosis and turns recoverable tool
+    // failures into terminal runs before the model can adjust.
+    64
 }
 
 fn default_turn_timeout() -> u64 {
@@ -314,6 +318,19 @@ fn portable_env_name(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn default_remote_turn_budget_allows_long_productive_investigations() {
+        let profile = ProviderProfile::default();
+
+        assert_eq!(profile.max_iterations, 64);
+        assert_eq!(
+            profile
+                .provider_config(ExecutionResidency::RemoteWorker)
+                .extra["max_iterations"],
+            64
+        );
+    }
 
     #[test]
     fn credentials_stay_out_of_serialized_config_and_routes_are_bounded() {

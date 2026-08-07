@@ -254,6 +254,7 @@ export type RunFailureKind =
   | "insufficient_credits"
   | "tool_fatal"
   | "local_state"
+  | "iteration_limit"
   | "runtime_interrupted"
   | "verification_incomplete"
   | "empty_response";

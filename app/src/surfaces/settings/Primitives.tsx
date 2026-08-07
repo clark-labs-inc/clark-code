@@ -14,7 +14,7 @@ export function GroupLabel({ children }: { children: React.ReactNode }) {
 
 export function Card({ children }: { children: React.ReactNode }) {
   return (
-    <div className="overflow-hidden rounded-xl bg-bg-secondary/55 p-1 [&>*]:rounded-lg">
+    <div className="flex flex-col">
       {children}
     </div>
   );

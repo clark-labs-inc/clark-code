@@ -112,7 +112,7 @@ export function ProfileMenu({ variant = "topbar" }: { variant?: "topbar" | "rail
       {open && (
         <div
           className={cn(
-            "popover-surface absolute z-30 w-72 rounded-[22px] bg-bg-elevated p-1.5 shadow-lifted ring-1 ring-border-subtle",
+            "popover-surface absolute z-30 w-72 rounded-2xl bg-bg-elevated p-1.5 shadow-lifted ring-1 ring-border-subtle",
             variant === "sidebar"
               ? "bottom-full left-0 mb-2"
               : variant === "rail"

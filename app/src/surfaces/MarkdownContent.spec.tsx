@@ -30,4 +30,12 @@ describe("MarkdownContent", () => {
     expect(markup).toContain("katex");
     expect(markup).toContain("x");
   });
+
+  it("repairs unfinished Markdown when a document requests best-effort rendering", () => {
+    const markup = renderToStaticMarkup(
+      <MarkdownContent repairIncomplete>{"A **partially written document"}</MarkdownContent>,
+    );
+
+    expect(markup).toContain("<strong>partially written document</strong>");
+  });
 });

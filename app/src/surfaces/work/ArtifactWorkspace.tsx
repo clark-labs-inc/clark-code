@@ -22,6 +22,7 @@ import {
   PanelRightClose,
   Plus,
   Presentation,
+  RefreshCw,
   Sparkles,
   X,
 } from "lucide-react";
@@ -206,11 +207,15 @@ function ArtifactPreview({
   artifact,
   text,
   loading,
+  readFailed,
+  onRetry,
   presenting,
 }: {
   artifact: Artifact;
   text: string | null;
   loading: boolean;
+  readFailed: boolean;
+  onRetry: () => void;
   presenting: boolean;
 }) {
   const [imageFailed, setImageFailed] = useState(false);
@@ -224,7 +229,40 @@ function ArtifactPreview({
         </div>
       );
     }
-    if (text == null) return <GenericPreview artifact={artifact} />;
+    if (text == null && readFailed) {
+      return (
+        <div className="mx-auto flex min-h-full max-w-3xl items-center justify-center px-8 py-12">
+          <div className="w-full rounded-xl border border-border bg-bg-elevated px-7 py-8 text-center shadow-soft">
+            <span className="mx-auto grid size-14 place-items-center rounded-xl bg-accent-subtle text-accent">
+              <FileText className="size-6" />
+            </span>
+            <h1 className="mt-4 font-display text-2xl text-ink">Couldn’t display this Markdown</h1>
+            <p className="mx-auto mt-3 max-w-md text-sm leading-relaxed text-ink-muted">
+              Clark couldn’t read the document source. The file may have moved or may no longer be on this device.
+            </p>
+            <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
+              <button
+                type="button"
+                onClick={onRetry}
+                className="inline-flex h-10 items-center gap-2 rounded-lg bg-accent px-4 text-sm font-medium text-on-accent transition hover:bg-accent-hover"
+              >
+                <RefreshCw className="size-3.5" /> Try again
+              </button>
+              {canOpenArtifactExternally(artifact) && (
+                <button
+                  type="button"
+                  onClick={() => void openArtifactExternally(artifact)}
+                  className="inline-flex h-10 items-center gap-2 rounded-lg bg-bg-secondary px-4 text-sm font-medium text-ink-secondary ring-1 ring-border-subtle transition hover:bg-bg-hover hover:text-ink"
+                >
+                  Open file <ExternalLink className="size-3.5" />
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    }
+    if (text == null) return null;
     return (
       <article
         className={cn(
@@ -242,7 +280,7 @@ function ArtifactPreview({
             "[&_table]:mt-4 [&_table]:text-sm",
           )}
         >
-          <MarkdownContent math diagrams>{text}</MarkdownContent>
+          <MarkdownContent math diagrams repairIncomplete>{text}</MarkdownContent>
         </div>
       </article>
     );
@@ -403,6 +441,8 @@ export function ArtifactWorkspace({
   const [contextPanel, setContextPanel] = useState<ContextPanel | null>(null);
   const [text, setText] = useState<string | null>(null);
   const [loadingText, setLoadingText] = useState(false);
+  const [markdownReadFailed, setMarkdownReadFailed] = useState(false);
+  const [markdownReadAttempt, setMarkdownReadAttempt] = useState(0);
   const [downloading, setDownloading] = useState(false);
   const [saved, setSaved] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
@@ -438,6 +478,7 @@ export function ArtifactWorkspace({
     setSaved(false);
     setPdfSaved(false);
     setPresenting(false);
+    setMarkdownReadFailed(false);
     if (!activeId || !activeIsMarkdown) {
       setLoadingText(false);
       return;
@@ -447,12 +488,13 @@ export function ArtifactWorkspace({
     readDocText(activeUri).then((value) => {
       if (!alive) return;
       setText(value);
+      setMarkdownReadFailed(value == null);
       setLoadingText(false);
     });
     return () => {
       alive = false;
     };
-  }, [activeId, activeIsMarkdown, activeUri]);
+  }, [activeId, activeIsMarkdown, activeUri, markdownReadAttempt]);
 
   useEffect(() => {
     if (!pickerOpen) return;
@@ -497,7 +539,9 @@ export function ArtifactWorkspace({
   const activeTabId = artifactDomId("artifact-tab", active.id);
   const activePanelId = artifactDomId("artifact-panel", active.id);
   const availability = artifactAvailability(active);
-  const availabilityLabel = availability === "saved" ? "Saved" : availability === "available" ? "Available" : "Unavailable";
+  const availabilityLabel = markdownReadFailed
+    ? "Preview unavailable"
+    : availability === "saved" ? "Saved" : availability === "available" ? "Available" : "Unavailable";
 
   const closeTab = (artifact: Artifact) => {
     const next = openArtifacts.filter((item) => item.id !== artifact.id);
@@ -641,7 +685,9 @@ export function ArtifactWorkspace({
         <span className="text-ink-faint">/</span>
         <span className="text-xs text-ink-muted">{isMarkdownDoc(active) ? "Markdown" : KIND_LABEL[active.kind]}</span>
         <span className="ml-2 hidden items-center gap-1.5 text-xs text-ink-faint xl:flex">
-          {availability === "unavailable" ? <X className="size-3.5" /> : <Check className="size-3.5 text-success" />}
+          {availability === "unavailable" || markdownReadFailed
+            ? <X className="size-3.5" />
+            : <Check className="size-3.5 text-success" />}
           {availabilityLabel}
           {byteSize != null && <><span className="mx-1">·</span>{formatBytes(byteSize)}</>}
         </span>
@@ -714,7 +760,14 @@ export function ArtifactWorkspace({
           tabIndex={0}
           className="min-w-0 flex-1 overflow-y-auto outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent"
         >
-          <ArtifactPreview artifact={active} text={text} loading={loadingText} presenting={presenting} />
+          <ArtifactPreview
+            artifact={active}
+            text={text}
+            loading={loadingText}
+            readFailed={markdownReadFailed}
+            onRetry={() => setMarkdownReadAttempt((attempt) => attempt + 1)}
+            presenting={presenting}
+          />
         </div>
         <nav aria-label="Artifact context" className={cn("flex min-w-14 shrink-0 flex-col items-center gap-1 border-l border-border-subtle bg-bg-primary py-2", presenting && "hidden")}>
           {([

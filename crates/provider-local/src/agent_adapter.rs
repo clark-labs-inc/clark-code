@@ -1,4 +1,5 @@
 mod event_sink;
+mod proposed_plan_stream;
 pub(crate) mod redaction;
 mod tool_title;
 mod translate;
@@ -25,12 +26,12 @@ use crate::tools::{
     ProducedArtifact, ToolCtx, ToolExecutor, ToolOutcome, ToolRegistry, ToolSignal,
 };
 
+use proposed_plan_stream::ProposedPlanStreamFilter;
 use tool_title::tool_title;
 use translate::*;
 
 pub(crate) use event_sink::DesktopEventSink;
 pub(crate) use translate::to_wire_messages;
-
 /// Running token/cost totals across a run's model calls, shared between the
 /// stream adapter (writer) and the engine (reads them into the run outcome).
 #[derive(Default)]
@@ -192,69 +193,110 @@ impl ca::StreamFn for ClarkAgentStream {
             let reasoning_tx = tx.clone();
             let proposal_filter =
                 Arc::new(std::sync::Mutex::new(ProposedPlanStreamFilter::default()));
-            let proposal_filter_for_text = proposal_filter.clone();
-            let turn = llm
-                .stream_chat_observed_with_tool_choice(
-                    &messages,
-                    &tools,
-                    crate::llm::StreamChatOptions {
-                        cancel: &signal,
-                        force_tool_call,
-                    },
-                    move |delta| {
-                        if force_tool_call {
-                            return;
-                        }
-                        let visible = proposal_filter_for_text
-                            .lock()
-                            .map(|mut filter| filter.feed(delta))
-                            .unwrap_or_else(|_| delta.to_string());
-                        if !visible.is_empty() {
-                            let _ = chunk_tx.send(ca::StreamEvent::Chunk(
-                                ca::AssistantStreamChunk::Text { delta: visible },
-                            ));
-                        }
-                    },
-                    move |delta| {
-                        // The transport releases reasoning only after the whole
-                        // provider turn passes isolation validation. Preserve
-                        // its typed Thinking projection after that boundary.
-                        let _ = reasoning_tx.send(ca::StreamEvent::Chunk(
-                            ca::AssistantStreamChunk::Reasoning {
-                                delta: delta.to_string(),
-                            },
-                        ));
-                    },
-                    {
-                        let incidents = incidents.clone();
-                        move |context| incidents.observe_retry(context)
-                    },
-                )
-                .await;
+            let mut discarded_usage = Vec::new();
+            let mut repair_attempts = 0_u8;
+            let turn = loop {
+                let proposal_filter_for_text = proposal_filter.clone();
+                let chunk_tx = chunk_tx.clone();
+                let reasoning_tx = reasoning_tx.clone();
+                let incidents_for_retry = incidents.clone();
+                let response = llm
+                    .stream_chat_observed_with_tool_choice(
+                        &messages,
+                        &tools,
+                        crate::llm::StreamChatOptions {
+                            cancel: &signal,
+                            force_tool_call,
+                        },
+                        move |delta| {
+                            if force_tool_call {
+                                return;
+                            }
+                            let visible = proposal_filter_for_text
+                                .lock()
+                                .map(|mut filter| filter.feed(delta))
+                                .unwrap_or_else(|_| delta.to_string());
+                            if !visible.is_empty() {
+                                let _ = chunk_tx.send(ca::StreamEvent::Chunk(
+                                    ca::AssistantStreamChunk::Text { delta: visible },
+                                ));
+                            }
+                        },
+                        move |delta| {
+                            // Required-tool responses remain staged until the
+                            // complete turn proves it honored that contract.
+                            if !force_tool_call {
+                                let _ = reasoning_tx.send(ca::StreamEvent::Chunk(
+                                    ca::AssistantStreamChunk::Reasoning {
+                                        delta: delta.to_string(),
+                                    },
+                                ));
+                            }
+                        },
+                        move |context| incidents_for_retry.observe_retry(context),
+                    )
+                    .await;
+
+                let Ok(invalid) = &response else {
+                    break response;
+                };
+                if !force_tool_call || !invalid.tool_calls.is_empty() {
+                    break response;
+                }
+
+                let payload = invalid
+                    .response_metadata
+                    .as_ref()
+                    .and_then(|metadata| serde_json::to_value(metadata).ok())
+                    .unwrap_or(Value::Null);
+                let _ = events
+                    .send(desktop::AgentEvent::Trace {
+                        run: Some(run.clone()),
+                        source: "provider_output_contract_violation".to_string(),
+                        payload: json!({
+                            "contract": "required_tool_call",
+                            "repair_attempt": repair_attempts,
+                            "response": payload,
+                        }),
+                    })
+                    .await;
+                if let Some(usage) = invalid.usage {
+                    discarded_usage.push(usage);
+                }
+                if repair_attempts == 0 {
+                    repair_attempts = 1;
+                    messages.push(crate::llm::ChatMessage::system(
+                        "Your previous response violated the required structured-tool boundary and was discarded. Call exactly one appropriate available tool now. Do not return a prose-only response.",
+                    ));
+                    continue;
+                }
+                break Err(crate::llm::LlmError::Provider(format!(
+                    "{} provider ignored required tool choice after one isolated repair attempt",
+                    crate::llm::REQUIRED_TOOL_CONTRACT_VIOLATION
+                )));
+            };
+
+            for usage in discarded_usage {
+                let mut usage = totals.add(usage);
+                usage.context_limit = context_limit;
+                let _ = events
+                    .send(desktop::AgentEvent::RunUsageUpdated {
+                        run: run.clone(),
+                        usage,
+                    })
+                    .await;
+            }
 
             match turn {
                 Ok(mut turn) => {
-                    if force_tool_call && turn.tool_calls.is_empty() {
-                        let payload = turn
-                            .response_metadata
-                            .as_ref()
-                            .and_then(|metadata| serde_json::to_value(metadata).ok())
-                            .unwrap_or(Value::Null);
-                        let _ = events
-                            .send(desktop::AgentEvent::Trace {
-                                run: Some(run.clone()),
-                                source: "provider_output_contract_violation".to_string(),
-                                payload,
-                            })
-                            .await;
-                        let _ = tx.send(ca::StreamEvent::Error {
-                            partial: empty_assistant(ca::StopReason::Error, None),
-                            kind: ca::stream::StreamErrorKind::ZeroOutputTransport,
-                            message: "provider ignored required tool choice".to_string(),
-                        });
-                        return;
-                    }
                     if force_tool_call {
+                        if !turn.reasoning.is_empty() {
+                            let _ = tx.send(ca::StreamEvent::Chunk(
+                                ca::AssistantStreamChunk::Reasoning {
+                                    delta: turn.reasoning.clone(),
+                                },
+                            ));
+                        }
                         // Hold text until the required structured boundary is
                         // known. Ordinary tool turns may carry progress
                         // commentary, while terminal delivery comes only from
@@ -389,65 +431,6 @@ fn should_surface_reasoning_details(turn: &AssistantTurn) -> bool {
     // so emitting the latter here would append a duplicate Thinking block after
     // the answer. Details remain on the completed assistant message for replay.
     turn.reasoning.trim().is_empty() && !turn.reasoning_details.is_empty()
-}
-
-#[derive(Default)]
-struct ProposedPlanStreamFilter {
-    pending: String,
-    in_plan: bool,
-}
-
-impl ProposedPlanStreamFilter {
-    fn feed(&mut self, delta: &str) -> String {
-        self.pending.push_str(delta);
-        self.drain(false)
-    }
-
-    fn finish(&mut self) -> String {
-        self.drain(true)
-    }
-
-    fn drain(&mut self, final_chunk: bool) -> String {
-        let mut visible = String::new();
-        loop {
-            if self.in_plan {
-                if let Some(end) = self.pending.find("</proposed_plan>") {
-                    self.pending = self.pending[end + "</proposed_plan>".len()..].to_string();
-                    self.in_plan = false;
-                    continue;
-                }
-                if final_chunk {
-                    visible.push_str("<proposed_plan>");
-                    visible.push_str(&self.pending);
-                    self.pending.clear();
-                    self.in_plan = false;
-                }
-                break;
-            }
-            if let Some(start) = self.pending.find("<proposed_plan>") {
-                visible.push_str(&self.pending[..start]);
-                self.pending = self.pending[start + "<proposed_plan>".len()..].to_string();
-                self.in_plan = true;
-                continue;
-            }
-            if final_chunk {
-                visible.push_str(&self.pending);
-                self.pending.clear();
-            } else {
-                // Hold only a possible opening-tag prefix across token
-                // boundaries; emit all other text immediately.
-                let keep = (1.."<proposed_plan>".len())
-                    .rev()
-                    .find(|length| self.pending.ends_with(&"<proposed_plan>"[..*length]))
-                    .unwrap_or(0);
-                let emit_len = self.pending.len().saturating_sub(keep);
-                visible.push_str(&self.pending[..emit_len]);
-                self.pending = self.pending[emit_len..].to_string();
-            }
-            break;
-        }
-        visible
-    }
 }
 
 pub(crate) struct DesktopToolRegistryOptions {

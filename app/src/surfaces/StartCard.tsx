@@ -60,7 +60,7 @@ export function StartCard() {
       <m.div
         {...accessibleMotion(RISE, reduce)}
         transition={staggeredTransition(reduce, 0, 0.04, { duration: DUR.slow })}
-        className="chat-column-width mx-auto w-full px-6 pb-6 pt-10"
+        className="conversation-column-width mx-auto w-full px-6 pb-6 pt-10"
       >
         <div className="mb-6">
           <div className="mb-2.5 text-xs font-semibold uppercase tracking-[0.16em] text-accent">
@@ -97,7 +97,7 @@ export function StartCard() {
                 </button>
               )}
             </div>
-            <div className="flex flex-col gap-0.5 overflow-hidden rounded-2xl bg-bg-secondary/55 p-1 [&>*]:rounded-xl">
+            <div className="flex flex-col">
               {shown.map((c) => (
                 <SessionRow key={c.id} c={c} />
               ))}

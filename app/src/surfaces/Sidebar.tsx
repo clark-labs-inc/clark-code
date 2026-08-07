@@ -18,7 +18,7 @@ import {
   saveSidebarWidth,
 } from "../lib/sidebarWidth";
 import { fuzzyFilter } from "../lib/fuzzy";
-import { stableRankMap } from "../lib/stableOrder";
+import { stableProjectOrder, stableRankMap } from "../lib/stableOrder";
 import { cn } from "../lib/cn";
 import { getBridge } from "../core-bridge/bridge";
 import { openProjectPath } from "../lib/openPath";
@@ -596,7 +596,13 @@ export function Sidebar({
     [defaultProject, recentProjects],
   );
   const groups = useMemo(
-    () => groupSidebarProjects(activeConvos, rememberedProjects, rank, projectPreferences, filter),
+    () => stableProjectOrder(
+      groupSidebarProjects(activeConvos, rememberedProjects, rank, projectPreferences, filter),
+      (group) => {
+        const pinnedIndex = projectPreferences.pinned.indexOf(group.key);
+        return pinnedIndex < 0 ? projectPreferences.pinned.length : pinnedIndex;
+      },
+    ),
     [activeConvos, rememberedProjects, rank, projectPreferences, filter],
   );
   const activeWorktreePaths = useMemo(() => {

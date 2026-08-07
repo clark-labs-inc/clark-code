@@ -19,7 +19,7 @@ mod schema;
 mod storage;
 pub(crate) use barrier::wait_for_acknowledged_prefix;
 pub(crate) use recovery::interrupt_live_runs;
-use storage::{open, owner_key, sql_error};
+use storage::{open, owner_key, reclaim_free_pages, sql_error};
 
 #[derive(Clone)]
 pub struct TrajectoryOutbox {
@@ -268,6 +268,7 @@ pub async fn checkpoint_snapshot(
         )
         .map_err(sql_error)?;
         tx.commit().map_err(sql_error)?;
+        reclaim_free_pages(&conn)?;
         Ok(())
     })
     .await

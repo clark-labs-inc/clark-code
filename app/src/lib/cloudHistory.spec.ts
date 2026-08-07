@@ -136,6 +136,39 @@ describe("cloud history size backstop", () => {
     unsubscribe();
   });
 
+  it("does not repeatedly serialize an already-oversized running transcript", async () => {
+    const warning = vi.fn();
+    const unsubscribe = onCloudHistoryWarning(warning);
+    const snapshot: Snapshot = {
+      runs: {},
+      timeline: [{
+        item: "message",
+        run: "r1",
+        role: "user",
+        blocks: [{ type: "text", text: "x".repeat(MAX_SNAPSHOT_BYTES + 1) }],
+      }],
+      tool_calls: {},
+      artifacts: [],
+      provider_incidents: {},
+    };
+    const meta = {
+      id: "oversized-running",
+      title: "Oversized running",
+      provider: "local",
+      createdAt: 1,
+      updatedAt: 1,
+    };
+
+    scheduleCloudPut(creds, meta, snapshot, "running");
+    await vi.waitFor(() => expect(warning).toHaveBeenCalledOnce());
+    scheduleCloudPut(creds, meta, snapshot, "running");
+    await Promise.resolve();
+
+    expect(warning).toHaveBeenCalledOnce();
+    expect(invoke).not.toHaveBeenCalled();
+    unsubscribe();
+  });
+
   it("publishes a recovered terminal snapshot after native recovery", async () => {
     const snapshot: Snapshot = {
       history_checkpoint: 9,

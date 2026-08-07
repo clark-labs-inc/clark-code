@@ -175,7 +175,7 @@ export function CommandPalette({
           role="dialog"
           aria-modal="true"
           aria-label="Command palette"
-          className="popover-surface flex max-h-[70vh] w-full max-w-xl flex-col overflow-hidden rounded-[22px] bg-bg-elevated shadow-lifted ring-1 ring-border-subtle"
+          className="popover-surface flex max-h-[70vh] w-full max-w-xl flex-col overflow-hidden rounded-2xl bg-bg-elevated shadow-lifted ring-1 ring-border-subtle"
         >
           <input
             ref={inputRef}

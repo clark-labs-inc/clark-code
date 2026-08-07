@@ -762,13 +762,20 @@ impl From<SshTransportError> for RemoteWorkerError {
 }
 
 fn remote_command(artifact: &RemoteArtifact, credential_envs: &[String]) -> String {
+    // SSH commands run under a non-login shell, so they do not inherit the
+    // user's normal profile PATH. Give the worker (and therefore its shell
+    // tools) the same conventional user-local binary locations explicitly.
+    let path = format!(
+        "{}/.local/bin:{}/bin:/usr/local/bin:/usr/bin:/bin",
+        artifact.home, artifact.home
+    );
     let worker = format!(
         "{} --config {}",
         shq(&artifact.binary_path),
         shq(&artifact.config_path)
     );
     if credential_envs.is_empty() {
-        return format!("exec {worker}");
+        return format!("PATH={}; export PATH; exec {worker}", shq(&path));
     }
     let reads = credential_envs
         .iter()
@@ -776,7 +783,8 @@ fn remote_command(artifact: &RemoteArtifact, credential_envs: &[String]) -> Stri
         .collect::<Vec<_>>()
         .join(" && ");
     format!(
-        "{reads}; export {envs}; exec {worker}",
+        "{reads}; export {envs}; PATH={path}; export PATH; exec {worker}",
+        path = shq(&path),
         envs = credential_envs.join(" ")
     )
 }
@@ -836,9 +844,28 @@ mod tests {
         );
         assert_eq!(
             command,
-            "IFS= read -r OPENROUTER_API_KEY && IFS= read -r CLARK_API_KEY; export OPENROUTER_API_KEY CLARK_API_KEY; exec '/home/ubuntu/.clark/bin/worker' --config '/home/ubuntu/.clark/run/config.json'"
+            "IFS= read -r OPENROUTER_API_KEY && IFS= read -r CLARK_API_KEY; export OPENROUTER_API_KEY CLARK_API_KEY; PATH='/home/ubuntu/.local/bin:/home/ubuntu/bin:/usr/local/bin:/usr/bin:/bin'; export PATH; exec '/home/ubuntu/.clark/bin/worker' --config '/home/ubuntu/.clark/run/config.json'"
         );
         assert!(!command.contains("$"));
+        assert!(!command.contains('\n'));
+    }
+
+    #[test]
+    fn worker_path_includes_user_local_binaries_without_profile_loading() {
+        let artifact = RemoteArtifact {
+            arch: RemoteArch::LinuxX86_64,
+            home: "/srv/remote user".into(),
+            binary_path: "/srv/remote user/.clark/bin/worker".into(),
+            binary_sha256: "a".repeat(64),
+            config_path: "/srv/remote user/.clark/run/config.json".into(),
+        };
+
+        let command = remote_command(&artifact, &[]);
+
+        assert!(command.contains(
+            "PATH='/srv/remote user/.local/bin:/srv/remote user/bin:/usr/local/bin:/usr/bin:/bin'"
+        ));
+        assert!(!command.contains('$'));
         assert!(!command.contains('\n'));
     }
 

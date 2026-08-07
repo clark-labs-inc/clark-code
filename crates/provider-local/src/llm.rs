@@ -20,6 +20,8 @@ mod output_quarantine;
 mod recovery;
 mod retry;
 
+pub(crate) const REQUIRED_TOOL_CONTRACT_VIOLATION: &str = "required_tool_contract_violation:";
+
 pub(crate) use recovery::{now_ms, ProviderFailureContext};
 
 /// Bound the complete HTTP exchange, including a response stream that stops
