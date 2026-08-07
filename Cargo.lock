@@ -49,7 +49,7 @@ dependencies = [
 
 [[package]]
 name = "agent-core"
-version = "0.1.132"
+version = "0.1.133"
 dependencies = [
  "async-channel",
  "async-trait",
@@ -68,7 +68,7 @@ dependencies = [
 
 [[package]]
 name = "agent-orchestration"
-version = "0.1.132"
+version = "0.1.133"
 dependencies = [
  "agent-core",
  "async-channel",
@@ -924,7 +924,7 @@ dependencies = [
 
 [[package]]
 name = "clark-cli"
-version = "0.1.132"
+version = "0.1.133"
 dependencies = [
  "agent-core",
  "base64 0.22.1",
@@ -959,7 +959,7 @@ dependencies = [
 
 [[package]]
 name = "clark-desktop"
-version = "0.1.132"
+version = "0.1.133"
 dependencies = [
  "agent-core",
  "async-trait",
@@ -1019,14 +1019,14 @@ dependencies = [
 
 [[package]]
 name = "clark-http"
-version = "0.1.132"
+version = "0.1.133"
 dependencies = [
  "reqwest 0.13.4",
 ]
 
 [[package]]
 name = "clark-install-context"
-version = "0.1.132"
+version = "0.1.133"
 dependencies = [
  "tempfile",
 ]
@@ -1048,7 +1048,7 @@ checksum = "0c9ea0ac24bc397ab3c98583a3c9ba74fa56b09a4449bbe172b9b1ddb016027a"
 
 [[package]]
 name = "code-host"
-version = "0.1.132"
+version = "0.1.133"
 dependencies = [
  "async-trait",
  "serde",
@@ -1063,7 +1063,7 @@ dependencies = [
 
 [[package]]
 name = "code-remote"
-version = "0.1.132"
+version = "0.1.133"
 dependencies = [
  "code-host",
  "serde",
@@ -1079,7 +1079,7 @@ dependencies = [
 
 [[package]]
 name = "code-worker"
-version = "0.1.132"
+version = "0.1.133"
 dependencies = [
  "agent-core",
  "async-trait",
@@ -1130,7 +1130,7 @@ dependencies = [
 
 [[package]]
 name = "computer-use"
-version = "0.1.132"
+version = "0.1.133"
 dependencies = [
  "accessibility-sys",
  "core-foundation",
@@ -1196,7 +1196,7 @@ dependencies = [
 
 [[package]]
 name = "conversation-cloud"
-version = "0.1.132"
+version = "0.1.133"
 dependencies = [
  "agent-core",
  "clark-http",
@@ -1606,7 +1606,7 @@ dependencies = [
 
 [[package]]
 name = "devbridge"
-version = "0.1.132"
+version = "0.1.133"
 dependencies = [
  "agent-core",
  "futures",
@@ -2062,7 +2062,7 @@ dependencies = [
 
 [[package]]
 name = "exec-core"
-version = "0.1.132"
+version = "0.1.133"
 dependencies = [
  "async-trait",
  "exec-private-fs",
@@ -2081,7 +2081,7 @@ dependencies = [
 
 [[package]]
 name = "exec-private-fs"
-version = "0.1.132"
+version = "0.1.133"
 dependencies = [
  "libc",
  "tempfile",
@@ -2090,7 +2090,7 @@ dependencies = [
 
 [[package]]
 name = "exec-protocol"
-version = "0.1.132"
+version = "0.1.133"
 dependencies = [
  "base64 0.23.0",
  "serde",
@@ -2099,7 +2099,7 @@ dependencies = [
 
 [[package]]
 name = "exec-sandbox"
-version = "0.1.132"
+version = "0.1.133"
 dependencies = [
  "async-trait",
  "exec-core",
@@ -2114,7 +2114,7 @@ dependencies = [
 
 [[package]]
 name = "exec-sandbox-protocol"
-version = "0.1.132"
+version = "0.1.133"
 dependencies = [
  "base64 0.23.0",
  "rmp-serde",
@@ -2127,7 +2127,7 @@ dependencies = [
 
 [[package]]
 name = "exec-sandbox-windows"
-version = "0.1.132"
+version = "0.1.133"
 dependencies = [
  "base64 0.23.0",
  "exec-sandbox-protocol",
@@ -5054,7 +5054,7 @@ dependencies = [
 
 [[package]]
 name = "provider-acp"
-version = "0.1.132"
+version = "0.1.133"
 dependencies = [
  "agent-core",
  "agent-orchestration",
@@ -5071,7 +5071,7 @@ dependencies = [
 
 [[package]]
 name = "provider-clark"
-version = "0.1.132"
+version = "0.1.133"
 dependencies = [
  "agent-core",
  "async-channel",
@@ -5090,7 +5090,7 @@ dependencies = [
 
 [[package]]
 name = "provider-local"
-version = "0.1.132"
+version = "0.1.133"
 dependencies = [
  "agent-core",
  "agent-orchestration",
@@ -5151,7 +5151,7 @@ dependencies = [
 
 [[package]]
 name = "provider-remote-worker"
-version = "0.1.132"
+version = "0.1.133"
 dependencies = [
  "agent-core",
  "async-channel",
@@ -5166,7 +5166,7 @@ dependencies = [
 
 [[package]]
 name = "provider-specialist"
-version = "0.1.132"
+version = "0.1.133"
 dependencies = [
  "agent-core",
  "async-channel",
@@ -5967,7 +5967,7 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
 name = "scout-accumulator"
-version = "0.1.132"
+version = "0.1.133"
 dependencies = [
  "serde",
  "serde_json",
@@ -5976,7 +5976,7 @@ dependencies = [
 
 [[package]]
 name = "scout-adapter-protocol"
-version = "0.1.132"
+version = "0.1.133"
 dependencies = [
  "serde",
  "serde_json",
@@ -5987,7 +5987,7 @@ dependencies = [
 
 [[package]]
 name = "scout-adapter-runtime"
-version = "0.1.132"
+version = "0.1.133"
 dependencies = [
  "base64 0.23.0",
  "chacha20poly1305",
@@ -6011,7 +6011,7 @@ dependencies = [
 
 [[package]]
 name = "scout-capability-census"
-version = "0.1.132"
+version = "0.1.133"
 dependencies = [
  "serde",
  "serde_json",
@@ -6022,7 +6022,7 @@ dependencies = [
 
 [[package]]
 name = "scout-capsule-core"
-version = "0.1.132"
+version = "0.1.133"
 dependencies = [
  "scout-adapter-protocol",
  "serde",
@@ -6033,14 +6033,14 @@ dependencies = [
 
 [[package]]
 name = "scout-capsule-guest"
-version = "0.1.132"
+version = "0.1.133"
 dependencies = [
  "scout-capsule-core",
 ]
 
 [[package]]
 name = "scout-capsule-host"
-version = "0.1.132"
+version = "0.1.133"
 dependencies = [
  "base64 0.23.0",
  "ed25519-dalek",
@@ -6056,7 +6056,7 @@ dependencies = [
 
 [[package]]
 name = "scout-cartography-adapter"
-version = "0.1.132"
+version = "0.1.133"
 dependencies = [
  "scout-adapter-protocol",
  "scout-ingest-protocol",
@@ -6067,7 +6067,7 @@ dependencies = [
 
 [[package]]
 name = "scout-coordinator"
-version = "0.1.132"
+version = "0.1.133"
 dependencies = [
  "agent-orchestration",
  "exec-private-fs",
@@ -6084,7 +6084,7 @@ dependencies = [
 
 [[package]]
 name = "scout-ingest-client"
-version = "0.1.132"
+version = "0.1.133"
 dependencies = [
  "agent-orchestration",
  "async-trait",
@@ -6101,7 +6101,7 @@ dependencies = [
 
 [[package]]
 name = "scout-ingest-protocol"
-version = "0.1.132"
+version = "0.1.133"
 dependencies = [
  "agent-orchestration",
  "ed25519-dalek",
@@ -6113,7 +6113,7 @@ dependencies = [
 
 [[package]]
 name = "scout-machine-identity"
-version = "0.1.132"
+version = "0.1.133"
 dependencies = [
  "exec-private-fs",
  "getrandom 0.4.3",
@@ -6125,7 +6125,7 @@ dependencies = [
 
 [[package]]
 name = "scout-platform-client"
-version = "0.1.132"
+version = "0.1.133"
 dependencies = [
  "clark-http",
  "getrandom 0.4.3",
@@ -6143,7 +6143,7 @@ dependencies = [
 
 [[package]]
 name = "scout-scheduler"
-version = "0.1.132"
+version = "0.1.133"
 dependencies = [
  "scout-adapter-protocol",
  "serde",
@@ -6153,7 +6153,7 @@ dependencies = [
 
 [[package]]
 name = "scout-store"
-version = "0.1.132"
+version = "0.1.133"
 dependencies = [
  "agent-orchestration",
  "base64 0.23.0",
@@ -6182,7 +6182,7 @@ dependencies = [
 
 [[package]]
 name = "security-cloud-sync"
-version = "0.1.132"
+version = "0.1.133"
 dependencies = [
  "ed25519-dalek",
  "exec-private-fs",
@@ -6224,7 +6224,7 @@ dependencies = [
 
 [[package]]
 name = "security-poc-runner"
-version = "0.1.132"
+version = "0.1.133"
 dependencies = [
  "async-trait",
  "exec-core",
