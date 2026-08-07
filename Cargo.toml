@@ -44,7 +44,7 @@ members = [
 exclude = ["vendor/clark-capture"]
 
 [workspace.package]
-version = "0.1.129"
+version = "0.1.130"
 edition = "2021"
 license = "Apache-2.0"
 repository = "https://github.com/clark-labs-inc/clark-desktop"

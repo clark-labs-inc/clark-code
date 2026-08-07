@@ -6,11 +6,14 @@
 //! pending [`EffectReceipt`]s, and the model resolves them through an
 //! independent observation before the agent is allowed to stop.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 
 use agent_core::ids::RunId;
-use clark_agent::{AgentMessage, FollowUpSource, Plugin, PluginCapabilities};
+use clark_agent::{
+    plugin::{ToolGate, ToolGateContext},
+    AgentMessage, FollowUpSource, Plugin, PluginCapabilities,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::sync::Mutex;
@@ -192,6 +195,22 @@ impl EffectLedger {
         })
     }
 
+    fn requires_verification_only_turn(&self, run: &RunId) -> bool {
+        let unresolved = self.receipts.values().filter(|receipt| {
+            &receipt.run == run
+                && matches!(
+                    receipt.verification,
+                    EffectVerification::Pending | EffectVerification::Mismatch
+                )
+        });
+        let mut count = 0usize;
+        let ready = unresolved.fold(true, |ready, receipt| {
+            count = count.saturating_add(1);
+            ready && receipt.completion_reminders >= 2
+        });
+        count > 0 && ready
+    }
+
     #[cfg(test)]
     pub(crate) fn get(&self, id: &str) -> Option<&EffectReceipt> {
         self.receipts.get(id)
@@ -228,7 +247,41 @@ impl Plugin for EffectCompletionGuard {
     }
 
     fn capabilities(&self) -> PluginCapabilities {
-        PluginCapabilities::follow_up()
+        PluginCapabilities::follow_up().with_tool_gate()
+    }
+}
+
+#[async_trait::async_trait]
+impl ToolGate for EffectCompletionGuard {
+    async fn next_turn_tool_allowlist(&self, _ctx: ToolGateContext<'_>) -> Option<HashSet<String>> {
+        self.session
+            .lock()
+            .await
+            .effects
+            .requires_verification_only_turn(&self.run)
+            .then(|| ["verify_effect".to_string()].into_iter().collect())
+    }
+
+    async fn denial_reason(&self, tool_name: &str, _ctx: ToolGateContext<'_>) -> Option<String> {
+        if tool_name == "verify_effect" {
+            return None;
+        }
+        self.session
+            .lock()
+            .await
+            .effects
+            .requires_verification_only_turn(&self.run)
+            .then(|| {
+                "Canonical evidence is already in context; resolve the pending effect with `verify_effect` before using another tool.".to_string()
+            })
+    }
+
+    fn conflict_priority(&self) -> i32 {
+        100
+    }
+
+    fn suppresses_advisory_gates(&self, _ctx: ToolGateContext<'_>) -> bool {
+        true
     }
 }
 
@@ -353,6 +406,23 @@ mod tests {
             )
             .unwrap();
         assert!(!ledger.has_unresolved());
+    }
+
+    #[test]
+    fn repeated_completion_attempts_narrow_the_next_turn_to_verification() {
+        let mut ledger = EffectLedger::default();
+        ledger.register(
+            run("run-1"),
+            "call-1",
+            "publisher",
+            EffectIntent::opaque_external("published a resource"),
+        );
+
+        assert!(!ledger.requires_verification_only_turn(&run("run-1")));
+        assert!(ledger.completion_prompt(&run("run-1")).is_some());
+        assert!(!ledger.requires_verification_only_turn(&run("run-1")));
+        assert!(ledger.completion_prompt(&run("run-1")).is_some());
+        assert!(ledger.requires_verification_only_turn(&run("run-1")));
     }
 
     #[tokio::test]

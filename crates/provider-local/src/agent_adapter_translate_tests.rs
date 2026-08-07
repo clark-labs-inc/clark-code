@@ -205,7 +205,11 @@ fn typed_llm_failures_map_to_typed_stream_errors() {
 #[test]
 fn model_tool_result_preserves_large_text_byte_for_byte() {
     let expected = format!("begin:{}:end", "0123456789abcdef".repeat(8_000));
-    let result = tool_result_from_outcome(crate::tools::ToolOutcome::ok(expected.clone()), false);
+    let result = tool_result_from_outcome(
+        crate::tools::ToolOutcome::ok(expected.clone()),
+        false,
+        false,
+    );
     assert!(matches!(
         result.content.as_slice(),
         [ca::ToolResultBlock::Text(text)] if text.text == expected

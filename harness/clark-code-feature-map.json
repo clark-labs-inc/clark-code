@@ -12,13 +12,6 @@
     "credential": "CLARK_CODE_API_KEY",
     "default_paid": true,
     "selection_policy": "lowest_expected_cost_for_input_heavy_tool_calling_tests",
-    "pricing_snapshot": {
-      "as_of": "2026-07-28",
-      "source": "https://openrouter.ai/api/v1/models",
-      "input_usd_per_million_tokens": 0.03,
-      "output_usd_per_million_tokens": 0.13,
-      "cached_input_usd_per_million_tokens": 0.006
-    },
     "offline_flag": "--offline",
     "max_live_tests": 3,
     "max_iterations_per_turn": 16,
@@ -194,6 +187,7 @@
     "document_convert",
     "edit_file",
     "enter_plan_mode",
+    "final_answer",
     "generate_image",
     "get_goal",
     "glob",
@@ -467,7 +461,7 @@
     {
       "id": "conversation_streaming_and_control",
       "surface": "desktop",
-      "tools": [],
+      "tools": ["final_answer"],
       "lanes": ["frontend_contract", "rust_contract", "resilience_contract"],
       "platform_support": {"macos": "supported", "windows": "supported", "ubuntu": "supported"}
     },

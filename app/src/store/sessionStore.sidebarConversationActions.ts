@@ -179,6 +179,7 @@ async function archiveConversations(
           conversation.id === id ? { ...conversation, archived: true } : conversation,
         ),
         runningIds: state.runningIds.filter((runningId) => runningId !== id),
+        unseenWorkIds: state.unseenWorkIds.filter((unseenId) => unseenId !== id),
         selectedConversationIds: new Set(
           [...state.selectedConversationIds].filter((selectedId) => selectedId !== id),
         ),
@@ -248,6 +249,7 @@ async function deleteConversations(
       set((state) => ({
         conversations: state.conversations.filter((conversation) => conversation.id !== id),
         runningIds: state.runningIds.filter((runningId) => runningId !== id),
+        unseenWorkIds: state.unseenWorkIds.filter((unseenId) => unseenId !== id),
         selectedConversationIds: new Set(
           [...state.selectedConversationIds].filter((selectedId) => selectedId !== id),
         ),

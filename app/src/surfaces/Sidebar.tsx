@@ -10,6 +10,13 @@ import { liveSessions, openRemote } from "../store/sessionStore.runtime";
 import { projectName, removeRecentProject } from "../lib/localAgent";
 import { codeKeyAccountBinding } from "../lib/account";
 import { useIsNarrow } from "../lib/responsive";
+import {
+  DEFAULT_SIDEBAR_WIDTH,
+  MIN_SIDEBAR_WIDTH,
+  constrainSidebarWidth,
+  loadSidebarWidth,
+  saveSidebarWidth,
+} from "../lib/sidebarWidth";
 import { fuzzyFilter } from "../lib/fuzzy";
 import { stableRankMap } from "../lib/stableOrder";
 import { cn } from "../lib/cn";
@@ -65,6 +72,7 @@ function ConversationRow({
   c,
   active,
   streaming,
+  unseen,
   opening,
   selected,
   mutation,
@@ -77,6 +85,8 @@ function ConversationRow({
   active: boolean;
   /** A run is currently streaming in this conversation. */
   streaming: boolean;
+  /** Finished in the background and not opened yet — the blue "done" dot. */
+  unseen: boolean;
   /** This conversation is currently being (re)opened. */
   opening: boolean;
   /** In the sidebar's Shift-click selection. */
@@ -169,7 +179,7 @@ function ConversationRow({
           aria-label={
             mutating
               ? `${mutation === "archive" ? "Archiving" : mutation === "delete" ? "Deleting" : "Restoring"} ${c.title}`
-              : `Conversation: ${c.title}${selected ? ", selected" : ""}`
+              : `Conversation: ${c.title}${unseen ? ", has finished work you haven't reviewed" : ""}${selected ? ", selected" : ""}`
           }
           className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
           title={`${c.title} — Shift-click or Shift+Arrow selects a range`}
@@ -180,6 +190,10 @@ function ConversationRow({
             <span className="relative grid size-3.5 shrink-0 place-items-center" aria-hidden="true">
               <span className="absolute size-2 animate-ping rounded-full bg-accent/40" />
               <span className="size-1.5 rounded-full bg-accent" />
+            </span>
+          ) : unseen ? (
+            <span className="grid size-3.5 shrink-0 place-items-center" aria-hidden="true">
+              <span className="size-2 rounded-full bg-info" />
             </span>
           ) : selected ? (
             <span className="grid size-3 shrink-0 place-items-center" aria-hidden="true">
@@ -390,6 +404,9 @@ export function Sidebar({
   // Any number of conversations can be streaming at once — each busy one gets
   // its own pulsing "Working…" dot, whether or not it's on screen.
   const runningIds = useSessionStore((s) => s.runningIds);
+  // Runs that finished in the background and haven't been opened yet — the
+  // blue "finished, not yet visited" dots.
+  const unseenWorkIds = useSessionStore((s) => s.unseenWorkIds);
   const endSession = useSessionStore((s) => s.endSession);
   const defaultProject = useSessionStore((s) => s.localSettings.cwd);
   const localSettings = useSessionStore((s) => s.localSettings);
@@ -453,6 +470,86 @@ export function Sidebar({
   const handledMutationFocusRef = useRef<number | null>(null);
   const deleteConfirmRef = useRef<HTMLButtonElement>(null);
   const reduceMotion = useReducedMotion();
+  // The conversation sidebar is horizontally resizable; the width persists per
+  // window and is clamped so the conversation pane keeps a usable minimum.
+  const [sidebarWidth, setSidebarWidth] = useState(() => loadSidebarWidth());
+  const [resizingSidebar, setResizingSidebar] = useState(false);
+  const asideRef = useRef<HTMLElement>(null);
+  const sidebarResizeCleanupRef = useRef<(() => void) | null>(null);
+  const sidebarDoubleClickRef = useRef<{ time: number; x: number } | null>(null);
+
+  const resizeSidebar = (clientX: number) => {
+    const left = asideRef.current?.getBoundingClientRect().left ?? 0;
+    setSidebarWidth(constrainSidebarWidth(clientX - left, window.innerWidth));
+  };
+  const finishSidebarResize = () => {
+    setResizingSidebar(false);
+    setSidebarWidth((current) => {
+      const constrained = constrainSidebarWidth(current, window.innerWidth);
+      saveSidebarWidth(constrained);
+      return constrained;
+    });
+  };
+  const handleSidebarResizeStart = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    // preventDefault on mousedown suppresses the browser's dblclick (Chromium),
+    // so detect the double-click here: a repeat press at nearly the same x
+    // within the double-click window resets to the default width.
+    const now = Date.now();
+    const previous = sidebarDoubleClickRef.current;
+    sidebarDoubleClickRef.current = { time: now, x: event.clientX };
+    if (previous && now - previous.time < 400 && Math.abs(event.clientX - previous.x) <= 4) {
+      setSidebarWidth(DEFAULT_SIDEBAR_WIDTH);
+      saveSidebarWidth(DEFAULT_SIDEBAR_WIDTH);
+      return;
+    }
+    sidebarResizeCleanupRef.current?.();
+    setResizingSidebar(true);
+    // Only resize once the pointer actually moves: a plain click (or a second
+    // click within the double-click window) must not shift the width.
+    let lastX = event.clientX;
+    const move = (moveEvent: MouseEvent) => {
+      moveEvent.preventDefault();
+      if (Math.abs(moveEvent.clientX - lastX) <= 1) return;
+      lastX = moveEvent.clientX;
+      resizeSidebar(moveEvent.clientX);
+    };
+    const stop = () => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", stop);
+      sidebarResizeCleanupRef.current = null;
+      finishSidebarResize();
+    };
+    sidebarResizeCleanupRef.current = stop;
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", stop, { once: true });
+  };
+  const handleSidebarResizeKey = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    let next = constrainSidebarWidth(sidebarWidth, window.innerWidth);
+    if (event.key === "ArrowRight") next += 24;
+    else if (event.key === "ArrowLeft") next -= 24;
+    else if (event.key === "Home") next = MIN_SIDEBAR_WIDTH;
+    else if (event.key === "End") next = constrainSidebarWidth(window.innerWidth, window.innerWidth);
+    else return;
+    event.preventDefault();
+    const constrained = constrainSidebarWidth(next, window.innerWidth);
+    setSidebarWidth(constrained);
+    saveSidebarWidth(constrained);
+  };
+
+  useEffect(() => {
+    const onResize = () =>
+      setSidebarWidth((current) => constrainSidebarWidth(current, window.innerWidth));
+    window.addEventListener("resize", onResize);
+    return () => {
+      window.removeEventListener("resize", onResize);
+      sidebarResizeCleanupRef.current?.();
+    };
+  }, []);
+
+  const renderedWidth = constrainSidebarWidth(sidebarWidth, window.innerWidth);
+  const maxSidebarWidth = constrainSidebarWidth(window.innerWidth, window.innerWidth);
   // Below this width the full sidebar would crowd out the conversation, so it
   // auto-collapses to the icon rail (and can't be expanded until there's room).
   const narrow = useIsNarrow(768);
@@ -843,7 +940,15 @@ export function Sidebar({
   }
 
   return (
-    <aside className="flex w-[17rem] shrink-0 flex-col bg-bg-secondary text-sm leading-5">
+    <aside
+      ref={asideRef}
+      className={cn(
+        "flex shrink-0 text-sm leading-5",
+        resizingSidebar && "cursor-col-resize select-none",
+      )}
+      style={{ width: renderedWidth }}
+    >
+      <div className="flex min-w-0 flex-1 flex-col bg-bg-secondary">
       <div className="flex min-h-12 shrink-0 items-center gap-1 px-3 py-1">
         <span className="truncate text-base font-semibold tracking-[-0.01em] text-ink">Clark Code</span>
         <button
@@ -1017,6 +1122,10 @@ export function Sidebar({
                               c={c}
                               active={navigatedConversationId === c.id}
                               streaming={runningIds.includes(c.id)}
+                              unseen={
+                                unseenWorkIds.includes(c.id) &&
+                                navigatedConversationId !== c.id
+                              }
                               opening={openingId === c.id}
                               selected={selectedIds.has(c.id)}
                               mutation={mutation}
@@ -1301,6 +1410,33 @@ export function Sidebar({
           }}
         />
       )}
+      </div>
+      <div
+        role="separator"
+        aria-label="Resize sidebar"
+        aria-orientation="vertical"
+        aria-valuemin={MIN_SIDEBAR_WIDTH}
+        aria-valuemax={Math.max(MIN_SIDEBAR_WIDTH, maxSidebarWidth)}
+        aria-valuenow={renderedWidth}
+        tabIndex={0}
+        title="Drag to resize sidebar · Double-click to reset"
+        onDoubleClick={() => {
+          setSidebarWidth(DEFAULT_SIDEBAR_WIDTH);
+          saveSidebarWidth(DEFAULT_SIDEBAR_WIDTH);
+        }}
+        onKeyDown={handleSidebarResizeKey}
+        onMouseDown={handleSidebarResizeStart}
+        className="group relative z-20 w-2 shrink-0 touch-none cursor-col-resize outline-none"
+      >
+        <span
+          className={cn(
+            "absolute inset-y-0 left-1/2 w-px -translate-x-1/2 transition-colors",
+            resizingSidebar
+              ? "bg-accent"
+              : "bg-border-subtle group-hover:bg-accent/70 group-focus-visible:bg-accent",
+          )}
+        />
+      </div>
     </aside>
   );
 }

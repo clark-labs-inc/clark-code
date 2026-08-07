@@ -11,7 +11,8 @@ use agent_core::{classify_provider_access_failure, RunFailureKind};
 
 use super::{
     drain_lines, output_quarantine, recovery, retry_after_from_metadata, Accumulator,
-    AssistantTurn, ChatMessage, LlmClient, LlmError, ProviderFailureContext, ToolSchema,
+    AssistantTurn, ChatMessage, LlmClient, LlmError, ProviderFailureContext, StreamChatOptions,
+    ToolSchema,
 };
 
 const MAX_RATE_LIMIT_RETRIES: usize = 12;
@@ -83,6 +84,7 @@ where
     tools: &'a [ToolSchema],
     cancel: &'a CancellationToken,
     request_model: &'a str,
+    force_tool_call: bool,
     idempotency_key: &'a str,
     on_text: &'a mut OnText,
     on_reasoning: &'a mut OnReasoning,
@@ -122,10 +124,37 @@ impl LlmClient {
         messages: &[ChatMessage],
         tools: &[ToolSchema],
         cancel: &CancellationToken,
+        on_text: impl FnMut(&str),
+        on_reasoning: impl FnMut(&str),
+        on_retry: impl FnMut(ProviderFailureContext),
+    ) -> Result<AssistantTurn, LlmError> {
+        self.stream_chat_observed_with_tool_choice(
+            messages,
+            tools,
+            StreamChatOptions {
+                cancel,
+                force_tool_call: false,
+            },
+            on_text,
+            on_reasoning,
+            on_retry,
+        )
+        .await
+    }
+
+    pub(crate) async fn stream_chat_observed_with_tool_choice(
+        &self,
+        messages: &[ChatMessage],
+        tools: &[ToolSchema],
+        options: StreamChatOptions<'_>,
         mut on_text: impl FnMut(&str),
         mut on_reasoning: impl FnMut(&str),
         mut on_retry: impl FnMut(ProviderFailureContext),
     ) -> Result<AssistantTurn, LlmError> {
+        let StreamChatOptions {
+            cancel,
+            force_tool_call,
+        } = options;
         // One client key identifies an unchanged request body across transport
         // retries. Whether a configured gateway honors it is provider-specific,
         // so diagnostics keep it separate from the provider's own request ID.
@@ -143,6 +172,7 @@ impl LlmClient {
                     tools,
                     cancel,
                     request_model: &request_model,
+                    force_tool_call,
                     idempotency_key: &retry.idempotency_key,
                     on_text: &mut on_text,
                     on_reasoning: &mut on_reasoning,
@@ -298,6 +328,7 @@ impl LlmClient {
             tools,
             cancel,
             request_model,
+            force_tool_call,
             idempotency_key,
             on_text,
             on_reasoning,
@@ -307,7 +338,7 @@ impl LlmClient {
             .http
             .post(&url)
             .header("Idempotency-Key", idempotency_key)
-            .json(&self.body_for_model(request_model, messages, tools));
+            .json(&self.body_for_model(request_model, messages, tools, force_tool_call));
         if let Some(session_id) = &self.session_id {
             request = request.header("x-session-id", session_id);
         }

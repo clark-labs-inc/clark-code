@@ -10,7 +10,7 @@ use computer_use::SimulatedComputerBackend;
 use futures::StreamExt;
 use serde_json::json;
 
-use support::{final_body, scripted_model, tool_call_body};
+use support::{final_body, plain_body, scripted_model, tool_call_body};
 
 #[tokio::test]
 async fn kimi_k3_uses_qwen_vision_for_computer_observations() {
@@ -27,7 +27,7 @@ async fn kimi_k3_uses_qwen_vision_for_computer_observations() {
         ),
         tool_call_body("list", "computer_list_windows", json!({})),
         tool_call_body("observe-1", "computer_get_state", target.clone()),
-        final_body("Image 1 shows the simulated desktop before typing."),
+        plain_body("Image 1 shows the simulated desktop before typing."),
         tool_call_body(
             "type",
             "computer_type_text",
@@ -49,7 +49,7 @@ async fn kimi_k3_uses_qwen_vision_for_computer_observations() {
             json!({"prepared_action_id": "sim-prepared-0"}),
         ),
         tool_call_body("observe-2", "computer_get_state", target.clone()),
-        final_body("Image 1 shows the simulated desktop after typing."),
+        plain_body("Image 1 shows the simulated desktop after typing."),
         tool_call_body(
             "click",
             "computer_click",
@@ -69,7 +69,7 @@ async fn kimi_k3_uses_qwen_vision_for_computer_observations() {
             json!({"prepared_action_id": "sim-prepared-1"}),
         ),
         tool_call_body("observe-3", "computer_get_state", target),
-        final_body("Image 1 shows the simulated desktop after opening the example."),
+        plain_body("Image 1 shows the simulated desktop after opening the example."),
         final_body("The simulated app contains the entered text and reports Opened example."),
     ])
     .await;

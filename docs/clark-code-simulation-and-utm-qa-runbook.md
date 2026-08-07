@@ -118,11 +118,11 @@ remains a protected read-only boundary.
 The default paid test route is:
 
 ```text
-clark-code:minimax_m3
+qwen/qwen3.7-flash
 ```
 
-It was selected because the checked-in pricing snapshot identifies it as the
-lowest expected cost for input-heavy tool-calling tests. Paid model calls are
+It was selected by the feature map's cost-based selection policy (lowest
+expected cost for input-heavy tool-calling tests). Paid model calls are
 not part of the deterministic receipts. A user-authorized host-side
 provider-local paid campaign has now run independently of the still-pending
 isolated macOS product `auth-smoke`. Its current authoritative v7 receipt is
@@ -207,8 +207,8 @@ Current checked-in contract:
 
 | Field | Value |
 | --- | --- |
-| Route | `clark-code:minimax_m3` |
-| Upstream | `minimax/minimax-m3` |
+| Route | `qwen/qwen3.7-flash` |
+| Upstream | `qwen/qwen3.7-flash` |
 | Provider | Clark platform |
 | Selection rule | lowest expected cost for input-heavy tool-calling tests |
 | Maximum live tests | 3 |
@@ -216,16 +216,8 @@ Current checked-in contract:
 | Inter-test cost ceiling | USD 0.50 |
 | Explicit deterministic mode | `--offline` |
 
-Pricing is a dated snapshot, not an eternal truth:
-
-| Token class | Snapshot price per million |
-| --- | ---: |
-| Input | USD 0.30 |
-| Output | USD 1.20 |
-| Cached input | USD 0.06 |
-
-The snapshot date in the feature map is 2026-07-23. Refresh the map and justify
-the selection if provider pricing changes.
+The selection is cost-based against provider list prices at selection time.
+Refresh the feature map and justify the selection if provider pricing changes.
 
 ### 2.6 Credentials are local configuration, never evidence
 
@@ -3654,7 +3646,7 @@ benchmark policy is not “always Kimi” or “always DeepSeek”; it is:
 > use the cheapest paid Clark route that satisfies the bounded tool-calling
 > test contract, and pin that choice in the feature map.
 
-The current route is `clark-code:minimax_m3`. The selection must be revisited
+The current route is `qwen/qwen3.7-flash`. The selection must be revisited
 when pricing changes. Brand preference does not authorize a costlier fallback.
 
 ### 29.12 Exact-source and dirty-worktree correction

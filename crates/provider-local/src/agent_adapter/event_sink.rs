@@ -20,6 +20,7 @@ fn transcript_chars(messages: &[ca::AgentMessage]) -> usize {
         .sum()
 }
 
+use crate::tools::final_answer::{FINAL_ANSWER_DETAILS_KEY, FINAL_ANSWER_TOOL};
 use crate::tools::ToolRegistry;
 
 use super::{
@@ -297,6 +298,9 @@ impl ca::EventSink for DesktopEventSink {
                 tool_name,
                 args,
             } => {
+                if tool_name == FINAL_ANSWER_TOOL {
+                    return;
+                }
                 let executor = self.registry.get(&tool_name);
                 let kind = executor
                     .as_ref()
@@ -349,10 +353,30 @@ impl ca::EventSink for DesktopEventSink {
             }
             ca::AgentEvent::ToolExecutionEnd {
                 tool_call_id,
+                tool_name,
                 result,
                 is_error,
                 ..
             } => {
+                if tool_name == FINAL_ANSWER_TOOL {
+                    if !is_error {
+                        if let Some(answer) = result
+                            .details
+                            .get(FINAL_ANSWER_DETAILS_KEY)
+                            .and_then(serde_json::Value::as_str)
+                        {
+                            let _ = self
+                                .events
+                                .send(desktop::AgentEvent::MessageChunk {
+                                    run: self.run.clone(),
+                                    role: desktop::Role::Agent,
+                                    delta: desktop::ContentBlock::text(answer),
+                                })
+                                .await;
+                        }
+                    }
+                    return;
+                }
                 let locations = locations_from_details(&result.details);
                 if let Some(execution) = &self.execution {
                     execution.tool_finished(

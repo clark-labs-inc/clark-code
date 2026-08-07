@@ -182,7 +182,7 @@ async fn background_response_streams_public_outline_and_returns_findings() {
     let requests = requests.lock().unwrap();
     assert!(requests[0].starts_with("POST /v1/responses HTTP/1.1"));
     assert!(requests[0].contains("\"background\":true"));
-    assert!(requests[0].contains("\"model\":\"clark\""));
+    assert!(requests[0].contains("\"model\":\"openrouter:qwen37_flash\""));
     assert!(requests[1].contains("GET /v1/responses/resp_1/events?after_seq=0&limit=200"));
     assert!(requests[2].contains("after_seq=3"));
 }
@@ -250,7 +250,7 @@ async fn cancellation_interrupts_poll_wait() {
     let client = ClarkResearchClient::new(AgenticClarkConfig {
         base_url,
         api_key: Some("ck_test".to_string()),
-        model: "clark".to_string(),
+        model: crate::config::DEFAULT_RESEARCH_MODEL.to_string(),
     })
     .unwrap()
     .with_test_timing(
@@ -276,7 +276,7 @@ fn test_client(base_url: String) -> ClarkResearchClient {
     ClarkResearchClient::new(AgenticClarkConfig {
         base_url,
         api_key: Some("ck_test".to_string()),
-        model: "clark".to_string(),
+        model: crate::config::DEFAULT_RESEARCH_MODEL.to_string(),
     })
     .unwrap()
     .with_test_timing(

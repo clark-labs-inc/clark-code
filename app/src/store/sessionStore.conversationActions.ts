@@ -9,6 +9,7 @@ import {
   addRecentProject,
   bindCloudTrajectory,
   buildResumeTranscript,
+  clearUnseenFinished,
   closeLiveSession,
   codeKeyAccountBinding,
   cloudCreds,
@@ -41,6 +42,7 @@ import {
   composerDraftRef,
   composerDraftOwner,
   loadComposerDraft,
+  moveComposerDraft,
   saveComposerDraft,
 } from "../lib/composerDraft";
 import { clearCloudComposerDraft } from "../lib/cloudComposerDraft";
@@ -570,6 +572,21 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
         worktreePreparing: false,
         worktreeTransition: null,
       });
+      // A dirty-checkout / branch dialog can interrupt the very first send of a
+      // brand-new session. The submit flow clears the start-screen draft and
+      // re-hydrates it via `composerPrefill`, so it survives the pause — but the
+      // composer that mounts for the created session hydrates from its own
+      // conversation key, not "new". Carry the still-unsent text across that
+      // remount so choosing a checkout never makes the user retype a message.
+      if (isLocal && !isRemote && !quickChat && !specialistDefinition) {
+        const draftOwner = composerDraftOwner(get().auth?.user ?? null);
+        const pendingText =
+          loadComposerDraft(draftOwner, null).trim()
+          || composerDraftRef.current.trim();
+        if (pendingText) {
+          moveComposerDraft(draftOwner, null, session.id, pendingText);
+        }
+      }
     } catch (e) {
       // Brought up a tunnel but failed afterward → tear it back down.
       if (nativeSession) void bridge.closeSession?.(nativeSession.id);
@@ -637,6 +654,11 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
   },
 
   openConversation: async (id) => {
+    // Opening is the visit: drop any finished-but-unvisited marker for this row
+    // immediately, even when the chat is already open or an open is in flight.
+    if (get().unseenWorkIds.includes(id)) {
+      set({ unseenWorkIds: clearUnseenFinished(get().unseenWorkIds, id) });
+    }
     const { bridge, activeProvider, auth, session, providers, localSettings } = get();
     if (!bridge || !activeProvider) return;
     const targetMeta = get().conversations.find((conversation) => conversation.id === id);

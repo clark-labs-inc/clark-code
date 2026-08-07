@@ -67,6 +67,10 @@ test("candidate release is parallel, supply-chain bound, and platform independen
     new URL("../scripts/stage-code-worker.sh", import.meta.url),
     "utf8",
   );
+  const scientistLockRefreshScript = readFileSync(
+    new URL("../scripts/refresh-scientist-lock.sh", import.meta.url),
+    "utf8",
+  );
   const ciWorkflow = readFileSync(
     new URL("../.github/workflows/ci.yml", import.meta.url),
     "utf8",
@@ -178,7 +182,24 @@ test("candidate release is parallel, supply-chain bound, and platform independen
   );
   assert.match(
     workflow,
-    /remote-code-worker:[\s\S]*?runs-on: ubuntu-22\.04[\s\S]*?mlugg\/setup-zig@[0-9a-f]{40}[\s\S]*?\.\/scripts\/stage-code-worker\.sh --target x86_64-unknown-linux-musl[\s\S]*?\.\/scripts\/stage-scientist-worker\.sh[\s\S]*?--target x86_64-unknown-linux-musl[\s\S]*?remote-code-workers-linux-x86_64/,
+    /remote-code-worker:[\s\S]*?runs-on: ubuntu-22\.04[\s\S]*?Refresh Clark Scientist lock for the exact Desktop source[\s\S]*?refresh-scientist-lock\.sh[\s\S]*?Install exact Zig toolchain[\s\S]*?70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00[\s\S]*?\.\/scripts\/stage-code-worker\.sh --target x86_64-unknown-linux-musl[\s\S]*?\.\/scripts\/stage-scientist-worker\.sh[\s\S]*?--target x86_64-unknown-linux-musl[\s\S]*?remote-code-workers-linux-x86_64/,
+  );
+  assert.doesNotMatch(workflow, /mlugg\/setup-zig/);
+  assert.match(
+    workflow,
+    /\n  build:[\s\S]*?Refresh Clark Scientist lock for the exact Desktop source[\s\S]*?refresh-scientist-lock\.sh[\s\S]*?Build installers/,
+  );
+  assert.match(
+    scientistLockRefreshScript,
+    /cargo "\$@"[\s\S]*?run_cargo update[\s\S]*?run_cargo metadata[\s\S]*?--locked[\s\S]*?--no-deps/,
+  );
+  assert.match(
+    workflow,
+    /name: Managed Qwen 3\.7 Flash release benchmark \(opt-in; macOS sandbox\)[\s\S]*?inputs\.run_paid_benchmark/,
+  );
+  assert.match(
+    workflow,
+    /name: Windows publisher identity preflight \(signed mode only\)[\s\S]*?CLARK_WINDOWS_RELEASE_MODE == 'signed'/,
   );
   assert.match(
     workflow,

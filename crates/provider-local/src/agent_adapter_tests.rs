@@ -198,6 +198,61 @@ async fn desktop_sink_marks_text_with_tool_calls_as_commentary() {
 }
 
 #[tokio::test]
+async fn desktop_sink_projects_final_answer_as_text_without_a_tool_row() {
+    let (send, receive) = async_channel::unbounded();
+    let sink = DesktopEventSink::new(
+        send,
+        RunId::new("run-1"),
+        Arc::new(ToolRegistry::new(None, None)),
+        None,
+    );
+    ca::EventSink::emit(
+        &sink,
+        ca::AgentEvent::ToolExecutionStart {
+            tool_call_id: "answer-1".into(),
+            tool_name: crate::tools::final_answer::FINAL_ANSWER_TOOL.into(),
+            args: json!({"content": "Fixed and verified."}),
+        },
+    )
+    .await;
+    let mut result = ca::ToolResult::terminal("Final answer delivered.");
+    result.details = json!({
+        crate::tools::final_answer::FINAL_ANSWER_DETAILS_KEY: "Fixed and verified."
+    });
+    ca::EventSink::emit(
+        &sink,
+        ca::AgentEvent::ToolExecutionEnd {
+            tool_call_id: "answer-1".into(),
+            tool_name: crate::tools::final_answer::FINAL_ANSWER_TOOL.into(),
+            result,
+            is_error: false,
+        },
+    )
+    .await;
+
+    let events = std::iter::from_fn(|| receive.try_recv().ok()).collect::<Vec<_>>();
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(event, desktop::AgentEvent::MessageChunk { .. }))
+            .count(),
+        1,
+        "unexpected projected events: {events:?}"
+    );
+    assert!(events.iter().any(|event| matches!(
+        event,
+        desktop::AgentEvent::MessageChunk {
+            delta: desktop::ContentBlock::Text { text },
+            ..
+        } if text == "Fixed and verified."
+    )));
+    assert!(!events.iter().any(|event| matches!(
+        event,
+        desktop::AgentEvent::ToolCall { .. } | desktop::AgentEvent::ToolCallUpdate { .. }
+    )));
+}
+
+#[tokio::test]
 async fn desktop_sink_captures_only_canonical_completed_turns() {
     let (send, _receive) = async_channel::unbounded();
     let sink = DesktopEventSink::new(

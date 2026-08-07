@@ -200,7 +200,7 @@ jobs:
           retention-days: 90
 
   windows_release_prerequisites:
-    name: Windows publisher identity preflight
+    name: Windows publisher identity preflight (signed mode only)
     needs: [release_source_prerequisites]
     if: ${{ vars.CLARK_WINDOWS_RELEASE_MODE == 'signed' }}
     runs-on: windows-2022
@@ -288,7 +288,7 @@ jobs:
           if-no-files-found: error
 
   windows_utm_runner_preflight:
-    name: UAC-enabled Windows UTM runner preflight
+    name: UAC-enabled Windows UTM runner preflight (signed mode only)
     needs: [windows_release_prerequisites]
     runs-on: [self-hosted, macOS, ARM64, clark-utm-qa]
     timeout-minutes: 10
@@ -537,7 +537,7 @@ jobs:
           if-no-files-found: warn
 
   paid_release_benchmark:
-    name: Managed Qwen 3.7 Flash release benchmark (macOS sandbox)
+    name: Managed Qwen 3.7 Flash release benchmark (opt-in; macOS sandbox)
     needs: [release_source_prerequisites]
     # Model execution is opt-in and never spends provider credits merely because
     # a release candidate was dispatched. It remains available as a separately
@@ -705,7 +705,7 @@ jobs:
               "/repos/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID/jobs?per_page=100" |
               ConvertFrom-Json
             $preflight = @($response.jobs | Where-Object {
-              $_.name -eq "Windows publisher identity preflight"
+              $_.name -eq "Windows publisher identity preflight (signed mode only)"
             }) | Select-Object -First 1
             if ($preflight -and $preflight.status -eq "completed") {
               if ($preflight.conclusion -eq "success") {
@@ -1719,7 +1719,7 @@ jobs:
           if-no-files-found: error
 
   windows_packaged_journey:
-    name: Clean packaged Windows first-run journey
+    name: Clean packaged Windows first-run journey (signed mode only)
     needs: [build, windows_utm_runner_preflight]
     runs-on: [self-hosted, macOS, ARM64, clark-utm-qa]
     timeout-minutes: 30
@@ -3226,9 +3226,27 @@ jobs:
           bash scripts/refresh-scientist-lock.sh \
             --source "$GITHUB_WORKSPACE/vendor/clark-scientist" \
             --autoresearch-source "$GITHUB_WORKSPACE/vendor/clark-autoresearch"
-      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29
-        with:
-          version: 0.16.0
+      # setup-zig v2.2.1 still declares the retired Node 20 action runtime.
+      # Install the same exact compiler directly from Zig's official archive so
+      # successful release jobs do not carry a deprecation annotation.
+      - name: Install exact Zig toolchain
+        shell: bash
+        env:
+          ZIG_VERSION: 0.16.0
+          ZIG_SHA256: 70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/zig-$ZIG_VERSION.tar.xz"
+          install_dir="$RUNNER_TEMP/zig-$ZIG_VERSION"
+          curl --proto '=https' --tlsv1.2 --retry 5 --retry-connrefused \
+            --location --fail --silent --show-error \
+            "https://ziglang.org/download/$ZIG_VERSION/zig-x86_64-linux-$ZIG_VERSION.tar.xz" \
+            --output "$archive"
+          printf '%s  %s\n' "$ZIG_SHA256" "$archive" | sha256sum --check --strict
+          mkdir -p "$install_dir"
+          tar -xJf "$archive" --strip-components=1 -C "$install_dir"
+          test "$("$install_dir/zig" version)" = "$ZIG_VERSION"
+          echo "$install_dir" >> "$GITHUB_PATH"
       - name: Install cargo-zigbuild
         run: |
           cargo install cargo-zigbuild --locked

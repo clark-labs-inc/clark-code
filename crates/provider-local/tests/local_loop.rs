@@ -46,12 +46,23 @@ fn commentary_tool_call_body() -> String {
 
 /// SSE body for the second model call: the final answer.
 fn final_body() -> String {
+    final_answer_body("The file says: hi")
+}
+
+fn final_answer_body(text: &str) -> String {
+    let arguments = json!({"content": text}).to_string();
     [
-        r#"data: {"choices":[{"delta":{"content":"The file says: "}}]}"#,
-        r#"data: {"choices":[{"delta":{"content":"hi"}}]}"#,
-        r#"data: {"choices":[{"delta":{},"finish_reason":"stop"}]}"#,
-        "data: [DONE]",
-        "",
+        format!(
+            "data: {}",
+            json!({"choices":[{"delta":{"tool_calls":[{
+                "index": 0,
+                "id": "final-answer",
+                "function": {"name": "final_answer", "arguments": arguments}
+            }]}}]})
+        ),
+        r#"data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}"#.to_string(),
+        "data: [DONE]".to_string(),
+        String::new(),
     ]
     .join("\n\n")
 }
@@ -1210,6 +1221,10 @@ fn overflow_error_body() -> String {
 }
 
 fn text_body(text: &str) -> String {
+    final_answer_body(text)
+}
+
+fn plain_text_body(text: &str) -> String {
     format!(
         "data: {}\n\ndata: {}\n\ndata: [DONE]\n\n",
         json!({"choices":[{"delta":{"content": text}}]}),
@@ -1505,7 +1520,7 @@ async fn context_overflow_recovers_by_compacting_and_continuing() {
             // 1) the turn's first model call is rejected for context size,
             overflow_error_body(),
             // 2) the compaction summarizer runs,
-            text_body("SUMMARY: the user wants a haiku about databases."),
+            plain_text_body("SUMMARY: the user wants a haiku about databases."),
             // 3) the same turn continues on the compacted transcript.
             final_body(),
         ],
@@ -1664,7 +1679,7 @@ async fn goal_mode_continues_the_run_until_update_goal_complete() {
                 json!({"objective": "hello.txt must exist containing exactly HELLO"}),
             ),
             // …and ends its turn with a status line (natural stop).
-            text_body("Goal created — starting."),
+            plain_text_body("Goal created — starting."),
             // Continuation turn 1 (engine-launched): do the actual work…
             tool_call_sse(
                 "g2",
@@ -1808,9 +1823,11 @@ async fn goal_mode_continues_beyond_the_previous_24_turn_limit() {
             "create_goal",
             json!({"objective": "continue until the twenty-fifth goal turn"}),
         ),
-        text_body("Goal created — starting."),
+        plain_text_body("Goal created — starting."),
     ];
-    bodies.extend((1..=24).map(|turn| text_body(&format!("Continuation {turn} made progress."))));
+    bodies.extend(
+        (1..=24).map(|turn| plain_text_body(&format!("Continuation {turn} made progress."))),
+    );
     bodies.push(tool_call_sse(
         "g25",
         "update_goal",

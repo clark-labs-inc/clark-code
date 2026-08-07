@@ -5,6 +5,13 @@ import type {
   ProjectWorktreeTransitionPlan,
 } from "../core-bridge/bridge";
 import { emptySnapshot, type Session } from "../core-bridge/types";
+import {
+  composerDraftOwner,
+  loadComposerDraft,
+  saveComposerDraft,
+} from "../lib/composerDraft";
+
+const draftOwner = composerDraftOwner(null);
 
 const sourceRoot = "/tmp/project";
 const managedRoot = "/tmp/project.clark-worktrees/session-1";
@@ -301,5 +308,46 @@ describe("managed worktree session journeys", () => {
     expect(vi.mocked(bridge.openSession)).not.toHaveBeenCalled();
     expect(useSessionStore.getState().localSettings.cwd).toBe("/tmp/other-project");
     expect(useSessionStore.getState().pendingManagedWorktreePath).toBeNull();
+  });
+
+  it("carries the unsent draft into the session composer after a new-checkout choice", async () => {
+    const bridge = bridgeFor(plan({
+      sourceChanges: { changedFiles: 2, untrackedFiles: 1, conflictedFiles: 0 },
+      preservation: "changes_remain_in_source",
+      requiresConfirmation: true,
+    }));
+    useSessionStore.setState({ bridge, providers: await bridge.listProviders() });
+    saveComposerDraft(draftOwner, null, "fix the login bug");
+
+    await useSessionStore.getState().startSession();
+    expect(useSessionStore.getState().worktreeTransition?.requiresConfirmation).toBe(true);
+
+    await useSessionStore.getState().confirmManagedWorktreeStart();
+
+    const startedId = useSessionStore.getState().session?.id;
+    expect(startedId).toBe("managed-chat");
+    expect(loadComposerDraft(draftOwner, startedId!)).toBe("fix the login bug");
+    expect(loadComposerDraft(draftOwner, null)).toBe("");
+  });
+
+  it("keeps the unsent draft after choosing to keep working in this checkout", async () => {
+    const bridge = bridgeFor(plan({
+      sourceChanges: { changedFiles: 1, untrackedFiles: 1, conflictedFiles: 0 },
+      preservation: "changes_remain_in_source",
+      requiresConfirmation: true,
+    }));
+    useSessionStore.setState({ bridge, providers: await bridge.listProviders() });
+    saveComposerDraft(draftOwner, null, "refactor the checkout flow");
+
+    await useSessionStore.getState().startSession();
+    expect(useSessionStore.getState().worktreeTransition).not.toBeNull();
+
+    useSessionStore.getState().dismissManagedWorktreeStart();
+    await vi.waitFor(() => {
+      const startedId = useSessionStore.getState().session?.id;
+      if (!startedId) throw new Error("session never started");
+      expect(loadComposerDraft(draftOwner, startedId)).toBe("refactor the checkout flow");
+      expect(loadComposerDraft(draftOwner, null)).toBe("");
+    });
   });
 });

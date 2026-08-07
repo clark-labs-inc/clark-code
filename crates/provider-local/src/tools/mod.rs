@@ -36,6 +36,7 @@ mod deferred;
 pub mod diagnostics;
 pub mod document;
 pub mod effect;
+pub mod final_answer;
 pub mod fs;
 pub mod goal;
 pub mod grep;
@@ -391,6 +392,10 @@ pub trait ToolExecutor: Send + Sync {
     fn mutating(&self) -> bool {
         false
     }
+    /// Whether a successful result is the typed final delivery boundary.
+    fn terminates_run(&self) -> bool {
+        false
+    }
     /// Invocation-level mutation classification for mixed read/write schemas.
     /// The static flag continues to control ordinary permission prompting;
     /// Plan Mode uses this exact argument-aware contract to keep its read-only
@@ -491,6 +496,7 @@ impl ToolRegistry {
             Arc::new(plan::EnterPlanMode),
             Arc::new(plan::UpdatePlan),
             Arc::new(diagnostics::CheckDiagnostics),
+            Arc::new(final_answer::FinalAnswer),
             Arc::new(deferred::ToolSearch::new(deferred_catalog)),
         ] {
             registry.register_eager(tool);

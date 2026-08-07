@@ -113,6 +113,20 @@ impl ca::StreamFn for ClarkAgentStream {
         let session = self.session.clone();
         let run = self.run.clone();
         let context_limit = self.context_limit;
+        let force_tool_call = {
+            let session = session.lock().await;
+            let autonomous_goal_in_progress = session
+                .goal
+                .as_ref()
+                .is_some_and(|goal| goal.status != crate::loop_state::GoalStatus::Complete);
+            request.force_tool_call
+                && !session.planning.plan_mode()
+                && !autonomous_goal_in_progress
+                && request
+                    .tools
+                    .iter()
+                    .any(|tool| tool.name == crate::tools::final_answer::FINAL_ANSWER_TOOL)
+        };
         let messages = to_wire_messages(&request.system_prompt, &request.messages);
         let tools = request
             .tools
@@ -131,11 +145,17 @@ impl ca::StreamFn for ClarkAgentStream {
                 Arc::new(std::sync::Mutex::new(ProposedPlanStreamFilter::default()));
             let proposal_filter_for_text = proposal_filter.clone();
             let turn = llm
-                .stream_chat_observed(
+                .stream_chat_observed_with_tool_choice(
                     &messages,
                     &tools,
-                    &signal,
+                    crate::llm::StreamChatOptions {
+                        cancel: &signal,
+                        force_tool_call,
+                    },
                     move |delta| {
+                        if force_tool_call {
+                            return;
+                        }
                         let visible = proposal_filter_for_text
                             .lock()
                             .map(|mut filter| filter.feed(delta))
@@ -164,7 +184,44 @@ impl ca::StreamFn for ClarkAgentStream {
                 .await;
 
             match turn {
-                Ok(turn) => {
+                Ok(mut turn) => {
+                    if force_tool_call && turn.tool_calls.is_empty() {
+                        let payload = turn
+                            .response_metadata
+                            .as_ref()
+                            .and_then(|metadata| serde_json::to_value(metadata).ok())
+                            .unwrap_or(Value::Null);
+                        let _ = events
+                            .send(desktop::AgentEvent::Trace {
+                                run: Some(run.clone()),
+                                source: "provider_output_contract_violation".to_string(),
+                                payload,
+                            })
+                            .await;
+                        let _ = tx.send(ca::StreamEvent::Error {
+                            partial: empty_assistant(ca::StopReason::Error, None),
+                            kind: ca::stream::StreamErrorKind::ZeroOutputTransport,
+                            message: "provider ignored required tool choice".to_string(),
+                        });
+                        return;
+                    }
+                    if force_tool_call {
+                        // Hold text until the required structured boundary is
+                        // known. Ordinary tool turns may carry progress
+                        // commentary, while terminal delivery comes only from
+                        // the typed final_answer payload.
+                        let is_terminal = turn.tool_calls.iter().any(|call| {
+                            call.function.name == crate::tools::final_answer::FINAL_ANSWER_TOOL
+                        });
+                        if is_terminal {
+                            turn.text.clear();
+                        } else if !turn.text.is_empty() {
+                            let _ =
+                                tx.send(ca::StreamEvent::Chunk(ca::AssistantStreamChunk::Text {
+                                    delta: turn.text.clone(),
+                                }));
+                        }
+                    }
                     // If a response ended while the stream filter was holding
                     // a possible tag prefix, release it. A malformed marker
                     // must remain visible rather than disappearing.
@@ -383,7 +440,12 @@ pub(crate) fn desktop_tool_registry(
         gate = gate.with_execution(execution);
     }
     for exec in source.executors() {
-        if options.hide_plan_mode_tools && matches!(exec.name(), "propose_plan" | "update_plan") {
+        if options.hide_plan_mode_tools
+            && matches!(
+                exec.name(),
+                "propose_plan" | "update_plan" | crate::tools::final_answer::FINAL_ANSWER_TOOL
+            )
+        {
             continue;
         }
         registry.register(Arc::new(DesktopToolAdapter {
@@ -522,6 +584,19 @@ impl ca::AgentTool for DesktopToolAdapter {
         }));
         let effect_intent = self.exec.effect_intent(&args);
         let mut outcome = self.exec.invoke(args.clone(), &call_ctx).await;
+        let terminates_run = self.exec.terminates_run();
+        if terminates_run && !outcome.is_error {
+            let unresolved = self
+                .ctx
+                .session
+                .lock()
+                .await
+                .effects
+                .completion_prompt(&self.run);
+            if let Some(reminder) = unresolved {
+                outcome = ToolOutcome::error(reminder);
+            }
+        }
         if !outcome.is_error {
             if let Some(intent) = effect_intent {
                 let receipt = self.ctx.session.lock().await.effects.register(
@@ -629,11 +704,16 @@ impl ca::AgentTool for DesktopToolAdapter {
         Ok(tool_result_from_outcome(
             outcome,
             self.image_policy.native_image_support,
+            terminates_run,
         ))
     }
 }
 
-fn tool_result_from_outcome(outcome: ToolOutcome, native_image_support: bool) -> ca::ToolResult {
+fn tool_result_from_outcome(
+    outcome: ToolOutcome,
+    native_image_support: bool,
+    terminates_run: bool,
+) -> ca::ToolResult {
     let mut result = if outcome.is_error {
         ca::ToolResult::error(outcome.content)
     } else {
@@ -657,6 +737,7 @@ fn tool_result_from_outcome(outcome: ToolOutcome, native_image_support: bool) ->
         }
         result.details["locations"] = json!(outcome.locations);
     }
+    result.terminate = terminates_run && !result.is_error;
     result
 }
 
