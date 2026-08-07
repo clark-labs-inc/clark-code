@@ -13,6 +13,11 @@ use serde_json::Value;
 
 use crate::exec::Executor;
 
+/// High product-level circuit breaker. Productive runs remain iteration-
+/// uncapped; this bounds cumulative model work only after substantially more
+/// usage than the retained long-run samples require.
+pub(crate) const DEFAULT_ROOT_WEIGHTED_TOKEN_LIMIT: f64 = 10_000_000.0;
+
 #[derive(Clone, Debug)]
 pub(crate) struct RootExecutionConfig {
     pub max_attempts: u32,
@@ -24,7 +29,7 @@ impl Default for RootExecutionConfig {
     fn default() -> Self {
         Self {
             max_attempts: 2,
-            weighted_token_limit: None,
+            weighted_token_limit: Some(DEFAULT_ROOT_WEIGHTED_TOKEN_LIMIT),
             max_cost_usd: None,
         }
     }
@@ -42,7 +47,11 @@ impl RootExecutionConfig {
             .and_then(|value| u32::try_from(value).ok())
             .unwrap_or(defaults.max_attempts)
             .clamp(1, 3);
-        let weighted_token_limit = positive_f64(object.get("weighted_token_limit"));
+        let weighted_token_limit = match object.get("weighted_token_limit") {
+            Some(value) if value.as_f64() == Some(0.0) => None,
+            Some(value) => positive_f64(Some(value)).or(defaults.weighted_token_limit),
+            None => defaults.weighted_token_limit,
+        };
         let max_cost_usd = non_negative_f64(object.get("max_cost_usd"));
         Self {
             max_attempts,
@@ -395,7 +404,10 @@ mod tests {
     fn execution_config_is_bounded_and_defaults_to_one_recovery() {
         let defaults = RootExecutionConfig::from_extra(&serde_json::json!({}));
         assert_eq!(defaults.max_attempts, 2);
-        assert_eq!(defaults.weighted_token_limit, None);
+        assert_eq!(
+            defaults.weighted_token_limit,
+            Some(DEFAULT_ROOT_WEIGHTED_TOKEN_LIMIT)
+        );
 
         let bounded = RootExecutionConfig::from_extra(&serde_json::json!({
             "execution": {
@@ -407,5 +419,10 @@ mod tests {
         assert_eq!(bounded.max_attempts, 3);
         assert_eq!(bounded.weighted_token_limit, Some(50_000.0));
         assert_eq!(bounded.max_cost_usd, Some(0.5));
+
+        let explicitly_unlimited = RootExecutionConfig::from_extra(&serde_json::json!({
+            "execution": { "weighted_token_limit": 0 }
+        }));
+        assert_eq!(explicitly_unlimited.weighted_token_limit, None);
     }
 }

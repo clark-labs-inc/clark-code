@@ -71,4 +71,56 @@ describe("provider incident snapshot boundaries", () => {
 
     expect(mergeHistory(prefix, live).model_context_checkpoint?.timeline_index).toBe(2);
   });
+
+  it("preserves both runs when a resumed provider reuses a legacy run id", () => {
+    const prefix = emptySnapshot();
+    prefix.runs["run-1"] = { id: "run-1", status: "done" };
+    prefix.timeline.push({
+      item: "message",
+      run: "run-1",
+      role: "agent",
+      phase: "final_answer",
+      blocks: [{ type: "text", text: "old answer" }],
+    });
+    const live = emptySnapshot();
+    live.runs["run-1"] = {
+      id: "run-1",
+      status: "running",
+      outcome: {
+        status: "running",
+        execution: {
+          execution_id: "conversation:run-1",
+          root_path: "/tmp/project",
+          attempts: 1,
+          recoveries: 0,
+          child_executions: 0,
+          completed_children: 0,
+          failed_children: 0,
+          weighted_tokens: 0,
+          cost_usd: 0,
+          changed_paths: [],
+          completed_tools: [],
+          failed_tools: [],
+        },
+      },
+    };
+    live.timeline.push({
+      item: "message",
+      run: "run-1",
+      role: "agent",
+      blocks: [{ type: "text", text: "new work" }],
+    });
+
+    const merged = mergeHistory(prefix, live);
+
+    expect(merged.runs["run-1"].status).toBe("done");
+    expect(merged.runs["run-1~resume-1"]).toMatchObject({
+      id: "run-1~resume-1",
+      status: "running",
+    });
+    expect(merged.runs["run-1~resume-1"].outcome?.execution?.execution_id)
+      .toBe("conversation:run-1~resume-1");
+    expect(merged.timeline.map((item) => "run" in item ? item.run : undefined))
+      .toEqual(["run-1", "run-1~resume-1"]);
+  });
 });

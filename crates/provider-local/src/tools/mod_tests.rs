@@ -240,6 +240,42 @@ fn registry_lists_local_tools_and_optionally_clark() {
 }
 
 #[tokio::test]
+async fn copy_on_write_registry_isolates_prior_run_and_rebinds_tool_search() {
+    let mut next = Arc::new(ToolRegistry::new(None, None));
+    let prior_run = next.clone();
+
+    Arc::make_mut(&mut next).enable_browser();
+
+    assert!(!Arc::ptr_eq(&next, &prior_run));
+    assert!(next.get("browser").is_some());
+    assert!(prior_run.get("browser").is_none());
+
+    let directory = tempfile::tempdir().unwrap();
+    let session = Arc::new(tokio::sync::Mutex::new(SessionState::default()));
+    let search = next.get("tool_search").unwrap();
+    let outcome = search
+        .invoke(
+            serde_json::json!({"query": "browser"}),
+            &ToolCtx {
+                sandbox: Arc::new(Sandbox::new(directory.path()).unwrap()),
+                executor: Arc::new(crate::exec::LocalExecutor),
+                reads: Arc::new(Mutex::new(ReadTracker::default())),
+                cancel: CancellationToken::new(),
+                background: Arc::new(crate::background::BackgroundTasks::default()),
+                session: session.clone(),
+                progress: None,
+                agent_progress: None,
+                call_progress: None,
+                model_override: None,
+            },
+        )
+        .await;
+
+    assert!(!outcome.is_error, "{}", outcome.content);
+    assert!(session.lock().await.deferred_tools.contains("browser"));
+}
+
+#[tokio::test]
 async fn runtime_catalog_keeps_core_eager_and_defers_specialized_tools() {
     let registry = ToolRegistry::new(None, None);
     let session = Arc::new(tokio::sync::Mutex::new(SessionState::default()));

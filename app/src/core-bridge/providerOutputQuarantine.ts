@@ -8,7 +8,7 @@ const RESERVED_PROTOCOL_MARKERS = [
 ] as const;
 
 function containsReservedProtocolMarker(value: string): boolean {
-  const normalized = value.toLowerCase().replace(/_+/g, "_");
+  const normalized = value.normalize("NFKC").toLowerCase().replace(/[_▁]+/gu, "_");
   return RESERVED_PROTOCOL_MARKERS.some((marker) => normalized.includes(marker));
 }
 

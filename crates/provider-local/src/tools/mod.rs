@@ -455,6 +455,29 @@ pub struct ToolRegistry {
     _mcp_clients: Vec<Arc<crate::mcp::McpClient>>,
 }
 
+impl Clone for ToolRegistry {
+    fn clone(&self) -> Self {
+        let deferred_catalog = self.deferred_catalog.snapshot();
+        let tools = self
+            .tools
+            .iter()
+            .map(|tool| {
+                if tool.name() == "tool_search" {
+                    Arc::new(deferred::ToolSearch::new(deferred_catalog.clone()))
+                        as Arc<dyn ToolExecutor>
+                } else {
+                    tool.clone()
+                }
+            })
+            .collect();
+        Self {
+            tools,
+            deferred_catalog,
+            _mcp_clients: self._mcp_clients.clone(),
+        }
+    }
+}
+
 impl ToolRegistry {
     /// A deliberately empty registry for host-owned structured model turns.
     /// This is stronger than denying permissions: no tool schema or executor

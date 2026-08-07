@@ -328,11 +328,7 @@ impl Provider for LocalAgentProvider {
                 )
                 .await
         };
-        let registry = self
-            .registry
-            .as_mut()
-            .and_then(Arc::get_mut)
-            .ok_or_else(|| Error::Other("tool registry is already shared".to_string()))?;
+        let registry = self.next_run_registry_mut()?;
         if config.tools_enabled && skills.enabled().next().is_some() {
             registry.enable_skills(skills.clone());
         } else {
@@ -528,11 +524,11 @@ impl Provider for LocalAgentProvider {
                     &self.skill_disabled_names,
                 )
                 .await;
-            let registry = self
-                .registry
-                .as_mut()
-                .and_then(Arc::get_mut)
-                .ok_or_else(|| Error::Other("tool registry is still in use".to_string()))?;
+            // A just-finished run may still be dropping its event sink and
+            // tool adapters after RunFinished reaches the UI. Fork the next
+            // run's registry snapshot instead of rejecting an accepted user
+            // turn merely because the prior immutable snapshot is still held.
+            let registry = self.next_run_registry_mut()?;
             if refreshed.enabled().next().is_some() {
                 registry.enable_skills(refreshed.clone());
             } else {
@@ -775,10 +771,7 @@ impl Provider for LocalAgentProvider {
             native_image_support,
         );
 
-        let run = RunId::new(format!(
-            "run-{}",
-            self.run_counter.fetch_add(1, Ordering::SeqCst) + 1
-        ));
+        let run = self.next_run_id();
         self.run_cancellations.register(&run, cancel.clone());
         let (tx, rx) = async_channel::unbounded::<AgentEvent>();
 
@@ -885,10 +878,7 @@ impl Provider for LocalAgentProvider {
             ));
         }
 
-        let run = RunId::new(format!(
-            "run-{}",
-            self.run_counter.fetch_add(1, Ordering::SeqCst) + 1
-        ));
+        let run = self.next_run_id();
         let cancel = CancellationToken::new();
         self.run_cancellations.register(&run, cancel.clone());
         let registration = ManualCompactionRegistration {

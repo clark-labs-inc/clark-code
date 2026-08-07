@@ -35,6 +35,46 @@ fn tool_call_body(call_id: &str, name: &str, args: Value) -> String {
     .join("\n\n")
 }
 
+fn tool_call_body_with_usage(
+    call_id: &str,
+    name: &str,
+    args: Value,
+    prompt_tokens: u64,
+    completion_tokens: u64,
+) -> String {
+    let arguments = serde_json::to_string(&args).expect("tool arguments serialize");
+    [
+        format!(
+            "data: {}",
+            json!({
+                "choices": [{
+                    "delta": {
+                        "tool_calls": [{
+                            "index": 0,
+                            "id": call_id,
+                            "function": {"name": name, "arguments": arguments}
+                        }]
+                    }
+                }]
+            })
+        ),
+        format!(
+            "data: {}",
+            json!({
+                "choices": [{"delta": {}, "finish_reason": "tool_calls"}],
+                "usage": {
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "total_tokens": prompt_tokens + completion_tokens
+                }
+            })
+        ),
+        "data: [DONE]".to_string(),
+        String::new(),
+    ]
+    .join("\n\n")
+}
+
 fn text_body(text: &str) -> String {
     tool_call_body("final-answer", "final_answer", json!({"content": text}))
 }
@@ -302,6 +342,52 @@ async fn productive_turn_runs_past_128_model_tool_iterations_without_global_cap(
 }
 
 #[tokio::test]
+async fn cumulative_token_budget_stops_before_another_provider_request() {
+    let root = tempfile::tempdir().expect("temporary project");
+    std::fs::write(root.path().join("receipt.txt"), "bounded").expect("write fixture");
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind model endpoint");
+    let address = listener.local_addr().expect("model endpoint address");
+    let server = tokio::spawn(serve(
+        listener,
+        vec![tool_call_body_with_usage(
+            "read-once",
+            "read_file",
+            json!({"path": "receipt.txt"}),
+            90,
+            10,
+        )],
+    ));
+    let mut provider = connect(
+        address,
+        root.path(),
+        json!({"execution": {"weighted_token_limit": 100}}),
+    )
+    .await;
+    let session = new_session(&mut provider, root.path()).await;
+
+    let (outcome, tool_calls) = terminal_outcome(
+        &mut provider,
+        &session,
+        "Read the fixture, then continue exploring indefinitely.",
+    )
+    .await;
+
+    assert_eq!(tool_calls, 1);
+    assert_eq!(outcome.status, RunStatus::Failed, "{outcome:?}");
+    assert_eq!(outcome.failure_kind, Some(RunFailureKind::LocalState));
+    assert!(
+        outcome
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("cumulative model-token safety limit")),
+        "{outcome:?}"
+    );
+    assert_eq!(server.await.expect("model server task").len(), 1);
+}
+
+#[tokio::test]
 async fn unresolved_effect_blocks_final_answer_until_canonical_verification() {
     let root = tempfile::tempdir().expect("temporary project");
     let listener = TcpListener::bind("127.0.0.1:0")
@@ -350,16 +436,41 @@ async fn unresolved_effect_blocks_final_answer_until_canonical_verification() {
     .await;
     let session = new_session(&mut provider, root.path()).await;
 
-    let (outcome, tool_calls) = terminal_outcome(
-        &mut provider,
-        &session,
-        "Create the external marker and verify its canonical state before finishing.",
-    )
-    .await;
+    let mut stream = provider
+        .prompt(
+            &session.id,
+            PromptInput::text(
+                "Create the external marker and verify its canonical state before finishing.",
+            ),
+        )
+        .await
+        .expect("start prompt");
+    let mut tool_calls = 0;
+    let mut visible_text = Vec::new();
+    let outcome = loop {
+        match stream.next().await.expect("run reaches terminal event") {
+            AgentEvent::ToolCall { .. } => tool_calls += 1,
+            AgentEvent::MessageChunk {
+                delta: ContentBlock::Text { text },
+                ..
+            } => visible_text.push(text),
+            AgentEvent::RunFinished { outcome, .. } => break outcome,
+            _ => {}
+        }
+    };
 
     assert_eq!(tool_calls, 3);
     assert_eq!(outcome.status, RunStatus::Done, "{outcome:?}");
     assert_eq!(outcome.failure_kind, None, "{outcome:?}");
+    assert!(
+        !visible_text
+            .iter()
+            .any(|text| text.contains("premature answer")),
+        "unverified final answer reached the UI: {visible_text:?}"
+    );
+    assert!(visible_text
+        .iter()
+        .any(|text| text.contains("verified canonical read-back")));
 
     let requests = server.await.expect("model server task");
     assert_eq!(requests.len(), 5);

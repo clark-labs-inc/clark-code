@@ -364,15 +364,23 @@ The repaired contracts are narrow:
 - deferred-tool discovery ignores connective/query boilerplate such as `and`,
   `with`, `tool`, and `capability`, preventing a multi-capability lookup from
   activating unrelated device, security, goal, and delegation schemas; and
-- production stays iteration-uncapped. Only consecutive prose-only completion
-  retries with an unresolved runtime obligation are bounded; any tool
-  execution resets that non-progress counter.
+- productive model/tool work stays iteration-uncapped, but ordinary root runs
+  now receive a high 10,000,000 cumulative-token circuit breaker with a 90%
+  wrap-up warning. An explicit zero disables that ceiling for a controlled
+  harness. Consecutive prose-only completion retries with an unresolved
+  runtime obligation and identical-action/identical-result loops remain
+  independently bounded; materially new tool results reset the latter signal;
+- final-answer publication is denied while the originating run has unresolved
+  effect receipts, and the denial plus any terminal fallback identifies the
+  exact receipt, tool, description, and verification state; and
+- provider-output quarantine recognizes both ASCII protocol markers and the
+  Unicode tokenizer-boundary form observed in persisted conversations.
 
 The deterministic production composition test completes 160 consecutive
 model/tool iterations, proving there is no 128-iteration product cutoff. Its
-paired regression proves a genuinely unresolved external effect terminates as
-`VerificationIncomplete` after bounded non-progress instead of printing
-forever.
+paired regressions prove that a genuinely unresolved external effect cannot
+publish a final answer and that a configured cumulative-token ceiling stops
+before another provider request rather than consuming unbounded work.
 
 Retained live host evidence:
 

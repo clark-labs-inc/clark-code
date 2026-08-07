@@ -248,8 +248,77 @@ export function clearUnseenFinished(current: readonly string[], id: string): str
   return current.filter((entry) => entry !== id);
 }
 
+/**
+ * Old provider builds allocated run-1, run-2, ... from a process-local
+ * counter. A reopened conversation therefore could reuse a run id already in
+ * its restored prefix. Preserve both histories rather than letting the live
+ * run overwrite the earlier terminal receipt.
+ */
+function rekeyCollidingLiveRuns(prefix: Snapshot, live: Snapshot): Snapshot {
+  const used = new Set([...Object.keys(prefix.runs), ...Object.keys(live.runs)]);
+  const aliases = new Map<string, string>();
+  for (const id of Object.keys(live.runs)) {
+    if (!prefix.runs[id]) continue;
+    let suffix = 1;
+    let alias = `${id}~resume-${suffix}`;
+    while (used.has(alias)) alias = `${id}~resume-${++suffix}`;
+    used.add(alias);
+    aliases.set(id, alias);
+  }
+  if (aliases.size === 0) return live;
+
+  const runId = (id: string): string => aliases.get(id) ?? id;
+  const incidentAliases = new Map<string, string>();
+  const providerIncidents = Object.fromEntries(
+    Object.entries(live.provider_incidents).map(([id, incident]) => {
+      let alias = id;
+      for (const [oldRun, newRun] of aliases) {
+        if (id === oldRun || id.startsWith(`${oldRun}:`)) {
+          alias = `${newRun}${id.slice(oldRun.length)}`;
+          break;
+        }
+      }
+      if (alias !== id) incidentAliases.set(id, alias);
+      return [alias, alias === id ? incident : { ...incident, id: alias }];
+    }),
+  );
+  const runs = Object.fromEntries(
+    Object.entries(live.runs).map(([id, run]) => {
+      const alias = runId(id);
+      const execution = run.outcome?.execution;
+      const executionId = execution?.execution_id;
+      const rewrittenExecution = execution && executionId?.endsWith(`:${id}`)
+        ? { ...execution, execution_id: `${executionId.slice(0, -id.length)}${alias}` }
+        : execution;
+      return [alias, {
+        ...run,
+        id: alias,
+        ...(run.outcome && rewrittenExecution
+          ? { outcome: { ...run.outcome, execution: rewrittenExecution } }
+          : {}),
+      }];
+    }),
+  );
+  const timeline = live.timeline.map((item) => {
+    const withRun = "run" in item && item.run
+      ? { ...item, run: runId(item.run) }
+      : item;
+    return withRun.item === "provider_incident"
+      ? { ...withRun, id: incidentAliases.get(withRun.id) ?? withRun.id }
+      : withRun;
+  });
+  return {
+    ...live,
+    runs,
+    timeline,
+    provider_incidents: providerIncidents,
+    goal: live.goal?.run ? { ...live.goal, run: runId(live.goal.run) } : live.goal,
+  };
+}
+
 /** Past transcript (prefix) + live resumed turns → one displayed snapshot. */
 export function mergeHistory(prefix: Snapshot, live: Snapshot): Snapshot {
+  live = rekeyCollidingLiveRuns(prefix, live);
   const artifacts = [...prefix.artifacts];
   const idx = new Map(artifacts.map((a, i) => [a.id, i]));
   for (const a of live.artifacts) {

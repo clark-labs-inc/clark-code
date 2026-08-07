@@ -10,7 +10,7 @@ use agent_core::ids::{RunId, SessionId, ToolCallId};
 use async_channel::Sender;
 use async_trait::async_trait;
 use clark_agent as ca;
-use futures::stream::BoxStream;
+use futures::{stream::BoxStream, StreamExt};
 use serde_json::{json, Value};
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
@@ -71,6 +71,33 @@ pub(crate) struct ClarkAgentStream {
     session: Arc<Mutex<SessionState>>,
     run: RunId,
     context_limit: Option<u64>,
+    weighted_token_limit: Option<f64>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ExecutionBudgetState {
+    Within,
+    Approaching,
+    Exhausted,
+}
+
+fn execution_budget_state(
+    usage: Option<agent_core::domain::RunUsage>,
+    limit: Option<f64>,
+) -> ExecutionBudgetState {
+    let Some(limit) = limit.filter(|limit| limit.is_finite() && *limit > 0.0) else {
+        return ExecutionBudgetState::Within;
+    };
+    let used = usage
+        .map(|usage| usage.input_tokens.saturating_add(usage.output_tokens) as f64)
+        .unwrap_or(0.0);
+    if used >= limit {
+        ExecutionBudgetState::Exhausted
+    } else if used >= limit * 0.9 {
+        ExecutionBudgetState::Approaching
+    } else {
+        ExecutionBudgetState::Within
+    }
 }
 
 impl ClarkAgentStream {
@@ -81,6 +108,7 @@ impl ClarkAgentStream {
         session: Arc<Mutex<SessionState>>,
         run: RunId,
         context_limit: Option<u64>,
+        weighted_token_limit: Option<f64>,
     ) -> Self {
         Self {
             llm,
@@ -90,6 +118,7 @@ impl ClarkAgentStream {
             session,
             run,
             context_limit,
+            weighted_token_limit,
         }
     }
 
@@ -106,6 +135,21 @@ impl ca::StreamFn for ClarkAgentStream {
         request: ca::StreamRequest,
         signal: CancellationToken,
     ) -> BoxStream<'static, ca::StreamEvent> {
+        let budget_state =
+            execution_budget_state(self.totals.snapshot(), self.weighted_token_limit);
+        if budget_state == ExecutionBudgetState::Exhausted {
+            return futures::stream::iter([
+                ca::StreamEvent::Start {
+                    partial: empty_assistant(ca::StopReason::EndTurn, None),
+                },
+                ca::StreamEvent::Error {
+                    partial: empty_assistant(ca::StopReason::Error, None),
+                    kind: ca::stream::StreamErrorKind::Fatal,
+                    message: "execution_budget_exhausted: cumulative model-token safety limit reached; the conversation and completed work are preserved, so continue in a follow-up run".to_string(),
+                },
+            ])
+            .boxed();
+        }
         let llm = self.llm.clone();
         let totals = self.totals.clone();
         let incidents = self.incidents.clone();
@@ -127,7 +171,12 @@ impl ca::StreamFn for ClarkAgentStream {
                     .iter()
                     .any(|tool| tool.name == crate::tools::final_answer::FINAL_ANSWER_TOOL)
         };
-        let messages = to_wire_messages(&request.system_prompt, &request.messages);
+        let mut messages = to_wire_messages(&request.system_prompt, &request.messages);
+        if budget_state == ExecutionBudgetState::Approaching {
+            messages.push(crate::llm::ChatMessage::system(
+                "Execution budget is nearly exhausted. Stop broad exploration, complete only essential verification, then call final_answer with a concise handoff. Do not start another large task in this run.",
+            ));
+        }
         let tools = request
             .tools
             .iter()

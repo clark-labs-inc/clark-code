@@ -38,6 +38,20 @@ describe("provider output quarantine", () => {
     expect(normalized.model_context_checkpoint).toBeUndefined();
   });
 
+  it("removes the Unicode tokenizer marker observed in persisted conversations", () => {
+    const snapshot: Snapshot = {
+      ...emptySnapshot(),
+      timeline: [{
+        item: "message",
+        run: "run-1",
+        role: "agent",
+        blocks: [{ type: "text", text: "safe prefix <｜begin▁of▁sentence｜> leaked tail" }],
+      }],
+    };
+
+    expect(normalizeSnapshot(snapshot).timeline).toEqual([]);
+  });
+
   it("removes contaminated tool arguments and their timeline reference", () => {
     const snapshot: Snapshot = {
       ...emptySnapshot(),

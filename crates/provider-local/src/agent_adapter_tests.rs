@@ -34,6 +34,36 @@ fn usage_totals_return_each_calls_cumulative_cost_and_tokens() {
 }
 
 #[test]
+fn execution_budget_warns_before_the_hard_stop_and_can_be_disabled() {
+    let usage = desktop::RunUsage {
+        input_tokens: 90,
+        output_tokens: 0,
+        context_tokens: 10,
+        cost_usd: None,
+        context_limit: None,
+    };
+    assert_eq!(
+        execution_budget_state(Some(usage), Some(100.0)),
+        ExecutionBudgetState::Approaching
+    );
+    assert_eq!(
+        execution_budget_state(
+            Some(desktop::RunUsage {
+                input_tokens: 99,
+                output_tokens: 1,
+                ..usage
+            }),
+            Some(100.0)
+        ),
+        ExecutionBudgetState::Exhausted
+    );
+    assert_eq!(
+        execution_budget_state(Some(usage), None),
+        ExecutionBudgetState::Within
+    );
+}
+
+#[test]
 fn malformed_tool_args_use_core_parse_error_marker() {
     let value = parse_tool_args("{bad");
     assert!(ca::detect_arg_parse_error(&value).is_some());

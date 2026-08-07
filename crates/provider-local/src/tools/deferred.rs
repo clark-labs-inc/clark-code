@@ -28,7 +28,7 @@ struct CatalogEntry {
     description: String,
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct Catalog {
     eager: HashSet<String>,
     deferred: Vec<CatalogEntry>,
@@ -40,6 +40,17 @@ pub(super) struct DeferredToolCatalog {
 }
 
 impl DeferredToolCatalog {
+    /// Create an independent catalog snapshot for a future run. Ordinary
+    /// `Clone` intentionally shares live activation state with the tool-search
+    /// executor and gate inside one run; copy-on-write registry updates need a
+    /// deep snapshot so refreshing the next run cannot mutate the prior run.
+    pub(super) fn snapshot(&self) -> Self {
+        let catalog = self.inner.lock().unwrap().clone();
+        Self {
+            inner: Arc::new(Mutex::new(catalog)),
+        }
+    }
+
     pub(super) fn register(&self, name: &str, description: &str, exposure: ToolExposure) {
         let mut catalog = self.inner.lock().unwrap();
         match exposure {

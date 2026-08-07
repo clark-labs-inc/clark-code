@@ -66,15 +66,19 @@ fn collapse_underscores(text: &str) -> String {
     let mut normalized = String::with_capacity(text.len());
     let mut previous_underscore = false;
     for character in text.chars() {
-        let character = character.to_ascii_lowercase();
-        if character == '_' {
-            if !previous_underscore {
+        for character in character.to_lowercase() {
+            // Some tokenizers expose their word-boundary sentinel as U+2581
+            // rather than an ASCII underscore. Fullwidth low line appears in
+            // the same provider-residue family after copy/paste.
+            if matches!(character, '_' | '\u{2581}' | '\u{ff3f}') {
+                if !previous_underscore {
+                    normalized.push('_');
+                }
+                previous_underscore = true;
+            } else {
                 normalized.push(character);
+                previous_underscore = false;
             }
-            previous_underscore = true;
-        } else {
-            normalized.push(character);
-            previous_underscore = false;
         }
     }
     normalized
@@ -137,6 +141,8 @@ mod tests {
         for text in [
             "<|begin_of_sentence|>",
             "<|begin__of__sentence|>",
+            "<｜begin▁of▁sentence｜>",
+            "<|begin＿of＿sentence|>",
             "prefix require_escalated_model:gpt suffix",
             "expiration_placeholder",
             "SKILLconstraint_hard",

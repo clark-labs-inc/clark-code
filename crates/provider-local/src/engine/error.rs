@@ -40,7 +40,7 @@ pub(super) fn map_loop_error_with_completion_state(
     error: clark_agent::LoopError,
     final_answer_committed: bool,
     goal_completed: bool,
-    unresolved_effects: usize,
+    unresolved_effects: &[String],
 ) -> MappedLoopError {
     let mapped = map_loop_error(error);
     if mapped.failure_kind != Some(RunFailureKind::EmptyResponse) {
@@ -50,7 +50,7 @@ pub(super) fn map_loop_error_with_completion_state(
     // A final answer or a typed goal-complete signal means the work itself
     // has already been delivered. Pending external effects remain a distinct
     // failure because they still need canonical verification.
-    if unresolved_effects > 0 && (final_answer_committed || goal_completed) {
+    if !unresolved_effects.is_empty() && (final_answer_committed || goal_completed) {
         return MappedLoopError::verification_incomplete(unresolved_effects);
     }
 
@@ -96,6 +96,20 @@ fn map_stream_error(error: clark_agent::StreamError) -> MappedLoopError {
                 .to_string();
             MappedLoopError::failed(RunFailureKind::ProviderError, "provider_error", message)
         }
+        clark_agent::StreamError::Fatal(message)
+            if message.starts_with("execution_budget_exhausted:") =>
+        {
+            let message = message
+                .strip_prefix("execution_budget_exhausted:")
+                .unwrap_or(&message)
+                .trim()
+                .to_string();
+            MappedLoopError::failed(
+                RunFailureKind::LocalState,
+                "execution_budget_exhausted",
+                message,
+            )
+        }
         clark_agent::StreamError::ProviderRateLimited(message) => {
             MappedLoopError::failed(RunFailureKind::RateLimited, "rate_limited", message)
         }
@@ -140,12 +154,20 @@ impl MappedLoopError {
         }
     }
 
-    pub(super) fn verification_incomplete(unresolved: usize) -> Self {
-        let effects = if unresolved == 1 { "effect" } else { "effects" };
+    pub(super) fn verification_incomplete(unresolved: &[String]) -> Self {
+        let effects = if unresolved.len() == 1 {
+            "effect"
+        } else {
+            "effects"
+        };
         Self::failed(
             RunFailureKind::VerificationIncomplete,
             "effect_verification_incomplete",
-            format!("{unresolved} external {effects} remained unverified after the final answer"),
+            format!(
+                "{} external {effects} remained unverified after the final answer:\n- {}",
+                unresolved.len(),
+                unresolved.join("\n- ")
+            ),
         )
     }
 }
@@ -179,6 +201,12 @@ mod tests {
                 clark_agent::StreamError::ContextOverflow("too large".into()),
                 RunFailureKind::ContextOverflow,
             ),
+            (
+                clark_agent::StreamError::Fatal(
+                    "execution_budget_exhausted: preserved for follow-up".into(),
+                ),
+                RunFailureKind::LocalState,
+            ),
         ];
 
         for (error, expected) in cases {
@@ -195,7 +223,7 @@ mod tests {
             },
             true,
             false,
-            2,
+            &["`effect-1` pending".into(), "`effect-2` mismatched".into()],
         );
         assert_eq!(
             mapped.failure_kind,
@@ -216,7 +244,7 @@ mod tests {
             )),
             false,
             true,
-            1,
+            &["`effect-1` pending".into()],
         );
         assert_eq!(
             mapped.failure_kind,
@@ -232,7 +260,7 @@ mod tests {
             )),
             false,
             true,
-            0,
+            &[],
         );
         assert_eq!(mapped.status, RunStatus::Done);
         assert_eq!(mapped.failure_kind, None);
@@ -249,7 +277,7 @@ mod tests {
             },
             true,
             false,
-            0,
+            &[],
         );
         assert_eq!(mapped.failure_kind, Some(RunFailureKind::EmptyResponse));
     }
@@ -263,7 +291,7 @@ mod tests {
             },
             false,
             false,
-            1,
+            &["`effect-1` pending".into()],
         );
         assert_eq!(mapped.failure_kind, Some(RunFailureKind::EmptyResponse));
     }

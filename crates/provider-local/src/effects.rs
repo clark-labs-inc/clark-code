@@ -173,7 +173,7 @@ impl EffectLedger {
         ))
     }
 
-    pub(crate) fn unresolved_count(&self, run: &RunId) -> usize {
+    pub(crate) fn unresolved_diagnostics(&self, run: &RunId) -> Vec<String> {
         self.receipts
             .values()
             .filter(|receipt| {
@@ -183,7 +183,13 @@ impl EffectLedger {
                         EffectVerification::Pending | EffectVerification::Mismatch
                     )
             })
-            .count()
+            .map(|receipt| {
+                format!(
+                    "`{}` from `{}`: {} ({:?})",
+                    receipt.id, receipt.tool_name, receipt.description, receipt.verification
+                )
+            })
+            .collect()
     }
 
     pub(crate) fn has_unresolved(&self) -> bool {
@@ -266,9 +272,15 @@ impl ToolGate for EffectCompletionGuard {
         if tool_name == "verify_effect" {
             return None;
         }
-        self.session
-            .lock()
-            .await
+        let session = self.session.lock().await;
+        let unresolved = session.effects.unresolved_diagnostics(&self.run);
+        if tool_name == crate::tools::final_answer::FINAL_ANSWER_TOOL && !unresolved.is_empty() {
+            return Some(format!(
+                "Clark cannot publish the final answer while these effects remain unresolved:\n- {}\nIndependently inspect each canonical target, then call `verify_effect` with `verified`, `mismatch`, or `unverifiable` and concrete evidence.",
+                unresolved.join("\n- ")
+            ));
+        }
+        session
             .effects
             .requires_verification_only_turn(&self.run)
             .then(|| {
@@ -486,12 +498,55 @@ mod tests {
         assert_eq!(original_follow_up.len(), 1);
         assert!(later_follow_up.is_empty());
         assert_eq!(
-            session.lock().await.effects.unresolved_count(&run("run-1")),
+            session
+                .lock()
+                .await
+                .effects
+                .unresolved_diagnostics(&run("run-1"))
+                .len(),
             1
         );
         assert_eq!(
-            session.lock().await.effects.unresolved_count(&run("run-2")),
+            session
+                .lock()
+                .await
+                .effects
+                .unresolved_diagnostics(&run("run-2"))
+                .len(),
             0
         );
+    }
+
+    #[tokio::test]
+    async fn final_answer_is_denied_with_exact_pending_receipt_diagnostics() {
+        let session = Arc::new(Mutex::new(SessionState::default()));
+        session.lock().await.effects.register(
+            run("run-1"),
+            "publish-7",
+            "fake_publisher",
+            EffectIntent::declared_external(
+                EffectAction::Publish,
+                Some("resource://example".into()),
+                "published the requested resource",
+            ),
+        );
+        let guard = EffectCompletionGuard::new(session, run("run-1"));
+        let reason = guard
+            .denial_reason(
+                crate::tools::final_answer::FINAL_ANSWER_TOOL,
+                ToolGateContext {
+                    iteration: 1,
+                    messages: &[],
+                    conversation_id: Some("conversation"),
+                    available_tool_names: &["final_answer", "verify_effect"],
+                },
+            )
+            .await
+            .expect("pending receipt must block final publication");
+
+        assert!(reason.contains("publish-7"));
+        assert!(reason.contains("fake_publisher"));
+        assert!(reason.contains("published the requested resource"));
+        assert!(reason.contains("verify_effect"));
     }
 }

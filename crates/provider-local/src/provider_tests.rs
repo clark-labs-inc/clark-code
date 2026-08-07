@@ -578,6 +578,35 @@ async fn prompt_admission_accepts_same_blocked_goal_and_rejects_conflicting_goal
     assert!(!error.contains("update_goal"));
 }
 
+#[test]
+fn next_run_registry_forks_while_prior_run_snapshot_is_still_held() {
+    let mut provider = LocalAgentProvider::new();
+    provider.registry = Some(Arc::new(ToolRegistry::new(None, None)));
+    let prior_run = provider.registry.as_ref().unwrap().clone();
+
+    provider.next_run_registry_mut().unwrap().enable_browser();
+
+    let next_run = provider.registry.as_ref().unwrap();
+    assert!(!Arc::ptr_eq(next_run, &prior_run));
+    assert!(next_run.get("browser").is_some());
+    assert!(prior_run.get("browser").is_none());
+}
+
+#[test]
+fn run_ids_do_not_collide_across_provider_instances() {
+    let first = LocalAgentProvider::new();
+    let second = LocalAgentProvider::new();
+
+    let first_run = first.next_run_id();
+    let first_follow_up = first.next_run_id();
+    let resumed_run = second.next_run_id();
+
+    assert_ne!(first_run, first_follow_up);
+    assert_ne!(first_run, resumed_run);
+    assert_ne!(first_follow_up, resumed_run);
+    assert!(first_run.as_str().starts_with("run-"));
+}
+
 #[tokio::test]
 async fn close_session_stops_session_owned_background_tasks() {
     let mut provider = LocalAgentProvider::new();

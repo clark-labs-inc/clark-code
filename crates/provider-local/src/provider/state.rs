@@ -28,6 +28,10 @@ pub struct LocalAgentProvider {
     /// whole provider inside its worker, so this remains process-local.
     pub(super) executor: Arc<dyn crate::exec::Executor>,
     pub(super) run_counter: AtomicU64,
+    /// Per-provider-instance namespace. Resuming or editing a conversation
+    /// constructs a new provider, so the sequence alone is not a durable run
+    /// identity across the merged history prefix.
+    pub(super) run_namespace: String,
     /// Last MCP connection result, surfaced to the settings UI.
     pub(super) mcp_status: Vec<crate::mcp::McpStatus>,
     /// Stable identity for the active project, when private project knowledge
@@ -66,6 +70,7 @@ impl LocalAgentProvider {
             manual_compacting: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             executor: Arc::new(crate::exec::LocalExecutor),
             run_counter: AtomicU64::new(0),
+            run_namespace: uuid::Uuid::new_v4().simple().to_string(),
             mcp_status: Vec::new(),
             repository_fingerprint: None,
             skills: Arc::new(crate::skills::SkillCatalog::default()),
@@ -129,6 +134,20 @@ impl LocalAgentProvider {
     ) -> Self {
         self.skill_catalogs = service;
         self
+    }
+
+    /// Mutate the registry used by future runs without requiring every owner
+    /// of the previous run's immutable registry snapshot to have dropped.
+    pub(super) fn next_run_registry_mut(&mut self) -> Result<&mut ToolRegistry> {
+        self.registry
+            .as_mut()
+            .map(Arc::make_mut)
+            .ok_or(Error::NotConnected)
+    }
+
+    pub(super) fn next_run_id(&self) -> RunId {
+        let sequence = self.run_counter.fetch_add(1, Ordering::SeqCst) + 1;
+        RunId::new(format!("run-{}-{sequence}", self.run_namespace))
     }
 
     pub(super) fn config(&self) -> Result<&LocalConfig> {

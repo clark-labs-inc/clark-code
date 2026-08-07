@@ -249,6 +249,7 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
         tc.session.clone(),
         run.clone(),
         context_limit,
+        tc.execution.weighted_token_limit,
     );
     let usage = stream.usage();
     // Breaks stuck same-action/same-result loops early (nudge → hard block).
@@ -648,7 +649,7 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
             let (unresolved_effects, goal_completed_this_run) = {
                 let session = tc.session.lock().await;
                 (
-                    session.effects.unresolved_count(&run),
+                    session.effects.unresolved_diagnostics(&run),
                     session.goal.as_ref().is_some_and(|goal| {
                         goal.status == GoalStatus::Complete && !is_completed_before_run(goal)
                     }),
@@ -659,7 +660,7 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
                 error,
                 final_answer_committed,
                 goal_completed_this_run,
-                unresolved_effects,
+                &unresolved_effects,
             );
             // The core returns its message tail only on success. Preserve the
             // typed prompt/steering messages and every complete assistant/tool

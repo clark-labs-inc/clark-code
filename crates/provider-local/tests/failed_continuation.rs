@@ -1,7 +1,6 @@
 //! Continuation regressions for runs that stop after completing useful work.
 
 use agent_core::domain::{AgentEvent, RunStatus};
-use agent_core::ids::RunId;
 use agent_core::provider::{PromptInput, Provider, ProviderConfig, Session, SessionOptions};
 use agent_orchestration::{ExecutionEvent, ExecutionLedger, ExecutionState};
 use futures::StreamExt;
@@ -449,18 +448,21 @@ async fn cancelled_turn_preserves_completed_context_for_follow_up() {
     });
     let (mut provider, session) = new_provider(addr, dir.path()).await;
 
-    let first = provider
+    let mut first = provider
         .prompt(
             &session.id,
             PromptInput::text("Read hello.txt. CONTEXT_SENTINEL_2048"),
         )
         .await
         .unwrap();
+    let first_run = loop {
+        let event = first.next().await.expect("run starts before cancellation");
+        if let AgentEvent::RunStarted { run } = event {
+            break run;
+        }
+    };
     waiting_rx.await.unwrap();
-    provider
-        .cancel(&session.id, &RunId::new("run-1"))
-        .await
-        .unwrap();
+    provider.cancel(&session.id, &first_run).await.unwrap();
     let _ = release_tx.send(());
     assert_eq!(run_status(first).await, RunStatus::Cancelled);
 
