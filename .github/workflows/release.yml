@@ -456,8 +456,11 @@ jobs:
   native_host_benchmark:
     name: Native host release benchmark
     needs: [release_source_prerequisites]
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Keep the native dependency graph on the same stable image used by the
+    # Linux release build. Ubuntu-latest can move to a new archive and spend
+    # the entire short gate timeout downloading WebKit packages.
+    runs-on: ubuntu-22.04
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
@@ -468,8 +471,8 @@ jobs:
           save-if: false
       - name: Install native host test dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=120 -o Acquire::https::Timeout=120 update
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=120 -o Acquire::https::Timeout=120 install -y \
             libwebkit2gtk-4.1-dev \
             libayatana-appindicator3-dev \
             librsvg2-dev \
