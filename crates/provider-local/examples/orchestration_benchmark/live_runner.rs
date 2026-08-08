@@ -509,7 +509,7 @@ async fn run_attempt(
         .map_err(|error| error.to_string())?;
         let profile = ScriptedProfile {
             provider: if request.research {
-                "local+clark-cloud".into()
+                "local+brokered-cloud".into()
             } else if request.acp {
                 "acp".into()
             } else {

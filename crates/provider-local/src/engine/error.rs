@@ -8,23 +8,23 @@ pub(super) struct MappedLoopError {
     pub(super) ui_error: Option<(String, String)>,
 }
 
-pub(super) fn map_loop_error(error: clark_agent::LoopError) -> MappedLoopError {
+pub(super) fn map_loop_error(error: agent_loop::LoopError) -> MappedLoopError {
     match error {
-        clark_agent::LoopError::Aborted => MappedLoopError {
+        agent_loop::LoopError::Aborted => MappedLoopError {
             status: RunStatus::Cancelled,
             run_error: None,
             failure_kind: None,
             ui_error: None,
         },
-        clark_agent::LoopError::Stream(stream) => map_stream_error(stream),
-        clark_agent::LoopError::ToolFatal { tool, reason } => {
+        agent_loop::LoopError::Stream(stream) => map_stream_error(stream),
+        agent_loop::LoopError::ToolFatal { tool, reason } => {
             let message = format!("fatal tool `{tool}` error: {reason}");
             MappedLoopError::failed(RunFailureKind::ToolFatal, "tool_fatal", message)
         }
-        clark_agent::LoopError::InvalidContinuation(message) => {
+        agent_loop::LoopError::InvalidContinuation(message) => {
             MappedLoopError::failed(RunFailureKind::LocalState, "local_agent_state", message)
         }
-        clark_agent::LoopError::EmptyOutcomeBudgetExhausted { budget, observed } => {
+        agent_loop::LoopError::EmptyOutcomeBudgetExhausted { budget, observed } => {
             MappedLoopError::failed(
                 RunFailureKind::EmptyResponse,
                 "empty_agent_response",
@@ -37,14 +37,14 @@ pub(super) fn map_loop_error(error: clark_agent::LoopError) -> MappedLoopError {
 }
 
 pub(super) fn map_loop_error_with_completion_state(
-    error: clark_agent::LoopError,
+    error: agent_loop::LoopError,
     final_answer_committed: bool,
     goal_completed: bool,
     unresolved_effects: &[String],
 ) -> MappedLoopError {
     let completion_delivery_failed = matches!(
         &error,
-        clark_agent::LoopError::Stream(clark_agent::StreamError::Fatal(message))
+        agent_loop::LoopError::Stream(agent_loop::StreamError::Fatal(message))
             if message
                 .strip_prefix("provider_error:")
                 .is_some_and(|message| message.starts_with(crate::llm::REQUIRED_TOOL_CONTRACT_VIOLATION))
@@ -72,18 +72,16 @@ pub(super) fn map_loop_error_with_completion_state(
     mapped
 }
 
-fn map_stream_error(error: clark_agent::StreamError) -> MappedLoopError {
+fn map_stream_error(error: agent_loop::StreamError) -> MappedLoopError {
     match error {
-        clark_agent::StreamError::Fatal(message)
-            if message.starts_with("insufficient_credits:") =>
-        {
+        agent_loop::StreamError::Fatal(message) if message.starts_with("insufficient_credits:") => {
             MappedLoopError::failed(
                 RunFailureKind::InsufficientCredits,
                 "insufficient_credits",
                 message,
             )
         }
-        clark_agent::StreamError::Fatal(message)
+        agent_loop::StreamError::Fatal(message)
             if message.starts_with("platform_key_rejected:") =>
         {
             let message = message
@@ -96,7 +94,7 @@ fn map_stream_error(error: clark_agent::StreamError) -> MappedLoopError {
                 message,
             )
         }
-        clark_agent::StreamError::Fatal(message) if message.starts_with("provider_error:") => {
+        agent_loop::StreamError::Fatal(message) if message.starts_with("provider_error:") => {
             let message = message.strip_prefix("provider_error:").unwrap_or(&message);
             let message = message
                 .strip_prefix(crate::llm::REQUIRED_TOOL_CONTRACT_VIOLATION)
@@ -105,7 +103,7 @@ fn map_stream_error(error: clark_agent::StreamError) -> MappedLoopError {
                 .to_string();
             MappedLoopError::failed(RunFailureKind::ProviderError, "provider_error", message)
         }
-        clark_agent::StreamError::Fatal(message)
+        agent_loop::StreamError::Fatal(message)
             if message.starts_with("execution_budget_exhausted:") =>
         {
             let message = message
@@ -119,24 +117,24 @@ fn map_stream_error(error: clark_agent::StreamError) -> MappedLoopError {
                 message,
             )
         }
-        clark_agent::StreamError::ProviderRateLimited(message) => {
+        agent_loop::StreamError::ProviderRateLimited(message) => {
             MappedLoopError::failed(RunFailureKind::RateLimited, "rate_limited", message)
         }
-        clark_agent::StreamError::Transient(message) => {
+        agent_loop::StreamError::Transient(message) => {
             MappedLoopError::failed(RunFailureKind::TransportError, "transport_error", message)
         }
-        clark_agent::StreamError::ContextOverflow(message) => {
+        agent_loop::StreamError::ContextOverflow(message) => {
             MappedLoopError::failed(RunFailureKind::ContextOverflow, "context_overflow", message)
         }
-        clark_agent::StreamError::ZeroOutputTransport(message) => MappedLoopError::failed(
+        agent_loop::StreamError::ZeroOutputTransport(message) => MappedLoopError::failed(
             RunFailureKind::EmptyResponse,
             "empty_agent_response",
             message,
         ),
-        clark_agent::StreamError::Fatal(message) => {
+        agent_loop::StreamError::Fatal(message) => {
             MappedLoopError::failed(RunFailureKind::ProviderError, "provider_error", message)
         }
-        clark_agent::StreamError::Empty => MappedLoopError::failed(
+        agent_loop::StreamError::Empty => MappedLoopError::failed(
             RunFailureKind::EmptyResponse,
             "empty_agent_response",
             "model returned an empty response".to_string(),
@@ -189,29 +187,29 @@ mod tests {
     fn stream_failures_keep_their_typed_category() {
         let cases = [
             (
-                clark_agent::StreamError::Fatal(
+                agent_loop::StreamError::Fatal(
                     "platform_key_rejected:model endpoint returned 401".into(),
                 ),
                 RunFailureKind::PlatformKeyRejected,
             ),
             (
-                clark_agent::StreamError::ProviderRateLimited("busy".into()),
+                agent_loop::StreamError::ProviderRateLimited("busy".into()),
                 RunFailureKind::RateLimited,
             ),
             (
-                clark_agent::StreamError::Transient("connection reset".into()),
+                agent_loop::StreamError::Transient("connection reset".into()),
                 RunFailureKind::TransportError,
             ),
             (
-                clark_agent::StreamError::Fatal("provider_error:upstream failed".into()),
+                agent_loop::StreamError::Fatal("provider_error:upstream failed".into()),
                 RunFailureKind::ProviderError,
             ),
             (
-                clark_agent::StreamError::ContextOverflow("too large".into()),
+                agent_loop::StreamError::ContextOverflow("too large".into()),
                 RunFailureKind::ContextOverflow,
             ),
             (
-                clark_agent::StreamError::Fatal(
+                agent_loop::StreamError::Fatal(
                     "execution_budget_exhausted: preserved for follow-up".into(),
                 ),
                 RunFailureKind::LocalState,
@@ -226,7 +224,7 @@ mod tests {
     #[test]
     fn incomplete_verification_has_its_own_failure_category() {
         let mapped = map_loop_error_with_completion_state(
-            clark_agent::LoopError::EmptyOutcomeBudgetExhausted {
+            agent_loop::LoopError::EmptyOutcomeBudgetExhausted {
                 budget: 1,
                 observed: 2,
             },
@@ -248,7 +246,7 @@ mod tests {
     #[test]
     fn completed_goal_with_pending_effects_stays_verification_incomplete() {
         let mapped = map_loop_error_with_completion_state(
-            clark_agent::LoopError::Stream(clark_agent::StreamError::ZeroOutputTransport(
+            agent_loop::LoopError::Stream(agent_loop::StreamError::ZeroOutputTransport(
                 "provider returned no content".into(),
             )),
             false,
@@ -264,7 +262,7 @@ mod tests {
     #[test]
     fn completed_goal_stays_done_when_its_post_tool_response_is_empty() {
         let mapped = map_loop_error_with_completion_state(
-            clark_agent::LoopError::Stream(clark_agent::StreamError::ZeroOutputTransport(
+            agent_loop::LoopError::Stream(agent_loop::StreamError::ZeroOutputTransport(
                 "provider returned no content".into(),
             )),
             false,
@@ -280,7 +278,7 @@ mod tests {
     #[test]
     fn completed_goal_stays_done_when_required_tool_repair_is_exhausted() {
         let mapped = map_loop_error_with_completion_state(
-            clark_agent::LoopError::Stream(clark_agent::StreamError::Fatal(format!(
+            agent_loop::LoopError::Stream(agent_loop::StreamError::Fatal(format!(
                 "provider_error:{} provider ignored required tool choice",
                 crate::llm::REQUIRED_TOOL_CONTRACT_VIOLATION
             ))),
@@ -297,7 +295,7 @@ mod tests {
     #[test]
     fn final_answer_alone_does_not_hide_a_later_empty_turn() {
         let mapped = map_loop_error_with_completion_state(
-            clark_agent::LoopError::EmptyOutcomeBudgetExhausted {
+            agent_loop::LoopError::EmptyOutcomeBudgetExhausted {
                 budget: 1,
                 observed: 2,
             },
@@ -311,7 +309,7 @@ mod tests {
     #[test]
     fn genuinely_empty_first_answer_stays_an_empty_response() {
         let mapped = map_loop_error_with_completion_state(
-            clark_agent::LoopError::EmptyOutcomeBudgetExhausted {
+            agent_loop::LoopError::EmptyOutcomeBudgetExhausted {
                 budget: 1,
                 observed: 2,
             },

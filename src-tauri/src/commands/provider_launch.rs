@@ -22,17 +22,16 @@ impl ProviderLaunchRequest {
                     return Err("ACP launch configuration accepts only its command and cwd".into());
                 }
             }
-            "clark" => {
-                if self.command.is_some() || self.cwd.is_some() || !self.extra.is_null() {
-                    return Err("Clark connection configuration is native-owned".into());
-                }
-            }
-            "local" | "specialist" => {
+            "local" => {
                 if self.command.is_some() {
                     return Err("local provider executables are native-owned".into());
                 }
             }
-            _ => return Err(format!("unknown provider: {provider_id}")),
+            _ => {
+                if self.command.is_some() {
+                    return Err("product provider executables are native-owned".into());
+                }
+            }
         }
         Ok(ProviderConfig {
             command: self.command,
@@ -54,8 +53,8 @@ mod tests {
             assert!(serde_json::from_value::<ProviderLaunchRequest>(value).is_err());
         }
         let request: ProviderLaunchRequest =
-            serde_json::from_value(serde_json::json!({})).expect("empty Clark request is valid");
-        assert!(request.into_provider_config("clark").is_ok());
+            serde_json::from_value(serde_json::json!({})).expect("empty product request is valid");
+        assert!(request.into_provider_config("product-provider").is_ok());
     }
 
     #[test]
@@ -66,10 +65,10 @@ mod tests {
         .unwrap();
         assert!(local.into_provider_config("local").is_err());
 
-        let clark: ProviderLaunchRequest = serde_json::from_value(serde_json::json!({
-            "extra": { "memory_scope": "another-account" },
+        let product: ProviderLaunchRequest = serde_json::from_value(serde_json::json!({
+            "command": ["untrusted-provider"],
         }))
         .unwrap();
-        assert!(clark.into_provider_config("clark").is_err());
+        assert!(product.into_provider_config("product-provider").is_err());
     }
 }

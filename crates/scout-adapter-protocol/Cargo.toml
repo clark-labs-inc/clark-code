@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "Dependency-light target-bound discovery contract for Clark Scout adapters."
+description = "Dependency-light target-bound discovery contract for Scout adapters."
 
 [dependencies]
 serde.workspace = true

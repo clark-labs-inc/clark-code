@@ -2,7 +2,7 @@
 //!
 //! Every provider adapter translates its wire format into these types, and the
 //! projection layer consumes them. This is the superset normalization of ACP's
-//! `session/update` variants and Clark's envelope `kind`s.
+//! `session/update` variants and managed-provider envelope `kind`s.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -68,7 +68,7 @@ pub enum ContentBlock {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         name: Option<String>,
     },
-    /// A user-selected Clark Code skill. Identity and content revision are
+    /// A user-selected host-provided skill. Identity and content revision are
     /// carried separately from display text so the provider can reject stale
     /// or ambiguous bindings before a run starts.
     SkillReference {
@@ -309,7 +309,7 @@ pub struct ChecklistStep {
     pub priority: Option<String>,
 }
 
-/// The agent's live execution checklist (ACP `plan` update / Clark plan phases).
+/// The agent's live execution checklist (ACP `plan` update / managed-provider plan phases).
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct ExecutionChecklist {
     pub steps: Vec<ChecklistStep>,
@@ -375,7 +375,7 @@ pub struct PermissionOption {
 }
 
 /// A human-in-the-loop authorization request (ACP `session/request_permission`,
-/// Clark confirmation gate). The UI must resolve it before the agent proceeds.
+/// managed-provider confirmation gate). The UI must resolve it before the agent proceeds.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PermissionRequest {
     pub id: PermissionRequestId,
@@ -587,7 +587,7 @@ pub struct GoalState {
 
 /// A file the user attached but a provider hasn't ingested yet. The bytes ride
 /// base64-encoded; each provider decides how to make it available to the agent
-/// (ACP → content blocks, Clark → an attachment record, …).
+/// (ACP → content blocks, managed providers → an attachment record, …).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PendingUpload {
     pub filename: String,
@@ -799,7 +799,7 @@ pub enum AgentEvent {
     /// Provider-native trajectory detail that does not participate in the
     /// presentation projection. Hosts persist this verbatim for replay and
     /// debugging (for example the full model-visible request and compaction
-    /// before/after transcript emitted by the local clark-agent loop).
+    /// before/after transcript emitted by the local agent loop).
     Trace {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         run: Option<RunId>,

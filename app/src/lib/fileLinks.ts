@@ -56,7 +56,7 @@ export function localPathFromHref(href: string | undefined, cwd: string): string
 }
 
 /** Preserve filesystem destinations while rejecting active or unknown URL
- * schemes. This policy belongs to Clark rather than to a Markdown renderer. */
+ * schemes. This policy belongs to the agent rather than to a Markdown renderer. */
 export function markdownUrlTransform(value: string): string {
   if (localPathFromHref(value, "") !== null) return value;
   const colon = value.indexOf(":");

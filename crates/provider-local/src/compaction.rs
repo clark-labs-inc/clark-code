@@ -2,10 +2,10 @@
 
 use agent_core::domain::{AgentEvent, ContentBlock, Role, RunFailureKind, RunOutcome, RunStatus};
 use agent_core::ids::RunId;
+use agent_loop as ca;
+use agent_loop_compaction as core;
 use async_channel::Sender;
 use async_trait::async_trait;
-use clark_agent as ca;
-use clark_agent_compaction as core;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::sync::{Arc, Mutex};
@@ -41,7 +41,7 @@ impl CheckpointCompactor {
         }
     }
 
-    /// clark-agent transforms a request-local clone rather than mutating its
+    /// agent-loop transforms a request-local clone rather than mutating its
     /// live context. Keep the replacement here and project it over the raw
     /// lineage on every later request; otherwise the same full transcript is
     /// summarized again on every turn.
@@ -350,7 +350,7 @@ pub(crate) async fn run_manual_compaction(
         if signal.is_cancelled() {
             finish_manual(&tx, &run, RunStatus::Cancelled, None, None).await;
         } else {
-            let message = "Clark could not summarize this conversation. Your existing context was left unchanged.";
+            let message = "Agent Desktop could not summarize this conversation. Your existing context was left unchanged.";
             let _ = tx
                 .send(AgentEvent::Error {
                     code: "compaction_failed".into(),
@@ -382,7 +382,7 @@ pub(crate) async fn run_manual_compaction(
         }
     };
     if !replaced {
-        let message = "The conversation changed while context was being compacted, so Clark kept the newer context unchanged.";
+        let message = "The conversation changed while context was being compacted, so Agent Desktop kept the newer context unchanged.";
         let _ = tx
             .send(AgentEvent::Error {
                 code: "compaction_conflict".into(),
@@ -404,7 +404,7 @@ pub(crate) async fn run_manual_compaction(
     let _ = tx
         .send(AgentEvent::Trace {
             run: Some(run.clone()),
-            source: "clark_code_compaction".into(),
+            source: "agent_loop_compaction".into(),
             payload: serde_json::json!({
                 "trigger": "manual",
                 "before_messages": source_len,

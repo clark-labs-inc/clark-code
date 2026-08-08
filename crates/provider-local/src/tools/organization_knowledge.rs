@@ -3,22 +3,17 @@
 use agent_core::domain::ToolKind;
 use async_trait::async_trait;
 use serde_json::{json, Value};
+use std::sync::Arc;
 
 use super::{arg_str, arg_str_opt, ToolCtx, ToolExecutor, ToolOutcome};
 
-#[derive(Clone)]
-pub struct OrganizationKnowledgeConfig {
-    pub base_url: String,
-    pub api_key: String,
-}
-
 pub struct OrganizationKnowledgeTool {
-    config: OrganizationKnowledgeConfig,
+    provider: Arc<dyn crate::platform::PlatformContextProvider>,
 }
 
 impl OrganizationKnowledgeTool {
-    pub fn new(config: OrganizationKnowledgeConfig) -> Self {
-        Self { config }
+    pub fn new(provider: Arc<dyn crate::platform::PlatformContextProvider>) -> Self {
+        Self { provider }
     }
 }
 
@@ -68,13 +63,9 @@ impl ToolExecutor for OrganizationKnowledgeTool {
         };
         let organization_id = arg_str_opt(&args, "organization_id");
         let limit = args.get("limit").and_then(Value::as_i64).unwrap_or(20);
-        match crate::platform::recall_organization_knowledge(
-            &self.config.base_url,
-            &self.config.api_key,
-            &query,
-            organization_id.as_deref(),
-            limit,
-        )
+        match self
+            .provider
+            .organization_knowledge(&query, organization_id.as_deref(), limit)
         .await
         {
             Ok(response) if response.organizations.iter().all(|packet| packet.hits.is_empty()) => {
@@ -95,12 +86,38 @@ impl ToolExecutor for OrganizationKnowledgeTool {
 mod tests {
     use super::*;
 
+    struct EmptyContext;
+
+    #[async_trait]
+    impl crate::platform::PlatformContextProvider for EmptyContext {
+        async fn personal_memories(&self) -> Result<Vec<crate::platform::PersonalMemory>, String> {
+            Ok(Vec::new())
+        }
+
+        async fn repository_context(
+            &self,
+            _fingerprint: &str,
+            _query: &str,
+        ) -> Result<crate::platform::RepositoryContext, String> {
+            Err("not configured".into())
+        }
+
+        async fn organization_knowledge(
+            &self,
+            query: &str,
+            _organization_id: Option<&str>,
+            _limit: i64,
+        ) -> Result<crate::platform::OrganizationKnowledgeResponse, String> {
+            Ok(crate::platform::OrganizationKnowledgeResponse {
+                query: query.into(),
+                organizations: Vec::new(),
+            })
+        }
+    }
+
     #[test]
     fn tool_is_read_only_and_has_a_bounded_schema() {
-        let tool = OrganizationKnowledgeTool::new(OrganizationKnowledgeConfig {
-            base_url: "https://api.clarkslabs.com/v1".into(),
-            api_key: "ck_live_test".into(),
-        });
+        let tool = OrganizationKnowledgeTool::new(Arc::new(EmptyContext));
         assert_eq!(tool.name(), "organization_knowledge");
         assert!(!tool.mutating());
         assert_eq!(tool.parameters()["properties"]["limit"]["maximum"], 50);

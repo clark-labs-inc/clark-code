@@ -192,7 +192,7 @@ fn compare(candidate: &LaneAggregate, control: &LaneAggregate) -> ValueCompariso
 }
 
 fn markdown(summary: &BenchmarkSummary, records: &[RunRecord]) -> String {
-    let mut out = String::from("# Clark multi-repository orchestration benchmark\n\n");
+    let mut out = String::from("# Agent multi-repository orchestration benchmark\n\n");
     out.push_str(&format!("Evidence: `{:?}`  \nRuns: {}  \nMulti-agent conformance: {:.1}%  \nValue claim allowed: **{}**\n\n{}\n\n", summary.evidence_level, summary.total_runs, summary.multi_conformance_pass_rate * 100.0, summary.value_claim_allowed, summary.note));
     out.push_str("## Lane results\n\n| Lane | Pass | Behavior | Replay | Conformance | Tokens | Useful | Duplicate | Wall ms | Verified / 100k |\n|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n");
     for lane in &summary.aggregates {

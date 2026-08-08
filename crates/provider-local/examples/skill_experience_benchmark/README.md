@@ -1,9 +1,9 @@
-# Clark skill experience benchmark
+# Agent skill experience benchmark
 
-This benchmark reproduces Read's Superpowers journey from two isolated,
-initially empty user homes. It exercises production Clark catalog, executor,
-managed-pack, typed-history, instruction, and provider boundaries. It does not
-call a live model.
+This benchmark reproduces a Superpowers journey from two isolated, initially
+empty user homes. It exercises the foundation catalog, executor, managed-pack,
+typed-history, instruction, and provider boundaries. It does not call a live
+model.
 
 ## What it proves
 
@@ -12,7 +12,7 @@ The local lane performs the following ordered journey:
 1. Start with empty personal and project skill roots.
 2. Reproduce legacy directory-symlink discovery.
 3. Load personal, project, and nested instruction provenance.
-4. Install the real Superpowers tree into Clark-managed user storage.
+4. Install the real Superpowers tree into agent-managed user storage.
 5. Preserve an intentionally-created project skill name collision.
 6. Serialize and deserialize an exact typed skill binding.
 7. Send that binding through `LocalAgentProvider` to a scripted
@@ -35,8 +35,7 @@ cargo run -p provider-local --example skill_experience_benchmark -- \
   --superpowers /path/to/obra/superpowers
 ```
 
-The path can also be supplied through `CLARK_SUPERPOWERS_FIXTURE`. When neither
-is provided, the runner checks the normal Codex plugin cache.
+When no path is provided, the runner checks the normal Codex plugin cache.
 
 Use `--out /new/path` to choose the artifact directory. The runner refuses to
 overwrite an existing directory. By default, it creates a unique directory
@@ -63,7 +62,7 @@ cargo test -p provider-local --example skill_experience_benchmark
 ```
 
 This uses the same 10-stage journey as the real repository run. Passing it
-proves benchmark mechanics and Clark contract integration; the separate real
+proves benchmark mechanics and foundation contract integration; the separate real
 run proves compatibility with the current Obra repository layout.
 
 The standalone runner can also emit a complete receipt from that fixture:
@@ -73,34 +72,6 @@ cargo run -p provider-local --example skill_experience_benchmark -- \
   --synthetic --out target/skill-experience-benchmark/local
 ```
 
-## Pre-release suite
-
-The repository-level entrypoint runs this deep journey as one family inside a
-broader fast sample of core/provider contracts, native desktop/account
-boundaries, local capabilities, scripted conversations, remote/git/worktree
-behavior, frontend contracts, and UI resilience:
-
-```bash
-./scripts/run-pre-release-benchmarks.sh \
-  --superpowers /path/to/obra/superpowers
-```
-
-Add `--live` to include a representative Clark Platform model sample: managed
-skill/resource use, basic response, read/search tools, permissioned mutation,
-and memory. That lane has no implicit provider or model and fails closed unless
-all four values are set:
-
-```bash
-CLARK_CODE_PROVIDER=clark-platform \
-CLARK_CODE_BASE_URL=https://api.clarkslabs.com/v1 \
-CLARK_CODE_MODEL='clark-code:YOUR_EXPLICIT_TIER' \
-CLARK_CODE_API_KEY=ck_live_... \
-  ./scripts/run-pre-release-benchmarks.sh \
-    --superpowers /path/to/obra/superpowers \
-    --live
-```
-
-The live credential is never stored in the logs or receipts. The release
-workflow runs this suite before any native build. It uses a pinned Superpowers
-revision and enables the paid lane only when
-`CLARK_CODE_PRERELEASE_LIVE=1` is configured at the repository level.
+Product-specific pre-release orchestration and paid model lanes belong to the
+downstream distribution. This public benchmark remains deterministic and
+credential-free.

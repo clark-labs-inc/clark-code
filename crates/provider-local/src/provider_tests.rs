@@ -103,18 +103,18 @@ fn native_image_content_is_forwarded_when_policy_allows_it() {
     }];
 
     let content = model_user_content("review the design".into(), &attachments, true);
-    let clark_agent::UserContent::Blocks(blocks) = content else {
+    let agent_loop::UserContent::Blocks(blocks) = content else {
         panic!("expected multimodal user content");
     };
     assert!(matches!(
         &blocks[0],
-        clark_agent::UserBlock::Image(image)
+        agent_loop::UserBlock::Image(image)
             if image.source == "data:image/png;base64,QUJD"
                 && image.alt.as_deref() == Some("design.png")
     ));
     assert!(matches!(
         &blocks[1],
-        clark_agent::UserBlock::Text(text) if text.text == "review the design"
+        agent_loop::UserBlock::Text(text) if text.text == "review the design"
     ));
 }
 
@@ -128,7 +128,7 @@ fn non_vision_models_keep_plain_text_user_content() {
 
     assert!(matches!(
         model_user_content("fallback description".into(), &attachments, false),
-        clark_agent::UserContent::Text(text) if text == "fallback description"
+        agent_loop::UserContent::Text(text) if text == "fallback description"
     ));
 }
 
@@ -184,9 +184,9 @@ async fn new_session_requires_cwd() {
 #[tokio::test]
 async fn isolated_orchestration_session_has_no_ambient_writable_surfaces() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(dir.path().join(".clark")).unwrap();
+    std::fs::create_dir_all(dir.path().join(".agent")).unwrap();
     std::fs::write(
-        dir.path().join(".clark/settings.json"),
+        dir.path().join(".agent/settings.json"),
         r#"{
           "hooks":{"PreToolUse":[{"matcher":"*","command":"touch /tmp/should-not-run"}]},
           "permissions":{"allow":["bash"]},
@@ -270,7 +270,7 @@ async fn strict_toolless_session_uses_the_host_owned_cache_identity() {
         .connect(provider_test_config_with_extra(serde_json::json!({
             "tools_enabled": false,
             "response_format": {"type": "json_object"},
-            "cache_session_id": "clark-specialist-cache-1",
+            "cache_session_id": "product-specialist-cache-1",
             "memories": false,
             "research": false
         })))
@@ -283,7 +283,7 @@ async fn strict_toolless_session_uses_the_host_owned_cache_identity() {
         })
         .await
         .unwrap();
-    assert_eq!(session.id.as_str(), "clark-specialist-cache-1");
+    assert_eq!(session.id.as_str(), "product-specialist-cache-1");
 }
 
 #[tokio::test]
@@ -304,10 +304,31 @@ async fn live_configuration_uses_only_provider_advertised_choices() {
     let mut provider = LocalAgentProvider::new();
     provider
         .connect(provider_test_config_with_extra(serde_json::json!({
-            "model": "clark-code:free",
+            "model": "managed-model-standard",
+            "models": [
+                {
+                    "id": "managed-model-standard",
+                    "label": "Standard",
+                    "description": "Standard managed coding model",
+                    "reasoning_effort": "high"
+                },
+                {
+                    "id": "managed-model-large",
+                    "label": "Large",
+                    "description": "Larger managed coding model",
+                    "reasoning_effort": "xhigh"
+                }
+            ],
             "memories": false,
             "browser_enabled": false,
-            "research": false
+            "research": false,
+            "browser_binary": {
+                "version": "1.0.0",
+                "release_tag": "browser-v1",
+                "download_base_url": "https://downloads.example/browser",
+                "archive_prefix": "managed-browser",
+                "cache_namespace": ".agent-desktop"
+            }
         })))
         .await
         .unwrap();
@@ -320,18 +341,18 @@ async fn live_configuration_uses_only_provider_advertised_choices() {
         .unwrap();
 
     let initial = provider.configuration(&session.id).await.unwrap();
-    assert_eq!(initial.models.len(), 3);
-    assert_eq!(initial.model.as_deref(), Some("clark-code:free"));
+    assert_eq!(initial.models.len(), 2);
+    assert_eq!(initial.model.as_deref(), Some("managed-model-standard"));
     let changed = provider
         .configure(
             &session.id,
             ProviderConfigurationChange::Model {
-                model: "clark-code:glm52".into(),
+                model: "managed-model-large".into(),
             },
         )
         .await
         .unwrap();
-    assert_eq!(changed.model.as_deref(), Some("clark-code:glm52"));
+    assert_eq!(changed.model.as_deref(), Some("managed-model-large"));
     assert_eq!(changed.reasoning_effort.as_deref(), Some("xhigh"));
     assert!(provider
         .configure(
@@ -354,7 +375,14 @@ async fn memory_and_browser_toggles_change_the_active_tool_contract() {
         .connect(provider_test_config_with_extra(serde_json::json!({
             "memories": false,
             "browser_enabled": false,
-            "research": false
+            "research": false,
+            "browser_binary": {
+                "version": "1.0.0",
+                "release_tag": "browser-v1",
+                "download_base_url": "https://downloads.example/browser",
+                "archive_prefix": "managed-browser",
+                "cache_namespace": ".agent-desktop"
+            }
         })))
         .await
         .unwrap();
@@ -500,7 +528,7 @@ async fn typed_goal_state_resumes_blocked_and_rebudgets_budget_limited_goals() {
         let mut state = provider.session.lock().await;
         crate::tools::goal::start_goal(
             &mut state,
-            "finish Clark-owned terminal parity".into(),
+            "finish Agent Desktop-owned terminal parity".into(),
             Some(10_000),
         )
         .unwrap();
@@ -584,7 +612,10 @@ fn next_run_registry_forks_while_prior_run_snapshot_is_still_held() {
     provider.registry = Some(Arc::new(ToolRegistry::new(None, None)));
     let prior_run = provider.registry.as_ref().unwrap().clone();
 
-    provider.next_run_registry_mut().unwrap().enable_browser();
+    provider
+        .next_run_registry_mut()
+        .unwrap()
+        .enable_browser(crate::browser_binary::test_browser_config());
 
     let next_run = provider.registry.as_ref().unwrap();
     assert!(!Arc::ptr_eq(next_run, &prior_run));
@@ -731,9 +762,9 @@ async fn cached_system_prompt_excludes_mutable_project_instructions() {
 #[tokio::test]
 async fn project_settings_customize_claude_style_commit_attribution() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(dir.path().join(".clark")).unwrap();
+    std::fs::create_dir_all(dir.path().join(".agent")).unwrap();
     std::fs::write(
-        dir.path().join(".clark/settings.json"),
+        dir.path().join(".agent/settings.json"),
         r#"{
           "attribution": {
             "commit": "Co-Authored-By: Project Agent <agent@example.com>"
@@ -1013,7 +1044,7 @@ async fn new_session_replays_typed_resume_into_history() {
     assert_eq!(s.transcript.len(), 1);
     assert!(matches!(
         s.transcript[0],
-        clark_agent::AgentMessage::User { .. }
+        agent_loop::AgentMessage::User { .. }
     ));
     let goal = s.goal.as_ref().expect("standing goal restored");
     assert_eq!(goal.id, "goal-restore");
@@ -1085,14 +1116,14 @@ async fn paid_explicit_vs_proactive_delegation_trigger_precision() {
     use agent_core::domain::RunUsage;
     use futures::StreamExt as _;
 
-    let api_key = std::env::var("CLARK_CODE_API_KEY")
-        .or_else(|_| std::env::var("CLARK_API_KEY"))
-        .expect("CLARK_CODE_API_KEY or CLARK_API_KEY must be set");
-    let root_model = std::env::var("CLARK_PAID_EVAL_ROOT_MODEL")
+    let api_key = std::env::var("MODEL_API_KEY")
+        .or_else(|_| std::env::var("PRODUCT_API_KEY"))
+        .expect("MODEL_API_KEY or PRODUCT_API_KEY must be set");
+    let root_model = std::env::var("PAID_EVAL_ROOT_MODEL")
         .unwrap_or_else(|_| crate::config::DEFAULT_MODEL.into());
-    let subagent_model = std::env::var("CLARK_PAID_EVAL_SUBAGENT_MODEL")
+    let subagent_model = std::env::var("PAID_EVAL_SUBAGENT_MODEL")
         .unwrap_or_else(|_| crate::config::DEFAULT_MODEL.into());
-    let base_url = std::env::var("CLARK_PAID_EVAL_BASE_URL")
+    let base_url = std::env::var("PAID_EVAL_BASE_URL")
         .unwrap_or_else(|_| crate::config::DEFAULT_BASE_URL.into());
     let dir = tempfile::tempdir().unwrap();
     for scope in ["alpha", "beta"] {
@@ -1239,7 +1270,7 @@ async fn side_question_leaves_session_transcript_byte_identical() {
     // into it would corrupt the run's history. We can't reach a live model in
     // a unit test, so we exercise the snapshot+build half of the fork directly
     // and assert the transcript is unchanged after building wire messages.
-    use clark_agent::{AgentMessage, UserContent};
+    use agent_loop::{AgentMessage, UserContent};
 
     let dir = tempfile::tempdir().unwrap();
     let mut p = LocalAgentProvider::new();
@@ -1293,7 +1324,7 @@ async fn side_question_leaves_session_transcript_byte_identical() {
 
 #[tokio::test]
 async fn plan_decision_current_approves_without_erasing_research_context() {
-    use clark_agent::{AgentMessage, UserContent};
+    use agent_loop::{AgentMessage, UserContent};
 
     let mut provider = LocalAgentProvider::new();
     let plan_id = {
@@ -1328,7 +1359,7 @@ async fn plan_decision_current_approves_without_erasing_research_context() {
 
 #[tokio::test]
 async fn plan_decision_fresh_discards_research_transcript_but_keeps_typed_plan() {
-    use clark_agent::{AgentMessage, UserContent};
+    use agent_loop::{AgentMessage, UserContent};
 
     let mut provider = LocalAgentProvider::new();
     let plan_id = {

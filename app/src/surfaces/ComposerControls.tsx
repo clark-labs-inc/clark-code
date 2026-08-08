@@ -60,7 +60,7 @@ export function ModelPill() {
         aria-haspopup="menu"
         aria-expanded={open}
         title={busy ? "Finish the current run before changing models" : "Model"}
-        className="flex min-h-8 items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-medium text-ink-secondary transition duration-200 ease-clark hover:bg-accent-subtle hover:text-accent"
+        className="flex min-h-8 items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-medium text-ink-secondary transition duration-200 ease-agent hover:bg-accent-subtle hover:text-accent"
       >
         {modelLabel(model)}
         <ChevronDown className="size-3 opacity-70" />
@@ -88,7 +88,7 @@ export function ModelPill() {
               }}
               disabled={busy || switching}
               className={cn(
-                "flex w-full items-start gap-2.5 rounded-xl px-2.5 py-2.5 text-left transition duration-200 ease-clark hover:bg-accent-subtle",
+                "flex w-full items-start gap-2.5 rounded-xl px-2.5 py-2.5 text-left transition duration-200 ease-agent hover:bg-accent-subtle",
                 candidate.id === model && "bg-accent-subtle",
               )}
             >

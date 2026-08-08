@@ -25,7 +25,7 @@ const session: Session = {
 
 function bridgeStub(): CoreBridge {
   return {
-    listProviders: async () => [{ id: "local", label: "Clark Code", capabilities: session.capabilities }],
+    listProviders: async () => [{ id: "local", label: "Agent Desktop", capabilities: session.capabilities }],
     openSession: vi.fn(async () => session),
     closeSession: vi.fn(async () => {}),
     prompt: vi.fn(async () => ({ runId: "run-stub" })),
@@ -50,8 +50,8 @@ beforeEach(() => {
     conversations: [],
     localSettings: {
       cwd: "/tmp/project",
-      model: "clark-code:free",
-      reasoningEffort: "max",
+      model: "local-model",
+      reasoningEffort: "high",
     },
     chatModels: {},
     activeRemote: null,
@@ -95,7 +95,7 @@ describe("edit and resend", () => {
       },
     });
     expect(openSession.mock.calls[1]?.[1].extra).toMatchObject({
-      model: "clark-code:free",
+      model: "local-model",
     });
     const request = openSession.mock.calls[1]?.[2];
     const resume = request?.kind === "new" ? request.options.resume : undefined;

@@ -57,7 +57,7 @@ pub(super) fn transition_decision(
     }
     if source_is_managed && source_branch != Some(target_branch) {
         return Err(format!(
-            "This Clark-managed checkout is pinned to {}. Open its existing checkout or start a new isolated session instead of switching this worktree.",
+            "This app-managed checkout is pinned to {}. Open its existing checkout or start a new isolated session instead of switching this worktree.",
             source_branch.unwrap_or("its current commit")
         ));
     }
@@ -192,7 +192,7 @@ pub(super) async fn resolve_base(
     match base {
         ManagedWorktreeBase::Current => Ok(current),
         // The picker may render before a network round-trip. Refresh only at
-        // the moment Clark actually creates the isolated checkout, with a
+        // the moment Agent Desktop actually creates the isolated checkout, with a
         // short bounded fallback to the locally advertised default branch.
         ManagedWorktreeBase::Default => Ok(resolve_fresh_default_base(root, &current).await),
     }

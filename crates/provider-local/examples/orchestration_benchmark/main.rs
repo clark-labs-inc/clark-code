@@ -1,4 +1,4 @@
-//! Reproducible benchmark for Clark's proposed multi-agent coding coordinator.
+//! Reproducible benchmark for the proposed multi-agent coding coordinator.
 //!
 //! Offline scripted runs are the default and validate benchmark mechanics,
 //! safety gates, failure recovery, scenario solvability, and report generation.
@@ -166,7 +166,7 @@ async fn run() -> Result<(), String> {
     let mut args = Args::parse()?;
     if args.live {
         if args.strong_model == "scripted-strong" {
-            args.strong_model = "clark-code".into();
+            args.strong_model = "strong-model".into();
         }
         if args.cheap_model == "scripted-cheap" {
             args.cheap_model = provider_local::DEFAULT_MODEL.into();
@@ -242,7 +242,7 @@ async fn run() -> Result<(), String> {
         && args.acp_command.is_none()
     {
         return Err(
-            "live mixed-harness requires --acp-command-json; Clark wraps it in a macOS read-only sandbox"
+            "live mixed-harness requires --acp-command-json; the harness wraps it in a macOS read-only sandbox"
                 .into(),
         );
     }
@@ -340,7 +340,7 @@ fn live_preflight() -> Result<(), String> {
 }
 
 fn live_api_key() -> Result<String, String> {
-    ["CLARK_CODE_API_KEY", "CLARK_API_KEY"]
+    ["MODEL_API_KEY", "PRODUCT_API_KEY"]
         .into_iter()
         .find_map(|name| {
             std::env::var(name)
@@ -348,7 +348,7 @@ fn live_api_key() -> Result<String, String> {
                 .filter(|value| !value.trim().is_empty())
         })
         .ok_or_else(|| {
-            "set CLARK_CODE_API_KEY or CLARK_API_KEY; keys are never written to results".into()
+            "set MODEL_API_KEY or PRODUCT_API_KEY; keys are never written to results".into()
         })
 }
 
@@ -387,7 +387,7 @@ fn load_env_file(path: PathBuf) -> Result<(), String> {
 
 fn print_help() {
     println!(
-        "Clark orchestration benchmark\n\n\
+        "Agent orchestration benchmark\n\n\
          Usage: cargo run -p provider-local --example orchestration_benchmark -- [options]\n\n\
          --out PATH             Artifact directory (must not already contain results.jsonl)\n\
          --repetitions N        Repetitions per scenario/lane (default 1)\n\

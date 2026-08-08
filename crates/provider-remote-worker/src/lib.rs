@@ -1,4 +1,4 @@
-//! `agent_core::Provider` adapter for a complete Clark Code worker owned by the
+//! `agent_core::Provider` adapter for a complete coding-agent worker owned by the
 //! native runtime. The worker owns the model loop, tools, checkout, policy, and
 //! trajectory; this adapter only translates its ordered control stream.
 
@@ -50,7 +50,7 @@ impl WorkerClient for RemoteWorkerSlot {
     }
 }
 
-/// One provider attachment to a shared, native-owned worker. A Clark Desktop
+/// One provider attachment to a shared, native-owned worker. A desktop host
 /// host creates one adapter per conversation while the worker safely
 /// multiplexes the underlying sessions by their private worker ids.
 pub struct RemoteWorkerProvider {

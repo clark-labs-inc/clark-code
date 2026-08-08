@@ -47,7 +47,7 @@ describe("settleRuns", () => {
     expect(settled.tool_calls.t3.status).toBe("failed");
     expect(settled.goal).toMatchObject({
       status: "blocked",
-      blocker_reason: "Clark stopped before the goal finished.",
+      blocker_reason: "the agent stopped before the goal finished.",
     });
     expect(settled.pending_permission).toBeUndefined();
   });

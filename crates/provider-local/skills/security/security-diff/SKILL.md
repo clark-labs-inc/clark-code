@@ -3,16 +3,16 @@ name: security-diff
 description: Review an exact Git range or working-tree patch for security regressions with complete changed-file coverage, supporting-code receipts, validation, attack paths, and a sealed result.
 ---
 
-# Clark Security diff scan
+# Security scanner diff scan
 
 This is a source-read-only security assessment unless the user separately and
 explicitly asks to fix a finding. Do not change the checkout, stage files,
 install dependencies, create tickets, publish results, or run live provider
-tests. Writing the canonical scan bundle under `.clark/security-scans/` is
+tests. Writing the canonical scan bundle under `.agent/security-scans/` is
 permitted. `security_poc_execute` may write and execute controls only in its
 automatically provisioned disposable offline copy.
 
-Clark pins the root Security turn to the exact `~deepseek/deepseek-v4-flash-latest` production model.
+The host selects the Security model through trusted runtime policy.
 The workflow model is not chosen from the conversation model setting.
 
 ## Bind the exact target
@@ -33,16 +33,13 @@ paths without modifying the real index. Review patches against the returned
 `resolvedBase` and `resolvedHead`; do not silently switch to a moving symbolic
 revision.
 
-After the exact diff target and governing policies are bound, call
-`cloud_advisor` once with phase `threat_model`, a bounded change-risk goal,
-inventory and policy summaries as evidence, and typed Security capabilities as
-candidate actions. Do not send credentials, raw secrets, private source bodies,
-or executable commands. Kimi K3 advice is strategy, not source evidence or
-authority; validate it independently. If unavailable, record the limitation
-and continue the baseline diff review.
+After the exact diff target and governing policies are bound, build a bounded
+change-risk threat model from the repository evidence. Do not place
+credentials, raw secrets, private source bodies, or executable commands in
+planning artifacts.
 
 Never claim a clean or completed review unless finalization succeeds. Write the
-canonical bundle to `.clark/security-scans/<scan-id>/scan.json`, then call
+canonical bundle to `.agent/security-scans/<scan-id>/scan.json`, then call
 `security_scan_contract(action="finalize", path="<canonical bundle>")`.
 A changed target, missing changed file, unrelated candidate, incomplete
 evidence, or reportable finding without an attack path must remain a visible
@@ -73,7 +70,7 @@ trace:
 
 `attacker-controlled source → changed or removed control → sink → impact`
 
-Every candidate needs a scan-local `candidateId` plus Clark Security semantic
+Every candidate needs a scan-local `candidateId` plus Security scanner semantic
 identity: a stable lowercase vulnerability-family `ruleId`, a stable lowercase
 root-control `identityAnchor`, and an optional lowercase `identityInstance` for
 independently attackable siblings. Also provide `title`, `summary`, `category`,
@@ -110,8 +107,3 @@ target id, changed reviewed/excluded counts, supporting file count, deferred
 proof gaps, limitations, and each finding's evidence, PoC receipts, and attack
 path. If the seal has no findings, say "no reportable findings were validated
 in this exact diff"; do not claim the patch or repository is secure.
-
-If `cloud_advisor` returned an accepted receipt, finish by calling
-`cloud_advisor_feedback` with the complete signed receipt fields, actual typed
-actions, seal status, bounded outcome, and evidence receipt ids. Never send credentials, secrets, or raw
-private source in feedback.

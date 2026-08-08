@@ -162,44 +162,6 @@ bubblewrap boundary, launch the binary inside a read-only root with one writable
 output bind and pass `--containment bwrap --denied-write PATH`, where `PATH` is
 inside a read-only bind. The benchmark fails if that negative write succeeds.
 
-UTM qualification must cross the guest boundary with a byte-for-byte binary
-read-back and a marker-authenticated result. A successful `utmctl exec` return
-alone is not evidence. Build the appropriate portable binary, then run:
-
-```bash
-node harness/scout-utm-qualify.mjs \
-  --platform ubuntu \
-  --binary target/aarch64-unknown-linux-musl/release/examples/scout_benchmark \
-  --reference target/scout-benchmark/local/receipt.json \
-  --out target/scout-benchmark/utm-ubuntu
-
-node harness/scout-utm-qualify.mjs \
-  --platform windows \
-  --binary target/aarch64-pc-windows-msvc/release/examples/scout_benchmark.exe \
-  --reference target/scout-benchmark/local/receipt.json \
-  --out target/scout-benchmark/utm-windows
-```
-
-The qualifier refuses to overwrite an output directory. It verifies the
-binary read-back, guest receipt/report hashes, canonical and semantic graph
-roots, and exact guest scratch cleanup. A Windows failure receipt also carries
-the read-back length/hash plus path-scoped Defender, signature, and file-state
-evidence. Quarantine is a failed packaging/trust gate; do not add an exclusion
-or disable real-time protection to turn it green.
-
-Live target adapters have a separate credential-safe qualification harness:
-
-```bash
-CLARK_EXEC_TOKEN="$CLARK_EXEC_TOKEN" \
-SCOUT_GITHUB_AUTHORITY="$SCOUT_GITHUB_AUTHORITY" \
-node harness/scout-adapter-live-qualification.mjs \
-  --url ws://127.0.0.1:PORT \
-  --root /target/project/.clark/scout/adapters/private \
-  --out target/scout-benchmark/live-adapter
-```
-
-The authenticated target service must already be reachable through the Clark
-SSH/VM transport. The harness verifies every opaque candidate and follows
-provider cursors, but its receipt contains only status classes, counts, and
-hashes—never credential values, principal ids, authority names, provider
-records, or raw cursors.
+Guest-VM packaging qualification, authenticated live target adapters, and
+credential-bearing transport receipts are distribution-owned lanes and are not
+part of this public deterministic benchmark.

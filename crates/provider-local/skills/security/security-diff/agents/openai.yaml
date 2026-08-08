@@ -1,7 +1,7 @@
 interface:
   display_name: "Security Diff"
   short_description: "Review an exact Git patch with sealed evidence"
-  default_prompt: "Use $security:security-diff to review the current Git working tree for security regressions. The workflow runs on host-pinned DeepSeek V4 Flash Latest."
+  default_prompt: "Use $security:security-diff to review the current Git working tree for security regressions. The workflow uses the host-pinned model."
 dependencies:
   tools:
     - type: tool

@@ -49,75 +49,61 @@ beforeEach(() => {
   (globalThis as { localStorage: Storage }).localStorage = store as unknown as Storage;
 });
 
-describe("Clark Code model settings", () => {
-  it("keeps the included coding route as the default", () => {
-    expect(DEFAULT_LOCAL_SETTINGS.model).toBe("clark-code:free");
-    expect(modelLabel(DEFAULT_LOCAL_SETTINGS.model)).toBe("Free");
+describe("product-supplied model settings", () => {
+  it("uses the neutral product model by default", () => {
+    expect(DEFAULT_LOCAL_SETTINGS.model).toBe("local-model");
+    expect(DEFAULT_LOCAL_SETTINGS.chatContrast).toBe("low");
+    expect(modelLabel(DEFAULT_LOCAL_SETTINGS.model)).toBe("Local model");
   });
 
-  it("exposes the three current Clark Code model tiers", () => {
+  it("exposes the neutral host model choices without a downstream product", () => {
     expect(CODING_MODELS.map(({ id, label }) => ({ id, label }))).toEqual([
-      { id: "clark-code:free", label: "Free" },
-      { id: "clark-code:glm52", label: "GLM 5.2" },
-      { id: "clark-code:kimi_k3", label: "Kimi K3" },
+      { id: "local-model", label: "Local model" },
+      { id: "local-model-large", label: "Large local model" },
     ]);
-  });
-
-  it("describes each model by its best use", () => {
-    expect(CODING_MODELS.map(({ id, hint }) => ({ id, hint }))).toEqual([
-      { id: "clark-code:free", hint: "Fast coding and agent work" },
-      { id: "clark-code:glm52", hint: "Daily driver for coding and security" },
-      { id: "clark-code:kimi_k3", hint: "Super intelligence" },
-    ]);
-  });
-
-  it("pins every selectable model to its maximum reasoning effort", () => {
-    expect(CODING_MODELS.map(({ id, defaultReasoningEffort }) => ({ id, defaultReasoningEffort })))
-      .toEqual([
-        { id: "clark-code:free", defaultReasoningEffort: "max" },
-        { id: "clark-code:glm52", defaultReasoningEffort: "xhigh" },
-        { id: "clark-code:kimi_k3", defaultReasoningEffort: "max" },
-      ]);
-    expect(normalizeReasoningEffort("clark-code:free", "low")).toBe("max");
-    expect(normalizeReasoningEffort("clark-code:glm52", "")).toBe("xhigh");
-    expect(normalizeReasoningEffort("clark-code:kimi_k3", "high")).toBe("max");
+    expect(normalizeReasoningEffort("local-model", "low")).toBe("high");
   });
 
   it("retires saved removed picker selections to the default model", () => {
     saveLocalSettings({
       ...DEFAULT_LOCAL_SETTINGS,
-      model: "clark-code:grok45",
+      model: "retired-model",
       reasoningEffort: "high",
     });
     saveChatModels({
-      "chat-retired": { model: "clark-code:claude_opus_5", reasoningEffort: "" },
+      "chat-retired": { model: "retired-model", reasoningEffort: "" },
     });
 
     expect(loadLocalSettings()).toMatchObject({
-      model: "clark-code:free",
-      reasoningEffort: "max",
+      model: "local-model",
+      reasoningEffort: "high",
     });
     expect(loadChatModels()).toEqual({
       "chat-retired": {
-        model: "clark-code:free",
-        reasoningEffort: "max",
+        model: "local-model",
+        reasoningEffort: "high",
       },
     });
   });
 
-  it("keeps the included coding route without rewriting it", () => {
-    saveLocalSettings({ ...DEFAULT_LOCAL_SETTINGS, model: "clark-code:free" });
+  it("keeps the configured neutral route without rewriting it", () => {
+    saveLocalSettings({
+      ...DEFAULT_LOCAL_SETTINGS,
+      model: "local-model",
+      chatContrast: "medium",
+    });
 
     expect(loadLocalSettings()).toMatchObject({
-      model: "clark-code:free",
-      reasoningEffort: "max",
+      model: "local-model",
+      reasoningEffort: "high",
+      chatContrast: "medium",
     });
   });
 
 });
 
-describe("cloud advisor host binding", () => {
-  it("binds a local Scout session without granting training eligibility", () => {
+describe("product specialist extension binding", () => {
+  it("keeps product provider extras empty in the neutral composition", () => {
     const config = localConnectConfig(
       { ...DEFAULT_LOCAL_SETTINGS, cwd: "/project" },
       undefined,
@@ -126,17 +112,11 @@ describe("cloud advisor host binding", () => {
       "id:account",
       {
         organizationId: "018f8e8a-4722-7c68-b5b7-a4c6793c85b0",
-        specialist: "scout",
+        kind: "scout",
         workflow: "scout:map",
       },
     );
-    expect(config.extra?.cloud_advisor).toEqual({
-      organization_id: "018f8e8a-4722-7c68-b5b7-a4c6793c85b0",
-      specialist: "scout",
-      workflow: "scout:map",
-      execution_residency: "local_only",
-      training_consent: "none",
-    });
+    expect(config.extra).toMatchObject({ model: "local-model" });
   });
 
   it("sends only an opaque native binding for a remote worker", () => {
@@ -148,9 +128,9 @@ describe("cloud advisor host binding", () => {
       "id:account",
       {
         organizationId: "018f8e8a-4722-7c68-b5b7-a4c6793c85b0",
-        specialist: "security",
+        kind: "security",
         workflow: "security:scan",
-        trainingConsent: "explicit_user",
+        trainingOptIn: true,
       },
     );
     expect(config.cwd).toBeUndefined();
@@ -200,25 +180,28 @@ describe("effectiveModelSettings (per-conversation model)", () => {
 
   it("uses the per-chat override when one is set", () => {
     const overrides: Record<string, ChatModelOverride> = {
-      "chat-1": { model: "clark-code:free", reasoningEffort: "" },
+      "chat-1": { model: "local-model-large", reasoningEffort: "" },
     };
     const out = effectiveModelSettings(DEFAULT_LOCAL_SETTINGS, overrides, "chat-1");
-    expect(out.model).toBe("clark-code:free");
+    expect(out.model).toBe("local-model-large");
     expect(out.reasoningEffort).toBe("max");
   });
 
   it("falls back when an un-migrated chat still names a retired picker model", () => {
     const overrides: Record<string, ChatModelOverride> = {
-      "chat-1": { model: "clark-code:gemini35_flash_lite", reasoningEffort: "low" },
+      "chat-1": { model: "retired-model", reasoningEffort: "low" },
     };
 
     expect(effectiveModelSettings(DEFAULT_LOCAL_SETTINGS, overrides, "chat-1"))
-      .toMatchObject({ model: DEFAULT_LOCAL_SETTINGS.model, reasoningEffort: "max" });
+      .toMatchObject({
+        model: DEFAULT_LOCAL_SETTINGS.model,
+        reasoningEffort: DEFAULT_LOCAL_SETTINGS.reasoningEffort,
+      });
   });
 
   it("one chat's override does not leak into another", () => {
     const overrides: Record<string, ChatModelOverride> = {
-      "chat-1": { model: "clark-code:free", reasoningEffort: "" },
+      "chat-1": { model: "local-model-large", reasoningEffort: "" },
     };
     expect(effectiveModelSettings(DEFAULT_LOCAL_SETTINGS, overrides, "chat-2").model)
       .toBe(DEFAULT_LOCAL_SETTINGS.model);
@@ -227,9 +210,9 @@ describe("effectiveModelSettings (per-conversation model)", () => {
 
 describe("chat model overrides round-trip localStorage", () => {
   it("persists and reloads per-chat models", () => {
-    saveChatModels({ "chat-a": { model: "clark-code:free", reasoningEffort: "" } });
+    saveChatModels({ "chat-a": { model: "local-model-large", reasoningEffort: "" } });
     expect(loadChatModels()).toEqual({
-      "chat-a": { model: "clark-code:free", reasoningEffort: "max" },
+      "chat-a": { model: "local-model-large", reasoningEffort: "max" },
     });
     saveChatModels({});
     expect(loadChatModels()).toEqual({});
@@ -268,9 +251,9 @@ describe("specialist model contract", () => {
     ).model).toBe(SPECIALIST_MODEL_ID);
   });
 
-  it("pins every specialist connect config to DeepSeek at maximum reasoning", () => {
+  it("pins every specialist connect config to the product specialist policy", () => {
     const config = localConnectConfig(
-      { ...DEFAULT_LOCAL_SETTINGS, cwd: "/repo", model: "clark-code:deepseek_v4_flash_latest", reasoningEffort: "low" },
+      { ...DEFAULT_LOCAL_SETTINGS, cwd: "/repo", model: "retired-specialist-model", reasoningEffort: "low" },
       undefined,
       undefined,
       "security",
@@ -287,9 +270,9 @@ describe("retired picker model routing", () => {
     expect(localConnectConfig({
       ...DEFAULT_LOCAL_SETTINGS,
       cwd: "/repo",
-      model: "clark-code:gemini35_flash_lite",
+      model: "retired-model",
       reasoningEffort: "low",
-    }).extra).toMatchObject({ model: "clark-code:free" });
+    }).extra).toMatchObject({ model: "local-model" });
   });
 });
 

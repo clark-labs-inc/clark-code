@@ -66,7 +66,7 @@ async fn run() -> Result<(), String> {
         (BackendKind::LinuxBubblewrap, "/usr/bin/bwrap"),
         (
             BackendKind::WindowsRestrictedToken,
-            "clark-command-runner.exe",
+            "agent-command-runner.exe",
         ),
     ] {
         let manager = SandboxManager::simulate(policy.clone(), backend, PathBuf::from(helper));

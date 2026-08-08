@@ -18,7 +18,7 @@ export interface SshHost {
   remoteRoot: string;
 }
 
-const KEY = "clark-desktop:ssh-hosts";
+const KEY = "agent-desktop:ssh-hosts";
 
 export function loadSshHosts(scope?: string | null): SshHost[] {
   try {

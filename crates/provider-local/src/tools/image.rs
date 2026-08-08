@@ -1,7 +1,7 @@
 //! Safe workspace image tools.
 //!
 //! `view_image` feeds a contained raster image back through the typed tool
-//! result channel. `generate_image` calls Clark's authenticated platform relay,
+//! result channel. `generate_image` calls Agent Desktop's authenticated platform relay,
 //! writes the returned bytes through the active executor (local or remote), and
 //! emits a typed artifact instead of relying on a prose convention.
 
@@ -23,7 +23,7 @@ const MAX_INPUT_IMAGE_BYTES: usize = 20 * 1024 * 1024;
 const MAX_OUTPUT_IMAGE_BYTES: usize = 20 * 1024 * 1024;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(180);
 
-/// Clark Platform relay configuration. The platform key is user-scoped; the
+/// Agent Desktop Platform relay configuration. The platform key is user-scoped; the
 /// server alone owns the upstream image-provider credential and billing.
 #[derive(Clone, Debug)]
 pub struct ImageGenerationConfig {
@@ -131,7 +131,7 @@ impl ToolExecutor for GenerateImage {
         }
         let output = requested_output_path(args, prompt);
         Some(format!(
-            "Generate an image through Clark (may consume credits)\nPrompt: {}\nSave to: {output} (extension matches returned image)",
+            "Generate an image through Agent Desktop (may consume credits)\nPrompt: {}\nSave to: {output} (extension matches returned image)",
             preview_prompt(prompt)
         ))
     }
@@ -184,9 +184,9 @@ impl ToolExecutor for GenerateImage {
         }
 
         ctx.report(if input_images.is_empty() {
-            "Generating image through Clark…"
+            "Generating image through Agent Desktop…"
         } else {
-            "Generating image with workspace references through Clark…"
+            "Generating image with workspace references through Agent Desktop…"
         });
         let generated = match self.generate(&prompt, input_images, &ctx.cancel).await {
             Ok(generated) => generated,
@@ -225,7 +225,7 @@ impl ToolExecutor for GenerateImage {
             kind: ArtifactKind::Image,
             mime_type: Some(generated.mime_type.to_string()),
             // A data URL is intentional: it renders safely for local and remote
-            // workspaces without broadening the desktop host's file-read scope.
+            // workspaces without broadening Agent Desktop's file-read scope.
             uri: Some(data_url),
         };
         ToolOutcome::ok(format!(
@@ -250,9 +250,9 @@ impl GenerateImage {
         input_images: Vec<String>,
         cancel: &tokio_util::sync::CancellationToken,
     ) -> Result<GeneratedImage, String> {
-        let client = clark_http::build_client(clark_http::ClientOptions {
+        let client = desktop_http::build_client(desktop_http::ClientOptions {
             request_timeout: Some(REQUEST_TIMEOUT),
-            user_agent: Some("clark-desktop"),
+            user_agent: Some("agent-desktop"),
             ..Default::default()
         })
         .map_err(|error| format!("creating image client: {error}"))?;
@@ -264,7 +264,7 @@ impl GenerateImage {
             .json(&json!({"prompt": prompt, "input_images": input_images}));
         let response = tokio::select! {
             _ = cancel.cancelled() => return Err("image generation cancelled".to_string()),
-            response = request.send() => response.map_err(|error| format!("calling Clark image generation: {error}"))?,
+            response = request.send() => response.map_err(|error| format!("calling Agent Desktop image generation: {error}"))?,
         };
         parse_generation_response(response).await
     }
@@ -335,24 +335,23 @@ async fn parse_generation_response(response: reqwest::Response) -> Result<Genera
     let body = response
         .bytes()
         .await
-        .map_err(|error| format!("reading Clark image response: {error}"))?;
+        .map_err(|error| format!("reading Agent Desktop image response: {error}"))?;
     if status != StatusCode::OK {
         return Err(format!(
-            "Clark image generation returned HTTP {status}: {}",
+            "Agent Desktop image generation returned HTTP {status}: {}",
             compact_response(&body)
         ));
     }
     let parsed: ImageGenerationResponse = serde_json::from_slice(&body).map_err(|error| {
         format!(
-            "Clark image generation returned an invalid response ({error}): {}",
+            "Agent Desktop image generation returned an invalid response ({error}): {}",
             compact_response(&body)
         )
     })?;
-    let image = parsed
-        .data
-        .into_iter()
-        .next()
-        .ok_or_else(|| "Clark image generation completed without an image".to_string())?;
+    let image =
+        parsed.data.into_iter().next().ok_or_else(|| {
+            "Agent Desktop image generation completed without an image".to_string()
+        })?;
     decode_generated_image(image)
 }
 
@@ -365,14 +364,16 @@ fn decode_generated_image(image: ImageGenerationData) -> Result<GeneratedImage, 
             "generated image is too large (max {MAX_OUTPUT_IMAGE_BYTES} bytes)"
         ));
     }
-    let detected = detect_image_mime(&bytes)
-        .ok_or_else(|| "Clark returned bytes that are not a supported raster image".to_string())?;
+    let detected = detect_image_mime(&bytes).ok_or_else(|| {
+        "Agent Desktop returned bytes that are not a supported raster image".to_string()
+    })?;
     if let Some(reported) = image.media_type.as_deref() {
-        let reported = normalize_image_mime(reported)
-            .ok_or_else(|| "Clark returned an unsupported generated image MIME type".to_string())?;
+        let reported = normalize_image_mime(reported).ok_or_else(|| {
+            "Agent Desktop returned an unsupported generated image MIME type".to_string()
+        })?;
         if reported != detected {
             return Err(format!(
-                "Clark returned inconsistent generated image MIME types ({reported} vs {detected})"
+                "Agent Desktop returned inconsistent generated image MIME types ({reported} vs {detected})"
             ));
         }
     }
@@ -619,8 +620,8 @@ mod tests {
         assert_eq!(preview_prompt("neon fox"), "neon fox");
         assert!(preview_prompt(&"x".repeat(301)).ends_with('…'));
         assert_eq!(
-            generation_url("https://api.clarklabs.com/v1/"),
-            "https://api.clarklabs.com/v1/images/generations"
+            generation_url("https://product.example/v1/"),
+            "https://product.example/v1/images/generations"
         );
     }
 
@@ -646,10 +647,10 @@ mod tests {
     #[ignore = "paid live image generation; run only with explicit user authorization"]
     #[tokio::test]
     async fn paid_generation_writes_a_filename_matching_the_returned_image_format() {
-        let api_key = std::env::var("CLARK_IMAGE_E2E_API_KEY")
-            .expect("set CLARK_IMAGE_E2E_API_KEY for the paid image E2E test");
-        let base_url = std::env::var("CLARK_IMAGE_E2E_BASE_URL")
-            .unwrap_or_else(|_| "https://api.clarkslabs.com/v1".to_string());
+        let api_key = std::env::var("IMAGE_GENERATION_E2E_API_KEY")
+            .expect("set IMAGE_GENERATION_E2E_API_KEY for the paid image E2E test");
+        let base_url = std::env::var("IMAGE_GENERATION_E2E_BASE_URL")
+            .unwrap_or_else(|_| "http://127.0.0.1:11434/v1".to_string());
         let dir = tempfile::tempdir().unwrap();
         let outcome = GenerateImage::new(ImageGenerationConfig { base_url, api_key })
             .invoke(

@@ -233,16 +233,16 @@ impl AdmissionPolicy {
                     reject(
                         &mut rejections,
                         "external_research_not_required",
-                        "Clark cloud is reserved for genuinely external research",
+                        "product cloud is reserved for genuinely external research",
                     );
                 }
                 if request.workstreams.len() != 1
-                    || request.workstreams[0].harness_kind != HarnessKind::ClarkCloud
+                    || request.workstreams[0].harness_kind != HarnessKind::BrokeredCloud
                 {
                     reject(
                         &mut rejections,
                         "invalid_cloud_route",
-                        "external research must use exactly one Clark cloud workstream",
+                        "external research must use exactly one product cloud workstream",
                     );
                 }
             }
@@ -251,12 +251,12 @@ impl AdmissionPolicy {
             && request
                 .workstreams
                 .iter()
-                .any(|workstream| workstream.harness_kind == HarnessKind::ClarkCloud)
+                .any(|workstream| workstream.harness_kind == HarnessKind::BrokeredCloud)
         {
             reject(
                 &mut rejections,
                 "cloud_for_local_task",
-                "Clark cloud agents cannot be used for repository-local work",
+                "product cloud agents cannot be used for repository-local work",
             );
         }
 
@@ -435,7 +435,7 @@ mod tests {
         assert!(!AdmissionPolicy::default().evaluate(&request).admitted);
         request.risk.touches_auth_or_security = true;
         assert!(AdmissionPolicy::default().evaluate(&request).admitted);
-        request.workstreams[0].harness_kind = HarnessKind::ClarkCloud;
+        request.workstreams[0].harness_kind = HarnessKind::BrokeredCloud;
         assert!(!AdmissionPolicy::default().evaluate(&request).admitted);
     }
 

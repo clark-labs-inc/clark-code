@@ -28,7 +28,7 @@ const dev = spawn(
   ["node_modules/vite/bin/vite.js", "--host", "127.0.0.1", "--port", String(port), "--strictPort"],
   {
     cwd: appDir,
-    env: { ...process.env, VITE_CLARK_DEV_AUTH: "1" },
+    env: { ...process.env, VITE_PRODUCT_DEV_AUTH: "1" },
     stdio: ["ignore", "pipe", "pipe"],
   },
 );
@@ -52,14 +52,14 @@ async function waitForServer() {
 const SEED = () => {
   localStorage.clear();
   localStorage.setItem(
-    "clark.desktop.dev-account",
+    "agent-desktop.dev-account",
     JSON.stringify({
-      user: { id: "profiler", name: "Profiler", email: "p@clark.local", method: "local" },
+      user: { id: "profiler", name: "Profiler", email: "p@example.local", method: "local" },
     }),
   );
   localStorage.setItem(
-    "clark-desktop:project-context:id%3Aprofiler",
-    JSON.stringify({ cwd: "/tmp/clark-profiling" }),
+    "agent-desktop:project-context:id%3Aprofiler",
+    JSON.stringify({ cwd: "/tmp/agent-profiling" }),
   );
 };
 
@@ -90,7 +90,7 @@ const REPLY_BLOCK = [
   "Shell:\n",
   "```bash\ncargo test -p agent-core -p provider-local\npnpm --dir app build\n",
   "Config:\n",
-  "```toml\n[project]\nname = \"clark-desktop\"\nversion = \"0.1.0\"\n\n[dependencies]\ntauri = \"2\"\nserde = { version = \"1\", features = [\"derive\"] }\n",
+  "```toml\n[project]\nname = \"example-desktop\"\nversion = \"0.1.0\"\n\n[dependencies]\ntauri = \"2\"\nserde = { version = \"1\", features = [\"derive\"] }\n",
   "Payload:\n",
   "```json\n{ \"session\": \"abc\", \"snapshot\": { \"timeline\": [], \"runs\": {} }, \"rev\": 42 }\n",
   "Numbers:\n\n| Path | Warm | Cold |\n| --- | --- | --- |\n| Reattach | 19ms | n/a |\n| Cold open | n/a | ~900ms |\n| Cloud fetch | 0 | ~400ms |\n\nSome closing prose. ".repeat(3),
@@ -270,7 +270,7 @@ try {
       await switched;
       const { profile: prof } = await cdp.send("Profiler.stop");
       await cdp.detach();
-      writeFileSync(`/tmp/clark-switch-${label}.cpuprofile`, JSON.stringify(prof));
+      writeFileSync(`/tmp/agent-switch-${label}.cpuprofile`, JSON.stringify(prof));
     } else {
       await switched;
     }
@@ -294,7 +294,7 @@ try {
     await page.waitForTimeout(300);
     const { profile: prof } = await cdp.send("Profiler.stop");
     await cdp.detach();
-    writeFileSync("/tmp/clark-switch-first-cold.cpuprofile", JSON.stringify(prof));
+    writeFileSync("/tmp/agent-switch-first-cold.cpuprofile", JSON.stringify(prof));
     const busy = (prof.timeDeltas ?? []).reduce((a, b) => a + b, 0) / 1000;
     console.log(`[first-switch] JS busy ≈ ${busy.toFixed(0)}ms`);
     results.firstSwitchBusyMs = Math.round(busy);
@@ -338,7 +338,7 @@ try {
 
   // Aggregate the CPU profiles into a self-time leaderboard.
   const agg = new Map();
-  for (const f of ["/tmp/clark-switch-r1-A.cpuprofile", "/tmp/clark-switch-r1-B.cpuprofile", `/tmp/clark-switch-r${rounds}-A.cpuprofile`]) {
+  for (const f of ["/tmp/agent-switch-r1-A.cpuprofile", "/tmp/agent-switch-r1-B.cpuprofile", `/tmp/agent-switch-r${rounds}-A.cpuprofile`]) {
     let prof;
     try {
       prof = JSON.parse(readFileSync(f, "utf8"));
@@ -377,9 +377,9 @@ try {
   console.log("TOP SELF-TIME:");
   results.topFunctions.slice(0, 15).forEach((t) => console.log(`  ${String(t.selfMs).padStart(7)}ms  ${t.fn}`));
   if (results.errors.length) console.log("PAGE ERRORS:", results.errors.slice(0, 5));
-  mkdirSync("/tmp/clark-profile", { recursive: true });
-  writeFileSync("/tmp/clark-profile/results.json", JSON.stringify(results, null, 2));
-  console.log(`DONE in ${((Date.now() - t0) / 1000).toFixed(0)}s — /tmp/clark-profile/results.json`);
+  mkdirSync("/tmp/agent-profile", { recursive: true });
+  writeFileSync("/tmp/agent-profile/results.json", JSON.stringify(results, null, 2));
+  console.log(`DONE in ${((Date.now() - t0) / 1000).toFixed(0)}s — /tmp/agent-profile/results.json`);
 } finally {
   await browser?.close();
   dev.kill("SIGTERM");

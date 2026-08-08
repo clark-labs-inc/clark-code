@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "Bounded native desktop perception and input backends for Clark Code."
+description = "Bounded native desktop perception and input backends for desktop agents."
 
 [features]
 default = []
@@ -66,6 +66,6 @@ windows = { version = "0.62", features = [
 ] }
 
 [[bin]]
-name = "clark-computer-use-helper"
-path = "src/bin/clark-computer-use-helper.rs"
+name = "agent-computer-use-helper"
+path = "src/bin/agent-computer-use-helper.rs"
 required-features = ["helper-service"]

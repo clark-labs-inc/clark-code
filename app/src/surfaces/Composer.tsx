@@ -41,7 +41,7 @@ import {
 } from "../lib/composerDraft";
 import { useComposerDraftState } from "../lib/useComposerDraftState";
 import { useSkillCatalog } from "../lib/useSkillCatalog";
-import { useSubscriptionWorkflowGate } from "../lib/useSubscriptionWorkflowGate";
+import { useGatedWorkflowGate } from "../lib/useGatedWorkflowGate";
 import { AttachmentChips } from "./ComposerAttachments";
 import { ComposerContextBar } from "./ComposerContextBar";
 import { ComposerAttachmentMenu } from "./ComposerAttachmentMenu";
@@ -49,7 +49,7 @@ import { ComposerAutocomplete } from "./ComposerAutocomplete";
 import { ComposerPermissionPill } from "./ComposerPermissionPill";
 import { ComposerCollaborationPill } from "./ComposerCollaborationPill";
 import { ComposerQueuedMessages } from "./ComposerQueuedMessages";
-import { ComposerSubscriptionWorkflowGate } from "./ComposerSubscriptionWorkflowGate";
+import { ComposerGatedWorkflowGate } from "./ComposerGatedWorkflowGate";
 import { ModelPill } from "./ComposerControls";
 import {
   SandboxSetupCard,
@@ -135,7 +135,7 @@ export function Composer() {
   const setPrefill = useSessionStore((s) => s.setComposerPrefill);
   const resendFrom = useSessionStore((s) => s.resendFrom);
   const [editTimelineIndex, setEditTimelineIndex] = useState<number | null>(null);
-  const subscriptionAccess = useSubscriptionWorkflowGate(sessionId);
+  const workflowAccess = useGatedWorkflowGate(sessionId);
 
   useEffect(() => {
     setCaret(0);
@@ -183,7 +183,7 @@ export function Composer() {
               invocationName: reference.name,
               description: "Pinned skill from conversation history",
               scope: "project",
-              origin: "clark",
+              origin: "bundled",
               source: "conversation history",
               requiredTools: [],
               missingTools: [],
@@ -370,7 +370,7 @@ export function Composer() {
     });
   };
 
-  const submit = async ({ subscriptionApproved = false } = {}) => {
+  const submit = async ({ workflowAccessApproved = false } = {}) => {
     if (!canSend) return;
     const expandedPastes = expandPendingPastes(value, pendingPastes);
     const specialistIntent = specialistSlashIntent(expandedPastes);
@@ -392,10 +392,10 @@ export function Composer() {
       return;
     }
     const t = expandPromptSlashCommand(expandedPastes);
-    if (subscriptionAccess.shouldGate(
+    if (workflowAccess.shouldGate(
       t,
       selectedSkills.flatMap((skill) => [skill.name, skill.invocationName]),
-      subscriptionApproved,
+      workflowAccessApproved,
     )) {
       return;
     }
@@ -448,7 +448,7 @@ export function Composer() {
     const goalObjective = goalCommandObjective(t);
     if (goalObjective === "") {
       setDraftValue("/goal ");
-      flashNotice("Describe what Clark should keep working toward after /goal.");
+      flashNotice("Describe what the agent should keep working toward after /goal.");
       requestAnimationFrame(() => {
         taRef.current?.focus();
         taRef.current?.setSelectionRange(6, 6);
@@ -604,9 +604,9 @@ export function Composer() {
           onStatusChange={updateSandboxStatus}
         />
       )}
-      <ComposerSubscriptionWorkflowGate
-        access={subscriptionAccess}
-        onRun={() => submit({ subscriptionApproved: true })}
+      <ComposerGatedWorkflowGate
+        access={workflowAccess}
+        onRun={() => submit({ workflowAccessApproved: true })}
         onDismissed={() => taRef.current?.focus()}
       />
       {/* Keep suggestions in normal layout flow. The old absolute menu was
@@ -627,7 +627,7 @@ export function Composer() {
       <ComposerContextBar />
       <div
         className={cn(
-          "conversation-column-width relative z-10 mx-auto w-full rounded-lg border px-2.5 py-[1.375rem] transition duration-200 ease-clark",
+          "conversation-column-width relative z-10 mx-auto w-full rounded-lg border px-2.5 py-[1.375rem] transition duration-200 ease-agent",
           "border-border bg-composer-surface shadow-none",
           dragging
             ? "border-accent bg-accent-subtle"
@@ -679,7 +679,7 @@ export function Composer() {
           <div className="flex items-center gap-1.5 pb-1 pt-0.5 text-xs font-medium text-accent">
             <Target className="size-3.5" />
             <span>Standing goal</span>
-            <span className="font-normal text-ink-faint">Clark keeps going until it is done</span>
+            <span className="font-normal text-ink-faint">the agent keeps going until it is done</span>
           </div>
         )}
 
@@ -715,16 +715,16 @@ export function Composer() {
           onSelect={syncCaret}
           onClick={syncCaret}
           rows={1}
-          aria-label="Message Clark"
+          aria-label="Message the agent"
           autoCorrect="off"
           autoCapitalize="off"
           spellCheck={false}
           placeholder={
             !session
-              ? "Describe what you want Clark to do…"
+              ? "Describe what you want the agent to do…"
               : busy
                 ? "Queue a follow-up…"
-                : "Ask Clark anything about this project…"
+                : "Ask the agent anything about this project…"
           }
           disabled={connecting}
           className="composer-input max-h-52 w-full resize-none overflow-y-auto bg-transparent px-0.5 py-0.5 text-base leading-[1.5] text-ink outline-none placeholder:text-ink-muted disabled:opacity-50"
@@ -754,7 +754,7 @@ export function Composer() {
               <button
                 onClick={() => void cancelActive()}
                 aria-label="Stop"
-                className="grid size-8 shrink-0 place-items-center rounded-full bg-danger/12 text-danger transition duration-200 ease-clark hover:bg-danger/20"
+                className="grid size-8 shrink-0 place-items-center rounded-full bg-danger/12 text-danger transition duration-200 ease-agent hover:bg-danger/20"
               >
                 <Square className="size-3 fill-current" />
               </button>
@@ -773,10 +773,10 @@ export function Composer() {
                   submission.shouldPickProjectFolder
                     ? "Choose project folder and send"
                     : busy
-                      ? "Queue message (sends when Clark finishes)"
+                      ? "Queue message (sends when the agent finishes)"
                       : "Send · ⇧↵ newline"
                 }
-                className="grid size-8 shrink-0 place-items-center rounded-full bg-accent text-on-accent shadow-soft transition duration-200 ease-clark hover:-translate-y-0.5 hover:bg-accent-hover active:translate-y-0 disabled:translate-y-0 disabled:bg-bg-tertiary disabled:text-ink-muted disabled:shadow-none"
+                className="grid size-8 shrink-0 place-items-center rounded-full bg-accent text-on-accent shadow-soft transition duration-200 ease-agent hover:-translate-y-0.5 hover:bg-accent-hover active:translate-y-0 disabled:translate-y-0 disabled:bg-bg-tertiary disabled:text-ink-muted disabled:shadow-none"
               >
                 {busy ? <CornerDownRight className="size-4" /> : <ArrowUp className="size-4" />}
               </button>

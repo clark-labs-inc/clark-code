@@ -1,6 +1,6 @@
 //! Small shared helpers for reading project config through the session
 //! process-local [`Executor`] and
-//! parsing the `---`-fenced YAML-ish frontmatter Claude/Clark markdown
+//! parsing the `---`-fenced YAML-ish frontmatter Claude/Agent Desktop markdown
 //! conventions use (`SKILL.md`, `.claude/commands/*.md`).
 
 use std::path::{Path, PathBuf};

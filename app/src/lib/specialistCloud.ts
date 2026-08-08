@@ -1,5 +1,5 @@
-import { invoke } from "@tauri-apps/api/core";
 import type { CloudCreds } from "./cloudHistory";
+import { productRequest } from "../product/productBridge";
 import type { SpecialistKind } from "./specialists";
 import {
   parseResearchOverview,
@@ -180,7 +180,7 @@ export async function specialistOrganizations(
   _creds: CloudCreds,
 ): Promise<SpecialistOrganization[]> {
   if (!inTauri()) return demoOrganizations;
-  return invoke<SpecialistOrganization[]>("desktop_specialist_organizations");
+  return productRequest<SpecialistOrganization[]>("specialist.organizations");
 }
 
 export async function specialistEntitlement(
@@ -189,7 +189,7 @@ export async function specialistEntitlement(
   organizationId?: string,
 ): Promise<SpecialistEntitlement> {
   if (!inTauri()) return { allowed: true, state: "ready", source: "personal" };
-  return invoke<SpecialistEntitlement>("desktop_specialist_entitlement", {
+  return productRequest<SpecialistEntitlement>("specialist.entitlement", {
     specialist: kind,
     organizationId: organizationId ?? null,
   });
@@ -205,7 +205,7 @@ export async function specialistQuery<T>(
 ): Promise<T> {
   const result = !inTauri()
     ? demoSpecialistQuery(operation)
-    : await invoke<unknown>("desktop_specialist_query", {
+    : await productRequest<unknown>("specialist.query", {
       specialist,
       operation,
       organizationId,
@@ -232,7 +232,7 @@ export async function specialistPublishOverview(
     : parseRsiOverview(projection);
   const result = !inTauri()
     ? validated
-    : await invoke<unknown>("desktop_specialist_publish", {
+    : await productRequest<unknown>("specialist.publish", {
       specialist,
       organizationId,
       schemaVersion: 1,
@@ -255,8 +255,8 @@ export interface ScoutCreatedWorkspace {
 }
 
 /** Create a Scout cartography workspace for an organization. This reaches the
- * same `POST /cli/scout/workspaces` contract `clark-cli` uses with
- * `--create-workspace`, so the first Scout run for an organization that has no
+ * same host product request contract used by its operator client, so the first
+ * Scout run for an organization that has no
  * workspace yet can enroll and upload evidence instead of failing with
  * "backend is not host-configured". */
 export async function specialistCreateWorkspace(
@@ -271,7 +271,7 @@ export async function specialistCreateWorkspace(
       status: "active",
     };
   }
-  return invoke<ScoutCreatedWorkspace>("desktop_specialist_create_workspace", {
+  return productRequest<ScoutCreatedWorkspace>("specialist.create_workspace", {
     organizationId,
     displayName,
   });
@@ -306,7 +306,7 @@ export async function specialistCreateSecurityCampaign(
     demoCampaigns = [campaign, ...demoCampaigns];
     return { campaign, repositories: [], findings: [] };
   }
-  return invoke<SecurityCampaignDetail>("desktop_specialist_create_security_campaign", {
+  return productRequest<SecurityCampaignDetail>("specialist.create_security_campaign", {
     organizationId,
     title,
     description,
@@ -315,7 +315,7 @@ export async function specialistCreateSecurityCampaign(
 }
 
 export const demoOrganizations: SpecialistOrganization[] = [
-  { id: "11111111-1111-4111-8111-111111111111", name: "Clark Labs", role: "owner", status: "active" },
+  { id: "11111111-1111-4111-8111-111111111111", name: "the agent Labs", role: "owner", status: "active" },
 ];
 
 const demoWorkspaces: ScoutWorkspace[] = [{
@@ -441,9 +441,9 @@ const demoFindings: SecurityFinding[] = [
 ];
 
 const demoRepositories: SecurityRepository[] = [
-  { repositoryId: "repository-1", canonicalRemote: "github.com/clark-ai/clark", serviceName: "Clark API", latestScanStatus: "complete", latestScanCreatedAt: new Date(Date.now() - 38 * 60_000).toISOString(), openCriticalCount: 1, openHighCount: 2, openMediumCount: 3, riskScore: 92, stale: false },
-  { repositoryId: "repository-2", canonicalRemote: "github.com/clark-ai/clark-desktop", serviceName: "Clark Desktop", latestScanStatus: "complete", latestScanCreatedAt: new Date(Date.now() - 2 * 3_600_000).toISOString(), openCriticalCount: 0, openHighCount: 2, openMediumCount: 1, riskScore: 71, stale: false },
-  { repositoryId: "repository-3", canonicalRemote: "github.com/clark-ai/edge-worker", serviceName: "Edge worker", latestScanStatus: "needs_attention", latestScanCreatedAt: new Date(Date.now() - 9 * 86_400_000).toISOString(), openCriticalCount: 0, openHighCount: 0, openMediumCount: 2, riskScore: 43, stale: true },
+  { repositoryId: "repository-1", canonicalRemote: "github.com/example/api", serviceName: "Example API", latestScanStatus: "complete", latestScanCreatedAt: new Date(Date.now() - 38 * 60_000).toISOString(), openCriticalCount: 1, openHighCount: 2, openMediumCount: 3, riskScore: 92, stale: false },
+  { repositoryId: "repository-2", canonicalRemote: "github.com/example/desktop", serviceName: "Example Desktop", latestScanStatus: "complete", latestScanCreatedAt: new Date(Date.now() - 2 * 3_600_000).toISOString(), openCriticalCount: 0, openHighCount: 2, openMediumCount: 1, riskScore: 71, stale: false },
+  { repositoryId: "repository-3", canonicalRemote: "github.com/example/edge-worker", serviceName: "Example worker", latestScanStatus: "needs_attention", latestScanCreatedAt: new Date(Date.now() - 9 * 86_400_000).toISOString(), openCriticalCount: 0, openHighCount: 0, openMediumCount: 2, riskScore: 43, stale: true },
 ];
 
 const demoScans: SecurityScan[] = [

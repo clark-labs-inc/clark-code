@@ -97,7 +97,7 @@ describe("GUI motion policy", () => {
       expect(match, `--${name} should be a cubic-bezier`).toBeTruthy();
       return match![1].split(",").map((s) => Number.parseFloat(s.trim()));
     };
-    expect(cssEase("ease-clark")).toEqual([...EASE.out]);
-    expect(cssEase("ease-clark-inout")).toEqual([...EASE.inOut]);
+    expect(cssEase("ease-agent")).toEqual([...EASE.out]);
+    expect(cssEase("ease-agent-inout")).toEqual([...EASE.inOut]);
   });
 });

@@ -31,7 +31,7 @@ export function ScienceArtifactInventory({
         <MetricCard label="Verified bytes" value={formatBytes(totalBytes)} />
       </div>
       <SectionCard
-        title="Clark Cloud science inventory"
+        title="product cloud science inventory"
         detail="Every row is content-addressed, versioned, and verified before its Scientist run can finish."
       >
         {files.length === 0 ? (

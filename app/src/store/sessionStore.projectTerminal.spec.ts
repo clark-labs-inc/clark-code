@@ -15,7 +15,7 @@ import { emptySnapshot, type Session } from "../core-bridge/types";
 
 const baseSettings = {
   cwd: "/tmp/project",
-  model: "clark-code",
+  model: "local-model",
   reasoningEffort: "",
 };
 

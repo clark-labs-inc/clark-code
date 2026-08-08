@@ -81,8 +81,8 @@ fn duplicate_tool_call_ids_are_normalized_with_their_results_on_the_wire() {
 
     assert_eq!(wire[0].tool_calls[0].id, "shell:89");
     assert_eq!(wire[1].tool_call_id.as_deref(), Some("shell:89"));
-    assert_eq!(wire[3].tool_calls[0].id, "clark_agent_call_1");
-    assert_eq!(wire[4].tool_call_id.as_deref(), Some("clark_agent_call_1"));
+    assert_eq!(wire[3].tool_calls[0].id, "agent_loop_call_1");
+    assert_eq!(wire[4].tool_call_id.as_deref(), Some("agent_loop_call_1"));
 }
 
 #[test]
@@ -189,7 +189,7 @@ fn typed_llm_failures_map_to_typed_stream_errors() {
     assert!(matches!(kind, ca::stream::StreamErrorKind::Fatal));
     assert_eq!(
         message,
-        "insufficient_credits: Clark billing declined this run."
+        "insufficient_credits: the selected provider declined this run for insufficient usage access."
     );
     assert!(!message.contains("Your"));
 

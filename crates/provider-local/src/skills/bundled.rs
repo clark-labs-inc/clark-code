@@ -42,25 +42,25 @@ const SECURITY_DEEP_TOOLS: &[&str] = &[
 
 pub(super) fn skills() -> Vec<Skill> {
     vec![
-        bundled("github", "clark://skills/github", GITHUB, BASH),
+        bundled("github", "agent://skills/github", GITHUB, BASH),
         bundled(
             "github",
-            "clark://skills/github/gh-address-comments",
+            "agent://skills/github/gh-address-comments",
             ADDRESS_COMMENTS,
             BASH,
         ),
-        bundled("github", "clark://skills/github/gh-fix-ci", FIX_CI, BASH),
-        bundled("github", "clark://skills/github/yeet", YEET, BASH),
-        bundled("sentry", "clark://skills/sentry", SENTRY, BASH),
+        bundled("github", "agent://skills/github/gh-fix-ci", FIX_CI, BASH),
+        bundled("github", "agent://skills/github/yeet", YEET, BASH),
+        bundled("sentry", "agent://skills/sentry", SENTRY, BASH),
         {
-            let mut scout = bundled("scout", "clark://skills/scout", SCOUT, SCOUT_TOOLS);
+            let mut scout = bundled("scout", "agent://skills/scout", SCOUT, SCOUT_TOOLS);
             scout.allow_implicit_invocation = false;
             scout
         },
         {
             let mut security = bundled(
                 "security",
-                "clark://skills/security/security-scan",
+                "agent://skills/security/security-scan",
                 SECURITY_SCAN,
                 SECURITY_TOOLS,
             );
@@ -70,7 +70,7 @@ pub(super) fn skills() -> Vec<Skill> {
         {
             let mut security = bundled(
                 "security",
-                "clark://skills/security/security-diff",
+                "agent://skills/security/security-diff",
                 SECURITY_DIFF,
                 SECURITY_TOOLS,
             );
@@ -80,7 +80,7 @@ pub(super) fn skills() -> Vec<Skill> {
         {
             let mut security = bundled(
                 "security",
-                "clark://skills/security/security-deep",
+                "agent://skills/security/security-deep",
                 SECURITY_DEEP,
                 SECURITY_DEEP_TOOLS,
             );

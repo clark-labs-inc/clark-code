@@ -1,11 +1,10 @@
 import { describe, it, expect } from "vitest";
 import {
-  creditFailureSurface,
   humanizeError,
   humanizeRunFailure,
-  isClarkAccountReconnectError,
-  isIncludedWeeklyAllowanceExhausted,
+  isAccountReconnectError,
 } from "./errors";
+import { installProductModule, neutralProduct } from "../product/productModule";
 
 describe("humanizeRunFailure", () => {
   it("keeps session expiry and platform-key rejection distinct", () => {
@@ -43,49 +42,34 @@ describe("humanizeRunFailure", () => {
     expect(msg).not.toMatch(/start another run/i);
   });
 
-  it("keeps the included weekly allowance distinct from paid credits", () => {
-    const outcome = {
-      failure_kind: "insufficient_credits" as const,
-      error: "Your included weekly usage is used up. It resets on Monday.",
-    };
-    expect(isIncludedWeeklyAllowanceExhausted(outcome)).toBe(true);
-    expect(humanizeRunFailure(outcome)).toMatch(/resets on Monday/i);
-  });
-
-  it("always selects a visible surface for an insufficient-credits failure", () => {
-    const credits = { failure_kind: "insufficient_credits" as const };
-    expect(creditFailureSurface(credits, false, true)).toBe("upgrade");
-    expect(creditFailureSurface(credits, false, false)).toBe("generic");
-    expect(creditFailureSurface(credits, true, false)).toBe("generic");
-    expect(
-      creditFailureSurface(
-        { ...credits, error: "Included weekly usage is used up. Resets on Monday." },
-        true,
-        false,
-      ),
-    ).toBe("weekly_reset");
+  it("keeps provider usage failures product-neutral", () => {
+    expect(humanizeRunFailure({ failure_kind: "insufficient_credits" }))
+      .toMatch(/selected provider/i);
   });
 });
 
 describe("humanizeError", () => {
   it("turns native account-authority failures into one recovery action", () => {
-    const current =
-      "clark_account_mismatch: Clark is connected to a different signed-in account.";
-    const legacy = "Clark credentials do not match the active signed-in account";
+    installProductModule({
+      ...neutralProduct,
+      errors: {
+        isAccountReconnectError: (raw) => raw.startsWith("example_account_mismatch:"),
+      },
+    });
+    const current = "example_account_mismatch: another account owns this session";
+    const unrelated = "provider credentials do not match";
 
-    expect(isClarkAccountReconnectError(current)).toBe(true);
-    expect(isClarkAccountReconnectError(legacy)).toBe(true);
+    expect(isAccountReconnectError(current)).toBe(true);
+    expect(isAccountReconnectError(unrelated)).toBe(false);
     expect(humanizeError(current)).toBe(
-      "Clark needs to reconnect your account. Sign out and sign in again.",
+      "the agent needs to reconnect your account. Sign out and sign in again.",
     );
-    expect(humanizeError(legacy)).toBe(
-      "Clark needs to reconnect your account. Sign out and sign in again.",
-    );
+    installProductModule(neutralProduct);
   });
 
   it("collapses the raw 429 provider JSON blob into one friendly line", () => {
     const raw =
-      'model endpoint returned 429 Too Many Requests: {"error":{"message":"Provider returned error","code":429,"metadata":{"raw":"moonshotai/kimi-k2.7-code is temporarily rate-limited upstream. Please retry shortly, or add your own key to accumulate your rate limits: https://openrouter.ai/settings/integrations","provider_name":"DeepInfra","is_byok":false}},"user_id":"user_3A8lOkOB3knNQ5GzXvi9p8X0aBk"}';
+      'model endpoint returned 429 Too Many Requests: {"error":{"message":"Provider returned error","code":429,"metadata":{"raw":"vendor/model is temporarily rate-limited upstream. Please retry shortly.","provider_name":"ExampleProvider","is_byok":false}},"user_id":"example-user"}';
     const msg = humanizeError(raw);
     expect(msg).toBe("The model is busy right now (rate-limited). Give it a moment and try again.");
     expect(msg).not.toContain("{");
@@ -107,7 +91,7 @@ describe("humanizeError", () => {
     const msg = humanizeError(
       "invalid args `baseSnapshot` for command `session_configure_cloud`: unknown variant `plan`",
     );
-    expect(msg).toBe("Clark Code couldn’t restore this conversation. Please try again.");
+    expect(msg).toBe("Agent Desktop couldn’t restore this conversation. Please try again.");
     expect(msg).not.toContain("baseSnapshot");
     expect(msg).not.toContain("plan");
   });

@@ -30,7 +30,7 @@ async fn recursively_discovers_project_skills_and_ignores_hidden_system_skills()
     let project = temp.path().join("repo");
     let home = temp.path().join("home");
     write_skill(
-        &project.join(".clark/skills"),
+        &project.join(".agent/skills"),
         "release/nested",
         "release",
         "Ship: verify the real boundary",
@@ -47,7 +47,7 @@ async fn recursively_discovers_project_skills_and_ignores_hidden_system_skills()
     let catalog = discover_catalog_with_home(&LocalExecutor, &project, Some(&home)).await;
     let release = catalog.resolve_name("release").unwrap();
     assert_eq!(release.scope, SkillScope::Project);
-    assert_eq!(release.origin, SkillOrigin::Clark);
+    assert_eq!(release.origin, SkillOrigin::Bundled);
     assert_eq!(release.description, "Ship: verify the real boundary");
     assert!(catalog.resolve_name("skill-creator").is_err());
 }
@@ -160,9 +160,9 @@ async fn preserves_name_collisions_with_exact_source_qualified_invocations() {
 async fn plugin_manifest_namespaces_skills_and_rejects_escape_paths() {
     let temp = tempfile::tempdir().unwrap();
     let project = temp.path().join("repo");
-    let plugin = project.join(".clark/plugins/acme");
+    let plugin = project.join(".agent/plugins/acme");
     write(
-        &plugin.join(".clark-plugin/plugin.json"),
+        &plugin.join(".agent-plugin/plugin.json"),
         r#"{"name":"acme","skills":["./skills","../outside"]}"#,
     );
     write_skill(
@@ -187,9 +187,9 @@ async fn plugin_manifest_namespaces_skills_and_rejects_escape_paths() {
 async fn metadata_dependencies_and_explicit_only_policy_are_enforced() {
     let temp = tempfile::tempdir().unwrap();
     let project = temp.path().join("repo");
-    let skill_dir = project.join(".clark/skills/deploy");
+    let skill_dir = project.join(".agent/skills/deploy");
     write_skill(
-        &project.join(".clark/skills"),
+        &project.join(".agent/skills"),
         "deploy",
         "deploy",
         "Deploy a service",
@@ -216,9 +216,9 @@ async fn metadata_dependencies_and_explicit_only_policy_are_enforced() {
 async fn invalid_skill_metadata_is_a_structured_catalog_error() {
     let temp = tempfile::tempdir().unwrap();
     let project = temp.path().join("repo");
-    let skill_dir = project.join(".clark/skills/review");
+    let skill_dir = project.join(".agent/skills/review");
     write_skill(
-        &project.join(".clark/skills"),
+        &project.join(".agent/skills"),
         "review",
         "review",
         "Review changes",
@@ -377,13 +377,13 @@ async fn bundled_security_skill_requires_its_contract_tool_and_explicit_selectio
     let body = catalog.read(&LocalExecutor, security).await.unwrap();
     assert!(body.contains("Never claim a clean or completed scan"));
     assert!(body.contains("source → nearest control → sink or broken control → impact"));
-    assert!(body.contains("exact `~deepseek/deepseek-v4-flash-latest` production model"));
+    assert!(body.contains("trusted runtime policy"));
     assert!(body.contains("positive control"));
     assert!(body.contains("host-issued receipt ids"));
     let diff_body = catalog.read(&LocalExecutor, security_diff).await.unwrap();
     assert!(diff_body.contains("staged, unstaged, untracked, renamed, and deleted"));
     assert!(diff_body.contains("Every candidate must touch at least one changed"));
-    assert!(diff_body.contains("exact `~deepseek/deepseek-v4-flash-latest` production model"));
+    assert!(diff_body.contains("trusted runtime policy"));
 
     tools.insert("delegate_read_only".to_string());
     tools.insert("resolve_delegation".to_string());
@@ -394,7 +394,7 @@ async fn bundled_security_skill_requires_its_contract_tool_and_explicit_selectio
     let deep_body = catalog.read(&LocalExecutor, security_deep).await.unwrap();
     assert!(deep_body.contains("explicitly authorizes bounded read-only delegation"));
     assert!(deep_body.contains("two consecutive passes that add no new candidate ids"));
-    assert!(deep_body.contains("exact `~deepseek/deepseek-v4-flash-latest` production model"));
+    assert!(deep_body.contains("delegated models through trusted runtime policy"));
 }
 
 #[test]
@@ -445,9 +445,9 @@ fn bundled_scout_openai_metadata_matches_runtime_dependencies() {
 async fn skill_resources_are_relative_text_and_cannot_escape_or_follow_symlinks() {
     let temp = tempfile::tempdir().unwrap();
     let project = temp.path().join("repo");
-    let skill_dir = project.join(".clark/skills/review");
+    let skill_dir = project.join(".agent/skills/review");
     write_skill(
-        &project.join(".clark/skills"),
+        &project.join(".agent/skills"),
         "review",
         "review",
         "Review with a reference",
@@ -490,13 +490,13 @@ async fn skill_resources_are_relative_text_and_cannot_escape_or_follow_symlinks(
 }
 
 #[tokio::test]
-async fn catalog_is_complete_and_describes_clark_authority() {
+async fn catalog_is_complete_and_describes_host_authority() {
     let temp = tempfile::tempdir().unwrap();
     let project = temp.path().join("repo");
     let description = "long description ".repeat(80);
     for index in 0..200 {
         write_skill(
-            &project.join(".clark/skills"),
+            &project.join(".agent/skills"),
             &format!("skill-{index}"),
             &format!("skill-{index}"),
             &description,
@@ -517,7 +517,7 @@ async fn catalog_is_complete_and_describes_clark_authority() {
 async fn discovery_preserves_deep_skills_and_more_than_the_old_count_cap() {
     let temp = tempfile::tempdir().unwrap();
     let project = temp.path().join("repo");
-    let root = project.join(".clark/skills");
+    let root = project.join(".agent/skills");
     for index in 0..520 {
         write_skill(
             &root,
@@ -646,10 +646,10 @@ async fn managed_pack_install_update_restart_binding_and_uninstall_are_exact() {
 }
 
 #[tokio::test]
-#[ignore = "set CLARK_SUPERPOWERS_FIXTURE to exercise a real obra/superpowers checkout"]
+#[ignore = "set AGENT_SUPERPOWERS_FIXTURE to exercise a real obra/superpowers checkout"]
 async fn imports_the_real_superpowers_repository_layout() {
-    let source = std::env::var("CLARK_SUPERPOWERS_FIXTURE")
-        .expect("CLARK_SUPERPOWERS_FIXTURE must point to the repository root");
+    let source = std::env::var("AGENT_SUPERPOWERS_FIXTURE")
+        .expect("AGENT_SUPERPOWERS_FIXTURE must point to the repository root");
     let temp = tempfile::tempdir().unwrap();
     let project = temp.path().join("repo");
     std::fs::create_dir_all(&project).unwrap();

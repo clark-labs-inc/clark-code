@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use agent_core::domain::GoalState;
 pub(crate) use agent_core::domain::GoalStatus;
 use agent_core::ids::{PermissionRequestId, RunId};
-use clark_agent::AgentMessage;
+use agent_loop::AgentMessage;
 use tokio::sync::oneshot;
 
 use crate::project_settings::HooksConfig;
@@ -19,10 +19,10 @@ pub(crate) struct SessionState {
     /// Shell-command prefixes the user always allows (skip the gate). Honored
     /// only for Safe/Caution commands, so a trusted prefix can't carry a
     /// destructive suffix past the gate. Union of the global (UI-driven)
-    /// allowlist and the project's `.clark/settings.json` `permissions.allow`.
+    /// allowlist and the project's `.agent/settings.json` `permissions.allow`.
     pub allow_commands: Vec<String>,
     /// Shell-command prefixes that are always refused. Union of the global
-    /// denylist and the project's `.clark/settings.json` `permissions.deny`.
+    /// denylist and the project's `.agent/settings.json` `permissions.deny`.
     pub deny_commands: Vec<String>,
     /// Collaboration-mode and execution-checklist state. Kept independent
     /// from permission policy and standing goals.
@@ -36,13 +36,13 @@ pub(crate) struct SessionState {
     /// each turn's text like the plan-mode reminder. Empty string = default.
     pub output_style: String,
     /// `PreToolUse`/`PostToolUse` hooks from the project's
-    /// `.clark/settings.json`, read once at `new_session`.
+    /// `.agent/settings.json`, read once at `new_session`.
     pub hooks: HooksConfig,
     /// Durable and externally visible mutations that require an independent
     /// canonical read-back before the agent may finish.
     pub effects: crate::effects::EffectLedger,
     /// The project's configured check/lint/typecheck command (§7
-    /// `check_diagnostics`), from `.clark/settings.json` or a per-project
+    /// `check_diagnostics`), from `.agent/settings.json` or a per-project
     /// Settings override.
     pub check_command: Option<String>,
     /// First `check_diagnostics` call's output lines this session — later

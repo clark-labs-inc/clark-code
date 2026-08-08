@@ -35,7 +35,7 @@ fn http_gateway_timeout() -> Vec<u8> {
 }
 
 fn http_unauthorized() -> Vec<u8> {
-    let body = r#"{"error":{"message":"invalid Clark platform key"}}"#;
+    let body = r#"{"error":{"message":"invalid managed platform key"}}"#;
     format!(
         "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{body}",
         body.len(),
@@ -53,7 +53,7 @@ fn http_forbidden_credentials() -> Vec<u8> {
 }
 
 fn http_payment_required() -> Vec<u8> {
-    let body = r#"{"error":{"message":"Insufficient Clark credits. Add credits to continue.","type":"usage_limit_reached"}}"#;
+    let body = r#"{"error":{"message":"Insufficient Agent Desktop credits. Add credits to continue.","type":"usage_limit_reached"}}"#;
     format!(
         "HTTP/1.1 402 Payment Required\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{body}",
         body.len(),
@@ -61,13 +61,27 @@ fn http_payment_required() -> Vec<u8> {
     .into_bytes()
 }
 
-fn http_unknown_clark_code_model() -> Vec<u8> {
-    let body = r#"{"error":{"message":"Unknown clark-code model option.","type":"invalid_request_error","param":"model","code":"invalid_request_error"}}"#;
+const FALLBACK_MODEL: &str = "managed-model-safe";
+const FALLBACK_REASON: &str = "unsupported_model_option";
+
+fn http_unknown_managed_model() -> Vec<u8> {
+    let body = r#"{"error":{"message":"Unknown managed model option.","type":"invalid_request_error","param":"model","code":"invalid_request_error"}}"#;
     format!(
         "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{body}",
         body.len(),
     )
     .into_bytes()
+}
+
+fn with_model_fallback(mut client: LlmClient) -> LlmClient {
+    client.model_fallback = Some(crate::config::ModelFallbackPolicy {
+        model: FALLBACK_MODEL.into(),
+        reason: FALLBACK_REASON.into(),
+        error_type: "invalid_request_error".into(),
+        error_param: "model".into(),
+        error_message: "Unknown managed model option.".into(),
+    });
+    client
 }
 
 fn http_unrelated_bad_request() -> Vec<u8> {
@@ -324,13 +338,14 @@ async fn retries_http_rate_limit_before_output() {
 }
 
 #[tokio::test]
-async fn unknown_clark_code_option_falls_back_once_to_included_free_alias() {
+async fn configured_model_rejection_falls_back_once() {
     let (base_url, mut requests) =
-        endpoint_capturing_requests(vec![http_unknown_clark_code_model(), success()]).await;
-    let requested_model = "clark-code:deepseek_v4_flash_latest";
-    let client = LlmClient::from_parts(&base_url, requested_model, None, Vec::new(), None)
-        .unwrap()
-        .with_session_id("fallback-session");
+        endpoint_capturing_requests(vec![http_unknown_managed_model(), success()]).await;
+    let requested_model = "managed-model-large";
+    let client = with_model_fallback(
+        LlmClient::from_parts(&base_url, requested_model, None, Vec::new(), None).unwrap(),
+    )
+    .with_session_id("fallback-session");
 
     let turn = client
         .stream_chat(
@@ -346,14 +361,8 @@ async fn unknown_clark_code_option_falls_back_once_to_included_free_alias() {
     assert_eq!(turn.text, "done");
     let metadata = turn.response_metadata.expect("fallback receipt");
     assert_eq!(metadata.requested_model.as_deref(), Some(requested_model));
-    assert_eq!(
-        metadata.fallback_model.as_deref(),
-        Some(CLARK_CODE_SAFE_HAVEN_MODEL)
-    );
-    assert_eq!(
-        metadata.fallback_reason.as_deref(),
-        Some(CLARK_CODE_SAFE_HAVEN_REASON)
-    );
+    assert_eq!(metadata.fallback_model.as_deref(), Some(FALLBACK_MODEL));
+    assert_eq!(metadata.fallback_reason.as_deref(), Some(FALLBACK_REASON));
     assert_eq!(metadata.request_attempts, Some(2));
     assert_eq!(metadata.rate_limit_retries, Some(0));
     assert_eq!(metadata.transient_retries, Some(0));
@@ -363,10 +372,7 @@ async fn unknown_clark_code_option_falls_back_once_to_included_free_alias() {
     let first = requests.recv().await.unwrap();
     let second = requests.recv().await.unwrap();
     assert_eq!(captured_request_json(&first)["model"], requested_model);
-    assert_eq!(
-        captured_request_json(&second)["model"],
-        CLARK_CODE_SAFE_HAVEN_MODEL
-    );
+    assert_eq!(captured_request_json(&second)["model"], FALLBACK_MODEL);
     assert_eq!(
         captured_request_header(&first, "x-session-id"),
         "fallback-session"
@@ -382,16 +388,11 @@ async fn unknown_clark_code_option_falls_back_once_to_included_free_alias() {
 }
 
 #[tokio::test]
-async fn included_free_alias_does_not_fallback_to_itself() {
-    let (base_url, calls) = endpoint(vec![http_unknown_clark_code_model()]).await;
-    let client = LlmClient::from_parts(
-        &base_url,
-        CLARK_CODE_SAFE_HAVEN_MODEL,
-        None,
-        Vec::new(),
-        None,
-    )
-    .unwrap();
+async fn fallback_model_does_not_fallback_to_itself() {
+    let (base_url, calls) = endpoint(vec![http_unknown_managed_model()]).await;
+    let client = with_model_fallback(
+        LlmClient::from_parts(&base_url, FALLBACK_MODEL, None, Vec::new(), None).unwrap(),
+    );
 
     let error = client
         .stream_chat(
@@ -411,14 +412,9 @@ async fn included_free_alias_does_not_fallback_to_itself() {
 #[tokio::test]
 async fn unrelated_bad_request_does_not_trigger_model_fallback() {
     let (base_url, calls) = endpoint(vec![http_unrelated_bad_request()]).await;
-    let client = LlmClient::from_parts(
-        &base_url,
-        "clark-code:deepseek_v4_flash_latest",
-        None,
-        Vec::new(),
-        None,
-    )
-    .unwrap();
+    let client = with_model_fallback(
+        LlmClient::from_parts(&base_url, "managed-model-large", None, Vec::new(), None).unwrap(),
+    );
 
     let error = client
         .stream_chat(
@@ -436,13 +432,13 @@ async fn unrelated_bad_request_does_not_trigger_model_fallback() {
 }
 
 #[tokio::test]
-async fn qwen_flash_survives_eight_consecutive_free_pool_rate_limits() {
+async fn managed_flash_model_survives_eight_consecutive_pool_rate_limits() {
     let mut responses = vec![http_rate_limit(0); 8];
     responses.push(success());
     let (base_url, calls) = endpoint(responses).await;
-    let client = LlmClient::from_parts(&base_url, "qwen/qwen3.7-flash", None, Vec::new(), None)
+    let client = LlmClient::from_parts(&base_url, "vendor/managed-flash", None, Vec::new(), None)
         .unwrap()
-        .with_session_id("qwen-free-eval-session");
+        .with_session_id("managed-pool-eval-session");
     let turn = client
         .stream_chat(
             &[ChatMessage::user("hello")],
@@ -462,7 +458,7 @@ async fn qwen_flash_survives_eight_consecutive_free_pool_rate_limits() {
     assert_eq!(metadata.transient_retries, Some(0));
     assert_eq!(
         metadata.session_id.as_deref(),
-        Some("qwen-free-eval-session")
+        Some("managed-pool-eval-session")
     );
 }
 
@@ -511,7 +507,7 @@ async fn retries_keep_idempotency_key_and_session_id_for_the_logical_turn() {
         };
         (header("idempotency-key"), header("x-session-id"))
     });
-    assert!(headers[0].0.starts_with("clark-code-"));
+    assert!(headers[0].0.starts_with("model-request-"));
     assert_eq!(headers[0].0, headers[1].0);
     assert_eq!(headers[0].1, "conversation-uuid");
     assert_eq!(headers[0].1, headers[1].1);
@@ -534,7 +530,7 @@ async fn successful_turn_maps_cache_and_provider_request_identities() {
     assert!(metadata
         .idempotency_key
         .as_deref()
-        .is_some_and(|value| value.starts_with("clark-code-")));
+        .is_some_and(|value| value.starts_with("model-request-")));
     assert!(metadata.provider_route.is_some());
     assert_eq!(metadata.http_version.as_deref(), Some("HTTP/1.1"));
     assert_eq!(metadata.request_attempts, Some(1));

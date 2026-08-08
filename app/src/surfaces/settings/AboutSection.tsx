@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { productName } from "../../product/productModule";
 import { AlertTriangle, Check, Loader2, RefreshCw } from "lucide-react";
 import { useSessionStore } from "../../store/sessionStore";
 import { useAppVersion } from "../../lib/appInfo";
@@ -31,7 +32,7 @@ export function AboutSection() {
       <div>
         <GroupLabel>About</GroupLabel>
         <Card>
-          <Row name="Clark Code" sub="Local AI coding agent">
+          <Row name={productName()} sub="Local AI coding agent">
             <span className="font-mono text-sm text-ink-secondary">{version ? `v${version}` : "—"}</span>
           </Row>
         </Card>
@@ -43,13 +44,13 @@ export function AboutSection() {
           <button
             onClick={() => void applyUpdate()}
             disabled={updateWaiting}
-            aria-label={`Ready to update Clark Code to ${update.version}; restart now`}
+            aria-label={`Ready to update ${productName()} to ${update.version}; restart now`}
             className="flex w-full items-center gap-2.5 rounded-lg bg-accent/15 px-3.5 py-2.5 text-sm font-medium text-accent transition hover:bg-accent/25"
           >
             <RefreshCw className={cn("size-4", updateWaiting && "animate-[spin_1.4s_linear_infinite]")} />{" "}
             {updateWaiting
               ? "Finishing active work before updating…"
-              : `Clark Code ${update.version} is ready — restart to update`}
+              : `${productName()} ${update.version} is ready — restart to update`}
           </button>
         ) : (
           <button

@@ -42,7 +42,7 @@ function outcome(incident: ProviderIncident): string {
     case "recovered":
       return `Recovered${seconds === null ? "" : ` after ${seconds} second${seconds === 1 ? "" : "s"}`}.`;
     case "interrupted":
-      return "Clark stopped before recovery completed.";
+      return "the agent stopped before recovery completed.";
     case "failed":
       return "Recovery failed.";
   }

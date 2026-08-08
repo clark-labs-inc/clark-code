@@ -1,7 +1,7 @@
 //! End-to-end termination regressions for the production local-agent engine.
 //!
 //! These use a deterministic OpenAI-compatible endpoint. They exercise the
-//! provider composition root rather than only the underlying `clark-agent`
+//! provider composition root rather than only the underlying `agent-loop`
 //! loop, so production builder defaults and completion plugins are in scope.
 
 use agent_core::domain::{AgentEvent, ContentBlock, RunFailureKind, RunStatus};

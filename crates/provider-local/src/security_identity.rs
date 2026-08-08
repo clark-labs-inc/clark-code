@@ -31,7 +31,7 @@ pub(super) fn inventory_digest(scope: &str, paths: &[String]) -> String {
 /// identical bytes must not rotate the id mid-scan, while any real content
 /// change still does.
 pub(super) fn inventory_snapshot_digest(scope: &str, snapshot: &[(String, String)]) -> String {
-    let mut input = format!("clark-security-inventory-v2\0{scope}").into_bytes();
+    let mut input = format!("agent-security-inventory-v2\0{scope}").into_bytes();
     for (path, content_sha256) in snapshot {
         input.push(0);
         input.extend_from_slice(path.as_bytes());

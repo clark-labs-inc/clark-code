@@ -59,11 +59,11 @@ fn run_windows_sandbox_smoke(output: &Path, cwd: &Path) {
     use std::time::Duration;
     use tokio_util::sync::CancellationToken;
 
-    if let Err(error) = clark_install_context::activate_bundled_path() {
+    if let Err(error) = desktop_install_context::activate_bundled_path() {
         fail(&format!("could not activate packaged PATH: {error}"));
     }
-    let inside = cwd.join("clark-release-sandbox-smoke.txt");
-    let outside = PathBuf::from(r"C:\Users\Public\clark-release-sandbox-escape.txt");
+    let inside = cwd.join("agent-release-sandbox-smoke.txt");
+    let outside = PathBuf::from(r"C:\Users\Public\agent-release-sandbox-escape.txt");
     let _ = std::fs::remove_file(&inside);
     let _ = std::fs::remove_file(&outside);
     let (inside_command, outside_command) =
@@ -107,21 +107,21 @@ fn run_windows_sandbox_smoke(output: &Path, cwd: &Path) {
             let ordinary_output = String::from_utf8_lossy(&ordinary.stdout);
             let terminal_output = String::from_utf8_lossy(&terminal.stdout);
             let inside_written = std::fs::read_to_string(&inside)
-                .is_ok_and(|value| value.contains("CLARK_SANDBOX_OK"));
+                .is_ok_and(|value| value.contains("AGENT_SANDBOX_OK"));
             let outside_write_blocked = !exit_succeeded(escape.code) && !outside.exists();
             let passed = exit_succeeded(ordinary.code)
                 && exit_succeeded(terminal.code)
-                && ordinary_output.contains("CLARK_SANDBOX_OK")
-                && terminal_output.contains("CLARK_SANDBOX_OK")
+                && ordinary_output.contains("AGENT_SANDBOX_OK")
+                && terminal_output.contains("AGENT_SANDBOX_OK")
                 && inside_written
                 && outside_write_blocked;
             json!({
                 "status": if passed { "passed" } else { "failed" },
                 "containment": "managed",
                 "ordinary_exit_code": ordinary.code,
-                "ordinary_output_seen": ordinary_output.contains("CLARK_SANDBOX_OK"),
+                "ordinary_output_seen": ordinary_output.contains("AGENT_SANDBOX_OK"),
                 "pty_exit_code": terminal.code,
-                "pty_output_seen": terminal_output.contains("CLARK_SANDBOX_OK"),
+                "pty_output_seen": terminal_output.contains("AGENT_SANDBOX_OK"),
                 "inside_write_observed": inside_written,
                 "outside_exit_code": escape.code,
                 "outside_write_blocked": outside_write_blocked,
@@ -144,7 +144,7 @@ fn smoke_commands(kind: exec_core::ShellKind, inside: &Path, outside: &Path) -> 
     match kind {
         exec_core::ShellKind::PowerShell => (
             format!(
-                "$ErrorActionPreference='Stop'; Set-Content -LiteralPath '{}' -Value CLARK_SANDBOX_OK; Get-Content -LiteralPath '{}'",
+                "$ErrorActionPreference='Stop'; Set-Content -LiteralPath '{}' -Value AGENT_SANDBOX_OK; Get-Content -LiteralPath '{}'",
                 powershell_path(inside),
                 powershell_path(inside),
             ),
@@ -155,7 +155,7 @@ fn smoke_commands(kind: exec_core::ShellKind, inside: &Path, outside: &Path) -> 
         ),
         exec_core::ShellKind::Cmd => (
             format!(
-                "> \"{}\" echo CLARK_SANDBOX_OK & type \"{}\"",
+                "> \"{}\" echo AGENT_SANDBOX_OK & type \"{}\"",
                 inside.display(),
                 inside.display(),
             ),
@@ -193,18 +193,18 @@ mod tests {
             windows_sandbox_smoke_paths([
                 WINDOWS_SANDBOX_SMOKE_ARG,
                 r"C:\Users\Public\receipt.json",
-                r"C:\Users\home\ClarkCodeQA",
+                r"C:\Users\home\AgentDesktopQA",
             ]),
             Some((
                 std::path::PathBuf::from(r"C:\Users\Public\receipt.json"),
-                std::path::PathBuf::from(r"C:\Users\home\ClarkCodeQA"),
+                std::path::PathBuf::from(r"C:\Users\home\AgentDesktopQA"),
             )),
         );
         assert_eq!(
             windows_sandbox_smoke_paths([
                 WINDOWS_SANDBOX_SMOKE_ARG,
                 "receipt.json",
-                r"C:\Users\home\ClarkCodeQA",
+                r"C:\Users\home\AgentDesktopQA",
             ]),
             None,
         );

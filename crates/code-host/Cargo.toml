@@ -5,7 +5,7 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
-description = "Provider-neutral control plane for reusable headless Clark Code workers."
+description = "Provider-neutral control plane for reusable headless coding-agent workers."
 
 [dependencies]
 async-trait.workspace = true

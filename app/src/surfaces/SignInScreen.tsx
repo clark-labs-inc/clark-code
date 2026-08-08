@@ -1,8 +1,9 @@
 import { useState } from "react";
+import { productName } from "../product/productModule";
 import { useReducedMotion } from "motion/react";
 import * as m from "motion/react-m";
 import { Loader2, Download, RotateCw, Check, AlertCircle } from "lucide-react";
-import { ClarkMark } from "./ClarkMark";
+import { ProductMark } from "./ProductMark";
 import { useSessionStore } from "../store/sessionStore";
 import {
   DUR,
@@ -138,12 +139,12 @@ export function SignInScreen() {
         className="w-full max-w-sm text-center"
       >
         <div className="mb-6 flex justify-center">
-          <ClarkMark size={64} className="rounded-2xl" />
+          <ProductMark size={64} className="rounded-2xl" />
         </div>
-        <h1 className="text-2xl font-semibold tracking-tight text-ink">Clark Code</h1>
+        <h1 className="text-2xl font-semibold tracking-tight text-ink">{productName()}</h1>
         <p className="mt-2 text-sm text-ink-muted">
           A coding agent on your machine — your files, your shell, your model,
-          with Clark for research.
+          with the agent for research.
         </p>
 
         <div className="mt-8">
@@ -151,7 +152,7 @@ export function SignInScreen() {
             data-qa="sign-in-google"
             onClick={() => void go()}
             disabled={busy}
-            className="flex min-h-11 w-full items-center justify-center gap-3 rounded-xl bg-accent px-4 py-3 text-sm font-semibold text-on-accent shadow-soft transition duration-200 ease-clark hover:-translate-y-0.5 hover:bg-accent-hover active:translate-y-0 disabled:translate-y-0 disabled:opacity-60"
+            className="flex min-h-11 w-full items-center justify-center gap-3 rounded-xl bg-accent px-4 py-3 text-sm font-semibold text-on-accent shadow-soft transition duration-200 ease-agent hover:-translate-y-0.5 hover:bg-accent-hover active:translate-y-0 disabled:translate-y-0 disabled:opacity-60"
           >
             {busy ? (
               <Loader2 className="size-4 animate-[spin_1s_linear_infinite]" />
@@ -166,7 +167,7 @@ export function SignInScreen() {
 
         <UpdateControl />
 
-        <p className="mt-8 text-xs text-ink-faint">Private beta · Clark Code</p>
+        <p className="mt-8 text-xs text-ink-faint">Private beta · {productName()}</p>
       </m.div>
     </div>
   );

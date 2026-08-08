@@ -1,12 +1,12 @@
-// Clark Code mobile remote control helpers.
+// Agent Desktop mobile remote control helpers.
 //
-// The desktop app talks to Clark through Tauri commands so auth and CORS stay
+// The desktop app talks to the agent through Tauri commands so auth and CORS stay
 // host-side. These helpers intentionally do not execute commands themselves;
 // they only register this host, poll durable mobile-originated commands, and
 // record host receipts.
 
-import { invoke } from "@tauri-apps/api/core";
 import type { CloudCreds } from "./cloudHistory";
+import { productRequest } from "../product/productBridge";
 
 export type CodeRemoteProjectKind = "local" | "ssh";
 export const CODE_REMOTE_PROTOCOL_VERSION = 2;
@@ -97,7 +97,7 @@ export async function registerCodeRemoteHost(
   _creds: CloudCreds,
   registration: CodeRemoteHostRegistration,
 ): Promise<unknown> {
-  return invoke("desktop_code_host_upsert", {
+  return productRequest("mobile.host_upsert", {
     hostId: registration.hostId,
     displayName: registration.displayName,
     osName: registration.os,
@@ -116,7 +116,7 @@ export async function pollCodeRemoteCommands(
   limit = 20,
   waitMs = 0,
 ): Promise<PollCodeRemoteCommandsResponse> {
-  return invoke<PollCodeRemoteCommandsResponse>("desktop_code_command_poll", {
+  return productRequest<PollCodeRemoteCommandsResponse>("mobile.command_poll", {
     hostId,
     instanceId,
     limit,
@@ -132,7 +132,7 @@ export async function ackCodeRemoteCommand(
   status: "accepted" | "completed" | "failed" | "rejected",
   response: Record<string, unknown> = {},
 ): Promise<CodeRemoteCommandReceipt> {
-  return invoke<CodeRemoteCommandReceipt>("desktop_code_command_ack", {
+  return productRequest<CodeRemoteCommandReceipt>("mobile.command_ack", {
     commandId,
     hostId,
     instanceId,
@@ -146,7 +146,7 @@ export async function downloadCodeRemoteAttachment(
   commandId: string,
   attachmentId: string,
 ): Promise<DownloadedCodeRemoteAttachment> {
-  return invoke<DownloadedCodeRemoteAttachment>("desktop_code_attachment_download", {
+  return productRequest<DownloadedCodeRemoteAttachment>("mobile.attachment_download", {
     commandId,
     attachmentId,
   });

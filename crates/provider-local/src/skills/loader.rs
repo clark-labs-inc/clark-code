@@ -93,9 +93,9 @@ pub(crate) async fn discover_catalog_with_home(
 fn ordinary_roots(project_root: &Path, home: Option<&Path>) -> Vec<SkillRoot> {
     let mut roots = vec![
         root(
-            project_root.join(".clark/skills"),
+            project_root.join(".agent/skills"),
             SkillScope::Project,
-            SkillOrigin::Clark,
+            SkillOrigin::Bundled,
         ),
         root(
             project_root.join(".agents/skills"),
@@ -116,9 +116,9 @@ fn ordinary_roots(project_root: &Path, home: Option<&Path>) -> Vec<SkillRoot> {
     if let Some(home) = home {
         roots.extend([
             root(
-                home.join(".clark/skills"),
+                home.join(".agent/skills"),
                 SkillScope::User,
-                SkillOrigin::Clark,
+                SkillOrigin::Bundled,
             ),
             root(
                 home.join(".agents/skills"),
@@ -383,7 +383,7 @@ pub(super) fn parse_bundled_skill(spec: BundledSkillSpec) -> Skill {
         base_name,
         description: sanitize(&parsed.description),
         scope: SkillScope::Bundled,
-        origin: SkillOrigin::Clark,
+        origin: SkillOrigin::Bundled,
         resource: SkillResource::Embedded {
             locator: spec.locator,
             contents: spec.contents,
@@ -427,7 +427,7 @@ fn parse_frontmatter(value: &str) -> Result<SkillFrontmatter, String> {
         Ok(parsed) => Ok(parsed),
         Err(yaml_error) => {
             // Repair common third-party scalar prose such as
-            // `description: Deploy to AWS: ECS`. Clark's narrow fallback reads
+            // `description: Deploy to AWS: ECS`. Agent Desktop's narrow fallback reads
             // only the two supported fields and leaves unrelated invalid YAML
             // rejected.
             let repaired = repair_scalar_fields(value).ok_or_else(|| yaml_error.to_string())?;

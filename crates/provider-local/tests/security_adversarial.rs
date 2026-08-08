@@ -17,8 +17,10 @@ use provider_local::security::{
     SecurityScanBundle, SecurityScanMode, SecurityScanPhase, SecuritySeverity, SecurityThreatModel,
     SecurityValidation, SECURITY_SCAN_CONTRACT_VERSION,
 };
-use provider_local::{LocalExecutor, SECURITY_MODEL};
+use provider_local::LocalExecutor;
 use serde::Deserialize;
+
+const SECURITY_SIMULATION_MODEL: &str = "security-model";
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -171,7 +173,7 @@ fn standard_bundle(inventory: &SecurityInventory, oracle: &Oracle) -> SecuritySc
         contract_version: SECURITY_SCAN_CONTRACT_VERSION,
         scan_id: "adversarial-standard".into(),
         mode: SecurityScanMode::Standard,
-        model: SECURITY_MODEL.into(),
+        model: SECURITY_SIMULATION_MODEL.into(),
         scope: inventory.scope.clone(),
         inventory_id: inventory.inventory_id.clone(),
         phase: SecurityScanPhase::Reporting,
@@ -362,7 +364,7 @@ fn diff_bundle(inventory: &SecurityInventory, diff: &SecurityDiffInventory) -> S
         contract_version: SECURITY_SCAN_CONTRACT_VERSION,
         scan_id: "adversarial-diff".into(),
         mode: SecurityScanMode::Diff,
-        model: SECURITY_MODEL.into(),
+        model: SECURITY_SIMULATION_MODEL.into(),
         scope: inventory.scope.clone(),
         inventory_id: inventory.inventory_id.clone(),
         phase: SecurityScanPhase::Reporting,
@@ -450,7 +452,7 @@ fn poc_ledger(bundle: &SecurityScanBundle) -> SecurityPocLedger {
                     passed: true,
                     containment: "managed_disposable".into(),
                     artifact_path: format!(
-                        ".clark/security-scans/{}/poc/{receipt_id}/receipt.json",
+                        ".agent/security-scans/{}/poc/{receipt_id}/receipt.json",
                         bundle.scan_id
                     ),
                     execution: None,
@@ -479,9 +481,9 @@ fn git(root: &Path, args: &[&str]) {
         .arg("-C")
         .arg(root)
         .args(args)
-        .env("GIT_AUTHOR_NAME", "Clark Security Simulation")
+        .env("GIT_AUTHOR_NAME", "Agent Security Simulation")
         .env("GIT_AUTHOR_EMAIL", "security@example.invalid")
-        .env("GIT_COMMITTER_NAME", "Clark Security Simulation")
+        .env("GIT_COMMITTER_NAME", "Agent Security Simulation")
         .env("GIT_COMMITTER_EMAIL", "security@example.invalid")
         .output()
         .expect("run Git");

@@ -16,7 +16,7 @@ fn runner_request_round_trip_preserves_utf16_and_policy() {
     let request = WindowsRunnerRequest {
         protocol_version: RUNNER_PROTOCOL_VERSION,
         request_id: "request-1".to_string(),
-        state_dir: PathBuf::from("/Clark/sandbox"),
+        state_dir: PathBuf::from("/agent-desktop/sandbox"),
         policy: policy(),
         process: WireProcess {
             program: WireOsString::from_os(OsStr::new("cmd.exe")),
@@ -37,7 +37,7 @@ fn runner_request_round_trip_preserves_utf16_and_policy() {
 #[test]
 fn marker_pins_runner_digest_and_protocol_versions() {
     let dir = tempfile::tempdir().unwrap();
-    let runner = dir.path().join("clark-command-runner.exe");
+    let runner = dir.path().join("agent-command-runner.exe");
     std::fs::write(&runner, b"signed runner fixture").unwrap();
     let marker = WindowsSetupMarker {
         setup_protocol_version: SETUP_PROTOCOL_VERSION,
@@ -61,7 +61,7 @@ fn marker_accepts_only_safe_capability_subsets_without_exact_policy_match() {
     let mut provisioned = policy();
     provisioned
         .write_roots
-        .push(PathBuf::from(r"C:\Clark\sandbox-tmp"));
+        .push(PathBuf::from(r"C:\AgentDesktop\sandbox-tmp"));
     let marker = WindowsSetupMarker {
         setup_protocol_version: SETUP_PROTOCOL_VERSION,
         runner_protocol_version: RUNNER_PROTOCOL_VERSION,
@@ -75,11 +75,11 @@ fn marker_accepts_only_safe_capability_subsets_without_exact_policy_match() {
 
     let readonly = WireSandboxPolicy {
         read_roots: Vec::new(),
-        write_roots: vec![PathBuf::from(r"C:\Clark\sandbox-tmp")],
+        write_roots: vec![PathBuf::from(r"C:\AgentDesktop\sandbox-tmp")],
         deny_read: Vec::new(),
         deny_write: Vec::new(),
         network: WireNetworkPolicy::Restricted,
-        process_temp_root: Some(PathBuf::from(r"C:\Clark\sandbox-tmp\session-1")),
+        process_temp_root: Some(PathBuf::from(r"C:\AgentDesktop\sandbox-tmp\session-1")),
     };
     assert!(marker.validate_for_policy(&readonly).is_ok());
 
@@ -90,7 +90,7 @@ fn marker_accepts_only_safe_capability_subsets_without_exact_policy_match() {
     let mut new_deny_policy = readonly;
     new_deny_policy
         .deny_write
-        .push(PathBuf::from(r"C:\Clark\sandbox-tmp\protected"));
+        .push(PathBuf::from(r"C:\AgentDesktop\sandbox-tmp\protected"));
     assert!(marker.validate_for_policy(&new_deny_policy).is_err());
 }
 
@@ -99,13 +99,13 @@ fn policy_fingerprint_collapses_redundant_session_temp_roots() {
     let mut first = policy();
     first
         .write_roots
-        .push(PathBuf::from(r"C:\workspace\.clark\tmp\one"));
-    first.process_temp_root = Some(PathBuf::from(r"C:\workspace\.clark\tmp\one"));
+        .push(PathBuf::from(r"C:\workspace\.agent\tmp\one"));
+    first.process_temp_root = Some(PathBuf::from(r"C:\workspace\.agent\tmp\one"));
     let mut second = policy();
     second
         .write_roots
-        .push(PathBuf::from(r"C:\workspace\.clark\tmp\two"));
-    second.process_temp_root = Some(PathBuf::from(r"C:\workspace\.clark\tmp\two"));
+        .push(PathBuf::from(r"C:\workspace\.agent\tmp\two"));
+    second.process_temp_root = Some(PathBuf::from(r"C:\workspace\.agent\tmp\two"));
     assert_eq!(first.fingerprint().unwrap(), second.fingerprint().unwrap());
 }
 
@@ -151,11 +151,11 @@ fn validation_rejects_relative_privilege_boundary_paths() {
         protocol_version: SETUP_PROTOCOL_VERSION,
         request_id: "request-1".to_string(),
         state_dir: PathBuf::from("relative"),
-        runner_path: PathBuf::from(r"C:\Clark\clark-command-runner.exe"),
+        runner_path: PathBuf::from(r"C:\AgentDesktop\agent-command-runner.exe"),
         policy: policy(),
         root_proofs: vec![WindowsRootProof {
             root: PathBuf::from(r"C:\workspace"),
-            proof_path: PathBuf::from(r"C:\workspace\.clark-sandbox-setup-request-1-0.proof"),
+            proof_path: PathBuf::from(r"C:\workspace\.agent-sandbox-setup-request-1-0.proof"),
             nonce: "0123456789abcdef0123456789abcdef".to_string(),
         }],
     };
@@ -167,7 +167,7 @@ fn windows_requests_reject_unenforceable_read_or_network_policies() {
     let mut request = WindowsRunnerRequest {
         protocol_version: RUNNER_PROTOCOL_VERSION,
         request_id: "request-policy".to_string(),
-        state_dir: PathBuf::from(r"C:\Clark\sandbox"),
+        state_dir: PathBuf::from(r"C:\AgentDesktop\sandbox"),
         policy: policy(),
         process: WireProcess {
             program: WireOsString::from_os(OsStr::new("cmd.exe")),
@@ -188,7 +188,7 @@ fn runner_request_rejects_embedded_nuls_and_environment_injection() {
     let mut request = WindowsRunnerRequest {
         protocol_version: RUNNER_PROTOCOL_VERSION,
         request_id: "request-strings".to_string(),
-        state_dir: PathBuf::from(r"C:\Clark\sandbox"),
+        state_dir: PathBuf::from(r"C:\AgentDesktop\sandbox"),
         policy: policy(),
         process: WireProcess {
             program: WireOsString::from_os(OsStr::new("cmd.exe")),
@@ -219,7 +219,7 @@ fn encoder_rejects_requests_that_cannot_fit_a_windows_command_line() {
     let mut request = WindowsRunnerRequest {
         protocol_version: RUNNER_PROTOCOL_VERSION,
         request_id: "request-oversized".to_string(),
-        state_dir: PathBuf::from(r"C:\Clark\sandbox"),
+        state_dir: PathBuf::from(r"C:\AgentDesktop\sandbox"),
         policy: policy(),
         process: WireProcess {
             program: WireOsString::from_os(OsStr::new("powershell.exe")),

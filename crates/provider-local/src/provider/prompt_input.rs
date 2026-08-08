@@ -122,15 +122,15 @@ pub(super) fn model_user_content(
     text: String,
     attachments: &[agent_core::domain::PendingUpload],
     native_image_support: bool,
-) -> clark_agent::UserContent {
+) -> agent_loop::UserContent {
     if !native_image_support {
-        return clark_agent::UserContent::Text(text);
+        return agent_loop::UserContent::Text(text);
     }
     let mut blocks = attachments
         .iter()
         .filter(|attachment| attachment.is_image())
         .map(|attachment| {
-            clark_agent::UserBlock::Image(clark_agent::ImageContent {
+            agent_loop::UserBlock::Image(agent_loop::ImageContent {
                 source: format!(
                     "data:{};base64,{}",
                     attachment.content_type, attachment.data_base64
@@ -141,12 +141,12 @@ pub(super) fn model_user_content(
         })
         .collect::<Vec<_>>();
     if blocks.is_empty() {
-        return clark_agent::UserContent::Text(text);
+        return agent_loop::UserContent::Text(text);
     }
-    blocks.push(clark_agent::UserBlock::Text(
-        clark_agent::types::TextContent { text },
+    blocks.push(agent_loop::UserBlock::Text(
+        agent_loop::types::TextContent { text },
     ));
-    clark_agent::UserContent::Blocks(blocks)
+    agent_loop::UserContent::Blocks(blocks)
 }
 
 /// Minimal standard-base64 decoder (no external dep) for inlining text files.

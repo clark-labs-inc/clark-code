@@ -100,7 +100,7 @@ describe("nextApprovalPolicy", () => {
 
 describe("legacy preference migration", () => {
   it("maps old plan mode to auto approval plus Plan collaboration", () => {
-    localStorage.setItem("clark-desktop:permission-mode", "plan");
+    localStorage.setItem("agent-desktop:permission-mode", "plan");
     expect(loadApprovalPolicy()).toBe("auto");
     expect(loadCollaborationMode()).toBe("plan");
   });

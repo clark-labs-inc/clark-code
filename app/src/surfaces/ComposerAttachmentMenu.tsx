@@ -86,7 +86,7 @@ export function ComposerAttachmentMenu({
         aria-haspopup="menu"
         aria-expanded={open}
         title="Add files or a folder"
-        className="grid size-8 shrink-0 place-items-center rounded-full bg-bg-tertiary text-ink-muted transition duration-200 ease-clark hover:bg-accent-subtle hover:text-accent disabled:opacity-40"
+        className="grid size-8 shrink-0 place-items-center rounded-full bg-bg-tertiary text-ink-muted transition duration-200 ease-agent hover:bg-accent-subtle hover:text-accent disabled:opacity-40"
       >
         <Plus className="size-4" />
       </button>
@@ -104,7 +104,7 @@ export function ComposerAttachmentMenu({
             type="button"
             role="menuitem"
             onClick={() => choose(fileRef.current)}
-            className="flex min-h-9 w-full items-center gap-2.5 rounded-xl px-2.5 py-1.5 text-left text-sm text-ink transition duration-200 ease-clark hover:bg-bg-hover focus-visible:bg-bg-hover"
+            className="flex min-h-9 w-full items-center gap-2.5 rounded-xl px-2.5 py-1.5 text-left text-sm text-ink transition duration-200 ease-agent hover:bg-bg-hover focus-visible:bg-bg-hover"
           >
             <FileUp className="size-4 shrink-0 text-ink-muted" />
             <span className="shrink-0">Files</span>
@@ -116,7 +116,7 @@ export function ComposerAttachmentMenu({
             type="button"
             role="menuitem"
             onClick={() => choose(folderRef.current)}
-            className="flex min-h-9 w-full items-center gap-2.5 rounded-xl px-2.5 py-1.5 text-left text-sm text-ink transition duration-200 ease-clark hover:bg-bg-hover focus-visible:bg-bg-hover"
+            className="flex min-h-9 w-full items-center gap-2.5 rounded-xl px-2.5 py-1.5 text-left text-sm text-ink transition duration-200 ease-agent hover:bg-bg-hover focus-visible:bg-bg-hover"
           >
             <FolderOpen className="size-4 shrink-0 text-ink-muted" />
             <span className="shrink-0">Folder</span>

@@ -1,8 +1,8 @@
-import { projectClarkCodeBilling, type BillingSummary } from "./billing";
+import { capabilityAccess, type ProductAccessProjection } from "./productAccess";
 import type { ConnectConfig } from "../core-bridge/bridge";
 import type { RemoteInfo } from "./remoteWorker";
-import type { CloudAdvisorTarget, ScoutCartographyTarget } from "./localAgent";
-import firstPartyCatalog from "./first-party-specialists.json";
+import type { ProductSpecialistTarget, ScoutCartographyTarget } from "./localAgent";
+import { productModule } from "../product/productModule";
 
 export type SpecialistKind = string;
 export type SpecialistWorkflow = string;
@@ -60,6 +60,10 @@ export interface SpecialistDefinition {
   headline: string;
   value: string;
   engine: "skill" | "research_runtime";
+  runtime?: Readonly<{
+    modelRoute: string;
+    maxIterations: number;
+  }>;
   tabs: ReadonlyArray<{ id: SpecialistTab; label: string }>;
   defaultTab: SpecialistTab;
   defaultWorkflow: SpecialistWorkflow;
@@ -148,6 +152,20 @@ export function parseSpecialistCatalog(value: unknown): SpecialistCatalogReceipt
     if (!Array.isArray(manifest.tabs) || !Array.isArray(manifest.slashCommands)) {
       throw new Error(`Specialist manifest ${index} has invalid navigation`);
     }
+    const runtime = manifest.runtime === undefined
+      ? undefined
+      : catalogObject(manifest.runtime, `Specialist manifest ${index} runtime`);
+    if (
+      (engine === "research_runtime" && !runtime)
+      || (runtime !== undefined && (
+        typeof runtime.modelRoute !== "string"
+        || !runtime.modelRoute
+        || !Number.isInteger(runtime.maxIterations)
+        || (runtime.maxIterations as number) < 1
+      ))
+    ) {
+      throw new Error(`Specialist manifest ${index} has an invalid runtime policy`);
+    }
     const skillBindings = catalogObject(
       manifest.skillBindings,
       `Specialist manifest ${index} skill bindings`,
@@ -162,6 +180,14 @@ export function parseSpecialistCatalog(value: unknown): SpecialistCatalogReceipt
       headline: catalogString(manifest.headline, "specialist headline"),
       value: catalogString(manifest.value, "specialist value"),
       engine,
+      ...(runtime
+        ? {
+          runtime: {
+            modelRoute: runtime.modelRoute as string,
+            maxIterations: runtime.maxIterations as number,
+          },
+        }
+        : {}),
       defaultTab: catalogString(manifest.defaultTab, "specialist default tab"),
       defaultWorkflow: catalogString(
         manifest.defaultWorkflow,
@@ -205,12 +231,25 @@ export function parseSpecialistCatalog(value: unknown): SpecialistCatalogReceipt
   };
 }
 
-export const FIRST_PARTY_SPECIALIST_CATALOG = parseSpecialistCatalog(firstPartyCatalog);
+const EMPTY_SPECIALIST_CATALOG: SpecialistCatalogReceipt = {
+  schemaVersion: 1,
+  catalogVersion: "1.0.0",
+  catalogSha256: "0".repeat(64),
+  trust: {
+    source: "signed_app_bundle",
+    requiresSignedReleaseBinary: true,
+  },
+  manifests: [],
+};
+
+export const PRODUCT_SPECIALIST_CATALOG = productModule().specialistCatalog === undefined
+  ? EMPTY_SPECIALIST_CATALOG
+  : parseSpecialistCatalog(productModule().specialistCatalog);
 export const SPECIALIST_CATALOG_SHA256 =
-  FIRST_PARTY_SPECIALIST_CATALOG.catalogSha256;
+  PRODUCT_SPECIALIST_CATALOG.catalogSha256;
 
 export const SPECIALIST_REGISTRY = createSpecialistRegistry(
-  FIRST_PARTY_SPECIALIST_CATALOG.manifests,
+  PRODUCT_SPECIALIST_CATALOG.manifests,
 );
 export const SPECIALISTS = SPECIALIST_REGISTRY.byKind;
 export const SPECIALIST_KINDS = SPECIALIST_REGISTRY.ordered.map(({ kind }) => kind);
@@ -223,10 +262,10 @@ export function researchRuntimeSpecialist(
   return definition?.engine === "research_runtime" ? definition : null;
 }
 
-export function skillAdvisorTarget(
+export function productSpecialistTarget(
   context: SpecialistContext | null | undefined,
   trainingEnabled = false,
-): CloudAdvisorTarget | undefined {
+): ProductSpecialistTarget | undefined {
   if (
     !context?.organizationId?.trim()
     || (context.kind !== "scout" && context.kind !== "security")
@@ -235,9 +274,9 @@ export function skillAdvisorTarget(
   if (!definition || definition.engine !== "skill") return undefined;
   return {
     organizationId: context.organizationId,
-    specialist: context.kind,
+    kind: context.kind,
     workflow: context.workflow || definition.defaultWorkflow,
-    ...(trainingEnabled ? { trainingConsent: "explicit_user" as const } : {}),
+    ...(trainingEnabled ? { trainingOptIn: true } : {}),
   };
 }
 
@@ -280,7 +319,7 @@ export function specialistConnectConfig(
 ): ConnectConfig {
   const definition = researchRuntimeSpecialist(context);
   const project = cwd.trim();
-  if (!definition || !project) {
+  if (!definition || !definition.runtime || !project) {
     throw new Error("A registered research specialist and local project folder are required.");
   }
   const workflow = context.workflow || definition.defaultWorkflow;
@@ -301,8 +340,8 @@ export function specialistConnectConfig(
       ...(definition.kind === "rsi" && scoutContext
         ? { scoutContext }
         : {}),
-      modelRoute: "clark_deepseek_v4_latest",
-      maxIterations: 3,
+      modelRoute: definition.runtime.modelRoute,
+      maxIterations: definition.runtime.maxIterations,
       ...(advisorTrainingEnabled ? { advisorTrainingEnabled: true } : {}),
       ...(remote ? { remote } : {}),
     },
@@ -341,24 +380,25 @@ export function specialistAccessBadge(state: SpecialistAccessState): string {
   }
 }
 
-/** Local projection used while the organization-bound server entitlement is
- * loading. Shared billing policy supplies coverage and usage admission; the
- * entitlement API remains authoritative before specialist data or actions. */
+/** Local projection used while organization-bound capability access is
+ * loading. The product access projection remains authoritative before
+ * specialist data or actions. */
 export function projectedSpecialistAccess(
   signedIn: boolean,
-  billing: BillingSummary | null,
+  access: ProductAccessProjection | null,
+  kind: SpecialistKind,
 ): SpecialistAccessState {
   if (!signedIn) return "signed_out";
-  if (!billing) return "loading";
-  switch (projectClarkCodeBilling(billing).coverage.state) {
-    case "ready": return "ready";
-    case "action_needed": return "action_needed";
-    case "not_included": return "free";
-    case "unknown": return "loading";
-  }
+  const capability = capabilityAccess(access, kind);
+  if (!capability || capability.availability === "unknown") return "loading";
+  if (capability.availability === "available") return "ready";
+  return ["coverage_action_needed", "coverage_unavailable", "usage_limited", "past_due"]
+    .includes(capability.reason)
+    ? "action_needed"
+    : "free";
 }
 
-/** Keep an already verified entitlement distinct from a later specialist-data
+/** Keep already verified access distinct from a later specialist-data
  * failure. A failed overview/query is a canvas error, not evidence that the
  * user's paid coverage became unverifiable. */
 export function specialistAccessAfterLoadFailure(
@@ -370,30 +410,41 @@ export function specialistAccessAfterLoadFailure(
 export function specialistAccessCopy(
   state: SpecialistAccessState,
   kind: SpecialistKind,
-): { title: string; detail: string; action: "sign_in" | "upgrade" | "billing" | "retry" | null } {
+): {
+  title: string;
+  detail: string;
+  action: "sign_in" | "product_action" | "retry" | null;
+  actionLabel?: string;
+} {
+  const brand = productModule().branding;
   const definition = SPECIALIST_REGISTRY.get(kind);
   if (!definition) {
     return {
       title: "Unknown specialist",
-      detail: "This specialist is not registered in this Clark build.",
+      detail: `This specialist is not registered in this ${brand.shortName} build.`,
       action: null,
     };
   }
   const label = definition.label;
+  const productCopy = productModule().specialistAccessCopy;
+  if (productCopy) {
+    return productCopy({ state, kind, label, value: definition.value });
+  }
   switch (state) {
     case "loading":
       return { title: `Checking ${label} access…`, detail: "This usually takes a moment.", action: null };
     case "signed_out":
       return {
-        title: `Sign in to use Clark ${label}`,
-        detail: `${definition.value} Specialist work is saved to your Clark account.`,
+        title: `Sign in to use ${brand.shortName} ${label}`,
+        detail: `${definition.value} Specialist work is saved to your ${brand.shortName} account.`,
         action: "sign_in",
       };
     case "action_needed":
       return {
-        title: `${label} is paused`,
-        detail: "Update billing or ask a workspace admin to restore your paid seat. Saved work is safe.",
-        action: "billing",
+        title: `${label} access needs attention`,
+        detail: "Review this capability in the active product account. Saved work remains available.",
+        action: "product_action",
+        actionLabel: "Review access",
       };
     case "scope_lost":
       return {
@@ -409,9 +460,10 @@ export function specialistAccessCopy(
       };
     case "free":
       return {
-        title: `Unlock Clark ${label}`,
-        detail: `Clark ${label} is available with Pro coverage. ${definition.value} Your existing chats and Clark Code remain available.`,
-        action: "upgrade",
+        title: `${label} is unavailable`,
+        detail: `This capability is not available in the current ${brand.shortName} configuration. ${definition.value}`,
+        action: "product_action",
+        actionLabel: "Review access",
       };
     case "ready":
       return { title: `${label} is ready`, detail: definition.value, action: null };

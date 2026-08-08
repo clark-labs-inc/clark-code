@@ -126,7 +126,7 @@ if __name__ == "__main__":
     )
     .unwrap();
     git(root, &["init", "--quiet"]);
-    git(root, &["config", "user.name", "Clark Large Paid Eval"]);
+    git(root, &["config", "user.name", "Agent Large Paid Eval"]);
     git(root, &["config", "user.email", "large-eval@invalid.local"]);
     git(root, &["add", "--all"]);
     git(

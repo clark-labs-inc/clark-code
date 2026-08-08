@@ -113,7 +113,7 @@ pub async fn project_worktree_transition_plan(
 
 /// Create a branch-backed, app-managed worktree from an explicit base choice.
 /// The source checkout is never switched, stashed, committed, reset, or
-/// cleaned. Each checkout receives a unique `clark/<id>` branch so commits are
+/// cleaned. Each checkout receives a unique `agent/<id>` branch so commits are
 /// durable even if the checkout is later archived.
 #[tauri::command]
 pub async fn project_managed_worktree_create(
@@ -123,7 +123,7 @@ pub async fn project_managed_worktree_create(
     let source = source_checkout(&project_path).await?;
     if is_registered_managed_worktree(&source.root).await? {
         return Err(
-            "This checkout is already a Clark-managed isolated worktree. Reuse it instead of nesting another checkout."
+            "This checkout is already a app-managed isolated worktree. Reuse it instead of nesting another checkout."
                 .into(),
         );
     }
@@ -198,7 +198,7 @@ pub async fn project_managed_worktree_create(
     ))
 }
 
-/// List only worktrees created by Clark's managed lifecycle. User-created
+/// List only worktrees created by Agent Desktop's managed lifecycle. User-created
 /// linked worktrees remain visible through normal Git branch ownership but are
 /// never candidates for lifecycle cleanup here.
 #[tauri::command]
@@ -248,7 +248,7 @@ pub async fn project_managed_worktree_list(
 
 /// Explicitly remove one clean, registered managed worktree. This intentionally
 /// omits --force, never prunes arbitrary Git worktrees, and refuses any path
-/// not present in both Clark's registry and Git's current worktree list.
+/// not present in both Agent Desktop's registry and Git's current worktree list.
 #[tauri::command]
 pub async fn project_managed_worktree_cleanup(
     project_path: String,
@@ -291,7 +291,7 @@ pub(super) async fn cleanup_managed_worktree(
     let live_sessions = live_sessions_using_checkout(state, &path).await;
     if !live_sessions.is_empty() {
         return Err(format!(
-            "Managed worktree {} is still used by {} live Clark session{}. Archive or close that chat before archiving this checkout.",
+            "Managed worktree {} is still used by {} live desktop session{}. Archive or close that chat before archiving this checkout.",
             path.display(),
             live_sessions.len(),
             if live_sessions.len() == 1 { "" } else { "s" }
@@ -389,7 +389,7 @@ pub async fn project_managed_worktree_save_branch(
     if let Some(existing) = branch_revision(&root, &branch).await {
         if existing != head_revision {
             return Err(format!(
-                "Branch {branch} already points somewhere else, so Clark will not overwrite it. Create or choose another branch manually."
+                "Branch {branch} already points somewhere else, so Agent Desktop will not overwrite it. Create or choose another branch manually."
             ));
         }
     } else {
@@ -455,7 +455,7 @@ async fn managed_status(
 fn managed_branch_name(id: &str) -> String {
     // `id` is normalized to an ASCII-only path/ref segment before it reaches
     // this boundary. Never derive a Git ref from raw UI input here.
-    format!("clark/{id}")
+    format!("agent/{id}")
 }
 
 fn recovery_branch_name(id: &str) -> String {
@@ -509,7 +509,7 @@ fn managed_root(repo_root: &Path) -> Result<PathBuf, String> {
         .and_then(|name| name.to_str())
         .filter(|name| !name.is_empty())
         .ok_or_else(|| "The repository folder has no usable name.".to_string())?;
-    Ok(parent.join(format!("{repo_name}.clark-worktrees")))
+    Ok(parent.join(format!("{repo_name}.agent-worktrees")))
 }
 
 fn unix_time_ms() -> u64 {

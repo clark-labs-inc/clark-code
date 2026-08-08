@@ -62,7 +62,7 @@ export async function readLocalSandboxStatus(
   cwd: string,
 ): Promise<LocalSandboxStatus> {
   if (!bridge.localSandboxStatus) {
-    throw new Error("This Clark build cannot inspect the local command sandbox");
+    throw new Error("This the agent build cannot inspect the local command sandbox");
   }
   return bridge.localSandboxStatus(cwd);
 }
@@ -145,9 +145,9 @@ export function SandboxSetupCard({
           </p>
           <p className="mt-0.5 text-xs leading-relaxed text-ink-muted">
             {canSetup
-              ? "Clark needs one Windows approval before it can run project commands safely. Setup is reused after restart."
+              ? "the agent needs one Windows approval before it can run project commands safely. Setup is reused after restart."
               : (status?.reason || error
-                || "Repair the Clark Code installation before running local commands.")}
+                || "Repair Agent Desktop installation before running local commands.")}
           </p>
           {error && <p className="mt-1.5 text-xs text-danger">{error}</p>}
         </div>
@@ -166,7 +166,7 @@ export function SandboxSetupCard({
             : <AlertTriangle className="size-4 text-warning" />}
           name={canSetup ? "Enable the Windows sandbox" : "Sandbox unavailable"}
           sub={canSetup
-            ? "One Windows approval creates Clark’s offline identity and network block. After that, Clark enrolls folders you own without prompting; protected folders ask only when Windows requires it. Clark Cloud stays available through its brokered host tool."
+            ? "One Windows approval creates the agent’s offline identity and network block. After that, the agent enrolls folders you own without prompting; protected folders ask only when Windows requires it. product cloud stays available through its brokered host tool."
             : (status?.reason || error
               || "This platform sandbox is not available on this machine.")}
         >

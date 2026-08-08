@@ -32,7 +32,7 @@ use futures::StreamExt;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
-use crate::config::{is_free_model, LocalConfig, DEFAULT_MODEL};
+use crate::config::LocalConfig;
 use crate::engine::{run_turn, TurnContext};
 use crate::exec::{Executor, LocalExecutor};
 use crate::llm::LlmClient;
@@ -133,38 +133,33 @@ impl Provider for LocalAgentProvider {
         }
         let llm = LlmClient::new(&local).map_err(Error::Other)?;
         let memory =
-            (local.tools_enabled && local.memories_enabled).then(|| Self::memory_config(&local));
+            (local.tools_enabled && local.memories_enabled).then(|| self.memory_config(&local));
         let mut registry = if local.tools_enabled {
-            ToolRegistry::new(local.clark.clone(), memory)
+            ToolRegistry::new(local.research.clone(), memory)
         } else {
             ToolRegistry::empty()
         };
         if local.tools_enabled {
-            if let Some(api_key) = local
-                .api_key
-                .clone()
-                .filter(|_| !is_free_model(&local.model))
-            {
+            if let Some(api_key) = local.api_key.clone().filter(|_| {
+                !local
+                    .image_generation_excluded_models
+                    .contains(&local.model)
+            }) {
                 registry.enable_image_generation(crate::tools::image::ImageGenerationConfig {
                     base_url: local.base_url.clone(),
                     api_key,
                 });
             }
             if !self.isolation.disposable_writer() {
-                if let Some(api_key) = local.api_key.clone() {
-                    registry.enable_organization_knowledge(
-                        crate::tools::organization_knowledge::OrganizationKnowledgeConfig {
-                            base_url: local.base_url.clone(),
-                            api_key,
-                        },
-                    );
-                }
-                if let Some(config) = local.cloud_advisor.clone() {
-                    registry.enable_cloud_advisor(config);
+                if let Some(provider) = self.context_provider.clone() {
+                    registry.enable_organization_knowledge(provider);
                 }
             }
             if local.browser_enabled {
-                registry.enable_browser();
+                let browser = local.browser_binary.clone().ok_or_else(|| {
+                    Error::Unsupported("browser is enabled without a host binary policy".into())
+                })?;
+                registry.enable_browser(browser);
             }
             if local.computer_use_enabled && !self.isolation.disposable_writer() {
                 let backend: Arc<dyn computer_use::ComputerBackend> =
@@ -186,6 +181,13 @@ impl Provider for LocalAgentProvider {
             } else if !self.isolation.disposable_writer() {
                 if let Some(policy) = local.scout_capsules.clone() {
                     registry.enable_scout_capsules(policy);
+                }
+            }
+            if !self.isolation.disposable_writer() {
+                for pack in &self.tool_packs {
+                    registry
+                        .install_tool_pack(pack.as_ref())
+                        .map_err(Error::Other)?;
                 }
             }
         }
@@ -289,7 +291,7 @@ impl Provider for LocalAgentProvider {
             None
         };
 
-        // Project-scoped config (`.clark/settings.json`) mirrors Claude Code's
+        // Project-scoped config (`.agent/settings.json`) mirrors Claude Code's
         // configurable commit attribution and also layers permissions/hooks
         // beneath the global UI-driven config.
         let project = if self.isolation.disposable_writer() {
@@ -340,14 +342,14 @@ impl Provider for LocalAgentProvider {
 
         let commit_attribution = project
             .include_git_instructions()
-            .then(|| project.commit_attribution());
+            .then(|| project.commit_attribution_or(&config.default_commit_attribution));
         let pr_body_attribution = project
             .include_git_instructions()
-            .then(|| project.pr_body_attribution());
+            .then(|| project.pr_body_attribution_or(&config.default_pr_body_attribution));
         let mut prompt = config.system_prompt_override.clone().unwrap_or_else(|| {
             system_prompt(
                 &sandbox,
-                config.clark.is_some(),
+                config.research.is_some(),
                 false,
                 commit_attribution,
                 pr_body_attribution,
@@ -611,31 +613,30 @@ impl Provider for LocalAgentProvider {
                     crate::skills::invokes_skill(&run_skills, &input.blocks, &user_request, skill)
                 });
         // The conversation picker is not an entitlement source. Scout and
-        // Security pin their own execution routes below; Clark's gateway then
+        // Security pin their own execution routes below; Agent Desktop's gateway then
         // admits those routes against the API key's current personal/workspace
         // coverage. Rejecting here merely because the base conversation uses
         // the included lane blocks paid workspace members before the
         // authoritative billing boundary can run.
         let model_override = if scout_turn {
-            Some(crate::tools::TurnModelOverride {
-                model: crate::config::SCOUT_MODEL,
-                reasoning_effort: crate::config::SCOUT_REASONING_EFFORT,
-            })
+            config.skill_model_overrides.get("scout")
         } else if security_turn {
-            Some(crate::tools::TurnModelOverride {
-                model: crate::config::SECURITY_MODEL,
-                reasoning_effort: crate::config::SECURITY_REASONING_EFFORT,
-            })
+            config.skill_model_overrides.get("security")
         } else {
             None
-        };
+        }
+        .map(|policy| crate::tools::TurnModelOverride {
+            model: policy.model.clone(),
+            reasoning_effort: policy.reasoning_effort.clone(),
+        });
         let effective_model = model_override
-            .map(|policy| policy.model)
-            .unwrap_or(config.model.as_str());
-        let llm = match model_override {
+            .as_ref()
+            .map(|policy| policy.model.clone())
+            .unwrap_or_else(|| config.model.clone());
+        let llm = match model_override.as_ref() {
             Some(policy) => llm
-                .with_model(policy.model)
-                .with_reasoning_effort(policy.reasoning_effort),
+                .with_model(&policy.model)
+                .with_reasoning_effort(policy.reasoning_effort.as_deref()),
             None => llm,
         };
         if security_turn {
@@ -662,7 +663,7 @@ impl Provider for LocalAgentProvider {
                     .map(str::to_string),
             );
         }
-        let native_image_support = crate::config::model_supports_images(effective_model);
+        let native_image_support = crate::config::model_supports_images(&effective_model);
         let mut context_sections = Vec::new();
         if config.orchestration.enabled {
             context_sections.push(
@@ -703,16 +704,12 @@ impl Provider for LocalAgentProvider {
             if !config.project_knowledge_enabled {
                 return None;
             }
-            let api_key = config.api_key.as_deref()?;
+            let provider = self.context_provider.as_ref()?;
             let fingerprint = self.repository_fingerprint.as_deref()?;
-            let context = crate::platform::recall_repository_context(
-                &config.base_url,
-                api_key,
-                fingerprint,
-                &knowledge_query,
-            )
-            .await
-            .ok()?;
+            let context = provider
+                .repository_context(fingerprint, &knowledge_query)
+                .await
+                .ok()?;
             crate::platform::repository_context_section(&context)
         };
 
@@ -777,14 +774,13 @@ impl Provider for LocalAgentProvider {
 
         // Post-turn durable-fact extraction (structural memory proactivity):
         // only when memories are on, and always off the turn's latency path.
-        // Extraction quality shouldn't inherit a weaker session model — on the
-        // Clark platform, pin it to the default clark-code tier.
+        // Extraction quality may use a host-pinned model instead of inheriting
+        // the active conversation model.
         let memory_extraction = config.memories_enabled.then(|| {
-            let extraction_llm = if config.model.starts_with("clark-code") {
-                llm.clone().with_model(DEFAULT_MODEL)
-            } else {
-                llm.clone()
-            };
+            let extraction_llm = config
+                .memory_extraction_model
+                .as_deref()
+                .map_or_else(|| llm.clone(), |model| llm.clone().with_model(model));
             crate::memory_extraction::ExtractionCtx {
                 llm: extraction_llm,
                 executor: self.executor.clone(),
@@ -820,7 +816,7 @@ impl Provider for LocalAgentProvider {
             compaction: config.compaction,
             plan_execution_reminders: config.plan_execution_reminders,
             hidden_plan_protocol: config.hidden_plan_protocol,
-            model: effective_model.to_string(),
+            model: effective_model,
             temperature: config.temperature,
             user_text: text,
             user_content,

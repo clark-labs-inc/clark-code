@@ -41,7 +41,7 @@ pub enum DocumentPreview {
     },
 }
 
-/// Render a supported office file from Clark's app-managed document workspace.
+/// Render a supported office file from Agent Desktop's app-managed document workspace.
 /// Writer documents, sheets, and PDFs use compact semantic HTML. Presentations
 /// prefer paginated PNG output because slide geometry is part of the content;
 /// raster failures fall back to semantic HTML.
@@ -99,7 +99,7 @@ pub async fn read_document_preview_page(
 }
 
 /// Remove one generated page-preview directory. UUID validation makes the
-/// cleanup target an exact child of Clark's app cache, never a caller path.
+/// cleanup target an exact child of Agent Desktop's app cache, never a caller path.
 #[tauri::command]
 pub async fn cleanup_document_preview(app: AppHandle, preview_id: String) -> Result<(), String> {
     let directory = preview_directory(&app, &preview_id)?;
@@ -210,9 +210,12 @@ mod tests {
 
     #[test]
     fn renders_docx_as_compact_semantic_html() {
-        let docx =
-            libreoffice_pure::convert_bytes(b"# Native preview\n\nHello **Clark**.", "md", "docx")
-                .expect("create DOCX fixture");
+        let docx = libreoffice_pure::convert_bytes(
+            b"# Native preview\n\nHello **Agent Desktop**.",
+            "md",
+            "docx",
+        )
+        .expect("create DOCX fixture");
 
         let root = tempfile::tempdir().expect("preview cache");
         let preview = render_preview(&docx, "docx", root.path()).expect("render DOCX preview");
@@ -225,10 +228,11 @@ mod tests {
 
     #[test]
     fn renders_spreadsheet_as_styled_inert_html() {
-        let xlsx = libreoffice_pure::convert_bytes(b"name,value\nClark,42\n", "csv", "xlsx")
-            .expect("create XLSX fixture");
+        let xlsx =
+            libreoffice_pure::convert_bytes(b"name,value\nAgent Desktop,42\n", "csv", "xlsx")
+                .expect("create XLSX fixture");
         let html = render_html(&xlsx, "xlsx").expect("render XLSX preview");
-        assert!(html.contains("Clark"));
+        assert!(html.contains("Agent Desktop"));
         assert!(html.contains("Content-Security-Policy"));
         assert!(html.contains("default-src 'none'"));
     }

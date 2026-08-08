@@ -38,7 +38,7 @@ impl CdpClient {
     async fn connect(ws_url: &str) -> Result<Self, String> {
         let (stream, _resp) = tokio_tungstenite::connect_async(ws_url)
             .await
-            .map_err(|e| format!("connecting to clark-browser's CDP endpoint: {e}"))?;
+            .map_err(|e| format!("connecting to managed browser's CDP endpoint: {e}"))?;
         let (sink, mut source) = stream.split();
         let pending: Pending = Arc::new(Mutex::new(HashMap::new()));
 
@@ -69,7 +69,7 @@ impl CdpClient {
                     }
                 }
                 for (_, tx) in pending.lock().unwrap().drain() {
-                    let _ = tx.send(Err("clark-browser closed the CDP connection".into()));
+                    let _ = tx.send(Err("managed browser closed the CDP connection".into()));
                 }
             });
         }
@@ -125,20 +125,20 @@ pub struct BrowserSession {
 }
 
 impl BrowserSession {
-    /// Discover the browser-level WS endpoint from clark-browser's
+    /// Discover the browser-level WS endpoint from managed browser's
     /// `--remote-debugging-port`, then connect.
     pub async fn connect(devtools_port: u16) -> Result<Self, String> {
         let version_url = format!("http://127.0.0.1:{devtools_port}/json/version");
         let resp: Value = reqwest::get(&version_url)
             .await
-            .map_err(|e| format!("reaching clark-browser's devtools endpoint: {e}"))?
+            .map_err(|e| format!("reaching managed browser's devtools endpoint: {e}"))?
             .json()
             .await
-            .map_err(|e| format!("parsing clark-browser's devtools response: {e}"))?;
+            .map_err(|e| format!("parsing managed browser's devtools response: {e}"))?;
         let ws_url = resp
             .get("webSocketDebuggerUrl")
             .and_then(Value::as_str)
-            .ok_or("clark-browser's devtools response had no webSocketDebuggerUrl")?;
+            .ok_or("managed browser's devtools response had no webSocketDebuggerUrl")?;
         Ok(Self {
             cdp: CdpClient::connect(ws_url).await?,
             session_id: AsyncMutex::new(None),

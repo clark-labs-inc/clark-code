@@ -89,7 +89,7 @@ impl Recorder {
         let canonical_sha256 = canonical_hash(&self.cases);
         BenchmarkReceipt {
             schema_version: 1,
-            benchmark: "clark_scout_offline_v1",
+            benchmark: "scout_offline_v1",
             status: if self.passed() { "passed" } else { "failed" },
             host_label,
             started_at_epoch_ms: self.started_at_epoch_ms,

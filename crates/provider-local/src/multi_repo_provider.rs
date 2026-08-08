@@ -23,7 +23,7 @@ mod events;
 use events::run_provider;
 #[path = "multi_repo_provider/cloud.rs"]
 mod cloud;
-pub use cloud::{ClarkCloudWriterConfig, ClarkCloudWriterHarness};
+pub use cloud::{BrokeredCloudWriterConfig, BrokeredCloudWriterHarness};
 #[path = "multi_repo_provider/integration.rs"]
 mod integration;
 #[path = "multi_repo_provider/prompt.rs"]

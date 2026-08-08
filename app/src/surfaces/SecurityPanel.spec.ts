@@ -49,7 +49,7 @@ describe("Security scan summaries", () => {
 
 describe("Security repository connection", () => {
   const organizations: SecurityOrganization[] = [
-    { id: "org-one", name: "Clark Labs", role: "owner", status: "active" },
+    { id: "org-one", name: "the agent Labs", role: "owner", status: "active" },
   ];
 
   it("requires an explicit first connection even when only one workspace exists", () => {

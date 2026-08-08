@@ -45,7 +45,7 @@ const port = await reservePort();
 const url = `http://127.0.0.1:${port}/`;
 const dev = spawn("pnpm", ["--dir", "app", "dev", "--host", "127.0.0.1", "--port", String(port), "--strictPort"], {
   cwd: repoDir,
-  env: { ...process.env, VITE_CLARK_DEV_AUTH: "1" },
+  env: { ...process.env, VITE_PRODUCT_DEV_AUTH: "1" },
   stdio: ["ignore", "pipe", "pipe"],
 });
 let serverOutput = "";
@@ -67,7 +67,7 @@ async function asideWidth(page) {
   return page.locator("aside").first().evaluate((el) => Math.round(el.getBoundingClientRect().width));
 }
 async function storedWidth(page) {
-  return page.evaluate(() => Number(localStorage.getItem("clark.sidebar-width")));
+  return page.evaluate(() => Number(localStorage.getItem("agent-desktop.sidebar-width")));
 }
 
 let browser;
@@ -78,13 +78,13 @@ try {
   await context.addInitScript(() => {
     const accountScope = "id:full-gui-qa";
     const encodedScope = encodeURIComponent(accountScope);
-    localStorage.setItem("clark.desktop.dev-account", JSON.stringify({
+    localStorage.setItem("agent-desktop.dev-account", JSON.stringify({
       user: { id: "full-gui-qa", name: "Full GUI QA", method: "local" },
     }));
-    localStorage.setItem(`clark-desktop:local-agent:${encodedScope}`, JSON.stringify({
-      cwd: "/tmp", model: "clark-code:free", reasoningEffort: "high",
+    localStorage.setItem(`agent-desktop:local-agent:${encodedScope}`, JSON.stringify({
+      cwd: "/tmp", model: "local-model", reasoningEffort: "high",
     }));
-    localStorage.setItem(`clark-desktop:project-context:${encodedScope}`, JSON.stringify({ cwd: "/tmp" }));
+    localStorage.setItem(`agent-desktop:project-context:${encodedScope}`, JSON.stringify({ cwd: "/tmp" }));
   });
   const page = await context.newPage();
   const errors = [];

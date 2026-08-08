@@ -74,7 +74,7 @@ fn receipt(
         exit_code: Some(if passed { 0 } else { 1 }),
         passed,
         containment: "managed_disposable".into(),
-        artifact_path: format!(".clark/security-scans/scan-1/poc/{id}/receipt.json"),
+        artifact_path: format!(".agent/security-scans/scan-1/poc/{id}/receipt.json"),
         execution: None,
     }
 }

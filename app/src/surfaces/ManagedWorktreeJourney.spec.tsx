@@ -1,13 +1,17 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import type { ProjectWorktreeTransitionPlan } from "../core-bridge/bridge";
-import { ManagedWorktreeTransitionContent } from "./ManagedWorktreeJourney";
+import { useSessionStore } from "../store/sessionStore";
+import {
+  ManagedWorktreeBasePicker,
+  ManagedWorktreeTransitionContent,
+} from "./ManagedWorktreeJourney";
 
 function plan(
   overrides: Partial<ProjectWorktreeTransitionPlan> = {},
 ): ProjectWorktreeTransitionPlan {
   return {
-    sourceRoot: "/repo/clark-desktop",
+    sourceRoot: "/repo/example-desktop",
     sourceBranch: "feature/current-work",
     sourceRevision: "1111111111111111111111111111111111111111",
     sourceChanges: { changedFiles: 2, untrackedFiles: 1, conflictedFiles: 0 },
@@ -33,12 +37,21 @@ function plan(
         fallback: false,
       },
     ],
-    managedLocation: "/repo/clark-desktop.clark-worktrees",
+    managedLocation: "/repo/example-desktop.agent-worktrees",
     ...overrides,
   };
 }
 
 describe("managed worktree decision copy", () => {
+  it("labels the selected checkout as the default new-chat destination", () => {
+    useSessionStore.setState({ managedWorktreeBase: "current" });
+
+    const markup = renderToStaticMarkup(<ManagedWorktreeBasePicker />);
+
+    expect(markup).toContain("New chat · This checkout");
+    expect(markup).toContain("New chat starts in this checkout");
+  });
+
   it("presents dirty-chat choices as concrete destinations", () => {
     const markup = renderToStaticMarkup(
       <ManagedWorktreeTransitionContent

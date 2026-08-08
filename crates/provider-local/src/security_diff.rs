@@ -237,14 +237,14 @@ fn target_digest(
 ) -> String {
     // Range scans bind the exact immutable head commit. Working-tree scans bind
     // the in-scope blob transitions instead of the whole throwaway tree: that
-    // lets the scan write its own excluded `.clark/security-scans` bundle
+    // lets the scan write its own excluded `.agent/security-scans` bundle
     // without invalidating an otherwise unchanged target.
     let head_identity = match kind {
         SecurityDiffKind::WorkingTree => "",
         SecurityDiffKind::Range => head,
     };
     let mut input =
-        format!("clark-security-diff-v1\0{scope}\0{kind:?}\0{base}\0{head_identity}").into_bytes();
+        format!("agent-security-diff-v1\0{scope}\0{kind:?}\0{base}\0{head_identity}").into_bytes();
     for record in records {
         input.push(0);
         input.extend_from_slice(record.object_transition.as_bytes());

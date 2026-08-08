@@ -114,7 +114,7 @@ function ConversationRow({
       }}
       aria-busy={mutating || undefined}
       className={cn(
-        "group relative flex min-h-7 items-center gap-1 rounded-lg px-2 py-0.5 text-sm transition duration-150 ease-clark",
+        "group relative flex min-h-7 items-center gap-1 rounded-lg px-2 py-0.5 text-sm transition duration-150 ease-agent",
         mutating && "opacity-60",
         selected
           ? "bg-bg-tertiary text-ink"
@@ -428,6 +428,7 @@ export function Sidebar({
   const setSelectedHostId = useSessionStore((s) => s.setSelectedHostId);
   const setProjectFolder = useSessionStore((s) => s.setProjectFolder);
   const setSshOpen = useSessionStore((s) => s.setSshOpen);
+  const setNewProjectOpen = useSessionStore((s) => s.setNewProjectOpen);
   const openProjectTerminalAction = useSessionStore((s) => s.openProjectTerminal);
   const startQuickChat = useSessionStore((s) => s.startQuickChat);
   const openProjectTerminal = async (path?: string) => {
@@ -920,9 +921,9 @@ export function Sidebar({
           <MessageSquare className="size-4" />
         </button>
         <button
-          onClick={() => void openProjectTerminal()}
+          onClick={() => setNewProjectOpen(true)}
           aria-label="New project"
-          title="New project — choose a folder and set it as the current project"
+          title="New project — choose a folder or remote SSH host and start a session"
           className="grid size-8 place-items-center rounded-lg text-ink-secondary transition hover:bg-bg-hover hover:text-ink"
         >
           <FolderPlus className="size-4" />
@@ -956,7 +957,7 @@ export function Sidebar({
     >
       <div className="flex min-w-0 flex-1 flex-col bg-bg-secondary">
       <div className="flex min-h-12 shrink-0 items-center gap-1 px-3 py-1">
-        <span className="truncate text-base font-semibold tracking-[-0.01em] text-ink">Clark Code</span>
+        <span className="truncate text-base font-semibold tracking-[-0.01em] text-ink">Agent Desktop</span>
         <button
           onClick={() => setSearchOpen((open) => !open)}
           aria-label="Search conversations"
@@ -986,15 +987,15 @@ export function Sidebar({
         <button
           type="button"
           onClick={() => void startQuickChat()}
-          title="Start in a temporary Clark workspace — no project required"
+          title="Start in a temporary the agent workspace — no project required"
           className="flex min-h-8 w-full items-center gap-2.5 rounded-lg px-2 py-1 text-sm font-medium text-ink-secondary transition hover:bg-bg-hover hover:text-ink"
         >
           <MessageSquare className="size-4" /> Quick Chat
         </button>
         <button
           type="button"
-          onClick={() => void openProjectTerminal()}
-          title="Choose a folder and set it as the current project"
+          onClick={() => setNewProjectOpen(true)}
+          title="Choose a folder or remote SSH host and start a session"
           className="flex min-h-8 w-full items-center gap-2.5 rounded-lg px-2 py-1 text-sm font-medium text-ink-secondary transition hover:bg-bg-hover hover:text-ink"
         >
           <FolderPlus className="size-4" /> New project…
@@ -1027,7 +1028,7 @@ export function Sidebar({
 
       {(searchOpen || filter) && (
         <div className="px-2 pb-2">
-          <div className="flex min-h-8 items-center gap-2 rounded-lg bg-bg-primary px-2.5 py-1 ring-1 ring-border-subtle transition focus-within:ring-border-strong">
+          <div className="flex min-h-8 items-center gap-2 rounded-lg bg-bg px-2.5 py-1 ring-1 ring-border-subtle transition focus-within:ring-border-strong">
             <Search className="size-3.5 shrink-0 text-ink-faint" />
             <input
               autoFocus

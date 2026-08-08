@@ -1,6 +1,6 @@
-//! Portable wire contract for Clark's authoritative system-cartography API.
+//! Portable wire contract for an authoritative system-cartography API.
 //!
-//! These types intentionally do not depend on the Clark backend repository.
+//! These types intentionally do not depend on a particular backend repository.
 //! They reimplement the public JSON/signature contract so desktop, SSH, and VM
 //! collectors remain portable untrusted sensors.
 

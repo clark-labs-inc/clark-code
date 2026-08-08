@@ -7,6 +7,8 @@ use provider_local::security::{
     SECURITY_SCAN_CONTRACT_VERSION,
 };
 
+const SECURITY_SIMULATION_MODEL: &str = "security-model";
+
 fn main() {
     let inventory = SecurityInventory {
         contract_version: SECURITY_SCAN_CONTRACT_VERSION,
@@ -32,7 +34,7 @@ fn main() {
     println!(
         "{}",
         serde_json::to_string_pretty(&serde_json::json!({
-            "simulation": "clark-security-contract-v2",
+            "simulation": "agent-security-contract-v2",
             "sealedFindingCount": seal.findings.len(),
             "findingId": seal.findings[0].finding_id,
             "negativeControls": {
@@ -49,7 +51,7 @@ fn fixture(inventory: &SecurityInventory) -> SecurityScanBundle {
         contract_version: SECURITY_SCAN_CONTRACT_VERSION,
         scan_id: "simulation".into(),
         mode: SecurityScanMode::Standard,
-        model: provider_local::SECURITY_MODEL.into(),
+        model: SECURITY_SIMULATION_MODEL.into(),
         scope: inventory.scope.clone(),
         inventory_id: inventory.inventory_id.clone(),
         phase: SecurityScanPhase::Reporting,
@@ -159,7 +161,7 @@ fn poc_ledger(bundle: &SecurityScanBundle) -> SecurityPocLedger {
                 exit_code: Some(0),
                 passed: true,
                 containment: "managed_disposable".into(),
-                artifact_path: format!(".clark/security-scans/simulation/poc/{id}.json"),
+                artifact_path: format!(".agent/security-scans/simulation/poc/{id}.json"),
                 execution: None,
             })
             .unwrap();

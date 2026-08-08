@@ -14,7 +14,7 @@ import { ManagedWorktreeBasePicker } from "./ManagedWorktreeJourney";
 import { ParallelWorkContext } from "./ParallelWorkContext";
 
 const ITEM =
-  "flex h-[22px] min-w-0 items-center gap-1 rounded-md bg-composer-context px-1.5 text-[11px] font-medium leading-none";
+  "flex h-[22px] min-w-0 items-center gap-1 rounded-md bg-composer-context px-1.5 text-xs font-medium leading-none";
 
 /** Checkout identity attached to the composer. Before a session starts the
  * project/environment fields remain interactive; once a session is live they
@@ -126,7 +126,7 @@ export function ComposerContextBar() {
     ? "text-checkout-worktree"
     : "text-checkout-branch";
   const normalizedCheckout = checkoutRoot.replace(/\/+$/, "");
-  const clarkPeers = conversations
+  const desktopPeers = conversations
     .filter((conversation) => {
       if (!runningIds.includes(conversation.id) || conversation.id === session?.id) return false;
       if ((conversation.project ?? "").replace(/\/+$/, "") !== normalizedCheckout) return false;
@@ -151,7 +151,7 @@ export function ComposerContextBar() {
           : "",
       ].filter(Boolean).join(", ")
     : null;
-  const otherAgentCount = (context?.activity.externalAgents.length ?? 0) + clarkPeers.length;
+  const otherAgentCount = (context?.activity.externalAgents.length ?? 0) + desktopPeers.length;
   const branchSwitchDisabledReason = otherAgentCount > 0
     ? `${otherAgentCount} other agent${otherAgentCount === 1 ? " is" : "s are"} active in this checkout.`
     : workingFiles > 0
@@ -171,7 +171,7 @@ export function ComposerContextBar() {
         aria-expanded={mobileExpanded}
         aria-controls="composer-checkout-context"
         onClick={() => setMobileExpanded((expanded) => !expanded)}
-        className="flex h-7 max-w-full items-center gap-1.5 rounded-lg bg-composer-context px-2 text-[11px] font-medium text-ink-secondary sm:hidden"
+        className="flex h-7 max-w-full items-center gap-1.5 rounded-lg bg-composer-context px-2 text-xs font-medium text-ink-secondary sm:hidden"
       >
         <LocationIcon className="size-3 shrink-0" />
         <span className="truncate">
@@ -278,7 +278,7 @@ export function ComposerContextBar() {
           <ParallelWorkContext
             activity={context.activity}
             branch={context.detached ? `detached@${context.branch}` : context.branch}
-            clarkPeers={clarkPeers}
+            desktopPeers={desktopPeers}
             onOpenPeer={(id) => {
               void openConversation(id);
             }}

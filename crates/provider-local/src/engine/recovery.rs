@@ -3,21 +3,21 @@ use agent_orchestration::FailureClass;
 
 use crate::root_execution::RecoveryBoundary;
 
-pub(super) fn candidate(error: &clark_agent::LoopError) -> Option<(FailureClass, String)> {
+pub(super) fn candidate(error: &agent_loop::LoopError) -> Option<(FailureClass, String)> {
     match error {
-        clark_agent::LoopError::Stream(clark_agent::StreamError::Transient(message)) => {
+        agent_loop::LoopError::Stream(agent_loop::StreamError::Transient(message)) => {
             Some((FailureClass::TransientTransport, message.clone()))
         }
-        clark_agent::LoopError::Stream(clark_agent::StreamError::ProviderRateLimited(message)) => {
+        agent_loop::LoopError::Stream(agent_loop::StreamError::ProviderRateLimited(message)) => {
             Some((FailureClass::RateLimited, message.clone()))
         }
         _ => None,
     }
 }
 
-pub(super) fn transcript_marker() -> clark_agent::AgentMessage {
-    clark_agent::AgentMessage::User {
-        content: clark_agent::UserContent::Text(
+pub(super) fn transcript_marker() -> agent_loop::AgentMessage {
+    agent_loop::AgentMessage::User {
+        content: agent_loop::UserContent::Text(
             "[runtime recovery — the previous model stream failed after every started tool had a \
              terminal receipt. Completed transcript and current workspace state were preserved. \
              Re-read any state you depend on, do not repeat completed writes, and continue from \

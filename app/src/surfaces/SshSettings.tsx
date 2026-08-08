@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { productName } from "../product/productModule";
 import { AnimatePresence, useReducedMotion } from "motion/react";
 import * as m from "motion/react-m";
 import { Server, Trash2, X, Loader2, CheckCircle2, AlertCircle, Plus } from "lucide-react";
@@ -190,7 +191,7 @@ export function SshSettings() {
               <h2 id="ssh-settings-title" className="text-sm font-semibold text-ink">
                 Remote hosts
               </h2>
-              <span className="text-xs text-ink-muted">Run Clark Code on a machine over SSH</span>
+              <span className="text-xs text-ink-muted">Run {productName()} on a machine over SSH</span>
               <button
                 onClick={close}
                 aria-label="Close"
@@ -243,7 +244,7 @@ export function SshSettings() {
               <button
                 type="button"
                 onClick={save}
-                className="min-h-8 rounded-lg bg-accent px-3 py-1.5 text-sm font-semibold text-on-accent transition duration-200 ease-clark hover:bg-accent-hover"
+                className="min-h-8 rounded-lg bg-accent px-3 py-1.5 text-sm font-semibold text-on-accent transition duration-200 ease-agent hover:bg-accent-hover"
               >
                 Save
               </button>

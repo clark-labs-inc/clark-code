@@ -58,7 +58,8 @@ fn shell_quoting_escapes_single_quotes() {
 #[test]
 fn parses_remote_directory_listing_and_sorts_names() {
     let listing =
-        parse_directory_listing(b"/home/ubuntu/git\0zeta\0.alpha\0Clark Project\0").unwrap();
+        parse_directory_listing(b"/home/ubuntu/git\0zeta\0.alpha\0Agent Desktop Project\0")
+            .unwrap();
     assert_eq!(listing.path, "/home/ubuntu/git");
     assert_eq!(listing.parent.as_deref(), Some("/home/ubuntu"));
     assert_eq!(
@@ -69,7 +70,10 @@ fn parses_remote_directory_listing_and_sorts_names() {
             .collect::<Vec<_>>(),
         vec![
             (".alpha", "/home/ubuntu/git/.alpha"),
-            ("Clark Project", "/home/ubuntu/git/Clark Project"),
+            (
+                "Agent Desktop Project",
+                "/home/ubuntu/git/Agent Desktop Project"
+            ),
             ("zeta", "/home/ubuntu/git/zeta"),
         ]
     );

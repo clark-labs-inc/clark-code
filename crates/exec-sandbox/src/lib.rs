@@ -40,15 +40,15 @@ mod tests {
         let local = std::path::Path::new(r"C:\Users\tester\AppData\Local");
         assert_eq!(
             crate::backend::windows_product_data_root_from(local, false),
-            local.join("Clark").join("Code"),
+            local.join("Agent Desktop").join("Code"),
         );
         assert_eq!(
             crate::backend::windows_product_data_root_from(local, true),
-            local.join("Clark").join("Code Dev"),
+            local.join("Agent Desktop").join("Code Dev"),
         );
         assert_ne!(
             crate::backend::windows_product_data_root_from(local, false),
-            local.join("Clark Code"),
+            local.join("Agent Desktop"),
         );
     }
 
@@ -67,7 +67,7 @@ mod tests {
                 PathBuf::from(match backend {
                     BackendKind::MacosSeatbelt => "/usr/bin/sandbox-exec",
                     BackendKind::LinuxBubblewrap => "/usr/bin/bwrap",
-                    BackendKind::WindowsRestrictedToken => "clark-command-runner.exe",
+                    BackendKind::WindowsRestrictedToken => "agent-command-runner.exe",
                 }),
             );
             let prepared = manager.prepare_process(original.clone()).unwrap();
@@ -110,7 +110,7 @@ mod tests {
         let manager = SandboxManager::simulate(
             policy,
             BackendKind::WindowsRestrictedToken,
-            PathBuf::from("clark-command-runner.exe"),
+            PathBuf::from("agent-command-runner.exe"),
         );
         let process = ProcessSpec::argv("cmd.exe", fixture_workspace());
         assert!(manager.prepare_process(process).is_err());

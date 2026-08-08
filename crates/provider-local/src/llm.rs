@@ -2,13 +2,16 @@
 //!
 //! This is the only place that knows the model wire format. It speaks the
 //! ubiquitous `POST {base}/chat/completions` contract (OpenRouter, vLLM,
-//! llama.cpp, LM Studio, a future Clark passthrough, …): streamed
+//! llama.cpp, LM Studio, a future Agent Desktop passthrough, …): streamed
 //! `chat.completion.chunk` SSE frames carrying assistant text deltas and
 //! fragmented tool-call deltas. The parser reassembles those into a single
 //! [`AssistantTurn`], validates the complete provider-owned object, and only
 //! then publishes its text through the UI callback.
 
-use std::{collections::BTreeMap, time::Duration};
+use std::{
+    collections::{BTreeMap, HashMap},
+    time::Duration,
+};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -28,13 +31,13 @@ pub(crate) use recovery::{now_ms, ProviderFailureContext};
 /// making progress. Provider retries remain separately bounded in `retry`.
 const DEFAULT_MODEL_REQUEST_TIMEOUT: Duration = Duration::from_secs(7 * 60);
 
-fn clark_code_user_agent() -> String {
+fn desktop_user_agent() -> String {
     let platform = match std::env::consts::OS {
         "macos" => "darwin",
         other => other,
     };
     format!(
-        "clark-code/{} ({} {})",
+        "agent-desktop/{} ({} {})",
         env!("CARGO_PKG_VERSION"),
         platform,
         std::env::consts::ARCH,
@@ -52,8 +55,8 @@ pub struct ChatMessage {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_call_id: Option<String>,
     /// Provider-native reasoning replayed on assistant messages of the
-    /// in-flight tool exchange (OpenRouter's `reasoning` field). GLM/Kimi
-    /// reasoning models keep their chain across tool calls this way.
+    /// in-flight tool exchange (an OpenAI-compatible `reasoning` field).
+    /// Reasoning-capable models keep their chain across tool calls this way.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning: Option<String>,
     /// OpenRouter-normalized structured reasoning blocks. The sequence is
@@ -208,7 +211,7 @@ pub(crate) struct StreamChatOptions<'a> {
 }
 
 /// Token/cost accounting from the final streamed chunk (OpenRouter shape,
-/// forwarded verbatim by the Clark passthrough).
+/// forwarded verbatim by Agent Desktop passthrough).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct TokenUsage {
     /// Prompt size of this call — the live context footprint.
@@ -236,7 +239,7 @@ pub struct AssistantTurn {
     /// Unknown future item shapes remain intact for provider replay.
     pub reasoning_details: Vec<Value>,
     /// Stable transport identities for joining a successful model turn to
-    /// OpenRouter/Clark diagnostics and cache-routing receipts.
+    /// OpenRouter/Agent Desktop diagnostics and cache-routing receipts.
     pub response_metadata: Option<ProviderResponseMetadata>,
 }
 
@@ -244,7 +247,7 @@ pub struct AssistantTurn {
 pub struct ProviderResponseMetadata {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub requested_model: Option<String>,
-    /// Clark-managed model alias used after a pre-output compatibility
+    /// Agent Desktop-managed model alias used after a pre-output compatibility
     /// rejection of the requested model.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fallback_model: Option<String>,
@@ -291,14 +294,13 @@ pub struct ProviderResponseMetadata {
 pub enum LlmError {
     /// The caller's cancellation token fired mid-request.
     Cancelled,
-    /// Clark billing rejected the request (402, plus legacy credit 403s). The
-    /// UI prompts the user to review billing instead of blaming the provider.
+    /// The selected provider rejected the request for insufficient usage access.
     InsufficientCredits,
-    /// Clark's API rejected the desktop platform key (401).
+    /// The host-managed API rejected the desktop access key (401).
     PlatformKeyRejected(String),
-    /// Clark or the upstream provider returned an application-level failure.
+    /// The configured gateway or upstream provider returned an application-level failure.
     Provider(String),
-    /// Provider output failed Clark's isolation boundary before any of the
+    /// Provider output failed the desktop isolation boundary before any of the
     /// response was published, persisted, or offered to a tool.
     OutputQuarantined {
         reason: &'static str,
@@ -350,12 +352,14 @@ pub struct LlmClient {
     model: String,
     api_key: Option<String>,
     headers: Vec<(String, String)>,
-    /// Clark conversation UUID forwarded through the gateway for routing.
+    /// Agent Desktop conversation UUID forwarded through the gateway for routing.
     session_id: Option<String>,
     temperature: Option<f32>,
     /// Reasoning-effort override forwarded to the passthrough ("low" … "xhigh").
     /// `None` → the server applies the model's default.
     reasoning_effort: Option<String>,
+    model_reasoning_efforts: HashMap<String, String>,
+    model_fallback: Option<crate::config::ModelFallbackPolicy>,
     /// Provider-owned strict response schema for this session.
     response_format: Option<Value>,
     /// Provider routing preferences supplied by the trusted host.
@@ -378,7 +382,7 @@ impl LlmClient {
         self
     }
 
-    /// Bind subsequent model calls to one Clark conversation.
+    /// Bind subsequent model calls to one Agent Desktop conversation.
     pub fn with_session_id(mut self, session_id: &str) -> Self {
         self.session_id = Some(session_id.to_string());
         self
@@ -393,6 +397,17 @@ impl LlmClient {
             config.temperature,
         )?;
         client.reasoning_effort = config.reasoning_effort.clone();
+        client.model_reasoning_efforts = config
+            .models
+            .iter()
+            .filter_map(|model| {
+                model
+                    .reasoning_effort
+                    .clone()
+                    .map(|effort| (model.id.clone(), effort))
+            })
+            .collect();
+        client.model_fallback = config.model_fallback.clone();
         client.response_format = config.response_format.clone();
         client.provider_preferences = config.provider_preferences.clone();
         Ok(client)
@@ -425,8 +440,8 @@ impl LlmClient {
         temperature: Option<f32>,
         request_timeout: Duration,
     ) -> Result<Self, String> {
-        let user_agent = clark_code_user_agent();
-        let http = clark_http::build_client(clark_http::ClientOptions {
+        let user_agent = desktop_user_agent();
+        let http = desktop_http::build_client(desktop_http::ClientOptions {
             request_timeout: Some(request_timeout),
             user_agent: Some(&user_agent),
             ..Default::default()
@@ -441,12 +456,14 @@ impl LlmClient {
             session_id: None,
             temperature,
             reasoning_effort: None,
+            model_reasoning_efforts: HashMap::new(),
+            model_fallback: None,
             response_format: None,
             provider_preferences: None,
         })
     }
 
-    /// One-shot completion with NO client tools (the agentic Clark path): send an
+    /// One-shot completion with NO client tools (the agentic Agent Desktop path): send an
     /// optional system + a user message, return the assembled assistant text.
     pub(crate) async fn complete(
         &self,
@@ -482,7 +499,7 @@ impl LlmClient {
     /// One-shot completion with image(s) attached — mirrors [`Self::complete`],
     /// swapping [`ChatMessage::user`] for [`ChatMessage::user_with_images`].
     /// Used by the vision-fallback path: a separate call to a vision-capable
-    /// Clark model, not part of the coding model's own turn.
+    /// Agent Desktop model, not part of the coding model's own turn.
     pub(crate) async fn describe_images(
         &self,
         system: &str,
@@ -529,16 +546,13 @@ impl LlmClient {
         if let Some(t) = self.temperature {
             body["temperature"] = json!(t);
         }
-        // Reasoning is a product policy, not a user setting: each selectable
-        // Clark Code model always uses its highest supported wire value.
-        // Normalize at the wire seam so legacy settings, remote clients, and
-        // direct provider-local harnesses cannot weaken the request.
-        let reasoning_effort = match model {
-            "clark-code:kimi_k3" => Some("max"),
-            "clark-code" | "clark-code:free" | "clark-code:deepseek_v4_flash_latest" => Some("max"),
-            "clark-code:glm52" => Some("xhigh"),
-            _ => self.reasoning_effort.as_deref(),
-        };
+        // Normalize host-advertised per-model policy at the wire seam so
+        // persisted settings and direct harnesses cannot weaken it.
+        let reasoning_effort = self
+            .model_reasoning_efforts
+            .get(model)
+            .map(String::as_str)
+            .or(self.reasoning_effort.as_deref());
         if let Some(effort) = reasoning_effort {
             if self.base_url.contains("openrouter.ai") {
                 body["reasoning"] = json!({

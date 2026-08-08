@@ -35,7 +35,7 @@ export function validateNativeContainmentReceipt(receipt, expectedRevision) {
       .map((item) => item.id),
   );
   if (
-    receipt?.receipt_type !== "clark_code_windows_native_containment"
+    receipt?.receipt_type !== "agent_windows_native_containment"
     || receipt?.status !== "passed"
     || receipt?.source_revision !== expectedRevision
     || !/^[0-9a-f]{64}$/.test(receipt?.evidence?.log_sha256 || "")
@@ -76,9 +76,9 @@ export function runNativeContainment({
       cwd: repoDir,
       env: {
         ...process.env,
-        CLARK_WINDOWS_SANDBOX_E2E_REQUIRED: "1",
-        CLARK_WINDOWS_SANDBOX_RUNNER: path.resolve(runner),
-        CLARK_WINDOWS_SANDBOX_SETUP: path.resolve(setup),
+        AGENT_WINDOWS_SANDBOX_E2E_REQUIRED: "1",
+        AGENT_WINDOWS_SANDBOX_RUNNER: path.resolve(runner),
+        AGENT_WINDOWS_SANDBOX_SETUP: path.resolve(setup),
       },
       encoding: "utf8",
       timeout: 10 * 60_000,
@@ -88,18 +88,18 @@ export function runNativeContainment({
   const log = `${completed.stdout || ""}${completed.stderr || completed.error?.message || ""}`;
   const logPath = path.join(outputDir, "cargo-test.log");
   writeFileSync(logPath, log, { encoding: "utf8", mode: 0o600 });
-  const corePassed = /clark_windows_core_containment=passed/.test(log);
+  const corePassed = /agent_windows_core_containment=passed/.test(log);
   const passed = completed.status === 0
     && corePassed
     && /native_windows_sandbox_enforces_filesystem_process_and_network_boundaries \.\.\. ok/.test(log);
-  const gitCompatibility = /clark_windows_git_compatibility=passed/.test(log)
+  const gitCompatibility = /agent_windows_git_compatibility=passed/.test(log)
     ? "passed"
-    : /clark_windows_git_compatibility=failed_(?:optional|required)/.test(log)
+    : /agent_windows_git_compatibility=failed_(?:optional|required)/.test(log)
       ? "failed"
       : "not_run";
   const receipt = {
     schema_version: 1,
-    receipt_type: "clark_code_windows_native_containment",
+    receipt_type: "agent_windows_native_containment",
     status: passed ? "passed" : "failed",
     generated_at: new Date().toISOString(),
     source_revision: sourceRevision,

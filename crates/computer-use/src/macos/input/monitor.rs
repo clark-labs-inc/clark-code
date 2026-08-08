@@ -71,7 +71,7 @@ impl PhysicalInputMonitor {
         let shared_state = self.state.clone();
         let leases = self.leases.clone();
         if let Err(error) = std::thread::Builder::new()
-            .name("clark-physical-input-monitor".to_string())
+            .name("agent-physical-input-monitor".to_string())
             .spawn(move || {
                 let callback_leases = leases.clone();
                 let result = CGEventTap::with_enabled(

@@ -12,18 +12,18 @@ describe("MacPermissionGuide", () => {
     expect(initialMacPermissionStep(true, true)).toBe("accessibility");
   });
 
-  it("explains the separate Clark Computer Use identity and both setup steps", () => {
+  it("explains the separate the agent Computer Use identity and both setup steps", () => {
     const markup = renderToStaticMarkup(
       <MacPermissionGuide
-        ownerName="Clark Computer Use"
+        ownerName="the agent Computer Use"
         accessibilityGranted={false}
         screenRecordingGranted={false}
         working={false}
         onRequestPermissions={vi.fn()}
       />,
     );
-    expect(markup).toContain("Let’s set up Clark on your Mac");
-    expect(markup).toContain("Clark Computer Use");
+    expect(markup).toContain("Let’s set up the agent on your Mac");
+    expect(markup).toContain("the agent Computer Use");
     expect(markup).toContain("Accessibility");
     expect(markup).toContain("Screen Recording");
     expect(markup).toContain("Open macOS settings");
@@ -33,14 +33,14 @@ describe("MacPermissionGuide", () => {
   it("marks already-granted access in the visual walkthrough", () => {
     const markup = renderToStaticMarkup(
       <MacPermissionGuide
-        ownerName="Clark Computer Use Dev"
+        ownerName="the agent Computer Use Dev"
         accessibilityGranted
         screenRecordingGranted={false}
         working={false}
         onRequestPermissions={vi.fn()}
       />,
     );
-    expect(markup).toContain("Clark Computer Use Dev");
+    expect(markup).toContain("the agent Computer Use Dev");
     expect(markup).toContain('aria-current="step"');
     expect(markup).toContain("2 / 2");
   });

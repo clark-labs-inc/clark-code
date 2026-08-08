@@ -1,4 +1,4 @@
-# Clark orchestration benchmark
+# Agent orchestration benchmark
 
 This example measures whether multi-agent coding improves repository-task reliability enough to justify its latency, token, cost, and coordination overhead. It deliberately separates two evidence levels:
 
@@ -11,7 +11,7 @@ Scripted success is never reported as model success. Live success is never accep
 
 Every lane emits the same `BenchmarkRecord` schema and is paired by scenario, variant, and repetition.
 
-Every local or scripted attempt also emits the default `/root` execution lifecycle. The benchmark replays that trace independently and records root executions, attempts, recoveries, duplicate terminal tool receipts, and missing/invalid lifecycle traces. ACP readers remain an explicit exception because their harness does not expose Clark's lifecycle contract.
+Every local or scripted attempt also emits the default `/root` execution lifecycle. The benchmark replays that trace independently and records root executions, attempts, recoveries, duplicate terminal tool receipts, and missing/invalid lifecycle traces. ACP readers remain an explicit exception because their harness does not expose the foundation lifecycle contract.
 
 The summary also includes an eight-case default-agent recovery A/B: clean completion, safe transient and rate-limit recovery, active mutation, pending permission, exhausted budget, exhausted attempt count, and non-transient provider failure. It compares correctness, attempts, weighted tokens, cost, replay validity, and duplicate tool receipts against a one-attempt baseline.
 
@@ -23,7 +23,7 @@ The summary also includes an eight-case default-agent recovery A/B: clean comple
 | `reviewed` | readers, writer, reviewer, rework, verifier | maximum reliability lane |
 | `cheap-subagents` | cheap parallel readers, strong writer | cost-quality tradeoff |
 | `homogeneous-strong` | strong readers and writer | strong-model ceiling |
-| `clark-cloud` | cloud-eligible research reader plus local writer | Clark cloud-agent integration |
+| `brokered-cloud` | cloud-eligible research reader plus local writer | host-injected cloud-agent integration |
 | `mixed-harness` | OS-sandboxed ACP readers plus local writer | compares an external coding harness at the same read-only boundary |
 
 Only one task may hold the writer lease. Readers, reviewers, and verifiers have a read-only permission ceiling. Result reporting and acceptance are separate control-plane transitions so a reviewer can reject a reported writer attempt and accept a later rework attempt.
@@ -38,7 +38,7 @@ The catalog uses freshly seeded Git repositories (plus a non-Git case), private 
 - hidden cross-module contracts, decoys, and misleading docs;
 - worker crash, missing/false/duplicate handoff, flaky verification, and reviewer bugs;
 - permission escalation, tree-budget exhaustion, context truncation, and restart/resume;
-- remote/non-Git execution and Clark cloud-agent research.
+- remote/non-Git execution and host-injected cloud-agent research.
 
 The hidden rubric prefers behavioral checks when several implementations are valid. Exact-file checks are reserved for tasks whose requested output is exact.
 
@@ -48,12 +48,12 @@ Offline is the default. Live mode requires all of the following:
 
 1. `--live`;
 2. `ORCHESTRATION_BENCH_LIVE=1`;
-3. `CLARK_CODE_API_KEY` or `CLARK_API_KEY` (the runner loads the root `.env` without logging values);
+3. `MODEL_API_KEY` or `PRODUCT_API_KEY` (the runner loads the root `.env` without logging values);
 4. a scenario and/or lane filter, unless `--full-live-matrix` is explicit.
 
-Live defaults add further bounds: 600 seconds per agent, 400k tokens per orchestration tree, 12 benchmark runs per invocation, and a $2 inter-run cost stop. Each is configurable. Cost caps are checked between retained runs because providers report authoritative cost only after a run finishes. `clark_research` currently returns findings but not nested-call usage, so reports count those calls explicitly as unmetered external work and never pretend the displayed metered total is complete. The normalized Provider usage also does not expose cache-hit tokens, so `non_cached_input_available` is false and the benchmark records zero rather than relabeling total input as non-cached input.
+Live defaults add further bounds: 600 seconds per agent, 400k tokens per orchestration tree, 12 benchmark runs per invocation, and a $2 inter-run cost stop. Each is configurable. Cost caps are checked between retained runs because providers report authoritative cost only after a run finishes. `product_research` currently returns findings but not nested-call usage, so reports count those calls explicitly as unmetered external work and never pretend the displayed metered total is complete. The normalized Provider usage also does not expose cache-hit tokens, so `non_cached_input_available` is false and the benchmark records zero rather than relabeling total input as non-cached input.
 
-The live mixed-harness lane takes an explicit ACP command as a JSON string array. Clark wraps it in macOS `sandbox-exec` with filesystem writes denied, uses a scratch `HOME`, rejects permission requests, snapshots the repository around the parallel reader batch, and never routes the writer through ACP. It is deliberately unavailable on platforms where that boundary is not implemented.
+The live mixed-harness lane takes an explicit ACP command as a JSON string array. The benchmark wraps it in macOS `sandbox-exec` with filesystem writes denied, uses a scratch `HOME`, rejects permission requests, snapshots the repository around the parallel reader batch, and never routes the writer through ACP. It is deliberately unavailable on platforms where that boundary is not implemented.
 
 Read-only sessions set `write_file`, `edit_file`, and `bash` to deny. Writer sessions allow those tools only inside the synthetic sandbox, deny destructive/network command prefixes, and still inherit provider safety classification. No session can commit, push, widen its role permission ceiling, or write outside its synthetic checkout without failing the rubric.
 

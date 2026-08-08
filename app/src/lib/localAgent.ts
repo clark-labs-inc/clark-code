@@ -1,7 +1,5 @@
-// Settings for the "Local coding" provider — the OpenCode-style mode where the
-// agent loop runs on this machine, the model is reached over an
-// Clark's included coding route is the default, and research is delegated to
-// Clark's sandbox.
+// Settings for the local coding provider. The open foundation owns the local
+// loop; the active product supplies its selectable models and managed routes.
 //
 // Non-secret preferences are persisted in account-scoped localStorage. Model
 // and integration credentials are resolved only by the native encrypted store.
@@ -11,6 +9,7 @@ import { loadAllowlist, loadDenylist } from "./commandPolicy";
 import { loadMcpServers, enabledMcpConfigs } from "./mcpServers";
 import type { RemoteTargetConfig } from "./remoteWorker";
 import { projectKnowledgeEnabled } from "./repositoryKnowledge";
+import { productModule } from "../product/productModule";
 import {
   accountScopedKey,
   loadProjectCwd,
@@ -32,22 +31,20 @@ export interface ScoutCartographyTarget {
   targetId?: string;
 }
 
-export interface CloudAdvisorTarget {
+export interface ProductSpecialistTarget {
   organizationId: string;
-  specialist: "scout" | "security";
+  kind: string;
   workflow: string;
-  /** Training remains fail-closed until a user or organization has supplied
-   * one explicit, versioned consent receipt. */
-  trainingConsent?: "explicit_user" | "organization_contract";
+  trainingOptIn?: boolean;
 }
 
-const KEY = "clark-desktop:local-agent";
+const KEY = "agent-desktop:local-agent";
 const env = import.meta.env as Record<string, string | undefined>;
 
 export interface LocalAgentSettings {
   /** Absolute path to the project the agent edits. */
   cwd: string;
-  /** Clark model id (see `GET /v1/models`). */
+  /** Product-advertised model id. */
   model: string;
   /** Model-specific maximum reasoning effort sent with each request. */
   reasoningEffort: string;
@@ -55,20 +52,29 @@ export interface LocalAgentSettings {
    *  platform-gated again by the host and by OS privacy permissions. */
   computerUseEnabled?: boolean;
   /** Explicit opt-in for using bounded advisor packets and outcome feedback
-   * to improve future Clark advisors. Operational telemetry is still retained
+   * to improve future product advisors. Operational telemetry is still retained
    * when off, but remains training-ineligible. */
   advisorTrainingEnabled?: boolean;
+  /** Reading contrast for assistant responses. This is intentionally separate
+   * from the global theme so controls and accessibility states stay crisp. */
+  chatContrast?: ChatContrast;
 }
+
+export const CHAT_CONTRASTS = ["low", "medium", "high"] as const;
+export type ChatContrast = (typeof CHAT_CONTRASTS)[number];
+
+const productModels = productModule().localAgent;
 
 export const DEFAULT_LOCAL_SETTINGS: LocalAgentSettings = {
   cwd: "",
-  model: "clark-code:free",
-  reasoningEffort: "max",
+  model: productModels.defaultModel,
+  reasoningEffort: productModels.defaultReasoningEffort,
   computerUseEnabled: false,
   advisorTrainingEnabled: false,
+  chatContrast: "low",
 };
 
-/** Reasoning effort ids accepted by the OpenRouter models behind Clark Code. */
+/** Reasoning effort ids accepted by the active product's models. */
 export type ReasoningEffortId =
   | ""
   | "max"
@@ -80,52 +86,31 @@ export type ReasoningEffortId =
 
 /** Specialist sessions are a controlled product lane, not a user-selectable
  * coding session. Their model and reasoning contract is pinned end to end. */
-export const SPECIALIST_MODEL_ID = "clark-code:deepseek_v4_flash_latest";
-export const SPECIALIST_MODEL_LABEL = "DeepSeek V4 Flash Latest";
-export const SPECIALIST_REASONING_EFFORT: ReasoningEffortId = "max";
+export const SPECIALIST_MODEL_ID = productModels.specialistModel?.id ?? productModels.defaultModel;
+export const SPECIALIST_MODEL_LABEL = productModels.specialistModel?.label
+  ?? productModels.models.find((model) => model.id === productModels.defaultModel)?.label
+  ?? "Product model";
+export const SPECIALIST_REASONING_EFFORT: ReasoningEffortId =
+  productModels.specialistModel?.defaultReasoningEffort ?? productModels.defaultReasoningEffort;
 
-/** The single Clark Code choice that is included with the product rather than
- * charged against the signed-in account's prepaid balance. */
-export const INCLUDED_CODING_MODEL_ID = "clark-code:free";
+/** The single choice included with the product's default usage policy. */
+export const INCLUDED_CODING_MODEL_ID = productModels.includedModel ?? "";
 
-/** The coding models the composer picker offers (clark-code tier options).
+/** The coding models the active product exposes in the composer picker.
  *  `defaultReasoningEffort` is the highest effort supported by that model. */
-export const CODING_MODELS = [
-  {
-    id: INCLUDED_CODING_MODEL_ID,
-    label: "Free",
-    hint: "Fast coding and agent work",
-    defaultReasoningEffort: "max",
-  },
-  {
-    id: "clark-code:glm52",
-    label: "GLM 5.2",
-    hint: "Daily driver for coding and security",
-    defaultReasoningEffort: "xhigh",
-  },
-  {
-    id: "clark-code:kimi_k3",
-    label: "Kimi K3",
-    hint: "Super intelligence",
-    defaultReasoningEffort: "max",
-  },
-] as const satisfies readonly {
-  id: string;
-  label: string;
-  hint: string;
-  defaultReasoningEffort: ReasoningEffortId;
-}[];
+export const CODING_MODELS = productModels.models;
 
-/** Keep billing UI gated on the selected managed lane, never on a raw model
+/** Keep included-usage UI gated on the selected managed lane, never on a raw model
  * name that happens to resolve to the same upstream provider. */
 export function isIncludedCodingModel(model: string): boolean {
-  return model === INCLUDED_CODING_MODEL_ID;
+  return INCLUDED_CODING_MODEL_ID.length > 0 && model === INCLUDED_CODING_MODEL_ID;
 }
 
 /** Keep local storage, conversation overrides, and direct callers inside the
  * current picker catalog. Retired choices must not silently reach the provider. */
 export function normalizeCodingModel(model: string): string {
-  return model === SPECIALIST_MODEL_ID || CODING_MODELS.some((candidate) => candidate.id === model)
+  return (productModels.specialistModel !== undefined && model === SPECIALIST_MODEL_ID)
+    || CODING_MODELS.some((candidate) => candidate.id === model)
     ? model
     : DEFAULT_LOCAL_SETTINGS.model;
 }
@@ -133,7 +118,9 @@ export function normalizeCodingModel(model: string): string {
 /** Keep persisted and programmatic settings at the selected model's maximum
  *  supported OpenRouter effort. User-selectable effort overrides are retired. */
 export function normalizeReasoningEffort(model: string, _effort: string): ReasoningEffortId {
-  if (model === SPECIALIST_MODEL_ID) return SPECIALIST_REASONING_EFFORT;
+  if (productModels.specialistModel !== undefined && model === SPECIALIST_MODEL_ID) {
+    return SPECIALIST_REASONING_EFFORT;
+  }
   const config = CODING_MODELS.find((candidate) => candidate.id === model);
   return config?.defaultReasoningEffort ?? "xhigh";
 }
@@ -141,7 +128,9 @@ export function normalizeReasoningEffort(model: string, _effort: string): Reason
 /** Short display label for the current model id. */
 export function modelLabel(id: string): string {
   const model = normalizeCodingModel(id);
-  if (model === SPECIALIST_MODEL_ID) return SPECIALIST_MODEL_LABEL;
+  if (productModels.specialistModel !== undefined && model === SPECIALIST_MODEL_ID) {
+    return SPECIALIST_MODEL_LABEL;
+  }
   return CODING_MODELS.find((candidate) => candidate.id === model)!.label;
 }
 
@@ -151,7 +140,7 @@ export function loadLocalSettings(scope?: string | null): LocalAgentSettings {
     const scopedKey = accountScopedKey(KEY, accountScope);
     const scopedRaw = localStorage.getItem(scopedKey);
     const raw = scopedRaw;
-    const devCwd = import.meta.env.DEV ? env.VITE_CLARK_DEV_CWD?.trim() || "" : "";
+    const devCwd = import.meta.env.DEV ? env.VITE_AGENT_DESKTOP_DEV_CWD?.trim() || "" : "";
     const merged = raw
       ? {
           ...DEFAULT_LOCAL_SETTINGS,
@@ -187,6 +176,9 @@ function normalizeSettings(s: LocalAgentSettings): LocalAgentSettings {
     reasoningEffort,
     computerUseEnabled: s.computerUseEnabled === true,
     advisorTrainingEnabled: s.advisorTrainingEnabled === true,
+    chatContrast: CHAT_CONTRASTS.includes(s.chatContrast as ChatContrast)
+      ? s.chatContrast
+      : DEFAULT_LOCAL_SETTINGS.chatContrast,
   };
 }
 
@@ -210,7 +202,7 @@ export function saveLocalSettings(settings: LocalAgentSettings, scope?: string |
 // snapshots those values when it is created or first reopened, then updates
 // only its own entry. The cloud stores transcripts, not model preferences, so
 // these values live in localStorage (scoped by conversation id).
-const CHAT_MODELS_KEY = "clark-desktop:chat-models";
+const CHAT_MODELS_KEY = "agent-desktop:chat-models";
 
 export interface ChatModelOverride {
   model: string;
@@ -309,7 +301,7 @@ export function effectiveModelSettings(
 // Durable memory is a single global (per-user) preference, on by default. When
 // on, the agent gets the `memory` tool and its saved facts (project + global)
 // are injected into the system prompt.
-const MEMORIES_KEY = "clark-desktop:memories-enabled";
+const MEMORIES_KEY = "agent-desktop:memories-enabled";
 
 export function loadMemoriesEnabled(scope?: string | null): boolean {
   try {
@@ -327,9 +319,9 @@ export function saveMemoriesEnabled(on: boolean, scope?: string | null): void {
   }
 }
 
-// Experimental `browser` tool (clark-browser, downloaded on first use). Off
+// Experimental `browser` tool (managed browser, downloaded on first use). Off
 // by default — Alpha-status, ~150-300MB, not bundled in the app.
-const BROWSER_KEY = "clark-desktop:browser-enabled";
+const BROWSER_KEY = "agent-desktop:browser-enabled";
 
 export function loadBrowserEnabled(scope?: string | null): boolean {
   try {
@@ -350,7 +342,7 @@ export function saveBrowserEnabled(on: boolean, scope?: string | null): void {
 // Bounded multi-agent fan-out is available by default for local projects. The
 // model-facing policy remains explicit-request-only; coding writers use
 // isolated clones and need a separate apply step.
-const ORCHESTRATION_KEY = "clark-desktop:orchestration-enabled";
+const ORCHESTRATION_KEY = "agent-desktop:orchestration-enabled";
 
 export function loadOrchestrationEnabled(scope?: string | null): boolean {
   try {
@@ -370,9 +362,8 @@ export function saveOrchestrationEnabled(on: boolean, scope?: string | null): vo
 
 /**
  * Build the `connect` config the native coding provider expects. Everything
- * routes through the production Clark Platform API; the only inputs are the
- * project folder, an optional model id, and the `ck_live_` key. Research uses
- * the same key automatically.
+ * routes through the provider selected by the native product composition.
+ * Credentials remain in the native encrypted store.
  */
 export function localConnectConfig(
   s: LocalAgentSettings,
@@ -380,7 +371,7 @@ export function localConnectConfig(
   scout?: ScoutCartographyTarget,
   specialistKind?: string,
   scope?: string | null,
-  advisor?: CloudAdvisorTarget,
+  productSpecialist?: ProductSpecialistTarget,
 ): ConnectConfig {
   // For a remote project the root lives on the remote host; tool I/O runs there
   // inside the durable worker. The command policy is keyed by the project path.
@@ -425,22 +416,24 @@ export function localConnectConfig(
           ...(scout.targetId ? { target_id: scout.targetId } : {}),
         },
       } : {}),
-      ...(advisor ? {
-        cloud_advisor: {
-          organization_id: advisor.organizationId,
-          specialist: advisor.specialist,
-          workflow: advisor.workflow,
-          execution_residency: remote ? "remote_worker" : "local_only",
-          training_consent: advisor.trainingConsent ?? "none",
-        },
-      } : {}),
+      ...(productModels.providerExtra?.({
+        ...(productSpecialist ? {
+          specialist: {
+            organizationId: productSpecialist.organizationId,
+            kind: productSpecialist.kind,
+            workflow: productSpecialist.workflow,
+          },
+        } : {}),
+        trainingOptIn: productSpecialist?.trainingOptIn === true,
+        executionResidency: "local_only",
+      }) ?? {}),
       // When present, the provider runs this session's tools on the remote host.
     },
   };
 }
 
-/** Whether the settings are complete enough to start a session. The Clark Code
- *  API key is provisioned automatically on sign-in, so it isn't required here. */
+/** Whether the settings are complete enough to start a session. Managed product
+ * credentials are provisioned by the native host, so they are not required here. */
 export function localSettingsReady(s: LocalAgentSettings): string | null {
   if (!s.cwd.trim()) return "Choose a project folder.";
   return null;

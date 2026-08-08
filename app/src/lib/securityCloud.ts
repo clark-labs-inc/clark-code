@@ -3,8 +3,9 @@ import type { CloudCreds } from "./cloudHistory";
 import { organizationForRepository } from "./organizationKnowledge";
 import type { RepositoryIdentity } from "./repositoryKnowledge";
 import { accountScopedKey } from "./accountProjectStorage";
+import { productRequest } from "../product/productBridge";
 
-const SECURITY_ORGANIZATION_PREFIX = "clark-desktop:security-organization:";
+const SECURITY_ORGANIZATION_PREFIX = "agent-desktop:security-organization:";
 
 export interface SecurityOrganization {
   id: string;
@@ -56,13 +57,15 @@ export interface SecurityCloudSyncResult {
 export async function inspectSecurityRepository(
   cwd: string,
 ): Promise<RepositoryIdentity | null> {
-  return invoke<RepositoryIdentity | null>("clark_repository_inspect", { cwd });
+  return invoke<RepositoryIdentity | null>("repository_inspect", { cwd });
 }
 
 export async function loadSecurityOrganizations(
   _creds: CloudCreds,
 ): Promise<SecurityOrganization[]> {
-  const organizations = await invoke<SecurityOrganization[]>("desktop_security_organizations");
+  const organizations = await productRequest<SecurityOrganization[]>(
+    "security.organizations",
+  );
   return organizations.filter((organization) => organization.status === "active");
 }
 
@@ -104,8 +107,8 @@ export function registerSecurityRepository(
   organizationId: string,
   cwd: string,
 ): Promise<SecurityRepositoryRegistration> {
-  return invoke<SecurityRepositoryRegistration>(
-    "desktop_security_register_repository",
+  return productRequest<SecurityRepositoryRegistration>(
+    "security.register_repository",
     {
       organizationId,
       cwd,
@@ -119,7 +122,7 @@ export function syncSecurityScans(
   registration: SecurityRepositoryRegistration,
   cwd: string,
 ): Promise<SecurityCloudSyncResult> {
-  return invoke<SecurityCloudSyncResult>("desktop_security_sync_scans", {
+  return productRequest<SecurityCloudSyncResult>("security.sync_scans", {
     organizationId,
     repositoryId: registration.repository.id,
     policyId: registration.repositoryPolicy.policyId,

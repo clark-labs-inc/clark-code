@@ -7,6 +7,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { isCloudArtifactUri, isWorkspaceArtifactUri } from "./cloudArtifacts";
+import { productRequest } from "../product/productBridge";
 
 function isTauri(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -41,7 +42,7 @@ export function isPreviewableDocument(uri?: string, title?: string, mimeType?: s
   );
 }
 
-/** Render a local office document through Clark's bundled pure-Rust
+/** Render a local office document through the agent's bundled pure-Rust
  * libreoffice-rs engine. HTML remains inert inside the caller's sandbox. */
 export async function readDocumentPreview(uri?: string): Promise<DocumentPreview | null> {
   if (!uri || !isTauri() || !isLocalDocUri(uri)) return null;
@@ -72,14 +73,14 @@ export async function readDocText(uri?: string): Promise<string | null> {
   if (!uri) return null;
   if (isTauri() && isCloudArtifactUri(uri)) {
     try {
-      return await invoke<string>("desktop_artifact_read", { uri });
+      return await productRequest<string>("artifact.read", { uri });
     } catch {
       return null;
     }
   }
   if (isTauri() && isWorkspaceArtifactUri(uri)) {
     try {
-      return await invoke<string>("desktop_artifact_read_workspace", { uri });
+      return await invoke<string>("workspace_artifact_read", { uri });
     } catch {
       return null;
     }

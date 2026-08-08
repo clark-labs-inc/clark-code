@@ -630,7 +630,7 @@ fn writer_fault(scenario: &Scenario, lane: &LaneSpec) -> ScriptedFault {
 fn profile(lane: &LaneSpec, role: &str, subagent: bool, cloud: bool) -> ScriptedProfile {
     ScriptedProfile {
         provider: if cloud {
-            "scripted-clark-cloud".into()
+            "scripted-brokered-cloud".into()
         } else if matches!(lane.kind, LaneKind::MixedHarness) && subagent {
             "scripted-acp".into()
         } else {

@@ -61,7 +61,7 @@ export class PanelErrorBoundary extends Component<Props, State> {
             {this.props.title ?? "This panel needs to restart"}
           </h2>
           <p className="mt-2 text-xs leading-5 text-ink-muted">
-            Your conversation is still saved. Retry this panel without restarting the rest of Clark.
+            Your conversation is still saved. Retry this panel without restarting the rest of the agent.
           </p>
           {this.state.reference && (
             <p className="mt-2 text-xs text-ink-faint">Reference {this.state.reference}</p>

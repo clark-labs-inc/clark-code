@@ -51,7 +51,7 @@ string_id!(
     ToolCallId
 );
 string_id!(
-    /// Identifies a registered provider implementation (e.g. `"acp"`, `"clark"`).
+    /// Identifies a registered provider implementation (e.g. `"acp"`, `"managed"`).
     ProviderId
 );
 string_id!(

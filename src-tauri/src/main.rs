@@ -1,17 +1,20 @@
-// Clark owns an in-app terminal. Launching the GUI must never create a second,
+// The desktop owns an in-app terminal. Launching the GUI must never create a second,
 // OS-owned console window, including in QA and development builds.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 fn main() {
-    let _diagnostics_guard = clark_desktop_lib::init_diagnostics();
-    if clark_desktop_lib::run_signed_computer_use_smoke_if_requested() {
+    let _diagnostics_guard = desktop_foundation::init_diagnostics();
+    if desktop_foundation::run_signed_computer_use_smoke_if_requested() {
         return;
     }
-    if clark_desktop_lib::run_windows_console_smoke_if_requested() {
+    if desktop_foundation::run_windows_console_smoke_if_requested() {
         return;
     }
-    if clark_desktop_lib::run_windows_sandbox_smoke_if_requested() {
+    if desktop_foundation::run_windows_sandbox_smoke_if_requested() {
         return;
     }
-    clark_desktop_lib::run();
+    desktop_foundation::run_with_product_and_context(
+        std::sync::Arc::new(desktop_foundation::product::NeutralProduct),
+        tauri::generate_context!(),
+    );
 }

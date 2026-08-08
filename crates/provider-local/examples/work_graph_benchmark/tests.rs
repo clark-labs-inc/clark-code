@@ -259,12 +259,12 @@ fn cloud_lane_routes_only_cloud_eligible_work_to_the_cloud_harness() {
         .iter()
         .find(|task| task.id == "update-client")
         .unwrap();
-    assert_eq!(kernel.harness, "clark-cloud");
+    assert_eq!(kernel.harness, "brokered-cloud");
     assert_eq!(client.harness, "local");
 }
 
 #[test]
-fn current_clark_baseline_stays_red_even_when_hidden_code_checks_pass() {
+fn current_agent_baseline_stays_red_even_when_hidden_code_checks_pass() {
     let scenario = scenario("toolchain-bootstrap-fix");
     let lane = lane(LaneKind::WorkGraphStrong);
     let temp = tempfile::tempdir().unwrap();
@@ -273,7 +273,7 @@ fn current_clark_baseline_stays_red_even_when_hidden_code_checks_pass() {
     let record = grader::grade(
         "test".into(),
         EvidenceLevel::Simulation,
-        CandidateKind::ClarkCurrent,
+        CandidateKind::CurrentAgent,
         &scenario,
         0,
         &lane,

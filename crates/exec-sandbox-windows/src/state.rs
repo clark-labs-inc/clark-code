@@ -137,7 +137,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let credential = CredentialEnvelope {
             version: CREDENTIAL_VERSION,
-            username: "ClarkSandboxOffline".into(),
+            username: "AgentSandboxOffline".into(),
             sid: "S-1-5-21-1000".into(),
             protected_password_b64: "fixture".into(),
         };

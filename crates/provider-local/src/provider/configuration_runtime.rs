@@ -7,19 +7,13 @@ use super::*;
 const MEMORY_SECTION_MARKER: &str = "\n# Memory\n";
 
 impl LocalAgentProvider {
-    pub(super) fn memory_config(config: &LocalConfig) -> crate::tools::memory::MemoryConfig {
+    pub(super) fn memory_config(&self, config: &LocalConfig) -> crate::tools::memory::MemoryConfig {
         crate::tools::memory::MemoryConfig {
             global_dir: config
                 .memory_scope
                 .as_deref()
                 .and_then(crate::memory::global_memory_dir_for_scope),
-            personal: config
-                .api_key
-                .clone()
-                .map(|api_key| crate::tools::memory::PersonalRecall {
-                    base_url: config.base_url.clone(),
-                    api_key,
-                }),
+            personal: self.context_provider.clone(),
         }
     }
 
@@ -36,7 +30,7 @@ impl LocalAgentProvider {
     ) -> Result<ProviderConfiguration> {
         if self.session_id.as_ref() != Some(session) {
             return Err(Error::Unsupported(
-                "Clark can only configure the active local session".into(),
+                "Agent Desktop can only configure the active local session".into(),
             ));
         }
         match change {
@@ -49,7 +43,7 @@ impl LocalAgentProvider {
                     .any(|candidate| candidate.id == style)
                 {
                     return Err(Error::Unsupported(format!(
-                        "Clark does not advertise output style `{style}`"
+                        "Agent Desktop does not advertise output style `{style}`"
                     )));
                 }
                 self.session.lock().await.output_style = style;
@@ -60,7 +54,7 @@ impl LocalAgentProvider {
             ProviderConfigurationChange::Experiment { id, enabled } => {
                 if id != "browser" {
                     return Err(Error::Unsupported(format!(
-                        "Clark does not advertise experiment `{id}`"
+                        "Agent Desktop does not advertise experiment `{id}`"
                     )));
                 }
                 self.apply_browser(enabled).await?;
@@ -70,15 +64,20 @@ impl LocalAgentProvider {
     }
 
     fn apply_model(&mut self, model: &str) -> Result<()> {
-        let capability = crate::configuration::model(model).ok_or_else(|| {
-            Error::Unsupported(format!("Clark does not advertise model `{model}`"))
+        let capability = crate::configuration::model(self.config()?, model).ok_or_else(|| {
+            Error::Unsupported(format!("the host does not advertise model `{model}`"))
         })?;
         let reasoning = capability.reasoning_effort.as_deref();
         let config = self.config()?;
         let image_config = config
             .api_key
             .clone()
-            .filter(|_| !crate::config::is_free_model(model))
+            .filter(|_| {
+                !config
+                    .image_generation_excluded_models
+                    .iter()
+                    .any(|id| id == model)
+            })
             .map(|api_key| crate::tools::image::ImageGenerationConfig {
                 base_url: config.base_url.clone(),
                 api_key,
@@ -115,13 +114,14 @@ impl LocalAgentProvider {
         } else {
             None
         };
+        let memory_config = enabled.then(|| self.memory_config(&config));
         let registry = self
             .registry
             .as_mut()
             .and_then(Arc::get_mut)
             .ok_or_else(|| Error::Other("tool registry is still in use".into()))?;
         if enabled {
-            registry.enable_memory(Self::memory_config(&config));
+            registry.enable_memory(memory_config.expect("created when enabled"));
         } else {
             registry.disable_memory();
         }
@@ -145,13 +145,25 @@ impl LocalAgentProvider {
                 "this provider session has no experimental tools".into(),
             ));
         }
+        let browser = enabled
+            .then(|| {
+                self.config()
+                    .ok()
+                    .and_then(|config| config.browser_binary.clone())
+            })
+            .flatten();
+        if enabled && browser.is_none() {
+            return Err(Error::Unsupported(
+                "this product does not provide a managed browser binary".into(),
+            ));
+        }
         let registry = self
             .registry
             .as_mut()
             .and_then(Arc::get_mut)
             .ok_or_else(|| Error::Other("tool registry is still in use".into()))?;
         if enabled {
-            registry.enable_browser();
+            registry.enable_browser(browser.expect("checked above"));
         } else {
             registry.disable_browser();
             self.session.lock().await.deferred_tools.remove("browser");
@@ -197,10 +209,8 @@ impl LocalAgentProvider {
                 memory.push('\n');
             }
         }
-        if let Some(key) = &config.api_key {
-            if let Ok(memories) =
-                crate::platform::recall_personal_memories(&config.base_url, key).await
-            {
+        if let Some(provider) = &self.context_provider {
+            if let Ok(memories) = provider.personal_memories().await {
                 let memories = crate::platform::scope_personal_memories(
                     memories,
                     self.repository_fingerprint.as_deref(),

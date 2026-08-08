@@ -3,11 +3,11 @@ import { describe, expect, it } from "vitest";
 import { activityAge, ParallelWorkContext } from "./ParallelWorkContext";
 
 describe("ParallelWorkContext", () => {
-  it("summarizes Clark and external peers without overstating detection", () => {
+  it("summarizes the agent and external peers without overstating detection", () => {
     const html = renderToStaticMarkup(
       <ParallelWorkContext
         branch="main"
-        clarkPeers={[{ id: "clark-1", title: "Run the frontend tests" }]}
+        desktopPeers={[{ id: "agent-1", title: "Run the frontend tests" }]}
         onOpenPeer={() => {}}
         activity={{
           changedFiles: 2,

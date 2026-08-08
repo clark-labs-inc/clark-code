@@ -23,7 +23,7 @@ import {
 } from "../../lib/motion";
 import { extractSources } from "../../lib/sources";
 import { openExternal } from "../../lib/account";
-import { ClarkMark } from "../ClarkMark";
+import { ProductMark } from "../ProductMark";
 import { MarkdownContent, MARKDOWN_CLASSES } from "../MarkdownContent";
 import type {
   ContentBlock,
@@ -40,7 +40,7 @@ function blocksText(blocks: ContentBlock[]): string {
 
 export function researchQuery(call: ToolCall): string {
   const query = (call.raw_input as { query?: string } | undefined)?.query;
-  return (query || call.title.replace(/^clark_research:\s*/, "")).trim();
+  return (query || call.title.replace(/^[a-z][a-z0-9_]*:\s*/, "")).trim();
 }
 
 const STATUS_LABEL: Record<ToolStatus, string> = {
@@ -154,15 +154,15 @@ export function ResearchOutline({
 }) {
   if (!progress || (progress.phases.length === 0 && progress.agents.length === 0)) {
     return (
-      <div className="flex min-h-9 items-center gap-2 text-sm text-ink-muted" aria-label="Clark Cloud Agent progress">
+      <div className="flex min-h-9 items-center gap-2 text-sm text-ink-muted" aria-label="Research agent progress">
         <ProgressIcon status="in_progress" className="size-4" />
-        <span>{progress?.latest_activity || "Starting Clark Cloud Agent"}</span>
+        <span>{progress?.latest_activity || "Starting research agent"}</span>
       </div>
     );
   }
 
   return (
-    <div className="max-h-72 overflow-y-auto pr-1" aria-label="Clark Cloud Agent progress">
+    <div className="max-h-72 overflow-y-auto pr-1" aria-label="Research agent progress">
       <ol className="-ml-5">{progress.phases.map((phase) => <Phase key={phase.id} phase={phase} />)}</ol>
       {progress.agents.length > 0 && (
         <section className="mt-1" aria-label="Parallel research agents">
@@ -244,7 +244,7 @@ function completedSubtitle(call: ToolCall): string {
   if (call.status === "failed") return call.progress?.latest_activity || "Research failed";
   if (call.status === "cancelled") return "Research cancelled";
   if (call.status === "completed") return "Research complete";
-  return call.progress?.latest_activity || "Starting Clark Cloud Agent";
+  return call.progress?.latest_activity || "Starting research agent";
 }
 
 export function ResearchWork({ call, active }: { call: ToolCall; active: boolean }) {
@@ -269,7 +269,7 @@ export function ResearchWork({ call, active }: { call: ToolCall; active: boolean
       data-tool-call-id={call.id}
       {...accessibleMotion(RISE_SMALL, reduce)}
       className="mb-1 mt-3 overflow-hidden rounded-xl border border-border-subtle bg-bg-secondary/45"
-      aria-label="Clark Cloud Agent"
+      aria-label="Research agent"
     >
       <button
         type="button"
@@ -281,9 +281,9 @@ export function ResearchWork({ call, active }: { call: ToolCall; active: boolean
           canOpen && "cursor-pointer transition hover:bg-bg-hover/45",
         )}
       >
-        <ClarkMark size={30} className="shrink-0" />
+        <ProductMark size={30} className="shrink-0" />
         <span className="min-w-0 flex-1">
-          <span className="block text-sm font-medium leading-5 text-ink">Clark Cloud Agent</span>
+          <span className="block text-sm font-medium leading-5 text-ink">Research agent</span>
           <span aria-live="polite" className="block truncate text-xs leading-4 text-ink-faint">
             {completedSubtitle(call)}
           </span>

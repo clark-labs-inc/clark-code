@@ -1,8 +1,8 @@
-//! Translation between the typed Clark agent protocol and desktop/wire records.
+//! Translation between the typed Agent Desktop agent protocol and desktop/wire records.
 
 use agent_core::domain as desktop;
 use agent_core::ids::ToolCallId;
-use clark_agent as ca;
+use agent_loop as ca;
 use serde_json::{json, Value};
 
 use crate::llm::{
@@ -11,7 +11,7 @@ use crate::llm::{
 };
 use crate::tools::ImageAttachment;
 
-const DESKTOP_IMAGES_DETAIL_KEY: &str = "_clark_desktop_images";
+const DESKTOP_IMAGES_DETAIL_KEY: &str = "_agent_desktop_images";
 
 /// Build the wire `ChatMessage` list for a model call from the session's
 /// system prompt + typed transcript. Shared by the live stream adapter and the
@@ -28,7 +28,7 @@ pub(crate) fn to_wire_messages(
     }
     // Reasoning replays only for the in-flight exchange: assistant messages
     // AFTER the latest user message (the current turn's tool loop, per the
-    // OpenRouter contract for GLM/Kimi reasoning models). Older reasoning is
+    // OpenAI-compatible contract for reasoning-capable models). Older reasoning is
     // display history — replaying it across turns would balloon every prompt.
     let last_user = messages
         .iter()
@@ -108,7 +108,24 @@ pub(crate) fn to_wire_messages(
             )),
         }
     }
+    neutralize_upstream_generated_tool_call_ids(&mut out);
     out
+}
+
+fn neutralize_upstream_generated_tool_call_ids(messages: &mut [ChatMessage]) {
+    const UPSTREAM_PREFIX: &str = concat!("cl", "ark_agent_call_");
+    for message in messages {
+        for call in &mut message.tool_calls {
+            if let Some(suffix) = call.id.strip_prefix(UPSTREAM_PREFIX) {
+                call.id = format!("agent_loop_call_{suffix}");
+            }
+        }
+        if let Some(id) = &mut message.tool_call_id {
+            if let Some(suffix) = id.strip_prefix(UPSTREAM_PREFIX) {
+                *id = format!("agent_loop_call_{suffix}");
+            }
+        }
+    }
 }
 /// Build the wire `user` message for a turn, forwarding any attached images
 /// as content-parts (the OpenAI-compatible wire format allows parts arrays
@@ -275,7 +292,7 @@ pub(super) fn stream_error(error: LlmError) -> (ca::stream::StreamErrorKind, Str
         ),
         LlmError::InsufficientCredits => (
             ca::stream::StreamErrorKind::Fatal,
-            "insufficient_credits: Clark billing declined this run.".to_string(),
+            "insufficient_credits: the selected provider declined this run for insufficient usage access.".to_string(),
         ),
         LlmError::PlatformKeyRejected(message) => (
             ca::stream::StreamErrorKind::Fatal,
@@ -287,7 +304,7 @@ pub(super) fn stream_error(error: LlmError) -> (ca::stream::StreamErrorKind, Str
         ),
         LlmError::OutputQuarantined { .. } => (
             ca::stream::StreamErrorKind::Fatal,
-            "provider_error:Clark blocked a response that failed its data-isolation checks. No output from that response was saved. Please retry."
+            "provider_error:Agent Desktop blocked a response that failed its data-isolation checks. No output from that response was saved. Please retry."
                 .to_string(),
         ),
         // Typed so the engine's overflow recovery (force-compact + retry the
@@ -335,7 +352,7 @@ pub(super) fn tool_result_blocks_to_content(
 
 /// Store UI-only image results in tool metadata when the active coding model
 /// cannot accept image content parts. `ToolResult.details` is explicitly
-/// excluded from model context by clark-agent, while the event sink can still
+/// excluded from model context by agent-loop, while the event sink can still
 /// reconstruct the typed desktop image blocks from this structured field.
 pub(super) fn store_tool_images(details: &mut Value, images: &[ImageAttachment]) {
     if !details.is_object() {

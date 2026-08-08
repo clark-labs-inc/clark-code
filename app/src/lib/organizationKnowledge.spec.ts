@@ -70,8 +70,8 @@ describe("repository-scoped organization contribution", () => {
     setProjectKnowledgeEnabled(true, "id:account-one");
     setOrganizationForRepository("repo-1", "org-1", "id:account-one");
     invoke.mockImplementation(async (command: string) => {
-      if (command === "clark_repository_inspect") return repository;
-      if (command === "clark_repository_history") {
+      if (command === "repository_inspect") return repository;
+      if (command === "repository_history") {
         return {
           repository,
           offset: 0,
@@ -89,7 +89,7 @@ describe("repository-scoped organization contribution", () => {
           }],
         };
       }
-      if (command === "desktop_organization_repository_sync") {
+      if (command === "product_request") {
         return { next_offset: 1, complete: true, reset_required: false };
       }
       throw new Error(`unexpected command: ${command}`);
@@ -101,11 +101,13 @@ describe("repository-scoped organization contribution", () => {
     );
 
     const commands = invoke.mock.calls.map(([command]) => command);
-    expect(commands).toContain("desktop_organization_repository_sync");
-    expect(commands).not.toContain("desktop_code_repository_sync");
+    expect(commands).toContain("product_request");
     expect(invoke).toHaveBeenCalledWith(
-      "desktop_organization_repository_sync",
-      expect.objectContaining({ organizationId: "org-1", hostId: "host-1" }),
+      "product_request",
+      expect.objectContaining({
+        operation: "organization_knowledge.repository_sync",
+        payload: expect.objectContaining({ organizationId: "org-1", hostId: "host-1" }),
+      }),
     );
   });
 });

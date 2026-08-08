@@ -1,8 +1,8 @@
-//! Discovers helper executables shipped with Clark Code.
+//! Discovers helper executables shipped with Agent Desktop.
 //!
 //! The package has two intentionally disjoint surfaces:
-//! `clark-path/` contains commands exposed to agent processes, while
-//! `clark-resources/` contains implementation helpers that are resolved only by
+//! `agent-path/` contains commands exposed to agent processes, while
+//! `agent-resources/` contains implementation helpers that are resolved only by
 //! absolute path. macOS keeps supporting Tauri's signed sidecar location for
 //! PATH tools, but private helpers never fall back to that shared directory.
 
@@ -25,10 +25,10 @@ pub struct BundledTool {
     pub exposure: ToolExposure,
 }
 
-pub const PATH_DIR: &str = "clark-path";
-pub const RESOURCES_DIR: &str = "clark-resources";
+pub const PATH_DIR: &str = "agent-path";
+pub const RESOURCES_DIR: &str = "agent-resources";
 #[cfg(target_os = "linux")]
-const PRODUCT_NAME: &str = "Clark Code";
+const PRODUCT_NAME: &str = "Agent Desktop";
 
 pub const RIPGREP: BundledTool = BundledTool {
     name: if cfg!(windows) { "rg.exe" } else { "rg" },
@@ -43,31 +43,14 @@ pub const BUBBLEWRAP: BundledTool = BundledTool {
 };
 
 pub const WINDOWS_SANDBOX_RUNNER: BundledTool = BundledTool {
-    name: "clark-command-runner.exe",
-    relative_path: "sandbox/windows/clark-command-runner.exe",
+    name: "agent-command-runner.exe",
+    relative_path: "sandbox/windows/agent-command-runner.exe",
     exposure: ToolExposure::Private,
 };
 
 pub const WINDOWS_SANDBOX_SETUP: BundledTool = BundledTool {
-    name: "clark-windows-sandbox-setup.exe",
-    relative_path: "sandbox/windows/clark-windows-sandbox-setup.exe",
-    exposure: ToolExposure::Private,
-};
-
-/// Linux worker carried privately by macOS development bundles so a local
-/// source build can bootstrap the same Scientist implementation over SSH.
-pub const SCIENTIST_REMOTE_LINUX_X86_64: BundledTool = BundledTool {
-    name: "clark-code-headless",
-    relative_path: "remote-workers/linux-x86_64/clark-code-headless",
-    exposure: ToolExposure::Private,
-};
-
-/// Ordinary Clark Code worker carried privately by desktop bundles. Unlike
-/// the Scientist worker this runs the complete coding provider and is the
-/// durable authority for remote conversations.
-pub const CODE_REMOTE_LINUX_X86_64: BundledTool = BundledTool {
-    name: "clark-code-worker",
-    relative_path: "remote-workers/linux-x86_64/clark-code-worker",
+    name: "agent-windows-sandbox-setup.exe",
+    relative_path: "sandbox/windows/agent-windows-sandbox-setup.exe",
     exposure: ToolExposure::Private,
 };
 
@@ -78,8 +61,6 @@ pub const BUNDLED_TOOLS: &[BundledTool] = &[
     BUBBLEWRAP,
     WINDOWS_SANDBOX_RUNNER,
     WINDOWS_SANDBOX_SETUP,
-    SCIENTIST_REMOTE_LINUX_X86_64,
-    CODE_REMOTE_LINUX_X86_64,
 ];
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -193,7 +174,7 @@ pub fn rg_command() -> PathBuf {
 }
 
 fn default_resource_dir(executable_dir: &Path) -> PathBuf {
-    if let Some(override_dir) = std::env::var_os("CLARK_RESOURCE_DIR") {
+    if let Some(override_dir) = std::env::var_os("AGENT_DESKTOP_RESOURCE_DIR") {
         return PathBuf::from(override_dir);
     }
 
@@ -238,9 +219,9 @@ mod tests {
         std::fs::create_dir_all(&bin_dir)?;
         std::fs::create_dir_all(&path_dir)?;
         let app = bin_dir.join(if cfg!(windows) {
-            "clark-desktop.exe"
+            "agent-desktop.exe"
         } else {
-            "clark-desktop"
+            "agent-desktop"
         });
         let rg = path_dir.join(RIPGREP.name);
         std::fs::write(&app, b"app")?;
@@ -262,7 +243,7 @@ mod tests {
     #[test]
     fn source_build_falls_back_to_command_name() -> std::io::Result<()> {
         let package = tempfile::tempdir()?;
-        let app = package.path().join("clark-desktop");
+        let app = package.path().join("agent-desktop");
         std::fs::write(&app, b"app")?;
         let context = InstallContext::from_exe(Some(&app));
 
@@ -281,19 +262,14 @@ mod tests {
         std::fs::create_dir_all(&bin_dir)?;
         std::fs::create_dir_all(&path_dir)?;
         std::fs::create_dir_all(&private_dir)?;
-        let app = bin_dir.join("clark-desktop");
+        let app = bin_dir.join("agent-desktop");
         let rg = path_dir.join(RIPGREP.name);
         let runner = private_dir.join(WINDOWS_SANDBOX_RUNNER.name);
         let setup = private_dir.join(WINDOWS_SANDBOX_SETUP.name);
-        let remote_worker = resources
-            .join(RESOURCES_DIR)
-            .join(SCIENTIST_REMOTE_LINUX_X86_64.relative_path);
-        std::fs::create_dir_all(remote_worker.parent().unwrap())?;
         std::fs::write(&app, b"app")?;
         std::fs::write(&rg, b"rg")?;
         std::fs::write(&runner, b"runner")?;
         std::fs::write(&setup, b"setup")?;
-        std::fs::write(&remote_worker, b"worker")?;
         let context = InstallContext::from_layout(Some(&app), Some(&resources));
 
         assert_eq!(
@@ -303,10 +279,6 @@ mod tests {
         assert_eq!(
             context.bundled_tool(WINDOWS_SANDBOX_SETUP),
             Some(setup.canonicalize()?)
-        );
-        assert_eq!(
-            context.bundled_tool(SCIENTIST_REMOTE_LINUX_X86_64),
-            Some(remote_worker.canonicalize()?)
         );
         let activated = context
             .path_with_bundled_tools(None)
@@ -324,7 +296,7 @@ mod tests {
     #[test]
     fn existing_package_path_is_not_duplicated() -> std::io::Result<()> {
         let package = tempfile::tempdir()?;
-        let app = package.path().join("clark-desktop");
+        let app = package.path().join("agent-desktop");
         std::fs::write(&app, b"app")?;
         std::fs::write(package.path().join(RIPGREP.name), b"rg")?;
         let context = InstallContext::from_exe(Some(&app));

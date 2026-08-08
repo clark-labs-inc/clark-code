@@ -101,7 +101,7 @@ export function SecurityCanvas({
             <button
               type="button"
               onClick={tab === "zero-days" ? onResearchCandidate : onStartScan}
-              className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-accent/90"
+              className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-on-accent transition hover:bg-accent/90"
             >
               {tab === "zero-days" ? <Beaker className="size-3.5" /> : <ScanSearch className="size-3.5" />}
               {tab === "zero-days" ? "Research candidate" : "Start scan"}
@@ -111,7 +111,7 @@ export function SecurityCanvas({
           {rows.length === 0 ? (
             <EmptyState
               title={tab === "zero-days" ? "No novel candidates" : "No open findings"}
-              detail="Clark only clears a surface after sufficient coverage; unknown coverage remains explicit."
+              detail="the agent only clears a surface after sufficient coverage; unknown coverage remains explicit."
             />
           ) : (
             <div className="divide-y divide-border-subtle">
@@ -152,7 +152,7 @@ export function SecurityCanvas({
                 setCampaignFormOpen((open) => !open);
                 setCampaignError(null);
               }}
-              className="rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-accent/90"
+              className="rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-on-accent transition hover:bg-accent/90"
             >
               New campaign
             </button>
@@ -219,7 +219,7 @@ export function SecurityCanvas({
               <button
                 type="submit"
                 disabled={creatingCampaign || campaignFindingIds.length === 0}
-                className="rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                className="rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-on-accent disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {creatingCampaign ? "Creating…" : "Create campaign"}
               </button>
@@ -266,7 +266,7 @@ export function SecurityCanvas({
                     <div className="mt-0.5 text-xs text-ink-muted">{scan.repositoryId}</div>
                   </div>
                   <StatusPill status={scan.status} />
-                  <span className="truncate text-xs text-ink-muted">Clark Security</span>
+                  <span className="truncate text-xs text-ink-muted">Security scanner</span>
                   <span className="text-xs text-ink-faint">{relativeDate(scan.createdAt)}</span>
                   <button
                     type="button"

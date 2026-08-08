@@ -43,9 +43,9 @@ impl SeededWorkspace {
             git(&project_root, &["init", "--quiet"])?;
             git(
                 &project_root,
-                &["config", "user.email", "benchmark@clark.local"],
+                &["config", "user.email", "benchmark@example.test"],
             )?;
-            git(&project_root, &["config", "user.name", "Clark Benchmark"])?;
+            git(&project_root, &["config", "user.name", "Agent Benchmark"])?;
             git(&project_root, &["add", "."])?;
             git(
                 &project_root,

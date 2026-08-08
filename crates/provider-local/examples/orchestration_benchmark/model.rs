@@ -77,7 +77,7 @@ pub enum LaneKind {
     Reviewed,
     CheapSubagents,
     HomogeneousStrong,
-    ClarkCloud,
+    BrokeredCloud,
     MixedHarness,
 }
 
@@ -111,7 +111,7 @@ impl LaneSpec {
             token_budget: 120_000,
             reviewer: matches!(kind, LaneKind::Reviewed),
             verifier: matches!(kind, LaneKind::Reviewed),
-            cloud_agents: matches!(kind, LaneKind::ClarkCloud),
+            cloud_agents: matches!(kind, LaneKind::BrokeredCloud),
         };
         vec![
             lane("single", LaneKind::Single, None, "local"),
@@ -136,10 +136,10 @@ impl LaneSpec {
                 "local",
             ),
             lane(
-                "clark-cloud",
-                LaneKind::ClarkCloud,
+                "brokered-cloud",
+                LaneKind::BrokeredCloud,
                 Some(cheap),
-                "clark-cloud",
+                "brokered-cloud",
             ),
             lane(
                 "mixed-harness",

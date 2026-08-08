@@ -5,6 +5,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { productRequest } from "../product/productBridge";
 import type {
   CloudTrajectoryConfig,
   ComputerUseActionReceipt,
@@ -53,7 +54,7 @@ export class TauriBridge implements CoreBridge {
   }
 
   listSpecialistCatalog(): Promise<SpecialistCatalogAttestation> {
-    return invoke<SpecialistCatalogAttestation>("desktop_specialist_catalog");
+    return productRequest<SpecialistCatalogAttestation>("specialist.catalog");
   }
 
   prepareQuickChatWorkspace(id?: string) {

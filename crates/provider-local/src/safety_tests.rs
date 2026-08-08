@@ -159,10 +159,10 @@ fn identifies_network_and_host_boundary_crossings() {
 #[test]
 fn git_global_directory_option_preserves_read_only_classification() {
     for command in [
-        "git -C clark-nucleus diff --stat main...HEAD 2>&1 | tail -30",
-        "git -C clark-nucleus status --short --branch 2>&1 | head -60; echo count; git -C clark-nucleus status --porcelain 2>&1 | wc -l",
-        "git -C clark-nucleus log --oneline main..HEAD 2>&1 | head -50; git -C clark-nucleus log --oneline main..HEAD 2>&1 | wc -l",
-        "git -C clark-nucleus rev-parse --abbrev-ref HEAD; git -C clark-nucleus rev-list --left-right --count main...HEAD",
+        "git -C primary-repo diff --stat main...HEAD 2>&1 | tail -30",
+        "git -C primary-repo status --short --branch 2>&1 | head -60; echo count; git -C primary-repo status --porcelain 2>&1 | wc -l",
+        "git -C primary-repo log --oneline main..HEAD 2>&1 | head -50; git -C primary-repo log --oneline main..HEAD 2>&1 | wc -l",
+        "git -C primary-repo rev-parse --abbrev-ref HEAD; git -C primary-repo rev-list --left-right --count main...HEAD",
         "git --git-dir=.git --work-tree=. status --short",
     ] {
         assert!(!command_requires_host(command), "{command}");
@@ -170,11 +170,9 @@ fn git_global_directory_option_preserves_read_only_classification() {
         assert_eq!(risk(command), CommandRisk::Safe, "{command}");
     }
 
-    assert!(command_requires_host("git -C clark-nucleus commit -m test"));
-    assert!(!is_read_only_command("git -C clark-nucleus commit -m test"));
-    assert!(command_requires_network(
-        "git -C clark-nucleus fetch origin"
-    ));
+    assert!(command_requires_host("git -C primary-repo commit -m test"));
+    assert!(!is_read_only_command("git -C primary-repo commit -m test"));
+    assert!(command_requires_network("git -C primary-repo fetch origin"));
 }
 
 #[test]

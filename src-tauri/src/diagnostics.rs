@@ -1,6 +1,6 @@
 //! Owner-local structured diagnostics for the native Desktop boundary.
 //!
-//! `CLARK_LOGS` and `CLARK_CAPTURED_LOGS` are deliberately only directory
+//! `AGENT_DESKTOP_LOGS` and `AGENT_DESKTOP_CAPTURED_LOGS` are deliberately only directory
 //! selectors. Events are emitted through `tracing`, so providers and commands
 //! do not know or care which local sinks are configured. Conversation content,
 //! credentials, and request bodies must never be attached to these events.
@@ -11,7 +11,7 @@ compile_error!("debug-diagnostics is forbidden in release/production builds");
 use serde::Deserialize;
 #[cfg(feature = "debug-diagnostics")]
 use {
-    clark_capture::{CaptureClient, CaptureConfig, CaptureLayer, EventInput, Level},
+    diagnostic_capture::{CaptureClient, CaptureConfig, CaptureLayer, EventInput, Level},
     serde_json::{json, Map, Value},
     std::path::{Path, PathBuf},
     std::sync::atomic::{AtomicBool, Ordering},
@@ -25,7 +25,7 @@ use {
 #[cfg(feature = "debug-diagnostics")]
 const RETAINED_LOG_FILES: usize = 15;
 #[cfg(feature = "debug-diagnostics")]
-const CAPTURE_FILTER: &str = "clark_desktop_lib=info,agent_core=info,provider_local=info,provider_clark=info,provider_specialist=info,code_remote=info,exec_core=warn,tauri=warn";
+const CAPTURE_FILTER: &str = "desktop_foundation=info,agent_core=info,provider_local=info,code_remote=info,exec_core=warn,tauri=warn";
 #[cfg(feature = "debug-diagnostics")]
 static INITIALIZED: AtomicBool = AtomicBool::new(false);
 #[cfg(feature = "debug-diagnostics")]
@@ -38,7 +38,7 @@ pub struct DiagnosticsGuard {
 
 #[cfg(feature = "debug-diagnostics")]
 fn configured_log_directory() -> Option<PathBuf> {
-    std::env::var_os("CLARK_LOGS")
+    std::env::var_os("AGENT_DESKTOP_LOGS")
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
 }
@@ -46,20 +46,20 @@ fn configured_log_directory() -> Option<PathBuf> {
 #[cfg(feature = "debug-diagnostics")]
 fn prepare_log_directory(path: &Path) -> Result<(), String> {
     if !path.is_absolute() {
-        return Err("CLARK_LOGS must be an absolute directory".into());
+        return Err("AGENT_DESKTOP_LOGS must be an absolute directory".into());
     }
     std::fs::create_dir_all(path)
-        .map_err(|error| format!("create CLARK_LOGS directory: {error}"))?;
+        .map_err(|error| format!("create AGENT_DESKTOP_LOGS directory: {error}"))?;
     let metadata = std::fs::symlink_metadata(path)
-        .map_err(|error| format!("inspect CLARK_LOGS directory: {error}"))?;
+        .map_err(|error| format!("inspect AGENT_DESKTOP_LOGS directory: {error}"))?;
     if metadata.file_type().is_symlink() || !metadata.is_dir() {
-        return Err("CLARK_LOGS must be a real directory, not a symlink".into());
+        return Err("AGENT_DESKTOP_LOGS must be a real directory, not a symlink".into());
     }
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
-            .map_err(|error| format!("secure CLARK_LOGS directory: {error}"))?;
+            .map_err(|error| format!("secure AGENT_DESKTOP_LOGS directory: {error}"))?;
     }
     Ok(())
 }
@@ -71,36 +71,36 @@ fn file_appender(
     prepare_log_directory(path)?;
     let appender = RollingFileAppender::builder()
         .rotation(Rotation::DAILY)
-        .filename_prefix("clark-desktop")
+        .filename_prefix("agent-desktop")
         .filename_suffix("jsonl")
         // The appender documents that retention can briefly dip below the
         // configured maximum, so keep one spare beyond the intended 14 days.
         .max_log_files(RETAINED_LOG_FILES)
         .build(path)
-        .map_err(|error| format!("open CLARK_LOGS appender: {error}"))?;
+        .map_err(|error| format!("open AGENT_DESKTOP_LOGS appender: {error}"))?;
     Ok(NonBlockingBuilder::default().lossy(false).finish(appender))
 }
 
 #[cfg(feature = "debug-diagnostics")]
 fn capture_layer() -> Option<CaptureLayer> {
-    let path = std::env::var_os("CLARK_CAPTURED_LOGS")
+    let path = std::env::var_os("AGENT_DESKTOP_CAPTURED_LOGS")
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)?;
     if let Err(error) = prepare_capture_directory(&path) {
-        eprintln!("Clark capture sink unavailable: {error}");
+        eprintln!("Agent Desktop capture sink unavailable: {error}");
         return None;
     }
-    let mut config = CaptureConfig::with_root("clark-desktop", path);
+    let mut config = CaptureConfig::with_root("agent-desktop", path);
     config.release = Some(env!("CARGO_PKG_VERSION").to_owned());
     config.environment = Some("development".to_owned());
     let client = match CaptureClient::new(config) {
         Ok(client) => client,
         Err(error) => {
-            eprintln!("Clark capture client unavailable: {error}");
+            eprintln!("Agent Desktop capture client unavailable: {error}");
             return None;
         }
     };
-    client.set_tag("application", "clark-desktop");
+    client.set_tag("application", "agent-desktop");
     client.set_tag("capture_transport", "local-disk");
     client.install_panic_hook();
     let _ = CAPTURE_CLIENT.set(client.clone());
@@ -110,20 +110,20 @@ fn capture_layer() -> Option<CaptureLayer> {
 #[cfg(feature = "debug-diagnostics")]
 fn prepare_capture_directory(path: &Path) -> Result<(), String> {
     if !path.is_absolute() {
-        return Err("CLARK_CAPTURED_LOGS must be an absolute directory".into());
+        return Err("AGENT_DESKTOP_CAPTURED_LOGS must be an absolute directory".into());
     }
     std::fs::create_dir_all(path)
-        .map_err(|error| format!("create CLARK_CAPTURED_LOGS directory: {error}"))?;
+        .map_err(|error| format!("create AGENT_DESKTOP_CAPTURED_LOGS directory: {error}"))?;
     let metadata = std::fs::symlink_metadata(path)
-        .map_err(|error| format!("inspect CLARK_CAPTURED_LOGS directory: {error}"))?;
+        .map_err(|error| format!("inspect AGENT_DESKTOP_CAPTURED_LOGS directory: {error}"))?;
     if metadata.file_type().is_symlink() || !metadata.is_dir() {
-        return Err("CLARK_CAPTURED_LOGS must be a real directory, not a symlink".into());
+        return Err("AGENT_DESKTOP_CAPTURED_LOGS must be a real directory, not a symlink".into());
     }
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
-            .map_err(|error| format!("secure CLARK_CAPTURED_LOGS directory: {error}"))?;
+            .map_err(|error| format!("secure AGENT_DESKTOP_CAPTURED_LOGS directory: {error}"))?;
     }
     Ok(())
 }
@@ -249,7 +249,7 @@ pub(crate) fn init() -> DiagnosticsGuard {
         return DiagnosticsGuard { _file_guard: None };
     }
     let console_filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| "clark_desktop_lib=info,agent_core=info".into());
+        .unwrap_or_else(|_| "desktop_foundation=info,agent_core=info".into());
     let console = tracing_subscriber::fmt::layer().with_writer(std::io::stderr);
 
     if let Some(path) = configured_log_directory() {
@@ -265,14 +265,14 @@ pub(crate) fn init() -> DiagnosticsGuard {
                     // Local diagnostics stay useful even when a shell-level
                     // `RUST_LOG=warn` quiets the interactive console.
                     .with(file.with_filter(tracing_subscriber::EnvFilter::new(
-                        "clark_desktop_lib=info,agent_core=info",
+                        "desktop_foundation=info,agent_core=info",
                     )))
                     .with(capture_layer().map(|layer| {
                         layer.with_filter(tracing_subscriber::EnvFilter::new(CAPTURE_FILTER))
                     }));
                 // Set only the tracing dispatcher here. `try_init` also owns
                 // the legacy `log` facade and can fail if a GUI dependency
-                // installed that bridge before Clark's native host starts.
+                // installed that bridge before Agent Desktop's native host starts.
                 let initialized = tracing::subscriber::set_global_default(subscriber).is_ok();
                 if initialized {
                     tracing::info!(
@@ -287,7 +287,7 @@ pub(crate) fn init() -> DiagnosticsGuard {
                 }
                 return DiagnosticsGuard { _file_guard: None };
             }
-            Err(error) => eprintln!("Clark diagnostics file sink unavailable: {error}"),
+            Err(error) => eprintln!("Agent Desktop diagnostics file sink unavailable: {error}"),
         }
     }
 
@@ -306,7 +306,7 @@ pub(crate) fn init() -> DiagnosticsGuard {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "clark_desktop_lib=info,agent_core=info".into()),
+                .unwrap_or_else(|_| "desktop_foundation=info,agent_core=info".into()),
         )
         .try_init()
         .ok();

@@ -111,7 +111,7 @@ fn parse_git_status(status: &str) -> (u32, u32, u32) {
 
 /// The external local thread index is an intentionally best-effort signal: when
 /// its database is absent (including many remote hosts), the command prints no
-/// rows and Clark simply reports no externally observed agents. Text fields
+/// rows and Agent Desktop simply reports no externally observed agents. Text fields
 /// are hex-encoded so task titles containing tabs/newlines stay parseable.
 fn external_agent_activity_command(worktree_root: &Path, branch: &str, detached: bool) -> String {
     let root = sql_hex(&worktree_root.to_string_lossy());
@@ -215,8 +215,8 @@ mod tests {
         let linked = temp.path().join("project-feature");
         std::fs::create_dir(&repo).unwrap();
         git(&repo, &["init", "-q", "-b", "main"]);
-        git(&repo, &["config", "user.email", "test@clark.local"]);
-        git(&repo, &["config", "user.name", "Clark Test"]);
+        git(&repo, &["config", "user.email", "test@example.local"]);
+        git(&repo, &["config", "user.name", "Agent Test"]);
         std::fs::write(repo.join("README.md"), "fixture\n").unwrap();
         git(&repo, &["add", "README.md"]);
         git(&repo, &["commit", "-qm", "initial"]);

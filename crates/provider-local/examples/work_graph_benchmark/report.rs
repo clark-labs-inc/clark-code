@@ -201,7 +201,7 @@ fn compare(candidate: &LaneAggregate, control: &LaneAggregate) -> ValueCompariso
 }
 
 fn markdown(summary: &BenchmarkSummary, records: &[RunRecord]) -> String {
-    let mut out = String::from("# Clark universal work-graph orchestration benchmark\n\n");
+    let mut out = String::from("# Agent universal work-graph orchestration benchmark\n\n");
     out.push_str(&format!(
         "Evidence: `{:?}`  \nRuns: {}  \nRequired work-graph pass rate: {:.1}%  \nValue claim allowed: **{}**\n\n{}\n\n",
         summary.evidence_level,

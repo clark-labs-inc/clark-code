@@ -12,6 +12,7 @@ use std::sync::Arc;
 use agent_core::{Provider, Session, Snapshot};
 use tokio::sync::{Mutex, RwLock};
 
+use crate::product::{NeutralProduct, ProductIntegration};
 use crate::runtime_registry::{AccountKey, RuntimeRegistry};
 use crate::session_credentials::SessionCredentials;
 use crate::trajectory::CloudTrajectoryClient;
@@ -22,7 +23,7 @@ use crate::trajectory::CloudTrajectoryClient;
 /// single-session), so sessions never contend — dropping the entry drops the
 /// provider and with it any running agent loop.
 pub struct HostSession {
-    /// Native-validated Clark account that owns this session. `None` is valid
+    /// Native-validated desktop account that owns this session. `None` is valid
     /// only before a local session is attached to cloud history.
     pub(crate) account: Option<AccountKey>,
     pub provider: Box<dyn Provider>,
@@ -41,11 +42,12 @@ pub struct HostSession {
 /// Shared, thread-safe host state managed by Tauri.
 #[derive(Clone)]
 pub struct AppState {
+    pub(crate) product: Arc<dyn ProductIntegration>,
     /// Sole authority for live sessions, projections, trajectory clients,
     /// account-bound durable workers, skill caches, and reconnect state. The
     /// WebView can hold only public conversation ids and opaque capabilities.
     pub(crate) runtime_registry: Arc<RuntimeRegistry>,
-    /// Account-partitioned secrets persisted in Clark's authenticated,
+    /// Account-partitioned secrets persisted in Agent Desktop's authenticated,
     /// app-encrypted private file. No operating-system credential vault is used.
     pub(crate) credentials: Arc<SessionCredentials>,
     /// Same-account work holds shared admission while sign-in/sign-out takes
@@ -75,9 +77,15 @@ impl Drop for ActiveRunGuard {
 
 impl AppState {
     pub fn new() -> Self {
+        Self::with_product(Arc::new(NeutralProduct))
+    }
+
+    pub fn with_product(product: Arc<dyn ProductIntegration>) -> Self {
+        let credential_policy = product.credential_envelope_policy();
         Self {
+            product,
             runtime_registry: Arc::new(RuntimeRegistry::new()),
-            credentials: Arc::new(SessionCredentials::new()),
+            credentials: Arc::new(SessionCredentials::with_policy(credential_policy)),
             account_lifecycle: Arc::new(RwLock::new(())),
             update_draining: Arc::new(AtomicBool::new(false)),
             active_runs: Arc::new(AtomicUsize::new(0)),

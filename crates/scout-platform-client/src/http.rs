@@ -10,16 +10,16 @@ use super::{MAX_ERROR_BYTES, MAX_RESPONSE_BYTES};
 
 pub(super) fn authorization_header(api_key: &str) -> Result<HeaderValue, String> {
     if api_key.is_empty() || api_key.trim() != api_key {
-        return Err("Clark Platform API key must be a non-empty header value".into());
+        return Err("host platform API key must be a non-empty header value".into());
     }
     let mut authorization = HeaderValue::from_str(&format!("Bearer {api_key}"))
-        .map_err(|_| "Clark Platform API key is not a valid header value".to_string())?;
+        .map_err(|_| "host platform API key is not a valid header value".to_string())?;
     authorization.set_sensitive(true);
     Ok(authorization)
 }
 
 pub(super) fn build_http_client(timeout: Duration) -> Result<Client, String> {
-    clark_http::build_client(clark_http::ClientOptions {
+    desktop_http::build_client(desktop_http::ClientOptions {
         request_timeout: Some(timeout),
         ..Default::default()
     })

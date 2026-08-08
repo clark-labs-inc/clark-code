@@ -3,7 +3,7 @@ import { Activity, Circle, GitMerge, UsersRound } from "lucide-react";
 import type { ProjectActivity } from "../core-bridge/bridge";
 import { cn } from "../lib/cn";
 
-export interface ClarkPeerActivity {
+export interface DesktopPeerActivity {
   id: string;
   title: string;
 }
@@ -11,7 +11,7 @@ export interface ClarkPeerActivity {
 interface ParallelWorkContextProps {
   activity: ProjectActivity;
   branch: string;
-  clarkPeers: ClarkPeerActivity[];
+  desktopPeers: DesktopPeerActivity[];
   onOpenPeer?: (id: string) => void;
 }
 
@@ -28,13 +28,13 @@ export function activityAge(updatedAtMs: number, now = Date.now()): string {
 export function ParallelWorkContext({
   activity,
   branch,
-  clarkPeers,
+  desktopPeers,
   onOpenPeer,
 }: ParallelWorkContextProps) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const external = activity.externalAgents;
-  const agentCount = external.length + clarkPeers.length;
+  const agentCount = external.length + desktopPeers.length;
   const workingFiles = activity.changedFiles + activity.untrackedFiles + activity.conflictedFiles;
 
   useEffect(() => {
@@ -106,11 +106,11 @@ export function ParallelWorkContext({
           </div>
 
           <div className="max-h-52 overflow-y-auto p-2">
-            {clarkPeers.map((peer) => (
+            {desktopPeers.map((peer) => (
               <AgentRow
-                key={`clark:${peer.id}`}
-                label="Clark"
-                title={peer.title || "Untitled Clark task"}
+                key={`desktop:${peer.id}`}
+                label="the agent"
+                title={peer.title || "Untitled the agent task"}
                 status="running now"
                 onOpen={onOpenPeer ? () => onOpenPeer(peer.id) : undefined}
               />
@@ -144,10 +144,10 @@ export function ParallelWorkContext({
                   : workingFiles > 0
                     ? `${workingFiles} working-tree file${workingFiles === 1 ? "" : "s"}. `
                     : "Working tree clean. "}
-                {clarkPeers.length > 0 && external.length > 0
-                  ? "Clark sessions are tracked on this device; external activity is inferred from tasks updated in the last five minutes."
-                  : clarkPeers.length > 0
-                    ? "Clark session activity is tracked on this device."
+                {desktopPeers.length > 0 && external.length > 0
+                  ? "the agent sessions are tracked on this device; external activity is inferred from tasks updated in the last five minutes."
+                  : desktopPeers.length > 0
+                    ? "the agent session activity is tracked on this device."
                     : "External activity is inferred from tasks updated in the last five minutes."}
               </span>
             </p>
@@ -195,8 +195,8 @@ function AgentRow({
         <button
           type="button"
           onClick={onOpen}
-          className="shrink-0 rounded-md px-1.5 py-1 text-[11px] font-medium text-accent transition hover:bg-accent-subtle"
-          aria-label={`Open Clark session: ${title}`}
+          className="shrink-0 rounded-md px-1.5 py-1 text-xs font-medium text-accent transition hover:bg-accent-subtle"
+          aria-label={`Open the agent session: ${title}`}
         >
           Open
         </button>

@@ -1,6 +1,54 @@
 use super::*;
 use crate::loop_state::SessionState;
 
+struct ExtensionTool;
+
+#[async_trait::async_trait]
+impl ToolExecutor for ExtensionTool {
+    fn name(&self) -> &str {
+        "example_extension"
+    }
+
+    fn description(&self) -> &str {
+        "Example product extension."
+    }
+
+    fn parameters(&self) -> Value {
+        serde_json::json!({ "type": "object", "properties": {} })
+    }
+
+    fn kind(&self) -> ToolKind {
+        ToolKind::Other
+    }
+
+    async fn invoke(&self, _args: Value, _ctx: &ToolCtx) -> ToolOutcome {
+        ToolOutcome::ok("ok")
+    }
+}
+
+struct ExtensionPack;
+
+impl ToolPack for ExtensionPack {
+    fn id(&self) -> &str {
+        "example"
+    }
+
+    fn install(&self, registry: &mut ToolRegistry) -> Result<(), String> {
+        registry.register_extension_tool(ToolExposure::Deferred, Arc::new(ExtensionTool))
+    }
+}
+
+#[test]
+fn product_tool_packs_extend_without_shadowing_core_tools() {
+    let mut registry = ToolRegistry::new(None, None);
+    registry.install_tool_pack(&ExtensionPack).unwrap();
+    assert!(registry.get("example_extension").is_some());
+
+    let duplicate = registry.install_tool_pack(&ExtensionPack).unwrap_err();
+    assert!(duplicate.contains("already registered"));
+    assert!(registry.get("read_file").is_some());
+}
+
 #[test]
 fn read_tracker_distinguishes_fresh_notread_and_stale() {
     use std::time::{Duration, SystemTime};
@@ -195,7 +243,7 @@ fn schema_property_order_survives_serialization() {
 
     let mut image_registry = ToolRegistry::new(None, None);
     image_registry.enable_image_generation(image::ImageGenerationConfig {
-        base_url: "https://api.clarkslabs.com/v1".into(),
+        base_url: "https://product.example/v1".into(),
         api_key: "ck_live_test".into(),
     });
     wire_order(
@@ -206,7 +254,7 @@ fn schema_property_order_survives_serialization() {
 }
 
 #[test]
-fn registry_lists_local_tools_and_optionally_clark() {
+fn registry_lists_neutral_local_tools_without_product_extensions() {
     let local = ToolRegistry::new(None, None);
     let names: Vec<_> = local
         .schemas()
@@ -218,25 +266,25 @@ fn registry_lists_local_tools_and_optionally_clark() {
     assert!(names.contains(&"bash".to_string()));
     assert!(names.contains(&"view_image".to_string()));
     assert!(!names.contains(&"generate_image".to_string()));
-    assert!(!names.contains(&"clark_research".to_string()));
+    assert!(!names.contains(&"product_research".to_string()));
     assert!(!names.contains(&"memory".to_string()));
     assert!(local.get("read_file").is_some());
     assert!(local.get("nope").is_none());
 
-    let with_clark = ToolRegistry::new(
-        Some(AgenticClarkConfig {
-            base_url: "https://api.clarkslabs.com/v1".into(),
+    let product_config_does_not_implicitly_install_tools = ToolRegistry::new(
+        Some(AuxiliaryModelConfig {
+            base_url: "https://product.example/v1".into(),
             api_key: Some("ck_live_x".into()),
-            model: "clark".into(),
+            model: "local-model".into(),
         }),
         None,
     );
-    let names: Vec<_> = with_clark
+    let names: Vec<_> = product_config_does_not_implicitly_install_tools
         .schemas()
         .iter()
         .map(|s| s.function.name.clone())
         .collect();
-    assert!(names.contains(&"clark_research".to_string()));
+    assert!(!names.contains(&"product_research".to_string()));
 }
 
 #[tokio::test]
@@ -244,7 +292,7 @@ async fn copy_on_write_registry_isolates_prior_run_and_rebinds_tool_search() {
     let mut next = Arc::new(ToolRegistry::new(None, None));
     let prior_run = next.clone();
 
-    Arc::make_mut(&mut next).enable_browser();
+    Arc::make_mut(&mut next).enable_browser(crate::browser_binary::test_browser_config());
 
     assert!(!Arc::ptr_eq(&next, &prior_run));
     assert!(next.get("browser").is_some());
@@ -286,7 +334,7 @@ async fn runtime_catalog_keeps_core_eager_and_defers_specialized_tools() {
         .collect::<Vec<_>>();
     let available_refs = available.iter().map(String::as_str).collect::<Vec<_>>();
     let initial = gate
-        .next_turn_tool_allowlist(clark_agent::plugin::ToolGateContext {
+        .next_turn_tool_allowlist(agent_loop::plugin::ToolGateContext {
             iteration: 0,
             messages: &[],
             conversation_id: Some("session"),
@@ -326,7 +374,7 @@ async fn runtime_catalog_keeps_core_eager_and_defers_specialized_tools() {
         .deferred_tools
         .insert("android_tap".into());
     let activated = gate
-        .next_turn_tool_allowlist(clark_agent::plugin::ToolGateContext {
+        .next_turn_tool_allowlist(agent_loop::plugin::ToolGateContext {
             iteration: 1,
             messages: &[],
             conversation_id: Some("session"),
@@ -354,12 +402,34 @@ fn memory_tool_registered_only_when_enabled() {
 
 #[test]
 fn organization_knowledge_is_an_explicit_read_only_registry_plugin() {
+    struct EmptyContext;
+    #[async_trait::async_trait]
+    impl crate::platform::PlatformContextProvider for EmptyContext {
+        async fn personal_memories(&self) -> Result<Vec<crate::platform::PersonalMemory>, String> {
+            Ok(Vec::new())
+        }
+        async fn repository_context(
+            &self,
+            _fingerprint: &str,
+            _query: &str,
+        ) -> Result<crate::platform::RepositoryContext, String> {
+            Err("not configured".into())
+        }
+        async fn organization_knowledge(
+            &self,
+            query: &str,
+            _organization_id: Option<&str>,
+            _limit: i64,
+        ) -> Result<crate::platform::OrganizationKnowledgeResponse, String> {
+            Ok(crate::platform::OrganizationKnowledgeResponse {
+                query: query.into(),
+                organizations: Vec::new(),
+            })
+        }
+    }
     let mut registry = ToolRegistry::new(None, None);
     assert!(registry.get("organization_knowledge").is_none());
-    registry.enable_organization_knowledge(organization_knowledge::OrganizationKnowledgeConfig {
-        base_url: "https://api.clarkslabs.com/v1".into(),
-        api_key: "ck_live_test".into(),
-    });
+    registry.enable_organization_knowledge(Arc::new(EmptyContext));
     let tool = registry.get("organization_knowledge").unwrap();
     assert!(!tool.mutating());
     assert_eq!(tool.kind(), ToolKind::Research);
@@ -377,7 +447,7 @@ fn mutating_tools_are_flagged() {
 
     let mut signed_in = ToolRegistry::new(None, None);
     signed_in.enable_image_generation(image::ImageGenerationConfig {
-        base_url: "https://api.clarkslabs.com/v1".into(),
+        base_url: "https://product.example/v1".into(),
         api_key: "ck_live_test".into(),
     });
     assert!(signed_in.get("generate_image").unwrap().mutating());
@@ -455,91 +525,4 @@ fn ios_tools_are_registered_with_correct_mutating_flags() {
 fn ios_tools_are_absent_on_non_macos() {
     let reg = ToolRegistry::new(None, None);
     assert!(reg.get("ios_list_simulators").is_none());
-}
-
-#[test]
-fn checked_in_feature_map_matches_every_builtin_model_tool() {
-    use std::collections::{BTreeSet, HashMap};
-
-    let mut registry = ToolRegistry::new(
-        Some(AgenticClarkConfig {
-            base_url: "https://example.invalid/v1".into(),
-            api_key: None,
-            model: "clark".into(),
-        }),
-        Some(memory::MemoryConfig::default()),
-    );
-    registry.enable_skills(Arc::new(crate::skills::SkillCatalog::default()));
-    registry.enable_browser();
-    registry.enable_computer_use(Arc::new(::computer_use::SimulatedComputerBackend::new()));
-    registry.enable_image_generation(image::ImageGenerationConfig {
-        base_url: "https://example.invalid/v1".into(),
-        api_key: "ck_test_manifest".into(),
-    });
-    registry.enable_organization_knowledge(organization_knowledge::OrganizationKnowledgeConfig {
-        base_url: "https://example.invalid/v1".into(),
-        api_key: "ck_test_manifest".into(),
-    });
-    let cloud_advisor = cloud_advisor::CloudAdvisorConfig::from_extra(
-        &serde_json::json!({"cloud_advisor": {
-            "organization_id": "018f8e8a-4722-7c68-b5b7-a4c6793c85b0",
-            "specialist": "security",
-            "workflow": "security:security-scan",
-            "execution_residency": "local_only",
-            "training_consent": "none"
-        }}),
-        "https://example.invalid/v1",
-        Some("ck_test_manifest"),
-        Some("/project"),
-        false,
-    )
-    .expect("feature-map advisor config should be valid");
-    registry.enable_cloud_advisor(cloud_advisor);
-    registry.enable_orchestration(crate::orchestration::OrchestrationToolsConfig {
-        policy: crate::orchestration::OrchestrationConfig::default(),
-        base_url: "https://example.invalid/v1".into(),
-        api_key: None,
-        headers: HashMap::new(),
-        root_model: "clark-code".into(),
-        reasoning_effort: None,
-        scout_capsules: None,
-        scout_cartography: None,
-    });
-
-    let manifest: Value = serde_json::from_str(include_str!(
-        "../../../../harness/clark-code-feature-map.json"
-    ))
-    .expect("feature map should be valid JSON");
-    let platform = if cfg!(target_os = "macos") {
-        "macos"
-    } else if cfg!(windows) {
-        "windows"
-    } else {
-        "ubuntu"
-    };
-    let expected = manifest["features"]
-        .as_array()
-        .expect("features should be an array")
-        .iter()
-        .filter(|feature| feature["platform_support"][platform] != "unsupported")
-        .flat_map(|feature| {
-            feature["tools"]
-                .as_array()
-                .expect("feature tools should be an array")
-        })
-        .map(|name| {
-            name.as_str()
-                .expect("tool name should be a string")
-                .to_string()
-        })
-        .collect::<BTreeSet<_>>();
-    let actual = registry
-        .executors()
-        .map(|tool| tool.name().to_string())
-        .collect::<BTreeSet<_>>();
-
-    assert_eq!(
-        actual, expected,
-        "update clark-code-feature-map.json whenever a model tool is added, removed, or changes platform support"
-    );
 }

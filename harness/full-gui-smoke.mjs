@@ -26,7 +26,7 @@ const port = await reservePort();
 const url = `http://127.0.0.1:${port}/`;
 const dev = spawn("pnpm", ["--dir", "app", "dev", "--host", "127.0.0.1", "--port", String(port), "--strictPort"], {
   cwd: repoDir,
-  env: { ...process.env, VITE_CLARK_DEV_AUTH: "1" },
+  env: { ...process.env, VITE_PRODUCT_DEV_AUTH: "1" },
   stdio: ["ignore", "pipe", "pipe"],
 });
 let serverOutput = "";
@@ -76,19 +76,19 @@ try {
   await context.addInitScript(() => {
     const accountScope = "id:full-gui-qa";
     const encodedScope = encodeURIComponent(accountScope);
-    localStorage.setItem("clark.desktop.dev-account", JSON.stringify({
+    localStorage.setItem("agent-desktop.dev-account", JSON.stringify({
       user: { id: "full-gui-qa", name: "Full GUI QA", method: "local" },
     }));
-    localStorage.setItem(`clark-desktop:local-agent:${encodedScope}`, JSON.stringify({
-      cwd: "/tmp", model: "clark-code:free", reasoningEffort: "high",
+    localStorage.setItem(`agent-desktop:local-agent:${encodedScope}`, JSON.stringify({
+      cwd: "/tmp", model: "local-model", reasoningEffort: "high",
     }));
-    localStorage.setItem(`clark-desktop:project-context:${encodedScope}`, JSON.stringify({ cwd: "/tmp" }));
+    localStorage.setItem(`agent-desktop:project-context:${encodedScope}`, JSON.stringify({ cwd: "/tmp" }));
   });
   page = await context.newPage();
   page.on("pageerror", (error) => errors.push(error.stack ?? error.message));
   page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
   await page.goto(url, { waitUntil: "networkidle" });
-  const composer = page.getByLabel("Message Clark");
+  const composer = page.getByLabel("Message Agent Desktop");
   await composer.waitFor({ state: "visible" });
 
   // Multi-turn conversation with the deterministic mock, including permission.
@@ -117,7 +117,7 @@ try {
   await composer.fill("/new");
   await page.getByRole("button", { name: /\/new\b/ }).click();
   await page.getByText("New session", { exact: false }).first().waitFor();
-  const goalComposer = page.getByLabel("Message Clark");
+  const goalComposer = page.getByLabel("Message Agent Desktop");
   await goalComposer.fill("/goal complete");
   await goalComposer.press("Enter");
   await page.getByText("Goal complete", { exact: true }).waitFor();
@@ -132,7 +132,7 @@ try {
   await composer.fill("Slash command discovery session.");
   await composer.press("Enter");
   await approveIfNeeded(page);
-  const freshComposer = page.getByLabel("Message Clark");
+  const freshComposer = page.getByLabel("Message Agent Desktop");
   for (const command of expectedSlashCommands) {
     await freshComposer.fill(`/${command}`);
     check(await page.getByRole("button", { name: new RegExp(`/${command}\\b`) }).count() > 0, `missing slash command /${command}`);
@@ -191,7 +191,7 @@ try {
   const notice = page.locator('[role="status"]').filter({ hasText: "Context compaction" });
   if (await notice.isVisible()) {
     const noticeBox = await notice.boundingBox();
-    const composerBox = await page.getByLabel("Message Clark").boundingBox();
+    const composerBox = await page.getByLabel("Message Agent Desktop").boundingBox();
     check(Boolean(noticeBox && composerBox), "mobile notice or composer has no layout box");
     check(noticeBox.y + noticeBox.height <= composerBox.y, "mobile notice overlaps the composer");
   }
@@ -200,7 +200,7 @@ try {
   check(errors.length === 0, `browser errors:\n${errors.join("\n")}`);
   const receipt = {
     schema_version: 1,
-    benchmark: "clark_desktop_full_gui_smoke",
+    benchmark: "agent_desktop_full_gui_smoke",
     status: "passed",
     mode: "mock_provider_no_paid_calls",
     checks,
@@ -214,7 +214,7 @@ try {
 } catch (error) {
   const receipt = {
     schema_version: 1,
-    benchmark: "clark_desktop_full_gui_smoke",
+    benchmark: "agent_desktop_full_gui_smoke",
     status: "failed",
     mode: "mock_provider_no_paid_calls",
     checks,

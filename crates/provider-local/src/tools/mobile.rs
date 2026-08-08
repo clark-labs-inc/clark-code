@@ -1,6 +1,6 @@
 //! Shared helpers for the mobile device control tools (`ios_simulator`,
 //! `android_emulator`). These deliberately never go through `ctx.executor` —
-//! simulators/emulators are a property of the machine running Clark
+//! simulators/emulators are a property of the machine running Agent Desktop
 //! Desktop's own GUI, not of whichever project executor (local or
 //! SSH-remote) happens to be active for the current session.
 

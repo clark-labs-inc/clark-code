@@ -54,7 +54,7 @@ import { createSidebarConversationActions } from "./sessionStore.sidebarConversa
 import { activeSpecialistContext, useSpecialistStore } from "./specialistStore";
 import {
   researchRuntimeSpecialist,
-  skillAdvisorTarget,
+  productSpecialistTarget,
   type RsiScoutContextSnapshot,
   scoutCartographyTarget,
   specialistConnectConfig,
@@ -95,7 +95,7 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
     const { activeProvider, projectMode, localSettings, selectedHostId } = get();
     const specialist = researchRuntimeSpecialist(activeSpecialistContext());
     if (specialist && activeProvider !== "local") {
-      return `${specialist.label} runs through the local Clark Code environment.`;
+      return `${specialist.label} runs through the local Agent Desktop environment.`;
     }
     // Non-local providers (cloud) need no local folder/host — always ready.
     if (activeProvider !== "local") return null;
@@ -199,7 +199,7 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
   startQuickChat: async () => {
     const bridge = get().bridge;
     if (!bridge?.prepareQuickChatWorkspace) {
-      set({ error: "Quick Chat requires the Clark Desktop native workspace." });
+      set({ error: "Quick Chat requires Agent Desktop native workspace." });
       return;
     }
     let quickChat;
@@ -231,7 +231,7 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
     const specialistDefinition = researchRuntimeSpecialist(specialistContext);
     if (specialistDefinition && activeProvider !== "local") {
       set({
-        error: `${specialistDefinition.label} runs through the local Clark Code environment.`,
+        error: `${specialistDefinition.label} runs through the local Agent Desktop environment.`,
       });
       return;
     }
@@ -294,7 +294,7 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
     let remote: RemoteInfo | null = null;
     let nativeSession: Session | null = null;
     try {
-      // Make sure a Clark Code key has been minted before the local provider
+      // Make sure an Agent Desktop key has been minted before the local provider
       // needs it (covers the case where sign-in's background provision is still
       // in flight or failed).
       if (isLocal) await get().ensureCodeKey();
@@ -316,7 +316,7 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
             if (epochStale(epoch)) return;
             if (plan.action !== "create_isolated") {
               throw new Error(
-                "This checkout needs a safe branch transition before Clark can start an isolated session.",
+                "This checkout needs a safe branch transition before the agent can start an isolated session.",
               );
             }
             const approval = get().dirtyWorktreeApproval;
@@ -340,7 +340,15 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
               return;
             }
             if (approvalMatches) set({ dirtyWorktreeApproval: null });
-            if (!plan.sourceIsManaged && !approvalMatches) {
+            // The selected checkout is the default workspace. Only create a
+            // sibling worktree when the user explicitly chose the default
+            // branch as the isolated starting point; selecting a project must
+            // otherwise keep its checkout path stable.
+            if (
+              !plan.sourceIsManaged
+              && !approvalMatches
+              && get().managedWorktreeBase === "default"
+            ) {
               set({ worktreePreparing: true });
               const created = await bridge.createManagedWorktree(localSessionPath, {
                 base: get().managedWorktreeBase,
@@ -358,7 +366,7 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
 
       // Remote: attach the native durable worker, then bind this conversation to
       // run its tools there. Local: run the loop on this machine. Other
-      // providers connect with the signed-in Clark config, no embedded creds.
+      // providers connect with the signed-in the agent config, no embedded creds.
       let config;
       let options;
       let remoteHost: string | null = null;
@@ -446,7 +454,7 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
           scoutCartographyTarget(specialistContext, remote, remoteHost),
           specialistContext?.kind,
           codeKeyAccountBinding(get().auth),
-          skillAdvisorTarget(specialistContext, localSettings.advisorTrainingEnabled),
+          productSpecialistTarget(specialistContext, localSettings.advisorTrainingEnabled),
         );
         options = { cwd: remote.cwd, mode, collaboration_mode };
       } else if (isLocal) {
@@ -457,7 +465,7 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
           scoutCartographyTarget(specialistContext, undefined, "local"),
           specialistContext?.kind,
           codeKeyAccountBinding(get().auth),
-          skillAdvisorTarget(specialistContext, localSettings.advisorTrainingEnabled),
+          productSpecialistTarget(specialistContext, localSettings.advisorTrainingEnabled),
         );
         options = { cwd: localSessionPath, mode, collaboration_mode };
       } else {
@@ -812,7 +820,7 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
         && bridge.configureCloudTrajectory
       ) {
         throw new Error(
-          "This conversation’s saved history is unavailable, so Clark Code did not open an empty replacement.",
+          "This conversation’s saved history is unavailable, so Agent Desktop did not open an empty replacement.",
         );
       }
 
@@ -825,7 +833,7 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
       );
       if (quickChat) {
         if (!bridge.prepareQuickChatWorkspace) {
-          throw new Error("Quick Chat requires the Clark Desktop native workspace.");
+          throw new Error("Quick Chat requires Agent Desktop native workspace.");
         }
         requestedProjectRoot = (await bridge.prepareQuickChatWorkspace(id)).path;
       }
@@ -933,7 +941,7 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
           scoutCartographyTarget(resolvedSpecialist, remote, remoteHost),
           resolvedSpecialist?.kind,
           codeKeyAccountBinding(get().auth),
-          skillAdvisorTarget(resolvedSpecialist, effSettings.advisorTrainingEnabled),
+          productSpecialistTarget(resolvedSpecialist, effSettings.advisorTrainingEnabled),
         );
         options = { cwd: remote.cwd, mode, collaboration_mode };
       } else if (isLocal) {
@@ -946,7 +954,7 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
           scoutCartographyTarget(resolvedSpecialist, undefined, "local"),
           resolvedSpecialist?.kind,
           codeKeyAccountBinding(get().auth),
-          skillAdvisorTarget(resolvedSpecialist, effSettings.advisorTrainingEnabled),
+          productSpecialistTarget(resolvedSpecialist, effSettings.advisorTrainingEnabled),
         );
         options = { cwd: requestedProjectRoot, mode, collaboration_mode };
       } else {
@@ -1048,7 +1056,7 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
         activeRemoteHost: remoteHost,
         activeProjectRoot: projectRoot,
         warning: restored?.sync_pending
-          ? "This conversation was recovered from local disk and will sync when Clark cloud is reachable."
+          ? "This conversation was recovered from local disk and will sync when product cloud is reachable."
           : get().warning,
       });
     } catch (e) {

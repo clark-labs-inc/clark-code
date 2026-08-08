@@ -220,18 +220,18 @@ export function SubagentsInspectorView({
             </div>
 
             <div className="mt-5">
-              <div className="text-[0.6875rem] font-semibold uppercase tracking-[0.12em] text-ink-faint">Objective</div>
+              <div className="text-xs font-semibold uppercase tracking-[0.12em] text-ink-faint">Objective</div>
               <p className="mt-2 text-sm leading-6 text-ink-secondary">{selected.objective || selected.label}</p>
             </div>
 
             <div className="mt-5">
-              <div className="text-[0.6875rem] font-semibold uppercase tracking-[0.12em] text-ink-faint">Current activity</div>
+              <div className="text-xs font-semibold uppercase tracking-[0.12em] text-ink-faint">Current activity</div>
               <p className="mt-2 text-sm leading-6 text-ink-secondary">{activity}</p>
             </div>
           </div>
 
           <div className="pt-5">
-            <div className="mb-4 text-[0.6875rem] font-semibold uppercase tracking-[0.12em] text-ink-faint">Progress</div>
+            <div className="mb-4 text-xs font-semibold uppercase tracking-[0.12em] text-ink-faint">Progress</div>
             <ol>
               <ProgressRow label="Task scoped" detail="Complete" state="complete" reduce={reduce} />
               <ProgressRow
@@ -252,7 +252,7 @@ export function SubagentsInspectorView({
 
           {selected.result && (
             <section aria-label="Subagent result" className="mt-1 border-t border-border-subtle pt-5">
-              <div className="text-[0.6875rem] font-semibold uppercase tracking-[0.12em] text-ink-faint">Result</div>
+              <div className="text-xs font-semibold uppercase tracking-[0.12em] text-ink-faint">Result</div>
               <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-ink-secondary">{selected.result}</p>
             </section>
           )}

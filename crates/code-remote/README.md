@@ -1,12 +1,11 @@
 # `code-remote`
 
-`code-remote` is the host-side SSH transport for a complete headless Clark
-Code worker. It does not execute provider calls itself: it deploys and starts
-the configured worker binary on the target, then carries the strict
-`code-host` JSONL protocol over the SSH stdio channel. The same transport can
-launch the Scientist worker from `clark-scientist`: that worker exposes the
-protocol-compatible `scientist`/`turn` Invoke lane while retaining the richer
-`specialist_turn` protocol for the native Scientist provider.
+`code-remote` is the host-side SSH transport for a complete headless coding
+worker. It does not execute provider calls itself: it deploys and starts a
+host-configured worker binary, then carries the strict `code-host` JSONL
+protocol over the SSH stdio channel. Worker identity, provider composition,
+credentials, plugins, and product-specific invoke lanes belong to the
+downstream product.
 
 The lifecycle is deliberately bounded:
 
@@ -15,7 +14,7 @@ The lifecycle is deliberately bounded:
 2. Open one process-owned SSH master on a private mode-`0700` control socket.
    Every probe, upload, and worker channel multiplexes over that connection;
    neither the socket nor the master persists after the worker lifecycle.
-3. Probe the remote OS and home, create only the registered roots and Clark
+3. Probe the remote OS and home, create only the registered roots and configured
    artifact directories, and select a versioned architecture-specific binary.
 4. Upload the binary through a random partial path, verify SHA-256 remotely,
    and atomically install it mode `0700`. Install the credential-free,
@@ -47,16 +46,9 @@ opaque handle stable for attached sessions. It never persists the bootstrap
 secret. Completed request retries replay from the worker's owner-private
 receipt; incomplete or mismatched retries are rejected without re-execution.
 
-Use `RemoteWorkerSpec` from a trusted native caller or the sole
-`remote_worker_connect` Tauri command. Clark Desktop has no executor-only remote
-mode: its worker owns the provider loop, tools, project primitives, and
-trajectory together.
-
-For a Scientist worker, set `remote_binary` to the verified
-`clark-code-headless` release binary, keep `execution_residency` as
-`remote_worker`, and send an `invoke` request with `plugin: "scientist"` and
-`operation: "turn"`. The response includes the Scientist projection and the
-worker's private trajectory remains on the remote host.
+Use `RemoteWorkerSpec` only from a trusted native caller. The foundation's
+`remote_worker_connect` command delegates worker selection, credential binding,
+and launch policy to `ProductIntegration::prepare_remote_worker`.
 
 For the trusted GPU autoresearch lane, the remote worker config may explicitly
 set `provider.permission_mode` to `allow_anything` together with
@@ -67,8 +59,5 @@ effects. This profile is valid only with `execution_residency:
 The transport still validates the registered project and remote roots, and the
 worker retains its budget, residency, and terminal-receipt checks.
 
-The ignored live tests in `tests/live_cpu.rs` separate a transport/catalog
-receipt from the explicitly paid model-turn receipt. Neither is part of normal
-CI. Set `CLARK_REMOTE_CPU_RECEIPT` to an absolute path when retaining the
-transport receipt; Cargo may run the test with the crate rather than repository
-root as its working directory.
+Product-owned live transport and paid model receipts are intentionally outside
+this crate's normal CI contract.

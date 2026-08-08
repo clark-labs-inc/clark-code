@@ -23,20 +23,20 @@ struct RuleSpec {
 }
 
 const LEGACY_RULES: [&str; 2] = [
-    "clark_sandbox_offline_block_loopback_tcp",
-    "clark_sandbox_offline_block_loopback_udp",
+    "agent_sandbox_offline_block_loopback_tcp",
+    "agent_sandbox_offline_block_loopback_udp",
 ];
 
 const RULES: [RuleSpec; 2] = [
     RuleSpec {
-        name: "clark_sandbox_offline_block_outbound",
-        description: "Clark Sandbox Offline - Block Non-Loopback Outbound",
+        name: "agent_sandbox_offline_block_outbound",
+        description: "Agent Desktop Sandbox Offline - Block Non-Loopback Outbound",
         protocol: NET_FW_IP_PROTOCOL_ANY.0,
         remote_addresses: NON_LOOPBACK,
     },
     RuleSpec {
-        name: "clark_sandbox_offline_block_loopback",
-        description: "Clark Sandbox Offline - Block All Loopback",
+        name: "agent_sandbox_offline_block_loopback",
+        description: "Agent Desktop Sandbox Offline - Block All Loopback",
         protocol: NET_FW_IP_PROTOCOL_ANY.0,
         remote_addresses: LOOPBACK,
     },

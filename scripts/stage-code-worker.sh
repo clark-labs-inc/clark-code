@@ -4,7 +4,8 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TARGET=""
 PROFILE="release"
-TARGET_DIR="${CLARK_CODE_WORKER_TARGET_DIR:-$ROOT_DIR/target}"
+TARGET_DIR="${AGENT_CODE_WORKER_TARGET_DIR:-$ROOT_DIR/target}"
+OUTPUT_DIR="${AGENT_CODE_WORKER_OUTPUT_DIR:-$ROOT_DIR/src-tauri/binaries}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -33,7 +34,7 @@ if [[ "$TARGET" != "$HOST_TARGET" && "$TARGET" == *-unknown-linux-musl ]]; then
   CARGO_SUBCOMMAND="zigbuild"
 fi
 
-CARGO_ARGS=("$CARGO_SUBCOMMAND" --locked -p code-worker --bin clark-code-worker --target "$TARGET")
+CARGO_ARGS=("$CARGO_SUBCOMMAND" --locked -p code-worker --bin agent-code-worker --target "$TARGET")
 if [[ "$PROFILE" == "release" ]]; then
   CARGO_ARGS+=(--release)
 fi
@@ -41,10 +42,10 @@ CARGO_TARGET_DIR="$TARGET_DIR" cargo "${CARGO_ARGS[@]}"
 
 SUFFIX=""
 if [[ "$TARGET" == *-pc-windows-msvc ]]; then SUFFIX=".exe"; fi
-SOURCE="$TARGET_DIR/$TARGET/$PROFILE/clark-code-worker$SUFFIX"
-OUTPUT="$ROOT_DIR/src-tauri/binaries/clark-code-worker-$TARGET$SUFFIX"
+SOURCE="$TARGET_DIR/$TARGET/$PROFILE/agent-code-worker$SUFFIX"
+OUTPUT="$OUTPUT_DIR/agent-code-worker-$TARGET$SUFFIX"
 if [[ ! -f "$SOURCE" ]]; then
-  echo "error: Clark Code worker build did not produce $SOURCE" >&2
+  echo "error: agent worker build did not produce $SOURCE" >&2
   exit 1
 fi
 mkdir -p "$(dirname "$OUTPUT")"
@@ -54,10 +55,10 @@ if [[ "$TARGET" == "$HOST_TARGET" ]]; then
   SELF_TEST="$($OUTPUT --self-test)"
   if ! jq -e '
     .status == "passed"
-    and .worker == "clark-code-worker"
+    and .worker == "agent-code-worker"
     and .protocol_version == 2
   ' >/dev/null <<<"$SELF_TEST"; then
-    echo "error: staged Clark Code worker failed its typed self-test" >&2
+    echo "error: staged agent worker failed its typed self-test" >&2
     exit 1
   fi
 else
@@ -75,8 +76,8 @@ else
       ;;
   esac
   if [[ "$FILE_KIND" != *"$EXPECTED_KIND"* || "$FILE_KIND" != *"statically linked"* ]]; then
-    echo "error: staged Clark Code worker has unexpected target metadata: $FILE_KIND" >&2
+    echo "error: staged agent worker has unexpected target metadata: $FILE_KIND" >&2
     exit 1
   fi
 fi
-echo "staged Clark Code worker: $OUTPUT"
+echo "staged agent worker: $OUTPUT"

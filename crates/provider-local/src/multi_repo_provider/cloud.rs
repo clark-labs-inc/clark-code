@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use agent_core::domain::PendingUpload;
-use agent_core::provider::{PromptInput, Provider, ProviderConfig};
+use agent_core::provider::{PromptInput, ProviderConfig};
 use agent_orchestration::{
     HarnessKind, MultiRepoPlan, MultiRepoTask, MultiRepoTaskRole, MultiRepoWriterHarness,
     ProviderFactory, WriterFailure, WriterHarnessAttempt,
@@ -16,12 +16,10 @@ use tokio_util::sync::CancellationToken;
 
 use super::events::run_provider;
 use super::{validate_runtime_root, writer_failure};
-use crate::{
-    Executor, IsolatedWriterWorkspace, LocalExecutor, RepositorySelection, SelectedRepository,
-};
+use crate::{Executor, IsolatedWriterWorkspace, RepositorySelection, SelectedRepository};
 
 #[derive(Clone)]
-pub struct ClarkCloudWriterConfig {
+pub struct BrokeredCloudWriterConfig {
     pub id: String,
     pub provider_config: ProviderConfig,
     pub timeout: Duration,
@@ -30,17 +28,17 @@ pub struct ClarkCloudWriterConfig {
     pub max_upload_bytes: usize,
 }
 
-pub struct ClarkCloudWriterHarness {
-    config: ClarkCloudWriterConfig,
+pub struct BrokeredCloudWriterHarness {
+    config: BrokeredCloudWriterConfig,
     selection: Arc<RepositorySelection>,
     plan: Arc<MultiRepoPlan>,
     factory: Arc<dyn ProviderFactory>,
     executor: Arc<dyn Executor>,
 }
 
-impl ClarkCloudWriterHarness {
+impl BrokeredCloudWriterHarness {
     pub fn new(
-        config: ClarkCloudWriterConfig,
+        config: BrokeredCloudWriterConfig,
         selection: Arc<RepositorySelection>,
         plan: Arc<MultiRepoPlan>,
         factory: Arc<dyn ProviderFactory>,
@@ -48,7 +46,7 @@ impl ClarkCloudWriterHarness {
     ) -> Result<Self, String> {
         plan.validate()?;
         if config.id.trim().is_empty() || config.timeout.is_zero() || config.max_upload_bytes == 0 {
-            return Err("Clark Cloud writer configuration is incomplete".into());
+            return Err("brokered cloud writer configuration is incomplete".into());
         }
         validate_runtime_root(&config.scratch_root, &selection, "scratch")?;
         validate_runtime_root(&config.artifact_root, &selection, "artifact")?;
@@ -60,15 +58,15 @@ impl ClarkCloudWriterHarness {
         if tasks.is_empty()
             || tasks
                 .iter()
-                .any(|task| task.harness_kind != HarnessKind::ClarkCloud)
+                .any(|task| task.harness_kind != HarnessKind::BrokeredCloud)
         {
-            return Err("plan has no Clark Cloud writer for this harness".into());
+            return Err("plan has no brokered cloud writer for this harness".into());
         }
         for task in tasks {
             let repository = &plan.repositories[task.repository_id.as_ref().unwrap()];
             if !repository.cloud_eligible {
                 return Err(format!(
-                    "repository {} has no Clark Cloud consent",
+                    "repository {} has no brokered cloud consent",
                     repository.repository_id
                 ));
             }
@@ -82,20 +80,6 @@ impl ClarkCloudWriterHarness {
         })
     }
 
-    pub fn clark(
-        config: ClarkCloudWriterConfig,
-        selection: Arc<RepositorySelection>,
-        plan: Arc<MultiRepoPlan>,
-    ) -> Result<Self, String> {
-        Self::new(
-            config,
-            selection,
-            plan,
-            Arc::new(|| Box::new(provider_clark::ClarkProvider::new()) as Box<dyn Provider>),
-            Arc::new(LocalExecutor),
-        )
-    }
-
     async fn run_inner(
         &self,
         task: MultiRepoTask,
@@ -103,15 +87,17 @@ impl ClarkCloudWriterHarness {
     ) -> Result<WriterHarnessAttempt, WriterFailure> {
         if task.role != MultiRepoTaskRole::Writer
             || task.harness != self.config.id
-            || task.harness_kind != HarnessKind::ClarkCloud
+            || task.harness_kind != HarnessKind::BrokeredCloud
         {
             return Err(writer_failure(
-                "task is not leased to this Clark Cloud writer",
+                "task is not leased to this brokered cloud writer",
             ));
         }
         let repository = &self.plan.repositories[task.repository_id.as_ref().unwrap()];
         if !repository.cloud_eligible {
-            return Err(writer_failure("Clark Cloud repository consent is absent"));
+            return Err(writer_failure(
+                "brokered cloud repository consent is absent",
+            ));
         }
         self.selection
             .verify_primaries_unchanged(self.executor.as_ref())
@@ -141,7 +127,7 @@ impl ClarkCloudWriterHarness {
             Value::Null => Map::new(),
             _ => {
                 return Err(writer_failure(
-                    "Clark provider extra config must be an object",
+                    "managed provider extra config must be an object",
                 ))
             }
         };
@@ -153,7 +139,7 @@ impl ClarkCloudWriterHarness {
                 &task, &self.plan,
             ))],
             attachments: vec![PendingUpload {
-                filename: "clark-repository-lease.json".into(),
+                filename: "repository-lease.json".into(),
                 content_type: "application/json".into(),
                 data_base64: base64::engine::general_purpose::STANDARD.encode(bundle_json),
             }],
@@ -206,13 +192,13 @@ impl ClarkCloudWriterHarness {
 }
 
 #[async_trait]
-impl MultiRepoWriterHarness for ClarkCloudWriterHarness {
+impl MultiRepoWriterHarness for BrokeredCloudWriterHarness {
     fn id(&self) -> &str {
         &self.config.id
     }
 
     fn kind(&self) -> HarnessKind {
-        HarnessKind::ClarkCloud
+        HarnessKind::BrokeredCloud
     }
 
     async fn run(
@@ -264,12 +250,12 @@ async fn source_bundle(
                 bytes = bytes.saturating_add(contents.len());
                 if bytes > max_bytes {
                     return Err(format!(
-                        "Clark Cloud source lease exceeds {max_bytes} bytes"
+                        "brokered cloud source lease exceeds {max_bytes} bytes"
                     ));
                 }
                 Some(
                     String::from_utf8(contents)
-                        .map_err(|_| format!("Clark Cloud source path is not UTF-8: {path}"))?,
+                        .map_err(|_| format!("brokered cloud source path is not UTF-8: {path}"))?,
                 )
             }
             Err(_) => None,
@@ -295,7 +281,7 @@ fn cloud_prompt(task: &MultiRepoTask, plan: &MultiRepoPlan) -> String {
         .collect::<Vec<_>>()
         .join("\n");
     format!(
-        "You are a Clark Cloud repository writer. The attached JSON is the complete, explicitly consented source lease.\n\
+        "You are a brokered cloud repository writer. The attached JSON is the complete, explicitly consented source lease.\n\
          Implement only this task: {}\nAllowed paths: {:?}\nCross-repository decisions:\n{}\n\
          Return exactly one JSON object and no trailing prose: {{\"patch_base64\":\"base64 encoded git unified diff\"}}.\n\
          The patch must be relative, must not touch .git, and must change only allowed paths.",
@@ -321,13 +307,13 @@ fn decode_patch(text: &str) -> Result<Vec<u8>, String> {
                 .find_map(|(start, _)| serde_json::from_str(&trimmed[start..=end]).ok())
         });
     let report = report.ok_or_else(|| {
-        "Clark Cloud writer did not return the required patch receipt".to_string()
+        "brokered cloud writer did not return the required patch receipt".to_string()
     })?;
     let patch = base64::engine::general_purpose::STANDARD
         .decode(report.patch_base64)
-        .map_err(|error| format!("Clark Cloud patch base64 is invalid: {error}"))?;
+        .map_err(|error| format!("brokered cloud patch base64 is invalid: {error}"))?;
     if patch.is_empty() {
-        return Err("Clark Cloud patch is empty".into());
+        return Err("brokered cloud patch is empty".into());
     }
     Ok(patch)
 }
@@ -336,10 +322,12 @@ fn decode_patch(text: &str) -> Result<Vec<u8>, String> {
 mod tests {
     use std::sync::atomic::Ordering;
 
+    use agent_core::Provider;
     use agent_orchestration::{IsolationKind, MultiRepoTaskRole, TaskId};
 
     use super::*;
     use crate::multi_repo_provider::tests::{plan, selected, FakeProvider, FakeState};
+    use crate::LocalExecutor;
 
     fn cloud_plan(
         selection: &RepositorySelection,
@@ -357,9 +345,9 @@ mod tests {
                         .is_some_and(|id| id.as_str() == repository)
             })
             .unwrap();
-        task.harness = "clark-cloud".into();
-        task.harness_kind = HarnessKind::ClarkCloud;
-        task.model = "clark".into();
+        task.harness = "brokered-cloud".into();
+        task.harness_kind = HarnessKind::BrokeredCloud;
+        task.model = "local-model".into();
         let task = task.clone();
         (Arc::new(plan), task)
     }
@@ -371,9 +359,9 @@ mod tests {
         let (plan, task) = cloud_plan(&selection, "sdk");
         let shared = Arc::new(FakeState::default());
         let factory_state = shared.clone();
-        let harness = ClarkCloudWriterHarness::new(
-            ClarkCloudWriterConfig {
-                id: "clark-cloud".into(),
+        let harness = BrokeredCloudWriterHarness::new(
+            BrokeredCloudWriterConfig {
+                id: "brokered-cloud".into(),
                 provider_config: ProviderConfig::default(),
                 timeout: Duration::from_secs(2),
                 scratch_root: temp.path().join("cloud-scratch"),
@@ -409,9 +397,9 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let selection = selected(&temp).await;
         let (plan, _) = cloud_plan(&selection, "api");
-        let error = ClarkCloudWriterHarness::new(
-            ClarkCloudWriterConfig {
-                id: "clark-cloud".into(),
+        let error = BrokeredCloudWriterHarness::new(
+            BrokeredCloudWriterConfig {
+                id: "brokered-cloud".into(),
                 provider_config: ProviderConfig::default(),
                 timeout: Duration::from_secs(1),
                 scratch_root: temp.path().join("cloud-scratch"),
@@ -420,7 +408,9 @@ mod tests {
             },
             selection,
             plan,
-            Arc::new(|| Box::new(provider_clark::ClarkProvider::new()) as Box<dyn Provider>),
+            Arc::new(|| -> Box<dyn Provider> {
+                panic!("provider must not be constructed when consent is absent")
+            }),
             Arc::new(LocalExecutor),
         )
         .err()

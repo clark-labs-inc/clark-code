@@ -2,16 +2,16 @@
 //!
 //! When the local agent produces a user-facing written deliverable (a report,
 //! summary or design note…), it saves it as Markdown into a per-session folder under
-//! `~/.clark/workspace/<session>/` rather than into the project — keeping the
+//! `~/.agent/workspace/<session>/` rather than into the project — keeping the
 //! repo clean and giving the UI a stable place to read the document from for its
 //! inline viewer. The sandbox is extended (see [`crate::sandbox::Sandbox`]) to
 //! permit writes here in addition to the project root.
 
 use std::path::{Path, PathBuf};
 
-/// `~/.clark/workspace` — the root of the app-managed document workspace.
-pub const WORKSPACE_SUBDIR: &str = ".clark/workspace";
-pub const QUICK_CHAT_MARKER: &str = ".clark-quick-chat";
+/// `~/.agent/workspace` — the root of the app-managed document workspace.
+pub const WORKSPACE_SUBDIR: &str = ".agent/workspace";
+pub const QUICK_CHAT_MARKER: &str = ".agent-quick-chat";
 
 /// The workspace root on this machine, or `None` if the home dir can't resolve.
 pub fn workspace_root() -> Option<PathBuf> {
@@ -21,7 +21,7 @@ pub fn workspace_root() -> Option<PathBuf> {
         .map(|home| PathBuf::from(home).join(WORKSPACE_SUBDIR))
 }
 
-/// The workspace directory for one session (`~/.clark/workspace/<session>`).
+/// The workspace directory for one session (`~/.agent/workspace/<session>`).
 pub fn session_workspace(session_id: &str) -> Option<PathBuf> {
     workspace_root().map(|root| root.join(session_id))
 }
@@ -39,7 +39,7 @@ pub fn is_session_workspace(path: &Path) -> bool {
 /// Mark a newly allocated directory as a repository-free Quick Chat checkout.
 pub fn initialize_quick_chat_workspace(path: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(path)?;
-    std::fs::write(path.join(QUICK_CHAT_MARKER), b"clark-quick-chat-v1\n")
+    std::fs::write(path.join(QUICK_CHAT_MARKER), b"agent-quick-chat-v1\n")
 }
 
 pub fn is_quick_chat_workspace(path: &Path) -> bool {

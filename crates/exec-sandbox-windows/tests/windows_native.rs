@@ -16,23 +16,26 @@ use support::*;
 
 #[test]
 fn native_windows_sandbox_enforces_filesystem_process_and_network_boundaries() {
-    if std::env::var_os("CLARK_WINDOWS_SANDBOX_E2E_REQUIRED").is_none() {
-        eprintln!("set CLARK_WINDOWS_SANDBOX_E2E_REQUIRED=1 to run the machine-mutating test");
+    if std::env::var_os("DESKTOP_WINDOWS_SANDBOX_E2E_REQUIRED").is_none() {
+        eprintln!("set DESKTOP_WINDOWS_SANDBOX_E2E_REQUIRED=1 to run the machine-mutating test");
         return;
     }
 
-    let runner = required_helper("CLARK_WINDOWS_SANDBOX_RUNNER");
-    let setup = required_helper("CLARK_WINDOWS_SANDBOX_SETUP");
+    let runner = required_helper("DESKTOP_WINDOWS_SANDBOX_RUNNER");
+    let setup = required_helper("DESKTOP_WINDOWS_SANDBOX_SETUP");
     assert_eq!(runner.parent(), setup.parent(), "helpers must be siblings");
     let local_app_data = PathBuf::from(std::env::var_os("LOCALAPPDATA").unwrap());
-    let state_dir = local_app_data.join("Clark").join("Code").join("sandbox");
+    let state_dir = local_app_data
+        .join("Agent Desktop")
+        .join("Code")
+        .join("sandbox");
     let workspace = tempfile::tempdir().unwrap();
     let outside = tempfile::tempdir().unwrap();
     let process_temp_guard = tempfile::tempdir().unwrap();
     let process_temp = process_temp_guard.path().to_path_buf();
     let dot_git = workspace.path().join(".git");
     let second_workspace = tempfile::tempdir().unwrap();
-    let second_temp = second_workspace.path().join(".clark-sandbox-tmp");
+    let second_temp = second_workspace.path().join(".agent-sandbox-tmp");
     std::fs::create_dir_all(&process_temp).unwrap();
     std::fs::create_dir_all(&second_temp).unwrap();
     let git = find_program("git.exe");
@@ -44,7 +47,7 @@ fn native_windows_sandbox_enforces_filesystem_process_and_network_boundaries() {
             .unwrap();
         assert_success("git fixture", &git_init);
     } else {
-        // Git is optional for Clark Code and is intentionally not bundled.
+        // Git is optional for Agent Desktop and is intentionally not bundled.
         // Keep the protected-metadata boundary covered on a clean machine.
         std::fs::create_dir_all(&dot_git).unwrap();
     }
@@ -97,7 +100,7 @@ fn native_windows_sandbox_enforces_filesystem_process_and_network_boundaries() {
     assert_user_enrollment_success(&setup, &[&second_setup_request], "user-mode enrollment");
 
     let environment_probe = format!(
-        "if ($env:CLARK_SANDBOX_TEST_EXPLICIT -ne 'preserved') {{ exit 74 }}; \
+        "if ($env:DESKTOP_SANDBOX_TEST_EXPLICIT -ne 'preserved') {{ exit 74 }}; \
          if ($env:USERPROFILE -ne {temp}) {{ exit 75 }}; \
          if ($env:LOCALAPPDATA -ne {temp}) {{ exit 76 }}; \
          if ($env:GIT_OPTIONAL_LOCKS -ne '0') {{ exit 77 }}",
@@ -362,7 +365,7 @@ fn native_windows_sandbox_enforces_filesystem_process_and_network_boundaries() {
             ),
         ),
     );
-    eprintln!("clark_windows_core_containment=passed");
+    eprintln!("agent_windows_core_containment=passed");
 
     // Git is an optional external integration, not one of the filesystem,
     // process-tree, or network-containment assertions above. Keep its stricter
@@ -379,16 +382,16 @@ fn native_windows_sandbox_enforces_filesystem_process_and_network_boundaries() {
             &["status", "--short"],
         );
         if git_status.status.success() {
-            eprintln!("clark_windows_git_compatibility=passed");
-        } else if std::env::var_os("CLARK_WINDOWS_SANDBOX_GIT_REQUIRED").is_some() {
-            eprintln!("clark_windows_git_compatibility=failed_required");
+            eprintln!("agent_windows_git_compatibility=passed");
+        } else if std::env::var_os("DESKTOP_WINDOWS_SANDBOX_GIT_REQUIRED").is_some() {
+            eprintln!("agent_windows_git_compatibility=failed_required");
             assert_success(
                 "Git safe.directory and noninteractive environment",
                 &git_status,
             );
         } else {
             eprintln!(
-                "clark_windows_git_compatibility=failed_optional\nstatus={:?}\nstdout={}\nstderr={}",
+                "agent_windows_git_compatibility=failed_optional\nstatus={:?}\nstdout={}\nstderr={}",
                 git_status.status.code(),
                 String::from_utf8_lossy(&git_status.stdout),
                 String::from_utf8_lossy(&git_status.stderr),

@@ -91,15 +91,12 @@ export const useSessionStore = create<import("./sessionStore.runtime").SessionSt
   terminalLaunch: null,
   mcpOpen: false,
   sshOpen: false,
+  newProjectOpen: false,
   settingsOpen: false,
   settingsSection: "general",
   paletteOpen: false,
   sideQuestion: null,
   sidebarCollapsed: false,
-  billing: null,
-  loadingBilling: false,
-  billingTransition: null,
-  activityReward: null,
   update: null,
   updateProgress: null,
   updateChecking: false,
@@ -117,6 +114,6 @@ export const useSessionStore = create<import("./sessionStore.runtime").SessionSt
 // credit balance) to exercise UI that depends on the live backend. Stripped from
 // production builds.
 if (import.meta.env.DEV && typeof window !== "undefined") {
-  (window as unknown as { __clarkStore?: typeof useSessionStore }).__clarkStore =
+  (window as unknown as { __agentDesktopStore?: typeof useSessionStore }).__agentDesktopStore =
     useSessionStore;
 }

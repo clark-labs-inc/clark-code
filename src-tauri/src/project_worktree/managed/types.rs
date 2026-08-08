@@ -119,7 +119,7 @@ pub struct ManagedWorktree {
     /// The checkout's current commit. Missing worktrees have no readable head
     /// revision.
     pub head_revision: Option<String>,
-    /// A Clark-created branch that protects committed work before archival.
+    /// A Agent Desktop-created branch that protects committed work before archival.
     pub preserved_branch: Option<String>,
     pub created_at_ms: u64,
     pub state: ManagedWorktreeState,

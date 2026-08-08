@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import { LazyMotion, MotionConfig, domMax } from "motion/react";
 import { initializeAuthSession } from "./lib/auth";
 import { installLocalCapture } from "./lib/localCapture";
+import "@product-entry";
 import "./index.css";
 
 if (import.meta.env.DEV) {
@@ -22,7 +23,7 @@ async function start(): Promise<void> {
   // Headless profiling hook (harness/profile-chat-switch.mjs): expose the store
   // and bridge only in dev/preview bundles — never inside the shipped Tauri app.
   if (import.meta.env.DEV) {
-    (window as unknown as Record<string, unknown>).__clarkProfiling = {
+    (window as unknown as Record<string, unknown>).__agentDesktopProfiling = {
       store: useSessionStore,
       getBridge,
     };
@@ -42,6 +43,6 @@ async function start(): Promise<void> {
 void start().catch(() => {
   const root = document.getElementById("root");
   if (root) {
-    root.textContent = "Clark Code could not open its encrypted local session. Restart the app or sign in again.";
+    root.textContent = "The desktop app could not open its local session. Restart the app and try again.";
   }
 });

@@ -1,7 +1,7 @@
 //! Wire codecs shared by adapters.
 //!
 //! - [`jsonrpc`] — JSON-RPC 2.0 framing used by the ACP adapter (over stdio).
-//! - [`msgpack`] — MessagePack helpers used by the Clark adapter (over WebSocket).
+//! - [`msgpack`] — MessagePack helpers used by the managed-provider adapter (over WebSocket).
 
 /// JSON-RPC 2.0 message model. Line-delimited JSON on the wire.
 pub mod jsonrpc {
@@ -197,7 +197,7 @@ pub mod jsonrpc {
     }
 }
 
-/// MessagePack helpers (Clark transport). Works on native and wasm.
+/// MessagePack helpers (managed-provider transport). Works on native and wasm.
 pub mod msgpack {
     use crate::error::{Error, Result};
     use serde::{de::DeserializeOwned, Serialize};

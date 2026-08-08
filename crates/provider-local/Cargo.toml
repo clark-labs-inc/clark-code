@@ -4,15 +4,14 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "Local coding-agent provider for clark-desktop: an OpenAI-compatible tool-calling loop that runs file/shell tools on the local machine and delegates research to Clark's sandbox."
+description = "Product-extensible local coding-agent provider with sandboxed tools."
 
 [dependencies]
 agent-core = { path = "../agent-core", features = ["native"] }
 agent-orchestration = { path = "../agent-orchestration" }
 provider-acp = { path = "../provider-acp" }
-provider-clark = { path = "../provider-clark" }
-clark-agent = "0.2.2"
-clark-agent-compaction = { git = "https://github.com/clark-labs-inc/clark-agent-compaction", rev = "e5f4a4b7d122f73adc362c4a5395355ac95e540c" }
+agent-loop = { package = "clark-agent", version = "0.2.2" }
+agent-loop-compaction = { package = "clark-agent-compaction", git = "https://github.com/clark-labs-inc/clark-agent-compaction", rev = "e5f4a4b7d122f73adc362c4a5395355ac95e540c" }
 # The Executor trait + LocalExecutor live in a dependency-light crate shared by
 # native composition roots and remote workers.
 exec-core = { path = "../exec-core" }
@@ -25,9 +24,9 @@ scout-capsule-host = { path = "../scout-capsule-host" }
 scout-capability-census = { path = "../scout-capability-census" }
 scout-ingest-protocol = { path = "../scout-ingest-protocol" }
 scout-platform-client = { path = "../scout-platform-client" }
-clark-install-context = { path = "../install-context" }
+desktop-install-context = { path = "../install-context" }
 computer-use = { path = "../computer-use" }
-clark-http = { path = "../clark-http" }
+desktop-http = { path = "../desktop-http" }
 libreoffice-pure = "0.5.4"
 serde.workspace = true
 serde_json.workspace = true
@@ -42,8 +41,7 @@ async-channel.workspace = true
 uuid = { version = "1", features = ["v4"] }
 sha2 = "0.10"
 url = "2"
-# OpenAI-compatible streaming chat client (mirrors provider-clark's reqwest setup
-# so `https://` works without a system OpenSSL/cert dependency).
+# OpenAI-compatible streaming chat client with a rustls transport.
 reqwest = { version = "0.13", default-features = false, features = ["http2", "stream", "json", "rustls"] }
 tokio-util = { version = "0.7", default-features = false }
 # Browser CDP transport.
@@ -59,7 +57,7 @@ base64 = "0.23"
 similar = "3"
 # HTML->Markdown conversion for the local `web_fetch` tool.
 htmd = "0.5"
-# Archive extraction for the opt-in `browser` tool's clark-browser download.
+# Archive extraction for a host-configured opt-in managed browser download.
 tar = "0.4"
 flate2 = "1"
 zip = { version = "8", default-features = false, features = ["deflate"] }

@@ -1,12 +1,12 @@
 //! The tool layer the model drives.
 //!
 //! Every tool — whether it edits a local file, runs a local shell command, or
-//! delegates research to Clark's sandbox — implements one [`ToolExecutor`]
+//! delegates work to a product capability — implements one [`ToolExecutor`]
 //! trait. Execution uses one flat registry while the model initially sees only
 //! core schemas and discovers deferred capabilities through `tool_search`.
 //! Local executors hold
 //! a [`Sandbox`]; remote executors carry their own client. This is the seam that
-//! lets coding stay local while research runs in Clark's sandbox.
+//! lets coding stay local while optional product tools run behind their own boundary.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -22,15 +22,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
-use crate::config::AgenticClarkConfig;
+use crate::config::AuxiliaryModelConfig;
 use crate::sandbox::Sandbox;
 
 pub mod android_emulator;
 pub mod apply_patch;
 pub mod browser;
-pub mod clark;
-mod clark_progress;
-pub mod cloud_advisor;
 pub mod computer_use;
 mod deferred;
 pub mod diagnostics;
@@ -103,14 +100,14 @@ pub enum PermissionMode {
 }
 
 /// Authorization class is independent of whether a tool mutates local state.
-/// In particular, Clark Cloud is a trusted brokered capability while direct
+/// In particular, brokered cloud is a trusted brokered capability while direct
 /// network access still needs consent even for an HTTP GET.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ToolPermissionClass {
     LocalRead,
     LocalMutation,
     External,
-    BrokeredClarkCloud,
+    BrokeredProduct,
 }
 
 /// Invocation-specific permission identity. Most tools are gated by their
@@ -159,10 +156,10 @@ impl PermissionMode {
 }
 
 /// Per-invocation context handed to every tool.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct TurnModelOverride {
-    pub model: &'static str,
-    pub reasoning_effort: Option<&'static str>,
+    pub model: String,
+    pub reasoning_effort: Option<String>,
 }
 
 #[derive(Clone)]
@@ -221,7 +218,7 @@ impl ToolCtx {
     }
 
     /// Replace the in-flight call's structured public progress snapshot.
-    pub(crate) fn report_call_progress(&self, progress: ToolCallProgress) {
+    pub fn report_call_progress(&self, progress: ToolCallProgress) {
         if let Some(report) = &self.call_progress {
             report(progress);
         }
@@ -310,7 +307,7 @@ pub struct ImageAttachment {
 /// A durable user-facing result emitted by a tool.
 ///
 /// The URI may be a `data:` URL when the image was produced on a remote
-/// executor: the desktop host cannot safely read arbitrary remote paths, but
+/// executor: Agent Desktop cannot safely read arbitrary remote paths, but
 /// it can render bytes the tool just received from the trusted platform relay.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ProducedArtifact {
@@ -447,6 +444,22 @@ pub trait ToolExecutor: Send + Sync {
     async fn invoke(&self, args: Value, ctx: &ToolCtx) -> ToolOutcome;
 }
 
+/// Whether a product-supplied tool is visible in the initial model schema or
+/// discovered later through `tool_search`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ToolExposure {
+    Eager,
+    Deferred,
+}
+
+/// Compile-time extension point for product-owned tool bundles. The open local
+/// provider owns execution and safety; a branded product can add brokered
+/// capabilities without teaching the provider their names or policies.
+pub trait ToolPack: Send + Sync {
+    fn id(&self) -> &str;
+    fn install(&self, registry: &mut ToolRegistry) -> Result<(), String>;
+}
+
 /// The ordered executor registry plus its model-visible exposure catalog.
 pub struct ToolRegistry {
     tools: Vec<Arc<dyn ToolExecutor>>,
@@ -490,11 +503,14 @@ impl ToolRegistry {
         }
     }
 
-    /// The standard local coding tools, plus the Clark research tool when a
+    /// The standard local coding tools, plus Agent Desktop research tool when a
     /// research endpoint is configured, plus the `memory` tool when memories are
-    /// enabled (`memory` is `Some` with the local global dir + optional Clark
+    /// enabled (`memory` is `Some` with the local global dir + optional Agent Desktop
     /// personal-recall config).
-    pub fn new(clark: Option<AgenticClarkConfig>, memory: Option<memory::MemoryConfig>) -> Self {
+    pub fn new(
+        research: Option<AuxiliaryModelConfig>,
+        memory: Option<memory::MemoryConfig>,
+    ) -> Self {
         let deferred_catalog = deferred::DeferredToolCatalog::default();
         let mut registry = Self {
             tools: Vec::new(),
@@ -565,9 +581,7 @@ impl ToolRegistry {
                 registry.register_deferred(tool);
             }
         }
-        if let Some(cfg) = clark {
-            registry.register_deferred(Arc::new(clark::ClarkResearchTool::new(cfg)));
-        }
+        let _ = research;
         if let Some(cfg) = memory {
             registry.register_deferred(Arc::new(memory::MemoryRecallTool::new(
                 cfg.global_dir.clone(),
@@ -599,6 +613,45 @@ impl ToolRegistry {
         self.tools.push(tool);
     }
 
+    /// Add one product-owned tool without allowing it to shadow a built-in or
+    /// another extension. Registration order remains model-visible order.
+    pub fn register_extension_tool(
+        &mut self,
+        exposure: ToolExposure,
+        tool: Arc<dyn ToolExecutor>,
+    ) -> Result<(), String> {
+        let name = tool.name();
+        if name.is_empty()
+            || name.len() > 128
+            || !name
+                .bytes()
+                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
+        {
+            return Err("extension tool name is invalid".to_string());
+        }
+        if self
+            .tools
+            .iter()
+            .any(|registered| registered.name() == name)
+        {
+            return Err(format!("tool `{name}` is already registered"));
+        }
+        match exposure {
+            ToolExposure::Eager => self.register_eager(tool),
+            ToolExposure::Deferred => self.register_deferred(tool),
+        }
+        Ok(())
+    }
+
+    pub fn install_tool_pack(&mut self, pack: &dyn ToolPack) -> Result<(), String> {
+        let id = pack.id();
+        if id.is_empty() || id.len() > 128 || id.chars().any(char::is_control) {
+            return Err("tool pack id is invalid".to_string());
+        }
+        pack.install(self)
+            .map_err(|error| format!("tool pack `{id}`: {error}"))
+    }
+
     /// Install the session's progressive-disclosure skill reader. Replacing a
     /// prior reader keeps repeated `new_session` calls bound to the new root.
     pub(crate) fn enable_skills(&mut self, catalog: Arc<crate::skills::SkillCatalog>) {
@@ -618,13 +671,13 @@ impl ToolRegistry {
             .collect()
     }
 
-    /// Register the opt-in, experimental `browser` tool (clark-browser,
-    /// downloaded on first use). Called separately from `new()`, gated by the
+    /// Register the opt-in, host-configured browser tool, downloaded on first
+    /// use. Called separately from `new()`, gated by the
     /// user's Settings toggle (off by default) — the tool isn't even
     /// advertised to the model unless enabled.
-    pub fn enable_browser(&mut self) {
+    pub fn enable_browser(&mut self, config: crate::browser_binary::BrowserBinaryConfig) {
         self.disable_browser();
-        self.register_deferred(Arc::new(browser::BrowserTool::new()));
+        self.register_deferred(Arc::new(browser::BrowserTool::new(config)));
     }
 
     pub(crate) fn disable_browser(&mut self) {
@@ -674,8 +727,8 @@ impl ToolRegistry {
         }
     }
 
-    /// Register Clark-platform-backed image generation/editing when a signed-in
-    /// session has a platform key. The key stays between Desktop and Clark;
+    /// Register Agent Desktop-platform-backed image generation/editing when a signed-in
+    /// session has a platform key. The key stays between Desktop and Agent Desktop;
     /// the relay owns provider credentials and billing.
     pub fn enable_image_generation(&mut self, config: image::ImageGenerationConfig) {
         self.disable_image_generation();
@@ -689,7 +742,10 @@ impl ToolRegistry {
 
     /// Register the bounded orchestration tools. Explicitly disabled and
     /// fail-closed child configurations never advertise them.
-    pub fn enable_orchestration(&mut self, config: crate::orchestration::OrchestrationToolsConfig) {
+    pub(crate) fn enable_orchestration(
+        &mut self,
+        config: crate::orchestration::OrchestrationToolsConfig,
+    ) {
         for tool in crate::orchestration::orchestration_tools(config) {
             self.register_deferred(tool);
         }
@@ -698,7 +754,7 @@ impl ToolRegistry {
     /// Register only the target-local adapter census and signed capsule client.
     /// This remains available for remote execution targets without enabling
     /// nested child-process orchestration on those targets.
-    pub fn enable_scout_capsules(
+    pub(crate) fn enable_scout_capsules(
         &mut self,
         policy: crate::orchestration::ScoutCapsulePolicyConfig,
     ) {
@@ -712,27 +768,11 @@ impl ToolRegistry {
     /// service for every read.
     pub fn enable_organization_knowledge(
         &mut self,
-        config: organization_knowledge::OrganizationKnowledgeConfig,
+        provider: Arc<dyn crate::platform::PlatformContextProvider>,
     ) {
         self.register_deferred(Arc::new(
-            organization_knowledge::OrganizationKnowledgeTool::new(config),
+            organization_knowledge::OrganizationKnowledgeTool::new(provider),
         ));
-    }
-
-    /// Register the host-bound specialist advisor. It is eager only inside a
-    /// first-party Scout or Security session so the specialist skill can make
-    /// its required strategy call without a discovery round-trip.
-    pub fn enable_cloud_advisor(&mut self, config: cloud_advisor::CloudAdvisorConfig) {
-        self.tools
-            .retain(|tool| !matches!(tool.name(), "cloud_advisor" | "cloud_advisor_feedback"));
-        self.deferred_catalog.remove_name("cloud_advisor");
-        self.deferred_catalog.remove_name("cloud_advisor_feedback");
-        self.register_eager(Arc::new(cloud_advisor::CloudAdvisorTool::new(
-            config.clone(),
-        )));
-        self.register_deferred(Arc::new(cloud_advisor::CloudAdvisorFeedbackTool::new(
-            config,
-        )));
     }
 
     /// Connect the configured MCP servers and register their tools. A server
@@ -790,7 +830,7 @@ impl ToolRegistry {
     pub(crate) fn deferred_tool_gate(
         &self,
         session: Arc<tokio::sync::Mutex<crate::loop_state::SessionState>>,
-    ) -> Arc<dyn clark_agent::plugin::ToolGate> {
+    ) -> Arc<dyn agent_loop::plugin::ToolGate> {
         Arc::new(deferred::DeferredToolGate::new(
             self.deferred_catalog.clone(),
             session,

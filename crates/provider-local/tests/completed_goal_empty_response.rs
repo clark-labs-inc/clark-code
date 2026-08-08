@@ -32,7 +32,7 @@ async fn completed_goal_is_not_reclassified_as_an_empty_response_failure() {
             "update_goal",
             json!({"status": "complete"}),
         ),
-        // `clark-agent` retries a zero-output transport response once before
+        // `agent-loop` retries a zero-output transport response once before
         // returning it to the provider engine.
         empty_sse_body(),
         empty_sse_body(),

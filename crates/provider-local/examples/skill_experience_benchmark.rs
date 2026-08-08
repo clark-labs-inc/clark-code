@@ -80,7 +80,7 @@ fn next_path(args: &mut impl Iterator<Item = String>, option: &str) -> Result<Pa
 fn resolve_superpowers(explicit: Option<PathBuf>) -> Result<PathBuf, DynError> {
     let candidates = explicit
         .into_iter()
-        .chain(std::env::var_os("CLARK_SUPERPOWERS_FIXTURE").map(PathBuf::from))
+        .chain(std::env::var_os("AGENT_SUPERPOWERS_FIXTURE").map(PathBuf::from))
         .chain(
             std::env::var_os("CODEX_HOME")
                 .map(PathBuf::from)

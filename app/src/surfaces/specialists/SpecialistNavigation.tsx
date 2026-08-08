@@ -1,10 +1,7 @@
 import {
-  FlaskConical,
   Loader2,
   MessageSquare,
   Network,
-  ShieldCheck,
-  Waypoints,
 } from "lucide-react";
 import { useSessionStore } from "../../store/sessionStore";
 import { useSpecialistStore } from "../../store/specialistStore";
@@ -15,17 +12,13 @@ import {
 } from "../../lib/specialists";
 import { specialistConversationsForNavigation } from "../../lib/specialistNavigation";
 import { cn } from "../../lib/cn";
+import { productModule } from "../../product/productModule";
 
-const ICONS: Readonly<Record<string, typeof Network>> = {
-  scout: Network,
-  security: ShieldCheck,
-  scientist: FlaskConical,
-  rsi: Waypoints,
-};
+const product = productModule();
 
 const ITEMS = SPECIALIST_KINDS.map((kind) => ({
   kind,
-  icon: ICONS[kind] ?? Network,
+  icon: product.specialistIcons?.[kind] ?? Network,
 }));
 
 export function SpecialistNavigation({ rail = false }: { rail?: boolean }) {
@@ -102,7 +95,7 @@ export function SpecialistNavigation({ rail = false }: { rail?: boolean }) {
                 <Icon className="relative size-4 shrink-0" />
                 <span className="relative">{SPECIALISTS[kind].label}</span>
                 <span className="relative ml-auto text-[0.65rem] font-normal text-ink-faint">
-                  Pro
+                  {product.specialistBadge ?? "Specialist"}
                 </span>
               </button>
               {selected && specialistConversations.length > 0 && (

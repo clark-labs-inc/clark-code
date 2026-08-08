@@ -23,8 +23,8 @@ describe("remote worker attachment", () => {
     };
     let resolve!: (value: typeof connection) => void;
     invoke.mockReturnValue(new Promise((done) => { resolve = done; }));
-    const first = remoteWorkerConnect("host", "/repo", "clark-code:free", "max");
-    const second = remoteWorkerConnect("host", "/repo", "clark-code:free", "max");
+    const first = remoteWorkerConnect("host", "/repo", "local-model", "max");
+    const second = remoteWorkerConnect("host", "/repo", "local-model", "max");
     expect(invoke).toHaveBeenCalledTimes(1);
     resolve(connection);
     await expect(Promise.all([first, second])).resolves.toEqual([

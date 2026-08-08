@@ -28,7 +28,7 @@ impl ToolExecutor for CheckDiagnostics {
         "Run the project's configured check command (lint/typecheck/build) and report problems. \
         The first call in a session returns everything; later calls report only *new* problems \
         introduced since then, so call it again after making changes to see what you fixed or \
-        broke. Requires a check_command configured in .clark/settings.json — errors otherwise."
+        broke. Requires a check_command configured in .agent/settings.json — errors otherwise."
     }
     fn parameters(&self) -> Value {
         json!({ "type": "object", "properties": {} })
@@ -44,7 +44,7 @@ impl ToolExecutor for CheckDiagnostics {
                 None => {
                     return ToolOutcome::error(
                         "no check_command configured — set `check_command` in \
-                        .clark/settings.json (e.g. \"tsc --noEmit\" or \"cargo check\")",
+                        .agent/settings.json (e.g. \"tsc --noEmit\" or \"cargo check\")",
                     )
                 }
             }

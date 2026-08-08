@@ -92,7 +92,7 @@ export function previewFanOut(): void {
       id: "platform-endpoint-survey",
       label: "Platform endpoint survey",
       status: "done",
-      objective: "Trace the Clark server route, auth, billing, and artifact seams.",
+      objective: "Trace the agent server route, auth, access, and artifact seams.",
       activity: "Complete",
       result: "Confirmed the platform route and authentication boundary.",
       attempt: 1,

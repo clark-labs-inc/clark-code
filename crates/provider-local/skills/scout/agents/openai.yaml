@@ -1,7 +1,7 @@
 interface:
   display_name: "Scout"
   short_description: "Map a business system for simulation"
-  default_prompt: "Use $scout to map this organization's end-to-end technical business graph and derive a verified simulation model. Scout runs on its host-pinned DeepSeek V4 Flash Latest model."
+  default_prompt: "Use $scout to map this organization's end-to-end technical business graph and derive a verified simulation model. Scout uses the host-pinned workflow model."
 dependencies:
   tools:
     - type: tool

@@ -36,7 +36,7 @@ const CALL_TIMEOUT: Duration = Duration::from_secs(300);
 /// One stdio MCP server the user has configured.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct McpServerConfig {
-    /// Native credential-store reference. The desktop host resolves and clears
+    /// Native credential-store reference. Agent Desktop resolves and clears
     /// this before provider startup; provider-local never persists it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub credential_ref: Option<String>,
@@ -169,7 +169,7 @@ impl McpClient {
                 json!({
                     "protocolVersion": PROTOCOL_VERSION,
                     "capabilities": {},
-                    "clientInfo": { "name": "clark-desktop", "version": env!("CARGO_PKG_VERSION") },
+                    "clientInfo": { "name": "agent-desktop", "version": env!("CARGO_PKG_VERSION") },
                 }),
             ),
         )

@@ -115,7 +115,7 @@ impl TenantBearerAuth {
     }
 }
 
-/// Maps one already-parsed bearer token to Clark's authoritative tenant.
+/// Maps one already-parsed bearer token to the platform's authoritative tenant.
 ///
 /// Implementations sit inside the trusted host boundary. They must neither
 /// persist nor log the token and must fail closed when the token is expired,
@@ -148,7 +148,7 @@ struct Shared {
     active: Arc<AtomicUsize>,
 }
 
-/// Minimal loopback HTTP/1.1 boundary intended to sit behind Clark's TLS ingress.
+/// Minimal loopback HTTP/1.1 boundary intended to sit behind a TLS ingress.
 ///
 /// It deliberately has no TLS or deployment configuration of its own. The
 /// boundary owns authentication, request limits, tenant isolation, and exact

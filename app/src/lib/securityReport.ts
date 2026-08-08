@@ -9,7 +9,7 @@ function inTauri(): boolean {
 function reportFileName(scan: SecurityScan): string {
   const mode = scan.mode.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-") || "scan";
   const date = scan.createdAt.slice(0, 10).replace(/[^0-9-]/g, "") || "report";
-  return `clark-security-${mode}-${date}.pdf`;
+  return `security-report-${mode}-${date}.pdf`;
 }
 
 /** Open the native save dialog and render the selected scan with the bundled
@@ -19,11 +19,11 @@ export async function saveSecurityScanPdf(
   localRecord?: SecurityScanRecord,
 ): Promise<boolean> {
   if (!inTauri()) {
-    throw new Error("Security reports can be saved from the Clark desktop app.");
+    throw new Error("Security reports can be saved from the desktop app.");
   }
   const { save } = await import("@tauri-apps/plugin-dialog");
   const path = await save({
-    title: "Save Clark Security report",
+    title: "Save security report",
     defaultPath: reportFileName(scan),
     filters: [{ name: "PDF", extensions: ["pdf"] }],
   });

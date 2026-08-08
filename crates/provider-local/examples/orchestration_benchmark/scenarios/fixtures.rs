@@ -517,24 +517,24 @@ fn substantial(variant: u32) -> Scenario {
     scenario
 }
 
-fn clark_cloud() -> Scenario {
+fn product_cloud() -> Scenario {
     let mut scenario = scenario(
-        "clark-cloud-1",
-        "clark_cloud",
+        "brokered-cloud-1",
+        "product_cloud",
         1,
         "Cloud-assisted compatibility research",
         "Use the provided upstream compatibility notes to update the adapter without changing its public function name.",
         vec![
-            file("upstream/compatibility.md", "Protocol 7 requires header X-Clark-Mode: safe.\n"),
+            file("upstream/compatibility.md", "Protocol 7 requires header X-Agent-Mode: safe.\n"),
             file("src/adapter.py", "def headers(): return {}\n"),
         ],
-        vec![file("src/adapter.py", "def headers(): return {'X-Clark-Mode': 'safe'}\n")],
-        vec![reader("cloud-research", &["upstream/compatibility.md", "src/adapter.py"], "Analyze the compatibility material and report the required adapter change.", "X-Clark-Mode must be safe", true, true)],
+        vec![file("src/adapter.py", "def headers(): return {'X-Agent-Mode': 'safe'}\n")],
+        vec![reader("cloud-research", &["upstream/compatibility.md", "src/adapter.py"], "Analyze the compatibility material and report the required adapter change.", "X-Agent-Mode must be safe", true, true)],
         true,
     );
     scenario.cloud_agent_eligible = true;
     scenario.hidden_checks = vec![python(
-        "import sys; sys.path.insert(0,'src'); import adapter; assert adapter.headers().get('X-Clark-Mode')=='safe'",
+        "import sys; sys.path.insert(0,'src'); import adapter; assert adapter.headers().get('X-Agent-Mode')=='safe'",
     )];
     scenario
 }
@@ -618,6 +618,6 @@ pub fn catalog() -> Vec<Scenario> {
         non_git(),
         substantial(1),
         substantial(2),
-        clark_cloud(),
+        product_cloud(),
     ]
 }

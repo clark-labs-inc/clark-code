@@ -119,7 +119,9 @@ fn is_terminal(status: ProviderIncidentStatus) -> bool {
 fn summary(category: agent_core::recovery::ProviderIncidentCategory) -> &'static str {
     use agent_core::recovery::ProviderIncidentCategory;
     match category {
-        ProviderIncidentCategory::Timeout => "Model connection timed out while Clark was working.",
+        ProviderIncidentCategory::Timeout => {
+            "Model connection timed out while Agent Desktop was working."
+        }
         ProviderIncidentCategory::RateLimit => "The model provider is temporarily rate limited.",
         ProviderIncidentCategory::UpstreamUnavailable => {
             "The model provider is temporarily unavailable."

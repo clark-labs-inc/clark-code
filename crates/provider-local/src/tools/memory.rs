@@ -1,12 +1,12 @@
 //! The `memory` tool — how the agent recalls and saves durable facts.
 //!
-//! Two scopes: **project** (this codebase, `<root>/.clark/memory`, reached
+//! Two scopes: **project** (this codebase, `<root>/.agent/memory`, reached
 //! through the session executor so it works local or remote) and **global** (the
-//! user, `~/.clark/memory` on the desktop machine, always local). This is the
+//! user, `~/.agent/memory` on the desktop machine, always local). This is the
 //! only way the agent can reach the global scope — its ordinary file tools are
 //! sandboxed to the project root.
 
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::Arc};
 
 use agent_core::domain::ToolKind;
 use async_trait::async_trait;
@@ -16,22 +16,14 @@ use super::{arg_str, arg_str_opt, ToolCtx, ToolExecutor, ToolOutcome};
 use crate::exec::LocalExecutor;
 use crate::memory::{self, MemoryType};
 
-/// Read config for the user's Clark-hosted personal memory (recall only —
-/// Clark extracts it server-side; there is no client write path).
-#[derive(Clone)]
-pub struct PersonalRecall {
-    pub base_url: String,
-    pub api_key: String,
-}
-
 /// What the registry needs to expose the `memory` tool + inject memory at
 /// session start. `Some` ⇒ memories are enabled.
 #[derive(Clone, Default)]
 pub struct MemoryConfig {
-    /// `~/.clark/memory` for the local, agent-writable global scope.
+    /// `~/.agent/memory` for the local, agent-writable global scope.
     pub global_dir: Option<PathBuf>,
-    /// Clark Platform recall of the user's extracted memory, when signed in.
-    pub personal: Option<PersonalRecall>,
+    /// Agent Desktop Platform recall of the user's extracted memory, when signed in.
+    pub personal: Option<Arc<dyn crate::platform::PlatformContextProvider>>,
 }
 
 /// Read-only progressive disclosure for Plan Mode. Unlike `memory`, this tool
@@ -39,11 +31,14 @@ pub struct MemoryConfig {
 /// not create an action-shaped side channel.
 pub struct MemoryRecallTool {
     global_dir: Option<PathBuf>,
-    personal: Option<PersonalRecall>,
+    personal: Option<Arc<dyn crate::platform::PlatformContextProvider>>,
 }
 
 impl MemoryRecallTool {
-    pub fn new(global_dir: Option<PathBuf>, personal: Option<PersonalRecall>) -> Self {
+    pub fn new(
+        global_dir: Option<PathBuf>,
+        personal: Option<Arc<dyn crate::platform::PlatformContextProvider>>,
+    ) -> Self {
         Self {
             global_dir,
             personal,
@@ -61,7 +56,7 @@ impl ToolExecutor for MemoryRecallTool {
         "Read durable memory without changing it. Start with action \"overview\" to inspect the \
         bounded index and note catalog for a scope; use action \"full\" only after that overview \
         exposes history or a standing decision that could change the plan. scope \"project\" is \
-        this codebase, \"global\" is cross-project user memory, \"personal\" is Clark-extracted \
+        this codebase, \"global\" is cross-project user memory, \"personal\" is Agent Desktop-extracted \
         memory, and \"all\" reads every available scope."
     }
 
@@ -122,16 +117,19 @@ impl ToolExecutor for MemoryRecallTool {
 }
 
 /// Recall/save durable memory across the project, global (local), and personal
-/// (Clark-extracted) scopes.
+/// (Agent Desktop-extracted) scopes.
 pub struct MemoryTool {
-    /// `~/.clark/memory` on the local machine, or `None` if home is unresolved.
+    /// `~/.agent/memory` on the local machine, or `None` if home is unresolved.
     global_dir: Option<PathBuf>,
-    /// Clark personal-memory recall, when signed in.
-    personal: Option<PersonalRecall>,
+    /// Agent Desktop personal-memory recall, when signed in.
+    personal: Option<Arc<dyn crate::platform::PlatformContextProvider>>,
 }
 
 impl MemoryTool {
-    pub fn new(global_dir: Option<PathBuf>, personal: Option<PersonalRecall>) -> Self {
+    pub fn new(
+        global_dir: Option<PathBuf>,
+        personal: Option<Arc<dyn crate::platform::PlatformContextProvider>>,
+    ) -> Self {
         Self {
             global_dir,
             personal,
@@ -147,7 +145,7 @@ impl ToolExecutor for MemoryTool {
 
     fn description(&self) -> &str {
         "Recall, save, or retire durable memories. action \"recall\" returns your saved facts \
-(project + global) plus personal memory Clark has learned about the user across their work; \
+(project + global) plus personal memory Agent Desktop has learned about the user across their work; \
 action \"remember\" saves one; action \"forget\" removes a note whose fact was superseded or \
 turned out wrong (when the user reverses a decision, save the new fact AND forget the old \
 note in the same turn). scope \"project\" = facts about this codebase; scope \"global\" = \
@@ -306,7 +304,7 @@ async fn recall_memory(
     action: &str,
     scope: &str,
     global_dir: Option<&PathBuf>,
-    personal: Option<&PersonalRecall>,
+    personal: Option<&Arc<dyn crate::platform::PlatformContextProvider>>,
     ctx: &ToolCtx,
 ) -> ToolOutcome {
     let overview = action == "overview";
@@ -350,10 +348,8 @@ async fn recall_memory(
     }
 
     if matches!(scope, "personal" | "all") {
-        if let Some(config) = personal {
-            if let Ok(memories) =
-                crate::platform::recall_personal_memories(&config.base_url, &config.api_key).await
-            {
+        if let Some(provider) = personal {
+            if let Ok(memories) = provider.personal_memories().await {
                 if let Some(section) = crate::platform::personal_memory_section(&memories) {
                     sections.push(section);
                 }

@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "Safe root execution lifecycle and read-only multi-agent orchestration for Clark Desktop."
+description = "Safe root execution lifecycle and read-only multi-agent orchestration for agent desktops."
 
 [dependencies]
 agent-core = { path = "../agent-core", features = ["native"] }

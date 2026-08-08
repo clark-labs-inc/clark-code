@@ -21,7 +21,7 @@ const dev = spawn(
   ["--dir", "app", "dev", "--host", "127.0.0.1", "--port", String(port), "--strictPort"],
   {
     cwd: root,
-    env: { ...process.env, VITE_CLARK_DEV_AUTH: "1" },
+    env: { ...process.env, VITE_PRODUCT_DEV_AUTH: "1" },
     stdio: ["ignore", "pipe", "pipe"],
   },
 );
@@ -114,14 +114,14 @@ try {
   const context = await browser.newContext({ viewport: { width: 1360, height: 880 } });
   await context.addInitScript(() => {
     localStorage.setItem(
-      "clark.desktop.dev-account",
+      "agent-desktop.dev-account",
       JSON.stringify({
         user: { id: "selection-qa", name: "Selection QA", method: "local" },
       }),
     );
     localStorage.setItem(
-      "clark-desktop:local-agent",
-      JSON.stringify({ cwd: "/tmp", model: "clark-code", reasoningEffort: "", apiKey: "" }),
+      "agent-desktop:local-agent",
+      JSON.stringify({ cwd: "/tmp", model: "local-model", reasoningEffort: "", apiKey: "" }),
     );
   });
   const page = await context.newPage();

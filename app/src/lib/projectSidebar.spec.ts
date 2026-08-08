@@ -42,9 +42,9 @@ function remoteConversation(id: string, host: string, project: string): Conversa
 
 describe("project sidebar preferences", () => {
   it("keeps managed checkouts visibly tied to their source repository", () => {
-    const path = "/repo/clark-desktop.clark-worktrees/session-1";
-    expect(projectDisplayName(path)).toBe("session-1 · clark-desktop");
-    expect(projectDisplayTitle(path)).toContain("Isolated checkout of clark-desktop");
+    const path = "/repo/example-desktop.agent-worktrees/session-1";
+    expect(projectDisplayName(path)).toBe("session-1 · example-desktop");
+    expect(projectDisplayTitle(path)).toContain("Isolated checkout of example-desktop");
     expect(
       groupSidebarProjects(
         [conversation("managed", path)],
@@ -60,7 +60,7 @@ describe("project sidebar preferences", () => {
         () => 0,
         { pinned: [], aliases: {} },
       )[0]?.repositoryLabel,
-    ).toBe("clark-desktop");
+    ).toBe("example-desktop");
   });
 
   it("persists pins and aliases and clears both when a project is removed", () => {
@@ -115,7 +115,7 @@ describe("project sidebar preferences", () => {
 
   it("keeps the SSH destination on aliased remote groups", () => {
     const groups = groupSidebarProjects(
-      [remoteConversation("remote", "ubuntu@cpu", "/home/ubuntu/clark")],
+      [remoteConversation("remote", "ubuntu@cpu", "/home/ubuntu/project")],
       [],
       () => 0,
       { pinned: [], aliases: { "r:ubuntu@cpu": "Build server" } },
@@ -125,13 +125,13 @@ describe("project sidebar preferences", () => {
       kind: "remote",
       label: "Build server",
       remoteHost: "ubuntu@cpu",
-      remoteRoot: "/home/ubuntu/clark",
+      remoteRoot: "/home/ubuntu/project",
     });
   });
 
   it("groups app-managed workspaces as Quick chats instead of projects", () => {
     const id = "912a9700-7f5f-4f18-9785-b5d9315a41b4";
-    const path = `/Users/alex/.clark/workspace/${id}`;
+    const path = `/Users/alex/.agent/workspace/${id}`;
     const groups = groupSidebarProjects(
       [conversation(id, path)],
       [],
@@ -141,14 +141,14 @@ describe("project sidebar preferences", () => {
 
     expect(isQuickChatProject(path, id)).toBe(true);
     expect(projectDisplayName(path)).toBe("Quick Chat");
-    expect(projectDisplayTitle(path)).toBe("Temporary Clark workspace");
+    expect(projectDisplayTitle(path)).toBe("Temporary the agent workspace");
     expect(groups).toHaveLength(1);
     expect(groups[0]).toMatchObject({
       key: "quick-chats",
       kind: "none",
       label: "Quick chats",
     });
-    expect(isQuickChatProject(`/home/another-user/.clark/workspace/${id}`, id)).toBe(true);
-    expect(isQuickChatProject(`/Users/alex/.clark/workspace/different-id`, id)).toBe(false);
+    expect(isQuickChatProject(`/home/another-user/.agent/workspace/${id}`, id)).toBe(true);
+    expect(isQuickChatProject(`/Users/alex/.agent/workspace/different-id`, id)).toBe(false);
   });
 });

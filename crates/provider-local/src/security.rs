@@ -1,4 +1,4 @@
-//! Deterministic contracts for Clark Code security scans.
+//! Deterministic contracts for local agent security scans.
 //!
 //! The model performs semantic analysis. This module owns the parts that must
 //! not depend on model judgment: target inventory, complete coverage, phase
@@ -306,7 +306,7 @@ fn model_path(path: &Path) -> String {
 }
 
 fn is_security_output(path: &str) -> bool {
-    path == ".clark/security-scans" || path.starts_with(".clark/security-scans/")
+    path == ".agent/security-scans" || path.starts_with(".agent/security-scans/")
 }
 
 #[cfg(test)]

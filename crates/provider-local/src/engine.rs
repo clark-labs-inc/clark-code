@@ -1,4 +1,4 @@
-//! Thin launcher from clark-desktop's provider API into `clark_agent::run`.
+//! Thin launcher from agent-desktop's provider API into `agent_loop::run`.
 
 mod error;
 mod recovery;
@@ -14,7 +14,7 @@ use async_channel::Sender;
 use tokio::sync::Mutex;
 
 use crate::agent_adapter::{
-    desktop_tool_registry, ClarkAgentStream, DesktopEventSink, DesktopToolRegistryOptions,
+    desktop_tool_registry, AgentLoopStream, DesktopEventSink, DesktopToolRegistryOptions,
     ToolImagePolicy,
 };
 use crate::compaction::{CheckpointCompactor, CompactionConfig};
@@ -62,9 +62,9 @@ pub(crate) struct TurnContext {
     pub model: String,
     pub temperature: Option<f32>,
     pub user_text: String,
-    pub user_content: clark_agent::UserContent,
+    pub user_content: agent_loop::UserContent,
     /// Per-turn host instructions translated to provider `developer` messages.
-    pub developer_instructions: Vec<clark_agent::AgentMessage>,
+    pub developer_instructions: Vec<agent_loop::AgentMessage>,
     /// Provider-owned state transitions that become visible at the start of
     /// this run, after `RunStarted` and before model output.
     pub initial_events: Vec<AgentEvent>,
@@ -92,7 +92,7 @@ impl RootFinishContext {
 }
 
 /// Drive one user turn to completion, emitting normalized Desktop events into
-/// `tx` while clark-agent owns the actual LLM/tool loop.
+/// `tx` while agent-loop owns the actual LLM/tool loop.
 pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId) {
     struct CancellationRegistration {
         registry: crate::provider::RunCancellationRegistry,
@@ -242,7 +242,7 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
     // the same authoritative totals into the run outcome at finish.
     let incidents = crate::incidents::ProviderIncidentTracker::new(run.clone(), tx.clone());
     let context_limit = crate::compaction::limit_of(&tc.compaction);
-    let stream = ClarkAgentStream::new(
+    let stream = AgentLoopStream::new(
         tc.llm.clone(),
         incidents.clone(),
         tx.clone(),
@@ -263,11 +263,11 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
     let steering = Arc::new(EngineSteering::with_execution(execution.clone()));
     // Keep the handle so request-time compaction can become canonical history.
     let compactor = CheckpointCompactor::new(tc.llm.clone(), tc.compaction.clone());
-    let mut builder = clark_agent::AgentBuilder::new()
+    let mut builder = agent_loop::AgentBuilder::new()
         .stream(Arc::new(stream))
         .tools(tools)
         .event_sink(sink)
-        .default_execution_mode(clark_agent::ExecutionMode::Parallel)
+        .default_execution_mode(agent_loop::ExecutionMode::Parallel)
         .grace_iterations(GRACE_ITERATIONS)
         .before_tool_call_arc(loop_breaker.clone())
         .after_tool_call_arc(loop_breaker.clone())
@@ -282,7 +282,7 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
         .context_transform(compactor.clone())
         // Transparent context-window recovery: a provider overflow mid-run
         // force-compacts the live transcript and retries the same call
-        // (clark-agent ≥0.2.2), any number of times at any iteration —
+        // (agent-loop ≥0.2.2), any number of times at any iteration —
         // replacing the old engine-level once-per-run restart.
         .overflow_recovery(compactor.clone());
     if tc.plan_execution_reminders {
@@ -329,12 +329,12 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
         }
     };
 
-    let identity = clark_agent::RunIdentity::root()
+    let identity = agent_loop::RunIdentity::root()
         .with_run_id(run.as_str())
         .with_conversation_id(tc.session_id.as_str());
     // The turn consumes user_text; extraction needs its own copy afterwards.
     let extraction = tc.memory_extraction.map(|ctx| (ctx, tc.user_text.clone()));
-    let prompt = clark_agent::AgentMessage::User {
+    let prompt = agent_loop::AgentMessage::User {
         content: tc.user_content,
         timestamp: None,
     };
@@ -347,7 +347,7 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
     // clean completion with a goal-continuation turn (the thread-goal
     // loop): the run keeps going until the model proves the goal complete, gets
     // blocked, or the budget runs out. Context-window overflows are recovered
-    // transparently inside `clark_agent::run` (the checkpoint compactor hook
+    // transparently inside `agent_loop::run` (the checkpoint compactor hook
     // registered above), so there is no overflow bookkeeping here. Steering and
     // cancel keep working throughout — it is all one desktop run.
     let mut prompts = tc.developer_instructions;
@@ -362,14 +362,14 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
         let attempt_result = loop {
             let context = {
                 let session = tc.session.lock().await;
-                clark_agent::AgentContext::new(session.system_prompt.clone())
+                agent_loop::AgentContext::new(session.system_prompt.clone())
                     .with_messages(session.transcript.clone())
                     .with_identity(identity.clone())
             };
             let result = if prompts.is_empty() {
-                clark_agent::run_continue(context, &config, cancel.clone()).await
+                agent_loop::run_continue(context, &config, cancel.clone()).await
             } else {
-                clark_agent::run(
+                agent_loop::run(
                     std::mem::take(&mut prompts),
                     context,
                     &config,
@@ -504,8 +504,8 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
                                 delta: agent_core::domain::ContentBlock::text(note),
                             })
                             .await;
-                        prompts = vec![clark_agent::AgentMessage::User {
-                            content: clark_agent::UserContent::Text(text),
+                        prompts = vec![agent_loop::AgentMessage::User {
+                            content: agent_loop::UserContent::Text(text),
                             timestamp: None,
                         }];
                         continue 'goal;
@@ -652,7 +652,7 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
                     }),
                 )
             };
-            let aborted = matches!(&error, clark_agent::LoopError::Aborted);
+            let aborted = matches!(&error, agent_loop::LoopError::Aborted);
             let mapped = map_loop_error_with_completion_state(
                 error,
                 final_answer_committed,
@@ -698,8 +698,8 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
                 // without it, the next turn continues as if the last
                 // one finished cleanly, re-trusting steps that never ran.
                 if aborted {
-                    session.transcript.push(clark_agent::AgentMessage::User {
-                        content: clark_agent::UserContent::Text(
+                    session.transcript.push(agent_loop::AgentMessage::User {
+                        content: agent_loop::UserContent::Text(
                             "[runtime note — the user stopped the previous turn before it \
                              finished; some of its steps may be incomplete. Take stock of the \
                              current state before continuing.]"

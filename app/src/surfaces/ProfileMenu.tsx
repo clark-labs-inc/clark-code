@@ -1,51 +1,34 @@
 import { useEffect, useRef, useState } from "react";
 import {
-  CreditCard, ExternalLink, LogOut, Loader2, Brain, SlidersHorizontal, ChevronsUpDown,
+  LogOut, Brain, SlidersHorizontal, ChevronsUpDown,
 } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
-import {
-  clarkBillingUrl,
-  openExternal,
-} from "../lib/account";
-import {
-  billingAccountStatusPresentation,
-  projectClarkCodeBilling,
-} from "../lib/billing";
 import { cn } from "../lib/cn";
-import { isClarkAccountReconnectError } from "../lib/errors";
-
-function formatDate(iso?: string | null): string | null {
-  if (!iso) return null;
-  const t = Date.parse(iso);
-  if (Number.isNaN(t)) return null;
-  return new Date(t).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
-}
-
-const ROW = "flex items-center justify-between";
+import { isAccountReconnectError } from "../lib/errors";
+import { productModule } from "../product/productModule";
+import { useProductAccess } from "../lib/useProductAccess";
 const ACTION =
-  "flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-sm text-ink-secondary transition duration-200 ease-clark hover:bg-accent-subtle hover:text-ink";
+  "flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-sm text-ink-secondary transition duration-200 ease-agent hover:bg-accent-subtle hover:text-ink";
 
-/** Account trigger → subscription popover. Subscription + credit state is read
- *  from Clark; "Manage" opens clarkchat.com (same account → same wallet).
+/** Account trigger → product-owned account popover. Product access state and
+ * management destinations are supplied by the active product module.
  *  `topbar` = a compact avatar button (opens down-right); `rail` = the
  *  collapsed sidebar avatar (opens right); `sidebar` = a full-width account
  *  row in the sidebar footer (opens up). */
 export function ProfileMenu({ variant = "topbar" }: { variant?: "topbar" | "rail" | "sidebar" }) {
   const auth = useSessionStore((s) => s.auth);
-  const billing = useSessionStore((s) => s.billing);
-  const loading = useSessionStore((s) => s.loadingBilling);
   const error = useSessionStore((s) => s.error);
-  const loadBilling = useSessionStore((s) => s.loadBilling);
   const signOut = useSessionStore((s) => s.signOutAuth);
   const memoriesEnabled = useSessionStore((s) => s.memoriesEnabled);
   const setMemoriesEnabled = useSessionStore((s) => s.setMemoriesEnabled);
   const setSettingsOpen = useSessionStore((s) => s.setSettingsOpen);
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const AccountSlot = productModule().slots.account;
+  const productAccess = useProductAccess(open && Boolean(AccountSlot));
 
   useEffect(() => {
     if (!open) return;
-    void loadBilling();
     const onDown = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
     };
@@ -56,22 +39,11 @@ export function ProfileMenu({ variant = "topbar" }: { variant?: "topbar" | "rail
       document.removeEventListener("mousedown", onDown);
       document.removeEventListener("keydown", onKey);
     };
-  }, [open, loadBilling]);
+  }, [open]);
 
   if (!auth) return null;
   const user = auth.user;
-  const billingState = projectClarkCodeBilling(billing);
-  const activeBilling = billingState.effective;
-  const isTeamBilling = activeBilling?.owner_kind === "organization";
-  const sub = activeBilling?.subscription ?? null;
-  const accountNeedsReconnect = isClarkAccountReconnectError(error);
-  const st = accountNeedsReconnect
-    ? { label: "Reconnect", tone: "text-danger" }
-    : billingAccountStatusPresentation(billingState.accountStatus);
-  const planLabel = billingState.planLabel;
-  const limitLabel = billingState.usage.limitLabel;
-  const renews = formatDate(sub?.current_period_end);
-  const firstLoad = loading && !billing;
+  const accountNeedsReconnect = isAccountReconnectError(error);
   return (
     <div ref={ref} className={cn("relative", variant === "sidebar" && "w-full")}>
       {variant === "sidebar" ? (
@@ -132,56 +104,18 @@ export function ProfileMenu({ variant = "topbar" }: { variant?: "topbar" | "rail
               >
                 <div className="text-sm font-medium text-danger">Session needs reconnecting</div>
                 <div className="mt-0.5 text-xs leading-4 text-ink-secondary">
-                  Sign out, then sign in again to reconnect this Clark account.
+                  Sign out, then sign in again to reconnect this account.
                 </div>
               </div>
             )}
 
-            <div className="space-y-2 px-3 py-2.5">
-              {isTeamBilling && (
-                <div className={ROW}>
-                  <span className="text-xs text-ink-muted">Billing account</span>
-                  <span className="max-w-40 truncate text-sm font-medium text-ink">
-                    {activeBilling?.display_name ?? "Workspace"}
-                  </span>
-                </div>
-              )}
-              <div className={ROW}>
-                <span className="text-xs text-ink-muted">Plan</span>
-                {firstLoad ? (
-                  <Loader2 className="size-3.5 animate-[spin_1s_linear_infinite] text-ink-muted" />
-                ) : (
-                  <span className="flex items-center gap-1.5 text-sm">
-                    <span className="font-medium text-ink">
-                      {planLabel}
-                    </span>
-                    <span className={cn("text-xs", st.tone)}>· {st.label}</span>
-                  </span>
-                )}
-              </div>
-              <div className={ROW}>
-                <span className="text-xs text-ink-muted">Limit used</span>
-                <span className="text-sm font-medium tabular-nums text-ink">
-                  {limitLabel}
-                </span>
-              </div>
-              {isTeamBilling && activeBilling?.seat && (
-                <div className={ROW}>
-                  <span className="text-xs text-ink-muted">Seats</span>
-                  <span className="text-xs text-ink-secondary">
-                    {activeBilling.seat.purchased} purchased · {activeBilling.seat.assigned} assigned
-                  </span>
-                </div>
-              )}
-              {renews && (
-                <div className={ROW}>
-                  <span className="text-xs text-ink-muted">
-                    {sub?.cancel_at_period_end ? "Ends" : "Renews"}
-                  </span>
-                  <span className="text-xs text-ink-secondary">{renews}</span>
-                </div>
-              )}
-            </div>
+            {AccountSlot && (
+              <AccountSlot
+                access={productAccess.access}
+                accessLoading={productAccess.loading}
+                reloadAccess={productAccess.reload}
+              />
+            )}
 
             <div className="px-2 py-1.5">
               <button
@@ -213,11 +147,6 @@ export function ProfileMenu({ variant = "topbar" }: { variant?: "topbar" | "rail
             >
               <SlidersHorizontal className="size-4" />
               Settings
-            </button>
-            <button onClick={() => void openExternal(clarkBillingUrl())} className={ACTION}>
-              <CreditCard className="size-4" />
-              Review billing accounts
-              <ExternalLink className="ml-auto size-3.5 text-ink-faint" />
             </button>
             <button
               onClick={() => {

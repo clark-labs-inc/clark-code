@@ -36,7 +36,7 @@ pub(super) fn run(
         let drag = backend.prepare_action(PrepareActionRequest {
             intent: ActionIntent {
                 risk: ActionRisk::Ambiguous,
-                reason: "prove physical input immediately takes over from Clark".to_string(),
+                reason: "prove physical input immediately takes over from the agent".to_string(),
             },
             window: fixture.target.clone(),
             observation_id: before.observation_id,

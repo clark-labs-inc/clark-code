@@ -1,7 +1,7 @@
 //! Durable agent memory — two scopes the agent reads and maintains through the
 //! [`memory`](crate::tools) tool:
 //!
-//! - **project** — facts about *this* codebase, under `<root>/.clark/memory/`.
+//! - **project** — facts about *this* codebase, under `<root>/.agent/memory/`.
 //!   Read/written through the session's [`Executor`], so it lives on the local
 //!   disk for a local project and on the remote host for a remote one.
 //! - **global** — facts about the *user* across every project, under an opaque
@@ -18,7 +18,7 @@ use crate::exec::Executor;
 use sha2::{Digest, Sha256};
 
 /// Directory (relative to a scope root) holding memory files.
-pub const MEMORY_SUBDIR: &str = ".clark/memory";
+pub const MEMORY_SUBDIR: &str = ".agent/memory";
 /// Always-loaded index / project-memory file.
 pub const INDEX_FILE: &str = "MEMORY.md";
 
@@ -75,15 +75,15 @@ pub struct MemoryFact {
     pub mtime: Option<std::time::SystemTime>,
 }
 
-/// The memory directory for a scope root (`<root>/.clark/memory`).
+/// The memory directory for a scope root (`<root>/.agent/memory`).
 pub fn memory_dir(root: &Path) -> PathBuf {
     root.join(MEMORY_SUBDIR)
 }
 
-/// The user's global memory directory (`~/.clark/memory`) on the local machine,
+/// The user's global memory directory (`~/.agent/memory`) on the local machine,
 /// or `None` if the home directory can't be resolved.
 pub fn global_memory_dir() -> Option<PathBuf> {
-    if let Some(directory) = std::env::var_os("CLARK_EVAL_GLOBAL_MEMORY_DIR")
+    if let Some(directory) = std::env::var_os("AGENT_EVAL_GLOBAL_MEMORY_DIR")
         .filter(|path| !path.is_empty())
         .map(PathBuf::from)
     {
@@ -103,7 +103,7 @@ pub fn global_memory_dir_for_scope(scope: &str) -> Option<PathBuf> {
     if scope.is_empty() {
         return None;
     }
-    let base = if let Some(directory) = std::env::var_os("CLARK_EVAL_GLOBAL_MEMORY_DIR")
+    let base = if let Some(directory) = std::env::var_os("AGENT_EVAL_GLOBAL_MEMORY_DIR")
         .filter(|path| !path.is_empty())
         .map(PathBuf::from)
     {
@@ -113,7 +113,7 @@ pub fn global_memory_dir_for_scope(scope: &str) -> Option<PathBuf> {
             .or_else(|| std::env::var_os("USERPROFILE"))
             .filter(|home| !home.is_empty())
             .map(PathBuf::from)?
-            .join(".clark")
+            .join(".agent")
             .join("account-memory")
     };
     let digest = format!("{:x}", Sha256::digest(scope.as_bytes()));
@@ -666,12 +666,12 @@ skepticism to CODE facts only (paths, commands, stack — verify against the rep
 relying on them). The user's own decisions and preferences — vocabulary, tone, rules, \
 who their product is for — are not verifiable in code and stay binding until the user \
 changes them: apply them as written.\n\
-- Notes record what THIS user said HERE. Never blend in facts from Clark's cloud \
+- Notes record what THIS user said HERE. Never blend in facts from Agent Desktop's cloud \
 profile, other projects, or your own guesses — a note that mixes sources becomes \
 impossible to trust or correct.\n\
 - Precedence: what the user says in this conversation outranks local saved notes, which \
-outrank Clark's cloud profile (\"Personal memory\"). Cloud-profile facts were extracted \
-from the user's other work — when you cite them, attribute them to Clark's profile, and \
+outrank Agent Desktop's cloud profile (\"Personal memory\"). Cloud-profile facts were extracted \
+from the user's other work — when you cite them, attribute them to Agent Desktop's profile, and \
 never let them override what the user tells you here. Never use cloud-profile facts to \
 fill gaps in THIS project either — its product, audience, and copy come from this repo \
 and this user's own words; if that context is missing, ask instead of borrowing.\n\

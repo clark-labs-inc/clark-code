@@ -82,7 +82,7 @@ impl GithubAdapter {
         if max_body_bytes == 0 || max_body_bytes > 8 * 1024 * 1024 {
             return Err(RuntimeError::InvalidRequest);
         }
-        let client = clark_http::build_client(clark_http::ClientOptions {
+        let client = desktop_http::build_client(desktop_http::ClientOptions {
             request_timeout: Some(timeout),
             ..Default::default()
         })
@@ -261,7 +261,7 @@ impl GithubAdapter {
             .client
             .get(url)
             .header(AUTHORIZATION, format!("Bearer {token}"))
-            .header(USER_AGENT, "clark-scout-adapter-runtime")
+            .header(USER_AGENT, "scout-adapter-runtime")
             .send()
             .await
             .map_err(|_| RuntimeError::ProviderUnavailable)?;

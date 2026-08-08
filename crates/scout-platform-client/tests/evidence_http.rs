@@ -13,9 +13,9 @@ use scout_ingest_protocol::cartography::{
     SimulationOverlayStatus, TaskClaimRequest, TaskClaimResponse, UploadHeader,
 };
 use scout_platform_client::{
-    enroll_machine, ClarkCartographyClient, ClarkCartographyClientConfig,
-    ClarkCartographyEnrollmentConfig, CollectorMachineIdentity, MachineEnrollment,
-    MachineEnrollmentRequest, ScoutCartographySession, ScoutCartographySessionConfig,
+    enroll_machine, CartographyClient, CartographyClientConfig, CartographyEnrollmentConfig,
+    CollectorMachineIdentity, MachineEnrollment, MachineEnrollmentRequest, ScoutCartographySession,
+    ScoutCartographySessionConfig,
 };
 use sha2::{Digest as _, Sha256};
 use uuid::Uuid;
@@ -85,6 +85,7 @@ async fn enrolled_session_signs_claims_with_a_host_private_bound_identity() {
         ScoutCartographySessionConfig::new(
             &base_url,
             "platform-test-key",
+            "/v1/cartography",
             identity_root.path(),
             organization_id,
             workspace_id,
@@ -156,7 +157,8 @@ async fn enrollment_pins_the_exact_backend_and_machine_binding() {
     });
 
     let enrolled = enroll_machine(
-        ClarkCartographyEnrollmentConfig::new(&base_url, "platform-test-key").unwrap(),
+        CartographyEnrollmentConfig::new(&base_url, "platform-test-key", "/v1/cartography")
+            .unwrap(),
         &request,
     )
     .await
@@ -166,7 +168,7 @@ async fn enrollment_pins_the_exact_backend_and_machine_binding() {
 
     let requests = recorded.lock().unwrap();
     assert_eq!(requests.len(), 1);
-    assert_eq!(requests[0].path, "/v1/system-cartography/machines/enroll");
+    assert_eq!(requests[0].path, "/v1/cartography/machines/enroll");
     assert!(header(&requests[0], "authorization")
         .is_some_and(|value| value == "Bearer platform-test-key"));
     let posted: MachineEnrollmentRequest = serde_json::from_slice(&requests[0].body).unwrap();
@@ -209,8 +211,14 @@ async fn snapshot_query_posts_the_exact_tenant_and_temporal_boundary() {
         write_response(&mut stream, "200 OK", "application/json", &page_json);
     });
 
-    let client = ClarkCartographyClient::new(
-        ClarkCartographyClientConfig::new(&base_url, "platform-test-key", "ab".repeat(32)).unwrap(),
+    let client = CartographyClient::new(
+        CartographyClientConfig::new(
+            &base_url,
+            "platform-test-key",
+            "ab".repeat(32),
+            "/v1/cartography",
+        )
+        .unwrap(),
     )
     .unwrap();
     assert_eq!(client.query_snapshot(&query).await.unwrap(), page);
@@ -218,7 +226,7 @@ async fn snapshot_query_posts_the_exact_tenant_and_temporal_boundary() {
 
     let requests = recorded.lock().unwrap();
     assert_eq!(requests.len(), 1);
-    assert_eq!(requests[0].path, "/v1/system-cartography/snapshots/query");
+    assert_eq!(requests[0].path, "/v1/cartography/snapshots/query");
     assert!(header(&requests[0], "authorization")
         .is_some_and(|value| value == "Bearer platform-test-key"));
     let posted: GraphSnapshotQuery = serde_json::from_slice(&requests[0].body).unwrap();
@@ -274,8 +282,14 @@ async fn delta_query_posts_the_exact_pinned_temporal_boundary() {
         write_response(&mut stream, "200 OK", "application/json", &page_json);
     });
 
-    let client = ClarkCartographyClient::new(
-        ClarkCartographyClientConfig::new(&base_url, "platform-test-key", "ab".repeat(32)).unwrap(),
+    let client = CartographyClient::new(
+        CartographyClientConfig::new(
+            &base_url,
+            "platform-test-key",
+            "ab".repeat(32),
+            "/v1/cartography",
+        )
+        .unwrap(),
     )
     .unwrap();
     assert_eq!(client.query_delta(&query).await.unwrap(), page);
@@ -283,7 +297,7 @@ async fn delta_query_posts_the_exact_pinned_temporal_boundary() {
 
     let requests = recorded.lock().unwrap();
     assert_eq!(requests.len(), 1);
-    assert_eq!(requests[0].path, "/v1/system-cartography/deltas/query");
+    assert_eq!(requests[0].path, "/v1/cartography/deltas/query");
     let posted: GraphDeltaQuery = serde_json::from_slice(&requests[0].body).unwrap();
     assert_eq!(posted, query);
 }
@@ -338,8 +352,14 @@ async fn simulation_query_pins_the_overlay_identity_and_version() {
         write_response(&mut stream, "200 OK", "application/json", &page_json);
     });
 
-    let client = ClarkCartographyClient::new(
-        ClarkCartographyClientConfig::new(&base_url, "platform-test-key", "ab".repeat(32)).unwrap(),
+    let client = CartographyClient::new(
+        CartographyClientConfig::new(
+            &base_url,
+            "platform-test-key",
+            "ab".repeat(32),
+            "/v1/cartography",
+        )
+        .unwrap(),
     )
     .unwrap();
     assert_eq!(client.query_simulation_overlay(&query).await.unwrap(), page);
@@ -348,7 +368,7 @@ async fn simulation_query_pins_the_overlay_identity_and_version() {
     let requests = recorded.lock().unwrap();
     assert_eq!(
         requests[0].path,
-        "/v1/system-cartography/simulation-overlays/query"
+        "/v1/cartography/simulation-overlays/query"
     );
     let posted: SimulationOverlayQuery = serde_json::from_slice(&requests[0].body).unwrap();
     assert_eq!(posted, query);
@@ -392,15 +412,21 @@ async fn change_query_preserves_monotonic_workspace_sequence() {
         write_response(&mut stream, "200 OK", "application/json", &page_json);
     });
 
-    let client = ClarkCartographyClient::new(
-        ClarkCartographyClientConfig::new(&base_url, "platform-test-key", "ab".repeat(32)).unwrap(),
+    let client = CartographyClient::new(
+        CartographyClientConfig::new(
+            &base_url,
+            "platform-test-key",
+            "ab".repeat(32),
+            "/v1/cartography",
+        )
+        .unwrap(),
     )
     .unwrap();
     assert_eq!(client.query_changes(&query).await.unwrap(), page);
     server.join().unwrap();
 
     let requests = recorded.lock().unwrap();
-    assert_eq!(requests[0].path, "/v1/system-cartography/changes/query");
+    assert_eq!(requests[0].path, "/v1/cartography/changes/query");
     let posted: CartographyChangeQuery = serde_json::from_slice(&requests[0].body).unwrap();
     assert_eq!(posted, query);
 }
@@ -488,8 +514,14 @@ async fn authorizes_then_uploads_exact_bytes_without_platform_credentials_on_s3_
         );
     });
 
-    let client = ClarkCartographyClient::new(
-        ClarkCartographyClientConfig::new(&base_url, "platform-test-key", "ab".repeat(32)).unwrap(),
+    let client = CartographyClient::new(
+        CartographyClientConfig::new(
+            &base_url,
+            "platform-test-key",
+            "ab".repeat(32),
+            "/v1/cartography",
+        )
+        .unwrap(),
     )
     .unwrap();
     let returned = client.authorize_evidence(&request).await.unwrap();
@@ -500,7 +532,7 @@ async fn authorizes_then_uploads_exact_bytes_without_platform_credentials_on_s3_
     let requests = recorded.lock().unwrap();
     assert_eq!(requests.len(), 2);
     assert_eq!(requests[0].method, "POST");
-    assert_eq!(requests[0].path, "/v1/system-cartography/evidence/uploads");
+    assert_eq!(requests[0].path, "/v1/cartography/evidence/uploads");
     assert!(header(&requests[0], "authorization")
         .is_some_and(|value| value == "Bearer platform-test-key"));
     let posted: EvidenceUploadRequest = serde_json::from_slice(&requests[0].body).unwrap();

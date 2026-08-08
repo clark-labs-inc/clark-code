@@ -67,7 +67,7 @@ pub struct SecurityPocRunRequest {
     pub expected_exit_code: i32,
     pub timeout_seconds: u64,
     /// Repository-relative root for the run receipt (`artifact_path`), e.g.
-    /// `.clark/security-scans/<scan>/poc/runs/<...>`. Joined under the service
+    /// `.agent/security-scans/<scan>/poc/runs/<...>`. Joined under the service
     /// root; must be relative and escape-free.
     pub run_root: String,
     /// The inventory snapshot to stage. The runner recomputes `workspace_sha256`

@@ -1,4 +1,4 @@
-//! The process-local execution backend abstraction used by Clark tools.
+//! The process-local execution backend abstraction used by agent tools.
 //!
 //! Separates `ExecBackend` (processes) from `ExecutorFileSystem`
 //! (files) into one trait here. Every coding tool (`read_file`, `write_file`,
@@ -32,7 +32,7 @@ pub const NONINTERACTIVE_ENV: &[(&str, &str)] = &[
     ("GIT_TERMINAL_PROMPT", "0"),
     // Repository-selected fsmonitor executables can hang every innocent Git
     // command. Apply the same safe override to model-issued shell commands as
-    // Clark's internal Git probes, including commands run on remote executors.
+    // Internal Git probes, including commands run on remote executors.
     ("GIT_CONFIG_COUNT", "1"),
     ("GIT_CONFIG_KEY_0", "core.fsmonitor"),
     ("GIT_CONFIG_VALUE_0", "false"),
@@ -177,7 +177,7 @@ pub fn configure_noninteractive(command: &mut tokio::process::Command) {
     command.envs(NONINTERACTIVE_ENV.iter().copied());
 }
 
-/// Keep a background child attached only to Clark's product-owned surfaces.
+/// Keep a background child attached only to product-owned surfaces.
 ///
 /// On Windows a GUI parent that starts a console program without this flag can
 /// make Windows Terminal create a visible tab. Unix does not need an equivalent

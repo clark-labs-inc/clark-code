@@ -38,7 +38,7 @@ const originalOpenConversation = useSessionStore.getState().openConversation;
 
 function bridgeStub(): CoreBridge {
   return {
-    listProviders: async () => [{ id: "local", label: "Clark Code", capabilities: session.capabilities }],
+    listProviders: async () => [{ id: "local", label: "Agent Desktop", capabilities: session.capabilities }],
     openSession: vi.fn(async () => session),
     closeSession: vi.fn(async () => {}),
     prompt: vi.fn(async () => ({ runId: "rerun-from-phone" })),
@@ -96,7 +96,7 @@ beforeEach(() => {
     conversations: [],
     localSettings: {
       cwd: "/tmp/project",
-      model: "clark-code:free",
+      model: "local-model",
       reasoningEffort: "max",
     },
     chatModels: {},
@@ -107,7 +107,7 @@ beforeEach(() => {
   });
 });
 
-describe("Clark Mobile parity commands", () => {
+describe("the agent Mobile parity commands", () => {
   it("classifies a recovered stale run without reopening its large transcript", async () => {
     const restored = {
       ...emptySnapshot(),

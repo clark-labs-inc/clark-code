@@ -98,8 +98,8 @@ impl ScriptedProvider {
         let summary = match &envelope.action {
             ScriptedAction::Inspect { finding } => {
                 tool_calls.push(
-                    if self.profile.provider == "scripted-clark-cloud" {
-                        "clark_research"
+                    if self.profile.provider == "scripted-brokered-cloud" {
+                        "product_research"
                     } else {
                         "read_file"
                     }

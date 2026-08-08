@@ -1,4 +1,4 @@
-const HOST_ID_KEY = "clark-desktop:code-remote-host-id";
+const HOST_ID_KEY = "agent-desktop:code-remote-host-id";
 const DESKTOP_INSTANCE_ID = (() => {
   try {
     return crypto.randomUUID();

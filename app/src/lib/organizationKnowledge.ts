@@ -1,10 +1,10 @@
-import { invoke } from "@tauri-apps/api/core";
 import type { CloudCreds } from "./cloudHistory";
 import { desktopHostId } from "./desktopHost";
 import { accountScopedKey } from "./accountProjectStorage";
+import { productRequest } from "../product/productBridge";
 
-const REPOSITORY_OPT_IN_PREFIX = "clark-desktop:organization-knowledge-repository:";
-const ORGANIZATION_KNOWLEDGE_SETTING_EVENT = "clark:organization-knowledge-setting";
+const REPOSITORY_OPT_IN_PREFIX = "agent-desktop:organization-knowledge-repository:";
+const ORGANIZATION_KNOWLEDGE_SETTING_EVENT = "agent-desktop:organization-knowledge-setting";
 
 export interface OrganizationKnowledgeOrganization {
   organization_id: string;
@@ -20,7 +20,7 @@ export interface OrganizationKnowledgeStatus {
 export async function loadOrganizationKnowledgeStatus(
   _creds: CloudCreds,
 ): Promise<OrganizationKnowledgeStatus> {
-  return invoke<OrganizationKnowledgeStatus>("desktop_organization_knowledge_status");
+  return productRequest<OrganizationKnowledgeStatus>("organization_knowledge.status");
 }
 
 /** The selected organization for this exact repository, or null when private. */
@@ -61,7 +61,7 @@ export function uploadOrganizationRepositoryBatch<T>(
   organizationId: string,
   batch: unknown,
 ): Promise<T> {
-  return invoke<T>("desktop_organization_repository_sync", {
+  return productRequest<T>("organization_knowledge.repository_sync", {
     organizationId,
     hostId: desktopHostId(),
     batch,

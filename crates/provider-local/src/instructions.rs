@@ -22,7 +22,7 @@ pub enum InstructionScope {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum InstructionOrigin {
-    Clark,
+    AgentHome,
     Compatible,
     Claude,
 }
@@ -151,9 +151,9 @@ async fn first_personal_readable(
 ) -> Option<(PathBuf, Vec<u8>, InstructionOrigin)> {
     for (directory, names, origin) in [
         (
-            home.join(".clark"),
+            home.join(".agent"),
             &["AGENTS.override.md", "AGENTS.md"][..],
-            InstructionOrigin::Clark,
+            InstructionOrigin::AgentHome,
         ),
         (
             home.join(".codex"),
@@ -229,7 +229,7 @@ fn scope_label(scope: InstructionScope) -> &'static str {
 
 fn origin_label(origin: InstructionOrigin) -> &'static str {
     match origin {
-        InstructionOrigin::Clark => "clark",
+        InstructionOrigin::AgentHome => "agent_home",
         InstructionOrigin::Compatible => "compatible",
         InstructionOrigin::Claude => "claude",
     }
@@ -294,9 +294,9 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let home = temp.path().join("home");
         let project = home.join("repo");
-        std::fs::create_dir_all(home.join(".clark")).unwrap();
+        std::fs::create_dir_all(home.join(".agent")).unwrap();
         std::fs::create_dir_all(&project).unwrap();
-        std::fs::write(home.join(".clark/AGENTS.md"), "personal rule").unwrap();
+        std::fs::write(home.join(".agent/AGENTS.md"), "personal rule").unwrap();
         std::fs::write(project.join("AGENTS.md"), "project rule").unwrap();
 
         let loaded = load_with_home(&LocalExecutor, &project, Some(&home))
@@ -305,7 +305,7 @@ mod tests {
             .unwrap();
         assert_eq!(loaded.sources.len(), 2);
         assert_eq!(loaded.sources[0].scope, InstructionScope::Personal);
-        assert_eq!(loaded.sources[0].origin, InstructionOrigin::Clark);
+        assert_eq!(loaded.sources[0].origin, InstructionOrigin::AgentHome);
         assert_eq!(loaded.sources[0].precedence, 0);
         assert_eq!(loaded.sources[1].scope, InstructionScope::Project);
         assert!(loaded.text.find("personal rule") < loaded.text.find("project rule"));

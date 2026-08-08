@@ -250,7 +250,7 @@ struct PrivateDesktop {
 impl PrivateDesktop {
     fn create(user_sid: &str, capability_sids: &[String]) -> Result<Self, String> {
         let security = DesktopSecurity::new(user_sid, capability_sids)?;
-        let desktop_name = format!("ClarkSandbox-{}", std::process::id());
+        let desktop_name = format!("AgentSandbox-{}", std::process::id());
         let desktop_w = wide_str(&desktop_name);
         let desktop = unsafe {
             CreateDesktopW(
@@ -332,14 +332,14 @@ impl Drop for DesktopSecurity {
 fn trace(message: &str) {
     if std::env::var_os(TRACE_ENV).is_some() {
         eprintln!(
-            "clark Windows sandbox trace: {message}; pid={}",
+            "agent Windows sandbox trace: {message}; pid={}",
             std::process::id()
         );
     }
 }
 
 /// Git status normally refreshes the index as a side effect.  That refresh
-/// needs an index lock, while Clark intentionally denies writes below `.git`
+/// needs an index lock, while Agent Desktop intentionally denies writes below `.git`
 /// for restricted children.  `GIT_OPTIONAL_LOCKS=0` is a useful fallback for
 /// shell-launched Git, but direct Git children need the command-line contract
 /// too: Git documents this exact global option for background status calls.

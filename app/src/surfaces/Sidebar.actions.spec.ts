@@ -11,7 +11,7 @@ describe("Sidebar creation actions", () => {
     expect(sidebarSource).toContain("New project…");
     expect(sidebarSource).toContain("onClick={() => newConversation()}");
     expect(sidebarSource).toContain("onClick={() => void startQuickChat()}");
-    expect(sidebarSource).toContain("onClick={() => void openProjectTerminal()}");
+    expect(sidebarSource).toContain("onClick={() => setNewProjectOpen(true)}");
   });
 
   it("renders a blue finished-not-yet-visited dot from unseen open rows", () => {

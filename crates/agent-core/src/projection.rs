@@ -355,7 +355,7 @@ pub fn apply(snapshot: &mut Snapshot, event: &AgentEvent) {
         AgentEvent::RunStarted { run } => {
             // Retire the previous turn's parallel-work receipt only when new
             // work begins. A completed card remains visible long enough for
-            // the user to understand what Clark finished.
+            // the user to understand what the agent finished.
             snapshot.fan_out = None;
             snapshot.starting = false;
             snapshot.runs.entry(run.clone()).or_insert_with(|| RunView {

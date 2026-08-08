@@ -159,7 +159,7 @@ async fn identical_session_ids_are_isolated_by_native_account_partition() {
         .unwrap();
     registry
         .set_cloud_account(Some(CloudAccountState {
-            rest_base: "https://www.clarkchat.com".into(),
+            rest_base: "https://product.example".into(),
             account: account_a.clone(),
             token: zeroize::Zeroizing::new("token-a".into()),
         }))
@@ -174,7 +174,7 @@ async fn identical_session_ids_are_isolated_by_native_account_partition() {
     assert!(Arc::ptr_eq(&removed[0], &session_a));
     registry
         .set_cloud_account(Some(CloudAccountState {
-            rest_base: "https://www.clarkchat.com".into(),
+            rest_base: "https://product.example".into(),
             account: account_b,
             token: zeroize::Zeroizing::new("token-b".into()),
         }))
@@ -192,7 +192,7 @@ async fn skill_catalog_authorities_are_account_partitioned_and_retired() {
     let account_b = AccountKey::new("account-b").unwrap();
     registry
         .set_cloud_account(Some(CloudAccountState {
-            rest_base: "https://www.clarkchat.com".into(),
+            rest_base: "https://product.example".into(),
             account: account_a.clone(),
             token: zeroize::Zeroizing::new("token-a".into()),
         }))
@@ -200,7 +200,7 @@ async fn skill_catalog_authorities_are_account_partitioned_and_retired() {
     let catalog_a = registry.current_skill_catalogs().await;
     registry
         .set_cloud_account(Some(CloudAccountState {
-            rest_base: "https://www.clarkchat.com".into(),
+            rest_base: "https://product.example".into(),
             account: account_b,
             token: zeroize::Zeroizing::new("token-b".into()),
         }))
@@ -211,7 +211,7 @@ async fn skill_catalog_authorities_are_account_partitioned_and_retired() {
     registry.disconnect_account(&account_a).await;
     registry
         .set_cloud_account(Some(CloudAccountState {
-            rest_base: "https://www.clarkchat.com".into(),
+            rest_base: "https://product.example".into(),
             account: account_a,
             token: zeroize::Zeroizing::new("token-a-2".into()),
         }))
@@ -287,7 +287,7 @@ async fn account_generation_transition_blocks_readers_until_it_is_complete() {
     let registry = std::sync::Arc::new(RuntimeRegistry::new());
     registry
         .set_cloud_account(Some(CloudAccountState {
-            rest_base: "https://www.clarkchat.com".into(),
+            rest_base: "https://product.example".into(),
             account: AccountKey::new("account-a").unwrap(),
             token: zeroize::Zeroizing::new("native-token".into()),
         }))

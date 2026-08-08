@@ -53,10 +53,10 @@ fn delegation_model_policy(
 ) -> DelegationModelPolicy {
     match model_override {
         Some(policy) => DelegationModelPolicy {
-            root_model: policy.model.to_string(),
-            child_model: policy.model.to_string(),
+            root_model: policy.model.clone(),
+            child_model: policy.model,
             harness: "local".to_string(),
-            reasoning_effort: policy.reasoning_effort.map(str::to_string),
+            reasoning_effort: policy.reasoning_effort,
         },
         None => DelegationModelPolicy {
             root_model: config.root_model.clone(),
@@ -163,7 +163,7 @@ impl ToolExecutor for DelegateReadOnly {
         };
         if args.purpose == OrchestrationPurpose::ExternalResearch {
             return ToolOutcome::error(
-                "use clark_research for genuinely external research; coding fan-out cannot route to Clark cloud",
+                "use an installed brokered research capability for external research; coding fan-out cannot perform it",
             );
         }
         if !self
@@ -213,7 +213,7 @@ async fn run_delegation(
         ),
         ..RiskSignals::default()
     };
-    let model_policy = delegation_model_policy(&shared.config, ctx.model_override);
+    let model_policy = delegation_model_policy(&shared.config, ctx.model_override.clone());
     let mut tasks = Vec::with_capacity(args.workstreams.len());
     let mut estimates = Vec::with_capacity(args.workstreams.len());
     for workstream in args.workstreams {

@@ -1,7 +1,7 @@
 //! Dev-only WebSocket bridge.
 //!
 //! Wraps the real `agent_core::Provider` implementations + projection and speaks
-//! a tiny JSON protocol to a browser, so the Vite app can drive **real** Clark /
+//! a tiny JSON protocol to a browser, so the Vite app can drive real local and
 //! ACP turns without the Tauri host. Used for headless UI testing and video
 //! capture. Not shipped in the app.
 //!
@@ -17,7 +17,6 @@ use agent_core::{
 };
 use futures::{SinkExt, StreamExt};
 use provider_acp::AcpProvider;
-use provider_clark::ClarkProvider;
 use provider_local::LocalAgentProvider;
 use serde_json::{json, Value};
 use tokio::net::{TcpListener, TcpStream};
@@ -50,15 +49,14 @@ fn caps(streaming_only: bool) -> ProviderCapabilities {
 
 fn providers() -> Value {
     json!([
-        { "id": "local", "label": "Clark Code", "capabilities": LocalAgentProvider::new().capabilities() },
-        { "id": "clark", "label": "Clark", "capabilities": caps(true) },
+        { "id": "local", "label": "Local agent", "capabilities": LocalAgentProvider::new().capabilities() },
+        { "id": "acp", "label": "ACP", "capabilities": caps(true) },
     ])
 }
 
 fn make_provider(id: &str) -> Result<Box<dyn Provider>, String> {
     match id {
         "acp" => Ok(Box::new(AcpProvider::new())),
-        "clark" => Ok(Box::new(ClarkProvider::new())),
         "local" => Ok(Box::new(LocalAgentProvider::new())),
         other => Err(format!("unknown provider: {other}")),
     }
@@ -68,9 +66,8 @@ fn make_provider(id: &str) -> Result<Box<dyn Provider>, String> {
 async fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-                "devbridge=info,provider_local=info,provider_clark=info,provider_acp=info".into()
-            }),
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "devbridge=info,provider_local=info,provider_acp=info".into()),
         )
         .init();
 

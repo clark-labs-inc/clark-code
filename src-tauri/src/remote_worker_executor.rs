@@ -1,5 +1,5 @@
 //! `Executor` adapter over the project-confined operation exposed by a durable
-//! Clark Code worker. The worker process and SSH transport remain native-owned;
+//! local agent worker. The worker process and SSH transport remain native-owned;
 //! callers hold only this cloneable, account-authorized attachment.
 
 use std::path::{Path, PathBuf};

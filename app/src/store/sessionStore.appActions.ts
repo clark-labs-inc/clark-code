@@ -11,7 +11,6 @@ import {
   addRecentProject,
   authSignOut,
   beginUpdateDrain,
-  billingMe,
   cancelUpdateDrain,
   checkAndStageUpdate,
   closeLiveSession,
@@ -21,18 +20,15 @@ import {
   configureCloudHistoryCredentials,
   consumeJustUpdated,
   delay,
-  describeBillingTransition,
   deriveTitle,
   effectiveApprovalPolicy,
   emptySnapshot,
   flushCloudPuts,
   getBridge,
   hasContent,
-  hasSeenActivityReward,
   appInitializationState,
   installStagedUpdate,
   isBusy,
-  latestActivityReward,
   latestRunFailed,
   loadApprovalPolicy,
   loadApprovalPolicies,
@@ -47,7 +43,6 @@ import {
   loadSshHosts,
   liveSessions,
   liveUpdateBlockerCount,
-  markActivityRewardSeen,
   markUnseenFinished,
   mergeConversations,
   mergeHistory,
@@ -81,7 +76,6 @@ import { composerDraftOwner, removeComposerDraft } from "../lib/composerDraft";
 import { useSpecialistStore } from "./specialistStore";
 import { resetStableOrder } from "../lib/stableOrder";
 import { authAccountMatches } from "../lib/account";
-import { isClarkAccountReconnectError } from "../lib/errors";
 
 type AppActions = Pick<
   SessionState,
@@ -92,10 +86,7 @@ type AppActions = Pick<
   | "flashNotice"
   | "dismissNotice"
   | "dismissWarning"
-  | "dismissActivityReward"
   | "dismissFailedRun"
-  | "loadBilling"
-  | "dismissBillingTransition"
   | "init"
   | "ensureCodeKey"
   | "syncCloudIndex"
@@ -114,8 +105,6 @@ type AppActions = Pick<
   | "signIn"
   | "signOutAuth"
 >;
-
-let latestBillingRequest = 0;
 
 /** A refreshed token for the same stable account still owns an in-flight list
  * request. When older sessions have no stable identity, retain the stricter
@@ -182,7 +171,7 @@ export function handleCloudConversationDeleted(
         cleanupStillOwnsTarget
           ? current.warning
           : viewTarget || restoringTarget || wasLive
-          ? "This conversation was deleted on another device, so Clark Code stopped it here."
+          ? "This conversation was deleted on another device, so Agent Desktop stopped it here."
           : current.warning,
       ...(viewTarget
         ? {
@@ -250,7 +239,7 @@ export function handleCloudHistoryConflict(
       unavailableConversation: {
         id: conversationId,
         title: meta?.title || "Conversation",
-        detail: "Clark cloud has a newer revision of this conversation.",
+        detail: "product cloud has a newer revision of this conversation.",
         kind: "refresh_required",
       },
       unavailableCleanupId: null,
@@ -272,7 +261,7 @@ export function handleCloudHistoryConflict(
   set({
     runningIds: before.runningIds.filter((id) => id !== conversationId),
     warning: wasLive
-      ? "A conversation changed on another device, so Clark Code stopped its stale local session."
+      ? "A conversation changed on another device, so Agent Desktop stopped its stale local session."
       : before.warning,
   });
 }
@@ -313,7 +302,7 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
         }
         if (waitedMs >= UPDATE_DRAIN_TIMEOUT_MS) {
           throw new Error(
-            "The update drain appears stuck. The update was cancelled so Clark Code can keep working; try again after reopening the app.",
+            "The update drain appears stuck. The update was cancelled so Agent Desktop can keep working; try again after reopening the app.",
           );
         }
         const pollMs = Math.min(UPDATE_DRAIN_POLL_MS, UPDATE_DRAIN_TIMEOUT_MS - waitedMs);
@@ -333,7 +322,7 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
       while (true) {
         if (waitedMs >= UPDATE_DRAIN_TIMEOUT_MS) {
           throw new Error(
-            "The native update drain appears stuck. The update was cancelled so Clark Code can keep working; try again after reopening the app.",
+            "The native update drain appears stuck. The update was cancelled so Agent Desktop can keep working; try again after reopening the app.",
           );
         }
         if ((await beginUpdateDrain()) === 0) break;
@@ -349,13 +338,13 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
         throw new Error(
           refreshed.status === "error"
             ? refreshed.message
-            : "Clark Code could not confirm the latest update; try again.",
+            : "Agent Desktop could not confirm the latest update; try again.",
         );
       }
       set({ update: refreshed.update });
 
       if (!(await flushCloudPuts())) {
-        throw new Error("Clark Code could not save the final conversation state; update postponed.");
+        throw new Error("Agent Desktop could not save the final conversation state; update postponed.");
       }
 
       set({ updateWaiting: false, updateApplying: true });
@@ -365,7 +354,7 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
       // The process normally exits before this fires. If the platform accepted
       // the request but did not relaunch, release the blocking overlay/latch.
       await delay(1500);
-      throw new Error("Clark Code did not relaunch. Quit and reopen it to finish the update.");
+      throw new Error("Agent Desktop did not relaunch. Quit and reopen it to finish the update.");
     } catch (error) {
       await cancelUpdateDrain().catch(() => {});
       set({
@@ -382,64 +371,12 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
   flashNotice: (message) => set({ notice: message }),
   dismissNotice: () => set({ notice: null }),
   dismissWarning: () => set({ warning: null }),
-  dismissActivityReward: () => {
-    const reward = get().activityReward;
-    if (reward) markActivityRewardSeen(get().auth, reward);
-    set({ activityReward: null });
-  },
-  dismissBillingTransition: () => set({ billingTransition: null }),
   dismissFailedRun: (runId) =>
     set((s) =>
       s.dismissedFailedRuns.includes(runId)
         ? s
         : { dismissedFailedRuns: [...s.dismissedFailedRuns, runId] },
     ),
-
-  loadBilling: async () => {
-    const requestId = ++latestBillingRequest;
-    const requestAuth = get().auth;
-    const creds = cloudCreds(requestAuth);
-    if (!creds) {
-      set({
-        billing: null,
-        loadingBilling: false,
-        billingTransition: null,
-        activityReward: null,
-      });
-      return;
-    }
-    set({ loadingBilling: true });
-    try {
-      const billing = await billingMe(creds);
-      if (
-        requestId !== latestBillingRequest
-        || !cloudRequestStillOwned(requestAuth, get().auth)
-      ) return;
-      // Billing is authoritative account state. Publish it before deriving the
-      // optional reward presentation so a malformed/older reward field can
-      // never turn a valid plan and balance into the empty-account fallback.
-      const billingTransition = describeBillingTransition(get().billing, billing);
-      const accountReconnectRecovered = isClarkAccountReconnectError(get().error);
-      set({
-        billing,
-        loadingBilling: false,
-        ...(billingTransition ? { billingTransition } : {}),
-        ...(accountReconnectRecovered ? { error: null } : {}),
-      });
-      const reward = latestActivityReward(billing);
-      const current = get().activityReward;
-      const activityReward =
-        current ?? (reward && !hasSeenActivityReward(get().auth, reward) ? reward : null);
-      set({ activityReward });
-    } catch (error) {
-      if (requestId !== latestBillingRequest) return;
-      const reconnectRequired = isClarkAccountReconnectError(String(error));
-      set({
-        loadingBilling: false,
-        ...(reconnectRequired ? { billing: null, error: String(error) } : {}),
-      });
-    }
-  },
 
   init: () => {
     if (appInitializationState.initialization) return appInitializationState.initialization;
@@ -461,15 +398,15 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
           const result = await get().checkForUpdate();
           if (result.status === "ready") {
             get().flashNotice(
-              `Clark Code ${result.update.version} is downloaded and ready to install.`,
+              `Agent Desktop ${result.update.version} is downloaded and ready to install.`,
             );
           } else if (result.status === "up-to-date") {
-            get().flashNotice("Clark Code is already up to date.");
+            get().flashNotice("Agent Desktop is already up to date.");
           } else if (result.status === "busy") {
-            get().flashNotice("Clark Code is already checking for or downloading an update.");
+            get().flashNotice("Agent Desktop is already checking for or downloading an update.");
           } else if (result.status === "error") {
             get().flashNotice(
-              "Clark Code couldn't check for updates. Check your connection and try again.",
+              "Agent Desktop couldn't check for updates. Check your connection and try again.",
             );
           }
         })();
@@ -501,12 +438,12 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
         )
       ) {
         throw new Error(
-          "Clark Code rejected a specialist catalog that did not match its signed native bundle.",
+          "Agent Desktop rejected a specialist catalog that did not match its signed native bundle.",
         );
       }
       configureCloudHistoryCredentials(cloudCreds(get().auth));
       // Native trajectory sync hit a 401 mid-retry: refresh the host-owned
-      // Google/Clark credential generation. The retry loop reads it natively,
+      // Google/the agent credential generation. The retry loop reads it natively,
       // so the run self-heals without any WebView credential. Single-
       // flight: retries can raise the event repeatedly during one refresh.
       // A failed refresh mid-run must NOT sign the user out; the append just
@@ -572,7 +509,6 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
         syncFanOut(merged.fan_out);
         set({ snapshot: merged });
       };
-      let lastBilling = 0;
       // Route each engine snapshot to its live-session entry (any number can
       // stream at once): render if active, persist, notify, auto-approve, and
       // drain queued follow-ups — all per session.
@@ -655,7 +591,7 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
               ) {
                 set({ conversations: [meta, ...get().conversations.filter((c) => c.id !== meta.id)] });
               }
-              // Mirror to Clark on the same throttle as local persistence:
+              // Mirror to the agent on the same throttle as local persistence:
               // ~every 2s while streaming (so mobile/web can watch the run
               // live and show a running indicator), and immediately when the
               // turn settles. Coalesced + single-flight + idempotent (see
@@ -684,7 +620,7 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
           if (failedRun) {
             void notify("Run failed", title ? `“${title}” ended with an error.` : "The agent ended unexpectedly.");
           } else {
-            void notify("Clark finished", title ? `“${title}” is ready for review.` : "Your task is ready for review.");
+            void notify("the agent finished", title ? `“${title}” is ready for review.` : "Your task is ready for review.");
           }
         }
         // A run that just finished in a conversation the user isn't looking at
@@ -699,16 +635,6 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
           if (marked !== unseen) set({ unseenWorkIds: marked });
         }
         entry.prevBusy = busyNow;
-
-        // Refresh the credit balance shortly after a turn settles so the credit
-        // banner reflects spend (throttled — billing is a network call).
-        if (!busyNow) {
-          const now = Date.now();
-          if (justSettled || now - lastBilling > 15000) {
-            lastBilling = now;
-            void get().loadBilling();
-          }
-        }
 
         // Auto-approve the pending permission per THIS conversation's policy
         // (its own override, else the account's global default). Full access
@@ -730,7 +656,7 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
           } else if (pend.id !== entry.notifiedPermId && !wouldAutoApprove(policy, pend)) {
             // The gate will actually block for the user — ping them.
             entry.notifiedPermId = pend.id;
-            void notify("Approval needed", pend.title || "Clark is waiting for your approval.");
+            void notify("Approval needed", pend.title || "the agent is waiting for your approval.");
           }
         } else {
           entry.autoResolvedId = null;
@@ -769,11 +695,10 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
         });
         return;
       }
-      // Best-effort: ensure a Clark Code key exists, pull cloud/native-cached
-      // history, and load the credit balance. All no-op offline / signed out.
+      // Best-effort: ensure the configured model key exists and pull
+      // cloud/native-cached history. Both are no-ops offline or signed out.
       void get().ensureCodeKey();
       void get().syncCloudIndex();
-      void get().loadBilling();
     } catch (e) {
       set({ error: String(e) });
       appInitializationState.initialization = null;
@@ -987,15 +912,12 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
       terminalLaunch: null,
       mcpOpen: false,
       sshOpen: false,
+      newProjectOpen: false,
       paletteOpen: false,
       error: null,
       notice: null,
       warning: null,
       dismissedFailedRuns: [],
-      billing: null,
-      loadingBilling: false,
-      billingTransition: null,
-      activityReward: null,
       conversations: [],
       conversationsLoading: true,
       runningIds: [],
@@ -1004,15 +926,14 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
       mutatingConversationIds: new Set(),
       conversationMutation: null,
     });
-    // Provision the Clark Code key, then pull the cloud/native-cached list.
+    // Provision Agent Desktop key, then pull the cloud/native-cached list.
     void get().ensureCodeKey();
     void get().syncCloudIndex();
-    void get().loadBilling();
   },
 
   signOutAuth: async () => {
-    // A Clark Code key is account-scoped. Removing the local binding prevents
-    // the next user from silently billing against this account.
+    // A Agent Desktop key is account-scoped. Removing the local binding prevents
+    // the next user from silently consuming access owned by this account.
     resetCloudHistory();
     resetStableOrder();
     try {
@@ -1049,15 +970,12 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
       terminalLaunch: null,
       mcpOpen: false,
       sshOpen: false,
+      newProjectOpen: false,
       paletteOpen: false,
       error: null,
       notice: null,
       warning: null,
       dismissedFailedRuns: [],
-      billing: null,
-      loadingBilling: false,
-      billingTransition: null,
-      activityReward: null,
       conversations: [],
       conversationsLoading: false,
       unseenWorkIds: [],

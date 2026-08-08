@@ -1,5 +1,5 @@
 use agent_core::ContentBlock;
-use clark_agent as ca;
+use agent_loop as ca;
 
 pub(super) fn user_content(blocks: &[ContentBlock]) -> Option<ca::UserContent> {
     let mut rich = Vec::new();
@@ -27,7 +27,7 @@ pub(super) fn user_content(blocks: &[ContentBlock]) -> Option<ca::UserContent> {
             }
             ContentBlock::SkillReference { id, revision, name } => {
                 rich.push(ca::UserBlock::Text(ca::TextContent {
-                    text: format!("[Selected Clark skill: {name} ({id}@{revision})]"),
+                    text: format!("[Selected Agent Desktop skill: {name} ({id}@{revision})]"),
                 }))
             }
             ContentBlock::Audio { .. }

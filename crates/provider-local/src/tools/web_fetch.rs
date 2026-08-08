@@ -1,6 +1,6 @@
 //! `web_fetch` — fetch a URL locally and return it as markdown. The sanctioned
-//! local alternative to `clark_research` for simple page/doc lookups: no Clark
-//! credits, no round trip, but also no JS rendering or search — just HTTP GET
+//! local fallback to brokered research for simple page/doc lookups: no product
+//! round trip, but also no JS rendering or search — just HTTP GET
 //! + HTML→Markdown.
 //!
 //! Guards against SSRF: the target host is resolved and validated as a public
@@ -44,7 +44,7 @@ impl ToolExecutor for WebFetchTool {
     fn description(&self) -> &str {
         "Fetch a URL over HTTP(S) and return its content as markdown. Local and direct — use it \
         for simple page/doc lookups. For anything needing search, JS-rendered pages, or multi-step \
-        browsing, use clark_research instead. Never fetch URLs with `bash` — use this tool."
+        browsing, use an installed brokered research capability instead. Never fetch URLs with `bash` — use this tool."
     }
     fn parameters(&self) -> Value {
         json!({
@@ -88,7 +88,7 @@ async fn fetch_markdown(url_str: &str, cancel: &CancellationToken) -> Result<Str
             res = resolve_and_validate(&host, port) => res?,
         };
 
-        let client = clark_http::client_builder(clark_http::ClientOptions {
+        let client = desktop_http::client_builder(desktop_http::ClientOptions {
             request_timeout: Some(FETCH_TIMEOUT),
             ..Default::default()
         })

@@ -4,10 +4,10 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "Portable signed sensor client for Clark's authoritative system-cartography API."
+description = "Portable signed sensor client for a host-configured system-cartography API."
 
 [dependencies]
-clark-http = { path = "../clark-http" }
+desktop-http = { path = "../desktop-http" }
 getrandom = "0.4"
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
 scout-ingest-protocol = { path = "../scout-ingest-protocol" }

@@ -7,14 +7,14 @@ use exec_sandbox::SandboxRuntime;
 use exec_sandbox::{SandboxManager, SandboxPolicy, SandboxStatus, SandboxedExecutor};
 use tokio_util::sync::CancellationToken;
 
-const PROBE_MODE: &str = "CLARK_SANDBOX_TEST_PROBE";
+const PROBE_MODE: &str = "DESKTOP_SANDBOX_TEST_PROBE";
 
 #[test]
 fn sandbox_network_probe_child() {
     if std::env::var(PROBE_MODE).as_deref() != Ok("network") {
         return;
     }
-    let address = std::env::var("CLARK_SANDBOX_TEST_ADDRESS").unwrap();
+    let address = std::env::var("DESKTOP_SANDBOX_TEST_ADDRESS").unwrap();
     let address = address.parse().unwrap();
     let connected = std::net::TcpStream::connect_timeout(&address, Duration::from_secs(2)).is_ok();
     std::process::exit(if connected { 0 } else { 73 });
@@ -32,7 +32,7 @@ async fn workspace_write_policy_holds_at_direct_process_and_network_boundaries()
     let manager = setup_windows_if_required(manager, &policy);
     if !matches!(manager.status(), SandboxStatus::Enforced { .. }) {
         assert!(
-            std::env::var_os("CLARK_SANDBOX_E2E_REQUIRED").is_none(),
+            std::env::var_os("DESKTOP_SANDBOX_E2E_REQUIRED").is_none(),
             "native sandbox is required but unavailable: {:?}",
             manager.status()
         );
@@ -42,7 +42,7 @@ async fn workspace_write_policy_holds_at_direct_process_and_network_boundaries()
 
     #[cfg(target_os = "linux")]
     {
-        if let Some(expected) = std::env::var_os("CLARK_BWRAP_PATH") {
+        if let Some(expected) = std::env::var_os("DESKTOP_BWRAP_PATH") {
             let prepared = manager
                 .prepare_process(ProcessSpec::argv("/bin/true", workspace.path()))
                 .unwrap();
@@ -167,7 +167,7 @@ async fn read_only_policy_denies_project_mutation_but_keeps_private_temp_usable(
     let manager = setup_windows_if_required(manager, &policy);
     if !matches!(manager.status(), SandboxStatus::Enforced { .. }) {
         assert!(
-            std::env::var_os("CLARK_SANDBOX_E2E_REQUIRED").is_none(),
+            std::env::var_os("DESKTOP_SANDBOX_E2E_REQUIRED").is_none(),
             "native sandbox is required but unavailable: {:?}",
             manager.status()
         );
@@ -206,7 +206,7 @@ async fn read_only_policy_denies_project_mutation_but_keeps_private_temp_usable(
 
 #[cfg(windows)]
 fn setup_windows_if_required(manager: SandboxManager, policy: &SandboxPolicy) -> SandboxManager {
-    if std::env::var_os("CLARK_SANDBOX_E2E_REQUIRED").is_none()
+    if std::env::var_os("DESKTOP_SANDBOX_E2E_REQUIRED").is_none()
         || !matches!(manager.status(), SandboxStatus::SetupRequired { .. })
         || !manager.setup_available()
     {
@@ -237,7 +237,7 @@ async fn assert_network_is_denied(
     let process = ProcessSpec::argv(std::env::current_exe().unwrap(), cwd)
         .args(["--exact", "sandbox_network_probe_child", "--nocapture"])
         .env(PROBE_MODE, "network")
-        .env("CLARK_SANDBOX_TEST_ADDRESS", address.to_string());
+        .env("DESKTOP_SANDBOX_TEST_ADDRESS", address.to_string());
     let process = executor.prepare_process(process).unwrap();
     let output = run_process_streaming(&process, Duration::from_secs(10), cancel, &|_, _| {})
         .await

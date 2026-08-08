@@ -9,7 +9,9 @@ use provider_local::security::{
     SecurityPocReceipt, SecurityScanBundle, SecurityScanMode, SecurityScanPhase, SecuritySeverity,
     SecurityThreatModel, SecurityValidation, SECURITY_SCAN_CONTRACT_VERSION,
 };
-use provider_local::{LocalExecutor, SECURITY_MODEL};
+use provider_local::LocalExecutor;
+
+const SECURITY_SIMULATION_MODEL: &str = "security-model";
 
 #[tokio::main]
 async fn main() {
@@ -81,7 +83,7 @@ async fn main() {
     println!(
         "{}",
         serde_json::to_string_pretty(&serde_json::json!({
-            "simulation": "clark-security-diff-contract-v2",
+            "simulation": "agent-security-diff-contract-v2",
             "resolvedBase": diff.resolved_base,
             "resolvedHead": diff.resolved_head,
             "diffTargetId": diff.target.target_id,
@@ -105,7 +107,7 @@ fn fixture(
         contract_version: SECURITY_SCAN_CONTRACT_VERSION,
         scan_id: "diff-simulation".into(),
         mode: SecurityScanMode::Diff,
-        model: SECURITY_MODEL.into(),
+        model: SECURITY_SIMULATION_MODEL.into(),
         scope: ".".into(),
         inventory_id: inventory_id.into(),
         phase: SecurityScanPhase::Reporting,
@@ -216,7 +218,7 @@ fn poc_ledger(bundle: &SecurityScanBundle) -> SecurityPocLedger {
                 exit_code: Some(0),
                 passed: true,
                 containment: "managed_disposable".into(),
-                artifact_path: format!(".clark/security-scans/diff-simulation/poc/{id}.json"),
+                artifact_path: format!(".agent/security-scans/diff-simulation/poc/{id}.json"),
                 execution: None,
             })
             .unwrap();
@@ -229,9 +231,9 @@ fn git(root: &Path, args: &[&str]) {
         .arg("-C")
         .arg(root)
         .args(args)
-        .env("GIT_AUTHOR_NAME", "Clark Security Simulation")
+        .env("GIT_AUTHOR_NAME", "Agent Security Simulation")
         .env("GIT_AUTHOR_EMAIL", "security@example.com")
-        .env("GIT_COMMITTER_NAME", "Clark Security Simulation")
+        .env("GIT_COMMITTER_NAME", "Agent Security Simulation")
         .env("GIT_COMMITTER_EMAIL", "security@example.com")
         .output()
         .expect("run Git");

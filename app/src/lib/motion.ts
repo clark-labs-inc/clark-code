@@ -1,6 +1,6 @@
 //! The app's motion vocabulary — one easing curve and a small speed scale, so
 //! every animation reads as one system instead of a pile of inline magic
-//! numbers. Mirrors the CSS tokens in `index.css` (`--dur-*`, `--ease-clark*`);
+//! numbers. Mirrors the CSS tokens in `index.css` (`--dur-*`, `--ease-agent*`);
 //! keep the two in sync. motion/react wants seconds and raw cubic-bezier
 //! arrays, which is what these expose.
 
@@ -131,7 +131,7 @@ export const SLIDE_RIGHT = {
   transition: TRANSITION,
 } satisfies MotionProps;
 
-/** Apply one vocabulary everywhere while keeping the stronger Clark policy:
+/** Apply one vocabulary everywhere while keeping the stronger the agent policy:
  * reduced motion removes spatial movement but keeps a short opacity-only fade
  * on exit so disappearing surfaces don't cut out like a glitch. */
 export function accessibleMotion(

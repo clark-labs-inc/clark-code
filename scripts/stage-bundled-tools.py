@@ -21,7 +21,7 @@ from typing import Optional
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / "scripts" / "bundled-tools.json"
 OUTPUT_DIR = ROOT / "src-tauri" / "binaries"
-CACHE_DIR = Path(tempfile.gettempdir()) / "clark-code-bundled-tools"
+CACHE_DIR = Path(tempfile.gettempdir()) / "agent-desktop-bundled-tools"
 
 
 def parse_args() -> argparse.Namespace:
@@ -144,7 +144,7 @@ def build_meson_artifact(artifact: dict, target: str, destination: Path) -> None
         raise RuntimeError(
             f"native source build for {target} requires {expected_arch}, host is {host_arch}"
         )
-    with tempfile.TemporaryDirectory(prefix="clark-tool-build-") as temp:
+    with tempfile.TemporaryDirectory(prefix="agent-tool-build-") as temp:
         temp_dir = Path(temp)
         source = extract_source_tree(artifact, temp_dir)
         build = temp_dir / "build"
@@ -170,7 +170,7 @@ def stage_tool(tool: dict, target: str, destination: Path) -> None:
         raise RuntimeError(f"{tool['command']} has no artifact for {target}")
     strategy = artifact.get("strategy")
     if strategy == "macho-universal":
-        with tempfile.TemporaryDirectory(prefix="clark-tool-lipo-") as temp:
+        with tempfile.TemporaryDirectory(prefix="agent-tool-lipo-") as temp:
             inputs = []
             for source_target in artifact["merge"]:
                 source = Path(temp) / source_target

@@ -183,12 +183,12 @@ impl ToolExecutor for FakeMutating {
     }
 }
 
-struct FakeClarkCloud;
+struct FakeBrokeredProduct;
 
 #[async_trait::async_trait]
-impl ToolExecutor for FakeClarkCloud {
+impl ToolExecutor for FakeBrokeredProduct {
     fn name(&self) -> &str {
-        "clark_research"
+        "brokered_research"
     }
     fn description(&self) -> &str {
         "test cloud tool"
@@ -200,7 +200,7 @@ impl ToolExecutor for FakeClarkCloud {
         agent_core::domain::ToolKind::Research
     }
     fn permission_class(&self) -> crate::tools::ToolPermissionClass {
-        crate::tools::ToolPermissionClass::BrokeredClarkCloud
+        crate::tools::ToolPermissionClass::BrokeredProduct
     }
     async fn invoke(&self, _args: Value, _ctx: &ToolCtx) -> crate::tools::ToolOutcome {
         crate::tools::ToolOutcome::ok("done")
@@ -255,7 +255,7 @@ fn plan_session_state() -> SessionState {
 }
 
 #[tokio::test]
-async fn brokered_clark_cloud_is_default_allowed_without_opening_local_network() {
+async fn brokered_product_tool_is_default_allowed_without_opening_local_network() {
     let dir = tempfile::tempdir().unwrap();
     let session = Arc::new(Mutex::new(SessionState::default()));
     let control = Arc::new(Mutex::new(RunControl::default()));
@@ -264,8 +264,8 @@ async fn brokered_clark_cloud_is_default_allowed_without_opening_local_network()
     let outcome = gate
         .check(
             &ToolCallId::new("t1"),
-            "clark_research",
-            &FakeClarkCloud,
+            "brokered_research",
+            &FakeBrokeredProduct,
             &serde_json::json!({"query": "current docs"}),
             &test_ctx(dir.path()),
             &CancellationToken::new(),

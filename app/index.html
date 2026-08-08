@@ -11,9 +11,9 @@
       (() => {
         try {
           const root = document.documentElement;
-          const dark = localStorage.getItem("clark.theme") === "dark";
-          const colorblind = localStorage.getItem("clark.colorblind") === "1";
-          const savedTextSize = localStorage.getItem("clark.text-size");
+          const dark = localStorage.getItem("agent-desktop.theme") === "dark";
+          const colorblind = localStorage.getItem("agent-desktop.colorblind") === "1";
+          const savedTextSize = localStorage.getItem("agent-desktop.text-size");
           const textSize = savedTextSize === "large"
             ? 110
             : /^(100|110|125|150|175|200)$/.test(savedTextSize ?? "")
@@ -33,17 +33,17 @@
         }
       })();
     </script>
-    <title>Clark Code</title>
+    <title>Agent Desktop</title>
     <link
       rel="icon"
-      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230a0a0a'/%3E%3Ctext x='16' y='23' font-family='Inter,system-ui,sans-serif' font-size='21' font-weight='700' fill='%23ededec' text-anchor='middle'%3EC%3C/text%3E%3C/svg%3E"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230a0a0a'/%3E%3Ctext x='16' y='23' font-family='Inter,system-ui,sans-serif' font-size='21' font-weight='700' fill='%23ededec' text-anchor='middle'%3EA%3C/text%3E%3C/svg%3E"
     />
-    <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230a0a0a'/%3E%3Ctext x='16' y='23' font-family='sans-serif' font-size='21' font-weight='700' fill='%23ededec' text-anchor='middle'%3EC%3C/text%3E%3C/svg%3E" />
+    <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230a0a0a'/%3E%3Ctext x='16' y='23' font-family='sans-serif' font-size='21' font-weight='700' fill='%23ededec' text-anchor='middle'%3EA%3C/text%3E%3C/svg%3E" />
   </head>
   <body>
     <div id="root">
-      <div class="clark-bootstrap-shell" data-clark-bootstrap-shell="true" aria-label="Loading Clark Code">
-        <span class="clark-bootstrap-mark" aria-hidden="true">c</span>
+      <div class="desktop-bootstrap-shell" data-desktop-bootstrap-shell="true" aria-label="Loading Agent Desktop">
+        <span class="desktop-bootstrap-mark" aria-hidden="true">a</span>
       </div>
     </div>
     <script type="module" src="/src/main.tsx"></script>

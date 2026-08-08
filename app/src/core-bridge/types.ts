@@ -409,7 +409,7 @@ export type TimelineItem =
   | { item: "proposed_plan"; run: string; plan: ProposedPlan };
 
 export interface Snapshot {
-  /** Local outbox has durable events not yet acknowledged by Clark cloud. */
+  /** Local outbox has durable events not yet acknowledged by product cloud. */
   sync_pending?: boolean;
   /** Opaque device-local journal cursor used by the native bridge to
    * checkpoint exactly the event prefix represented by this snapshot. */
@@ -528,7 +528,7 @@ export type ClientResponse =
       decision: PlanDecision;
     };
 
-/** One per-fact memory file under `<cwd>/.clark/memory/`. */
+/** One per-fact memory file under `<cwd>/.agent/memory/`. */
 export interface MemoryFactView {
   file: string;
   name?: string | null;
@@ -539,7 +539,7 @@ export interface MemoryFactView {
 
 /** The per-repository memory for one project folder (index + fact files). */
 export interface MemoryOverview {
-  /** Absolute path to `<cwd>/.clark/memory`. */
+  /** Absolute path to `<cwd>/.agent/memory`. */
   dir: string;
   /** Whether a `MEMORY.md` index has been written. */
   exists: boolean;

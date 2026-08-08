@@ -1,5 +1,5 @@
-const PROJECT_CONTEXT_KEY_PREFIX = "clark-desktop:project-context:";
-const RECENTS_KEY = "clark-desktop:recent-projects";
+const PROJECT_CONTEXT_KEY_PREFIX = "agent-desktop:project-context:";
+const RECENTS_KEY = "agent-desktop:recent-projects";
 const ANONYMOUS_SCOPE = "anonymous";
 const MAX_RECENTS = 8;
 

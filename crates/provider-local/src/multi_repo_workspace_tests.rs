@@ -28,7 +28,7 @@ fn seed_repository(root: &Path, path: &str, content: &str) {
     std::fs::write(root.join(path), content).unwrap();
     run_git(root, &["init", "--quiet"]);
     run_git(root, &["config", "core.autocrlf", "false"]);
-    run_git(root, &["config", "user.name", "Clark Test"]);
+    run_git(root, &["config", "user.name", "Agent Test"]);
     run_git(root, &["config", "user.email", "test@invalid.local"]);
     run_git(root, &["add", "--all"]);
     run_git(root, &["commit", "--quiet", "-m", "baseline"]);

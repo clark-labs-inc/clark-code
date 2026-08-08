@@ -108,13 +108,13 @@ fn only_opaque_mutations_across_the_host_boundary_require_effect_verification() 
     // Git's global `-C` option and must never become synthetic mutations when
     // the model omits the optional effect declaration.
     for command in [
-        "git -C clark-nucleus diff --stat main...HEAD 2>&1 | tail -30",
-        "git -C clark-nucleus status --short --branch 2>&1 | head -60; echo count; git -C clark-nucleus status --porcelain 2>&1 | wc -l",
-        "for d in clark-nucleus nucleus-canvas phase3; do echo $d; git -C $d rev-parse --is-inside-work-tree 2>&1; git -C $d branch -a 2>&1 | head; done",
-        "git -C clark-nucleus diff --stat main 2>&1 | tail -40; git -C clark-nucleus status --porcelain | grep '^??' | wc -l",
-        "cd clark-nucleus && git remote -v; git -C /home/ubuntu/git/nucleus-canvas remote -v",
-        "git -C clark-nucleus log --oneline main..HEAD 2>&1 | head -50; git -C clark-nucleus log --oneline main..HEAD 2>&1 | wc -l",
-        "git -C clark-nucleus rev-parse HEAD main; git -C clark-nucleus rev-list --left-right --count main...HEAD",
+        "git -C primary-repo diff --stat main...HEAD 2>&1 | tail -30",
+        "git -C primary-repo status --short --branch 2>&1 | head -60; echo count; git -C primary-repo status --porcelain 2>&1 | wc -l",
+        "for d in primary-repo secondary-repo third-repo; do echo $d; git -C $d rev-parse --is-inside-work-tree 2>&1; git -C $d branch -a 2>&1 | head; done",
+        "git -C primary-repo diff --stat main 2>&1 | tail -40; git -C primary-repo status --porcelain | grep '^??' | wc -l",
+        "cd primary-repo && git remote -v; git -C /home/ubuntu/git/secondary-repo remote -v",
+        "git -C primary-repo log --oneline main..HEAD 2>&1 | head -50; git -C primary-repo log --oneline main..HEAD 2>&1 | wc -l",
+        "git -C primary-repo rev-parse HEAD main; git -C primary-repo rev-list --left-right --count main...HEAD",
     ] {
         assert!(
             Bash.effect_intent(&json!({"command": command})).is_none(),
@@ -194,7 +194,7 @@ async fn ordinary_git_commit_heredoc_preserves_hooks_and_attribution() {
     let out = Bash
         .invoke(
             json!({
-                "command": "git commit -m \"$(cat <<'EOF'\ntest: attributed commit\n\nCo-Authored-By: Clark Code <noreply@clarkchat.com>\nEOF\n)\""
+                "command": "git commit -m \"$(cat <<'EOF'\ntest: attributed commit\n\nCo-Authored-By: local agent <noreply@example.test>\nEOF\n)\""
             }),
             &ctx(dir.path()),
         )
@@ -208,7 +208,7 @@ async fn ordinary_git_commit_heredoc_preserves_hooks_and_attribution() {
         .unwrap();
     assert!(
         String::from_utf8_lossy(&message.stdout)
-            .contains("Co-Authored-By: Clark Code <noreply@clarkchat.com>"),
+            .contains("Co-Authored-By: local agent <noreply@example.test>"),
         "{}",
         String::from_utf8_lossy(&message.stdout)
     );

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Artifact } from "../core-bridge/types";
 import {
   artifactAvailability,
@@ -6,6 +6,16 @@ import {
   canOpenArtifactExternally,
   readableArtifactLocation,
 } from "./artifactPresentation";
+import { installProductModule, neutralProduct } from "../product/productModule";
+
+beforeEach(() => installProductModule({
+  ...neutralProduct,
+  artifacts: {
+    ...neutralProduct.artifacts,
+    isCloudUri: (uri) => /^\/product-artifacts\/[^/]+$/.test(uri),
+  },
+}));
+afterEach(() => installProductModule(neutralProduct));
 
 function artifact(uri?: string): Artifact {
   return {
@@ -38,13 +48,13 @@ describe("artifact presentation metadata", () => {
     expect(canOpenArtifactExternally(remote)).toBe(true);
   });
 
-  it("labels Clark cloud and pending workspace artifacts without unsafe external links", () => {
-    const cloud = artifact("/api/desktop/conversations/desk-1/artifacts/deskart-1");
-    expect(artifactLocationLabel(cloud)).toBe("Clark cloud");
-    expect(readableArtifactLocation(cloud)).toBe("Saved securely in Clark cloud");
+  it("labels product cloud and pending workspace artifacts without unsafe external links", () => {
+    const cloud = artifact("/product-artifacts/artifact-1");
+    expect(artifactLocationLabel(cloud)).toBe("Product cloud");
+    expect(readableArtifactLocation(cloud)).toBe("Saved securely in product cloud");
     expect(canOpenArtifactExternally(cloud)).toBe(false);
 
-    const pending = artifact("clark-workspace://desk-1/report.md");
+    const pending = artifact("workspace-artifact://desk-1/report.md");
     expect(artifactAvailability(pending)).toBe("saved");
     expect(artifactLocationLabel(pending)).toBe("Local");
     expect(canOpenArtifactExternally(pending)).toBe(false);

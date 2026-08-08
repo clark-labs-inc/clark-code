@@ -58,7 +58,6 @@ pub(super) fn tool_title(name: &str, args: &Value) -> String {
             Some("screenshot") => "browser screenshot".to_string(),
             _ => "browser action".to_string(),
         },
-        "clark_research" => activity_with_argument(args, "query", "Researching", "Researching"),
         "organization_knowledge" => "Searched organization knowledge".to_string(),
         "propose_plan" => "Proposed a plan".to_string(),
         "enter_plan_mode" => "Entered plan mode".to_string(),

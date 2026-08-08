@@ -49,7 +49,7 @@ export function ProjectHeader({
         <span className="min-w-0 truncate">{group.label}</span>
         {group.repositoryLabel && (
           <span
-            className="shrink-0 text-[10px] font-normal text-ink-faint"
+            className="shrink-0 text-xs font-normal text-ink-faint"
             aria-label={`Repository ${group.repositoryLabel}`}
           >
             {group.repositoryLabel}
@@ -151,7 +151,7 @@ export function ProjectActionsMenu({
   onUseManagedWorktree: (path: string) => void;
   onSaveManagedWorktreeBranch: (id: string) => Promise<{ branch: string }>;
   onCleanupManagedWorktree: (id: string) => Promise<void>;
-  /** Current/streaming Clark sessions must keep their checkout intact. */
+  /** Current/streaming the agent sessions must keep their checkout intact. */
   activeWorktreePaths: string[];
   onRename: (name: string) => void;
   onArchive: () => void;
@@ -282,7 +282,7 @@ export function ProjectActionsMenu({
             <button type="button" onClick={() => setMode("menu")} className="rounded-lg px-2.5 py-1.5 text-xs text-ink-muted hover:bg-bg-hover hover:text-ink">
               Cancel
             </button>
-            <button type="submit" disabled={!name.trim()} className="rounded-lg bg-accent px-2.5 py-1.5 text-xs font-medium text-white disabled:opacity-40">
+            <button type="submit" disabled={!name.trim()} className="rounded-lg bg-accent px-2.5 py-1.5 text-xs font-medium text-on-accent disabled:opacity-40">
               Rename
             </button>
           </div>
@@ -319,7 +319,7 @@ export function ProjectActionsMenu({
             <button type="button" disabled={creating} onClick={() => setMode("menu")} className="rounded-lg px-2.5 py-1.5 text-xs text-ink-muted hover:bg-bg-hover hover:text-ink disabled:opacity-40">
               Cancel
             </button>
-            <button type="submit" disabled={!worktreeName.trim() || creating} className="flex items-center gap-1.5 rounded-lg bg-accent px-2.5 py-1.5 text-xs font-medium text-white disabled:opacity-40">
+            <button type="submit" disabled={!worktreeName.trim() || creating} className="flex items-center gap-1.5 rounded-lg bg-accent px-2.5 py-1.5 text-xs font-medium text-on-accent disabled:opacity-40">
               {creating && <Loader2 className="size-3 animate-spin" />}
               Create
             </button>

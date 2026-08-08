@@ -8,7 +8,7 @@ use crate::AcpProvider;
 
 /// Build a live ACP-backed delegated harness.
 ///
-/// External ACP processes do not share Clark's local tool gate, so this helper
+/// External ACP processes do not share the local provider's tool gate, so this helper
 /// refuses prompt-only/host-gate safety claims. The command must be wrapped in
 /// an OS read-only sandbox or run against a disposable checkout.
 pub fn read_only_harness(

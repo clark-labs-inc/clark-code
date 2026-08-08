@@ -3,7 +3,7 @@ name: security-scan
 description: Run an evidence-backed security scan over a repository or scoped directory with deterministic file coverage, validation, attack-path analysis, and sealed findings.
 ---
 
-# Clark Security scan
+# Security scanner scan
 
 This is a source-read-only security assessment unless the user separately and
 explicitly asks to fix a finding. Do not edit the checkout, install
@@ -11,7 +11,7 @@ dependencies, create tickets, publish results, or run live provider tests
 merely because this skill is active. `security_poc_execute` may write scripts
 and receipts only inside its automatically provisioned disposable offline copy.
 
-Clark pins the root Security turn to the exact `~deepseek/deepseek-v4-flash-latest` production model.
+The host selects the Security model through trusted runtime policy.
 The workflow model is not chosen from the conversation model setting.
 
 ## Hard completion contract
@@ -29,16 +29,12 @@ skill is explicitly selected. Start by calling:
    `nextCursor` is null.
 
 Use a narrower `scope` only when the user explicitly requested one. Write the
-canonical bundle to `.clark/security-scans/<scan-id>/scan.json`; this path is
-local Clark state and is excluded from its own target inventory.
+canonical bundle to `.agent/security-scans/<scan-id>/scan.json`; this path is
+local host-managed state and is excluded from its own target inventory.
 
-After inventory and policy discovery, call `cloud_advisor` once with phase
-`threat_model`, the bounded assessment goal, inventory/policy summaries as
-evidence, and typed Security capabilities as candidate actions. Do not send
-credentials, raw secrets, private source bodies, or executable commands. Kimi
-K3 advice is strategy, not source evidence, validation, severity, or execution
-authority; verify it independently. If unavailable, record the limitation and
-continue the baseline scan.
+After inventory and policy discovery, build a bounded threat model from the
+repository evidence. Do not place credentials, raw secrets, private source
+bodies, or executable commands in planning artifacts.
 
 Before reporting, call
 `security_scan_contract(action="finalize", path="<canonical bundle>")`.
@@ -87,7 +83,7 @@ Create separate candidates for independently attackable source/control/sink
 tuples. Do not collapse candidates merely because they share a CWE, helper,
 subsystem, or sink family.
 
-Every candidate must carry Clark Security's semantic identity and complete
+Every candidate must carry Security scanner's semantic identity and complete
 product metadata:
 
 - `candidateId` is a scan-local ledger id;
@@ -169,8 +165,3 @@ counterevidence, and a concise remediation direction. Separately report:
 
 If the seal contains no findings, say "no reportable findings were validated";
 do not claim that the repository is secure.
-
-If `cloud_advisor` returned an accepted receipt, finish by calling
-`cloud_advisor_feedback` with the complete signed receipt fields, actual typed
-actions, seal status, bounded outcome, and evidence receipt ids. Never send credentials, secrets, or raw
-private source in feedback.

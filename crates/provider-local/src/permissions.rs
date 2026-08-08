@@ -256,7 +256,7 @@ impl PermissionGate {
             info,
             signal,
         } = attempt;
-        // clark-agent runs non-mutating tools in parallel, but the desktop UI
+        // agent-loop runs non-mutating tools in parallel, but the desktop UI
         // intentionally presents one permission decision at a time. Queue only
         // this acquisition phase; the guard is released before the tool body
         // runs, preserving parallel fetch/read execution after authorization.
@@ -606,7 +606,7 @@ fn gate_info(name: &str, args: &Value) -> GateInfo {
             network: false,
             requires_elevation: false,
         },
-        // Image generation writes an output file and calls Clark's billed
+        // Image generation writes an output file and calls Agent Desktop's billed
         // platform relay. Keep it outside automatic approval and show the
         // visual intent without serializing large reference-image payloads.
         "generate_image" => {
@@ -624,11 +624,11 @@ fn gate_info(name: &str, args: &Value) -> GateInfo {
                 .unwrap_or("images/<prompt>.<returned-format>");
             GateInfo {
                 detail: Some(format!(
-                    "Generate image through Clark (may consume credits)\nPrompt: {prompt_preview}\nSave to: {output} (extension matches returned image)"
+                    "Generate image through Agent Desktop (may consume credits)\nPrompt: {prompt_preview}\nSave to: {output} (extension matches returned image)"
                 )),
                 risk: None,
                 reason: Some(
-                    "uses a billed Clark image-generation call; review the visual intent"
+                    "uses a billed Agent Desktop image-generation call; review the visual intent"
                         .to_string(),
                 ),
                 external: true,
@@ -636,7 +636,7 @@ fn gate_info(name: &str, args: &Value) -> GateInfo {
                 requires_elevation: false,
             }
         }
-        // MCP-tool posture, not `clark_research`'s zero-gate one: it drives a
+        // MCP-tool posture, not a brokered product tool's zero-gate one: it drives a
         // real browser against live sites under arbitrary session state, a
         // much larger blast radius than a bounded server-side call — `external:
         // true` keeps it out of "auto" mode's default-safe auto-approval.

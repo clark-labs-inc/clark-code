@@ -20,7 +20,7 @@ pub async fn list_security_scans(
     exec: &dyn Executor,
     root: &Path,
 ) -> Result<Vec<SecurityScanRecord>, String> {
-    let scans_root = root.join(".clark/security-scans");
+    let scans_root = root.join(".agent/security-scans");
     let metadata = match exec.metadata(&scans_root).await {
         Ok(metadata) => metadata,
         Err(_) => return Ok(Vec::new()),
@@ -148,7 +148,7 @@ mod tests {
             contract_version: SECURITY_SCAN_CONTRACT_VERSION,
             scan_id: scan_id.into(),
             mode: SecurityScanMode::Standard,
-            model: crate::config::SECURITY_MODEL.into(),
+            model: "security-test-model".into(),
             scope: ".".into(),
             inventory_id: "inventory".into(),
             phase: SecurityScanPhase::Reporting,
@@ -173,7 +173,7 @@ mod tests {
     #[tokio::test]
     async fn history_reads_valid_artifacts_and_ignores_malformed_rows() {
         let temp = tempfile::tempdir().unwrap();
-        let scans = temp.path().join(".clark/security-scans");
+        let scans = temp.path().join(".agent/security-scans");
         std::fs::create_dir_all(scans.join("scan-1")).unwrap();
         std::fs::create_dir_all(scans.join("broken")).unwrap();
         let bundle = bundle("scan-1");
@@ -188,7 +188,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(records.len(), 1);
-        assert_eq!(records[0].path, ".clark/security-scans/scan-1/scan.json");
+        assert_eq!(records[0].path, ".agent/security-scans/scan-1/scan.json");
         assert_eq!(records[0].bundle.scan_id, "scan-1");
         assert!(records[0].seal.is_none());
     }
@@ -196,7 +196,7 @@ mod tests {
     #[tokio::test]
     async fn history_preserves_every_valid_scan_beyond_the_old_count_cap() {
         let temp = tempfile::tempdir().unwrap();
-        let scans = temp.path().join(".clark/security-scans");
+        let scans = temp.path().join(".agent/security-scans");
         for index in 0..205 {
             let scan_id = format!("scan-{index}");
             let directory = scans.join(&scan_id);

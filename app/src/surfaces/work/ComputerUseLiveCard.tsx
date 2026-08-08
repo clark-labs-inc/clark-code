@@ -94,7 +94,7 @@ function observationFrames(calls: ToolCall[]): ComputerFrame[] {
 
 function actionLabel(call: ToolCall | undefined): string | null {
   if (!call?.tool_name) return null;
-  if (call.status === "in_progress") return "Clark is acting";
+  if (call.status === "in_progress") return "the agent is acting";
   if (call.status === "failed") return "Computer action failed";
   const labels: Record<string, string> = {
     computer_click: "Clicked a control",
@@ -160,7 +160,7 @@ function FrameStack({
             alt={`${visible[visible.length - 1].appName} current computer state`}
             className="h-full w-full object-cover object-top transition duration-300 group-hover:scale-[1.01]"
           />
-          <span className="absolute left-2 top-2 inline-flex items-center gap-1 rounded-full border border-white/15 bg-black/65 px-2 py-1 text-[10px] font-medium uppercase tracking-[0.14em] text-white/80 backdrop-blur-sm">
+          <span className="absolute left-2 top-2 inline-flex items-center gap-1 rounded-full border border-white/15 bg-black/65 px-2 py-1 text-xs font-medium uppercase tracking-[0.14em] text-white/80 backdrop-blur-sm">
             <span className="size-1.5 animate-pulse rounded-full bg-emerald-400" />
             Live view
           </span>
@@ -290,9 +290,9 @@ export function ComputerUseLiveCard({
   const actionText = actionLabel(action);
   const active = calls.some((call) => call.status === "in_progress") && controlState === "live";
   const controlText = controlState === "stopped"
-    ? "Clark stopped"
+    ? "the agent stopped"
     : active
-      ? "Clark is working"
+      ? "the agent is working"
       : "Computer state captured";
 
   const stop = async () => {
@@ -303,7 +303,7 @@ export function ComputerUseLiveCard({
   const card = (
     <section
       ref={panelRef}
-      aria-label="Clark computer use"
+      aria-label="the agent computer use"
       style={floating ? {
         width: `${panelSize.width}px`,
         height: panelSize.height ? `${panelSize.height}px` : undefined,
@@ -358,7 +358,7 @@ export function ComputerUseLiveCard({
 
       {historyOpen && frames.length > 1 && (
         <div className="border-t border-white/[0.08] px-3 py-3 sm:px-4">
-          <div className="mb-2 flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-[0.14em] text-white/40">
+          <div className="mb-2 flex items-center gap-1.5 text-xs font-medium uppercase tracking-[0.14em] text-white/40">
             <History className="size-3" />
             Recent observations
           </div>
@@ -387,7 +387,7 @@ export function ComputerUseLiveCard({
             {controlState === "stopped" ? <X className="size-3.5 text-red-300" /> : <MousePointerClick className="size-3.5 text-white/50" />}
             <span className="truncate">{controlState === "live" ? actionText ?? controlText : controlText}</span>
           </div>
-          <div className="mt-0.5 flex items-center gap-1 text-[11px] text-white/40">
+          <div className="mt-0.5 flex items-center gap-1 text-xs text-white/40">
             <Clock3 className="size-3" />
             {formatAge(action)}
           </div>
@@ -396,7 +396,7 @@ export function ComputerUseLiveCard({
             <button
               type="button"
               onClick={() => void stop()}
-              aria-label="Stop Clark computer use"
+              aria-label="Stop the agent computer use"
               className="grid size-8 place-items-center rounded-lg border border-red-300/25 text-red-200 transition hover:bg-red-300/10"
             >
               <Square className="size-3.5 fill-current" />

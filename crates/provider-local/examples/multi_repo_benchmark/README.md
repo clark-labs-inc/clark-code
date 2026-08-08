@@ -1,6 +1,6 @@
 # Multi-repository orchestration benchmark
 
-This benchmark is an executable acceptance contract for Clark's future multi-writer orchestration. It is deliberately red for Clark's current local-agent architecture. A root agent that directly edits every repository can make the visible tests pass, but it still fails if it cannot prove isolation, pinned baselines, replayable handoffs, targeted recovery, and fresh integration.
+This benchmark is an executable acceptance contract for multi-writer orchestration. It is deliberately red for the foundation's current single-writer architecture. A root agent that directly edits every repository can make the visible tests pass, but it still fails if it cannot prove isolation, pinned baselines, replayable handoffs, targeted recovery, and fresh integration.
 
 The existing [`orchestration_benchmark`](../orchestration_benchmark/README.md) measures single-repository reader/writer orchestration and the default-agent lifecycle. This suite adds the missing multi-repository control plane.
 
@@ -22,7 +22,7 @@ Hard gates cover:
 - targeted retry after a child crash or stale baseline;
 - cheap-reader/strong-writer model routing;
 - independent reviewer receipts in review lanes;
-- Clark Cloud routing for cloud-only repositories;
+- brokered cloud routing for cloud-only repositories;
 - trigger discipline, including a scenario where delegation is harmful;
 - token budget, useful-token, duplicate-read, cost, wall-time, and aggregate agent-time accounting.
 
@@ -62,13 +62,13 @@ List scenarios and lanes without model calls:
 cargo run -p provider-local --example multi_repo_orchestration_benchmark -- --list
 ```
 
-Capture Clark's expected-red baseline:
+Capture the foundation's expected-red baseline:
 
 ```bash
 cargo run -p provider-local --example multi_repo_orchestration_benchmark -- \
-  --candidate clark-current \
+  --candidate current-agent \
   --allow-red \
-  --out target/multi-repo-benchmark/clark-current
+  --out target/multi-repo-benchmark/current-agent
 ```
 
 Omit `--allow-red` in CI. The same command then exits non-zero until the required features exist.
@@ -96,7 +96,7 @@ The external program receives one `CandidateRequest` JSON object on stdin. The p
 
 On macOS, external candidates run under `sandbox-exec`: reads, processes, and network access remain available, but filesystem writes are restricted to that synthetic run directory. `HOME` and `TMPDIR` are also placed inside it. Other platforms fail closed because this repository does not yet have an equivalent write sandbox. `--unsafe-external` is an explicit escape hatch intended only for disposable CI machines.
 
-No API key is read and no provider is called by the built-in `clark-current` or `reference` adapters. A real model run happens only through an explicitly supplied external command.
+No API key is read and no provider is called by the built-in `current-agent` or `reference` adapters. A real model run happens only through an explicitly supplied external command.
 
 ## Artifacts
 
@@ -111,4 +111,4 @@ Every invocation retains:
 - `runs/<id>/artifacts/*.patch`: content-addressed writer handoffs;
 - `runs/<id>/fresh-replay/repos/*`: independent integration evidence.
 
-The reference adapter is an oracle for lifecycle mechanics, not a coding-model baseline: it is given fixture solutions internally so that a reference failure means the benchmark itself is broken. Clark's current adapter is intentionally given enough fixture knowledge to make visible behavior pass; its failure therefore isolates missing orchestration guarantees rather than code-generation quality.
+The reference adapter is an oracle for lifecycle mechanics, not a coding-model baseline: it is given fixture solutions internally so that a reference failure means the benchmark itself is broken. The current foundation adapter is intentionally given enough fixture knowledge to make visible behavior pass; its failure therefore isolates missing orchestration guarantees rather than code-generation quality.

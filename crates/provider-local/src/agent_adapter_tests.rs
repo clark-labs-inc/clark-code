@@ -107,7 +107,7 @@ async fn desktop_sink_preserves_stream_lifecycle_events_as_trace() {
         desktop::AgentEvent::Trace {
             source, payload, ..
         } => {
-            assert_eq!(source, "clark_agent");
+            assert_eq!(source, "agent_loop");
             assert_eq!(payload["type"], "message_start");
             assert_eq!(payload["message"]["content"], "hello");
         }

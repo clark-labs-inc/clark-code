@@ -16,12 +16,10 @@ on:
       - "crates/install-context/**"
       - "scripts/bundled-tools.json"
       - "scripts/stage-bundled-tools.py"
-      - "scripts/verify-bundled-layout.py"
       - "src-tauri/tauri.sandbox.macos.conf.json"
       - "src-tauri/tauri.sandbox.linux.conf.json"
       - "src-tauri/tauri.sandbox.windows.conf.json"
       - ".github/workflows/sandbox.yml"
-      - ".github/workflows/release.yml"
   workflow_dispatch:
 
 jobs:
@@ -45,11 +43,11 @@ jobs:
           sudo apt-get install -y bubblewrap meson ninja-build pkg-config libcap-dev
           python3 scripts/stage-bundled-tools.py --target x86_64-unknown-linux-gnu
           src-tauri/binaries/bwrap-x86_64-unknown-linux-gnu --version
-          echo "CLARK_BWRAP_PATH=$GITHUB_WORKSPACE/src-tauri/binaries/bwrap-x86_64-unknown-linux-gnu" >> "$GITHUB_ENV"
+          echo "DESKTOP_BWRAP_PATH=$GITHUB_WORKSPACE/src-tauri/binaries/bwrap-x86_64-unknown-linux-gnu" >> "$GITHUB_ENV"
       - name: Run required native adversarial suite
         env:
-          CLARK_SANDBOX_E2E_REQUIRED: "1"
-        run: cargo test -p exec-core -p exec-sandbox-protocol -p exec-sandbox -p clark-install-context --no-fail-fast
+          DESKTOP_SANDBOX_E2E_REQUIRED: "1"
+        run: cargo test -p exec-core -p exec-sandbox-protocol -p exec-sandbox -p desktop-install-context --no-fail-fast
       - name: Capture native benchmark
         run: cargo run -p exec-sandbox --example sandbox_benchmark -- --iterations 5000 --launch-iterations 30
 
@@ -69,23 +67,23 @@ jobs:
         run: |
           $dumpbin = Get-Command dumpbin.exe -ErrorAction Stop
           foreach ($helper in @(
-            "target/release/clark-command-runner.exe",
-            "target/release/clark-windows-sandbox-setup.exe"
+            "target/release/agent-command-runner.exe",
+            "target/release/agent-windows-sandbox-setup.exe"
           )) {
             $imports = (& $dumpbin.Source /dependents $helper | Out-String)
             if ($imports -match '(?im)^\s*(?:vcruntime|msvcp)[^\s]*\.dll\s*$') {
               throw "Clean-machine runtime invariant failed for ${helper}:`n$imports"
             }
           }
-      - run: target/release/clark-command-runner.exe --self-test
-      - run: target/release/clark-windows-sandbox-setup.exe --self-test
+      - run: target/release/agent-command-runner.exe --self-test
+      - run: target/release/agent-windows-sandbox-setup.exe --self-test
       - name: Run required native Windows adversarial suite
         shell: pwsh
         run: |
-          $env:CLARK_WINDOWS_SANDBOX_E2E_REQUIRED = "1"
-          $env:CLARK_WINDOWS_SANDBOX_RUNNER = (Resolve-Path "target/release/clark-command-runner.exe")
-          $env:CLARK_WINDOWS_SANDBOX_SETUP = (Resolve-Path "target/release/clark-windows-sandbox-setup.exe")
+          $env:DESKTOP_WINDOWS_SANDBOX_E2E_REQUIRED = "1"
+          $env:DESKTOP_WINDOWS_SANDBOX_RUNNER = (Resolve-Path "target/release/agent-command-runner.exe")
+          $env:DESKTOP_WINDOWS_SANDBOX_SETUP = (Resolve-Path "target/release/agent-windows-sandbox-setup.exe")
           cargo test -p exec-sandbox-windows --release --test windows_native -- --nocapture
-          $env:CLARK_SANDBOX_E2E_REQUIRED = "1"
-          $env:CLARK_WINDOWS_SANDBOX_EXPERIMENTAL = "1"
+          $env:DESKTOP_SANDBOX_E2E_REQUIRED = "1"
+          $env:DESKTOP_WINDOWS_SANDBOX_EXPERIMENTAL = "1"
           cargo test -p exec-sandbox --release --test sandbox_e2e -- --nocapture

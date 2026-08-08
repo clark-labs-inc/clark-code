@@ -1,8 +1,0 @@
-{
-  "bundle": {
-    "resources": {
-      "binaries/clark-code-headless-x86_64-unknown-linux-musl": "clark-resources/remote-workers/linux-x86_64/clark-code-headless",
-      "binaries/clark-code-worker-x86_64-unknown-linux-musl": "clark-resources/remote-workers/linux-x86_64/clark-code-worker"
-    }
-  }
-}

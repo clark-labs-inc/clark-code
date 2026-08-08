@@ -5,9 +5,9 @@ use std::sync::Arc;
 
 use agent_core::domain as desktop;
 use agent_core::ids::{RunId, ToolCallId};
+use agent_loop as ca;
 use async_channel::Sender;
 use async_trait::async_trait;
-use clark_agent as ca;
 
 /// Rough serialized size of a transcript, for detecting a real compaction
 /// shrink. Message COUNT is the wrong signal: compaction trades many messages
@@ -90,7 +90,7 @@ impl DesktopEventSink {
 
 /// Canonical messages that reached a complete commit boundary during a run.
 ///
-/// `clark_agent::run` returns its message tail only on success. On an error it
+/// `agent_loop::run` returns its message tail only on success. On an error it
 /// still emits typed lifecycle events, so retain the initial prompt/steering
 /// messages plus complete `TurnEnd` assistant/tool-result groups. Assistant
 /// `MessageEnd` alone is not a commit boundary: it can be a discarded
@@ -181,7 +181,7 @@ impl ca::EventSink for DesktopEventSink {
                 .events
                 .send(desktop::AgentEvent::Trace {
                     run: Some(self.run.clone()),
-                    source: "clark_agent".to_string(),
+                    source: "agent_loop".to_string(),
                     payload,
                 })
                 .await;

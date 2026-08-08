@@ -29,7 +29,7 @@ const STDERR_PIPE_SWITCH: &str = "--stderr-pipe";
 const PIPE_BUFFER_SIZE: u32 = 64 * 1024;
 static PIPE_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
-/// Parent half of Clark's process transport. The offline worker receives only
+/// Parent half of Agent Desktop's process transport. The offline worker receives only
 /// unguessable pipe names, never ambient desktop-process handles.
 pub struct ParentTransport {
     stdout: ServerPipe,
@@ -41,7 +41,7 @@ impl ParentTransport {
         let canonical_sid = canonical_sid(offline_sid)?;
         let security = PipeSecurity::for_sid(&canonical_sid)?;
         let sequence = PIPE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
-        let prefix = format!(r"\\.\pipe\clark-sandbox-{}-{sequence}", std::process::id());
+        let prefix = format!(r"\\.\pipe\agent-sandbox-{}-{sequence}", std::process::id());
         Ok(Self {
             stdout: ServerPipe::create(format!("{prefix}-stdout"), &security)?,
             stderr: ServerPipe::create(format!("{prefix}-stderr"), &security)?,
@@ -115,14 +115,14 @@ impl WorkerTransport {
     }
 
     pub fn write_failure(&self, message: &str) {
-        let rendered = format!("clark Windows sandbox: {message}\r\n");
+        let rendered = format!("agent Windows sandbox: {message}\r\n");
         let _ = write_handle(self.stderr.0, rendered.as_bytes());
     }
 
     pub fn write_trace(&self, message: &str) {
         if std::env::var_os(super::process::TRACE_ENV).is_some() {
             let rendered = format!(
-                "clark Windows sandbox trace: {message}; pid={}\r\n",
+                "agent Windows sandbox trace: {message}; pid={}\r\n",
                 std::process::id()
             );
             let _ = write_handle(self.stderr.0, rendered.as_bytes());

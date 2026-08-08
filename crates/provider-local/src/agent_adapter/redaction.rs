@@ -1,4 +1,4 @@
-use clark_agent as ca;
+use agent_loop as ca;
 use serde_json::Value;
 
 const REDACTED_TEXT: &str = "[redacted computer input]";

@@ -50,6 +50,11 @@ pub struct LocalAgentProvider {
     pub(super) session_mode: Option<String>,
     /// Owns the narrow temporary write root exposed to sandboxed children.
     pub(super) sandbox_temp: Option<tempfile::TempDir>,
+    /// Product-owned capabilities installed after the neutral core registry.
+    pub(super) tool_packs: Vec<Arc<dyn crate::tools::ToolPack>>,
+    /// Optional product transport for personal, repository, and organization
+    /// context. The neutral provider never owns cloud routes or credentials.
+    pub(super) context_provider: Option<Arc<dyn crate::platform::PlatformContextProvider>>,
 }
 
 impl LocalAgentProvider {
@@ -79,6 +84,8 @@ impl LocalAgentProvider {
             skill_disabled_names: Vec::new(),
             session_mode: None,
             sandbox_temp: None,
+            tool_packs: Vec::new(),
+            context_provider: None,
         }
     }
 
@@ -133,6 +140,19 @@ impl LocalAgentProvider {
         service: Arc<crate::skills::SkillCatalogService>,
     ) -> Self {
         self.skill_catalogs = service;
+        self
+    }
+
+    pub fn with_tool_pack(mut self, pack: Arc<dyn crate::tools::ToolPack>) -> Self {
+        self.tool_packs.push(pack);
+        self
+    }
+
+    pub fn with_context_provider(
+        mut self,
+        provider: Arc<dyn crate::platform::PlatformContextProvider>,
+    ) -> Self {
+        self.context_provider = Some(provider);
         self
     }
 

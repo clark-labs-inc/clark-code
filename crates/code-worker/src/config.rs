@@ -182,12 +182,12 @@ impl ProviderProfile {
             "project_knowledge": false,
             "worker_execution_residency": execution_residency,
             // The durable worker is already a trusted native host boundary.
-            // Clark's canonical project-root sandbox still contains file tools,
+            // The canonical project-root sandbox still contains file tools,
             // while shell execution remains permission-gated with the exact
             // command allowlist below. Do not require optional host packages
             // such as Bubblewrap merely to open a remote session.
             "sandbox_mode": "disabled",
-            "system_prompt_override": "You are running as a headless Clark Code worker. Work only inside the registered project root. Use the available tools deliberately, keep actions bounded, and finish with a concise machine-readable summary."
+            "system_prompt_override": "You are running as a headless coding-agent worker. Work only inside the registered project root. Use the available tools deliberately, keep actions bounded, and finish with a concise machine-readable summary."
         });
         ProviderConfig {
             endpoint: None,
@@ -255,7 +255,7 @@ pub enum ConfigError {
 }
 
 fn default_worker_name() -> String {
-    "clark-code-worker".into()
+    "agent-code-worker".into()
 }
 
 fn default_plugins() -> BTreeSet<String> {
@@ -275,15 +275,15 @@ fn default_concurrent_requests() -> usize {
 }
 
 fn default_base_url() -> String {
-    "https://api.clarkslabs.com/v1".into()
+    "http://127.0.0.1:11434/v1".into()
 }
 
 fn default_model() -> String {
-    "clark-code:free".into()
+    "local-model".into()
 }
 
 fn default_key_env() -> String {
-    "CLARK_CODE_API_KEY".into()
+    "DESKTOP_MODEL_API_KEY".into()
 }
 
 fn default_iterations() -> u32 {
@@ -345,7 +345,7 @@ mod tests {
             .contains("edit_file"));
         assert!(!serde_json::to_string(&config)
             .unwrap()
-            .contains("CLARK_CODE_API_KEY"));
+            .contains("DESKTOP_MODEL_API_KEY"));
         assert_eq!(config.extra["worker_execution_residency"], "remote_worker");
         assert_eq!(config.extra["sandbox_mode"], "disabled");
         assert_eq!(config.extra["permissions"]["edit_file"], "ask");

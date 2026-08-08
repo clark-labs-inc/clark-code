@@ -13,7 +13,7 @@ use sha2::{Digest as _, Sha256};
 use uuid::Uuid;
 
 use super::{
-    enroll_machine, hex_lower, now_ms, ClarkCartographyClient, ClarkCartographyEnrollmentConfig,
+    enroll_machine, hex_lower, now_ms, CartographyClient, CartographyEnrollmentConfig,
     CollectorMachineIdentity, MachineEnrollment, MachineEnrollmentRequest,
 };
 
@@ -22,7 +22,7 @@ use super::{
 /// This type intentionally does not implement `Debug`, `Clone`, or
 /// serialization because it contains the Platform API credential.
 pub struct ScoutCartographySessionConfig {
-    enrollment: ClarkCartographyEnrollmentConfig,
+    enrollment: CartographyEnrollmentConfig,
     identity_root: PathBuf,
     organization_id: Uuid,
     workspace_id: Uuid,
@@ -35,6 +35,7 @@ impl ScoutCartographySessionConfig {
     pub fn new(
         platform_base_url: impl AsRef<str>,
         platform_api_key: impl AsRef<str>,
+        route_prefix: impl Into<String>,
         identity_root: impl AsRef<Path>,
         organization_id: Uuid,
         workspace_id: Uuid,
@@ -42,7 +43,11 @@ impl ScoutCartographySessionConfig {
         architecture: impl Into<String>,
     ) -> Result<Self, String> {
         Ok(Self {
-            enrollment: ClarkCartographyEnrollmentConfig::new(platform_base_url, platform_api_key)?,
+            enrollment: CartographyEnrollmentConfig::new(
+                platform_base_url,
+                platform_api_key,
+                route_prefix,
+            )?,
             identity_root: identity_root.as_ref().to_path_buf(),
             organization_id,
             workspace_id,
@@ -52,12 +57,12 @@ impl ScoutCartographySessionConfig {
     }
 }
 
-/// Enrolled sensor session pinned to one exact Clark organization/workspace.
+/// Enrolled sensor session pinned to one exact organization/workspace.
 ///
 /// The protected signing key never enters model arguments, graph rows, logs,
 /// or HTTP responses. A session cannot submit or retrieve another tenant.
 pub struct ScoutCartographySession {
-    client: ClarkCartographyClient,
+    client: CartographyClient,
     identity: CollectorMachineIdentity,
     enrollment: MachineEnrollment,
 }
@@ -250,7 +255,7 @@ impl ScoutCartographySession {
         {
             return Err(outcome
                 .rejection_reason
-                .unwrap_or_else(|| "Clark did not verify the evidence object".into()));
+                .unwrap_or_else(|| "the platform did not verify the evidence object".into()));
         }
         verified_evidence_ref(outcome.evidence)
     }
@@ -344,10 +349,10 @@ fn verified_evidence_ref(
     authorization: scout_ingest_protocol::cartography::EvidenceUploadAuthorization,
 ) -> Result<EvidenceObjectRef, String> {
     if authorization.status != EvidenceStatus::Verified {
-        return Err("Clark evidence object is not verified".into());
+        return Err("platform evidence object is not verified".into());
     }
     let version_id = authorization.version_id.ok_or_else(|| {
-        "Clark verified evidence without returning its immutable S3 version id".to_string()
+        "the platform verified evidence without returning its immutable S3 version id".to_string()
     })?;
     Ok(EvidenceObjectRef {
         evidence_id: authorization.evidence_id,

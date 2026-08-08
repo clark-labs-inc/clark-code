@@ -404,8 +404,8 @@ mod tests {
     #[test]
     fn canonical_windows_paths_are_rendered_as_local_git_paths() {
         assert_eq!(
-            windows_git_path(r"\\?\C:\Clark QA\repo"),
-            "C:/Clark QA/repo"
+            windows_git_path(r"\\?\C:\Agent Desktop QA\repo"),
+            "C:/Agent Desktop QA/repo"
         );
         assert_eq!(
             windows_git_path(r"\\?\UNC\server\share\repo"),
@@ -460,8 +460,8 @@ mod tests {
             );
         };
         run(&main, &["init", "-q", "--initial-branch=main"]);
-        run(&main, &["config", "user.name", "Clark Test"]);
-        run(&main, &["config", "user.email", "clark@example.com"]);
+        run(&main, &["config", "user.name", "Agent Test"]);
+        run(&main, &["config", "user.email", "agent@example.com"]);
         std::fs::write(main.join("tracked"), "one").unwrap();
         run(&main, &["add", "tracked"]);
         run(&main, &["commit", "-qm", "initial"]);

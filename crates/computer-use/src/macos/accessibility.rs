@@ -518,12 +518,12 @@ mod tests {
             "Example Domain - Google Chrome - Personal"
         ));
         assert!(window_titles_match(
-            "Clark Labs | An AI agent",
-            "Clark Labs | An AI agent — Google Chrome"
+            "Example Labs | An AI agent",
+            "Example Labs | An AI agent — Google Chrome"
         ));
         assert!(window_titles_match(
-            "Clark Labs | An AI agent in the …A coding agent on your machine.",
-            "Clark Labs | An AI agent in the cloud. A coding agent on your machine. - Google Chrome - Demo User"
+            "Example Labs | An AI agent in the …A coding agent on your machine.",
+            "Example Labs | An AI agent in the cloud. A coding agent on your machine. - Google Chrome - Demo User"
         ));
     }
 

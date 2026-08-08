@@ -350,7 +350,7 @@ static TEMP_SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU6
 
 pub fn default_approval_store() -> Result<ApprovalStore, ComputerUseError> {
     #[cfg(debug_assertions)]
-    if let Some(path) = std::env::var_os("CLARK_COMPUTER_USE_DATA_DIR") {
+    if let Some(path) = std::env::var_os("DESKTOP_COMPUTER_USE_DATA_DIR") {
         return Ok(ApprovalStore::new(path));
     }
     let home = std::env::var_os("HOME").ok_or_else(|| {
@@ -360,10 +360,12 @@ pub fn default_approval_store() -> Result<ApprovalStore, ComputerUseError> {
     let root = PathBuf::from(home)
         .join("Library")
         .join("Application Support")
-        .join("Clark Code")
+        .join(env!("DESKTOP_COMPUTER_USE_MAC_SUPPORT_NAME"))
         .join("Computer Use");
     #[cfg(not(target_os = "macos"))]
-    let root = PathBuf::from(home).join(".clark").join("computer-use");
+    let root = PathBuf::from(home)
+        .join(env!("DESKTOP_COMPUTER_USE_DATA_NAMESPACE"))
+        .join("computer-use");
     Ok(ApprovalStore::new(root))
 }
 

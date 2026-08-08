@@ -54,7 +54,7 @@ describe("MockBridge", () => {
   });
 
   it("exposes every specialist workflow in the browser preview", async () => {
-    const catalog = await new MockBridge().listSkills("/tmp/clark-desktop");
+    const catalog = await new MockBridge().listSkills("/tmp/example-desktop");
 
     expect(catalog.skills.map((skill) => skill.invocationName)).toEqual([
       "scout:scout",
@@ -114,13 +114,13 @@ describe("MockBridge", () => {
   });
 
   it("exposes checkout context for the browser preview", async () => {
-    const context = await new MockBridge().projectContext("/tmp/clark-desktop");
+    const context = await new MockBridge().projectContext("/tmp/example-desktop");
 
     expect(context).toEqual(expect.objectContaining({
       branch: "main",
       detached: false,
       isWorktree: false,
-      worktreeRoot: "/tmp/clark-desktop",
+      worktreeRoot: "/tmp/example-desktop",
       activity: expect.objectContaining({
         changedFiles: 0,
         untrackedFiles: 0,
@@ -132,7 +132,7 @@ describe("MockBridge", () => {
 
   it("re-roots the browser fixture for the persisted project folder", async () => {
     const bridge = new MockBridge();
-    const root = "/Users/example/projects/clark-desktop";
+    const root = "/Users/example/projects/example-desktop";
 
     expect(await bridge.projectContext(root)).toEqual(expect.objectContaining({
       branch: "main",
@@ -148,23 +148,23 @@ describe("MockBridge", () => {
   it("switches the browser preview between known local branches", async () => {
     const bridge = new MockBridge();
 
-    expect(await bridge.listProjectBranches("/tmp/clark-desktop")).toContainEqual({
+    expect(await bridge.listProjectBranches("/tmp/example-desktop")).toContainEqual({
       name: "feature/checkout-context",
       checkoutPath: null,
     });
-    await bridge.switchProjectBranch("/tmp/clark-desktop", "feature/checkout-context");
+    await bridge.switchProjectBranch("/tmp/example-desktop", "feature/checkout-context");
 
-    expect((await bridge.projectContext("/tmp/clark-desktop"))?.branch).toBe(
+    expect((await bridge.projectContext("/tmp/example-desktop"))?.branch).toBe(
       "feature/checkout-context",
     );
     await expect(
-      bridge.switchProjectBranch("/tmp/clark-desktop", "missing"),
+      bridge.switchProjectBranch("/tmp/example-desktop", "missing"),
     ).rejects.toThrow("Local branch missing no longer exists.");
   });
 
   it("models a managed worktree lifecycle without nesting it in preview", async () => {
     const bridge = new MockBridge();
-    const source = "/tmp/clark-desktop";
+    const source = "/tmp/example-desktop";
     const created = await bridge.createManagedWorktree(source, {
       base: "default",
       label: "review",
@@ -176,7 +176,7 @@ describe("MockBridge", () => {
       worktreeRoot: created.path,
     });
     await expect(bridge.createManagedWorktree(created.path, { base: "current" })).rejects.toThrow(
-      "already a Clark-managed isolated worktree",
+      "already a the agent-managed isolated worktree",
     );
     expect((await bridge.planProjectWorktree(created.path)).sourceIsManaged).toBe(true);
     expect(await bridge.listManagedWorktrees(created.path)).toEqual([created]);
@@ -192,16 +192,16 @@ describe("MockBridge", () => {
   it("simulates the save-commits-before-archive worktree journey", async () => {
     localStorage.setItem(MANAGED_WORKTREE_SIMULATION_STORAGE_KEY, "committed");
     const bridge = new MockBridge();
-    const source = "/tmp/clark-desktop";
+    const source = "/tmp/example-desktop";
     const created = await bridge.createManagedWorktree(source, { base: "default", label: "review" });
 
-    expect(created).toMatchObject({ state: "committed", preservedBranch: `clark/${created.id}` });
+    expect(created).toMatchObject({ state: "committed", preservedBranch: `agent/${created.id}` });
     await expect(bridge.cleanupManagedWorktree(source, created.id)).rejects.toThrow(
       "not protected by a branch",
     );
 
     const saved = await bridge.saveManagedWorktreeBranch(source, created.id);
-    expect(saved.branch).toBe(`clark/${created.id}-saved`);
+    expect(saved.branch).toBe(`agent/${created.id}-saved`);
     expect(await bridge.listManagedWorktrees(source)).toMatchObject([
       { id: created.id, state: "saved", preservedBranch: saved.branch },
     ]);
@@ -284,7 +284,7 @@ describe("MockBridge", () => {
     expect(snapshot.timeline.filter((item) => item.item === "artifact")).toHaveLength(3);
   });
 
-  it("exposes a live Clark Cloud research state before cited findings", async () => {
+  it("exposes a live product cloud research state before cited findings", async () => {
     const b = new MockBridge();
     await b.openSession("local", {}, { kind: "new", options: {} });
     await b.prompt("mock-session", [{ type: "text", text: "preview cloud research" }]);

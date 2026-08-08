@@ -42,7 +42,7 @@ pub(crate) fn provider_route(base_url: &str) -> String {
                 format!("{host}{path}")
             })
         })
-        .unwrap_or_else(|| "Clark model gateway".to_string())
+        .unwrap_or_else(|| "Agent Desktop model gateway".to_string())
 }
 
 fn sensitive_key(key: &str) -> bool {

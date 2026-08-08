@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "Provider-agnostic engine for clark-desktop: domain model, event projection, and the Provider abstraction. Compiles to native and WASM."
+description = "Provider-agnostic desktop agent engine: domain model, event projection, and Provider abstraction. Compiles to native and WASM."
 
 [lib]
 crate-type = ["rlib"]

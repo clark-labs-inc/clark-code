@@ -47,13 +47,13 @@ describe("FakeGitRepository", () => {
   it("routes an owned branch to its checkout and never nests managed worktrees", () => {
     const git = new FakeGitRepository("/repo");
     const managed = git.createManaged("/repo", { base: "current" });
-    expect(git.plan("/repo", `clark/${managed.id}`)).toMatchObject({
+    expect(git.plan("/repo", `agent/${managed.id}`)).toMatchObject({
       action: "open_owner",
       targetCheckoutPath: managed.path,
       preservation: "owner_checkout",
     });
     expect(() => git.createManaged(managed.path, { base: "current" })).toThrow(
-      "already a Clark-managed isolated worktree",
+      "already a the agent-managed isolated worktree",
     );
     expect(() => git.plan(managed.path, "feature/checkout-context")).toThrow("pinned");
   });
@@ -63,7 +63,7 @@ describe("FakeGitRepository", () => {
     const managed = git.createManaged("/repo", { base: "current" }, "committed");
     expect(() => git.cleanupManaged("/repo", managed.id)).toThrow("not protected by a branch");
     const saved = git.saveManaged("/repo", managed.id);
-    expect(saved.branch).toBe(`clark/${managed.id}-saved`);
+    expect(saved.branch).toBe(`agent/${managed.id}-saved`);
     expect(git.cleanupManaged("/repo", managed.id).removed).toBe(true);
   });
 });

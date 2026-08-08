@@ -1,6 +1,6 @@
 # Third-party notices
 
-Clark Code release packages include the following command-line helper:
+Agent Desktop distributions may include the following command-line helper:
 
 - [ripgrep](https://github.com/BurntSushi/ripgrep), version 15.1.0, by Andrew Gallant and contributors. Distributed under the MIT License or the Unlicense.
 

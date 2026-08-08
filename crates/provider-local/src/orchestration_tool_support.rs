@@ -188,7 +188,7 @@ pub(super) fn role_for_purpose(purpose: OrchestrationPurpose) -> Result<AgentRol
         OrchestrationPurpose::Review => Ok(AgentRole::Reviewer),
         OrchestrationPurpose::Verify => Ok(AgentRole::Verifier),
         OrchestrationPurpose::ExternalResearch => {
-            Err("external research must use clark_research".to_string())
+            Err("external research must use an installed research capability".to_string())
         }
     }
 }

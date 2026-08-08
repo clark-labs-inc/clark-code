@@ -38,7 +38,7 @@ pub trait WorkspaceGuard: Send + Sync {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ReadOnlyEnforcement {
-    /// Clark's local host refuses every mutating tool before invocation.
+    /// Agent Desktop's local host refuses every mutating tool before invocation.
     HostToolGate,
     /// The child process is wrapped in an OS-enforced read-only sandbox.
     OsSandbox,
@@ -83,13 +83,13 @@ impl ProviderHarness {
             && config.enforcement == ReadOnlyEnforcement::HostToolGate
         {
             return Err(
-                "ACP harnesses require an OS sandbox or disposable checkout; Clark cannot prove an external process obeys its host tool gate"
+                "ACP harnesses require an OS sandbox or disposable checkout; Agent Desktop cannot prove an external process obeys its host tool gate"
                     .to_string(),
             );
         }
-        if config.kind == HarnessKind::ClarkCloud {
+        if config.kind == HarnessKind::BrokeredCloud {
             return Err(
-                "Clark cloud research uses the dedicated clark_research boundary, not a coding provider harness"
+                "product cloud research uses a dedicated product tool boundary, not a coding provider harness"
                     .to_string(),
             );
         }
@@ -254,7 +254,8 @@ async fn collect_events(
                             request: request.id,
                             option: option.id.clone(),
                             feedback: Some(
-                                "delegated Clark agents are structurally read-only".to_string(),
+                                "delegated Agent Desktop agents are structurally read-only"
+                                    .to_string(),
                             ),
                         },
                     )

@@ -45,10 +45,10 @@ impl CartographyBackendState {
 
     async fn enroll(&self) -> Result<&ScoutCartographySession, String> {
         let host = self.host.as_ref().ok_or_else(|| {
-            "Scout enterprise backend is not host-configured; Clark must supply an exact organization, workspace, and private identity root".to_string()
+            "Scout enterprise backend is not host-configured; Agent Desktop must supply an exact organization, workspace, and private identity root".to_string()
         })?;
         let api_key = self.api_key.as_deref().ok_or_else(|| {
-            "Scout enterprise backend requires the host-injected Clark Platform credential"
+            "Scout enterprise backend requires the host-injected Agent Desktop Platform credential"
                 .to_string()
         })?;
         self.session
@@ -56,6 +56,7 @@ impl CartographyBackendState {
                 let config = ScoutCartographySessionConfig::new(
                     &self.base_url,
                     api_key,
+                    &host.route_prefix,
                     &host.identity_root,
                     host.organization_id,
                     host.workspace_id,
@@ -83,7 +84,7 @@ impl CartographyBackendState {
             })
         });
         json!({
-            "authority": "clark_system_cartography_backend",
+            "authority": "host_system_cartography_backend",
             "configured": self.host.is_some() && self.api_key.is_some(),
             "session_enrolled": self.session.get().is_some(),
             "binding": binding,
@@ -171,7 +172,7 @@ impl ToolExecutor for ScoutEnterpriseBackendTool {
     }
 
     fn description(&self) -> &str {
-        "Enroll this host's protected collector key with Clark's authoritative organization-scoped system-cartography backend, claim one fenced task from a backend-managed run, or submit a target-produced adapter receipt previously retained by this host. Submission uploads immutable evidence, translates the safe receipt under the backend-authored task scope, and ingests a signed batch. Organization, workspace, run binding, source, fence, Platform credential, signing key, and identity path are host-owned and cannot be supplied for submission."
+        "Enroll this host's protected collector key with Agent Desktop's authoritative organization-scoped system-cartography backend, claim one fenced task from a backend-managed run, or submit a target-produced adapter receipt previously retained by this host. Submission uploads immutable evidence, translates the safe receipt under the backend-authored task scope, and ingests a signed batch. Organization, workspace, run binding, source, fence, Platform credential, signing key, and identity path are host-owned and cannot be supplied for submission."
     }
 
     fn parameters(&self) -> Value {
@@ -235,10 +236,10 @@ impl ToolExecutor for ScoutEnterpriseBackendTool {
                 Ok(session) => {
                     let enrollment = session.enrollment();
                     ToolOutcome::ok(
-                        "Scout collector is enrolled with Clark's authoritative backend.",
+                        "Scout collector is enrolled with Agent Desktop's authoritative backend.",
                     )
                     .with_details(json!({
-                        "authority": "clark_system_cartography_backend",
+                        "authority": "host_system_cartography_backend",
                         "organization_id": enrollment.organization_id,
                         "workspace_id": enrollment.workspace_id,
                         "machine_id": enrollment.id,
@@ -295,7 +296,7 @@ impl ToolExecutor for ScoutEnterpriseBackendTool {
                         "outcome": submitted.acceptance.outcome,
                         "inserted_events": submitted.acceptance.inserted_events,
                         "recorded_conflicts": submitted.acceptance.recorded_conflicts,
-                        "authority": "clark_system_cartography_backend",
+                        "authority": "host_system_cartography_backend",
                     })),
                     Err(error) => ToolOutcome::error(error),
                 }
@@ -308,7 +309,7 @@ fn claim_task_outcome(response: TaskClaimResponse) -> ToolOutcome {
     let content = match &response.task {
         Some(task) => match serde_json::to_string(task) {
             Ok(task) => format!(
-                "Claimed one fenced Scout task from Clark. Copy this exact backend-issued task \
+                "Claimed one fenced Scout task from Agent Desktop. Copy this exact backend-issued task \
                  into the next adapter step; do not infer or replace any field:\n{task}"
             ),
             Err(_) => {
@@ -317,7 +318,7 @@ fn claim_task_outcome(response: TaskClaimResponse) -> ToolOutcome {
                 )
             }
         },
-        None => "Clark reports no claimable Scout task for this run.".to_string(),
+        None => "Agent Desktop reports no claimable Scout task for this run.".to_string(),
     };
     ToolOutcome::ok(content).with_details(json!({
         "request_id": response.request_id,
@@ -335,7 +336,7 @@ impl ScoutEnterpriseBackendQueryTool {
         let configured = status["configured"].as_bool().unwrap_or(false);
         let enrolled = status["session_enrolled"].as_bool().unwrap_or(false);
         ToolOutcome::ok(format!(
-            "Scout enterprise authority is Clark's organization-scoped backend; \
+            "Scout enterprise authority is Agent Desktop's organization-scoped backend; \
              configured={configured}, session_enrolled={enrolled}."
         ))
         .with_details(status)
@@ -399,7 +400,7 @@ impl ToolExecutor for ScoutEnterpriseBackendQueryTool {
     }
 
     fn description(&self) -> &str {
-        "Read bounded current or bitemporal as-of graph snapshots, exact temporal deltas, versioned simulation coverage/result overlays, and the monotonic workspace change feed from Clark's authoritative system-cartography backend. Delta pages classify added, changed, removed, and optionally unchanged objects between two independently pinned bitemporal cuts, so they can show either business-system change or how Scout's knowledge grew over hours and days. Simulation overlays are immutable versions pinned to one exact graph snapshot. Change pages let clients refresh maps without rescanning. Tenant ids are fixed by trusted host configuration, never inferred from email domains or accepted from model arguments. This tool never reads a local enterprise database."
+        "Read bounded current or bitemporal as-of graph snapshots, exact temporal deltas, versioned simulation coverage/result overlays, and the monotonic workspace change feed from Agent Desktop's authoritative system-cartography backend. Delta pages classify added, changed, removed, and optionally unchanged objects between two independently pinned bitemporal cuts, so they can show either business-system change or how Scout's knowledge grew over hours and days. Simulation overlays are immutable versions pinned to one exact graph snapshot. Change pages let clients refresh maps without rescanning. Tenant ids are fixed by trusted host configuration, never inferred from email domains or accepted from model arguments. This tool never reads a local enterprise database."
     }
 
     fn parameters(&self) -> Value {
@@ -522,7 +523,7 @@ impl ToolExecutor for ScoutEnterpriseBackendQueryTool {
                     .await
                 {
                     Ok(page) => ToolOutcome::ok(format!(
-                        "Read {} bounded graph rows from Clark.",
+                        "Read {} bounded graph rows from Agent Desktop.",
                         page.entries.len()
                     ))
                     .with_details(json!({
@@ -532,7 +533,7 @@ impl ToolExecutor for ScoutEnterpriseBackendQueryTool {
                         "known_at_ms": page.known_at_ms,
                         "entries": page.entries,
                         "next_cursor": page.next_cursor,
-                        "authority": "clark_system_cartography_backend",
+                        "authority": "host_system_cartography_backend",
                     })),
                     Err(error) => ToolOutcome::error(error),
                 }
@@ -566,7 +567,7 @@ impl ToolExecutor for ScoutEnterpriseBackendQueryTool {
                     .await
                 {
                     Ok(page) => ToolOutcome::ok(format!(
-                        "Read {} temporal graph changes from Clark.",
+                        "Read {} temporal graph changes from Agent Desktop.",
                         page.entries.len()
                     ))
                     .with_details(json!({
@@ -576,7 +577,7 @@ impl ToolExecutor for ScoutEnterpriseBackendQueryTool {
                         "to_snapshot": page.to_snapshot,
                         "entries": page.entries,
                         "next_cursor": page.next_cursor,
-                        "authority": "clark_system_cartography_backend",
+                        "authority": "host_system_cartography_backend",
                     })),
                     Err(error) => ToolOutcome::error(error),
                 }
@@ -599,14 +600,14 @@ impl ToolExecutor for ScoutEnterpriseBackendQueryTool {
                     .await
                 {
                     Ok(page) => ToolOutcome::ok(format!(
-                        "Read {} simulation overlay memberships from Clark.",
+                        "Read {} simulation overlay memberships from Agent Desktop.",
                         page.memberships.len()
                     ))
                     .with_details(json!({
                         "overlay": page.overlay,
                         "memberships": page.memberships,
                         "next_cursor": page.next_cursor,
-                        "authority": "clark_system_cartography_backend",
+                        "authority": "host_system_cartography_backend",
                     })),
                     Err(error) => ToolOutcome::error(error),
                 }
@@ -621,7 +622,7 @@ impl ToolExecutor for ScoutEnterpriseBackendQueryTool {
                     .await
                 {
                     Ok(page) => ToolOutcome::ok(format!(
-                        "Read {} realtime cartography changes from Clark.",
+                        "Read {} realtime cartography changes from Agent Desktop.",
                         page.changes.len()
                     ))
                     .with_details(json!({
@@ -629,7 +630,7 @@ impl ToolExecutor for ScoutEnterpriseBackendQueryTool {
                         "workspace_id": page.workspace_id,
                         "changes": page.changes,
                         "next_after_sequence": page.next_after_sequence,
-                        "authority": "clark_system_cartography_backend",
+                        "authority": "host_system_cartography_backend",
                     })),
                     Err(error) => ToolOutcome::error(error),
                 }

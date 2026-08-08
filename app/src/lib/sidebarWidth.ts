@@ -5,7 +5,7 @@
 // enough room for the conversation pane by clamping against the current window
 // width. Mirrors the artifact-panel width helpers in artifactPanelWidth.ts.
 
-export const SIDEBAR_WIDTH_KEY = "clark.sidebar-width";
+export const SIDEBAR_WIDTH_KEY = "agent-desktop.sidebar-width";
 export const DEFAULT_SIDEBAR_WIDTH = 272; // 17rem — the historical fixed width
 export const MIN_SIDEBAR_WIDTH = 200;
 /** Reserved for the conversation pane when the sidebar is constrained by the window. */

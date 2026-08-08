@@ -27,9 +27,9 @@ pub(super) async fn roots(
     home: Option<&Path>,
     warnings: &mut Vec<String>,
 ) -> Vec<SkillRoot> {
-    let mut plugin_dirs = vec![project_root.join(".clark/plugins")];
+    let mut plugin_dirs = vec![project_root.join(".agent/plugins")];
     if let Some(home) = home {
-        plugin_dirs.push(home.join(".clark/plugins"));
+        plugin_dirs.push(home.join(".agent/plugins"));
     }
 
     let mut roots = Vec::new();
@@ -49,7 +49,7 @@ pub(super) async fn roots(
             }
             let plugin_root = plugin_dir.join(&entry.name);
             let manifest_paths = [
-                plugin_root.join(".clark-plugin/plugin.json"),
+                plugin_root.join(".agent-plugin/plugin.json"),
                 plugin_root.join(".codex-plugin/plugin.json"),
             ];
             let mut loaded = None;

@@ -98,7 +98,9 @@ pub async fn install_skill_pack(
     let source = source_skills_root(exec, &source).await;
     let base = pack_storage_root(exec, project_root, request.scope).await?;
     if source.starts_with(&base) {
-        return Err("skill pack source cannot be inside Clark's managed pack storage".into());
+        return Err(
+            "skill pack source cannot be inside Agent Desktop's managed pack storage".into(),
+        );
     }
 
     let files = collect_source_files(exec, &source).await?;
@@ -244,7 +246,7 @@ pub(super) async fn active_roots(
                             SkillPackScope::Project => SkillScope::Project,
                             SkillPackScope::User => SkillScope::User,
                         },
-                        origin: SkillOrigin::Clark,
+                        origin: SkillOrigin::Bundled,
                         namespace: None,
                         identity_namespace: Some(format!(
                             "managed:{}:{pack_id}",
@@ -280,7 +282,7 @@ async fn validate_pack(
                 SkillPackScope::Project => SkillScope::Project,
                 SkillPackScope::User => SkillScope::User,
             },
-            origin: SkillOrigin::Clark,
+            origin: SkillOrigin::Bundled,
             namespace: None,
             identity_namespace: Some(format!("managed:{}:{pack_id}", scope_label(scope))),
             revision_context: Some(revision.to_string()),
@@ -398,7 +400,7 @@ async fn write_staging(
 
 fn pack_revision(files: &[SourceFile]) -> String {
     let mut hasher = Sha256::new();
-    hasher.update(b"clark-skill-pack-v1\0");
+    hasher.update(b"agent-skill-pack-v1\0");
     for file in files {
         hasher.update(file.relative.to_string_lossy().as_bytes());
         hasher.update(b"\0");
@@ -414,21 +416,21 @@ async fn pack_storage_root(
     scope: SkillPackScope,
 ) -> Result<PathBuf, String> {
     Ok(match scope {
-        SkillPackScope::Project => project_root.join(".clark/skill-packs"),
+        SkillPackScope::Project => project_root.join(".agent/skill-packs"),
         SkillPackScope::User => resolve_home(exec, project_root)
             .await
             .ok_or_else(|| "could not resolve the target environment home directory".to_string())?
-            .join(".clark/skill-packs"),
+            .join(".agent/skill-packs"),
     })
 }
 
 fn pack_bases(project_root: &Path, home: Option<&Path>) -> Vec<(SkillPackScope, PathBuf)> {
     let mut bases = vec![(
         SkillPackScope::Project,
-        project_root.join(".clark/skill-packs"),
+        project_root.join(".agent/skill-packs"),
     )];
     if let Some(home) = home {
-        bases.push((SkillPackScope::User, home.join(".clark/skill-packs")));
+        bases.push((SkillPackScope::User, home.join(".agent/skill-packs")));
     }
     bases
 }

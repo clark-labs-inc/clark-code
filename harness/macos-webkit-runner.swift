@@ -17,7 +17,7 @@ private final class TauriSchemeHandler: NSObject, WKURLSchemeHandler {
         let body = Data(
             """
             <!doctype html>
-            <html><head><meta charset="utf-8"></head><body>Clark QA store</body></html>
+            <html><head><meta charset="utf-8"></head><body>Agent Desktop QA store</body></html>
             """.utf8
         )
         guard let response = HTTPURLResponse(
@@ -132,7 +132,7 @@ private final class WebViewEvaluation {
             finish(
                 .failure(
                     WebKitEvaluationFailure.message(
-                        "could not create Clark local origin"
+                        "could not create Agent Desktop local origin"
                     )
                 )
             )

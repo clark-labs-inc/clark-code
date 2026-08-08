@@ -40,8 +40,8 @@ export function UnavailableConversationPanel({
         </h1>
         <p className="mt-2 text-sm leading-6 text-ink-muted">
           {conversation.kind === "refresh_required"
-            ? "Clark Code paused this local copy so it can’t overwrite newer history. The chat stays selected; reopen it to continue from the latest version."
-            : "Clark Code couldn’t reopen it. The chat stays selected so you can retry or remove the unavailable entry from your history."}
+            ? "Agent Desktop paused this local copy so it can’t overwrite newer history. The chat stays selected; reopen it to continue from the latest version."
+            : "Agent Desktop couldn’t reopen it. The chat stays selected so you can retry or remove the unavailable entry from your history."}
         </p>
 
         {cleanupError && (

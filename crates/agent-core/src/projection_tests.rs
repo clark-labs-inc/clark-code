@@ -60,7 +60,7 @@ fn incident(status: crate::recovery::ProviderIncidentStatus) -> crate::recovery:
         scope: crate::recovery::ProviderIncidentScope::ModelRequest,
         failure_class: crate::recovery::ProviderFailureClass::TransientTransport,
         category: crate::recovery::ProviderIncidentCategory::Timeout,
-        message: "Model connection timed out while Clark was working.".into(),
+        message: "Model connection timed out while the agent was working.".into(),
         detail: "gateway timeout".into(),
         model: "test-model".into(),
         provider_route: "gateway.test".into(),
@@ -487,7 +487,7 @@ fn structured_tool_progress_survives_final_content_replacement() {
             run: run(),
             call: ToolCall {
                 id: id.clone(),
-                tool_name: Some("clark_research".into()),
+                tool_name: Some("research_extension".into()),
                 title: "Researching".into(),
                 kind: ToolKind::Research,
                 status: ToolStatus::Pending,

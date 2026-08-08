@@ -4,15 +4,10 @@ members = [
     "crates/agent-core",
     "crates/agent-orchestration",
     "crates/computer-use",
-    "crates/clark-http",
-    "crates/conversation-cloud",
-    "crates/clark-cli",
-    "crates/security-cloud-sync",
+    "crates/desktop-http",
     "crates/install-context",
     "crates/provider-acp",
-    "crates/provider-clark",
     "crates/provider-local",
-    "crates/provider-specialist",
     "crates/provider-remote-worker",
     "crates/code-host",
     "crates/code-worker",
@@ -44,7 +39,7 @@ members = [
 exclude = ["vendor/clark-capture"]
 
 [workspace.package]
-version = "0.1.133"
+version = "0.1.134"
 edition = "2021"
 license = "Apache-2.0"
 repository = "https://github.com/clark-labs-inc/clark-desktop"

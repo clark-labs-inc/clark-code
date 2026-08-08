@@ -9,7 +9,7 @@ fn summary() -> SecurityScanReportSummary {
         id: "scan-123".into(),
         repository_id: "repository-456".into(),
         mode: "deep".into(),
-        model: "Clark Security".into(),
+        model: "security-model".into(),
         status: "completed".into(),
         created_at: "2026-08-04T12:00:00Z".into(),
         generated_at: "2026-08-04T12:05:00Z".into(),
@@ -18,13 +18,13 @@ fn summary() -> SecurityScanReportSummary {
 
 fn local_record() -> SecurityScanRecord {
     serde_json::from_value(json!({
-        "path": ".clark/security-scans/local-123/scan.json",
+        "path": ".agent/security-scans/local-123/scan.json",
         "modifiedAtMs": 1,
         "bundle": {
             "contractVersion": 2,
             "scanId": "local-123",
             "mode": "deep",
-            "model": "Clark Security",
+            "model": "security-model",
             "scope": ".",
             "inventoryId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "phase": "reporting",
@@ -80,7 +80,7 @@ fn local_record() -> SecurityScanRecord {
         "seal": {
             "contractVersion": 2,
             "scanId": "local-123",
-            "model": "Clark Security",
+            "model": "security-model",
             "scope": ".",
             "inventoryId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "deepPasses": 3,
@@ -135,7 +135,7 @@ fn report_renders_as_a_tagged_pdf() {
     let body = String::from_utf8_lossy(&pdf);
     assert!(body.contains("/StructTreeRoot"));
     assert!(body.contains("/S /H1"));
-    if let Ok(path) = std::env::var("CLARK_SECURITY_REPORT_TEST_OUTPUT") {
+    if let Ok(path) = std::env::var("AGENT_SECURITY_REPORT_TEST_OUTPUT") {
         std::fs::write(path, &pdf).expect("write requested visual QA artifact");
     }
 }

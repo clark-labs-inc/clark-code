@@ -7,7 +7,7 @@ use thiserror::Error;
 use crate::spec::RemoteWorkerSpec;
 use crate::transport::SshTransport;
 
-const WORKER_BIN_DIR: &str = ".clark/bin";
+const WORKER_BIN_DIR: &str = ".agent/bin";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RemoteArch {
@@ -82,7 +82,7 @@ impl RemoteArtifact {
         }
         let expected_binary_path = spec.remote_binary.clone().unwrap_or_else(|| {
             format!(
-                "{home}/{WORKER_BIN_DIR}/clark-code-worker-v{}-{}",
+                "{home}/{WORKER_BIN_DIR}/agent-code-worker-v{}-{}",
                 env!("CARGO_PKG_VERSION"),
                 arch.slug()
             )
@@ -102,7 +102,7 @@ impl RemoteArtifact {
         } else {
             installed_worker(transport).await.map_err(|_| {
                 RemoteArtifactError::MissingBinary(format!(
-                    "{expected_binary_path}; install the current Clark Code CLI on the SSH host"
+                    "{expected_binary_path}; install a compatible agent worker on the SSH host"
                 ))
             })?
         };
@@ -124,7 +124,7 @@ impl RemoteArtifact {
 
 fn cached_config_path(home: &str, bytes: &[u8]) -> String {
     format!(
-        "{home}/.clark/config/code-worker/config-{}.json",
+        "{home}/.agent/config/code-worker/config-{}.json",
         hex_digest(bytes)
     )
 }
@@ -160,7 +160,7 @@ fn parse_sha256(value: &str) -> Result<String, RemoteArtifactError> {
 async fn installed_worker(transport: &SshTransport) -> Result<String, RemoteArtifactError> {
     let candidate = ssh_capture(
         transport,
-        "candidate=$(command -v clark-code-headless 2>/dev/null || true); [ -n \"$candidate\" ] && [ -x \"$candidate\" ] && case \"$candidate\" in /*) printf '%s' \"$candidate\";; *) exit 1;; esac",
+        "candidate=$(command -v agent-code-worker 2>/dev/null || true); [ -n \"$candidate\" ] && [ -x \"$candidate\" ] && case \"$candidate\" in /*) printf '%s' \"$candidate\";; *) exit 1;; esac",
     )
     .await?;
     let candidate = candidate.trim();
@@ -358,7 +358,7 @@ pub enum RemoteArtifactError {
     LocalBinaryMissing(PathBuf),
     #[error("remote worker binary is not installed: {0}")]
     MissingBinary(String),
-    #[error("remote worker binary must be under the per-user Clark bin directory: {0}")]
+    #[error("remote worker binary must be under the per-user agent bin directory: {0}")]
     InvalidRemoteBinary(String),
     #[error("remote worker binary did not produce one exact SHA-256 digest")]
     InvalidBinaryDigest,
@@ -431,11 +431,10 @@ mod tests {
     #[test]
     fn missing_worker_error_explains_the_remote_install_contract() {
         assert!(RemoteArtifactError::MissingBinary(
-            "/home/user/.clark/bin/worker; install the current Clark Code CLI on the SSH host"
-                .into()
+            "/home/user/.agent/bin/worker; install the current agent worker on the SSH host".into()
         )
         .to_string()
-        .contains("install the current Clark Code CLI"));
+        .contains("install the current agent worker"));
     }
 
     #[test]
@@ -445,7 +444,7 @@ mod tests {
         let changed = cached_config_path("/home/ubuntu", br#"{"model":"two"}"#);
         assert_eq!(first, same);
         assert_ne!(first, changed);
-        assert!(first.starts_with("/home/ubuntu/.clark/config/code-worker/config-"));
+        assert!(first.starts_with("/home/ubuntu/.agent/config/code-worker/config-"));
         assert!(first.ends_with(".json"));
     }
 }

@@ -1,4 +1,4 @@
-//! Resource-enforced WebAssembly execution for pure Clark Scout capsules.
+//! Resource-enforced WebAssembly execution for pure Scout capsules.
 //!
 //! The host accepts only administrator-approved module digests and modules with
 //! zero imports. Every invocation gets a fresh instance and store. Wasmi fuel,

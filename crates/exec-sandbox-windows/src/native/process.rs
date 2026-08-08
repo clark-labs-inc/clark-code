@@ -5,8 +5,8 @@ use std::path::Path;
 
 use exec_sandbox_protocol::WindowsRunnerRequest;
 
-pub(super) const WORKER_REQUEST_ENV: &str = "CLARK_WINDOWS_SANDBOX_WORKER_REQUEST_B64";
-pub(super) const TRACE_ENV: &str = "CLARK_WINDOWS_SANDBOX_TRACE";
+pub(super) const WORKER_REQUEST_ENV: &str = "DESKTOP_WINDOWS_SANDBOX_WORKER_REQUEST_B64";
+pub(super) const TRACE_ENV: &str = "DESKTOP_WINDOWS_SANDBOX_TRACE";
 
 pub(super) fn worker_environment(encoded_request: &str) -> Vec<u16> {
     let mut overrides = windows_noninteractive_environment().collect::<Vec<_>>();

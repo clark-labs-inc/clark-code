@@ -19,7 +19,7 @@ interface ResilienceBenchmarkContract {
   storageKey: string;
   model: string;
   modelLabel: string;
-  provider: "clark-managed";
+  provider: "managed-agent";
   faults: ResilienceFault[];
 }
 
@@ -115,7 +115,7 @@ function incident(
     message,
     detail,
     model: RESILIENCE_BENCHMARK.model,
-    provider_route: "https://api.clarkslabs.com/v1",
+    provider_route: "http://127.0.0.1:11434/v1",
     ...(category === "rate_limit" ? { provider_status: 429, provider_error_type: "rate_limit" } : {}),
     request: {
       idempotency_key: `${run}-${suffix}-request`,
@@ -156,7 +156,7 @@ function settleActiveIncidents(snapshot: Snapshot, status: "recovered" | "interr
  * Deterministic browser-only fault injection at the same typed Snapshot seam
  * used by the native provider. It never pretends to be a paid model result:
  * the Playwright report labels every one of these cases `simulated`, and a
- * separate devbridge control exercises the real Clark-managed model route.
+ * separate devbridge control exercises the real the agent-managed model route.
  */
 export async function playResilienceSimulation(
   stored: StoredResilienceCase,
@@ -203,8 +203,8 @@ export async function playResilienceSimulation(
   snapshot.timeline.push({ item: "tool_call", id: "shell:89", run });
 
   if (faults.has("duplicated_tool_ids")) {
-    snapshot.tool_calls.clark_agent_call_1 = {
-      id: "clark_agent_call_1",
+    snapshot.tool_calls.agent_loop_call_1 = {
+      id: "agent_loop_call_1",
       tool_name: "shell",
       title: "Verify normalized tool result",
       kind: "execute",
@@ -212,7 +212,7 @@ export async function playResilienceSimulation(
       locations: [{ path: "README.md", line: 1 }],
       content: [{ type: "text", text: "The repeated provider identifier was normalized safely." }],
     };
-    snapshot.timeline.push({ item: "tool_call", id: "clark_agent_call_1", run });
+    snapshot.timeline.push({ item: "tool_call", id: "agent_loop_call_1", run });
   }
 
   if (faults.has("rate_limit")) {
@@ -222,8 +222,8 @@ export async function playResilienceSimulation(
       started,
       "model_request",
       "rate_limit",
-      "Clark is waiting for temporary model capacity.",
-      "The Clark-managed model route returned HTTP 429 before output began.",
+      "the agent is waiting for temporary model capacity.",
+      "The the agent-managed model route returned HTTP 429 before output began.",
       13,
     ));
   }
@@ -234,7 +234,7 @@ export async function playResilienceSimulation(
       started,
       "provider_event_stream",
       "connection_lost",
-      "Clark briefly lost the model connection.",
+      "the agent briefly lost the model connection.",
       "The response stream ended before any model output was committed.",
       4,
     ));
@@ -248,7 +248,7 @@ export async function playResilienceSimulation(
       "cloud_history_sync",
       "connection_lost",
       "Cloud history sync is catching up.",
-      "The durable local outbox is waiting for Clark cloud acknowledgment.",
+      "The durable local outbox is waiting for product cloud acknowledgment.",
       8,
     ));
   }
@@ -259,7 +259,7 @@ export async function playResilienceSimulation(
       started,
       "provider_process",
       "connection_lost",
-      "Clark stopped unexpectedly. Your saved progress is intact.",
+      "the agent stopped unexpectedly. Your saved progress is intact.",
       "The local provider process ended after the transcript boundary was committed.",
       2,
     );
@@ -274,7 +274,7 @@ export async function playResilienceSimulation(
         transcript_commit_id: `${run}-commit`,
         completed_tools: faults.has("duplicated_tool_ids") ? 2 : 1,
         last_completed_tool_id: faults.has("duplicated_tool_ids")
-          ? "clark_agent_call_1"
+          ? "agent_loop_call_1"
           : "shell:89",
         last_completed_tool_name: "shell",
         baseline_checkpoint_id: "benchmark-checkpoint",
@@ -334,7 +334,7 @@ export async function playResilienceSimulation(
       outcome: {
         status: "failed",
         failure_kind: "runtime_interrupted",
-        error: "Clark stopped before recovery completed.",
+        error: "the agent stopped before recovery completed.",
       },
       checkpoint: "benchmark-checkpoint",
     };

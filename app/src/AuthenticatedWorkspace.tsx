@@ -14,10 +14,6 @@ import { OpeningScreen } from "./surfaces/OpeningScreen";
 import { UnavailableConversation } from "./surfaces/UnavailableConversation";
 import { Composer } from "./surfaces/Composer";
 import { GoalStatusRail } from "./surfaces/GoalStatusRail";
-import { CreditBanner } from "./surfaces/CreditBanner";
-import { ActivityRewardToast } from "./surfaces/ActivityRewardToast";
-import { BillingStateSync } from "./surfaces/BillingStateSync";
-import { BillingTransitionToast } from "./surfaces/BillingTransitionToast";
 import { OfflineBanner } from "./surfaces/OfflineBanner";
 import { CommandPalette } from "./surfaces/CommandPalette";
 import { MobileRemoteAgent } from "./surfaces/MobileRemoteAgent";
@@ -52,6 +48,9 @@ const McpSettings = lazy(() =>
 const SshSettings = lazy(() =>
   import("./surfaces/SshSettings").then((module) => ({ default: module.SshSettings })),
 );
+const NewProjectDialogLazy = lazy(() =>
+  import("./surfaces/NewProjectDialog").then((module) => ({ default: module.NewProjectDialog })),
+);
 const Settings = lazy(() =>
   import("./surfaces/Settings").then((module) => ({ default: module.Settings })),
 );
@@ -82,6 +81,7 @@ export default function AuthenticatedWorkspace({
   const terminalOpen = useSessionStore((state) => state.terminalOpen);
   const mcpOpen = useSessionStore((state) => state.mcpOpen);
   const sshOpen = useSessionStore((state) => state.sshOpen);
+  const newProjectOpen = useSessionStore((state) => state.newProjectOpen);
   const settingsOpen = useSessionStore((state) => state.settingsOpen);
   const subagentsOpen = useFanOutStore(
     (state) => state.inspectorOpen && state.fanOut !== null,
@@ -268,15 +268,11 @@ export default function AuthenticatedWorkspace({
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-bg text-ink">
-      <BillingStateSync />
       <MobileRemoteAgent />
-      <ActivityRewardToast />
-      <BillingTransitionToast />
       <Sidebar artifactCount={artifactCount} onOpenArtifacts={openArtifacts} />
       <div className="relative flex min-w-0 flex-1 flex-col">
         {!activeSpecialist && <TopBar dark={dark} onToggleTheme={onToggleTheme} />}
         <OfflineBanner />
-        <CreditBanner />
         {/* Cached target content stays visible while its native runtime
             reattaches. The full-pane screen is only for a start/open that has
             no target session metadata to render yet. */}
@@ -412,6 +408,11 @@ export default function AuthenticatedWorkspace({
       {sshOpen && (
         <Suspense fallback={null}>
           <SshSettings />
+        </Suspense>
+      )}
+      {newProjectOpen && (
+        <Suspense fallback={null}>
+          <NewProjectDialogLazy />
         </Suspense>
       )}
       {settingsOpen && (

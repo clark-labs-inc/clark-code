@@ -1,13 +1,12 @@
 {
   "bundle": {
-    "externalBin": ["binaries/clark-code-headless"],
     "resources": {
-      "binaries/rg-x86_64-pc-windows-msvc.exe": "clark-path/rg.exe",
-      "binaries/clark-command-runner-x86_64-pc-windows-msvc.exe": "clark-resources/sandbox/windows/clark-command-runner.exe",
-      "binaries/clark-windows-sandbox-setup-x86_64-pc-windows-msvc.exe": "clark-resources/sandbox/windows/clark-windows-sandbox-setup.exe",
-      "binaries/clark-computer-use-helper-x86_64-pc-windows-msvc.exe": "clark-resources/computer-use/clark-computer-use-helper.exe",
-      "binaries/rg-LICENSE-MIT": "clark-resources/licenses/ripgrep/LICENSE-MIT",
-      "binaries/rg-UNLICENSE": "clark-resources/licenses/ripgrep/UNLICENSE"
+      "binaries/rg-x86_64-pc-windows-msvc.exe": "agent-path/rg.exe",
+      "binaries/agent-command-runner-x86_64-pc-windows-msvc.exe": "agent-resources/sandbox/windows/agent-command-runner.exe",
+      "binaries/agent-windows-sandbox-setup-x86_64-pc-windows-msvc.exe": "agent-resources/sandbox/windows/agent-windows-sandbox-setup.exe",
+      "binaries/agent-computer-use-helper-x86_64-pc-windows-msvc.exe": "agent-resources/computer-use/agent-computer-use-helper.exe",
+      "binaries/rg-LICENSE-MIT": "agent-resources/licenses/ripgrep/LICENSE-MIT",
+      "binaries/rg-UNLICENSE": "agent-resources/licenses/ripgrep/UNLICENSE"
     },
     "windows": {
       "webviewInstallMode": {

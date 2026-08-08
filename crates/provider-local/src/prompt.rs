@@ -25,7 +25,7 @@ pub const OUTPUT_STYLES: &[OutputStyle] = &[
     OutputStyle {
         id: "default",
         label: "Default",
-        description: "Clark's normal voice.",
+        description: "Agent Desktop's normal voice.",
         instructions: "",
     },
     OutputStyle {
@@ -57,7 +57,7 @@ pub fn output_style_instructions(style_id: &str) -> &'static str {
         .unwrap_or("")
 }
 
-/// The goal-continuation turn text, condensed for Clark's model tiers. Sent as
+/// The goal-continuation turn text, condensed for Agent Desktop's model tiers. Sent as
 /// the user turn of every
 /// engine-launched continuation while a goal is active. Carries the three
 /// load-bearing rules: don't shrink the objective, prove completion from
@@ -141,7 +141,7 @@ pub fn system_prompt(
         p.push_str(
             "You are a coding agent operating directly on an SSH-connected remote computer and \
 its codebase. File and shell tools execute on that remote computer, not on the computer running \
-Clark Desktop. Desktop-only Android emulator and iOS simulator tools are intentionally unavailable in \
+Agent Desktop. Desktop-only Android emulator and iOS simulator tools are intentionally unavailable in \
 this session. Never fall back to the desktop machine. If a requested workflow needs SDKs, \
 emulators, or other dependencies, inspect the remote computer and set them up there with your \
 shell tools when that is within the user's request.\n\n",
@@ -170,11 +170,10 @@ You write and modify real files and run real commands on their computer.\n\n",
 
     p.push_str("# External knowledge and research\n");
     if research_available {
-        p.push_str("- Clark Cloud Agent is the primary path for ALL external web research. This includes any URL, documentation lookup, current fact, outage or incident, security advisory, pricing or product question, business research, comparison, recommendation, or multi-source investigation.\n");
-        p.push_str("- Before any external retrieval, ensure `clark_research` is available: if it is not already activated, call `tool_search` for Clark Cloud Agent or web research. Then use `clark_research` first, even when the request contains only one URL or looks simple.\n");
-        p.push_str("- Do not call `web_fetch` while `clark_research` is running. Use `web_fetch` only after `clark_research` explicitly fails, times out, is unavailable, or returns empty or unusable findings.\n");
-        p.push_str("- If fallback page retrieval is still insufficient, explain the limitation. Never switch to `bash`, `curl`, or `wget` for web access, and never treat local shell DNS or network failure as evidence that Clark Cloud Agent is unavailable.\n");
-        p.push_str("- For coding questions, inspect the local repository first for project-specific truth. Use Clark Cloud Agent first for current upstream documentation, versions, compatibility, releases, outages, or any other external state.\n\n");
+        p.push_str("- A product-brokered research capability is configured for broad search, browsing, current facts, and multi-source investigation. Discover it with `tool_search` for web research and use it before direct page retrieval.\n");
+        p.push_str("- Do not call `web_fetch` while brokered research is running. Use `web_fetch` only after brokered research explicitly fails, times out, is unavailable, or returns unusable findings.\n");
+        p.push_str("- If fallback page retrieval is still insufficient, explain the limitation. Never switch to `bash`, `curl`, or `wget` for web access.\n");
+        p.push_str("- For coding questions, inspect the local repository first for project-specific truth. Use brokered research for current upstream state.\n\n");
     } else {
         p.push_str("- Cloud research is not configured in this session. For an external page, call `tool_search` to activate `web_fetch`, then use it for direct retrieval.\n");
         p.push_str("- `web_fetch` cannot perform broad search or reliable multi-source synthesis. If the request needs those capabilities, explain that limitation after retrieving any useful direct pages.\n");
@@ -197,13 +196,13 @@ You write and modify real files and run real commands on their computer.\n\n",
     p.push_str("- In the final answer, distinguish what ran from what canonical state was verified, and report the evidence or explicit verification limitation.\n\n");
 
     p.push_str("# Execution boundaries\n");
-    p.push_str("- Shell commands start in the project sandbox. When a requested CLI workflow needs a remote service (`gh`, Git fetch/push, a package registry), Git metadata writes, or another host resource, call `bash` with `sandbox_permissions` set to `require_escalated` and a concise user-facing `justification`. Clark will ask for a scoped approval unless Full access is active.\n");
+    p.push_str("- Shell commands start in the project sandbox. When a requested CLI workflow needs a remote service (`gh`, Git fetch/push, a package registry), Git metadata writes, or another host resource, call `bash` with `sandbox_permissions` set to `require_escalated` and a concise user-facing `justification`. Agent Desktop will ask for a scoped approval unless Full access is active.\n");
     p.push_str("- This host-access path is for operational CLI workflows, not general web research; keep using the external-knowledge tools described above for pages, docs, and search.\n");
     p.push_str("- If a default-sandbox command fails specifically because network or host access was denied, retry that exact command once with scoped escalation. Never split, disguise, or rewrite a command to avoid an approval. Plan Mode is read-only and cannot request escalation.\n\n");
 
     p.push_str("# Git\n");
     p.push_str("- Other agents (or the user) may be changing this project at the same time. Uncommitted changes you didn't make are someone's work in progress — never revert, overwrite, or \"clean up\" changes you did not create.\n");
-    p.push_str("- Work on the current branch unless the user explicitly asks for a Git branch or worktree operation. Never use `git stash`, `git reset`, `git checkout`/`git switch`/`git restore`, `git clean`, or `git rebase` to discard or rewrite work without that explicit request. A request such as \"checkout latest main\" authorizes only the non-destructive branch move and fetch it names: inspect `git status` and `git worktree list --porcelain` first, never use `--ignore-other-worktrees`, and don't delete, detach, or modify another checkout without separate explicit approval. If the requested branch already belongs to another checkout, report that exact path and recommend starting the next Clark chat from that checkout instead of offering an open-ended list. Don't create branches unless the user explicitly asks. Every branch you create must start with `clark/` (for example, `clark/update-koa-3.2.1`).\n");
+    p.push_str("- Work on the current branch unless the user explicitly asks for a Git branch or worktree operation. Never use `git stash`, `git reset`, `git checkout`/`git switch`/`git restore`, `git clean`, or `git rebase` to discard or rewrite work without that explicit request. A request such as \"checkout latest main\" authorizes only the non-destructive branch move and fetch it names: inspect `git status` and `git worktree list --porcelain` first, never use `--ignore-other-worktrees`, and don't delete, detach, or modify another checkout without separate explicit approval. If the requested branch already belongs to another checkout, report that exact path and recommend starting the next Agent Desktop chat from that checkout instead of offering an open-ended list. Don't create branches unless the user explicitly asks. Every branch you create must start with `agent/` (for example, `agent/update-koa-3.2.1`).\n");
     p.push_str("- A dirty tree is normal; mention it only when changes you didn't make overlap the files you need to edit — then pause and ask before touching them.\n");
     p.push_str("- Re-read a file before editing it if you haven't read it this turn — it may have changed since you last looked.\n");
     p.push_str(
@@ -277,7 +276,7 @@ You write and modify real files and run real commands on their computer.\n\n",
 
     p.push_str("# Planning\n");
     p.push_str(crate::planning::EXECUTION_CHECKLIST_INSTRUCTIONS);
-    p.push_str("- If the project has a check_command configured (.clark/settings.json), call `check_diagnostics` after non-trivial changes — it reports only new problems since your last call.\n");
+    p.push_str("- If the project has a check_command configured (.agent/settings.json), call `check_diagnostics` after non-trivial changes — it reports only new problems since your last call.\n");
     p.push_str("- Plan Mode is separate, read-only collaboration: the user selects it or `enter_plan_mode` suggests it; emit one hidden `<proposed_plan>` Markdown block for approval before changes. The host removes it from the visible transcript.\n");
     p.push('\n');
 
@@ -323,7 +322,7 @@ mod tests {
             Some(crate::project_settings::DEFAULT_PR_BODY_ATTRIBUTION),
         );
         assert!(p.contains("Project root:"));
-        assert!(p.contains("clark_research"));
+        assert!(p.contains("product-brokered research capability"));
         assert!(p.find("# Instruction boundaries").unwrap() < p.find("# Git").unwrap());
         assert!(
             p.find("# External knowledge and research").unwrap()
@@ -331,13 +330,13 @@ mod tests {
         );
         assert!(p.find("# Communication").unwrap() < p.find("# Git").unwrap());
         assert!(p.contains("`sandbox_permissions` set to `require_escalated`"));
-        assert!(p.contains("Clark will ask for a scoped approval"));
+        assert!(p.contains("Agent Desktop will ask for a scoped approval"));
         assert!(p.contains("Plan Mode is read-only and cannot request escalation"));
         assert!(p.contains("final `# User request`"));
     }
 
     #[test]
-    fn configured_research_is_cloud_first_with_web_fetch_only_as_fallback() {
+    fn configured_research_is_brokered_first_with_web_fetch_only_as_fallback() {
         let dir = tempfile::tempdir().unwrap();
         let sb = Sandbox::new(dir.path()).unwrap();
         let p = system_prompt(
@@ -348,15 +347,12 @@ mod tests {
             Some(crate::project_settings::DEFAULT_PR_BODY_ATTRIBUTION),
         );
 
-        assert!(p.contains("primary path for ALL external web research"));
-        assert!(p.contains("Before any external retrieval"));
-        assert!(p.contains("even when the request contains only one URL or looks simple"));
-        assert!(p.contains("Do not call `web_fetch` while `clark_research` is running"));
-        assert!(p.contains("Use `web_fetch` only after `clark_research` explicitly fails"));
-        assert!(p.contains("current upstream documentation"));
-        assert!(p.contains("outage or incident"));
+        assert!(p.contains("product-brokered research capability"));
+        assert!(p.contains("Discover it with `tool_search`"));
+        assert!(p.contains("Do not call `web_fetch` while brokered research is running"));
+        assert!(p.contains("Use `web_fetch` only after brokered research explicitly fails"));
+        assert!(p.contains("current upstream state"));
         assert!(p.contains("Never switch to `bash`, `curl`, or `wget`"));
-        assert!(p.contains("never treat local shell DNS or network failure"));
         assert!(
             p.find("# External knowledge and research").unwrap() < p.find("# Behavior").unwrap()
         );
@@ -393,7 +389,7 @@ mod tests {
             Some(crate::project_settings::DEFAULT_COMMIT_ATTRIBUTION),
             Some(crate::project_settings::DEFAULT_PR_BODY_ATTRIBUTION),
         );
-        assert!(!p.contains("clark_research"));
+        assert!(!p.contains("product-brokered research capability"));
         assert!(p.contains("Cloud research is not configured"));
         assert!(p.contains("activate `web_fetch`"));
         assert!(p.contains("cannot perform broad search or reliable multi-source synthesis"));
@@ -477,16 +473,16 @@ mod tests {
         assert!(p.contains("do not make assumption-dependent changes"));
         assert!(p.contains("state the assumption briefly and proceed without asking"));
         // Shared-tree git rules: no stash/reset, foreign changes are off-limits.
-        assert!(p.contains("Every branch you create must start with `clark/`"));
+        assert!(p.contains("Every branch you create must start with `agent/`"));
         assert!(p.contains("`git stash`"));
         assert!(p.contains("checkout latest main"));
         assert!(p.contains("git worktree list --porcelain"));
         assert!(p.contains("never use `--ignore-other-worktrees`"));
         assert!(p.contains("changes you did not create"));
         assert!(p.contains("Keep the repository's configured human author"));
-        assert!(p.contains("Co-Authored-By: Clark Code <noreply@clarkchat.com>"));
+        assert!(p.contains("Co-Authored-By: Local Agent <noreply@localhost>"));
         assert!(p.contains("## Creating pull requests"));
-        assert!(p.contains("Code written by [Clark Code]"));
+        assert!(p.contains("Code written by Local Agent"));
         assert!(!p.to_ascii_lowercase().contains("codex"));
         // Test-quality bar: at least one would-fail case.
         assert!(p.contains("# Testing"));

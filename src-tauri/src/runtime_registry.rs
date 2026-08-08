@@ -2,7 +2,7 @@
 //!
 //! Account-partitioned session, project, worker, reconnect, claim, and skill
 //! cache state lives here. The WebView receives only opaque handles; every use
-//! re-authorizes them against the Clark account validated by the native host.
+//! re-authorizes them against the Agent Desktop account validated by the native host.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -64,7 +64,7 @@ impl AccountKey {
             || owner_scope.len() > 256
             || owner_scope.chars().any(char::is_control)
         {
-            return Err("Clark account identity is invalid".into());
+            return Err("Agent Desktop account identity is invalid".into());
         }
         Ok(Self(owner_scope))
     }
@@ -94,7 +94,7 @@ impl SessionKey {
 
     fn validate(raw: &str) -> Result<(), String> {
         if raw.is_empty() || raw.len() > 512 || raw.chars().any(char::is_control) {
-            return Err("Clark session identity is invalid".into());
+            return Err("Agent Desktop session identity is invalid".into());
         }
         Ok(())
     }
@@ -137,7 +137,7 @@ impl ProjectKey {
     }
 }
 
-/// One indivisible, native-owned Clark account binding. Keeping the validated
+/// One indivisible, native-owned desktop account binding. Keeping the validated
 /// origin, account identity, and bearer in the same lock prevents observers
 /// from ever combining fields from two sign-in generations.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -305,10 +305,6 @@ pub(crate) struct RuntimeRegistry {
 impl RuntimeRegistry {
     pub(crate) fn new() -> Self {
         Self::default()
-    }
-
-    pub(crate) fn cloud_account_source(&self) -> Arc<RwLock<Option<CloudAccountState>>> {
-        self.cloud_account.clone()
     }
 
     pub(crate) async fn cloud_account(&self) -> Option<CloudAccountState> {
@@ -532,7 +528,7 @@ impl RuntimeRegistry {
             .cloned()
             .ok_or("remote worker is no longer available")?;
         if &runtime.account != account {
-            return Err("remote worker belongs to a different Clark account".into());
+            return Err("remote worker belongs to a different desktop account".into());
         }
         Ok(runtime)
     }

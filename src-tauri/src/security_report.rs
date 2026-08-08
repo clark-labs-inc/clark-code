@@ -17,7 +17,7 @@ pub struct SecurityScanReportSummary {
     generated_at: String,
 }
 
-/// Export one Security scan through Clark Desktop's bundled pure-Rust PDF
+/// Export one Security scan through the foundation's bundled pure-Rust PDF
 /// renderer. The cloud row is always represented; when its originating local
 /// record is available, the report also includes the sealed evidence bundle.
 #[tauri::command]
@@ -30,7 +30,7 @@ pub async fn export_security_scan_pdf(
     let report = build_report(&scan, local_record.as_ref());
 
     tokio::task::spawn_blocking(move || {
-        let pdf = render_markdown_pdf(Path::new("clark-security-report.md"), report.as_bytes())?;
+        let pdf = render_markdown_pdf(Path::new("security-report.md"), report.as_bytes())?;
         if let Some(parent) = destination.parent() {
             std::fs::create_dir_all(parent).map_err(|error| format!("create dir: {error}"))?;
         }
@@ -45,7 +45,7 @@ fn build_report(
     local_record: Option<&SecurityScanRecord>,
 ) -> String {
     let mut out = String::new();
-    out.push_str("# Clark Security Report\n\n");
+    out.push_str("# Security Report\n\n");
     out.push_str("*Evidence-backed repository security assessment*\n\n");
     out.push_str("---\n\n");
     out.push_str("## Executive summary\n\n");
@@ -70,7 +70,7 @@ fn build_report(
             "In progress - evidence is not sealed"
         };
         out.push_str(&format!(
-            "Clark Security identified **{reportable} reportable finding{}**. The report contains {critical} critical, {high} high, {medium} medium, and {low} low severity findings. {deferred} candidate{} remain deferred. **Evidence status:** {integrity}.\n\n",
+            "The security scan identified **{reportable} reportable finding{}**. The report contains {critical} critical, {high} high, {medium} medium, and {low} low severity findings. {deferred} candidate{} remain deferred. **Evidence status:** {integrity}.\n\n",
             plural(reportable),
             plural(deferred),
         ));

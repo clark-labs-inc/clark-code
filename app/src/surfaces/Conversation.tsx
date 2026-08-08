@@ -6,7 +6,7 @@ import { useSessionStore } from "../store/sessionStore";
 import { effectiveApprovalPolicy } from "../store/sessionStore.runtime";
 import { wouldAutoApprove } from "../lib/permissions";
 import { currentActivity, shouldShowPending } from "../lib/activity";
-import { creditFailureSurface, humanizeError, humanizeRunFailure } from "../lib/errors";
+import { humanizeError, humanizeRunFailure } from "../lib/errors";
 import { cn } from "../lib/cn";
 import {
   commitChatRowKeys,
@@ -29,7 +29,7 @@ import { Message } from "./Message";
 import { WorkBlock } from "./work/WorkBlock";
 import { ArtifactCard } from "./work/ArtifactCard";
 import { PermissionGate } from "./PermissionGate";
-import { billingFailureNeedsAction, UpgradePrompt } from "./UpgradePrompt";
+import { UpgradePrompt } from "./UpgradePrompt";
 import { FanOutPanel } from "./FanOutPanel";
 import { ExecutionChecklistCard } from "./PlanChecklist";
 import { ProposedPlanCard } from "./ProposedPlanCard";
@@ -144,7 +144,6 @@ export function Conversation({
       effectiveModelSettings(s.localSettings, s.chatModels, s.session?.id ?? null).model,
     ),
   );
-  const billing = useSessionStore((s) => s.billing);
   const error = useSessionStore((s) => s.error);
   const dismissError = useSessionStore((s) => s.dismissError);
   const dismissFailedRun = useSessionStore((s) => s.dismissFailedRun);
@@ -351,11 +350,6 @@ export function Conversation({
       ? latestRun
       : undefined;
   const outOfCredits = failed?.outcome?.failure_kind === "insufficient_credits";
-  const creditSurface = creditFailureSurface(
-    failed?.outcome,
-    includedModel,
-    billingFailureNeedsAction(billing),
-  );
   const interrupted = failed?.outcome?.failure_kind === "runtime_interrupted" ? failed : undefined;
   const verificationIncomplete =
     failed?.outcome?.failure_kind === "verification_incomplete" ? failed : undefined;
@@ -432,7 +426,7 @@ export function Conversation({
           key={block.key}
           incident={incident}
           executionLocation={session.environment?.remote ? "your remote host" : "this computer"}
-          modelRouteLabel={session.provider === "local" ? "Clark's cloud model gateway" : "the selected model provider"}
+          modelRouteLabel={session.provider === "local" ? "the agent's cloud model gateway" : "the selected model provider"}
           onContinue={canContinue
             ? () => void useSessionStore.getState().continueProviderIncident(incident.id)
             : undefined}
@@ -461,7 +455,7 @@ export function Conversation({
         <div ref={contentRef} className="conversation-column-width mx-auto flex w-full flex-col gap-3 px-5 py-5">
         {visible.length === 0 && !showPending && (
           <p className="py-10 text-center text-sm text-ink-faint">
-            Ask Clark anything — file work, web research, and computer use show up here as it works.
+            Ask the agent anything — file work, web research, and computer use show up here as it works.
           </p>
         )}
 
@@ -493,29 +487,12 @@ export function Conversation({
               <PermissionGate req={pending_permission} />
             </m.div>
           )}
-          {creditSurface === "upgrade" && (
+          {outOfCredits && failed && (
             <m.div key="upgrade" {...transientMotion}>
-              <UpgradePrompt />
-            </m.div>
-          )}
-          {creditSurface === "weekly_reset" && (
-            <m.div key="included-weekly-usage" {...transientMotion}>
-              <div className="rounded-xl border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-ink">
-                Your included weekly usage is used up. It resets on Monday.
-              </div>
-            </m.div>
-          )}
-          {creditSurface === "generic" && failed && (
-            <m.div
-              key="credit-failure"
-              {...transientMotion}
-              className={cn(DANGER_BANNER, "flex items-start gap-2")}
-            >
-              <div className="min-w-0 flex-1">
-                <span className="font-medium">Run failed.</span>{" "}
-                {humanizeRunFailure(failed.outcome)}
-              </div>
-              <DismissButton onClick={() => dismissFailedRun(failed.id)} />
+              <UpgradePrompt
+                error={failed.outcome?.error}
+                includedModel={includedModel}
+              />
             </m.div>
           )}
           {verificationIncomplete && (

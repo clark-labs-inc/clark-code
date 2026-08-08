@@ -10,10 +10,10 @@ use crate::orchestration::OrchestrationConfig;
 fn config() -> OrchestrationToolsConfig {
     OrchestrationToolsConfig {
         policy: OrchestrationConfig::default(),
-        base_url: "https://api.clarkslabs.com/v1".into(),
+        base_url: "https://product.example/v1".into(),
         api_key: None,
         headers: HashMap::new(),
-        root_model: "clark-code".into(),
+        root_model: "local-model".into(),
         reasoning_effort: None,
         scout_capsules: None,
         scout_cartography: None,
@@ -77,7 +77,7 @@ fn claim_result_exposes_the_exact_safe_task_to_the_model() {
             task_kind: "adapter_page".into(),
             scope: json!({
                 "schema_version": 1,
-                "adapter_id": "clark/github-organization@1",
+                "adapter_id": "host/github-organization@1",
             }),
             fence: 7,
             lease_expires_at: "2026-07-27T21:00:00Z".into(),
@@ -88,7 +88,7 @@ fn claim_result_exposes_the_exact_safe_task_to_the_model() {
     assert!(outcome.content.contains(&task_id.to_string()));
     assert!(outcome.content.contains(&source_id.to_string()));
     assert!(outcome.content.contains("\"fence\":7"));
-    assert!(outcome.content.contains("clark/github-organization@1"));
+    assert!(outcome.content.contains("host/github-organization@1"));
     assert_eq!(outcome.details["task"]["task_id"], task_id.to_string());
 }
 
@@ -102,7 +102,7 @@ fn empty_claim_result_remains_explicit_and_terminal() {
     assert!(!outcome.is_error);
     assert_eq!(
         outcome.content,
-        "Clark reports no claimable Scout task for this run."
+        "Agent Desktop reports no claimable Scout task for this run."
     );
     assert!(outcome.details["task"].is_null());
 }

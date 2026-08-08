@@ -1,4 +1,4 @@
-# Clark execution sandbox
+# Desktop host execution sandbox
 
 `exec-sandbox` is the policy and platform-adapter layer between agent tools and
 `exec-core`. It has no provider, UI, HTTP, or Tauri dependency.
@@ -16,7 +16,7 @@ The contracts are deliberately separate:
 - `SandboxedExecutor` applies one policy to both direct filesystem primitives
   and every process launched through `Executor::prepare_process`.
 
-Clark Cloud is a brokered host capability and does not run inside a child
+brokered cloud is a brokered host capability and does not run inside a child
 process. It remains enabled by default for signed-in users while arbitrary
 networking from local shell processes is denied. Direct external tools such as
 `web_fetch`, browsers, and connected services have their own consent class.
@@ -27,7 +27,7 @@ networking from local shell processes is denied. Direct external tools such as
 | --- | --- | --- |
 | macOS | `/usr/bin/sandbox-exec` + Seatbelt | Fixed system path; no setup |
 | Linux | bubblewrap | Pinned private build preferred; probed distro helper is a fallback |
-| Windows | restricted-token runner | Private signed `clark-command-runner.exe`; missing helper reports `SetupRequired` |
+| Windows | restricted-token runner | Private signed `agent-command-runner.exe`; missing helper reports `SetupRequired` |
 
 The Windows runner is intentionally a separate executable boundary. Its setup
 service can own elevation, durable capability identities, ACL reconciliation,
@@ -49,7 +49,7 @@ the worker tree in a kill-on-close job. Missing or partial setup still reports
 `SetupRequired` rather than silently running with partial containment.
 
 Linux releases compile bubblewrap 0.11.2 from its digest-pinned upstream source
-archive and ship it under the private `clark-resources/sandbox/linux` tree. The
+archive and ship it under the private `agent-resources/sandbox/linux` tree. The
 bundle includes the LGPL notices and the exact verified source archive. The
 build retains upstream's warning policy except that GCC's optimization-only
 `format-overflow` false-positive is not promoted to an error. Debian and RPM
@@ -80,8 +80,8 @@ orphan-process cleanup through the packaged helper boundary.
 The paid model receipt is separately ignored and cost-capped:
 
 ```bash
-CLARK_CODE_API_KEY=... \
-CLARK_SANDBOX_E2E_MODEL=clark-code:deepseek_v4_flash_latest \
+DESKTOP_CODE_API_KEY=... \
+DESKTOP_SANDBOX_E2E_MODEL=host-managed-model \
 cargo test -p provider-local --test sandbox_live \
   paid_cheapest_model_cannot_escape_workspace -- --ignored --exact --nocapture
 ```

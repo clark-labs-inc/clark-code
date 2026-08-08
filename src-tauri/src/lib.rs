@@ -1,4 +1,4 @@
-//! Clark Desktop — Tauri host.
+//! Agent Desktop — Tauri host.
 //!
 //! The host owns the native `agent-core` engine: it holds provider instances,
 //! drives transports/sidecars, and bridges to the web UI via Tauri commands
@@ -7,6 +7,7 @@
 
 use agent_core::{CollaborationMode, ProviderCapabilities};
 use serde::Serialize;
+use std::sync::Arc;
 use tauri::Manager;
 use tauri_plugin_deep_link::DeepLinkExt;
 
@@ -15,7 +16,7 @@ mod diagnostics;
 mod document_preview;
 mod file_actions;
 mod markdown_export;
-mod mobile_remote;
+pub mod product;
 mod project_context;
 mod project_worktree;
 mod remote_worker_executor;
@@ -52,19 +53,8 @@ pub struct ProviderInfo {
     pub internal: bool,
 }
 
-const PRODUCTION_BUNDLE_IDENTIFIER: &str = "com.clark.desktop";
 const SIGNED_COMPUTER_USE_SMOKE_ARG: &str = "--computer-use-signed-smoke";
 const WINDOWS_CONSOLE_SMOKE_ARG: &str = "--windows-console-smoke";
-#[cfg(target_os = "macos")]
-const MACOS_QA_WINDOW_TITLE: &str = "Clark Code Dev QA";
-#[cfg(target_os = "macos")]
-const MACOS_QA_DATA_STORE_IDENTIFIER: [u8; 16] = [
-    116, 150, 179, 45, 188, 12, 68, 3, 182, 192, 198, 80, 198, 95, 91, 138,
-];
-
-fn updates_enabled_for(debug_build: bool, identifier: &str) -> bool {
-    !debug_build && identifier == PRODUCTION_BUNDLE_IDENTIFIER
-}
 
 /// Read-only packaged-app probe for the release workflow. Calling
 /// `permissions` forces the real parent/helper handshake and both code-signing
@@ -132,8 +122,8 @@ pub fn run_windows_console_smoke_if_requested() -> bool {
             std::process::exit(1);
         });
         let command = match exec_core::scripted_shell_kind() {
-            ShellKind::PowerShell => "Write-Output CLARK_PIPE_OK; Start-Sleep -Milliseconds 750",
-            ShellKind::Cmd => "echo CLARK_PIPE_OK & ping -n 2 127.0.0.1 >NUL",
+            ShellKind::PowerShell => "Write-Output AGENT_PIPE_OK; Start-Sleep -Milliseconds 750",
+            ShellKind::Cmd => "echo AGENT_PIPE_OK & ping -n 2 127.0.0.1 >NUL",
             ShellKind::Posix => unreachable!(),
         };
         let result = runtime.block_on(async {
@@ -166,10 +156,10 @@ pub fn run_windows_console_smoke_if_requested() -> bool {
                 "status": "passed",
                 "ordinary_exit_code": ordinary.code,
                 "ordinary_output_seen": String::from_utf8_lossy(&ordinary.stdout)
-                    .contains("CLARK_PIPE_OK"),
+                    .contains("AGENT_PIPE_OK"),
                 "pty_exit_code": terminal.code,
                 "pty_output_seen": String::from_utf8_lossy(&terminal.stdout)
-                    .contains("CLARK_PIPE_OK"),
+                    .contains("AGENT_PIPE_OK"),
                 "computer_use_permissions": permissions,
             }),
             Err(error) => json!({ "status": "failed", "error": error }),
@@ -223,60 +213,54 @@ fn windows_console_smoke_output(
 /// Development builds have a distinct bundle identity and must never replace
 /// themselves with a release artifact from the production update channel.
 #[tauri::command]
-fn app_updates_enabled(app: tauri::AppHandle) -> bool {
-    updates_enabled_for(cfg!(debug_assertions), &app.config().identifier)
+fn app_updates_enabled(app: tauri::AppHandle, state: tauri::State<'_, AppState>) -> bool {
+    state
+        .product
+        .updates_enabled(cfg!(debug_assertions), &app.config().identifier)
 }
 
-/// The providers this build ships with. Clark Desktop is a coding client: it
-/// ships the local coding agent only (the model + research route through the
-/// production Clark Platform API).
+/// Provider-neutral adapters shipped by the open foundation.
 pub fn builtin_providers() -> Vec<ProviderInfo> {
-    vec![
-        ProviderInfo {
-            id: "local".into(),
-            label: "Clark Code".into(),
-            capabilities: ProviderCapabilities {
-                streaming: true,
-                permissions: true,
-                fs: true,
-                terminal: true,
-                load_session: false,
-                attachment_kinds: vec![
-                    agent_core::AttachmentKind::Text,
-                    agent_core::AttachmentKind::Image,
-                    agent_core::AttachmentKind::Pdf,
-                    agent_core::AttachmentKind::Docx,
-                ],
-                modes: Vec::new(),
-                collaboration_modes: vec![CollaborationMode::Default, CollaborationMode::Plan],
-            },
-            internal: false,
+    vec![ProviderInfo {
+        id: "local".into(),
+        label: "Local agent".into(),
+        capabilities: ProviderCapabilities {
+            streaming: true,
+            permissions: true,
+            fs: true,
+            terminal: true,
+            load_session: false,
+            attachment_kinds: vec![
+                agent_core::AttachmentKind::Text,
+                agent_core::AttachmentKind::Image,
+                agent_core::AttachmentKind::Pdf,
+                agent_core::AttachmentKind::Docx,
+            ],
+            modes: Vec::new(),
+            collaboration_modes: vec![CollaborationMode::Default, CollaborationMode::Plan],
         },
-        ProviderInfo {
-            id: "specialist".into(),
-            label: "Clark Specialist Runtime".into(),
-            capabilities: ProviderCapabilities {
-                streaming: true,
-                permissions: false,
-                fs: false,
-                terminal: false,
-                load_session: true,
-                attachment_kinds: Vec::new(),
-                modes: Vec::new(),
-                collaboration_modes: vec![CollaborationMode::Default],
-            },
-            internal: true,
-        },
-    ]
+        internal: false,
+    }]
 }
 
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
+#[cfg(mobile)]
+#[tauri::mobile_entry_point]
 pub fn run() {
+    run_with_product_and_context(
+        Arc::new(product::NeutralProduct),
+        tauri::generate_context!(),
+    );
+}
+
+pub fn run_with_product_and_context(
+    product: Arc<dyn product::ProductIntegration>,
+    context: tauri::Context<tauri::Wry>,
+) {
     // Tauri sidecars live beside the main executable. Activate PATH-visible
     // helpers before tracing/Tauri/Tokio create worker threads so every child
     // surface (agent shell, background jobs, MCP, terminal) inherits one
     // deterministic toolchain.
-    if let Err(error) = clark_install_context::activate_bundled_path() {
+    if let Err(error) = desktop_install_context::activate_bundled_path() {
         eprintln!("failed to activate bundled tool PATH: {error}");
     }
 
@@ -287,7 +271,7 @@ pub fn run() {
     let mut builder = tauri::Builder::default();
 
     // Single-instance must be registered FIRST so a second launch (e.g. the OS
-    // opening a `clark://` URL on Windows/Linux) is funneled into the already
+    // opening a a product deep link URL on Windows/Linux) is funneled into the already
     // running process rather than spawning a new window. Its `deep-link` feature
     // re-emits the URL, so the `on_open_url` handler below still fires; this
     // callback just raises the existing window. macOS routes deep links to the
@@ -318,10 +302,11 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_google_auth::init())
         .plugin(tauri_plugin_deep_link::init())
-        .manage(AppState::new())
+        .manage(AppState::with_product(product))
         .manage(terminal::Terminals::default())
         .invoke_handler(tauri::generate_handler![
             commands::provider_list,
+            commands::product_request,
             commands::provider_reconfigure,
             commands::ssh_probe,
             commands::ssh_list_directories,
@@ -344,7 +329,6 @@ pub fn run() {
             commands::session_open::session_open,
             commands::session_close,
             commands::session_configure_cloud,
-            commands::clark_refresh_cloud_session,
             app_updates_enabled,
             commands::update_begin_drain,
             commands::update_cancel_drain,
@@ -365,16 +349,6 @@ pub fn run() {
             commands::local_list_global_memory,
             commands::local_list_files,
             commands::local_list_security_scans,
-            commands::desktop_security_organizations,
-            commands::desktop_security_register_repository,
-            commands::desktop_security_sync_scans,
-            commands::desktop_specialist_organizations,
-            commands::desktop_specialist_catalog,
-            commands::desktop_specialist_entitlement,
-            commands::desktop_specialist_query,
-            commands::desktop_specialist_publish,
-            commands::desktop_specialist_create_workspace,
-            commands::desktop_specialist_create_security_campaign,
             commands::project_context,
             commands::read_doc_text,
             commands::read_image_data_url,
@@ -394,39 +368,21 @@ pub fn run() {
             project_worktree::managed::project_managed_worktree_list,
             project_worktree::managed::project_managed_worktree_cleanup,
             project_worktree::managed::project_managed_worktree_save_branch,
-            commands::clark_google_sign_in,
-            commands::clark_account_load,
-            commands::clark_sign_out,
-            commands::clark_provision_code_key,
-            commands::clark_billing_me,
-            commands::clark_repository_inspect,
-            commands::clark_repository_discover,
-            commands::clark_repository_history,
+            commands::repository_inspect,
+            commands::repository_discover,
+            commands::repository_history,
             commands::changes_summary,
             commands::changes_diff,
             commands::changes_revert,
             commands::changes_release_checkpoints,
-            commands::clark_mcp_probe,
-            commands::clark_mcp_credentials_sync,
+            commands::mcp_probe,
+            commands::mcp_credentials_sync,
             commands::desktop_conv_list,
             commands::desktop_conv_get,
             commands::desktop_conv_put,
-            commands::desktop_draft_get,
-            commands::desktop_draft_put,
-            commands::desktop_conv_share,
-            commands::desktop_conv_unshare,
             commands::desktop_conv_delete,
             commands::desktop_conv_set_archived,
-            commands::desktop_artifact_upload,
-            commands::desktop_artifact_read,
-            commands::desktop_artifact_read_workspace,
-            mobile_remote::desktop_code_host_upsert,
-            mobile_remote::desktop_code_command_poll,
-            mobile_remote::desktop_code_command_ack,
-            mobile_remote::desktop_code_attachment_download,
-            mobile_remote::desktop_code_repository_sync,
-            mobile_remote::desktop_organization_knowledge_status,
-            mobile_remote::desktop_organization_repository_sync,
+            commands::workspace_artifact_read,
             terminal::terminal_open,
             terminal::terminal_write,
             terminal::terminal_resize,
@@ -453,11 +409,15 @@ pub fn run() {
                     .app
                     .windows
                     .first()
-                    .filter(|window| !window.create && window.title == MACOS_QA_WINDOW_TITLE)
+                    .filter(|window| !window.create)
                     .cloned();
-                if let Some(config) = qa_window {
+                let data_store_identifier =
+                    app.state::<AppState>().product.qa_data_store_identifier();
+                if let (Some(config), Some(data_store_identifier)) =
+                    (qa_window, data_store_identifier)
+                {
                     tauri::WebviewWindowBuilder::from_config(app.handle(), &config)?
-                        .data_store_identifier(MACOS_QA_DATA_STORE_IDENTIFIER)
+                        .data_store_identifier(data_store_identifier)
                         .build()?;
                 }
             }
@@ -471,10 +431,8 @@ pub fn run() {
                 }
             }
 
-            // The Google sign-in success page (served by the loopback) redirects
-            // to `clark://auth-complete`; the OS routes that URL here so we can
-            // pull the window back to the foreground instead of leaving the user
-            // stranded on a browser tab.
+            // Product deep links may route back from a system-browser flow. Pull
+            // the existing window to the foreground when the OS opens one.
             let handle = app.handle().clone();
             app.deep_link().on_open_url(move |_event| {
                 if let Some(window) = handle.get_webview_window("main") {
@@ -495,8 +453,8 @@ pub fn run() {
                 let _ = window.minimize();
             }
         })
-        .build(tauri::generate_context!())
-        .expect("error while building Clark Code");
+        .build(context)
+        .expect("error while building desktop app");
     app.run(|app, event| {
         if !matches!(event, tauri::RunEvent::Exit) {
             return;
@@ -518,17 +476,10 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        signed_computer_use_smoke_requested, updates_enabled_for, windows_console_smoke_output,
+        signed_computer_use_smoke_requested, windows_console_smoke_output,
         SIGNED_COMPUTER_USE_SMOKE_ARG, WINDOWS_CONSOLE_SMOKE_ARG,
     };
     use serde_json::Value;
-
-    #[test]
-    fn updater_is_limited_to_non_debug_production_flavors() {
-        assert!(updates_enabled_for(false, "com.clark.desktop"));
-        assert!(!updates_enabled_for(true, "com.clark.desktop"));
-        assert!(!updates_enabled_for(false, "com.clark.desktop.dev"));
-    }
 
     #[test]
     fn webview_cannot_invoke_raw_google_token_commands() {
@@ -543,51 +494,12 @@ mod tests {
     }
 
     #[test]
-    fn development_and_release_bundle_identities_are_distinct() {
+    fn neutral_bundle_has_no_release_authority() {
         let development: Value =
             serde_json::from_str(include_str!("../tauri.conf.json")).expect("development config");
-        let release: Value = serde_json::from_str(include_str!("../tauri.release.conf.json"))
-            .expect("release config");
-
-        assert_eq!(development["productName"], "Clark Code Dev");
-        assert_eq!(development["identifier"], "com.clark.desktop.dev");
+        assert_eq!(development["productName"], "Agent Desktop Dev");
+        assert_eq!(development["identifier"], "org.agentdesktop.dev");
         assert_eq!(development["bundle"]["createUpdaterArtifacts"], false);
-        assert_eq!(release["productName"], "Clark Code");
-        assert_eq!(release["identifier"], "com.clark.desktop");
-        assert_eq!(release["bundle"]["createUpdaterArtifacts"], true);
-        assert_eq!(
-            release["bundle"]["windows"]["nsis"]["installerHooks"],
-            "./windows/preserve-sandbox-state.nsh",
-        );
-        let windows_hooks = include_str!("../windows/preserve-sandbox-state.nsh");
-        assert!(windows_hooks.contains("NSIS_HOOK_PREINSTALL"));
-        assert!(windows_hooks.contains("NSIS_HOOK_PREUNINSTALL"));
-        assert!(windows_hooks.contains(r"$LOCALAPPDATA\Clark Code\sandbox"));
-        assert!(windows_hooks.contains(r"$LOCALAPPDATA\Clark\Code\sandbox"));
-        let windows_signing: Value =
-            serde_json::from_str(include_str!("../tauri.windows-signing.conf.json"))
-                .expect("Windows signing config");
-        let sign_command = &windows_signing["bundle"]["windows"]["signCommand"];
-        assert_eq!(sign_command["cmd"], "powershell.exe");
-        assert_eq!(
-            sign_command["args"],
-            serde_json::json!([
-                "-NoLogo",
-                "-NoProfile",
-                "-NonInteractive",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-File",
-                "sign-windows-artifact.ps1",
-                "-FilePath",
-                "%1",
-            ])
-        );
-        let signing_script = include_str!("../sign-windows-artifact.ps1");
-        assert!(signing_script.contains("http://timestamp.acs.microsoft.com"));
-        assert!(signing_script.contains("/dlib"));
-        assert!(signing_script.contains("/dmdf"));
-        assert!(signing_script.contains("verify /v /pa /all"));
         assert!(include_str!("../Info.plist").contains("NSDocumentsFolderUsageDescription"));
     }
 
@@ -629,19 +541,5 @@ mod tests {
             ),
             None,
         );
-    }
-
-    #[test]
-    fn native_computer_use_fixture_is_debug_only_and_never_bundled() {
-        let fixture_info = include_str!("../../harness/fixtures/computer-use-native/Info.plist");
-        assert!(fixture_info.contains("<key>ClarkDebugOnlyFixture</key>"));
-        for production_config in [
-            include_str!("../tauri.conf.json"),
-            include_str!("../tauri.release.conf.json"),
-            include_str!("../tauri.computer-use.macos.conf.json"),
-        ] {
-            assert!(!production_config.contains("computer-use-fixture"));
-            assert!(!production_config.contains("Clark Computer Use Fixture"));
-        }
     }
 }

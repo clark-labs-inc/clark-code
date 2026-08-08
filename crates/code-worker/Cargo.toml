@@ -5,10 +5,10 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
-description = "Standalone JSONL headless Clark Code worker."
+description = "Standalone JSONL headless coding-agent worker."
 
 [[bin]]
-name = "clark-code-worker"
+name = "agent-code-worker"
 path = "src/main.rs"
 
 [dependencies]

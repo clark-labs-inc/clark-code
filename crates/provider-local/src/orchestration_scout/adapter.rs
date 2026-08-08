@@ -46,7 +46,7 @@ impl ToolExecutor for ScoutAdapterTool {
     }
 
     fn description(&self) -> &str {
-        "Run a fixed, read-only Scout control-plane adapter on the current execution target. Census returns opaque credential candidates without values; verify_auth proves one candidate against an exact authority; fetch_page executes only registered GitHub/AWS/GCP list operations and returns normalized metadata plus a target-bound receipt. Provider tokens and raw pagination cursors remain in target-private storage. Local enterprise persistence is retired; backend-fenced tasks must be uploaded through Clark's authoritative cartography API."
+        "Run a fixed, read-only Scout control-plane adapter on the current execution target. Census returns opaque credential candidates without values; verify_auth proves one candidate against an exact authority; fetch_page executes only registered GitHub/AWS/GCP list operations and returns normalized metadata plus a target-bound receipt. Provider tokens and raw pagination cursors remain in target-private storage. Local enterprise persistence is retired; backend-fenced tasks must be uploaded through Agent Desktop's authoritative cartography API."
     }
 
     fn parameters(&self) -> Value {
@@ -124,7 +124,7 @@ impl ToolExecutor for ScoutAdapterTool {
         };
         let root = match ctx
             .sandbox
-            .resolve_host_managed(".clark/scout/adapters/private")
+            .resolve_host_managed(".agent/scout/adapters/private")
         {
             Ok(root) => root,
             Err(error) => return ToolOutcome::error(error),
@@ -403,7 +403,7 @@ mod tests {
                 "target_id": format!("target:{}", "a".repeat(64)),
                 "target_identity_sha256": "b".repeat(64),
                 "candidate_handle": format!("candidate:{}", "c".repeat(64)),
-                "adapter_id": "clark/github-organization@1",
+                "adapter_id": "host/github-organization@1",
                 "requested_authority_scope": "Neon-Mobile",
             })),
         })
@@ -426,7 +426,7 @@ mod tests {
                 "task_scope": {
                     "schema_version": 1,
                     "first_source_sequence": 50_001,
-                    "adapter_id": "clark/github-organization@1",
+                    "adapter_id": "host/github-organization@1",
                     "enterprise_id": "neonmobile-system-map",
                     "charter_id": "charter-1",
                     "discovery_epoch": 1,

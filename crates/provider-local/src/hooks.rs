@@ -1,5 +1,5 @@
 //! `PreToolUse`/`PostToolUse` hooks — v1, command-type only. Configured via
-//! `.clark/settings.json`'s `hooks` key ([`crate::project_settings::HooksConfig`]).
+//! `.agent/settings.json`'s `hooks` key ([`crate::project_settings::HooksConfig`]).
 //!
 //! Fired from `DesktopToolAdapter::execute` (`agent_adapter.rs`): `PreToolUse`
 //! right before the permission gate (can deny or rewrite the tool's args
@@ -162,7 +162,7 @@ async fn run_hook(
     cancel: &CancellationToken,
 ) -> Result<HookDecision, String> {
     let payload_str = serde_json::to_string(payload).map_err(|e| e.to_string())?;
-    let payload_path = cwd.join(format!(".clark-hook-{}.json", uuid::Uuid::new_v4()));
+    let payload_path = cwd.join(format!(".agent-hook-{}.json", uuid::Uuid::new_v4()));
     exec.write(&payload_path, payload_str.as_bytes())
         .await
         .map_err(|error| format!("writing hook input: {error}"))?;

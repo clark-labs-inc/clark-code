@@ -25,7 +25,7 @@ impl RuntimeRegistry {
     ) -> Result<(), String> {
         if command_id.is_empty() || host_id.is_empty() || instance_id.is_empty() || token.is_empty()
         {
-            return Err("Clark Code command claim is invalid".into());
+            return Err("local agent command claim is invalid".into());
         }
         let mut claims = self.command_claims.lock().await;
         claims.insert(
@@ -61,10 +61,10 @@ impl RuntimeRegistry {
         let claims = self.command_claims.lock().await;
         let claim = claims
             .get(command_id)
-            .ok_or("Clark Code command claim is no longer available")?;
+            .ok_or("local agent command claim is no longer available")?;
         if &claim.account != account || claim.host_id != host_id || claim.instance_id != instance_id
         {
-            return Err("Clark Code command claim belongs to a different account or host".into());
+            return Err("local agent command claim belongs to a different account or host".into());
         }
         Ok(claim.token.as_str().to_string())
     }

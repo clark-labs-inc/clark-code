@@ -79,7 +79,7 @@ impl PhysicalInputMonitor {
         let expected = self.expected.clone();
         let leases = self.leases.clone();
         if let Err(error) = std::thread::Builder::new()
-            .name("clark-physical-input-monitor".to_string())
+            .name("agent-physical-input-monitor".to_string())
             .spawn(move || {
                 if let Err(error) = platform_monitor(leases, state.clone(), expected) {
                     set_state(&state, MonitorState::Failed(error));

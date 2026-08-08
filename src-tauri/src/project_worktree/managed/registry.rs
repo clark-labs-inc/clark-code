@@ -12,7 +12,7 @@ use uuid::Uuid;
 use super::super::git_output;
 use super::types::{registry_version, ManagedWorktreeRegistry};
 
-const MANAGED_REGISTRY_FILE: &str = "clark-managed-worktrees-v1.json";
+const MANAGED_REGISTRY_FILE: &str = "agent-managed-worktrees-v1.json";
 const REGISTRY_LOCK_TIMEOUT: Duration = Duration::from_secs(2);
 const REGISTRY_LOCK_RETRY: Duration = Duration::from_millis(25);
 const STALE_REGISTRY_LOCK_AGE: Duration = Duration::from_secs(10 * 60);
@@ -166,7 +166,7 @@ pub(super) fn write_registry(
         }
         // Windows does not replace an existing destination with rename. Every
         // caller holds the lifecycle lock, so this brief replacement is still
-        // serialized with all Clark reads and writes of the registry.
+        // serialized with all Agent Desktop reads and writes of the registry.
         fs::remove_file(path).map_err(|error| {
             let _ = fs::remove_file(&temporary);
             format!(

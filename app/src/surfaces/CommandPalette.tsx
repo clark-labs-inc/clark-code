@@ -12,6 +12,7 @@ import { projectName } from "../lib/localAgent";
 import { cn } from "../lib/cn";
 import { DIALOG, OVERLAY, accessibleMotion } from "../lib/motion";
 import { useModalFocus } from "../lib/modalFocus";
+import { productModule } from "../product/productModule";
 
 interface PaletteItem {
   id: string;
@@ -78,7 +79,9 @@ export function CommandPalette({
           id: `action:${c.name}`,
           label: presentation.label,
           hint: presentation.hint,
-          badge: c.subscriptionWorkflow ? "Subscriber" : undefined,
+          badge: c.gatedWorkflow
+            ? productModule().localAgent.workflowAccess?.badge ?? "Restricted"
+            : undefined,
           icon: ICON[c.name] ?? Plus,
           group: "Actions",
           searchText: presentation.searchText,
@@ -209,7 +212,7 @@ export function CommandPalette({
                       onMouseMove={() => setActive(i)}
                       onClick={() => run(item)}
                       className={cn(
-                        "flex min-h-9 w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left text-sm transition duration-200 ease-clark",
+                        "flex min-h-9 w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left text-sm transition duration-200 ease-agent",
                         i === active ? "bg-accent-subtle text-ink" : "text-ink-secondary",
                       )}
                     >

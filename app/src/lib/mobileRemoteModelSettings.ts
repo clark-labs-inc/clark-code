@@ -30,12 +30,12 @@ export function mobileRemoteModelSettings(
 
   const rawModel = payload.model;
   if (typeof rawModel !== "string" || !rawModel.trim()) {
-    throw new Error("The selected Clark Code model is invalid.");
+    throw new Error("The selected product model is invalid.");
   }
   const model = rawModel.trim();
   const config = CODING_MODELS.find((candidate) => candidate.id === model);
   if (!config) {
-    throw new Error("The selected Clark Code model is not available on this desktop.");
+    throw new Error("The selected product model is not available on this desktop.");
   }
 
   // Older mobile clients may still send a user-selected effort. Ignore it so

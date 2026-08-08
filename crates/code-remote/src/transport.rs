@@ -157,7 +157,7 @@ fn private_socket_directory() -> Result<TempDir, std::io::Error> {
     #[cfg(not(unix))]
     let root = std::env::temp_dir();
     let directory = tempfile::Builder::new()
-        .prefix("clark-ssh-")
+        .prefix("agent-ssh-")
         .tempdir_in(root)?;
     #[cfg(unix)]
     {
@@ -245,10 +245,10 @@ mod tests {
 
     #[test]
     fn sessions_require_the_owned_control_socket_without_creating_aliases() {
-        let socket = Path::new("/tmp/clark-ssh-test/master");
+        let socket = Path::new("/tmp/agent-ssh-test/master");
         let options = session_options(socket);
         assert!(options.contains(&"ControlMaster=no".into()));
-        assert!(options.contains(&"ControlPath=/tmp/clark-ssh-test/master".into()));
+        assert!(options.contains(&"ControlPath=/tmp/agent-ssh-test/master".into()));
         assert!(!options
             .iter()
             .any(|option| option.starts_with("ControlPersist=")));
@@ -256,7 +256,7 @@ mod tests {
 
     #[test]
     fn master_is_process_owned_and_never_persists() {
-        let options = master_options(Path::new("/tmp/clark-ssh-test/master"));
+        let options = master_options(Path::new("/tmp/agent-ssh-test/master"));
         assert!(options.contains(&"ControlMaster=yes".into()));
         assert!(options.contains(&"ControlPersist=no".into()));
         assert!(options.contains(&"ServerAliveInterval=15".into()));

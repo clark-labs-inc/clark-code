@@ -14,7 +14,7 @@ use docx_rs::{DocumentChild, ParagraphChild, RunChild};
 use futures::{stream, StreamExt};
 use tokio_util::sync::CancellationToken;
 
-use crate::config::AgenticClarkConfig;
+use crate::config::AuxiliaryModelConfig;
 use crate::llm::LlmClient;
 use crate::tools::ImageAttachment;
 
@@ -87,7 +87,7 @@ pub(crate) async fn hydrate_resume_attachments(resume: &mut ResumeTranscript) {
 pub(crate) async fn process_attachments(
     attachments: &[PendingUpload],
     user_text: &str,
-    vision: Option<&AgenticClarkConfig>,
+    vision: Option<&AuxiliaryModelConfig>,
     native_image_support: bool,
     cancel: &CancellationToken,
 ) -> String {
@@ -238,7 +238,7 @@ fn inline_doc_block(filename: &str, label: &str, text: &str) -> String {
 }
 
 /// An honest note for content the model cannot access — deliberately never a
-/// bare filename, which is exactly what sent GLM 5.2 hunting the filesystem
+/// bare filename, which can send a vision model hunting the filesystem
 /// for a file that only ever existed as inline base64.
 fn unavailable_note(filename: &str, reason: &str) -> String {
     format!(
@@ -252,7 +252,7 @@ fn unavailable_note(filename: &str, reason: &str) -> String {
 async fn describe_images_block(
     images: &[&PendingUpload],
     user_text: &str,
-    vision: Option<&AgenticClarkConfig>,
+    vision: Option<&AuxiliaryModelConfig>,
     cancel: &CancellationToken,
 ) -> String {
     let Some(vision) = vision else {
@@ -309,7 +309,7 @@ async fn describe_images_block(
 /// The caller still keeps the original image in the typed UI result.
 pub(crate) async fn describe_tool_images(
     images: &[ImageAttachment],
-    vision: Option<&AgenticClarkConfig>,
+    vision: Option<&AuxiliaryModelConfig>,
     cancel: &CancellationToken,
 ) -> String {
     let Some(vision) = vision else {

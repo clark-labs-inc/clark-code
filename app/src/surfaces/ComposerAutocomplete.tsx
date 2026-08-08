@@ -4,6 +4,7 @@ import * as m from "motion/react-m";
 import { cn } from "../lib/cn";
 import type { ComposerSuggestion } from "../lib/composerInput";
 import { DUR, EASE, REDUCED_EXIT } from "../lib/motion";
+import { productModule } from "../product/productModule";
 
 /** The `@`-file / `/`-command suggestion list, anchored above the textarea. */
 export function ComposerAutocomplete({
@@ -45,7 +46,7 @@ export function ComposerAutocomplete({
             }}
             onMouseMove={() => onHover(index)}
             className={cn(
-              "flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-sm transition duration-200 ease-clark",
+              "flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-sm transition duration-200 ease-agent",
               index === selectedIndex
                 ? "bg-accent-subtle text-ink"
                 : "text-ink-secondary",
@@ -71,9 +72,9 @@ export function ComposerAutocomplete({
                 <span className="min-w-0 flex-1 truncate text-xs text-ink-faint">
                   {suggestion.cmd.hint}
                 </span>
-                {suggestion.cmd.subscriptionWorkflow && (
+                {suggestion.cmd.gatedWorkflow && (
                   <span className="shrink-0 rounded-md bg-accent/10 px-1.5 py-0.5 text-xs font-medium text-accent">
-                    Subscriber
+                    {productModule().localAgent.workflowAccess?.badge ?? "Restricted"}
                   </span>
                 )}
               </>

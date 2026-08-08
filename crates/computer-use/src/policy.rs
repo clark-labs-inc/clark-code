@@ -23,13 +23,17 @@ pub fn ensure_bundle_allowed(bundle_id: &str) -> Result<(), ComputerUseError> {
         ));
     }
     let normalized = bundle_id.to_ascii_lowercase();
-    if normalized == "com.clark.desktop"
-        || normalized == "com.clark.desktop.dev"
-        || normalized.starts_with("com.clark.desktop.")
+    let product_bundle_ids = [
+        env!("DESKTOP_COMPUTER_USE_PROD_APP_ID"),
+        env!("DESKTOP_COMPUTER_USE_DEV_APP_ID"),
+    ];
+    if product_bundle_ids
+        .iter()
+        .any(|product| normalized == product.to_ascii_lowercase())
     {
         return Err(forbidden(
             bundle_id,
-            "Clark Code and its privileged helpers cannot control their own UI",
+            "Agent Desktop and its privileged helpers cannot control their own UI",
         ));
     }
     if let Some((_, reason)) = FORBIDDEN_BUNDLE_IDS

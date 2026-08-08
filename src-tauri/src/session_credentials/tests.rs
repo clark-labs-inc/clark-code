@@ -67,7 +67,7 @@ async fn obsolete_webview_credential_payload_is_deleted_not_migrated() {
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("credentials/credentials.enc");
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    std::fs::write(&path, b"CLKCRD01obsolete-bearer-payload").unwrap();
+    std::fs::write(&path, b"AGTCRD01obsolete-bearer-payload").unwrap();
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt as _;

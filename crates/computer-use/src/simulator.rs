@@ -68,7 +68,7 @@ pub struct SimulatedComputerBackend {
 }
 
 impl SimulatedComputerBackend {
-    pub const BUNDLE_ID: &'static str = "com.clark.computer-use-simulator";
+    pub const BUNDLE_ID: &'static str = "com.agent-desktop.computer-use-simulator";
 
     pub fn new() -> Self {
         Self::default()
@@ -86,7 +86,7 @@ impl SimulatedComputerBackend {
                 window_id: 7,
                 bundle_id: Self::BUNDLE_ID.to_string(),
             },
-            app_name: "Clark Computer Use Simulator".to_string(),
+            app_name: "Agent Computer Use Simulator".to_string(),
             title: "Computer Use Test Surface".to_string(),
             frame: Rect {
                 x: 100.0,

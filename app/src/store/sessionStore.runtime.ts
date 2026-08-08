@@ -105,14 +105,6 @@ import {
   provisionCodeKey,
   codeKeyAccountBinding,
 } from "../lib/account";
-import {
-  billingMe,
-  describeBillingTransition,
-  latestActivityReward,
-  type ActivityReward,
-  type BillingTransition,
-  type BillingSummary,
-} from "../lib/billing";
 import { copyText } from "../lib/clipboard";
 import { notify } from "../lib/notify";
 import { repositoryFingerprintForRoot } from "../lib/repositoryKnowledge";
@@ -134,12 +126,12 @@ import { onSettingsMenuRequested, onUpdateMenuRequested } from "../lib/nativeMen
 import { updateDrainBlockerCount } from "../lib/updateDrain";
 
 export {
-  MAX_ATTACHMENT_BYTES, LOCAL_ATTACHMENT_KINDS, addRecentProject, attachmentKind, authSignOut, beginUpdateDrain, billingMe, buildResumeTranscript,
+  MAX_ATTACHMENT_BYTES, LOCAL_ATTACHMENT_KINDS, addRecentProject, attachmentKind, authSignOut, beginUpdateDrain, buildResumeTranscript,
   cancelUpdateDrain, checkAndStageUpdate, cloudCreds, cloudDelete, cloudGet, cloudList,
   cloudSetArchived, cloudShare, cloudUnshare, codeKeyAccountBinding, configureCloudHistoryCredentials, consumeJustUpdated,
   conversationProjectRoot, copyText, deriveTitle, effectiveModelSettings, emptySnapshot,
   fileToAttachment, flushCloudPuts, getBridge, hasContent, hostReady, installStagedUpdate,
-  describeBillingTransition, latestActivityReward, liveProjectRoot, loadApprovalPolicy, loadApprovalPolicies, loadAuthSession, loadBrowserEnabled, loadChatModels,
+  liveProjectRoot, loadApprovalPolicy, loadApprovalPolicies, loadAuthSession, loadBrowserEnabled, loadChatModels,
   loadCollaborationMode, loadLocalSettings, loadMemoriesEnabled, loadOrchestrationEnabled, loadOutputStyle, loadRecentProjects,
   loadSshHosts, localConnectConfig, localSettingsReady, minLoadDuration, nextApprovalPolicy, normalizeCodingModel, normalizeReasoningEffort,
   notify, onCloudHistoryConflict, onCloudHistoryWarning, onSettingsMenuRequested, onUpdateMenuRequested, pickAllowOption,
@@ -150,7 +142,7 @@ export {
   updateDrainBlockerCount, wouldAutoApprove,
 };
 export type {
-  ActivityReward, ApprovalPolicy, AuthMethod, AuthSession, BillingSummary, BillingTransition, ChatModelOverride,
+  ApprovalPolicy, AuthMethod, AuthSession, ChatModelOverride,
   ClientResponse, CloudTrajectoryConfig, CollaborationMode, ConversationMeta, CoreBridge, DownloadProgress,
   LocalAgentSettings, ManagedWorktreeBase, MemoryOverview, PendingAttachment, PlanImplementationContext,
   ProjectWorktreeTransitionPlan, ProviderInfo, RemoteInfo,
@@ -193,7 +185,7 @@ export interface ComposerPrefill {
   timelineIndex?: number;
 }
 
-/** A sidebar conversation that the user selected but Clark could not reopen.
+/** A sidebar conversation that the user selected but the agent could not reopen.
  * It remains the active navigation target until retry or cleanup, rather than
  * silently snapping the workspace back to the previously rendered chat. */
 export interface UnavailableConversation {
@@ -374,7 +366,7 @@ export interface SessionState {
   warning: string | null;
   /** Run ids whose failed/stopped terminal banner was dismissed this session. */
   dismissedFailedRuns: string[];
-  /** Authenticated user + the Clark connection config it carries. */
+  /** Authenticated user + the agent connection config it carries. */
   auth: AuthSession | null;
   /** Files staged to send with the next message. */
   attachments: PendingAttachment[];
@@ -467,7 +459,7 @@ export interface SessionState {
    *  the `memory` tool and its saved facts are injected into the prompt). */
   memoriesEnabled: boolean;
   /** Whether the experimental `browser` tool is enabled (off by default —
-   *  downloads clark-browser, ~150-300MB, on first use). */
+   *  downloads managed browser, ~150-300MB, on first use). */
   browserEnabled: boolean;
   /** Whether bounded parallel repository work is available. The model-facing
    *  policy still requires an explicit trigger; writers run in safe copies. */
@@ -501,6 +493,8 @@ export interface SessionState {
   mcpOpen: boolean;
   /** Whether the remote-hosts (SSH) settings modal is open. */
   sshOpen: boolean;
+  /** Whether the "New project" chooser modal is open. */
+  newProjectOpen: boolean;
   /** Whether the unified Settings modal is open, and which section it shows. */
   settingsOpen: boolean;
   settingsSection: SettingsSection;
@@ -512,13 +506,6 @@ export interface SessionState {
   sideQuestion: SideQuestionState | null;
   /** Whether the sidebar is collapsed to its icon rail. */
   sidebarCollapsed: boolean;
-  /** Billing summary (plan, subscription, credits) from Clark; null until loaded. */
-  billing: BillingSummary | null;
-  loadingBilling: boolean;
-  /** Announced only when a refresh observes a real tier/coverage change. */
-  billingTransition: BillingTransition | null;
-  /** A fresh server-issued reward earned by completed paid activity. */
-  activityReward: ActivityReward | null;
   /** A downloaded + staged app update awaiting a relaunch to apply. */
   update: StagedUpdate | null;
   /** Live byte progress while an update downloads in the background; null when idle. */
@@ -533,8 +520,6 @@ export interface SessionState {
   justUpdatedTo: string | null;
 
   init: () => Promise<void>;
-  loadBilling: () => Promise<void>;
-  dismissBillingTransition: () => void;
   selectProvider: (id: string) => void;
   setLocalSettings: (patch: Partial<LocalAgentSettings>) => void;
   setManagedWorktreeBase: (base: ManagedWorktreeBase) => void;
@@ -550,7 +535,7 @@ export interface SessionState {
   setMemoryViewerOpen: (open: boolean) => void;
   signIn: (method: AuthMethod) => Promise<void>;
   signOutAuth: () => Promise<void>;
-  /** Mint + store a Clark Code API key for the signed-in user if none yet. */
+  /** Mint + store an Agent Desktop API key for the signed-in user if none yet. */
   ensureCodeKey: () => Promise<void>;
   /** Fetch the account's conversation list from the cloud (the source of truth). */
   syncCloudIndex: () => Promise<void>;
@@ -612,10 +597,10 @@ export interface SessionState {
     text: string,
     skills?: SkillReferenceBlock[],
   ) => Promise<SendOutcome>;
-  /** Summarize and replace Clark Code's model-visible history without adding a user turn. */
+  /** Summarize and replace Agent Desktop's model-visible history without adding a user turn. */
   compactConversation: () => Promise<void>;
   continueProviderIncident: (incidentId: string) => Promise<void>;
-  /** Replace one prior Clark Code user turn and rerun from the retained prefix. */
+  /** Replace one prior Agent Desktop user turn and rerun from the retained prefix. */
   resendFrom: (
     timelineIndex: number,
     text: string,
@@ -645,8 +630,13 @@ export interface SessionState {
    *  no-op. Does not force the terminal open — if one is already open it
    *  records a launch so a fresh tab roots at the folder. */
   openProjectTerminal: (path?: string) => Promise<void>;
+  /** Set the project (a local folder or a remote SSH host + folder) and start
+   *  its first session immediately instead of waiting for a typed prompt. */
+  startNewProject: (target: NewProjectTarget) => Promise<void>;
   setMcpOpen: (open: boolean) => void;
   setSshOpen: (open: boolean) => void;
+  /** Open/close the "New project" chooser modal. */
+  setNewProjectOpen: (open: boolean) => void;
   /** Open/close the unified Settings modal, optionally jumping to a section. */
   setSettingsOpen: (open: boolean, section?: SettingsSection) => void;
   setPaletteOpen: (open: boolean) => void;
@@ -665,8 +655,6 @@ export interface SessionState {
   dismissNotice: () => void;
   /** Clear the transient warning toast. */
   dismissWarning: () => void;
-  /** Hide the current activity reward and remember that it was seen. */
-  dismissActivityReward: () => void;
   /** Hide the failed/stopped terminal banner for a specific run. */
   dismissFailedRun: (runId: string) => void;
   toggleSidebar: () => void;
@@ -692,7 +680,13 @@ export const epochStale = (epoch: number) => epoch !== sessionEpoch;
  *  streaming. Switching chats is always safe — sessions keep running in the
  *  background — but archive/delete tears the session down for real. */
 export const BUSY_SESSION_MESSAGE =
-  "Clark is still working in this chat — stop the run first (⌘.), then archive or delete it.";
+  "the agent is still working in this chat — stop the run first (⌘.), then archive or delete it.";
+
+/** Destination for a brand-new project's first session: run it on this machine
+ *  (a local folder) or over SSH on a remote host (a remote folder). */
+export type NewProjectTarget =
+  | { kind: "local"; path: string }
+  | { kind: "remote"; host: SshHost };
 
 /** One live session in the pool. Every opened conversation gets an entry that
  *  keeps its provider session (and any streaming run) alive independently of
@@ -877,33 +871,6 @@ export const appInitializationState = {
   initialization: null as Promise<void> | null,
 };
 
-export const ACTIVITY_REWARD_SEEN_PREFIX = "clark.activity-reward.seen.v1";
-
-export function activityRewardSeenKey(auth: AuthSession | null, reward: ActivityReward): string | null {
-  const account = codeKeyAccountBinding(auth);
-  return account ? `${ACTIVITY_REWARD_SEEN_PREFIX}.${encodeURIComponent(account)}.${reward.id}` : null;
-}
-
-export function hasSeenActivityReward(auth: AuthSession | null, reward: ActivityReward): boolean {
-  const key = activityRewardSeenKey(auth, reward);
-  if (!key) return true;
-  try {
-    return localStorage.getItem(key) === "1";
-  } catch {
-    return false;
-  }
-}
-
-export function markActivityRewardSeen(auth: AuthSession | null, reward: ActivityReward): void {
-  const key = activityRewardSeenKey(auth, reward);
-  if (!key) return;
-  try {
-    localStorage.setItem(key, "1");
-  } catch {
-    // This is presentation-only; an in-memory dismissal still avoids a loop.
-  }
-}
-
 export async function bindCloudTrajectory(
   bridge: CoreBridge,
   session: Session,
@@ -913,11 +880,11 @@ export async function bindCloudTrajectory(
   baseSnapshot: Snapshot,
 ): Promise<void> {
   // Browser preview/dev bridges have no native cloud sink. Production Tauri
-  // always implements it and requires authenticated Clark cloud credentials.
+  // always implements it and requires authenticated product cloud credentials.
   if (!bridge.configureCloudTrajectory) return;
   const creds = cloudCreds(auth);
   if (!creds) {
-    throw new Error("Clark cloud is required to start or resume a coding session.");
+    throw new Error("product cloud is required to start or resume a coding session.");
   }
   const repositoryFingerprint = meta.project
     ? await repositoryFingerprintForRoot(meta.project, codeKeyAccountBinding(auth))

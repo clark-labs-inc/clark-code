@@ -14,7 +14,7 @@ use agent_core::domain::{
     ProposedPlanStatus,
 };
 use agent_core::provider::CollaborationMode;
-use clark_agent::{
+use agent_loop::{
     AgentMessage, ContextTransform, FollowUpSource, Plugin, PluginCapabilities, TransformContext,
 };
 use serde::Serialize;
@@ -131,7 +131,7 @@ impl PlanningState {
         plan
     }
 
-    /// Record Clark's hidden Plan Mode artifact. The model-facing protocol is
+    /// Record Agent Desktop's hidden Plan Mode artifact. The model-facing protocol is
     /// deliberately just Markdown; durable typed execution contracts remain a
     /// compatibility path for older transcripts and explicit structured
     /// callers, but are not required for a normal Plan Mode proposal.
@@ -487,8 +487,8 @@ fn append_previous_proposal(instructions: &mut String, previous: Option<&Propose
     }
 }
 
-pub(crate) fn developer_instruction_message(content: String) -> clark_agent::AgentMessage {
-    clark_agent::AgentMessage::Custom {
+pub(crate) fn developer_instruction_message(content: String) -> agent_loop::AgentMessage {
+    agent_loop::AgentMessage::Custom {
         kind: DEVELOPER_INSTRUCTION_MESSAGE_KIND.into(),
         payload: serde_json::json!({ "content": content }),
         timestamp: None,
@@ -1225,7 +1225,7 @@ mod tests {
         let message = developer_instruction_message("policy".into());
         assert!(matches!(
             message,
-            clark_agent::AgentMessage::Custom { kind, payload, .. }
+            agent_loop::AgentMessage::Custom { kind, payload, .. }
                 if kind == DEVELOPER_INSTRUCTION_MESSAGE_KIND
                     && payload["content"] == "policy"
         ));

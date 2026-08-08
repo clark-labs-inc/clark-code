@@ -40,12 +40,12 @@
 }
 
 /* ----------------------------------------------------------------------------
-   Clark editorial workspace — warm paper, graphite type, violet interaction.
+   Agent Desktop editorial workspace — warm paper, graphite type, violet interaction.
    Violet is reserved for primary actions, focus, selection, and live state;
    code and tool values retain the quiet monospace-chip vernacular.
 ---------------------------------------------------------------------------- */
 @theme {
-  --color-bg-primary: #f7f5f1;
+  --color-bg: #f7f5f1;
   --color-bg-secondary: #ede9e2;
   --color-bg-tertiary: #ded8ce;
   --color-bg-elevated: #fdfcfa;
@@ -56,36 +56,20 @@
   --color-checkout-branch: #4b6347;
   --color-checkout-worktree: #5748c7;
 
-  --color-text-primary: #211f1c;
-  --color-text-secondary: #4b4742;
-  --color-text-muted: #5d5750;
-  --color-text-faint: #625c55;
+  --color-ink: #211f1c;
+  --color-ink-secondary: #4b4742;
+  --color-ink-muted: #5d5750;
+  --color-ink-faint: #625c55;
 
   --color-accent: #5748c7;
   --color-accent-hover: #493bad;
   --color-accent-gradient-start: #493bad;
   --color-accent-gradient-end: #6657d9;
-  --color-accent-muted: rgba(87, 72, 199, 0.18);
+  --color-accent-soft: rgba(87, 72, 199, 0.18);
   --color-accent-subtle: rgba(87, 72, 199, 0.09);
   --color-on-accent: #fdfcfa;
 
-  /* Compatibility aliases keep existing desktop utilities on the canonical
-     cross-platform token contract while surfaces migrate incrementally. */
-  --color-bg: var(--color-bg-primary);
-  --color-ink: var(--color-text-primary);
-  --color-ink-secondary: var(--color-text-secondary);
-  --color-ink-muted: var(--color-text-muted);
-  --color-ink-faint: var(--color-text-faint);
-  --color-accent-soft: var(--color-accent-muted);
   --color-accent-focus: rgba(87, 72, 199, 0.38);
-  --color-canvas: var(--color-bg-primary);
-  --color-surface: var(--color-bg-elevated);
-  --color-surface-muted: var(--color-bg-secondary);
-  --color-primary: var(--color-accent);
-  --color-primary-hover: var(--color-accent-hover);
-  --color-primary-soft: var(--color-accent-soft);
-  --color-focus: var(--color-accent-focus);
-  --color-on-primary: var(--color-on-accent);
 
   /* Light-theme text colors stay at or above 4.5:1 on the darkest paper
      surface (`bg-sunken`), including small labels and status copy. */
@@ -99,7 +83,7 @@
   --color-border-subtle: rgba(40, 36, 32, 0.055);
   --color-border-strong: rgba(40, 36, 32, 0.3);
 
-  /* Clark's type voice is editorial, not ornamental: DM Sans for calm UI,
+  /* Agent Desktop's type voice is editorial, not ornamental: DM Sans for calm UI,
      Newsreader for moments of emphasis, and JetBrains Mono for literal data.
      The rest of each stack is deliberately broad. A single font cannot cover
      every writing system, so native script fonts and Noto-compatible system
@@ -133,12 +117,12 @@
 
   /* ── Motion tokens ───────────────────────────────────────────────
    * One easing curve and a small, deliberate speed scale for the whole
-   * app, so every transition feels like one system. `ease-clark` is a
-   * gentle ease-out (fast start, soft landing); `ease-clark-inout` is
+   * app, so every transition feels like one system. `ease-agent` is a
+   * gentle ease-out (fast start, soft landing); `ease-agent-inout` is
    * for symmetric moves (a value sliding between two states). Keep JS
    * (lib/motion.ts) and these in sync — same numbers, two consumers. */
-  --ease-clark: cubic-bezier(0.22, 1, 0.36, 1);
-  --ease-clark-inout: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-agent: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-agent-inout: cubic-bezier(0.4, 0, 0.2, 1);
   --dur-fast: 120ms;   /* hovers, taps, small icon/color changes */
   --dur-base: 200ms;   /* the default — enters, popovers, most UI */
   --dur-slow: 300ms;   /* large surfaces, deliberate reveals */
@@ -152,24 +136,7 @@
   --text-size-scale: 1;
   --conversation-column-max-width: calc(50rem * var(--text-size-scale));
 
-  /* Transitional bridge for compact UI labels written before the semantic type
-     scale. They grow enough to remain readable, then cap so fixed chrome can
-     stay compact at the largest reading sizes. New code should use --text-*.
-  */
-  --text-ui-8: clamp(0.625rem, calc(0.5rem * var(--text-size-scale)), 1rem);
-  --text-ui-10: clamp(0.75rem, calc(0.625rem * var(--text-size-scale)), 1rem);
-  --text-ui-11: clamp(0.75rem, calc(0.6875rem * var(--text-size-scale)), 1rem);
-  --text-ui-13: clamp(0.8125rem, calc(0.8125rem * var(--text-size-scale)), 1rem);
 }
-
-/* Tailwind arbitrary pixel text utilities bypass --text-size-scale. These
-   exact legacy sizes occur in dense metadata and status labels; keep their
-   intended hierarchy without leaving them at 8–11px when reading type grows. */
-[class~="text-[8px]"] { font-size: var(--text-ui-8); }
-[class~="text-[10px]"] { font-size: var(--text-ui-10); }
-[class~="text-[11px]"],
-[class~="text-[0.6875rem]"] { font-size: var(--text-ui-11); }
-[class~="text-[13px]"] { font-size: var(--text-ui-13); }
 
 /* Tailwind's numeric leading utilities are fixed spacing lengths. Preserve
    their 100% rhythm while scaling explicit dense copy with the reading size. */
@@ -177,18 +144,37 @@
 .leading-5 { line-height: max(1.25rem, calc(1.25rem * var(--text-size-scale))); }
 .leading-6 { line-height: max(1.5rem, calc(1.5rem * var(--text-size-scale))); }
 
-/* Legacy primary actions still compose `bg-accent text-white`. Use the
-   theme-aware foreground token so the lighter dark-theme violet stays legible. */
-.bg-accent.text-white { color: var(--color-on-accent); }
-
 .conversation-column-width {
   max-width: var(--conversation-column-max-width);
+}
+
+/* Assistant prose has its own contrast scale. Low is the default reading tone:
+   calmer than UI chrome while remaining comfortably legible. Descendant
+   overrides keep Markdown headings, links, and emphasis on the same tone. */
+.chat-reading-contrast[data-chat-contrast="low"] {
+  --chat-reading-color: #56514b;
+}
+
+.chat-reading-contrast[data-chat-contrast="medium"] {
+  --chat-reading-color: #3b3833;
+}
+
+.chat-reading-contrast[data-chat-contrast="high"] {
+  --chat-reading-color: var(--color-ink);
+}
+
+.chat-reading-contrast {
+  color: var(--chat-reading-color) !important;
+}
+
+.chat-reading-contrast :where(a, strong, h1, h2, h3, h4, h5, h6) {
+  color: inherit !important;
 }
 
 /* Dark keeps the same violet interaction contract on a warm graphite canvas. */
 html.dark {
   color-scheme: dark;
-  --color-bg-primary: #0d0d0d;
+  --color-bg: #0d0d0d;
   --color-bg-secondary: #161616;
   --color-bg-tertiary: #1f1f1f;
   --color-bg-elevated: #161616;
@@ -199,16 +185,16 @@ html.dark {
   --color-checkout-branch: #7faf75;
   --color-checkout-worktree: #9b8cff;
 
-  --color-text-primary: #f5f5f4;
-  --color-text-secondary: #c6c4bf;
-  --color-text-muted: #a8a5a0;
-  --color-text-faint: #918e99;
+  --color-ink: #f5f5f4;
+  --color-ink-secondary: #c6c4bf;
+  --color-ink-muted: #a8a5a0;
+  --color-ink-faint: #918e99;
 
   --color-accent: #9b8cff;
   --color-accent-hover: #ad9fff;
   --color-accent-gradient-start: #8c7bfa;
   --color-accent-gradient-end: #ad9fff;
-  --color-accent-muted: rgba(155, 140, 255, 0.22);
+  --color-accent-soft: rgba(155, 140, 255, 0.22);
   --color-accent-subtle: rgba(155, 140, 255, 0.1);
   --color-accent-focus: rgba(155, 140, 255, 0.38);
   --color-on-accent: #17131f;
@@ -225,6 +211,14 @@ html.dark {
 
   --shadow-soft: none;
   --shadow-lifted: 0 10px 32px rgba(0, 0, 0, 0.26);
+}
+
+html.dark .chat-reading-contrast[data-chat-contrast="low"] {
+  --chat-reading-color: #aaa7a2;
+}
+
+html.dark .chat-reading-contrast[data-chat-contrast="medium"] {
+  --chat-reading-color: #c6c4bf;
 }
 
 /* Colorblind-friendly (daltonized) variant — layered on top of either light or
@@ -266,7 +260,7 @@ body {
   letter-spacing: 0;
   /* Permit synthetic emphasis when a fallback script lacks a requested face.
      Disabling synthesis globally can make bold and italic semantics invisible
-     in languages not covered by Clark's bundled Latin fonts. */
+     in languages not covered by Agent Desktop's bundled Latin fonts. */
   font-synthesis: weight style;
   font-feature-settings: "kern" 1, "calt" 1, "locl" 1;
   font-optical-sizing: auto;
@@ -281,7 +275,7 @@ body {
   text-wrap: balance;
 }
 
-/* Script-aware display typography. Clark keeps its editorial serif voice when
+/* Script-aware display typography. Agent Desktop keeps its editorial serif voice when
    an appropriate local face exists, while avoiding Latin-centric tight
    tracking and balanced wrapping on connected or ideographic scripts. These
    rules work both when the document language changes and for tagged excerpts
@@ -338,14 +332,14 @@ body {
   --font-display: "Noto Nastaliq Urdu", "Noto Naskh Arabic", serif;
 }
 
-.clark-bootstrap-shell {
+.desktop-bootstrap-shell {
   display: grid;
   height: 100vh;
   place-items: center;
   background: var(--color-bg);
 }
 
-.clark-bootstrap-mark {
+.desktop-bootstrap-mark {
   display: grid;
   width: 3rem;
   height: 3rem;
@@ -650,9 +644,9 @@ svg.lucide {
   0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--color-accent) 0%, transparent); }
   50% { box-shadow: 0 0 0 3px color-mix(in oklab, var(--color-accent) 18%, transparent); }
 }
-.permission-guide-step { animation: permission-guide-step-in 0.24s var(--ease-clark) both; }
-.permission-guide-arrow { animation: permission-guide-arrow-nudge 1.15s var(--ease-clark-inout) infinite; }
-.permission-guide-cursor { animation: permission-guide-arrow-nudge 1.15s var(--ease-clark-inout) 0.12s infinite; }
+.permission-guide-step { animation: permission-guide-step-in 0.24s var(--ease-agent) both; }
+.permission-guide-arrow { animation: permission-guide-arrow-nudge 1.15s var(--ease-agent-inout) infinite; }
+.permission-guide-cursor { animation: permission-guide-arrow-nudge 1.15s var(--ease-agent-inout) 0.12s infinite; }
 .permission-guide-target { animation: permission-guide-target-pulse 1.8s ease-in-out infinite; }
 
 /* Respect reduced-motion across both bespoke effects and Tailwind's animation
@@ -665,7 +659,7 @@ svg.lucide {
   }
 
   .breathe,
-  .clark-bootstrap-mark,
+  .desktop-bootstrap-mark,
   .fade-in,
   .appear-delayed,
   .skeleton,

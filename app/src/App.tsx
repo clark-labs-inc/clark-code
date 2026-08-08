@@ -8,14 +8,16 @@ import { useAppVersion } from "./lib/appInfo";
 import { SignInScreen } from "./surfaces/SignInScreen";
 import { UpdateStatus } from "./surfaces/UpdateStatus";
 import { NoticeToast, TextSizeToast, WarningToast } from "./surfaces/Toast";
+import { productModule } from "./product/productModule";
 
 const AuthenticatedWorkspace = lazy(() => import("./AuthenticatedWorkspace"));
 
 function WorkspaceLoadingScreen() {
+  const initial = productModule().branding.shortName.slice(0, 1).toLowerCase();
   return (
     <div className="grid h-screen w-screen place-items-center bg-bg text-ink">
       <div className="breathe grid size-12 place-items-center rounded-xl border border-border-subtle bg-bg-elevated text-lg font-semibold">
-        c
+        {initial}
       </div>
     </div>
   );
@@ -23,12 +25,13 @@ function WorkspaceLoadingScreen() {
 
 function AppVersionBadge() {
   const version = useAppVersion();
+  const product = productModule();
   if (!version) return null;
 
   return (
     <span
-      aria-label={`Clark Code version ${version}`}
-      className="pointer-events-none fixed bottom-2 right-3 z-10 font-mono text-[10px] tabular-nums text-ink-faint"
+      aria-label={`${product.branding.name} version ${version}`}
+      className="pointer-events-none fixed bottom-2 right-3 z-10 font-mono text-xs tabular-nums text-ink-faint"
     >
       v{version}
     </span>
@@ -36,6 +39,7 @@ function AppVersionBadge() {
 }
 
 export default function App() {
+  const product = productModule();
   const init = useSessionStore((s) => s.init);
   const auth = useSessionStore((s) => s.auth);
   const addFiles = useSessionStore((s) => s.addFiles);
@@ -65,9 +69,9 @@ export default function App() {
   // File drops land on the composer when it's open; anywhere else in the
   // window they still attach (and never navigate the webview away). On the
   // sign-in screen they're only swallowed, not attached.
-  useWindowFileDropGuard(auth ? (files) => void addFiles(files) : undefined);
+  useWindowFileDropGuard(auth || !product.authRequired ? (files) => void addFiles(files) : undefined);
 
-  if (!auth)
+  if (!auth && product.authRequired)
     return (
       <>
         <SignInScreen />

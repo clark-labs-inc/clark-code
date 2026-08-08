@@ -5,7 +5,6 @@ import {
   isCompactCommand,
   sideQuestionCommandQuestion,
   slashCommands,
-  subscriptionWorkflowForSubmission,
 } from "./slashCommands";
 
 describe("goal slash command", () => {
@@ -61,99 +60,9 @@ describe("sentry slash command", () => {
   });
 });
 
-describe("scout slash command", () => {
-  it("is discoverable as a handoff into the first-class Scout space", () => {
-    expect(slashCommands()).toContainEqual(expect.objectContaining({
-      name: "scout",
-      body: "/scout",
-      hint: "Map your business systems end to end",
-      localOnly: true,
-      subscriptionWorkflow: expect.objectContaining({ label: "Scout" }),
-    }));
-  });
-
-  it("leaves specialist commands visible for the workspace handoff", () => {
-    expect(expandPromptSlashCommand("/scout")).toBe("/scout");
-    expect(expandPromptSlashCommand("  /scout map AWS")).toBe("  /scout map AWS");
-    expect(expandPromptSlashCommand("/scouting")).toBe("/scouting");
-    expect(expandPromptSlashCommand("please /scout")).toBe("please /scout");
-  });
-});
-
-describe("security slash command", () => {
-  it("selects the first-class Security space", () => {
-    expect(slashCommands()).toContainEqual(expect.objectContaining({
-      name: "security",
-      body: "/security",
-      hint: "Find verified repository vulnerabilities",
-      localOnly: true,
-      subscriptionWorkflow: expect.objectContaining({ label: "Security Scan" }),
-    }));
-  });
-
-  it("leaves the exact command prefix for the workspace handoff", () => {
-    expect(expandPromptSlashCommand("/security")).toBe("/security");
-    expect(expandPromptSlashCommand("  /security crates/auth"))
-      .toBe("  /security crates/auth");
-    expect(expandPromptSlashCommand("/securityish")).toBe("/securityish");
-    expect(expandPromptSlashCommand("please /security")).toBe("please /security");
-  });
-
-  it("offers a distinct exact-diff workflow", () => {
-    expect(slashCommands()).toContainEqual(expect.objectContaining({
-      name: "security-diff",
-      body: "/security-diff",
-      hint: "Catch security regressions in this diff",
-      localOnly: true,
-      subscriptionWorkflow: expect.objectContaining({ label: "Security Diff" }),
-    }));
-    expect(expandPromptSlashCommand("/security-diff"))
-      .toBe("/security-diff");
-    expect(expandPromptSlashCommand("  /security-diff src"))
-      .toBe("  /security-diff src");
-    expect(expandPromptSlashCommand("/security-different"))
-      .toBe("/security-different");
-  });
-
-  it("offers a distinct bounded deep workflow", () => {
-    expect(slashCommands()).toContainEqual(expect.objectContaining({
-      name: "security-deep",
-      body: "/security-deep",
-      hint: "Audit deeply with independent passes",
-      localOnly: true,
-      subscriptionWorkflow: expect.objectContaining({ label: "Security Deep" }),
-    }));
-    expect(expandPromptSlashCommand("/security-deep"))
-      .toBe("/security-deep");
-    expect(expandPromptSlashCommand("  /security-deep crates"))
-      .toBe("  /security-deep crates");
-    expect(expandPromptSlashCommand("/security-deeper"))
-      .toBe("/security-deeper");
-  });
-});
-
-describe("subscription workflow gating", () => {
-  it("recognizes slash commands before and after prompt expansion", () => {
-    expect(subscriptionWorkflowForSubmission("/scout map AWS")?.command).toBe("scout");
-    expect(subscriptionWorkflowForSubmission("$security:security-scan src")?.command)
-      .toBe("security");
-    expect(subscriptionWorkflowForSubmission("$security:security-diff")?.command)
-      .toBe("security-diff");
-    expect(subscriptionWorkflowForSubmission("$security:security-deep")?.command)
-      .toBe("security-deep");
-  });
-
-  it("recognizes a selected premium skill chip", () => {
-    expect(subscriptionWorkflowForSubmission(
-      "review this",
-      ["security:security-deep"],
-    )?.label).toBe("Security Deep");
-  });
-
-  it("does not gate lookalikes or ordinary skills", () => {
-    expect(subscriptionWorkflowForSubmission("/scouting")).toBeNull();
-    expect(subscriptionWorkflowForSubmission("$security:security-deeper")).toBeNull();
-    expect(subscriptionWorkflowForSubmission("$sentry:sentry")).toBeNull();
+describe("product-gated slash commands", () => {
+  it("exposes none in the neutral composition", () => {
+    expect(slashCommands().filter((command) => command.gatedWorkflow)).toEqual([]);
   });
 });
 

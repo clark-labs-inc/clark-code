@@ -105,7 +105,7 @@ fn run_session(
     let control_backend = backend.clone();
     let control_session = session_id.clone();
     std::thread::Builder::new()
-        .name("clark-computer-use-control".to_string())
+        .name("agent-computer-use-control".to_string())
         .spawn(move || {
             let _ = run_control(control, control_backend, control_session, parent_pid);
         })

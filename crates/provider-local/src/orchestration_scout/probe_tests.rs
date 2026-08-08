@@ -12,7 +12,7 @@ fn secret_bearing_paths_are_rejected_on_posix_and_windows_shapes() {
     assert!(sensitive_path(Path::new(".docker/config.json")));
     assert!(sensitive_path(Path::new(".kube/config")));
     assert!(sensitive_path(Path::new(
-        r"C:\Users\Clark\.aws\credentials"
+        r"C:\Users\Agent Desktop\.aws\credentials"
     )));
     assert!(!sensitive_path(Path::new("src/config.rs")));
 }
@@ -21,7 +21,7 @@ fn secret_bearing_paths_are_rejected_on_posix_and_windows_shapes() {
 fn probe_paths_are_project_relative_on_posix_and_windows() {
     assert!(project_relative_path("src/config.rs"));
     assert!(!project_relative_path("/etc/passwd"));
-    assert!(!project_relative_path(r"C:\Users\Clark\secret.txt"));
+    assert!(!project_relative_path(r"C:\Users\Agent Desktop\secret.txt"));
     assert!(!project_relative_path(r"\\server\share\secret.txt"));
 }
 

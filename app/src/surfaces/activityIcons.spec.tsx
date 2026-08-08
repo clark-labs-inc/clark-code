@@ -26,21 +26,21 @@ describe("activity icon restraint", () => {
     expect(markup).not.toContain("lucide-square-terminal");
   });
 
-  it("renders the Clark Cloud identity for research", () => {
+  it("renders the product-neutral identity for research", () => {
     const markup = renderToStaticMarkup(
       <WorkLine
         call={toolCall({
           kind: "research",
-          title: "clark_research: WKWebView selection",
+          title: "brokered_research: WKWebView selection",
           raw_input: { query: "WKWebView selection" },
         })}
         active={false}
       />,
     );
 
-    expect(markup).toContain("Clark Cloud Agent");
+    expect(markup).toContain("Research agent");
     expect(markup).toContain("Research complete");
-    expect(markup).toContain('aria-label="Clark"');
+    expect(markup).toContain('aria-label="Agent Desktop"');
     expect(markup).not.toContain("lucide-telescope");
   });
 
@@ -50,7 +50,7 @@ describe("activity icon restraint", () => {
         call={toolCall({
           kind: "research",
           status: "in_progress",
-          title: "clark_research: WKWebView selection",
+          title: "brokered_research: WKWebView selection",
           raw_input: { query: "WKWebView selection" },
         })}
         active
@@ -58,7 +58,7 @@ describe("activity icon restraint", () => {
     );
 
     expect(markup).toContain("Live");
-    expect(markup).toContain("Starting Clark Cloud Agent");
+    expect(markup).toContain("Starting research agent");
     expect(markup).not.toContain("Web search");
     expect(markup).not.toContain("Source reading");
     expect(markup).not.toContain("Cited synthesis");
@@ -79,7 +79,7 @@ describe("activity icon restraint", () => {
             { id: "search", title: "Search official Vorflux sources", status: "completed" as const },
             {
               id: "read",
-              title: "Read clarkchat.com",
+              title: "Read example.test",
               status: "in_progress" as const,
               summary: "Reading API and architecture pages",
             },
@@ -102,7 +102,7 @@ describe("activity icon restraint", () => {
         },
         {
           id: "product",
-          label: "Clark product site",
+          label: "the agent product site",
           status: "completed" as const,
           summary: "Verified primary claims",
         },
@@ -113,8 +113,8 @@ describe("activity icon restraint", () => {
         call={toolCall({
           kind: "research",
           status: "in_progress",
-          title: "clark_research: Deep-dive on Vorflux and verify clarkchat.com",
-          raw_input: { query: "Deep-dive on Vorflux and verify clarkchat.com" },
+          title: "brokered_research: Deep-dive on Vorflux and verify sources",
+          raw_input: { query: "Deep-dive on Vorflux and verify example.test" },
           progress,
         })}
         active
@@ -131,7 +131,7 @@ describe("activity icon restraint", () => {
     expect(markup).not.toContain("Hidden pending detail");
     expect(markup).toContain("Parallel research · 2 agents");
     expect(markup).toContain("Vorflux documentation");
-    expect(markup).toContain("Clark product site");
+    expect(markup).toContain("the agent product site");
     expect(markup).toContain("Verified primary claims");
   });
 
@@ -160,7 +160,7 @@ describe("activity icon restraint", () => {
       <WorkLine
         call={toolCall({
           kind: "research",
-          title: "clark_research: WKWebView selection",
+          title: "brokered_research: WKWebView selection",
           raw_input: { query: "WKWebView selection" },
           content: [{ type: "text", text: "See https://webkit.org/ and https://github.com/WebKit/WebKit." }],
         })}
@@ -178,7 +178,7 @@ describe("activity icon restraint", () => {
         call={toolCall({
           kind: "research",
           status: "failed",
-          title: "clark_research: Verify sources",
+          title: "brokered_research: Verify sources",
           progress: {
             revision: 3,
             status: "failed",
@@ -195,7 +195,7 @@ describe("activity icon restraint", () => {
         call={toolCall({
           kind: "research",
           status: "cancelled",
-          title: "clark_research: Verify sources",
+          title: "brokered_research: Verify sources",
         })}
         active={false}
       />,

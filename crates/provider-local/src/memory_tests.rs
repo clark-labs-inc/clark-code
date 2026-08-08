@@ -15,7 +15,7 @@ fn guidance_explains_deferred_memory_activation() {
 #[test]
 fn paths_are_under_dot_clark() {
     let root = Path::new("/proj");
-    assert_eq!(memory_dir(root), Path::new("/proj/.clark/memory"));
+    assert_eq!(memory_dir(root), Path::new("/proj/.agent/memory"));
 }
 
 #[test]

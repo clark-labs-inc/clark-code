@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { productName } from "../product/productModule";
 import { useReducedMotion } from "motion/react";
 import * as m from "motion/react-m";
 import { ChevronRight, MessageSquare, FolderGit2, Server } from "lucide-react";
@@ -64,7 +65,7 @@ export function StartCard() {
       >
         <div className="mb-6">
           <div className="mb-2.5 text-xs font-semibold uppercase tracking-[0.16em] text-accent">
-            Clark Code
+            {productName()}
           </div>
           <h1 className="font-display max-w-xl text-3xl leading-[1.12] text-ink">
             {daypart()}, {firstName}.
@@ -130,7 +131,7 @@ function SessionRow({ c }: { c: ConversationMeta }) {
   return (
     <button
       onClick={() => void open(c.id)}
-      className="group flex min-h-11 items-center gap-3 px-4 py-2.5 text-left transition duration-200 ease-clark hover:bg-accent-subtle"
+      className="group flex min-h-11 items-center gap-3 px-4 py-2.5 text-left transition duration-200 ease-agent hover:bg-accent-subtle"
     >
       <Icon className="size-4 shrink-0 text-ink-faint" />
       <span className="min-w-0 flex-1 truncate text-sm text-ink">{c.title}</span>

@@ -37,14 +37,14 @@ impl SeededWorkspace {
             let repo_root = root.join("repos").join(&spec.id);
             fs::create_dir_all(&repo_root)?;
             run_git(&repo_root, &["init", "--quiet"])?;
-            run_git(&repo_root, &["config", "user.name", "Clark Benchmark"])?;
+            run_git(&repo_root, &["config", "user.name", "Agent Benchmark"])?;
             run_git(
                 &repo_root,
                 &["config", "user.email", "benchmark@invalid.local"],
             )?;
             write_files(&repo_root, &spec.initial_files)?;
             fs::write(
-                repo_root.join(".clark-benchmark-repository-id"),
+                repo_root.join(".agent-benchmark-repository-id"),
                 format!("{}\n", spec.id),
             )?;
             run_git(&repo_root, &["add", "--all"])?;

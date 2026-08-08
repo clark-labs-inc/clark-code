@@ -1,4 +1,4 @@
-//! Remote control for a standalone [`clark-code-worker`] over system SSH.
+//! Remote control for a standalone `agent-code-worker` over system SSH.
 //!
 //! The connection is intentionally separate from `code-host`: the host owns
 //! protocol and plugin policy, while this crate owns artifact deployment and a

@@ -7,9 +7,7 @@ use sha2::{Digest as _, Sha256};
 use uuid::Uuid;
 
 use super::http::{authorization_header, build_http_client, post_json, validate_remote_url};
-use super::{hex_lower, ClarkCartographyClient, DEFAULT_TIMEOUT};
-
-const MACHINE_ENROLL_PATH: &str = "/v1/system-cartography/machines/enroll";
+use super::{hex_lower, validate_route_prefix, CartographyClient, DEFAULT_TIMEOUT};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -39,25 +37,29 @@ pub struct MachineEnrollment {
 /// Enrollment is deliberately separate from collection because it requires
 /// active organization-administrator authority and returns the coordinator
 /// key that pins all later acceptance-receipt verification.
-pub struct ClarkCartographyEnrollmentConfig {
+pub struct CartographyEnrollmentConfig {
     pub(super) base_url: Url,
     authorization: HeaderValue,
     timeout: Duration,
+    route_prefix: String,
 }
 
-impl ClarkCartographyEnrollmentConfig {
+impl CartographyEnrollmentConfig {
     pub fn new(
         platform_base_url: impl AsRef<str>,
         platform_api_key: impl AsRef<str>,
+        route_prefix: impl Into<String>,
     ) -> Result<Self, String> {
         let base_url = Url::parse(platform_base_url.as_ref())
-            .map_err(|_| "invalid Clark Platform base URL".to_string())?;
-        validate_remote_url(&base_url, "Clark Platform base URL")?;
+            .map_err(|_| "invalid host platform base URL".to_string())?;
+        validate_remote_url(&base_url, "host platform base URL")?;
         let authorization = authorization_header(platform_api_key.as_ref())?;
+        let route_prefix = validate_route_prefix(route_prefix.into())?;
         Ok(Self {
             base_url,
             authorization,
             timeout: DEFAULT_TIMEOUT,
+            route_prefix,
         })
     }
 
@@ -70,32 +72,33 @@ impl ClarkCartographyEnrollmentConfig {
     }
 }
 
-pub struct EnrolledClarkCartographyClient {
+pub struct EnrolledCartographyClient {
     pub enrollment: MachineEnrollment,
-    pub client: ClarkCartographyClient,
+    pub client: CartographyClient,
 }
 
 pub async fn enroll_machine(
-    config: ClarkCartographyEnrollmentConfig,
+    config: CartographyEnrollmentConfig,
     request: &MachineEnrollmentRequest,
-) -> Result<EnrolledClarkCartographyClient, String> {
+) -> Result<EnrolledCartographyClient, String> {
     validate_request(request)?;
     let http_client = build_http_client(config.timeout)?;
     let enrollment: MachineEnrollment = post_json(
         &http_client,
         &config.base_url,
         &config.authorization,
-        MACHINE_ENROLL_PATH,
+        &format!("{}/machines/enroll", config.route_prefix),
         request,
     )
     .await?;
     validate_response(request, &enrollment)?;
-    Ok(EnrolledClarkCartographyClient {
-        client: ClarkCartographyClient {
+    Ok(EnrolledCartographyClient {
+        client: CartographyClient {
             client: http_client,
             base_url: config.base_url,
             authorization: config.authorization,
             coordinator_public_key: enrollment.coordinator_public_key.clone(),
+            route_prefix: config.route_prefix,
         },
         enrollment,
     })

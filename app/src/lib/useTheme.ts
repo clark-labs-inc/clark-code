@@ -15,7 +15,7 @@ async function syncNativeTheme(dark: boolean): Promise<void> {
   }
 }
 
-/** Light (warm papyrus, default) ↔ dark (clarkDark), persisted. A colorblind
+/** Light (warm papyrus, default) ↔ dark (agentDark), persisted. A colorblind
  *  (daltonized) variant can be layered on top of either theme — it swaps the
  *  red/green success/danger tokens for blue/orange so status is legible to
  *  red-green colorblind users. */
@@ -26,7 +26,7 @@ export function useTheme() {
       // makes React adopt the already-painted state instead of correcting it
       // after the first render.
       if (document.documentElement.classList.contains("dark")) return true;
-      return localStorage.getItem("clark.theme") === "dark";
+      return localStorage.getItem("agent-desktop.theme") === "dark";
     } catch {
       return false;
     }
@@ -34,7 +34,7 @@ export function useTheme() {
   const [colorblind, setColorblind] = useState<boolean>(() => {
     try {
       if (document.documentElement.classList.contains("colorblind")) return true;
-      return localStorage.getItem("clark.colorblind") === "1";
+      return localStorage.getItem("agent-desktop.colorblind") === "1";
     } catch {
       return false;
     }
@@ -47,7 +47,7 @@ export function useTheme() {
       ?.setAttribute("content", dark ? "#0D0D0D" : "#F7F5F1");
     void syncNativeTheme(dark);
     try {
-      localStorage.setItem("clark.theme", dark ? "dark" : "light");
+      localStorage.setItem("agent-desktop.theme", dark ? "dark" : "light");
     } catch {
       /* ignore */
     }
@@ -56,7 +56,7 @@ export function useTheme() {
   useEffect(() => {
     document.documentElement.classList.toggle("colorblind", colorblind);
     try {
-      localStorage.setItem("clark.colorblind", colorblind ? "1" : "0");
+      localStorage.setItem("agent-desktop.colorblind", colorblind ? "1" : "0");
     } catch {
       /* ignore */
     }

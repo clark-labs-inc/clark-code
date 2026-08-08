@@ -160,70 +160,6 @@ describe("cloud conversation index ownership", () => {
   });
 });
 
-describe("account authority recovery", () => {
-  it("removes stale Ready billing and exposes reconnect state on a real account mismatch", async () => {
-    vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
-    invoke.mockRejectedValueOnce(new Error(
-      "clark_account_mismatch: Clark is connected to a different signed-in account.",
-    ));
-    useSessionStore.setState({
-      auth: {
-        user: { id: "account-1", name: "Owner", method: "google" },
-      },
-      billing: {
-        stripe_enabled: true,
-        enforcement_enabled: true,
-        effective: {
-          owner_kind: "organization",
-          display_name: "Workspace",
-          coverage_status: "ready",
-        },
-      },
-      loadingBilling: false,
-      error: null,
-    });
-
-    await useSessionStore.getState().loadBilling();
-
-    expect(useSessionStore.getState()).toMatchObject({
-      billing: null,
-      loadingBilling: false,
-      error: expect.stringContaining("clark_account_mismatch:"),
-    });
-  });
-
-  it("clears the reconnect state after authoritative billing succeeds", async () => {
-    vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
-    invoke.mockResolvedValueOnce({
-      stripe_enabled: true,
-      enforcement_enabled: true,
-      effective: {
-        owner_kind: "user",
-        display_name: "Personal",
-        coverage_status: "ready",
-      },
-    });
-    useSessionStore.setState({
-      auth: {
-        user: { id: "account-1", name: "Owner", method: "google" },
-      },
-      billing: null,
-      loadingBilling: false,
-      error: "clark_account_mismatch: reconnect required",
-    });
-
-    await useSessionStore.getState().loadBilling();
-
-    expect(useSessionStore.getState()).toMatchObject({
-      loadingBilling: false,
-      error: null,
-      billing: {
-        effective: { coverage_status: "ready" },
-      },
-    });
-  });
-});
-
 describe("other-device conversation lifecycle events", () => {
   it("cancels a deleted opening target and clears state that cannot belong to the next chat", () => {
     useSpecialistStore.getState().open("scout");
@@ -325,10 +261,10 @@ describe("other-device conversation lifecycle events", () => {
     expect(state.unavailableConversation).toEqual({
       id: "changed",
       title: "Conversation changed",
-      detail: "Clark cloud has a newer revision of this conversation.",
+      detail: "product cloud has a newer revision of this conversation.",
       kind: "refresh_required",
     });
-    expect(useSpecialistStore.getState().active).toBe("security");
+    expect(useSpecialistStore.getState().active).toBeNull();
   });
 
   it("does not replace an explicit cleanup with a conflict refresh screen", () => {

@@ -5,7 +5,7 @@ use serde_json::{json, Value};
 use super::{arg_str, ToolCtx, ToolExecutor, ToolOutcome};
 
 pub(crate) const FINAL_ANSWER_TOOL: &str = "final_answer";
-pub(crate) const FINAL_ANSWER_DETAILS_KEY: &str = "_clark_final_answer";
+pub(crate) const FINAL_ANSWER_DETAILS_KEY: &str = "_agent_final_answer";
 
 pub struct FinalAnswer;
 

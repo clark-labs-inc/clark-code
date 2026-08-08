@@ -1,9 +1,9 @@
 {
   "version": 1,
-  "storageKey": "clark-desktop:resilience-benchmark",
-  "model": "clark-code:free",
+  "storageKey": "agent-desktop:resilience-benchmark",
+  "model": "local-model",
   "modelLabel": "Free",
-  "provider": "clark-managed",
+  "provider": "managed-agent",
   "faults": [
     "rate_limit",
     "duplicated_tool_ids",

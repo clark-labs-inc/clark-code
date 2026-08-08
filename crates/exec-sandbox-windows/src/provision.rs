@@ -255,7 +255,7 @@ mod tests {
             },
             root_proofs: vec![WindowsRootProof {
                 root,
-                proof_path: PathBuf::from(r"C:\workspace\.clark-sandbox-setup-setup-test-0.proof"),
+                proof_path: PathBuf::from(r"C:\workspace\.agent-sandbox-setup-setup-test-0.proof"),
                 nonce: "0123456789abcdef0123456789abcdef".into(),
             }],
         }
@@ -264,7 +264,7 @@ mod tests {
     #[test]
     fn bootstrap_is_fail_closed_and_attestation_is_last() {
         let temp = tempfile::tempdir().unwrap();
-        let runner = temp.path().join("clark-command-runner.exe");
+        let runner = temp.path().join("agent-command-runner.exe");
         std::fs::write(&runner, b"runner fixture").unwrap();
         let mut host = FakeHost::default();
         let marker = provision(&request(&runner), &mut host).unwrap();
@@ -287,7 +287,7 @@ mod tests {
     #[test]
     fn acl_is_never_granted_when_network_enforcement_fails() {
         let temp = tempfile::tempdir().unwrap();
-        let runner = temp.path().join("clark-command-runner.exe");
+        let runner = temp.path().join("agent-command-runner.exe");
         std::fs::write(&runner, b"runner fixture").unwrap();
         let mut host = FakeHost {
             fail_at: Some("network"),
@@ -301,7 +301,7 @@ mod tests {
     #[test]
     fn user_mode_enrollment_accumulates_policy_attestations() {
         let temp = tempfile::tempdir().unwrap();
-        let runner = temp.path().join("clark-command-runner.exe");
+        let runner = temp.path().join("agent-command-runner.exe");
         std::fs::write(&runner, b"runner fixture").unwrap();
         let mut host = FakeHost::default();
         provision(&request(&runner), &mut host).unwrap();
@@ -323,7 +323,7 @@ mod tests {
         second.policy.write_roots = vec![PathBuf::from(r"C:\other-workspace")];
         second.root_proofs[0].root = PathBuf::from(r"C:\other-workspace");
         second.root_proofs[0].proof_path =
-            PathBuf::from(r"C:\other-workspace\.clark-sandbox-setup-setup-test-0.proof");
+            PathBuf::from(r"C:\other-workspace\.agent-sandbox-setup-setup-test-0.proof");
         let marker = enroll(&second, &mut host).unwrap();
         assert_eq!(marker.generation, 3);
         assert_eq!(marker.provisioned_policy_sha256.len(), 2);

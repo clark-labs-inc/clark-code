@@ -19,8 +19,8 @@ async fn worker_exposes_strict_ping_catalog_and_shutdown_protocol() {
         "enabled_plugins": ["coding"],
         "max_concurrent_requests": 1,
         "provider": {
-            "base_url": "https://api.clarkslabs.com/v1",
-            "model": "clark-code:free",
+            "base_url": "http://127.0.0.1:11434/v1",
+            "model": "local-model",
             "allowed_tools": []
         }
     });
@@ -29,7 +29,7 @@ async fn worker_exposes_strict_ping_catalog_and_shutdown_protocol() {
         .await
         .unwrap();
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_clark-code-worker"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_agent-code-worker"))
         .arg("--config")
         .arg(&config_path)
         .stdin(Stdio::piped())

@@ -222,7 +222,7 @@ impl SecurityPocExecute {
 
         let execution_id = uuid::Uuid::new_v4().simple().to_string();
         let relative_run_root = format!(
-            ".clark/security-scans/{}/poc/runs/{}-{}-{execution_id}",
+            ".agent/security-scans/{}/poc/runs/{}-{}-{execution_id}",
             args.scan_id,
             args.candidate_id,
             control_label(args.control)
@@ -240,7 +240,7 @@ impl SecurityPocExecute {
             Err(error) => return ToolOutcome::error(error),
         };
 
-        let script_dir = workspace.join("__clark_poc__");
+        let script_dir = workspace.join("__agent_poc__");
         if let Err(error) = ctx.executor.create_dir_all(&script_dir).await {
             return ToolOutcome::error(format!("cannot create PoC script directory: {error}"));
         }
@@ -296,7 +296,7 @@ impl SecurityPocExecute {
 
         let artifact_path = format!("{relative_run_root}/receipt.json");
         let script_artifact_path = format!(
-            "{relative_run_root}/workspace/__clark_poc__/{}",
+            "{relative_run_root}/workspace/__agent_poc__/{}",
             script_name(args.language)
         );
         let mut receipt = SecurityPocReceipt {
@@ -323,10 +323,10 @@ impl SecurityPocExecute {
                 completed_at_ms,
                 timeout_ms: args.timeout_seconds.saturating_mul(1_000),
                 output_limit_bytes: MAX_OUTPUT_BYTES as u64,
-                sandbox_provider: "clark-desktop-native".into(),
+                sandbox_provider: "agent-desktop-native".into(),
                 sandbox_profile_sha256: digest(
                     format!(
-                        "clark-security-native-sandbox/v1\0{}\0{}\0offline\0disposable-write-root",
+                        "agent-security-native-sandbox/v1\0{}\0{}\0offline\0disposable-write-root",
                         std::env::consts::OS,
                         std::env::consts::ARCH
                     )
@@ -386,7 +386,7 @@ impl SecurityPocExecute {
 
         let execution_id = uuid::Uuid::new_v4().simple().to_string();
         let relative_run_root = format!(
-            ".clark/security-scans/{}/poc/runs/{}-{}-{execution_id}",
+            ".agent/security-scans/{}/poc/runs/{}-{}-{execution_id}",
             args.scan_id,
             args.candidate_id,
             control_label(args.control)
@@ -556,7 +556,7 @@ fn epoch_ms() -> Result<i64, String> {
         .duration_since(std::time::UNIX_EPOCH)
         .map_err(|error| format!("system clock is before the Unix epoch: {error}"))?;
     i64::try_from(duration.as_millis())
-        .map_err(|_| "system clock exceeds the Clark Security timestamp range".to_string())
+        .map_err(|_| "system clock exceeds the Security scanner timestamp range".to_string())
 }
 
 fn parse_args(value: &Value) -> Result<PocArgs, String> {

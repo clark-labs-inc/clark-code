@@ -90,7 +90,7 @@ export function ScoutCanvas({
             <button
               type="button"
               onClick={onStartSimulation}
-              className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-accent/90"
+              className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-on-accent transition hover:bg-accent/90"
             >
               <PlayCircle className="size-3.5" /> New simulation
             </button>

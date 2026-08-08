@@ -172,7 +172,7 @@ export function SecurityButton() {
       if (organizations.length === 0) {
         setCloud({
           status: "error",
-          message: "No active Clark workspace is available for this account.",
+          message: "No active the agent workspace is available for this account.",
         });
         return;
       }
@@ -347,7 +347,7 @@ function SecurityCloudStatus({
   if (state.status === "loading") {
     return (
       <p className="mb-3 rounded-lg border border-border-subtle px-3 py-2 text-xs text-ink-muted">
-        Connecting this repository to Clark Security…
+        Connecting this repository to Security scanner…
       </p>
     );
   }
@@ -374,12 +374,12 @@ function SecurityCloudStatus({
             Connect this repository to {organization.name}?
           </p>
           <p className="mt-1 text-xs text-ink-muted">
-            Clark will register this Git repository and sync sealed Security results while it is open.
+            the agent will register this Git repository and sync sealed Security results while it is open.
           </p>
           <button
             type="button"
             onClick={() => void onConnect(organization, state.fingerprint)}
-            className="mt-2 rounded-md bg-accent px-2.5 py-1.5 text-xs font-medium text-white transition hover:opacity-90"
+            className="mt-2 rounded-md bg-accent px-2.5 py-1.5 text-xs font-medium text-on-accent transition hover:opacity-90"
           >
             Connect repository
           </button>

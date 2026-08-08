@@ -1,12 +1,13 @@
-// Mandatory cloud synchronization for Clark Code generated Markdown.
+// Optional product-cloud synchronization for generated Markdown.
 //
 // The live snapshot keeps its absolute local URI for instant preview. Before
-// cloud persistence, this module replaces that URI with either a durable Clark
+// cloud persistence, this module replaces that URI with either a durable product
 // API URI or a workspace-relative retry intent. Upload leases stay inside the
 // native host and retries continue until sign-out/account reset or deletion.
 
-import { invoke } from "@tauri-apps/api/core";
 import type { Artifact, Snapshot } from "../core-bridge/types";
+import { productRequest } from "../product/productBridge";
+import { productModule } from "../product/productModule";
 
 export interface ArtifactCloudCreds {
   accountScope: string;
@@ -51,11 +52,11 @@ function isMarkdown(artifact: Artifact): boolean {
 }
 
 export function isCloudArtifactUri(uri?: string): boolean {
-  return /^\/api\/desktop\/conversations\/[^/]+\/artifacts\/[^/?#]+$/.test(uri ?? "");
+  return uri ? productModule().artifacts.isCloudUri(uri) : false;
 }
 
 export function isWorkspaceArtifactUri(uri?: string): boolean {
-  return uri?.startsWith("clark-workspace://") === true;
+  return uri?.startsWith("workspace-artifact://") === true;
 }
 
 function localFilesystemUri(uri?: string): boolean {
@@ -91,7 +92,7 @@ function safeFileName(title: string): string {
 
 function workspaceRelativePath(uri: string, conversationId: string): string | null {
   const normalized = decodedLocalPath(uri).replace(/\\/g, "/");
-  const marker = "/.clark/workspace/";
+  const marker = "/.agent/workspace/";
   const at = normalized.lastIndexOf(marker);
   if (at < 0) return null;
   const tail = normalized.slice(at + marker.length);
@@ -113,7 +114,7 @@ function pendingWorkspaceUri(
     : workspaceRelativePath(artifact.uri ?? "", conversationId);
   if (isWorkspaceArtifactUri(artifact.uri)) {
     const encodedSession = encodeURIComponent(conversationId);
-    const prefix = `clark-workspace://${encodedSession}/`;
+    const prefix = `workspace-artifact://${encodedSession}/`;
     if (artifact.uri!.startsWith(prefix)) {
       return { uri: artifact.uri!, logicalId: safeArtifactId(artifact, conversationId) };
     }
@@ -121,7 +122,7 @@ function pendingWorkspaceUri(
   const path = relative ?? safeFileName(artifact.title);
   const encodedPath = path.split("/").map(encodeURIComponent).join("/");
   return {
-    uri: `clark-workspace://${encodeURIComponent(conversationId)}/${encodedPath}`,
+    uri: `workspace-artifact://${encodeURIComponent(conversationId)}/${encodedPath}`,
     logicalId: relative ? `doc:${relative}` : `doc:${safeFileName(artifact.title)}:${opaqueHash(artifact.id)}`,
   };
 }
@@ -152,7 +153,7 @@ function uploadJobKey(
 /**
  * Pure cloud projection. It cannot leak an absolute host path in either
  * `artifact.id` or `artifact.uri`; pending Markdown remains retryable after an
- * app restart through `clark-workspace://`.
+ * app restart through `workspace-artifact://`.
  */
 export function snapshotForArtifactCloud(
   conversationId: string,
@@ -216,7 +217,7 @@ async function drain(key: string): Promise<void> {
   inflight.add(key);
   clearTimer(key);
   try {
-    const artifact = await invoke<UploadedArtifact>("desktop_artifact_upload", {
+    const artifact = await productRequest<UploadedArtifact>("artifact.upload", {
       desktopId: job.conversationId,
       logicalId: job.logicalId,
       sourceUri: job.sourceUri,
@@ -227,14 +228,14 @@ async function drain(key: string): Promise<void> {
       || artifact.state !== "uploaded"
       || !isCloudArtifactUri(artifact.uri)
     ) {
-      throw new Error("Clark did not confirm the uploaded artifact");
+      throw new Error("the product did not confirm the uploaded artifact");
     }
     readyUris.set(key, artifact.uri);
     jobs.delete(key);
     job.onReady();
   } catch (error) {
     const message = String(error);
-    const sourceMissing = /artifact is unavailable|workspace is unavailable|no Clark workspace/i.test(
+    const sourceMissing = /artifact is unavailable|workspace is unavailable|no the agent workspace/i.test(
       message,
     );
     const permanentlyInvalid = /exceeds the 8 MB|not Markdown|invalid artifact|quota exceeded|400 Bad Request|403 Forbidden|413 Payload Too Large/i.test(
@@ -245,7 +246,7 @@ async function drain(key: string): Promise<void> {
       nonRetryable.add(key);
       if (permanentlyInvalid) {
         job.onWarning?.(
-          "A generated document could not be saved to Clark cloud. It remains available locally.",
+          "A generated document could not be saved to product cloud. It remains available locally.",
         );
       }
     } else {

@@ -22,7 +22,7 @@ describe("document artifacts", () => {
   });
 
   it("turns encoded file URIs into native paths", () => {
-    expect(toPath("file:///tmp/Clark%20report.docx")).toBe("/tmp/Clark report.docx");
+    expect(toPath("file:///tmp/the agent%20report.docx")).toBe("/tmp/the agent report.docx");
     expect(toPath("file:///C:/work/report.docx")).toBe("C:/work/report.docx");
     expect(toPath("file://localhost/tmp/report.docx")).toBe("/tmp/report.docx");
   });

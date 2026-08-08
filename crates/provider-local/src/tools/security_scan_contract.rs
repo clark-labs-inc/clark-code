@@ -22,7 +22,7 @@ impl ToolExecutor for SecurityScanContract {
     }
 
     fn description(&self) -> &str {
-        "Deterministic Clark Security workbench. Use `schema` to get the canonical scan \
+        "Deterministic Security scanner workbench. Use `schema` to get the canonical scan \
          shape, `inventory` to page through the exact target file set and obtain its \
          snapshot id, `diff_inventory` to bind changed files to an exact Git range or \
          working-tree object, `deep_begin`/`deep_checkpoint` to bind accepted \
@@ -106,7 +106,14 @@ impl ToolExecutor for SecurityScanContract {
             Err(error) => return ToolOutcome::error(error),
         };
         match action.as_str() {
-            "schema" => ToolOutcome::ok(schema().to_string()).with_details(schema()),
+            "schema" => {
+                let model = ctx
+                    .model_override
+                    .as_ref()
+                    .map(|policy| policy.model.as_str())
+                    .unwrap_or("conversation-model");
+                ToolOutcome::ok(schema(model).to_string()).with_details(schema(model))
+            }
             "inventory" => inventory(args, ctx).await,
             "diff_inventory" => diff_inventory(args, ctx).await,
             "deep_begin" => deep_begin(args, ctx).await,
@@ -333,12 +340,12 @@ async fn finalize(args: Value, ctx: &ToolCtx) -> ToolOutcome {
         Ok(path) => path,
         Err(error) => return ToolOutcome::error(error),
     };
-    let scans_root = ctx.sandbox.root().join(".clark/security-scans");
+    let scans_root = ctx.sandbox.root().join(".agent/security-scans");
     if resolved.file_name().is_none_or(|name| name != "scan.json")
         || !resolved.starts_with(&scans_root)
     {
         return ToolOutcome::error(
-            "finalize path must be `.clark/security-scans/<scan-id>/scan.json`",
+            "finalize path must be `.agent/security-scans/<scan-id>/scan.json`",
         );
     }
     let bytes = match ctx.executor.read(&resolved).await {
@@ -421,12 +428,12 @@ async fn finalize(args: Value, ctx: &ToolCtx) -> ToolOutcome {
         .with_location(ctx.sandbox.display(&resolved), None)
 }
 
-fn schema() -> Value {
+fn schema(model: &str) -> Value {
     json!({
         "contractVersion": SECURITY_SCAN_CONTRACT_VERSION,
         "scanId": "scan-unique-id",
         "mode": "standard",
-        "model": crate::config::SECURITY_MODEL,
+        "model": model,
         "scope": ".",
         "inventoryId": "from security_scan_contract inventory",
         "diffTarget": null,

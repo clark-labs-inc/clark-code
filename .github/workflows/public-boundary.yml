@@ -57,3 +57,6 @@ jobs:
           else
             git diff --check HEAD^ HEAD
           fi
+
+      - name: Check product decomposition contract
+        run: node --test harness/product-boundary.spec.mjs

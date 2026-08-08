@@ -1,6 +1,6 @@
-# `clark-code-worker`
+# `agent-code-worker`
 
-`clark-code-worker` is a quiet, standalone JSONL service. It composes the
+`agent-code-worker` is a quiet, standalone JSONL service. It composes the
 existing `agent_core::Provider` contract with `provider-local::LocalAgentProvider`
 through the `coding` plugin:
 
@@ -17,13 +17,13 @@ registrations and an absolute trajectory directory:
   "schema_version": 1,
   "worker_name": "gpu-worker",
   "projects": [{"id": "omnivoicegraph", "root": "/workspace/omnivoicegraph"}],
-  "trajectory_root": "/workspace/.clark/trajectory",
+  "trajectory_root": "/workspace/.agent-desktop/trajectory",
   "execution_residency": "remote_worker",
   "enabled_plugins": ["coding"],
   "provider": {
-    "base_url": "https://api.clarkslabs.com/v1",
-    "model": "clark-code:free",
-    "api_key_env": "CLARK_CODE_API_KEY",
+    "base_url": "http://127.0.0.1:11434/v1",
+    "model": "local-model",
+    "api_key_env": "DESKTOP_MODEL_API_KEY",
     "allowed_tools": ["bash", "write_file", "edit_file"],
     "allowed_command_prefixes": ["git ", "cargo test"]
   }
@@ -51,7 +51,7 @@ simulation, and future GPU-specific plugins separate from the coding loop.
 For a worker resident on a CPU/GPU host, set `execution_residency` to
 `remote_worker` and launch it through [`code-remote`](../code-remote/README.md).
 The launcher creates the registered roots, uploads a versioned worker binary
-to `$HOME/.clark/bin`, verifies its SHA-256 before an atomic install, writes a
+to `$HOME/.agent-desktop/bin`, verifies its SHA-256 before an atomic install, writes a
 mode-0600 content-addressed, credential-free config, and reuses both artifacts
 by verified digest. A configured
 credential is sent once over encrypted SSH stdin and is never included in argv

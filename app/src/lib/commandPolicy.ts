@@ -7,8 +7,8 @@ import { accountScopedKey } from "./accountProjectStorage";
 // (and only those — see safety.rs). Persisted per project folder so trust
 // doesn't leak between repos, and sent to the engine on connect.
 
-const ALLOW_PREFIX = "clark-desktop:cmd-allow:";
-const DENY_PREFIX = "clark-desktop:cmd-deny:";
+const ALLOW_PREFIX = "agent-desktop:cmd-allow:";
+const DENY_PREFIX = "agent-desktop:cmd-deny:";
 
 function read(key: string): string[] {
   try {

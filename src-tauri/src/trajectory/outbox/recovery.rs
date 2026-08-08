@@ -159,8 +159,8 @@ pub(super) fn recover_sync(
         let events = interrupt_live_runs(
             &mut snapshot,
             "desktop_restart",
-            "Clark restarted before this run finished. You can continue from the saved history.",
-            "Clark restarted before the goal finished. Continue from the saved history.",
+            "Agent Desktop restarted before this run finished. You can continue from the saved history.",
+            "Agent Desktop restarted before the goal finished. Continue from the saved history.",
         );
         if !events.is_empty() {
             needs_snapshot_publication = true;

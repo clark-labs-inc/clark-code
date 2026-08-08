@@ -297,7 +297,7 @@ mod tests {
                 id: "fixture".into(),
                 root: root.into(),
             }],
-            trajectory_root: root.join(".clark/trajectory"),
+            trajectory_root: root.join(".agent-desktop/trajectory"),
             enabled_plugins: ["project".into()].into_iter().collect(),
             ..WorkerConfig::default()
         };

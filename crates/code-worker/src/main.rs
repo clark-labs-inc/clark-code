@@ -13,7 +13,7 @@ async fn main() {
         return;
     }
     if let Err(error) = run().await {
-        eprintln!("clark-code-worker: {error}");
+        eprintln!("agent-code-worker: {error}");
         std::process::exit(1);
     }
 }
@@ -27,7 +27,7 @@ fn run_self_test() -> bool {
         "{}",
         serde_json::json!({
             "status": "passed",
-            "worker": "clark-code-worker",
+            "worker": "agent-code-worker",
             "protocol_version": PROTOCOL_VERSION,
             "worker_version": env!("CARGO_PKG_VERSION"),
         })
@@ -153,7 +153,7 @@ fn parse_config_path() -> Result<PathBuf, String> {
         (Some(flag), Some(path)) if flag == "--config" && args.next().is_none() => {
             Ok(PathBuf::from(path))
         }
-        _ => Err("usage: clark-code-worker --config /absolute/path/worker.json".into()),
+        _ => Err("usage: agent-code-worker --config /absolute/path/worker.json".into()),
     }
 }
 

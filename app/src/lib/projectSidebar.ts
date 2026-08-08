@@ -1,7 +1,7 @@
 import type { ConversationMeta } from "./history";
 import { projectName } from "./localAgent";
 
-const STORAGE_KEY = "clark-desktop:project-sidebar";
+const STORAGE_KEY = "agent-desktop:project-sidebar";
 const ANONYMOUS_SCOPE = "anonymous";
 
 function scopedStorageKey(scope: string | null | undefined): string | null {
@@ -14,11 +14,11 @@ export type ProjectGroupKind = "remote" | "local" | "none";
 
 function quickChatWorkspaceId(path: string): string | null {
   const normalized = path.replaceAll("\\", "/").replace(/\/+$/, "");
-  const match = normalized.match(/\/\.clark\/workspace\/([0-9a-f-]{36})$/i);
+  const match = normalized.match(/\/\.agent\/workspace\/([0-9a-f-]{36})$/i);
   return match?.[1] ?? null;
 }
 
-/** Quick chats use Clark's per-conversation workspace as their checkout. The
+/** Quick chats use the agent's per-conversation workspace as their checkout. The
  * suffix is stable across machines even though the home-directory prefix is
  * not, so a cloud-restored chat can recreate its workspace locally. */
 export function isQuickChatProject(path: string | undefined, id: string): boolean {
@@ -32,7 +32,7 @@ export interface ProjectGroup {
   kind: ProjectGroupKind;
   /** The local folder behind the group (local projects only). */
   path?: string;
-  /** Source repository name for a Clark-managed isolated checkout. */
+  /** Source repository name for a the agent-managed isolated checkout. */
   repositoryLabel?: string;
   /** SSH destination behind a remote group, independent of its display alias. */
   remoteHost?: string;
@@ -49,20 +49,20 @@ export interface ProjectSidebarPreferences {
 
 /** Compactly identify a managed isolated checkout without hiding the source
  * repository. Managed worktrees live beside the repository at
- * `<repo>.clark-worktrees/<session>`; showing both names prevents two chats
+ * `<repo>.agent-worktrees/<session>`; showing both names prevents two chats
  * from looking like unrelated projects in the sidebar and recent-work card. */
 export function projectDisplayName(path: string): string {
   if (quickChatWorkspaceId(path)) return "Quick Chat";
   const normalized = path.replaceAll("\\", "/").replace(/\/+$/, "");
-  const managed = normalized.match(/^(.*)\.clark-worktrees\/([^/]+)$/);
+  const managed = normalized.match(/^(.*)\.agent-worktrees\/([^/]+)$/);
   if (!managed) return projectName(path);
   return `${projectName(managed[2])} · ${projectName(managed[1])}`;
 }
 
 export function projectDisplayTitle(path: string): string {
-  if (quickChatWorkspaceId(path)) return "Temporary Clark workspace";
+  if (quickChatWorkspaceId(path)) return "Temporary the agent workspace";
   const normalized = path.replaceAll("\\", "/").replace(/\/+$/, "");
-  const managed = normalized.match(/^(.*)\.clark-worktrees\/([^/]+)$/);
+  const managed = normalized.match(/^(.*)\.agent-worktrees\/([^/]+)$/);
   if (!managed) return path;
   return `${path}\nIsolated checkout of ${projectName(managed[1])}`;
 }
@@ -72,7 +72,7 @@ export function projectDisplayTitle(path: string): string {
  * secondary cue. */
 export function managedCheckoutRepositoryName(path: string): string | undefined {
   const normalized = path.replaceAll("\\", "/").replace(/\/+$/, "");
-  const managed = normalized.match(/^(.*)\.clark-worktrees\/([^/]+)$/);
+  const managed = normalized.match(/^(.*)\.agent-worktrees\/([^/]+)$/);
   return managed ? projectName(managed[1]) : undefined;
 }
 
@@ -179,7 +179,7 @@ export function groupSidebarProjects(
     if (isQuickChatProject(conversation.project, conversation.id)) {
       key = "quick-chats";
       label = "Quick chats";
-      title = "Conversations in temporary Clark workspaces";
+      title = "Conversations in temporary the agent workspaces";
       kind = "none";
     } else if (conversation.remoteHost) {
       key = `r:${conversation.remoteHost}`;

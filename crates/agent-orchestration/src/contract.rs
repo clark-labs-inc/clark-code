@@ -114,7 +114,7 @@ pub enum AgentRole {
 pub enum HarnessKind {
     Local,
     Acp,
-    ClarkCloud,
+    BrokeredCloud,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

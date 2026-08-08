@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "Portable host-private collector identity for Clark Scout sensors."
+description = "Portable host-private collector identity for Scout sensors."
 
 [dependencies]
 exec-private-fs = { path = "../exec-core/private-fs" }

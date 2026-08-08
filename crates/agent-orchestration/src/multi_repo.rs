@@ -98,7 +98,7 @@ impl MultiRepoPlan {
             return Err("change package artifact path is empty".to_string());
         }
         let expected_isolation = match writer.harness_kind {
-            HarnessKind::ClarkCloud => IsolationKind::CloudEphemeralClone,
+            HarnessKind::BrokeredCloud => IsolationKind::CloudEphemeralClone,
             HarnessKind::Local | HarnessKind::Acp => IsolationKind::LocalEphemeralClone,
         };
         if package.isolation != expected_isolation
@@ -190,7 +190,8 @@ impl MultiRepoPlan {
                     {
                         return Err("writer lease exceeds its repository path scope".to_string());
                     }
-                    if task.harness_kind == HarnessKind::ClarkCloud && !repository.cloud_eligible {
+                    if task.harness_kind == HarnessKind::BrokeredCloud && !repository.cloud_eligible
+                    {
                         return Err(
                             "cloud writer selected a repository without cloud consent".to_string()
                         );
@@ -407,7 +408,7 @@ pub fn repository_result_tree_sha256<'a>(
         return None;
     }
     let mut hasher = Sha256::new();
-    hasher.update(b"clark-repository-result-tree-v1");
+    hasher.update(b"agent-repository-result-tree-v1");
     for package in packages {
         hasher.update([0]);
         hasher.update(package.task_id.0.as_bytes());

@@ -5,9 +5,10 @@ import {
   uploadOrganizationRepositoryBatch,
 } from "./organizationKnowledge";
 import { accountScopedKey } from "./accountProjectStorage";
+import { productRequest } from "../product/productBridge";
 
-const ENABLED_KEY = "clark-desktop:project-knowledge-enabled";
-const CURSOR_PREFIX = "clark-desktop:project-knowledge-cursor:";
+const ENABLED_KEY = "agent-desktop:project-knowledge-enabled";
+const CURSOR_PREFIX = "agent-desktop:project-knowledge-cursor:";
 const HISTORY_BATCH_SIZE = 200;
 const MAX_BATCHES_PER_PASS = 4;
 const MAX_REPOSITORIES_PER_PASS = 4;
@@ -79,7 +80,7 @@ export function projectKnowledgeEnabled(scope?: string | null): boolean {
 export function setProjectKnowledgeEnabled(enabled: boolean, scope?: string | null): void {
   try {
     localStorage.setItem(accountScopedKey(ENABLED_KEY, scope), enabled ? "1" : "0");
-    window.dispatchEvent(new CustomEvent("clark:project-knowledge-setting"));
+    window.dispatchEvent(new CustomEvent("agent-desktop:project-knowledge-setting"));
   } catch {
     // Storage can be unavailable in hardened browser previews.
   }
@@ -109,7 +110,7 @@ export async function discoverRepositories(
   const normalized = root.trim();
   if (!normalized || !projectKnowledgeEnabled(scope)) return [];
   try {
-    const repositories = await invoke<RepositoryIdentity[]>("clark_repository_discover", {
+    const repositories = await invoke<RepositoryIdentity[]>("repository_discover", {
       cwd: normalized,
     });
     for (const repository of repositories) identities.set(repository.root, repository);
@@ -139,7 +140,7 @@ export async function refreshRepositoryIdentity(
   const normalized = root.trim();
   if (!normalized || !projectKnowledgeEnabled(scope)) return null;
   try {
-    const identity = await invoke<RepositoryIdentity | null>("clark_repository_inspect", {
+    const identity = await invoke<RepositoryIdentity | null>("repository_inspect", {
       cwd: normalized,
     });
     if (identity) identities.set(normalized, identity);
@@ -174,7 +175,7 @@ export async function syncRepositoryHistory(creds: CloudCreds, root: string): Pr
   }
 
   for (let pass = 0; pass < MAX_BATCHES_PER_PASS && !cursor.complete; pass += 1) {
-    const batch: GitHistoryBatch | null = await invoke("clark_repository_history", {
+    const batch: GitHistoryBatch | null = await invoke("repository_history", {
       cwd: identity.root,
       offset: cursor.offset,
       limit: HISTORY_BATCH_SIZE,
@@ -228,7 +229,7 @@ function upload(creds: CloudCreds, batch: GitHistoryBatch): Promise<SyncResponse
   if (organizationId) {
     return uploadOrganizationRepositoryBatch<SyncResponse>(creds, organizationId, batch);
   }
-  return invoke<SyncResponse>("desktop_code_repository_sync", {
+  return productRequest<SyncResponse>("repository.sync", {
     batch,
   });
 }

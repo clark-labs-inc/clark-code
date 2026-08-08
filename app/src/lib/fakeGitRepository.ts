@@ -16,7 +16,7 @@ export type FakeManagedScenario = "ready" | "dirty" | "committed";
 const REVISION = "0123456789abcdef0123456789abcdef01234567";
 const PRIVATE_REVISION = "fedcba9876543210fedcba9876543210fedcba98";
 
-export const FAKE_GIT_SIMULATION_STORAGE_KEY = "clark-desktop:fake-git-simulation";
+export const FAKE_GIT_SIMULATION_STORAGE_KEY = "agent-desktop:fake-git-simulation";
 
 export function fakeGitScenario(): FakeGitScenario {
   if (typeof localStorage === "undefined") return "clean";
@@ -98,7 +98,7 @@ function tryDecideFakeGitTransition(input: FakeGitTransitionInput): FakeGitTrans
     }};
   }
   if (sourceIsManaged && sourceBranch !== targetBranch) {
-    return { ok: false, error: "This Clark-managed checkout is pinned to its existing branch. Start a new isolated session instead of switching this worktree." };
+    return { ok: false, error: "This the agent-managed checkout is pinned to its existing branch. Start a new isolated session instead of switching this worktree." };
   }
   if (sourceBranch === targetBranch) {
     return { ok: true, decision: {
@@ -237,14 +237,14 @@ export class FakeGitRepository {
           fallback: false,
         },
       ],
-      managedLocation: `${checkout.sourceRoot}.clark-worktrees`,
+      managedLocation: `${checkout.sourceRoot}.agent-worktrees`,
     };
   }
 
   switchBranch(path: string, branch: string): void {
     const checkout = this.requireCheckout(path);
     if (!this.branches.has(branch)) throw new Error(`Local branch ${branch} no longer exists.`);
-    if (checkout.managedId) throw new Error("This Clark-managed checkout is pinned to its existing branch. Start a new isolated session instead of switching this worktree.");
+    if (checkout.managedId) throw new Error("This the agent-managed checkout is pinned to its existing branch. Start a new isolated session instead of switching this worktree.");
     if (checkout.branch === branch) return;
     if (dirty(checkout.changes)) throw new Error("Commit or remove local changes before switching branches.");
     const owner = [...this.checkouts.values()].find((candidate) => candidate.branch === branch);
@@ -255,10 +255,10 @@ export class FakeGitRepository {
 
   createManaged(path: string, request: ManagedWorktreeRequest, scenario: FakeManagedScenario = "ready"): ManagedWorktree {
     const source = this.requireCheckout(path);
-    if (source.managedId) throw new Error("This checkout is already a Clark-managed isolated worktree. Reuse it instead of nesting another checkout.");
+    if (source.managedId) throw new Error("This checkout is already a the agent-managed isolated worktree. Reuse it instead of nesting another checkout.");
     const id = `session-${++this.sequence}`;
-    const managedPath = `${source.sourceRoot}.clark-worktrees/${id}`;
-    const branch = `clark/${id}`;
+    const managedPath = `${source.sourceRoot}.agent-worktrees/${id}`;
+    const branch = `agent/${id}`;
     this.branches.add(branch);
     const headRevision = scenario === "committed" ? PRIVATE_REVISION : REVISION;
     const checkout: FakeCheckout = {
@@ -315,11 +315,11 @@ export class FakeGitRepository {
       return {
         id,
         path: worktree.path,
-        branch: worktree.preservedBranch ?? `clark/${id}`,
+        branch: worktree.preservedBranch ?? `agent/${id}`,
         headRevision: worktree.headRevision ?? REVISION,
       };
     }
-    const branch = `${worktree.preservedBranch ?? `clark/${id}`}-saved`;
+    const branch = `${worktree.preservedBranch ?? `agent/${id}`}-saved`;
     this.branches.add(branch);
     worktree.preservedBranch = branch;
     worktree.state = "saved";

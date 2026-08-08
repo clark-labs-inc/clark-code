@@ -1,4 +1,4 @@
-//! Composition helpers for standalone headless Clark Code workers.
+//! Composition helpers for standalone headless coding-agent workers.
 //!
 //! The binary in `src/main.rs` registers the first-party coding plugin. A
 //! different worker can reuse this library, register additional

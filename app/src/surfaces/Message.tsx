@@ -169,6 +169,7 @@ function MessageImpl({
   animateEntry?: boolean;
 }) {
   const reduce = useReducedMotion();
+  const chatContrast = useSessionStore((state) => state.localSettings.chatContrast ?? "low");
   // User turns carry attachment echo blocks (image / resource_link) alongside
   // the text; keep those out of the flattened copy/edit body.
   const body = role === "user" ? userTextBody(blocks) : text(blocks);
@@ -224,10 +225,11 @@ function MessageImpl({
             <div
               key={i}
               className={cn(
-                "min-w-0 w-full text-base leading-[1.6] [overflow-wrap:anywhere]",
+                "chat-reading-contrast min-w-0 w-full text-base leading-[1.6] [overflow-wrap:anywhere]",
                 MARKDOWN_CLASSES,
                 kind === "narrate" && "text-ink-secondary",
               )}
+              data-chat-contrast={chatContrast}
             >
               <MarkdownContent
                 mode={live ? "streaming" : "static"}

@@ -33,13 +33,13 @@ function reservePort() {
 
 const seedLocalStorage = `
   const scope = encodeURIComponent("id:motion-qa");
-  localStorage.setItem("clark.desktop.dev-account", JSON.stringify({
+  localStorage.setItem("agent-desktop.dev-account", JSON.stringify({
     user: { id: "motion-qa", name: "Motion QA", method: "local" },
   }));
-  localStorage.setItem('clark-desktop:local-agent:' + scope, JSON.stringify({
-    cwd: "/tmp", model: "clark-code:free", reasoningEffort: "high",
+  localStorage.setItem('agent-desktop:local-agent:' + scope, JSON.stringify({
+    cwd: "/tmp", model: "local-model", reasoningEffort: "high",
   }));
-  localStorage.setItem('clark-desktop:project-context:' + scope, JSON.stringify({ cwd: "/tmp" }));
+  localStorage.setItem('agent-desktop:project-context:' + scope, JSON.stringify({ cwd: "/tmp" }));
 `;
 
 async function scenario(browser, reduce) {
@@ -54,7 +54,7 @@ async function scenario(browser, reduce) {
   page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
 
   await page.goto(devUrl, { waitUntil: "domcontentloaded" });
-  await page.getByLabel("Message Clark").waitFor({ state: "visible" });
+  await page.getByLabel("Message Agent Desktop").waitFor({ state: "visible" });
 
   // The account default is "Approve for me" (auto), which auto-approves the
   // mock's routine edit. Pin "Ask for approval" first so every pending request
@@ -63,8 +63,8 @@ async function scenario(browser, reduce) {
   await page.getByRole("menuitemradio", { name: "Ask for approval" }).click();
 
   // Trigger a run that lands on the permission gate.
-  await page.getByLabel("Message Clark").fill("First turn: inspect the workspace.");
-  await page.getByLabel("Message Clark").press("Enter");
+  await page.getByLabel("Message Agent Desktop").fill("First turn: inspect the workspace.");
+  await page.getByLabel("Message Agent Desktop").press("Enter");
   try {
     await page.getByRole("button", { name: "Allow once" }).waitFor({ state: "visible", timeout: 15000 });
   } catch (e) {
@@ -150,7 +150,7 @@ function analyze(reduce, samples) {
 const port = await reservePort();
 const dev = spawn(
   "pnpm", ["--dir", "app", "dev", "--host", "127.0.0.1", "--port", String(port), "--strictPort"],
-  { cwd: repoDir, env: { ...process.env, VITE_CLARK_DEV_AUTH: "1" }, stdio: ["ignore", "pipe", "pipe"] },
+  { cwd: repoDir, env: { ...process.env, VITE_PRODUCT_DEV_AUTH: "1" }, stdio: ["ignore", "pipe", "pipe"] },
 );
 let devOutput = "";
 const devUrl = `http://127.0.0.1:${port}/`;

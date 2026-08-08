@@ -1,4 +1,4 @@
-//! Privilege-boundary protocol for Clark's Windows sandbox helpers.
+//! Privilege-boundary protocol for Agent Desktop's Windows sandbox helpers.
 //!
 //! This crate deliberately contains no process spawning, ACL mutation, network
 //! configuration, provider logic, or UI code. The unprivileged desktop, the
@@ -105,7 +105,7 @@ impl WireSandboxPolicy {
         let mut capabilities = vec![Self::device_capability_sid()];
         capabilities.extend(roots.iter().map(|root| {
             capability_sid_for_key(&format!(
-                "clark-sandbox-write-root-v1:{}",
+                "agent-sandbox-write-root-v1:{}",
                 normalized_boundary_text(root)
             ))
         }));
@@ -117,12 +117,12 @@ impl WireSandboxPolicy {
     /// granted on a workspace, so it cannot combine filesystem authority
     /// across independently enrolled projects.
     pub fn device_capability_sid() -> String {
-        capability_sid_for_key("clark-sandbox-device-v1")
+        capability_sid_for_key("agent-sandbox-device-v1")
     }
 
     pub fn write_capability_sid_for_root(root: &Path) -> String {
         capability_sid_for_key(&format!(
-            "clark-sandbox-write-root-v1:{}",
+            "agent-sandbox-write-root-v1:{}",
             normalized_boundary_text(root)
         ))
     }
@@ -435,7 +435,7 @@ impl WindowsSetupMarker {
         // narrowed reads because those constraints need their own native ACL
         // reconciliation. A default read-only session has neither: it merely
         // omits the project write capability while retaining already-consented
-        // Clark document/temp roots.
+        // Agent Desktop document/temp roots.
         let subset_eligible = policy.network == WireNetworkPolicy::Restricted
             && policy.read_roots.is_empty()
             && policy.deny_read.is_empty()

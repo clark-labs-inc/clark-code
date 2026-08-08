@@ -107,10 +107,10 @@ fn commit_marker(state_dir: &Path, marker: &WindowsSetupMarker) -> Result<(), St
 }
 
 fn validate_private_runner(runner: &Path, setup: &Path) -> Result<(), String> {
-    if runner.file_name().and_then(|name| name.to_str()) != Some("clark-command-runner.exe") {
+    if runner.file_name().and_then(|name| name.to_str()) != Some("agent-command-runner.exe") {
         return Err("Windows sandbox runner has an unexpected filename".into());
     }
-    if setup.file_name().and_then(|name| name.to_str()) != Some("clark-windows-sandbox-setup.exe") {
+    if setup.file_name().and_then(|name| name.to_str()) != Some("agent-windows-sandbox-setup.exe") {
         return Err("Windows sandbox setup helper has an unexpected filename".into());
     }
     let runner_parent = canonical_parent(runner)?;
@@ -129,8 +129,12 @@ fn validate_user_state_dir(state_dir: &Path) -> Result<(), String> {
 }
 
 fn validate_user_state_dir_under(local_app_data: &Path, state_dir: &Path) -> Result<(), String> {
-    let allowed = ["Code", "Code Dev"]
-        .map(|product| local_app_data.join("Clark").join(product).join("sandbox"));
+    let allowed = ["Code", "Code Dev"].map(|product| {
+        local_app_data
+            .join("Agent Desktop")
+            .join(product)
+            .join("sandbox")
+    });
     if !allowed
         .iter()
         .any(|expected| normalize(state_dir) == normalize(expected))
@@ -168,12 +172,12 @@ mod tests {
         let local = Path::new(r"C:\Users\tester\AppData\Local");
         assert!(validate_user_state_dir_under(
             local,
-            Path::new(r"C:\Users\tester\AppData\Local\Clark\Code\sandbox")
+            Path::new(r"C:\Users\tester\AppData\Local\Agent Desktop\Code\sandbox")
         )
         .is_ok());
         assert!(validate_user_state_dir_under(
             local,
-            Path::new(r"C:\Users\tester\AppData\Local\Clark\Code Dev\sandbox")
+            Path::new(r"C:\Users\tester\AppData\Local\Agent Desktop\Code Dev\sandbox")
         )
         .is_ok());
         assert!(validate_user_state_dir_under(
@@ -183,12 +187,12 @@ mod tests {
         .is_err());
         assert!(validate_user_state_dir_under(
             local,
-            Path::new(r"C:\Users\other\AppData\Local\Clark\Code Dev\sandbox")
+            Path::new(r"C:\Users\other\AppData\Local\Agent Desktop\Code Dev\sandbox")
         )
         .is_err());
         assert!(validate_user_state_dir_under(
             local,
-            Path::new(r"C:\Users\tester\AppData\Local\Clark Code\sandbox")
+            Path::new(r"C:\Users\tester\AppData\Local\Agent Desktop\sandbox")
         )
         .is_err());
     }

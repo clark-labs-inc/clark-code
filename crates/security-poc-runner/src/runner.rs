@@ -26,7 +26,7 @@ const CONTRACT_VERSION: u32 = 2;
 /// denied workspace under `root`, returning the sealed receipt and raw output.
 ///
 /// `root` is the repository root on this target; `request.run_root` is the
-/// repository-relative artifact directory (e.g. `.clark/security-scans/…`).
+/// repository-relative artifact directory (e.g. `.agent/security-scans/…`).
 pub async fn run(root: &Path, request: &SecurityPocRunRequest) -> Result<RunOutcome, String> {
     validate_request(request)?;
     let run_root = resolve_run_root(root, &request.run_root)?;
@@ -36,7 +36,7 @@ pub async fn run(root: &Path, request: &SecurityPocRunRequest) -> Result<RunOutc
         .map_err(|error| format!("cannot create disposable PoC workspace: {error}"))?;
     let workspace_sha256 = stage_inventory(&request.inventory, &workspace).await?;
 
-    let script_dir = workspace.join("__clark_poc__");
+    let script_dir = workspace.join("__agent_poc__");
     tokio::fs::create_dir_all(&script_dir)
         .await
         .map_err(|error| format!("cannot create PoC script directory: {error}"))?;
@@ -226,7 +226,7 @@ fn process_spec(
         .env("TMPDIR", temp_root.as_os_str())
         .env("TMP", temp_root.as_os_str())
         .env("TEMP", temp_root.as_os_str())
-        .env("CLARK_SECURITY_POC", "1")
+        .env("AGENT_SECURITY_POC", "1")
 }
 
 async fn run_bounded(
@@ -322,7 +322,7 @@ fn build_receipt(
         .replace('\\', "/");
     let artifact_path = format!("{relative_run_root}/receipt.json");
     let script_artifact_path = format!(
-        "{relative_run_root}/workspace/__clark_poc__/{}",
+        "{relative_run_root}/workspace/__agent_poc__/{}",
         request.language.script_name()
     );
     let control_label = match request.control {
@@ -354,10 +354,10 @@ fn build_receipt(
             completed_at_ms,
             timeout_ms: request.timeout_seconds.saturating_mul(1_000),
             output_limit_bytes: MAX_OUTPUT_BYTES as u64,
-            sandbox_provider: "clark-desktop-native".into(),
+            sandbox_provider: "agent-desktop-native".into(),
             sandbox_profile_sha256: sha256_hex(
                 format!(
-                    "clark-security-native-sandbox/v1\0{}\0{}\0offline\0disposable-write-root",
+                    "agent-security-native-sandbox/v1\0{}\0{}\0offline\0disposable-write-root",
                     std::env::consts::OS,
                     std::env::consts::ARCH
                 )
@@ -388,5 +388,5 @@ fn epoch_ms() -> Result<i64, String> {
         .duration_since(std::time::UNIX_EPOCH)
         .map_err(|error| format!("system clock is before the Unix epoch: {error}"))?;
     i64::try_from(duration.as_millis())
-        .map_err(|_| "system clock exceeds the Clark Security timestamp range".to_string())
+        .map_err(|_| "system clock exceeds the security receipt timestamp range".to_string())
 }

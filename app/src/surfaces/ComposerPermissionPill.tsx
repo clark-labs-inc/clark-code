@@ -27,7 +27,7 @@ export function ComposerPermissionPill() {
   // the account default — so switching chats never displays a sibling's mode.
   const mode = effectiveApprovalPolicy(globalDefault, approvalPolicies, session?.id);
   const setMode = useSessionStore((s) => s.setApprovalPolicy);
-  // Permission modes govern the LOCAL engine's gate; a Clark cloud session
+  // Permission modes govern the LOCAL engine's gate; a product cloud session
   // runs every tool server-side in its own sandbox and never consults them.
   const isLocalTarget = useSessionStore((s) =>
     s.session ? s.session.provider === "local" : s.activeProvider === "local",
@@ -97,9 +97,9 @@ export function ComposerPermissionPill() {
         }}
         aria-haspopup="menu"
         aria-expanded={open}
-        title="How Clark's actions are approved (Shift+Tab to cycle)"
+        title="How the agent's actions are approved (Shift+Tab to cycle)"
         className={cn(
-          "flex min-h-8 items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-medium transition duration-200 ease-clark hover:bg-accent-subtle",
+          "flex min-h-8 items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-medium transition duration-200 ease-agent hover:bg-accent-subtle",
           mode === "full" ? "text-warning" : "text-ink-secondary",
         )}
       >
@@ -156,7 +156,7 @@ export function ComposerPermissionPill() {
                   setOpen(false);
                 }}
                 className={cn(
-                  "flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 text-left transition duration-200 ease-clark hover:bg-accent-subtle",
+                  "flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 text-left transition duration-200 ease-agent hover:bg-accent-subtle",
                   item.id === mode && "bg-accent-subtle",
                 )}
               >

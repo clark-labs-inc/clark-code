@@ -2,7 +2,7 @@
 //! loop's canonical typed history.
 
 use agent_core::{ContentBlock, ResumeItem, ResumeTranscript, Role, ToolKind, ToolStatus};
-use clark_agent as ca;
+use agent_loop as ca;
 
 mod content;
 

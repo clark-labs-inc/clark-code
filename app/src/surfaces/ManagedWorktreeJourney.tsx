@@ -11,7 +11,7 @@ import type { ManagedWorktreeBase, ProjectWorktreeTransitionPlan } from "../core
 import { useSessionStore } from "../store/sessionStore";
 
 const CHIP =
-  "flex h-[22px] min-w-0 items-center gap-1 rounded-md bg-composer-context px-1.5 text-[11px] font-medium leading-none text-checkout-worktree transition hover:bg-bg-hover";
+  "flex h-[22px] min-w-0 items-center gap-1 rounded-md bg-composer-context px-1.5 text-xs font-medium leading-none text-checkout-worktree transition hover:bg-bg-hover";
 
 function changeSummary(changes: {
   changedFiles: number;
@@ -31,7 +31,7 @@ function changeSummary(changes: {
   return parts.join(", ") || "no local changes";
 }
 
-/** Base selector for the next isolated session. The host resolves the exact
+/** Starting-point selector for the next session. The host resolves the exact
  * revision on launch, so this remains an intent picker rather than a stale ref
  * cache in the renderer. */
 export function ManagedWorktreeBasePicker() {
@@ -39,7 +39,8 @@ export function ManagedWorktreeBasePicker() {
   const setBase = useSessionStore((state) => state.setManagedWorktreeBase);
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-  const label = base === "default" ? "default branch" : "this branch";
+  const label = base === "default" ? "default branch" : "this checkout";
+  const Icon = base === "default" ? GitFork : GitBranch;
 
   useEffect(() => {
     if (!open) return;
@@ -63,14 +64,14 @@ export function ManagedWorktreeBasePicker() {
         type="button"
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-label={"New chat starts from " + label}
-        title={"New chat starts from " + label}
+        aria-label={"New chat starts in " + label}
+        title={"New chat starts in " + label}
         onClick={() => setOpen((current) => !current)}
         className={CHIP}
       >
-        <GitFork className="size-3 shrink-0" />
+        <Icon className="size-3 shrink-0" />
         <span className="max-w-36 truncate">
-          New chat · {base === "default" ? "Default branch" : "This branch"}
+          New chat · {base === "default" ? "Default branch" : "This checkout"}
         </span>
         <ChevronDown className="size-2.5 shrink-0 opacity-65" />
       </button>
@@ -80,12 +81,12 @@ export function ManagedWorktreeBasePicker() {
           aria-label="New chat starting point"
           className="popover-surface absolute bottom-full left-0 z-50 mb-2 w-72 rounded-xl bg-bg-elevated p-1.5 shadow-lifted ring-1 ring-border-subtle"
         >
-          <p className="px-2.5 pb-1.5 pt-1 text-[11px] leading-4 text-ink-faint">
+          <p className="px-2.5 pb-1.5 pt-1 text-xs leading-4 text-ink-faint">
             Choose where new chats begin. This never moves your uncommitted files.
           </p>
           {([
-            ["current", "This branch", "Start from the commit currently checked out."],
-            ["default", "Default branch", "Start from the latest available default branch."],
+            ["current", "This checkout", "Start directly in the selected checkout; no worktree is created."],
+            ["default", "Default branch", "Create an isolated worktree from the latest available default branch."],
           ] as const).map(([id, title, description]) => (
             <button
               key={id}
@@ -103,7 +104,7 @@ export function ManagedWorktreeBasePicker() {
               </span>
               <span className="min-w-0">
                 <span className="block text-xs font-medium text-ink-secondary">{title}</span>
-                <span className="mt-0.5 block text-[11px] leading-4 text-ink-faint">{description}</span>
+                <span className="mt-0.5 block text-xs leading-4 text-ink-faint">{description}</span>
               </span>
             </button>
           ))}
@@ -114,7 +115,7 @@ export function ManagedWorktreeBasePicker() {
 }
 
 /** The source checkout is dirty. This is the deliberate preservation gate: the
- * user chooses an immutable base, then Clark creates a clean sibling checkout
+ * user chooses an immutable base, then the agent creates a clean sibling checkout
  * while leaving every source change exactly where it was. */
 export function ManagedWorktreeTransitionDialog() {
   const plan = useSessionStore((state) => state.worktreeTransition);
@@ -231,7 +232,7 @@ export function ManagedWorktreeTransitionContent({
                     className={
                       "mt-0.5 grid size-4 shrink-0 place-items-center rounded-full border " +
                       (base === option.id
-                        ? "border-accent bg-accent text-white"
+                        ? "border-accent bg-accent text-on-accent"
                         : "border-ink-faint")
                     }
                   >
@@ -278,7 +279,7 @@ export function ManagedWorktreeTransitionContent({
                 ? `Open ${targetBranch} in a new worktree`
                 : `Create worktree from ${selectedLabel}`
             }
-            className="flex items-center gap-2 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-white transition hover:bg-accent-hover disabled:opacity-50"
+            className="flex items-center gap-2 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-on-accent transition hover:bg-accent-hover disabled:opacity-50"
           >
             {preparing ? (
               <Loader2 className="size-3.5 animate-spin" />

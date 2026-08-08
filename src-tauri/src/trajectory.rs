@@ -3,14 +3,12 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use agent_core::AgentEvent;
-use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::Mutex;
 
-use crate::commands::clark_rest_base;
-use crate::runtime_registry::CloudAccountState;
+use crate::state::AppState;
 
 mod outbox;
 pub(crate) use outbox::{
@@ -41,8 +39,6 @@ pub(crate) fn normalize_snapshot_value(snapshot: Value) -> Value {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CloudTrajectoryConfig {
-    #[serde(skip_deserializing)]
-    pub endpoint: String,
     pub title: String,
     pub provider: String,
     pub project: Option<String>,
@@ -60,9 +56,8 @@ pub struct CloudTrajectoryClient {
     config: CloudTrajectoryConfig,
     /// Atomic native account state, read per attempt so refresh reaches every
     /// request without mixing a bearer and account from different generations.
-    account: Arc<RwLock<Option<CloudAccountState>>>,
+    state: AppState,
     app: AppHandle,
-    http: reqwest::Client,
     outbox: outbox::TrajectoryOutbox,
     flush_lock: Arc<Mutex<()>>,
     flush_scheduled: Arc<AtomicBool>,
@@ -102,7 +97,7 @@ impl CloudTrajectoryClient {
         conversation_id: String,
         config: CloudTrajectoryConfig,
         owner_scope: String,
-        account: Arc<RwLock<Option<CloudAccountState>>>,
+        state: AppState,
         app: AppHandle,
         outbox_path: std::path::PathBuf,
     ) -> Result<Self, String> {
@@ -111,9 +106,8 @@ impl CloudTrajectoryClient {
             conversation_id,
             owner_scope: owner_scope.clone(),
             config,
-            account,
+            state,
             app,
-            http: crate::commands::clark_http_client()?,
             outbox,
             flush_lock: Arc::new(Mutex::new(())),
             flush_scheduled: Arc::new(AtomicBool::new(false)),
@@ -203,7 +197,7 @@ impl CloudTrajectoryClient {
                 } else {
                     let _ = client.app.emit(
                         "cloud-sync-warning",
-                        "Clark saved this run locally and will sync it when the cloud is reachable.",
+                        "Agent Desktop saved this run locally and will sync it when the cloud is reachable.",
                     );
                 }
                 if !error.starts_with("cloud_account_changed:")
@@ -258,12 +252,6 @@ impl CloudTrajectoryClient {
     }
 
     async fn deliver(&self, request: &AppendRequest) -> Result<(), String> {
-        let url = format!(
-            "{}/api/desktop/conversations/{}/trajectory",
-            clark_rest_base(&self.config.endpoint)?,
-            urlencoding::encode(&self.conversation_id)
-        );
-
         // Transient failures use only the short prefix of this schedule; a 401
         // unlocks the longer tail so the frontend has time to refresh the JWT
         // (asked for via `cloud-auth-expired`) before the token is re-read.
@@ -276,50 +264,47 @@ impl CloudTrajectoryClient {
             if delay > 0 {
                 tokio::time::sleep(Duration::from_millis(delay)).await;
             }
-            let token = self
-                .account
-                .read()
+            let current_account = self
+                .state
+                .runtime_registry
+                .cloud_account()
                 .await
-                .as_ref()
                 .filter(|account| account.account.as_str() == self.owner_scope)
-                .map(|account| account.token.as_str().to_string())
                 .ok_or_else(|| {
-                    "cloud_account_changed: Clark signed out or changed accounts before this pending run could sync"
+                    "cloud_account_changed: Agent Desktop signed out or changed accounts before this pending run could sync"
                         .to_string()
                 })?;
-            match self
-                .http
-                .post(&url)
-                .bearer_auth(&token)
-                .json(request)
-                .send()
-                .await
+            drop(current_account);
+            let payload = serde_json::json!({
+                "conversationId": self.conversation_id,
+                "request": request,
+            });
+            match crate::commands::product_cloud_request(
+                "conversation.append_trajectory",
+                payload,
+                &self.app,
+                &self.state,
+            )
+            .await?
             {
-                Ok(response) if response.status().is_success() => return Ok(()),
-                Ok(response) => {
-                    let status = response.status();
-                    let detail = response.text().await.unwrap_or_default();
-                    last_error = format!(
-                        "trajectory endpoint returned {status}: {}",
-                        detail.chars().take(300).collect::<String>()
-                    );
-                    if status == StatusCode::UNAUTHORIZED {
-                        if !auth_retry {
-                            auth_retry = true;
-                            let _ = self.app.emit("cloud-auth-expired", ());
-                        }
-                    } else if matches!(status, StatusCode::NOT_FOUND | StatusCode::GONE) {
-                        return Err(
-                            "cloud_deleted: this conversation was deleted on another device".into(),
-                        );
-                    } else if status.is_client_error()
-                        && status != StatusCode::TOO_MANY_REQUESTS
-                        && status != StatusCode::REQUEST_TIMEOUT
-                    {
-                        break;
+                crate::commands::ProductCloudOutcome::Ok(_) => return Ok(()),
+                crate::commands::ProductCloudOutcome::Unauthorized(error) => {
+                    last_error = error;
+                    if !auth_retry {
+                        auth_retry = true;
+                        let _ = self.app.emit("cloud-auth-expired", ());
                     }
                 }
-                Err(error) => last_error = format!("trajectory request failed: {error}"),
+                crate::commands::ProductCloudOutcome::NotFound(_) => {
+                    return Err(
+                        "cloud_deleted: this conversation was deleted on another device".into(),
+                    );
+                }
+                crate::commands::ProductCloudOutcome::Conflict(error)
+                | crate::commands::ProductCloudOutcome::Rejected(error) => return Err(error),
+                crate::commands::ProductCloudOutcome::Unavailable(error) => {
+                    last_error = error;
+                }
             }
             if !auth_retry && attempt == 2 {
                 break;
@@ -379,10 +364,10 @@ mod tests {
         assert_eq!(
             event_kind(&json!({
                 "event": "trace",
-                "source": "clark_agent",
+                "source": "agent_loop",
                 "payload": {"type": "context_transform_applied"}
             })),
-            "trace.clark_agent.context_transform_applied"
+            "trace.agent_loop.context_transform_applied"
         );
     }
 

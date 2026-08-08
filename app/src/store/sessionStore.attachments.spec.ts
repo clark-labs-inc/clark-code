@@ -50,7 +50,7 @@ beforeEach(() => {
     conversations: [],
     localSettings: {
       cwd: "/tmp/project",
-      model: "clark-code:free",
+      model: "local-model",
       reasoningEffort: "max",
     },
   });

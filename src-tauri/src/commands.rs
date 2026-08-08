@@ -1,39 +1,32 @@
 //! Tauri command surface — the IPC boundary the web UI calls via `invoke`.
 //! These mirror the `agent_core::Provider` trait and drive the live provider.
 
-mod auth;
 mod cloud;
 mod cloud_authority;
 mod cloud_conversations;
 mod computer_use;
 mod desktop_artifacts;
 mod local;
+mod product;
 mod project;
 mod prompt_admission;
 mod provider_launch;
 mod remote_worker;
-mod security_cloud;
 mod session_close;
 mod skills;
-mod specialists;
 mod stream_batch;
-pub use auth::*;
 pub use cloud::*;
-pub(crate) use cloud_authority::{
-    clark_gateway_endpoint, clark_http_client, clark_rest_base, current_cloud_access, CloudAccess,
-};
 pub use cloud_conversations::*;
 pub use computer_use::*;
 pub use desktop_artifacts::*;
 pub use local::*;
+pub use product::*;
 pub(crate) use project::project_executor;
 use prompt_admission::admit_and_append_prompt;
 pub(crate) use provider_launch::ProviderLaunchRequest;
 pub use remote_worker::*;
-pub use security_cloud::*;
 pub use session_close::*;
 pub use skills::*;
-pub use specialists::*;
 
 use agent_core::provider::EventStream;
 use agent_core::{
@@ -43,17 +36,11 @@ use agent_core::{
 use agent_core::{AgentEvent, Role};
 use futures::StreamExt;
 use provider_acp::AcpProvider;
-use provider_clark::ClarkProvider;
 use provider_local::LocalAgentProvider;
-use provider_specialist::SpecialistProvider;
 use serde::Serialize;
 use serde_json::Value;
-use sha2::{Digest, Sha256};
-use std::fs::File;
-use std::io::Read;
-use std::path::PathBuf;
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, State};
 use tokio::sync::Mutex;
 
 use crate::runtime_registry::{AccountKey, SessionKey};
@@ -122,112 +109,31 @@ pub struct PromptReceipt {
 }
 
 /// Construct a provider instance by id.
-async fn make_provider(id: &str, state: &AppState) -> Result<Box<dyn Provider>, String> {
+async fn make_provider(
+    id: &str,
+    config: &ProviderConfig,
+    app: &AppHandle,
+    state: &AppState,
+) -> Result<Box<dyn Provider>, String> {
+    if let Some(provider) = state
+        .product
+        .make_provider(
+            id,
+            config,
+            crate::product::ProductRequestContext { app, state },
+        )
+        .await?
+    {
+        return Ok(provider);
+    }
     match id {
         "acp" => Ok(Box::new(AcpProvider::new())),
-        "clark" => Ok(Box::new(ClarkProvider::new())),
         "local" => Ok(Box::new(
             LocalAgentProvider::new()
                 .with_skill_catalog_service(state.runtime_registry.current_skill_catalogs().await),
         )),
-        "specialist" => Ok(Box::new(SpecialistProvider::new())),
         other => Err(format!("unknown provider: {other}")),
     }
-}
-
-fn specialist_worker_path() -> Result<PathBuf, String> {
-    let override_path = std::env::var_os("CLARK_SCIENTIST_WORKER")
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from);
-    #[cfg(not(debug_assertions))]
-    if override_path.is_some() {
-        return Err("CLARK_SCIENTIST_WORKER overrides are disabled in release builds".into());
-    }
-    #[cfg(debug_assertions)]
-    if let Some(path) = override_path {
-        if path.is_absolute() && path.is_file() {
-            return verify_specialist_worker(path);
-        }
-        return Err(
-            "CLARK_SCIENTIST_WORKER must name an absolute clark-code-headless executable".into(),
-        );
-    }
-    let filename = if cfg!(windows) {
-        "clark-code-headless.exe"
-    } else {
-        "clark-code-headless"
-    };
-    let packaged = std::env::current_exe()
-        .map_err(|error| format!("could not resolve Clark Code executable: {error}"))?
-        .parent()
-        .ok_or("Clark Code executable has no parent directory")?
-        .join(filename);
-    if packaged.is_file() {
-        return verify_specialist_worker(packaged);
-    }
-    #[cfg(debug_assertions)]
-    {
-        let development = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../clark-scientist/target/debug")
-            .join(filename);
-        if development.is_file() {
-            return verify_specialist_worker(development);
-        }
-    }
-    Err(
-        "Clark Scientist worker is not installed. Build clark-code-headless or set CLARK_SCIENTIST_WORKER."
-            .into(),
-    )
-}
-
-fn verify_specialist_worker(path: PathBuf) -> Result<PathBuf, String> {
-    let path = path
-        .canonicalize()
-        .map_err(|error| format!("could not resolve Clark Scientist worker: {error}"))?;
-    let metadata = path
-        .metadata()
-        .map_err(|error| format!("could not inspect Clark Scientist worker: {error}"))?;
-    if !metadata.is_file() || metadata.len() == 0 {
-        return Err("Clark Scientist worker is missing or empty".into());
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        if metadata.permissions().mode() & 0o111 == 0 {
-            return Err("Clark Scientist worker is not executable".into());
-        }
-    }
-    let actual = specialist_worker_sha256(&path)?;
-    #[cfg(not(debug_assertions))]
-    {
-        let expected = env!("CLARK_SCIENTIST_WORKER_SHA256");
-        if expected.len() != 64 || actual != expected {
-            return Err(
-                "Clark Scientist worker does not match the digest embedded in this signed Clark Code build"
-                    .into(),
-            );
-        }
-    }
-    #[cfg(debug_assertions)]
-    let _ = actual;
-    Ok(path)
-}
-
-fn specialist_worker_sha256(path: &std::path::Path) -> Result<String, String> {
-    let mut file = File::open(path)
-        .map_err(|error| format!("could not open Clark Scientist worker: {error}"))?;
-    let mut digest = Sha256::new();
-    let mut chunk = [0_u8; 1024 * 1024];
-    loop {
-        let read = file
-            .read(&mut chunk)
-            .map_err(|error| format!("could not hash Clark Scientist worker: {error}"))?;
-        if read == 0 {
-            break;
-        }
-        digest.update(&chunk[..read]);
-    }
-    Ok(format!("{:x}", digest.finalize()))
 }
 
 async fn prepare_provider_config(
@@ -236,128 +142,39 @@ async fn prepare_provider_config(
     mut config: ProviderConfig,
     state: &AppState,
 ) -> Result<(ProviderConfig, Option<AccountKey>), String> {
-    let mut account = None;
     if config.auth_token.is_some() {
         return Err("provider credentials must not cross the WebView boundary".into());
     }
-    if provider_id == "clark" {
-        let cloud = state
-            .runtime_registry
-            .cloud_account()
-            .await
-            .ok_or("Clark must be signed in before starting a Clark session")?;
-        account = Some(cloud.account.clone());
-        config.endpoint = Some(clark_gateway_endpoint(&cloud.rest_base)?);
-        config.auth_token = Some(cloud.token.as_str().to_string());
-        return Ok((config, account));
-    }
-    if matches!(provider_id, "local" | "specialist") {
-        if config.extra.get("worker_execution_residency").is_some() {
-            return Err(
-                "worker execution residency is native-owned and must not cross the WebView boundary"
-                    .into(),
-            );
-        }
-        let owner_scope = state
-            .runtime_registry
-            .cloud_account()
-            .await
-            .map(|account| account.account.as_str().to_string())
-            .ok_or("Clark must be signed in before starting a coding session")?;
-        account = Some(AccountKey::new(owner_scope.clone())?);
-        bind_native_memory_scope(&mut config, &owner_scope);
-        let credential = state
-            .credentials
-            .code_key(&owner_scope)
-            .await?
-            .ok_or("Clark Code credential is not provisioned for this account")?;
-        config.auth_token = Some(credential.to_string());
-        if let Some(servers) = config.extra.get_mut("mcp_servers") {
-            let mut servers: Vec<provider_local::McpServerConfig> =
-                serde_json::from_value(servers.clone())
-                    .map_err(|_| "MCP server configuration is invalid")?;
-            hydrate_mcp_servers(&mut servers, &owner_scope, state).await?;
-            config.extra["mcp_servers"] = serde_json::to_value(servers)
-                .map_err(|_| "MCP server configuration could not be prepared")?;
-        }
-    }
-    if provider_id == "specialist" {
-        let app_data_dir = app
-            .path()
-            .app_data_dir()
-            .map_err(|error| format!("could not resolve Clark Code app data: {error}"))?;
-        let worker = specialist_worker_path()?;
-        let remote_worker_binaries = clark_install_context::InstallContext::current()
-            .bundled_tool(clark_install_context::SCIENTIST_REMOTE_LINUX_X86_64)
-            .map(|binary| [("linux-x86_64".to_string(), binary)].into_iter().collect())
-            .unwrap_or_default();
-        let config = provider_specialist::prepare_native_config(
-            config,
-            &app_data_dir,
-            &worker,
-            remote_worker_binaries,
+    if let Some(prepared) = state
+        .product
+        .prepare_provider_config(
+            provider_id,
+            config.clone(),
+            crate::product::ProductRequestContext { app, state },
         )
-        .map_err(|error| error.to_string())?;
-        return Ok((config, account));
+        .await?
+    {
+        let account = prepared.account_id.map(AccountKey::new).transpose()?;
+        return Ok((prepared.config, account));
     }
     if provider_id != "local" {
-        return Ok((config, account));
+        return Ok((config, None));
     }
-    let Some(extra) = config.extra.as_object_mut() else {
-        return Ok((config, account));
-    };
-    let Some(cartography) = extra
-        .get_mut("scout_cartography")
-        .and_then(Value::as_object_mut)
-    else {
-        return Ok((config, account));
-    };
-    let organization_id = cartography
-        .get("organization_id")
-        .and_then(Value::as_str)
-        .ok_or("Scout organization binding is missing")?;
-    let workspace_id = cartography
-        .get("workspace_id")
-        .and_then(Value::as_str)
-        .ok_or("Scout workspace binding is missing")?;
-    uuid::Uuid::parse_str(organization_id).map_err(|_| "Scout organization binding is invalid")?;
-    uuid::Uuid::parse_str(workspace_id).map_err(|_| "Scout workspace binding is invalid")?;
-    let app_data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|error| format!("could not resolve Clark Code app data: {error}"))?;
-    let target_id = cartography
-        .get("target_id")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or("local");
-    let mut target_digest = Sha256::new();
-    target_digest.update(target_id.as_bytes());
-    let target_scope = format!("{:x}", target_digest.finalize());
-    let identity_scope = format!("{organization_id}-{workspace_id}-{}", &target_scope[..16]);
-    let identity_root = app_data_dir.join("scout").join(identity_scope);
-    cartography.insert(
-        "identity_root".into(),
-        Value::String(identity_root.to_string_lossy().into_owned()),
-    );
-    cartography
-        .entry("platform")
-        .or_insert_with(|| Value::String(std::env::consts::OS.into()));
-    cartography
-        .entry("architecture")
-        .or_insert_with(|| Value::String(std::env::consts::ARCH.into()));
-    Ok((config, account))
-}
-
-/// Replace any renderer-provided memory partition with the server-validated
-/// native account. WebView state is UX input, never an authorization key for
-/// account-isolated files.
-fn bind_native_memory_scope(config: &mut ProviderConfig, owner_scope: &str) {
-    if !config.extra.is_object() {
-        config.extra = Value::Object(serde_json::Map::new());
+    if config.extra.get("worker_execution_residency").is_some() {
+        return Err(
+            "worker execution residency is native-owned and must not cross the WebView boundary"
+                .into(),
+        );
     }
-    config.extra["memory_scope"] = Value::String(owner_scope.to_string());
+    if config.extra.get("scout_cartography").is_some() {
+        return Err("this build has no Scout product integration".into());
+    }
+    if config.auth_token.is_none() {
+        config.auth_token = std::env::var("OPENAI_API_KEY")
+            .ok()
+            .filter(|credential| !credential.is_empty());
+    }
+    Ok((config, None))
 }
 
 pub(crate) async fn hydrate_mcp_servers(
@@ -411,7 +228,7 @@ fn spawn_provider_stream(
                 .filter_map(|event| match event {
                     AgentEvent::Trace {
                         source, payload, ..
-                    } if source == "clark_specialist_projection" => Some(payload.clone()),
+                    } if source == "product_projection" => Some(payload.clone()),
                     _ => None,
                 })
                 .collect::<Vec<_>>();
@@ -446,7 +263,7 @@ fn spawn_provider_stream(
                     tracing::error!(%error, "local trajectory outbox append failed; interrupting projection");
                     let _ = app.emit(
                         "cloud-sync-warning",
-                        "Clark could not safely save the next part of this run, so it stopped at the last saved point.",
+                        "Agent Desktop could not safely save the next part of this run, so it stopped at the last saved point.",
                     );
                     break;
                 }
@@ -461,10 +278,21 @@ fn spawn_provider_stream(
             };
             let _ = app.emit("snapshot", &snapshot);
             for payload in specialist_projections {
-                match specialists::publish_projection_from_trace(&state, &payload).await {
-                    Ok(receipt) => {
+                match state
+                    .product
+                    .publish_projection(
+                        &payload,
+                        crate::product::ProductRequestContext {
+                            app: &app,
+                            state: &state,
+                        },
+                    )
+                    .await
+                {
+                    Ok(Some(receipt)) => {
                         let _ = app.emit("specialist-projection-published", receipt);
                     }
+                    Ok(None) => {}
                     Err(error) => {
                         tracing::warn!(%error, "specialist overview publication failed");
                         let _ = app.emit(
@@ -487,8 +315,8 @@ fn spawn_provider_stream(
 }
 
 #[tauri::command]
-pub fn provider_list() -> Vec<ProviderInfo> {
-    builtin_providers()
+pub fn provider_list(state: State<'_, AppState>) -> Vec<ProviderInfo> {
+    state.product.providers(builtin_providers())
 }
 
 /// Files changed since a session baseline checkpoint (the Changes panel).
@@ -547,7 +375,7 @@ pub async fn changes_revert(
     .await
 }
 
-/// Drop Clark's retention refs for checkpoints owned by a conversation that
+/// Drop Agent Desktop's retention refs for checkpoints owned by a conversation that
 /// the user permanently deleted.
 #[tauri::command]
 pub async fn changes_release_checkpoints(
@@ -585,7 +413,7 @@ pub async fn provider_reconfigure(
     let config = config.into_provider_config("local")?;
     let (config, account) = prepare_provider_config("local", &app, config, state.inner()).await?;
     if s.account.as_ref() != account.as_ref() {
-        return Err("session belongs to a different Clark account".into());
+        return Err("session belongs to a different desktop account".into());
     }
     s.provider.connect(config).await.map_err(|e| e.to_string())
 }
@@ -706,7 +534,7 @@ async fn register_session(
 pub async fn session_configure_cloud(
     app: AppHandle,
     session_id: String,
-    mut config: CloudTrajectoryConfig,
+    config: CloudTrajectoryConfig,
     base_snapshot: Value,
     base_rev: i64,
     state: State<'_, AppState>,
@@ -717,8 +545,7 @@ pub async fn session_configure_cloud(
         .current_session_entry(&session_key)
         .await
         .ok_or("no such session")?;
-    let access = cloud_authority::current_cloud_access(state.inner()).await?;
-    config.endpoint = access.rest_base;
+    let access = cloud_authority::current_account_access(state.inner()).await?;
     let outbox_path = crate::trajectory::outbox_path(&app)?;
     let owner_scope = access.owner_scope.clone();
     let account = AccountKey::new(owner_scope.clone())?;
@@ -726,7 +553,7 @@ pub async fn session_configure_cloud(
         session_id,
         config,
         owner_scope.clone(),
-        state.runtime_registry.cloud_account_source(),
+        state.inner().clone(),
         app.clone(),
         outbox_path,
     )?;
@@ -737,7 +564,7 @@ pub async fn session_configure_cloud(
     trajectory
         .append(&[AgentEvent::Trace {
             run: None,
-            source: "clark_desktop_session".into(),
+            source: "desktop_session".into(),
             payload: serde_json::json!({"type": "session_configured"}),
         }])
         .await?;
@@ -747,11 +574,11 @@ pub async fn session_configure_cloud(
         .await
         .is_some_and(|current| current.account.as_str() == owner_scope);
     if !still_current {
-        return Err("Clark account changed while configuring the session".into());
+        return Err("Agent Desktop account changed while configuring the session".into());
     }
     let mut live = entry.lock().await;
     if live.account.as_ref().is_some_and(|bound| bound != &account) {
-        return Err("session already belongs to a different Clark account".into());
+        return Err("session already belongs to a different desktop account".into());
     }
     live.account = Some(account);
     live.trajectory = Some(trajectory);
@@ -798,7 +625,7 @@ pub async fn steer(
         .await
         .trajectory
         .clone()
-        .ok_or("Clark cloud trajectory is not configured for this session")?;
+        .ok_or("product cloud trajectory is not configured for this session")?;
     let durable = blocks
         .iter()
         .cloned()
@@ -849,7 +676,7 @@ pub async fn prompt(
 ) -> Result<PromptReceipt, String> {
     let _account_lifecycle = state.account_lifecycle.read().await;
     let run_guard = state.try_start_run().ok_or(
-        "Clark Code is finishing active work before an update; wait for the relaunch to send another message",
+        "local agent is finishing active work before an update; wait for the relaunch to send another message",
     )?;
     let sid = SessionId::new(session_id);
     let session_key = SessionKey::from_session(&sid)?;
@@ -872,7 +699,7 @@ pub async fn prompt(
         .await
         .trajectory
         .clone()
-        .ok_or("Clark cloud trajectory is not configured for this session")?;
+        .ok_or("product cloud trajectory is not configured for this session")?;
     // The visible user turn is the text PLUS an echo of each attachment
     // (image thumbnail / file chip) — without it the timeline shows only the
     // text and the files the user attached seem to vanish on send.
@@ -883,7 +710,7 @@ pub async fn prompt(
         .collect();
     let mut durable_prompt = vec![AgentEvent::Trace {
         run: None,
-        source: "clark_desktop_prompt".into(),
+        source: "desktop_prompt".into(),
         payload: serde_json::json!({
             "blocks": blocks.clone(),
             "attachments": attachments.clone(),
@@ -974,10 +801,10 @@ pub async fn prompt(
     let first = stream
         .next()
         .await
-        .ok_or("Clark Code prompt ended before it allocated a run")?;
+        .ok_or("local agent prompt ended before it allocated a run")?;
     let run_id = match &first {
         AgentEvent::RunStarted { run } => run.as_str().to_string(),
-        _ => return Err("Clark Code prompt did not begin with a run identity".into()),
+        _ => return Err("local agent prompt did not begin with a run identity".into()),
     };
     tracing::info!(
         event = "conversation_run_allocated",
@@ -1007,7 +834,7 @@ pub async fn prompt(
     Ok(PromptReceipt { run_id })
 }
 
-/// Explicit Clark Code context compaction. This is a standalone provider run,
+/// Explicit local agent context compaction. This is a standalone provider run,
 /// not a user prompt: `/compact` never enters the model transcript as a user
 /// instruction. The first lifecycle event is projected before returning so the
 /// composer cannot race a new prompt into the history replacement.
@@ -1019,7 +846,7 @@ pub async fn compact(
 ) -> Result<(), String> {
     let _account_lifecycle = state.account_lifecycle.read().await;
     let run_guard = state.try_start_run().ok_or(
-        "Clark Code is finishing active work before an update; wait for the relaunch to compact context",
+        "local agent is finishing active work before an update; wait for the relaunch to compact context",
     )?;
     let sid = SessionId::new(session_id);
     let session_key = SessionKey::from_session(&sid)?;
@@ -1033,7 +860,7 @@ pub async fn compact(
         .await
         .trajectory
         .clone()
-        .ok_or("Clark cloud trajectory is not configured for this session")?;
+        .ok_or("product cloud trajectory is not configured for this session")?;
     let mut stream = {
         let mut session = entry.lock().await;
         session
@@ -1189,33 +1016,8 @@ pub(crate) mod session_open;
 
 #[cfg(test)]
 mod tests {
-    use super::{batch_contains_terminal_run, bind_native_memory_scope};
-    use agent_core::{AgentEvent, ProviderConfig, RunId, RunOutcome, RunStatus};
-
-    #[test]
-    fn native_account_replaces_untrusted_memory_partition() {
-        let mut config = ProviderConfig {
-            extra: serde_json::json!({
-                "memory_scope": "id:another-account",
-                "memories": true
-            }),
-            ..ProviderConfig::default()
-        };
-
-        bind_native_memory_scope(&mut config, "server-validated-account");
-
-        assert_eq!(config.extra["memory_scope"], "server-validated-account");
-        assert_eq!(config.extra["memories"], true);
-    }
-
-    #[test]
-    fn native_memory_partition_is_installed_on_empty_provider_config() {
-        let mut config = ProviderConfig::default();
-
-        bind_native_memory_scope(&mut config, "server-validated-account");
-
-        assert_eq!(config.extra["memory_scope"], "server-validated-account");
-    }
+    use super::batch_contains_terminal_run;
+    use agent_core::{AgentEvent, RunId, RunOutcome, RunStatus};
 
     #[test]
     fn terminal_run_event_ends_the_native_drain_boundary() {

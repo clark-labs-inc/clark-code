@@ -1,4 +1,4 @@
-//! Project-level Clark config: `<root>/.clark/settings.json`. Read once at
+//! Project-level local-agent config: `<root>/.agent/settings.json`. Read once at
 //! `new_session` through the session [`Executor`] (so it works for remote/SSH
 //! projects too), and layered under the global, UI-driven config
 //! ([`crate::config::LocalConfig`]) rather than replacing it: permission
@@ -15,11 +15,10 @@ use serde::Deserialize;
 use crate::exec::Executor;
 use crate::markdown_frontmatter::read_json;
 
-pub const DEFAULT_COMMIT_ATTRIBUTION: &str = "Co-Authored-By: Clark Code <noreply@clarkchat.com>";
+pub const DEFAULT_COMMIT_ATTRIBUTION: &str = "Co-Authored-By: Local Agent <noreply@localhost>";
 
 /// Default PR-body attribution note. Empty string or `attribution.pr_body: ""` disables it.
-pub const DEFAULT_PR_BODY_ATTRIBUTION: &str =
-    "*Code written by [Clark Code](https://www.clarkchat.com/clark-code).*";
+pub const DEFAULT_PR_BODY_ATTRIBUTION: &str = "*Code written by Local Agent.*";
 
 /// One `PreToolUse`/`PostToolUse` hook entry.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
@@ -62,7 +61,7 @@ pub struct AttributionConfig {
     pub commit: Option<String>,
 
     /// Attribution note appended to pull-request bodies. An empty string
-    /// disables it. Defaults to a Clark Code credit line.
+    /// disables it. Defaults to the active product's attribution line.
     #[serde(default)]
     pub pr_body: Option<String>,
 }
@@ -102,30 +101,34 @@ pub struct ProjectSettings {
 }
 
 impl ProjectSettings {
+    #[cfg(test)]
     pub fn commit_attribution(&self) -> &str {
-        if let Some(attribution) = &self.attribution {
-            return attribution
-                .commit
-                .as_deref()
-                .unwrap_or(DEFAULT_COMMIT_ATTRIBUTION);
-        }
-        if self.include_co_authored_by == Some(false) {
-            return "";
-        }
-        DEFAULT_COMMIT_ATTRIBUTION
+        self.commit_attribution_or(DEFAULT_COMMIT_ATTRIBUTION)
     }
 
-    pub fn pr_body_attribution(&self) -> &str {
+    pub fn commit_attribution_or<'a>(&'a self, product_default: &'a str) -> &'a str {
         if let Some(attribution) = &self.attribution {
-            return attribution
-                .pr_body
-                .as_deref()
-                .unwrap_or(DEFAULT_PR_BODY_ATTRIBUTION);
+            return attribution.commit.as_deref().unwrap_or(product_default);
         }
         if self.include_co_authored_by == Some(false) {
             return "";
         }
-        DEFAULT_PR_BODY_ATTRIBUTION
+        product_default
+    }
+
+    #[cfg(test)]
+    pub fn pr_body_attribution(&self) -> &str {
+        self.pr_body_attribution_or(DEFAULT_PR_BODY_ATTRIBUTION)
+    }
+
+    pub fn pr_body_attribution_or<'a>(&'a self, product_default: &'a str) -> &'a str {
+        if let Some(attribution) = &self.attribution {
+            return attribution.pr_body.as_deref().unwrap_or(product_default);
+        }
+        if self.include_co_authored_by == Some(false) {
+            return "";
+        }
+        product_default
     }
 
     pub fn include_git_instructions(&self) -> bool {
@@ -133,11 +136,11 @@ impl ProjectSettings {
     }
 }
 
-/// Read `<root>/.clark/settings.json` through `exec`. Missing file, unreadable,
+/// Read `<root>/.agent/settings.json` through `exec`. Missing file, unreadable,
 /// or malformed JSON all degrade silently to defaults — project settings are
 /// optional, never required for a session to start.
 pub async fn load(exec: &dyn Executor, root: &Path) -> ProjectSettings {
-    read_json(exec, &root.join(".clark/settings.json"))
+    read_json(exec, &root.join(".agent/settings.json"))
         .await
         .and_then(|v| serde_json::from_value(v).ok())
         .unwrap_or_default()
@@ -253,9 +256,9 @@ mod tests {
     #[tokio::test]
     async fn reads_settings_file_through_executor() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join(".clark")).unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent")).unwrap();
         std::fs::write(
-            dir.path().join(".clark/settings.json"),
+            dir.path().join(".agent/settings.json"),
             r#"{"check_command": "tsc --noEmit"}"#,
         )
         .unwrap();

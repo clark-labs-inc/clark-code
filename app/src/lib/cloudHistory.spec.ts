@@ -192,7 +192,7 @@ describe("cloud history size backstop", () => {
         time_used_seconds: 0,
         continuations: 0,
         updated_at_ms: 9,
-        blocker_reason: "Clark restarted before the goal finished.",
+        blocker_reason: "the agent restarted before the goal finished.",
       },
     };
     invoke

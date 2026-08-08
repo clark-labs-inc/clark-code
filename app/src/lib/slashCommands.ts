@@ -5,61 +5,20 @@
 
 import { useSessionStore } from "../store/sessionStore";
 import { conversationMarkdown } from "./transcript";
+import { productModule } from "../product/productModule";
 
 const SENTRY_SKILL = "$sentry:sentry";
 
-export interface SubscriptionWorkflow {
-  command:
-    | "scout"
-    | "security"
-    | "security-diff"
-    | "security-deep"
-    | "scientist"
-    | "rsi";
+export interface GatedWorkflow {
+  command: string;
   skill?: string;
   label: string;
+  hint: string;
   value: string;
 }
 
-export const SUBSCRIPTION_WORKFLOWS: readonly SubscriptionWorkflow[] = [
-  {
-    command: "scout",
-    skill: "scout:scout",
-    label: "Scout",
-    value: "Map your business systems end to end with evidence-backed coverage.",
-  },
-  {
-    command: "security",
-    skill: "security:security-scan",
-    label: "Security Scan",
-    value: "Find verified vulnerabilities across your repository.",
-  },
-  {
-    command: "security-diff",
-    skill: "security:security-diff",
-    label: "Security Diff",
-    value: "Catch security regressions in the exact change you are shipping.",
-  },
-  {
-    command: "security-deep",
-    skill: "security:security-deep",
-    label: "Security Deep",
-    value: "Run independent security passes until the review is saturated.",
-  },
-  {
-    command: "scientist",
-    label: "Scientist",
-    value: "Run preregistered discovery programs with durable evidence and replication.",
-  },
-  {
-    command: "rsi",
-    label: "RSI",
-    value: "Research and create evaluation worlds with reproducible counterexamples.",
-  },
-];
-
-function subscriptionWorkflow(command: SubscriptionWorkflow["command"]): SubscriptionWorkflow {
-  return SUBSCRIPTION_WORKFLOWS.find((candidate) => candidate.command === command)!;
+export function gatedWorkflows(): readonly GatedWorkflow[] {
+  return productModule().localAgent.gatedWorkflows ?? [];
 }
 
 export interface SlashCommand {
@@ -71,8 +30,8 @@ export interface SlashCommand {
   /** Local coding-agent command; unavailable on cloud/ACP providers. */
   localOnly?: boolean;
   /** Paid, host-pinned workflow. It remains discoverable on Free, but submit
-   *  must verify current Clark coverage before it can run. */
-  subscriptionWorkflow?: SubscriptionWorkflow;
+   *  must verify current the agent coverage before it can run. */
+  gatedWorkflow?: GatedWorkflow;
   /** Built-in commands run an action and clear the composer. */
   run?: () => void;
   /** User-authored commands (`.claude/commands/*.md`) insert this into the
@@ -106,48 +65,13 @@ export function slashCommands(): SlashCommand[] {
       localOnly: true,
       body: "/skills",
     },
-    {
-      name: "scout",
-      hint: "Map your business systems end to end",
+    ...gatedWorkflows().map((workflow) => ({
+      name: workflow.command,
+      hint: workflow.hint,
       localOnly: true,
-      body: "/scout",
-      subscriptionWorkflow: subscriptionWorkflow("scout"),
-    },
-    {
-      name: "security",
-      hint: "Find verified repository vulnerabilities",
-      localOnly: true,
-      body: "/security",
-      subscriptionWorkflow: subscriptionWorkflow("security"),
-    },
-    {
-      name: "security-diff",
-      hint: "Catch security regressions in this diff",
-      localOnly: true,
-      body: "/security-diff",
-      subscriptionWorkflow: subscriptionWorkflow("security-diff"),
-    },
-    {
-      name: "security-deep",
-      hint: "Audit deeply with independent passes",
-      localOnly: true,
-      body: "/security-deep",
-      subscriptionWorkflow: subscriptionWorkflow("security-deep"),
-    },
-    {
-      name: "scientist",
-      hint: "Turn an ambitious objective into a discovery program",
-      localOnly: true,
-      body: "/scientist",
-      subscriptionWorkflow: subscriptionWorkflow("scientist"),
-    },
-    {
-      name: "rsi",
-      hint: "Research and create high-information evaluations",
-      localOnly: true,
-      body: "/rsi",
-      subscriptionWorkflow: subscriptionWorkflow("rsi"),
-    },
+      body: `/${workflow.command}`,
+      gatedWorkflow: workflow,
+    })),
     {
       name: "sentry",
       hint: "Inspect current Sentry issues and production errors",
@@ -251,12 +175,13 @@ export function expandPromptSlashCommand(text: string): string {
 
 /** Identify a paid workflow regardless of whether it arrived as a slash
  * command, an expanded `$skill` mention, or a selected skill chip. */
-export function subscriptionWorkflowForSubmission(
+export function gatedWorkflowForSubmission(
   text: string,
   selectedSkillNames: readonly string[] = [],
-): SubscriptionWorkflow | null {
+): GatedWorkflow | null {
   const command = text.trimStart();
-  const explicitSlash = SUBSCRIPTION_WORKFLOWS.find((workflow) => {
+  const workflows = gatedWorkflows();
+  const explicitSlash = workflows.find((workflow) => {
     const prefix = `/${workflow.command}`;
     if (!command.startsWith(prefix)) return false;
     const rest = command.slice(prefix.length);
@@ -268,7 +193,7 @@ export function subscriptionWorkflowForSubmission(
     ...selectedSkillNames,
     ...Array.from(text.matchAll(/\$([A-Za-z0-9_:-]+)/g), (match) => match[1]),
   ].map((name) => name.toLowerCase());
-  return SUBSCRIPTION_WORKFLOWS.find(
+  return workflows.find(
     (workflow) =>
       Boolean(workflow.skill)
       && requestedSkills.includes(workflow.skill!.toLowerCase()),

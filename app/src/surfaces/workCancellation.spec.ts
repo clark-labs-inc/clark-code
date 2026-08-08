@@ -30,7 +30,7 @@ describe("cancelled tool presentation", () => {
       createElement(WorkLine, {
         call: cancelledCall({
           kind: "research",
-          title: "clark_research: interrupted lookup",
+          title: "brokered_research: interrupted lookup",
         }),
         active: false,
       }),

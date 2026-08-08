@@ -834,17 +834,17 @@ mod tests {
         let artifact = RemoteArtifact {
             arch: RemoteArch::LinuxX86_64,
             home: "/home/ubuntu".into(),
-            binary_path: "/home/ubuntu/.clark/bin/worker".into(),
+            binary_path: "/home/ubuntu/.agent/bin/worker".into(),
             binary_sha256: "a".repeat(64),
-            config_path: "/home/ubuntu/.clark/run/config.json".into(),
+            config_path: "/home/ubuntu/.agent/run/config.json".into(),
         };
         let command = remote_command(
             &artifact,
-            &["OPENROUTER_API_KEY".into(), "CLARK_API_KEY".into()],
+            &["OPENROUTER_API_KEY".into(), "PRODUCT_API_KEY".into()],
         );
         assert_eq!(
             command,
-            "IFS= read -r OPENROUTER_API_KEY && IFS= read -r CLARK_API_KEY; export OPENROUTER_API_KEY CLARK_API_KEY; PATH='/home/ubuntu/.local/bin:/home/ubuntu/bin:/usr/local/bin:/usr/bin:/bin'; export PATH; exec '/home/ubuntu/.clark/bin/worker' --config '/home/ubuntu/.clark/run/config.json'"
+            "IFS= read -r OPENROUTER_API_KEY && IFS= read -r PRODUCT_API_KEY; export OPENROUTER_API_KEY PRODUCT_API_KEY; PATH='/home/ubuntu/.local/bin:/home/ubuntu/bin:/usr/local/bin:/usr/bin:/bin'; export PATH; exec '/home/ubuntu/.agent/bin/worker' --config '/home/ubuntu/.agent/run/config.json'"
         );
         assert!(!command.contains("$"));
         assert!(!command.contains('\n'));
@@ -855,9 +855,9 @@ mod tests {
         let artifact = RemoteArtifact {
             arch: RemoteArch::LinuxX86_64,
             home: "/srv/remote user".into(),
-            binary_path: "/srv/remote user/.clark/bin/worker".into(),
+            binary_path: "/srv/remote user/.agent/bin/worker".into(),
             binary_sha256: "a".repeat(64),
-            config_path: "/srv/remote user/.clark/run/config.json".into(),
+            config_path: "/srv/remote user/.agent/run/config.json".into(),
         };
 
         let command = remote_command(&artifact, &[]);

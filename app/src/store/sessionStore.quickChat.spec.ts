@@ -33,7 +33,7 @@ describe("Quick Chat", () => {
       if (request.kind !== "new") throw new Error("expected new session");
       const { options, bindId } = request;
       const id = bindId ?? "missing-id";
-      const root = `/Users/test/.clark/workspace/${id}`;
+      const root = `/Users/test/.agent/workspace/${id}`;
       return {
         id,
         provider: "local",
@@ -58,7 +58,7 @@ describe("Quick Chat", () => {
     const bridge = {
       prepareQuickChatWorkspace: vi.fn(async () => ({
         id: "912a9700-7f5f-4f18-9785-b5d9315a41b4",
-        path: "/Users/test/.clark/workspace/912a9700-7f5f-4f18-9785-b5d9315a41b4",
+        path: "/Users/test/.agent/workspace/912a9700-7f5f-4f18-9785-b5d9315a41b4",
       })),
       openSession,
       subscribe: () => () => {},
@@ -72,7 +72,7 @@ describe("Quick Chat", () => {
     expect(request).toMatchObject({
       kind: "new",
       options: {
-        cwd: "/Users/test/.clark/workspace/912a9700-7f5f-4f18-9785-b5d9315a41b4",
+        cwd: "/Users/test/.agent/workspace/912a9700-7f5f-4f18-9785-b5d9315a41b4",
       },
       bindId: "912a9700-7f5f-4f18-9785-b5d9315a41b4",
     });
@@ -85,7 +85,7 @@ describe("Quick Chat", () => {
 
   it("reopens a cloud-saved Quick Chat under this device's workspace root", async () => {
     const id = "912a9700-7f5f-4f18-9785-b5d9315a41b4";
-    const currentPath = `/Users/current/.clark/workspace/${id}`;
+    const currentPath = `/Users/current/.agent/workspace/${id}`;
     const prepareQuickChatWorkspace = vi.fn(async () => ({ id, path: currentPath }));
     const openSession = vi.fn(async (
       _provider: string,
@@ -137,7 +137,7 @@ describe("Quick Chat", () => {
         id,
         title: "Saved Quick Chat",
         provider: "local",
-        project: `/home/previous/.clark/workspace/${id}`,
+        project: `/home/previous/.agent/workspace/${id}`,
         createdAt: 1,
         updatedAt: 1,
       }],

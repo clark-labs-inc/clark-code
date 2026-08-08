@@ -12,7 +12,7 @@ import { accountScopedKey } from "../lib/accountProjectStorage";
 import { codeKeyAccountBinding } from "../lib/account";
 import { loadAuthSession } from "../lib/auth";
 
-const STORAGE_KEY = "clark-desktop:specialist-view:v1";
+const STORAGE_KEY = "agent-desktop:specialist-view:v1";
 
 interface PersistedSpecialistState {
   tabs?: Partial<Record<SpecialistKind, SpecialistTab>>;

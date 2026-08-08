@@ -11,7 +11,6 @@ import {
 } from "./securityCloud";
 
 const creds = {
-  endpoint: "wss://www.clarkchat.com/ws",
   accountScope: "id:account-one",
 };
 
@@ -29,24 +28,27 @@ const registration: SecurityRepositoryRegistration = {
   },
 };
 
-describe("Clark Security cloud boundary", () => {
+describe("Security scanner cloud boundary", () => {
   beforeEach(() => {
     invoke.mockReset();
   });
 
-  it("registers with the Clark account bearer before local evidence sync", async () => {
+  it("registers with the product account bearer before local evidence sync", async () => {
     invoke.mockResolvedValue(registration);
     await registerSecurityRepository(creds, "org-1", "/work/service");
     expect(invoke).toHaveBeenCalledWith(
-      "desktop_security_register_repository",
+      "product_request",
       {
-        organizationId: "org-1",
-        cwd: "/work/service",
+        operation: "security.register_repository",
+        payload: {
+          organizationId: "org-1",
+          cwd: "/work/service",
+        },
       },
     );
   });
 
-  it("keeps the Clark Code credential entirely behind the native command", async () => {
+  it("keeps Agent Desktop credential entirely behind the native command", async () => {
     invoke.mockResolvedValue({
       sealedScanCount: 1,
       syncedCount: 1,
@@ -61,11 +63,14 @@ describe("Clark Security cloud boundary", () => {
       registration,
       "/work/service",
     );
-    expect(invoke).toHaveBeenCalledWith("desktop_security_sync_scans", {
-      organizationId: "org-1",
-      repositoryId: "repo-1",
-      policyId: "policy-1",
-      cwd: "/work/service",
+    expect(invoke).toHaveBeenCalledWith("product_request", {
+      operation: "security.sync_scans",
+      payload: {
+        organizationId: "org-1",
+        repositoryId: "repo-1",
+        policyId: "policy-1",
+        cwd: "/work/service",
+      },
     });
   });
 
@@ -95,9 +100,9 @@ describe("Clark Security cloud boundary", () => {
 
     expect(result?.syncedCount).toBe(1);
     expect(invoke.mock.calls.map(([command]) => command)).toEqual([
-      "clark_repository_inspect",
-      "desktop_security_register_repository",
-      "desktop_security_sync_scans",
+      "repository_inspect",
+      "product_request",
+      "product_request",
     ]);
   });
 });

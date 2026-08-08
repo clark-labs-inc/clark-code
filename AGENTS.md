@@ -4,10 +4,10 @@ Guidance for agents (and humans) working in this repo.
 
 ## What this is
 
-Clark Desktop — a Tauri 2 + React 19 + Rust desktop client for agentic work.
-One UI talks to many agent backends through a single `Provider` trait in
-`agent-core`. Clean-room: no code from the main Clark repository is copied in;
-shared behavior is reimplemented against provider contracts.
+Agent Desktop — a Tauri 2 + React 19 + Rust desktop foundation for agentic
+work. One UI talks to many agent backends through a single `Provider` trait in
+`agent-core`. Branded services and commercial policy live in downstream
+product compositions, not in this repository.
 
 ## Critical safety rules (concurrent agents)
 
@@ -37,9 +37,9 @@ destroys other agents' work with no recovery path.
   baseline".** Use Read for disk state and read-only `git diff` for changes.
   A failing test means fix the code, fix/delete the test, or confirm it's
   pre-existing — never stash-and-rerun.
-- **Live-model tests cost real money.** `live_clark_code` (and anything else
-  that calls a provider) is env-gated and ignored by default; run it only when
-  the user explicitly asks, with the model and key they name.
+- **Live-model tests cost real money.** Anything that calls a hosted provider
+  is env-gated and ignored by default; run it only when the user explicitly
+  asks, with the model and key they name.
 - **When in doubt, ask instead of acting.** Pausing costs seconds; a
   destructive command costs hours of recovery.
 
@@ -82,8 +82,7 @@ files you're about to make claims about yourself.
 | --- | --- |
 | `crates/agent-core` | Domain model, projection reducers, `Provider` trait, codecs. Native + WASM. |
 | `crates/provider-acp` | Agent Client Protocol adapter (JSON-RPC over stdio). |
-| `crates/provider-clark` | Clark runtime adapter: HTTP command writes + resumable SSE event stream, WS for realtime session binding. |
-| `crates/provider-local` | Local coding agent (OpenCode-style): an OpenAI-compatible tool-calling loop that runs file/shell tools locally (read-before-edit invariant, project-root sandbox), delegates research to Clark's sandbox via a `clark_research` tool, and keeps a per-repo memory under `<root>/.clark/memory/` that Clark can auto-extract. |
+| `crates/provider-local` | Local coding agent (OpenCode-style): an OpenAI-compatible tool-calling loop that runs file/shell tools locally with a read-before-edit invariant, project-root sandbox, generic tool-pack seam, and per-repo memory. |
 | `crates/devbridge` | Dev-only WebSocket bridge driving real providers from a browser. Not shipped. |
 | `src-tauri` | Tauri 2 host: commands, event bridge, sidecar, state. |
 | `app` | Vite + React + TS + Tailwind v4 frontend. |
@@ -93,20 +92,16 @@ files you're about to make claims about yourself.
 ## Evaluations and simulations
 
 Read `EVALS.md` before designing, running, changing, or interpreting an eval.
-It is the routing source for planning/context, memory, goals, orchestration,
-Scout, skills, security, resilience, VM/product, and focused contract
-simulations. Keep scripted/reference, live-model, packaged-product, and guest-VM
-evidence separate. Never promote ignored `target/` or disposable `/tmp`
+It is the routing source for foundation contracts and deterministic checks.
+Keep scripted/reference, live-model, packaged-product, and guest-VM evidence
+separate. Never promote ignored `target/` or disposable `/tmp`
 artifacts into durable claims without a tracked conclusion, and update
 `EVALS.md` whenever an eval contract or authoritative result changes.
 
-For Clark Desktop release requests, "full evals", "full sims", and similar
-language means the release-relevant lanes cataloged in this repository's
-`EVALS.md`, including its explicitly configured paid release benchmark. It does
-not authorize running the main Clark repository's broad scenario corpus or any
-other sibling repository's eval suite. Those cross-repository, high-volume, or
-otherwise non-release-blocking paid runs require a separate explicit request;
-they must not delay or gate a Desktop release.
+For foundation requests, "full evals", "full sims", and similar language means
+the public lanes cataloged in this repository's `EVALS.md`. Branded-product,
+cross-repository, high-volume, or paid runs require a separate explicit request
+and belong to the downstream product's own evaluation catalog.
 
 ## Commands
 
@@ -116,12 +111,9 @@ Run these before considering work done.
 
 ```bash
 cargo fmt --all --check
-cargo clippy -p agent-core -p provider-acp -p provider-clark -p provider-local -p devbridge --all-targets -- -D warnings
-cargo test -p agent-core -p provider-acp -p provider-clark -p provider-local
+cargo clippy -p agent-core -p provider-acp -p provider-local -p devbridge --all-targets -- -D warnings
+cargo test -p agent-core -p provider-acp -p provider-local
 ```
-
-`provider-clark` live tests are ignored unless `CLARK_WS_URL` is set; they still
-compile under `--all-targets`.
 
 `agent-core` also builds for WASM:
 
@@ -144,9 +136,8 @@ pnpm build
 ./script/build_and_run.sh
 ```
 
-On macOS, always use this launcher instead of opening a raw debug bundle. It
-assigns the separate `Clark Code Dev` identity and applies a stable development
-signature so TCC privacy grants survive rebuilds.
+This neutral launcher enables debug-only diagnostics. Branded products own
+their signing identities, sidecars, and release launchers outside this repo.
 
 ## Conventions
 

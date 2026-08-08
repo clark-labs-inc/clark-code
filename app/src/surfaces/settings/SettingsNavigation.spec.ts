@@ -21,7 +21,7 @@ describe("settings navigation search", () => {
   it("matches section content keywords", () => {
     expect(ids("font")).toEqual(["general"]);
     expect(ids("ssh")).toEqual(["integrations"]);
-    expect(ids("billing")).toEqual(["account"]);
+    expect(ids("sign out")).toEqual(["account"]);
     expect(ids("accessibility")).toEqual(["computer-use"]);
   });
 

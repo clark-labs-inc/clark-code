@@ -50,7 +50,7 @@ pub fn run_current(
         false,
         TraceAuthority::SelfReported,
     );
-    result.candidate_id = "clark-current".into();
+    result.candidate_id = "current-agent".into();
     result.delegation_reason =
         "Current provider has one authoritative writer and no production work-graph trace".into();
     result.plan = None;
@@ -700,7 +700,7 @@ fn task_receipt(
             lane.root_model.clone()
         },
         model_tier: if cheap { "cheap" } else { "strong" }.into(),
-        harness: if cloud { "clark-cloud" } else { "local" }.into(),
+        harness: if cloud { "brokered-cloud" } else { "local" }.into(),
         workspace_id: if isolated && spec.role.writes() {
             format!("isolated:{}", spec.id)
         } else {

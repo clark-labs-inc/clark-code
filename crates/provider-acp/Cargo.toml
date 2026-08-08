@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "Agent Client Protocol (ACP) provider for clark-desktop: drives local CLI agents over JSON-RPC/stdio."
+description = "Agent Client Protocol (ACP) provider for agent-desktop: drives local CLI agents over JSON-RPC/stdio."
 
 [dependencies]
 agent-core = { path = "../agent-core", features = ["native"] }

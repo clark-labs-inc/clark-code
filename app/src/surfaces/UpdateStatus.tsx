@@ -1,10 +1,11 @@
 import { useEffect } from "react";
+import { productName } from "../product/productModule";
 import { AnimatePresence, useReducedMotion } from "motion/react";
 import * as m from "motion/react-m";
 import { CheckCircle2, X } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
 import { DUR, EASE, REDUCED_EXIT, RISE, accessibleMotion } from "../lib/motion";
-import { ClarkMark } from "./ClarkMark";
+import { ProductMark } from "./ProductMark";
 
 /** Full-window "applying update" overlay. The staged bundle is already on disk,
  *  so this is brief — its job is to make the relaunch feel intentional instead
@@ -27,9 +28,9 @@ function UpdateOverlay() {
           <div
             className="popover-surface flex w-72 flex-col items-center gap-3 rounded-2xl border border-border-subtle bg-bg-elevated p-6 text-center shadow-xl"
           >
-            <ClarkMark size={40} className="rounded-xl" />
+            <ProductMark size={40} className="rounded-xl" />
             <div>
-              <div className="text-sm font-semibold text-ink">Updating Clark Code</div>
+              <div className="text-sm font-semibold text-ink">Updating {productName()}</div>
               <div className="mt-0.5 text-xs text-ink-muted">
                 {version ? `Restarting into v${version}…` : "Restarting…"}
               </div>

@@ -38,7 +38,7 @@ describe("TauriBridge remote project Git", () => {
 
   it("opens a newly bound session with one atomic native invocation", async () => {
     const bridge = new TauriBridge();
-    const config = { cwd: "/srv/project", extra: { model: "clark-code:free" } };
+    const config = { cwd: "/srv/project", extra: { model: "local-model" } };
 
     await bridge.openSession("local", config, {
       kind: "new",
@@ -61,14 +61,14 @@ describe("TauriBridge remote project Git", () => {
   it("loads a session with one atomic native invocation", async () => {
     const bridge = new TauriBridge();
 
-    await bridge.openSession("clark", {}, {
+    await bridge.openSession("local", {}, {
       kind: "load",
       id: "conversation-2",
     });
 
     expect(invoke).toHaveBeenCalledTimes(1);
     expect(invoke).toHaveBeenCalledWith("session_open", {
-      providerId: "clark",
+      providerId: "local",
       config: {},
       request: { kind: "load", id: "conversation-2" },
     });

@@ -1,10 +1,8 @@
-//! Local coding-agent provider — clark-desktop's coding mode.
+//! Product-extensible local coding-agent provider.
 //!
-//! The agent loop runs **locally**: the model reasons over the production Clark
-//! Platform API (`https://api.clarkslabs.com/v1`, OpenAI-compatible, `ck_live_`
-//! key) and the tool calls execute on the user's own machine and codebase.
-//! Research (`clark_research`) routes through the same agentic Platform API +
-//! key — Clark runs web search / browsing server-side and returns findings.
+//! The agent loop runs locally against an OpenAI-compatible model endpoint;
+//! tool calls execute on the user's own machine and codebase. Products can add
+//! brokered capabilities through the `ToolPack` extension point.
 //! Durable memory (project + global) is curated by the agent via the `memory`
 //! tool. The model sees one flat tool list;
 //! execution routes to local or remote backends behind a uniform
@@ -55,7 +53,6 @@ mod root_execution;
 mod safety;
 mod sandbox;
 pub mod security;
-mod security_export;
 mod security_history;
 pub mod scout_census {
     pub use scout_capability_census::*;
@@ -68,10 +65,7 @@ pub use changes::{changes_diff, changes_revert, changes_summary, ChangedFile};
 pub use checkpoint::{create_checkpoint, is_git_repo, release_checkpoints};
 // Discover compatible setup from other coding agents without mutating it.
 pub use commands::{discover_commands, CustomCommand};
-pub use config::{
-    LocalConfig, DEFAULT_BASE_URL, DEFAULT_MODEL, DEFAULT_RESEARCH_MODEL, SCOUT_MODEL,
-    SCOUT_REASONING_EFFORT, SECURITY_MODEL,
-};
+pub use config::{LocalConfig, DEFAULT_BASE_URL, DEFAULT_MODEL, DEFAULT_RESEARCH_MODEL};
 pub use configuration::defaults as configuration_capabilities;
 pub use exec::{Executor, LocalExecutor};
 pub use external_import::{
@@ -91,7 +85,7 @@ pub use memory::{
     MemoryHeader, MemoryType,
 };
 pub use multi_repo_provider::{
-    ClarkCloudWriterConfig, ClarkCloudWriterHarness, IntegrationReadinessGate,
+    BrokeredCloudWriterConfig, BrokeredCloudWriterHarness, IntegrationReadinessGate,
     LocalIntegrationHarness, LocalMultiRepoRuntime, LocalMultiRepoRuntimeConfig,
     LocalReaderHarness, LocalReviewHarness, LocalWriterHarness,
 };
@@ -102,22 +96,15 @@ pub use multi_repo_workspace::{
 pub use orchestration::{local_read_only_harness, WorkspaceDigestGuard};
 #[doc(hidden)]
 pub use planning::{complete_plan_markdown_for_eval, planning_prompt_contract_for_eval};
-#[doc(hidden)]
-pub use platform::recall_organization_knowledge;
 pub use platform::{
-    personal_memory_section, recall_personal_memories, recall_repository_context,
-    repository_context_section, scope_personal_memories, PersonalMemory, RepositoryCommitContext,
-    RepositoryContext,
+    personal_memory_section, repository_context_section, scope_personal_memories,
+    OrganizationKnowledgeHit, OrganizationKnowledgePacket, OrganizationKnowledgeResponse,
+    PersonalMemory, PlatformContextProvider, RepositoryCommitContext, RepositoryContext,
 };
 pub use provider::{local_sandbox_setup_policy, LocalAgentProvider};
 pub use repository::{
     discover_repositories, inspect_repository, load_git_history, GitCommitEvidence,
     GitHistoryBatch, RepositoryIdentity, RepositoryRemote,
-};
-pub use security_export::{
-    build_clark_security_cloud_export, clark_security_cloud_identity, ClarkSecurityCloudExport,
-    ClarkSecurityCloudIdentity, ClarkSecurityCoverageSurfaceDraft,
-    ClarkSecurityFindingIdentityDraft, ClarkSecurityLocationDraft, ClarkSecurityOccurrenceDraft,
 };
 pub use security_history::{list_security_scans, SecurityScanRecord};
 pub use skills::{
@@ -125,6 +112,10 @@ pub use skills::{
     uninstall_skill_pack, InstallSkillPackRequest, InstalledSkillPack, SkillCatalogEntry,
     SkillCatalogService, SkillCatalogSnapshot, SkillDiagnostic, SkillDiagnosticSeverity,
     SkillOrigin, SkillPackAction, SkillPackReceipt, SkillPackScope, SkillScope,
+};
+pub use tools::{
+    PermissionScope, ToolCtx, ToolExecutor, ToolExposure, ToolOutcome, ToolPack,
+    ToolPermissionClass, ToolPermissionDecision, ToolRegistry,
 };
 // The app-managed document workspace, so the host can confine artifact reads.
 pub use workspace::{

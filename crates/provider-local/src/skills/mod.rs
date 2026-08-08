@@ -1,4 +1,4 @@
-//! Clark-owned skill discovery and progressive disclosure.
+//! Agent Desktop-owned skill discovery and progressive disclosure.
 //!
 //! Skills are instruction packages, not executable plugins or authorization.
 //! The catalog exposes complete metadata to the model; [`ReadSkill`](crate::tools::skill::ReadSkill)
@@ -56,7 +56,7 @@ impl SkillScope {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SkillOrigin {
-    Clark,
+    Bundled,
     Compatible,
     Claude,
     Plugin,
@@ -65,7 +65,7 @@ pub enum SkillOrigin {
 impl SkillOrigin {
     pub fn label(self) -> &'static str {
         match self {
-            Self::Clark => "Clark",
+            Self::Bundled => "Agent Desktop",
             Self::Compatible => "external",
             Self::Claude => "Claude",
             Self::Plugin => "plugin",
@@ -74,7 +74,7 @@ impl SkillOrigin {
 
     fn rank(self) -> u8 {
         match self {
-            Self::Clark | Self::Plugin => 0,
+            Self::Bundled | Self::Plugin => 0,
             Self::Compatible => 1,
             Self::Claude => 2,
         }
@@ -467,7 +467,7 @@ impl SkillCatalog {
 impl SkillOrigin {
     fn invocation_label(self) -> &'static str {
         match self {
-            Self::Clark => "clark",
+            Self::Bundled => "bundled",
             Self::Compatible => "compatible",
             Self::Claude => "claude",
             Self::Plugin => "plugin",

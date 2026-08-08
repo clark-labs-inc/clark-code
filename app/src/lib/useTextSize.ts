@@ -12,7 +12,7 @@ const LEGACY_TEXT_SIZES: Record<string, TextSize> = {
   large: 110,
 };
 
-const STORAGE_KEY = "clark.text-size";
+const STORAGE_KEY = "agent-desktop.text-size";
 const DEFAULT_TEXT_SIZE: TextSize = 100;
 
 function isTextSize(value: number): value is TextSize {

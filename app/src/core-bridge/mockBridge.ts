@@ -27,7 +27,7 @@ import {
   type Snapshot,
 } from "./types";
 import { loadStoredResilienceCase, playResilienceSimulation } from "./resilienceBenchmark";
-import { FIRST_PARTY_SPECIALIST_CATALOG } from "../lib/specialists";
+import { PRODUCT_SPECIALIST_CATALOG } from "../lib/specialists";
 import {
   specialistConversationPresentation,
   specialistPresentationPayload,
@@ -38,13 +38,13 @@ import {
   type FakeManagedScenario,
 } from "../lib/fakeGitRepository";
 
-// Mirrors the shipped app: Clark Code is the only environment choice, while
+// Mirrors the shipped app: Agent Desktop is the only environment choice, while
 // the product can route Scientist/RSI conversations through an internal
 // native provider.
 const PROVIDERS: ProviderInfo[] = [
   {
     id: "local",
-    label: "Clark Code",
+    label: "Agent Desktop",
     capabilities: {
       streaming: true,
       permissions: true,
@@ -57,7 +57,7 @@ const PROVIDERS: ProviderInfo[] = [
   },
   {
     id: "specialist",
-    label: "Clark Specialist Runtime",
+    label: "the agent Specialist Runtime",
     internal: true,
     capabilities: {
       streaming: true,
@@ -83,8 +83,8 @@ const SPECIALIST_SKILLS: SkillCatalogEntry[] = [
   invocationName,
   description,
   scope: "bundled",
-  origin: "clark",
-  source: `clark://skills/${invocationName.replace(":", "/")}`,
+  origin: "bundled",
+  source: `skill://bundled/${invocationName.replace(":", "/")}`,
   requiredTools: [],
   missingTools: [],
   allowImplicitInvocation: false,
@@ -111,10 +111,10 @@ function specialistPresentationForPrompt(userText: string) {
 }
 
 export const SECURITY_SIMULATION_STORAGE_KEY =
-  "clark-desktop:security-simulation";
+  "agent-desktop:security-simulation";
 /** Preview-only lifecycle state for the isolated-worktree manager. */
 export const MANAGED_WORKTREE_SIMULATION_STORAGE_KEY =
-  "clark-desktop:managed-worktree-simulation";
+  "agent-desktop:managed-worktree-simulation";
 
 function managedWorktreeSimulation(): "ready" | "dirty" | "committed" {
   const value = localStorage.getItem(MANAGED_WORKTREE_SIMULATION_STORAGE_KEY);
@@ -138,13 +138,13 @@ export function securitySimulationRecords(): SecurityScanRecord[] {
   const now = Date.UTC(2026, 6, 29, 12);
   return [
     {
-      path: ".clark/security-scans/adversarial-standard/scan.json",
+      path: ".agent/security-scans/adversarial-standard/scan.json",
       modifiedAtMs: now,
       pocReceipts: [],
       bundle: {
         scanId: "adversarial-standard",
         mode: "standard",
-        model: "clark-code",
+        model: "local-model",
         scope: ".",
         inventoryId: "fixture-inventory",
         phase: "reporting",
@@ -166,13 +166,13 @@ export function securitySimulationRecords(): SecurityScanRecord[] {
       },
     },
     {
-      path: ".clark/security-scans/adversarial-diff/scan.json",
+      path: ".agent/security-scans/adversarial-diff/scan.json",
       modifiedAtMs: now - 1_000,
       pocReceipts: [],
       bundle: {
         scanId: "adversarial-diff",
         mode: "diff",
-        model: "clark-code",
+        model: "local-model",
         scope: ".",
         inventoryId: "fixture-diff-inventory",
         phase: "reporting",
@@ -195,13 +195,13 @@ export function securitySimulationRecords(): SecurityScanRecord[] {
       },
     },
     {
-      path: ".clark/security-scans/adversarial-deep/scan.json",
+      path: ".agent/security-scans/adversarial-deep/scan.json",
       modifiedAtMs: now - 2_000,
       pocReceipts: [],
       bundle: {
         scanId: "adversarial-deep",
         mode: "deep",
-        model: "clark-code",
+        model: "local-model",
         scope: ".",
         inventoryId: "fixture-deep-inventory",
         phase: "reporting",
@@ -228,7 +228,7 @@ export function securitySimulationRecords(): SecurityScanRecord[] {
 export class MockBridge implements CoreBridge {
   private snapshot: Snapshot = emptySnapshot();
   private handlers = new Set<(s: Snapshot) => void>();
-  private git = new FakeGitRepository("/tmp/clark-desktop", fakeGitScenario());
+  private git = new FakeGitRepository("/tmp/example-desktop", fakeGitScenario());
   private sessionSequence = 0;
 
   async listProviders(): Promise<ProviderInfo[]> {
@@ -236,7 +236,7 @@ export class MockBridge implements CoreBridge {
   }
 
   async listSpecialistCatalog() {
-    return FIRST_PARTY_SPECIALIST_CATALOG;
+    return PRODUCT_SPECIALIST_CATALOG;
   }
 
   async openSession(
@@ -519,7 +519,7 @@ export class MockBridge implements CoreBridge {
         status: "failed",
         outcome: {
           status: "failed",
-          error: "insufficient_credits: out of Clark credits",
+          error: "insufficient_credits: out of the agent credits",
           failure_kind: "insufficient_credits",
         },
         checkpoint: "mock-checkpoint-sha",
@@ -560,7 +560,7 @@ export class MockBridge implements CoreBridge {
             id: "platform-endpoint-survey",
             label: "Platform endpoint survey",
             status: "done",
-            objective: "Trace the Clark server route, auth, billing, and artifact seams.",
+            objective: "Trace the agent server route, auth, access, and artifact seams.",
             activity: "Complete",
             result: "Confirmed the platform route and authentication boundary.",
             attempt: 1,
@@ -656,7 +656,7 @@ export class MockBridge implements CoreBridge {
     this.emit();
     await sleep(250);
 
-    // A Clark research call — keep the cloud phase live in browser demos long
+    // A the agent research call — keep the cloud phase live in browser demos long
     // enough to inspect its compact progress surface before cited findings land.
     const research = `tc-research-${Date.now()}`;
     const xtermResearch = userText.toLowerCase().includes("xterm");
@@ -665,7 +665,7 @@ export class MockBridge implements CoreBridge {
       : "latest clap argument-parsing API";
     this.snapshot.tool_calls[research] = {
       id: research,
-      title: `clark_research: ${researchQuery}`,
+      title: `brokered_research: ${researchQuery}`,
       kind: "research",
       status: "in_progress",
       locations: [],
@@ -707,7 +707,7 @@ export class MockBridge implements CoreBridge {
       const markdown = [
         "# Artifact UX recommendations",
         "",
-        "This document proposes improvements to how artifacts are surfaced, viewed, and connected to their generating context in Clark Code.",
+        "This document proposes improvements to how artifacts are surfaced, viewed, and connected to their generating context in Agent Desktop.",
         "",
         "## What changed",
         "",

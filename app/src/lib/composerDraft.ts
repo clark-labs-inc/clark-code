@@ -1,4 +1,4 @@
-const DRAFT_KEY_PREFIX = "clark.composer-draft.v1.";
+const DRAFT_KEY_PREFIX = "agent-desktop.composer-draft.v1.";
 const DRAFT_ENVELOPE_VERSION = 2;
 
 export interface ComposerDraftRecord {

@@ -46,7 +46,7 @@ pub fn run_process(
     args: &[&str],
 ) -> Output {
     const COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
-    const TIMEOUT_MARKER: &str = "clark Windows sandbox test command timed out";
+    const TIMEOUT_MARKER: &str = "agent Windows sandbox test command timed out";
     let trace_paths = git_trace_paths(policy, program);
     let mut env = vec![
         (
@@ -58,7 +58,7 @@ pub fn run_process(
             WireOsString::from_os(policy.process_temp_root.as_ref().unwrap().as_os_str()),
         ),
         (
-            WireOsString::from_os(OsStr::new("CLARK_SANDBOX_TEST_EXPLICIT")),
+            WireOsString::from_os(OsStr::new("DESKTOP_SANDBOX_TEST_EXPLICIT")),
             WireOsString::from_os(OsStr::new("preserved")),
         ),
     ];
@@ -119,7 +119,7 @@ pub fn run_process(
 }
 
 fn git_trace_paths(policy: &WireSandboxPolicy, program: &Path) -> Vec<(&'static str, PathBuf)> {
-    if std::env::var_os("CLARK_WINDOWS_SANDBOX_TRACE").is_none()
+    if std::env::var_os("DESKTOP_WINDOWS_SANDBOX_TRACE").is_none()
         || !program
             .file_stem()
             .is_some_and(|stem| stem.eq_ignore_ascii_case("git"))
@@ -267,7 +267,7 @@ fn cleanup_paths(requests: &[&WindowsSetupRequest]) -> Vec<PathBuf> {
 
 pub fn assert_initial_setup_success(setup: &Path, requests: &[&WindowsSetupRequest], label: &str) {
     let args = setup_args(requests);
-    if std::env::var_os("CLARK_WINDOWS_SANDBOX_E2E_USE_CONSENT").is_some() {
+    if std::env::var_os("DESKTOP_WINDOWS_SANDBOX_E2E_USE_CONSENT").is_some() {
         exec_sandbox_windows::run_setup_action(setup, &args, true, cleanup_paths(requests))
             .unwrap_or_else(|error| panic!("{label} failed: {error}"));
     } else {
@@ -298,7 +298,7 @@ pub fn proof_roots(policy: &WireSandboxPolicy, request_id: &str) -> Vec<WindowsR
         .map(|(index, root)| {
             std::fs::create_dir_all(root).unwrap();
             let nonce = format!("{:032x}", index + 1);
-            let proof_path = root.join(format!(".clark-sandbox-setup-{request_id}-{index}.proof"));
+            let proof_path = root.join(format!(".agent-sandbox-setup-{request_id}-{index}.proof"));
             std::fs::write(&proof_path, &nonce).unwrap();
             WindowsRootProof {
                 root: root.clone(),
@@ -327,7 +327,7 @@ pub fn assert_failure(label: &str, output: &Output) {
     assert!(
         !output.status.success()
             && !String::from_utf8_lossy(&output.stderr)
-                .contains("clark Windows sandbox test command timed out"),
+                .contains("agent Windows sandbox test command timed out"),
         "{label} unexpectedly succeeded\nstdout={}\nstderr={}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)

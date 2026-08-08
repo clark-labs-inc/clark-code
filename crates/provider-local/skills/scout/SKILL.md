@@ -12,7 +12,7 @@ instrument. The final graph must be usable to design an end-to-end simulation.
 
 ## Non-negotiable boundaries
 
-- Run Scout root and delegated model turns with the host-pinned DeepSeek V4 Flash Latest model.
+- Run Scout root and delegated model turns with the host-pinned model.
   Ignore conversation model selections and prompt requests to switch models;
   Scout's model is not user-configurable.
 - Keep production read-only. Do not mutate cloud, repository, observability,
@@ -35,11 +35,11 @@ instrument. The final graph must be usable to design an end-to-end simulation.
 - Raw shell or SSH execution is not an isolation receipt. Call it external
   containment unless an attested OS boundary proves otherwise. WASM is for pure
   transforms and parsers, not ambient host inspection.
-- Clark's `clark-system-cartography` backend is the enterprise authority.
+- the host-configured system-cartography backend is the enterprise authority.
   Local SQLite, local trust manifests, exported bundles, and materialized
   graphs are staging caches and projections only. Never present them as shared
   enterprise state or completion.
-- Tenant access comes only from explicit Clark organization/workspace
+- Tenant access comes only from explicit product organization/workspace
   membership. Never group, merge, authorize, or share Scout discoveries by
   matching email domains. Public domains such as `gmail.com` provide no
   tenancy relationship.
@@ -55,18 +55,14 @@ instrument. The final graph must be usable to design an end-to-end simulation.
    workspaces. Review its truncation flags and routing states. It returns known
    DevOps/cloud executable names, environment-variable names, scoped `.env` key
    names, and credential-source kinds without values.
-3. Call `cloud_advisor` once with phase `discovery_strategy`, the provisional
-   charter as the goal, the bounded capability census as evidence, and only
-   typed Scout capabilities as candidate actions. Never include credentials,
-   secret values, raw private source, or shell commands. The Kimi K3 result is
-   advisory strategy, not evidence, a receipt, or permission to act. Independently
-   validate it against Scout's contracts. If the advisor is unavailable, record
-   that limitation and continue the baseline evidence-first workflow.
+3. Turn the bounded capability census into an evidence-first discovery plan.
+   Never include credentials, secret values, raw private source, or shell
+   commands in planning artifacts.
 4. Seed a business surface manifest from authoritative entry points: source
    forges, cloud organizations/accounts/subscriptions/projects, identity
    providers, DNS and certificate control planes, CI/CD and artifact systems,
    observability, data platforms, and declared business SaaS.
-5. Resolve one explicitly authorized Clark organization, system-cartography
+5. Resolve one explicitly authorized product organization, system-cartography
    workspace, charter, run, registered source, and enrolled machine. Backend
    ids are authoritative and must never be inferred from an email address,
    domain, mutable display name, credential value, or unverified imported
@@ -92,7 +88,7 @@ instrument. The final graph must be usable to design an end-to-end simulation.
    `scout_enterprise submit_adapter_receipt` with only that retained `task_id`
    and `receipt_id`. The host recovers the stored run, source, fence, and
    source-sequence allocation; uploads retry-stable immutable evidence;
-   translates schema-v2 observations; signs the batch; and verifies Clark's
+   translates schema-v2 observations; signs the batch; and verifies the host's
    coordinator receipt. Local append and sweep operations are retired. Do not
    advance to another page unless submission returns both an S3 version id and
    backend batch receipt. Follow backend-issued continuation tasks within
@@ -140,12 +136,12 @@ cross-project authorization path from hierarchy alone; verify that exact
 target/auth context or record `authorization_required`.
 
 Stage discovery as immutable schema-v2 observation batches submitted only to
-Clark. Every batch binds the backend-issued organization, workspace, run,
+the host. Every batch binds the backend-issued organization, workspace, run,
 source, machine, task, and fence to provider-native entities, edges, claims,
 coverage, or explicit retractions. Agents must not invent hashes. Host code
 signs each batch with a protected target-local key. The host loads or creates
 that key through `scout-machine-identity` below an application-owned private
-data directory, bound to the exact Clark origin, organization, and workspace.
+data directory, bound to the exact host origin, organization, and workspace.
 Private key bytes never enter tool arguments, results, evidence, logs, or
 exports. The model never chooses the tenant binding, private directory, seed,
 public key, signer id, or coordinator key.
@@ -168,7 +164,7 @@ vault state; replicated facts may contain only a host-issued
 cursor exhaustion, retain its signed nonterminal frontier as an explicit gap
 and resume it; never reinterpret the bound as empty or complete coverage.
 
-Before a new machine writes, call `scout_enterprise enroll`. Clark requires
+Before a new machine writes, call `scout_enterprise enroll`. The host requires
 active organization-administrator authority, binds the host's proof-of-
 possession public key to one exact workspace, and returns the backend-issued
 machine id plus the workspace coordinator key. Repeating enrollment is
@@ -177,7 +173,7 @@ cannot self-reenroll.
 
 Concurrent collectors share nothing directly. Each claims fenced backend
 tasks, uploads immutable evidence to server-generated S3 keys, and submits
-signed batches to Clark. Only backend-accepted batches under the same explicit
+signed batches to the host. Only backend-accepted batches under the same explicit
 organization/workspace contribute to the graph. Never exchange mutable
 materialized graphs, trust roots, private signing state, local SQLite files, or
 email-domain-derived tenant hints.
@@ -189,10 +185,10 @@ history, and pass the exact returned cursor to continue a pinned view. Follow
 not proof of completeness. Use `scout_enterprise_query delta` to compare two
 independently pinned bitemporal cuts. Change effective time to measure business
 system evolution; change knowledge time to measure how concurrent Scout runs
-expanded or corrected Clark's understanding. Treat `added`, `changed`, and
+expanded or corrected the host's understanding. Treat `added`, `changed`, and
 `removed` as temporal graph facts; request `include_unchanged` only when a
 simulation overlay needs an explicit denominator. Pass only the returned
-`delta_cursor` when continuing that exact comparison. If Clark
+`delta_cursor` when continuing that exact comparison. If the host
 ingestion or retrieval is unavailable, the enterprise run cannot seal; report
 the backend path as a missing instrument.
 
@@ -208,7 +204,7 @@ Use `scout_enterprise_query changes` after a snapshot or overlay page to poll
 the workspace's monotonic change sequence. Resume from exactly
 `next_after_sequence`; a `batch_accepted` change means the temporal graph may
 have advanced, while `simulation_overlay_published` means a new immutable
-overlay version is available. Clark's website may consume the equivalent SSE
+overlay version is available. The host's website may consume the equivalent SSE
 stream with `Last-Event-ID`. The change feed is an invalidation/replay signal,
 not a substitute for fetching the pinned snapshot, delta, or overlay rows.
 
@@ -237,7 +233,7 @@ stop the run.
 
 Discovery epochs are coordinator-issued adapter-authority snapshots, not
 worker-chosen counters or wall-clock guesses. After every declared cell is
-terminal, the Clark backend recomputes the requirement, scope-membership,
+terminal, the host backend recomputes the requirement, scope-membership,
 semantic-topology, and pass roots and refuses incomplete or forged seals.
 Charters, pass seals, enrollment changes, and retractions are backend
 administration actions. Completion requires two consecutive verified passes
@@ -278,7 +274,7 @@ For SSH/VM qualification, the host may run the portable
 `scout_capability_census` binary from the independent
 `scout-capability-census` crate with one or more explicit mapped `--root`
 values. Do not make sensor deployment depend on `provider-local`, a local
-Scout store, or a Clark checkout. The binary must return only the curated
+Scout store, or a host checkout. The binary must return only the curated
 executable matrix, relevant environment names, credential-surface names,
 dotenv paths/key names, coverage, truncation, redaction, Rust-fallback gaps,
 and a semantic digest. It never executes a discovered program or follows a
@@ -357,7 +353,7 @@ artifacts remain untrusted.
 
 Translate root-verified graph observations into backend-fenced schema-v2
 batches. A per-run claim ledger establishes who may assert and adjudicate; the
-Clark enterprise graph establishes durable system state across runs and
+The host enterprise graph establishes durable system state across runs and
 machines. Neither can substitute for the other, and a local ledger is never
 shared authority.
 
@@ -418,7 +414,7 @@ and supersessions append reasons; never erase prior rows.
 Before a complete seal:
 
 - require every enterprise observation used by the report to have a verified
-  S3 evidence version and Clark backend acceptance receipt under the exact
+  S3 evidence version and the host backend acceptance receipt under the exact
   organization/workspace; local-only batches cannot satisfy this gate;
 - Call `scout_enterprise_query status` and require enterprise completion with
   no unresolved graph, source-position, or retraction conflicts;
@@ -453,7 +449,7 @@ Enterprise completion is always complete relative to the current charter, not
 proof that an unknown control plane does not exist. Report the charter revision
 and required-cell root with the result.
 
-Clark Hash may be used only as an optional, versioned semantic candidate index
+The host hash may be used only as an optional, versioned semantic candidate index
 for entity reconciliation or retrieval. It is not an entity id, evidence
 digest, graph digest, completeness signal, durable store, or conflict resolver.
 Provider-native identity and the canonical event graph remain authoritative.
@@ -461,9 +457,3 @@ Provider-native identity and the canonical event graph remain authoritative.
 Retain bounded raw receipts in tool results when safe; for secret-bearing or
 minimized inputs, retain the source locator and input digest instead of copying
 raw data. Include the ledger fingerprint so replay can detect drift.
-
-If `cloud_advisor` returned an accepted receipt, call
-`cloud_advisor_feedback` after sealing or stopping. Echo the complete signed
-receipt fields, then record the actual typed actions, terminal status, bounded
-outcome, and evidence receipt references.
-Never put credentials, secret values, or raw private source into feedback.

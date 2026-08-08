@@ -127,7 +127,7 @@ mod tests {
     async fn provider_and_ui_share_revisioned_snapshots_and_refresh_between_runs() {
         let temp = tempfile::tempdir().unwrap();
         let project = temp.path().join("repo");
-        let source = project.join(".clark/skills/review/SKILL.md");
+        let source = project.join(".agent/skills/review/SKILL.md");
         write_skill(&source, "Version one.");
         let service = SkillCatalogService::new();
         let environment = skill_environment_id(&project, None);

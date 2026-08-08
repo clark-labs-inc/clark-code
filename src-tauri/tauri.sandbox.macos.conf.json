@@ -1,9 +1,9 @@
 {
   "bundle": {
-    "externalBin": ["binaries/rg", "binaries/clark-code-headless"],
+    "externalBin": ["binaries/rg"],
     "resources": {
-      "binaries/rg-LICENSE-MIT": "clark-resources/licenses/ripgrep/LICENSE-MIT",
-      "binaries/rg-UNLICENSE": "clark-resources/licenses/ripgrep/UNLICENSE"
+      "binaries/rg-LICENSE-MIT": "agent-resources/licenses/ripgrep/LICENSE-MIT",
+      "binaries/rg-UNLICENSE": "agent-resources/licenses/ripgrep/UNLICENSE"
     }
   }
 }

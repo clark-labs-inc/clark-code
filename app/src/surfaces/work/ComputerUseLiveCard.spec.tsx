@@ -35,7 +35,7 @@ describe("ComputerUseLiveCard", () => {
     expect(markup).toContain("Computer use");
     expect(markup).toContain("Safari · Confirmation");
     expect(markup).not.toContain("Take over");
-    expect(markup).toContain("Stop Clark computer use");
+    expect(markup).toContain("Stop the agent computer use");
     expect(markup).toContain("data:image/png;base64,REVG");
     expect(markup).toContain("Show computer screenshot history");
   });

@@ -12,7 +12,7 @@ pub enum EvidenceLevel {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CandidateKind {
-    ClarkCurrent,
+    CurrentAgent,
     Reference,
     External,
 }
@@ -20,7 +20,7 @@ pub enum CandidateKind {
 impl CandidateKind {
     pub fn id(self) -> &'static str {
         match self {
-            Self::ClarkCurrent => "clark-current",
+            Self::CurrentAgent => "current-agent",
             Self::Reference => "reference",
             Self::External => "external",
         }
@@ -369,12 +369,12 @@ pub struct InteractionReceipt {
     /// True only when this trace came from the ordinary user-facing path,
     /// rather than an evaluator-only or advanced orchestration screen.
     pub default_flow: bool,
-    /// User actions required before Clark can start. Selecting several
+    /// User actions required before the agent can start. Selecting several
     /// projects in one picker counts as one action.
     pub setup_actions: u32,
     /// Separate Cloud approval prompts shown during one run.
     pub cloud_consent_prompts: u32,
-    /// User actions required after Clark finishes to inspect and apply work.
+    /// User actions required after the agent finishes to inspect and apply work.
     pub completion_actions: u32,
     pub model_choice_required: bool,
     pub agent_configuration_required: bool,

@@ -35,7 +35,7 @@ pub(super) fn build_local_executor(
     };
     #[cfg(not(windows))]
     let private_temp = tempfile::Builder::new()
-        .prefix("clark-sandbox-")
+        .prefix("agent-sandbox-")
         .tempdir()
         .map_err(|error| Error::Io(error.to_string()))?;
     let policy = match preset {
@@ -51,11 +51,11 @@ pub(super) fn build_local_executor(
         exec_sandbox::SandboxPreset::DangerFullAccess => unreachable!(),
     }
     .with_process_temp_root(private_temp.path().to_path_buf());
-    let install = clark_install_context::InstallContext::current();
+    let install = desktop_install_context::InstallContext::current();
     let runtime = exec_sandbox::SandboxRuntime {
-        linux_bubblewrap: install.bundled_tool(clark_install_context::BUBBLEWRAP),
-        windows_runner: install.bundled_tool(clark_install_context::WINDOWS_SANDBOX_RUNNER),
-        windows_setup: install.bundled_tool(clark_install_context::WINDOWS_SANDBOX_SETUP),
+        linux_bubblewrap: install.bundled_tool(desktop_install_context::BUBBLEWRAP),
+        windows_runner: install.bundled_tool(desktop_install_context::WINDOWS_SANDBOX_RUNNER),
+        windows_setup: install.bundled_tool(desktop_install_context::WINDOWS_SANDBOX_SETUP),
         windows_state_dir: None,
     };
     let manager =
@@ -126,7 +126,7 @@ fn auto_enroll_windows_workspace(
 
 /// Stable policy used by the desktop's explicit Windows setup flow. Session
 /// directories nest under these roots, so one consented ACL reconciliation is
-/// reusable without broadening access beyond Clark's project/docs/temp areas.
+/// reusable without broadening access beyond Agent Desktop's project/docs/temp areas.
 pub fn local_sandbox_setup_policy(cwd: &std::path::Path) -> Result<exec_sandbox::SandboxPolicy> {
     #[cfg(not(windows))]
     let write_roots = Vec::new();

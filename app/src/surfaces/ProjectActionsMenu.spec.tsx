@@ -22,7 +22,7 @@ describe("ProjectHeader", () => {
         group={group({
           key: "r:ubuntu@cpu",
           label: "ubuntu@cpu",
-          title: "Remote · ubuntu@cpu · /home/ubuntu/clark",
+          title: "Remote · ubuntu@cpu · /home/ubuntu/project",
           kind: "remote",
           remoteHost: "ubuntu@cpu",
         })}

@@ -196,7 +196,7 @@ pub(super) async fn worktree_create(
         "Fetch latest origin/main",
     )
     .await?;
-    let branch = format!("clark/{clean_name}");
+    let branch = format!("agent/{clean_name}");
     git_output(
         executor,
         &repo_root,

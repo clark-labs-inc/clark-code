@@ -1,4 +1,5 @@
 use super::*;
+use std::path::PathBuf;
 
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -81,7 +82,7 @@ pub struct MemoryFactView {
 /// Everything the memory viewer needs for one scope (project or global).
 #[derive(serde::Serialize)]
 pub struct MemoryOverview {
-    /// Absolute path to the scope's `.clark/memory` directory.
+    /// Absolute path to the scope's `.agent/memory` directory.
     pub dir: String,
     /// Whether the scope holds any memory (an index or at least one fact).
     pub exists: bool,
@@ -91,7 +92,7 @@ pub struct MemoryOverview {
     pub facts: Vec<MemoryFactView>,
 }
 
-/// Read one scope's `.clark/memory` directory into a viewer overview. The
+/// Read one scope's `.agent/memory` directory into a viewer overview. The
 /// directory is always local here (the desktop machine), so `LocalExecutor`.
 async fn memory_overview(
     exec: &dyn provider_local::Executor,
@@ -138,7 +139,7 @@ fn session_memory_root(session: &Session) -> Result<std::path::PathBuf, String> 
 }
 
 /// List the project-scoped memory for a live conversation's host-owned checkout
-/// root (`<checkout>/.clark/memory/`). Read-only.
+/// root (`<checkout>/.agent/memory/`). Read-only.
 #[tauri::command]
 pub async fn local_list_memory(
     session_id: String,
@@ -162,7 +163,7 @@ async fn native_global_memory_dir(state: &AppState) -> Result<std::path::PathBuf
         .cloud_account()
         .await
         .map(|account| account.account.as_str().to_string())
-        .ok_or("Clark must be signed in before reading global memory")?;
+        .ok_or("Agent Desktop must be signed in before reading global memory")?;
     provider_local::global_memory_dir_for_scope(&owner_scope)
         .ok_or_else(|| "the signed-in account's global memory is unavailable".to_string())
 }
@@ -194,7 +195,7 @@ pub async fn local_list_files(
     Ok(provider_local::list_project_files(exec.as_ref(), &root).await)
 }
 
-/// Read sealed and in-progress Clark Security artifacts from the selected
+/// Read sealed and in-progress Security scanner artifacts from the selected
 /// checkout. The provider owns parsing and bounds; the desktop receives only
 /// canonical scan records, never arbitrary project files.
 #[tauri::command]
@@ -212,7 +213,7 @@ pub async fn local_list_security_scans(
 }
 
 /// Read an agent-authored document (Markdown) so the UI can render it inline.
-/// Confined to the app-managed workspace (`~/.clark/workspace`) — it never reads
+/// Confined to the app-managed workspace (`~/.agent/workspace`) — it never reads
 /// arbitrary files — and capped so a pathological file can't be slurped whole.
 #[tauri::command]
 pub async fn read_doc_text(path: String) -> Result<String, String> {
@@ -241,7 +242,7 @@ pub async fn read_doc_text(path: String) -> Result<String, String> {
 
 /// Read a locally-captured screenshot (or other small image) from the
 /// app-managed workspace and return it as a `data:` URL for inline `<img>`
-/// rendering. Confined to `~/.clark/workspace`, same root and containment
+/// rendering. Confined to `~/.agent/workspace`, same root and containment
 /// check as `read_doc_text`.
 #[tauri::command]
 pub async fn read_image_data_url(path: String) -> Result<String, String> {
@@ -372,7 +373,7 @@ mod tests {
         state
             .runtime_registry
             .set_cloud_account(Some(CloudAccountState {
-                rest_base: "https://www.clarkchat.com".into(),
+                rest_base: "https://product.example".into(),
                 account: AccountKey::new("server-account-a").unwrap(),
                 token: zeroize::Zeroizing::new("benchmark-token".into()),
             }))

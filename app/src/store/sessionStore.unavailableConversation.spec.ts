@@ -59,7 +59,7 @@ beforeEach(() => {
     }],
     localSettings: {
       cwd: "/tmp/previous-project",
-      model: "clark-code",
+      model: "local-model",
       reasoningEffort: "",
     },
     chatModels: {},

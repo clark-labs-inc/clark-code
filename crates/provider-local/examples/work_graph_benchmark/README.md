@@ -32,7 +32,7 @@ Every built-in run creates real synthetic Git repositories. Hidden file checks, 
 
 Editing the correct files without authoritative lifecycle evidence fails. Producing a perfect trace without fixing the repositories also fails.
 
-The deterministic reference candidate is an oracle for benchmark mechanics. It receives hidden solutions internally and emits host-simulation receipts. It is not evidence of model quality or production autonomy. `clark-current` is deliberately allowed to make the hidden code changes, then remains red because Clark does not yet expose the required production work-graph trace.
+The deterministic reference candidate is an oracle for benchmark mechanics. It receives hidden solutions internally and emits host-simulation receipts. It is not evidence of model quality or production autonomy. `current-agent` is deliberately allowed to make the hidden code changes, then remains red because the foundation does not yet expose the required production work-graph trace.
 
 ## Generic scenario catalog
 
@@ -88,16 +88,16 @@ cargo run -p provider-local --example work_graph_orchestration_benchmark -- \
 
 The intentionally chaotic `naive-parallel` lane is a negative control and is expected to fail. The command exits non-zero only when a required `work-graph-*` lane fails.
 
-Capture Clark's expected-red baseline:
+Capture the foundation's expected-red baseline:
 
 ```bash
 cargo run -p provider-local --example work_graph_orchestration_benchmark -- \
-  --candidate clark-current \
+  --candidate current-agent \
   --allow-red \
-  --out target/work-graph-benchmark/clark-current
+  --out target/work-graph-benchmark/current-agent
 ```
 
-Omit `--allow-red` in CI once a real Clark adapter exists. The gate will stay red until the adapter provides authoritative production traces and the default user flow.
+Omit `--allow-red` in CI once a production adapter exists. The gate will stay red until the adapter provides authoritative production traces and the default user flow.
 
 Evaluate a real orchestrator through the versioned JSON protocol:
 
@@ -111,7 +111,7 @@ cargo run -p provider-local --example work_graph_orchestration_benchmark -- \
 
 The external process receives one `CandidateRequest` on stdin and writes `CandidateResult` to `result_path` or stdout. The public task includes repository paths and baselines but excludes hidden solutions, the oracle task graph, the expected delegation decision, and the injected fault. Fault injection is passed separately in `control` so a trusted adapter can apply it below the manager-agent boundary.
 
-On macOS the process is write-sandboxed to its synthetic run directory. Other platforms fail closed unless `--unsafe-external` is explicitly used on a disposable machine. Built-in reference and Clark-current runs never load `.env`, read an API key, or call a provider.
+On macOS the process is write-sandboxed to its synthetic run directory. Other platforms fail closed unless `--unsafe-external` is explicitly used on a disposable machine. Built-in reference and current-agent runs never load `.env`, read an API key, or call a provider.
 
 ## Retained evidence
 

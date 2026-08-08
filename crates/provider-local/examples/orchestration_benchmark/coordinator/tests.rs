@@ -98,11 +98,11 @@ async fn reviewer_rejects_a_wrong_report_then_accepts_rework() {
 
 #[tokio::test]
 async fn cloud_lane_only_assigns_cloud_provider_to_eligible_reader() {
-    let scenario = scenarios::find("clark-cloud-1").unwrap();
+    let scenario = scenarios::find("brokered-cloud-1").unwrap();
     let artifacts = tempfile::tempdir().unwrap();
     let record = run_scripted(
         &scenario,
-        &lane(LaneKind::ClarkCloud),
+        &lane(LaneKind::BrokeredCloud),
         &ScriptedRunOptions {
             artifact_root: artifacts.path().to_path_buf(),
             repetition: 1,
@@ -114,6 +114,6 @@ async fn cloud_lane_only_assigns_cloud_provider_to_eligible_reader() {
     assert!(record
         .attempts
         .iter()
-        .any(|attempt| attempt.provider == "scripted-clark-cloud"));
+        .any(|attempt| attempt.provider == "scripted-brokered-cloud"));
     assert_eq!(record.trigger.cloud_agent_assignment_score, 1.0);
 }

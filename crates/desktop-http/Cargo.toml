@@ -1,0 +1,10 @@
+[package]
+name = "desktop-http"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Shared HTTP transport policy for desktop-agent clients."
+
+[dependencies]
+reqwest = { version = "0.13", default-features = false, features = ["cookies", "http2", "rustls"] }

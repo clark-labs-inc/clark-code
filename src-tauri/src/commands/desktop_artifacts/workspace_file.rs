@@ -1,4 +1,4 @@
-//! Handle-bound reads from a Clark workspace directory.
+//! Handle-bound reads from an Agent Desktop workspace directory.
 //!
 //! A pathname is mutable after validation. These helpers instead open the
 //! workspace as a directory capability, validate the resulting file handle,

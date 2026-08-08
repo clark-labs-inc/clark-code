@@ -269,7 +269,7 @@ async fn run_workstreams(
     }
 
     let scratch_root = std::env::temp_dir()
-        .join("clark-orchestration")
+        .join("agent-orchestration")
         .join(Uuid::new_v4().to_string());
     let artifact_root = scratch_root.join("artifacts");
     let provider_config = ProviderConfig {

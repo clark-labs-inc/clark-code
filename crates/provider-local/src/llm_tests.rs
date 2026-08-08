@@ -1,9 +1,9 @@
 use super::*;
 
 #[test]
-fn user_agent_identifies_clark_code_version_and_platform() {
-    let user_agent = clark_code_user_agent();
-    assert!(user_agent.starts_with(&format!("clark-code/{} (", env!("CARGO_PKG_VERSION"))));
+fn user_agent_identifies_desktop_version_and_platform() {
+    let user_agent = desktop_user_agent();
+    assert!(user_agent.starts_with(&format!("agent-desktop/{} (", env!("CARGO_PKG_VERSION"))));
     assert!(user_agent.ends_with(&format!(" {})", std::env::consts::ARCH)));
 }
 
@@ -153,15 +153,18 @@ fn captures_in_band_openrouter_stream_error() {
 }
 
 #[test]
-fn kimi_k3_always_uses_its_mandatory_max_reasoning_contract() {
+fn host_model_policy_overrides_a_weaker_session_reasoning_value() {
     let mut client = LlmClient::from_parts(
         "https://api.example.test/v1",
-        "clark-code:kimi_k3",
+        "managed-model-large",
         None,
         Vec::new(),
         None,
     )
     .unwrap();
+    client
+        .model_reasoning_efforts
+        .insert("managed-model-large".into(), "max".into());
     for configured in [None, Some("high"), Some("xhigh")] {
         client.reasoning_effort = configured.map(str::to_string);
         assert_eq!(client.body(&[], &[])["reasoning_effort"], json!("max"));
@@ -169,18 +172,19 @@ fn kimi_k3_always_uses_its_mandatory_max_reasoning_contract() {
 }
 
 #[test]
-fn selectable_coding_models_always_use_maximum_reasoning() {
+fn every_host_advertised_model_uses_its_own_reasoning_policy() {
     for (model, expected) in [
-        ("clark-code", "max"),
-        ("clark-code:free", "max"),
-        ("clark-code:deepseek_v4_flash_latest", "max"),
-        ("clark-code:glm52", "xhigh"),
-        ("clark-code:kimi_k3", "max"),
+        ("managed-model-standard", "high"),
+        ("managed-model-large", "xhigh"),
+        ("managed-model-research", "max"),
     ] {
         let mut client =
             LlmClient::from_parts("https://api.example.test/v1", model, None, Vec::new(), None)
                 .unwrap();
         client.reasoning_effort = Some("low".to_string());
+        client
+            .model_reasoning_efforts
+            .insert(model.to_string(), expected.to_string());
         assert_eq!(client.body(&[], &[])["reasoning_effort"], json!(expected));
     }
 }
@@ -189,7 +193,7 @@ fn selectable_coding_models_always_use_maximum_reasoning() {
 fn openrouter_uses_unified_reasoning_and_strict_response_contracts() {
     let mut client = LlmClient::from_parts(
         "https://openrouter.ai/api/v1",
-        "qwen/qwen3.7-flash",
+        "vendor/reasoning-model",
         None,
         Vec::new(),
         None,

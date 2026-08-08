@@ -86,7 +86,7 @@ if ($missing -contains "comctl32.dll!TaskDialogIndirect") {
   if ($mt) {
     $manifestPath = Join-Path `
       $env:RUNNER_TEMP `
-      "clark-pe-manifest-$([Guid]::NewGuid().ToString('N')).xml"
+      "agent-pe-manifest-$([Guid]::NewGuid().ToString('N')).xml"
     try {
       & $mt.FullName `
         -nologo `

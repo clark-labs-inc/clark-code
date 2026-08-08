@@ -105,13 +105,13 @@ fn sandbox_status(cwd: &Path) -> Result<LocalSandboxStatus, String> {
 }
 
 fn manager(policy: exec_sandbox::SandboxPolicy) -> Result<exec_sandbox::SandboxManager, String> {
-    let install = clark_install_context::InstallContext::current();
+    let install = desktop_install_context::InstallContext::current();
     exec_sandbox::SandboxManager::current_with_runtime(
         policy,
         exec_sandbox::SandboxRuntime {
-            linux_bubblewrap: install.bundled_tool(clark_install_context::BUBBLEWRAP),
-            windows_runner: install.bundled_tool(clark_install_context::WINDOWS_SANDBOX_RUNNER),
-            windows_setup: install.bundled_tool(clark_install_context::WINDOWS_SANDBOX_SETUP),
+            linux_bubblewrap: install.bundled_tool(desktop_install_context::BUBBLEWRAP),
+            windows_runner: install.bundled_tool(desktop_install_context::WINDOWS_SANDBOX_RUNNER),
+            windows_setup: install.bundled_tool(desktop_install_context::WINDOWS_SANDBOX_SETUP),
             windows_state_dir: None,
         },
     )

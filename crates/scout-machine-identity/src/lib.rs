@@ -10,7 +10,7 @@ const KEY_MAGIC: &[u8] = b"clark-scout-key-v1\0";
 const KEY_BYTES: usize = 32;
 const MAX_BINDING_BYTES: usize = 4_096;
 
-/// Host-private signing identity for one Clark organization/workspace binding.
+/// Host-private signing identity for one platform organization/workspace binding.
 ///
 /// The seed is stored below an explicit host-private directory and is never
 /// exposed by this API. The type intentionally does not implement `Debug`,
@@ -24,7 +24,7 @@ impl CollectorMachineIdentity {
     /// Load or atomically create the identity for an exact backend binding.
     ///
     /// `private_root` must be an absolute host-owned path outside any project
-    /// workspace. `binding` should include the Clark origin, organization id,
+    /// workspace. `binding` should include the platform origin, organization id,
     /// and workspace id; only its SHA-256 appears in the filename.
     pub fn load_or_create(private_root: impl AsRef<Path>, binding: &str) -> Result<Self, String> {
         let private_root = private_root.as_ref();
@@ -145,17 +145,17 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let first = CollectorMachineIdentity::load_or_create(
             root(&temp),
-            "https://api.clarkslabs.com|org-a|workspace-a",
+            "https://product.example|org-a|workspace-a",
         )
         .unwrap();
         let replay = CollectorMachineIdentity::load_or_create(
             root(&temp),
-            "https://api.clarkslabs.com|org-a|workspace-a",
+            "https://product.example|org-a|workspace-a",
         )
         .unwrap();
         let other = CollectorMachineIdentity::load_or_create(
             root(&temp),
-            "https://api.clarkslabs.com|org-b|workspace-b",
+            "https://product.example|org-b|workspace-b",
         )
         .unwrap();
         assert_eq!(first.public_key_hex(), replay.public_key_hex());

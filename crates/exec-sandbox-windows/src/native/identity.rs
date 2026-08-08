@@ -21,7 +21,7 @@ use crate::state::{
     credential_path, read_credential, write_json_atomic, CredentialEnvelope, CREDENTIAL_VERSION,
 };
 
-const OFFLINE_USERNAME: &str = "ClarkSandboxOffline";
+const OFFLINE_USERNAME: &str = "AgentSandboxOffline";
 const NERR_SUCCESS: u32 = 0;
 const NERR_USER_EXISTS: u32 = 2224;
 
@@ -181,7 +181,7 @@ fn protect_password(password: &str) -> Result<Vec<u8>, String> {
         cbData: bytes.len() as u32,
         pbData: bytes.as_ptr() as *mut u8,
     };
-    let description = wide("Clark sandbox offline identity");
+    let description = wide("Agent Desktop sandbox offline identity");
     let mut output = CRYPT_INTEGER_BLOB {
         cbData: 0,
         pbData: ptr::null_mut(),

@@ -115,7 +115,7 @@ fn create_root_proofs(
             ));
         }
         let nonce = uuid::Uuid::new_v4().simple().to_string();
-        let proof_path = root.join(format!(".clark-sandbox-setup-{request_id}-{index}.proof"));
+        let proof_path = root.join(format!(".agent-sandbox-setup-{request_id}-{index}.proof"));
         let mut file = match OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -182,8 +182,8 @@ mod tests {
         let policy = SandboxPolicy::workspace_write(temp.path().to_path_buf(), vec![]);
         let action = setup_action(
             &policy,
-            &temp.path().join("clark-command-runner.exe"),
-            &temp.path().join("clark-windows-sandbox-setup.exe"),
+            &temp.path().join("agent-command-runner.exe"),
+            &temp.path().join("agent-windows-sandbox-setup.exe"),
             &temp.path().join("state"),
         )
         .unwrap();
@@ -204,7 +204,7 @@ mod tests {
     #[test]
     fn bootstrapped_setup_action_enrolls_without_elevation() {
         let temp = tempfile::tempdir().unwrap();
-        let runner = temp.path().join("clark-command-runner.exe");
+        let runner = temp.path().join("agent-command-runner.exe");
         std::fs::write(&runner, b"runner fixture").unwrap();
         let state = temp.path().join("state");
         std::fs::create_dir_all(&state).unwrap();
@@ -227,7 +227,7 @@ mod tests {
         let action = setup_action(
             &policy,
             &runner,
-            &temp.path().join("clark-windows-sandbox-setup.exe"),
+            &temp.path().join("agent-windows-sandbox-setup.exe"),
             &state,
         )
         .unwrap();

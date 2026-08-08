@@ -1,14 +1,14 @@
 //! Private-reasoning rendering for the local compaction adapter.
 //!
 //! The public compaction crate owns the generic transcript protocol. This
-//! adapter owns the `clark_agent`-specific boundary: it supplies readable
+//! adapter owns the `agent_loop`-specific boundary: it supplies readable
 //! findings to the summarizer and withholds opaque provider replay payloads.
 
-use clark_agent::{AssistantBlock, AssistantContent, ReasoningItem};
+use agent_loop::{AssistantBlock, AssistantContent, ReasoningItem};
 const HEADER: &str =
     "[private reasoning — non-user context; distill durable findings, do not quote]\n";
 
-/// Translate Clark Agent's typed reasoning blocks into the public compaction
+/// Translate Agent Desktop Agent's typed reasoning blocks into the public compaction
 /// kernel's safe text-only boundary. Signatures and encrypted replay payloads
 /// never leave this adapter.
 pub(super) fn append_readable_findings(content: &AssistantContent, out: &mut String) -> bool {

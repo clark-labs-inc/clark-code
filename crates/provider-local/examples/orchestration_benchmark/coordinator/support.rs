@@ -128,8 +128,10 @@ pub(crate) fn trigger_metrics(
         .filter(|reader| reader.cheap_model_eligible)
         .count();
     let cheap_model_assignment_score = if cheap_eligible == 0
-        || matches!(lane.kind, LaneKind::CheapSubagents | LaneKind::ClarkCloud)
-    {
+        || matches!(
+            lane.kind,
+            LaneKind::CheapSubagents | LaneKind::BrokeredCloud
+        ) {
         1.0
     } else {
         0.0
@@ -228,8 +230,8 @@ pub(crate) fn metrics(
             .iter()
             .map(|attempt| attempt.duplicate_tool_receipts)
             .sum(),
-        cloud_agent_calls: tool_call_count(attempts, "clark_research"),
-        unmetered_external_calls: tool_call_count(attempts, "clark_research"),
+        cloud_agent_calls: tool_call_count(attempts, "product_research"),
+        unmetered_external_calls: tool_call_count(attempts, "product_research"),
         max_parallel_agents,
         utilization,
     }

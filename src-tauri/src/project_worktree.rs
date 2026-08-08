@@ -342,7 +342,7 @@ async fn local_branch_switch(project_path: &str, branch: &str) -> Result<(), Str
 }
 
 /// Create a durable sibling checkout from the latest advertised origin/main.
-/// The explicit name becomes both the folder suffix and a `clark/<name>` branch;
+/// The explicit name becomes both the folder suffix and a `agent/<name>` branch;
 /// no shell is involved, and validation prevents either value becoming an option
 /// or path traversal payload. The source checkout's HEAD, index, files, and
 /// remote-tracking refs are left untouched.
@@ -372,7 +372,7 @@ async fn local_worktree_create(project_path: &str, name: &str) -> Result<String,
     }
 
     let latest_main = fetch_latest_main(&repo_root).await?;
-    let branch = format!("clark/{clean_name}");
+    let branch = format!("agent/{clean_name}");
     git_output(
         &repo_root,
         vec![
@@ -443,8 +443,8 @@ mod tests {
     #[test]
     fn destination_is_a_named_sibling_of_the_repository() {
         assert_eq!(
-            destination_for(Path::new("/projects/clark"), "menu").unwrap(),
-            PathBuf::from("/projects/clark-menu")
+            destination_for(Path::new("/projects/project"), "menu").unwrap(),
+            PathBuf::from("/projects/project-menu")
         );
     }
 
@@ -485,8 +485,8 @@ mod tests {
         let repo = temp.path().join("project");
         std::fs::create_dir(&repo).unwrap();
         git(&repo, &["init", "-q", "--initial-branch=main"]);
-        git(&repo, &["config", "user.email", "test@clark.local"]);
-        git(&repo, &["config", "user.name", "Clark Test"]);
+        git(&repo, &["config", "user.email", "test@example.local"]);
+        git(&repo, &["config", "user.name", "Agent Test"]);
         std::fs::write(repo.join("README.md"), "original\n").unwrap();
         git(&repo, &["add", "README.md"]);
         git(&repo, &["commit", "-qm", "initial"]);
@@ -538,8 +538,8 @@ mod tests {
         let repo = temp.path().join("remote-project");
         std::fs::create_dir(&repo).unwrap();
         git(&repo, &["init", "-q", "--initial-branch=main"]);
-        git(&repo, &["config", "user.email", "test@clark.local"]);
-        git(&repo, &["config", "user.name", "Clark Test"]);
+        git(&repo, &["config", "user.email", "test@example.local"]);
+        git(&repo, &["config", "user.name", "Agent Test"]);
         std::fs::write(repo.join("README.md"), "remote\n").unwrap();
         git(&repo, &["add", "README.md"]);
         git(&repo, &["commit", "-qm", "initial"]);
@@ -585,8 +585,8 @@ mod tests {
         let main_checkout = temp.path().join("project-main");
         std::fs::create_dir(&repo).unwrap();
         git(&repo, &["init", "-q", "--initial-branch=main"]);
-        git(&repo, &["config", "user.email", "test@clark.local"]);
-        git(&repo, &["config", "user.name", "Clark Test"]);
+        git(&repo, &["config", "user.email", "test@example.local"]);
+        git(&repo, &["config", "user.name", "Agent Test"]);
         std::fs::write(repo.join("README.md"), "original\n").unwrap();
         git(&repo, &["add", "README.md"]);
         git(&repo, &["commit", "-qm", "initial"]);
@@ -644,8 +644,8 @@ mod tests {
         let remote_arg = remote.to_string_lossy();
         let repo_arg = repo.to_string_lossy();
         git(temp.path(), &["clone", "-q", &remote_arg, &repo_arg]);
-        git(&repo, &["config", "user.email", "test@clark.local"]);
-        git(&repo, &["config", "user.name", "Clark Test"]);
+        git(&repo, &["config", "user.email", "test@example.local"]);
+        git(&repo, &["config", "user.name", "Agent Test"]);
         std::fs::write(repo.join("README.md"), "original\n").unwrap();
         git(&repo, &["add", "README.md"]);
         git(&repo, &["commit", "-qm", "initial"]);
@@ -654,8 +654,8 @@ mod tests {
 
         let publisher_arg = publisher.to_string_lossy();
         git(temp.path(), &["clone", "-q", &remote_arg, &publisher_arg]);
-        git(&publisher, &["config", "user.email", "test@clark.local"]);
-        git(&publisher, &["config", "user.name", "Clark Test"]);
+        git(&publisher, &["config", "user.email", "test@example.local"]);
+        git(&publisher, &["config", "user.name", "Agent Test"]);
         std::fs::write(publisher.join("README.md"), "latest main\n").unwrap();
         git(&publisher, &["add", "README.md"]);
         git(&publisher, &["commit", "-qm", "advance main"]);
@@ -687,7 +687,7 @@ mod tests {
         );
         assert_eq!(
             git_text(&created, &["branch", "--show-current"]),
-            "clark/sidebar-menu"
+            "agent/sidebar-menu"
         );
         assert_eq!(git_text(&created, &["rev-parse", "HEAD"]), latest_main);
 

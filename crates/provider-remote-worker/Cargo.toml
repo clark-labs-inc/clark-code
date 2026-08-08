@@ -5,7 +5,7 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
-description = "Agent-core provider adapter for a native-owned remote Clark Code worker."
+description = "Agent-core provider adapter for a native-owned remote coding-agent worker."
 
 [dependencies]
 agent-core = { path = "../agent-core", features = ["native"] }

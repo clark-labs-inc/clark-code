@@ -90,7 +90,7 @@ export function PermissionGate({ req }: { req: PermissionRequest }) {
         {tone && <span className={cn("shrink-0 rounded-md px-1.5 py-0.5 text-xs font-medium", tone.chip)}>{tone.label}</span>}
       </div>
       {req.detail && req.risk === "plan_entry" ? <p className="mb-3 text-sm leading-relaxed text-ink-secondary">{req.detail}</p> : req.detail ? <DetailView text={req.detail} /> : null}
-      {req.risk === "plan_entry" && <p className="mb-3 text-xs text-ink-muted">Clark will research read-only and return a decision-complete plan. Execution begins only after you approve it.</p>}
+      {req.risk === "plan_entry" && <p className="mb-3 text-xs text-ink-muted">the agent will research read-only and return a decision-complete plan. Execution begins only after you approve it.</p>}
       {boundary && <p className="mb-3 text-xs text-ink-muted">Approval applies only to this command. “Always allow” remembers this exact command, not general host access.</p>}
       {req.reason && <p className="mb-3 text-xs text-ink-muted">{boundary ? "Why" : "Flagged"}: <span className={cn(danger && "text-danger")}>{req.reason}</span></p>}
       <div className="flex flex-wrap gap-2">

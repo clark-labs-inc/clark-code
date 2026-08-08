@@ -60,7 +60,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let approval_root = tempfile::tempdir()?;
     std::env::set_var(
-        "CLARK_COMPUTER_USE_DATA_DIR",
+        "DESKTOP_COMPUTER_USE_DATA_DIR",
         approval_root.path().join("computer-use"),
     );
     let backend = native_backend()?;
@@ -69,7 +69,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "helper_permissions=accessibility:{} screen_recording:{}",
         status.accessibility, status.screen_recording
     );
-    if std::env::var_os("CLARK_COMPUTER_USE_REQUEST_PERMISSIONS").is_some() {
+    if std::env::var_os("DESKTOP_COMPUTER_USE_REQUEST_PERMISSIONS").is_some() {
         status = backend.request_permissions(PermissionRequest {
             accessibility: true,
             screen_recording: true,
@@ -99,7 +99,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     println!("forbidden_browser=passed");
 
-    if let Ok(bundle_id) = std::env::var("CLARK_COMPUTER_USE_FIXTURE_BUNDLE_ID") {
+    if let Ok(bundle_id) = std::env::var("DESKTOP_COMPUTER_USE_FIXTURE_BUNDLE_ID") {
         run_native_fixture_smoke(backend, status, &bundle_id)?;
     } else {
         run_calculator_smoke(backend, status)?;
@@ -202,10 +202,10 @@ fn run_native_fixture_smoke(
     status: PermissionStatus,
     bundle_id: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    if bundle_id != "com.clark.computer-use-fixture" {
+    if bundle_id != "com.agent-desktop.computer-use-fixture" {
         return Err(format!("unexpected native fixture bundle id: {bundle_id}").into());
     }
-    let expected_pid = std::env::var("CLARK_COMPUTER_USE_FIXTURE_PID")
+    let expected_pid = std::env::var("DESKTOP_COMPUTER_USE_FIXTURE_PID")
         .ok()
         .map(|value| value.parse::<i32>())
         .transpose()?;
@@ -427,7 +427,7 @@ fn run_native_fixture_smoke(
         "debug_fixture_actions=passed receipt={} cancellation_helper_terminated={}",
         receipt.receipt_id, ack.helper_terminated
     );
-    if std::env::var_os("CLARK_COMPUTER_USE_REQUIRE_PHYSICAL_TAKEOVER").is_some() {
+    if std::env::var_os("DESKTOP_COMPUTER_USE_REQUIRE_PHYSICAL_TAKEOVER").is_some() {
         takeover::run(backend.clone(), &fixture)?;
     }
     Ok(())
@@ -443,7 +443,7 @@ fn wait_for_window(
         if let Some(window) = backend
             .list_windows(WindowFilter {
                 bundle_id: Some(bundle_id.to_string()),
-                title_contains: Some("Clark Computer Use Fixture".to_string()),
+                title_contains: Some("Agent Computer Use Fixture".to_string()),
             })?
             .into_iter()
             .find(|window| expected_pid.is_none_or(|pid| window.target.pid == pid))

@@ -23,7 +23,7 @@ pub struct RemoteWorkerSpec {
     pub remote_binary: Option<String>,
     /// Names of local environment variables whose values are sent as bounded
     /// SSH bootstrap lines and exported under the same names remotely. This
-    /// supports separate model and Clark Cloud credentials without putting
+    /// supports separate model and product-cloud credentials without putting
     /// either secret in worker configuration.
     pub credential_envs: Vec<String>,
 }
@@ -282,12 +282,12 @@ mod tests {
             host: "cpu".into(),
             project_id: "fixture".into(),
             remote_root: PathBuf::from("/workspace/fixture"),
-            trajectory_root: PathBuf::from("/workspace/.clark/trajectory"),
+            trajectory_root: PathBuf::from("/workspace/.agent-desktop/trajectory"),
             worker_config: config,
             local_binary: None,
             local_binaries: BTreeMap::new(),
             remote_binary: None,
-            credential_envs: vec!["CLARK_CODE_API_KEY".into()],
+            credential_envs: vec!["DESKTOP_MODEL_API_KEY".into()],
         }
     }
 
@@ -295,8 +295,8 @@ mod tests {
         serde_json::json!({
             "schema_version": 1,
             "projects": [{"id": "fixture", "root": "/workspace/fixture"}],
-            "trajectory_root": "/workspace/.clark/trajectory",
-            "provider": {"api_key_env": "CLARK_CODE_API_KEY"},
+            "trajectory_root": "/workspace/.agent-desktop/trajectory",
+            "provider": {"api_key_env": "DESKTOP_MODEL_API_KEY"},
             "execution_residency": "remote_worker"
         })
     }
@@ -362,13 +362,13 @@ mod tests {
         let mut config = config();
         config["provider"]["api_key_env"] = Value::String("OPENROUTER_API_KEY".into());
         config["cloud_sync"] = serde_json::json!({
-            "api_base_url": "https://api.clarkslabs.com/v1",
+            "api_base_url": "https://product.example/v1",
             "organization_id": "00000000-0000-0000-0000-000000000000",
             "scope_id": "gpu-science",
-            "api_key_env": "CLARK_API_KEY"
+            "api_key_env": "PRODUCT_API_KEY"
         });
         let mut remote = spec(config);
-        remote.credential_envs = vec!["OPENROUTER_API_KEY".into(), "CLARK_API_KEY".into()];
+        remote.credential_envs = vec!["OPENROUTER_API_KEY".into(), "PRODUCT_API_KEY".into()];
         assert!(remote.validate().is_ok());
     }
 }

@@ -7,7 +7,7 @@ description: Diagnose or fix failing GitHub pull-request checks that run in GitH
 
 ## Inspect the real failure
 
-Resolve the pull request and current head SHA. Use a connected GitHub tool found through `tool_search`, or `gh` through `bash`, to list checks and inspect failing GitHub Actions jobs. If a failed check belongs to an external CI provider, report its name and details URL; do not claim to have inspected logs Clark cannot access.
+Resolve the pull request and current head SHA. Use a connected GitHub tool found through `tool_search`, or `gh` through `bash`, to list checks and inspect failing GitHub Actions jobs. If a failed check belongs to an external CI provider, report its name and details URL; do not claim to have inspected logs the host cannot access.
 
 For GitHub Actions, identify the first meaningful error in the failing job rather than the final cancellation or cascade. Record the workflow, job, step, run attempt, commit SHA, and concise failure excerpt. Compare that evidence with the checked-out source and workflow at the same revision.
 

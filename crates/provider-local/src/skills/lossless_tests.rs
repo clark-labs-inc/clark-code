@@ -8,7 +8,7 @@ use super::loader::discover_catalog_with_home;
 async fn selected_skill_body_is_loaded_byte_for_byte() {
     let temp = tempfile::tempdir().unwrap();
     let project = temp.path().join("repo");
-    let path = project.join(".clark/skills/large/SKILL.md");
+    let path = project.join(".agent/skills/large/SKILL.md");
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     let expected = format!(
         "---\nname: large\ndescription: Complete large skill\n---\n\nBEGIN:{}:END\n",

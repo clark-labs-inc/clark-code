@@ -1,4 +1,4 @@
-# Clark Security adversarial fixture
+# Security adversarial fixture
 
 This directory is intentionally vulnerable test data. It is not an example
 application and must never be deployed, copied into production, or populated

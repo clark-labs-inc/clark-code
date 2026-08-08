@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
     use super::*;
-    use clark_agent_compaction::TranscriptMessage;
+    use agent_loop_compaction::TranscriptMessage;
 
     fn config() -> CompactionConfig {
         CompactionConfig {
@@ -233,7 +233,7 @@ mod usage_trigger_tests {
     }
 
     fn rendered(message: &ca::AgentMessage) -> String {
-        use clark_agent_compaction::TranscriptMessage;
+        use agent_loop_compaction::TranscriptMessage;
         let mut out = String::new();
         AgentMessageView(message).render_for_compaction(&mut out);
         out
@@ -277,7 +277,7 @@ mod usage_trigger_tests {
 
     #[test]
     fn provider_usage_triggers_compaction_before_the_char_heuristic() {
-        use clark_agent::ContextTransform;
+        use agent_loop::ContextTransform;
         let cancel = CancellationToken::new();
         // A tiny transcript the char heuristic would never flag…
         let messages = vec![user_message("short")];
@@ -341,7 +341,7 @@ mod usage_trigger_tests {
 
     #[tokio::test]
     async fn checkpoint_is_reused_and_new_raw_tool_turns_are_appended() {
-        use clark_agent::ContextTransform;
+        use agent_loop::ContextTransform;
 
         let (base_url, calls) = summary_endpoint().await;
         let llm =
@@ -446,7 +446,7 @@ mod usage_trigger_tests {
         assert!(events.iter().any(|event| matches!(
             event,
             AgentEvent::Trace { source, payload, .. }
-                if source == "clark_code_compaction" && payload["trigger"] == "manual"
+                if source == "agent_loop_compaction" && payload["trigger"] == "manual"
         )));
         assert!(events.iter().any(|event| matches!(
             event,

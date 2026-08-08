@@ -1,4 +1,4 @@
-//! Portable HTTPS client for Clark's authoritative system-cartography backend.
+//! Portable HTTPS client for a host-configured system-cartography backend.
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -15,8 +15,8 @@ use serde::Serialize;
 use sha2::{Digest as _, Sha256};
 
 pub use enrollment::{
-    enroll_machine, ClarkCartographyEnrollmentConfig, EnrolledClarkCartographyClient,
-    MachineEnrollment, MachineEnrollmentRequest,
+    enroll_machine, CartographyEnrollmentConfig, EnrolledCartographyClient, MachineEnrollment,
+    MachineEnrollmentRequest,
 };
 pub use scout_machine_identity::CollectorMachineIdentity;
 pub use session::{ScoutCartographySession, ScoutCartographySessionConfig};
@@ -29,39 +29,34 @@ use http::{
     validate_remote_url,
 };
 
-const CLAIM_PATH: &str = "/v1/system-cartography/tasks/claim";
-const EVIDENCE_UPLOAD_PATH: &str = "/v1/system-cartography/evidence/uploads";
-const EVIDENCE_COMMIT_PATH: &str = "/v1/system-cartography/evidence/commits";
-const BATCH_PATH: &str = "/v1/system-cartography/batches";
-const SNAPSHOT_QUERY_PATH: &str = "/v1/system-cartography/snapshots/query";
-const DELTA_QUERY_PATH: &str = "/v1/system-cartography/deltas/query";
-const SIMULATION_OVERLAY_QUERY_PATH: &str = "/v1/system-cartography/simulation-overlays/query";
-const CHANGE_QUERY_PATH: &str = "/v1/system-cartography/changes/query";
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
 const MAX_ERROR_BYTES: usize = 16 * 1024;
 
-/// Secret-bearing configuration for Clark's authoritative cartography API.
+/// Secret-bearing configuration for host-authoritative cartography API.
 ///
 /// Deliberately does not implement `Debug`, `Clone`, or serialization.
-pub struct ClarkCartographyClientConfig {
+pub struct CartographyClientConfig {
     base_url: Url,
     authorization: HeaderValue,
     coordinator_public_key: String,
+    route_prefix: String,
     timeout: Duration,
 }
 
-impl ClarkCartographyClientConfig {
+impl CartographyClientConfig {
     pub fn new(
         platform_base_url: impl AsRef<str>,
         platform_api_key: impl AsRef<str>,
         coordinator_public_key: impl Into<String>,
+        route_prefix: impl Into<String>,
     ) -> Result<Self, String> {
         let base_url = Url::parse(platform_base_url.as_ref())
-            .map_err(|_| "invalid Clark Platform base URL".to_string())?;
-        validate_remote_url(&base_url, "Clark Platform base URL")?;
+            .map_err(|_| "invalid host platform base URL".to_string())?;
+        validate_remote_url(&base_url, "host platform base URL")?;
         let authorization = authorization_header(platform_api_key.as_ref())?;
         let coordinator_public_key = coordinator_public_key.into();
+        let route_prefix = validate_route_prefix(route_prefix.into())?;
         if coordinator_public_key.len() != 64
             || !coordinator_public_key
                 .bytes()
@@ -73,6 +68,7 @@ impl ClarkCartographyClientConfig {
             base_url,
             authorization,
             coordinator_public_key,
+            route_prefix,
             timeout: DEFAULT_TIMEOUT,
         })
     }
@@ -87,21 +83,23 @@ impl ClarkCartographyClientConfig {
 }
 
 #[derive(Clone)]
-pub struct ClarkCartographyClient {
+pub struct CartographyClient {
     client: Client,
     base_url: Url,
     authorization: HeaderValue,
     coordinator_public_key: String,
+    route_prefix: String,
 }
 
-impl ClarkCartographyClient {
-    pub fn new(config: ClarkCartographyClientConfig) -> Result<Self, String> {
+impl CartographyClient {
+    pub fn new(config: CartographyClientConfig) -> Result<Self, String> {
         let client = build_http_client(config.timeout)?;
         Ok(Self {
             client,
             base_url: config.base_url,
             authorization: config.authorization,
             coordinator_public_key: config.coordinator_public_key,
+            route_prefix: config.route_prefix,
         })
     }
 
@@ -109,14 +107,16 @@ impl ClarkCartographyClient {
         &self,
         request: &TaskClaimRequest,
     ) -> Result<TaskClaimResponse, String> {
-        self.post_json(CLAIM_PATH, request).await
+        self.post_json(&self.route("tasks/claim"), request).await
     }
 
     pub async fn authorize_evidence(
         &self,
         request: &EvidenceUploadRequest,
     ) -> Result<EvidenceUploadGrant, String> {
-        let grant: EvidenceUploadGrant = self.post_json(EVIDENCE_UPLOAD_PATH, request).await?;
+        let grant: EvidenceUploadGrant = self
+            .post_json(&self.route("evidence/uploads"), request)
+            .await?;
         let authorization = &grant.authorization;
         let lifecycle_matches = match authorization.status {
             scout_ingest_protocol::cartography::EvidenceStatus::Pending => {
@@ -215,7 +215,9 @@ impl ClarkCartographyClient {
         &self,
         request: &EvidenceCommitRequest,
     ) -> Result<EvidenceCommitOutcome, String> {
-        let outcome: EvidenceCommitOutcome = self.post_json(EVIDENCE_COMMIT_PATH, request).await?;
+        let outcome: EvidenceCommitOutcome = self
+            .post_json(&self.route("evidence/commits"), request)
+            .await?;
         let evidence = &outcome.evidence;
         if evidence.evidence_id != request.evidence_id
             || evidence.organization_id != request.organization_id
@@ -231,7 +233,7 @@ impl ClarkCartographyClient {
     }
 
     pub async fn ingest_batch(&self, envelope: &BatchEnvelope) -> Result<BatchAcceptance, String> {
-        let acceptance: BatchAcceptance = self.post_json(BATCH_PATH, envelope).await?;
+        let acceptance: BatchAcceptance = self.post_json(&self.route("batches"), envelope).await?;
         acceptance.receipt.verify(&self.coordinator_public_key)?;
         if acceptance.receipt.organization_id != envelope.organization_id
             || acceptance.receipt.workspace_id != envelope.workspace_id
@@ -246,7 +248,9 @@ impl ClarkCartographyClient {
         &self,
         query: &GraphSnapshotQuery,
     ) -> Result<GraphSnapshotPage, String> {
-        let page: GraphSnapshotPage = self.post_json(SNAPSHOT_QUERY_PATH, query).await?;
+        let page: GraphSnapshotPage = self
+            .post_json(&self.route("snapshots/query"), query)
+            .await?;
         let expected_effective_at_ms = query
             .effective_at_ms
             .or_else(|| query.cursor.as_ref().map(|cursor| cursor.effective_at_ms));
@@ -264,7 +268,7 @@ impl ClarkCartographyClient {
     }
 
     pub async fn query_delta(&self, query: &GraphDeltaQuery) -> Result<GraphDeltaPage, String> {
-        let page: GraphDeltaPage = self.post_json(DELTA_QUERY_PATH, query).await?;
+        let page: GraphDeltaPage = self.post_json(&self.route("deltas/query"), query).await?;
         let expected_to_effective_at_ms = query.to_effective_at_ms.or_else(|| {
             query
                 .cursor
@@ -297,8 +301,9 @@ impl ClarkCartographyClient {
         &self,
         query: &SimulationOverlayQuery,
     ) -> Result<SimulationOverlayPage, String> {
-        let page: SimulationOverlayPage =
-            self.post_json(SIMULATION_OVERLAY_QUERY_PATH, query).await?;
+        let page: SimulationOverlayPage = self
+            .post_json(&self.route("simulation-overlays/query"), query)
+            .await?;
         if page.overlay.organization_id != query.organization_id
             || page.overlay.workspace_id != query.workspace_id
             || page.overlay.stable_key != query.stable_key
@@ -319,7 +324,8 @@ impl ClarkCartographyClient {
         &self,
         query: &CartographyChangeQuery,
     ) -> Result<CartographyChangePage, String> {
-        let page: CartographyChangePage = self.post_json(CHANGE_QUERY_PATH, query).await?;
+        let page: CartographyChangePage =
+            self.post_json(&self.route("changes/query"), query).await?;
         let expected_next = page
             .changes
             .last()
@@ -361,6 +367,23 @@ impl ClarkCartographyClient {
         )
         .await
     }
+
+    fn route(&self, suffix: &str) -> String {
+        format!("{}/{suffix}", self.route_prefix)
+    }
+}
+
+fn validate_route_prefix(prefix: String) -> Result<String, String> {
+    let prefix = prefix.trim_end_matches('/').to_string();
+    if !prefix.starts_with('/')
+        || prefix.len() < 2
+        || prefix.contains('?')
+        || prefix.contains('#')
+        || prefix.contains("..")
+    {
+        return Err("cartography route prefix must be an absolute URL path".into());
+    }
+    Ok(prefix)
 }
 
 fn now_ms() -> Result<u64, String> {
@@ -383,12 +406,17 @@ mod tests {
     };
     use uuid::Uuid;
 
-    use super::{ClarkCartographyClient, ClarkCartographyClientConfig};
+    use super::{CartographyClient, CartographyClientConfig};
 
-    fn client() -> ClarkCartographyClient {
-        ClarkCartographyClient::new(
-            ClarkCartographyClientConfig::new("http://127.0.0.1:9", "test-key", "ab".repeat(32))
-                .unwrap(),
+    fn client() -> CartographyClient {
+        CartographyClient::new(
+            CartographyClientConfig::new(
+                "http://127.0.0.1:9",
+                "test-key",
+                "ab".repeat(32),
+                "/v1/cartography",
+            )
+            .unwrap(),
         )
         .unwrap()
     }
@@ -426,16 +454,18 @@ mod tests {
 
     #[test]
     fn remote_http_and_embedded_credentials_are_rejected() {
-        assert!(ClarkCartographyClientConfig::new(
+        assert!(CartographyClientConfig::new(
             "http://example.com",
             "test-key",
-            "ab".repeat(32)
+            "ab".repeat(32),
+            "/v1/cartography",
         )
         .is_err());
-        assert!(ClarkCartographyClientConfig::new(
+        assert!(CartographyClientConfig::new(
             "https://user:password@example.com",
             "test-key",
-            "ab".repeat(32)
+            "ab".repeat(32),
+            "/v1/cartography",
         )
         .is_err());
     }

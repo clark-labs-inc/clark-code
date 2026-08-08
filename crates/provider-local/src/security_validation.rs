@@ -355,7 +355,7 @@ fn validate_candidates(
         let fingerprint = candidate_fingerprint(candidate);
         if !semantic_identities.insert(fingerprint.clone()) {
             return Err(format!(
-                "multiple candidates resolve to the same Clark Security identity `{}`",
+                "multiple candidates resolve to the same Security scanner identity `{}`",
                 candidate.identity_anchor
             ));
         }

@@ -324,7 +324,8 @@ impl IsolatedWriterWorkspace {
         executor.create_dir_all(artifact_root).await?;
         let artifact_path = artifact_root.join(format!("{patch_sha256}.patch"));
         executor.write(&artifact_path, &patch).await?;
-        let isolation = if self.task.harness_kind == agent_orchestration::HarnessKind::ClarkCloud {
+        let isolation = if self.task.harness_kind == agent_orchestration::HarnessKind::BrokeredCloud
+        {
             IsolationKind::CloudEphemeralClone
         } else {
             IsolationKind::LocalEphemeralClone

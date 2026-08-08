@@ -2,11 +2,14 @@ use computer_use::{
     default_approval_store, ActionReceipt, ApprovalSnapshot, PermissionRequest, PermissionStatus,
 };
 use serde::Serialize;
+use tauri::State;
 
-#[derive(Debug, Serialize)]
+use crate::AppState;
+
+#[derive(Clone, Debug, Serialize)]
 pub struct ComputerUsePermissionOwner {
-    pub display_name: &'static str,
-    pub bundle_id: &'static str,
+    pub display_name: String,
+    pub bundle_id: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -34,44 +37,49 @@ where
 /// state. A missing or rejected service remains visible instead of being
 /// collapsed into a generic unsupported-platform state.
 #[tauri::command]
-pub async fn computer_use_platform_status() -> ComputerUsePlatformStatus {
+pub async fn computer_use_platform_status(
+    state: State<'_, AppState>,
+) -> Result<ComputerUsePlatformStatus, String> {
+    let permission_owner = permission_owner(state.inner());
     #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
     {
-        match blocking(|| {
-            let backend = computer_use::native_backend().map_err(|error| error.to_string())?;
-            backend.permissions().map_err(|error| error.to_string())
-        })
-        .await
-        {
-            Ok(permissions) => ComputerUsePlatformStatus {
-                supported: true,
-                platform: std::env::consts::OS,
-                service_ready: true,
-                readiness: if permissions.screen_recording_restart_required {
-                    "restart_required"
-                } else if permissions.accessibility && permissions.screen_recording {
-                    "ready"
-                } else {
-                    "needs_permission"
+        Ok(
+            match blocking(|| {
+                let backend = computer_use::native_backend().map_err(|error| error.to_string())?;
+                backend.permissions().map_err(|error| error.to_string())
+            })
+            .await
+            {
+                Ok(permissions) => ComputerUsePlatformStatus {
+                    supported: true,
+                    platform: std::env::consts::OS,
+                    service_ready: true,
+                    readiness: if permissions.screen_recording_restart_required {
+                        "restart_required"
+                    } else if permissions.accessibility && permissions.screen_recording {
+                        "ready"
+                    } else {
+                        "needs_permission"
+                    },
+                    permission_owner: Some(permission_owner.clone()),
+                    permissions: Some(permissions),
+                    detail: None,
                 },
-                permission_owner: Some(permission_owner()),
-                permissions: Some(permissions),
-                detail: None,
+                Err(error) => ComputerUsePlatformStatus {
+                    supported: true,
+                    platform: std::env::consts::OS,
+                    service_ready: false,
+                    readiness: "service_unavailable",
+                    permission_owner: Some(permission_owner),
+                    permissions: None,
+                    detail: Some(error),
+                },
             },
-            Err(error) => ComputerUsePlatformStatus {
-                supported: true,
-                platform: std::env::consts::OS,
-                service_ready: false,
-                readiness: "service_unavailable",
-                permission_owner: Some(permission_owner()),
-                permissions: None,
-                detail: Some(error),
-            },
-        }
+        )
     }
 
     #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
-    ComputerUsePlatformStatus {
+    Ok(ComputerUsePlatformStatus {
         supported: false,
         platform: std::env::consts::OS,
         service_ready: false,
@@ -79,35 +87,16 @@ pub async fn computer_use_platform_status() -> ComputerUsePlatformStatus {
         permission_owner: None,
         permissions: None,
         detail: Some("native computer use is unavailable on this platform".to_string()),
-    }
+    })
 }
 
-fn permission_owner() -> ComputerUsePermissionOwner {
-    #[cfg(target_os = "macos")]
-    if cfg!(debug_assertions) {
-        return ComputerUsePermissionOwner {
-            display_name: "Clark Computer Use Dev",
-            bundle_id: "com.clark.computer-use.dev",
-        };
-    } else {
-        return ComputerUsePermissionOwner {
-            display_name: "Clark Computer Use",
-            bundle_id: "com.clark.computer-use",
-        };
-    }
-    #[cfg(target_os = "windows")]
-    {
-        ComputerUsePermissionOwner {
-            display_name: "Clark Computer Use Service",
-            bundle_id: "clark-computer-use-helper.exe",
-        }
-    }
-    #[cfg(target_os = "linux")]
-    {
-        ComputerUsePermissionOwner {
-            display_name: "Clark Computer Use Service",
-            bundle_id: "com.clark.ComputerUse",
-        }
+fn permission_owner(state: &AppState) -> ComputerUsePermissionOwner {
+    let (display_name, bundle_id) = state
+        .product
+        .computer_use_permission_owner(cfg!(debug_assertions), std::env::consts::OS);
+    ComputerUsePermissionOwner {
+        display_name,
+        bundle_id,
     }
 }
 

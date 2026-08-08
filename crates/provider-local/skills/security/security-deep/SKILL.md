@@ -1,21 +1,21 @@
 ---
 name: security-deep
-description: Run a bounded exhaustive repository security scan with independent DeepSeek V4 Flash Latest discovery passes, parent-verified evidence, semantic candidate reduction, saturation, complete coverage, and a sealed result.
+description: Run a bounded exhaustive repository security scan with independent discovery passes, parent-verified evidence, semantic candidate reduction, saturation, complete coverage, and a sealed result.
 ---
 
-# Clark Security deep scan
+# Security scanner deep scan
 
 This is a source-read-only assessment unless the user separately and explicitly
 asks to fix a finding. Do not edit the checkout, install dependencies, create
 tickets, publish results, or run live provider tests. Writing the canonical
-bundle under `.clark/security-scans/` is permitted. `security_poc_execute` may
+bundle under `.agent/security-scans/` is permitted. `security_poc_execute` may
 write and execute controls only in its automatically provisioned disposable
 offline copy.
 
 This skill explicitly authorizes bounded read-only delegation for independent
 security discovery and verification passes. Do not use coding delegates, do not
-recurse, and do not widen repository scope or permissions. Clark pins the root
-and delegated turns to the exact `~deepseek/deepseek-v4-flash-latest` production model.
+recurse, and do not widen repository scope or permissions. The host selects
+the root and delegated models through trusted runtime policy.
 
 ## Start and inventory
 
@@ -31,13 +31,9 @@ path exactly once in final `coverage` as `reviewed` or `excluded`; exclusions
 need concrete reasons. Read applicable `SECURITY.md` files from repository root
 toward each file.
 
-After inventory and policy discovery, call `cloud_advisor` once with phase
-`threat_model`, the bounded deep-scan goal, inventory/policy summaries as
-evidence, and typed Security capabilities as candidate actions. Do not send
-credentials, raw secrets, private source bodies, or executable commands. Kimi
-K3 advice is strategy, not evidence, validation, or delegation authority;
-verify it independently. If unavailable, record the limitation and continue
-the baseline independent-pass workflow.
+After inventory and policy discovery, build a bounded threat model from the
+repository evidence. Do not place credentials, raw secrets, private source
+bodies, or executable commands in planning artifacts.
 
 ## Independent-pass loop
 
@@ -85,7 +81,7 @@ reportable candidate requires a realistic attacker, reachable entrypoint,
 preconditions, concrete reachability path, likelihood rationale, calibrated
 severity, and impact.
 
-Every candidate needs a scan-local `candidateId` plus Clark Security semantic
+Every candidate needs a scan-local `candidateId` plus Security scanner semantic
 identity: a stable lowercase vulnerability-family `ruleId`, a stable lowercase
 root-control `identityAnchor`, and an optional lowercase `identityInstance` for
 independently attackable siblings. Also provide `title`, `summary`, `category`,
@@ -105,15 +101,10 @@ the labels zero-day and novel for later independent novelty review.
 
 The final bundle uses `mode: "deep"` and copies the host-issued `deepRunId`.
 Its candidate ids must exactly equal the union checkpointed across passes.
-Write it to `.clark/security-scans/<scan-id>/scan.json`, then call
+Write it to `.agent/security-scans/<scan-id>/scan.json`, then call
 `security_scan_contract(action="finalize", path="<canonical bundle>")`.
 
 Never claim a clean or completed scan unless finalization succeeds. Report the
 sealed pass count, reviewed/excluded counts, findings, PoC receipt ids, deferred
 proof gaps, and limitations. With no findings, say "no reportable findings were
 validated after the sealed deep passes"; do not claim the repository is secure.
-
-If `cloud_advisor` returned an accepted receipt, finish by calling
-`cloud_advisor_feedback` with the complete signed receipt fields, actual typed
-actions, seal status, bounded outcome, and evidence receipt ids. Never send credentials, secrets, or raw
-private source in feedback.

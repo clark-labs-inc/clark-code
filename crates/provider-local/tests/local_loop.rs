@@ -20,6 +20,9 @@ use serde_json::{json, Value};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
+const TEST_SCOUT_MODEL: &str = "scout-model";
+const TEST_SECURITY_MODEL: &str = "security-model";
+
 /// SSE body for the first model call: ask to read `hello.txt`.
 fn tool_call_body() -> String {
     [
@@ -82,15 +85,6 @@ fn http_response(body: &str) -> Vec<u8> {
         "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
         body.len(),
         body
-    )
-    .into_bytes()
-}
-
-fn http_json_error(status: &str, message: &str) -> Vec<u8> {
-    let body = json!({ "error": { "message": message } }).to_string();
-    format!(
-        "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{body}",
-        body.len()
     )
     .into_bytes()
 }
@@ -199,6 +193,9 @@ async fn scout_uses_its_host_route_when_the_conversation_uses_the_included_lane(
                 "base_url": format!("http://{addr}/v1"),
                 "model": provider_local::DEFAULT_MODEL,
                 "reasoning_effort": "max",
+                "skill_model_overrides": {
+                    "scout": {"model": TEST_SCOUT_MODEL, "reasoning_effort": "max"}
+                },
                 "memories": false,
                 "sandbox_mode": "disabled"
             }),
@@ -230,16 +227,16 @@ async fn scout_uses_its_host_route_when_the_conversation_uses_the_included_lane(
     let requests = captured.await.unwrap();
     assert_eq!(requests.len(), 1);
     let request = request_json(&requests[0]);
-    assert_eq!(request["model"], provider_local::SCOUT_MODEL);
+    assert_eq!(request["model"], TEST_SCOUT_MODEL);
     assert_eq!(
         request.get("reasoning_effort").and_then(Value::as_str),
-        provider_local::SCOUT_REASONING_EFFORT,
+        Some("max"),
         "Scout must use its host-pinned reasoning configuration"
     );
 }
 
 #[tokio::test]
-async fn security_uses_host_pinned_deepseek_instead_of_conversation_model_settings() {
+async fn security_uses_host_pinned_model_instead_of_conversation_model_settings() {
     let dir = tempfile::tempdir().unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -251,8 +248,11 @@ async fn security_uses_host_pinned_deepseek_instead_of_conversation_model_settin
             auth_token: Some("test-key".into()),
             extra: json!({
                 "base_url": format!("http://{addr}/v1"),
-                "model": "clark-code:kimi_k3",
+                "model": "local-model-large",
                 "reasoning_effort": "max",
+                "skill_model_overrides": {
+                    "security": {"model": TEST_SECURITY_MODEL, "reasoning_effort": "max"}
+                },
                 "memories": false,
                 "sandbox_mode": "disabled"
             }),
@@ -284,15 +284,11 @@ async fn security_uses_host_pinned_deepseek_instead_of_conversation_model_settin
     let requests = captured.await.unwrap();
     assert_eq!(requests.len(), 1);
     let request = request_json(&requests[0]);
-    assert_eq!(
-        provider_local::SECURITY_MODEL,
-        "~deepseek/deepseek-v4-flash-latest"
-    );
-    assert_eq!(request["model"], "~deepseek/deepseek-v4-flash-latest");
+    assert_eq!(request["model"], TEST_SECURITY_MODEL);
     assert_eq!(
         request.get("reasoning_effort").and_then(Value::as_str),
         Some("max"),
-        "Security must use DeepSeek's highest supported reasoning configuration"
+        "Security must use the host-provided reasoning configuration"
     );
     assert!(
         request["tools"].as_array().is_some_and(|tools| tools
@@ -314,7 +310,7 @@ async fn security_uses_host_pinned_deepseek_instead_of_conversation_model_settin
 async fn security_skill_fake_provider_seals_artifact_and_exposes_history() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(dir.path().join("src")).unwrap();
-    std::fs::create_dir_all(dir.path().join(".clark/security-scans/fake-e2e")).unwrap();
+    std::fs::create_dir_all(dir.path().join(".agent/security-scans/fake-e2e")).unwrap();
     std::fs::write(
         dir.path().join("SECURITY.md"),
         "Review src/. This is a deterministic fake-provider fixture.\n",
@@ -336,7 +332,7 @@ async fn security_skill_fake_provider_seals_artifact_and_exposes_history() {
         "contractVersion": provider_local::security::SECURITY_SCAN_CONTRACT_VERSION,
         "scanId": "fake-e2e",
         "mode": "standard",
-        "model": provider_local::SECURITY_MODEL,
+        "model": TEST_SECURITY_MODEL,
         "scope": ".",
         "inventoryId": inventory.inventory_id,
         "phase": "reporting",
@@ -356,7 +352,7 @@ async fn security_skill_fake_provider_seals_artifact_and_exposes_history() {
         "deepRunId": null,
         "candidates": []
     });
-    let scan_path = ".clark/security-scans/fake-e2e/scan.json";
+    let scan_path = ".agent/security-scans/fake-e2e/scan.json";
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -396,7 +392,10 @@ async fn security_skill_fake_provider_seals_artifact_and_exposes_history() {
             auth_token: Some("test-key".into()),
             extra: json!({
                 "base_url": format!("http://{addr}/v1"),
-                "model": "clark-code:kimi_k3",
+                "model": "local-model-large",
+                "skill_model_overrides": {
+                    "security": {"model": TEST_SECURITY_MODEL, "reasoning_effort": "max"}
+                },
                 "memories": false,
                 "sandbox_mode": "disabled",
                 "permissions": {"write_file": "allow"}
@@ -448,7 +447,7 @@ async fn security_skill_fake_provider_seals_artifact_and_exposes_history() {
     );
     assert!(dir
         .path()
-        .join(".clark/security-scans/fake-e2e/seal.json")
+        .join(".agent/security-scans/fake-e2e/seal.json")
         .is_file());
     let history = provider_local::list_security_scans(&provider_local::LocalExecutor, dir.path())
         .await
@@ -461,7 +460,7 @@ async fn security_skill_fake_provider_seals_artifact_and_exposes_history() {
     assert_eq!(requests.len(), 5);
     assert!(requests
         .iter()
-        .all(|request| request_json(request)["model"] == provider_local::SECURITY_MODEL));
+        .all(|request| request_json(request)["model"] == TEST_SECURITY_MODEL));
 }
 
 #[tokio::test]
@@ -876,6 +875,7 @@ async fn image_attachments_are_described_by_vision_fallback_before_the_coding_ca
             extra: json!({
                 "base_url": format!("http://{addr}/v1"),
                 "model": "fake-model",
+                "vision_model": "vision-model",
                 "memories": false,
                 "sandbox_mode": "disabled"
             }),
@@ -936,7 +936,7 @@ async fn image_attachments_are_described_by_vision_fallback_before_the_coding_ca
     // First request: the vision fallback, hitting the stateless multimodal
     // model with BOTH images batched into one content-parts array.
     let vision_req = request_json(&captured[0]);
-    assert_eq!(vision_req["model"], "qwen/qwen3.7-flash");
+    assert_eq!(vision_req["model"], "vision-model");
     let vision_content = &vision_req["messages"]
         .as_array()
         .unwrap()
@@ -1250,109 +1250,6 @@ async fn connect_provider(addr: std::net::SocketAddr) -> provider_local::LocalAg
     provider
 }
 
-#[tokio::test]
-async fn failed_clark_research_can_fall_back_to_web_fetch_on_the_next_model_turn() {
-    let dir = tempfile::tempdir().unwrap();
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let serve_handle = tokio::spawn(serve_responses(
-        listener,
-        vec![
-            http_response(&tool_call_sse(
-                "research_search",
-                "tool_search",
-                json!({"query": "clark_research", "limit": 1}),
-            )),
-            http_response(&tool_call_sse(
-                "research_call",
-                "clark_research",
-                json!({"query": "Research the current status of example.com"}),
-            )),
-            http_json_error("400 Bad Request", "synthetic Clark research unavailable"),
-            http_response(&tool_call_sse(
-                "fallback_search",
-                "tool_search",
-                json!({"query": "web_fetch", "limit": 1}),
-            )),
-            http_response(&tool_call_sse(
-                "fallback_call",
-                "web_fetch",
-                json!({"url": "not-a-valid-url"}),
-            )),
-            http_response(&final_body()),
-        ],
-    ));
-
-    let mut provider = connect_provider(addr).await;
-    let session = provider
-        .new_session(SessionOptions {
-            cwd: Some(dir.path().to_string_lossy().to_string()),
-            mode: None,
-            collaboration_mode: None,
-            resume: None,
-        })
-        .await
-        .unwrap();
-    let mut stream = provider
-        .prompt(
-            &session.id,
-            PromptInput::text("Check the current status of https://example.com"),
-        )
-        .await
-        .unwrap();
-
-    let mut events = Vec::new();
-    while let Some(event) = stream.next().await {
-        if let AgentEvent::PermissionRequest { request } = &event {
-            provider
-                .respond(
-                    &session.id,
-                    ClientResponse::Permission {
-                        request: request.id.clone(),
-                        option: "allow_once".into(),
-                        feedback: None,
-                    },
-                )
-                .await
-                .unwrap();
-        }
-        let finished = matches!(event, AgentEvent::RunFinished { .. });
-        events.push(event);
-        if finished {
-            break;
-        }
-    }
-
-    let tools = events
-        .iter()
-        .filter_map(|event| match event {
-            AgentEvent::ToolCall { call, .. } => call.tool_name.clone(),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(
-        tools,
-        ["tool_search", "clark_research", "tool_search", "web_fetch"]
-    );
-    assert!(events.iter().any(|event| matches!(
-        event,
-        AgentEvent::RunFinished { outcome, .. } if outcome.status == RunStatus::Done
-    )));
-
-    let captured = serve_handle.await.unwrap();
-    assert_eq!(captured.len(), 6);
-    let after_research_failure = request_json(&captured[3]).to_string();
-    assert!(after_research_failure.contains("synthetic Clark research unavailable"));
-    let fallback_request = request_json(&captured[4]);
-    let fallback_tools = fallback_request["tools"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .filter_map(|tool| tool["function"]["name"].as_str())
-        .collect::<Vec<_>>();
-    assert!(fallback_tools.contains(&"web_fetch"));
-}
-
 async fn drain_run(stream: &mut agent_core::provider::EventStream) -> Vec<AgentEvent> {
     let mut events = Vec::new();
     while let Some(ev) = stream.next().await {
@@ -1506,7 +1403,7 @@ async fn steering_message_is_injected_into_the_active_run() {
     assert!(refused.is_err());
 }
 
-/// A provider context-window rejection no longer kills the run: clark-agent's
+/// A provider context-window rejection no longer kills the run: agent-loop's
 /// checkpoint compactor's overflow-recovery hook force-compacts the live
 /// transcript and retries the same call, transparently, and the run finishes.
 #[tokio::test]

@@ -33,20 +33,20 @@ describe("ComputerUseSection", () => {
       service_ready: true,
       readiness: "needs_permission",
       permission_owner: {
-        display_name: "Clark Computer Use",
-        bundle_id: "com.clark.computer-use",
+        display_name: "the agent Computer Use",
+        bundle_id: "org.agentdesktop.computer-use",
       },
-    })).toBe("Clark Computer Use needs macOS privacy access.");
+    })).toBe("the agent Computer Use needs macOS privacy access.");
     expect(computerUseSupportMessage({
       supported: true,
       platform: "linux",
       service_ready: true,
       readiness: "needs_permission",
       permission_owner: {
-        display_name: "Clark Computer Use Service",
-        bundle_id: "com.clark.ComputerUse",
+        display_name: "the agent Computer Use Service",
+        bundle_id: "org.agentdesktop.ComputerUse",
       },
-    })).toBe("Clark Computer Use Service needs desktop capture and input access.");
+    })).toBe("the agent Computer Use Service needs desktop capture and input access.");
     expect(computerUseSupportMessage({
       supported: true,
       platform: "macos",
@@ -68,11 +68,11 @@ describe("ComputerUseSection", () => {
       service_ready: true,
       readiness: "needs_permission",
       permission_owner: {
-        display_name: "Clark Computer Use Dev",
-        bundle_id: "com.clark.computer-use.dev",
+        display_name: "the agent Computer Use Dev",
+        bundle_id: "org.agentdesktop.computer-use.dev",
       },
     })).toBe(
-      "Grant access to Clark Computer Use Dev. Existing Clark Code privacy grants do not transfer to the separately identified service.",
+      "Grant access to the agent Computer Use Dev. Existing Agent Desktop privacy grants do not transfer to the separately identified service.",
     );
     expect(computerUseRepairMessage({
       supported: true,

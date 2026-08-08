@@ -12,9 +12,9 @@ import { inTauri } from "../lib/pickFolder";
 import { cn } from "../lib/cn";
 
 const CHIP =
-  "flex min-h-8 items-center gap-1.5 rounded-xl border border-accent/10 bg-accent-subtle px-2.5 py-1.5 text-sm font-medium text-ink-secondary transition duration-200 ease-clark hover:bg-accent-soft hover:text-ink";
+  "flex min-h-8 items-center gap-1.5 rounded-xl border border-accent/10 bg-accent-subtle px-2.5 py-1.5 text-sm font-medium text-ink-secondary transition duration-200 ease-agent hover:bg-accent-soft hover:text-ink";
 const COMPACT_CHIP =
-  "flex min-h-7 items-center gap-1 rounded-md bg-composer-context px-1.5 text-xs font-medium leading-none text-ink-secondary transition duration-200 ease-clark hover:bg-bg-hover hover:text-ink";
+  "flex min-h-7 items-center gap-1 rounded-md bg-composer-context px-1.5 text-xs font-medium leading-none text-ink-secondary transition duration-200 ease-agent hover:bg-bg-hover hover:text-ink";
 
 /** The "Local · Select folder…" control that sits above the start-screen
  *  composer. It maps the target machine (Local / a Cloud provider / an SSH host)
@@ -205,7 +205,7 @@ function RemoteFolderChip({
   );
 }
 
-function RemoteFolderBrowser({
+export function RemoteFolderBrowser({
   host,
   onSelect,
   onManage,
@@ -374,7 +374,7 @@ function FolderChip({ cwd, compact = false }: { cwd: string; compact?: boolean }
                 void pick();
                 close();
               }}
-              className="mb-1 flex min-h-10 w-full items-center gap-2 rounded-xl bg-accent px-2.5 py-2 text-sm font-medium text-on-accent transition duration-200 ease-clark hover:bg-accent-hover"
+              className="mb-1 flex min-h-10 w-full items-center gap-2 rounded-xl bg-accent px-2.5 py-2 text-sm font-medium text-on-accent transition duration-200 ease-agent hover:bg-accent-hover"
             >
               <FolderOpen className="size-4" /> Choose folder…
             </button>
@@ -438,7 +438,7 @@ function OptionRow({
     <button
       onClick={onClick}
       className={cn(
-        "flex min-h-9 w-full items-center gap-2.5 rounded-xl px-2 py-1.5 text-left transition duration-200 ease-clark hover:bg-accent-subtle",
+        "flex min-h-9 w-full items-center gap-2.5 rounded-xl px-2 py-1.5 text-left transition duration-200 ease-agent hover:bg-accent-subtle",
         active && "bg-accent-subtle",
       )}
     >

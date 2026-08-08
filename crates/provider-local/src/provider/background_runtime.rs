@@ -57,7 +57,7 @@ impl LocalAgentProvider {
             Ok(())
         } else {
             Err(Error::Unsupported(
-                "Clark can only inspect terminals owned by the active session".into(),
+                "Agent Desktop can only inspect terminals owned by the active session".into(),
             ))
         }
     }

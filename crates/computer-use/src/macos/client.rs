@@ -22,8 +22,8 @@ use super::protocol::{
 mod action_gate;
 use action_gate::ActionGate;
 
-const SERVICE_APP_NAME: &str = "Clark Computer Use.app";
-const SERVICE_EXECUTABLE: &str = "clark-computer-use-helper";
+const SERVICE_APP_NAME: &str = env!("DESKTOP_COMPUTER_USE_MAC_HELPER_APP");
+const SERVICE_EXECUTABLE: &str = env!("DESKTOP_COMPUTER_USE_HELPER_EXECUTABLE");
 const SERVICE_STARTUP_TIMEOUT: Duration = Duration::from_secs(5);
 #[cfg(not(test))]
 const CALL_TIMEOUT: Duration = Duration::from_secs(30);
@@ -635,7 +635,7 @@ fn connect_service(path: &Path, deadline: Instant) -> Result<UnixStream, Compute
 
 fn service_socket_path() -> Result<PathBuf, ComputerUseError> {
     let path = PathBuf::from("/tmp").join(format!(
-        "clark-cua-{}-{}.sock",
+        "agent-cua-{}-{}.sock",
         unsafe { libc::geteuid() },
         uuid::Uuid::new_v4()
     ));
@@ -650,23 +650,25 @@ fn service_socket_path() -> Result<PathBuf, ComputerUseError> {
 
 fn service_app_path() -> Result<PathBuf, ComputerUseError> {
     #[cfg(debug_assertions)]
-    if let Some(path) = std::env::var_os("CLARK_COMPUTER_USE_SERVICE_APP_PATH") {
+    if let Some(path) = std::env::var_os("DESKTOP_COMPUTER_USE_SERVICE_APP_PATH") {
         return validate_service_app_path(PathBuf::from(path), None);
     }
     let executable = std::env::current_exe().map_err(|error| {
-        ComputerUseError::HelperUnavailable(format!("could not locate Clark executable: {error}"))
+        ComputerUseError::HelperUnavailable(format!("could not locate desktop executable: {error}"))
     })?;
     let directory = executable.parent().ok_or_else(|| {
-        ComputerUseError::HelperUnavailable("Clark executable has no parent directory".to_string())
+        ComputerUseError::HelperUnavailable(
+            "desktop executable has no parent directory".to_string(),
+        )
     })?;
     let contents = directory.parent().ok_or_else(|| {
         ComputerUseError::HelperUnavailable(
-            "Clark executable is not inside a macOS app Contents directory".to_string(),
+            "desktop executable is not inside a macOS app Contents directory".to_string(),
         )
     })?;
     let expected_resources = contents.join("Resources").canonicalize().map_err(|error| {
         ComputerUseError::HelperUnavailable(format!(
-            "could not resolve Clark app resources {}: {error}",
+            "could not resolve desktop app resources {}: {error}",
             contents.join("Resources").display()
         ))
     })?;
@@ -699,7 +701,8 @@ fn validate_service_app_path(
     }
     if expected_directory.is_some_and(|directory| canonical.parent() != Some(directory)) {
         return Err(ComputerUseError::HelperRejected(
-            "release service must be a real nested app in Clark's Resources directory".to_string(),
+            "release service must be a real nested app in Agent Desktop's Resources directory"
+                .to_string(),
         ));
     }
     let executable = canonical

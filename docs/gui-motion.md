@@ -1,6 +1,6 @@
 # GUI motion system
 
-Clark Desktop uses [Motion for React](https://motion.dev/docs/react) for
+Agent Desktop uses [Motion for React](https://motion.dev/docs/react) for
 stateful transitions and CSS for small, static effects. Motion is MIT-licensed,
 works with React DOM in Tauri's macOS, Windows, and Linux WebViews, and gives us
 one implementation for presence, layout, gestures, and reduced motion.
@@ -8,13 +8,13 @@ one implementation for presence, layout, gestures, and reduced motion.
 ## Runtime contract
 
 - `app/src/main.tsx` owns one strict `LazyMotion` boundary with `domMax`.
-  `domMax` is required because Clark uses layout animations. Strict mode rejects
+  `domMax` is required because the desktop uses layout animations. Strict mode rejects
   accidentally importing the larger `motion` components.
 - Components import declarative elements from `motion/react-m`:
   `import * as m from "motion/react-m"`. Hooks and `AnimatePresence` continue to
   come from `motion/react`.
 - Shared duration, easing, and surface presets live in `app/src/lib/motion.ts`.
-  CSS uses the matching `--dur-*` and `--ease-clark*` tokens in
+  CSS uses the matching `--dur-*` and `--ease-agent*` tokens in
   `app/src/index.css`.
 - `app/src/lib/motionPolicy.spec.ts` prevents raw `motion` components,
   `transition-all`, inline exit hard-cuts, raw inline slides/stagger
@@ -88,7 +88,7 @@ exit is an opacity-only fade. Use it with the same ternary as the transients in
 
 The speed scale mirrors CSS: `DUR.fast = 120ms`, `DUR.base = 200ms`,
 `DUR.slow = 300ms`; `EASE.out = cubic-bezier(0.22, 1, 0.36, 1)` and
-`EASE.inOut = cubic-bezier(0.4, 0, 0.2, 1)` match `--dur-*` / `--ease-clark*`
+`EASE.inOut = cubic-bezier(0.4, 0, 0.2, 1)` match `--dur-*` / `--ease-agent*`
 in `index.css`. `motionPolicy.spec.ts` reads `index.css` and asserts the two
 stay in sync.
 
@@ -108,7 +108,7 @@ matching the canonical presets):
 
 The root `MotionConfig reducedMotion="user"` follows the operating-system
 preference. Components that choreograph presence also call `useReducedMotion`
-and send the result through `accessibleMotion`, so Clark's policy is:
+and send the result through `accessibleMotion`, so the foundation policy is:
 
 - **Enters snap in.** Reduced motion keeps content appearing immediately — no
   slides, no rises, no choreographed stagger, no scale.

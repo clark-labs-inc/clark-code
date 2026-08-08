@@ -79,7 +79,7 @@ describe("resilience benchmark contract", () => {
       expect(new Set(toolIds).size, testCase.id).toBe(toolIds.length);
       expect(toolIds, testCase.id).toHaveLength(faults.has("duplicated_tool_ids") ? 2 : 1);
       if (faults.has("duplicated_tool_ids")) {
-        expect(toolIds).toEqual(["shell:89", "clark_agent_call_1"]);
+        expect(toolIds).toEqual(["shell:89", "agent_loop_call_1"]);
       }
 
       const expectedIncidents = [

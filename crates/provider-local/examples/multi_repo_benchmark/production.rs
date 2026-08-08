@@ -22,7 +22,7 @@ use async_trait::async_trait;
 use base64::Engine;
 use futures::stream;
 use provider_local::{
-    ClarkCloudWriterConfig, ClarkCloudWriterHarness, LocalExecutor, LocalMultiRepoRuntime,
+    BrokeredCloudWriterConfig, BrokeredCloudWriterHarness, LocalExecutor, LocalMultiRepoRuntime,
     RepositorySelection, RepositorySelectionRequest,
 };
 use tokio_util::sync::CancellationToken;
@@ -123,8 +123,8 @@ async fn run_async(
         .iter()
         .any(|task| task.role == MultiRepoTaskRole::Writer && task.harness == "cloud-writer")
     {
-        coordinator.register_writer(Arc::new(ClarkCloudWriterHarness::new(
-            ClarkCloudWriterConfig {
+        coordinator.register_writer(Arc::new(BrokeredCloudWriterHarness::new(
+            BrokeredCloudWriterConfig {
                 id: "cloud-writer".into(),
                 provider_config,
                 timeout: Duration::from_secs(10),
@@ -203,11 +203,11 @@ fn build_plan(
     {
         let id = format!("{}-writer", repo.id);
         let harness_kind = if lane.kind == LaneKind::CloudMixed && repo.cloud_eligible {
-            HarnessKind::ClarkCloud
+            HarnessKind::BrokeredCloud
         } else {
             HarnessKind::Local
         };
-        let harness = if harness_kind == HarnessKind::ClarkCloud {
+        let harness = if harness_kind == HarnessKind::BrokeredCloud {
             "cloud-writer"
         } else {
             "local-writer"
@@ -447,7 +447,7 @@ fn candidate_result(
     let error = result.error.clone();
     CandidateResult {
         schema_version: 1,
-        candidate_id: "clark-current".into(),
+        candidate_id: "current-agent".into(),
         scenario_id: scenario.id.clone(),
         lane_id: lane.id.clone(),
         delegated: result.decomposition.delegated,
@@ -484,7 +484,7 @@ fn candidate_result(
         usage: usage(&result),
         safety: SafetyReceipt::default(),
         // This backend adapter cannot prove the desktop's default UI. Keeping
-        // this absent intentionally leaves Clark red until the real UI trace
+        // this absent intentionally leaves the current lane red until the real UI trace
         // is wired into the benchmark.
         interaction: None,
         claimed_complete: error.is_none(),
@@ -526,7 +526,7 @@ fn task_receipt(
         }
         .into(),
         harness: match task.harness_kind {
-            HarnessKind::ClarkCloud => "clark-cloud".into(),
+            HarnessKind::BrokeredCloud => "brokered-cloud".into(),
             _ => receipt.harness.clone(),
         },
         isolated: receipt.role != MultiRepoTaskRole::Planner,
@@ -707,7 +707,7 @@ impl Provider for FixtureProvider {
                     self.state.fault
                 )));
             }
-            if text.contains("Clark Cloud repository writer") {
+            if text.contains("brokered cloud repository writer") {
                 if input.attachments.len() != 1 {
                     return Err(CoreError::Protocol(
                         "cloud writer must receive one bounded source lease".into(),

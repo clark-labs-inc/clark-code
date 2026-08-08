@@ -24,7 +24,7 @@ export interface McpServerConfig {
   env: Record<string, string>;
 }
 
-const KEY = "clark-desktop:mcp-servers";
+const KEY = "agent-desktop:mcp-servers";
 
 export function loadMcpServers(scope?: string | null): McpServer[] {
   try {

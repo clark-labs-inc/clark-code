@@ -5,7 +5,7 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
-description = "SSH transport and artifact launcher for headless Clark Code workers."
+description = "SSH transport and artifact launcher for headless coding-agent workers."
 
 [dependencies]
 code-host = { path = "../code-host" }

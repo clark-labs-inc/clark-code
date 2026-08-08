@@ -74,7 +74,7 @@ impl Sandbox {
         let joined = self.join(path);
         if is_host_private(&lexically_normalize(&joined)) {
             return Err(format!(
-                "{path}: path is reserved for host-private Clark state"
+                "{path}: path is reserved for host-private Agent Desktop state"
             ));
         }
         let canon = joined.canonicalize().map_err(|e| format!("{path}: {e}"))?;
@@ -90,7 +90,7 @@ impl Sandbox {
         let normalized = lexically_normalize(&joined);
         if is_host_private(&normalized) {
             return Err(format!(
-                "{path}: path is reserved for host-private Clark state"
+                "{path}: path is reserved for host-private Agent Desktop state"
             ));
         }
         // Walk up to the first existing ancestor and canonicalize it.
@@ -122,13 +122,13 @@ impl Sandbox {
         Ok(normalized)
     }
 
-    /// Resolve a Clark-owned path for an internal host tool. Model-facing file
+    /// Resolve an Agent Desktop-owned path for an internal host tool. Model-facing file
     /// tools must use `resolve_for_write`, which rejects this namespace.
     pub(crate) fn resolve_host_managed(&self, path: &str) -> Result<PathBuf, String> {
         let joined = self.join(path);
         let normalized = lexically_normalize(&joined);
         if !is_host_private(&normalized) {
-            return Err(format!("{path}: path is not in host-managed Clark state"));
+            return Err(format!("{path}: path is not in host-managed desktop state"));
         }
         let mut ancestor = normalized.as_path();
         loop {
@@ -213,13 +213,13 @@ fn is_host_private(path: &Path) -> bool {
         .collect::<Vec<_>>();
     components
         .windows(3)
-        .any(|window| window == [".clark", "scout", "enterprises"])
+        .any(|window| window == [".agent", "scout", "enterprises"])
         || components
             .windows(4)
-            .any(|window| window == [".clark", "scout", "adapters", "private"])
+            .any(|window| window == [".agent", "scout", "adapters", "private"])
         || components
             .windows(4)
-            .any(|window| window == [".clark", "scout", "capsules", "private"])
+            .any(|window| window == [".agent", "scout", "capsules", "private"])
 }
 
 #[cfg(test)]
@@ -253,40 +253,40 @@ mod tests {
     #[test]
     fn host_private_scout_state_is_not_model_readable_or_writable() {
         let dir = temp_root();
-        let private = dir.path().join(".clark/scout/enterprises/v3-test/private");
+        let private = dir.path().join(".agent/scout/enterprises/v3-test/private");
         std::fs::create_dir_all(&private).unwrap();
         std::fs::write(private.join("signing-bootstrap"), b"secret").unwrap();
-        let trust = dir.path().join(".clark/scout/enterprises/v3-test/trust");
+        let trust = dir.path().join(".agent/scout/enterprises/v3-test/trust");
         std::fs::create_dir_all(&trust).unwrap();
         std::fs::write(trust.join("chain.json"), b"{}").unwrap();
-        let adapter_private = dir.path().join(".clark/scout/adapters/private");
+        let adapter_private = dir.path().join(".agent/scout/adapters/private");
         std::fs::create_dir_all(&adapter_private).unwrap();
         std::fs::write(adapter_private.join("vault.key"), b"secret").unwrap();
-        let capsule_private = dir.path().join(".clark/scout/capsules/private");
+        let capsule_private = dir.path().join(".agent/scout/capsules/private");
         std::fs::create_dir_all(&capsule_private).unwrap();
         std::fs::write(capsule_private.join("registry-v1.json"), b"secret").unwrap();
         let sandbox = Sandbox::new(dir.path()).unwrap();
 
         assert!(sandbox
-            .resolve_existing(".clark/scout/enterprises/v3-test/private/signing-bootstrap")
+            .resolve_existing(".agent/scout/enterprises/v3-test/private/signing-bootstrap")
             .is_err());
         assert!(sandbox
-            .resolve_for_write(".clark/scout/enterprises/v3-test/private/replacement")
+            .resolve_for_write(".agent/scout/enterprises/v3-test/private/replacement")
             .is_err());
         assert!(sandbox
-            .resolve_existing(".clark/scout/enterprises/v3-test/trust/chain.json")
+            .resolve_existing(".agent/scout/enterprises/v3-test/trust/chain.json")
             .is_err());
         assert!(sandbox
-            .resolve_for_write(".clark/scout/enterprises/v3-test/batches/forged.json")
+            .resolve_for_write(".agent/scout/enterprises/v3-test/batches/forged.json")
             .is_err());
         assert!(sandbox
-            .resolve_existing(".clark/scout/adapters/private/vault.key")
+            .resolve_existing(".agent/scout/adapters/private/vault.key")
             .is_err());
         assert!(sandbox
-            .resolve_existing(".clark/scout/capsules/private/registry-v1.json")
+            .resolve_existing(".agent/scout/capsules/private/registry-v1.json")
             .is_err());
         assert!(sandbox
-            .resolve_for_write(".clark/scout/capsules/private/replacement")
+            .resolve_for_write(".agent/scout/capsules/private/replacement")
             .is_err());
     }
 
@@ -315,7 +315,7 @@ mod tests {
         // a non-existent target — the executor's write would follow it and plant
         // a file at /tmp/…, escaping the root. resolve_for_write must refuse.
         let link = dir.path().join("evil");
-        std::os::unix::fs::symlink("/tmp/clark-sandbox-escape-test", &link).unwrap();
+        std::os::unix::fs::symlink("/tmp/agent-sandbox-escape-test", &link).unwrap();
         let err = sb.resolve_for_write("evil").unwrap_err();
         assert!(err.contains("symlink"), "{err}");
     }

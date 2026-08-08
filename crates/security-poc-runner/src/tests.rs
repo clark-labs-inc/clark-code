@@ -11,7 +11,7 @@ fn base_request(root_name: &str) -> SecurityPocRunRequest {
         script: "printf poc-ok".into(),
         expected_exit_code: 0,
         timeout_seconds: 10,
-        run_root: format!(".clark/security-scans/scan-1/poc/runs/cand-1-positive-{root_name}"),
+        run_root: format!(".agent/security-scans/scan-1/poc/runs/cand-1-positive-{root_name}"),
         inventory: vec![PocInventoryFile {
             path: "src/app.txt".into(),
             bytes: b"hello poc\n".to_vec(),

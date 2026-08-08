@@ -46,19 +46,19 @@ fn seed_synthetic_project(root: &Path) {
     )
     .unwrap();
     git(root, &["init", "--quiet"]);
-    git(root, &["config", "user.name", "Clark Paid Eval"]);
+    git(root, &["config", "user.name", "Agent Paid Eval"]);
     git(root, &["config", "user.email", "eval@invalid.local"]);
     git(root, &["add", "--all"]);
     git(root, &["commit", "--quiet", "-m", "synthetic baseline"]);
 }
 
 fn paid_config() -> (String, String, String) {
-    let api_key = std::env::var("CLARK_CODE_API_KEY")
-        .or_else(|_| std::env::var("CLARK_API_KEY"))
-        .expect("CLARK_CODE_API_KEY or CLARK_API_KEY must be set");
-    let model = std::env::var("CLARK_PAID_EVAL_MODEL")
-        .unwrap_or_else(|_| crate::config::DEFAULT_MODEL.into());
-    let base_url = std::env::var("CLARK_PAID_EVAL_BASE_URL")
+    let api_key = std::env::var("MODEL_API_KEY")
+        .or_else(|_| std::env::var("PRODUCT_API_KEY"))
+        .expect("MODEL_API_KEY or PRODUCT_API_KEY must be set");
+    let model =
+        std::env::var("PAID_EVAL_MODEL").unwrap_or_else(|_| crate::config::DEFAULT_MODEL.into());
+    let base_url = std::env::var("PAID_EVAL_BASE_URL")
         .unwrap_or_else(|_| crate::config::DEFAULT_BASE_URL.into());
     (api_key, model, base_url)
 }
@@ -82,7 +82,7 @@ fn config() -> OrchestrationToolsConfig {
 
 fn absolute_test_root() -> &'static str {
     if cfg!(windows) {
-        "C:/clark-test/workspace"
+        "C:/agent-test/workspace"
     } else {
         "/tmp/workspace"
     }

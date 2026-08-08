@@ -8,7 +8,6 @@ use std::time::Duration;
 
 fn config() -> CloudTrajectoryConfig {
     CloudTrajectoryConfig {
-        endpoint: "https://example.test".into(),
         title: "Test".into(),
         provider: "local".into(),
         project: None,
@@ -134,7 +133,7 @@ async fn crash_recovery_replays_uncheckpointed_batches_and_marks_run_interrupted
     assert_eq!(recovered_goal.status, GoalStatus::Blocked);
     assert_eq!(
         recovered_goal.blocker_reason.as_deref(),
-        Some("Clark restarted before the goal finished. Continue from the saved history.")
+        Some("Agent Desktop restarted before the goal finished. Continue from the saved history.")
     );
     let metadata = recovered.metadata.as_ref().unwrap();
     assert_eq!(metadata["id"], "session-1");
@@ -163,7 +162,7 @@ async fn crash_recovery_replays_uncheckpointed_batches_and_marks_run_interrupted
         AgentEvent::GoalUpdated { goal, .. }
             if goal.status == GoalStatus::Blocked
                 && goal.blocker_reason.as_deref()
-                    == Some("Clark restarted before the goal finished. Continue from the saved history.")
+                    == Some("Agent Desktop restarted before the goal finished. Continue from the saved history.")
     )));
 
     for batch in &pending {

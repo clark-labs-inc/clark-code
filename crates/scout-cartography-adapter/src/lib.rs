@@ -1,4 +1,4 @@
-//! Deterministic, I/O-free translation from safe adapter receipts to Clark's
+//! Deterministic, I/O-free translation from safe adapter receipts to the
 //! authoritative system-cartography observation wire.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -35,7 +35,7 @@ pub struct TranslatedPage {
 
 /// Backend-authored scope for one exact target-side adapter page.
 ///
-/// Clark deliberately omits target and authorization identities here: those
+/// The protocol deliberately omits target and authorization identities here: those
 /// are established on the collector and cryptographically bound into the
 /// receipt. Every discovery choice that the backend can know in advance is
 /// pinned so a model cannot redirect a leased task to another authority.

@@ -1,46 +1,46 @@
 [package]
-name = "clark-desktop"
+name = "desktop-foundation"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "Clark Code — local AI coding agent."
-default-run = "clark-desktop"
+description = "Open native host for a product-extensible local AI coding agent."
+default-run = "agent-desktop"
 
 [lib]
-name = "clark_desktop_lib"
+name = "desktop_foundation"
 # staticlib/cdylib are only needed for iOS/Android embeddings; desktop builds
 # link the rlib into the binary, so skip the two extra codegen passes.
 crate-type = ["rlib"]
+
+[[bin]]
+name = "agent-desktop"
+path = "src/main.rs"
 
 [features]
 default = []
 # Owner-local Sentry-like capture and JSONL tracing are development-only.
 # diagnostics.rs rejects this feature in any profile without debug assertions.
 debug-diagnostics = [
-    "dep:clark-capture",
+    "dep:diagnostic-capture",
     "dep:tracing-appender",
     "tracing-subscriber/json",
 ]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
-sha2 = "0.10"
 
 [dependencies]
 agent-core = { path = "../crates/agent-core", features = ["native"] }
 code-host = { path = "../crates/code-host" }
 code-remote = { path = "../crates/code-remote" }
 provider-acp = { path = "../crates/provider-acp" }
-provider-clark = { path = "../crates/provider-clark" }
 provider-local = { path = "../crates/provider-local" }
 provider-remote-worker = { path = "../crates/provider-remote-worker" }
-provider-specialist = { path = "../crates/provider-specialist" }
 computer-use = { path = "../crates/computer-use" }
-clark-install-context = { path = "../crates/install-context" }
-clark-http = { path = "../crates/clark-http" }
-conversation-cloud = { path = "../crates/conversation-cloud" }
-clark-capture = { path = "../vendor/clark-capture", features = ["tracing"], optional = true }
+desktop-install-context = { path = "../crates/install-context" }
+desktop-http = { path = "../crates/desktop-http" }
+diagnostic-capture = { package = "clark-capture", path = "../vendor/clark-capture", features = ["tracing"], optional = true }
 libreoffice-pure = "0.5.4"
 
 tauri = { version = "2", features = [] }
@@ -63,14 +63,13 @@ tauri-plugin-notification = "2"
 # verifies the Ed25519 signature, swaps the bundle, and relaunches.
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
-# Native Google sign-in (system browser + localhost loopback). Returns a Google
-# ID token we exchange with Clark's Better Auth backend.
+# Optional native Google sign-in surface for products that use a system-browser
+# OAuth flow. Product-owned code decides whether and how to exchange the token.
 tauri-plugin-google-auth = "0.5"
-# Custom `clark://` URL scheme. The Google sign-in success page redirects here so
-# the OS hands focus back to Clark instead of stranding the user on the loopback
-# tab in their browser.
+# Product deep-link support. A branded configuration owns the URL scheme and
+# callback semantics; the neutral development bundle defines no auth callback.
 tauri-plugin-deep-link = "2"
-# Server-to-server token exchange against Clark's auth API (no browser CORS).
+# Generic native HTTP support used by foundation-owned artifact reads.
 reqwest = { version = "0.13", default-features = false, features = ["http2", "json", "query", "cookies", "rustls"] }
 # Percent-encode desktop conversation ids in REST sync URLs.
 urlencoding = "2"
@@ -97,7 +96,7 @@ tracing.workspace = true
 tracing-appender = { version = "0.2", optional = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
-# Route a second launch (e.g. Windows/Linux opening a `clark://` URL) into the
+# Route a second launch (e.g. Windows/Linux opening a product URL) into the
 # already-running process instead of spawning a new window; the `deep-link`
 # feature re-emits the URL to the running instance so `on_open_url` still fires.
 # macOS delivers deep links to the running app natively, so this is desktop-only.

@@ -21,7 +21,7 @@ fn production_adapter_passes_backend_gates_but_stays_red_without_real_ui_evidenc
     let record = grader::grade(
         "test".into(),
         EvidenceLevel::Scripted,
-        CandidateKind::ClarkCurrent,
+        CandidateKind::CurrentAgent,
         &scenario,
         0,
         &lane,

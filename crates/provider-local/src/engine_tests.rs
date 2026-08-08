@@ -1,6 +1,6 @@
 mod tests {
     use super::*;
-    use clark_agent::SteeringSource;
+    use agent_loop::SteeringSource;
 
     #[tokio::test]
     async fn steering_queue_injects_in_order_and_recovers_leftovers() {
@@ -14,8 +14,8 @@ mod tests {
         let texts: Vec<_> = drained
             .iter()
             .map(|m| match m {
-                clark_agent::AgentMessage::User {
-                    content: clark_agent::UserContent::Text(t),
+                agent_loop::AgentMessage::User {
+                    content: agent_loop::UserContent::Text(t),
                     ..
                 } => t.as_str(),
                 other => panic!("expected user text, got {other:?}"),

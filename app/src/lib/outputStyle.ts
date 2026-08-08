@@ -12,14 +12,14 @@ export interface OutputStyleInfo {
 }
 
 export const OUTPUT_STYLES: OutputStyleInfo[] = [
-  { id: "default", label: "Default", description: "Clark's normal voice." },
+  { id: "default", label: "Default", description: "the agent's normal voice." },
   { id: "terse", label: "Terse", description: "Minimal narration — just the work and the result." },
   { id: "teaching", label: "Teaching", description: "Explains reasoning and trade-offs as it works." },
 ];
 
 const DEFAULT_OUTPUT_STYLE = "default";
 
-const KEY = "clark-desktop:output-style";
+const KEY = "agent-desktop:output-style";
 
 export function loadOutputStyle(scope?: string | null): string {
   try {

@@ -82,7 +82,7 @@ impl ActionFlavor {
             Self::Keypress => "Prepare one bounded keypress against a freshly observed window. The trusted backend classifies activation, deletion, submission, and shortcut semantics before returning an opaque commit id.",
             Self::Scroll => "Prepare a bounded scroll against a freshly observed window or element. The preparation consumes the observation but sends no input.",
             Self::Drag => "Prepare a bounded left-button drag between observed elements or screenshot-local points. Drag effects require action-time review.",
-            Self::SecondaryAction => "Prepare an Accessibility action explicitly advertised by an observed element and present in Clark's bounded allowlist.",
+            Self::SecondaryAction => "Prepare an Accessibility action explicitly advertised by an observed element and present in Agent Desktop's bounded allowlist.",
             Self::SelectText => "Prepare a bounded text selection in an observed editable control. Secure text selection requires user handoff.",
             Self::SetValue => "Prepare a numeric slider or incrementor update constrained by the observed minimum, maximum, and step.",
         }
@@ -162,7 +162,7 @@ impl ToolExecutor for CommitAction {
     }
 
     fn description(&self) -> &str {
-        "Commit exactly one opaque prepared_action_id returned by a computer action tool. Clark derives the permission prompt, durable signer-bound approval eligibility, and redacted preview from trusted native preparation state. Never reconstruct or modify the action payload."
+        "Commit exactly one opaque prepared_action_id returned by a computer action tool. Agent Desktop derives the permission prompt, durable signer-bound approval eligibility, and redacted preview from trusted native preparation state. Never reconstruct or modify the action payload."
     }
 
     fn parameters(&self) -> Value {

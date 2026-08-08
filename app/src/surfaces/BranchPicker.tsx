@@ -18,7 +18,7 @@ import { getBridge } from "../core-bridge/bridge";
 import { resolveBranchSelection } from "../lib/projectBranches";
 
 const ITEM =
-  "flex h-[22px] min-w-0 items-center gap-1 rounded-md bg-composer-context px-1.5 text-[11px] font-medium leading-none";
+  "flex h-[22px] min-w-0 items-center gap-1 rounded-md bg-composer-context px-1.5 text-xs font-medium leading-none";
 
 function errorMessage(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause);
@@ -252,23 +252,23 @@ export function BranchPicker({
                   {active ? (
                     <Loader2 className="size-3.5 shrink-0 animate-spin text-accent" />
                   ) : current ? (
-                    <span className="flex items-center gap-1 text-[11px] text-accent">
+                    <span className="flex items-center gap-1 text-xs text-accent">
                       Current <Check className="size-3.5 shrink-0" />
                     </span>
                   ) : ownedElsewhere ? (
                     <span
-                      className="flex min-w-0 items-center gap-1 text-[11px] text-ink-faint"
+                      className="flex min-w-0 items-center gap-1 text-xs text-ink-faint"
                       title={checkoutName(branch.checkoutPath ?? "")}
                     >
                       Open checkout
                       <FolderOpen className="size-3.5 shrink-0" />
                     </span>
                   ) : allowPreserveChanges && disabledReason ? (
-                    <span className="flex items-center gap-1 text-[11px] text-checkout-worktree">
+                    <span className="flex items-center gap-1 text-xs text-checkout-worktree">
                       New worktree <GitFork className="size-3.5 shrink-0" />
                     </span>
                   ) : (
-                    <span className="text-[11px] text-ink-faint">Switch here</span>
+                    <span className="text-xs text-ink-faint">Switch here</span>
                   )}
                 </button>
               );
@@ -284,7 +284,7 @@ export function BranchPicker({
             </p>
           )}
           {!error && (
-            <p className="border-t border-border-subtle px-3 py-2 text-[11px] text-ink-faint">
+            <p className="border-t border-border-subtle px-3 py-2 text-xs text-ink-faint">
               {disabledReason
                 ? allowPreserveChanges
                   ? "Choose another branch to open it in a new worktree. Your current files stay here."

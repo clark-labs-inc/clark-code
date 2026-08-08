@@ -33,7 +33,7 @@ impl ToolExecutor for Permissions {
     }
 
     fn description(&self) -> &str {
-        "Check whether Clark Code currently has the macOS Accessibility and Screen Recording permissions required for computer use. This does not show system prompts."
+        "Check whether local agent currently has the macOS Accessibility and Screen Recording permissions required for computer use. This does not show system prompts."
     }
 
     fn parameters(&self) -> Value {
@@ -76,7 +76,7 @@ impl ToolExecutor for RequestPermissions {
     }
 
     fn description(&self) -> &str {
-        "Ask macOS for Accessibility and/or Screen Recording access. Use only after computer_permissions reports a missing permission. The user must approve the macOS system prompt; Screen Recording may require relaunching Clark Code."
+        "Ask macOS for Accessibility and/or Screen Recording access. Use only after computer_permissions reports a missing permission. The user must approve the macOS system prompt; Screen Recording may require relaunching local agent."
     }
 
     fn parameters(&self) -> Value {
@@ -109,7 +109,7 @@ impl ToolExecutor for RequestPermissions {
             title: Some("Open macOS privacy permission prompts?".to_string()),
             always_label: None,
             reason: Some(
-                "changes which apps macOS permits Clark Code to observe and control".to_string(),
+                "changes which apps macOS permits local agent to observe and control".to_string(),
             ),
             risk: Some("confirm".to_string()),
             remember: false,
@@ -212,7 +212,7 @@ impl ToolExecutor for ListWindows {
         app_scope(args, true).or_else(|| {
             Some(PermissionScope {
                 key: "computer:window-discovery".to_string(),
-                title: Some("Allow Clark to see open app windows?".to_string()),
+                title: Some("Allow Agent Desktop to see open app windows?".to_string()),
                 always_label: Some("Always allow window discovery".to_string()),
                 reason: Some("reveals app names and window titles on this Mac".to_string()),
                 // Full access must not silently reveal which private apps and

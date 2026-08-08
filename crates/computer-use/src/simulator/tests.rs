@@ -57,12 +57,12 @@ fn simulator_types_and_returns_a_real_image() {
             window: target,
             observation_id: observed.observation_id,
             element_id: "ax-1".to_string(),
-            text: "hello Clark".to_string(),
+            text: "hello agent".to_string(),
             replace: true,
             dry_run: false,
         })
         .unwrap();
-    assert_eq!(backend.snapshot().0, "hello Clark");
+    assert_eq!(backend.snapshot().0, "hello agent");
 }
 
 #[test]

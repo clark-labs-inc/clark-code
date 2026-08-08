@@ -27,7 +27,7 @@ function isVideo(a: Artifact): boolean {
 }
 
 /** Renders an artifact image `uri`, which may be a remote `http(s)` URL
- *  (Clark cloud — usable directly) or a local absolute path (a local-agent
+ *  (product cloud — usable directly) or a local absolute path (a local-agent
  *  screenshot — no `assetProtocol` scope is configured, so it's fetched as a
  *  `data:` URL on demand, mirroring `MarkdownDoc`'s async-fetch idiom for
  *  `read_doc_text`). */

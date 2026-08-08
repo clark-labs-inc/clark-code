@@ -20,14 +20,14 @@ export interface McpStatus {
 export async function probeMcp(servers: McpServerConfig[]): Promise<McpStatus[]> {
   if (servers.length === 0) return [];
   if (!isTauri()) throw new Error("Connection testing is available in the desktop app.");
-  return invoke<McpStatus[]>("clark_mcp_probe", { servers });
+  return invoke<McpStatus[]>("mcp_probe", { servers });
 }
 
 /** Replace the signed-in account's native encrypted MCP credential set. Blank
  * values retain an existing secret; omitted servers and names are deleted. */
 export async function syncMcpCredentials(servers: McpServer[]): Promise<void> {
   if (!isTauri()) return;
-  await invoke("clark_mcp_credentials_sync", {
+  await invoke("mcp_credentials_sync", {
     servers: servers.map((server) => ({ id: server.id, environment: server.env })),
   });
 }
@@ -64,7 +64,7 @@ export async function discoverAgentSetups(
   return invoke("external_agent_discover", { cwd: cwd.trim(), remote: remote ?? null });
 }
 
-/** Merge only missing names. Existing Clark configuration always wins. */
+/** Merge only missing names. Existing the agent configuration always wins. */
 export function mergeDiscoveredMcp(
   existing: McpServer[],
   discovered: McpServerConfig[],

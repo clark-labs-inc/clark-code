@@ -227,7 +227,7 @@ impl HeadlessHost {
                 return Response::error(
                     Some(request_id.into()),
                     "ambiguous_request",
-                    "this request may already have executed; Clark will not run it twice",
+                    "this request may already have executed; the agent will not run it twice",
                 );
             }
             Ok(Reservation::Conflict) => {
@@ -243,7 +243,7 @@ impl HeadlessHost {
                 return Response::error(
                     Some(request_id.into()),
                     "receipt_capacity_exhausted",
-                    "durable request receipt storage is full; Clark will not run untracked work",
+                    "durable request receipt storage is full; the agent will not run untracked work",
                 );
             }
             Err(error) => {

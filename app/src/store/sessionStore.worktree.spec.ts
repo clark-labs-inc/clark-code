@@ -14,12 +14,12 @@ import {
 const draftOwner = composerDraftOwner(null);
 
 const sourceRoot = "/tmp/project";
-const managedRoot = "/tmp/project.clark-worktrees/session-1";
+const managedRoot = "/tmp/project.agent-worktrees/session-1";
 const session = { id: "managed-chat", provider: "local" } as unknown as Session;
 
 const baseSettings = {
   cwd: sourceRoot,
-  model: "clark-code",
+  model: "local-model",
   reasoningEffort: "",
 };
 
@@ -51,7 +51,7 @@ function plan(overrides: Partial<ProjectWorktreeTransitionPlan> = {}): ProjectWo
         fallback: false,
       },
     ],
-    managedLocation: "/tmp/project.clark-worktrees",
+    managedLocation: "/tmp/project.agent-worktrees",
     ...overrides,
   };
 }
@@ -134,22 +134,39 @@ beforeEach(() => {
 });
 
 describe("managed worktree session journeys", () => {
-  it("starts a clean Git project in a detached managed checkout by default", async () => {
+  it("keeps a clean Git project in the selected checkout by default", async () => {
     const bridge = bridgeFor(plan());
     useSessionStore.setState({ bridge, providers: await bridge.listProviders() });
 
     await useSessionStore.getState().startSession();
 
+    expect(vi.mocked(bridge.createManagedWorktree)).not.toHaveBeenCalled();
+    expect(vi.mocked(bridge.openSession).mock.calls[0]?.[2]).toMatchObject({
+      kind: "new",
+      options: { cwd: sourceRoot },
+    });
+    expect(useSessionStore.getState().localSettings.cwd).toBe(sourceRoot);
+    expect(useSessionStore.getState().activeProjectRoot).toBe(sourceRoot);
+    expect(useSessionStore.getState().conversations[0]?.project).toBe(sourceRoot);
+  });
+
+  it("creates an isolated checkout when the user chooses the default branch", async () => {
+    const bridge = bridgeFor(plan());
+    useSessionStore.setState({
+      bridge,
+      providers: await bridge.listProviders(),
+      managedWorktreeBase: "default",
+    });
+
+    await useSessionStore.getState().startSession();
+
     expect(vi.mocked(bridge.createManagedWorktree)).toHaveBeenCalledWith(sourceRoot, {
-      base: "current",
+      base: "default",
     });
     expect(vi.mocked(bridge.openSession).mock.calls[0]?.[2]).toMatchObject({
       kind: "new",
       options: { cwd: managedRoot },
     });
-    expect(useSessionStore.getState().localSettings.cwd).toBe(sourceRoot);
-    expect(useSessionStore.getState().activeProjectRoot).toBe(managedRoot);
-    expect(useSessionStore.getState().conversations[0]?.project).toBe(managedRoot);
   });
 
   it("requires an explicit dirty-source preservation choice before creating anything", async () => {

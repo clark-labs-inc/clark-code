@@ -80,7 +80,7 @@ function numericReleaseParts(version: string): number[] | null {
   return normalized.split(".").map(Number);
 }
 
-/** Compare the stable numeric versions used by Clark's production channel. */
+/** Compare the stable numeric versions used by the agent's production channel. */
 function compareReleaseVersions(left: string, right: string): number | null {
   const a = numericReleaseParts(left);
   const b = numericReleaseParts(right);
@@ -262,7 +262,7 @@ export async function relaunchApp(): Promise<void> {
 // The running version is recorded on every launch; when it differs from the last
 // recorded one, the app came back on a freshly-applied update — surface a
 // one-time confirmation so the restart doesn't feel like a black box.
-const LAST_VERSION_KEY = "clark.lastAppVersion";
+const LAST_VERSION_KEY = "agent-desktop.lastAppVersion";
 
 /** On the first launch after an update, return the new version (once) and record
  *  it; otherwise null. Never fires on a fresh install (no prior version). */

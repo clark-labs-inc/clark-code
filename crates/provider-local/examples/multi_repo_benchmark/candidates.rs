@@ -63,7 +63,7 @@ pub fn run_current(
     };
     Ok(CandidateResult {
         schema_version: 1,
-        candidate_id: "clark-current".into(),
+        candidate_id: "current-agent".into(),
         scenario_id: scenario.id.clone(),
         lane_id: lane.id.clone(),
         delegated,
@@ -175,7 +175,7 @@ pub fn run_reference(
             350 + index as u64 * 350
         };
         let harness = if lane.kind == LaneKind::CloudMixed && repo.cloud_eligible {
-            "clark-cloud"
+            "brokered-cloud"
         } else {
             "reference"
         };
@@ -215,7 +215,7 @@ pub fn run_reference(
                 &patch_sha256,
                 &changed_paths,
             )?,
-            isolation: if harness == "clark-cloud" {
+            isolation: if harness == "brokered-cloud" {
                 "cloud-ephemeral-clone".into()
             } else {
                 "local-ephemeral-clone".into()

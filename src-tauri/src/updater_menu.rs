@@ -53,7 +53,7 @@ pub fn build_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
     #[cfg(not(target_os = "macos"))]
     {
         // Windows and Linux do not get Tauri's macOS application submenu, so
-        // add the same Clark Code entry explicitly instead of leaving these
+        // add the same local agent entry explicitly instead of leaving these
         // actions platform-exclusive.
         let app_menu = Submenu::with_items(
             app,

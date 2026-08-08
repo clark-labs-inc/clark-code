@@ -49,6 +49,19 @@ describe("assistant message actions", () => {
     expect(markup).toMatch(/space-y-4 whitespace-normal[^\"]*min-w-0 w-full/);
   });
 
+  it("uses the persisted low-glare reading contrast by default", () => {
+    const markup = renderToStaticMarkup(
+      <Message
+        role="agent"
+        blocks={[{ type: "text", text: "A calmer response." }]}
+        timelineIndex={0}
+      />,
+    );
+
+    expect(markup).toContain("chat-reading-contrast");
+    expect(markup).toContain('data-chat-contrast="low"');
+  });
+
   it("marks new user and assistant rows with role-specific entrance motion", () => {
     const user = renderToStaticMarkup(
       <Message

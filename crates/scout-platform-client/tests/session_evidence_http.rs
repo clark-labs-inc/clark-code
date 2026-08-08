@@ -49,7 +49,7 @@ async fn session_uploads_commits_and_returns_immutable_evidence_reference() {
     let server = thread::spawn(move || {
         let (mut enroll_stream, _) = listener.accept().unwrap();
         let enroll = read_request(&mut enroll_stream);
-        assert_eq!(enroll.path, "/v1/system-cartography/machines/enroll");
+        assert_eq!(enroll.path, "/v1/cartography/machines/enroll");
         write_response(
             &mut enroll_stream,
             "201 Created",
@@ -59,7 +59,7 @@ async fn session_uploads_commits_and_returns_immutable_evidence_reference() {
 
         let (mut authorize_stream, _) = listener.accept().unwrap();
         let authorize = read_request(&mut authorize_stream);
-        assert_eq!(authorize.path, "/v1/system-cartography/evidence/uploads");
+        assert_eq!(authorize.path, "/v1/cartography/evidence/uploads");
         let upload: EvidenceUploadRequest = serde_json::from_slice(&authorize.body).unwrap();
         let authorization = scout_ingest_protocol::cartography::EvidenceUploadAuthorization {
             evidence_id: upload.evidence_id.clone(),
@@ -105,10 +105,7 @@ async fn session_uploads_commits_and_returns_immutable_evidence_reference() {
 
         let (mut commit_stream, _) = listener.accept().unwrap();
         let commit_request = read_request(&mut commit_stream);
-        assert_eq!(
-            commit_request.path,
-            "/v1/system-cartography/evidence/commits"
-        );
+        assert_eq!(commit_request.path, "/v1/cartography/evidence/commits");
         let commit: EvidenceCommitRequest = serde_json::from_slice(&commit_request.body).unwrap();
         assert_eq!(commit.evidence_id, authorization.evidence_id);
         let mut verified = authorization;
@@ -130,6 +127,7 @@ async fn session_uploads_commits_and_returns_immutable_evidence_reference() {
         ScoutCartographySessionConfig::new(
             &base_url,
             "platform-test-key",
+            "/v1/cartography",
             identity_root.path(),
             organization_id,
             workspace_id,
@@ -187,7 +185,7 @@ async fn idempotent_retry_reuses_verified_evidence_without_another_put() {
     let server = thread::spawn(move || {
         let (mut enroll_stream, _) = listener.accept().unwrap();
         let enroll = read_request(&mut enroll_stream);
-        assert_eq!(enroll.path, "/v1/system-cartography/machines/enroll");
+        assert_eq!(enroll.path, "/v1/cartography/machines/enroll");
         write_response(
             &mut enroll_stream,
             "201 Created",
@@ -199,7 +197,7 @@ async fn idempotent_retry_reuses_verified_evidence_without_another_put() {
         for _ in 0..2 {
             let (mut authorize_stream, _) = listener.accept().unwrap();
             let authorize = read_request(&mut authorize_stream);
-            assert_eq!(authorize.path, "/v1/system-cartography/evidence/uploads");
+            assert_eq!(authorize.path, "/v1/cartography/evidence/uploads");
             let upload: EvidenceUploadRequest = serde_json::from_slice(&authorize.body).unwrap();
             if let Some(first) = &first_upload {
                 assert_eq!(&upload, first);
@@ -242,6 +240,7 @@ async fn idempotent_retry_reuses_verified_evidence_without_another_put() {
         ScoutCartographySessionConfig::new(
             &base_url,
             "platform-test-key",
+            "/v1/cartography",
             identity_root.path(),
             organization_id,
             workspace_id,

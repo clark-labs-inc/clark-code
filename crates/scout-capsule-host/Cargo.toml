@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "Digest-pinned, resource-limited WebAssembly host for Clark Scout capsules."
+description = "Digest-pinned, resource-limited WebAssembly host for Scout capsules."
 
 [dependencies]
 base64 = "0.23"

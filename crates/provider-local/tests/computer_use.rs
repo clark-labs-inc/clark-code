@@ -1,6 +1,5 @@
 //! Full model/tool-loop simulation for computer use. The fake coding model is
-//! configured as Kimi K3, while screenshot understanding stays on Clark Code's
-//! dedicated Qwen vision path.
+//! configured independently from the host-provided screenshot-understanding model.
 
 mod support;
 
@@ -13,7 +12,7 @@ use serde_json::json;
 use support::{final_body, plain_body, scripted_model, tool_call_body};
 
 #[tokio::test]
-async fn kimi_k3_uses_qwen_vision_for_computer_observations() {
+async fn coding_and_vision_models_are_host_configured_independently() {
     let target = json!({
         "app_bundle_id": SimulatedComputerBackend::BUNDLE_ID,
         "pid": 42_424,
@@ -38,7 +37,7 @@ async fn kimi_k3_uses_qwen_vision_for_computer_observations() {
                     "reason": "enter text into the local test field",
                     "observation_id": "sim-observation-0",
                     "element_id": "ax-1",
-                    "text": "hello from Kimi K3",
+                    "text": "hello from the coding model",
                     "replace": true,
                 }),
             ),
@@ -88,7 +87,8 @@ async fn kimi_k3_uses_qwen_vision_for_computer_observations() {
             cwd: Some(project.path().to_string_lossy().into_owned()),
             extra: json!({
                 "base_url": base_url,
-                "model": "clark-code:kimi_k3",
+                "model": "local-model-large",
+                "vision_model": "vision-model",
                 "memories": false,
                 "research": false,
                 "sandbox_mode": "disabled",
@@ -160,20 +160,20 @@ async fn kimi_k3_uses_qwen_vision_for_computer_observations() {
     assert_eq!(
         requests
             .iter()
-            .filter(|request| request.model() == Some("clark-code:kimi_k3"))
+            .filter(|request| request.model() == Some("local-model-large"))
             .count(),
         10
     );
     assert_eq!(
         requests
             .iter()
-            .filter(|request| request.model() == Some("qwen/qwen3.7-flash"))
+            .filter(|request| request.model() == Some("vision-model"))
             .count(),
         3
     );
     assert!(requests
         .iter()
-        .filter(|request| request.model() == Some("qwen/qwen3.7-flash"))
+        .filter(|request| request.model() == Some("vision-model"))
         .all(|request| request.image_urls().len() == 1));
     let first_vision_request = &requests[3];
     let image_urls = first_vision_request.image_urls();
@@ -182,7 +182,7 @@ async fn kimi_k3_uses_qwen_vision_for_computer_observations() {
     assert!(requests[8]
         .tool_results()
         .iter()
-        .any(|result| result.contains("hello from Kimi K3")));
+        .any(|result| result.contains("hello from the coding model")));
     assert!(requests[8]
         .tool_results()
         .iter()

@@ -18,8 +18,8 @@ async fn git(root: &Path, command: &str) {
 async fn identifies_clone_equivalent_repository_by_remote() {
     let dir = tempfile::tempdir().unwrap();
     git(dir.path(), "init").await;
-    git(dir.path(), "config user.name Clark").await;
-    git(dir.path(), "config user.email clark@example.com").await;
+    git(dir.path(), "config user.name Agent-Desktop").await;
+    git(dir.path(), "config user.email agent@example.com").await;
     tokio::fs::write(dir.path().join("README.md"), "hello")
         .await
         .unwrap();
@@ -27,7 +27,7 @@ async fn identifies_clone_equivalent_repository_by_remote() {
     git(dir.path(), "commit -m initial").await;
     git(
         dir.path(),
-        "remote add origin git@github.com:Clark-Labs-Inc/Clark.git",
+        "remote add origin git@github.com:example/project.git",
     )
     .await;
 
@@ -37,15 +37,15 @@ async fn identifies_clone_equivalent_repository_by_remote() {
         .unwrap();
     assert_eq!(
         identity.canonical_remote.as_deref(),
-        Some("github.com/clark-labs-inc/clark")
+        Some("github.com/example/project")
     );
     assert!(identity.fingerprint.starts_with("git:"));
     assert_eq!(identity.commit_count, 1);
 
     let relocated = tempfile::tempdir().unwrap();
     git(relocated.path(), "init").await;
-    git(relocated.path(), "config user.name Clark").await;
-    git(relocated.path(), "config user.email clark@example.com").await;
+    git(relocated.path(), "config user.name Agent-Desktop").await;
+    git(relocated.path(), "config user.email agent@example.com").await;
     tokio::fs::write(relocated.path().join("README.md"), "hello elsewhere")
         .await
         .unwrap();
@@ -53,7 +53,7 @@ async fn identifies_clone_equivalent_repository_by_remote() {
     git(relocated.path(), "commit -m relocated").await;
     git(
         relocated.path(),
-        "remote add origin https://github.com/clark-labs-inc/clark.git",
+        "remote add origin https://github.com/example/project.git",
     )
     .await;
 
@@ -69,8 +69,8 @@ async fn identifies_clone_equivalent_repository_by_remote() {
 async fn history_is_paged_and_preserves_commit_metadata() {
     let dir = tempfile::tempdir().unwrap();
     git(dir.path(), "init").await;
-    git(dir.path(), "config user.name Clark").await;
-    git(dir.path(), "config user.email clark@example.com").await;
+    git(dir.path(), "config user.name Agent-Desktop").await;
+    git(dir.path(), "config user.email agent@example.com").await;
     for index in 0..3 {
         tokio::fs::write(dir.path().join("value.txt"), index.to_string())
             .await
@@ -86,7 +86,7 @@ async fn history_is_paged_and_preserves_commit_metadata() {
     assert_eq!(first.commits.len(), 2);
     assert!(!first.complete);
     assert_eq!(first.next_offset, 2);
-    assert_eq!(first.commits[0].author_name, "Clark");
+    assert_eq!(first.commits[0].author_name, "Agent-Desktop");
     let second = load_git_history(&LocalExecutor, dir.path(), first.next_offset, 2)
         .await
         .unwrap()
@@ -99,8 +99,8 @@ async fn history_is_paged_and_preserves_commit_metadata() {
 async fn working_tree_snapshot_lists_dirty_and_untracked() {
     let dir = tempfile::tempdir().unwrap();
     git(dir.path(), "init").await;
-    git(dir.path(), "config user.name Clark").await;
-    git(dir.path(), "config user.email clark@example.com").await;
+    git(dir.path(), "config user.name Agent-Desktop").await;
+    git(dir.path(), "config user.email agent@example.com").await;
     tokio::fs::write(dir.path().join("a.txt"), "one")
         .await
         .unwrap();
@@ -162,8 +162,8 @@ async fn discovers_nested_git_repositories() {
         let root = parent.path().join(name);
         tokio::fs::create_dir_all(&root).await.unwrap();
         git(&root, "init").await;
-        git(&root, "config user.name Clark").await;
-        git(&root, "config user.email clark@example.com").await;
+        git(&root, "config user.name Agent Desktop").await;
+        git(&root, "config user.email agent@example.com").await;
         tokio::fs::write(root.join("README.md"), name)
             .await
             .unwrap();

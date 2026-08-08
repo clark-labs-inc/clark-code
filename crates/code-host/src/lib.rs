@@ -1,4 +1,4 @@
-//! Reusable control plane for unattended Clark Code runtimes.
+//! Reusable control plane for unattended coding-agent runtimes.
 //!
 //! `code-host` deliberately knows nothing about a model, shell, filesystem
 //! executor, or desktop UI. It owns the stable boundaries that every

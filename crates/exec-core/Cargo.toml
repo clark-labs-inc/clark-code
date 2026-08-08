@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "The process-local Executor abstraction shared by Clark providers and durable workers."
+description = "The process-local Executor abstraction shared by providers and durable workers."
 
 [dependencies]
 async-trait.workspace = true

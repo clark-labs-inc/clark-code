@@ -97,7 +97,7 @@ describe("composer drafts", () => {
 
   it("migrates legacy plain text into a revision-aware local envelope", () => {
     localStorage.setItem(
-      "clark.composer-draft.v1.account-one.chat-one",
+      "agent-desktop.composer-draft.v1.account-one.chat-one",
       "legacy draft",
     );
     expect(loadComposerDraftRecord(owner, "chat-one")).toEqual({

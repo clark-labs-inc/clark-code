@@ -79,7 +79,7 @@ export function settleRuns(snapshot: Snapshot): Snapshot {
     goal = {
       ...goal,
       status: "blocked",
-      blocker_reason: "Clark stopped before the goal finished.",
+      blocker_reason: "the agent stopped before the goal finished.",
     };
     changed = true;
   }

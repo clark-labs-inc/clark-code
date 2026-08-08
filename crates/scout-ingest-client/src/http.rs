@@ -30,7 +30,7 @@ impl ReqwestTransportConfig {
         platform_api_key: impl AsRef<str>,
     ) -> Result<Self, String> {
         let mut endpoint = Url::parse(platform_base_url.as_ref())
-            .map_err(|_| "invalid Clark Platform base URL".to_string())?;
+            .map_err(|_| "invalid platform base URL".to_string())?;
         validate_platform_url(&endpoint)?;
         endpoint.set_path(INGEST_PATH);
         endpoint.set_query(None);
@@ -38,10 +38,10 @@ impl ReqwestTransportConfig {
 
         let platform_api_key = platform_api_key.as_ref();
         if platform_api_key.is_empty() || platform_api_key.trim() != platform_api_key {
-            return Err("Clark Platform API key must be a non-empty HTTP header value".into());
+            return Err("platform API key must be a non-empty HTTP header value".into());
         }
         let mut authorization = HeaderValue::from_str(&format!("Bearer {platform_api_key}"))
-            .map_err(|_| "Clark Platform API key is not a valid HTTP header value".to_string())?;
+            .map_err(|_| "platform API key is not a valid HTTP header value".to_string())?;
         authorization.set_sensitive(true);
 
         Ok(Self {
@@ -69,7 +69,7 @@ pub struct ReqwestCentralIngestTransport {
 
 impl ReqwestCentralIngestTransport {
     pub fn new(config: ReqwestTransportConfig) -> Result<Self, String> {
-        let client = clark_http::build_client(clark_http::ClientOptions {
+        let client = desktop_http::build_client(desktop_http::ClientOptions {
             request_timeout: Some(config.request_timeout),
             ..Default::default()
         })
@@ -113,12 +113,12 @@ impl CentralIngestTransport for ReqwestCentralIngestTransport {
 
 fn validate_platform_url(endpoint: &Url) -> Result<(), String> {
     if !endpoint.username().is_empty() || endpoint.password().is_some() {
-        return Err("Clark Platform base URL must not contain credentials".into());
+        return Err("platform base URL must not contain credentials".into());
     }
     match endpoint.scheme() {
         "https" => Ok(()),
         "http" if is_loopback_host(endpoint.host_str()) => Ok(()),
-        _ => Err("Clark Platform base URL must use HTTPS".into()),
+        _ => Err("platform base URL must use HTTPS".into()),
     }
 }
 

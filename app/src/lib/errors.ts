@@ -1,38 +1,15 @@
 import type { RunOutcome } from "../core-bridge/types";
+import { productModule } from "../product/productModule";
 
 // Run failures use the typed provider contract below. `humanizeError` remains
 // only for non-run errors and legacy records that predate `failure_kind`.
 
-export function isIncludedWeeklyAllowanceExhausted(
-  outcome?: Pick<RunOutcome, "failure_kind" | "error">,
-): boolean {
-  return outcome?.failure_kind === "insufficient_credits"
-    && outcome.error?.toLowerCase().includes("included weekly usage") === true;
-}
-
-export type CreditFailureSurface = "upgrade" | "weekly_reset" | "generic" | null;
-
-/** Select exactly one visible surface for a typed credits failure. Account
- * billing and provider admission are separate authorities, so a mismatch must
- * fall back to a useful error instead of rendering nothing. */
-export function creditFailureSurface(
-  outcome: Pick<RunOutcome, "failure_kind" | "error"> | undefined,
-  includedModel: boolean,
-  billingNeedsAction: boolean,
-): CreditFailureSurface {
-  if (outcome?.failure_kind !== "insufficient_credits") return null;
-  if (includedModel && isIncludedWeeklyAllowanceExhausted(outcome)) return "weekly_reset";
-  if (!includedModel && billingNeedsAction) return "upgrade";
-  return "generic";
-}
-
 /** Native account-authority failures are deliberately distinct from ordinary
  * provider authentication errors. They mean the desktop's two process halves
- * no longer agree about which Clark account owns cloud state. */
-export function isClarkAccountReconnectError(raw?: string | null): boolean {
-  const value = (raw ?? "").toLowerCase();
-  return value.includes("clark_account_mismatch:")
-    || value.includes("clark credentials do not match the active signed-in account");
+ * no longer agree about which product account owns cloud state. */
+export function isAccountReconnectError(raw?: string | null): boolean {
+  const value = (raw ?? "").trim();
+  return value ? productModule().errors.isAccountReconnectError(value) : false;
 }
 
 /** Map a typed terminal run failure to product language. */
@@ -41,9 +18,9 @@ export function humanizeRunFailure(
 ): string {
   switch (outcome?.failure_kind) {
     case "session_expired":
-      return "Your Clark sign-in expired. Sign in again.";
+      return "Your the agent sign-in expired. Sign in again.";
     case "platform_key_rejected":
-      return "Clark Code’s access key was rejected. Reconnect Clark Code and try again.";
+      return "Agent Desktop’s access key was rejected. Reconnect Agent Desktop and try again.";
     case "rate_limited":
       return "The model is busy right now (rate-limited). Give it a moment and try again.";
     case "transport_error":
@@ -53,20 +30,17 @@ export function humanizeRunFailure(
     case "context_overflow":
       return "This conversation is too long for the model’s context window. Start a new session.";
     case "insufficient_credits":
-      if (isIncludedWeeklyAllowanceExhausted(outcome)) {
-        return "Your included weekly usage is used up. It resets on Monday.";
-      }
-      return "Clark Code’s usage limit has been reached.";
+      return "The selected provider’s usage limit has been reached.";
     case "tool_fatal":
       return "A coding action failed unexpectedly. Review the last step and try again.";
     case "local_state":
-      return "Clark Code couldn’t continue this run. Start another run and try again.";
+      return "Agent Desktop couldn’t continue this run. Start another run and try again.";
     case "iteration_limit":
       return "This run reached its step limit. Continue in this task to resume from the saved work.";
     case "runtime_interrupted":
-      return "Clark restarted before this run finished. Continue from the saved history.";
+      return "the agent restarted before this run finished. Continue from the saved history.";
     case "verification_incomplete":
-      return "Clark finished its answer, but couldn’t independently verify one or more external changes. Review those actions before relying on them.";
+      return "the agent finished its answer, but couldn’t independently verify one or more external changes. Review those actions before relying on them.";
     case "empty_response":
       return "The model returned no response. Please try again.";
     default:
@@ -80,8 +54,8 @@ export function humanizeError(raw?: string | null): string {
   if (!s) return "Something went wrong. Please try again.";
   const lower = s.toLowerCase();
 
-  if (isClarkAccountReconnectError(s)) {
-    return "Clark needs to reconnect your account. Sign out and sign in again.";
+  if (isAccountReconnectError(s)) {
+    return "the agent needs to reconnect your account. Sign out and sign in again.";
   }
 
   // Defense in depth for older hosts or an accidentally reintroduced goal
@@ -100,7 +74,7 @@ export function humanizeError(raw?: string | null): string {
     || lower.includes("serde")
     || lower.includes("deserialization")
   ) {
-    return "Clark Code couldn’t restore this conversation. Please try again.";
+    return "Agent Desktop couldn’t restore this conversation. Please try again.";
   }
 
   // Rate limited — the most common one, and what the screenshot showed.
@@ -116,7 +90,7 @@ export function humanizeError(raw?: string | null): string {
 
   // Out of credits (normally handled by the upgrade prompt, but just in case).
   if (lower.includes("insufficient_credits") || lower.includes("out of credit")) {
-    return "Clark Code’s usage limit has been reached.";
+    return "Agent Desktop’s usage limit has been reached.";
   }
 
   // Context window exceeded.

@@ -53,7 +53,7 @@ pub(super) async fn search(
     args.push(scope.to_string_lossy().into_owned());
 
     let process = match ctx.executor.prepare_process(
-        exec_core::ProcessSpec::argv(clark_install_context::rg_command(), root).args(args),
+        exec_core::ProcessSpec::argv(desktop_install_context::rg_command(), root).args(args),
     ) {
         Ok(process) => process,
         Err(error) => return Some(ToolOutcome::error(error)),

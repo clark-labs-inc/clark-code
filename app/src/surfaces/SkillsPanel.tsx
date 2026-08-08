@@ -213,7 +213,7 @@ export function SkillsPanel(props: SkillsPanelProps) {
               Managed packs
             </h3>
             <p className="mt-1 text-xs leading-relaxed text-ink-muted">
-              Import a pack from this {props.remote ? "remote" : "local"} environment. Clark
+              Import a pack from this {props.remote ? "remote" : "local"} environment. the agent
               validates it, pins a content revision, and updates it atomically.
             </p>
             <div className="mt-3 space-y-2">

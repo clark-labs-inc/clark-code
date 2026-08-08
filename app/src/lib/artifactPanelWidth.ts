@@ -1,4 +1,4 @@
-export const ARTIFACT_PANEL_WIDTH_KEY = "clark.artifact-panel-width";
+export const ARTIFACT_PANEL_WIDTH_KEY = "agent-desktop.artifact-panel-width";
 export const DEFAULT_ARTIFACT_PANEL_WIDTH = 640;
 export const MIN_ARTIFACT_PANEL_WIDTH = 420;
 export const MIN_CONVERSATION_PANEL_WIDTH = 320;

@@ -1,7 +1,7 @@
 # `code-host`
 
-`code-host` is the reusable, provider-neutral control plane for headless Clark
-Code. It owns the boundaries that must stay stable while workers and plugins
+`code-host` is the reusable, provider-neutral control plane for headless coding
+agents. It owns the boundaries that must stay stable while workers and plugins
 change:
 
 - registered project IDs resolve to canonical roots; request payloads cannot

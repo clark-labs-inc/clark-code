@@ -32,7 +32,7 @@ pub(super) fn poc_ledger(inventory_id: &str) -> SecurityPocLedger {
                 exit_code: Some(0),
                 passed: true,
                 containment: "managed_disposable".into(),
-                artifact_path: format!(".clark/security-scans/scan-1/poc/{receipt_id}.json"),
+                artifact_path: format!(".agent/security-scans/scan-1/poc/{receipt_id}.json"),
                 execution: None,
             })
             .unwrap();

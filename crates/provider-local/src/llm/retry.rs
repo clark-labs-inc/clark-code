@@ -27,9 +27,6 @@ const MAX_REQUEST_ATTEMPTS: usize = 1
     + MAX_TRANSIENT_RETRIES
     + MAX_AUTH_RETRIES
     + MAX_COMPATIBILITY_FALLBACKS;
-const CLARK_CODE_SAFE_HAVEN_MODEL: &str = "clark-code:free";
-const CLARK_CODE_SAFE_HAVEN_REASON: &str = "unsupported_model_option";
-
 /// Classify the provider's context-overflow dialect while the response is
 /// still at the model transport boundary.
 fn is_context_overflow_message(message: &str) -> bool {
@@ -57,7 +54,7 @@ enum AttemptError {
     RateLimited(RetryableFailure),
     Transient(RetryableFailure),
     PlatformKeyRejected(String),
-    UnsupportedClarkCodeModel(String),
+    UnsupportedModel(String),
 }
 
 impl From<LlmError> for AttemptError {
@@ -93,7 +90,7 @@ where
 impl RetryState {
     fn new() -> Self {
         Self {
-            idempotency_key: format!("clark-code-{}", Uuid::new_v4()),
+            idempotency_key: format!("model-request-{}", Uuid::new_v4()),
             request_started_at_ms: recovery::now_ms(),
             request_attempts: 0,
             rate_limit_retries: 0,
@@ -105,7 +102,7 @@ impl RetryState {
 
 impl LlmClient {
     /// Stream one chat completion, transparently replaying retryable transport
-    /// failures and one exact Clark model-compatibility rejection only before
+    /// failures and one exact host-configured model-compatibility rejection only before
     /// the attempt has emitted user-visible output.
     pub(crate) async fn stream_chat(
         &self,
@@ -192,27 +189,34 @@ impl LlmClient {
                     metadata.fallback_model = fallback_model.clone();
                     metadata.fallback_reason = fallback_model
                         .as_ref()
-                        .map(|_| CLARK_CODE_SAFE_HAVEN_REASON.to_string());
+                        .and(self.model_fallback.as_ref())
+                        .map(|policy| policy.reason.clone());
                     return Ok(turn);
                 }
                 Err(AttemptError::Terminal(error)) => return Err(error),
-                Err(AttemptError::UnsupportedClarkCodeModel(_message))
+                Err(AttemptError::UnsupportedModel(_message))
                     if fallback_model.is_none()
-                        && self.model.starts_with("clark-code:")
-                        && self.model != CLARK_CODE_SAFE_HAVEN_MODEL =>
+                        && self
+                            .model_fallback
+                            .as_ref()
+                            .is_some_and(|policy| self.model != policy.model) =>
                 {
+                    let policy = self
+                        .model_fallback
+                        .as_ref()
+                        .expect("guard requires fallback policy");
                     tracing::warn!(
                         requested_model = self.model,
-                        fallback_model = CLARK_CODE_SAFE_HAVEN_MODEL,
-                        "Clark gateway rejected the selected model alias; retrying once with the included safe-haven model",
+                        fallback_model = policy.model,
+                        "managed model endpoint rejected the selected alias; retrying once with the host fallback model",
                     );
-                    request_model = CLARK_CODE_SAFE_HAVEN_MODEL.to_string();
+                    request_model = policy.model.clone();
                     fallback_model = Some(request_model.clone());
                     // The body changes with the model alias, so this is a new
                     // idempotent request lane rather than a transport replay.
-                    retry.idempotency_key = format!("clark-code-{}", Uuid::new_v4());
+                    retry.idempotency_key = format!("model-fallback-{}", Uuid::new_v4());
                 }
-                Err(AttemptError::UnsupportedClarkCodeModel(message)) => {
+                Err(AttemptError::UnsupportedModel(message)) => {
                     return Err(LlmError::Provider(message));
                 }
                 Err(AttemptError::RateLimited(failure))
@@ -277,7 +281,7 @@ impl LlmClient {
                     tracing::warn!(
                         retry = retry.auth_retries,
                         max_retries = MAX_AUTH_RETRIES,
-                        "Clark API rejected the current platform key; retrying once",
+                        "Agent Desktop API rejected the current platform key; retrying once",
                     );
                 }
                 Err(AttemptError::PlatformKeyRejected(message)) => {
@@ -399,8 +403,13 @@ impl LlmClient {
             if access_failure == Some(RunFailureKind::PlatformKeyRejected) {
                 return Err(AttemptError::PlatformKeyRejected(message));
             }
-            if status.as_u16() == 400 && is_unknown_clark_code_model_option(&body) {
-                return Err(AttemptError::UnsupportedClarkCodeModel(message));
+            if status.as_u16() == 400
+                && self
+                    .model_fallback
+                    .as_ref()
+                    .is_some_and(|policy| is_configured_model_rejection(&body, policy))
+            {
+                return Err(AttemptError::UnsupportedModel(message));
             }
             if access_failure == Some(RunFailureKind::RateLimited) {
                 return Err(AttemptError::RateLimited(RetryableFailure {
@@ -581,19 +590,19 @@ fn retry_after_body(body: &str) -> Option<Duration> {
         .and_then(retry_after_from_metadata)
 }
 
-fn is_unknown_clark_code_model_option(body: &str) -> bool {
+fn is_configured_model_rejection(body: &str, policy: &crate::config::ModelFallbackPolicy) -> bool {
     let Ok(payload) = serde_json::from_str::<Value>(body) else {
         return false;
     };
     let Some(error) = payload.get("error") else {
         return false;
     };
-    error.get("type").and_then(Value::as_str) == Some("invalid_request_error")
-        && error.get("param").and_then(Value::as_str) == Some("model")
+    error.get("type").and_then(Value::as_str) == Some(policy.error_type.as_str())
+        && error.get("param").and_then(Value::as_str) == Some(policy.error_param.as_str())
         && error
             .get("message")
             .and_then(Value::as_str)
-            .is_some_and(|message| message.eq_ignore_ascii_case("Unknown clark-code model option."))
+            .is_some_and(|message| message.eq_ignore_ascii_case(&policy.error_message))
 }
 
 fn rate_limit_delay(server_hint: Option<Duration>, retry: usize) -> Duration {

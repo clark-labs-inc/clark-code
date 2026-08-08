@@ -8,7 +8,7 @@ import { liveSessions, newLiveEntry } from "./sessionStore.runtime";
 // local message can still steer the live run when the user explicitly asks.
 
 const localSession = { id: "sess-1", provider: "local" } as unknown as Session;
-const cloudSession = { id: "conv-1", provider: "clark" } as unknown as Session;
+const cloudSession = { id: "conv-1", provider: "local" } as unknown as Session;
 
 function busySnapshot(sessionId: string): Snapshot {
   return {

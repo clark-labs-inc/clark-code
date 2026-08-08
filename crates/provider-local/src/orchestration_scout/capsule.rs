@@ -117,7 +117,7 @@ impl ToolExecutor for ScoutCapsuleTool {
         };
         let root = match ctx
             .sandbox
-            .resolve_host_managed(".clark/scout/capsules/private")
+            .resolve_host_managed(".agent/scout/capsules/private")
         {
             Ok(root) => root,
             Err(error) => return ToolOutcome::error(error),

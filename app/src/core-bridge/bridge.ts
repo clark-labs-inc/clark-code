@@ -129,7 +129,7 @@ export interface ManagedWorktree {
   baseReference: string;
   baseRevision: string;
   headRevision?: string | null;
-  /** Local branch Clark created to protect detached commits before archival. */
+  /** Local branch the agent created to protect detached commits before archival. */
   preservedBranch?: string | null;
   createdAtMs: number;
   state: ManagedWorktreeState;
@@ -243,7 +243,7 @@ export interface SkillCatalogEntry {
   invocationName: string;
   description: string;
   scope: "bundled" | "project" | "user";
-  origin: "clark" | "compatible" | "claude" | "plugin";
+  origin: "bundled" | "compatible" | "claude" | "plugin";
   source: string;
   requiredTools: string[];
   missingTools: string[];
@@ -277,7 +277,7 @@ export interface SkillCatalogChange {
 export interface InstructionProvenance {
   path: string;
   scope: "personal" | "project" | "nested";
-  origin: "clark" | "compatible" | "claude";
+  origin: "agent_home" | "compatible" | "claude";
   precedence: number;
   bytesLoaded: number;
   truncated: boolean;
@@ -318,7 +318,7 @@ export interface SkillPackOperationResult {
 
 export interface CoreBridge {
   listProviders(): Promise<ProviderInfo[]>;
-  /** Versioned first-party specialist manifests embedded in and protected by
+  /** Versioned product specialist manifests embedded in and protected by
    * the native app bundle. */
   listSpecialistCatalog?(): Promise<SpecialistCatalogAttestation>;
   /** Allocate or reopen an app-managed checkout for a repository-free chat. */
@@ -337,7 +337,7 @@ export interface CoreBridge {
   /** Drop a live session — destroys its provider and any running agent loop.
    *  Only called on archive/delete/sign-out; switching never closes. */
   closeSession?(sessionId: string): Promise<void>;
-  /** Bind the native event stream to Clark's append-only trajectory store.
+  /** Bind the native event stream to the agent's append-only trajectory store.
    * Native prompts are rejected until this succeeds, making the cloud the
    * durable source before local projection begins. */
   configureCloudTrajectory?(
@@ -349,11 +349,11 @@ export interface CoreBridge {
   /** The native trajectory sync hit a 401. Returns an unsubscribe fn; refreshing
    *  through native Google exchange rotates the host-owned credential. */
   onCloudAuthExpired?(handler: () => void): () => void;
-  /** Clear the native Clark credential and account binding during sign-out. */
+  /** Clear the native the agent credential and account binding during sign-out. */
   /** Best-effort cloud sync failed for part of a run (the run itself keeps
    *  going) — surface a non-blocking warning. Returns an unsubscribe fn. */
   onCloudSyncWarning?(handler: (message: string) => void): () => void;
-  /** A native Scientist/RSI projection was durably accepted by Clark
+  /** A native Scientist/RSI projection was durably accepted by the agent
    * cloud and its canvas can refresh from the authoritative endpoint. */
   onSpecialistProjectionPublished?(
     handler: (receipt: SpecialistProjectionPublished) => void,
@@ -400,7 +400,7 @@ export interface CoreBridge {
   listGlobalMemory?(): Promise<MemoryOverview>;
   /** Project-relative file paths under `cwd`, for the `@`-mention picker. */
   listFiles?(cwd: string, remote?: RemoteWorkerTarget | null): Promise<string[]>;
-  /** Canonical Clark Security bundles and seals under the selected checkout. */
+  /** Canonical Security scanner bundles and seals under the selected checkout. */
   listSecurityScans?(
     cwd: string,
     remote?: RemoteWorkerTarget | null,
@@ -470,14 +470,14 @@ export interface CoreBridge {
     projectPath: string,
     targetBranch?: string | null,
   ): Promise<ProjectWorktreeTransitionPlan>;
-  /** Create a branch-backed Clark-managed worktree from the selected base. */
+  /** Create a branch-backed the agent-managed worktree from the selected base. */
   createManagedWorktree?(
     projectPath: string,
     request: ManagedWorktreeRequest,
   ): Promise<ManagedWorktree>;
-  /** List only Clark-managed worktrees for a repository. */
+  /** List only the agent-managed worktrees for a repository. */
   listManagedWorktrees?(projectPath: string): Promise<ManagedWorktree[]>;
-  /** Explicitly remove one clean Clark-managed worktree. */
+  /** Explicitly remove one clean the agent-managed worktree. */
   cleanupManagedWorktree?(
     projectPath: string,
     id: string,
@@ -517,7 +517,7 @@ let loading: Promise<CoreBridge> | null = null;
  * Returns the right bridge:
  * - the Tauri-backed bridge inside the desktop app;
  * - the DevBridge (real providers via the `devbridge` server) when the page is
- *   loaded with `?dev` — used for headless real-Clark testing and video;
+ *   loaded with `?dev` — used for headless real-the agent testing and video;
  * - the mock otherwise (plain browser preview).
  */
 export async function getBridge(): Promise<CoreBridge> {

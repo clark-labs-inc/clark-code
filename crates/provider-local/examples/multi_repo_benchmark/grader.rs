@@ -435,7 +435,7 @@ fn capability_check(
                 .map(|repo| repo.id.as_str())
                 .collect::<BTreeSet<_>>();
             let covered = result.tasks.iter().any(|task| {
-                task.harness == "clark-cloud"
+                task.harness == "brokered-cloud"
                     && task
                         .repo_id
                         .as_deref()
@@ -443,7 +443,7 @@ fn capability_check(
             });
             (
                 covered,
-                "cloud-only repository is assigned to a Clark Cloud worker".into(),
+                "cloud-only repository is assigned to a brokered cloud worker".into(),
                 HardFailure::CloudWorkerMissing,
             )
         }

@@ -1,7 +1,7 @@
 interface:
   display_name: "Security Deep"
   short_description: "Run independent security passes to saturation"
-  default_prompt: "Use $security:security-deep to run a bounded exhaustive security scan over this repository. Root and delegated turns run on host-pinned DeepSeek V4 Flash Latest."
+  default_prompt: "Use $security:security-deep to run a bounded exhaustive security scan over this repository. Root and delegated turns use host-pinned workflow models."
 dependencies:
   tools:
     - type: tool

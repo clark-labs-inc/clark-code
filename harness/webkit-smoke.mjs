@@ -21,8 +21,8 @@ async function availablePort() {
   });
 }
 
-const port = process.env.CLARK_WEBKIT_SMOKE_PORT
-  ? Number(process.env.CLARK_WEBKIT_SMOKE_PORT)
+const port = process.env.AGENT_WEBKIT_SMOKE_PORT
+  ? Number(process.env.AGENT_WEBKIT_SMOKE_PORT)
   : await availablePort();
 const url = `http://127.0.0.1:${port}/`;
 const preview = spawn(
@@ -30,7 +30,7 @@ const preview = spawn(
   ["--dir", "app", "dev", "--host", "127.0.0.1", "--port", String(port), "--strictPort"],
   {
     cwd: root,
-    env: { ...process.env, VITE_CLARK_DEV_AUTH: "0" },
+    env: { ...process.env, VITE_PRODUCT_DEV_AUTH: "0" },
     stdio: ["ignore", "pipe", "pipe"],
   },
 );
@@ -57,21 +57,21 @@ async function verifyStartup(browser, authenticated) {
       const accountScope = "id:webkit-qa";
       const encodedScope = encodeURIComponent(accountScope);
       localStorage.setItem(
-        "clark.desktop.dev-account",
+        "agent-desktop.dev-account",
         JSON.stringify({
           user: { id: "webkit-qa", name: "WebKit QA", method: "local" },
         }),
       );
       localStorage.setItem(
-        `clark-desktop:local-agent:${encodedScope}`,
+        `agent-desktop:local-agent:${encodedScope}`,
         JSON.stringify({
           cwd: "",
-          model: "clark-code:free",
+          model: "local-model",
           reasoningEffort: "high",
         }),
       );
       localStorage.setItem(
-        `clark-desktop:project-context:${encodedScope}`,
+        `agent-desktop:project-context:${encodedScope}`,
         JSON.stringify({ cwd: "/tmp" }),
       );
     });

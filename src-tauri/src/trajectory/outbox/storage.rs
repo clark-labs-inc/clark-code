@@ -26,7 +26,7 @@ pub(super) fn open(path: &Path) -> Result<Connection, String> {
                 database = %path.display(),
                 backup_count = backups.len(),
                 %error,
-                "quarantined corrupt local cloud-history cache; rebuilding from Clark cloud"
+                "quarantined corrupt local cloud-history cache; rebuilding from product cloud"
             );
             open_once(path).map_err(sql_error)
         }

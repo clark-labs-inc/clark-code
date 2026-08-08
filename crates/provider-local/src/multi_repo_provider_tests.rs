@@ -86,7 +86,7 @@ impl Provider for FakeProvider {
             .collect::<Vec<_>>()
             .join("\n");
         let mut terminal_error = None;
-        let final_message = if text.contains("Clark Cloud repository writer") {
+        let final_message = if text.contains("brokered cloud repository writer") {
             self.shared
                 .cloud_attachments
                 .fetch_add(input.attachments.len(), Ordering::SeqCst);
@@ -208,7 +208,7 @@ fn seed(root: &Path, path: &str) {
     std::fs::write(root.join(path), "v1\n").unwrap();
     git(root, &["init", "--quiet"]);
     git(root, &["config", "core.autocrlf", "false"]);
-    git(root, &["config", "user.name", "Clark Test"]);
+    git(root, &["config", "user.name", "Agent Test"]);
     git(root, &["config", "user.email", "test@invalid.local"]);
     git(root, &["add", "--all"]);
     git(root, &["commit", "--quiet", "-m", "baseline"]);
@@ -531,7 +531,7 @@ async fn six_parallel_writers_retry_one_preserve_five_and_apply_all_packages() {
     }
     git(&root, &["init", "--quiet"]);
     git(&root, &["config", "core.autocrlf", "false"]);
-    git(&root, &["config", "user.name", "Clark Large Simulation"]);
+    git(&root, &["config", "user.name", "Agent Large Simulation"]);
     git(
         &root,
         &["config", "user.email", "large-simulation@invalid.local"],

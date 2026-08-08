@@ -13,7 +13,6 @@ path = "src/main.rs"
 [dependencies]
 agent-core = { path = "../agent-core", features = ["native"] }
 provider-acp = { path = "../provider-acp" }
-provider-clark = { path = "../provider-clark" }
 provider-local = { path = "../provider-local" }
 serde.workspace = true
 serde_json.workspace = true

@@ -109,7 +109,9 @@ function sourceTitle(call?: ToolCall): string {
   if (!call) return "Produced during this conversation";
   if (call.kind === "research") {
     const query = (call.raw_input as { query?: string } | undefined)?.query;
-    return query ? `Researched ${query}` : call.title.replace(/^clark_research:\s*/i, "Researched ");
+    return query
+      ? `Researched ${query}`
+      : call.title.replace(/^[a-z][a-z0-9_]*:\s*/i, "Researched ");
   }
   return call.title;
 }
@@ -187,7 +189,7 @@ function GenericPreview({ artifact }: { artifact: Artifact }) {
         <p className="mx-auto mt-5 max-w-md text-sm leading-relaxed text-ink-muted">
           {availability === "unavailable"
             ? "This artifact does not currently have a readable file or link. Its source remains available for context."
-            : "Clark keeps this artifact in your workspace without embedding an unreliable preview. Its source and location remain visible here."}
+            : "the agent keeps this artifact in your workspace without embedding an unreliable preview. Its source and location remain visible here."}
         </p>
         {canOpenArtifactExternally(artifact) && (
           <button
@@ -238,7 +240,7 @@ function ArtifactPreview({
             </span>
             <h1 className="mt-4 font-display text-2xl text-ink">Couldn’t display this Markdown</h1>
             <p className="mx-auto mt-3 max-w-md text-sm leading-relaxed text-ink-muted">
-              Clark couldn’t read the document source. The file may have moved or may no longer be on this device.
+              the agent couldn’t read the document source. The file may have moved or may no longer be on this device.
             </p>
             <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
               <button
@@ -392,7 +394,7 @@ function ContextPopover({
       )}
       {panel === "versions" && (
         <div className="p-4">
-          <div className="rounded-lg border border-border-subtle bg-bg-primary p-3">
+          <div className="rounded-lg border border-border-subtle bg-bg p-3">
             <div className="flex items-center gap-2 text-sm font-medium text-ink">
               <span className={cn("size-2 rounded-full", availability === "unavailable" ? "bg-ink-faint" : "bg-success")} />
               {availability === "unavailable" ? "No available version" : "Current"}
@@ -769,7 +771,7 @@ export function ArtifactWorkspace({
             presenting={presenting}
           />
         </div>
-        <nav aria-label="Artifact context" className={cn("flex min-w-14 shrink-0 flex-col items-center gap-1 border-l border-border-subtle bg-bg-primary py-2", presenting && "hidden")}>
+        <nav aria-label="Artifact context" className={cn("flex min-w-14 shrink-0 flex-col items-center gap-1 border-l border-border-subtle bg-bg py-2", presenting && "hidden")}>
           {([
             ["details", Info, "Details"],
             ["versions", Clock3, "Versions"],

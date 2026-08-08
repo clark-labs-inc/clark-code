@@ -103,7 +103,7 @@ pub fn tree_digest(root: &Path) -> Result<String, DynError> {
         .collect::<Vec<_>>();
     files.sort();
     let mut hasher = Sha256::new();
-    hasher.update(b"clark-skill-experience-source-v1\0");
+    hasher.update(b"agent-skill-experience-source-v1\0");
     for file in files {
         hasher.update(file.strip_prefix(root)?.to_string_lossy().as_bytes());
         hasher.update(b"\0");
@@ -129,9 +129,9 @@ pub fn init_repository(root: &Path) -> Result<(), DynError> {
 }
 
 pub fn seed_instructions(repository: &Path, selected: &Path, home: &Path) -> Result<(), DynError> {
-    std::fs::create_dir_all(home.join(".clark"))?;
+    std::fs::create_dir_all(home.join(".agent"))?;
     std::fs::write(
-        home.join(".clark/AGENTS.md"),
+        home.join(".agent/AGENTS.md"),
         "READ_BENCH_PERSONAL_INSTRUCTION\n",
     )?;
     std::fs::write(

@@ -8,15 +8,15 @@ use std::sync::Arc;
 
 use agent_core::domain as desktop;
 use agent_core::ids::{RunId, SessionId, ToolCallId};
+use agent_loop as ca;
 use async_channel::Sender;
 use async_trait::async_trait;
-use clark_agent as ca;
 use futures::{stream::BoxStream, StreamExt};
 use serde_json::{json, Value};
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
-use crate::config::AgenticClarkConfig;
+use crate::config::AuxiliaryModelConfig;
 use crate::llm::{AssistantTurn, LlmClient};
 #[cfg(test)]
 use crate::llm::{ChatContent, ContentPart};
@@ -64,7 +64,7 @@ impl UsageTotals {
 }
 
 #[derive(Clone)]
-pub(crate) struct ClarkAgentStream {
+pub(crate) struct AgentLoopStream {
     llm: LlmClient,
     totals: Arc<UsageTotals>,
     incidents: crate::incidents::ProviderIncidentTracker,
@@ -101,7 +101,7 @@ fn execution_budget_state(
     }
 }
 
-impl ClarkAgentStream {
+impl AgentLoopStream {
     pub fn new(
         llm: LlmClient,
         incidents: crate::incidents::ProviderIncidentTracker,
@@ -130,7 +130,7 @@ impl ClarkAgentStream {
 }
 
 #[async_trait]
-impl ca::StreamFn for ClarkAgentStream {
+impl ca::StreamFn for AgentLoopStream {
     async fn stream(
         &self,
         request: ca::StreamRequest,
@@ -347,14 +347,14 @@ impl ca::StreamFn for ClarkAgentStream {
                             })
                             .await;
                     }
-                    // GLM 5.2 over the Clark passthrough often ends a turn with
+                    // Some reasoning models over compatible gateways end a turn with
                     // its whole output in the OpenRouter `reasoning` field —
                     // empty `content`, no `tool_calls`, `finish_reason: stop`.
                     // Our accumulator reads only `content`/`tool_calls`, so that
                     // lands here as a genuinely empty turn. Reporting it as a
                     // normal `Done` ends the run with nothing ("second message
                     // did nothing"). Surface it as a zero-output transport so
-                    // clark-agent replays the turn with its built-in recovery
+                    // agent-loop replays the turn with its built-in recovery
                     // rather than succeeding on emptiness. This is a purely
                     // structural check (no output at all) — it never inspects
                     // what the text says.
@@ -453,7 +453,7 @@ pub(crate) struct DesktopToolRegistryOptions {
 #[derive(Clone)]
 pub(crate) struct ToolImagePolicy {
     pub native_image_support: bool,
-    pub vision: Option<AgenticClarkConfig>,
+    pub vision: Option<AuxiliaryModelConfig>,
 }
 
 pub(crate) fn desktop_tool_registry(
@@ -497,7 +497,7 @@ struct DesktopToolAdapter {
     ctx: ToolCtx,
     gate: PermissionGate,
     /// Typed tool effects are normalized against the active run here because
-    /// they are provider-local outcomes, not `clark-agent` stream events.
+    /// they are provider-local outcomes, not `agent-loop` stream events.
     run: RunId,
     events: Sender<desktop::AgentEvent>,
     image_policy: ToolImagePolicy,
@@ -683,7 +683,7 @@ impl ca::AgentTool for DesktopToolAdapter {
                 if !outcome.details.is_object() {
                     outcome.details = json!({});
                 }
-                outcome.details["_clark_post_tool_original_content"] =
+                outcome.details["_agent_post_tool_original_content"] =
                     Value::String(outcome.content.clone());
                 outcome.content = format!(
                     "PostToolUse hook rejected the tool result after execution: {reason}. Inspect canonical state and correct the effect before continuing."
@@ -693,7 +693,7 @@ impl ca::AgentTool for DesktopToolAdapter {
                 if !outcome.details.is_object() {
                     outcome.details = json!({});
                 }
-                outcome.details["_clark_post_tool_original_content"] =
+                outcome.details["_agent_post_tool_original_content"] =
                     Value::String(outcome.content.clone());
                 outcome.content = feedback;
             } else if !post.additional_contexts.is_empty() {

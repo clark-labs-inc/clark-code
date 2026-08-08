@@ -1,30 +1,46 @@
-use super::cloud_authority::current_cloud_access;
+use super::cloud_authority::current_account_access;
 use super::*;
-use conversation_cloud::{
-    ConversationClient, ConversationWrite, CredentialSurface, SpecialistContext,
-};
-use reqwest::StatusCode;
 use tauri::Emitter;
 
-pub(super) fn desktop_conversation_client(
-    rest_base: &str,
-    token: &str,
-) -> Result<ConversationClient, String> {
-    ConversationClient::new(
-        rest_base,
-        token,
-        CredentialSurface::DesktopSession,
-        concat!("clark-desktop/", env!("CARGO_PKG_VERSION")),
-    )
-    .map_err(|error| error.to_string())
+pub(crate) enum ProductCloudOutcome {
+    Ok(Value),
+    Unauthorized(String),
+    NotFound(String),
+    Conflict(String),
+    Unavailable(String),
+    Rejected(String),
 }
 
-fn transient_cloud_read_status(status: StatusCode) -> bool {
-    status.is_server_error()
-        || matches!(
-            status,
-            StatusCode::REQUEST_TIMEOUT | StatusCode::TOO_MANY_REQUESTS
-        )
+pub(crate) async fn product_cloud_request(
+    operation: &str,
+    payload: Value,
+    app: &AppHandle,
+    state: &AppState,
+) -> Result<ProductCloudOutcome, String> {
+    let response = super::product::dispatch_product_request(operation, payload, app, state).await?;
+    let object = response
+        .as_object()
+        .ok_or("product cloud response must be an object")?;
+    let outcome = object
+        .get("outcome")
+        .and_then(Value::as_str)
+        .ok_or("product cloud response has no outcome")?;
+    let error = object
+        .get("error")
+        .and_then(Value::as_str)
+        .unwrap_or("product cloud request failed")
+        .to_string();
+    match outcome {
+        "ok" => Ok(ProductCloudOutcome::Ok(
+            object.get("value").cloned().unwrap_or(Value::Null),
+        )),
+        "unauthorized" => Ok(ProductCloudOutcome::Unauthorized(error)),
+        "not_found" => Ok(ProductCloudOutcome::NotFound(error)),
+        "conflict" => Ok(ProductCloudOutcome::Conflict(error)),
+        "unavailable" => Ok(ProductCloudOutcome::Unavailable(error)),
+        "rejected" => Ok(ProductCloudOutcome::Rejected(error)),
+        _ => Err("product cloud response has an invalid outcome".into()),
+    }
 }
 
 /// List the signed-in user's desktop conversations (metadata only). The cloud
@@ -35,24 +51,27 @@ pub async fn desktop_conv_list(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<Value, String> {
-    let access = current_cloud_access(state.inner()).await?;
-    let token = access.token.clone();
-    let cloud = desktop_conversation_client(&access.rest_base, &token)?
-        .list()
-        .await;
+    let access = current_account_access(state.inner()).await?;
+    let cloud = product_cloud_request(
+        "conversation.list",
+        serde_json::json!({}),
+        &app,
+        state.inner(),
+    )
+    .await?;
     let (rows, cloud_available) = match cloud {
-        Ok(summaries) => (
-            summaries
-                .into_iter()
-                .map(serde_json::to_value)
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|error| format!("desktop list serialization failed: {error}"))?,
-            true,
-        ),
-        Err(error) => {
+        ProductCloudOutcome::Ok(Value::Array(summaries)) => (summaries, true),
+        ProductCloudOutcome::Ok(_) => {
+            return Err("product cloud conversation list is not an array".into())
+        }
+        ProductCloudOutcome::Unavailable(error) => {
             tracing::warn!(%error, "desktop cloud list unavailable; using local acknowledged cache");
             (Vec::new(), false)
         }
+        ProductCloudOutcome::Unauthorized(error)
+        | ProductCloudOutcome::NotFound(error)
+        | ProductCloudOutcome::Conflict(error)
+        | ProductCloudOutcome::Rejected(error) => return Err(error),
     };
     let merged = crate::trajectory::merge_local_summaries(
         crate::trajectory::outbox_path(&app)?,
@@ -71,32 +90,27 @@ pub async fn desktop_conv_get(
     id: String,
     state: State<'_, AppState>,
 ) -> Result<Value, String> {
-    let access = current_cloud_access(state.inner()).await?;
-    let token = access.token.clone();
-    let cloud = desktop_conversation_client(&access.rest_base, &token)?
-        .get(&id)
-        .await;
+    let access = current_account_access(state.inner()).await?;
+    let cloud = product_cloud_request(
+        "conversation.get",
+        serde_json::json!({ "id": id }),
+        &app,
+        state.inner(),
+    )
+    .await?;
     let cloud_detail = match cloud {
-        Ok(detail) => Some(
-            serde_json::to_value(detail)
-                .map_err(|error| format!("desktop get serialization failed: {error}"))?,
-        ),
-        Err(error) => {
-            let status = error
-                .status()
-                .and_then(|value| StatusCode::from_u16(value).ok());
-            if status == Some(StatusCode::UNAUTHORIZED) {
-                let _ = app.emit("cloud-auth-expired", ());
-                return Err(error.to_string());
-            }
-            if status.is_some_and(|status| !transient_cloud_read_status(status)) {
-                // A reachable cloud is authoritative. In particular, never turn
-                // another device's 404 deletion into a local recovery PUT.
-                return Err(error.to_string());
-            }
+        ProductCloudOutcome::Ok(detail) => Some(detail),
+        ProductCloudOutcome::Unauthorized(error) => {
+            let _ = app.emit("cloud-auth-expired", ());
+            return Err(error);
+        }
+        ProductCloudOutcome::Unavailable(error) => {
             tracing::warn!(%error, conversation_id = %id, "desktop cloud get temporarily unavailable; using local acknowledged cache");
             None
         }
+        ProductCloudOutcome::NotFound(error)
+        | ProductCloudOutcome::Conflict(error)
+        | ProductCloudOutcome::Rejected(error) => return Err(error),
     };
     let cloud_snapshot = cloud_detail.as_ref().and_then(|detail| {
         let raw = crate::trajectory::normalize_snapshot_value(detail.get("snapshot")?.clone());
@@ -150,77 +164,9 @@ pub async fn desktop_conv_get(
             Ok(detail)
         }
         (None, None) => Err(format!(
-            "desktop conversation {id} is unavailable locally and in Clark cloud"
+            "desktop conversation {id} is unavailable locally and in product cloud"
         )),
     }
-}
-
-/// Fetch one small composer draft without loading or rewriting its transcript.
-#[tauri::command]
-pub async fn desktop_draft_get(
-    app: AppHandle,
-    draft_key: String,
-    state: State<'_, AppState>,
-) -> Result<Value, String> {
-    let access = current_cloud_access(state.inner()).await?;
-    let token = access.token.clone();
-    let url = format!(
-        "{}/api/desktop/drafts/{}",
-        access.rest_base,
-        urlencoding::encode(&draft_key)
-    );
-    let response = clark_http_client()?
-        .get(url)
-        .header("Authorization", format!("Bearer {token}"))
-        .send()
-        .await
-        .map_err(|error| format!("desktop draft get request failed: {error}"))?;
-    if response.status() == StatusCode::NO_CONTENT {
-        return Ok(Value::Null);
-    }
-    if response.status() == StatusCode::UNAUTHORIZED {
-        let _ = app.emit("cloud-auth-expired", ());
-    }
-    read_json_or_err(response, "desktop draft get").await
-}
-
-/// Compare-and-swap one composer draft independently from transcript history.
-/// Conflicts are returned as data so the WebView can preserve both versions.
-#[tauri::command]
-pub async fn desktop_draft_put(
-    app: AppHandle,
-    draft_key: String,
-    text: String,
-    base_rev: i64,
-    mutation_id: String,
-    state: State<'_, AppState>,
-) -> Result<Value, String> {
-    let access = current_cloud_access(state.inner()).await?;
-    let token = access.token.clone();
-    let url = format!(
-        "{}/api/desktop/drafts/{}",
-        access.rest_base,
-        urlencoding::encode(&draft_key)
-    );
-    let response = clark_http_client()?
-        .put(url)
-        .header("Authorization", format!("Bearer {token}"))
-        .json(&serde_json::json!({
-            "text": text,
-            "baseRev": base_rev,
-            "mutationId": mutation_id,
-        }))
-        .send()
-        .await
-        .map_err(|error| format!("desktop draft put request failed: {error}"))?;
-    if response.status() == StatusCode::UNAUTHORIZED {
-        let _ = app.emit("cloud-auth-expired", ());
-    }
-    if response.status() == StatusCode::CONFLICT {
-        let current = read_json_or_err(response, "desktop draft conflict").await?;
-        return Ok(serde_json::json!({ "conflict": true, "current": current["current"] }));
-    }
-    read_json_or_err(response, "desktop draft put").await
 }
 
 /// Insert or replace a desktop conversation snapshot.
@@ -244,8 +190,7 @@ pub async fn desktop_conv_put(
     mutation_id: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<Value, String> {
-    let access = current_cloud_access(state.inner()).await?;
-    let token = access.token.clone();
+    let access = current_account_access(state.inner()).await?;
     let owner_scope = access.owner_scope;
     let local_live = status.as_deref() == Some("running");
     let checkpoint_seq = snapshot
@@ -267,11 +212,6 @@ pub async fn desktop_conv_put(
     snapshot = crate::trajectory::normalize_snapshot_value(snapshot);
     let typed_snapshot: Snapshot = serde_json::from_value(snapshot)
         .map_err(|error| format!("checkpoint desktop snapshot: {error}"))?;
-    let typed_specialist_context = specialist_context
-        .clone()
-        .map(serde_json::from_value::<SpecialistContext>)
-        .transpose()
-        .map_err(|error| format!("desktop specialist context is invalid: {error}"))?;
     let checkpoint_metadata = serde_json::json!({
         "id": id,
         "title": title,
@@ -285,64 +225,56 @@ pub async fn desktop_conv_put(
         "rev": rev,
         "archived": false,
     });
-    let parsed_mutation_id = mutation_id
-        .as_deref()
-        .map(uuid::Uuid::parse_str)
-        .transpose()
-        .map_err(|error| format!("desktop mutation id is invalid: {error}"))?;
-    let write = ConversationWrite {
-        id: id.clone(),
-        title: title.clone(),
-        provider: provider.clone(),
-        project: project.clone(),
-        repository_fingerprint: repository_fingerprint.clone(),
-        remote_host: remote_host.clone(),
-        mode: mode.clone(),
-        title_locked,
-        specialist_context: typed_specialist_context,
-        rev,
-        snapshot: typed_snapshot.clone(),
-        status: status.clone(),
-        base_rev,
-        mutation_id: parsed_mutation_id,
-    };
-    let summary = match desktop_conversation_client(&access.rest_base, &token)?
-        .put(&write)
-        .await
+    let summary = match product_cloud_request(
+        "conversation.put",
+        serde_json::json!({
+            "id": id,
+            "title": title,
+            "provider": provider,
+            "project": project,
+            "repositoryFingerprint": repository_fingerprint,
+            "remoteHost": remote_host,
+            "mode": mode,
+            "titleLocked": title_locked,
+            "specialistContext": specialist_context,
+            "rev": rev,
+            "snapshot": typed_snapshot,
+            "status": status,
+            "baseRev": base_rev,
+            "mutationId": mutation_id,
+        }),
+        &app,
+        state.inner(),
+    )
+    .await?
     {
-        Err(error)
-            if matches!(
-                error.status(),
-                Some(value) if value == StatusCode::NOT_FOUND.as_u16()
-                    || value == StatusCode::GONE.as_u16()
-            ) =>
-        {
+        ProductCloudOutcome::NotFound(error) => {
             let _ = app.emit("cloud-conversation-deleted", &id);
             return Err(format!(
                 "cloud_deleted: this conversation was deleted on another device: {error}"
             ));
         }
-        Err(error) if error.status() == Some(StatusCode::CONFLICT.as_u16()) => {
+        ProductCloudOutcome::Conflict(error) => {
             crate::trajectory::quarantine_snapshot_branch(
                 crate::trajectory::outbox_path(&app)?,
                 owner_scope,
                 id,
             )
             .await?;
-            return Err(error.to_string());
+            return Err(error);
         }
-        Err(error) => {
+        ProductCloudOutcome::Ok(summary) => summary,
+        ProductCloudOutcome::Unauthorized(error)
+        | ProductCloudOutcome::Unavailable(error)
+        | ProductCloudOutcome::Rejected(error) => {
             tracing::warn!(
                 event = "conversation_cloud_checkpoint_failed",
                 conversation_id = %id,
                 provider,
-                status = error.status(),
-                "Clark cloud rejected the conversation checkpoint"
+                "product cloud rejected the conversation checkpoint"
             );
-            return Err(error.to_string());
+            return Err(error);
         }
-        Ok(summary) => serde_json::to_value(summary)
-            .map_err(|error| format!("desktop put serialization failed: {error}"))?,
     };
     let stored_rev = summary
         .get("rev")
@@ -350,7 +282,7 @@ pub async fn desktop_conv_put(
         .unwrap_or_default();
     if stored_rev > rev {
         return Err(format!(
-            "cloud_conflict: Clark cloud revision {stored_rev} is newer than local revision {rev}"
+            "cloud_conflict: product cloud revision {stored_rev} is newer than local revision {rev}"
         ));
     }
     crate::trajectory::checkpoint_snapshot(

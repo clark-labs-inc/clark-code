@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "snake_case")]
 pub enum NetworkPolicy {
     /// Deny networking to sandboxed child processes. Brokered host
-    /// capabilities, such as Clark Cloud, remain available through their
+    /// capabilities, such as brokered cloud, remain available through their
     /// typed application tools and never inherit shell access.
     Restricted,
     Enabled,

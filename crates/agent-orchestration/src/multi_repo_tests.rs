@@ -52,8 +52,8 @@ fn task(
 }
 
 fn valid_plan() -> MultiRepoPlan {
-    let api = repository("api", "/tmp/clark-bench/api", "src/api.rs");
-    let sdk = repository("sdk", "/tmp/clark-bench/sdk", "src/sdk.rs");
+    let api = repository("api", "/tmp/agent-bench/api", "src/api.rs");
+    let sdk = repository("sdk", "/tmp/agent-bench/sdk", "src/sdk.rs");
     MultiRepoPlan {
         repositories: BTreeMap::from([
             (api.repository_id.clone(), api),
@@ -117,7 +117,7 @@ fn valid_plan() -> MultiRepoPlan {
 fn single_repository_plan() -> MultiRepoPlan {
     let app = RepositoryBaseline {
         allowed_changed_paths: BTreeSet::from(["src/engine.rs".into(), "tests/engine.rs".into()]),
-        ..repository("app", "/tmp/clark-bench/app", "src/engine.rs")
+        ..repository("app", "/tmp/agent-bench/app", "src/engine.rs")
     };
     MultiRepoPlan {
         repositories: BTreeMap::from([(app.repository_id.clone(), app)]),
@@ -275,7 +275,7 @@ fn checkout_selection_rejects_duplicate_identity_and_nested_roots() {
     plan.repositories
         .get_mut(&RepositoryId::new("sdk").unwrap())
         .unwrap()
-        .checkout_root = "/tmp/clark-bench/api/nested".into();
+        .checkout_root = "/tmp/agent-bench/api/nested".into();
     assert_eq!(
         plan.validate().unwrap_err(),
         "selected repository roots must be disjoint checkout boundaries"

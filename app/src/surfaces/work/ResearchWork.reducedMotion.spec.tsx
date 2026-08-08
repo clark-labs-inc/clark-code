@@ -53,7 +53,7 @@ describe("ResearchWork reduced motion", () => {
   it("mounts the live card without entrance motion while retaining essential progress feedback", () => {
     const call: ToolCall = {
       id: "research-reduced-motion",
-      title: "clark_research: Verify official sources",
+      title: "brokered_research: Verify official sources",
       kind: "research",
       status: "in_progress",
       raw_input: { query: "Verify official sources" },

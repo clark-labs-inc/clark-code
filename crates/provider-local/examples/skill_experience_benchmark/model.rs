@@ -111,7 +111,7 @@ impl Recorder {
     pub fn write_artifacts(&self, failure: Option<String>) -> Result<(), DynError> {
         let receipt = BenchmarkReceipt {
             schema_version: 1,
-            benchmark: "clark_skill_experience_v1",
+            benchmark: "agent_skill_experience_v1",
             status: if failure.is_none() {
                 "passed"
             } else {
@@ -138,14 +138,14 @@ impl Recorder {
 
 fn markdown(receipt: &BenchmarkReceipt) -> String {
     let mut out = format!(
-        "# Clark skill experience benchmark\n\n\
+        "# Agent skill experience benchmark\n\n\
          **Result:** {}  \n\
          **Source:** `{}`  \n\
          **Source digest:** `{}`  \n\
          **Synthetic user workspace:** `{}`  \n\
          **Live model calls:** 0\n\n\
          This benchmark starts from isolated empty local and remote user homes. \
-         A scripted loopback endpoint exercises Clark's real provider request boundary \
+         A scripted loopback endpoint exercises the product's real provider request boundary \
          without measuring or claiming model quality.\n\n## Journey\n\n",
         receipt.status, receipt.source, receipt.source_digest, receipt.workspace
     );

@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { productRequest } from "../product/productBridge";
 import type { CloudCreds } from "./cloudHistory";
 
 const NEW_CONVERSATION_DRAFT_KEY = "new";
@@ -22,7 +22,7 @@ export function cloudComposerDraftGet(
   _creds: CloudCreds,
   conversationId: string | null,
 ): Promise<CloudComposerDraft | null> {
-  return invoke<CloudComposerDraft | null>("desktop_draft_get", {
+  return productRequest<CloudComposerDraft | null>("draft.get", {
     draftKey: cloudComposerDraftKey(conversationId),
   });
 }
@@ -33,10 +33,10 @@ export async function cloudComposerDraftPut(
   text: string,
   baseRev: number,
 ): Promise<CloudDraftWrite> {
-  const result = await invoke<CloudComposerDraft | {
+  const result = await productRequest<CloudComposerDraft | {
     conflict: true;
     current: CloudComposerDraft;
-  }>("desktop_draft_put", {
+  }>("draft.put", {
     draftKey: cloudComposerDraftKey(conversationId),
     text,
     baseRev,

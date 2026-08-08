@@ -21,8 +21,8 @@ async function availablePort() {
   });
 }
 
-const port = process.env.CLARK_ATTACHMENT_SMOKE_PORT
-  ? Number(process.env.CLARK_ATTACHMENT_SMOKE_PORT)
+const port = process.env.AGENT_ATTACHMENT_SMOKE_PORT
+  ? Number(process.env.AGENT_ATTACHMENT_SMOKE_PORT)
   : await availablePort();
 const url = `http://127.0.0.1:${port}/`;
 const preview = spawn(
@@ -30,7 +30,7 @@ const preview = spawn(
   ["--dir", "app", "dev", "--host", "127.0.0.1", "--port", String(port), "--strictPort"],
   {
     cwd: root,
-    env: { ...process.env, VITE_CLARK_DEV_AUTH: "1" },
+    env: { ...process.env, VITE_PRODUCT_DEV_AUTH: "1" },
     stdio: ["ignore", "pipe", "pipe"],
   },
 );
@@ -63,21 +63,21 @@ try {
     const accountScope = "id:attachment-qa";
     const encodedScope = encodeURIComponent(accountScope);
     localStorage.setItem(
-      "clark.desktop.dev-account",
+      "agent-desktop.dev-account",
       JSON.stringify({
         user: { id: "attachment-qa", name: "Attachment QA", method: "local" },
       }),
     );
     localStorage.setItem(
-      `clark-desktop:local-agent:${encodedScope}`,
+      `agent-desktop:local-agent:${encodedScope}`,
       JSON.stringify({
         cwd: "",
-        model: "clark-code:free",
+        model: "local-model",
         reasoningEffort: "high",
       }),
     );
     localStorage.setItem(
-      `clark-desktop:project-context:${encodedScope}`,
+      `agent-desktop:project-context:${encodedScope}`,
       JSON.stringify({ cwd: "/tmp" }),
     );
   });
@@ -90,13 +90,13 @@ try {
   });
   await page.goto(url, { waitUntil: "networkidle" });
 
-  const composer = page.getByLabel("Message Clark");
+  const composer = page.getByLabel("Message Agent Desktop");
   try {
     await composer.waitFor({ state: "visible", timeout: 5_000 });
   } catch (error) {
     const text = await page.locator("body").innerText();
     throw new Error(
-      `Clark composer did not appear; body=${JSON.stringify(text)}; ` +
+      `Agent Desktop composer did not appear; body=${JSON.stringify(text)}; ` +
         `page_errors=${JSON.stringify(errors)}; cause=${error}`,
     );
   }
@@ -131,7 +131,7 @@ try {
     "large-paste thumbnail chip is missing",
   );
   check(await page.locator('[role="listitem"] img').isVisible(), "image thumbnail is missing");
-  await page.screenshot({ path: "/tmp/clark-desktop-attachment-smoke.png" });
+  await page.screenshot({ path: "/tmp/agent-desktop-attachment-smoke.png" });
 
   await composer.press("Enter");
   await page.waitForTimeout(250);
@@ -148,7 +148,7 @@ try {
       mode: "webkit_mock_desktop",
       status: "pass",
       checks: 7,
-      screenshot: "/tmp/clark-desktop-attachment-smoke.png",
+      screenshot: "/tmp/agent-desktop-attachment-smoke.png",
     }),
   );
 } finally {

@@ -141,7 +141,7 @@ fn print_self_test(kind: &str, protocol_version: u32) {
 }
 
 fn fail(code: i32, message: String) -> i32 {
-    eprintln!("clark Windows sandbox: {message}");
+    eprintln!("agent Windows sandbox: {message}");
     code
 }
 

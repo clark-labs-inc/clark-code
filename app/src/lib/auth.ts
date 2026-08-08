@@ -1,15 +1,16 @@
-// Native Clark Desktop authentication.
+// Product-provided native authentication.
 //
-// Google ID/access/refresh tokens and the Clark bearer exist only in the
+// Google ID/access/refresh tokens and the agent bearer exist only in the
 // Tauri host. The WebView receives this non-secret account descriptor and uses
 // native commands that resolve the current account atomically.
 
-import { invoke } from "@tauri-apps/api/core";
+import { productRequest } from "../product/productBridge";
+import { productModule } from "../product/productModule";
 
 export type AuthMethod = "google" | "local";
 
 export interface AuthUser {
-  /** Stable, server-validated Clark account identifier. */
+  /** Stable, server-validated product account identifier. */
   id: string;
   name: string;
   email?: string;
@@ -21,7 +22,7 @@ export interface AuthSession {
   user: AuthUser;
 }
 
-const DEV_SESSION_KEY = "clark.desktop.dev-account";
+const DEV_SESSION_KEY = "agent-desktop.dev-account";
 let cachedSession: AuthSession | null = null;
 
 function isTauri(): boolean {
@@ -38,7 +39,7 @@ function parseDescriptor(raw: string | null): AuthSession | null {
       !descriptor.user.id ||
       typeof descriptor.user.name !== "string" ||
       (descriptor.user.method !== "google" && descriptor.user.method !== "local") ||
-      Object.hasOwn(descriptor, "clark")
+      ["token", "bearer", "credentials"].some((field) => Object.hasOwn(descriptor, field))
     ) return null;
     return descriptor as AuthSession;
   } catch {
@@ -49,19 +50,23 @@ function parseDescriptor(raw: string | null): AuthSession | null {
 /** Load the native-retained account before stores derive account partitions. */
 export async function initializeAuthSession(): Promise<void> {
   if (isTauri()) {
-    cachedSession = await invoke<AuthSession | null>("clark_account_load");
+    if (!productModule().authRequired) {
+      cachedSession = null;
+      return;
+    }
+    cachedSession = await productRequest<AuthSession | null>("account.load");
     localStorage.removeItem(DEV_SESSION_KEY);
     return;
   }
 
   // Browser-only component tests and previews have no native credential host.
   // This descriptor contains no usable bearer and never ships in Tauri builds.
-  if (import.meta.env.DEV && import.meta.env.VITE_CLARK_DEV_AUTH === "1") {
+  if (import.meta.env.DEV && import.meta.env.VITE_PRODUCT_DEV_AUTH === "1") {
     cachedSession = parseDescriptor(localStorage.getItem(DEV_SESSION_KEY)) ?? {
       user: {
         id: "local-playwright",
         name: "Local Dev",
-        email: "local-playwright@clark.local",
+        email: "local-playwright@example.test",
         method: "local",
       },
     };
@@ -76,14 +81,14 @@ export function loadAuthSession(): AuthSession | null {
 }
 
 export async function signInWithGoogle(): Promise<AuthSession> {
-  if (!isTauri()) throw new Error("Google sign-in is available in Clark Desktop.");
-  const descriptor = await invoke<AuthSession>("clark_google_sign_in");
+  if (!isTauri()) throw new Error("Google sign-in requires the native desktop app.");
+  const descriptor = await productRequest<AuthSession>("account.sign_in");
   cachedSession = descriptor;
   return descriptor;
 }
 
 export async function signOut(): Promise<void> {
-  if (isTauri()) await invoke("clark_sign_out");
+  if (isTauri()) await productRequest("account.sign_out");
   localStorage.removeItem(DEV_SESSION_KEY);
   cachedSession = null;
 }
@@ -101,7 +106,7 @@ export function isAuthExpiredError(error: unknown): boolean {
 export async function refreshAuthSession(_session: AuthSession): Promise<AuthSession | null> {
   if (!isTauri()) return null;
   try {
-    const descriptor = await invoke<AuthSession>("clark_refresh_cloud_session");
+    const descriptor = await productRequest<AuthSession>("account.refresh");
     cachedSession = descriptor;
     return descriptor;
   } catch {

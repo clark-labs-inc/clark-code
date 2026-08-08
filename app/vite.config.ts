@@ -1,13 +1,23 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
+import { fileURLToPath } from "node:url";
 
 // Tauri expects a fixed port and no auto-clearing of the console.
 const host = process.env.TAURI_DEV_HOST;
 const productionSourcemaps = process.env.VITE_BUILD_SOURCEMAP === "1";
+const neutralProductEntry = fileURLToPath(
+  new URL("./src/product/neutralEntry.ts", import.meta.url),
+);
+const productEntry = process.env.DESKTOP_PRODUCT_ENTRY || neutralProductEntry;
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  resolve: {
+    alias: {
+      "@product-entry": productEntry,
+    },
+  },
   // Prevent Vite from obscuring Rust errors.
   clearScreen: false,
   server: {

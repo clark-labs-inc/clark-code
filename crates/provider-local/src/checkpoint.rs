@@ -9,10 +9,10 @@ use std::path::{Path, PathBuf};
 use crate::exec::Executor;
 
 const IDENTITY: &[(&str, &str)] = &[
-    ("GIT_AUTHOR_NAME", "Clark Code"),
-    ("GIT_AUTHOR_EMAIL", "checkpoint@clark.local"),
-    ("GIT_COMMITTER_NAME", "Clark Code"),
-    ("GIT_COMMITTER_EMAIL", "checkpoint@clark.local"),
+    ("GIT_AUTHOR_NAME", "local agent"),
+    ("GIT_AUTHOR_EMAIL", "checkpoint@agent.local"),
+    ("GIT_COMMITTER_NAME", "local agent"),
+    ("GIT_COMMITTER_EMAIL", "checkpoint@agent.local"),
 ];
 
 /// Whether `root` names a Git working tree on the executor target.
@@ -23,7 +23,7 @@ pub async fn is_git_repo(exec: &dyn Executor, root: &Path) -> bool {
 }
 
 async fn temp_index(exec: &dyn Executor, root: &Path) -> Result<PathBuf, String> {
-    let name = format!("clark-checkpoint-{}.idx", uuid::Uuid::new_v4());
+    let name = format!("agent-checkpoint-{}.idx", uuid::Uuid::new_v4());
     let path = crate::git_metadata::required(
         exec,
         root,
@@ -121,7 +121,7 @@ pub async fn create_checkpoint(exec: &dyn Executor, root: &Path) -> Result<Optio
     // Include a nonce so simultaneous sessions that snapshot the same tree in
     // the same second never share a commit/ref. That makes per-conversation
     // release safe when its durable history is deleted.
-    let message = format!("clark checkpoint {}", uuid::Uuid::new_v4());
+    let message = format!("agent checkpoint {}", uuid::Uuid::new_v4());
     let mut args = vec!["commit-tree", tree.as_str(), "-m", message.as_str()];
     if let Some(head) = head.as_deref() {
         args.extend(["-p", head]);
@@ -131,14 +131,14 @@ pub async fn create_checkpoint(exec: &dyn Executor, root: &Path) -> Result<Optio
     if sha.is_empty() {
         return Err("Git returned an empty checkpoint id".into());
     }
-    let reference = format!("refs/clark/checkpoints/{sha}");
+    let reference = format!("refs/agent/checkpoints/{sha}");
     crate::git_metadata::required(exec, root, &["update-ref", &reference, &sha]).await?;
     Ok(Some(sha))
 }
 
 /// Release checkpoint-retention refs after their owning conversation is
 /// permanently deleted. The commit objects remain recoverable until normal Git
-/// maintenance; only Clark's explicit retention roots are removed.
+/// maintenance; only Agent Desktop's explicit retention roots are removed.
 pub async fn release_checkpoints(
     exec: &dyn Executor,
     root: &Path,
@@ -153,7 +153,7 @@ pub async fn release_checkpoints(
         {
             return Err("invalid checkpoint id".into());
         }
-        let reference = format!("refs/clark/checkpoints/{checkpoint}");
+        let reference = format!("refs/agent/checkpoints/{checkpoint}");
         crate::git_metadata::required(exec, root, &["update-ref", "-d", &reference, checkpoint])
             .await?;
     }
@@ -171,10 +171,10 @@ mod tests {
             .arg("-C")
             .arg(root)
             .args(args)
-            .env("GIT_AUTHOR_NAME", "Clark Test")
-            .env("GIT_AUTHOR_EMAIL", "clark@example.com")
-            .env("GIT_COMMITTER_NAME", "Clark Test")
-            .env("GIT_COMMITTER_EMAIL", "clark@example.com")
+            .env("GIT_AUTHOR_NAME", "Agent Test")
+            .env("GIT_AUTHOR_EMAIL", "agent@example.com")
+            .env("GIT_COMMITTER_NAME", "Agent Test")
+            .env("GIT_COMMITTER_EMAIL", "agent@example.com")
             .output()
             .unwrap();
         assert!(
@@ -246,7 +246,7 @@ mod tests {
             &[
                 "show-ref",
                 "--verify",
-                &format!("refs/clark/checkpoints/{second}")
+                &format!("refs/agent/checkpoints/{second}")
             ],
         )
         .await
@@ -257,7 +257,7 @@ mod tests {
             &[
                 "show-ref",
                 "--verify",
-                &format!("refs/clark/checkpoints/{first}")
+                &format!("refs/agent/checkpoints/{first}")
             ],
         )
         .await

@@ -32,23 +32,26 @@ describe("registerCodeRemoteHost", () => {
       },
     );
 
-    expect(invoke).toHaveBeenCalledWith("desktop_code_host_upsert", {
-      hostId: "host-1",
-      displayName: "Stan desktop",
-      osName: "MacIntel",
-      arch: "arm64",
-      appVersion: "0.1.92",
-      protocolVersion: 2,
-      capabilities: [
-        "start_session",
-        "send_message",
-        "cancel_run",
-        "resolve_permission",
-        "steer_run",
-        "compact_conversation",
-        "edit_and_resend",
-      ],
-      projects: [],
+    expect(invoke).toHaveBeenCalledWith("product_request", {
+      operation: "mobile.host_upsert",
+      payload: {
+        hostId: "host-1",
+        displayName: "Stan desktop",
+        osName: "MacIntel",
+        arch: "arm64",
+        appVersion: "0.1.92",
+        protocolVersion: 2,
+        capabilities: [
+          "start_session",
+          "send_message",
+          "cancel_run",
+          "resolve_permission",
+          "steer_run",
+          "compact_conversation",
+          "edit_and_resend",
+        ],
+        projects: [],
+      },
     });
   });
 });

@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "Platform-neutral sandbox policy plus macOS, Linux, and Windows process adapters for Clark executors."
+description = "Platform-neutral sandbox policy plus macOS, Linux, and Windows process adapters for Agent Desktop executors."
 
 [dependencies]
 async-trait.workspace = true

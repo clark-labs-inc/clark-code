@@ -42,7 +42,7 @@ impl CodingPlugin {
             manifest: PluginManifest {
                 id: "coding".into(),
                 version: env!("CARGO_PKG_VERSION").into(),
-                description: "Clark Code provider sessions and bounded tool execution".into(),
+                description: "Coding-agent provider sessions and bounded tool execution".into(),
                 operations: BTreeSet::from([
                     SESSION_OPEN.into(),
                     SESSION_PROMPT.into(),

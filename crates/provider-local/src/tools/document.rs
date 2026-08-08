@@ -20,7 +20,7 @@ impl ToolExecutor for DocumentConvert {
     }
 
     fn description(&self) -> &str {
-        "Convert office and document files with Clark's bundled pure-Rust libreoffice-rs engine. Use this instead of textutil, soffice, Pandoc, or ad hoc Python for supported HTML, Markdown, DOCX, ODT, PDF, XLSX, ODS, PPTX, ODP, CSV, SVG, and text conversions. Provide the input path first, then the target format, then an optional output path."
+        "Convert office and document files with Agent Desktop's bundled pure-Rust libreoffice-rs engine. Use this instead of textutil, soffice, Pandoc, or ad hoc Python for supported HTML, Markdown, DOCX, ODT, PDF, XLSX, ODS, PPTX, ODP, CSV, SVG, and text conversions. Provide the input path first, then the target format, then an optional output path."
     }
 
     fn parameters(&self) -> Value {
@@ -248,7 +248,7 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         std::fs::write(
             root.path().join("report.md"),
-            "# Rust report\n\nHello **Clark**.",
+            "# Rust report\n\nHello **Agent Desktop**.",
         )
         .unwrap();
 

@@ -190,7 +190,9 @@ pub(super) fn app_scope(args: &Value, remember: bool) -> Option<PermissionScope>
         .filter(|value| !value.is_empty() && value.len() <= 255)?;
     Some(PermissionScope {
         key: format!("computer:{bundle_id}"),
-        title: Some(format!("Allow Clark to see and control {bundle_id}?")),
+        title: Some(format!(
+            "Allow Agent Desktop to see and control {bundle_id}?"
+        )),
         always_label: Some(format!("Always allow {bundle_id}")),
         reason: Some(
             "observes or controls this app through macOS Accessibility and Screen Recording"

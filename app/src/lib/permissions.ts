@@ -32,7 +32,7 @@ export const APPROVAL_POLICIES: ApprovalPolicyInfo[] = [
   {
     id: "full",
     label: "Full access",
-    description: "Run directly on your machine without Clark’s command sandbox or action approvals",
+    description: "Run directly on your machine without the agent’s command sandbox or action approvals",
   },
 ];
 
@@ -79,10 +79,10 @@ export function wouldAutoApprove(policy: ApprovalPolicy, req: PermissionRequest)
   return false;
 }
 
-const APPROVAL_KEY = "clark-desktop:approval-policy";
-const APPROVAL_POLICIES_KEY = "clark-desktop:approval-policies";
-const COLLABORATION_KEY = "clark-desktop:collaboration-mode";
-const LEGACY_MODE_KEY = "clark-desktop:permission-mode";
+const APPROVAL_KEY = "agent-desktop:approval-policy";
+const APPROVAL_POLICIES_KEY = "agent-desktop:approval-policies";
+const COLLABORATION_KEY = "agent-desktop:collaboration-mode";
+const LEGACY_MODE_KEY = "agent-desktop:permission-mode";
 
 function legacyMode(): string | null {
   try {

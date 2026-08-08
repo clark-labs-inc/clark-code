@@ -84,7 +84,7 @@ describe("per-conversation model", () => {
 
     // Chat A: switch to the included model.
     useSessionStore.setState({ session: sessionA });
-    await useSessionStore.getState().updateModelSettings({ model: "clark-code:free" });
+    await useSessionStore.getState().updateModelSettings({ model: "local-model" });
 
     // Chat B never diverges: its effective model is still the global default.
     useSessionStore.setState({ session: sessionB });
@@ -95,7 +95,7 @@ describe("per-conversation model", () => {
     // Chat A keeps its own choice.
     expect(
       effectiveModelSettings(useSessionStore.getState().localSettings, useSessionStore.getState().chatModels, sessionA.id).model,
-    ).toBe("clark-code:free");
+    ).toBe("local-model");
 
     // The global default the start screen shows is untouched — only the chat
     // override moved.
@@ -120,17 +120,20 @@ describe("per-conversation model", () => {
     });
     expect(useSessionStore.getState().chatModels[sessionA.id]).toEqual({
       model: DEFAULT_LOCAL_SETTINGS.model,
-      reasoningEffort: "max",
+      reasoningEffort: DEFAULT_LOCAL_SETTINGS.reasoningEffort,
     });
 
     // The picker on the start screen edits the default for the NEXT chat. It
     // must not retroactively change a conversation that already exists.
     useSessionStore.getState().endSession();
-    await useSessionStore.getState().updateModelSettings({ model: "clark-code:kimi_k3" });
+    await useSessionStore.getState().updateModelSettings({ model: "local-model-large" });
     const state = useSessionStore.getState();
     expect(
       effectiveModelSettings(state.localSettings, state.chatModels, sessionA.id),
-    ).toMatchObject({ model: DEFAULT_LOCAL_SETTINGS.model, reasoningEffort: "max" });
+    ).toMatchObject({
+      model: DEFAULT_LOCAL_SETTINGS.model,
+      reasoningEffort: DEFAULT_LOCAL_SETTINGS.reasoningEffort,
+    });
   });
 
   it("pins an existing untracked chat when it is reopened", async () => {
@@ -160,11 +163,11 @@ describe("per-conversation model", () => {
     });
     expect(useSessionStore.getState().chatModels[legacyId]).toEqual({
       model: DEFAULT_LOCAL_SETTINGS.model,
-      reasoningEffort: "max",
+      reasoningEffort: DEFAULT_LOCAL_SETTINGS.reasoningEffort,
     });
 
     useSessionStore.getState().endSession();
-    await useSessionStore.getState().updateModelSettings({ model: "clark-code:free" });
+    await useSessionStore.getState().updateModelSettings({ model: "local-model" });
     const state = useSessionStore.getState();
     expect(effectiveModelSettings(state.localSettings, state.chatModels, legacyId).model).toBe(
       DEFAULT_LOCAL_SETTINGS.model,
@@ -176,17 +179,17 @@ describe("per-conversation model", () => {
     useSessionStore.setState({ bridge, localSettings: { ...baseSettings }, chatModels: {} });
 
     useSessionStore.setState({ session: sessionA });
-    await useSessionStore.getState().updateModelSettings({ model: "clark-code:free" });
+    await useSessionStore.getState().updateModelSettings({ model: "local-model" });
 
     useSessionStore.setState({ session: sessionB });
-    await useSessionStore.getState().updateModelSettings({ model: "clark-code:kimi_k3" });
+    await useSessionStore.getState().updateModelSettings({ model: "local-model-large" });
 
     const { chatModels, localSettings } = useSessionStore.getState();
     expect(effectiveModelSettings(localSettings, chatModels, sessionA.id)).toMatchObject({
-      model: "clark-code:free",
-      reasoningEffort: "max",
+      model: "local-model",
+      reasoningEffort: "high",
     });
-    expect(effectiveModelSettings(localSettings, chatModels, sessionB.id).model).toBe("clark-code:kimi_k3");
+    expect(effectiveModelSettings(localSettings, chatModels, sessionB.id).model).toBe("local-model-large");
     expect(effectiveModelSettings(localSettings, chatModels, sessionB.id).reasoningEffort).toBe("max");
   });
 
@@ -200,15 +203,15 @@ describe("per-conversation model", () => {
       chatModels: {},
     });
 
-    await useSessionStore.getState().updateModelSettings({ model: "clark-code:kimi_k3" });
+    await useSessionStore.getState().updateModelSettings({ model: "local-model-large" });
 
     expect(useSessionStore.getState().chatModels[sessionA.id]).toEqual({
-      model: "clark-code:kimi_k3",
+      model: "local-model-large",
       reasoningEffort: "max",
     });
     const calls = vi.mocked(reconfigure).mock.calls as unknown as [string, { extra?: Record<string, unknown> }][];
     expect(calls[0]?.[1].extra).toMatchObject({
-      model: "clark-code:kimi_k3",
+      model: "local-model-large",
       reasoning_effort: "max",
     });
   });
@@ -217,11 +220,11 @@ describe("per-conversation model", () => {
     const bridge = stubBridge();
     useSessionStore.setState({ bridge, session: null, localSettings: { ...baseSettings }, chatModels: {} });
 
-    await useSessionStore.getState().updateModelSettings({ model: "clark-code:free" });
+    await useSessionStore.getState().updateModelSettings({ model: "local-model" });
 
     // Start-screen picker (no chat) edits the default new chats seed from — no
     // per-chat override is written.
-    expect(useSessionStore.getState().localSettings.model).toBe("clark-code:free");
+    expect(useSessionStore.getState().localSettings.model).toBe("local-model");
     expect(Object.keys(useSessionStore.getState().chatModels)).toHaveLength(0);
   });
 
@@ -231,12 +234,12 @@ describe("per-conversation model", () => {
     useSessionStore.setState({ bridge, localSettings: { ...baseSettings }, chatModels: {} });
 
     useSessionStore.setState({ session: sessionA });
-    await useSessionStore.getState().updateModelSettings({ model: "clark-code:free" });
+    await useSessionStore.getState().updateModelSettings({ model: "local-model" });
 
     expect(reconfigure).toHaveBeenCalledTimes(1);
     const calls = vi.mocked(reconfigure).mock.calls as unknown as [string, { extra?: unknown }][];
     const configArg = calls[0]?.[1];
-    expect(configArg?.extra).toMatchObject({ model: "clark-code:free" });
+    expect(configArg?.extra).toMatchObject({ model: "local-model" });
   });
 
   it("does not mutate a live provider while its run is active", async () => {
@@ -258,7 +261,7 @@ describe("per-conversation model", () => {
       },
     });
 
-    await useSessionStore.getState().updateModelSettings({ model: "clark-code:glm52" });
+    await useSessionStore.getState().updateModelSettings({ model: "local-model-large" });
 
     expect(reconfigure).not.toHaveBeenCalled();
     expect(useSessionStore.getState().chatModels[sessionA.id]).toBeUndefined();
@@ -278,7 +281,7 @@ describe("per-conversation model", () => {
     }));
     useSessionStore.setState({ bridge, session: sessionA, snapshot: emptySnapshot() });
 
-    const switching = useSessionStore.getState().updateModelSettings({ model: "clark-code:glm52" });
+    const switching = useSessionStore.getState().updateModelSettings({ model: "local-model-large" });
     await Promise.resolve();
     await useSessionStore.getState().send("hi");
 

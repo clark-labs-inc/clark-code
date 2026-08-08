@@ -24,8 +24,8 @@ async fn open_provider(
         .as_object_mut()
         .and_then(|extra| extra.remove("remote_worker"));
     let Some(remote_binding) = remote_binding else {
-        let mut provider = make_provider(provider_id, state).await?;
         let (config, account) = prepare_provider_config(provider_id, app, config, state).await?;
+        let mut provider = make_provider(provider_id, &config, app, state).await?;
         provider
             .connect(config)
             .await
@@ -57,7 +57,7 @@ async fn open_provider(
         .cloud_account()
         .await
         .map(|account| account.account.as_str().to_string())
-        .ok_or("Clark must be signed in before opening a remote worker session")?;
+        .ok_or("Agent Desktop must be signed in before opening a remote worker session")?;
     let account = AccountKey::new(account)?;
     let handle = WorkerHandle::parse(&binding.worker_handle)?;
     let runtime = state.runtime_registry.resolve(&account, &handle).await?;
@@ -138,7 +138,7 @@ pub async fn session_open(
             .is_some_and(|current| current.account.as_str() == owner);
         if !still_current {
             let _ = provider.close_session(&session.id).await;
-            return Err("Clark account changed while opening the remote session".into());
+            return Err("Agent Desktop account changed while opening the remote session".into());
         }
         return register_session(&app, &state, provider, session, account).await;
     }

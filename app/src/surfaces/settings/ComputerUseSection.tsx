@@ -45,7 +45,7 @@ export function computerUseSupportMessage(status: ComputerUsePlatformStatus | nu
   if (!status.supported) return `Native computer use is unavailable on ${status.platform}.`;
   if (!status.service_ready) return status.detail || "The signed computer-use service is unavailable.";
   if (status.readiness === "needs_permission") {
-    return `${status.permission_owner?.display_name || "Clark Computer Use"} needs ${status.platform === "macos" ? "macOS privacy" : "desktop capture and input"} access.`;
+    return `${status.permission_owner?.display_name || "the agent Computer Use"} needs ${status.platform === "macos" ? "macOS privacy" : "desktop capture and input"} access.`;
   }
   if (status.readiness === "restart_required") return "The service must restart to use its new privacy grant.";
   return status.platform === "macos"
@@ -54,12 +54,12 @@ export function computerUseSupportMessage(status: ComputerUsePlatformStatus | nu
 }
 
 export function computerUseRepairMessage(status: ComputerUsePlatformStatus): string {
-  const owner = status.permission_owner?.display_name || "Clark Computer Use";
+  const owner = status.permission_owner?.display_name || "the agent Computer Use";
   if (status.platform === "macos") {
-    return `Grant access to ${owner}. Existing Clark Code privacy grants do not transfer to the separately identified service.`;
+    return `Grant access to ${owner}. Existing Agent Desktop privacy grants do not transfer to the separately identified service.`;
   }
   if (status.platform === "windows") {
-    return "Unlock the signed-in desktop session and run Clark Code interactively, then retry access. A Windows service or secure desktop cannot supply observable user input.";
+    return "Unlock the signed-in desktop session and run Agent Desktop interactively, then retry access. A Windows service or secure desktop cannot supply observable user input.";
   }
   return "Use an active X11 or XWayland desktop session, then retry access. Existing portal sessions do not transfer to the isolated service.";
 }
@@ -152,7 +152,7 @@ export function ComputerUseSection() {
           service_ready: false,
           readiness: "unsupported",
           permission_owner: null,
-          detail: "Native computer use is available only inside the Clark Code desktop host.",
+          detail: "Native computer use is available only inside Agent Desktop desktop host.",
         });
         setApprovals(EMPTY_APPROVALS);
         setReceipts([]);
@@ -236,7 +236,7 @@ export function ComputerUseSection() {
           <Row
             icon={<MousePointer2 className="size-4" />}
             name="Allow computer use"
-            sub="Lets Clark propose actions in ordinary desktop apps. Every action still passes native target, freshness, risk, and approval checks."
+            sub="Lets the agent propose actions in ordinary desktop apps. Every action still passes native target, freshness, risk, and approval checks."
           >
             <Toggle
               on={enabled && canEnable}
@@ -318,7 +318,7 @@ export function ComputerUseSection() {
           {status.platform === "macos" && permissions && (!permissions.accessibility || !permissions.screen_recording) && (
             <div className="mt-3">
               <MacPermissionGuide
-                ownerName={status.permission_owner?.display_name || "Clark Computer Use"}
+                ownerName={status.permission_owner?.display_name || "the agent Computer Use"}
                 accessibilityGranted={permissions.accessibility}
                 screenRecordingGranted={permissions.screen_recording}
                 working={working === "permissions"}

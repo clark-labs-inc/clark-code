@@ -11,14 +11,14 @@ const incident: ProviderIncident = {
   scope: "model_request",
   failure_class: "transient_transport",
   category: "timeout",
-  message: "Model connection timed out while Clark was working.",
+  message: "Model connection timed out while the agent was working.",
   detail: "model endpoint returned 524",
   model: "z-ai/glm-5.2",
-  provider_route: "api.clarkslabs.com",
+  provider_route: "api.product.example",
   provider_status: 524,
   provider_error_type: "upstream_timeout",
   request: {
-    idempotency_key: "clark-code-request-1",
+    idempotency_key: "example-request-1",
     provider_request_id: "upstream-1",
     attempts: 4,
     max_attempts: 17,
@@ -49,7 +49,7 @@ function render(value: ProviderIncident, onContinue?: () => void) {
   return renderToStaticMarkup(createElement(ProviderIncidentCard, {
     incident: value,
     onContinue,
-    modelRouteLabel: "Clark's cloud model gateway",
+    modelRouteLabel: "the agent's cloud model gateway",
   }));
 }
 
@@ -59,7 +59,7 @@ describe("ProviderIncidentCard", () => {
     expect(markup).toContain("Completed tools: 49");
     expect(markup).toContain("Retrying attempt 2 of 2");
     expect(markup).toContain("Files and tools run on this computer");
-    expect(markup).toContain("Clark&#x27;s cloud model gateway");
+    expect(markup).toContain("the agent&#x27;s cloud model gateway");
     expect(markup).toContain("upstream-1");
     expect(markup).toContain("run-1:transcript-commit:52");
   });

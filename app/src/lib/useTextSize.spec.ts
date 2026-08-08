@@ -23,16 +23,16 @@ describe("text size preference", () => {
   it("uses default for missing, invalid, or retired compact persisted values", () => {
     const storage = new MemoryStorage();
     expect(loadTextSize(storage)).toBe(100);
-    storage.setItem("clark.text-size", "enormous");
+    storage.setItem("agent-desktop.text-size", "enormous");
     expect(loadTextSize(storage)).toBe(100);
-    storage.setItem("clark.text-size", "75");
+    storage.setItem("agent-desktop.text-size", "75");
     expect(loadTextSize(storage)).toBe(100);
   });
 
   it("persists and reloads a browser-style percentage", () => {
     const storage = new MemoryStorage();
     saveTextSize(150, storage);
-    expect(storage.getItem("clark.text-size")).toBe("150");
+    expect(storage.getItem("agent-desktop.text-size")).toBe("150");
     expect(loadTextSize(storage)).toBe(150);
   });
 

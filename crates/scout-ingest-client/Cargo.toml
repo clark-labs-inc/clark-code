@@ -4,12 +4,12 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "Crash-safe authenticated outbox delivery for Clark Scout central ingestion."
+description = "Crash-safe authenticated outbox delivery for Scout central ingestion."
 
 [dependencies]
 agent-orchestration = { path = "../agent-orchestration" }
 async-trait.workspace = true
-clark-http = { path = "../clark-http" }
+desktop-http = { path = "../desktop-http" }
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
 scout-ingest-protocol = { path = "../scout-ingest-protocol" }
 scout-store = { path = "../scout-store" }

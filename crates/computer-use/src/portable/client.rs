@@ -312,7 +312,7 @@ impl Drop for Connection {
 fn spawn_service() -> Result<Connection, ComputerUseError> {
     let service_path = locate_service()?;
     let socket_name = format!(
-        "clark-cua-{}-{}",
+        "agent-cua-{}-{}",
         std::process::id(),
         uuid::Uuid::new_v4().simple()
     );
@@ -450,7 +450,7 @@ fn spawn_service() -> Result<Connection, ComputerUseError> {
 }
 
 fn locate_service() -> Result<PathBuf, ComputerUseError> {
-    if let Some(path) = std::env::var_os("CLARK_COMPUTER_USE_SERVICE_PATH") {
+    if let Some(path) = std::env::var_os("DESKTOP_COMPUTER_USE_SERVICE_PATH") {
         return verify_service_path(PathBuf::from(path));
     }
     let executable = std::env::current_exe()
@@ -459,40 +459,40 @@ fn locate_service() -> Result<PathBuf, ComputerUseError> {
         ComputerUseError::HelperUnavailable("current executable has no parent".to_string())
     })?;
     let filename = if cfg!(target_os = "windows") {
-        "clark-computer-use-helper.exe"
+        "agent-computer-use-helper.exe"
     } else {
-        "clark-computer-use-helper"
+        "agent-computer-use-helper"
     };
     let candidates = [
         directory.join(filename),
         directory
-            .join("clark-resources")
+            .join("agent-resources")
             .join("computer-use")
             .join(filename),
         directory
             .join("resources")
-            .join("clark-resources")
+            .join("agent-resources")
             .join("computer-use")
             .join(filename),
         directory
             .join("..")
             .join("lib")
-            .join("clark-code")
-            .join("clark-resources")
+            .join("agent-desktop")
+            .join("agent-resources")
             .join("computer-use")
             .join(filename),
         directory
             .join("..")
             .join("lib")
-            .join("Clark Code")
-            .join("clark-resources")
+            .join("Agent Desktop")
+            .join("agent-resources")
             .join("computer-use")
             .join(filename),
         directory
             .join("..")
             .join("lib")
-            .join("clark-code-dev")
-            .join("clark-resources")
+            .join("agent-desktop-dev")
+            .join("agent-resources")
             .join("computer-use")
             .join(filename),
     ];
@@ -502,12 +502,12 @@ fn locate_service() -> Result<PathBuf, ComputerUseError> {
         }
     }
     if let Some(app_dir) = std::env::var_os("APPDIR") {
-        for product in ["clark-code", "Clark Code", "clark-code-dev"] {
+        for product in ["agent-desktop", "Agent Desktop", "agent-desktop-dev"] {
             let candidate = PathBuf::from(&app_dir)
                 .join("usr")
                 .join("lib")
                 .join(product)
-                .join("clark-resources")
+                .join("agent-resources")
                 .join("computer-use")
                 .join(filename);
             if candidate.is_file() {
@@ -537,13 +537,13 @@ fn verify_service_path(path: PathBuf) -> Result<PathBuf, ComputerUseError> {
 }
 
 fn data_dir() -> Result<PathBuf, ComputerUseError> {
-    if let Some(path) = std::env::var_os("CLARK_COMPUTER_USE_DATA_DIR") {
+    if let Some(path) = std::env::var_os("DESKTOP_COMPUTER_USE_DATA_DIR") {
         let path = PathBuf::from(path);
         if path.is_absolute() {
             return Ok(path);
         }
         return Err(ComputerUseError::HelperUnavailable(
-            "CLARK_COMPUTER_USE_DATA_DIR must be absolute".to_string(),
+            "DESKTOP_COMPUTER_USE_DATA_DIR must be absolute".to_string(),
         ));
     }
     #[cfg(target_os = "windows")]
@@ -554,7 +554,7 @@ fn data_dir() -> Result<PathBuf, ComputerUseError> {
         .or_else(|| {
             std::env::var_os("HOME").map(|home| Path::new(&home).join(".local").join("share"))
         });
-    base.map(|path| path.join("Clark").join("Computer Use"))
+    base.map(|path| path.join("Agent Desktop").join("Computer Use"))
         .ok_or_else(|| {
             ComputerUseError::HelperUnavailable(
                 "could not resolve a per-user Computer Use data directory".to_string(),

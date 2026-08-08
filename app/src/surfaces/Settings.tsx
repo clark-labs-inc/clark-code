@@ -1,32 +1,27 @@
 import { useEffect, useMemo, useState } from "react";
+import { productName } from "../product/productModule";
 import { AnimatePresence, useReducedMotion } from "motion/react";
 import * as m from "motion/react-m";
 import {
-  Blocks, Info, Sun, Moon, AlertTriangle, ExternalLink, CreditCard, LogOut,
-  Loader2, Trash2, Plus, Minus, Server, Brain, FolderOpen,
+  Blocks, Info, Sun, Moon, AlertTriangle, LogOut,
+  Trash2, Plus, Minus, Server, Brain, FolderOpen,
 } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
 import { cn } from "../lib/cn";
-import { isClarkAccountReconnectError } from "../lib/errors";
+import { isAccountReconnectError } from "../lib/errors";
 import { OVERLAY, accessibleMotion } from "../lib/motion";
 import { useModalFocus } from "../lib/modalFocus";
 import { APPROVAL_POLICIES } from "../lib/permissions";
 import { OUTPUT_STYLES } from "../lib/outputStyle";
-import { projectName, loadRecentProjects } from "../lib/localAgent";
+import { loadRecentProjects, projectName } from "../lib/localAgent";
 import { loadMcpServers } from "../lib/mcpServers";
 import { loadSshHosts } from "../lib/sshHosts";
 import {
   loadAllowlist, loadDenylist, allowCommand, denyCommand, removeAllowed, removeDenied,
 } from "../lib/commandPolicy";
-import {
-  clarkBillingUrl,
-  codeKeyAccountBinding,
-  openExternal,
-} from "../lib/account";
-import {
-  billingAccountStatusPresentation,
-  projectClarkCodeBilling,
-} from "../lib/billing";
+import { codeKeyAccountBinding } from "../lib/account";
+import { productModule } from "../product/productModule";
+import { useProductAccess } from "../lib/useProductAccess";
 import { stepTextSize, TEXT_SIZES, type TextSize } from "../lib/useTextSize";
 import { OrganizationKnowledgeSettings } from "./OrganizationKnowledgeSettings";
 import { SandboxSetupCard } from "./SandboxSetupCard";
@@ -37,6 +32,7 @@ import {
 } from "./settings/SettingsNavigation";
 import { AboutSection } from "./settings/AboutSection";
 import { ComputerUseSection } from "./settings/ComputerUseSection";
+import { ChatContrastControl } from "./settings/ChatContrastControl";
 
 const input =
   "w-full rounded-lg bg-bg-secondary px-2.5 py-1.5 text-sm text-ink outline-none transition placeholder:text-ink-muted focus:ring-2 focus:ring-accent/20";
@@ -68,10 +64,6 @@ function GeneralSection({
   const setBrowserEnabled = useSessionStore((s) => s.setBrowserEnabled);
   const setOrchestrationEnabled = useSessionStore((s) => s.setOrchestrationEnabled);
   const setMemoriesEnabled = useSessionStore((s) => s.setMemoriesEnabled);
-  const advisorTrainingEnabled = useSessionStore(
-    (s) => s.localSettings.advisorTrainingEnabled === true,
-  );
-  const setLocalSettings = useSessionStore((s) => s.setLocalSettings);
 
   const themeBtn = (isDark: boolean, Icon: typeof Sun, text: string) => (
     <button
@@ -136,6 +128,7 @@ function GeneralSection({
               </button>
             </div>
           </Row>
+          <ChatContrastControl />
           <Row name="Colorblind-friendly colors" sub="Blue/orange status instead of red/green">
             <Toggle on={colorblind} onClick={onToggleColorblind} label="Toggle colorblind-friendly colors" />
           </Row>
@@ -219,17 +212,6 @@ function GeneralSection({
           >
             <Toggle on={memoriesEnabled} onClick={() => setMemoriesEnabled(!memoriesEnabled)} label="Enable memories" />
           </Row>
-          <Row
-            icon={<Brain className="size-4" />}
-            name="Help improve Cloud Advisor"
-            sub="Allow bounded specialist decisions, Kimi K3 guidance, usage, and outcome receipts to be used for future advisor training. Credentials and declared sensitive data remain excluded."
-          >
-            <Toggle
-              on={advisorTrainingEnabled}
-              onClick={() => setLocalSettings({ advisorTrainingEnabled: !advisorTrainingEnabled })}
-              label="Allow advisor training data"
-            />
-          </Row>
         </Card>
       </div>
 
@@ -239,7 +221,7 @@ function GeneralSection({
           <Row
             icon={<Blocks className="size-4" />}
             name="Parallel coding agents"
-            sub="Available by default, but used only when you explicitly ask and the task has independent parts. Writers work in safe copies and Clark asks before applying."
+            sub="Available by default, but used only when you explicitly ask and the task has independent parts. Writers work in safe copies and the agent asks before applying."
           >
             <Toggle
               on={orchestrationEnabled}
@@ -250,7 +232,7 @@ function GeneralSection({
           <Row
             icon={<AlertTriangle className="size-4 text-warning" />}
             name="Enable browser tool"
-            sub="Downloads a ~150-300MB browser (clark-browser) on first use. Every action needs your approval."
+            sub="Downloads a ~150-300MB browser (managed browser) on first use. Every action needs your approval."
           >
             <Toggle on={browserEnabled} onClick={() => setBrowserEnabled(!browserEnabled)} label="Enable browser tool" />
           </Row>
@@ -315,14 +297,14 @@ function ProjectSection() {
         <input
           value={model}
           onChange={(e) => setLocalSettings({ model: e.target.value })}
-          placeholder="clark-code"
+          placeholder="local-model"
           autoCorrect="off"
           autoCapitalize="off"
           spellCheck={false}
           className={cn(input, "font-mono")}
         />
         <p className="mt-1.5 text-xs text-ink-faint">
-          Clark tier id for new chats (see GET /v1/models). Existing chats keep their own
+          the agent tier id for new chats (see GET /v1/models). Existing chats keep their own
           model.
         </p>
       </div>
@@ -356,7 +338,7 @@ function IntegrationsSection() {
   return (
     <div className="space-y-6">
       <div>
-        <GroupLabel>Extend Clark Code</GroupLabel>
+        <GroupLabel>Extend {productName()}</GroupLabel>
         <Card>
           <Row
             icon={<Blocks className="size-4" />}
@@ -515,40 +497,17 @@ function CommandsSection() {
 
 // --- Account ---------------------------------------------------------------
 
-function formatDate(iso?: string | null): string | null {
-  if (!iso) return null;
-  const t = Date.parse(iso);
-  if (Number.isNaN(t)) return null;
-  return new Date(t).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
-}
-
 function AccountSection() {
   const auth = useSessionStore((s) => s.auth);
-  const billing = useSessionStore((s) => s.billing);
-  const loading = useSessionStore((s) => s.loadingBilling);
   const error = useSessionStore((s) => s.error);
-  const loadBilling = useSessionStore((s) => s.loadBilling);
   const signOut = useSessionStore((s) => s.signOutAuth);
   const setSettingsOpen = useSessionStore((s) => s.setSettingsOpen);
-
-  useEffect(() => {
-    void loadBilling();
-  }, [loadBilling]);
+  const SettingsSlot = productModule().slots.settings;
+  const productAccess = useProductAccess(Boolean(SettingsSlot));
 
   if (!auth) return null;
   const user = auth.user;
-  const billingState = projectClarkCodeBilling(billing);
-  const activeBilling = billingState.effective;
-  const isTeamBilling = activeBilling?.owner_kind === "organization";
-  const sub = activeBilling?.subscription ?? null;
-  const accountNeedsReconnect = isClarkAccountReconnectError(error);
-  const st = accountNeedsReconnect
-    ? { label: "Reconnect", tone: "text-danger" }
-    : billingAccountStatusPresentation(billingState.accountStatus);
-  const planLabel = billingState.planLabel;
-  const limitLabel = billingState.usage.limitLabel;
-  const renews = formatDate(sub?.current_period_end);
-  const firstLoad = loading && !billing;
+  const accountNeedsReconnect = isAccountReconnectError(error);
 
   return (
     <div className="space-y-6">
@@ -577,7 +536,7 @@ function AccountSection() {
               <div>
                 <div className="text-sm font-medium text-danger">Session needs reconnecting</div>
                 <div className="mt-0.5 text-xs leading-4 text-ink-secondary">
-                  Sign out, then sign in again to reconnect this Clark account.
+                  Sign out, then sign in again to reconnect this account.
                 </div>
               </div>
             </div>
@@ -585,54 +544,15 @@ function AccountSection() {
         </Card>
       </div>
 
-      <div>
-        <GroupLabel>Clark coverage</GroupLabel>
-        <Card>
-          {isTeamBilling && (
-            <Row name="Billing account">
-              <span className="text-sm font-medium text-ink">
-                {activeBilling?.display_name ?? "Workspace"}
-              </span>
-            </Row>
-          )}
-          <Row name="Plan">
-            {firstLoad ? (
-              <Loader2 className="size-3.5 animate-[spin_1s_linear_infinite] text-ink-muted" />
-            ) : (
-              <span className="flex items-center gap-1.5 text-sm">
-                <span className="font-medium text-ink">{planLabel}</span>
-                <span className={cn("text-xs", st.tone)}>· {st.label}</span>
-              </span>
-            )}
-          </Row>
-          <Row name="Limit used">
-            <span className="text-sm font-medium tabular-nums text-ink">
-              {limitLabel}
-            </span>
-          </Row>
-          {isTeamBilling && activeBilling?.seat && (
-            <Row name="Seats">
-              <span className="text-sm text-ink-secondary">
-                {activeBilling.seat.purchased} purchased · {activeBilling.seat.assigned} assigned
-              </span>
-            </Row>
-          )}
-          {renews && (
-            <Row name={sub?.cancel_at_period_end ? "Ends" : "Renews"}>
-              <span className="text-sm text-ink-secondary">{renews}</span>
-            </Row>
-          )}
-        </Card>
-      </div>
+      {SettingsSlot && (
+        <SettingsSlot
+          access={productAccess.access}
+          accessLoading={productAccess.loading}
+          reloadAccess={productAccess.reload}
+        />
+      )}
 
       <div className="space-y-2">
-        <button
-          onClick={() => void openExternal(clarkBillingUrl())}
-          className="flex w-full items-center gap-2.5 rounded-lg border border-border-subtle px-3.5 py-2.5 text-sm text-ink-secondary transition hover:bg-bg-hover"
-        >
-          <CreditCard className="size-4" /> Review billing accounts
-          <ExternalLink className="ml-auto size-3.5 text-ink-faint" />
-        </button>
         <button
           onClick={() => {
             setSettingsOpen(false);

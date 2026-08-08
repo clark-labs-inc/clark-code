@@ -289,7 +289,7 @@ pub(crate) fn overlay_process_environment(command: &mut portable_pty::CommandBui
     // which can overwrite process-local PATH additions (toolchains, Git,
     // package managers). A pipe-backed child inherits the current process
     // exactly; restore that same contract for PTY-backed children before
-    // applying Clark's explicit overrides.
+    // applying the host's explicit overrides.
     for (name, value) in std::env::vars_os() {
         command.env(name, value);
     }

@@ -46,13 +46,13 @@ describe("account-owned desktop state", () => {
     saveLocalSettings({
       ...DEFAULT_LOCAL_SETTINGS,
       cwd: "/account-one/project",
-      model: "clark-code:kimi_k3",
+      model: "local-model-large",
       reasoningEffort: "max",
       computerUseEnabled: true,
     }, accountOne);
     saveChatModels({
       "shared-conversation-id": {
-        model: "clark-code:kimi_k3",
+        model: "local-model-large",
         reasoningEffort: "max",
       },
     }, accountOne);

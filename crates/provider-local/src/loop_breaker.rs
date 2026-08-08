@@ -9,10 +9,10 @@
 //! diagnostic in a circle — `ls`, re-seed, lock-check, `ls`, … — can keep
 //! consuming work without converging.
 //!
-//! Clark's *cloud* loop already guards against this with typed stop reasons
+//! Agent Desktop's *cloud* loop already guards against this with typed stop reasons
 //! (`identical_tool_call`, `fruitless_tool_streak`, `stale_evidence`, …).
 //! This plugin ports the idea to the *local* loop using only the public
-//! `clark-agent` plugin hooks, so it needs no fork of the pinned core.
+//! `agent-loop` plugin hooks, so it needs no fork of the pinned core.
 //!
 //! ## Signal (why keying on the result matters)
 //!
@@ -47,6 +47,7 @@
 
 use std::collections::HashMap;
 
+use agent_loop as ca;
 use async_trait::async_trait;
 use ca::plugin::{
     AfterToolCall, AfterToolCallContext, AfterToolDecision, BeforeToolCall, BeforeToolCallContext,
@@ -54,7 +55,6 @@ use ca::plugin::{
 };
 use ca::tool::ToolResult;
 use ca::types::{AgentMessage, TextContent, ToolResultBlock};
-use clark_agent as ca;
 use serde_json::Value;
 
 /// Same tool+args+result seen this many times ⇒ start nudging (soft). Set
@@ -73,7 +73,7 @@ const DEFAULT_WINDOW: usize = 30;
 /// the plugin's own annotations never change a result's identity (otherwise
 /// each nudge would make the next result look "different" and defeat
 /// detection).
-const GUARD_MARK: &str = "[clark:loop-guard]";
+const GUARD_MARK: &str = "[agent:loop-guard]";
 
 /// Detects and breaks stuck same-action/same-result loops. See module docs.
 pub struct LoopBreaker {

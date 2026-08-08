@@ -100,7 +100,7 @@ fn main() -> Result<(), DynError> {
                     serde_json::to_vec_pretty(&request.task)?,
                 )?;
                 let result = match options.candidate {
-                    CandidateKind::ClarkCurrent => {
+                    CandidateKind::CurrentAgent => {
                         simulator::run_current(scenario, lane, &workspace)
                     }
                     CandidateKind::Reference => {
@@ -172,7 +172,7 @@ impl Options {
     fn parse(args: impl Iterator<Item = String>) -> Result<Self, DynError> {
         let mut values = args.peekable();
         let mut output = None;
-        let mut candidate = CandidateKind::ClarkCurrent;
+        let mut candidate = CandidateKind::CurrentAgent;
         let mut external_command = Vec::new();
         let mut scenario_ids = Vec::new();
         let mut lane_ids = Vec::new();
@@ -189,7 +189,7 @@ impl Options {
                 "--out" => output = Some(PathBuf::from(next(&mut values, "--out")?)),
                 "--candidate" => {
                     candidate = match next(&mut values, "--candidate")?.as_str() {
-                        "clark-current" => CandidateKind::ClarkCurrent,
+                        "current-agent" => CandidateKind::CurrentAgent,
                         "reference" => CandidateKind::Reference,
                         "external" => CandidateKind::External,
                         value => return Err(format!("unknown candidate: {value}").into()),
@@ -426,7 +426,7 @@ fn comma_list(value: &str) -> Vec<String> {
 fn print_help() {
     println!(
         "Universal work-graph orchestration benchmark\n\n\
-         --candidate <clark-current|reference|external>\n\
+         --candidate <current-agent|reference|external>\n\
          --candidate-command-json '[\"program\", ...]'\n\
          --scenario <id,id>  --lane <id,id>  --repetitions <n>\n\
          --out <directory>  --allow-red  --unsafe-external  --list"

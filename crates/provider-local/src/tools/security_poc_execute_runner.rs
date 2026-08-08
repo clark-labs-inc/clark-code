@@ -110,7 +110,7 @@ pub(super) fn process_spec(
         .env("TMPDIR", temp_root.as_os_str())
         .env("TMP", temp_root.as_os_str())
         .env("TEMP", temp_root.as_os_str())
-        .env("CLARK_SECURITY_POC", "1")
+        .env("AGENT_SECURITY_POC", "1")
 }
 
 pub(super) async fn run_bounded(
@@ -282,7 +282,7 @@ mod tests {
 
     #[test]
     fn powershell_script_arguments_preserve_the_path_as_an_os_string() {
-        let script = Path::new(r"C:\Clark Code\control.ps1");
+        let script = Path::new(r"C:\local agent\control.ps1");
         assert_eq!(
             powershell_script_args(script),
             [

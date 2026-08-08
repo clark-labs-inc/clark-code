@@ -5,17 +5,17 @@
   <key>CFBundleDevelopmentRegion</key>
   <string>en</string>
   <key>CFBundleDisplayName</key>
-  <string>Clark Computer Use</string>
+  <string>Agent Computer Use</string>
   <key>CFBundleExecutable</key>
-  <string>clark-computer-use-helper</string>
+  <string>agent-computer-use-helper</string>
   <key>CFBundleIconFile</key>
-  <string>ClarkComputerUse</string>
+  <string>AgentComputerUse</string>
   <key>CFBundleIdentifier</key>
-  <string>com.clark.computer-use</string>
+  <string>org.agentdesktop.computer-use</string>
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
   <key>CFBundleName</key>
-  <string>Clark Computer Use</string>
+  <string>Agent Computer Use</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>

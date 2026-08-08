@@ -2,6 +2,7 @@ import {
   type SessionState,
   type ClientResponse,
   type ConversationMeta,
+  type NewProjectTarget,
   type Session,
   type SessionGet,
   type SessionOptions,
@@ -55,10 +56,16 @@ import {
 } from "../lib/localAgent";
 import {
   scoutCartographyTarget,
-  skillAdvisorTarget,
+  productSpecialistTarget,
 } from "../lib/specialists";
 import { authAccountMatches } from "../lib/account";
 import { projectDisplayName } from "../lib/projectSidebar";
+import {
+  loadSshHosts,
+  saveSshHosts,
+  hostReady,
+  type SshHost,
+} from "../lib/sshHosts";
 
 const RAPID_DUPLICATE_WINDOW_MS = 750;
 const modelReconfigureChains = new Map<string, Promise<void>>();
@@ -148,8 +155,10 @@ type InteractionActions = Pick<
   | "toggleTerminal"
   | "setTerminalOpen"
   | "openProjectTerminal"
+  | "startNewProject"
   | "setMcpOpen"
   | "setSshOpen"
+  | "setNewProjectOpen"
   | "setSettingsOpen"
   | "setPaletteOpen"
   | "togglePalette"
@@ -239,7 +248,7 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
           scoutCartographyTarget(activeSpecialistContext(), activeRemote, get().activeRemoteHost),
           activeSpecialistContext()?.kind,
           codeKeyAccountBinding(get().auth),
-          skillAdvisorTarget(activeSpecialistContext(), effSettings.advisorTrainingEnabled),
+          productSpecialistTarget(activeSpecialistContext(), effSettings.advisorTrainingEnabled),
         )
         : localConnectConfig(
           effSettings,
@@ -247,7 +256,7 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
           scoutCartographyTarget(activeSpecialistContext(), undefined, "local"),
           activeSpecialistContext()?.kind,
           codeKeyAccountBinding(get().auth),
-          skillAdvisorTarget(activeSpecialistContext(), effSettings.advisorTrainingEnabled),
+          productSpecialistTarget(activeSpecialistContext(), effSettings.advisorTrainingEnabled),
         );
       await queueModelReconfigure(session.id, () => bridge.reconfigure!(session.id, config));
       drainQueuedPromptAfterReconfigure(session.id, bridge, get, set);
@@ -346,13 +355,13 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
     const { bridge, session, snapshot } = state;
     if (!bridge || !session) return null;
     if (state.updateWaiting || state.updateApplying) {
-      get().flashNotice("Clark Code is finishing active work before updating; edit after it relaunches.");
+      get().flashNotice("Agent Desktop is finishing active work before updating; edit after it relaunches.");
       return null;
     }
     const rejectEdit = (error: string) =>
       set({ error, composerPrefill: { text, timelineIndex } });
     if (session.provider !== "local") {
-      rejectEdit("Editing earlier turns is currently available in Clark Code only.");
+      rejectEdit("Editing earlier turns is currently available in Agent Desktop only.");
       return null;
     }
     if (!text.trim() && state.attachments.length === 0) return null;
@@ -399,7 +408,7 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
         scoutCartographyTarget(previousMeta?.specialist, previousEntry.remote, previousEntry.remoteHost),
         previousMeta?.specialist?.kind,
         codeKeyAccountBinding(state.auth),
-        skillAdvisorTarget(previousMeta?.specialist, settings.advisorTrainingEnabled),
+        productSpecialistTarget(previousMeta?.specialist, settings.advisorTrainingEnabled),
       )
       : localConnectConfig(
         settings,
@@ -407,7 +416,7 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
         scoutCartographyTarget(previousMeta?.specialist, undefined, "local"),
         previousMeta?.specialist?.kind,
         codeKeyAccountBinding(state.auth),
-        skillAdvisorTarget(previousMeta?.specialist, settings.advisorTrainingEnabled),
+        productSpecialistTarget(previousMeta?.specialist, settings.advisorTrainingEnabled),
       );
     const options: SessionOptions = {
       cwd: projectRoot,
@@ -535,7 +544,7 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
     const { attachments, auth, bridge, session, snapshot } = get();
     if (!bridge || !session) return;
     if (session.provider !== "local" || !bridge.compact) {
-      get().flashNotice("Context compaction is available only in Clark Code conversations.");
+      get().flashNotice("Context compaction is available only in Agent Desktop conversations.");
       return;
     }
     if (attachments.length > 0) {
@@ -543,7 +552,7 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
       return;
     }
     if (isBusy(snapshot)) {
-      get().flashNotice("Wait for Clark to finish before compacting this conversation.");
+      get().flashNotice("Wait for the agent to finish before compacting this conversation.");
       return;
     }
     try {
@@ -558,7 +567,7 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
     const { auth, bridge, session, attachments, snapshot } = get();
     if (!bridge || !session) return { kind: "not_sent" };
     if (get().updateWaiting || get().updateApplying) {
-      get().flashNotice("Clark Code is finishing active work before updating; send after it relaunches.");
+      get().flashNotice("Agent Desktop is finishing active work before updating; send after it relaunches.");
       return { kind: "not_sent" };
     }
     if (!text.trim() && attachments.length === 0 && skills.length === 0) {
@@ -580,7 +589,7 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
         await bridge.cancel(session.id, activeRunId);
         return { kind: "cancelled" };
       } catch (error) {
-        set({ error: `Stopping Clark failed: ${String(error)}` });
+        set({ error: `Stopping the agent failed: ${String(error)}` });
         return { kind: "not_sent" };
       }
     }
@@ -694,7 +703,7 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
     const message = queued.find((candidate) => candidate.id === id);
     if (!bridge?.steer || !session || session.provider !== "local" || !message) return;
     if (message.uploads.length > 0 || message.skills.length > 0) {
-      get().flashNotice("Messages with attachments or skills stay queued until Clark finishes.");
+      get().flashNotice("Messages with attachments or skills stay queued until the agent finishes.");
       return;
     }
     if (!isBusy(snapshot)) return;
@@ -715,9 +724,9 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
       // the message safely queued; the normal drain will send it next.
       if (authAccountMatches(auth, get().auth) && get().session?.id === session.id) {
         if (stopping) {
-          set({ error: `Stopping Clark failed: ${String(error)}` });
+          set({ error: `Stopping the agent failed: ${String(error)}` });
         } else {
-          get().flashNotice("Clark finished before the message could steer; it remains queued.");
+          get().flashNotice("the agent finished before the message could steer; it remains queued.");
         }
       }
     }
@@ -900,8 +909,61 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
       terminalLaunch: { cwd, nonce: (s.terminalLaunch?.nonce ?? 0) + 1 },
     }));
   },
+  startNewProject: async (target: NewProjectTarget) => {
+    const requestAuth = get().auth;
+    const { bridge, session, runningIds, activeProjectRoot } = get();
+    if (!bridge) {
+      set({ error: "Starting a project session requires Agent Desktop native workspace." });
+      return;
+    }
+    const previousRoot = activeProjectRoot?.trim() ?? "";
+    const previousRunning = Boolean(session && runningIds.includes(session.id));
+    try {
+      if (target.kind === "local") {
+        const cwd = target.path.trim();
+        if (!cwd) return;
+        get().selectProvider("local");
+        get().setProjectMode("local");
+        get().setProjectFolder(cwd);
+      } else {
+        const host: SshHost = target.host;
+        if (!hostReady(host)) {
+          set({ error: "This host needs an SSH destination and remote folder before starting." });
+          return;
+        }
+        // Persist the chosen remote folder on the host so the first session
+        // opens rooted exactly there.
+        const accountScope = codeKeyAccountBinding(requestAuth);
+        const hosts = loadSshHosts(accountScope);
+        const exists = hosts.some((candidate) => candidate.id === host.id);
+        saveSshHosts(
+          exists
+            ? hosts.map((candidate) => candidate.id === host.id ? host : candidate)
+            : [...hosts, host],
+          accountScope,
+        );
+        get().selectProvider("local");
+        get().setProjectMode("remote");
+        get().setSelectedHostId(host.id);
+      }
+      // Detach any session the composer was pinned to — it keeps running in the
+      // sidebar pool — so the new project's first session is what's on screen.
+      get().endSession();
+      if (previousRunning && previousRoot) {
+        get().flashNotice(
+          `${projectDisplayName(previousRoot)} is still running in the sidebar.`,
+        );
+      }
+      // Auto-start the first session for the new project.
+      await get().startSession();
+    } catch (e) {
+      if (!authAccountMatches(requestAuth, get().auth)) return;
+      set({ error: String(e) });
+    }
+  },
   setMcpOpen: (open) => set({ mcpOpen: open }),
   setSshOpen: (open) => set({ sshOpen: open }),
+  setNewProjectOpen: (open) => set({ newProjectOpen: open }),
   setSettingsOpen: (open, section) =>
     set({ settingsOpen: open, ...(section ? { settingsSection: section } : {}) }),
   setPaletteOpen: (open) => set({ paletteOpen: open }),
@@ -920,7 +982,7 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
     try {
       await bridge.cancel(session.id, runId);
     } catch (error) {
-      set({ error: `Stopping Clark failed: ${String(error)}` });
+      set({ error: `Stopping the agent failed: ${String(error)}` });
     }
   },
 

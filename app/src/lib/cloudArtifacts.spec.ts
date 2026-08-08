@@ -1,5 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Snapshot } from "../core-bridge/types";
+import { installProductModule, neutralProduct } from "../product/productModule";
 
 const invoke = vi.hoisted(() => vi.fn());
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
@@ -17,14 +18,14 @@ const creds = { accountScope: "id:account-one" };
 function snapshot(toolCall = "tool-1"): Snapshot {
   return {
     runs: {},
-    timeline: [{ item: "artifact", id: "doc:/Users/alice/.clark/workspace/desk-1/report.md" }],
+    timeline: [{ item: "artifact", id: "doc:/Users/alice/.agent/workspace/desk-1/report.md" }],
     tool_calls: {},
     artifacts: [{
-      id: "doc:/Users/alice/.clark/workspace/desk-1/report.md",
+      id: "doc:/Users/alice/.agent/workspace/desk-1/report.md",
       title: "report.md",
       kind: "file",
       mime_type: "text/markdown",
-      uri: "/Users/alice/.clark/workspace/desk-1/report.md",
+      uri: "/Users/alice/.agent/workspace/desk-1/report.md",
       tool_call: toolCall,
     }],
     provider_incidents: {},
@@ -32,17 +33,25 @@ function snapshot(toolCall = "tool-1"): Snapshot {
 }
 
 beforeEach(() => {
+  installProductModule({
+    ...neutralProduct,
+    artifacts: {
+      ...neutralProduct.artifacts,
+      isCloudUri: (uri) => /^\/product-artifacts\/[^/]+$/.test(uri),
+    },
+  });
   resetArtifactCloudSync();
   configureArtifactCloudCredentials(creds);
   invoke.mockReset();
 });
+afterEach(() => installProductModule(neutralProduct));
 
 describe("mandatory generated artifact cloud sync", () => {
   it("persists a safe retry URI and never serializes the absolute host path", () => {
     const cloud = snapshotForArtifactCloud("desk-1", snapshot());
     expect(cloud.artifacts[0]).toMatchObject({
       id: "doc:report.md",
-      uri: "clark-workspace://desk-1/report.md",
+      uri: "workspace-artifact://desk-1/report.md",
     });
     expect(cloud.timeline[0]).toEqual({ item: "artifact", id: "doc:report.md" });
     expect(JSON.stringify(cloud)).not.toContain("/Users/alice");
@@ -57,20 +66,23 @@ describe("mandatory generated artifact cloud sync", () => {
       size_bytes: 12,
       sha256: "a".repeat(64),
       state: "uploaded",
-      uri: "/api/desktop/conversations/desk-1/artifacts/deskart_1",
+      uri: "/product-artifacts/deskart_1",
     });
     const onReady = vi.fn();
     const local = snapshot();
     scheduleArtifactCloudSync(creds, "desk-1", local, onReady);
     await vi.waitFor(() => expect(onReady).toHaveBeenCalledOnce());
 
-    expect(invoke).toHaveBeenCalledWith("desktop_artifact_upload", {
-      desktopId: "desk-1",
-      logicalId: "doc:report.md",
-      sourceUri: "/Users/alice/.clark/workspace/desk-1/report.md",
+    expect(invoke).toHaveBeenCalledWith("product_request", {
+      operation: "artifact.upload",
+      payload: {
+        desktopId: "desk-1",
+        logicalId: "doc:report.md",
+        sourceUri: "/Users/alice/.agent/workspace/desk-1/report.md",
+      },
     });
     expect(snapshotForArtifactCloud("desk-1", local).artifacts[0].uri)
-      .toBe("/api/desktop/conversations/desk-1/artifacts/deskart_1");
+      .toBe("/product-artifacts/deskart_1");
   });
 
   it("treats a rewrite from a later tool call as a new immutable version", async () => {
@@ -82,7 +94,7 @@ describe("mandatory generated artifact cloud sync", () => {
       size_bytes: 12,
       sha256: "b".repeat(64),
       state: "uploaded",
-      uri: `/api/desktop/conversations/desk-1/artifacts/deskart_${invoke.mock.calls.length}`,
+      uri: `/product-artifacts/deskart_${invoke.mock.calls.length}`,
     }));
     scheduleArtifactCloudSync(creds, "desk-1", snapshot("tool-1"), () => {});
     await vi.waitFor(() => expect(invoke).toHaveBeenCalledTimes(1));
@@ -107,13 +119,13 @@ describe("mandatory generated artifact cloud sync", () => {
       size_bytes: 12,
       sha256: "c".repeat(64),
       state: "uploaded",
-      uri: "/api/desktop/conversations/desk-1/artifacts/deskart_late",
+      uri: "/product-artifacts/deskart_late",
     });
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(onReady).not.toHaveBeenCalled();
     expect(snapshotForArtifactCloud("desk-1", local).artifacts[0].uri)
-      .toBe("clark-workspace://desk-1/report.md");
+      .toBe("workspace-artifact://desk-1/report.md");
   });
 
   it("surfaces a permanent quota failure without an endless retry loop", async () => {

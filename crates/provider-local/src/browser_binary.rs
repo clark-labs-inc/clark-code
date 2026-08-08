@@ -1,25 +1,38 @@
-//! Download/cache clark-browser (a stealth Chromium fork,
-//! github.com/clark-labs-inc/clark-browser) — never bundled in the installer
-//! (135-320MB per platform, Alpha status, ad-hoc-signed on macOS). Lazily
-//! downloaded on first use of the opt-in `browser` tool, cached under
-//! `~/.clark/bin/`, mirroring the URL/layout the project's own Python
-//! launcher (`clarkbrowser/config.py`) uses so a version bump here just means
-//! bumping the same two constants.
+//! Download/cache a host-approved Chromium build. Distribution identity,
+//! version, URL, and cache namespace are supplied by the active product.
 
 use std::path::{Path, PathBuf};
 
-const CHROMIUM_VERSION: &str = "148.0.7778.96";
-const RELEASE_TAG: &str = "chromium-v148.0.7778.96-stealth5";
-const DOWNLOAD_BASE_URL: &str = "https://github.com/clark-labs-inc/clark-browser/releases/download";
+use serde::Deserialize;
 
-/// This machine's clark-browser platform tag, or `Err` if unsupported.
+#[derive(Clone, Debug, Deserialize)]
+pub struct BrowserBinaryConfig {
+    pub version: String,
+    pub release_tag: String,
+    pub download_base_url: String,
+    pub archive_prefix: String,
+    pub cache_namespace: String,
+}
+
+#[cfg(test)]
+pub(crate) fn test_browser_config() -> BrowserBinaryConfig {
+    BrowserBinaryConfig {
+        version: "1.0.0".into(),
+        release_tag: "browser-v1".into(),
+        download_base_url: "https://downloads.example/browser".into(),
+        archive_prefix: "managed-browser".into(),
+        cache_namespace: ".agent-desktop".into(),
+    }
+}
+
+/// This machine's managed-browser platform tag, or `Err` if unsupported.
 fn platform_tag() -> Result<&'static str, String> {
     match (std::env::consts::OS, std::env::consts::ARCH) {
         ("linux", "x86_64") => Ok("linux-x64"),
         ("macos", "aarch64") => Ok("darwin-arm64"),
         ("macos", "x86_64") => Ok("darwin-x64"),
         ("windows", "x86_64") => Ok("windows-x64"),
-        (os, arch) => Err(format!("clark-browser isn't available for {os}/{arch}")),
+        (os, arch) => Err(format!("managed browser isn't available for {os}/{arch}")),
     }
 }
 
@@ -31,18 +44,22 @@ fn archive_ext(tag: &str) -> &'static str {
     }
 }
 
-fn download_url(tag: &str) -> String {
+fn download_url(config: &BrowserBinaryConfig, tag: &str) -> String {
     format!(
-        "{DOWNLOAD_BASE_URL}/{RELEASE_TAG}/clark-browser-{tag}{}",
+        "{}/{}/{}-{tag}{}",
+        config.download_base_url.trim_end_matches('/'),
+        config.release_tag,
+        config.archive_prefix,
         archive_ext(tag)
     )
 }
 
-fn cache_root() -> Result<PathBuf, String> {
+fn cache_root(config: &BrowserBinaryConfig) -> Result<PathBuf, String> {
     let home = dirs_home()?;
     Ok(home
-        .join(".clark/bin")
-        .join(format!("clark-browser-{CHROMIUM_VERSION}")))
+        .join(&config.cache_namespace)
+        .join("bin")
+        .join(format!("managed-browser-{}", config.version)))
 }
 
 /// The `HOME` (or `USERPROFILE` on Windows) directory. No `dirs` crate
@@ -78,22 +95,23 @@ pub struct DownloadProgress {
     pub total: Option<u64>,
 }
 
-/// Return the path to a locally cached clark-browser binary, downloading and
+/// Return the path to a locally cached managed browser binary, downloading and
 /// extracting it first if it isn't already present. `on_progress` is called
 /// periodically during the download (used to stream progress into the tool
 /// call's content, since a 135-320MB fetch is not instant).
 pub async fn ensure_binary(
+    config: &BrowserBinaryConfig,
     on_progress: impl Fn(DownloadProgress) + Send + Sync,
 ) -> Result<PathBuf, String> {
     let tag = platform_tag()?;
-    let cache_dir = cache_root()?;
+    let cache_dir = cache_root(config)?;
     let binary = binary_path_in(&cache_dir, tag);
     if binary.exists() {
         return Ok(binary);
     }
 
     std::fs::create_dir_all(&cache_dir).map_err(|e| e.to_string())?;
-    let archive_bytes = download(&download_url(tag), &on_progress).await?;
+    let archive_bytes = download(&download_url(config, tag), &on_progress).await?;
     extract(&archive_bytes, &cache_dir, tag)?;
 
     #[cfg(unix)]
@@ -110,7 +128,7 @@ pub async fn ensure_binary(
 
     if !binary.exists() {
         return Err(format!(
-            "clark-browser download completed but no binary found at {}",
+            "managed-browser download completed but no binary found at {}",
             binary.display()
         ));
     }
@@ -122,9 +140,9 @@ async fn download(
     on_progress: &(impl Fn(DownloadProgress) + Send + Sync),
 ) -> Result<Vec<u8>, String> {
     use futures::StreamExt;
-    let client = clark_http::build_client(clark_http::ClientOptions {
+    let client = desktop_http::build_client(desktop_http::ClientOptions {
         request_timeout: Some(std::time::Duration::from_secs(600)),
-        redirect_policy: clark_http::RedirectPolicy::Limited(10),
+        redirect_policy: desktop_http::RedirectPolicy::Limited(10),
         ..Default::default()
     })
     .map_err(|e| e.to_string())?;
@@ -132,10 +150,10 @@ async fn download(
         .get(url)
         .send()
         .await
-        .map_err(|e| format!("downloading clark-browser: {e}"))?;
+        .map_err(|e| format!("downloading managed browser: {e}"))?;
     if !resp.status().is_success() {
         return Err(format!(
-            "clark-browser download failed: HTTP {}",
+            "managed-browser download failed: HTTP {}",
             resp.status()
         ));
     }
@@ -166,15 +184,15 @@ fn extract_tar_gz(bytes: &[u8], dest: &Path) -> Result<(), String> {
     let mut archive = tar::Archive::new(gz);
     archive
         .unpack(dest)
-        .map_err(|e| format!("extracting clark-browser archive: {e}"))
+        .map_err(|e| format!("extracting managed-browser archive: {e}"))
 }
 
 fn extract_zip(bytes: &[u8], dest: &Path) -> Result<(), String> {
     let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes))
-        .map_err(|e| format!("reading clark-browser archive: {e}"))?;
+        .map_err(|e| format!("reading managed-browser archive: {e}"))?;
     archive
         .extract(dest)
-        .map_err(|e| format!("extracting clark-browser archive: {e}"))
+        .map_err(|e| format!("extracting managed-browser archive: {e}"))
 }
 
 #[cfg(test)]
@@ -199,10 +217,11 @@ mod tests {
 
     #[test]
     fn download_url_uses_zip_only_for_windows() {
-        assert!(download_url("windows-x64").ends_with(".zip"));
-        assert!(download_url("linux-x64").ends_with(".tar.gz"));
-        assert!(download_url("darwin-arm64").ends_with(".tar.gz"));
-        assert!(download_url("linux-x64").contains(RELEASE_TAG));
+        let config = test_browser_config();
+        assert!(download_url(&config, "windows-x64").ends_with(".zip"));
+        assert!(download_url(&config, "linux-x64").ends_with(".tar.gz"));
+        assert!(download_url(&config, "darwin-arm64").ends_with(".tar.gz"));
+        assert!(download_url(&config, "linux-x64").contains(&config.release_tag));
     }
 
     #[test]

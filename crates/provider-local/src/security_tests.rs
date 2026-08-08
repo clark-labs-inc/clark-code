@@ -69,7 +69,7 @@ pub(super) fn bundle() -> SecurityScanBundle {
         contract_version: SECURITY_SCAN_CONTRACT_VERSION,
         scan_id: "scan-1".into(),
         mode: SecurityScanMode::Standard,
-        model: crate::config::SECURITY_MODEL.into(),
+        model: "security-test-model".into(),
         scope: inventory.scope.clone(),
         inventory_id: inventory.inventory_id,
         phase: SecurityScanPhase::Reporting,
@@ -184,7 +184,7 @@ fn reportable_candidate_requires_attack_path_evidence() {
 }
 
 #[test]
-fn candidates_require_stable_clark_identity_and_concrete_locations() {
+fn candidates_require_stable_agent_identity_and_concrete_locations() {
     let inventory = inventory();
     let mut invalid = bundle();
     invalid.candidates[0].identity_anchor = "src/routes.rs:19".into();
@@ -207,7 +207,7 @@ fn candidates_require_stable_clark_identity_and_concrete_locations() {
     assert!(
         finalize_security_scan(&duplicate, &inventory, &poc_ledger())
             .unwrap_err()
-            .contains("same Clark Security identity")
+            .contains("same Security scanner identity")
     );
 }
 
@@ -291,11 +291,11 @@ fn diff_candidate_must_touch_a_changed_path() {
 async fn inventory_is_sorted_and_excludes_scan_outputs() {
     let temp = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(temp.path().join("src")).unwrap();
-    std::fs::create_dir_all(temp.path().join(".clark/security-scans/scan-1")).unwrap();
+    std::fs::create_dir_all(temp.path().join(".agent/security-scans/scan-1")).unwrap();
     std::fs::write(temp.path().join("src/z.rs"), "z").unwrap();
     std::fs::write(temp.path().join("src/a.rs"), "a").unwrap();
     std::fs::write(
-        temp.path().join(".clark/security-scans/scan-1/scan.json"),
+        temp.path().join(".agent/security-scans/scan-1/scan.json"),
         "{}",
     )
     .unwrap();
@@ -343,9 +343,9 @@ fn git(root: &std::path::Path, args: &[&str]) -> String {
         .arg("-C")
         .arg(root)
         .args(args)
-        .env("GIT_AUTHOR_NAME", "Clark Security Test")
+        .env("GIT_AUTHOR_NAME", "Security scanner Test")
         .env("GIT_AUTHOR_EMAIL", "security@example.com")
-        .env("GIT_COMMITTER_NAME", "Clark Security Test")
+        .env("GIT_COMMITTER_NAME", "Security scanner Test")
         .env("GIT_COMMITTER_EMAIL", "security@example.com")
         .output()
         .unwrap();
@@ -401,9 +401,9 @@ async fn working_tree_diff_inventory_covers_all_git_change_shapes() {
         Some("old.rs")
     );
 
-    std::fs::create_dir_all(root.join(".clark/security-scans/scan-1")).unwrap();
+    std::fs::create_dir_all(root.join(".agent/security-scans/scan-1")).unwrap();
     std::fs::write(
-        root.join(".clark/security-scans/scan-1/scan.json"),
+        root.join(".agent/security-scans/scan-1/scan.json"),
         "{\"phase\":\"reporting\"}\n",
     )
     .unwrap();

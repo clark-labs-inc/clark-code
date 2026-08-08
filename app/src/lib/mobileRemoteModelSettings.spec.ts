@@ -23,29 +23,29 @@ describe("mobileRemoteModelSettings", () => {
 
   it("always resolves selected models to their maximum effort", () => {
     expect(mobileRemoteModelSettings(command({
-      model: "clark-code:glm52",
+      model: "local-model-large",
       reasoning_effort: "xhigh",
     }))).toEqual({
-      model: "clark-code:glm52",
-      reasoningEffort: "xhigh",
+      model: "local-model-large",
+      reasoningEffort: "max",
     });
     expect(mobileRemoteModelSettings(command({
-      model: "clark-code:free",
+      model: "local-model",
       reasoning_effort: "low",
     }))).toEqual({
-      model: "clark-code:free",
-      reasoningEffort: "max",
+      model: "local-model",
+      reasoningEffort: "high",
     });
   });
 
   it("rejects stale model ids but ignores old effort choices", () => {
     expect(() => mobileRemoteModelSettings(command({
-      model: "clark-code:grok45",
+      model: "retired-model",
       reasoning_effort: "",
     }))).toThrow("not available");
     expect(mobileRemoteModelSettings(command({
-      model: "clark-code:kimi_k3",
+      model: "local-model-large",
       reasoning_effort: "low",
-    }))).toEqual({ model: "clark-code:kimi_k3", reasoningEffort: "max" });
+    }))).toEqual({ model: "local-model-large", reasoningEffort: "max" });
   });
 });

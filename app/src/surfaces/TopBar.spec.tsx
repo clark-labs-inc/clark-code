@@ -16,7 +16,7 @@ describe("UpdatePill", () => {
 
     expect(html).toContain("<button");
     expect(html).toContain("Ready to update");
-    expect(html).toContain("Ready to update Clark Code to 0.1.65; restart now");
+    expect(html).toContain("Ready to update Agent Desktop to 0.1.65; restart now");
   });
 
   it("shows download progress before the ready action", () => {

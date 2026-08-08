@@ -1,20 +1,16 @@
 import {
   ArrowUpRight,
-  FlaskConical,
-  Network,
   RefreshCw,
-  ShieldCheck,
   Sparkles,
-  Waypoints,
 } from "lucide-react";
 
-import { clarkBillingUrl, openExternal } from "../../lib/account";
 import {
   projectedSpecialistAccess,
   specialistAccessCopy,
   type SpecialistKind,
 } from "../../lib/specialists";
 import { useSessionStore } from "../../store/sessionStore";
+import { productModule } from "../../product/productModule";
 
 export function SpecialistAccessGate({
   kind,
@@ -27,16 +23,11 @@ export function SpecialistAccessGate({
 }) {
   const copy = specialistAccessCopy(state, kind);
   const signIn = useSessionStore((session) => session.signIn);
-  const Icon = {
-    scout: Network,
-    security: ShieldCheck,
-    scientist: FlaskConical,
-    rsi: Waypoints,
-  }[kind] ?? Sparkles;
+  const Icon = productModule().specialistIcons?.[kind] ?? Sparkles;
   const action = () => {
     if (copy.action === "sign_in") void signIn("google");
     else if (copy.action === "retry") onRetry();
-    else void openExternal(clarkBillingUrl());
+    else onRetry();
   };
 
   return (
@@ -56,16 +47,14 @@ export function SpecialistAccessGate({
             data-qa={`specialist-gate-action-${kind}`}
             type="button"
             onClick={action}
-            className="mt-6 inline-flex items-center gap-2 rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-accent/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+            className="mt-6 inline-flex items-center gap-2 rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-on-accent shadow-sm transition hover:bg-accent/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
           >
             {copy.action === "retry" ? <RefreshCw className="size-4" /> : <Sparkles className="size-4" />}
             {copy.action === "sign_in"
               ? "Sign in"
               : copy.action === "retry"
                 ? "Try again"
-                : copy.action === "billing"
-                  ? "Manage billing"
-                  : "Compare plans"}
+                : copy.actionLabel ?? "Review access"}
             {copy.action !== "retry" && <ArrowUpRight className="size-3.5" />}
           </button>
         )}

@@ -250,21 +250,21 @@ impl DeferredToolGate {
     }
 }
 
-impl clark_agent::Plugin for DeferredToolGate {
+impl agent_loop::Plugin for DeferredToolGate {
     fn name(&self) -> &'static str {
         "deferred_tool_gate"
     }
 
-    fn capabilities(&self) -> clark_agent::PluginCapabilities {
-        clark_agent::PluginCapabilities::tool_gate()
+    fn capabilities(&self) -> agent_loop::PluginCapabilities {
+        agent_loop::PluginCapabilities::tool_gate()
     }
 }
 
 #[async_trait]
-impl clark_agent::plugin::ToolGate for DeferredToolGate {
+impl agent_loop::plugin::ToolGate for DeferredToolGate {
     async fn next_turn_tool_allowlist(
         &self,
-        ctx: clark_agent::plugin::ToolGateContext<'_>,
+        ctx: agent_loop::plugin::ToolGateContext<'_>,
     ) -> Option<HashSet<String>> {
         let mut allowed = self.catalog.eager_names();
         allowed.extend(self.activated_names().await);
@@ -279,7 +279,7 @@ impl clark_agent::plugin::ToolGate for DeferredToolGate {
     async fn denial_reason(
         &self,
         tool_name: &str,
-        _ctx: clark_agent::plugin::ToolGateContext<'_>,
+        _ctx: agent_loop::plugin::ToolGateContext<'_>,
     ) -> Option<String> {
         if self.catalog.is_deferred(tool_name) && !self.activated_names().await.contains(tool_name)
         {
@@ -294,7 +294,7 @@ impl clark_agent::plugin::ToolGate for DeferredToolGate {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use clark_agent::plugin::ToolGate;
+    use agent_loop::plugin::ToolGate;
 
     #[test]
     fn search_prefers_names_and_preserves_registration_order_for_ties() {
@@ -385,7 +385,7 @@ mod tests {
         let available = ["read_file", "tool_search", "android_tap"];
 
         let initial = gate
-            .next_turn_tool_allowlist(clark_agent::plugin::ToolGateContext {
+            .next_turn_tool_allowlist(agent_loop::plugin::ToolGateContext {
                 iteration: 0,
                 messages: &[],
                 conversation_id: Some("session"),
@@ -404,7 +404,7 @@ mod tests {
             .deferred_tools
             .insert("android_tap".into());
         let activated = gate
-            .next_turn_tool_allowlist(clark_agent::plugin::ToolGateContext {
+            .next_turn_tool_allowlist(agent_loop::plugin::ToolGateContext {
                 iteration: 1,
                 messages: &[],
                 conversation_id: Some("session"),
@@ -431,7 +431,7 @@ mod tests {
         let available = ["read_file", "verify_effect"];
 
         let unresolved = gate
-            .next_turn_tool_allowlist(clark_agent::plugin::ToolGateContext {
+            .next_turn_tool_allowlist(agent_loop::plugin::ToolGateContext {
                 iteration: 0,
                 messages: &[],
                 conversation_id: Some("session"),
@@ -452,7 +452,7 @@ mod tests {
             )
             .unwrap();
         let resolved = gate
-            .next_turn_tool_allowlist(clark_agent::plugin::ToolGateContext {
+            .next_turn_tool_allowlist(agent_loop::plugin::ToolGateContext {
                 iteration: 1,
                 messages: &[],
                 conversation_id: Some("session"),

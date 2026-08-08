@@ -14,8 +14,8 @@ jobs:
     timeout-minutes: 20
     env:
       CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS: "-C target-feature=+crt-static"
-      CLARK_WINDOWS_SANDBOX_GIT_REQUIRED: "1"
-      CLARK_WINDOWS_SANDBOX_TRACE: "1"
+      AGENT_WINDOWS_SANDBOX_GIT_REQUIRED: "1"
+      AGENT_WINDOWS_SANDBOX_TRACE: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
@@ -35,17 +35,17 @@ jobs:
         shell: pwsh
         run: |
           node harness/windows-native-containment.mjs `
-            --runner target/release/clark-command-runner.exe `
-            --setup target/release/clark-windows-sandbox-setup.exe `
+            --runner target/release/agent-command-runner.exe `
+            --setup target/release/agent-windows-sandbox-setup.exe `
             --source-revision $env:GITHUB_SHA `
-            --out "$env:RUNNER_TEMP/clark-windows-native-containment-$env:GITHUB_RUN_ID"
+            --out "$env:RUNNER_TEMP/agent-windows-native-containment-$env:GITHUB_RUN_ID"
 
       - name: Upload native Windows containment receipt
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: windows-native-containment
-          path: ${{ runner.temp }}/clark-windows-native-containment-${{ github.run_id }}
+          path: ${{ runner.temp }}/agent-windows-native-containment-${{ github.run_id }}
           if-no-files-found: error
           retention-days: 30
 
@@ -53,7 +53,7 @@ jobs:
         if: always()
         shell: pwsh
         run: |
-          $receipt = Get-Content "$env:RUNNER_TEMP/clark-windows-native-containment-$env:GITHUB_RUN_ID/receipt.json" | ConvertFrom-Json
+          $receipt = Get-Content "$env:RUNNER_TEMP/agent-windows-native-containment-$env:GITHUB_RUN_ID/receipt.json" | ConvertFrom-Json
           "## Experimental Windows containment" >> $env:GITHUB_STEP_SUMMARY
           "" >> $env:GITHUB_STEP_SUMMARY
           "- Status: ``$($receipt.status)``" >> $env:GITHUB_STEP_SUMMARY

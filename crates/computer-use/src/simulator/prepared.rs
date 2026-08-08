@@ -288,9 +288,9 @@ fn validate_points(action: &ComputerAction) -> Result<(), ComputerUseError> {
 fn application_identity() -> ApplicationIdentity {
     ApplicationIdentity {
         bundle_id: SimulatedComputerBackend::BUNDLE_ID.to_string(),
-        team_identifier: Some("CLARK-SIMULATOR".to_string()),
-        designated_requirement: "identifier com.clark.computer-use-simulator and anchor simulator"
-            .to_string(),
+        team_identifier: Some("AGENT-SIMULATOR".to_string()),
+        designated_requirement:
+            "identifier com.agent-desktop.computer-use-simulator and anchor simulator".to_string(),
         identity_key: "simulator-signer-v1".to_string(),
         durable_approval_eligible: true,
     }
@@ -362,7 +362,7 @@ fn preview(action: &ComputerAction) -> RedactedActionPreview {
     };
     RedactedActionPreview {
         summary,
-        app_name: "Clark Computer Use Simulator".to_string(),
+        app_name: "Agent Computer Use Simulator".to_string(),
         bundle_id: SimulatedComputerBackend::BUNDLE_ID.to_string(),
         pid: 42_424,
         window_id: 7,

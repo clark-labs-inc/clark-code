@@ -1,5 +1,5 @@
 //! The provider abstraction — the heart of the app. One trait fronts every
-//! agentic backend (a local ACP CLI over stdio, the Clark runtime over a
+//! agentic backend (a local ACP CLI over stdio, a managed runtime over a
 //! WebSocket, an in-WASM client). The engine and all UI are provider-agnostic.
 
 use std::collections::HashMap;
@@ -52,14 +52,14 @@ pub struct ProviderCapabilities {
     /// Raw attachment families accepted by this provider's prompt boundary.
     #[serde(default)]
     pub attachment_kinds: Vec<AttachmentKind>,
-    /// Named operating modes (ACP modes / Clark tiers).
+    /// Named operating modes (ACP modes / managed-provider tiers).
     pub modes: Vec<String>,
     /// Host collaboration modes supported independently of provider-native modes.
     #[serde(default)]
     pub collaboration_modes: Vec<CollaborationMode>,
 }
 
-/// One Clark-owned model choice advertised by a provider. The terminal and
+/// One host-owned model choice advertised by a provider. The terminal and
 /// desktop clients render this catalog; they do not maintain their own model
 /// lists.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -112,7 +112,7 @@ pub struct ProviderConfiguration {
     pub experiments: Vec<ExperimentCapability>,
 }
 
-/// A validated configuration mutation requested by a Clark client.
+/// A validated configuration mutation requested by a provider client.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "setting", rename_all = "snake_case")]
 pub enum ProviderConfigurationChange {
@@ -259,7 +259,7 @@ pub struct Session {
 }
 
 /// A user turn to send to the agent: text/content plus any attached files. Each
-/// provider ingests `attachments` its own way (ACP → content blocks, Clark → an
+/// provider ingests `attachments` its own way (ACP → content blocks, managed providers → an
 /// attachment record), keeping the UI provider-agnostic.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct PromptInput {

@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "Pure translation from target-bound Scout adapter receipts to Clark cartography schema-v2 observations."
+description = "Pure translation from target-bound Scout adapter receipts to cartography schema-v2 observations."
 
 [dependencies]
 scout-adapter-protocol = { path = "../scout-adapter-protocol" }

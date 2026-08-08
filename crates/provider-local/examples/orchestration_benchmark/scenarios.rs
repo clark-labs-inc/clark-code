@@ -141,9 +141,9 @@ pub fn seed(root: &Path, scenario: &Scenario) -> Result<SeededRepository, String
         run_git(root, &["init", "--quiet"])?;
         run_git(
             root,
-            &["config", "user.name", "Clark orchestration benchmark"],
+            &["config", "user.name", "Agent orchestration benchmark"],
         )?;
-        run_git(root, &["config", "user.email", "benchmark@clark.local"])?;
+        run_git(root, &["config", "user.email", "benchmark@example.test"])?;
         run_git(root, &["add", "-A"])?;
         run_git(root, &["commit", "--quiet", "-m", "synthetic baseline"])?;
         Some(run_git(root, &["rev-parse", "HEAD"])?.trim().to_string())
@@ -367,7 +367,7 @@ mod tests {
             "remote_execution",
             "non_git",
             "substantial_multifile",
-            "clark_cloud",
+            "product_cloud",
         ] {
             assert!(families.contains(required), "missing family {required}");
         }
@@ -397,7 +397,7 @@ mod tests {
     fn trigger_policy_is_independent_from_the_expected_label() {
         assert!(!trigger_policy(&find("trivial-1").unwrap()));
         assert!(trigger_policy(&find("independent-modules-1").unwrap()));
-        assert!(trigger_policy(&find("clark-cloud-1").unwrap()));
+        assert!(trigger_policy(&find("brokered-cloud-1").unwrap()));
         assert!(!trigger_policy(&find("worker-crash-1").unwrap()));
         assert!(find("worker-crash-1").unwrap().expected_delegate);
     }

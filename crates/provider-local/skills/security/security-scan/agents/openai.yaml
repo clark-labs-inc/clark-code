@@ -1,7 +1,7 @@
 interface:
   display_name: "Security"
   short_description: "Scan code with complete coverage and sealed evidence"
-  default_prompt: "Use $security:security-scan to run an evidence-backed security scan over this repository. The workflow runs on host-pinned DeepSeek V4 Flash Latest."
+  default_prompt: "Use $security:security-scan to run an evidence-backed security scan over this repository. The workflow uses the host-pinned model."
 dependencies:
   tools:
     - type: tool

@@ -1,4 +1,4 @@
-// Cloud storage for conversation history — Clark's desktop-conversation API.
+// Product-cloud storage for conversation history.
 //
 // The cloud database is the SOURCE OF TRUTH for chats: the list comes from
 // `cloudList`, transcripts from `cloudGet`, and mutations use `cloudPut` /
@@ -6,7 +6,7 @@
 // account-scoped SQLite outbox and acknowledged snapshot cache for atomic local
 // writes, offline delivery, and restart recovery; it reconciles against cloud
 // revisions and cannot overwrite a newer cloud snapshot. The native host binds
-// the validated Clark JWT subject to the local records, so the WebView cannot
+// the validated product account to local records, so the WebView cannot
 // select another account's partition. Cloud sync is available only in the
 // desktop app for a native-retained signed-in account.
 
@@ -425,7 +425,7 @@ async function drainPush(id: string): Promise<void> {
       clearRetry(id);
       retryAttempts.delete(id);
       warningHandler?.(
-        "This conversation was deleted on another device, so Clark Code stopped syncing it here.",
+        "This conversation was deleted on another device, so Agent Desktop stopped syncing it here.",
       );
       ok = true;
     } else {

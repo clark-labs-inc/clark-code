@@ -18,7 +18,7 @@ pub fn verify_and_consume(request: &WindowsSetupRequest) -> Result<(), String> {
                 proof.proof_path.display()
             ));
         }
-        let expected_name = format!(".clark-sandbox-setup-{}-", request.request_id);
+        let expected_name = format!(".agent-sandbox-setup-{}-", request.request_id);
         let name = proof_path
             .file_name()
             .and_then(|name| name.to_str())
@@ -66,7 +66,7 @@ mod tests {
             protocol_version: SETUP_PROTOCOL_VERSION,
             request_id: "ownership-test".into(),
             state_dir: root.join("state"),
-            runner_path: root.join("clark-command-runner.exe"),
+            runner_path: root.join("agent-command-runner.exe"),
             policy: WireSandboxPolicy {
                 read_roots: Vec::new(),
                 write_roots: vec![root.to_path_buf()],
@@ -89,7 +89,7 @@ mod tests {
         let nonce = "0123456789abcdef0123456789abcdef";
         let proof = root
             .path()
-            .join(".clark-sandbox-setup-ownership-test-0.proof");
+            .join(".agent-sandbox-setup-ownership-test-0.proof");
         std::fs::write(&proof, nonce).unwrap();
         verify_and_consume(&request(root.path(), proof.clone(), nonce)).unwrap();
         assert!(!proof.exists());
@@ -102,7 +102,7 @@ mod tests {
         let nonce = "0123456789abcdef0123456789abcdef";
         let proof = outside
             .path()
-            .join(".clark-sandbox-setup-ownership-test-0.proof");
+            .join(".agent-sandbox-setup-ownership-test-0.proof");
         std::fs::write(&proof, nonce).unwrap();
         assert!(verify_and_consume(&request(root.path(), proof.clone(), nonce)).is_err());
         assert!(proof.exists());

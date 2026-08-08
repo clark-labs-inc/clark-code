@@ -63,18 +63,15 @@ fn scout_model_policy_ignores_root_child_and_harness_configuration() {
     let policy = delegation_model_policy(
         &config,
         Some(crate::tools::TurnModelOverride {
-            model: crate::config::SCOUT_MODEL,
-            reasoning_effort: crate::config::SCOUT_REASONING_EFFORT,
+            model: "host-scout-model".into(),
+            reasoning_effort: Some("max".into()),
         }),
     );
 
-    assert_eq!(policy.root_model, crate::config::SCOUT_MODEL);
-    assert_eq!(policy.child_model, crate::config::SCOUT_MODEL);
+    assert_eq!(policy.root_model, "host-scout-model");
+    assert_eq!(policy.child_model, "host-scout-model");
     assert_eq!(policy.harness, "local");
-    assert_eq!(
-        policy.reasoning_effort.as_deref(),
-        crate::config::SCOUT_REASONING_EFFORT
-    );
+    assert_eq!(policy.reasoning_effort.as_deref(), Some("max"));
 }
 
 #[test]

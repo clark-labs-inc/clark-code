@@ -30,15 +30,15 @@ const STEPS: Array<{
     id: "accessibility",
     title: "Allow Accessibility",
     setting: "Accessibility",
-    description: "Let Clark read the controls and safely target the window it is working in.",
-    detail: "Find the Clark Computer Use service, then turn it on.",
+    description: "Let the agent read the controls and safely target the window it is working in.",
+    detail: "Find the agent Computer Use service, then turn it on.",
   },
   {
     id: "screen-recording",
     title: "Allow Screen Recording",
     setting: "Screen Recording",
-    description: "Let Clark see the current app window and show you what it is doing.",
-    detail: "Find the same service, then turn it on and restart Clark if macOS asks.",
+    description: "Let the agent see the current app window and show you what it is doing.",
+    detail: "Find the same service, then turn it on and restart the agent if macOS asks.",
   },
 ];
 
@@ -62,7 +62,7 @@ function SettingRow({
 }) {
   return (
     <div className={cn(
-      "flex items-center gap-2 rounded-md px-2 py-1.5 text-[10px]",
+      "flex items-center gap-2 rounded-md px-2 py-1.5 text-xs",
       active ? "bg-accent/12 font-semibold text-accent" : "text-ink-muted",
     )}>
       <span className={cn("size-2 rounded-full", active ? "bg-accent" : "bg-ink-faint/50")} />
@@ -106,7 +106,7 @@ function SettingsPreview({
             </div>
           </div>
           <div className="relative flex-1 p-3">
-            <div className="text-[11px] font-semibold text-ink">Privacy &amp; Security</div>
+            <div className="text-xs font-semibold text-ink">Privacy &amp; Security</div>
             <div className="mt-0.5 text-[9px] text-ink-faint">{step.setting}</div>
             <div className="mt-2 rounded-md border border-border-subtle bg-bg-tertiary/55 p-2">
               <div className="text-[9px] text-ink-faint">Allow these applications to control your Mac:</div>
@@ -140,7 +140,7 @@ function SettingsPreview({
           </div>
         </div>
       </div>
-      <div className="mt-2 flex items-center justify-center gap-1.5 text-[10px] text-ink-faint">
+      <div className="mt-2 flex items-center justify-center gap-1.5 text-xs text-ink-faint">
         <ExternalLink className="size-3" />
         <span>Privacy &amp; Security</span>
         <ArrowRight className="size-3 text-accent" />
@@ -176,12 +176,12 @@ export function MacPermissionGuide({
           <MousePointer2 className="size-4" />
         </div>
         <div className="min-w-0 flex-1">
-          <div className="text-sm font-semibold text-ink">Let’s set up Clark on your Mac</div>
+          <div className="text-sm font-semibold text-ink">Let’s set up the agent on your Mac</div>
           <p className="mt-0.5 text-xs leading-5 text-ink-muted">
-            Follow the two steps below. Clark only uses these grants to observe the app it is controlling; it does not give you a takeover button.
+            Follow the two steps below. the agent only uses these grants to observe the app it is controlling; it does not give you a takeover button.
           </p>
         </div>
-        <div className="shrink-0 rounded-full bg-bg-secondary px-2 py-1 text-[10px] font-semibold tabular-nums text-ink-muted">
+        <div className="shrink-0 rounded-full bg-bg-secondary px-2 py-1 text-xs font-semibold tabular-nums text-ink-muted">
           {stepIndex + 1} / {STEPS.length}
         </div>
       </div>
@@ -202,12 +202,12 @@ export function MacPermissionGuide({
               )}
             >
               <span className={cn(
-                "grid size-5 shrink-0 place-items-center rounded-full border text-[10px] font-semibold",
+                "grid size-5 shrink-0 place-items-center rounded-full border text-xs font-semibold",
                 complete ? "border-success/40 bg-success/10 text-success" : candidate.id === stepId ? "border-accent/40 bg-accent/10 text-accent" : "border-border text-ink-faint",
               )}>
                 {complete ? <Check className="size-3" /> : index + 1}
               </span>
-              <span className="truncate text-[10px] font-medium">{candidate.setting}</span>
+              <span className="truncate text-xs font-medium">{candidate.setting}</span>
             </button>
           );
         })}

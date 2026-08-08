@@ -81,8 +81,8 @@ impl GitFixture {
         git(&main, &["init", "-q", "--initial-branch=main"]);
         git(&main, &["config", "core.autocrlf", "false"]);
         git(&main, &["config", "core.eol", "lf"]);
-        git(&main, &["config", "user.name", "Clark Test"]);
-        git(&main, &["config", "user.email", "clark@example.com"]);
+        git(&main, &["config", "user.name", "Agent Test"]);
+        git(&main, &["config", "user.email", "agent@example.test"]);
         std::fs::write(main.join("tracked.txt"), "main\n").expect("seed tracked file");
         git(&main, &["add", "tracked.txt"]);
         git(&main, &["commit", "-qm", "initial"]);
@@ -92,7 +92,7 @@ impl GitFixture {
                 "remote",
                 "add",
                 "origin",
-                "https://token@example.com/Clark/Simulation.git",
+                "https://token@example.com/agent/simulation.git",
             ],
         );
         git(

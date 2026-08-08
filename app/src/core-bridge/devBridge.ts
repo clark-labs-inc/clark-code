@@ -1,5 +1,5 @@
 // Dev/test bridge: talks to the `devbridge` Rust server, which runs the REAL
-// providers + agent-core projection. Lets the browser drive real Clark/ACP turns
+// providers + agent-core projection. Lets the browser drive real the agent/ACP turns
 // (for headless UI testing and video capture) with zero logic duplicated in TS —
 // it only relays commands and renders the Snapshots the engine produces.
 

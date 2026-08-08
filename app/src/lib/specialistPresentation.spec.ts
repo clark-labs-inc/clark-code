@@ -8,7 +8,7 @@ import {
 } from "./specialistPresentation";
 
 describe("specialist conversation presentation examples", () => {
-  it("covers every registered first-party specialist with bounded presentation data", () => {
+  it("covers every registered product specialist with bounded presentation data", () => {
     for (const kind of SPECIALIST_KINDS) {
       const presentation = specialistConversationPresentation(kind);
 

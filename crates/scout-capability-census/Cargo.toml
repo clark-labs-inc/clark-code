@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "Portable secret-safe capability census for Clark Scout sensors."
+description = "Portable secret-safe capability census for Scout sensors."
 
 [dependencies]
 serde.workspace = true

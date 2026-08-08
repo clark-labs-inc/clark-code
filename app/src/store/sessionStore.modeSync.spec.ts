@@ -102,7 +102,7 @@ describe("approval and collaboration mode", () => {
 
   it("does not cycle an invisible local approval policy for cloud sessions", () => {
     const bridge = stubBridge();
-    const cloudSession = { id: "conv-9", provider: "clark" } as unknown as Session;
+    const cloudSession = { id: "conv-9", provider: "product-cloud" } as unknown as Session;
     useSessionStore.setState({ bridge, session: cloudSession, approvalPolicy: "auto" });
     useSessionStore.getState().cycleApprovalPolicy();
     expect(useSessionStore.getState().approvalPolicy).toBe("auto");

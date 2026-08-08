@@ -90,7 +90,7 @@ export function AgentMigrationPanel({
       <div>
         <p className="text-sm font-medium text-ink">Bring over another coding agent</p>
         <p className="text-xs text-ink-muted">
-          Review detected setup before importing. Clark adds only missing MCP servers; source files
+          Review detected setup before importing. the agent adds only missing MCP servers; source files
           stay unchanged.
         </p>
       </div>

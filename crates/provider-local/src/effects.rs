@@ -10,7 +10,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 
 use agent_core::ids::RunId;
-use clark_agent::{
+use agent_loop::{
     plugin::{ToolGate, ToolGateContext},
     AgentMessage, FollowUpSource, Plugin, PluginCapabilities,
 };
@@ -21,7 +21,7 @@ use tokio::sync::Mutex;
 use crate::loop_state::SessionState;
 use crate::tools::ToolOutcome;
 
-pub(crate) const EFFECT_DETAILS_KEY: &str = "_clark_effect_receipt";
+pub(crate) const EFFECT_DETAILS_KEY: &str = "_agent_effect_receipt";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct EffectIntent {
@@ -160,7 +160,7 @@ impl EffectLedger {
             return None;
         }
         Some(format!(
-            "Clark cannot finish yet because these durable or externally visible effects have not \
+            "Agent Desktop cannot finish yet because these durable or externally visible effects have not \
              been independently verified:\n{}\nUse an appropriate read-only tool or command to inspect \
              each target's canonical state, then call `verify_effect`. When inspection uses `bash`, \
              set `effect` to `none` so the observation is not recorded as another mutation. Command \
@@ -276,7 +276,7 @@ impl ToolGate for EffectCompletionGuard {
         let unresolved = session.effects.unresolved_diagnostics(&self.run);
         if tool_name == crate::tools::final_answer::FINAL_ANSWER_TOOL && !unresolved.is_empty() {
             return Some(format!(
-                "Clark cannot publish the final answer while these effects remain unresolved:\n- {}\nIndependently inspect each canonical target, then call `verify_effect` with `verified`, `mismatch`, or `unverifiable` and concrete evidence.",
+                "Agent Desktop cannot publish the final answer while these effects remain unresolved:\n- {}\nIndependently inspect each canonical target, then call `verify_effect` with `verified`, `mismatch`, or `unverifiable` and concrete evidence.",
                 unresolved.join("\n- ")
             ));
         }

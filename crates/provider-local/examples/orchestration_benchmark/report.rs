@@ -382,7 +382,7 @@ fn mark_pareto(lanes: &mut [LaneSummary]) {
 
 pub fn markdown(summary: &BenchmarkSummary) -> String {
     let mut out = String::new();
-    out.push_str("# Clark orchestration benchmark\n\n");
+    out.push_str("# Agent orchestration benchmark\n\n");
     out.push_str(&format!(
         "Runs: {}. Evidence levels: {}.\n\n",
         summary.total_runs,

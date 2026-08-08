@@ -281,7 +281,7 @@ pub async fn run(source: &Path, output: &Path, recorder: &mut Recorder) -> Resul
     let (mut provider, first_turn) = recorder
         .step(
             "provider_boundary_v1",
-            "Send the exact selection through Clark's real provider request boundary",
+            "Send the exact selection through the product's real provider request boundary",
             || async {
                 let (active, turn) = provider_harness::launch_and_prompt(
                     &selected,
@@ -361,7 +361,7 @@ pub async fn run(source: &Path, output: &Path, recorder: &mut Recorder) -> Resul
     let (mut restarted, restarted_turn) = recorder
         .step(
             "restart_and_updated_body",
-            "Restart Clark, rediscover the pack, and load the updated body",
+            "Restart the desktop app, rediscover the pack, and load the updated body",
             || async {
                 let fresh = snapshot(&selected, "local:read-benchmark-restart").await;
                 let selected_after_restart = managed_brainstorming(&fresh.skills)?;
@@ -465,7 +465,7 @@ fn managed_brainstorming(skills: &[SkillCatalogEntry]) -> Result<&SkillCatalogEn
         .find(|skill| {
             skill.name == "brainstorming"
                 && skill.scope == SkillScope::User
-                && skill.origin == SkillOrigin::Clark
+                && skill.origin == SkillOrigin::Bundled
         })
         .ok_or_else(|| error("managed user brainstorming skill was not discoverable"))
 }

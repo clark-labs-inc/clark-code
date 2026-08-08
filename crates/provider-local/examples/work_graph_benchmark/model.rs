@@ -6,7 +6,7 @@ use sha2::{Digest, Sha256};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CandidateKind {
-    ClarkCurrent,
+    CurrentAgent,
     Reference,
     External,
 }
@@ -14,7 +14,7 @@ pub enum CandidateKind {
 impl CandidateKind {
     pub fn id(self) -> &'static str {
         match self {
-            Self::ClarkCurrent => "clark-current",
+            Self::CurrentAgent => "current-agent",
             Self::Reference => "reference",
             Self::External => "external",
         }

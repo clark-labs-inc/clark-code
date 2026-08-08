@@ -1,82 +1,45 @@
 //! Connection + behavior config for the local agent, parsed from
 //! [`agent_core::ProviderConfig`].
 //!
-//! Everything routes through the production Clark Platform API
-//! (`https://api.clarkslabs.com/v1`) authenticated with a single `ck_live_…`
-//! key. No URLs are user-configurable; the only required input is the key (and a
-//! project folder). A `base_url` override in `extra` exists solely for tests.
+//! The host supplies an OpenAI-compatible endpoint, model catalog, and optional
+//! auxiliary-model policy through [`ProviderConfig`].
 
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use agent_core::provider::ProviderConfig;
+use agent_core::provider::{ModelCapability, ProviderConfig};
+use serde::Deserialize;
 use serde_json::Value;
 
 use crate::compaction::CompactionConfig;
 use crate::tools::PermissionMode;
 
-/// Production Clark Platform API (OpenAI-compatible) base URL.
-pub const DEFAULT_BASE_URL: &str = "https://api.clarkslabs.com/v1";
-/// Default coding model: the included Clark Code alias backed by DeepSeek V4
-/// Flash Latest (native tool_calls, no internal sandbox loop), which the local
-/// loop drives with its own tools.
-pub const DEFAULT_MODEL: &str = "clark-code:free";
-/// Scout's host-pinned model. Scout
-/// ignores conversation and orchestration model selections so one evidence
-/// workflow cannot silently change models between root and delegated turns.
-pub const SCOUT_MODEL: &str = "clark-code:deepseek_v4_flash_latest";
-/// Scout uses DeepSeek's highest supported reasoning policy so its first typed action is
-/// prompt-latency bounded for interactive mapping and recording sessions.
-pub const SCOUT_REASONING_EFFORT: Option<&str> = Some("max");
-/// Clark Security scans use the exact production DeepSeek model id across
-/// discovery, validation, and reporting even when the surrounding conversation
-/// selected another coding model.
-pub const SECURITY_MODEL: &str = "~deepseek/deepseek-v4-flash-latest";
-pub const SECURITY_REASONING_EFFORT: Option<&str> = Some("max");
-/// First-party Free managed agent used for research (no client tools). The
-/// `openrouter:qwen37_flash` selection keeps Clark's server-side research
-/// tools while routing usage through the included weekly allowance.
-pub const DEFAULT_RESEARCH_MODEL: &str = "openrouter:qwen37_flash";
-/// Clark Code keeps image understanding on the dedicated Qwen vision model;
-/// the selectable coding tiers themselves receive the resulting description.
-pub const DEFAULT_VISION_MODEL: &str = "qwen/qwen3.7-flash";
+/// Neutral local endpoint used when a host does not provide product policy.
+pub const DEFAULT_BASE_URL: &str = "http://127.0.0.1:11434/v1";
+pub const DEFAULT_MODEL: &str = "local-model";
+/// Neutral auxiliary model used for research when a host does not override it.
+pub const DEFAULT_RESEARCH_MODEL: &str = "research-model";
+/// Neutral auxiliary model used for image understanding.
+pub const DEFAULT_VISION_MODEL: &str = "vision-model";
 /// Approximate transcript-token threshold where the local loop checkpoints old
-/// context before the next model request. The default DeepSeek Clark Code lane
-/// is capped at 400K, so leave room for one more large tool/result turn.
+/// context before the next model request.
 pub const DEFAULT_AUTO_COMPACT_TOKEN_LIMIT: usize = 300_000;
 
-/// Known context windows for the Clark Code aliases exposed by the Platform
-/// model catalog. Unknown models fall back to the flat default plus the
-/// engine's overflow-recovery path.
+/// Unknown models use the flat default plus the engine's overflow recovery.
 fn model_context_window(model: &str) -> Option<usize> {
-    match model {
-        "clark-code" => Some(400_000), // Clark Code default (DeepSeek V4 Flash Latest)
-        "clark-code:free" => Some(400_000), // Included Clark Code alias
-        "clark-code:kimi_k3" => Some(1_000_000), // "1M context"
-        "clark-code:glm52" => Some(1_000_000), // GLM 5.2
-        "clark-code:deepseek_v4_flash_latest" => Some(400_000), // DeepSeek V4 Flash Latest
-        "z-ai/glm-5.2" => Some(1_000_000), // GLM 5.2
-        "~deepseek/deepseek-v4-flash-latest" => Some(400_000), // Clark Security policy
-        "deepseek/deepseek-v4-flash-0731" => Some(400_000), // Dated DeepSeek V4 Flash contract
-        _ => None,
-    }
+    let _ = model;
+    None
 }
 
-/// Provider-safe output ceilings for any Clark Code option that needs a client
-/// override. The current three-option catalog uses backend-owned defaults.
+/// Provider-safe output ceiling. Hosts currently leave this backend-owned.
 pub(crate) fn model_max_output_tokens(_model: &str) -> Option<u32> {
     None
 }
 
-/// All selectable coding tiers use the dedicated Qwen fallback for image
-/// understanding, keeping image behavior independent of the coding tier.
+/// Image understanding is routed through the host-provided auxiliary model,
+/// keeping image behavior independent of the coding tier.
 pub(crate) fn model_supports_images(_model: &str) -> bool {
     false
-}
-
-/// Whether the coding selection consumes Clark's included DeepSeek allowance.
-pub(crate) fn is_free_model(model: &str) -> bool {
-    model.trim().eq_ignore_ascii_case("clark-code:free")
 }
 
 /// Effective auto-compaction threshold for `model`: the flat default, lowered
@@ -90,6 +53,17 @@ pub(crate) fn default_auto_compact_limit(model: &str) -> usize {
         None => DEFAULT_AUTO_COMPACT_TOKEN_LIMIT,
     }
 }
+
+/// Host-owned retry contract for a managed model alias. The generic transport
+/// does not know provider error wording or which model is safe to fall back to.
+#[derive(Clone, Debug, Deserialize)]
+pub struct ModelFallbackPolicy {
+    pub model: String,
+    pub reason: String,
+    pub error_type: String,
+    pub error_param: String,
+    pub error_message: String,
+}
 /// Approximate source budget for the summarization request itself.
 pub const DEFAULT_COMPACT_REQUEST_TOKEN_LIMIT: usize = 250_000;
 /// Approximate budget for preserving recent real user messages after compaction.
@@ -102,7 +76,14 @@ pub struct LocalConfig {
     pub base_url: String,
     /// Model id sent in the request body.
     pub model: String,
-    /// Bearer `ck_live_…` Platform API key.
+    /// Host-advertised selectable model catalog.
+    pub models: Vec<ModelCapability>,
+    pub model_fallback: Option<ModelFallbackPolicy>,
+    pub memory_extraction_model: Option<String>,
+    /// Product-owned execution policies for named built-in workflows such as
+    /// `scout` and `security`. Missing entries inherit the conversation model.
+    pub skill_model_overrides: HashMap<String, ModelPolicyConfig>,
+    /// Bearer credential for the configured model endpoint.
     pub api_key: Option<String>,
     /// Extra HTTP headers, if any.
     pub headers: HashMap<String, String>,
@@ -124,15 +105,19 @@ pub struct LocalConfig {
     /// scientist turns disable the registry entirely.
     pub tools_enabled: bool,
     /// Optional complete system prompt supplied by a trusted headless host.
-    /// Product sessions leave this unset and use Clark Code's normal prompt.
+    /// Product sessions leave this unset and use local agent's normal prompt.
     pub system_prompt_override: Option<String>,
+    /// Host-owned Git attribution defaults. Project settings may override or
+    /// disable either value without learning product policy from this crate.
+    pub default_commit_attribution: String,
+    pub default_pr_body_attribution: String,
     /// Optional hard cap on model<->tool iterations per turn. Production leaves
     /// this unbounded; tests and evals may set an explicit cap.
     pub max_iterations: Option<u32>,
     /// Hidden A/B switch used by the paid planning benchmark. Production and
     /// normal tests always use the decision-complete profile.
     pub(crate) planning_prompt_profile: crate::planning::PlanningPromptProfile,
-    /// Use Clark's hidden `<proposed_plan>` framing in Plan Mode instead
+    /// Use Agent Desktop's hidden `<proposed_plan>` framing in Plan Mode instead
     /// of exposing the legacy JSON plan tools. The legacy switch exists for
     /// protocol-compatibility fixtures and old clients.
     pub(crate) hidden_plan_protocol: bool,
@@ -160,12 +145,14 @@ pub struct LocalConfig {
     pub command_denylist: Vec<String>,
     /// MCP servers to connect and expose as tools.
     pub mcp_servers: Vec<crate::mcp::McpServerConfig>,
-    /// Clark research config (same Platform API + key), when research is enabled.
-    pub clark: Option<AgenticClarkConfig>,
+    /// Optional brokered research config, when research is enabled.
+    pub research: Option<AuxiliaryModelConfig>,
     /// Vision-fallback config for coding models without native image support.
     /// Independent of the `research` toggle — gated only on a key being
     /// present.
-    pub vision: Option<AgenticClarkConfig>,
+    pub vision: Option<AuxiliaryModelConfig>,
+    /// Product-owned model ids that must not receive image-generation tools.
+    pub image_generation_excluded_models: Vec<String>,
     /// Project root, when set at connect time. A session's `cwd` option wins.
     pub cwd: Option<String>,
     /// Trusted host attestation that this provider process itself is running
@@ -177,7 +164,7 @@ pub struct LocalConfig {
     /// host-capability mode.
     pub sandbox_mode: LocalSandboxMode,
     /// Host-approved directories that model-facing file reads may access in
-    /// addition to the project and Clark document workspace. They never widen
+    /// addition to the project and Agent Desktop document workspace. They never widen
     /// write access and are ignored for remote sessions.
     pub sandbox_read_roots: Vec<PathBuf>,
     /// Whether durable memory is enabled — exposes the `memory` tool and injects
@@ -188,14 +175,15 @@ pub struct LocalConfig {
     /// global-memory files. Missing scope disables that local global scope.
     pub memory_scope: Option<String>,
     /// Whether this opted-in session may retrieve private repository evidence
-    /// previously synced to the user's Clark account.
+    /// previously synced to the user's Agent Desktop account.
     pub project_knowledge_enabled: bool,
     /// Checkpoint compaction for the model-visible transcript.
     pub compaction: CompactionConfig,
-    /// Experimental: register the `browser` tool (clark-browser, lazily
+    /// Experimental: register the host-configured browser tool (lazily
     /// downloaded on first use). Off by default — the user opts in from
     /// Settings (`extra.browser_enabled = true`).
     pub browser_enabled: bool,
+    pub browser_binary: Option<crate::browser_binary::BrowserBinaryConfig>,
     /// Opt-in control of ordinary apps on the local Mac. The tool layer still
     /// enforces per-app permission scopes and macOS TCC independently.
     pub computer_use_enabled: bool,
@@ -207,10 +195,6 @@ pub struct LocalConfig {
     pub(crate) orchestration: crate::orchestration::OrchestrationConfig,
     pub(crate) scout_capsules: Option<crate::orchestration::ScoutCapsulePolicyConfig>,
     pub(crate) scout_cartography: Option<crate::orchestration::ScoutCartographyHostConfig>,
-    /// Private server-side guidance for one first-party specialist session.
-    /// The host owns this binding; model arguments cannot choose a specialist,
-    /// organization, workflow, residency, or training-consent policy.
-    pub(crate) cloud_advisor: Option<crate::tools::cloud_advisor::CloudAdvisorConfig>,
     /// Universal root execution lifecycle. This is always present; its limits
     /// control bounded recovery and accounting rather than tool permissions.
     pub(crate) execution: crate::root_execution::RootExecutionConfig,
@@ -251,18 +235,25 @@ impl LocalSandboxMode {
     }
 }
 
-/// Config for calling one of Clark's agentic model tiers (e.g. `clark`,
-/// `clark_max`) as an auxiliary, non-coding call over the same Platform API +
-/// key as the coding model — used by `clark_research`, the `web_fetch`
-/// long-page condenser, and the image-description vision fallback. Clark runs
+/// Config for calling a host-advertised model tier (for example
+/// `research-model`) as an auxiliary, non-coding call over the same model API and
+/// key as the coding model — used by optional brokered research, the `web_fetch`
+/// long-page condenser, and the image-description vision fallback. Agent Desktop runs
 /// web search / planning / browsing / vision server-side and returns the
-/// final answer — no client tools involved, so the `ck_live_` key suffices.
+/// final answer with no client tools involved.
 #[derive(Clone, Debug)]
-pub struct AgenticClarkConfig {
+pub struct AuxiliaryModelConfig {
     pub base_url: String,
     pub api_key: Option<String>,
-    /// Agentic model tier this call uses (e.g. `clark`, `clark_max`).
+    /// Agentic model tier this call uses (e.g. `research-model`).
     pub model: String,
+}
+
+#[derive(Clone, Debug, serde::Deserialize)]
+pub struct ModelPolicyConfig {
+    pub model: String,
+    #[serde(default)]
+    pub reasoning_effort: Option<String>,
 }
 
 fn str_field(extra: &Value, key: &str) -> Option<String> {
@@ -308,6 +299,28 @@ impl LocalConfig {
 
         let base_url = str_field(extra, "base_url").unwrap_or_else(|| DEFAULT_BASE_URL.to_string());
         let model = str_field(extra, "model").unwrap_or_else(|| DEFAULT_MODEL.to_string());
+        let models = extra
+            .get("models")
+            .and_then(|value| serde_json::from_value::<Vec<ModelCapability>>(value.clone()).ok())
+            .filter(|models| !models.is_empty())
+            .unwrap_or_else(|| {
+                vec![ModelCapability {
+                    id: DEFAULT_MODEL.into(),
+                    label: "Local model".into(),
+                    description: "OpenAI-compatible local coding model".into(),
+                    reasoning_effort: None,
+                }]
+            });
+        let skill_model_overrides = extra
+            .get("skill_model_overrides")
+            .and_then(|value| {
+                serde_json::from_value::<HashMap<String, ModelPolicyConfig>>(value.clone()).ok()
+            })
+            .unwrap_or_default();
+        let model_fallback = extra
+            .get("model_fallback")
+            .and_then(|value| serde_json::from_value(value.clone()).ok());
+        let memory_extraction_model = str_field(extra, "memory_extraction_model");
         let api_key = config
             .auth_token
             .clone()
@@ -338,6 +351,10 @@ impl LocalConfig {
             .unwrap_or(true);
         let system_prompt_override =
             str_field(extra, "system_prompt_override").filter(|prompt| prompt.len() <= 64 * 1024);
+        let default_commit_attribution = str_field(extra, "default_commit_attribution")
+            .unwrap_or_else(|| crate::project_settings::DEFAULT_COMMIT_ATTRIBUTION.to_string());
+        let default_pr_body_attribution = str_field(extra, "default_pr_body_attribution")
+            .unwrap_or_else(|| crate::project_settings::DEFAULT_PR_BODY_ATTRIBUTION.to_string());
         let max_iterations = extra
             .get("max_iterations")
             .and_then(Value::as_u64)
@@ -375,7 +392,7 @@ impl LocalConfig {
             .get("research")
             .and_then(Value::as_bool)
             .unwrap_or(true);
-        let clark = (research_enabled && api_key.is_some()).then(|| AgenticClarkConfig {
+        let research = (research_enabled && api_key.is_some()).then(|| AuxiliaryModelConfig {
             base_url: base_url.clone(),
             api_key: api_key.clone(),
             model: str_field(extra, "research_model")
@@ -385,10 +402,11 @@ impl LocalConfig {
         // Vision fallback is core functionality for models without native
         // image support, not the opt-out-able research feature — gated only on
         // a key.
-        let vision = api_key.is_some().then(|| AgenticClarkConfig {
+        let vision = api_key.is_some().then(|| AuxiliaryModelConfig {
             base_url: base_url.clone(),
             api_key: api_key.clone(),
-            model: DEFAULT_VISION_MODEL.to_string(),
+            model: str_field(extra, "vision_model")
+                .unwrap_or_else(|| DEFAULT_VISION_MODEL.to_string()),
         });
 
         let cwd = config.cwd.clone().or_else(|| str_field(extra, "cwd"));
@@ -409,6 +427,9 @@ impl LocalConfig {
             .get("browser_enabled")
             .and_then(Value::as_bool)
             .unwrap_or(false);
+        let browser_binary = extra
+            .get("browser_binary")
+            .and_then(|value| serde_json::from_value(value.clone()).ok());
         let computer_use_enabled = extra
             .get("computer_use_enabled")
             .and_then(Value::as_bool)
@@ -454,17 +475,13 @@ impl LocalConfig {
             .get("worker_execution_residency")
             .and_then(Value::as_str)
             .is_some_and(|value| value == "remote_worker");
-        let cloud_advisor = crate::tools::cloud_advisor::CloudAdvisorConfig::from_extra(
-            extra,
-            &base_url,
-            api_key.as_deref(),
-            cwd.as_deref(),
-            remote_worker,
-        );
-
         Self {
             base_url,
             model,
+            models,
+            model_fallback,
+            memory_extraction_model,
+            skill_model_overrides,
             api_key,
             headers: config.headers.clone(),
             temperature,
@@ -474,6 +491,8 @@ impl LocalConfig {
             cache_session_id,
             tools_enabled,
             system_prompt_override,
+            default_commit_attribution,
+            default_pr_body_attribution,
             max_iterations,
             planning_prompt_profile,
             hidden_plan_protocol,
@@ -487,8 +506,9 @@ impl LocalConfig {
                 .get("mcp_servers")
                 .and_then(|v| serde_json::from_value(v.clone()).ok())
                 .unwrap_or_default(),
-            clark,
+            research,
             vision,
+            image_generation_excluded_models: str_vec(extra, "image_generation_excluded_models"),
             cwd,
             remote_worker,
             sandbox_mode,
@@ -498,12 +518,12 @@ impl LocalConfig {
             project_knowledge_enabled,
             compaction,
             browser_enabled,
+            browser_binary,
             computer_use_enabled,
             computer_use_backend,
             orchestration,
             scout_capsules,
             scout_cartography,
-            cloud_advisor,
             execution,
         }
     }
@@ -536,7 +556,7 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn defaults_to_production_clark_and_no_research_without_key() {
+    fn defaults_to_neutral_local_endpoint_and_no_research_without_key() {
         let cfg = LocalConfig::from_provider_config(&ProviderConfig::default());
         assert_eq!(cfg.base_url, DEFAULT_BASE_URL);
         assert_eq!(cfg.model, DEFAULT_MODEL);
@@ -563,42 +583,21 @@ mod tests {
             crate::orchestration::DelegationMode::ExplicitRequestOnly
         );
         // No key → research can't run, so it's disabled.
-        assert!(cfg.clark.is_none());
+        assert!(cfg.research.is_none());
         // No key → vision fallback can't run either.
         assert!(cfg.vision.is_none());
     }
 
     #[test]
-    fn coding_models_use_the_qwen_vision_fallback() {
+    fn unknown_host_models_use_conservative_generic_defaults() {
         assert!(!model_supports_images(DEFAULT_MODEL));
-        assert!(!model_supports_images("clark-code:kimi_k3"));
-        assert!(!model_supports_images("clark-code:glm52"));
-        assert!(!model_supports_images(SECURITY_MODEL));
-        assert_eq!(model_context_window(DEFAULT_MODEL), Some(400_000));
+        assert_eq!(model_context_window(DEFAULT_MODEL), None);
     }
 
     #[test]
-    fn clark_security_uses_the_exact_production_model_id() {
-        assert_eq!(SECURITY_MODEL, "~deepseek/deepseek-v4-flash-latest");
-        assert_eq!(model_context_window(SECURITY_MODEL), Some(400_000));
-    }
-
-    #[test]
-    fn free_product_identity_does_not_match_paid_or_raw_proxy_traffic() {
-        assert!(is_free_model("clark-code:free"));
-        assert!(is_free_model(" CLARK-CODE:FREE "));
-        assert!(!is_free_model("clark-code:deepseek_v4_flash_latest"));
-        assert!(!is_free_model("qwen/qwen3.7-flash"));
-        assert!(!is_free_model("clark-code"));
-    }
-
-    #[test]
-    fn included_deepseek_uses_its_backend_owned_context_window() {
-        assert_eq!(model_context_window(DEFAULT_MODEL), Some(400_000));
-        assert_eq!(
-            model_context_window("deepseek/deepseek-v4-flash-0731"),
-            Some(400_000),
-        );
+    fn host_model_context_windows_do_not_change_the_neutral_default() {
+        assert_eq!(model_context_window(DEFAULT_MODEL), None);
+        assert_eq!(model_context_window("vendor/host-managed-model"), None,);
         assert_eq!(
             default_auto_compact_limit(DEFAULT_MODEL),
             DEFAULT_AUTO_COMPACT_TOKEN_LIMIT
@@ -606,18 +605,20 @@ mod tests {
     }
 
     #[test]
-    fn default_auto_sandbox_keeps_clark_cloud_enabled_through_the_same_api() {
+    fn default_auto_sandbox_enables_auxiliary_research_with_a_key() {
         let pc = ProviderConfig {
-            auth_token: Some("ck_live_abc".into()),
+            auth_token: Some("product_test_token".into()),
             ..Default::default()
         };
         let cfg = LocalConfig::from_provider_config(&pc);
         assert_eq!(cfg.sandbox_mode, LocalSandboxMode::Auto);
-        assert_eq!(cfg.api_key.as_deref(), Some("ck_live_abc"));
-        let clark = cfg.clark.expect("research enabled when a key is present");
-        assert_eq!(clark.base_url, DEFAULT_BASE_URL);
-        assert_eq!(clark.api_key.as_deref(), Some("ck_live_abc"));
-        assert_eq!(clark.model, "openrouter:qwen37_flash");
+        assert_eq!(cfg.api_key.as_deref(), Some("product_test_token"));
+        let research = cfg
+            .research
+            .expect("research enabled when a key is present");
+        assert_eq!(research.base_url, DEFAULT_BASE_URL);
+        assert_eq!(research.api_key.as_deref(), Some("product_test_token"));
+        assert_eq!(research.model, DEFAULT_RESEARCH_MODEL);
     }
 
     #[test]
@@ -653,7 +654,7 @@ mod tests {
     #[test]
     fn a_key_enables_the_vision_fallback_through_the_same_api() {
         let pc = ProviderConfig {
-            auth_token: Some("ck_live_abc".into()),
+            auth_token: Some("product_test_token".into()),
             ..Default::default()
         };
         let cfg = LocalConfig::from_provider_config(&pc);
@@ -661,21 +662,21 @@ mod tests {
             .vision
             .expect("vision fallback enabled when a key is present");
         assert_eq!(vision.base_url, DEFAULT_BASE_URL);
-        assert_eq!(vision.api_key.as_deref(), Some("ck_live_abc"));
+        assert_eq!(vision.api_key.as_deref(), Some("product_test_token"));
         assert_eq!(vision.model, DEFAULT_VISION_MODEL);
-        assert_eq!(vision.model, "qwen/qwen3.7-flash");
+        assert_eq!(vision.model, "vision-model");
     }
 
     #[test]
     fn vision_stays_enabled_when_research_is_disabled() {
         let pc = ProviderConfig {
-            auth_token: Some("ck_live_abc".into()),
+            auth_token: Some("product_test_token".into()),
             extra: json!({ "research": false }),
             ..Default::default()
         };
         let cfg = LocalConfig::from_provider_config(&pc);
         assert!(
-            cfg.clark.is_none(),
+            cfg.research.is_none(),
             "research:false disables the research config"
         );
         assert!(
@@ -711,14 +712,15 @@ mod tests {
         let organization_id = uuid::Uuid::new_v4();
         let workspace_id = uuid::Uuid::new_v4();
         let pc = ProviderConfig {
-            auth_token: Some("ck_live_abc".into()),
+            auth_token: Some("product_test_token".into()),
             extra: json!({
                 "scout_cartography": {
                     "organization_id": organization_id,
                     "workspace_id": workspace_id,
-                    "identity_root": "/host-private/clark/scout",
+                    "identity_root": "/host-private/agent/scout",
                     "platform": "linux",
-                    "architecture": "x86_64"
+                    "architecture": "x86_64",
+                    "route_prefix": "/v1/cartography"
                 }
             }),
             ..Default::default()
@@ -730,7 +732,7 @@ mod tests {
         assert_eq!(binding.workspace_id, workspace_id);
         assert_eq!(
             binding.identity_root,
-            std::path::PathBuf::from("/host-private/clark/scout")
+            std::path::PathBuf::from("/host-private/agent/scout")
         );
 
         let relative = ProviderConfig {
@@ -738,9 +740,10 @@ mod tests {
                 "scout_cartography": {
                     "organization_id": organization_id,
                     "workspace_id": workspace_id,
-                    "identity_root": ".clark/scout",
+                    "identity_root": ".agent/scout",
                     "platform": "linux",
-                    "architecture": "x86_64"
+                    "architecture": "x86_64",
+                    "route_prefix": "/v1/cartography"
                 }
             }),
             ..Default::default()
@@ -779,10 +782,10 @@ mod tests {
     #[test]
     fn extra_overrides_model_permissions_and_can_disable_research() {
         let pc = ProviderConfig {
-            auth_token: Some("ck_live_abc".into()),
+            auth_token: Some("product_test_token".into()),
             extra: json!({
                 "base_url": "http://localhost:1234/v1",
-                "model": "clark_max",
+                "model": "research-model",
                 "temperature": 0.2,
                 "max_iterations": 8,
                 "permissions": { "bash": "deny", "edit_file": "allow" },
@@ -792,14 +795,14 @@ mod tests {
         };
         let cfg = LocalConfig::from_provider_config(&pc);
         assert_eq!(cfg.base_url, "http://localhost:1234/v1");
-        assert_eq!(cfg.model, "clark_max");
+        assert_eq!(cfg.model, "research-model");
         assert_eq!(cfg.temperature, Some(0.2));
         assert_eq!(cfg.max_iterations, Some(8));
         assert_eq!(cfg.mode_for("bash"), PermissionMode::Deny);
         assert_eq!(cfg.mode_for("edit_file"), PermissionMode::Allow);
         assert_eq!(cfg.mode_for("write_file"), PermissionMode::Ask);
         assert!(
-            cfg.clark.is_none(),
+            cfg.research.is_none(),
             "research:false disables it even with a key"
         );
     }
@@ -855,7 +858,7 @@ mod tests {
                 "response_format": schema,
                 "provider": provider,
                 "tools_enabled": false,
-                "cache_session_id": "clark-specialist-cache-1",
+                "cache_session_id": "example-specialist-cache-1",
                 "system_prompt_override": "You are a bounded specialist."
             }),
             ..Default::default()
@@ -865,7 +868,7 @@ mod tests {
         assert_eq!(cfg.provider_preferences, Some(provider));
         assert_eq!(
             cfg.cache_session_id.as_deref(),
-            Some("clark-specialist-cache-1")
+            Some("example-specialist-cache-1")
         );
         assert!(!cfg.tools_enabled);
         assert_eq!(

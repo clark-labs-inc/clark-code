@@ -169,6 +169,7 @@ pub(crate) struct ScoutCartographyHostConfig {
     pub identity_root: PathBuf,
     pub platform: String,
     pub architecture: String,
+    pub route_prefix: String,
 }
 
 impl ScoutCartographyHostConfig {
@@ -192,12 +193,22 @@ impl ScoutCartographyHostConfig {
         }
         let platform = portable_namespace(value.get("platform")?.as_str()?)?;
         let architecture = portable_namespace(value.get("architecture")?.as_str()?)?;
+        let route_prefix = value.get("route_prefix")?.as_str()?.trim_end_matches('/');
+        if !route_prefix.starts_with('/')
+            || route_prefix.len() < 2
+            || route_prefix.contains('?')
+            || route_prefix.contains('#')
+            || route_prefix.contains("..")
+        {
+            return None;
+        }
         Some(Self {
             organization_id,
             workspace_id,
             identity_root,
             platform,
             architecture,
+            route_prefix: route_prefix.to_string(),
         })
     }
 }
@@ -334,7 +345,7 @@ pub(crate) fn turn_policy_section(mode: DelegationMode) -> &'static str {
 }
 
 /// Hashes the model-visible workspace before and after a delegated attempt.
-/// The executor walk honors repository ignores and Clark's fixed build-cache
+/// The executor walk honors repository ignores and Agent Desktop's fixed build-cache
 /// exclusions; source, tracked files, and ordinary untracked files are covered.
 pub struct WorkspaceDigestGuard {
     root: PathBuf,
@@ -359,11 +370,11 @@ impl WorkspaceGuard for WorkspaceDigestGuard {
     }
 }
 
-/// Build a nested Clark local-agent harness with fail-closed permissions.
+/// Build a nested Agent Desktop local-agent harness with fail-closed permissions.
 ///
 /// Configuration is sanitized here rather than trusting caller-provided
 /// permission maps: known file/shell mutators are denied, every other mutating
-/// tool defaults to Clark's approval gate (which ProviderHarness always rejects),
+/// tool defaults to Agent Desktop's approval gate (which ProviderHarness always rejects),
 /// remote/cloud/MCP/memory/browser paths are disabled, and recursion is off.
 pub fn local_read_only_harness(
     mut config: ProviderHarnessConfig,
@@ -373,7 +384,7 @@ pub fn local_read_only_harness(
         return Err("local adapter requires harness kind=local".to_string());
     }
     if config.enforcement != ReadOnlyEnforcement::HostToolGate {
-        return Err("local adapter requires Clark's host tool gate".to_string());
+        return Err("local adapter requires Agent Desktop's host tool gate".to_string());
     }
     config.provider_config = read_only_provider_config(config.provider_config);
     ProviderHarness::new(
@@ -474,7 +485,7 @@ mod tests {
             crate::tools::PermissionMode::Deny
         );
         assert_eq!(local.mode_for("bash"), crate::tools::PermissionMode::Deny);
-        assert!(local.clark.is_none());
+        assert!(local.research.is_none());
         assert!(!local.browser_enabled);
         assert!(!local.memories_enabled);
         assert!(local.mcp_servers.is_empty());

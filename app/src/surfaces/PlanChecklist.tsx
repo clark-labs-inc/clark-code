@@ -27,7 +27,7 @@ const STATUS_CLASS: Record<ChecklistStatus, string> = {
 
 
 /** Live checklist for the current plan — the render surface for the local
- *  agent's `update_plan` tool (and, for ACP/Clark providers, their own
+ *  agent's `update_plan` tool (and, for ACP/the agent providers, their own
  *  plan/execution-plan updates).
  *
  *  Wrapped in `memo` with a phase-content comparator: the parent (`Conversation`)

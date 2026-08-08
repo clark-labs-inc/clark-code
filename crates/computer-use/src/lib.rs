@@ -1,4 +1,4 @@
-//! Native computer-use boundary for Clark Code.
+//! Native computer-use boundary for Agent Desktop.
 //!
 //! The provider-facing tool layer depends only on [`ComputerBackend`]. Tests
 //! use [`SimulatedComputerBackend`]; the shipped macOS build uses

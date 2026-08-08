@@ -111,9 +111,9 @@ impl SandboxManager {
                 helper,
                 SandboxStatus::Enforced { backend },
                 (backend == BackendKind::WindowsRestrictedToken)
-                    .then(|| PathBuf::from("/clark-windows-sandbox-state")),
+                    .then(|| PathBuf::from("/agent-windows-sandbox-state")),
                 (backend == BackendKind::WindowsRestrictedToken)
-                    .then(|| PathBuf::from("/clark-windows-sandbox-setup.exe")),
+                    .then(|| PathBuf::from("/agent-windows-sandbox-setup.exe")),
             )),
         )
     }
@@ -291,18 +291,18 @@ fn current_backend(
         let backend = BackendKind::WindowsRestrictedToken;
         let helper = runtime
             .windows_runner
-            .or_else(|| std::env::var_os("CLARK_WINDOWS_SANDBOX_RUNNER").map(PathBuf::from))
-            .unwrap_or_else(|| PathBuf::from("clark-command-runner.exe"));
+            .or_else(|| std::env::var_os("DESKTOP_WINDOWS_SANDBOX_RUNNER").map(PathBuf::from))
+            .unwrap_or_else(|| PathBuf::from("agent-command-runner.exe"));
         let setup = runtime
             .windows_setup
-            .or_else(|| std::env::var_os("CLARK_WINDOWS_SANDBOX_SETUP").map(PathBuf::from))
-            .unwrap_or_else(|| PathBuf::from("clark-windows-sandbox-setup.exe"));
+            .or_else(|| std::env::var_os("DESKTOP_WINDOWS_SANDBOX_SETUP").map(PathBuf::from))
+            .unwrap_or_else(|| PathBuf::from("agent-windows-sandbox-setup.exe"));
         let state_dir = runtime
             .windows_state_dir
-            .or_else(|| std::env::var_os("CLARK_WINDOWS_SANDBOX_STATE_DIR").map(PathBuf::from))
+            .or_else(|| std::env::var_os("DESKTOP_WINDOWS_SANDBOX_STATE_DIR").map(PathBuf::from))
             .or_else(default_windows_state_dir);
         let policy_validation = windows::wire_policy(policy).validate_windows_enforceable();
-        let experimental_enabled = std::env::var_os("CLARK_WINDOWS_SANDBOX_EXPERIMENTAL")
+        let experimental_enabled = std::env::var_os("DESKTOP_WINDOWS_SANDBOX_EXPERIMENTAL")
             .is_some_and(|value| value == "1");
         let status = if !experimental_enabled {
             SandboxStatus::Unavailable {
@@ -341,7 +341,7 @@ fn current_backend(
     }
 
     #[allow(unreachable_code)]
-    Err("Clark has no sandbox backend for this operating system".to_string())
+    Err("Agent Desktop has no sandbox backend for this operating system".to_string())
 }
 
 #[cfg(target_os = "windows")]
@@ -359,9 +359,9 @@ fn migrate_legacy_windows_state(local_app_data: &Path, durable: &Path) {
         return;
     }
     let legacy_product = if cfg!(debug_assertions) {
-        "Clark Code Dev"
+        "Agent Desktop Dev"
     } else {
-        "Clark Code"
+        "Agent Desktop"
     };
     let legacy = local_app_data.join(legacy_product).join("sandbox");
     let Ok(metadata) = std::fs::symlink_metadata(&legacy) else {
@@ -381,7 +381,7 @@ fn migrate_legacy_windows_state(local_app_data: &Path, durable: &Path) {
 #[cfg(any(target_os = "windows", test))]
 pub(crate) fn windows_product_data_root_from(local_app_data: &Path, debug_build: bool) -> PathBuf {
     local_app_data
-        .join("Clark")
+        .join("Agent Desktop")
         .join(if debug_build { "Code Dev" } else { "Code" })
 }
 
@@ -406,7 +406,7 @@ fn linux_bwrap_ready(helper: &Path) -> Result<(), String> {
 fn select_linux_bwrap(bundled: Option<PathBuf>) -> (PathBuf, SandboxStatus) {
     let backend = BackendKind::LinuxBubblewrap;
     let mut candidates = Vec::new();
-    if let Some(explicit) = std::env::var_os("CLARK_BWRAP_PATH").map(PathBuf::from) {
+    if let Some(explicit) = std::env::var_os("DESKTOP_BWRAP_PATH").map(PathBuf::from) {
         candidates.push(explicit);
     }
     if let Some(bundled) = bundled {

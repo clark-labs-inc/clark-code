@@ -51,7 +51,7 @@ pub struct ProviderRetryCounts {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProviderRequestDiagnostics {
-    /// Clark-generated key reused across request-local retries.
+    /// Provider-generated key reused across request-local retries.
     pub idempotency_key: String,
     /// Provider/gateway-generated request identifier, when returned.
     #[serde(default, skip_serializing_if = "Option::is_none")]

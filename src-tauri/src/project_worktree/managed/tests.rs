@@ -43,8 +43,8 @@ fn initialized_repo() -> tempfile::TempDir {
     let repo = temp.path().join("project");
     std::fs::create_dir(&repo).unwrap();
     git(&repo, &["init", "-q", "--initial-branch=main"]);
-    git(&repo, &["config", "user.email", "test@clark.local"]);
-    git(&repo, &["config", "user.name", "Clark Test"]);
+    git(&repo, &["config", "user.email", "test@example.local"]);
+    git(&repo, &["config", "user.name", "Agent Test"]);
     std::fs::write(repo.join("README.md"), "initial\n").unwrap();
     git(&repo, &["add", "README.md"]);
     git(&repo, &["commit", "-qm", "initial"]);
@@ -111,7 +111,7 @@ async fn dirty_branch_transition_starts_a_branch_backed_target_continuation() {
     let continuation = Path::new(&created.path);
     assert_eq!(
         git_text(continuation, &["branch", "--show-current"]),
-        format!("clark/{}", created.id)
+        format!("agent/{}", created.id)
     );
     assert_eq!(
         std::fs::read_to_string(continuation.join("README.md")).unwrap(),
@@ -181,7 +181,7 @@ async fn managed_checkout_cannot_be_repurposed_by_switching_its_branch() {
     assert!(error.contains("managed checkout is pinned"));
     assert_eq!(
         git_text(Path::new(&created.path), &["branch", "--show-current"]),
-        format!("clark/{}", created.id)
+        format!("agent/{}", created.id)
     );
 }
 
@@ -238,11 +238,11 @@ async fn creates_and_explicitly_cleans_a_branch_backed_managed_worktree() {
     assert_eq!(created.label, "project-main");
     assert_eq!(
         git_text(created_path, &["branch", "--show-current"]),
-        format!("clark/{}", created.id)
+        format!("agent/{}", created.id)
     );
     assert_eq!(
         created.preserved_branch.as_deref(),
-        Some(format!("clark/{}", created.id).as_str())
+        Some(format!("agent/{}", created.id).as_str())
     );
     assert_eq!(git_text(&repo, &["status", "--short"]), source_status);
     assert_eq!(
@@ -270,7 +270,7 @@ async fn creates_and_explicitly_cleans_a_branch_backed_managed_worktree() {
     )
     .await
     .unwrap_err();
-    assert!(nested_error.contains("already a Clark-managed isolated worktree"));
+    assert!(nested_error.contains("already a app-managed isolated worktree"));
 
     let project_path = repo.to_string_lossy().into_owned();
     let receipt = cleanup_managed_worktree(&project_path, &created.id, &AppState::new())
@@ -310,7 +310,7 @@ async fn default_base_uses_the_repository_default_branch_not_the_feature_head() 
     );
     assert_eq!(
         git_text(created_path, &["branch", "--show-current"]),
-        format!("clark/{}", created.id)
+        format!("agent/{}", created.id)
     );
     assert_eq!(
         git_text(&repo, &["branch", "--show-current"]),
@@ -333,8 +333,8 @@ async fn default_base_refreshes_the_remote_default_before_creating_a_session() {
     let publisher = temp.path().join("publisher");
     let publisher_path = publisher.to_string_lossy().into_owned();
     git(temp.path(), &["clone", "-q", &remote_path, &publisher_path]);
-    git(&publisher, &["config", "user.email", "test@clark.local"]);
-    git(&publisher, &["config", "user.name", "Clark Test"]);
+    git(&publisher, &["config", "user.email", "test@example.local"]);
+    git(&publisher, &["config", "user.name", "Agent Test"]);
     std::fs::write(publisher.join("README.md"), "fresh remote default\n").unwrap();
     git(&publisher, &["add", "README.md"]);
     git(&publisher, &["commit", "-qm", "fresh default"]);
@@ -411,7 +411,7 @@ async fn cleanup_refuses_a_clean_externally_detached_worktree_with_unprotected_c
     .await
     .unwrap();
     let managed = Path::new(&created.path);
-    // A normal Clark checkout is branch-backed. Simulate an external detach to
+    // A normal Agent Desktop checkout is branch-backed. Simulate an external detach to
     // prove the recovery gate still protects an old or manually altered one.
     git(managed, &["switch", "--detach", "-q"]);
     std::fs::write(managed.join("README.md"), "private commit\n").unwrap();
@@ -429,7 +429,7 @@ async fn cleanup_refuses_a_clean_externally_detached_worktree_with_unprotected_c
     );
     assert_eq!(
         listed[0].preserved_branch.as_deref(),
-        Some(format!("clark/{}", created.id).as_str())
+        Some(format!("agent/{}", created.id).as_str())
     );
 
     let error = cleanup_managed_worktree(&project_path, &created.id, &AppState::new())
@@ -464,7 +464,7 @@ async fn saving_externally_detached_commits_as_a_branch_allows_archiving_the_che
     let saved = project_managed_worktree_save_branch(project_path.clone(), created.id.clone())
         .await
         .unwrap();
-    assert_eq!(saved.branch, format!("clark/{}-saved", created.id));
+    assert_eq!(saved.branch, format!("agent/{}-saved", created.id));
     assert_eq!(saved.head_revision, private_head);
     assert_eq!(
         git_text(
@@ -579,6 +579,6 @@ async fn cleanup_refuses_an_idle_live_session_using_the_checkout() {
     let error = cleanup_managed_worktree(&project_path, &created.id, &state)
         .await
         .unwrap_err();
-    assert!(error.contains("1 live Clark session"));
+    assert!(error.contains("1 live desktop session"));
     assert!(Path::new(&created.path).is_dir());
 }

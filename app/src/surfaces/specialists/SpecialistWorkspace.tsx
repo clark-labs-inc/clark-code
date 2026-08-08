@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { useSessionStore } from "../../store/sessionStore";
 import { useSpecialistStore } from "../../store/specialistStore";
+import { useProductAccess } from "../../lib/useProductAccess";
 import {
   SPECIALISTS,
   projectedSpecialistAccess,
@@ -182,8 +183,7 @@ export function SpecialistWorkspace({
     ? state.conversations.find((conversation) => conversation.id === state.session?.id)
     : undefined);
   const boundContext = boundConversation?.specialist;
-  const billing = useSessionStore((state) => state.billing);
-  const loadBilling = useSessionStore((state) => state.loadBilling);
+  const productAccess = useProductAccess(true);
   const setComposerPrefill = useSessionStore((state) => state.setComposerPrefill);
   const setSettingsOpen = useSessionStore((state) => state.setSettingsOpen);
   const configuredCwd = useSessionStore(
@@ -205,7 +205,7 @@ export function SpecialistWorkspace({
   const preview = previewAccess();
   const projected = preview
     ? preview === "paid" ? "ready" : "free"
-    : projectedSpecialistAccess(Boolean(auth), billing);
+    : projectedSpecialistAccess(Boolean(auth), productAccess.access, active);
   const access = projected === "ready"
     ? serverAccess === "unknown" ? "loading" : serverAccess
     : projected;
@@ -515,7 +515,7 @@ export function SpecialistWorkspace({
             }}
             onCreateCampaign={async (title, description, findingIds) => {
               if (!credentials || !context.organizationId) {
-                throw new Error("Clark Security organization context is unavailable");
+                throw new Error("Security scanner organization context is unavailable");
               }
               await specialistCreateSecurityCampaign(
                 credentials,
@@ -548,7 +548,7 @@ export function SpecialistWorkspace({
     <div data-qa={`specialist-workspace-${active}`} className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-bg">
       <header className="flex min-h-16 shrink-0 items-center gap-4 px-5 py-2.5">
         <div className="min-w-0">
-          <h1 className="font-serif text-2xl font-semibold tracking-[-0.03em] text-ink">Clark {definition.label}</h1>
+          <h1 className="font-serif text-2xl font-semibold tracking-[-0.03em] text-ink">the agent {definition.label}</h1>
           <p className="mt-0.5 line-clamp-2 max-w-2xl text-xs leading-4 text-ink-muted">{definition.value}</p>
         </div>
         <div className="ml-auto flex items-center gap-2">
@@ -603,7 +603,7 @@ export function SpecialistWorkspace({
                 type="button"
                 onClick={() => void createWorkspace()}
                 disabled={creatingWorkspace}
-                className="flex h-9 items-center gap-1.5 rounded-xl bg-accent px-3 text-xs font-semibold text-white transition hover:bg-accent/90 disabled:opacity-50"
+                className="flex h-9 items-center gap-1.5 rounded-xl bg-accent px-3 text-xs font-semibold text-on-accent transition hover:bg-accent/90 disabled:opacity-50"
               >
                 <Plus className="size-3.5" />
                 {creatingWorkspace ? "Creating…" : "Create workspace"}
@@ -641,7 +641,7 @@ export function SpecialistWorkspace({
           kind={active}
           state={access}
           onRetry={() => {
-            void loadBilling();
+            void productAccess.reload().catch(() => undefined);
             setServerAccess("unknown");
             void load();
           }}

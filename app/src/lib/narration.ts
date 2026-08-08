@@ -1,5 +1,5 @@
 // Split assistant text into spans of plain answer, `<narrate>` commentary, and
-// `<thinking>` reasoning. Clark (and some ACP agents) embed these tags inline in
+// `<thinking>` reasoning. the agent (and some ACP agents) embed these tags inline in
 // the message stream; we render each kind differently (answer = markdown,
 // narrate = running commentary, thinking = collapsible). Tolerant of unclosed
 // tags so it works mid-stream.
