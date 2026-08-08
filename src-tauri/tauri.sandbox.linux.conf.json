@@ -1,0 +1,22 @@
+{
+  "bundle": {
+    "resources": {
+      "binaries/rg-x86_64-unknown-linux-gnu": "agent-path/rg",
+      "binaries/bwrap-x86_64-unknown-linux-gnu": "agent-resources/sandbox/linux/bwrap",
+      "binaries/agent-computer-use-helper-x86_64-unknown-linux-gnu": "agent-resources/computer-use/agent-computer-use-helper",
+      "binaries/rg-LICENSE-MIT": "agent-resources/licenses/ripgrep/LICENSE-MIT",
+      "binaries/rg-UNLICENSE": "agent-resources/licenses/ripgrep/UNLICENSE",
+      "binaries/bwrap-COPYING": "agent-resources/licenses/bubblewrap/COPYING",
+      "binaries/bwrap-LICENSE": "agent-resources/licenses/bubblewrap/LICENSE",
+      "binaries/bwrap-0.11.2-source.tar.xz": "agent-resources/licenses/bubblewrap/bubblewrap-0.11.2.tar.xz"
+    },
+    "linux": {
+      "deb": {
+        "depends": ["bubblewrap"]
+      },
+      "rpm": {
+        "depends": ["bubblewrap"]
+      }
+    }
+  }
+}

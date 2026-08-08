@@ -1,0 +1,13 @@
+[package]
+name = "scout-capsule-guest"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "No-WASI WebAssembly guest ABI for the Scout normalization capsule."
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+scout-capsule-core = { path = "../scout-capsule-core" }

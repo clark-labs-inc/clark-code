@@ -1,0 +1,23 @@
+[package]
+name = "devbridge"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Dev-only WebSocket bridge: drives the real providers + agent-core projection from a browser for headless UI testing and video capture."
+
+[[bin]]
+name = "devbridge"
+path = "src/main.rs"
+
+[dependencies]
+agent-core = { path = "../agent-core", features = ["native"] }
+provider-acp = { path = "../provider-acp" }
+provider-local = { path = "../provider-local" }
+serde.workspace = true
+serde_json.workspace = true
+futures.workspace = true
+tracing.workspace = true
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tokio = { workspace = true, features = ["net"] }
+tokio-tungstenite = "0.30"

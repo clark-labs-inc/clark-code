@@ -1,0 +1,23 @@
+[package]
+name = "provider-acp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Agent Client Protocol (ACP) provider for agent-desktop: drives local CLI agents over JSON-RPC/stdio."
+
+[dependencies]
+agent-core = { path = "../agent-core", features = ["native"] }
+agent-orchestration = { path = "../agent-orchestration" }
+exec-core = { path = "../exec-core" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+futures.workspace = true
+async-trait.workspace = true
+tracing.workspace = true
+tokio.workspace = true
+async-channel.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }

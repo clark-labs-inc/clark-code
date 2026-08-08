@@ -1,0 +1,19 @@
+[package]
+name = "provider-remote-worker"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Agent-core provider adapter for a native-owned remote coding-agent worker."
+
+[dependencies]
+agent-core = { path = "../agent-core", features = ["native"] }
+code-host = { path = "../code-host" }
+code-remote = { path = "../code-remote" }
+async-channel.workspace = true
+async-trait.workspace = true
+futures.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+uuid = { version = "1", features = ["v4"] }

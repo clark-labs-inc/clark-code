@@ -1,0 +1,22 @@
+[package]
+name = "scout-ingest-client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Crash-safe authenticated outbox delivery for Scout central ingestion."
+
+[dependencies]
+agent-orchestration = { path = "../agent-orchestration" }
+async-trait.workspace = true
+desktop-http = { path = "../desktop-http" }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
+scout-ingest-protocol = { path = "../scout-ingest-protocol" }
+scout-store = { path = "../scout-store" }
+serde_ignored = "0.1"
+serde_json.workspace = true
+
+[dev-dependencies]
+scout-coordinator = { path = "../scout-coordinator" }
+tempfile = "3"
+tokio.workspace = true

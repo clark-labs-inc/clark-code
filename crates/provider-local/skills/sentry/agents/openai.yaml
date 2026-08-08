@@ -1,0 +1,4 @@
+interface:
+  display_name: "Sentry"
+  short_description: "Inspect production errors through Sentry"
+  default_prompt: "Use $sentry to list unresolved production issues from the last 24 hours."

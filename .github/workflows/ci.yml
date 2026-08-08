@@ -1,0 +1,171 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  rust:
+    name: Rust core and providers
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
+        with:
+          toolchain: 1.97.1
+          components: clippy, rustfmt
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+      - name: Install Linux keyring dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libdbus-1-dev pkg-config
+      - name: Format
+        run: cargo fmt --all --check
+      - name: Clippy core and providers
+        run: cargo clippy -p agent-core -p provider-acp -p provider-local -p provider-remote-worker -p code-host -p code-worker -p code-remote -p devbridge --all-targets -- -D warnings
+      - name: Test core and providers
+        run: cargo test -p agent-core -p provider-acp -p provider-local -p provider-remote-worker -p code-host -p code-worker -p code-remote --no-fail-fast
+      - name: WASM build (agent-core)
+        run: cargo check -p agent-core --target wasm32-unknown-unknown
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        with:
+          version: 10.34.5
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+
+  tauri:
+    name: Tauri build (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # Pin Windows to the VS 2022 image. `windows-latest` now follows the
+        # VS 2026 image and can silently raise the runtime ABI of produced apps.
+        os: [macos-latest, ubuntu-latest, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    env:
+      # Match release executables so Windows tests do not depend on the
+      # runner's dynamically installed Visual C++ runtime entry points.
+      CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS: "-C target-feature=+crt-static"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
+        with:
+          toolchain: 1.97.1
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          workspaces: ". -> target"
+          # Native links dominate failure diagnosis time. Cargo still validates
+          # dep-info before reuse, so preserve completed objects when a later
+          # runtime contract fails.
+          cache-on-failure: true
+      - name: Install Linux deps
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+      - name: Build app (no bundle on CI)
+        run: cargo build -p desktop-foundation
+      - name: Test native prompt and persistence contracts
+        if: matrix.os != 'windows-2022'
+        run: cargo test -p desktop-foundation --lib
+      - name: Test native prompt and persistence contracts (Windows)
+        if: matrix.os == 'windows-2022'
+        shell: pwsh
+        run: |
+          cargo test -p desktop-foundation --lib --no-run
+          $testExe = Get-ChildItem target/debug/deps/desktop_foundation-*.exe |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -First 1
+          if (-not $testExe) { throw "Desktop foundation test executable was not produced" }
+          Copy-Item src-tauri/windows-test.manifest "$($testExe.FullName).manifest"
+          scripts/check-windows-pe-imports.ps1 -FilePath target/debug/agent-desktop.exe
+          scripts/check-windows-pe-imports.ps1 -FilePath $testExe.FullName
+          # Git worktree/diff integration is covered on macOS and Linux. It
+          # requires Windows Git path/line-ending policy and is not a package
+          # startup dependency, so keep it out of the Windows release gate.
+          & $testExe.FullName `
+            --skip commands::real_backend_tests `
+            --skip project_worktree
+          exit $LASTEXITCODE
+  public-boundary:
+    name: Public boundary
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check changed paths and added content
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${BASE_SHA:-}" ]]; then
+            scripts/check-public-boundary.sh "$BASE_SHA" HEAD
+          else
+            scripts/check-public-boundary.sh
+          fi
+      - name: Check product decomposition contract
+        run: node --test harness/product-boundary.spec.mjs
+
+  required:
+    name: CI required
+    if: always()
+    needs: [rust, frontend, tauri, public-boundary]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Require every CI lane
+        env:
+          RUST_RESULT: ${{ needs.rust.result }}
+          FRONTEND_RESULT: ${{ needs.frontend.result }}
+          TAURI_RESULT: ${{ needs.tauri.result }}
+          PUBLIC_BOUNDARY_RESULT: ${{ needs.public-boundary.result }}
+        run: |
+          test "$RUST_RESULT" = success
+          test "$FRONTEND_RESULT" = success
+          test "$TAURI_RESULT" = success
+          test "$PUBLIC_BOUNDARY_RESULT" = success
+          {
+            echo "## CI receipt"
+            echo
+            echo "| Lane | Result |"
+            echo "| --- | --- |"
+            echo "| Rust core and providers | $RUST_RESULT |"
+            echo "| Frontend | $FRONTEND_RESULT |"
+            echo "| Native Tauri matrix | $TAURI_RESULT |"
+            echo "| Public boundary | $PUBLIC_BOUNDARY_RESULT |"
+          } >> "$GITHUB_STEP_SUMMARY"

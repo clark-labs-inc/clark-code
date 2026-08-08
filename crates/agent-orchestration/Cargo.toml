@@ -1,0 +1,24 @@
+[package]
+name = "agent-orchestration"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Safe root execution lifecycle and read-only multi-agent orchestration for agent desktops."
+
+[dependencies]
+agent-core = { path = "../agent-core", features = ["native"] }
+async-trait.workspace = true
+ed25519-dalek = "=3.0.0"
+futures.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2 = "0.10"
+scout-accumulator = { path = "../scout-accumulator" }
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util = { version = "0.7", default-features = false }
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+async-channel.workspace = true

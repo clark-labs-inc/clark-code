@@ -1,0 +1,22 @@
+interface:
+  display_name: "Scout"
+  short_description: "Map a business system for simulation"
+  default_prompt: "Use $scout to map this organization's end-to-end technical business graph and derive a verified simulation model. Scout uses the host-pinned workflow model."
+dependencies:
+  tools:
+    - type: tool
+      value: scout_capabilities
+    - type: tool
+      value: scout_adapter
+    - type: tool
+      value: scout_ledger
+    - type: tool
+      value: scout_enterprise
+    - type: tool
+      value: scout_enterprise_query
+    - type: tool
+      value: scout_probe
+    - type: tool
+      value: scout_measure
+policy:
+  allow_implicit_invocation: false

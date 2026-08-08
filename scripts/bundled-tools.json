@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "tools": {
+    "ripgrep": {
+      "command": "rg",
+      "exposure": "path",
+      "version": "15.1.0",
+      "license": "MIT OR Unlicense",
+      "notices": ["LICENSE-MIT", "UNLICENSE"],
+      "targets": {
+        "aarch64-apple-darwin": {
+          "url": "https://github.com/BurntSushi/ripgrep/releases/download/15.1.0/ripgrep-15.1.0-aarch64-apple-darwin.tar.gz",
+          "size": 1777930,
+          "sha256": "378e973289176ca0c6054054ee7f631a065874a352bf43f0fa60ef079b6ba715",
+          "format": "tar.gz",
+          "member": "ripgrep-15.1.0-aarch64-apple-darwin/rg"
+        },
+        "x86_64-apple-darwin": {
+          "url": "https://github.com/BurntSushi/ripgrep/releases/download/15.1.0/ripgrep-15.1.0-x86_64-apple-darwin.tar.gz",
+          "size": 1894127,
+          "sha256": "64811cb24e77cac3057d6c40b63ac9becf9082eedd54ca411b475b755d334882",
+          "format": "tar.gz",
+          "member": "ripgrep-15.1.0-x86_64-apple-darwin/rg"
+        },
+        "universal-apple-darwin": {
+          "merge": ["aarch64-apple-darwin", "x86_64-apple-darwin"],
+          "strategy": "macho-universal"
+        },
+        "x86_64-unknown-linux-gnu": {
+          "url": "https://github.com/BurntSushi/ripgrep/releases/download/15.1.0/ripgrep-15.1.0-x86_64-unknown-linux-musl.tar.gz",
+          "size": 2263077,
+          "sha256": "1c9297be4a084eea7ecaedf93eb03d058d6faae29bbc57ecdaf5063921491599",
+          "format": "tar.gz",
+          "member": "ripgrep-15.1.0-x86_64-unknown-linux-musl/rg"
+        },
+        "x86_64-pc-windows-msvc": {
+          "url": "https://github.com/BurntSushi/ripgrep/releases/download/15.1.0/ripgrep-15.1.0-x86_64-pc-windows-msvc.zip",
+          "size": 1810687,
+          "sha256": "124510b94b6baa3380d051fdf4650eaa80a302c876d611e9dba0b2e18d87493a",
+          "format": "zip",
+          "member": "ripgrep-15.1.0-x86_64-pc-windows-msvc/rg.exe"
+        }
+      }
+    },
+    "bubblewrap": {
+      "command": "bwrap",
+      "exposure": "private",
+      "platforms": ["linux"],
+      "version": "0.11.2",
+      "license": "LGPL-2.0-or-later",
+      "notices": ["COPYING", "LICENSE"],
+      "bundle_source_archive": true,
+      "targets": {
+        "x86_64-unknown-linux-gnu": {
+          "url": "https://github.com/containers/bubblewrap/releases/download/v0.11.2/bubblewrap-0.11.2.tar.xz",
+          "size": 116336,
+          "sha256": "69abc30005d2186baf7737feacd8da35633b93cf5af38838ecff17c5f8e924f6",
+          "format": "tar.xz",
+          "strategy": "meson-source",
+          "source_dir": "bubblewrap-0.11.2",
+          "build_target": "bwrap",
+          "output": "bwrap",
+          "meson_args": [
+            "--buildtype=release",
+            "-Dc_args=-Wno-error=format-overflow",
+            "-Dselinux=disabled",
+            "-Dman=disabled",
+            "-Dtests=false",
+            "-Dbash_completion=disabled",
+            "-Dzsh_completion=disabled"
+          ]
+        }
+      }
+    }
+  }
+}

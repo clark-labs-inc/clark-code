@@ -1,0 +1,14 @@
+[package]
+name = "scout-cartography-adapter"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Pure translation from target-bound Scout adapter receipts to cartography schema-v2 observations."
+
+[dependencies]
+scout-adapter-protocol = { path = "../scout-adapter-protocol" }
+scout-ingest-protocol = { path = "../scout-ingest-protocol" }
+serde.workspace = true
+serde_json.workspace = true
+uuid = { version = "1", features = ["serde"] }

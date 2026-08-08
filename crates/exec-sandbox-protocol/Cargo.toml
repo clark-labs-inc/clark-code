@@ -1,0 +1,18 @@
+[package]
+name = "exec-sandbox-protocol"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Versioned, platform-neutral protocol for Agent Desktop's privileged Windows sandbox helpers."
+
+[dependencies]
+base64 = "0.23"
+rmp-serde.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_bytes = "0.11"
+sha2 = "0.10"
+
+[dev-dependencies]
+tempfile = "3"

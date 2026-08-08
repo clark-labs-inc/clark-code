@@ -1,0 +1,14 @@
+{
+  "name": "agent-desktop-harness",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:webkit": "node webkit-smoke.mjs",
+    "test:attachments": "node attachment-smoke.mjs",
+    "test:full-gui": "node full-gui-smoke.mjs",
+    "test:product-boundary": "node --test product-boundary.spec.mjs"
+  },
+  "dependencies": {
+    "playwright": "^1.62.1"
+  }
+}

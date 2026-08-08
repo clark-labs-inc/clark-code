@@ -1,0 +1,24 @@
+interface:
+  display_name: "Security Deep"
+  short_description: "Run independent security passes to saturation"
+  default_prompt: "Use $security:security-deep to run a bounded exhaustive security scan over this repository. Root and delegated turns use host-pinned workflow models."
+dependencies:
+  tools:
+    - type: tool
+      value: security_scan_contract
+    - type: tool
+      value: security_poc_execute
+    - type: tool
+      value: delegate_read_only
+    - type: tool
+      value: resolve_delegation
+    - type: tool
+      value: read_file
+    - type: tool
+      value: grep
+    - type: tool
+      value: glob
+    - type: tool
+      value: bash
+policy:
+  allow_implicit_invocation: false

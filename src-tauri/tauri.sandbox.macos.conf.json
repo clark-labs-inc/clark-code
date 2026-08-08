@@ -1,0 +1,9 @@
+{
+  "bundle": {
+    "externalBin": ["binaries/rg"],
+    "resources": {
+      "binaries/rg-LICENSE-MIT": "agent-resources/licenses/ripgrep/LICENSE-MIT",
+      "binaries/rg-UNLICENSE": "agent-resources/licenses/ripgrep/UNLICENSE"
+    }
+  }
+}

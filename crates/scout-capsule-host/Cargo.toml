@@ -1,0 +1,22 @@
+[package]
+name = "scout-capsule-host"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Digest-pinned, resource-limited WebAssembly host for Scout capsules."
+
+[dependencies]
+base64 = "0.23"
+ed25519-dalek = "=3.0.0"
+serde.workspace = true
+serde_json.workspace = true
+sha2 = "0.10"
+thiserror.workspace = true
+wasmi = { version = "0.40", default-features = true }
+
+[dev-dependencies]
+scout-capsule-core = { path = "../scout-capsule-core" }
+serde_json.workspace = true
+tempfile = "3"
+wat = "1"

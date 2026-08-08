@@ -1,0 +1,15 @@
+[package]
+name = "scout-accumulator"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "WASM-clean deterministic authenticated set accumulation for Scout."
+
+[dependencies]
+serde.workspace = true
+sha2 = "0.10"
+
+[dev-dependencies]
+serde_json.workspace = true
