@@ -339,11 +339,8 @@ async fn required_tool_contract_violation_gets_one_isolated_repair() {
                 .then(|| value.trim().to_string())
         })
     };
-    assert_ne!(
-        idempotency_key(&request_text[0]),
-        idempotency_key(&request_text[1]),
-        "a corrected request must not replay the invalid body's idempotency identity"
-    );
+    assert!(idempotency_key(&request_text[0]).is_none());
+    assert!(idempotency_key(&request_text[1]).is_none());
     assert!(
         request_text[1]
             .contains("previous response violated the required structured-tool boundary"),
