@@ -338,11 +338,12 @@ impl LlmClient {
             on_reasoning,
         } = attempt;
         let url = format!("{}/chat/completions", self.base_url);
-        let mut request = self
-            .http
-            .post(&url)
-            .header("Idempotency-Key", idempotency_key)
-            .json(&self.body_for_model(request_model, messages, tools, force_tool_call));
+        let mut request = self.http.post(&url).json(&self.body_for_model(
+            request_model,
+            messages,
+            tools,
+            force_tool_call,
+        ));
         if let Some(session_id) = &self.session_id {
             request = request.header("x-session-id", session_id);
         }

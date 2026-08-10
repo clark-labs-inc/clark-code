@@ -304,11 +304,8 @@ async fn transient_failure_retries_the_same_model_turn_from_a_completed_tool_bou
     let requests = server.await.unwrap();
     assert_eq!(requests.len(), 3);
     assert_transparent_retry_context(&requests[2]);
-    let interrupted_key = request_header(&requests[1], "idempotency-key")
-        .expect("interrupted request has an idempotency key");
-    let retried_key =
-        request_header(&requests[2], "idempotency-key").expect("retry has an idempotency key");
-    assert_eq!(interrupted_key, retried_key);
+    assert!(request_header(&requests[1], "idempotency-key").is_none());
+    assert!(request_header(&requests[2], "idempotency-key").is_none());
 }
 
 #[tokio::test]

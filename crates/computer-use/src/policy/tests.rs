@@ -37,9 +37,10 @@ fn button(name: Option<&str>) -> ElementInfo {
 #[test]
 fn forbidden_targets_cover_self_terminals_credentials_and_system_security() {
     for bundle_id in [
-        "com.agent-desktop.desktop",
-        "com.agent-desktop.desktop.dev",
-        "com.agent-desktop.desktop.dev.computer-use-helper",
+        env!("DESKTOP_COMPUTER_USE_PROD_APP_ID"),
+        env!("DESKTOP_COMPUTER_USE_PROD_HELPER_ID"),
+        env!("DESKTOP_COMPUTER_USE_DEV_APP_ID"),
+        env!("DESKTOP_COMPUTER_USE_DEV_HELPER_ID"),
         "com.apple.Terminal",
         "com.googlecode.iterm2",
         "com.termius-dmg.mac",

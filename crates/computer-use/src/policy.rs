@@ -25,7 +25,9 @@ pub fn ensure_bundle_allowed(bundle_id: &str) -> Result<(), ComputerUseError> {
     let normalized = bundle_id.to_ascii_lowercase();
     let product_bundle_ids = [
         env!("DESKTOP_COMPUTER_USE_PROD_APP_ID"),
+        env!("DESKTOP_COMPUTER_USE_PROD_HELPER_ID"),
         env!("DESKTOP_COMPUTER_USE_DEV_APP_ID"),
+        env!("DESKTOP_COMPUTER_USE_DEV_HELPER_ID"),
     ];
     if product_bundle_ids
         .iter()

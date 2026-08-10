@@ -252,14 +252,16 @@ fn captured_request_json(request: &[u8]) -> Value {
 }
 
 fn captured_request_header(request: &[u8], expected: &str) -> String {
-    String::from_utf8_lossy(request)
-        .lines()
-        .find_map(|line| {
-            let (name, value) = line.split_once(':')?;
-            name.eq_ignore_ascii_case(expected)
-                .then(|| value.trim().to_string())
-        })
+    optional_captured_request_header(request, expected)
         .unwrap_or_else(|| panic!("missing {expected} header"))
+}
+
+fn optional_captured_request_header(request: &[u8], expected: &str) -> Option<String> {
+    String::from_utf8_lossy(request).lines().find_map(|line| {
+        let (name, value) = line.split_once(':')?;
+        name.eq_ignore_ascii_case(expected)
+            .then(|| value.trim().to_string())
+    })
 }
 
 #[test]
@@ -381,10 +383,9 @@ async fn configured_model_rejection_falls_back_once() {
         captured_request_header(&second, "x-session-id"),
         "fallback-session"
     );
-    let first_idempotency_key = captured_request_header(&first, "idempotency-key");
-    let second_idempotency_key = captured_request_header(&second, "idempotency-key");
-    assert_ne!(first_idempotency_key, second_idempotency_key);
-    assert_eq!(receipt_idempotency_key, second_idempotency_key);
+    assert!(optional_captured_request_header(&first, "idempotency-key").is_none());
+    assert!(optional_captured_request_header(&second, "idempotency-key").is_none());
+    assert!(receipt_idempotency_key.starts_with("model-fallback-"));
 }
 
 #[tokio::test]
@@ -473,7 +474,7 @@ async fn retries_http_524_before_output() {
 }
 
 #[tokio::test]
-async fn retries_keep_idempotency_key_and_session_id_for_the_logical_turn() {
+async fn streaming_retries_keep_session_id_without_an_idempotency_header() {
     let (base_url, mut requests) =
         endpoint_capturing_requests(vec![http_gateway_timeout(), success()]).await;
     let client = LlmClient::from_parts(&base_url, "fake-model", None, Vec::new(), None)
@@ -505,12 +506,11 @@ async fn retries_keep_idempotency_key_and_session_id_for_the_logical_turn() {
                 })
                 .unwrap_or_else(|| panic!("missing {expected} header"))
         };
-        (header("idempotency-key"), header("x-session-id"))
+        assert!(optional_captured_request_header(request.as_bytes(), "idempotency-key").is_none());
+        header("x-session-id")
     });
-    assert!(headers[0].0.starts_with("model-request-"));
-    assert_eq!(headers[0].0, headers[1].0);
-    assert_eq!(headers[0].1, "conversation-uuid");
-    assert_eq!(headers[0].1, headers[1].1);
+    assert_eq!(headers[0], "conversation-uuid");
+    assert_eq!(headers[0], headers[1]);
 }
 
 #[tokio::test]
