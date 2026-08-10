@@ -191,6 +191,7 @@ pub fn activate_macos_user_path() -> Result<(), std::env::JoinPathsError> {
     Ok(())
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn path_with_user_tools(
     existing_path: Option<OsString>,
     candidates: &[PathBuf],
