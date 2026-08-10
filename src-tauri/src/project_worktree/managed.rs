@@ -198,7 +198,7 @@ pub async fn project_managed_worktree_create(
     ))
 }
 
-/// List only worktrees created by Agent Desktop's managed lifecycle. User-created
+/// List only worktrees created by Clark Code's managed lifecycle. User-created
 /// linked worktrees remain visible through normal Git branch ownership but are
 /// never candidates for lifecycle cleanup here.
 #[tauri::command]
@@ -248,7 +248,7 @@ pub async fn project_managed_worktree_list(
 
 /// Explicitly remove one clean, registered managed worktree. This intentionally
 /// omits --force, never prunes arbitrary Git worktrees, and refuses any path
-/// not present in both Agent Desktop's registry and Git's current worktree list.
+/// not present in both Clark Code's registry and Git's current worktree list.
 #[tauri::command]
 pub async fn project_managed_worktree_cleanup(
     project_path: String,
@@ -389,7 +389,7 @@ pub async fn project_managed_worktree_save_branch(
     if let Some(existing) = branch_revision(&root, &branch).await {
         if existing != head_revision {
             return Err(format!(
-                "Branch {branch} already points somewhere else, so Agent Desktop will not overwrite it. Create or choose another branch manually."
+                "Branch {branch} already points somewhere else, so Clark Code will not overwrite it. Create or choose another branch manually."
             ));
         }
     } else {

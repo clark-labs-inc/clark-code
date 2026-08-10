@@ -53,7 +53,7 @@ fn http_forbidden_credentials() -> Vec<u8> {
 }
 
 fn http_payment_required() -> Vec<u8> {
-    let body = r#"{"error":{"message":"Insufficient Agent Desktop credits. Add credits to continue.","type":"usage_limit_reached"}}"#;
+    let body = r#"{"error":{"message":"Insufficient Clark Code credits. Add credits to continue.","type":"usage_limit_reached"}}"#;
     format!(
         "HTTP/1.1 402 Payment Required\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{body}",
         body.len(),

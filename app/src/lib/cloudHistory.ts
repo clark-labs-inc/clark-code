@@ -425,7 +425,7 @@ async function drainPush(id: string): Promise<void> {
       clearRetry(id);
       retryAttempts.delete(id);
       warningHandler?.(
-        "This conversation was deleted on another device, so Agent Desktop stopped syncing it here.",
+        "This conversation was deleted on another device, so Clark Code stopped syncing it here.",
       );
       ok = true;
     } else {

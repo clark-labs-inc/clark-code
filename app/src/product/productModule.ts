@@ -123,9 +123,9 @@ export interface ProductModule {
 
 export const neutralProduct: ProductModule = Object.freeze({
   branding: {
-    id: "desktop",
-    name: "Agent Desktop",
-    shortName: "Desktop",
+    id: "clark_code",
+    name: "Clark Code",
+    shortName: "Clark Code",
   },
   authRequired: false,
   slots: {},

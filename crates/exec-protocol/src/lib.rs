@@ -1,5 +1,5 @@
 //! Typed filesystem and bounded-process payloads shared by the durable worker's
-//! project plugin and Agent Desktop's native executor adapter. Correlation,
+//! project plugin and Clark Code's native executor adapter. Correlation,
 //! cancellation, ordering, and authentication belong to `code-host` and
 //! `code-remote`; this crate contains no second transport protocol.
 

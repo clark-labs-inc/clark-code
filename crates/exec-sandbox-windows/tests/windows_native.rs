@@ -26,7 +26,7 @@ fn native_windows_sandbox_enforces_filesystem_process_and_network_boundaries() {
     assert_eq!(runner.parent(), setup.parent(), "helpers must be siblings");
     let local_app_data = PathBuf::from(std::env::var_os("LOCALAPPDATA").unwrap());
     let state_dir = local_app_data
-        .join("Agent Desktop")
+        .join("Clark Code")
         .join("Code")
         .join("sandbox");
     let workspace = tempfile::tempdir().unwrap();
@@ -47,7 +47,7 @@ fn native_windows_sandbox_enforces_filesystem_process_and_network_boundaries() {
             .unwrap();
         assert_success("git fixture", &git_init);
     } else {
-        // Git is optional for Agent Desktop and is intentionally not bundled.
+        // Git is optional for Clark Code and is intentionally not bundled.
         // Keep the protected-metadata boundary covered on a clean machine.
         std::fs::create_dir_all(&dot_git).unwrap();
     }

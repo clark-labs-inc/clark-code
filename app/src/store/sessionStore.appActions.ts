@@ -76,6 +76,7 @@ import { composerDraftOwner, removeComposerDraft } from "../lib/composerDraft";
 import { useSpecialistStore } from "./specialistStore";
 import { resetStableOrder } from "../lib/stableOrder";
 import { authAccountMatches } from "../lib/account";
+import { loadManagedWorktreeBase } from "../lib/managedWorktreeSettings";
 
 type AppActions = Pick<
   SessionState,
@@ -171,7 +172,7 @@ export function handleCloudConversationDeleted(
         cleanupStillOwnsTarget
           ? current.warning
           : viewTarget || restoringTarget || wasLive
-          ? "This conversation was deleted on another device, so Agent Desktop stopped it here."
+          ? "This conversation was deleted on another device, so Clark Code stopped it here."
           : current.warning,
       ...(viewTarget
         ? {
@@ -261,7 +262,7 @@ export function handleCloudHistoryConflict(
   set({
     runningIds: before.runningIds.filter((id) => id !== conversationId),
     warning: wasLive
-      ? "A conversation changed on another device, so Agent Desktop stopped its stale local session."
+      ? "A conversation changed on another device, so Clark Code stopped its stale local session."
       : before.warning,
   });
 }
@@ -302,7 +303,7 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
         }
         if (waitedMs >= UPDATE_DRAIN_TIMEOUT_MS) {
           throw new Error(
-            "The update drain appears stuck. The update was cancelled so Agent Desktop can keep working; try again after reopening the app.",
+            "The update drain appears stuck. The update was cancelled so Clark Code can keep working; try again after reopening the app.",
           );
         }
         const pollMs = Math.min(UPDATE_DRAIN_POLL_MS, UPDATE_DRAIN_TIMEOUT_MS - waitedMs);
@@ -322,7 +323,7 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
       while (true) {
         if (waitedMs >= UPDATE_DRAIN_TIMEOUT_MS) {
           throw new Error(
-            "The native update drain appears stuck. The update was cancelled so Agent Desktop can keep working; try again after reopening the app.",
+            "The native update drain appears stuck. The update was cancelled so Clark Code can keep working; try again after reopening the app.",
           );
         }
         if ((await beginUpdateDrain()) === 0) break;
@@ -338,13 +339,13 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
         throw new Error(
           refreshed.status === "error"
             ? refreshed.message
-            : "Agent Desktop could not confirm the latest update; try again.",
+            : "Clark Code could not confirm the latest update; try again.",
         );
       }
       set({ update: refreshed.update });
 
       if (!(await flushCloudPuts())) {
-        throw new Error("Agent Desktop could not save the final conversation state; update postponed.");
+        throw new Error("Clark Code could not save the final conversation state; update postponed.");
       }
 
       set({ updateWaiting: false, updateApplying: true });
@@ -354,7 +355,7 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
       // The process normally exits before this fires. If the platform accepted
       // the request but did not relaunch, release the blocking overlay/latch.
       await delay(1500);
-      throw new Error("Agent Desktop did not relaunch. Quit and reopen it to finish the update.");
+      throw new Error("Clark Code did not relaunch. Quit and reopen it to finish the update.");
     } catch (error) {
       await cancelUpdateDrain().catch(() => {});
       set({
@@ -398,15 +399,15 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
           const result = await get().checkForUpdate();
           if (result.status === "ready") {
             get().flashNotice(
-              `Agent Desktop ${result.update.version} is downloaded and ready to install.`,
+              `Clark Code ${result.update.version} is downloaded and ready to install.`,
             );
           } else if (result.status === "up-to-date") {
-            get().flashNotice("Agent Desktop is already up to date.");
+            get().flashNotice("Clark Code is already up to date.");
           } else if (result.status === "busy") {
-            get().flashNotice("Agent Desktop is already checking for or downloading an update.");
+            get().flashNotice("Clark Code is already checking for or downloading an update.");
           } else if (result.status === "error") {
             get().flashNotice(
-              "Agent Desktop couldn't check for updates. Check your connection and try again.",
+              "Clark Code couldn't check for updates. Check your connection and try again.",
             );
           }
         })();
@@ -438,7 +439,7 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
         )
       ) {
         throw new Error(
-          "Agent Desktop rejected a specialist catalog that did not match its signed native bundle.",
+          "Clark Code rejected a specialist catalog that did not match its signed native bundle.",
         );
       }
       configureCloudHistoryCredentials(cloudCreds(get().auth));
@@ -766,6 +767,10 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
             worktreePreparing: false,
             connecting: false,
             opening: null,
+            managedWorktreeBase: loadManagedWorktreeBase(
+              codeKeyAccountBinding(get().auth),
+              next.cwd,
+            ),
           }
         : {}),
     });
@@ -889,9 +894,11 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
     configureCloudHistoryCredentials(cloudCreds(auth));
     // Start from an empty list for the new account; the cloud fetch below is the
     // authoritative source (a different account never inherits the prior list).
+    const accountLocalSettings = loadLocalSettings(accountScope);
     set({
       auth,
-      localSettings: loadLocalSettings(accountScope),
+      localSettings: accountLocalSettings,
+      managedWorktreeBase: loadManagedWorktreeBase(accountScope, accountLocalSettings.cwd),
       chatModels: loadChatModels(accountScope),
       approvalPolicies: loadApprovalPolicies(accountScope),
       memoriesEnabled: loadMemoriesEnabled(accountScope),
@@ -926,13 +933,13 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
       mutatingConversationIds: new Set(),
       conversationMutation: null,
     });
-    // Provision Agent Desktop key, then pull the cloud/native-cached list.
+    // Provision Clark Code key, then pull the cloud/native-cached list.
     void get().ensureCodeKey();
     void get().syncCloudIndex();
   },
 
   signOutAuth: async () => {
-    // A Agent Desktop key is account-scoped. Removing the local binding prevents
+    // A Clark Code key is account-scoped. Removing the local binding prevents
     // the next user from silently consuming access owned by this account.
     resetCloudHistory();
     resetStableOrder();
@@ -947,9 +954,11 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
     // Drop the in-memory history entirely so the signed-out (and any next)
     // account starts clean.
     snapshotCache.clear();
+    const anonymousLocalSettings = loadLocalSettings(null);
     set({
       auth: null,
-      localSettings: loadLocalSettings(null),
+      localSettings: anonymousLocalSettings,
+      managedWorktreeBase: loadManagedWorktreeBase(null, anonymousLocalSettings.cwd),
       chatModels: loadChatModels(null),
       approvalPolicies: loadApprovalPolicies(null),
       memoriesEnabled: loadMemoriesEnabled(null),

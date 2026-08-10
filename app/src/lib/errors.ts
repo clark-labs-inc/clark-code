@@ -20,7 +20,7 @@ export function humanizeRunFailure(
     case "session_expired":
       return "Your the agent sign-in expired. Sign in again.";
     case "platform_key_rejected":
-      return "Agent Desktop’s access key was rejected. Reconnect Agent Desktop and try again.";
+      return "Clark Code’s access key was rejected. Reconnect Clark Code and try again.";
     case "rate_limited":
       return "The model is busy right now (rate-limited). Give it a moment and try again.";
     case "transport_error":
@@ -34,7 +34,7 @@ export function humanizeRunFailure(
     case "tool_fatal":
       return "A coding action failed unexpectedly. Review the last step and try again.";
     case "local_state":
-      return "Agent Desktop couldn’t continue this run. Start another run and try again.";
+      return "Clark Code couldn’t continue this run. Start another run and try again.";
     case "iteration_limit":
       return "This run reached its step limit. Continue in this task to resume from the saved work.";
     case "runtime_interrupted":
@@ -74,7 +74,7 @@ export function humanizeError(raw?: string | null): string {
     || lower.includes("serde")
     || lower.includes("deserialization")
   ) {
-    return "Agent Desktop couldn’t restore this conversation. Please try again.";
+    return "Clark Code couldn’t restore this conversation. Please try again.";
   }
 
   // Rate limited — the most common one, and what the screenshot showed.
@@ -90,7 +90,7 @@ export function humanizeError(raw?: string | null): string {
 
   // Out of credits (normally handled by the upgrade prompt, but just in case).
   if (lower.includes("insufficient_credits") || lower.includes("out of credit")) {
-    return "Agent Desktop’s usage limit has been reached.";
+    return "Clark Code’s usage limit has been reached.";
   }
 
   // Context window exceeded.

@@ -181,7 +181,7 @@ fn protect_password(password: &str) -> Result<Vec<u8>, String> {
         cbData: bytes.len() as u32,
         pbData: bytes.as_ptr() as *mut u8,
     };
-    let description = wide("Agent Desktop sandbox offline identity");
+    let description = wide("Clark Code sandbox offline identity");
     let mut output = CRYPT_INTEGER_BLOB {
         cbData: 0,
         pbData: ptr::null_mut(),

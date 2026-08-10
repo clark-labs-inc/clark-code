@@ -4,7 +4,7 @@ Guidance for agents (and humans) working in this repo.
 
 ## What this is
 
-Agent Desktop — a Tauri 2 + React 19 + Rust desktop foundation for agentic
+Clark Code — a Tauri 2 + React 19 + Rust desktop foundation for agentic
 work. One UI talks to many agent backends through a single `Provider` trait in
 `agent-core`. Branded services and commercial policy live in downstream
 product compositions, not in this repository.

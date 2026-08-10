@@ -3,6 +3,6 @@
 <plist version="1.0">
 <dict>
   <key>NSDocumentsFolderUsageDescription</key>
-  <string>Agent Desktop needs access to the project folders you select so it can inspect and modify your code.</string>
+  <string>Clark Code needs access to the project folders you select so it can inspect and modify your code.</string>
 </dict>
 </plist>

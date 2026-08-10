@@ -1,4 +1,4 @@
-//! Discovers helper executables shipped with Agent Desktop.
+//! Discovers helper executables shipped with Clark Code.
 //!
 //! The package has two intentionally disjoint surfaces:
 //! `agent-path/` contains commands exposed to agent processes, while
@@ -28,7 +28,7 @@ pub struct BundledTool {
 pub const PATH_DIR: &str = "agent-path";
 pub const RESOURCES_DIR: &str = "agent-resources";
 #[cfg(target_os = "linux")]
-const PRODUCT_NAME: &str = "Agent Desktop";
+const PRODUCT_NAME: &str = "Clark Code";
 
 pub const RIPGREP: BundledTool = BundledTool {
     name: if cfg!(windows) { "rg.exe" } else { "rg" },
@@ -169,6 +169,47 @@ pub fn activate_bundled_path() -> Result<Option<PathBuf>, std::env::JoinPathsErr
     Ok(activated)
 }
 
+/// macOS GUI applications inherit launchd's minimal PATH instead of the user's
+/// interactive shell PATH. Add only conventional, existing user-tool
+/// directories so local sessions can resolve Homebrew and per-user commands
+/// without evaluating shell startup files.
+pub fn activate_macos_user_path() -> Result<(), std::env::JoinPathsError> {
+    #[cfg(target_os = "macos")]
+    {
+        let mut candidates = vec![
+            PathBuf::from("/opt/homebrew/bin"),
+            PathBuf::from("/usr/local/bin"),
+        ];
+        if let Some(home) = std::env::var_os("HOME") {
+            let home = PathBuf::from(home);
+            candidates.push(home.join(".local/bin"));
+            candidates.push(home.join(".cargo/bin"));
+        }
+        let path = path_with_user_tools(std::env::var_os("PATH"), &candidates)?;
+        std::env::set_var("PATH", path);
+    }
+    Ok(())
+}
+
+fn path_with_user_tools(
+    existing_path: Option<OsString>,
+    candidates: &[PathBuf],
+) -> Result<OsString, std::env::JoinPathsError> {
+    let mut entries = candidates
+        .iter()
+        .filter(|path| path.is_dir())
+        .cloned()
+        .collect::<Vec<_>>();
+    if let Some(path) = existing_path {
+        for entry in std::env::split_paths(&path) {
+            if !entries.iter().any(|known| known == &entry) {
+                entries.push(entry);
+            }
+        }
+    }
+    std::env::join_paths(entries)
+}
+
 pub fn rg_command() -> PathBuf {
     InstallContext::current().rg_command()
 }
@@ -219,9 +260,9 @@ mod tests {
         std::fs::create_dir_all(&bin_dir)?;
         std::fs::create_dir_all(&path_dir)?;
         let app = bin_dir.join(if cfg!(windows) {
-            "agent-desktop.exe"
+            "clark-code.exe"
         } else {
-            "agent-desktop"
+            "clark-code"
         });
         let rg = path_dir.join(RIPGREP.name);
         std::fs::write(&app, b"app")?;
@@ -243,7 +284,7 @@ mod tests {
     #[test]
     fn source_build_falls_back_to_command_name() -> std::io::Result<()> {
         let package = tempfile::tempdir()?;
-        let app = package.path().join("agent-desktop");
+        let app = package.path().join("clark-code");
         std::fs::write(&app, b"app")?;
         let context = InstallContext::from_exe(Some(&app));
 
@@ -262,7 +303,7 @@ mod tests {
         std::fs::create_dir_all(&bin_dir)?;
         std::fs::create_dir_all(&path_dir)?;
         std::fs::create_dir_all(&private_dir)?;
-        let app = bin_dir.join("agent-desktop");
+        let app = bin_dir.join("clark-code");
         let rg = path_dir.join(RIPGREP.name);
         let runner = private_dir.join(WINDOWS_SANDBOX_RUNNER.name);
         let setup = private_dir.join(WINDOWS_SANDBOX_SETUP.name);
@@ -296,7 +337,7 @@ mod tests {
     #[test]
     fn existing_package_path_is_not_duplicated() -> std::io::Result<()> {
         let package = tempfile::tempdir()?;
-        let app = package.path().join("agent-desktop");
+        let app = package.path().join("clark-code");
         std::fs::write(&app, b"app")?;
         std::fs::write(package.path().join(RIPGREP.name), b"rg")?;
         let context = InstallContext::from_exe(Some(&app));
@@ -310,6 +351,24 @@ mod tests {
         assert_eq!(
             std::env::split_paths(&updated).collect::<Vec<_>>(),
             vec![dir, PathBuf::from("/system")]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn conventional_user_tools_precede_and_deduplicate_the_gui_path() -> std::io::Result<()> {
+        let temp = tempfile::tempdir()?;
+        let homebrew = temp.path().join("homebrew/bin");
+        let local = temp.path().join("user/.local/bin");
+        std::fs::create_dir_all(&homebrew)?;
+        std::fs::create_dir_all(&local)?;
+        let existing = std::env::join_paths([local.clone(), PathBuf::from("/system/bin")]).unwrap();
+
+        let path =
+            path_with_user_tools(Some(existing), &[homebrew.clone(), local.clone()]).unwrap();
+        assert_eq!(
+            std::env::split_paths(&path).collect::<Vec<_>>(),
+            vec![homebrew, local, PathBuf::from("/system/bin")]
         );
         Ok(())
     }

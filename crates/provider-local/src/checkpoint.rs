@@ -138,7 +138,7 @@ pub async fn create_checkpoint(exec: &dyn Executor, root: &Path) -> Result<Optio
 
 /// Release checkpoint-retention refs after their owning conversation is
 /// permanently deleted. The commit objects remain recoverable until normal Git
-/// maintenance; only Agent Desktop's explicit retention roots are removed.
+/// maintenance; only Clark Code's explicit retention roots are removed.
 pub async fn release_checkpoints(
     exec: &dyn Executor,
     root: &Path,

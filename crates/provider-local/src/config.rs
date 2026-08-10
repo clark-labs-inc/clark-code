@@ -117,7 +117,7 @@ pub struct LocalConfig {
     /// Hidden A/B switch used by the paid planning benchmark. Production and
     /// normal tests always use the decision-complete profile.
     pub(crate) planning_prompt_profile: crate::planning::PlanningPromptProfile,
-    /// Use Agent Desktop's hidden `<proposed_plan>` framing in Plan Mode instead
+    /// Use Clark Code's hidden `<proposed_plan>` framing in Plan Mode instead
     /// of exposing the legacy JSON plan tools. The legacy switch exists for
     /// protocol-compatibility fixtures and old clients.
     pub(crate) hidden_plan_protocol: bool,
@@ -164,7 +164,7 @@ pub struct LocalConfig {
     /// host-capability mode.
     pub sandbox_mode: LocalSandboxMode,
     /// Host-approved directories that model-facing file reads may access in
-    /// addition to the project and Agent Desktop document workspace. They never widen
+    /// addition to the project and Clark Code document workspace. They never widen
     /// write access and are ignored for remote sessions.
     pub sandbox_read_roots: Vec<PathBuf>,
     /// Whether durable memory is enabled — exposes the `memory` tool and injects
@@ -175,7 +175,7 @@ pub struct LocalConfig {
     /// global-memory files. Missing scope disables that local global scope.
     pub memory_scope: Option<String>,
     /// Whether this opted-in session may retrieve private repository evidence
-    /// previously synced to the user's Agent Desktop account.
+    /// previously synced to the user's Clark Code account.
     pub project_knowledge_enabled: bool,
     /// Checkpoint compaction for the model-visible transcript.
     pub compaction: CompactionConfig,
@@ -238,7 +238,7 @@ impl LocalSandboxMode {
 /// Config for calling a host-advertised model tier (for example
 /// `research-model`) as an auxiliary, non-coding call over the same model API and
 /// key as the coding model — used by optional brokered research, the `web_fetch`
-/// long-page condenser, and the image-description vision fallback. Agent Desktop runs
+/// long-page condenser, and the image-description vision fallback. Clark Code runs
 /// web search / planning / browsing / vision server-side and returns the
 /// final answer with no client tools involved.
 #[derive(Clone, Debug)]

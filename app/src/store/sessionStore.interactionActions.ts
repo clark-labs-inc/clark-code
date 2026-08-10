@@ -355,13 +355,13 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
     const { bridge, session, snapshot } = state;
     if (!bridge || !session) return null;
     if (state.updateWaiting || state.updateApplying) {
-      get().flashNotice("Agent Desktop is finishing active work before updating; edit after it relaunches.");
+      get().flashNotice("Clark Code is finishing active work before updating; edit after it relaunches.");
       return null;
     }
     const rejectEdit = (error: string) =>
       set({ error, composerPrefill: { text, timelineIndex } });
     if (session.provider !== "local") {
-      rejectEdit("Editing earlier turns is currently available in Agent Desktop only.");
+      rejectEdit("Editing earlier turns is currently available in Clark Code only.");
       return null;
     }
     if (!text.trim() && state.attachments.length === 0) return null;
@@ -544,7 +544,7 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
     const { attachments, auth, bridge, session, snapshot } = get();
     if (!bridge || !session) return;
     if (session.provider !== "local" || !bridge.compact) {
-      get().flashNotice("Context compaction is available only in Agent Desktop conversations.");
+      get().flashNotice("Context compaction is available only in Clark Code conversations.");
       return;
     }
     if (attachments.length > 0) {
@@ -567,7 +567,7 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
     const { auth, bridge, session, attachments, snapshot } = get();
     if (!bridge || !session) return { kind: "not_sent" };
     if (get().updateWaiting || get().updateApplying) {
-      get().flashNotice("Agent Desktop is finishing active work before updating; send after it relaunches.");
+      get().flashNotice("Clark Code is finishing active work before updating; send after it relaunches.");
       return { kind: "not_sent" };
     }
     if (!text.trim() && attachments.length === 0 && skills.length === 0) {
@@ -913,7 +913,7 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
     const requestAuth = get().auth;
     const { bridge, session, runningIds, activeProjectRoot } = get();
     if (!bridge) {
-      set({ error: "Starting a project session requires Agent Desktop native workspace." });
+      set({ error: "Starting a project session requires Clark Code native workspace." });
       return;
     }
     const previousRoot = activeProjectRoot?.trim() ?? "";
@@ -925,6 +925,7 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
         get().selectProvider("local");
         get().setProjectMode("local");
         get().setProjectFolder(cwd);
+        get().setManagedWorktreeBase(target.base);
       } else {
         const host: SshHost = target.host;
         if (!hostReady(host)) {

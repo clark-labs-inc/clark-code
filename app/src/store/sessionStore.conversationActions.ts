@@ -46,6 +46,7 @@ import {
   saveComposerDraft,
 } from "../lib/composerDraft";
 import { clearCloudComposerDraft } from "../lib/cloudComposerDraft";
+import { saveSshHosts } from "../lib/sshHosts";
 import {
   SPECIALIST_MODEL_ID,
   SPECIALIST_REASONING_EFFORT,
@@ -89,13 +90,45 @@ type ConversationActions = Pick<
   | "deleteSelectedConversations"
 >;
 
+function syncNextSessionTarget(
+  get: SessionGet,
+  sessionId: string,
+  provider: string,
+  projectRoot: string | null,
+  remoteHost: string | null,
+): void {
+  if (provider !== "local" && provider !== "specialist") return;
+  if (remoteHost) {
+    get().setProjectMode("remote");
+    const accountScope = codeKeyAccountBinding(get().auth);
+    const hosts = loadSshHosts(accountScope);
+    const selected = hosts.find((host) => host.host.trim() === remoteHost.trim());
+    if (!selected) return;
+    if (projectRoot && selected.remoteRoot.trim() !== projectRoot.trim()) {
+      saveSshHosts(
+        hosts.map((host) => host.id === selected.id
+          ? { ...host, remoteRoot: projectRoot.trim() }
+          : host),
+        accountScope,
+      );
+    }
+    get().setSelectedHostId(selected.id);
+    return;
+  }
+
+  get().setProjectMode("local");
+  if (projectRoot && !isQuickChatProject(projectRoot, sessionId)) {
+    get().setProjectFolder(projectRoot);
+  }
+}
+
 export function createConversationActions(set: SessionSet, get: SessionGet): ConversationActions {
   return {
   startBlockedReason: () => {
     const { activeProvider, projectMode, localSettings, selectedHostId } = get();
     const specialist = researchRuntimeSpecialist(activeSpecialistContext());
     if (specialist && activeProvider !== "local") {
-      return `${specialist.label} runs through the local Agent Desktop environment.`;
+      return `${specialist.label} runs through the local Clark Code environment.`;
     }
     // Non-local providers (cloud) need no local folder/host — always ready.
     if (activeProvider !== "local") return null;
@@ -109,7 +142,11 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
   },
 
   setManagedWorktreeBase: (base) => {
-    saveManagedWorktreeBase(base);
+    saveManagedWorktreeBase(
+      base,
+      codeKeyAccountBinding(get().auth),
+      get().localSettings.cwd,
+    );
     set({ managedWorktreeBase: base });
   },
 
@@ -199,7 +236,7 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
   startQuickChat: async () => {
     const bridge = get().bridge;
     if (!bridge?.prepareQuickChatWorkspace) {
-      set({ error: "Quick Chat requires Agent Desktop native workspace." });
+      set({ error: "Quick Chat requires Clark Code native workspace." });
       return;
     }
     let quickChat;
@@ -231,7 +268,7 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
     const specialistDefinition = researchRuntimeSpecialist(specialistContext);
     if (specialistDefinition && activeProvider !== "local") {
       set({
-        error: `${specialistDefinition.label} runs through the local Agent Desktop environment.`,
+        error: `${specialistDefinition.label} runs through the local Clark Code environment.`,
       });
       return;
     }
@@ -294,7 +331,7 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
     let remote: RemoteInfo | null = null;
     let nativeSession: Session | null = null;
     try {
-      // Make sure an Agent Desktop key has been minted before the local provider
+      // Make sure an Clark Code key has been minted before the local provider
       // needs it (covers the case where sign-in's background provision is still
       // in flight or failed).
       if (isLocal) await get().ensureCodeKey();
@@ -715,6 +752,7 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
       }
       for (const a of get().attachments) if (a.previewUrl) URL.revokeObjectURL(a.previewUrl);
       const merged = mergedOf(entry);
+      const projectRoot = liveProjectRoot(entry.session, entry.projectRoot);
       // Switching to an idle session emits no snapshot frame, so re-sync the
       // fan-out from the reattached snapshot instead of leaving the prior
       // conversation's swarm on screen.
@@ -729,7 +767,7 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
         historyPrefix: entry.historyPrefix,
         activeRemote: entry.remote,
         activeRemoteHost: entry.remoteHost,
-        activeProjectRoot: liveProjectRoot(entry.session, entry.projectRoot),
+        activeProjectRoot: projectRoot,
         queued: entry.queued,
         attachments: [],
         connecting: false,
@@ -739,6 +777,13 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
         error: null,
         dismissedFailedRuns: [],
       });
+      syncNextSessionTarget(
+        get,
+        id,
+        entry.session.provider,
+        projectRoot,
+        entry.remoteHost,
+      );
       return;
     }
 
@@ -820,7 +865,7 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
         && bridge.configureCloudTrajectory
       ) {
         throw new Error(
-          "This conversation’s saved history is unavailable, so Agent Desktop did not open an empty replacement.",
+          "This conversation’s saved history is unavailable, so Clark Code did not open an empty replacement.",
         );
       }
 
@@ -833,7 +878,7 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
       );
       if (quickChat) {
         if (!bridge.prepareQuickChatWorkspace) {
-          throw new Error("Quick Chat requires Agent Desktop native workspace.");
+          throw new Error("Quick Chat requires Clark Code native workspace.");
         }
         requestedProjectRoot = (await bridge.prepareQuickChatWorkspace(id)).path;
       }
@@ -1059,6 +1104,7 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
           ? "This conversation was recovered from local disk and will sync when product cloud is reachable."
           : get().warning,
       });
+      syncNextSessionTarget(get, id, targetProvider, projectRoot, remoteHost);
     } catch (e) {
       if (nativeSession) void bridge.closeSession?.(nativeSession.id);
       if (epochStale(epoch)) return;

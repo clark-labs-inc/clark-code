@@ -40,7 +40,7 @@
 }
 
 /* ----------------------------------------------------------------------------
-   Agent Desktop editorial workspace — warm paper, graphite type, violet interaction.
+   Clark Code editorial workspace — warm paper, graphite type, violet interaction.
    Violet is reserved for primary actions, focus, selection, and live state;
    code and tool values retain the quiet monospace-chip vernacular.
 ---------------------------------------------------------------------------- */
@@ -83,7 +83,7 @@
   --color-border-subtle: rgba(40, 36, 32, 0.055);
   --color-border-strong: rgba(40, 36, 32, 0.3);
 
-  /* Agent Desktop's type voice is editorial, not ornamental: DM Sans for calm UI,
+  /* Clark Code's type voice is editorial, not ornamental: DM Sans for calm UI,
      Newsreader for moments of emphasis, and JetBrains Mono for literal data.
      The rest of each stack is deliberately broad. A single font cannot cover
      every writing system, so native script fonts and Noto-compatible system
@@ -260,7 +260,7 @@ body {
   letter-spacing: 0;
   /* Permit synthetic emphasis when a fallback script lacks a requested face.
      Disabling synthesis globally can make bold and italic semantics invisible
-     in languages not covered by Agent Desktop's bundled Latin fonts. */
+     in languages not covered by Clark Code's bundled Latin fonts. */
   font-synthesis: weight style;
   font-feature-settings: "kern" 1, "calt" 1, "locl" 1;
   font-optical-sizing: auto;
@@ -275,7 +275,7 @@ body {
   text-wrap: balance;
 }
 
-/* Script-aware display typography. Agent Desktop keeps its editorial serif voice when
+/* Script-aware display typography. Clark Code keeps its editorial serif voice when
    an appropriate local face exists, while avoiding Latin-centric tight
    tracking and balanced wrapping on connected or ideographic scripts. These
    rules work both when the document language changes and for tagged excerpts

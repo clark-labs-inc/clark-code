@@ -2,7 +2,7 @@
 //!
 //! This is the only place that knows the model wire format. It speaks the
 //! ubiquitous `POST {base}/chat/completions` contract (OpenRouter, vLLM,
-//! llama.cpp, LM Studio, a future Agent Desktop passthrough, …): streamed
+//! llama.cpp, LM Studio, a future Clark Code passthrough, …): streamed
 //! `chat.completion.chunk` SSE frames carrying assistant text deltas and
 //! fragmented tool-call deltas. The parser reassembles those into a single
 //! [`AssistantTurn`], validates the complete provider-owned object, and only
@@ -211,7 +211,7 @@ pub(crate) struct StreamChatOptions<'a> {
 }
 
 /// Token/cost accounting from the final streamed chunk (OpenRouter shape,
-/// forwarded verbatim by Agent Desktop passthrough).
+/// forwarded verbatim by Clark Code passthrough).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct TokenUsage {
     /// Prompt size of this call — the live context footprint.
@@ -239,7 +239,7 @@ pub struct AssistantTurn {
     /// Unknown future item shapes remain intact for provider replay.
     pub reasoning_details: Vec<Value>,
     /// Stable transport identities for joining a successful model turn to
-    /// OpenRouter/Agent Desktop diagnostics and cache-routing receipts.
+    /// OpenRouter/Clark Code diagnostics and cache-routing receipts.
     pub response_metadata: Option<ProviderResponseMetadata>,
 }
 
@@ -247,7 +247,7 @@ pub struct AssistantTurn {
 pub struct ProviderResponseMetadata {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub requested_model: Option<String>,
-    /// Agent Desktop-managed model alias used after a pre-output compatibility
+    /// Clark Code-managed model alias used after a pre-output compatibility
     /// rejection of the requested model.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fallback_model: Option<String>,
@@ -352,7 +352,7 @@ pub struct LlmClient {
     model: String,
     api_key: Option<String>,
     headers: Vec<(String, String)>,
-    /// Agent Desktop conversation UUID forwarded through the gateway for routing.
+    /// Clark Code conversation UUID forwarded through the gateway for routing.
     session_id: Option<String>,
     temperature: Option<f32>,
     /// Reasoning-effort override forwarded to the passthrough ("low" … "xhigh").
@@ -382,7 +382,7 @@ impl LlmClient {
         self
     }
 
-    /// Bind subsequent model calls to one Agent Desktop conversation.
+    /// Bind subsequent model calls to one Clark Code conversation.
     pub fn with_session_id(mut self, session_id: &str) -> Self {
         self.session_id = Some(session_id.to_string());
         self
@@ -463,7 +463,7 @@ impl LlmClient {
         })
     }
 
-    /// One-shot completion with NO client tools (the agentic Agent Desktop path): send an
+    /// One-shot completion with NO client tools (the agentic Clark Code path): send an
     /// optional system + a user message, return the assembled assistant text.
     pub(crate) async fn complete(
         &self,
@@ -499,7 +499,7 @@ impl LlmClient {
     /// One-shot completion with image(s) attached — mirrors [`Self::complete`],
     /// swapping [`ChatMessage::user`] for [`ChatMessage::user_with_images`].
     /// Used by the vision-fallback path: a separate call to a vision-capable
-    /// Agent Desktop model, not part of the coding model's own turn.
+    /// Clark Code model, not part of the coding model's own turn.
     pub(crate) async fn describe_images(
         &self,
         system: &str,

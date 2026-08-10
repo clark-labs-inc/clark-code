@@ -47,22 +47,32 @@ export interface ProjectSidebarPreferences {
   aliases: Record<string, string>;
 }
 
+const MANAGED_WORKTREE_PATH = /^(.*)\.(?:agent|clark)-worktrees\/([^/]+)$/;
+
+function managedCheckoutParts(path: string): RegExpMatchArray | null {
+  return path.replaceAll("\\", "/").replace(/\/+$/, "").match(MANAGED_WORKTREE_PATH);
+}
+
+export function remoteProjectKey(host: string, root: string | undefined): string {
+  const normalizedHost = host.trim();
+  const normalizedRoot = root?.replaceAll("\\", "/").replace(/\/+$/, "") ?? "";
+  return `r:${encodeURIComponent(normalizedHost)}:${encodeURIComponent(normalizedRoot)}`;
+}
+
 /** Compactly identify a managed isolated checkout without hiding the source
  * repository. Managed worktrees live beside the repository at
  * `<repo>.agent-worktrees/<session>`; showing both names prevents two chats
  * from looking like unrelated projects in the sidebar and recent-work card. */
 export function projectDisplayName(path: string): string {
   if (quickChatWorkspaceId(path)) return "Quick Chat";
-  const normalized = path.replaceAll("\\", "/").replace(/\/+$/, "");
-  const managed = normalized.match(/^(.*)\.agent-worktrees\/([^/]+)$/);
+  const managed = managedCheckoutParts(path);
   if (!managed) return projectName(path);
   return `${projectName(managed[2])} · ${projectName(managed[1])}`;
 }
 
 export function projectDisplayTitle(path: string): string {
   if (quickChatWorkspaceId(path)) return "Temporary the agent workspace";
-  const normalized = path.replaceAll("\\", "/").replace(/\/+$/, "");
-  const managed = normalized.match(/^(.*)\.agent-worktrees\/([^/]+)$/);
+  const managed = managedCheckoutParts(path);
   if (!managed) return path;
   return `${path}\nIsolated checkout of ${projectName(managed[1])}`;
 }
@@ -71,8 +81,7 @@ export function projectDisplayTitle(path: string): string {
  * already use the repository name as their primary label, so they need no
  * secondary cue. */
 export function managedCheckoutRepositoryName(path: string): string | undefined {
-  const normalized = path.replaceAll("\\", "/").replace(/\/+$/, "");
-  const managed = normalized.match(/^(.*)\.agent-worktrees\/([^/]+)$/);
+  const managed = managedCheckoutParts(path);
   return managed ? projectName(managed[1]) : undefined;
 }
 
@@ -182,8 +191,8 @@ export function groupSidebarProjects(
       title = "Conversations in temporary the agent workspaces";
       kind = "none";
     } else if (conversation.remoteHost) {
-      key = `r:${conversation.remoteHost}`;
-      label = conversation.remoteHost;
+      key = remoteProjectKey(conversation.remoteHost, conversation.project);
+      label = conversation.project ? projectName(conversation.project) : conversation.remoteHost;
       title = `Remote · ${conversation.remoteHost}${conversation.project ? ` · ${conversation.project}` : ""}`;
       kind = "remote";
     } else if (conversation.project) {

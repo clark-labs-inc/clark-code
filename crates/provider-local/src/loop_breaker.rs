@@ -9,7 +9,7 @@
 //! diagnostic in a circle — `ls`, re-seed, lock-check, `ls`, … — can keep
 //! consuming work without converging.
 //!
-//! Agent Desktop's *cloud* loop already guards against this with typed stop reasons
+//! Clark Code's *cloud* loop already guards against this with typed stop reasons
 //! (`identical_tool_call`, `fruitless_tool_streak`, `stale_evidence`, …).
 //! This plugin ports the idea to the *local* loop using only the public
 //! `agent-loop` plugin hooks, so it needs no fork of the pinned core.

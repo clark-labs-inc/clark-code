@@ -13,6 +13,7 @@ use super::super::git_output;
 use super::types::{registry_version, ManagedWorktreeRegistry};
 
 const MANAGED_REGISTRY_FILE: &str = "agent-managed-worktrees-v1.json";
+const LEGACY_MANAGED_REGISTRY_FILE: &str = "clark-managed-worktrees-v1.json";
 const REGISTRY_LOCK_TIMEOUT: Duration = Duration::from_secs(2);
 const REGISTRY_LOCK_RETRY: Duration = Duration::from_millis(25);
 const STALE_REGISTRY_LOCK_AGE: Duration = Duration::from_secs(10 * 60);
@@ -110,6 +111,24 @@ fn registry_lock_is_stale(path: &Path) -> bool {
 }
 
 pub(super) fn read_registry(path: &Path) -> Result<ManagedWorktreeRegistry, String> {
+    let mut registry = read_registry_file(path)?;
+    if path.file_name().and_then(|name| name.to_str()) == Some(MANAGED_REGISTRY_FILE) {
+        let legacy_path = path.with_file_name(LEGACY_MANAGED_REGISTRY_FILE);
+        let legacy = read_registry_file(&legacy_path)?;
+        for entry in legacy.entries {
+            let duplicate = registry
+                .entries
+                .iter()
+                .any(|current| current.id == entry.id || current.path == entry.path);
+            if !duplicate {
+                registry.entries.push(entry);
+            }
+        }
+    }
+    Ok(registry)
+}
+
+fn read_registry_file(path: &Path) -> Result<ManagedWorktreeRegistry, String> {
     let Ok(bytes) = fs::read(path) else {
         return if path.exists() {
             Err(format!(
@@ -166,7 +185,7 @@ pub(super) fn write_registry(
         }
         // Windows does not replace an existing destination with rename. Every
         // caller holds the lifecycle lock, so this brief replacement is still
-        // serialized with all Agent Desktop reads and writes of the registry.
+        // serialized with all Clark Code reads and writes of the registry.
         fs::remove_file(path).map_err(|error| {
             let _ = fs::remove_file(&temporary);
             format!(
@@ -181,6 +200,17 @@ pub(super) fn write_registry(
                 path.display()
             )
         })?;
+    }
+    if path.file_name().and_then(|name| name.to_str()) == Some(MANAGED_REGISTRY_FILE) {
+        let legacy_path = path.with_file_name(LEGACY_MANAGED_REGISTRY_FILE);
+        if let Err(error) = fs::remove_file(&legacy_path) {
+            if error.kind() != ErrorKind::NotFound {
+                return Err(format!(
+                    "Remove migrated managed-worktree registry {}: {error}",
+                    legacy_path.display()
+                ));
+            }
+        }
     }
     Ok(())
 }

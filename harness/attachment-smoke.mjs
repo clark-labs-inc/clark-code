@@ -90,13 +90,13 @@ try {
   });
   await page.goto(url, { waitUntil: "networkidle" });
 
-  const composer = page.getByLabel("Message Agent Desktop");
+  const composer = page.getByLabel("Message Clark Code");
   try {
     await composer.waitFor({ state: "visible", timeout: 5_000 });
   } catch (error) {
     const text = await page.locator("body").innerText();
     throw new Error(
-      `Agent Desktop composer did not appear; body=${JSON.stringify(text)}; ` +
+      `Clark Code composer did not appear; body=${JSON.stringify(text)}; ` +
         `page_errors=${JSON.stringify(errors)}; cause=${error}`,
     );
   }

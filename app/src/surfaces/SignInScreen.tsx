@@ -167,7 +167,7 @@ export function SignInScreen() {
 
         <UpdateControl />
 
-        <p className="mt-8 text-xs text-ink-faint">Private beta · {productName()}</p>
+        <p className="mt-8 text-xs text-ink-faint">Open source · {productName()}</p>
       </m.div>
     </div>
   );

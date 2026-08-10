@@ -212,7 +212,7 @@ impl ToolExecutor for ListWindows {
         app_scope(args, true).or_else(|| {
             Some(PermissionScope {
                 key: "computer:window-discovery".to_string(),
-                title: Some("Allow Agent Desktop to see open app windows?".to_string()),
+                title: Some("Allow Clark Code to see open app windows?".to_string()),
                 always_label: Some("Always allow window discovery".to_string()),
                 reason: Some("reveals app names and window titles on this Mac".to_string()),
                 // Full access must not silently reveal which private apps and

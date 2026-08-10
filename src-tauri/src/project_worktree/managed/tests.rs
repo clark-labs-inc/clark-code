@@ -186,6 +186,54 @@ async fn managed_checkout_cannot_be_repurposed_by_switching_its_branch() {
 }
 
 #[tokio::test]
+async fn legacy_clark_registry_is_visible_prevents_nesting_and_migrates_on_cleanup() {
+    let temp = initialized_repo();
+    let repo = temp.path().join("project");
+    let created = project_managed_worktree_create(
+        repo.to_string_lossy().into_owned(),
+        ManagedWorktreeRequest {
+            base: ManagedWorktreeBase::Current,
+            label: Some("legacy".into()),
+            target_branch: None,
+        },
+    )
+    .await
+    .unwrap();
+    let git_dir = repo.join(".git");
+    let current_registry = git_dir.join("agent-managed-worktrees-v1.json");
+    let legacy_registry = git_dir.join("clark-managed-worktrees-v1.json");
+    std::fs::rename(&current_registry, &legacy_registry).unwrap();
+
+    let listed = project_managed_worktree_list(repo.to_string_lossy().into_owned())
+        .await
+        .unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].id, created.id);
+
+    let plan = project_worktree_transition_plan(created.path.clone(), None)
+        .await
+        .unwrap();
+    assert!(plan.source_is_managed);
+    let nested = project_managed_worktree_create(
+        created.path.clone(),
+        ManagedWorktreeRequest {
+            base: ManagedWorktreeBase::Current,
+            label: Some("nested".into()),
+            target_branch: None,
+        },
+    )
+    .await
+    .unwrap_err();
+    assert!(nested.contains("already a app-managed isolated worktree"));
+
+    cleanup_managed_worktree(&repo.to_string_lossy(), &created.id, &AppState::new())
+        .await
+        .unwrap();
+    assert!(!legacy_registry.exists());
+    assert!(current_registry.exists());
+}
+
+#[tokio::test]
 async fn unavailable_branch_owner_requires_manual_repair() {
     let temp = initialized_repo();
     let repo = temp.path().join("project");
@@ -411,7 +459,7 @@ async fn cleanup_refuses_a_clean_externally_detached_worktree_with_unprotected_c
     .await
     .unwrap();
     let managed = Path::new(&created.path);
-    // A normal Agent Desktop checkout is branch-backed. Simulate an external detach to
+    // A normal Clark Code checkout is branch-backed. Simulate an external detach to
     // prove the recovery gate still protects an old or manually altered one.
     git(managed, &["switch", "--detach", "-q"]);
     std::fs::write(managed.join("README.md"), "private commit\n").unwrap();

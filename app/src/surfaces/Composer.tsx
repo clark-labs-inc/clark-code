@@ -67,8 +67,11 @@ import {
 } from "../lib/attachments";
 import { specialistSlashIntent, specialistWorkflowAvailable, withActiveSpecialistSkill } from "../lib/specialists";
 import { useSpecialistStore } from "../store/specialistStore";
+import { productName } from "../product/productModule";
+import { composerBrandingCopy } from "./composerBranding";
 
 export function Composer() {
+  const branding = composerBrandingCopy(productName());
   const session = useSessionStore((s) => s.session);
   const auth = useSessionStore((s) => s.auth);
   const draftOwner = composerDraftOwner(auth?.user ?? null);
@@ -448,7 +451,7 @@ export function Composer() {
     const goalObjective = goalCommandObjective(t);
     if (goalObjective === "") {
       setDraftValue("/goal ");
-      flashNotice("Describe what the agent should keep working toward after /goal.");
+      flashNotice(branding.goalHelp);
       requestAnimationFrame(() => {
         taRef.current?.focus();
         taRef.current?.setSelectionRange(6, 6);
@@ -679,7 +682,7 @@ export function Composer() {
           <div className="flex items-center gap-1.5 pb-1 pt-0.5 text-xs font-medium text-accent">
             <Target className="size-3.5" />
             <span>Standing goal</span>
-            <span className="font-normal text-ink-faint">the agent keeps going until it is done</span>
+            <span className="font-normal text-ink-faint">{branding.goalStatus}</span>
           </div>
         )}
 
@@ -715,16 +718,16 @@ export function Composer() {
           onSelect={syncCaret}
           onClick={syncCaret}
           rows={1}
-          aria-label="Message the agent"
+          aria-label={branding.ariaLabel}
           autoCorrect="off"
           autoCapitalize="off"
           spellCheck={false}
           placeholder={
             !session
-              ? "Describe what you want the agent to do…"
+              ? branding.initialPlaceholder
               : busy
                 ? "Queue a follow-up…"
-                : "Ask the agent anything about this project…"
+                : branding.projectPlaceholder
           }
           disabled={connecting}
           className="composer-input max-h-52 w-full resize-none overflow-y-auto bg-transparent px-0.5 py-0.5 text-base leading-[1.5] text-ink outline-none placeholder:text-ink-muted disabled:opacity-50"
@@ -773,7 +776,7 @@ export function Composer() {
                   submission.shouldPickProjectFolder
                     ? "Choose project folder and send"
                     : busy
-                      ? "Queue message (sends when the agent finishes)"
+                      ? branding.queuedTitle
                       : "Send · ⇧↵ newline"
                 }
                 className="grid size-8 shrink-0 place-items-center rounded-full bg-accent text-on-accent shadow-soft transition duration-200 ease-agent hover:-translate-y-0.5 hover:bg-accent-hover active:translate-y-0 disabled:translate-y-0 disabled:bg-bg-tertiary disabled:text-ink-muted disabled:shadow-none"

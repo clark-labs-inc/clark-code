@@ -4,7 +4,7 @@ use provider_local::Executor;
 use tokio_util::sync::CancellationToken;
 
 use super::{
-    destination_for, parse_branch_owners, parse_remote_main, validate_name, ProjectBranch,
+    destination_for, parse_branch_owners, parse_remote_default, validate_name, ProjectBranch,
     DEFAULT_REMOTE, GIT_TIMEOUT,
 };
 
@@ -177,11 +177,11 @@ pub(super) async fn worktree_create(
     let advertised = git_output(
         executor,
         &repo_root,
-        &["ls-remote", DEFAULT_REMOTE, "refs/heads/main"],
-        "Find latest origin/main",
+        &["ls-remote", "--symref", DEFAULT_REMOTE, "HEAD"],
+        "Find latest remote default branch",
     )
     .await?;
-    let commit = parse_remote_main(&advertised)?;
+    let (default_branch, commit) = parse_remote_default(&advertised)?;
     git_output(
         executor,
         &repo_root,
@@ -193,7 +193,7 @@ pub(super) async fn worktree_create(
             DEFAULT_REMOTE,
             &commit,
         ],
-        "Fetch latest origin/main",
+        &format!("Fetch latest origin/{default_branch}"),
     )
     .await?;
     let branch = format!("agent/{clean_name}");

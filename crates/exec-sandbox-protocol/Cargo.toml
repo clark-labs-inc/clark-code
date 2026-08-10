@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "Versioned, platform-neutral protocol for Agent Desktop's privileged Windows sandbox helpers."
+description = "Versioned, platform-neutral protocol for Clark Code's privileged Windows sandbox helpers."
 
 [dependencies]
 base64 = "0.23"

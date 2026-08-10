@@ -131,7 +131,7 @@ impl PlanningState {
         plan
     }
 
-    /// Record Agent Desktop's hidden Plan Mode artifact. The model-facing protocol is
+    /// Record Clark Code's hidden Plan Mode artifact. The model-facing protocol is
     /// deliberately just Markdown; durable typed execution contracts remain a
     /// compatibility path for older transcripts and explicit structured
     /// callers, but are not required for a normal Plan Mode proposal.

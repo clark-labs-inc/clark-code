@@ -197,7 +197,7 @@ impl CloudTrajectoryClient {
                 } else {
                     let _ = client.app.emit(
                         "cloud-sync-warning",
-                        "Agent Desktop saved this run locally and will sync it when the cloud is reachable.",
+                        "Clark Code saved this run locally and will sync it when the cloud is reachable.",
                     );
                 }
                 if !error.starts_with("cloud_account_changed:")
@@ -271,7 +271,7 @@ impl CloudTrajectoryClient {
                 .await
                 .filter(|account| account.account.as_str() == self.owner_scope)
                 .ok_or_else(|| {
-                    "cloud_account_changed: Agent Desktop signed out or changed accounts before this pending run could sync"
+                    "cloud_account_changed: Clark Code signed out or changed accounts before this pending run could sync"
                         .to_string()
                 })?;
             drop(current_account);

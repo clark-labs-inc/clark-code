@@ -131,7 +131,7 @@ fn validate_user_state_dir(state_dir: &Path) -> Result<(), String> {
 fn validate_user_state_dir_under(local_app_data: &Path, state_dir: &Path) -> Result<(), String> {
     let allowed = ["Code", "Code Dev"].map(|product| {
         local_app_data
-            .join("Agent Desktop")
+            .join("Clark Code")
             .join(product)
             .join("sandbox")
     });
@@ -172,12 +172,12 @@ mod tests {
         let local = Path::new(r"C:\Users\tester\AppData\Local");
         assert!(validate_user_state_dir_under(
             local,
-            Path::new(r"C:\Users\tester\AppData\Local\Agent Desktop\Code\sandbox")
+            Path::new(r"C:\Users\tester\AppData\Local\Clark Code\Code\sandbox")
         )
         .is_ok());
         assert!(validate_user_state_dir_under(
             local,
-            Path::new(r"C:\Users\tester\AppData\Local\Agent Desktop\Code Dev\sandbox")
+            Path::new(r"C:\Users\tester\AppData\Local\Clark Code\Code Dev\sandbox")
         )
         .is_ok());
         assert!(validate_user_state_dir_under(
@@ -187,12 +187,12 @@ mod tests {
         .is_err());
         assert!(validate_user_state_dir_under(
             local,
-            Path::new(r"C:\Users\other\AppData\Local\Agent Desktop\Code Dev\sandbox")
+            Path::new(r"C:\Users\other\AppData\Local\Clark Code\Code Dev\sandbox")
         )
         .is_err());
         assert!(validate_user_state_dir_under(
             local,
-            Path::new(r"C:\Users\tester\AppData\Local\Agent Desktop\sandbox")
+            Path::new(r"C:\Users\tester\AppData\Local\Clark Code\sandbox")
         )
         .is_err());
     }

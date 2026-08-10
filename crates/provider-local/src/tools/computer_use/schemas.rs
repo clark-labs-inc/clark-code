@@ -35,7 +35,7 @@ pub fn type_text() -> Value {
             ),
             (
                 "text",
-                json!({"type": "string", "description": "Literal text to enter; maximum 2,000 characters. Agent Desktop redacts it from durable records."}),
+                json!({"type": "string", "description": "Literal text to enter; maximum 2,000 characters. Clark Code redacts it from durable records."}),
             ),
             (
                 "replace",

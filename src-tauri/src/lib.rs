@@ -1,4 +1,4 @@
-//! Agent Desktop — Tauri host.
+//! Clark Code — Tauri host.
 //!
 //! The host owns the native `agent-core` engine: it holds provider instances,
 //! drives transports/sidecars, and bridges to the web UI via Tauri commands
@@ -256,6 +256,9 @@ pub fn run_with_product_and_context(
     product: Arc<dyn product::ProductIntegration>,
     context: tauri::Context<tauri::Wry>,
 ) {
+    if let Err(error) = desktop_install_context::activate_macos_user_path() {
+        eprintln!("failed to activate macOS user-tool PATH: {error}");
+    }
     // Tauri sidecars live beside the main executable. Activate PATH-visible
     // helpers before tracing/Tauri/Tokio create worker threads so every child
     // surface (agent shell, background jobs, MCP, terminal) inherits one
@@ -497,8 +500,8 @@ mod tests {
     fn neutral_bundle_has_no_release_authority() {
         let development: Value =
             serde_json::from_str(include_str!("../tauri.conf.json")).expect("development config");
-        assert_eq!(development["productName"], "Agent Desktop Dev");
-        assert_eq!(development["identifier"], "org.agentdesktop.dev");
+        assert_eq!(development["productName"], "Clark Code Dev");
+        assert_eq!(development["identifier"], "dev.clarkcode.desktop");
         assert_eq!(development["bundle"]["createUpdaterArtifacts"], false);
         assert!(include_str!("../Info.plist").contains("NSDocumentsFolderUsageDescription"));
     }

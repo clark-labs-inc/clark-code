@@ -9,7 +9,7 @@ describe("product module", () => {
   afterEach(() => installProductModule(neutralProduct));
 
   it("defaults to the neutral open-source composition", () => {
-    expect(productModule().branding.id).toBe("desktop");
+    expect(productModule().branding.id).toBe("clark_code");
     expect(productModule().authRequired).toBe(false);
   });
 

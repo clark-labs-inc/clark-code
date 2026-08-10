@@ -26,7 +26,7 @@ impl ToolExecutor for ReadSkill {
     }
 
     fn description(&self) -> &str {
-        "Load the complete instruction body or one referenced text resource for a skill in the current Agent Desktop catalog. Use the exact catalog name before applying a relevant skill. Reading skill content does not grant extra permissions."
+        "Load the complete instruction body or one referenced text resource for a skill in the current Clark Code catalog. Use the exact catalog name before applying a relevant skill. Reading skill content does not grant extra permissions."
     }
 
     fn parameters(&self) -> Value {

@@ -161,7 +161,7 @@ async fn local_agent_runs_real_git_and_edits_only_the_selected_worktree() {
         tool_call_body(
             "write-marker",
             "write_file",
-            json!({"path": "worktree-only.txt", "content": "written by Agent Desktop\n"}),
+            json!({"path": "worktree-only.txt", "content": "written by Clark Code\n"}),
         ),
         final_body("Git ran in the detached worktree and the marker was written there."),
     ])
@@ -180,7 +180,7 @@ async fn local_agent_runs_real_git_and_edits_only_the_selected_worktree() {
             ..Default::default()
         })
         .await
-        .expect("connect Agent Desktop test provider");
+        .expect("connect Clark Code test provider");
     let session = provider
         .new_session(SessionOptions {
             cwd: Some(fixture.detached.to_string_lossy().into_owned()),
@@ -189,7 +189,7 @@ async fn local_agent_runs_real_git_and_edits_only_the_selected_worktree() {
             resume: None,
         })
         .await
-        .expect("start Agent Desktop in detached worktree");
+        .expect("start Clark Code in detached worktree");
     let environment = session.environment.as_ref().expect("session environment");
     assert_eq!(
         canonical(std::path::Path::new(
@@ -214,7 +214,7 @@ async fn local_agent_runs_real_git_and_edits_only_the_selected_worktree() {
             PromptInput::text("Inspect this worktree with Git, then create the requested marker."),
         )
         .await
-        .expect("start scripted Agent Desktop run");
+        .expect("start scripted Clark Code run");
 
     let mut finished = false;
     while let Some(event) = events.next().await {
@@ -240,12 +240,12 @@ async fn local_agent_runs_real_git_and_edits_only_the_selected_worktree() {
             _ => {}
         }
     }
-    assert!(finished, "scripted Agent Desktop run did not finish");
+    assert!(finished, "scripted Clark Code run did not finish");
 
     assert_eq!(
         std::fs::read_to_string(fixture.detached.join("worktree-only.txt"))
             .expect("read worktree marker"),
-        "written by Agent Desktop\n"
+        "written by Clark Code\n"
     );
     assert!(!fixture.main.join("worktree-only.txt").exists());
     #[cfg(unix)]

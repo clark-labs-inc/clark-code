@@ -48,7 +48,7 @@ describe("Security scanner cloud boundary", () => {
     );
   });
 
-  it("keeps Agent Desktop credential entirely behind the native command", async () => {
+  it("keeps Clark Code credential entirely behind the native command", async () => {
     invoke.mockResolvedValue({
       sealedScanCount: 1,
       syncedCount: 1,

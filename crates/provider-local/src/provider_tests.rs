@@ -528,7 +528,7 @@ async fn typed_goal_state_resumes_blocked_and_rebudgets_budget_limited_goals() {
         let mut state = provider.session.lock().await;
         crate::tools::goal::start_goal(
             &mut state,
-            "finish Agent Desktop-owned terminal parity".into(),
+            "finish Clark Code-owned terminal parity".into(),
             Some(10_000),
         )
         .unwrap();

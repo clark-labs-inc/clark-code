@@ -46,7 +46,7 @@ impl ToolExecutor for ScoutAdapterTool {
     }
 
     fn description(&self) -> &str {
-        "Run a fixed, read-only Scout control-plane adapter on the current execution target. Census returns opaque credential candidates without values; verify_auth proves one candidate against an exact authority; fetch_page executes only registered GitHub/AWS/GCP list operations and returns normalized metadata plus a target-bound receipt. Provider tokens and raw pagination cursors remain in target-private storage. Local enterprise persistence is retired; backend-fenced tasks must be uploaded through Agent Desktop's authoritative cartography API."
+        "Run a fixed, read-only Scout control-plane adapter on the current execution target. Census returns opaque credential candidates without values; verify_auth proves one candidate against an exact authority; fetch_page executes only registered GitHub/AWS/GCP list operations and returns normalized metadata plus a target-bound receipt. Provider tokens and raw pagination cursors remain in target-private storage. Local enterprise persistence is retired; backend-fenced tasks must be uploaded through Clark Code's authoritative cartography API."
     }
 
     fn parameters(&self) -> Value {

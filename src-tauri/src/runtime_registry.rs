@@ -2,7 +2,7 @@
 //!
 //! Account-partitioned session, project, worker, reconnect, claim, and skill
 //! cache state lives here. The WebView receives only opaque handles; every use
-//! re-authorizes them against the Agent Desktop account validated by the native host.
+//! re-authorizes them against the Clark Code account validated by the native host.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -64,7 +64,7 @@ impl AccountKey {
             || owner_scope.len() > 256
             || owner_scope.chars().any(char::is_control)
         {
-            return Err("Agent Desktop account identity is invalid".into());
+            return Err("Clark Code account identity is invalid".into());
         }
         Ok(Self(owner_scope))
     }
@@ -94,7 +94,7 @@ impl SessionKey {
 
     fn validate(raw: &str) -> Result<(), String> {
         if raw.is_empty() || raw.len() > 512 || raw.chars().any(char::is_control) {
-            return Err("Agent Desktop session identity is invalid".into());
+            return Err("Clark Code session identity is invalid".into());
         }
         Ok(())
     }

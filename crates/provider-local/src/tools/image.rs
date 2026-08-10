@@ -1,7 +1,7 @@
 //! Safe workspace image tools.
 //!
 //! `view_image` feeds a contained raster image back through the typed tool
-//! result channel. `generate_image` calls Agent Desktop's authenticated platform relay,
+//! result channel. `generate_image` calls Clark Code's authenticated platform relay,
 //! writes the returned bytes through the active executor (local or remote), and
 //! emits a typed artifact instead of relying on a prose convention.
 
@@ -23,7 +23,7 @@ const MAX_INPUT_IMAGE_BYTES: usize = 20 * 1024 * 1024;
 const MAX_OUTPUT_IMAGE_BYTES: usize = 20 * 1024 * 1024;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(180);
 
-/// Agent Desktop Platform relay configuration. The platform key is user-scoped; the
+/// Clark Code Platform relay configuration. The platform key is user-scoped; the
 /// server alone owns the upstream image-provider credential and billing.
 #[derive(Clone, Debug)]
 pub struct ImageGenerationConfig {
@@ -131,7 +131,7 @@ impl ToolExecutor for GenerateImage {
         }
         let output = requested_output_path(args, prompt);
         Some(format!(
-            "Generate an image through Agent Desktop (may consume credits)\nPrompt: {}\nSave to: {output} (extension matches returned image)",
+            "Generate an image through Clark Code (may consume credits)\nPrompt: {}\nSave to: {output} (extension matches returned image)",
             preview_prompt(prompt)
         ))
     }
@@ -184,9 +184,9 @@ impl ToolExecutor for GenerateImage {
         }
 
         ctx.report(if input_images.is_empty() {
-            "Generating image through Agent Desktop…"
+            "Generating image through Clark Code…"
         } else {
-            "Generating image with workspace references through Agent Desktop…"
+            "Generating image with workspace references through Clark Code…"
         });
         let generated = match self.generate(&prompt, input_images, &ctx.cancel).await {
             Ok(generated) => generated,
@@ -225,7 +225,7 @@ impl ToolExecutor for GenerateImage {
             kind: ArtifactKind::Image,
             mime_type: Some(generated.mime_type.to_string()),
             // A data URL is intentional: it renders safely for local and remote
-            // workspaces without broadening Agent Desktop's file-read scope.
+            // workspaces without broadening Clark Code's file-read scope.
             uri: Some(data_url),
         };
         ToolOutcome::ok(format!(
@@ -264,7 +264,7 @@ impl GenerateImage {
             .json(&json!({"prompt": prompt, "input_images": input_images}));
         let response = tokio::select! {
             _ = cancel.cancelled() => return Err("image generation cancelled".to_string()),
-            response = request.send() => response.map_err(|error| format!("calling Agent Desktop image generation: {error}"))?,
+            response = request.send() => response.map_err(|error| format!("calling Clark Code image generation: {error}"))?,
         };
         parse_generation_response(response).await
     }
@@ -335,23 +335,24 @@ async fn parse_generation_response(response: reqwest::Response) -> Result<Genera
     let body = response
         .bytes()
         .await
-        .map_err(|error| format!("reading Agent Desktop image response: {error}"))?;
+        .map_err(|error| format!("reading Clark Code image response: {error}"))?;
     if status != StatusCode::OK {
         return Err(format!(
-            "Agent Desktop image generation returned HTTP {status}: {}",
+            "Clark Code image generation returned HTTP {status}: {}",
             compact_response(&body)
         ));
     }
     let parsed: ImageGenerationResponse = serde_json::from_slice(&body).map_err(|error| {
         format!(
-            "Agent Desktop image generation returned an invalid response ({error}): {}",
+            "Clark Code image generation returned an invalid response ({error}): {}",
             compact_response(&body)
         )
     })?;
-    let image =
-        parsed.data.into_iter().next().ok_or_else(|| {
-            "Agent Desktop image generation completed without an image".to_string()
-        })?;
+    let image = parsed
+        .data
+        .into_iter()
+        .next()
+        .ok_or_else(|| "Clark Code image generation completed without an image".to_string())?;
     decode_generated_image(image)
 }
 
@@ -365,15 +366,15 @@ fn decode_generated_image(image: ImageGenerationData) -> Result<GeneratedImage, 
         ));
     }
     let detected = detect_image_mime(&bytes).ok_or_else(|| {
-        "Agent Desktop returned bytes that are not a supported raster image".to_string()
+        "Clark Code returned bytes that are not a supported raster image".to_string()
     })?;
     if let Some(reported) = image.media_type.as_deref() {
         let reported = normalize_image_mime(reported).ok_or_else(|| {
-            "Agent Desktop returned an unsupported generated image MIME type".to_string()
+            "Clark Code returned an unsupported generated image MIME type".to_string()
         })?;
         if reported != detected {
             return Err(format!(
-                "Agent Desktop returned inconsistent generated image MIME types ({reported} vs {detected})"
+                "Clark Code returned inconsistent generated image MIME types ({reported} vs {detected})"
             ));
         }
     }

@@ -54,7 +54,7 @@ async function scenario(browser, reduce) {
   page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
 
   await page.goto(devUrl, { waitUntil: "domcontentloaded" });
-  await page.getByLabel("Message Agent Desktop").waitFor({ state: "visible" });
+  await page.getByLabel("Message Clark Code").waitFor({ state: "visible" });
 
   // The account default is "Approve for me" (auto), which auto-approves the
   // mock's routine edit. Pin "Ask for approval" first so every pending request
@@ -63,8 +63,8 @@ async function scenario(browser, reduce) {
   await page.getByRole("menuitemradio", { name: "Ask for approval" }).click();
 
   // Trigger a run that lands on the permission gate.
-  await page.getByLabel("Message Agent Desktop").fill("First turn: inspect the workspace.");
-  await page.getByLabel("Message Agent Desktop").press("Enter");
+  await page.getByLabel("Message Clark Code").fill("First turn: inspect the workspace.");
+  await page.getByLabel("Message Clark Code").press("Enter");
   try {
     await page.getByRole("button", { name: "Allow once" }).waitFor({ state: "visible", timeout: 15000 });
   } catch (e) {

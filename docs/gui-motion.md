@@ -1,6 +1,6 @@
 # GUI motion system
 
-Agent Desktop uses [Motion for React](https://motion.dev/docs/react) for
+Clark Code uses [Motion for React](https://motion.dev/docs/react) for
 stateful transitions and CSS for small, static effects. Motion is MIT-licensed,
 works with React DOM in Tauri's macOS, Windows, and Linux WebViews, and gives us
 one implementation for presence, layout, gestures, and reduced motion.

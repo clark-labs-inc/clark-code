@@ -281,7 +281,7 @@ impl LlmClient {
                     tracing::warn!(
                         retry = retry.auth_retries,
                         max_retries = MAX_AUTH_RETRIES,
-                        "Agent Desktop API rejected the current platform key; retrying once",
+                        "Clark Code API rejected the current platform key; retrying once",
                     );
                 }
                 Err(AttemptError::PlatformKeyRejected(message)) => {

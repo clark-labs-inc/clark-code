@@ -92,7 +92,7 @@ describe("startNewProject (local)", () => {
     const bridge = stubBridge();
     useSessionStore.setState({ bridge, providers: await bridge.listProviders() });
 
-    await useSessionStore.getState().startNewProject({ kind: "local", path: "/tmp/new-app" });
+    await useSessionStore.getState().startNewProject({ kind: "local", path: "/tmp/new-app", base: "current" });
 
     const s = useSessionStore.getState();
     expect(s.localSettings.cwd).toBe("/tmp/new-app");
@@ -111,7 +111,7 @@ describe("startNewProject (local)", () => {
     const bridge = stubBridge();
     useSessionStore.setState({ bridge, providers: await bridge.listProviders() });
 
-    await useSessionStore.getState().startNewProject({ kind: "local", path: "   " });
+    await useSessionStore.getState().startNewProject({ kind: "local", path: "   ", base: "current" });
 
     const s = useSessionStore.getState();
     expect(s.localSettings.cwd).toBe("/tmp/project");
@@ -148,7 +148,7 @@ describe("startNewProject (local)", () => {
       notifiedPermId: null,
     });
 
-    await useSessionStore.getState().startNewProject({ kind: "local", path: "/tmp/new-app" });
+    await useSessionStore.getState().startNewProject({ kind: "local", path: "/tmp/new-app", base: "current" });
 
     const s = useSessionStore.getState();
     expect(s.localSettings.cwd).toBe("/tmp/new-app");

@@ -147,7 +147,7 @@ export function SandboxSetupCard({
             {canSetup
               ? "the agent needs one Windows approval before it can run project commands safely. Setup is reused after restart."
               : (status?.reason || error
-                || "Repair Agent Desktop installation before running local commands.")}
+                || "Repair Clark Code installation before running local commands.")}
           </p>
           {error && <p className="mt-1.5 text-xs text-danger">{error}</p>}
         </div>

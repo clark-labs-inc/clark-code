@@ -307,7 +307,7 @@ pub struct ImageAttachment {
 /// A durable user-facing result emitted by a tool.
 ///
 /// The URI may be a `data:` URL when the image was produced on a remote
-/// executor: Agent Desktop cannot safely read arbitrary remote paths, but
+/// executor: Clark Code cannot safely read arbitrary remote paths, but
 /// it can render bytes the tool just received from the trusted platform relay.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ProducedArtifact {
@@ -503,9 +503,9 @@ impl ToolRegistry {
         }
     }
 
-    /// The standard local coding tools, plus Agent Desktop research tool when a
+    /// The standard local coding tools, plus Clark Code research tool when a
     /// research endpoint is configured, plus the `memory` tool when memories are
-    /// enabled (`memory` is `Some` with the local global dir + optional Agent Desktop
+    /// enabled (`memory` is `Some` with the local global dir + optional Clark Code
     /// personal-recall config).
     pub fn new(
         research: Option<AuxiliaryModelConfig>,
@@ -727,8 +727,8 @@ impl ToolRegistry {
         }
     }
 
-    /// Register Agent Desktop-platform-backed image generation/editing when a signed-in
-    /// session has a platform key. The key stays between Desktop and Agent Desktop;
+    /// Register Clark Code-platform-backed image generation/editing when a signed-in
+    /// session has a platform key. The key stays between Desktop and Clark Code;
     /// the relay owns provider credentials and billing.
     pub fn enable_image_generation(&mut self, config: image::ImageGenerationConfig) {
         self.disable_image_generation();

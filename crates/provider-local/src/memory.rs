@@ -666,12 +666,12 @@ skepticism to CODE facts only (paths, commands, stack — verify against the rep
 relying on them). The user's own decisions and preferences — vocabulary, tone, rules, \
 who their product is for — are not verifiable in code and stay binding until the user \
 changes them: apply them as written.\n\
-- Notes record what THIS user said HERE. Never blend in facts from Agent Desktop's cloud \
+- Notes record what THIS user said HERE. Never blend in facts from Clark Code's cloud \
 profile, other projects, or your own guesses — a note that mixes sources becomes \
 impossible to trust or correct.\n\
 - Precedence: what the user says in this conversation outranks local saved notes, which \
-outrank Agent Desktop's cloud profile (\"Personal memory\"). Cloud-profile facts were extracted \
-from the user's other work — when you cite them, attribute them to Agent Desktop's profile, and \
+outrank Clark Code's cloud profile (\"Personal memory\"). Cloud-profile facts were extracted \
+from the user's other work — when you cite them, attribute them to Clark Code's profile, and \
 never let them override what the user tells you here. Never use cloud-profile facts to \
 fill gaps in THIS project either — its product, audience, and copy come from this repo \
 and this user's own words; if that context is missing, ask instead of borrowing.\n\

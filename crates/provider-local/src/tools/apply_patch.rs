@@ -1,4 +1,4 @@
-//! Atomic-preflight multi-file patch tool using Agent Desktop's `*** Begin Patch`
+//! Atomic-preflight multi-file patch tool using Clark Code's `*** Begin Patch`
 //! envelope. All existing files must satisfy the same read-before-edit guard as
 //! `edit_file`; parsing and replacement computation finish before any write.
 
@@ -12,7 +12,7 @@ use serde_json::{json, Value};
 use super::{arg_str, ToolCtx, ToolExecutor, ToolOutcome};
 
 const MAX_PATCH_BYTES: usize = 256_000;
-const PATCH_DESCRIPTION: &str = "The complete Agent Desktop patch body. Every operation header includes its leading `***`. For an update, use `*** Update File: path`, then `@@` without unified-diff line ranges, then lines prefixed with space, `-`, or `+`. Example: `*** Begin Patch\n*** Update File: path.txt\n@@\n-old\n+new\n*** End Patch`. For an add, use `*** Add File: path` and prefix every content line with `+`.";
+const PATCH_DESCRIPTION: &str = "The complete Clark Code patch body. Every operation header includes its leading `***`. For an update, use `*** Update File: path`, then `@@` without unified-diff line ranges, then lines prefixed with space, `-`, or `+`. Example: `*** Begin Patch\n*** Update File: path.txt\n@@\n-old\n+new\n*** End Patch`. For an add, use `*** Add File: path` and prefix every content line with `+`.";
 
 pub struct ApplyPatch;
 
@@ -22,7 +22,7 @@ impl ToolExecutor for ApplyPatch {
         "apply_patch"
     }
     fn description(&self) -> &str {
-        "Apply one bounded multi-file patch using the exact Agent Desktop patch grammar described by the `patch` parameter. Existing files must be read first."
+        "Apply one bounded multi-file patch using the exact Clark Code patch grammar described by the `patch` parameter. Existing files must be read first."
     }
     fn parameters(&self) -> Value {
         json!({

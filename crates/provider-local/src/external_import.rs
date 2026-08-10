@@ -2,7 +2,7 @@
 //!
 //! Discovery is read-only and executor-backed, so the same contract works for
 //! local repositories and repositories reached through a native-owned worker.
-//! Agent Desktop imports compatible stdio MCP servers into its app settings while
+//! Clark Code imports compatible stdio MCP servers into its app settings while
 //! reading skills and project instructions in place, avoiding copied config
 //! that can drift from the source agent's setup.
 

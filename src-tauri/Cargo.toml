@@ -5,7 +5,7 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 description = "Open native host for a product-extensible local AI coding agent."
-default-run = "agent-desktop"
+default-run = "clark-code"
 
 [lib]
 name = "desktop_foundation"
@@ -14,7 +14,7 @@ name = "desktop_foundation"
 crate-type = ["rlib"]
 
 [[bin]]
-name = "agent-desktop"
+name = "clark-code"
 path = "src/main.rs"
 
 [features]

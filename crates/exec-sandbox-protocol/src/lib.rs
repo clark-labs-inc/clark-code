@@ -1,4 +1,4 @@
-//! Privilege-boundary protocol for Agent Desktop's Windows sandbox helpers.
+//! Privilege-boundary protocol for Clark Code's Windows sandbox helpers.
 //!
 //! This crate deliberately contains no process spawning, ACL mutation, network
 //! configuration, provider logic, or UI code. The unprivileged desktop, the
@@ -435,7 +435,7 @@ impl WindowsSetupMarker {
         // narrowed reads because those constraints need their own native ACL
         // reconciliation. A default read-only session has neither: it merely
         // omits the project write capability while retaining already-consented
-        // Agent Desktop document/temp roots.
+        // Clark Code document/temp roots.
         let subset_eligible = policy.network == WireNetworkPolicy::Restricted
             && policy.read_roots.is_empty()
             && policy.deny_read.is_empty()

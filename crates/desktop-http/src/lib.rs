@@ -1,4 +1,4 @@
-//! One transport policy for Agent Desktop's Reqwest clients.
+//! One transport policy for Clark Code's Reqwest clients.
 //!
 //! Callers still own endpoint-specific request semantics and retry policy. This
 //! crate owns connection reuse, HTTP/2 negotiation, timeouts, redirects, and
@@ -38,7 +38,7 @@ impl Default for ClientOptions<'_> {
     }
 }
 
-/// Start a Reqwest builder with Agent Desktop's shared connection policy.
+/// Start a Reqwest builder with Clark Code's shared connection policy.
 ///
 /// HTTP/2 remains negotiated rather than forced so localhost, test servers,
 /// and HTTP/1-only APIs continue to work. Adaptive HTTP/2 flow control and a

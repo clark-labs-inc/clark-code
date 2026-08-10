@@ -110,7 +110,7 @@ jobs:
             Select-Object -First 1
           if (-not $testExe) { throw "Desktop foundation test executable was not produced" }
           Copy-Item src-tauri/windows-test.manifest "$($testExe.FullName).manifest"
-          scripts/check-windows-pe-imports.ps1 -FilePath target/debug/agent-desktop.exe
+          scripts/check-windows-pe-imports.ps1 -FilePath target/debug/clark-code.exe
           scripts/check-windows-pe-imports.ps1 -FilePath $testExe.FullName
           # Git worktree/diff integration is covered on macOS and Linux. It
           # requires Windows Git path/line-ending policy and is not a package

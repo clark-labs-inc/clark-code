@@ -192,7 +192,7 @@ pub(super) async fn resolve_base(
     match base {
         ManagedWorktreeBase::Current => Ok(current),
         // The picker may render before a network round-trip. Refresh only at
-        // the moment Agent Desktop actually creates the isolated checkout, with a
+        // the moment Clark Code actually creates the isolated checkout, with a
         // short bounded fallback to the locally advertised default branch.
         ManagedWorktreeBase::Default => Ok(resolve_fresh_default_base(root, &current).await),
     }

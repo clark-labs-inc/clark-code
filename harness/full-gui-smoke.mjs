@@ -88,7 +88,7 @@ try {
   page.on("pageerror", (error) => errors.push(error.stack ?? error.message));
   page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
   await page.goto(url, { waitUntil: "networkidle" });
-  const composer = page.getByLabel("Message Agent Desktop");
+  const composer = page.getByLabel("Message Clark Code");
   await composer.waitFor({ state: "visible" });
 
   // Multi-turn conversation with the deterministic mock, including permission.
@@ -117,7 +117,7 @@ try {
   await composer.fill("/new");
   await page.getByRole("button", { name: /\/new\b/ }).click();
   await page.getByText("New session", { exact: false }).first().waitFor();
-  const goalComposer = page.getByLabel("Message Agent Desktop");
+  const goalComposer = page.getByLabel("Message Clark Code");
   await goalComposer.fill("/goal complete");
   await goalComposer.press("Enter");
   await page.getByText("Goal complete", { exact: true }).waitFor();
@@ -132,7 +132,7 @@ try {
   await composer.fill("Slash command discovery session.");
   await composer.press("Enter");
   await approveIfNeeded(page);
-  const freshComposer = page.getByLabel("Message Agent Desktop");
+  const freshComposer = page.getByLabel("Message Clark Code");
   for (const command of expectedSlashCommands) {
     await freshComposer.fill(`/${command}`);
     check(await page.getByRole("button", { name: new RegExp(`/${command}\\b`) }).count() > 0, `missing slash command /${command}`);
@@ -191,7 +191,7 @@ try {
   const notice = page.locator('[role="status"]').filter({ hasText: "Context compaction" });
   if (await notice.isVisible()) {
     const noticeBox = await notice.boundingBox();
-    const composerBox = await page.getByLabel("Message Agent Desktop").boundingBox();
+    const composerBox = await page.getByLabel("Message Clark Code").boundingBox();
     check(Boolean(noticeBox && composerBox), "mobile notice or composer has no layout box");
     check(noticeBox.y + noticeBox.height <= composerBox.y, "mobile notice overlaps the composer");
   }

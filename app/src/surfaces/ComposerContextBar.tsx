@@ -16,6 +16,19 @@ import { ParallelWorkContext } from "./ParallelWorkContext";
 const ITEM =
   "flex h-[22px] min-w-0 items-center gap-1 rounded-md bg-composer-context px-1.5 text-xs font-medium leading-none";
 
+export function contextLocationLabel({
+  isRemoteContext,
+  activeRemoteHost,
+  selectedRemoteHost,
+}: {
+  isRemoteContext: boolean;
+  activeRemoteHost?: string | null;
+  selectedRemoteHost?: string | null;
+}): string {
+  if (!isRemoteContext) return "Local";
+  return activeRemoteHost?.trim() || selectedRemoteHost?.trim() || "Remote";
+}
+
 /** Checkout identity attached to the composer. Before a session starts the
  * project/environment fields remain interactive; once a session is live they
  * become read-only because that run is pinned to its original checkout. */
@@ -114,11 +127,13 @@ export function ComposerContextBar() {
     return () => window.clearInterval(timer);
   }, [canInspect, inspectionKey]);
 
-  const isRemoteSession = Boolean(activeRemote);
+  const isRemoteSession = Boolean(session && activeRemoteHost);
   const isRemoteContext = isRemoteSession || isRemoteSelection;
-  const locationLabel = activeRemoteHost?.trim()
-    || selectedHost?.host.trim()
-    || (isRemoteContext ? "Remote" : "Local");
+  const locationLabel = contextLocationLabel({
+    isRemoteContext,
+    activeRemoteHost,
+    selectedRemoteHost: selectedHost?.host,
+  });
   const LocationIcon = isRemoteContext ? Server : Laptop;
   const checkoutRoot = context?.worktreeRoot || cwd;
   const CheckoutIcon = context?.isWorktree ? GitFork : GitBranch;
@@ -208,7 +223,10 @@ export function ComposerContextBar() {
             </span>
           </>
         ) : (
-          <EnvironmentPicker compact />
+          <EnvironmentPicker
+            compact
+            onEnvironmentChanged={() => setRefreshTick((tick) => tick + 1)}
+          />
         )}
 
         {context && canSwitchBranch ? (

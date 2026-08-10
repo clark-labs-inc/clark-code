@@ -16,7 +16,7 @@ Skills are reusable playbooks, not extra authority. User instructions, repositor
 the active collaboration mode, and tool permissions still control every action.\n\
 - If the user names `$skill`, its instruction body is attached to that turn automatically.\n\
 - When the task clearly matches a listed skill, call `read_skill` with its exact name before acting.\n\
-- Use only the smallest relevant set. Skill instructions apply to the current turn. Load a referenced text file with `read_skill`'s `resource` argument; use other Agent Desktop tools for scripts or assets.\n\
+- Use only the smallest relevant set. Skill instructions apply to the current turn. Load a referenced text file with `read_skill`'s `resource` argument; use other Clark Code tools for scripts or assets.\n\
 - If a required capability is unavailable, say so and use a safe in-scope fallback when one exists.\n\n\
 Available skills:\n",
     );
@@ -47,7 +47,7 @@ Available skills:\n",
     let diagnostic_count = catalog.warnings.len() + catalog.diagnostics.len();
     if diagnostic_count > 0 {
         section.push_str(&format!(
-            "- Agent Desktop ignored {} invalid or unreadable skill item(s).\n",
+            "- Clark Code ignored {} invalid or unreadable skill item(s).\n",
             diagnostic_count
         ));
     }

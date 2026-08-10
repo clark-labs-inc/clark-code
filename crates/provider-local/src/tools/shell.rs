@@ -36,13 +36,13 @@ impl ToolExecutor for Bash {
                 "sandbox_permissions": {
                     "type": "string",
                     "enum": ["use_default", "require_escalated"],
-                    "description": "Use require_escalated only when the command needs network access, Git metadata writes, or another host resource outside the project sandbox. Agent Desktop will request approval unless Full access is active."
+                    "description": "Use require_escalated only when the command needs network access, Git metadata writes, or another host resource outside the project sandbox. Clark Code will request approval unless Full access is active."
                 },
                 "justification": {"type": "string", "description": "Short user-facing reason escalated access is needed."},
                 "effect": {
                     "type": "string",
                     "enum": ["none", "create", "update", "publish", "send", "delete", "mutate"],
-                    "description": "Declare the durable or externally visible effect of this command. Use none for inspection. For a mutation across the host/network boundary, choose its generic action so Agent Desktop requires canonical read-back before completion."
+                    "description": "Declare the durable or externally visible effect of this command. Use none for inspection. For a mutation across the host/network boundary, choose its generic action so Clark Code requires canonical read-back before completion."
                 },
                 "effect_target": {"type": "string", "description": "Optional user-facing target hint for the declared effect, such as a resource URL, deployment, branch, or message recipient. Do not include secrets."},
                 "run_in_background": {"type": "boolean", "description": "Start a long-lived command (e.g. a dev server) without blocking; returns a task id immediately. Poll with bash_output, send input with bash_input, and stop with bash_kill."},

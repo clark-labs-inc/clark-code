@@ -40,15 +40,15 @@ mod tests {
         let local = std::path::Path::new(r"C:\Users\tester\AppData\Local");
         assert_eq!(
             crate::backend::windows_product_data_root_from(local, false),
-            local.join("Agent Desktop").join("Code"),
+            local.join("Clark Code").join("Code"),
         );
         assert_eq!(
             crate::backend::windows_product_data_root_from(local, true),
-            local.join("Agent Desktop").join("Code Dev"),
+            local.join("Clark Code").join("Code Dev"),
         );
         assert_ne!(
             crate::backend::windows_product_data_root_from(local, false),
-            local.join("Agent Desktop"),
+            local.join("Clark Code"),
         );
     }
 

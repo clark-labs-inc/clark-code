@@ -51,8 +51,8 @@ pub async fn session_close(
         let terminal_events = interrupt_live_runs(
             &mut live.snapshot,
             "desktop_session_closed",
-            "Agent Desktop closed this session before the run finished. You can continue from the saved history.",
-            "Agent Desktop closed this session before the goal finished. Continue from the saved history.",
+            "Clark Code closed this session before the run finished. You can continue from the saved history.",
+            "Clark Code closed this session before the goal finished. Continue from the saved history.",
         );
         (
             live.session.id.clone(),
@@ -78,7 +78,7 @@ pub async fn session_close(
                     terminal_error = Some(error);
                     let _ = app.emit(
                         "cloud-sync-warning",
-                        "Agent Desktop stopped this session, but could not safely save its final state to product cloud.",
+                        "Clark Code stopped this session, but could not safely save its final state to product cloud.",
                     );
                     let _ = app.emit("snapshot", snapshot);
                 }

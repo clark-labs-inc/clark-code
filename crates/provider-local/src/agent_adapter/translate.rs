@@ -1,4 +1,4 @@
-//! Translation between the typed Agent Desktop agent protocol and desktop/wire records.
+//! Translation between the typed Clark Code agent protocol and desktop/wire records.
 
 use agent_core::domain as desktop;
 use agent_core::ids::ToolCallId;
@@ -304,7 +304,7 @@ pub(super) fn stream_error(error: LlmError) -> (ca::stream::StreamErrorKind, Str
         ),
         LlmError::OutputQuarantined { .. } => (
             ca::stream::StreamErrorKind::Fatal,
-            "provider_error:Agent Desktop blocked a response that failed its data-isolation checks. No output from that response was saved. Please retry."
+            "provider_error:Clark Code blocked a response that failed its data-isolation checks. No output from that response was saved. Please retry."
                 .to_string(),
         ),
         // Typed so the engine's overflow recovery (force-compact + retry the

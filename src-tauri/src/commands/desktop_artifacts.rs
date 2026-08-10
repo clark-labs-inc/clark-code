@@ -23,7 +23,7 @@ fn validate_workspace_session(session: &str) -> Result<(), String> {
 fn session_workspace_path(desktop_id: &str) -> Result<PathBuf, String> {
     validate_workspace_session(desktop_id)?;
     provider_local::session_workspace(desktop_id)
-        .ok_or_else(|| "no Agent Desktop workspace directory".to_string())
+        .ok_or_else(|| "no Clark Code workspace directory".to_string())
 }
 
 fn relative_workspace_source(source: &str, desktop_id: &str) -> Result<Option<PathBuf>, String> {

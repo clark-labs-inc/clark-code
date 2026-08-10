@@ -1,4 +1,4 @@
-// Agent Desktop mobile remote control helpers.
+// Clark Code mobile remote control helpers.
 //
 // The desktop app talks to the agent through Tauri commands so auth and CORS stay
 // host-side. These helpers intentionally do not execute commands themselves;

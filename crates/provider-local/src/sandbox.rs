@@ -74,7 +74,7 @@ impl Sandbox {
         let joined = self.join(path);
         if is_host_private(&lexically_normalize(&joined)) {
             return Err(format!(
-                "{path}: path is reserved for host-private Agent Desktop state"
+                "{path}: path is reserved for host-private Clark Code state"
             ));
         }
         let canon = joined.canonicalize().map_err(|e| format!("{path}: {e}"))?;
@@ -90,7 +90,7 @@ impl Sandbox {
         let normalized = lexically_normalize(&joined);
         if is_host_private(&normalized) {
             return Err(format!(
-                "{path}: path is reserved for host-private Agent Desktop state"
+                "{path}: path is reserved for host-private Clark Code state"
             ));
         }
         // Walk up to the first existing ancestor and canonicalize it.
@@ -122,7 +122,7 @@ impl Sandbox {
         Ok(normalized)
     }
 
-    /// Resolve an Agent Desktop-owned path for an internal host tool. Model-facing file
+    /// Resolve an Clark Code-owned path for an internal host tool. Model-facing file
     /// tools must use `resolve_for_write`, which rejects this namespace.
     pub(crate) fn resolve_host_managed(&self, path: &str) -> Result<PathBuf, String> {
         let joined = self.join(path);

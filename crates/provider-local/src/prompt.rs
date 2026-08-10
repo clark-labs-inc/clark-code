@@ -25,7 +25,7 @@ pub const OUTPUT_STYLES: &[OutputStyle] = &[
     OutputStyle {
         id: "default",
         label: "Default",
-        description: "Agent Desktop's normal voice.",
+        description: "Clark Code's normal voice.",
         instructions: "",
     },
     OutputStyle {
@@ -57,7 +57,7 @@ pub fn output_style_instructions(style_id: &str) -> &'static str {
         .unwrap_or("")
 }
 
-/// The goal-continuation turn text, condensed for Agent Desktop's model tiers. Sent as
+/// The goal-continuation turn text, condensed for Clark Code's model tiers. Sent as
 /// the user turn of every
 /// engine-launched continuation while a goal is active. Carries the three
 /// load-bearing rules: don't shrink the objective, prove completion from
@@ -141,7 +141,7 @@ pub fn system_prompt(
         p.push_str(
             "You are a coding agent operating directly on an SSH-connected remote computer and \
 its codebase. File and shell tools execute on that remote computer, not on the computer running \
-Agent Desktop. Desktop-only Android emulator and iOS simulator tools are intentionally unavailable in \
+Clark Code. Desktop-only Android emulator and iOS simulator tools are intentionally unavailable in \
 this session. Never fall back to the desktop machine. If a requested workflow needs SDKs, \
 emulators, or other dependencies, inspect the remote computer and set them up there with your \
 shell tools when that is within the user's request.\n\n",
@@ -196,13 +196,13 @@ You write and modify real files and run real commands on their computer.\n\n",
     p.push_str("- In the final answer, distinguish what ran from what canonical state was verified, and report the evidence or explicit verification limitation.\n\n");
 
     p.push_str("# Execution boundaries\n");
-    p.push_str("- Shell commands start in the project sandbox. When a requested CLI workflow needs a remote service (`gh`, Git fetch/push, a package registry), Git metadata writes, or another host resource, call `bash` with `sandbox_permissions` set to `require_escalated` and a concise user-facing `justification`. Agent Desktop will ask for a scoped approval unless Full access is active.\n");
+    p.push_str("- Shell commands start in the project sandbox. When a requested CLI workflow needs a remote service (`gh`, Git fetch/push, a package registry), Git metadata writes, or another host resource, call `bash` with `sandbox_permissions` set to `require_escalated` and a concise user-facing `justification`. Clark Code will ask for a scoped approval unless Full access is active.\n");
     p.push_str("- This host-access path is for operational CLI workflows, not general web research; keep using the external-knowledge tools described above for pages, docs, and search.\n");
     p.push_str("- If a default-sandbox command fails specifically because network or host access was denied, retry that exact command once with scoped escalation. Never split, disguise, or rewrite a command to avoid an approval. Plan Mode is read-only and cannot request escalation.\n\n");
 
     p.push_str("# Git\n");
     p.push_str("- Other agents (or the user) may be changing this project at the same time. Uncommitted changes you didn't make are someone's work in progress — never revert, overwrite, or \"clean up\" changes you did not create.\n");
-    p.push_str("- Work on the current branch unless the user explicitly asks for a Git branch or worktree operation. Never use `git stash`, `git reset`, `git checkout`/`git switch`/`git restore`, `git clean`, or `git rebase` to discard or rewrite work without that explicit request. A request such as \"checkout latest main\" authorizes only the non-destructive branch move and fetch it names: inspect `git status` and `git worktree list --porcelain` first, never use `--ignore-other-worktrees`, and don't delete, detach, or modify another checkout without separate explicit approval. If the requested branch already belongs to another checkout, report that exact path and recommend starting the next Agent Desktop chat from that checkout instead of offering an open-ended list. Don't create branches unless the user explicitly asks. Every branch you create must start with `agent/` (for example, `agent/update-koa-3.2.1`).\n");
+    p.push_str("- Work on the current branch unless the user explicitly asks for a Git branch or worktree operation. Never use `git stash`, `git reset`, `git checkout`/`git switch`/`git restore`, `git clean`, or `git rebase` to discard or rewrite work without that explicit request. A request such as \"checkout latest main\" authorizes only the non-destructive branch move and fetch it names: inspect `git status` and `git worktree list --porcelain` first, never use `--ignore-other-worktrees`, and don't delete, detach, or modify another checkout without separate explicit approval. If the requested branch already belongs to another checkout, report that exact path and recommend starting the next Clark Code chat from that checkout instead of offering an open-ended list. Don't create branches unless the user explicitly asks. Every branch you create must start with `agent/` (for example, `agent/update-koa-3.2.1`).\n");
     p.push_str("- A dirty tree is normal; mention it only when changes you didn't make overlap the files you need to edit — then pause and ask before touching them.\n");
     p.push_str("- Re-read a file before editing it if you haven't read it this turn — it may have changed since you last looked.\n");
     p.push_str(
@@ -330,7 +330,7 @@ mod tests {
         );
         assert!(p.find("# Communication").unwrap() < p.find("# Git").unwrap());
         assert!(p.contains("`sandbox_permissions` set to `require_escalated`"));
-        assert!(p.contains("Agent Desktop will ask for a scoped approval"));
+        assert!(p.contains("Clark Code will ask for a scoped approval"));
         assert!(p.contains("Plan Mode is read-only and cannot request escalation"));
         assert!(p.contains("final `# User request`"));
     }

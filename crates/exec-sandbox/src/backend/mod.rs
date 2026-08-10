@@ -341,7 +341,7 @@ fn current_backend(
     }
 
     #[allow(unreachable_code)]
-    Err("Agent Desktop has no sandbox backend for this operating system".to_string())
+    Err("Clark Code has no sandbox backend for this operating system".to_string())
 }
 
 #[cfg(target_os = "windows")]
@@ -359,9 +359,9 @@ fn migrate_legacy_windows_state(local_app_data: &Path, durable: &Path) {
         return;
     }
     let legacy_product = if cfg!(debug_assertions) {
-        "Agent Desktop Dev"
+        "Clark Code Dev"
     } else {
-        "Agent Desktop"
+        "Clark Code"
     };
     let legacy = local_app_data.join(legacy_product).join("sandbox");
     let Ok(metadata) = std::fs::symlink_metadata(&legacy) else {
@@ -381,7 +381,7 @@ fn migrate_legacy_windows_state(local_app_data: &Path, durable: &Path) {
 #[cfg(any(target_os = "windows", test))]
 pub(crate) fn windows_product_data_root_from(local_app_data: &Path, debug_build: bool) -> PathBuf {
     local_app_data
-        .join("Agent Desktop")
+        .join("Clark Code")
         .join(if debug_build { "Code Dev" } else { "Code" })
 }
 

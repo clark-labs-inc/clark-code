@@ -126,7 +126,7 @@ fn auto_enroll_windows_workspace(
 
 /// Stable policy used by the desktop's explicit Windows setup flow. Session
 /// directories nest under these roots, so one consented ACL reconciliation is
-/// reusable without broadening access beyond Agent Desktop's project/docs/temp areas.
+/// reusable without broadening access beyond Clark Code's project/docs/temp areas.
 pub fn local_sandbox_setup_policy(cwd: &std::path::Path) -> Result<exec_sandbox::SandboxPolicy> {
     #[cfg(not(windows))]
     let write_roots = Vec::new();

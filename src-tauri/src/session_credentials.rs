@@ -1,6 +1,6 @@
-//! App-owned encrypted Agent Desktop credentials without an operating-system vault.
+//! App-owned encrypted Clark Code credentials without an operating-system vault.
 //!
-//! Agent Desktop stores one authenticated-encryption envelope and one random wrapping
+//! Clark Code stores one authenticated-encryption envelope and one random wrapping
 //! key under its owner-private app-data directory. This avoids Keychain,
 //! Credential Manager, and Secret Service prompts or platform behavior. It
 //! protects against casual disclosure and detects tampering; a process already
@@ -71,10 +71,10 @@ impl SessionCredentials {
 
     pub(crate) fn configure(&self, root: PathBuf) -> Result<(), String> {
         exec_private_fs::ensure_private_dir(&root).map_err(|_| {
-            "could not initialize Agent Desktop's private credential directory".to_string()
+            "could not initialize Clark Code's private credential directory".to_string()
         })?;
         self.root.set(root).map_err(|_| {
-            "Agent Desktop credential directory was configured more than once".to_string()
+            "Clark Code credential directory was configured more than once".to_string()
         })
     }
 
@@ -230,7 +230,7 @@ impl SessionCredentials {
         let policy = self.policy;
         let loaded = tokio::task::spawn_blocking(move || load_state(&root, policy))
             .await
-            .map_err(|_| "Agent Desktop credential read task failed".to_string())??;
+            .map_err(|_| "Clark Code credential read task failed".to_string())??;
         *self.secrets.write().await = SecretState {
             retained_auth: loaded.retained_auth.map(Zeroizing::new),
             code_keys: loaded
@@ -304,14 +304,14 @@ impl SessionCredentials {
         let policy = self.policy;
         tokio::task::spawn_blocking(move || persist_state(&root, plaintext, policy))
             .await
-            .map_err(|_| "Agent Desktop credential write task failed".to_string())?
+            .map_err(|_| "Clark Code credential write task failed".to_string())?
     }
 
     fn root(&self) -> Result<&Path, String> {
         self.root
             .get()
             .map(PathBuf::as_path)
-            .ok_or_else(|| "Agent Desktop credential directory is not initialized".to_string())
+            .ok_or_else(|| "Clark Code credential directory is not initialized".to_string())
     }
 }
 
@@ -320,14 +320,14 @@ fn validate_owner(owner_scope: &str) -> Result<(), String> {
         || owner_scope.len() > 256
         || owner_scope.chars().any(char::is_control)
     {
-        return Err("Agent Desktop account identity is invalid".into());
+        return Err("Clark Code account identity is invalid".into());
     }
     Ok(())
 }
 
 fn validate_secret(secret: &str) -> Result<(), String> {
     if secret.len() < 16 || secret.len() > 4096 || secret.contains(['\n', '\r', '\0']) {
-        return Err("Agent Desktop returned an invalid Code credential".into());
+        return Err("Clark Code returned an invalid Code credential".into());
     }
     Ok(())
 }
@@ -341,11 +341,11 @@ fn validate_mcp_value(value: &str) -> Result<(), String> {
 
 fn validate_retained_auth(retained: &str) -> Result<(), String> {
     if retained.is_empty() || retained.len() > 64 * 1024 || retained.contains('\0') {
-        return Err("Agent Desktop retained auth is invalid".into());
+        return Err("Clark Code retained auth is invalid".into());
     }
     serde_json::from_str::<serde_json::Value>(retained)
         .map(|_| ())
-        .map_err(|_| "Agent Desktop retained auth is invalid".to_string())
+        .map_err(|_| "Clark Code retained auth is invalid".to_string())
 }
 
 fn validate_portable(value: &str, what: &str) -> Result<(), String> {
@@ -379,7 +379,7 @@ fn validate_state(state: &PlaintextState) -> Result<(), String> {
         || state.code_keys.len() > MAX_ACCOUNTS
         || state.mcp_env.len() > MAX_ACCOUNTS
     {
-        return Err("Agent Desktop's encrypted credential payload is unsupported".into());
+        return Err("Clark Code's encrypted credential payload is unsupported".into());
     }
     let mut payload_bytes = 0_usize;
     if let Some(retained) = &state.retained_auth {
@@ -397,13 +397,13 @@ fn validate_state(state: &PlaintextState) -> Result<(), String> {
         validate_owner(owner)?;
         payload_bytes = payload_bytes.saturating_add(owner.len());
         if servers.len() > MAX_MCP_SERVERS_PER_ACCOUNT {
-            return Err("Agent Desktop's encrypted credential payload is unsupported".into());
+            return Err("Clark Code's encrypted credential payload is unsupported".into());
         }
         for (server, environment) in servers {
             validate_portable(server, "MCP server id")?;
             payload_bytes = payload_bytes.saturating_add(server.len());
             if environment.len() > MAX_MCP_ENV_PER_SERVER {
-                return Err("Agent Desktop's encrypted credential payload is unsupported".into());
+                return Err("Clark Code's encrypted credential payload is unsupported".into());
             }
             for (name, value) in environment {
                 validate_env_name(name)?;
@@ -415,7 +415,7 @@ fn validate_state(state: &PlaintextState) -> Result<(), String> {
         }
     }
     if payload_bytes > MAX_PLAINTEXT_BYTES {
-        return Err("Agent Desktop's encrypted credential payload is too large".into());
+        return Err("Clark Code's encrypted credential payload is too large".into());
     }
     Ok(())
 }

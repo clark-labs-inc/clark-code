@@ -701,7 +701,7 @@ fn validate_service_app_path(
     }
     if expected_directory.is_some_and(|directory| canonical.parent() != Some(directory)) {
         return Err(ComputerUseError::HelperRejected(
-            "release service must be a real nested app in Agent Desktop's Resources directory"
+            "release service must be a real nested app in Clark Code's Resources directory"
                 .to_string(),
         ));
     }

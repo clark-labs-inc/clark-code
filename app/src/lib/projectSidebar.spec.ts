@@ -6,6 +6,7 @@ import {
   loadProjectSidebarPreferences,
   projectDisplayName,
   projectDisplayTitle,
+  remoteProjectKey,
   saveProjectSidebarPreferences,
   withProjectAlias,
   withProjectPinned,
@@ -63,6 +64,12 @@ describe("project sidebar preferences", () => {
     ).toBe("example-desktop");
   });
 
+  it("keeps legacy Clark-managed checkouts tied to their source repository", () => {
+    const path = "/repo/clark-twitter.clark-worktrees/clark-twitter-main-84d96c71";
+    expect(projectDisplayName(path)).toBe("clark-twitter-main-84d96c71 · clark-twitter");
+    expect(projectDisplayTitle(path)).toContain("Isolated checkout of clark-twitter");
+  });
+
   it("persists pins and aliases and clears both when a project is removed", () => {
     const storage = new MemoryStorage();
     let preferences = loadProjectSidebarPreferences(storage);
@@ -114,11 +121,12 @@ describe("project sidebar preferences", () => {
   });
 
   it("keeps the SSH destination on aliased remote groups", () => {
+    const key = remoteProjectKey("ubuntu@cpu", "/home/ubuntu/project");
     const groups = groupSidebarProjects(
       [remoteConversation("remote", "ubuntu@cpu", "/home/ubuntu/project")],
       [],
       () => 0,
-      { pinned: [], aliases: { "r:ubuntu@cpu": "Build server" } },
+      { pinned: [], aliases: { [key]: "Build server" } },
     );
 
     expect(groups[0]).toMatchObject({
@@ -127,6 +135,24 @@ describe("project sidebar preferences", () => {
       remoteHost: "ubuntu@cpu",
       remoteRoot: "/home/ubuntu/project",
     });
+  });
+
+  it("keeps different repositories on the same SSH host as different projects", () => {
+    const groups = groupSidebarProjects(
+      [
+        remoteConversation("api", "ubuntu@cpu", "/srv/api"),
+        remoteConversation("web", "ubuntu@cpu", "/srv/web"),
+      ],
+      [],
+      (id) => id === "api" ? 0 : 1,
+      { pinned: [], aliases: {} },
+    );
+
+    expect(groups).toHaveLength(2);
+    expect(groups.map((group) => [group.label, group.remoteRoot, group.convos[0]?.id])).toEqual([
+      ["api", "/srv/api", "api"],
+      ["web", "/srv/web", "web"],
+    ]);
   });
 
   it("groups app-managed workspaces as Quick chats instead of projects", () => {

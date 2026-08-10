@@ -47,7 +47,7 @@ pub struct AppState {
     /// account-bound durable workers, skill caches, and reconnect state. The
     /// WebView can hold only public conversation ids and opaque capabilities.
     pub(crate) runtime_registry: Arc<RuntimeRegistry>,
-    /// Account-partitioned secrets persisted in Agent Desktop's authenticated,
+    /// Account-partitioned secrets persisted in Clark Code's authenticated,
     /// app-encrypted private file. No operating-system credential vault is used.
     pub(crate) credentials: Arc<SessionCredentials>,
     /// Same-account work holds shared admission while sign-in/sign-out takes

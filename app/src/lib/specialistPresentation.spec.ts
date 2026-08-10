@@ -38,7 +38,6 @@ describe("specialist conversation presentation examples", () => {
     expect(serialized).not.toContain("delegate_read_only");
     expect(serialized).not.toContain("z-ai/glm");
     expect(serialized).not.toContain("qwen/");
-    expect(serialized).not.toContain("provider-specialist");
   });
 
   it("round-trips the typed conversation payload used by native snapshots", () => {

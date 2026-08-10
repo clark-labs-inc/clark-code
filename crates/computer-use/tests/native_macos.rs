@@ -9,7 +9,7 @@ fn native_backend_fails_closed_outside_a_signed_packaged_app() {
         Err(ComputerUseError::HelperUnavailable(_)) => {}
         Err(ComputerUseError::HelperRejected(message)) => {
             assert!(
-                message.contains("parent must be a valid Agent Desktop")
+                message.contains("parent must be a valid Clark Code")
                     || message.contains("approved product team"),
                 "unexpected signed-boundary rejection: {message}"
             );

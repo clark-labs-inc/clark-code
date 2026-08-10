@@ -80,8 +80,8 @@ mod tests {
     #[test]
     fn automatic_names_identify_repository_and_branch() {
         assert_eq!(
-            automatic_label(Path::new("/src/Agent Desktop"), "feature/worktree-names"),
-            "agent-desktop-feature-worktree-names"
+            automatic_label(Path::new("/src/Clark Code"), "feature/worktree-names"),
+            "clark-code-feature-worktree-names"
         );
         assert_eq!(branch_label("origin/main"), "main");
         assert_eq!(branch_label("refs/heads/release/v2"), "release-v2");

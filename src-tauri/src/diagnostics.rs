@@ -87,7 +87,7 @@ fn capture_layer() -> Option<CaptureLayer> {
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)?;
     if let Err(error) = prepare_capture_directory(&path) {
-        eprintln!("Agent Desktop capture sink unavailable: {error}");
+        eprintln!("Clark Code capture sink unavailable: {error}");
         return None;
     }
     let mut config = CaptureConfig::with_root("agent-desktop", path);
@@ -96,7 +96,7 @@ fn capture_layer() -> Option<CaptureLayer> {
     let client = match CaptureClient::new(config) {
         Ok(client) => client,
         Err(error) => {
-            eprintln!("Agent Desktop capture client unavailable: {error}");
+            eprintln!("Clark Code capture client unavailable: {error}");
             return None;
         }
     };
@@ -272,7 +272,7 @@ pub(crate) fn init() -> DiagnosticsGuard {
                     }));
                 // Set only the tracing dispatcher here. `try_init` also owns
                 // the legacy `log` facade and can fail if a GUI dependency
-                // installed that bridge before Agent Desktop's native host starts.
+                // installed that bridge before Clark Code's native host starts.
                 let initialized = tracing::subscriber::set_global_default(subscriber).is_ok();
                 if initialized {
                     tracing::info!(
@@ -287,7 +287,7 @@ pub(crate) fn init() -> DiagnosticsGuard {
                 }
                 return DiagnosticsGuard { _file_guard: None };
             }
-            Err(error) => eprintln!("Agent Desktop diagnostics file sink unavailable: {error}"),
+            Err(error) => eprintln!("Clark Code diagnostics file sink unavailable: {error}"),
         }
     }
 

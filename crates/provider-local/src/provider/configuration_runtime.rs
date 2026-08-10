@@ -30,7 +30,7 @@ impl LocalAgentProvider {
     ) -> Result<ProviderConfiguration> {
         if self.session_id.as_ref() != Some(session) {
             return Err(Error::Unsupported(
-                "Agent Desktop can only configure the active local session".into(),
+                "Clark Code can only configure the active local session".into(),
             ));
         }
         match change {
@@ -43,7 +43,7 @@ impl LocalAgentProvider {
                     .any(|candidate| candidate.id == style)
                 {
                     return Err(Error::Unsupported(format!(
-                        "Agent Desktop does not advertise output style `{style}`"
+                        "Clark Code does not advertise output style `{style}`"
                     )));
                 }
                 self.session.lock().await.output_style = style;
@@ -54,7 +54,7 @@ impl LocalAgentProvider {
             ProviderConfigurationChange::Experiment { id, enabled } => {
                 if id != "browser" {
                     return Err(Error::Unsupported(format!(
-                        "Agent Desktop does not advertise experiment `{id}`"
+                        "Clark Code does not advertise experiment `{id}`"
                     )));
                 }
                 self.apply_browser(enabled).await?;

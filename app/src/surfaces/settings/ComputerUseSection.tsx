@@ -56,10 +56,10 @@ export function computerUseSupportMessage(status: ComputerUsePlatformStatus | nu
 export function computerUseRepairMessage(status: ComputerUsePlatformStatus): string {
   const owner = status.permission_owner?.display_name || "the agent Computer Use";
   if (status.platform === "macos") {
-    return `Grant access to ${owner}. Existing Agent Desktop privacy grants do not transfer to the separately identified service.`;
+    return `Grant access to ${owner}. Existing Clark Code privacy grants do not transfer to the separately identified service.`;
   }
   if (status.platform === "windows") {
-    return "Unlock the signed-in desktop session and run Agent Desktop interactively, then retry access. A Windows service or secure desktop cannot supply observable user input.";
+    return "Unlock the signed-in desktop session and run Clark Code interactively, then retry access. A Windows service or secure desktop cannot supply observable user input.";
   }
   return "Use an active X11 or XWayland desktop session, then retry access. Existing portal sessions do not transfer to the isolated service.";
 }
@@ -152,7 +152,7 @@ export function ComputerUseSection() {
           service_ready: false,
           readiness: "unsupported",
           permission_owner: null,
-          detail: "Native computer use is available only inside Agent Desktop desktop host.",
+          detail: "Native computer use is available only inside Clark Code desktop host.",
         });
         setApprovals(EMPTY_APPROVALS);
         setReceipts([]);

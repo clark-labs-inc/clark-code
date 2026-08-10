@@ -12,7 +12,7 @@ pub(crate) async fn project_executor(
                 .cloud_account()
                 .await
                 .map(|account| account.account.as_str().to_string())
-                .ok_or("Agent Desktop must be signed in before using a remote project")?;
+                .ok_or("Clark Code must be signed in before using a remote project")?;
             let account = crate::runtime_registry::AccountKey::new(owner)?;
             let handle = crate::runtime_registry::WorkerHandle::parse(&remote.id)?;
             let runtime = state.runtime_registry.resolve(&account, &handle).await?;

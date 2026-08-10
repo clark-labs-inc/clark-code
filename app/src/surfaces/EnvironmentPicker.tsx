@@ -19,7 +19,13 @@ const COMPACT_CHIP =
 /** The "Local · Select folder…" control that sits above the start-screen
  *  composer. It maps the target machine (Local / a Cloud provider / an SSH host)
  *  and the project folder onto the same store state the session starts from. */
-export function EnvironmentPicker({ compact = false }: { compact?: boolean }) {
+export function EnvironmentPicker({
+  compact = false,
+  onEnvironmentChanged,
+}: {
+  compact?: boolean;
+  onEnvironmentChanged?: () => void;
+}) {
   const providers = useSessionStore((s) => s.providers);
   const activeProvider = useSessionStore((s) => s.activeProvider);
   const selectProvider = useSessionStore((s) => s.selectProvider);
@@ -39,7 +45,9 @@ export function EnvironmentPicker({ compact = false }: { compact?: boolean }) {
     if (!sshOpen) setHosts(loadSshHosts(accountScope));
   }, [accountScope, sshOpen]);
 
-  const isLocal = activeProvider === "local";
+  // Provider discovery is asynchronous. Until it completes, the workspace is
+  // still local rather than an invented third "Cloud" destination.
+  const isLocal = activeProvider === null || activeProvider === "local";
   const isRemote = isLocal && projectMode === "remote";
   const selectedHost = hosts.find((h) => h.id === selectedHostId) ?? null;
   const cloudProviders = providers.filter((p) => p.id !== "local" && !p.internal);
@@ -137,6 +145,7 @@ export function EnvironmentPicker({ compact = false }: { compact?: boolean }) {
     const next = hosts.map((entry) => entry.id === host.id ? { ...entry, remoteRoot } : entry);
     setHosts(next);
     saveSshHosts(next, accountScope);
+    onEnvironmentChanged?.();
   };
 
   const folderPicker = isLocal && !isRemote ? (

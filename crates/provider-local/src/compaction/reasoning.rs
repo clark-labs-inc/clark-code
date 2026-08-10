@@ -8,7 +8,7 @@ use agent_loop::{AssistantBlock, AssistantContent, ReasoningItem};
 const HEADER: &str =
     "[private reasoning — non-user context; distill durable findings, do not quote]\n";
 
-/// Translate Agent Desktop Agent's typed reasoning blocks into the public compaction
+/// Translate Clark Code Agent's typed reasoning blocks into the public compaction
 /// kernel's safe text-only boundary. Signatures and encrypted replay payloads
 /// never leave this adapter.
 pub(super) fn append_readable_findings(content: &AssistantContent, out: &mut String) -> bool {

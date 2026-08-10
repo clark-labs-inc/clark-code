@@ -50,12 +50,6 @@ export function blankHost(): SshHost {
   return { id: crypto.randomUUID(), label: "", host: "", remoteRoot: "" };
 }
 
-/** Return the most recently added host, if this edit introduced one. */
-export function newlyAddedSshHostId(current: SshHost[], saved: SshHost[]): string | null {
-  const savedIds = new Set(saved.map((host) => host.id));
-  return current.findLast((host) => !savedIds.has(host.id))?.id ?? null;
-}
-
 /** Everything a host needs to connect is filled in. The binary path is optional
  *  (the server is fetched from the CDN), so only host + folder are required. */
 export function hostReady(h: SshHost): boolean {

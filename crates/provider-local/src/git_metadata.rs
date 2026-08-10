@@ -404,8 +404,8 @@ mod tests {
     #[test]
     fn canonical_windows_paths_are_rendered_as_local_git_paths() {
         assert_eq!(
-            windows_git_path(r"\\?\C:\Agent Desktop QA\repo"),
-            "C:/Agent Desktop QA/repo"
+            windows_git_path(r"\\?\C:\Clark Code QA\repo"),
+            "C:/Clark Code QA/repo"
         );
         assert_eq!(
             windows_git_path(r"\\?\UNC\server\share\repo"),

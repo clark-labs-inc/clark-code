@@ -1,6 +1,6 @@
 //! Regression coverage for model-emitted multi-call turns.
 //!
-//! Agent Desktop leaves agent-loop's per-turn call cap unset. Read batches
+//! Clark Code leaves agent-loop's per-turn call cap unset. Read batches
 //! may run in parallel, while any batch containing an exclusive workspace tool
 //! is executed sequentially in the exact order emitted by the model.
 

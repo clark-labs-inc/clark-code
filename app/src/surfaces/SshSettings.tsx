@@ -8,7 +8,6 @@ import {
   loadSshHosts,
   saveSshHosts,
   blankHost,
-  newlyAddedSshHostId,
   type SshHost,
 } from "../lib/sshHosts";
 import { probeSsh, type SshProbe } from "../lib/ssh";
@@ -122,9 +121,7 @@ function HostCard({
 export function SshSettings() {
   const open = useSessionStore((s) => s.sshOpen);
   const setOpen = useSessionStore((s) => s.setSshOpen);
-  const session = useSessionStore((s) => s.session);
-  const selectProvider = useSessionStore((s) => s.selectProvider);
-  const setProjectMode = useSessionStore((s) => s.setProjectMode);
+  const selectedHostId = useSessionStore((s) => s.selectedHostId);
   const setSelectedHostId = useSessionStore((s) => s.setSelectedHostId);
   const auth = useSessionStore((s) => s.auth);
   const accountScope = codeKeyAccountBinding(auth);
@@ -149,13 +146,10 @@ export function SshSettings() {
   const dirty = JSON.stringify(hosts) !== JSON.stringify(savedHosts);
   const close = () => setOpen(false);
   const save = () => {
-    const addedHostId = newlyAddedSshHostId(hosts, savedHosts);
     saveSshHosts(hosts, accountScope);
     setSavedHosts(hosts);
-    if (addedHostId && !session) {
-      selectProvider("local");
-      setProjectMode("remote");
-      setSelectedHostId(addedHostId);
+    if (selectedHostId && !hosts.some((host) => host.id === selectedHostId)) {
+      setSelectedHostId(null);
     }
     setOpen(false);
   };

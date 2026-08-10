@@ -120,7 +120,7 @@ fn summary(category: agent_core::recovery::ProviderIncidentCategory) -> &'static
     use agent_core::recovery::ProviderIncidentCategory;
     match category {
         ProviderIncidentCategory::Timeout => {
-            "Model connection timed out while Agent Desktop was working."
+            "Model connection timed out while Clark Code was working."
         }
         ProviderIncidentCategory::RateLimit => "The model provider is temporarily rate limited.",
         ProviderIncidentCategory::UpstreamUnavailable => {

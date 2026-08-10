@@ -606,7 +606,7 @@ fn gate_info(name: &str, args: &Value) -> GateInfo {
             network: false,
             requires_elevation: false,
         },
-        // Image generation writes an output file and calls Agent Desktop's billed
+        // Image generation writes an output file and calls Clark Code's billed
         // platform relay. Keep it outside automatic approval and show the
         // visual intent without serializing large reference-image payloads.
         "generate_image" => {
@@ -624,11 +624,11 @@ fn gate_info(name: &str, args: &Value) -> GateInfo {
                 .unwrap_or("images/<prompt>.<returned-format>");
             GateInfo {
                 detail: Some(format!(
-                    "Generate image through Agent Desktop (may consume credits)\nPrompt: {prompt_preview}\nSave to: {output} (extension matches returned image)"
+                    "Generate image through Clark Code (may consume credits)\nPrompt: {prompt_preview}\nSave to: {output} (extension matches returned image)"
                 )),
                 risk: None,
                 reason: Some(
-                    "uses a billed Agent Desktop image-generation call; review the visual intent"
+                    "uses a billed Clark Code image-generation call; review the visual intent"
                         .to_string(),
                 ),
                 external: true,

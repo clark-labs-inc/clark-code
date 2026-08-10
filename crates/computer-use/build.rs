@@ -60,7 +60,7 @@ fn main() {
     );
     println!(
         "cargo:rustc-env=DESKTOP_COMPUTER_USE_MAC_SUPPORT_NAME={}",
-        path_value("DESKTOP_COMPUTER_USE_MAC_SUPPORT_NAME", "Agent Desktop")
+        path_value("DESKTOP_COMPUTER_USE_MAC_SUPPORT_NAME", "Clark Code")
     );
     println!(
         "cargo:rustc-env=DESKTOP_COMPUTER_USE_MAC_HELPER_APP={}",

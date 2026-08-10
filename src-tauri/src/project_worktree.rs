@@ -20,7 +20,6 @@ mod remote_ops;
 
 const GIT_TIMEOUT: Duration = Duration::from_secs(30);
 const DEFAULT_REMOTE: &str = "origin";
-const DEFAULT_BRANCH: &str = "main";
 const DISABLED_HOOKS_PATH: &str = if cfg!(windows) { "NUL" } else { "/dev/null" };
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -135,43 +134,46 @@ async fn repository_root(project_path: &str) -> Result<PathBuf, String> {
         .map_err(|error| format!("Repository root is unavailable: {error}"))
 }
 
-fn parse_remote_main(output: &str) -> Result<String, String> {
-    let expected_ref = format!("refs/heads/{DEFAULT_BRANCH}");
-    let Some(line) = output.lines().find(|line| !line.trim().is_empty()) else {
-        return Err(format!(
-            "{DEFAULT_REMOTE} has no {DEFAULT_BRANCH} branch to start from."
-        ));
-    };
-    let mut fields = line.split_whitespace();
-    let commit = fields.next().unwrap_or_default();
-    let remote_ref = fields.next().unwrap_or_default();
-    if remote_ref != expected_ref
-        || !matches!(commit.len(), 40 | 64)
-        || !commit.bytes().all(|byte| byte.is_ascii_hexdigit())
-    {
-        return Err(format!(
-            "{DEFAULT_REMOTE} returned an invalid {DEFAULT_BRANCH} commit."
-        ));
+fn parse_remote_default(output: &str) -> Result<(String, String), String> {
+    let branch = output.lines().find_map(|line| {
+        let reference = line.strip_prefix("ref: refs/heads/")?;
+        let (branch, destination) = reference.split_once(char::is_whitespace)?;
+        (destination.trim() == "HEAD" && !branch.is_empty()).then(|| branch.to_string())
+    });
+    let commit = output.lines().find_map(|line| {
+        let mut fields = line.split_whitespace();
+        let candidate = fields.next()?;
+        let destination = fields.next()?;
+        (destination == "HEAD"
+            && matches!(candidate.len(), 40 | 64)
+            && candidate.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        .then(|| candidate.to_string())
+    });
+    match (branch, commit) {
+        (Some(branch), Some(commit)) => Ok((branch, commit)),
+        _ => Err(format!(
+            "{DEFAULT_REMOTE} did not advertise a valid default branch."
+        )),
     }
-    Ok(commit.to_string())
 }
 
-/// Fetch the advertised main commit without updating FETCH_HEAD, origin/main,
+/// Fetch the advertised default-branch commit without updating FETCH_HEAD,
 /// the current branch, or the selected checkout. Downloaded objects and the new
 /// worktree branch are the only durable repository changes required to create
 /// a checkout at the latest remote commit.
-async fn fetch_latest_main(repo_root: &Path) -> Result<String, String> {
+async fn fetch_latest_default(repo_root: &Path) -> Result<String, String> {
     let advertised = git_output(
         repo_root,
         vec![
             "ls-remote".into(),
+            "--symref".into(),
             DEFAULT_REMOTE.into(),
-            format!("refs/heads/{DEFAULT_BRANCH}").into(),
+            "HEAD".into(),
         ],
-        "Find latest origin/main",
+        "Find latest remote default branch",
     )
     .await?;
-    let commit = parse_remote_main(&advertised)?;
+    let (branch, commit) = parse_remote_default(&advertised)?;
     git_output(
         repo_root,
         vec![
@@ -182,7 +184,7 @@ async fn fetch_latest_main(repo_root: &Path) -> Result<String, String> {
             DEFAULT_REMOTE.into(),
             commit.clone().into(),
         ],
-        "Fetch latest origin/main",
+        &format!("Fetch latest origin/{branch}"),
     )
     .await?;
     Ok(commit)
@@ -341,7 +343,7 @@ async fn local_branch_switch(project_path: &str, branch: &str) -> Result<(), Str
     Ok(())
 }
 
-/// Create a durable sibling checkout from the latest advertised origin/main.
+/// Create a durable sibling checkout from the latest advertised remote default branch.
 /// The explicit name becomes both the folder suffix and a `agent/<name>` branch;
 /// no shell is involved, and validation prevents either value becoming an option
 /// or path traversal payload. The source checkout's HEAD, index, files, and
@@ -371,7 +373,7 @@ async fn local_worktree_create(project_path: &str, name: &str) -> Result<String,
         ));
     }
 
-    let latest_main = fetch_latest_main(&repo_root).await?;
+    let latest_default = fetch_latest_default(&repo_root).await?;
     let branch = format!("agent/{clean_name}");
     git_output(
         &repo_root,
@@ -381,7 +383,7 @@ async fn local_worktree_create(project_path: &str, name: &str) -> Result<String,
             "-b".into(),
             branch.into(),
             destination.as_os_str().to_os_string(),
-            latest_main.into(),
+            latest_default.into(),
         ],
         "Create permanent worktree",
     )
@@ -394,8 +396,11 @@ async fn local_worktree_create(project_path: &str, name: &str) -> Result<String,
 mod tests {
     use super::{
         destination_for, local_branch_list, local_branch_switch, local_worktree_create,
-        parse_branch_owners, parse_remote_main,
-        remote_ops::{branch_list as remote_branch_list, branch_switch as remote_branch_switch},
+        parse_branch_owners, parse_remote_default,
+        remote_ops::{
+            branch_list as remote_branch_list, branch_switch as remote_branch_switch,
+            worktree_create as remote_worktree_create,
+        },
         validate_name,
     };
     use provider_local::LocalExecutor;
@@ -449,18 +454,20 @@ mod tests {
     }
 
     #[test]
-    fn remote_main_requires_an_exact_commit_and_ref() {
+    fn remote_default_requires_a_symbolic_head_and_exact_commit() {
         assert_eq!(
-            parse_remote_main("0123456789abcdef0123456789abcdef01234567\trefs/heads/main\n")
-                .unwrap(),
-            "0123456789abcdef0123456789abcdef01234567"
+            parse_remote_default(
+                "ref: refs/heads/trunk\tHEAD\n0123456789abcdef0123456789abcdef01234567\tHEAD\n"
+            )
+            .unwrap(),
+            (
+                "trunk".to_string(),
+                "0123456789abcdef0123456789abcdef01234567".to_string(),
+            )
         );
-        assert!(parse_remote_main("").is_err());
-        assert!(parse_remote_main("not-a-commit\trefs/heads/main\n").is_err());
-        assert!(
-            parse_remote_main("0123456789abcdef0123456789abcdef01234567\trefs/heads/trunk\n")
-                .is_err()
-        );
+        assert!(parse_remote_default("").is_err());
+        assert!(parse_remote_default("not-a-commit\tHEAD\n").is_err());
+        assert!(parse_remote_default("0123456789abcdef0123456789abcdef01234567\tHEAD\n").is_err());
     }
 
     #[test]
@@ -579,6 +586,44 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn executor_backed_worktree_uses_the_remote_default_branch() {
+        let temp = tempfile::tempdir().unwrap();
+        let remote = temp.path().join("remote.git");
+        let repo = temp.path().join("remote-project");
+        std::fs::create_dir(&remote).unwrap();
+        git(&remote, &["init", "--bare", "-q", "--initial-branch=trunk"]);
+        git(
+            temp.path(),
+            &[
+                "clone",
+                "-q",
+                remote.to_string_lossy().as_ref(),
+                repo.to_string_lossy().as_ref(),
+            ],
+        );
+        git(&repo, &["config", "user.email", "test@example.local"]);
+        git(&repo, &["config", "user.name", "Agent Test"]);
+        std::fs::write(repo.join("README.md"), "remote trunk\n").unwrap();
+        git(&repo, &["add", "README.md"]);
+        git(&repo, &["commit", "-qm", "initial"]);
+        git(&repo, &["push", "-qu", "origin", "trunk"]);
+
+        let created =
+            remote_worktree_create(&LocalExecutor, &repo.to_string_lossy(), "remote-default")
+                .await
+                .unwrap();
+        let created = PathBuf::from(created);
+        assert_eq!(
+            std::fs::read_to_string(created.join("README.md")).unwrap(),
+            "remote trunk\n"
+        );
+        assert_eq!(
+            git_text(&created, &["branch", "--show-current"]),
+            "agent/remote-default"
+        );
+    }
+
+    #[tokio::test]
     async fn reports_the_checkout_that_already_owns_a_branch() {
         let temp = tempfile::tempdir().unwrap();
         let repo = temp.path().join("project");
@@ -634,13 +679,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn creates_a_real_sibling_worktree_from_latest_main_without_touching_source() {
+    async fn creates_a_real_sibling_worktree_from_remote_default_without_touching_source() {
         let temp = tempfile::tempdir().unwrap();
         let remote = temp.path().join("remote.git");
         let repo = temp.path().join("project");
         let publisher = temp.path().join("publisher");
         std::fs::create_dir(&remote).unwrap();
-        git(&remote, &["init", "--bare", "-q", "--initial-branch=main"]);
+        git(&remote, &["init", "--bare", "-q", "--initial-branch=trunk"]);
         let remote_arg = remote.to_string_lossy();
         let repo_arg = repo.to_string_lossy();
         git(temp.path(), &["clone", "-q", &remote_arg, &repo_arg]);
@@ -649,25 +694,26 @@ mod tests {
         std::fs::write(repo.join("README.md"), "original\n").unwrap();
         git(&repo, &["add", "README.md"]);
         git(&repo, &["commit", "-qm", "initial"]);
-        git(&repo, &["push", "-qu", "origin", "main"]);
+        git(&repo, &["branch", "-m", "trunk"]);
+        git(&repo, &["push", "-qu", "origin", "trunk"]);
         git(&repo, &["switch", "-qc", "feature/local"]);
 
         let publisher_arg = publisher.to_string_lossy();
         git(temp.path(), &["clone", "-q", &remote_arg, &publisher_arg]);
         git(&publisher, &["config", "user.email", "test@example.local"]);
         git(&publisher, &["config", "user.name", "Agent Test"]);
-        std::fs::write(publisher.join("README.md"), "latest main\n").unwrap();
+        std::fs::write(publisher.join("README.md"), "latest trunk\n").unwrap();
         git(&publisher, &["add", "README.md"]);
-        git(&publisher, &["commit", "-qm", "advance main"]);
-        git(&publisher, &["push", "-q", "origin", "main"]);
-        let latest_main = git_text(&publisher, &["rev-parse", "HEAD"]);
+        git(&publisher, &["commit", "-qm", "advance trunk"]);
+        git(&publisher, &["push", "-q", "origin", "trunk"]);
+        let latest_default = git_text(&publisher, &["rev-parse", "HEAD"]);
 
         std::fs::write(repo.join("README.md"), "local dirty change\n").unwrap();
         std::fs::write(repo.join("notes.txt"), "untracked\n").unwrap();
         let source_branch = git_text(&repo, &["branch", "--show-current"]);
         let source_head = git_text(&repo, &["rev-parse", "HEAD"]);
         let source_status = git_text(&repo, &["status", "--short"]);
-        let source_origin_main = git_text(&repo, &["rev-parse", "refs/remotes/origin/main"]);
+        let source_origin_default = git_text(&repo, &["rev-parse", "refs/remotes/origin/trunk"]);
 
         let created = local_worktree_create(&repo.to_string_lossy(), "sidebar-menu")
             .await
@@ -683,13 +729,13 @@ mod tests {
         );
         assert_eq!(
             std::fs::read_to_string(created.join("README.md")).unwrap(),
-            "latest main\n"
+            "latest trunk\n"
         );
         assert_eq!(
             git_text(&created, &["branch", "--show-current"]),
             "agent/sidebar-menu"
         );
-        assert_eq!(git_text(&created, &["rev-parse", "HEAD"]), latest_main);
+        assert_eq!(git_text(&created, &["rev-parse", "HEAD"]), latest_default);
 
         assert_eq!(
             git_text(&repo, &["branch", "--show-current"]),
@@ -698,8 +744,8 @@ mod tests {
         assert_eq!(git_text(&repo, &["rev-parse", "HEAD"]), source_head);
         assert_eq!(git_text(&repo, &["status", "--short"]), source_status);
         assert_eq!(
-            git_text(&repo, &["rev-parse", "refs/remotes/origin/main"]),
-            source_origin_main
+            git_text(&repo, &["rev-parse", "refs/remotes/origin/trunk"]),
+            source_origin_default
         );
         assert_eq!(
             std::fs::read_to_string(repo.join("README.md")).unwrap(),

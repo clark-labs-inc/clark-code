@@ -38,13 +38,13 @@ import {
   type FakeManagedScenario,
 } from "../lib/fakeGitRepository";
 
-// Mirrors the shipped app: Agent Desktop is the only environment choice, while
+// Mirrors the shipped app: Clark Code is the only environment choice, while
 // the product can route Scientist/RSI conversations through an internal
 // native provider.
 const PROVIDERS: ProviderInfo[] = [
   {
     id: "local",
-    label: "Agent Desktop",
+    label: "Clark Code",
     capabilities: {
       streaming: true,
       permissions: true,
@@ -707,7 +707,7 @@ export class MockBridge implements CoreBridge {
       const markdown = [
         "# Artifact UX recommendations",
         "",
-        "This document proposes improvements to how artifacts are surfaced, viewed, and connected to their generating context in Agent Desktop.",
+        "This document proposes improvements to how artifacts are surfaced, viewed, and connected to their generating context in Clark Code.",
         "",
         "## What changed",
         "",

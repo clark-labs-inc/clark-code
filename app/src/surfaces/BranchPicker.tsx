@@ -32,6 +32,13 @@ function checkoutName(path: string): string {
   return normalizedPath(path).split("/").at(-1) || path;
 }
 
+export function canOfferPreservingWorktree(
+  allowPreserveChanges: boolean,
+  remote: RemoteWorkerTarget | null,
+): boolean {
+  return allowPreserveChanges && !remote;
+}
+
 /** Branch selection is intentionally available only before a conversation is
  * started. The native boundary repeats the clean-tree check immediately before
  * `git switch`, so stale UI activity cannot carry edits across branches. */
@@ -71,6 +78,7 @@ export function BranchPicker({
     if (!needle) return branches;
     return branches.filter((branch) => branch.name.toLocaleLowerCase().includes(needle));
   }, [branches, query]);
+  const canPreserveChanges = canOfferPreservingWorktree(allowPreserveChanges, remote);
 
   useEffect(() => {
     if (!open) return;
@@ -134,7 +142,7 @@ export function BranchPicker({
         return;
       }
       if (plan?.action === "preserve_changes") {
-        if (!allowPreserveChanges) {
+        if (!canPreserveChanges) {
           throw new Error(
             disabledReason
               ?? "Wait for the active agent before starting an isolated branch continuation.",
@@ -229,7 +237,7 @@ export function BranchPicker({
                 disabledReason
                 && !current
                 && !ownedElsewhere
-                && !allowPreserveChanges,
+                && !canPreserveChanges,
               );
               return (
                 <button
@@ -263,7 +271,7 @@ export function BranchPicker({
                       Open checkout
                       <FolderOpen className="size-3.5 shrink-0" />
                     </span>
-                  ) : allowPreserveChanges && disabledReason ? (
+                  ) : canPreserveChanges && disabledReason ? (
                     <span className="flex items-center gap-1 text-xs text-checkout-worktree">
                       New worktree <GitFork className="size-3.5 shrink-0" />
                     </span>
@@ -286,7 +294,7 @@ export function BranchPicker({
           {!error && (
             <p className="border-t border-border-subtle px-3 py-2 text-xs text-ink-faint">
               {disabledReason
-                ? allowPreserveChanges
+                ? canPreserveChanges
                   ? "Choose another branch to open it in a new worktree. Your current files stay here."
                   : disabledReason + " Branches already open elsewhere can still be opened."
                 : "Choose a branch to switch this checkout. Branches already open elsewhere open that checkout."}

@@ -21,6 +21,7 @@ import {
 import { loadManagedWorktreeBase } from "../lib/managedWorktreeSettings";
 
 const bootAccountScope = codeKeyAccountBinding(bootAuth);
+const bootLocalSettings = loadLocalSettings(bootAccountScope);
 
 export {
   latestRunFailed,
@@ -61,8 +62,8 @@ export const useSessionStore = create<import("./sessionStore.runtime").SessionSt
   unavailableConversation: null,
   unavailableCleanupId: null,
   composerPrefill: null,
-  localSettings: loadLocalSettings(bootAccountScope),
-  managedWorktreeBase: loadManagedWorktreeBase(),
+  localSettings: bootLocalSettings,
+  managedWorktreeBase: loadManagedWorktreeBase(bootAccountScope, bootLocalSettings.cwd),
   worktreeTransition: null,
   dirtyWorktreeApproval: null,
   pendingManagedWorktreePath: null,

@@ -91,7 +91,7 @@ describe("humanizeError", () => {
     const msg = humanizeError(
       "invalid args `baseSnapshot` for command `session_configure_cloud`: unknown variant `plan`",
     );
-    expect(msg).toBe("Agent Desktop couldn’t restore this conversation. Please try again.");
+    expect(msg).toBe("Clark Code couldn’t restore this conversation. Please try again.");
     expect(msg).not.toContain("baseSnapshot");
     expect(msg).not.toContain("plan");
   });

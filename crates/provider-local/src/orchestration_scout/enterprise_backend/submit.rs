@@ -53,7 +53,7 @@ impl PendingSubmissions {
             || task.fence <= 0
             || !task.scope.is_object()
         {
-            return Err("Agent Desktop returned an invalid claimed Scout task".into());
+            return Err("Clark Code returned an invalid claimed Scout task".into());
         }
         let stored = StoredClaim { run_id, task };
         let mut state = self
@@ -64,7 +64,7 @@ impl PendingSubmissions {
             return if existing == &stored {
                 Ok(())
             } else {
-                Err("Agent Desktop returned conflicting leases for one Scout task".into())
+                Err("Clark Code returned conflicting leases for one Scout task".into())
             };
         }
         if state.claims.len() >= MAX_PENDING_CLAIMS {

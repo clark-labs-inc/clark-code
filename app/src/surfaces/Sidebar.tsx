@@ -58,6 +58,7 @@ import {
 import type { ConversationMeta } from "../lib/history";
 import { useSpecialistStore } from "../store/specialistStore";
 import { SpecialistNavigation } from "./specialists/SpecialistNavigation";
+import { productName } from "../product/productModule";
 
 type ConversationSelectionIntent = "open" | "toggle" | "range";
 
@@ -957,7 +958,7 @@ export function Sidebar({
     >
       <div className="flex min-w-0 flex-1 flex-col bg-bg-secondary">
       <div className="flex min-h-12 shrink-0 items-center gap-1 px-3 py-1">
-        <span className="truncate text-base font-semibold tracking-[-0.01em] text-ink">Agent Desktop</span>
+        <span className="truncate text-base font-semibold tracking-[-0.01em] text-ink">{productName()}</span>
         <button
           onClick={() => setSearchOpen((open) => !open)}
           aria-label="Search conversations"

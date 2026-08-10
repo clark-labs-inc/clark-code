@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { AnimatePresence, useReducedMotion } from "motion/react";
 import * as m from "motion/react-m";
 import {
-  Laptop, Server, Folder, FolderOpen, Check, Plus,
+  Laptop, Server, Folder, FolderOpen, Check, Plus, GitBranch, GitFork,
 } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
 import { projectName } from "../lib/localAgent";
@@ -18,6 +18,8 @@ import { codeKeyAccountBinding } from "../lib/account";
 import { cn } from "../lib/cn";
 import { DIALOG, OVERLAY, accessibleMotion } from "../lib/motion";
 import { RemoteFolderBrowser } from "./EnvironmentPicker";
+import type { ManagedWorktreeBase } from "../core-bridge/bridge";
+import { loadManagedWorktreeBase } from "../lib/managedWorktreeSettings";
 
 const input =
   "w-full rounded-lg border border-border bg-bg px-2.5 py-1.5 text-sm text-ink outline-none transition focus:border-accent placeholder:text-ink-muted";
@@ -44,9 +46,11 @@ export function NewProjectDialog() {
 
   const [mode, setMode] = useState<"local" | "remote">("local");
   const [localPath, setLocalPath] = useState(localCwd);
+  const [localBase, setLocalBase] = useState<ManagedWorktreeBase>("current");
   const [hosts, setHosts] = useState<SshHost[]>(() => loadSshHosts(accountScope));
   const [selectedHostId, setSelectedHostIdLocal] = useState<string | null>(null);
   const [remoteRoot, setRemoteRoot] = useState("");
+  const [pickerError, setPickerError] = useState<string | null>(null);
 
   // Refresh hosts when the manage-hosts modal closes (a host may have been
   // added) exactly like EnvironmentPicker does.
@@ -68,6 +72,7 @@ export function NewProjectDialog() {
   // Seed from the current environment the first time the dialog opens.
   useEffect(() => {
     if (!open) return;
+    setPickerError(null);
     setLocalPath((current) => current || localCwd || "");
     const loaded = loadSshHosts(accountScope);
     setHosts(loaded);
@@ -79,6 +84,10 @@ export function NewProjectDialog() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
+  useEffect(() => {
+    if (open) setLocalBase(loadManagedWorktreeBase(accountScope, localPath));
+  }, [accountScope, localPath, open]);
+
   const selectedHost = useMemo(
     () => hosts.find((h) => h.id === selectedHostId) ?? null,
     [hosts, selectedHostId],
@@ -87,11 +96,12 @@ export function NewProjectDialog() {
   const close = () => setOpen(false);
 
   const chooseLocal = async () => {
+    setPickerError(null);
     try {
       const picked = await pickFolder(localPath || undefined);
       if (picked) setLocalPath(picked);
-    } catch {
-      /* picker unavailable — keep the manual path input as the fallback */
+    } catch (error) {
+      setPickerError(`Could not open the folder picker: ${String(error)}`);
     }
   };
 
@@ -107,7 +117,7 @@ export function NewProjectDialog() {
     if (!open) return;
     if (mode === "local") {
       if (!localReady) return;
-      await startNewProject({ kind: "local", path: localPath.trim() });
+      await startNewProject({ kind: "local", path: localPath.trim(), base: localBase });
     } else {
       if (!selectedHost || !remoteReady) return;
       const host = { ...selectedHost, remoteRoot: remoteRoot.trim() };
@@ -177,6 +187,35 @@ export function NewProjectDialog() {
 
               {mode === "local" ? (
                 <div className="flex flex-col gap-3">
+                  <div className="rounded-xl border border-border-subtle bg-bg-secondary/55 p-2.5">
+                    <div className="px-0.5 text-xs font-semibold text-ink-secondary">First session checkout</div>
+                    <div className="mt-2 grid grid-cols-2 gap-1.5">
+                      <button
+                        type="button"
+                        aria-pressed={localBase === "current"}
+                        onClick={() => setLocalBase("current")}
+                        className={cn(
+                          "flex min-h-12 items-start gap-2 rounded-lg px-2.5 py-2 text-left text-xs transition hover:bg-bg-hover",
+                          localBase === "current" && "bg-bg-elevated shadow-lifted",
+                        )}
+                      >
+                        <GitBranch className="mt-0.5 size-3.5 shrink-0" />
+                        <span><strong className="block font-medium">This checkout</strong><span className="mt-0.5 block text-ink-faint">Use this exact folder and revision.</span></span>
+                      </button>
+                      <button
+                        type="button"
+                        aria-pressed={localBase === "default"}
+                        onClick={() => setLocalBase("default")}
+                        className={cn(
+                          "flex min-h-12 items-start gap-2 rounded-lg px-2.5 py-2 text-left text-xs transition hover:bg-bg-hover",
+                          localBase === "default" && "bg-bg-elevated shadow-lifted",
+                        )}
+                      >
+                        <GitFork className="mt-0.5 size-3.5 shrink-0" />
+                        <span><strong className="block font-medium">Fresh default branch</strong><span className="mt-0.5 block text-ink-faint">Create an isolated sibling worktree.</span></span>
+                      </button>
+                    </div>
+                  </div>
                   {inTauri() && (
                     <button
                       type="button"
@@ -197,6 +236,11 @@ export function NewProjectDialog() {
                     aria-label="Project folder path"
                     className={cn(input, "font-mono")}
                   />
+                  {pickerError && (
+                    <p role="alert" className="px-1 text-xs text-danger">
+                      {pickerError} Paste an absolute path above to continue.
+                    </p>
+                  )}
                   {recentProjects.length > 0 && (
                     <div>
                       <div className="px-1 pb-1.5 text-xs font-semibold uppercase tracking-wider text-ink-faint">

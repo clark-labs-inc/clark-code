@@ -29,17 +29,17 @@ pub(super) fn load_state(
     };
     if encrypted.starts_with(policy.obsolete_magic) {
         fs::remove_file(&path)
-            .map_err(|_| "could not remove obsolete Agent Desktop credentials".to_string())?;
+            .map_err(|_| "could not remove obsolete Clark Code credentials".to_string())?;
         return Ok(empty_state());
     }
     if encrypted.len() < policy.magic.len() + NONCE_BYTES + 16
         || &encrypted[..policy.magic.len()] != policy.magic
     {
-        return Err("Agent Desktop's encrypted credential file is invalid".into());
+        return Err("Clark Code's encrypted credential file is invalid".into());
     }
     let key = Zeroizing::new(load_or_create_key(root)?);
     let nonce = Nonce::try_from(&encrypted[policy.magic.len()..policy.magic.len() + NONCE_BYTES])
-        .map_err(|_| "Agent Desktop's encrypted credential nonce is invalid".to_string())?;
+        .map_err(|_| "Clark Code's encrypted credential nonce is invalid".to_string())?;
     let cipher = ChaCha20Poly1305::new((&*key).into());
     let plaintext = Zeroizing::new(
         cipher
@@ -51,13 +51,13 @@ pub(super) fn load_state(
                 },
             )
             .map_err(|_| {
-                "Agent Desktop's encrypted credential file failed authentication".to_string()
+                "Clark Code's encrypted credential file failed authentication".to_string()
             })?,
     );
     let state: PlaintextState = serde_json::from_slice(&plaintext)
-        .map_err(|_| "Agent Desktop's encrypted credential payload is invalid".to_string())?;
+        .map_err(|_| "Clark Code's encrypted credential payload is invalid".to_string())?;
     validate_state(&state)
-        .map_err(|_| "Agent Desktop's encrypted credential payload is unsupported".to_string())?;
+        .map_err(|_| "Clark Code's encrypted credential payload is unsupported".to_string())?;
     Ok(state)
 }
 
@@ -70,13 +70,13 @@ pub(super) fn persist_state(
     let key = Zeroizing::new(load_or_create_key(root)?);
     let plaintext = Zeroizing::new(
         serde_json::to_vec(&state)
-            .map_err(|_| "could not encode Agent Desktop's credential payload".to_string())?,
+            .map_err(|_| "could not encode Clark Code's credential payload".to_string())?,
     );
     let mut nonce_bytes = [0_u8; NONCE_BYTES];
     getrandom::fill(&mut nonce_bytes)
-        .map_err(|_| "could not generate Agent Desktop credential nonce".to_string())?;
+        .map_err(|_| "could not generate Clark Code credential nonce".to_string())?;
     let nonce = Nonce::try_from(nonce_bytes.as_slice())
-        .map_err(|_| "could not initialize Agent Desktop credential nonce".to_string())?;
+        .map_err(|_| "could not initialize Clark Code credential nonce".to_string())?;
     let cipher = ChaCha20Poly1305::new((&*key).into());
     let ciphertext = cipher
         .encrypt(
@@ -86,7 +86,7 @@ pub(super) fn persist_state(
                 aad: policy.aad,
             },
         )
-        .map_err(|_| "could not encrypt Agent Desktop's credential payload".to_string())?;
+        .map_err(|_| "could not encrypt Clark Code's credential payload".to_string())?;
     let mut envelope = Vec::with_capacity(policy.magic.len() + NONCE_BYTES + ciphertext.len());
     envelope.extend_from_slice(policy.magic);
     envelope.extend_from_slice(&nonce_bytes);
@@ -99,18 +99,18 @@ fn load_or_create_key(root: &Path) -> Result<[u8; KEY_BYTES], String> {
     if let Some(bytes) = read_private(&path)? {
         return bytes
             .try_into()
-            .map_err(|_| "Agent Desktop's local credential key is invalid".to_string());
+            .map_err(|_| "Clark Code's local credential key is invalid".to_string());
     }
     let mut generated = [0_u8; KEY_BYTES];
     getrandom::fill(&mut generated)
-        .map_err(|_| "could not generate Agent Desktop's local credential key".to_string())?;
+        .map_err(|_| "could not generate Clark Code's local credential key".to_string())?;
     match exec_private_fs::write_private_new(&path, &generated) {
         Ok(true) => Ok(generated),
         Ok(false) => read_private(&path)?
-            .ok_or_else(|| "Agent Desktop's local credential key disappeared".to_string())?
+            .ok_or_else(|| "Clark Code's local credential key disappeared".to_string())?
             .try_into()
-            .map_err(|_| "Agent Desktop's local credential key is invalid".to_string()),
-        Err(_) => Err("could not write Agent Desktop's local credential key".into()),
+            .map_err(|_| "Clark Code's local credential key is invalid".to_string()),
+        Err(_) => Err("could not write Clark Code's local credential key".into()),
     }
 }
 
@@ -118,18 +118,18 @@ fn read_private(path: &Path) -> Result<Option<Vec<u8>>, String> {
     let metadata = match fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(_) => return Err("could not inspect Agent Desktop's credential file".into()),
+        Err(_) => return Err("could not inspect Clark Code's credential file".into()),
     };
     if !metadata.is_file() || metadata.file_type().is_symlink() || metadata.len() > MAX_FILE_BYTES {
-        return Err("Agent Desktop's credential file is unsafe".into());
+        return Err("Clark Code's credential file is unsafe".into());
     }
     let mut file = exec_private_fs::PrivateFileOptions::new()
         .read(true)
         .open(path)
-        .map_err(|_| "could not read Agent Desktop's credential file".to_string())?;
+        .map_err(|_| "could not read Clark Code's credential file".to_string())?;
     let mut bytes = Vec::with_capacity(metadata.len() as usize);
     file.read_to_end(&mut bytes)
-        .map_err(|_| "could not read Agent Desktop's credential file".to_string())?;
+        .map_err(|_| "could not read Clark Code's credential file".to_string())?;
     Ok(Some(bytes))
 }
 
@@ -139,7 +139,7 @@ fn write_atomic_private(root: &Path, destination: &Path, bytes: &[u8]) -> Result
         uuid::Uuid::new_v4().simple()
     ));
     exec_private_fs::write_private_new(&temporary, bytes)
-        .map_err(|_| "could not write Agent Desktop's encrypted credential file".to_string())?;
+        .map_err(|_| "could not write Clark Code's encrypted credential file".to_string())?;
     let result = replace_file(&temporary, destination);
     if result.is_err() {
         let _ = fs::remove_file(&temporary);
@@ -150,14 +150,14 @@ fn write_atomic_private(root: &Path, destination: &Path, bytes: &[u8]) -> Result
 #[cfg(not(windows))]
 fn replace_file(source: &Path, destination: &Path) -> Result<(), String> {
     fs::rename(source, destination)
-        .map_err(|_| "could not install Agent Desktop's encrypted credential file".to_string())?;
+        .map_err(|_| "could not install Clark Code's encrypted credential file".to_string())?;
     fs::File::open(
         destination
             .parent()
-            .ok_or("Agent Desktop credential file has no parent directory")?,
+            .ok_or("Clark Code credential file has no parent directory")?,
     )
     .and_then(|directory| directory.sync_all())
-    .map_err(|_| "could not sync Agent Desktop's credential directory".to_string())
+    .map_err(|_| "could not sync Clark Code's credential directory".to_string())
 }
 
 #[cfg(windows)]
@@ -185,5 +185,5 @@ fn replace_file(source: &Path, destination: &Path) -> Result<(), String> {
     };
     (result != 0)
         .then_some(())
-        .ok_or_else(|| "could not install Agent Desktop's encrypted credential file".to_string())
+        .ok_or_else(|| "could not install Clark Code's encrypted credential file".to_string())
 }

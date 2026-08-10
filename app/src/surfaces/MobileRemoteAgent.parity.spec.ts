@@ -38,7 +38,7 @@ const originalOpenConversation = useSessionStore.getState().openConversation;
 
 function bridgeStub(): CoreBridge {
   return {
-    listProviders: async () => [{ id: "local", label: "Agent Desktop", capabilities: session.capabilities }],
+    listProviders: async () => [{ id: "local", label: "Clark Code", capabilities: session.capabilities }],
     openSession: vi.fn(async () => session),
     closeSession: vi.fn(async () => {}),
     prompt: vi.fn(async () => ({ runId: "rerun-from-phone" })),

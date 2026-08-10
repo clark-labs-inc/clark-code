@@ -161,7 +161,7 @@ async fn start_browser(
 
     let port = free_local_port()?;
     // Spawned directly (not through `ctx.executor`) — managed browser is a
-    // property of the machine running Agent Desktop's own GUI, not of
+    // property of the machine running Clark Code's own GUI, not of
     // whichever project executor is active (same reasoning `tools/mobile.rs`
     // already documents for simulators/emulators).
     let mut command = Command::new(&binary);

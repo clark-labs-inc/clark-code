@@ -36,7 +36,7 @@ const CALL_TIMEOUT: Duration = Duration::from_secs(300);
 /// One stdio MCP server the user has configured.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct McpServerConfig {
-    /// Native credential-store reference. Agent Desktop resolves and clears
+    /// Native credential-store reference. Clark Code resolves and clears
     /// this before provider startup; provider-local never persists it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub credential_ref: Option<String>,

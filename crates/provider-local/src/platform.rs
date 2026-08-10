@@ -90,9 +90,9 @@ pub fn personal_memory_section(memories: &[PersonalMemory]) -> Option<String> {
         return None;
     }
     let mut s = String::from(
-        "## Personal memory (Agent Desktop's cloud profile, extracted from the user's other work — \
+        "## Personal memory (Clark Code's cloud profile, extracted from the user's other work — \
 may lag or reflect a different context; in-conversation statements and local saved notes \
-take precedence, and cite these as \"Agent Desktop's profile\" when you use them)\n",
+take precedence, and cite these as \"Clark Code's profile\" when you use them)\n",
     );
     for m in memories {
         let line = m.content.trim().replace('\n', " ");
@@ -184,7 +184,7 @@ mod tests {
             default_branch: Some("main".to_string()),
             commits: vec![RepositoryCommitContext {
                 oid: "a".repeat(40),
-                author_name: "Agent Desktop".to_string(),
+                author_name: "Clark Code".to_string(),
                 committed_at: "2026-07-09T00:00:00Z".to_string(),
                 subject: "Preserve repository identity".to_string(),
                 body: "Evidence remains tied to the commit.".to_string(),

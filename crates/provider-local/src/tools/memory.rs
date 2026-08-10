@@ -22,7 +22,7 @@ use crate::memory::{self, MemoryType};
 pub struct MemoryConfig {
     /// `~/.agent/memory` for the local, agent-writable global scope.
     pub global_dir: Option<PathBuf>,
-    /// Agent Desktop Platform recall of the user's extracted memory, when signed in.
+    /// Clark Code Platform recall of the user's extracted memory, when signed in.
     pub personal: Option<Arc<dyn crate::platform::PlatformContextProvider>>,
 }
 
@@ -56,7 +56,7 @@ impl ToolExecutor for MemoryRecallTool {
         "Read durable memory without changing it. Start with action \"overview\" to inspect the \
         bounded index and note catalog for a scope; use action \"full\" only after that overview \
         exposes history or a standing decision that could change the plan. scope \"project\" is \
-        this codebase, \"global\" is cross-project user memory, \"personal\" is Agent Desktop-extracted \
+        this codebase, \"global\" is cross-project user memory, \"personal\" is Clark Code-extracted \
         memory, and \"all\" reads every available scope."
     }
 
@@ -117,11 +117,11 @@ impl ToolExecutor for MemoryRecallTool {
 }
 
 /// Recall/save durable memory across the project, global (local), and personal
-/// (Agent Desktop-extracted) scopes.
+/// (Clark Code-extracted) scopes.
 pub struct MemoryTool {
     /// `~/.agent/memory` on the local machine, or `None` if home is unresolved.
     global_dir: Option<PathBuf>,
-    /// Agent Desktop personal-memory recall, when signed in.
+    /// Clark Code personal-memory recall, when signed in.
     personal: Option<Arc<dyn crate::platform::PlatformContextProvider>>,
 }
 
@@ -145,7 +145,7 @@ impl ToolExecutor for MemoryTool {
 
     fn description(&self) -> &str {
         "Recall, save, or retire durable memories. action \"recall\" returns your saved facts \
-(project + global) plus personal memory Agent Desktop has learned about the user across their work; \
+(project + global) plus personal memory Clark Code has learned about the user across their work; \
 action \"remember\" saves one; action \"forget\" removes a note whose fact was superseded or \
 turned out wrong (when the user reverses a decision, save the new fact AND forget the old \
 note in the same turn). scope \"project\" = facts about this codebase; scope \"global\" = \

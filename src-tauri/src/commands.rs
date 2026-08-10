@@ -263,7 +263,7 @@ fn spawn_provider_stream(
                     tracing::error!(%error, "local trajectory outbox append failed; interrupting projection");
                     let _ = app.emit(
                         "cloud-sync-warning",
-                        "Agent Desktop could not safely save the next part of this run, so it stopped at the last saved point.",
+                        "Clark Code could not safely save the next part of this run, so it stopped at the last saved point.",
                     );
                     break;
                 }
@@ -375,7 +375,7 @@ pub async fn changes_revert(
     .await
 }
 
-/// Drop Agent Desktop's retention refs for checkpoints owned by a conversation that
+/// Drop Clark Code's retention refs for checkpoints owned by a conversation that
 /// the user permanently deleted.
 #[tauri::command]
 pub async fn changes_release_checkpoints(
@@ -574,7 +574,7 @@ pub async fn session_configure_cloud(
         .await
         .is_some_and(|current| current.account.as_str() == owner_scope);
     if !still_current {
-        return Err("Agent Desktop account changed while configuring the session".into());
+        return Err("Clark Code account changed while configuring the session".into());
     }
     let mut live = entry.lock().await;
     if live.account.as_ref().is_some_and(|bound| bound != &account) {

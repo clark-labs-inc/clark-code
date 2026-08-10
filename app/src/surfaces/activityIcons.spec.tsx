@@ -40,7 +40,7 @@ describe("activity icon restraint", () => {
 
     expect(markup).toContain("Research agent");
     expect(markup).toContain("Research complete");
-    expect(markup).toContain('aria-label="Agent Desktop"');
+    expect(markup).toContain('aria-label="Clark Code"');
     expect(markup).not.toContain("lucide-telescope");
   });
 

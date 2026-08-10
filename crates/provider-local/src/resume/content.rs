@@ -27,7 +27,7 @@ pub(super) fn user_content(blocks: &[ContentBlock]) -> Option<ca::UserContent> {
             }
             ContentBlock::SkillReference { id, revision, name } => {
                 rich.push(ca::UserBlock::Text(ca::TextContent {
-                    text: format!("[Selected Agent Desktop skill: {name} ({id}@{revision})]"),
+                    text: format!("[Selected Clark Code skill: {name} ({id}@{revision})]"),
                 }))
             }
             ContentBlock::Audio { .. }

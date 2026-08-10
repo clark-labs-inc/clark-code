@@ -427,7 +427,7 @@ fn parse_frontmatter(value: &str) -> Result<SkillFrontmatter, String> {
         Ok(parsed) => Ok(parsed),
         Err(yaml_error) => {
             // Repair common third-party scalar prose such as
-            // `description: Deploy to AWS: ECS`. Agent Desktop's narrow fallback reads
+            // `description: Deploy to AWS: ECS`. Clark Code's narrow fallback reads
             // only the two supported fields and leaves unrelated invalid YAML
             // rejected.
             let repaired = repair_scalar_fields(value).ok_or_else(|| yaml_error.to_string())?;

@@ -339,7 +339,7 @@ fn trace(message: &str) {
 }
 
 /// Git status normally refreshes the index as a side effect.  That refresh
-/// needs an index lock, while Agent Desktop intentionally denies writes below `.git`
+/// needs an index lock, while Clark Code intentionally denies writes below `.git`
 /// for restricted children.  `GIT_OPTIONAL_LOCKS=0` is a useful fallback for
 /// shell-launched Git, but direct Git children need the command-line contract
 /// too: Git documents this exact global option for background status calls.

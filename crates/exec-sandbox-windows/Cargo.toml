@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "Windows restricted-token runner and elevated setup boundary for Agent Desktop's local sandbox."
+description = "Windows restricted-token runner and elevated setup boundary for Clark Code's local sandbox."
 
 [lib]
 name = "exec_sandbox_windows"

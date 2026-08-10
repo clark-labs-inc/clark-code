@@ -350,7 +350,7 @@ pub(crate) async fn run_manual_compaction(
         if signal.is_cancelled() {
             finish_manual(&tx, &run, RunStatus::Cancelled, None, None).await;
         } else {
-            let message = "Agent Desktop could not summarize this conversation. Your existing context was left unchanged.";
+            let message = "Clark Code could not summarize this conversation. Your existing context was left unchanged.";
             let _ = tx
                 .send(AgentEvent::Error {
                     code: "compaction_failed".into(),
@@ -382,7 +382,7 @@ pub(crate) async fn run_manual_compaction(
         }
     };
     if !replaced {
-        let message = "The conversation changed while context was being compacted, so Agent Desktop kept the newer context unchanged.";
+        let message = "The conversation changed while context was being compacted, so Clark Code kept the newer context unchanged.";
         let _ = tx
             .send(AgentEvent::Error {
                 code: "compaction_conflict".into(),

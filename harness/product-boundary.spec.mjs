@@ -7,14 +7,17 @@ import test from "node:test";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
-function matchingTrackedLines(pattern, pathspecs, { include = () => true } = {}) {
-  const files = execFileSync("git", ["ls-files", "-z", "--", ...pathspecs], {
+function trackedFiles(pathspecs) {
+  return execFileSync("git", ["ls-files", "-co", "--exclude-standard", "-z", "--", ...pathspecs], {
     cwd: root,
     encoding: "utf8",
   }).split("\0").filter(Boolean);
+}
+
+function matchingLines(pattern, pathspecs) {
   const matches = [];
-  for (const relative of files) {
-    if (!include(relative)) continue;
+  for (const relative of trackedFiles(pathspecs)) {
+    if (!existsSync(resolve(root, relative))) continue;
     const lines = readFileSync(resolve(root, relative), "utf8").split(/\r?\n/);
     for (const [index, line] of lines.entries()) {
       if (pattern.test(line)) matches.push(`${relative}:${index + 1}:${line}`);
@@ -23,180 +26,63 @@ function matchingTrackedLines(pattern, pathspecs, { include = () => true } = {})
   return matches;
 }
 
-test("the open workspace has no Clark product packages", () => {
+test("workspace source dependencies stay inside the repository", () => {
   const metadata = JSON.parse(execFileSync(
     "cargo",
     ["metadata", "--no-deps", "--format-version", "1"],
     { cwd: root, encoding: "utf8" },
   ));
-  const packages = new Set(metadata.packages.map(({ name }) => name));
-  assert.equal(packages.has("provider-clark"), false);
-  assert.equal(packages.has("provider-specialist"), false);
-  assert.equal(packages.has("clark-cli"), false);
-  assert.equal(packages.has("conversation-cloud"), false);
-  assert.equal(packages.has("security-cloud-sync"), false);
-
-  for (const relative of [
-    "Cargo.toml",
-    "src-tauri/Cargo.toml",
-    "crates/provider-local/Cargo.toml",
-    "crates/devbridge/Cargo.toml",
-  ]) {
-    assert.doesNotMatch(
-      readFileSync(resolve(root, relative), "utf8"),
-      /provider-clark|provider-specialist|clark-cli|conversation-cloud|security-cloud-sync/,
-    );
+  for (const pkg of metadata.packages) {
+    assert.ok(pkg.manifest_path.startsWith(`${root}/`), pkg.manifest_path);
+    for (const dependency of pkg.dependencies.filter(({ path }) => path)) {
+      assert.ok(dependency.path.startsWith(`${root}/`), `${pkg.name}: ${dependency.path}`);
+    }
   }
 });
 
-test("the neutral Tauri config contains no Clark release authority", () => {
-  const config = readFileSync(resolve(root, "src-tauri/tauri.conf.json"), "utf8");
-  assert.doesNotMatch(config, /clarkchat|com\.clark|downloads\.clark|\"clark\"/i);
+test("the development bundle is Clark Code without release authority", () => {
+  const config = JSON.parse(readFileSync(resolve(root, "src-tauri/tauri.conf.json"), "utf8"));
+  assert.equal(config.productName, "Clark Code Dev");
+  assert.equal(config.app.windows[0].title, "Clark Code Dev");
+  assert.equal(config.bundle.createUpdaterArtifacts, false);
+  assert.equal(config.plugins?.updater, undefined);
+
   for (const relative of [
     "src-tauri/tauri.release.conf.json",
     "src-tauri/tauri.windows-signing.conf.json",
     "src-tauri/sign-windows-artifact.ps1",
-    "src-tauri/windows/preserve-sandbox-state.nsh",
   ]) {
     assert.equal(spawnSync("test", ["-e", relative], { cwd: root }).status, 1);
   }
 });
 
-test("the open bundle overlays do not package the private specialist worker", () => {
-  for (const relative of [
-    "src-tauri/tauri.computer-use.macos.conf.json",
-    "src-tauri/tauri.remote-workers.dev.conf.json",
-    "src-tauri/tauri.qa.macos.conf.json",
-  ]) {
-    assert.equal(spawnSync("test", ["-e", relative], { cwd: root }).status, 1);
-  }
-  for (const relative of [
-    "src-tauri/tauri.sandbox.linux.conf.json",
-    "src-tauri/tauri.sandbox.macos.conf.json",
-    "src-tauri/tauri.sandbox.windows.conf.json",
-  ]) {
-    assert.doesNotMatch(
-      readFileSync(resolve(root, relative), "utf8"),
-      /agent-desktop-headless/,
-      `${relative} must not package the private Scientist runtime`,
-    );
-  }
+test("the default product module is locally usable", () => {
+  const source = readFileSync(resolve(root, "app/src/product/productModule.ts"), "utf8");
+  assert.match(source, /id: "clark_code"/);
+  assert.match(source, /name: "Clark Code"/);
+  assert.match(source, /authRequired: false/);
+  assert.match(source, /defaultModel: "local-model"/);
 });
 
-test("billing policy is owned by the downstream product", () => {
-  for (const relative of [
-    "app/src/lib/billing.ts",
-    "app/src/surfaces/BillingStateSync.tsx",
-    "app/src/surfaces/CreditBanner.tsx",
-  ]) {
-    assert.equal(spawnSync("test", ["-e", relative], { cwd: root }).status, 1);
-  }
-  const native = readFileSync(resolve(root, "src-tauri/src/lib.rs"), "utf8");
-  assert.doesNotMatch(native, /clark_billing_me|api\/billing\/me/);
+test("account operations cross one opaque renderer boundary", () => {
+  const auth = readFileSync(resolve(root, "app/src/lib/auth.ts"), "utf8");
+  assert.match(auth, /productRequest<.*>\("account\.(load|sign_in|refresh)"\)/);
+  assert.doesNotMatch(auth, /fetch\(|reqwest/i);
 });
 
-test("account sign-in policy is owned by the downstream product", () => {
-  assert.equal(
-    spawnSync("test", ["-e", "src-tauri/src/commands/auth.rs"], { cwd: root }).status,
-    1,
-  );
-  const rendererAuth = readFileSync(resolve(root, "app/src/lib/auth.ts"), "utf8");
-  assert.doesNotMatch(
-    rendererAuth,
-    /clark_account_load|clark_google_sign_in|clark_refresh_cloud_session|clark_sign_out/,
-  );
-  assert.match(rendererAuth, /productRequest<.*>\("account\.(load|sign_in|refresh)"\)/);
-});
-
-test("first-party specialist policy is owned by the downstream product", () => {
-  for (const relative of [
-    "app/src/lib/first-party-specialists.json",
-    "app/src/surfaces/ClarkMark.tsx",
-    "src-tauri/src/commands/specialists.rs",
-  ]) {
-    assert.equal(spawnSync("test", ["-e", relative], { cwd: root }).status, 1);
-  }
-  const native = readFileSync(resolve(root, "src-tauri/src/lib.rs"), "utf8");
-  assert.doesNotMatch(native, /desktop_specialist_|provider-specialist/);
-
-  const specialistUi = [
-    "app/src/lib/specialists.ts",
-    "app/src/surfaces/specialists/SpecialistAccessGate.tsx",
-    "app/src/surfaces/specialists/SpecialistNavigation.tsx",
-  ].map((relative) => readFileSync(resolve(root, relative), "utf8")).join("\n");
-  assert.doesNotMatch(specialistUi, /FIRST_PARTY_SPECIALIST_CATALOG|\bPro\b/);
-  assert.match(specialistUi, /specialistIcons/);
-});
-
-test("the design system has one current token vocabulary", () => {
-  const css = readFileSync(resolve(root, "app/src/index.css"), "utf8");
-  assert.doesNotMatch(
-    css,
-    /--color-(?:bg-primary|text-primary|text-secondary|text-muted|text-faint|accent-muted|canvas|surface|primary|focus|on-primary)\s*:/,
-  );
-  assert.doesNotMatch(css, /Compatibility aliases|Transitional bridge/);
-
-  const appSource = matchingTrackedLines(
-    /text-\[(?:10px|11px|0\.6875rem)\]|bg-bg-primary|bg-accent.*text-white/,
-    ["app/src"],
-  );
-  assert.deepEqual(appSource, []);
-});
-
-test("Clark cloud security, artifact, and mobile transports are downstream", () => {
-  for (const relative of [
-    "crates/security-cloud-sync/Cargo.toml",
-    "crates/provider-local/src/security_export.rs",
-    "src-tauri/src/commands/security_cloud.rs",
-    "src-tauri/src/commands/security_cloud/client_tests.rs",
-    "src-tauri/src/mobile_remote.rs",
-  ]) {
-    assert.equal(spawnSync("test", ["-e", relative], { cwd: root }).status, 1);
-  }
-  for (const relative of [
-    "src-tauri/src/commands/desktop_artifacts.rs",
-    "src-tauri/src/lib.rs",
-    "crates/provider-local/src/lib.rs",
-  ]) {
-    assert.doesNotMatch(
-      readFileSync(resolve(root, relative), "utf8"),
-      /api\/desktop\/code|api\/desktop\/conversations\/.+artifacts|api\/orgs\/.+security|ClarkSecurityCloud/,
-    );
-  }
-});
-
-test("local-agent product policy is injected instead of compiled into the foundation", () => {
-  for (const relative of [
-    "crates/provider-local/src/config.rs",
-    "crates/provider-local/src/configuration.rs",
-    "crates/provider-local/src/project_settings.rs",
-    "app/src/lib/localAgent.ts",
-  ]) {
-    assert.doesNotMatch(
-      readFileSync(resolve(root, relative), "utf8"),
-      /api\.clarkslabs\.com|clarkchat\.com|clark-code:(?:free|glm52|kimi_k3|deepseek)/,
-    );
-  }
-});
-
-test("remote-worker launch policy is owned by the downstream product", () => {
-  const source = readFileSync(
-    resolve(root, "src-tauri/src/commands/remote_worker.rs"),
+test("specialist presentation is catalog-driven", () => {
+  const specialists = readFileSync(resolve(root, "app/src/lib/specialists.ts"), "utf8");
+  const navigation = readFileSync(
+    resolve(root, "app/src/surfaces/specialists/SpecialistNavigation.tsx"),
     "utf8",
   );
-  for (const privateDetail of [
-    "api.clarkslabs.com",
-    "clark-code:",
-    "CLARK_CODE_API_KEY",
-    "CODE_REMOTE_LINUX_X86_64",
-    "agent-desktop-worker",
-  ]) {
-    assert.equal(source.includes(privateDetail), false, privateDetail);
-  }
-  assert.match(source, /prepare_remote_worker/);
+  assert.match(specialists, /definition\.runtime\.modelRoute/);
+  assert.match(navigation, /specialistIcons/);
+  assert.match(navigation, /specialistBadge/);
+  assert.doesNotMatch(`${specialists}\n${navigation}`, /FIRST_PARTY_SPECIALIST_CATALOG|\bPro\b/);
 });
 
-test("product extensions remain dependency-inverted", () => {
+test("extension contracts remain dependency-inverted", () => {
   const integration = readFileSync(resolve(root, "src-tauri/src/product.rs"), "utf8");
   assert.match(integration, /trait ProductIntegration/);
   assert.match(integration, /make_provider/);
@@ -206,106 +92,72 @@ test("product extensions remain dependency-inverted", () => {
   const tools = readFileSync(resolve(root, "crates/provider-local/src/tools/mod.rs"), "utf8");
   assert.match(tools, /trait ToolPack/);
   assert.match(tools, /register_extension_tool/);
-
-  const privateResearch = matchingTrackedLines(
-    /clark_research|ClarkResearch|cloud_advisor|CloudAdvisor/,
-    ["crates/provider-local/src"],
-  );
-  assert.deepEqual(privateResearch, []);
 });
 
-test("cloud context and cartography routes are host-injected", () => {
-  const context = readFileSync(
-    resolve(root, "crates/provider-local/src/platform.rs"),
-    "utf8",
-  );
-  assert.match(context, /trait PlatformContextProvider/);
+test("remote execution policy is prepared by the native integration", () => {
+  const source = readFileSync(resolve(root, "src-tauri/src/commands/remote_worker.rs"), "utf8");
+  assert.match(source, /prepare_remote_worker/);
+  assert.doesNotMatch(source, /API_KEY\s*=|bearer_auth|https?:\/\//i);
+});
+
+test("platform context is host-injected", () => {
+  const source = readFileSync(resolve(root, "crates/provider-local/src/platform.rs"), "utf8");
+  assert.match(source, /trait PlatformContextProvider/);
+  assert.doesNotMatch(source, /reqwest|bearer_auth|https?:\/\//i);
+});
+
+test("the design system has one token vocabulary", () => {
+  const css = readFileSync(resolve(root, "app/src/index.css"), "utf8");
   assert.doesNotMatch(
-    context,
-    /reqwest|\/memories|organization-knowledge|code.*repositories.*context/i,
+    css,
+    /--color-(?:bg-primary|text-primary|text-secondary|text-muted|text-faint|accent-muted|canvas|surface|primary|focus|on-primary)\s*:/,
   );
-
-  const cartography = readFileSync(
-    resolve(root, "crates/scout-platform-client/src/lib.rs"),
-    "utf8",
+  assert.doesNotMatch(css, /Compatibility aliases|Transitional bridge/);
+  assert.deepEqual(
+    matchingLines(
+      /text-\[(?:10px|11px|0\.6875rem)\]|bg-bg-primary|bg-accent.*text-white/,
+      ["app/src"],
+    ),
+    [],
   );
-  assert.match(cartography, /route_prefix/);
-  assert.doesNotMatch(cartography, /\/v1\/system-cartography|ClarkCartography/);
 });
 
-test("credential and worker identities are neutral foundation contracts", () => {
-  const credentials = readFileSync(
-    resolve(root, "src-tauri/src/session_credentials.rs"),
-    "utf8",
+test("legacy Scout wire identifiers stay in protocol crates", () => {
+  const lines = matchingLines(
+    /clark(?:\.scout|\.system-cartography|\/github|\/gitlab|\/aws|\/gcp|-scout-key)/i,
+    ["crates"],
   );
-  assert.doesNotMatch(credentials, /CLKCRD|clark-desktop-credentials/i);
-
-  const worker = readFileSync(resolve(root, "crates/code-worker/Cargo.toml"), "utf8");
-  assert.match(worker, /name = "agent-code-worker"/);
-  assert.doesNotMatch(worker, /agent-desktop-worker/i);
-});
-
-test("specialist runtime policy and product auth stay downstream", () => {
-  const specialists = readFileSync(resolve(root, "app/src/lib/specialists.ts"), "utf8");
-  assert.match(specialists, /definition\.runtime\.modelRoute/);
-  assert.doesNotMatch(specialists, /clark_deepseek|modelRoute:\s*"clark/i);
-
-  const envExample = readFileSync(resolve(root, "app/.env.example"), "utf8");
-  assert.doesNotMatch(envExample, /CLARK_|clarkchat|clarkslabs/i);
-
-  const commands = readFileSync(resolve(root, "app/src/lib/slashCommands.ts"), "utf8");
-  assert.doesNotMatch(commands, /scout:scout|security:security-(?:scan|diff|deep)|subscriber_workflows/);
-  assert.match(commands, /localAgent\.gatedWorkflows/);
-});
-
-test("Clark identifiers in foundation source are limited to versioned Scout wire ABI", () => {
-  const lines = matchingTrackedLines(
-    /\bclark\b|clark[_-]|\.clark/i,
-    ["app/src", "src-tauri/src", "crates"],
-    {
-      include: (relative) => relative.includes("/src/")
-        && !relative.endsWith("/tests.rs")
-        && !relative.includes("/tests/"),
-    },
-  );
-  assert.ok(lines.length > 0, "the compatibility allowlist should remain explicit");
+  assert.ok(lines.length > 0);
   for (const line of lines) {
-    const path = line.split(":", 1)[0];
-    assert.match(
-      path,
-      /crates\/(?:scout-|agent-orchestration\/src\/scout\/)/,
-      `non-protocol Clark identifier leaked into ${line}`,
-    );
     assert.match(
       line,
-      /clark(?:\.scout|\.system-cartography|\/github|\/gitlab|\/aws|\/gcp|-scout-key)/i,
-      `unrecognized Scout compatibility identifier: ${line}`,
+      /crates\/(?:scout-|agent-orchestration\/src\/scout\/|provider-local\/examples\/scout_benchmark\/)/,
     );
   }
 });
 
-test("documentation, fixtures, and configuration contain no downstream runtime policy", () => {
-  const files = execFileSync(
-    "git",
-    ["ls-files", "-co", "--exclude-standard", "-z"],
-    { cwd: root, encoding: "utf8" },
-  ).split("\0").filter(Boolean);
-  const textExtensions = new Set([
-    ".cmd", ".css", ".example", ".html", ".json", ".lock", ".md", ".mjs",
-    ".nsh", ".plist", ".ps1", ".py", ".rs", ".sh", ".swift", ".toml",
-    ".ts", ".tsx", ".txt", ".yaml", ".yml",
-  ]);
-  const forbidden = /api\.clarkslabs|clarkchat|com\.clark|clark-code|clark_code|clark:\/\/|CLARK_[A-Z]|\.clark(?:\/|\b)|Kimi K3|DeepSeek V4|qwen3\.7|cloud_advisor|ClarkResearch|subscriber_workflows|Subscriber workflow|subscription unlocks this workflow|paid seat|Pro coverage/i;
-  const leaks = [];
-  for (const relative of files) {
-    if (
-      relative === "harness/product-boundary.spec.mjs"
-      || relative.startsWith("vendor/")
-      || !existsSync(resolve(root, relative))
-      || !textExtensions.has(relative.slice(relative.lastIndexOf(".")))
-    ) continue;
-    const text = readFileSync(resolve(root, relative), "utf8");
-    if (forbidden.test(text)) leaks.push(relative);
-  }
+test("the README is a clean Clark Code introduction", () => {
+  const readme = readFileSync(resolve(root, "README.md"), "utf8");
+  assert.match(readme, /^# Clark Code$/m);
+  assert.match(readme, /docs\/assets\/clark-code\.png/);
+  assert.equal(existsSync(resolve(root, "docs/assets/clark-code.png")), true);
+  assert.equal(readme.toLowerCase().includes(["agent", "desktop"].join(" ")), false);
+  assert.doesNotMatch(readme, /downstream product|proprietary composition|neutral foundation/i);
+});
+
+test("tracked text contains no obvious credential material", () => {
+  const textFiles = trackedFiles([
+    "README.md", "CONTRIBUTING.md", "docs", "app/src", "src-tauri/src", "crates",
+  ]).filter((relative) => (
+    /\.(?:md|json|rs|ts|tsx|toml|yml|yaml)$/.test(relative)
+      && !relative.includes("/tests/")
+      && !relative.endsWith("/tests.rs")
+      && !relative.endsWith("_tests.rs")
+  ));
+  const secret = /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|\bAKIA[0-9A-Z]{16}\b|\bxoxb-[A-Za-z0-9-]{20,}\b|\bsk-[A-Za-z0-9]{32,}\b/;
+  const leaks = textFiles.filter((relative) => (
+    existsSync(resolve(root, relative))
+      && secret.test(readFileSync(resolve(root, relative), "utf8"))
+  ));
   assert.deepEqual(leaks, []);
 });

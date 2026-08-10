@@ -72,7 +72,7 @@ describe("ComputerUseSection", () => {
         bundle_id: "org.agentdesktop.computer-use.dev",
       },
     })).toBe(
-      "Grant access to the agent Computer Use Dev. Existing Agent Desktop privacy grants do not transfer to the separately identified service.",
+      "Grant access to the agent Computer Use Dev. Existing Clark Code privacy grants do not transfer to the separately identified service.",
     );
     expect(computerUseRepairMessage({
       supported: true,

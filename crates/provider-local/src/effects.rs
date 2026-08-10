@@ -160,7 +160,7 @@ impl EffectLedger {
             return None;
         }
         Some(format!(
-            "Agent Desktop cannot finish yet because these durable or externally visible effects have not \
+            "Clark Code cannot finish yet because these durable or externally visible effects have not \
              been independently verified:\n{}\nUse an appropriate read-only tool or command to inspect \
              each target's canonical state, then call `verify_effect`. When inspection uses `bash`, \
              set `effect` to `none` so the observation is not recorded as another mutation. Command \
@@ -276,7 +276,7 @@ impl ToolGate for EffectCompletionGuard {
         let unresolved = session.effects.unresolved_diagnostics(&self.run);
         if tool_name == crate::tools::final_answer::FINAL_ANSWER_TOOL && !unresolved.is_empty() {
             return Some(format!(
-                "Agent Desktop cannot publish the final answer while these effects remain unresolved:\n- {}\nIndependently inspect each canonical target, then call `verify_effect` with `verified`, `mismatch`, or `unverifiable` and concrete evidence.",
+                "Clark Code cannot publish the final answer while these effects remain unresolved:\n- {}\nIndependently inspect each canonical target, then call `verify_effect` with `verified`, `mismatch`, or `unverifiable` and concrete evidence.",
                 unresolved.join("\n- ")
             ));
         }

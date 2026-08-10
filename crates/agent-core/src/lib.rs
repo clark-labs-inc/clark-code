@@ -1,6 +1,6 @@
 //! # agent-core
 //!
-//! Provider-agnostic engine for Agent Desktop. Houses the normalized domain
+//! Provider-agnostic engine for Clark Code. Houses the normalized domain
 //! model, the typed event-projection reducers, and the [`Provider`] abstraction
 //! that lets the app talk to many agentic backends (ACP CLI agents, managed
 //! runtime, …) through one interface.

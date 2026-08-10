@@ -98,9 +98,7 @@ pub async fn install_skill_pack(
     let source = source_skills_root(exec, &source).await;
     let base = pack_storage_root(exec, project_root, request.scope).await?;
     if source.starts_with(&base) {
-        return Err(
-            "skill pack source cannot be inside Agent Desktop's managed pack storage".into(),
-        );
+        return Err("skill pack source cannot be inside Clark Code's managed pack storage".into());
     }
 
     let files = collect_source_files(exec, &source).await?;

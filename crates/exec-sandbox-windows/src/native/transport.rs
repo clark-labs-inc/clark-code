@@ -29,7 +29,7 @@ const STDERR_PIPE_SWITCH: &str = "--stderr-pipe";
 const PIPE_BUFFER_SIZE: u32 = 64 * 1024;
 static PIPE_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
-/// Parent half of Agent Desktop's process transport. The offline worker receives only
+/// Parent half of Clark Code's process transport. The offline worker receives only
 /// unguessable pipe names, never ambient desktop-process handles.
 pub struct ParentTransport {
     stdout: ServerPipe,

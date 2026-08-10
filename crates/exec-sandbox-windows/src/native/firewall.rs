@@ -30,13 +30,13 @@ const LEGACY_RULES: [&str; 2] = [
 const RULES: [RuleSpec; 2] = [
     RuleSpec {
         name: "agent_sandbox_offline_block_outbound",
-        description: "Agent Desktop Sandbox Offline - Block Non-Loopback Outbound",
+        description: "Clark Code Sandbox Offline - Block Non-Loopback Outbound",
         protocol: NET_FW_IP_PROTOCOL_ANY.0,
         remote_addresses: NON_LOOPBACK,
     },
     RuleSpec {
         name: "agent_sandbox_offline_block_loopback",
-        description: "Agent Desktop Sandbox Offline - Block All Loopback",
+        description: "Clark Code Sandbox Offline - Block All Loopback",
         protocol: NET_FW_IP_PROTOCOL_ANY.0,
         remote_addresses: LOOPBACK,
     },

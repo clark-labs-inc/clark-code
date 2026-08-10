@@ -345,7 +345,7 @@ pub(crate) fn turn_policy_section(mode: DelegationMode) -> &'static str {
 }
 
 /// Hashes the model-visible workspace before and after a delegated attempt.
-/// The executor walk honors repository ignores and Agent Desktop's fixed build-cache
+/// The executor walk honors repository ignores and Clark Code's fixed build-cache
 /// exclusions; source, tracked files, and ordinary untracked files are covered.
 pub struct WorkspaceDigestGuard {
     root: PathBuf,
@@ -370,11 +370,11 @@ impl WorkspaceGuard for WorkspaceDigestGuard {
     }
 }
 
-/// Build a nested Agent Desktop local-agent harness with fail-closed permissions.
+/// Build a nested Clark Code local-agent harness with fail-closed permissions.
 ///
 /// Configuration is sanitized here rather than trusting caller-provided
 /// permission maps: known file/shell mutators are denied, every other mutating
-/// tool defaults to Agent Desktop's approval gate (which ProviderHarness always rejects),
+/// tool defaults to Clark Code's approval gate (which ProviderHarness always rejects),
 /// remote/cloud/MCP/memory/browser paths are disabled, and recursion is off.
 pub fn local_read_only_harness(
     mut config: ProviderHarnessConfig,
@@ -384,7 +384,7 @@ pub fn local_read_only_harness(
         return Err("local adapter requires harness kind=local".to_string());
     }
     if config.enforcement != ReadOnlyEnforcement::HostToolGate {
-        return Err("local adapter requires Agent Desktop's host tool gate".to_string());
+        return Err("local adapter requires Clark Code's host tool gate".to_string());
     }
     config.provider_config = read_only_provider_config(config.provider_config);
     ProviderHarness::new(

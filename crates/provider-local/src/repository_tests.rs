@@ -162,7 +162,7 @@ async fn discovers_nested_git_repositories() {
         let root = parent.path().join(name);
         tokio::fs::create_dir_all(&root).await.unwrap();
         git(&root, "init").await;
-        git(&root, "config user.name Agent Desktop").await;
+        git(&root, "config user.name Clark Code").await;
         git(&root, "config user.email agent@example.com").await;
         tokio::fs::write(root.join("README.md"), name)
             .await

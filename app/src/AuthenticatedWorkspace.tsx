@@ -20,6 +20,7 @@ import { MobileRemoteAgent } from "./surfaces/MobileRemoteAgent";
 import { ManagedWorktreeTransitionDialog } from "./surfaces/ManagedWorktreeJourney";
 import { ConversationMutationTransition } from "./surfaces/ConversationMutationTransition";
 import { PanelErrorBoundary } from "./components/PanelErrorBoundary";
+import { ArtifactWorkspaceEmpty } from "./surfaces/work/ArtifactWorkspaceEmpty";
 import type { Artifact } from "./core-bridge/types";
 import {
   DEFAULT_ARTIFACT_PANEL_WIDTH,
@@ -97,6 +98,7 @@ export default function AuthenticatedWorkspace({
   const conversationTitle = useSessionStore((state) =>
     state.session ? state.conversations.find((conversation) => conversation.id === state.session?.id)?.title : null,
   );
+  const [artifactPanelOpen, setArtifactPanelOpen] = useState(false);
   const [activeArtifactId, setActiveArtifactId] = useState<string | null>(null);
   const [artifactPanelWidth, setArtifactPanelWidth] = useState(loadArtifactPanelWidth);
   const [subagentsPanelWidth, setSubagentsPanelWidth] = useState(480);
@@ -106,10 +108,11 @@ export default function AuthenticatedWorkspace({
   const artifactResizeCleanupRef = useRef<(() => void) | null>(null);
   const terminalTouched = useRef(false);
   if (terminalOpen) terminalTouched.current = true;
-  const sidePanelOpen = subagentsOpen || activeArtifactId !== null;
+  const sidePanelOpen = subagentsOpen || artifactPanelOpen;
   const sidePanelWidth = subagentsOpen ? subagentsPanelWidth : artifactPanelWidth;
 
   useEffect(() => {
+    setArtifactPanelOpen(false);
     setActiveArtifactId(null);
   }, [session?.id]);
   // The conversation panel is lazy-loaded; the first chat switch pays its
@@ -148,8 +151,16 @@ export default function AuthenticatedWorkspace({
   }, [activeArtifactId, artifactCount]);
 
   useEffect(() => {
-    if (subagentsOpen && activeArtifactId) setActiveArtifactId(null);
-  }, [activeArtifactId, subagentsOpen]);
+    if (!subagentsOpen || !artifactPanelOpen) return;
+    setArtifactPanelOpen(false);
+    setActiveArtifactId(null);
+  }, [artifactPanelOpen, subagentsOpen]);
+
+  useEffect(() => {
+    if (!activeSpecialist || !artifactPanelOpen) return;
+    setArtifactPanelOpen(false);
+    setActiveArtifactId(null);
+  }, [activeSpecialist, artifactPanelOpen]);
 
   useEffect(() => {
     const splitPane = splitPaneRef.current;
@@ -228,19 +239,22 @@ export default function AuthenticatedWorkspace({
 
   const openArtifact = (artifact: Artifact) => {
     closeSubagents();
+    setArtifactPanelOpen(true);
     setActiveArtifactId(artifact.id);
   };
   const openArtifacts = () => {
     const artifacts = useSessionStore.getState().snapshot.artifacts;
     const latest = artifacts.at(-1);
-    if (!latest) return;
     closeSubagents();
+    useSpecialistStore.getState().close();
+    setArtifactPanelOpen(true);
     setActiveArtifactId((current) =>
-      current && artifacts.some((artifact) => artifact.id === current) ? current : latest.id,
+      current && artifacts.some((artifact) => artifact.id === current) ? current : (latest?.id ?? null),
     );
   };
   const jumpToSource = (artifact: Artifact) => {
     const targetId = artifact.tool_call ? `tool-call-${artifact.tool_call}` : `artifact-${artifact.id}`;
+    setArtifactPanelOpen(false);
     setActiveArtifactId(null);
     requestAnimationFrame(() => {
       const target = document.getElementById(targetId);
@@ -280,6 +294,8 @@ export default function AuthenticatedWorkspace({
           <OpeningScreen />
         ) : unavailableConversation ? (
           <UnavailableConversation />
+        ) : artifactPanelOpen && !session ? (
+          <ArtifactWorkspaceEmpty onClose={() => setArtifactPanelOpen(false)} />
         ) : activeSpecialist ? (
           <SpecialistWorkspace dark={dark} onToggleTheme={onToggleTheme} />
         ) : session ? (
@@ -351,6 +367,7 @@ export default function AuthenticatedWorkspace({
                     resetKey={subagentsOpen ? "subagents" : activeArtifactId}
                     onDismiss={() => {
                       closeSubagents();
+                      setArtifactPanelOpen(false);
                       setActiveArtifactId(null);
                     }}
                   >
@@ -362,10 +379,15 @@ export default function AuthenticatedWorkspace({
                           activeArtifactId={activeArtifactId}
                           conversationTitle={conversationTitle ?? "Current conversation"}
                           onSelect={setActiveArtifactId}
-                          onClose={() => setActiveArtifactId(null)}
+                          onClose={() => {
+                            setArtifactPanelOpen(false);
+                            setActiveArtifactId(null);
+                          }}
                           onJumpToSource={jumpToSource}
                         />
-                      ) : null}
+                      ) : (
+                        <ArtifactWorkspaceEmpty onClose={() => setArtifactPanelOpen(false)} />
+                      )}
                     </Suspense>
                   </PanelErrorBoundary>
                 </div>

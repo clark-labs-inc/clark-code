@@ -613,7 +613,7 @@ impl Provider for LocalAgentProvider {
                     crate::skills::invokes_skill(&run_skills, &input.blocks, &user_request, skill)
                 });
         // The conversation picker is not an entitlement source. Scout and
-        // Security pin their own execution routes below; Agent Desktop's gateway then
+        // Security pin their own execution routes below; Clark Code's gateway then
         // admits those routes against the API key's current personal/workspace
         // coverage. Rejecting here merely because the base conversation uses
         // the included lane blocks paid workspace members before the

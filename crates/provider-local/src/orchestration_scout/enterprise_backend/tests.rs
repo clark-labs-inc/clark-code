@@ -102,7 +102,7 @@ fn empty_claim_result_remains_explicit_and_terminal() {
     assert!(!outcome.is_error);
     assert_eq!(
         outcome.content,
-        "Agent Desktop reports no claimable Scout task for this run."
+        "Clark Code reports no claimable Scout task for this run."
     );
     assert!(outcome.details["task"].is_null());
 }

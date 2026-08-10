@@ -1,4 +1,4 @@
-//! Safe execution and orchestration primitives for Agent Desktop.
+//! Safe execution and orchestration primitives for Clark Code.
 //!
 //! Every run can use the root execution ledger even when it has no children.
 //! Delegated roles remain deliberately read-only: the root coding agent owns

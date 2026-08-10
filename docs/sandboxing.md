@@ -12,9 +12,9 @@ Core invariants:
 - environment and working-directory inputs are validated before launch;
 - cancellation terminates the owned process tree;
 - unavailable required isolation fails closed;
-- product tools retain their own authorization boundaries and cannot weaken
+- extension tools retain their own authorization boundaries and cannot weaken
   the local sandbox.
 
 Deterministic contracts live beside `exec-sandbox` and `provider-local`.
-Branded products separately own helper placement, signing, entitlements,
-bundled binaries, VM journeys, and packaged runtime receipts.
+Packaged releases verify helper placement, signing, bundled binaries, and
+platform behavior separately.

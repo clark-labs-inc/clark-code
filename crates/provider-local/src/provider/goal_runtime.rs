@@ -71,7 +71,7 @@ impl LocalAgentProvider {
             Ok(())
         } else {
             Err(Error::Unsupported(
-                "Agent Desktop can only inspect the goal owned by the active session".into(),
+                "Clark Code can only inspect the goal owned by the active session".into(),
             ))
         }
     }

@@ -484,7 +484,7 @@ fn locate_service() -> Result<PathBuf, ComputerUseError> {
         directory
             .join("..")
             .join("lib")
-            .join("Agent Desktop")
+            .join("Clark Code")
             .join("agent-resources")
             .join("computer-use")
             .join(filename),
@@ -502,7 +502,7 @@ fn locate_service() -> Result<PathBuf, ComputerUseError> {
         }
     }
     if let Some(app_dir) = std::env::var_os("APPDIR") {
-        for product in ["agent-desktop", "Agent Desktop", "agent-desktop-dev"] {
+        for product in ["agent-desktop", "Clark Code", "agent-desktop-dev"] {
             let candidate = PathBuf::from(&app_dir)
                 .join("usr")
                 .join("lib")
@@ -554,7 +554,7 @@ fn data_dir() -> Result<PathBuf, ComputerUseError> {
         .or_else(|| {
             std::env::var_os("HOME").map(|home| Path::new(&home).join(".local").join("share"))
         });
-    base.map(|path| path.join("Agent Desktop").join("Computer Use"))
+    base.map(|path| path.join("Clark Code").join("Computer Use"))
         .ok_or_else(|| {
             ComputerUseError::HelperUnavailable(
                 "could not resolve a per-user Computer Use data directory".to_string(),

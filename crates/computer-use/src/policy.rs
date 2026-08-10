@@ -33,7 +33,7 @@ pub fn ensure_bundle_allowed(bundle_id: &str) -> Result<(), ComputerUseError> {
     {
         return Err(forbidden(
             bundle_id,
-            "Agent Desktop and its privileged helpers cannot control their own UI",
+            "Clark Code and its privileged helpers cannot control their own UI",
         ));
     }
     if let Some((_, reason)) = FORBIDDEN_BUNDLE_IDS

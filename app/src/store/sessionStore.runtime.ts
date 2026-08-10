@@ -535,7 +535,7 @@ export interface SessionState {
   setMemoryViewerOpen: (open: boolean) => void;
   signIn: (method: AuthMethod) => Promise<void>;
   signOutAuth: () => Promise<void>;
-  /** Mint + store an Agent Desktop API key for the signed-in user if none yet. */
+  /** Mint + store an Clark Code API key for the signed-in user if none yet. */
   ensureCodeKey: () => Promise<void>;
   /** Fetch the account's conversation list from the cloud (the source of truth). */
   syncCloudIndex: () => Promise<void>;
@@ -597,10 +597,10 @@ export interface SessionState {
     text: string,
     skills?: SkillReferenceBlock[],
   ) => Promise<SendOutcome>;
-  /** Summarize and replace Agent Desktop's model-visible history without adding a user turn. */
+  /** Summarize and replace Clark Code's model-visible history without adding a user turn. */
   compactConversation: () => Promise<void>;
   continueProviderIncident: (incidentId: string) => Promise<void>;
-  /** Replace one prior Agent Desktop user turn and rerun from the retained prefix. */
+  /** Replace one prior Clark Code user turn and rerun from the retained prefix. */
   resendFrom: (
     timelineIndex: number,
     text: string,
@@ -685,7 +685,7 @@ export const BUSY_SESSION_MESSAGE =
 /** Destination for a brand-new project's first session: run it on this machine
  *  (a local folder) or over SSH on a remote host (a remote folder). */
 export type NewProjectTarget =
-  | { kind: "local"; path: string }
+  | { kind: "local"; path: string; base: ManagedWorktreeBase }
   | { kind: "remote"; host: SshHost };
 
 /** One live session in the pool. Every opened conversation gets an entry that

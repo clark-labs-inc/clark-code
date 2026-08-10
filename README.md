@@ -1,78 +1,75 @@
-# Agent Desktop
+# Clark Code
 
-Agent Desktop is an Apache-2.0 desktop foundation for agentic work. It combines
-a Tauri 2 host, React 19 interface, provider-neutral event model, local coding
-agent, ACP adapter, sandboxed execution, resumable sessions, and extension
-contracts for branded distributions.
+Clark Code is an open-source desktop coding agent for working across real
+projects with local tools, explicit permissions, and resumable sessions.
 
-The repository intentionally contains no downstream billing policy, hosted-provider
-transport, account entitlements, private research tools, specialist catalogs,
-release authority, or branded updater configuration. Those concerns belong to
-a separate product composition that consumes this foundation.
+![Clark Code desktop interface](docs/assets/clark-code.png)
 
-## Architecture
+## What it does
 
-| Path | Responsibility |
-| --- | --- |
-| `crates/agent-core` | Backend-neutral domain model, provider contract, codecs, and pure projections |
-| `crates/provider-acp` | Agent Client Protocol adapter |
-| `crates/provider-local` | Sandboxed local coding agent and product-neutral tool-pack extension seam |
-| `crates/exec-*` | Cross-platform process isolation and execution protocol |
-| `src-tauri` | Native lifecycle, session registry, IPC, and `ProductIntegration` composition boundary |
-| `app` | Reusable React shell and product module boundary |
-| `harness` | Deterministic foundation checks |
+- Works with local coding models and Agent Client Protocol (ACP) providers.
+- Reads, edits, searches, and runs commands inside project-scoped sandboxes.
+- Keeps tool calls, plans, progress, diffs, and artifacts visible while work is
+  running.
+- Supports multiple projects, Git worktrees, remote SSH environments, quick
+  chats, and durable conversation history.
+- Uses explicit approval boundaries for sensitive filesystem, network, and
+  computer-use actions.
+- Runs as a native Tauri application on macOS, Linux, and Windows.
 
-The native product boundary is documented in
-[`docs/product-boundary.md`](docs/product-boundary.md). A downstream product can
-add providers, prepare native-only credentials and configuration, implement
-opaque product requests, install tool packs, supply frontend slots and access
-policy, and own its branding and packaging without placing those details in
-this repository.
+## Build from source
 
-## Development
+You need a current Rust toolchain, Node.js, Corepack, and the platform
+dependencies required by [Tauri 2](https://v2.tauri.app/start/prerequisites/).
 
-Rust checks:
+```bash
+git clone https://github.com/clark-labs-inc/clark-desktop.git
+cd clark-desktop/app
+corepack pnpm install --frozen-lockfile
+cd ..
+```
+
+On macOS, build and launch the development app with:
+
+```bash
+./script/build_and_run.sh
+```
+
+For browser-only interface development:
+
+```bash
+cd app
+pnpm dev
+```
+
+## Development checks
 
 ```bash
 cargo fmt --all --check
 cargo clippy -p agent-core -p provider-acp -p provider-local -p devbridge --all-targets -- -D warnings
 cargo test -p agent-core -p provider-acp -p provider-local
 cargo check -p agent-core --target wasm32-unknown-unknown
-```
 
-Frontend checks:
-
-```bash
 cd app
-pnpm install --frozen-lockfile
 pnpm typecheck
 pnpm test
 pnpm build
 ```
 
-Run the neutral development host on macOS with:
+## Repository map
 
-```bash
-./script/build_and_run.sh
-```
+| Path | Purpose |
+| --- | --- |
+| `crates/agent-core` | Provider contract, domain events, codecs, and projections |
+| `crates/provider-acp` | Agent Client Protocol adapter |
+| `crates/provider-local` | Local tool-calling coding agent |
+| `crates/exec-*` | Sandboxed execution and cross-platform isolation |
+| `src-tauri` | Native application host and session lifecycle |
+| `app` | React interface |
+| `harness` | Deterministic integration and UI checks |
 
-## Product boundary
-
-Public code may define stable capabilities and extension interfaces. A branded
-product must privately own:
-
-- billing and entitlement decisions;
-- hosted service URLs, credentials, and account policy;
-- proprietary providers, research brokers, advisors, and specialist workflows;
-- first-party catalogs and product-specific interface copy;
-- bundle identifiers, deep links, signing, updater keys, release workflows,
-  and deployment receipts.
-
-The renderer receives only generic projections such as capability availability
-and safe actions. It never reconstructs subscription rules or receives service
-credentials.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
 
 ## License
 
-Apache-2.0. Downstream proprietary compositions remain separate works and are
-not included in this repository.
+Clark Code is licensed under the [Apache License 2.0](LICENSE).

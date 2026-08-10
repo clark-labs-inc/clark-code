@@ -163,7 +163,7 @@ async fn native_global_memory_dir(state: &AppState) -> Result<std::path::PathBuf
         .cloud_account()
         .await
         .map(|account| account.account.as_str().to_string())
-        .ok_or("Agent Desktop must be signed in before reading global memory")?;
+        .ok_or("Clark Code must be signed in before reading global memory")?;
     provider_local::global_memory_dir_for_scope(&owner_scope)
         .ok_or_else(|| "the signed-in account's global memory is unavailable".to_string())
 }
