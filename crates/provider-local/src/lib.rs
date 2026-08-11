@@ -103,14 +103,13 @@ pub use platform::{
     PersonalMemory, PlatformContextProvider, RepositoryCommitContext, RepositoryContext,
 };
 pub use provider::{local_sandbox_setup_policy, LocalAgentProvider};
-pub use runtime_plugins::{
-    RuntimeAgentEvent, RuntimeAgentMessage, RuntimeEventSink, RuntimeFollowUpSource,
-    RuntimePlugin, RuntimePluginCapabilities, RuntimePluginPack, RuntimeSteeringSource,
-    RuntimeUserContent,
-};
 pub use repository::{
     discover_repositories, inspect_repository, load_git_history, GitCommitEvidence,
     GitHistoryBatch, RepositoryIdentity, RepositoryRemote,
+};
+pub use runtime_plugins::{
+    RuntimeAgentEvent, RuntimeAgentMessage, RuntimeEventSink, RuntimeFollowUpSource, RuntimePlugin,
+    RuntimePluginCapabilities, RuntimePluginPack, RuntimeSteeringSource, RuntimeUserContent,
 };
 pub use security_history::{list_security_scans, SecurityScanRecord};
 pub use skills::{
