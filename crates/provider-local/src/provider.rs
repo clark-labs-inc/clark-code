@@ -838,6 +838,7 @@ impl Provider for LocalAgentProvider {
                 native_image_support,
                 vision: config.vision.clone(),
             },
+            runtime_plugin_packs: self.runtime_plugin_packs.clone(),
         };
         tokio::spawn(run_turn(tc, tx, run));
         Ok(rx.boxed())

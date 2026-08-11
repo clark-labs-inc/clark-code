@@ -73,6 +73,7 @@ pub(crate) struct TurnContext {
     pub execution: RootExecutionConfig,
     pub run_cancellations: crate::provider::RunCancellationRegistry,
     pub tool_image_policy: ToolImagePolicy,
+    pub runtime_plugin_packs: Vec<Arc<dyn crate::runtime_plugins::RuntimePluginPack>>,
 }
 
 struct RootFinishContext {
@@ -231,11 +232,20 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
     );
     // Documents the agent writes into this workspace become inline artifacts.
     let docs_dir = tc.ctx.sandbox.docs_root().map(std::path::Path::to_path_buf);
-    let sink = Arc::new(
+    let desktop_sink = Arc::new(
         DesktopEventSink::new(tx.clone(), run.clone(), tc.registry.clone(), docs_dir)
             .with_execution(execution.clone()),
     );
-    let completed_transcript = sink.completed_transcript();
+    let completed_transcript = desktop_sink.completed_transcript();
+    let mut event_sinks = vec![desktop_sink.clone() as Arc<dyn agent_loop::EventSink>];
+    for pack in &tc.runtime_plugin_packs {
+        event_sinks.extend(pack.event_sinks());
+    }
+    let sink: Arc<dyn agent_loop::EventSink> = if event_sinks.len() == 1 {
+        event_sinks.pop().expect("desktop event sink")
+    } else {
+        Arc::new(crate::runtime_plugins::CompositeEventSink::new(event_sinks))
+    };
 
     // The stream adapter accumulates token/cost usage across the run's model
     // calls; it publishes cumulative usage after each call and the handle folds
@@ -285,6 +295,14 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
         // (agent-loop ≥0.2.2), any number of times at any iteration —
         // replacing the old engine-level once-per-run restart.
         .overflow_recovery(compactor.clone());
+    for pack in &tc.runtime_plugin_packs {
+        for source in pack.steering_sources() {
+            builder = builder.steering_arc(source);
+        }
+        for source in pack.follow_up_sources() {
+            builder = builder.follow_up_arc(source);
+        }
+    }
     if tc.plan_execution_reminders {
         builder = builder
             .follow_up(crate::planning::PlanCompletionGuard::new(

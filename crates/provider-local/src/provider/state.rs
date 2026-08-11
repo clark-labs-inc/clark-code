@@ -52,6 +52,8 @@ pub struct LocalAgentProvider {
     pub(super) sandbox_temp: Option<tempfile::TempDir>,
     /// Product-owned capabilities installed after the neutral core registry.
     pub(super) tool_packs: Vec<Arc<dyn crate::tools::ToolPack>>,
+    /// Product-owned mailbox/event hooks attached only to root agent runs.
+    pub(super) runtime_plugin_packs: Vec<Arc<dyn crate::runtime_plugins::RuntimePluginPack>>,
     /// Optional product transport for personal, repository, and organization
     /// context. The neutral provider never owns cloud routes or credentials.
     pub(super) context_provider: Option<Arc<dyn crate::platform::PlatformContextProvider>>,
@@ -85,6 +87,7 @@ impl LocalAgentProvider {
             session_mode: None,
             sandbox_temp: None,
             tool_packs: Vec::new(),
+            runtime_plugin_packs: Vec::new(),
             context_provider: None,
         }
     }
@@ -145,6 +148,14 @@ impl LocalAgentProvider {
 
     pub fn with_tool_pack(mut self, pack: Arc<dyn crate::tools::ToolPack>) -> Self {
         self.tool_packs.push(pack);
+        self
+    }
+
+    pub fn with_runtime_plugin_pack(
+        mut self,
+        pack: Arc<dyn crate::runtime_plugins::RuntimePluginPack>,
+    ) -> Self {
+        self.runtime_plugin_packs.push(pack);
         self
     }
 

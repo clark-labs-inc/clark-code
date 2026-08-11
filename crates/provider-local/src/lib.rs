@@ -50,6 +50,7 @@ mod provider;
 mod repository;
 mod resume;
 mod root_execution;
+mod runtime_plugins;
 mod safety;
 mod sandbox;
 pub mod security;
@@ -102,6 +103,11 @@ pub use platform::{
     PersonalMemory, PlatformContextProvider, RepositoryCommitContext, RepositoryContext,
 };
 pub use provider::{local_sandbox_setup_policy, LocalAgentProvider};
+pub use runtime_plugins::{
+    RuntimeAgentEvent, RuntimeAgentMessage, RuntimeEventSink, RuntimeFollowUpSource,
+    RuntimePlugin, RuntimePluginCapabilities, RuntimePluginPack, RuntimeSteeringSource,
+    RuntimeUserContent,
+};
 pub use repository::{
     discover_repositories, inspect_repository, load_git_history, GitCommitEvidence,
     GitHistoryBatch, RepositoryIdentity, RepositoryRemote,
