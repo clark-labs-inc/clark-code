@@ -372,15 +372,18 @@ export function localConnectConfig(
   specialistKind?: string,
   scope?: string | null,
   productSpecialist?: ProductSpecialistTarget,
+  specialistModel?: { model: string; reasoningEffort: string },
 ): ConnectConfig {
   // For a remote project the root lives on the remote host; tool I/O runs there
   // inside the durable worker. The command policy is keyed by the project path.
   const project = (remote ? remote.cwd : s.cwd).trim();
   const isSpecialist = Boolean(specialistKind?.trim());
-  const model = isSpecialist ? SPECIALIST_MODEL_ID : normalizeCodingModel(s.model);
-  const reasoningEffort = isSpecialist
-    ? SPECIALIST_REASONING_EFFORT
-    : normalizeReasoningEffort(model, s.reasoningEffort);
+  const model = specialistModel?.model
+    ?? (isSpecialist ? SPECIALIST_MODEL_ID : normalizeCodingModel(s.model));
+  const reasoningEffort = specialistModel?.reasoningEffort
+    ?? (isSpecialist
+      ? SPECIALIST_REASONING_EFFORT
+      : normalizeReasoningEffort(model, s.reasoningEffort));
   if (remote) {
     return { extra: { remote_worker: remote } };
   }

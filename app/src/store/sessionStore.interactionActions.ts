@@ -50,10 +50,7 @@ import {
   wouldAutoApprove,
 } from "./sessionStore.runtime";
 import { activeSpecialistContext } from "./specialistStore";
-import {
-  SPECIALIST_MODEL_ID,
-  SPECIALIST_REASONING_EFFORT,
-} from "../lib/localAgent";
+import { specialistModelSettings } from "../lib/specialistModel";
 import {
   scoutCartographyTarget,
   productSpecialistTarget,
@@ -249,6 +246,7 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
           activeSpecialistContext()?.kind,
           codeKeyAccountBinding(get().auth),
           productSpecialistTarget(activeSpecialistContext(), effSettings.advisorTrainingEnabled),
+          specialistModelSettings(activeSpecialistContext()) ?? undefined,
         )
         : localConnectConfig(
           effSettings,
@@ -257,6 +255,7 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
           activeSpecialistContext()?.kind,
           codeKeyAccountBinding(get().auth),
           productSpecialistTarget(activeSpecialistContext(), effSettings.advisorTrainingEnabled),
+          specialistModelSettings(activeSpecialistContext()) ?? undefined,
         );
       await queueModelReconfigure(session.id, () => bridge.reconfigure!(session.id, config));
       drainQueuedPromptAfterReconfigure(session.id, bridge, get, set);
@@ -409,6 +408,7 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
         previousMeta?.specialist?.kind,
         codeKeyAccountBinding(state.auth),
         productSpecialistTarget(previousMeta?.specialist, settings.advisorTrainingEnabled),
+        specialistModelSettings(previousMeta?.specialist) ?? undefined,
       )
       : localConnectConfig(
         settings,
@@ -417,6 +417,7 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
         previousMeta?.specialist?.kind,
         codeKeyAccountBinding(state.auth),
         productSpecialistTarget(previousMeta?.specialist, settings.advisorTrainingEnabled),
+        specialistModelSettings(previousMeta?.specialist) ?? undefined,
       );
     const options: SessionOptions = {
       cwd: projectRoot,
@@ -461,9 +462,11 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
         resumed: true,
         editedFromTimelineIndex: timelineIndex,
         projectMode: previousEntry.remote ? "remote" : "local",
-        model: previousMeta?.specialist ? SPECIALIST_MODEL_ID : effective.model,
+        model: previousMeta?.specialist
+          ? specialistModelSettings(previousMeta.specialist)?.model
+          : effective.model,
         reasoningEffort: previousMeta?.specialist
-          ? SPECIALIST_REASONING_EFFORT
+          ? specialistModelSettings(previousMeta.specialist)?.reasoningEffort
           : effective.reasoningEffort,
         approvalPolicy: state.approvalPolicy,
         outputStyle: state.outputStyle,

@@ -47,10 +47,7 @@ import {
 } from "../lib/composerDraft";
 import { clearCloudComposerDraft } from "../lib/cloudComposerDraft";
 import { saveSshHosts } from "../lib/sshHosts";
-import {
-  SPECIALIST_MODEL_ID,
-  SPECIALIST_REASONING_EFFORT,
-} from "../lib/localAgent";
+import { specialistModelSettings } from "../lib/specialistModel";
 import { createSidebarConversationActions } from "./sessionStore.sidebarConversationActions";
 import { activeSpecialistContext, useSpecialistStore } from "./specialistStore";
 import {
@@ -492,6 +489,7 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
           specialistContext?.kind,
           codeKeyAccountBinding(get().auth),
           productSpecialistTarget(specialistContext, localSettings.advisorTrainingEnabled),
+          specialistModelSettings(specialistContext) ?? undefined,
         );
         options = { cwd: remote.cwd, mode, collaboration_mode };
       } else if (isLocal) {
@@ -503,6 +501,7 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
           specialistContext?.kind,
           codeKeyAccountBinding(get().auth),
           productSpecialistTarget(specialistContext, localSettings.advisorTrainingEnabled),
+          specialistModelSettings(specialistContext) ?? undefined,
         );
         options = { cwd: localSessionPath, mode, collaboration_mode };
       } else {
@@ -557,12 +556,12 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
         {
           projectMode: get().projectMode,
           model: specialistContext
-            ? SPECIALIST_MODEL_ID
+            ? specialistModelSettings(specialistContext)?.model
             : sessionProvider === "local"
               ? localSettings.model
               : undefined,
           reasoningEffort: specialistContext
-            ? SPECIALIST_REASONING_EFFORT
+            ? specialistModelSettings(specialistContext)?.reasoningEffort
             : sessionProvider === "local"
               ? localSettings.reasoningEffort
               : undefined,
@@ -987,6 +986,7 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
           resolvedSpecialist?.kind,
           codeKeyAccountBinding(get().auth),
           productSpecialistTarget(resolvedSpecialist, effSettings.advisorTrainingEnabled),
+          specialistModelSettings(resolvedSpecialist) ?? undefined,
         );
         options = { cwd: remote.cwd, mode, collaboration_mode };
       } else if (isLocal) {
@@ -1000,6 +1000,7 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
           resolvedSpecialist?.kind,
           codeKeyAccountBinding(get().auth),
           productSpecialistTarget(resolvedSpecialist, effSettings.advisorTrainingEnabled),
+          specialistModelSettings(resolvedSpecialist) ?? undefined,
         );
         options = { cwd: requestedProjectRoot, mode, collaboration_mode };
       } else {
@@ -1056,12 +1057,12 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
         restoredSnapshot: restored !== null,
         projectMode: wantRemote ? "remote" : quickChat ? "quick_chat" : "local",
         model: openingMeta?.specialist
-          ? SPECIALIST_MODEL_ID
+          ? specialistModelSettings(openingMeta.specialist)?.model
           : isLocal
             ? effSettings.model
             : undefined,
         reasoningEffort: openingMeta?.specialist
-          ? SPECIALIST_REASONING_EFFORT
+          ? specialistModelSettings(openingMeta.specialist)?.reasoningEffort
           : isLocal
             ? effSettings.reasoningEffort
             : undefined,

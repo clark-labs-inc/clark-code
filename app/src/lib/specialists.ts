@@ -17,6 +17,8 @@ export interface SpecialistContext {
   organizationId?: string;
   workspaceId?: string;
   repositoryId?: string;
+  /** Local repository root selected as code evidence for a living Spec. */
+  repositoryPath?: string;
   objectKind?: string;
   objectId?: string;
   workflow?: SpecialistWorkflow;
@@ -60,6 +62,9 @@ export interface SpecialistDefinition {
   headline: string;
   value: string;
   engine: "skill" | "research_runtime";
+  entitlement: "included" | "subscription";
+  modelPolicy: "included" | "specialist";
+  badge?: string;
   runtime?: Readonly<{
     modelRoute: string;
     maxIterations: number;
@@ -149,6 +154,14 @@ export function parseSpecialistCatalog(value: unknown): SpecialistCatalogReceipt
     if (engine !== "skill" && engine !== "research_runtime") {
       throw new Error(`Specialist manifest ${index} has an invalid engine`);
     }
+    const entitlement = manifest.entitlement;
+    if (entitlement !== "included" && entitlement !== "subscription") {
+      throw new Error(`Specialist manifest ${index} has an invalid entitlement`);
+    }
+    const modelPolicy = manifest.modelPolicy ?? "specialist";
+    if (modelPolicy !== "included" && modelPolicy !== "specialist") {
+      throw new Error(`Specialist manifest ${index} has an invalid model policy`);
+    }
     if (!Array.isArray(manifest.tabs) || !Array.isArray(manifest.slashCommands)) {
       throw new Error(`Specialist manifest ${index} has invalid navigation`);
     }
@@ -180,6 +193,11 @@ export function parseSpecialistCatalog(value: unknown): SpecialistCatalogReceipt
       headline: catalogString(manifest.headline, "specialist headline"),
       value: catalogString(manifest.value, "specialist value"),
       engine,
+      entitlement,
+      modelPolicy,
+      ...(manifest.badge === undefined
+        ? {}
+        : { badge: catalogString(manifest.badge, "specialist badge") }),
       ...(runtime
         ? {
           runtime: {
@@ -389,6 +407,7 @@ export function projectedSpecialistAccess(
   kind: SpecialistKind,
 ): SpecialistAccessState {
   if (!signedIn) return "signed_out";
+  if (SPECIALIST_REGISTRY.get(kind)?.entitlement === "included") return "ready";
   const capability = capabilityAccess(access, kind);
   if (!capability || capability.availability === "unknown") return "loading";
   if (capability.availability === "available") return "ready";
@@ -396,6 +415,12 @@ export function projectedSpecialistAccess(
     .includes(capability.reason)
     ? "action_needed"
     : "free";
+}
+
+export function specialistUsesIncludedModel(
+  context: SpecialistContext | null | undefined,
+): boolean {
+  return Boolean(context && SPECIALIST_REGISTRY.get(context.kind)?.modelPolicy === "included");
 }
 
 /** Keep already verified access distinct from a later specialist-data
