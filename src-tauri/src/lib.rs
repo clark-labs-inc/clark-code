@@ -55,6 +55,8 @@ pub struct ProviderInfo {
 
 const SIGNED_COMPUTER_USE_SMOKE_ARG: &str = "--computer-use-signed-smoke";
 const WINDOWS_CONSOLE_SMOKE_ARG: &str = "--windows-console-smoke";
+#[cfg(feature = "debug-diagnostics")]
+const OPEN_DEVTOOLS_ENV: &str = "CLARK_DESKTOP_OPEN_DEVTOOLS";
 
 /// Read-only packaged-app probe for the release workflow. Calling
 /// `permissions` forces the real parent/helper handshake and both code-signing
@@ -422,6 +424,18 @@ pub fn run_with_product_and_context(
                     tauri::WebviewWindowBuilder::from_config(app.handle(), &config)?
                         .data_store_identifier(data_store_identifier)
                         .build()?;
+                }
+            }
+
+            // Packaged debug builds normally exercise the same closed WebView
+            // surface as production. An explicit owner-local diagnostic flag
+            // can open the inspector before renderer startup failures erase
+            // their useful JavaScript exception. The feature itself is
+            // compile-time forbidden in release builds.
+            #[cfg(feature = "debug-diagnostics")]
+            if std::env::var_os(OPEN_DEVTOOLS_ENV).as_deref() == Some(std::ffi::OsStr::new("1")) {
+                if let Some(window) = app.get_webview_window("main") {
+                    window.open_devtools();
                 }
             }
 

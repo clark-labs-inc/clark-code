@@ -358,7 +358,11 @@ async fn unstructured_provider_output_is_quarantined_before_visible_history() {
     let address = listener.local_addr().expect("model endpoint address");
     let server = tokio::spawn(serve(
         listener,
-        vec![plain_text_body(MALFORMED), plain_text_body(MALFORMED)],
+        vec![
+            plain_text_body(MALFORMED),
+            plain_text_body(MALFORMED),
+            plain_text_body(MALFORMED),
+        ],
     ));
     let mut provider = connect(address, root.path(), json!({})).await;
     let session = new_session(&mut provider, root.path()).await;
@@ -397,11 +401,27 @@ async fn unstructured_provider_output_is_quarantined_before_visible_history() {
                 && outcome.failure_kind == Some(RunFailureKind::ProviderError)
     )));
     let requests = server.await.expect("model server task");
-    assert_eq!(requests.len(), 2);
+    assert_eq!(requests.len(), 3);
     assert!(
         String::from_utf8_lossy(&requests[1])
             .contains("previous response violated the required structured-tool boundary"),
         "second provider request was not an isolated contract repair"
+    );
+    let final_request = String::from_utf8_lossy(&requests[2]);
+    let final_body: Value = serde_json::from_str(
+        final_request
+            .split_once("\r\n\r\n")
+            .expect("HTTP request body")
+            .1,
+    )
+    .expect("final recovery JSON body");
+    assert_eq!(
+        final_body["tool_choice"],
+        json!({
+            "type": "function",
+            "function": { "name": "final_answer" },
+        }),
+        "final recovery request did not pin the typed delivery tool"
     );
 }
 

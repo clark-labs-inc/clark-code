@@ -22,7 +22,7 @@ function relativeDate(value: string | null | undefined): string {
 function SeverityPill({ severity }: { severity: SecurityFinding["currentSeverity"] }) {
   return (
     <span className={cn(
-      "rounded-full px-2 py-0.5 text-[0.68rem] font-semibold capitalize",
+      "rounded-full px-2 py-0.5 text-xs font-semibold capitalize",
       severity === "critical" && "bg-danger/10 text-danger",
       severity === "high" && "bg-warning/10 text-warning",
       severity === "medium" && "bg-accent-soft text-accent",
@@ -371,7 +371,7 @@ export function SecurityCanvas({
               </span>
               <span className="text-right text-sm font-semibold tabular-nums text-ink">
                 {repository.riskScore}
-                <span className="ml-1 text-[0.65rem] font-normal text-ink-faint">risk</span>
+                <span className="ml-1 text-xs font-normal text-ink-faint">risk</span>
               </span>
             </button>
           ))}

@@ -247,6 +247,7 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
           codeKeyAccountBinding(get().auth),
           productSpecialistTarget(activeSpecialistContext(), effSettings.advisorTrainingEnabled),
           specialistModelSettings(activeSpecialistContext()) ?? undefined,
+          get().recentProjects,
         )
         : localConnectConfig(
           effSettings,
@@ -256,6 +257,7 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
           codeKeyAccountBinding(get().auth),
           productSpecialistTarget(activeSpecialistContext(), effSettings.advisorTrainingEnabled),
           specialistModelSettings(activeSpecialistContext()) ?? undefined,
+          get().recentProjects,
         );
       await queueModelReconfigure(session.id, () => bridge.reconfigure!(session.id, config));
       drainQueuedPromptAfterReconfigure(session.id, bridge, get, set);
@@ -409,6 +411,7 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
         codeKeyAccountBinding(state.auth),
         productSpecialistTarget(previousMeta?.specialist, settings.advisorTrainingEnabled),
         specialistModelSettings(previousMeta?.specialist) ?? undefined,
+        state.recentProjects,
       )
       : localConnectConfig(
         settings,
@@ -418,6 +421,7 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
         codeKeyAccountBinding(state.auth),
         productSpecialistTarget(previousMeta?.specialist, settings.advisorTrainingEnabled),
         specialistModelSettings(previousMeta?.specialist) ?? undefined,
+        state.recentProjects,
       );
     const options: SessionOptions = {
       cwd: projectRoot,
@@ -598,12 +602,10 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
     }
     const rapidDuplicate =
       entry &&
-      attachments.length === 0 &&
-      skills.length === 0 &&
       entry.lastSubmittedText === normalizedText &&
       Date.now() - entry.lastSubmittedAt < RAPID_DUPLICATE_WINDOW_MS;
     if (rapidDuplicate) return { kind: "not_sent" };
-    if (entry && attachments.length === 0 && skills.length === 0) {
+    if (entry) {
       entry.lastSubmittedText = normalizedText;
       entry.lastSubmittedAt = Date.now();
     }

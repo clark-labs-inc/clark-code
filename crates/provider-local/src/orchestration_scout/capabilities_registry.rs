@@ -249,7 +249,6 @@ pub(super) fn safe_names_hash(names: &[String]) -> String {
 
 pub(super) fn safe_fingerprint(report: &CapabilityReport) -> String {
     let mut clone = report.clone();
-    clone.id.clear();
     clone.fingerprint.clear();
     clone.path_executable_count = 0;
     clone.path_executable_names_sha256.clear();

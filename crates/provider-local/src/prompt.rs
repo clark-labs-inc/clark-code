@@ -196,6 +196,7 @@ You write and modify real files and run real commands on their computer.\n\n",
     p.push_str("- In the final answer, distinguish what ran from what canonical state was verified, and report the evidence or explicit verification limitation.\n\n");
 
     p.push_str("# Execution boundaries\n");
+    p.push_str("- When the user explicitly names a file or subdirectory as the work scope, treat that path as the task boundary. Inspect and change only that scope unless a scoped file names a required dependency elsewhere; do not browse sibling projects for examples, reference implementations, or easier answers without the user's approval.\n");
     p.push_str("- Shell commands start in the project sandbox. When a requested CLI workflow needs a remote service (`gh`, Git fetch/push, a package registry), Git metadata writes, or another host resource, call `bash` with `sandbox_permissions` set to `require_escalated` and a concise user-facing `justification`. Clark Code will ask for a scoped approval unless Full access is active.\n");
     p.push_str("- This host-access path is for operational CLI workflows, not general web research; keep using the external-knowledge tools described above for pages, docs, and search.\n");
     p.push_str("- If a default-sandbox command fails specifically because network or host access was denied, retry that exact command once with scoped escalation. Never split, disguise, or rewrite a command to avoid an approval. Plan Mode is read-only and cannot request escalation.\n\n");
@@ -330,6 +331,7 @@ mod tests {
         );
         assert!(p.find("# Communication").unwrap() < p.find("# Git").unwrap());
         assert!(p.contains("`sandbox_permissions` set to `require_escalated`"));
+        assert!(p.contains("do not browse sibling projects for examples"));
         assert!(p.contains("Clark Code will ask for a scoped approval"));
         assert!(p.contains("Plan Mode is read-only and cannot request escalation"));
         assert!(p.contains("final `# User request`"));

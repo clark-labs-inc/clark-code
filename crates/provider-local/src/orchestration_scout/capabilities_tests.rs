@@ -4,7 +4,6 @@ use crate::exec::LocalExecutor;
 use crate::loop_state::SessionState;
 use crate::sandbox::Sandbox;
 use crate::tools::ReadTracker;
-use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use tokio_util::sync::CancellationToken;
@@ -37,9 +36,8 @@ fn dotenv_parser_returns_names_and_never_values() {
 }
 
 #[test]
-fn capability_fingerprint_excludes_random_census_id() {
+fn capability_fingerprint_excludes_host_inventory_churn() {
     let mut report = CapabilityReport {
-        id: "one".into(),
         schema_version: "v1".into(),
         platform: "linux".into(),
         architecture: "x86_64".into(),
@@ -62,7 +60,6 @@ fn capability_fingerprint_excludes_random_census_id() {
         fingerprint: String::new(),
     };
     let first = safe_fingerprint(&report);
-    report.id = "two".into();
     report.path_executable_count = 99;
     report.path_executable_names_sha256 = "d".repeat(64);
     report.environment_name_count = 42;
@@ -121,14 +118,7 @@ async fn capability_tool_finds_gitignored_dotenv_but_never_returns_values() {
         "AWS_PROFILE=production-name\n",
     )
     .unwrap();
-    let state = Arc::new(ScoutToolState {
-        censuses: Mutex::new(HashMap::new()),
-        ledgers: Mutex::new(HashMap::new()),
-        target: Mutex::new(None),
-        adapter_gate: tokio::sync::Mutex::new(()),
-        max_parallel_agents: 3,
-    });
-    let outcome = ScoutCapabilitiesTool { state }
+    let outcome = ScoutCapabilitiesTool
         .invoke(json!({"scope": "."}), &context(temp.path()))
         .await;
     assert!(!outcome.is_error, "{}", outcome.content);
@@ -153,15 +143,7 @@ async fn capability_tool_preserves_all_dotenv_keys_beyond_the_old_cap() {
         .collect::<Vec<_>>()
         .join("\n");
     std::fs::write(temp.path().join(".env"), body).unwrap();
-    let state = Arc::new(ScoutToolState {
-        censuses: Mutex::new(HashMap::new()),
-        ledgers: Mutex::new(HashMap::new()),
-        target: Mutex::new(None),
-        adapter_gate: tokio::sync::Mutex::new(()),
-        max_parallel_agents: 3,
-    });
-
-    let outcome = ScoutCapabilitiesTool { state }
+    let outcome = ScoutCapabilitiesTool
         .invoke(json!({"scope": "."}), &context(temp.path()))
         .await;
 

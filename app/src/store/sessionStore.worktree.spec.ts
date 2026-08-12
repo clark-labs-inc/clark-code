@@ -111,6 +111,7 @@ function bridgeFor(nextPlan: ProjectWorktreeTransitionPlan): CoreBridge {
 
 beforeEach(() => {
   useSessionStore.getState().endSession({ force: true });
+  saveComposerDraft(draftOwner, session.id, "");
   useSessionStore.setState({
     bridge: null,
     session: null,
@@ -129,6 +130,7 @@ beforeEach(() => {
     managedWorktreeBase: "current",
     worktreeTransition: null,
     pendingManagedWorktreePath: null,
+    deferredSessionStartDraft: null,
     worktreePreparing: false,
   });
 });
@@ -215,6 +217,29 @@ describe("managed worktree session journeys", () => {
 
     expect(useSessionStore.getState().worktreeTransition).toBeNull();
     expect(useSessionStore.getState().dirtyWorktreeApproval).toBeNull();
+    expect(vi.mocked(bridge.createManagedWorktree)).not.toHaveBeenCalled();
+    expect(vi.mocked(bridge.openSession).mock.calls[0]?.[2]).toMatchObject({
+      kind: "new",
+      options: { cwd: sourceRoot },
+    });
+  });
+
+  it("starts in an unborn checkout after acknowledging its untracked files", async () => {
+    const bridge = bridgeFor(plan({
+      sourceRevision: null,
+      sourceChanges: { changedFiles: 0, untrackedFiles: 26, conflictedFiles: 0 },
+      preservation: "changes_remain_in_source",
+      requiresConfirmation: true,
+      baseOptions: [],
+    }));
+    useSessionStore.setState({ bridge, providers: await bridge.listProviders() });
+
+    await useSessionStore.getState().startSession();
+    expect(useSessionStore.getState().worktreeTransition?.sourceRevision).toBeNull();
+
+    useSessionStore.getState().dismissManagedWorktreeStart();
+    await vi.waitFor(() => expect(vi.mocked(bridge.openSession)).toHaveBeenCalledTimes(1));
+
     expect(vi.mocked(bridge.createManagedWorktree)).not.toHaveBeenCalled();
     expect(vi.mocked(bridge.openSession).mock.calls[0]?.[2]).toMatchObject({
       kind: "new",
@@ -336,7 +361,7 @@ describe("managed worktree session journeys", () => {
     useSessionStore.setState({ bridge, providers: await bridge.listProviders() });
     saveComposerDraft(draftOwner, null, "fix the login bug");
 
-    await useSessionStore.getState().startSession();
+    await useSessionStore.getState().startSession({ submittedDraft: "fix the login bug" });
     expect(useSessionStore.getState().worktreeTransition?.requiresConfirmation).toBe(true);
 
     await useSessionStore.getState().confirmManagedWorktreeStart();
@@ -356,7 +381,7 @@ describe("managed worktree session journeys", () => {
     useSessionStore.setState({ bridge, providers: await bridge.listProviders() });
     saveComposerDraft(draftOwner, null, "refactor the checkout flow");
 
-    await useSessionStore.getState().startSession();
+    await useSessionStore.getState().startSession({ submittedDraft: "refactor the checkout flow" });
     expect(useSessionStore.getState().worktreeTransition).not.toBeNull();
 
     useSessionStore.getState().dismissManagedWorktreeStart();
@@ -366,5 +391,18 @@ describe("managed worktree session journeys", () => {
       expect(loadComposerDraft(draftOwner, startedId)).toBe("refactor the checkout flow");
       expect(loadComposerDraft(draftOwner, null)).toBe("");
     });
+  });
+
+  it("keeps an unrelated New session draft out of a normally created conversation", async () => {
+    const bridge = bridgeFor(plan());
+    useSessionStore.setState({ bridge, providers: await bridge.listProviders() });
+    saveComposerDraft(draftOwner, null, "UNSENT REGULAR SESSION ONLY");
+
+    await useSessionStore.getState().startSession({ submittedDraft: "accepted developer prompt" });
+
+    const startedId = useSessionStore.getState().session?.id;
+    expect(startedId).toBe("managed-chat");
+    expect(loadComposerDraft(draftOwner, startedId!)).toBe("");
+    expect(loadComposerDraft(draftOwner, null)).toBe("UNSENT REGULAR SESSION ONLY");
   });
 });

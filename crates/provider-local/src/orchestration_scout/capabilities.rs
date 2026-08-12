@@ -1,14 +1,9 @@
-use std::collections::BTreeMap;
-use std::sync::Arc;
-
+use crate::tools::{ToolCtx, ToolExecutor, ToolOutcome};
 use agent_core::domain::ToolKind;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use uuid::Uuid;
-
-use super::ScoutToolState;
-use crate::tools::{ToolCtx, ToolExecutor, ToolOutcome};
+use std::collections::BTreeMap;
 
 #[path = "dotenv.rs"]
 mod dotenv;
@@ -26,7 +21,6 @@ use registry::{
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(super) struct CapabilityReport {
-    pub id: String,
     pub schema_version: String,
     pub platform: String,
     pub architecture: String,
@@ -82,9 +76,7 @@ pub(super) struct CensusTruncation {
     pub dotenv_files: bool,
 }
 
-pub(super) struct ScoutCapabilitiesTool {
-    pub state: Arc<ScoutToolState>,
-}
+pub(super) struct ScoutCapabilitiesTool;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -99,7 +91,7 @@ impl ToolExecutor for ScoutCapabilitiesTool {
     }
 
     fn description(&self) -> &str {
-        "Run Scout's secret-safe adapter bootstrap before starting a Scout ledger. Reports curated DevOps/cloud adapter executables, relevant environment-variable names, known credential surfaces, and scoped .env key schemas without executing discovered binaries or returning values. Other PATH entries contribute only a count and digest. This is not a host or business-system map."
+        "Run Scout's secret-safe adapter bootstrap. Reports curated DevOps/cloud adapter executables, relevant environment-variable names, known credential surfaces, and scoped .env key schemas without executing discovered binaries or returning values. Other PATH entries contribute only a count and digest. This is a non-authoritative capability observation, not a host or business-system map."
     }
 
     fn parameters(&self) -> Value {
@@ -108,7 +100,7 @@ impl ToolExecutor for ScoutCapabilitiesTool {
             "properties": {
                 "scope": {
                     "type": "string",
-                    "description": "Declared workspace or graph-discovered component root to inspect for configuration schemas, relative to the project root. Do not use an unrelated home or system root."
+                    "description": "Declared workspace or graph-discovered component root to inspect for configuration schemas. Use `.` or one exact host-approved read_only_root from environment context; never use an unrelated home or system root."
                 }
             },
             "required": ["scope"],
@@ -146,7 +138,6 @@ impl ToolExecutor for ScoutCapabilitiesTool {
                 displayed
             }
         };
-        let id = format!("census-{}", Uuid::new_v4());
         let path_executable_count = system.executable_names.len();
         let path_executable_names_sha256 = safe_names_hash(&system.executable_names);
         let adapter_executable_names = adapter_executables(&system.executable_names);
@@ -166,7 +157,6 @@ impl ToolExecutor for ScoutCapabilitiesTool {
             &dotenv_files,
         );
         let mut report = CapabilityReport {
-            id: id.clone(),
             schema_version: "scout-adapter-census-v2".into(),
             platform: system.platform,
             architecture: system.architecture,
@@ -197,14 +187,8 @@ impl ToolExecutor for ScoutCapabilitiesTool {
                 ))
             }
         };
-        self.state
-            .censuses
-            .lock()
-            .expect("Scout census lock")
-            .insert(id.clone(), report);
-
         ToolOutcome::ok(format!(
-            "Scout adapter census `{id}` recorded: {} curated adapter executables, {} relevant environment-variable names, and {} scoped .env schemas. Other PATH entries were retained only as a count and digest. Values were not returned. Use this census id when starting scout_ledger.",
+            "Scout adapter bootstrap observed {} curated adapter executables, {} relevant environment-variable names, and {} scoped .env schemas. Other PATH entries were retained only as a count and digest. Values were not returned. This observation is not enterprise graph authority.",
             details["adapter_executable_names"].as_array().map_or(0, Vec::len),
             details["environment"].as_array().map_or(0, Vec::len),
             details["dotenv_files"].as_array().map_or(0, Vec::len),

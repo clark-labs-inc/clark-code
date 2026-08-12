@@ -20,7 +20,14 @@ export function specialistModelSettings(
     const model = INCLUDED_CODING_MODEL_ID || DEFAULT_LOCAL_SETTINGS.model;
     return {
       model,
-      reasoningEffort: normalizeReasoningEffort(model, DEFAULT_LOCAL_SETTINGS.reasoningEffort),
+      // Spec work needs enough reasoning to reconcile a document, but the
+      // included model's normal maximum tier can spend an entire first stream
+      // drafting the document privately before it ever calls `write_file`.
+      // Low reasoning preserves tool planning while prioritizing creation of
+      // the living artifact on the first substantive turn.
+      reasoningEffort: context.kind === "spec"
+        ? "low"
+        : normalizeReasoningEffort(model, DEFAULT_LOCAL_SETTINGS.reasoningEffort),
     };
   }
   return {

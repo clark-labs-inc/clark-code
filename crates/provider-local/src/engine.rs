@@ -59,6 +59,11 @@ pub(crate) struct TurnContext {
     pub compaction: CompactionConfig,
     pub plan_execution_reminders: bool,
     pub hidden_plan_protocol: bool,
+    /// Explicit Scout turns use a host-enforced tool and context boundary.
+    pub scout_turn: bool,
+    /// A per-turn system prompt when a workflow must exclude session-global
+    /// context such as personal memory without mutating the durable session.
+    pub turn_system_prompt: Option<String>,
     pub model: String,
     pub temperature: Option<f32>,
     pub user_text: String,
@@ -295,6 +300,9 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
         // (agent-loop ≥0.2.2), any number of times at any iteration —
         // replacing the old engine-level once-per-run restart.
         .overflow_recovery(compactor.clone());
+    if tc.scout_turn {
+        builder = builder.tool_gate_arc(Arc::new(crate::scout_policy::ScoutToolGate));
+    }
     for pack in &tc.runtime_plugin_packs {
         for source in pack.steering_sources() {
             builder = builder.steering_arc(source);
@@ -380,9 +388,13 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
         let attempt_result = loop {
             let context = {
                 let session = tc.session.lock().await;
-                agent_loop::AgentContext::new(session.system_prompt.clone())
-                    .with_messages(session.transcript.clone())
-                    .with_identity(identity.clone())
+                agent_loop::AgentContext::new(
+                    tc.turn_system_prompt
+                        .clone()
+                        .unwrap_or_else(|| session.system_prompt.clone()),
+                )
+                .with_messages(session.transcript.clone())
+                .with_identity(identity.clone())
             };
             let result = if prompts.is_empty() {
                 agent_loop::run_continue(context, &config, cancel.clone()).await

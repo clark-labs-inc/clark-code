@@ -11,6 +11,8 @@ export interface ComposerTrigger {
 }
 
 export type ComposerSuggestion =
+  | { kind: "spec_repository" }
+  | { kind: "spec_folder" }
   | { kind: "directory"; path: string }
   | { kind: "file"; path: string }
   | { kind: "slash"; cmd: SlashCommand }
@@ -41,6 +43,7 @@ interface ComposerSubmissionInput {
   localCwd: string;
   startBlocked: string | null;
   canPickProjectFolder: boolean;
+  usesConversationWorkspace?: boolean;
 }
 
 export function composerSubmissionState(input: ComposerSubmissionInput) {
@@ -48,6 +51,7 @@ export function composerSubmissionState(input: ComposerSubmissionInput) {
     !input.hasSession &&
     input.activeProvider === "local" &&
     input.projectMode === "local" &&
+    !input.usesConversationWorkspace &&
     !input.localCwd.trim();
   const canResolveBlockedStart = needsProjectFolder && input.canPickProjectFolder;
   const canSubmit =
@@ -55,7 +59,7 @@ export function composerSubmissionState(input: ComposerSubmissionInput) {
     (input.hasSession ||
       (!input.connecting &&
         input.activeProvider !== null &&
-        (!input.startBlocked || canResolveBlockedStart)));
+        (!input.startBlocked || canResolveBlockedStart || Boolean(input.usesConversationWorkspace))));
 
   return { canSubmit, shouldPickProjectFolder: canSubmit && needsProjectFolder };
 }

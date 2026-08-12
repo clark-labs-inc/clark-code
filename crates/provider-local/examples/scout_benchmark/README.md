@@ -30,13 +30,12 @@ pass/fail states, and any case-provided deterministic `semantic_sha256`; it
 excludes timings and host metadata so equivalent runs on different operating
 systems can be compared directly.
 
-The cases exercise capability-safe skill resolution, a synthetic
-business-system graph and simulation-readiness contract, fixed-point discovery
-and negative controls, append-only ledger replay, authority and
-self-certification rejection, replay-recipe and proof-tier requirements,
-Wilson reference values, the same seeded-bootstrap kernel used by
-`scout_measure`, and a 1,200-service/eight-machine enterprise graph that must
-converge under reversed and duplicate authenticated batch delivery. The
+The cases exercise the current capability-safe skill resolution and the
+portable enterprise graph contracts used behind the hosted authority. They
+retain a synthetic business-system graph and simulation-readiness contract,
+fixed-point discovery and negative controls, and a 1,200-service/eight-machine
+enterprise graph that must converge under reversed and duplicate authenticated
+batch delivery. The
 enterprise case uses a pinned Ed25519 trust root, exact short-lived coordinator
 or collector grants, signed batch envelopes, a coordinator charter, exact
 per-scope entity/edge membership, a critical actor-to-journey-to-state-effect
@@ -138,8 +137,8 @@ the same event, graph, query, semantic, and storage digests. This is a passing
 audit gate, not evidence that the current in-memory reducer should absorb
 unbounded enterprise history.
 
-The distributed scheduling oracle and its current coordinator persistence have
-a separate frontier-task gate:
+The deterministic frontier scheduler oracle has a separate persistence gate;
+it is benchmark infrastructure, not an alternative product run authority:
 
 ```bash
 cargo run --release -p scout-coordinator --example scheduler_scale -- \
@@ -153,9 +152,9 @@ operation replay, restart receipt equality, and the enforced latency gates. A
 fresh run used 473,063,424 bytes of coordinator state, claimed 1,024 tasks in
 891 ms, returned the exact idempotent retry in 1 ms, and reconstructed the
 restart receipt in 292 ms. It mutated 1,024 task rows while leaving 98,976
-untouched. The portable full-state oracle remains the semantic reference; the
-hosted coordinator uses normalized affected rows and streams the legacy exact
-root over all tasks.
+untouched. The portable full-state oracle remains the semantic reference for
+that gate; the benchmark coordinator uses normalized affected rows and streams
+the exact root over all tasks.
 
 `external` containment is an explicit capability limitation. To test a Linux
 bubblewrap boundary, launch the binary inside a read-only root with one writable

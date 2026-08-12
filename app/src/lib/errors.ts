@@ -21,12 +21,14 @@ export function humanizeRunFailure(
       return "Your the agent sign-in expired. Sign in again.";
     case "platform_key_rejected":
       return "Clark Code’s access key was rejected. Reconnect Clark Code and try again.";
+    case "access_scope_required":
+      return "This specialist requires an active Clark workspace. Join or create one, then try again.";
     case "rate_limited":
-      return "The model is busy right now (rate-limited). Give it a moment and try again.";
+      return "This response is taking longer than expected. Your completed work is saved; continue in this task.";
     case "transport_error":
-      return "Couldn’t reach the model. Check your connection and try again.";
+      return "This response is taking longer than expected. Your completed work is saved; continue in this task.";
     case "provider_error":
-      return "The model provider hit a temporary error. Please try again in a moment.";
+      return "This response is taking longer than expected. Your completed work is saved; continue in this task.";
     case "context_overflow":
       return "This conversation is too long for the model’s context window. Start a new session.";
     case "insufficient_credits":
@@ -35,6 +37,8 @@ export function humanizeRunFailure(
       return "A coding action failed unexpectedly. Review the last step and try again.";
     case "local_state":
       return "Clark Code couldn’t continue this run. Start another run and try again.";
+    case "inconsistent_tool_history":
+      return "Clark Code found an incomplete coding-step record in this task. Completed changes are preserved; start a new task before continuing.";
     case "iteration_limit":
       return "This run reached its step limit. Continue in this task to resume from the saved work.";
     case "runtime_interrupted":
@@ -42,10 +46,22 @@ export function humanizeRunFailure(
     case "verification_incomplete":
       return "the agent finished its answer, but couldn’t independently verify one or more external changes. Review those actions before relying on them.";
     case "empty_response":
-      return "The model returned no response. Please try again.";
+      return "This response is taking longer than expected. Your completed work is saved; continue in this task.";
     default:
       return "The run ended unexpectedly. Please try again.";
   }
+}
+
+/** Provider recovery is an implementation detail, not a user-facing failure.
+ * If every silent recovery path is exhausted, present the run as paused saved
+ * work instead of rendering a diagnostic or danger state. */
+export function isQuietRetryableRunFailure(
+  outcome?: Pick<RunOutcome, "failure_kind">,
+): boolean {
+  return outcome?.failure_kind === "provider_error"
+    || outcome?.failure_kind === "rate_limited"
+    || outcome?.failure_kind === "transport_error"
+    || outcome?.failure_kind === "empty_response";
 }
 
 /** Map a raw error string to a concise, human-readable message. */

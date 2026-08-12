@@ -9,6 +9,7 @@ import {
   removeComposerDraft,
   saveComposerDraft,
   shouldUseCloudComposerDraft,
+  specialistStartComposerDraftId,
 } from "./composerDraft";
 
 const owner = "account-one";
@@ -56,13 +57,34 @@ describe("composer drafts", () => {
     expect(loadComposerDraft(owner, "created-chat")).toBe("");
   });
 
-  it("keeps Scout and Security pre-conversation drafts cloud-key isolated", () => {
-    saveComposerDraft(owner, "specialist:scout:new", "map the production edge");
-    saveComposerDraft(owner, "specialist:security:new", "deep scan auth");
+  it("clears an accepted specialist-start prompt without moving it into the session", () => {
+    const start = specialistStartComposerDraftId("spec");
+    saveComposerDraft(owner, start, "write the specification now");
 
-    expect(loadComposerDraft(owner, "specialist:scout:new")).toBe("map the production edge");
-    expect(loadComposerDraft(owner, "specialist:security:new")).toBe("deep scan auth");
+    expect(clearComposerDraftIfUnchanged(owner, start, "write the specification now")).toBe(true);
+    expect(loadComposerDraft(owner, start)).toBe("");
+    expect(loadComposerDraft(owner, "created-spec-session")).toBe("");
+  });
+
+  it("keeps Scout and Security pre-conversation drafts cloud-key isolated", () => {
+    const scout = specialistStartComposerDraftId("scout");
+    const security = specialistStartComposerDraftId("security");
+    saveComposerDraft(owner, scout, "map the production edge");
+    saveComposerDraft(owner, security, "deep scan auth");
+
+    expect(loadComposerDraft(owner, scout)).toBe("map the production edge");
+    expect(loadComposerDraft(owner, security)).toBe("deep scan auth");
     expect(loadComposerDraft(owner, null)).toBe("");
+  });
+
+  it("leaves the contaminated legacy start-screen namespace behind", () => {
+    localStorage.setItem(
+      "agent-desktop.composer-draft.v1.account-one.new",
+      "stale shared prompt",
+    );
+
+    expect(loadComposerDraft(owner, null)).toBe("");
+    expect(specialistStartComposerDraftId("spec")).toBe("specialist:spec:new.v3");
   });
 
   it("uses stable account identity precedence", () => {

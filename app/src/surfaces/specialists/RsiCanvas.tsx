@@ -159,7 +159,7 @@ function LineageGraph({ overview }: { overview: RsiOverview }) {
             className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2"
           >
             <GraphNode kind={source?.kind ?? "world"} label={source?.label ?? edge.source} />
-            <div className="flex items-center gap-1 text-[0.62rem] font-medium text-ink-faint">
+            <div className="flex items-center gap-1 text-xs font-medium text-ink-faint">
               <span className="hidden sm:inline">{edge.relation.replaceAll("_", " ")}</span>
               <ArrowRight className="size-3.5" />
             </div>
@@ -183,7 +183,7 @@ function GraphNode({
 }) {
   return (
     <div className="min-w-0 border-l-2 border-border px-3 py-2">
-      <div className="text-[0.62rem] font-semibold uppercase tracking-[0.08em] text-accent">{kind}</div>
+      <div className="text-xs font-semibold uppercase tracking-[0.08em] text-accent">{kind}</div>
       <div className="mt-0.5 truncate text-xs font-medium text-ink-secondary" title={label}>{label}</div>
     </div>
   );
@@ -234,7 +234,7 @@ function ProjectionRow({
       <div className="min-w-0 flex-1">
         <div className="text-sm font-medium text-ink">{title}</div>
         <div className="mt-0.5 text-xs leading-5 text-ink-muted">{detail}</div>
-        <div className="mt-1 text-[0.68rem] text-ink-faint">{meta}</div>
+        <div className="mt-1 text-xs text-ink-faint">{meta}</div>
       </div>
       <StatusPill status={status} />
     </div>

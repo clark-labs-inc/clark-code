@@ -51,6 +51,10 @@ function isMarkdown(artifact: Artifact): boolean {
     || /\.(?:md|markdown)(?:[?#]|$)/i.test(artifact.uri ?? artifact.title);
 }
 
+function isSpecDocument(artifact: Artifact): boolean {
+  return /(?:^|[/\\])[^/\\]+_SPEC\.md$/i.test(artifact.uri ?? artifact.title);
+}
+
 export function isCloudArtifactUri(uri?: string): boolean {
   return uri ? productModule().artifacts.isCloudUri(uri) : false;
 }
@@ -264,6 +268,7 @@ export function scheduleArtifactCloudSync(
   snapshot: Snapshot,
   onReady: () => void,
   onWarning?: (message: string) => void,
+  finalizeDocuments = true,
 ): void {
   if (
     configuredCreds?.accountScope !== creds.accountScope
@@ -275,6 +280,7 @@ export function scheduleArtifactCloudSync(
       || !isMarkdown(artifact)
       || isCloudArtifactUri(sourceUri)
       || (!localFilesystemUri(sourceUri) && !isWorkspaceArtifactUri(sourceUri))
+      || (!finalizeDocuments && isSpecDocument(artifact))
     ) continue;
     const key = uploadJobKey(conversationId, artifact, sourceUri);
     if (readyUris.has(key) || nonRetryable.has(key)) continue;

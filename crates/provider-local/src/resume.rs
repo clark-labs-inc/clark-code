@@ -105,6 +105,7 @@ pub(crate) fn to_agent_messages(resume: Option<&ResumeTranscript>) -> Vec<ca::Ag
                         "status": plan.status,
                         "global_reminders": plan.global_reminders,
                         "execution_contract": plan.execution_contract,
+                        "context_revisions": plan.context_revisions,
                         "markdown": plan.markdown,
                     }),
                     timestamp: None,
@@ -433,6 +434,7 @@ mod tests {
                     status: ProposedPlanStatus::AwaitingDecision,
                     global_reminders: Vec::new(),
                     execution_contract: Vec::new(),
+                    context_revisions: Vec::new(),
                 },
             }],
         };

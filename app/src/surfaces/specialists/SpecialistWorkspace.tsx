@@ -15,6 +15,8 @@ import {
 import { useSessionStore } from "../../store/sessionStore";
 import { useSpecialistStore } from "../../store/specialistStore";
 import { useProductAccess } from "../../lib/useProductAccess";
+import { capabilityAccess } from "../../lib/productAccess";
+import { openExternal } from "../../lib/externalLinks";
 import {
   SPECIALISTS,
   projectedSpecialistAccess,
@@ -29,6 +31,7 @@ import {
 import {
   specialistEntitlement,
   specialistOrganizations,
+  specialistCreateOrganization,
   specialistQuery,
   specialistCreateWorkspace,
   specialistCreateSecurityCampaign,
@@ -54,6 +57,7 @@ import { cn } from "../../lib/cn";
 import { RISE, accessibleMotion } from "../../lib/motion";
 import { Composer } from "../Composer";
 import { GoalStatusRail } from "../GoalStatusRail";
+import { UpdatePill } from "../TopBar";
 import { PanelErrorBoundary } from "../../components/PanelErrorBoundary";
 import { ScoutCanvas } from "./ScoutCanvas";
 import { SecurityCanvas } from "./SecurityCanvas";
@@ -62,6 +66,7 @@ import { RsiCanvas } from "./RsiCanvas";
 import { CanvasStatus } from "./SpecialistPrimitives";
 import { SpecialistWelcome, type SpecialistStarter } from "./SpecialistWelcome";
 import { SpecialistAccessGate } from "./SpecialistAccessGate";
+import { SpecWorkspace } from "./SpecWorkspace";
 
 const Conversation = lazy(() =>
   import("../Conversation").then((module) => ({ default: module.Conversation })),
@@ -171,6 +176,7 @@ export function SpecialistWorkspace({
   const contexts = useSpecialistStore((state) => state.contexts);
   const setTab = useSpecialistStore((state) => state.setTab);
   const setContext = useSpecialistStore((state) => state.setContext);
+  const openSpecialist = useSpecialistStore((state) => state.open);
   const auth = useSessionStore((state) => state.auth);
   const bridge = useSessionStore((state) => state.bridge);
   const securityCompletionKey = useSessionStore((state) => active === "security"
@@ -196,16 +202,21 @@ export function SpecialistWorkspace({
   const [data, setData] = useState<SpecialistData>(EMPTY_DATA);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [serverAccess, setServerAccess] = useState<"unknown" | "ready" | "free" | "action_needed" | "scope_lost" | "offline">("unknown");
+  const [serverAccess, setServerAccess] = useState<"unknown" | "ready" | "free" | "action_needed" | "organization_required" | "scope_lost" | "offline">("unknown");
   const [mobilePane, setMobilePane] = useState<"chat" | "canvas">("chat");
   const [canvasOpen, setCanvasOpen] = useState(false);
   const [creatingWorkspace, setCreatingWorkspace] = useState(false);
+  const [organizationDialogOpen, setOrganizationDialogOpen] = useState(false);
+  const [creatingOrganization, setCreatingOrganization] = useState(false);
+  const [organizationName, setOrganizationName] = useState("");
+  const [organizationDomain, setOrganizationDomain] = useState("");
   const definition = SPECIALISTS[active];
   const context = boundContext?.kind === active ? boundContext : contexts[active] ?? { kind: active };
   const preview = previewAccess();
   const projected = preview
     ? preview === "paid" ? "ready" : "free"
     : projectedSpecialistAccess(Boolean(auth), productAccess.access, active);
+  const accessCapability = capabilityAccess(productAccess.access, active);
   const access = projected === "ready"
     ? serverAccess === "unknown" ? "loading" : serverAccess
     : projected;
@@ -217,6 +228,12 @@ export function SpecialistWorkspace({
   }, []);
 
   const load = useCallback(async () => {
+    if (active === "spec") {
+      setServerAccess("ready");
+      setData(EMPTY_DATA);
+      setError(null);
+      return;
+    }
     if (projected !== "ready" || !credentials) {
       clearSensitiveData();
       setServerAccess(projected === "action_needed" ? "action_needed" : "free");
@@ -236,11 +253,14 @@ export function SpecialistWorkspace({
         setServerAccess("scope_lost");
         return;
       }
-      const organization = orgs.find((item) => item.id === context.organizationId) ?? orgs[0];
+      const organization = orgs.find((item) => item.id === context.organizationId)
+        ?? (active === "scout" ? undefined : orgs[0]);
       setOrganizations(orgs);
       if (!organization) {
-        setServerAccess("ready");
         setData(EMPTY_DATA);
+        // Scout owns an explicit create/select scope flow in this workspace.
+        // Do not hide that human action behind the generic access gate.
+        setServerAccess(active === "scout" ? "ready" : orgs.length === 0 ? "organization_required" : "ready");
         return;
       }
       const entitlement = await specialistEntitlement(credentials, active, organization.id);
@@ -251,17 +271,23 @@ export function SpecialistWorkspace({
       }
       entitlementVerified = true;
       setServerAccess("ready");
-      if (context.organizationId !== organization.id) setContext({ organizationId: organization.id });
+      if (active !== "scout" && context.organizationId !== organization.id) {
+        setContext({ organizationId: organization.id });
+      }
       if (active === "scout") {
         const workspaces = await specialistQuery<ScoutWorkspace[]>(
           credentials, active, "scout_workspaces", organization.id,
         );
-        const workspace = workspaces.find((item) => item.id === context.workspaceId) ?? workspaces[0];
+        const workspace = workspaces.find((item) => item.id === context.workspaceId);
         if (!workspace) {
+          if (boundContext?.kind === active && context.workspaceId) {
+            clearSensitiveData();
+            setServerAccess("scope_lost");
+            return;
+          }
           setData({ ...EMPTY_DATA, workspaces });
           return;
         }
-        if (context.workspaceId !== workspace.id) setContext({ workspaceId: workspace.id });
         const [snapshot, changes, simulations] = await Promise.all([
           specialistQuery<{ entries: ScoutSnapshotEntry[] }>(
             credentials, active, "scout_snapshot", organization.id, workspace.id,
@@ -417,10 +443,8 @@ export function SpecialistWorkspace({
     if (projected !== "ready") clearSensitiveData();
   }, [clearSensitiveData, projected]);
 
-  // Create a Scout cartography workspace for the active organization when none
-  // exists yet, so Scout can enroll and upload evidence instead of silently
-  // sealing local-`Partial`. The auto-creation in `startSession` covers the
-  // "start a conversation" path; this covers the canvas-first path.
+  // Workspace creation is always a visible human action. Session startup never
+  // creates or silently selects cloud authority on the user's behalf.
   const createWorkspace = useCallback(async () => {
     if (!credentials || !context.organizationId?.trim()) return;
     setCreatingWorkspace(true);
@@ -440,10 +464,37 @@ export function SpecialistWorkspace({
     }
   }, [context.organizationId, credentials, load, setContext]);
 
+  const createOrganization = useCallback(async () => {
+    if (!credentials || !organizationName.trim() || !organizationDomain.trim()) return;
+    setCreatingOrganization(true);
+    setError(null);
+    try {
+      const created = await specialistCreateOrganization(
+        credentials,
+        organizationName.trim(),
+        organizationDomain.trim(),
+      );
+      setOrganizations((current) => [
+        created,
+        ...current.filter((organization) => organization.id !== created.id),
+      ]);
+      setContext({ organizationId: created.id, workspaceId: undefined, repositoryId: undefined });
+      setOrganizationDialogOpen(false);
+      setOrganizationName("");
+      setOrganizationDomain("");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setCreatingOrganization(false);
+    }
+  }, [credentials, organizationDomain, organizationName, setContext]);
+
   const activeWorkspace = useMemo(
-    () => data.workspaces.find((workspace) => workspace.id === context.workspaceId) ?? data.workspaces[0] ?? null,
+    () => data.workspaces.find((workspace) => workspace.id === context.workspaceId) ?? null,
     [context.workspaceId, data.workspaces],
   );
+
+  if (active === "spec") return <SpecWorkspace />;
 
   const canvas = (
     <div className="min-h-0 flex-1 overflow-y-auto bg-bg-secondary/30">
@@ -552,6 +603,7 @@ export function SpecialistWorkspace({
           <p className="mt-0.5 line-clamp-2 max-w-2xl text-xs leading-4 text-ink-muted">{definition.value}</p>
         </div>
         <div className="ml-auto flex items-center gap-2">
+          <UpdatePill />
           <button
             type="button"
             data-qa={`specialist-show-insights-${active}`}
@@ -568,12 +620,13 @@ export function SpecialistWorkspace({
               <span className="sr-only">Organization</span>
               <Building2 className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-ink-faint" />
               <select
-                value={context.organizationId ?? organizations[0]?.id}
+                value={active === "scout" ? context.organizationId ?? "" : context.organizationId ?? organizations[0]?.id}
                 onChange={(event) => setContext({ organizationId: event.target.value, workspaceId: undefined, repositoryId: undefined })}
                 disabled={boundContext?.kind === active}
                 title={boundContext?.kind === active ? "Start a new specialist conversation to change organization" : undefined}
                 className="h-9 appearance-none rounded-xl bg-bg-secondary pl-8 pr-8 text-xs font-medium text-ink-secondary outline-none transition focus:ring-2 focus:ring-accent/20"
               >
+                {active === "scout" && <option value="">Choose organization…</option>}
                 {organizations.map((organization) => (
                   <option key={organization.id} value={organization.id}>{organization.name}</option>
                 ))}
@@ -581,17 +634,29 @@ export function SpecialistWorkspace({
               <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 size-3.5 -translate-y-1/2 text-ink-faint" />
             </label>
           )}
-          {active === "scout" && organizations.length > 0 && serverAccess === "ready" && (
+          {active === "scout" && serverAccess === "ready" && boundContext?.kind !== active && (
+            <button
+              type="button"
+              onClick={() => setOrganizationDialogOpen(true)}
+              aria-label="Create organization"
+              title="Create organization"
+              className="grid size-9 place-items-center rounded-xl text-ink-muted transition hover:bg-bg-hover hover:text-ink"
+            >
+              <Plus className="size-4" />
+            </button>
+          )}
+          {active === "scout" && context.organizationId && organizations.length > 0 && serverAccess === "ready" && (
             data.workspaces.length > 0 ? (
               <label className="relative hidden md:block">
                 <span className="sr-only">Workspace</span>
                 <select
-                  value={context.workspaceId ?? data.workspaces[0]?.id ?? ""}
+                  value={context.workspaceId ?? ""}
                   onChange={(event) => setContext({ workspaceId: event.target.value || undefined })}
                   disabled={boundContext?.kind === active}
                   title={boundContext?.kind === active ? "Start a new specialist conversation to change workspace" : undefined}
                   className="h-9 appearance-none rounded-xl bg-bg-secondary pl-8 pr-8 text-xs font-medium text-ink-secondary outline-none transition focus:ring-2 focus:ring-accent/20"
                 >
+                  <option value="">Choose workspace…</option>
                   {data.workspaces.map((workspace) => (
                     <option key={workspace.id} value={workspace.id}>{workspace.display_name}</option>
                   ))}
@@ -635,11 +700,62 @@ export function SpecialistWorkspace({
         </div>
       </header>
 
+      {organizationDialogOpen && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4" role="presentation">
+          <form
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="create-scout-organization-title"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void createOrganization();
+            }}
+            className="w-full max-w-md rounded-2xl border border-border bg-bg-elevated p-5 shadow-xl"
+          >
+            <h2 id="create-scout-organization-title" className="text-base font-semibold text-ink">Create Scout organization</h2>
+            <p className="mt-1 text-xs leading-5 text-ink-muted">This creates the explicit tenant boundary. Scout will still wait for you to create a workspace and press Start run.</p>
+            <label className="mt-4 block text-xs font-medium text-ink-secondary">
+              Organization name
+              <input
+                value={organizationName}
+                onChange={(event) => setOrganizationName(event.target.value)}
+                autoFocus
+                className="mt-1.5 h-10 w-full rounded-xl border border-border bg-bg px-3 text-sm text-ink outline-none focus:border-accent"
+              />
+            </label>
+            <label className="mt-3 block text-xs font-medium text-ink-secondary">
+              Company domain
+              <input
+                value={organizationDomain}
+                onChange={(event) => setOrganizationDomain(event.target.value)}
+                placeholder="example.com"
+                className="mt-1.5 h-10 w-full rounded-xl border border-border bg-bg px-3 text-sm text-ink outline-none focus:border-accent"
+              />
+            </label>
+            <div className="mt-5 flex justify-end gap-2">
+              <button type="button" onClick={() => setOrganizationDialogOpen(false)} className="rounded-xl px-3 py-2 text-xs font-medium text-ink-muted hover:bg-bg-hover">Cancel</button>
+              <button
+                type="submit"
+                disabled={creatingOrganization || !organizationName.trim() || !organizationDomain.trim()}
+                className="rounded-xl bg-accent px-3 py-2 text-xs font-semibold text-on-accent disabled:opacity-50"
+              >
+                {creatingOrganization ? "Creating…" : "Create organization"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
       {access !== "ready" ? (
         <SpecialistAccessGate
           key={`${active}:${access}`}
           kind={active}
           state={access}
+          onProductAction={() => {
+            if (accessCapability?.actionUrl) void openExternal(accessCapability.actionUrl);
+            else setSettingsOpen(true);
+          }}
+          onWorkspaceSetup={() => openSpecialist("scout")}
           onRetry={() => {
             void productAccess.reload().catch(() => undefined);
             setServerAccess("unknown");

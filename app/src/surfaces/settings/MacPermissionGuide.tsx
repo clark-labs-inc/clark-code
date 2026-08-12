@@ -93,7 +93,7 @@ function SettingsPreview({
           <span className="size-1.5 rounded-full bg-danger/70" />
           <span className="size-1.5 rounded-full bg-warning/70" />
           <span className="size-1.5 rounded-full bg-success/70" />
-          <span className="ml-2 text-[9px] font-medium text-ink-muted">System Settings</span>
+          <span className="ml-2 text-xs font-medium text-ink-muted">System Settings</span>
         </div>
         <div className="flex min-h-[10.5rem]">
           <div className="w-[38%] border-r border-border-subtle bg-bg-tertiary/55 p-2">
@@ -107,15 +107,15 @@ function SettingsPreview({
           </div>
           <div className="relative flex-1 p-3">
             <div className="text-xs font-semibold text-ink">Privacy &amp; Security</div>
-            <div className="mt-0.5 text-[9px] text-ink-faint">{step.setting}</div>
+            <div className="mt-0.5 text-xs text-ink-faint">{step.setting}</div>
             <div className="mt-2 rounded-md border border-border-subtle bg-bg-tertiary/55 p-2">
-              <div className="text-[9px] text-ink-faint">Allow these applications to control your Mac:</div>
+              <div className="text-xs text-ink-faint">Allow these applications to control your Mac:</div>
               <div className={cn(
                 "permission-guide-target relative mt-2 flex items-center gap-2 rounded-md border px-2 py-1.5",
                 granted ? "border-success/35 bg-success/8" : "border-accent/45 bg-accent/8",
               )}>
-                <div className="grid size-5 place-items-center rounded bg-accent text-[9px] font-bold text-on-accent">C</div>
-                <span className="min-w-0 flex-1 truncate text-[9px] font-medium text-ink">{ownerName}</span>
+                <div className="grid size-5 place-items-center rounded bg-accent text-xs font-bold text-on-accent">C</div>
+                <span className="min-w-0 flex-1 truncate text-xs font-medium text-ink">{ownerName}</span>
                 <span className={cn(
                   "relative h-3.5 w-6 rounded-full",
                   granted ? "bg-success" : "bg-ink-faint/40",

@@ -102,7 +102,8 @@ export interface ManagedWorktreeBaseOption {
 export interface ProjectWorktreeTransitionPlan {
   sourceRoot: string;
   sourceBranch?: string | null;
-  sourceRevision: string;
+  /** Null while the selected branch has not received its first commit. */
+  sourceRevision: string | null;
   sourceChanges: WorktreeChangeSummary;
   sourceIsManaged: boolean;
   targetBranch?: string | null;

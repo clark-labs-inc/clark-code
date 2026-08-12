@@ -3,7 +3,7 @@ import { useSessionStore } from "./store/sessionStore";
 import { useWindowFileDropGuard } from "./lib/attachmentSources";
 import { useHotkeys } from "./lib/hotkeys";
 import { useTextSize } from "./lib/useTextSize";
-import { useTheme } from "./lib/useTheme";
+import { useAppearance } from "./lib/useAppearance";
 import { useAppVersion } from "./lib/appInfo";
 import { SignInScreen } from "./surfaces/SignInScreen";
 import { UpdateStatus } from "./surfaces/UpdateStatus";
@@ -44,7 +44,14 @@ export default function App() {
   const auth = useSessionStore((s) => s.auth);
   const addFiles = useSessionStore((s) => s.addFiles);
   const { textSize, setTextSize, increaseTextSize, decreaseTextSize, resetTextSize } = useTextSize();
-  const { dark, toggle, colorblind, toggleColorblind } = useTheme();
+  const {
+    dark,
+    toggleTheme,
+    colorblind,
+    toggleColorblind,
+    interfaceContrast,
+    setInterfaceContrast,
+  } = useAppearance();
   const [textSizeToastSignal, setTextSizeToastSignal] = useState(0);
 
   const runTextSizeShortcut = (action: () => void) => {
@@ -89,16 +96,17 @@ export default function App() {
           textSize={textSize}
           onTextSizeChange={setTextSize}
           dark={dark}
-          onToggleTheme={toggle}
+          onToggleTheme={toggleTheme}
           colorblind={colorblind}
           onToggleColorblind={toggleColorblind}
+          interfaceContrast={interfaceContrast}
+          onInterfaceContrastChange={setInterfaceContrast}
         />
       </Suspense>
       <UpdateStatus />
       <NoticeToast />
       <WarningToast />
       <TextSizeToast textSize={textSize} signal={textSizeToastSignal} />
-      <AppVersionBadge />
     </>
   );
 }

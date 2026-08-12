@@ -33,6 +33,7 @@ mod deferred;
 pub mod diagnostics;
 pub mod document;
 pub mod effect;
+pub mod feature_context;
 pub mod final_answer;
 pub mod fs;
 pub mod goal;
@@ -773,6 +774,27 @@ impl ToolRegistry {
         self.register_deferred(Arc::new(
             organization_knowledge::OrganizationKnowledgeTool::new(provider),
         ));
+    }
+
+    pub fn enable_feature_context(
+        &mut self,
+        provider: Arc<dyn crate::platform::PlatformContextProvider>,
+        binding: feature_context::FeatureContextBinding,
+    ) {
+        self.tools
+            .retain(|tool| tool.name() != "enterprise_context");
+        self.deferred_catalog.remove_name("enterprise_context");
+        self.register_deferred(Arc::new(feature_context::FeatureContextTool::new(
+            provider.clone(),
+            binding,
+        )));
+        self.tools
+            .retain(|tool| tool.name() != "enterprise_context_feedback");
+        self.deferred_catalog
+            .remove_name("enterprise_context_feedback");
+        self.register_deferred(Arc::new(feature_context::FeatureContextFeedbackTool::new(
+            provider,
+        )));
     }
 
     /// Connect the configured MCP servers and register their tools. A server

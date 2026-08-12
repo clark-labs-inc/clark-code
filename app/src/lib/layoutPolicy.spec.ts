@@ -6,10 +6,17 @@ const sourceModules = import.meta.glob("../surfaces/**/*.{ts,tsx}", {
   import: "default",
 }) as Record<string, string>;
 
+const librarySourceModules = import.meta.glob("../lib/**/*.{ts,tsx}", {
+  eager: true,
+  query: "?raw",
+  import: "default",
+}) as Record<string, string>;
+
 describe("responsive GUI layout policy", () => {
   it("keeps specialist chat primary while the optional canvas stays bounded", () => {
     const source = sourceModules["../surfaces/specialists/SpecialistWorkspace.tsx"];
 
+    expect(source).toContain("<UpdatePill />");
     expect(source).toContain('useState<"chat" | "canvas">("chat")');
     expect(source).toContain("useState(false)");
     expect(source).toContain("xl:grid-cols-[minmax(32rem,1fr)_clamp(22rem,34vw,30rem)]");
@@ -29,6 +36,62 @@ describe("responsive GUI layout policy", () => {
     expect(contextBar).toContain("gap-1.5 overflow-visible");
     expect(parallelContext).toContain("left-1/2");
     expect(parallelContext).toContain("calc(100vw-6rem)");
+  });
+
+  it("settles an accepted start-screen cloud draft before session remount", () => {
+    const composer = sourceModules["../surfaces/Composer.tsx"];
+    const branch = composer.indexOf("if (startedNewSession)");
+    const settle = composer.indexOf(
+      "startDraftSettleResult = await settleAcceptedDraft()",
+      branch,
+    );
+    const start = composer.indexOf("await start({ submittedDraft: t })", settle);
+
+    expect(settle).toBeGreaterThan(branch);
+    expect(start).toBeGreaterThan(settle);
+  });
+
+  it("remounts the composer when draft ownership changes", () => {
+    const composer = sourceModules["../surfaces/Composer.tsx"];
+
+    expect(composer).toContain("function ScopedComposer()");
+    expect(composer).toContain(
+      'return <ScopedComposer key={`${owner}\\u0000${conversationId ?? "new"}`} />',
+    );
+  });
+
+  it("does not re-save the previous render after a cloud draft discard", () => {
+    const source = librarySourceModules["./useCloudComposerDraft.ts"];
+    const effect = source.indexOf("const activeGeneration = configRef.current?.generation");
+    const guard = source.indexOf("discardedGenerationRef.current === activeGeneration", effect);
+    const desiredWrite = source.indexOf("desiredTextRef.current = text", guard);
+
+    expect(effect).toBeGreaterThan(-1);
+    expect(guard).toBeGreaterThan(effect);
+    expect(desiredWrite).toBeGreaterThan(guard);
+  });
+
+  it("surfaces a paused cloud draft instead of hiding repeated conflicts", () => {
+    const composer = sourceModules["../surfaces/Composer.tsx"];
+    const cloudDraft = librarySourceModules["./useCloudComposerDraft.ts"];
+
+    expect(composer).toContain('draft.cloud.status === "conflict"');
+    expect(composer).toContain("Draft cloud sync is paused.");
+    expect(cloudDraft).toContain("conflictPausedRef.current = true");
+    expect(cloudDraft).toContain("!conflictPausedRef.current");
+    expect(cloudDraft).not.toContain("conflictRetries");
+  });
+
+  it("uses the compact specialist composition when window height is scarce", () => {
+    const composer = sourceModules["../surfaces/Composer.tsx"];
+    const welcome = sourceModules["../surfaces/specialists/SpecialistWelcome.tsx"];
+
+    expect(composer).toContain('specialistSession && "specialist-composer"');
+    expect(composer).toContain('specialistSession && "specialist-composer-surface"');
+    expect(welcome).toContain("specialist-welcome-copy");
+    expect(welcome).toContain("specialist-welcome-starters");
+    expect(welcome).toContain("specialist-welcome-starter-detail");
+    expect(welcome).toContain("specialist-welcome-footer");
   });
 
   it("keeps specialist surfaces flat instead of nesting bordered cards and tab bars", () => {

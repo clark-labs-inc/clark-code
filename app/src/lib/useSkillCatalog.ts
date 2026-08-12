@@ -21,7 +21,7 @@ export function useSkillCatalog(
   contextRef.current = contextKey;
 
   const reload = useCallback(async () => {
-    if (!bridge?.reloadSkills || !cwd.trim()) return null;
+    if (!bridge?.reloadSkills) return null;
     const requestContext = contextKey;
     setLoading(true);
     try {
@@ -40,7 +40,7 @@ export function useSkillCatalog(
   }, [bridge, contextKey, cwd, remote]);
 
   useEffect(() => {
-    if (!enabled || !bridge?.listSkills || !cwd.trim()) {
+    if (!enabled || !bridge?.listSkills) {
       setCatalog(null);
       return;
     }
@@ -72,7 +72,7 @@ export function useSkillCatalog(
   }, [bridge, cwd, enabled]);
 
   useEffect(() => {
-    if (!enabled || !bridge?.skillChanges || !catalog || !cwd.trim()) return;
+    if (!enabled || !bridge?.skillChanges || !catalog) return;
     const requestContext = contextKey;
     const timer = window.setInterval(() => {
       if (checking.current || document.visibilityState !== "visible") return;

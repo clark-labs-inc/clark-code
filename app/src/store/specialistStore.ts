@@ -46,6 +46,10 @@ function savePersisted(
 interface SpecialistState {
   accountScope: string | null;
   active: SpecialistKind | null;
+  /** The specialist whose saved-session branch remains expanded in the sidebar.
+   * Navigation expansion is intentionally independent from the active workspace:
+   * opening a regular session leaves the branch available for the next switch. */
+  expanded: SpecialistKind | null;
   tabs: Record<SpecialistKind, SpecialistTab>;
   contexts: Partial<Record<SpecialistKind, SpecialistContext>>;
   open: (kind: SpecialistKind, context?: Partial<SpecialistContext>) => void;
@@ -85,6 +89,7 @@ const initialContexts = contextsFrom(persisted);
 export const useSpecialistStore = create<SpecialistState>((set, get) => ({
   accountScope: initialScope,
   active: null,
+  expanded: null,
   tabs: initialTabs,
   contexts: initialContexts,
   open: (kind, context = {}) => {
@@ -93,7 +98,7 @@ export const useSpecialistStore = create<SpecialistState>((set, get) => ({
       ...get().contexts,
       [kind]: { ...get().contexts[kind], ...context, kind },
     };
-    set({ active: kind, contexts });
+    set({ active: kind, expanded: kind, contexts });
     savePersisted(get().accountScope, get().tabs, contexts);
   },
   close: () => set({ active: null }),
@@ -120,6 +125,7 @@ export const useSpecialistStore = create<SpecialistState>((set, get) => ({
     set({
       accountScope: scope,
       active: null,
+      expanded: null,
       tabs: tabsFrom(next),
       contexts: contextsFrom(next),
     });

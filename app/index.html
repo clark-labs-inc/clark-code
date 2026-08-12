@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-interface-contrast="medium">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
@@ -13,6 +13,7 @@
           const root = document.documentElement;
           const dark = localStorage.getItem("agent-desktop.theme") === "dark";
           const colorblind = localStorage.getItem("agent-desktop.colorblind") === "1";
+          const interfaceContrast = localStorage.getItem("agent-desktop.interface-contrast") || "medium";
           const savedTextSize = localStorage.getItem("agent-desktop.text-size");
           const textSize = savedTextSize === "large"
             ? 110
@@ -21,6 +22,7 @@
               : 100;
           root.classList.toggle("dark", dark);
           root.classList.toggle("colorblind", colorblind);
+          root.dataset.interfaceContrast = interfaceContrast;
           root.dataset.textSize = String(textSize);
           root.style.setProperty("--text-size-scale", String(textSize / 100));
           document.querySelector('meta[name="theme-color"]')?.setAttribute(

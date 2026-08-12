@@ -18,15 +18,13 @@ use super::{
 const MAX_RATE_LIMIT_RETRIES: usize = 12;
 const MAX_RATE_LIMIT_DELAY: Duration = Duration::from_secs(30);
 const MAX_TRANSIENT_RETRIES: usize = 3;
+/// A broken response body is replayed once because the quarantined attempt has
+/// not published text or executed a tool. More replays make an upstream stream
+/// outage feel like an endless task instead of a short invisible recovery.
+const MAX_STREAM_TRANSIENT_RETRIES: usize = 1;
 const MAX_TRANSIENT_DELAY: Duration = Duration::from_secs(8);
 const MAX_SERVER_TRANSIENT_DELAY: Duration = Duration::from_secs(30);
 const MAX_AUTH_RETRIES: usize = 1;
-const MAX_COMPATIBILITY_FALLBACKS: usize = 1;
-const MAX_REQUEST_ATTEMPTS: usize = 1
-    + MAX_RATE_LIMIT_RETRIES
-    + MAX_TRANSIENT_RETRIES
-    + MAX_AUTH_RETRIES
-    + MAX_COMPATIBILITY_FALLBACKS;
 /// Classify the provider's context-overflow dialect while the response is
 /// still at the model transport boundary.
 fn is_context_overflow_message(message: &str) -> bool {
@@ -82,6 +80,7 @@ where
     cancel: &'a CancellationToken,
     request_model: &'a str,
     force_tool_call: bool,
+    forced_tool_name: Option<&'a str>,
     idempotency_key: &'a str,
     on_text: &'a mut OnText,
     on_reasoning: &'a mut OnReasoning,
@@ -131,6 +130,7 @@ impl LlmClient {
             StreamChatOptions {
                 cancel,
                 force_tool_call: false,
+                forced_tool_name: None,
             },
             on_text,
             on_reasoning,
@@ -151,6 +151,7 @@ impl LlmClient {
         let StreamChatOptions {
             cancel,
             force_tool_call,
+            forced_tool_name,
         } = options;
         // One client key identifies an unchanged request body across transport
         // retries. Whether a configured gateway honors it is provider-specific,
@@ -170,6 +171,7 @@ impl LlmClient {
                     cancel,
                     request_model: &request_model,
                     force_tool_call,
+                    forced_tool_name,
                     idempotency_key: &retry.idempotency_key,
                     on_text: &mut on_text,
                     on_reasoning: &mut on_reasoning,
@@ -247,15 +249,17 @@ impl LlmClient {
                     )));
                 }
                 Err(AttemptError::Transient(failure))
-                    if failure.retry_safe && retry.transient_retries < MAX_TRANSIENT_RETRIES =>
+                    if failure.retry_safe
+                        && retry.transient_retries < transient_retry_limit(&failure) =>
                 {
+                    let max_retries = transient_retry_limit(&failure);
                     let delay = transient_delay(failure.retry_after, retry.transient_retries);
                     retry.transient_retries += 1;
                     on_retry(self.failure_context(&failure, &retry, &request_model));
                     tracing::warn!(
                         model = request_model,
                         retry = retry.transient_retries,
-                        max_retries = MAX_TRANSIENT_RETRIES,
+                        max_retries,
                         delay_ms = delay.as_millis() as u64,
                         error = failure.message,
                         "model request failed before output; retrying the same turn",
@@ -307,7 +311,9 @@ impl LlmClient {
             idempotency_key: retry.idempotency_key.clone(),
             provider_request_id: failure.provider_request_id.clone(),
             attempts: retry.request_attempts.try_into().unwrap_or(u32::MAX),
-            max_attempts: MAX_REQUEST_ATTEMPTS.try_into().unwrap_or(u32::MAX),
+            max_attempts: max_attempts_for_failure(failure, retry)
+                .try_into()
+                .unwrap_or(u32::MAX),
             retries: ProviderRetryCounts {
                 transient: retry.transient_retries.try_into().unwrap_or(u32::MAX),
                 rate_limit: retry.rate_limit_retries.try_into().unwrap_or(u32::MAX),
@@ -333,6 +339,7 @@ impl LlmClient {
             cancel,
             request_model,
             force_tool_call,
+            forced_tool_name,
             idempotency_key,
             on_text,
             on_reasoning,
@@ -343,6 +350,7 @@ impl LlmClient {
             messages,
             tools,
             force_tool_call,
+            forced_tool_name,
         ));
         if let Some(session_id) = &self.session_id {
             request = request.header("x-session-id", session_id);
@@ -356,8 +364,10 @@ impl LlmClient {
 
         let response = tokio::select! {
             _ = cancel.cancelled() => return Err(LlmError::Cancelled.into()),
-            response = request.send() => response.map_err(|error| {
-                AttemptError::Transient(RetryableFailure {
+            response = tokio::time::timeout(self.response_start_timeout, request.send()) => {
+                match response {
+                    Ok(Ok(response)) => response,
+                    Ok(Err(error)) => return Err(AttemptError::Transient(RetryableFailure {
                     category: if error.is_timeout() {
                         ProviderIncidentCategory::Timeout
                     } else if error.is_connect() {
@@ -372,8 +382,22 @@ impl LlmClient {
                     provider_error_type: None,
                     provider_request_id: None,
                     output_started: false,
-                })
-            })?,
+                    })),
+                    Err(_) => return Err(AttemptError::Transient(RetryableFailure {
+                        category: ProviderIncidentCategory::Timeout,
+                        message: format!(
+                            "model response did not start within {} seconds",
+                            self.response_start_timeout.as_secs()
+                        ),
+                        retry_after: None,
+                        retry_safe: true,
+                        provider_status: None,
+                        provider_error_type: Some("response_start_timeout".to_string()),
+                        provider_request_id: None,
+                        output_started: false,
+                    })),
+                }
+            },
         };
         let status = response.status();
         let http_version = format!("{:?}", response.version());
@@ -391,7 +415,24 @@ impl LlmClient {
             let retry_after = retry_after_header(response.headers());
             let body = tokio::select! {
                 _ = cancel.cancelled() => return Err(LlmError::Cancelled.into()),
-                body = response.text() => body.unwrap_or_default(),
+                body = tokio::time::timeout(self.stream_idle_timeout, response.text()) => {
+                    match body {
+                        Ok(body) => body.unwrap_or_default(),
+                        Err(_) => return Err(AttemptError::Transient(RetryableFailure {
+                            category: ProviderIncidentCategory::Timeout,
+                            message: format!(
+                                "model error response made no progress for {} seconds",
+                                self.stream_idle_timeout.as_secs()
+                            ),
+                            retry_after: None,
+                            retry_safe: true,
+                            provider_status: Some(status.as_u16()),
+                            provider_error_type: Some("error_body_idle_timeout".to_string()),
+                            provider_request_id,
+                            output_started: false,
+                        })),
+                    }
+                },
             };
             let access_failure = classify_provider_access_failure(Some(status.as_u16()), &body);
             if access_failure == Some(RunFailureKind::InsufficientCredits) {
@@ -457,7 +498,24 @@ impl LlmClient {
         loop {
             let next = tokio::select! {
                 _ = cancel.cancelled() => return Err(LlmError::Cancelled.into()),
-                next = stream.next() => next,
+                next = tokio::time::timeout(self.stream_idle_timeout, stream.next()) => {
+                    match next {
+                        Ok(next) => next,
+                        Err(_) => return Err(AttemptError::Transient(RetryableFailure {
+                            category: ProviderIncidentCategory::Timeout,
+                            message: format!(
+                                "model stream made no progress for {} seconds",
+                                self.stream_idle_timeout.as_secs()
+                            ),
+                            retry_after: None,
+                            retry_safe: true,
+                            provider_status: None,
+                            provider_error_type: Some("stream_transport".to_string()),
+                            provider_request_id: provider_request_id.clone(),
+                            output_started: accumulator.emitted_output(),
+                        })),
+                    }
+                },
             };
             match next {
                 None => break,
@@ -470,7 +528,14 @@ impl LlmClient {
                         },
                         message: format!("model stream error: {error}"),
                         retry_after: None,
-                        retry_safe: !accumulator.emitted_output(),
+                        // The turn is quarantined in `accumulator` until the
+                        // complete response passes validation below. A body
+                        // decode failure therefore cannot have published text
+                        // or executed a tool, even when some SSE chunks were
+                        // received, so replaying this stateless completion is
+                        // safe. Explicit in-band provider failures keep their
+                        // stricter partial-output policy below.
+                        retry_safe: true,
                         provider_status: None,
                         provider_error_type: Some("stream_transport".to_string()),
                         provider_request_id: provider_request_id.clone(),
@@ -617,6 +682,30 @@ fn transient_delay(server_hint: Option<Duration>, retry: usize) -> Duration {
         Some(delay) => delay.min(MAX_SERVER_TRANSIENT_DELAY),
         None => Duration::from_millis(500_u64 << retry.min(4)).min(MAX_TRANSIENT_DELAY),
     }
+}
+
+fn transient_retry_limit(failure: &RetryableFailure) -> usize {
+    if matches!(
+        failure.provider_error_type.as_deref(),
+        Some("stream_transport" | "error_body_idle_timeout")
+    ) {
+        MAX_STREAM_TRANSIENT_RETRIES
+    } else {
+        MAX_TRANSIENT_RETRIES
+    }
+}
+
+fn max_attempts_for_failure(failure: &RetryableFailure, retry: &RetryState) -> usize {
+    if !failure.retry_safe {
+        return retry.request_attempts;
+    }
+    let remaining = match failure.category {
+        ProviderIncidentCategory::RateLimit => {
+            MAX_RATE_LIMIT_RETRIES.saturating_sub(retry.rate_limit_retries)
+        }
+        _ => transient_retry_limit(failure).saturating_sub(retry.transient_retries),
+    };
+    retry.request_attempts.saturating_add(remaining)
 }
 
 fn is_transient_status(status: u16) -> bool {

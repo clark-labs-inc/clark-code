@@ -49,7 +49,7 @@ export function MetricCard({
 }) {
   return (
     <div className="border-t border-border px-1 py-3">
-      <div className="text-[0.68rem] font-semibold uppercase tracking-[0.08em] text-ink-faint">{label}</div>
+      <div className="text-xs font-semibold uppercase tracking-[0.08em] text-ink-faint">{label}</div>
       <div className={cn(
         "mt-1 text-2xl font-semibold tracking-[-0.03em] text-ink",
         tone === "good" && "text-success",
@@ -95,7 +95,7 @@ export function StatusPill({ status }: { status: string }) {
   const attention = ["failed", "needs_attention", "stale", "blocked"].includes(normalized);
   return (
     <span className={cn(
-      "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[0.68rem] font-medium",
+      "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium",
       good && "bg-success/10 text-success",
       busy && "bg-accent-soft text-accent",
       attention && "bg-warning/10 text-warning",

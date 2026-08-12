@@ -23,6 +23,20 @@ describe("detectComposerTrigger", () => {
 });
 
 describe("composerSubmissionState", () => {
+  it("starts a conversation-bound specialist without selecting or replacing a repo", () => {
+    expect(composerSubmissionState({
+      hasContent: true,
+      hasSession: false,
+      connecting: false,
+      activeProvider: "local",
+      projectMode: "local",
+      localCwd: "",
+      startBlocked: "Pick a project folder.",
+      canPickProjectFolder: true,
+      usesConversationWorkspace: true,
+    })).toEqual({ canSubmit: true, shouldPickProjectFolder: false });
+  });
+
   const ready = {
     hasContent: true,
     hasSession: false,

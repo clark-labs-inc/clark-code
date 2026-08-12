@@ -171,6 +171,26 @@ impl ProcessRunner {
             .await
     }
 
+    pub(crate) async fn gh_organizations(
+        &self,
+        page: u32,
+        page_size: u32,
+    ) -> RuntimeResult<ProcessOutput> {
+        validate_page(page, page_size)?;
+        self.run(self.gh_invocation([
+            "api",
+            "--include",
+            "--method",
+            "GET",
+            "user/orgs",
+            "-f",
+            &format!("per_page={page_size}"),
+            "-f",
+            &format!("page={page}"),
+        ])?)
+        .await
+    }
+
     pub(crate) async fn gh_repositories(
         &self,
         organization: &str,
@@ -189,6 +209,32 @@ impl ProcessRunner {
             &format!("per_page={page_size}"),
             "-f",
             &format!("page={page}"),
+        ])?)
+        .await
+    }
+
+    pub(crate) async fn gh_accessible_repositories(
+        &self,
+        page: u32,
+        page_size: u32,
+    ) -> RuntimeResult<ProcessOutput> {
+        validate_page(page, page_size)?;
+        self.run(self.gh_invocation([
+            "api",
+            "--include",
+            "--method",
+            "GET",
+            "user/repos",
+            "-f",
+            &format!("per_page={page_size}"),
+            "-f",
+            &format!("page={page}"),
+            "-f",
+            "affiliation=owner,collaborator,organization_member",
+            "-f",
+            "sort=full_name",
+            "-f",
+            "direction=asc",
         ])?)
         .await
     }

@@ -92,7 +92,7 @@ pub async fn project_worktree_transition_plan(
     let base_options = if decision.action == WorktreeTransitionAction::OpenOwner {
         Vec::new()
     } else {
-        base_options(&source.root).await?
+        base_options(&source.root).await
     };
 
     Ok(ProjectWorktreeTransitionPlan {

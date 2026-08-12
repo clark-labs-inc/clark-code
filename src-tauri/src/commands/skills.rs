@@ -28,7 +28,12 @@ async fn catalog_context(
 ) -> Result<(Box<dyn provider_local::Executor>, PathBuf, String), String> {
     let remote_identity = remote.as_ref().map(|remote| remote.id.clone());
     let executor = project_executor(remote, state).await?;
-    let requested = PathBuf::from(cwd.trim());
+    let requested = if cwd.trim().is_empty() {
+        provider_local::workspace_root()
+            .ok_or_else(|| "Clark Code workspace root is unavailable".to_string())?
+    } else {
+        PathBuf::from(cwd.trim())
+    };
     let root = executor.canonicalize(&requested).await.unwrap_or(requested);
     let environment_id = provider_local::skill_environment_id(&root, remote_identity.as_deref());
     Ok((executor, root, environment_id))
@@ -43,12 +48,25 @@ pub async fn skills_list(
     let _account_lifecycle = state.account_lifecycle.read().await;
     let catalogs = state.runtime_registry.current_skill_catalogs().await;
     let (executor, cwd, environment_id) = catalog_context(&cwd, remote, state.inner()).await?;
-    if let Some(snapshot) = catalogs.current_snapshot(&cwd, &environment_id).await {
-        return Ok(snapshot);
-    }
-    Ok(catalogs
-        .refresh_snapshot(executor.as_ref(), &cwd, &environment_id)
-        .await)
+    let snapshot = match catalogs.current_snapshot(&cwd, &environment_id).await {
+        Some(snapshot) => snapshot,
+        None => {
+            catalogs
+                .refresh_snapshot(executor.as_ref(), &cwd, &environment_id)
+                .await
+        }
+    };
+    tracing::info!(
+        event = "skill_catalog_listed",
+        skill_count = snapshot.skills.len(),
+        enabled_count = snapshot.skills.iter().filter(|skill| skill.enabled).count(),
+        spec_enabled = snapshot
+            .skills
+            .iter()
+            .any(|skill| skill.invocation_name == "spec:spec" && skill.enabled),
+        "skill catalog returned to composer"
+    );
+    Ok(snapshot)
 }
 
 #[tauri::command]

@@ -78,7 +78,8 @@ pub struct ManagedWorktreeBaseOption {
 pub struct ProjectWorktreeTransitionPlan {
     pub source_root: String,
     pub source_branch: Option<String>,
-    pub source_revision: String,
+    /// `None` for an initialized repository whose branch has no first commit.
+    pub source_revision: Option<String>,
     pub source_changes: WorktreeChangeSummary,
     pub source_is_managed: bool,
     pub target_branch: Option<String>,
@@ -159,7 +160,7 @@ pub(super) struct BaseResolution {
 pub(super) struct SourceCheckout {
     pub(super) root: PathBuf,
     pub(super) branch: Option<String>,
-    pub(super) revision: String,
+    pub(super) revision: Option<String>,
     pub(super) changes: WorktreeChangeSummary,
 }
 

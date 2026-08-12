@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { contextLocationLabel } from "./ComposerContextBar";
+import { composerContextKind, contextLocationLabel } from "./ComposerContextBar";
 
 describe("composer execution location", () => {
   it("never labels a local session with the selected SSH host", () => {
@@ -16,5 +16,13 @@ describe("composer execution location", () => {
       activeRemoteHost: "ubuntu@active",
       selectedRemoteHost: "ubuntu@pending",
     })).toBe("ubuntu@active");
+  });
+});
+
+describe("composer context authority", () => {
+  it("never represents Scout as a checkout-scoped conversation", () => {
+    expect(composerContextKind("scout")).toBe("enterprise");
+    expect(composerContextKind("spec")).toBe("hidden");
+    expect(composerContextKind(null)).toBe("checkout");
   });
 });

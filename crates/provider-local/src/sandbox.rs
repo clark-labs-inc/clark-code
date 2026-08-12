@@ -16,6 +16,10 @@ mod access;
 #[derive(Clone, Debug)]
 pub struct Sandbox {
     root: PathBuf,
+    /// An unambiguous user-named subdirectory for the current turn. This is a
+    /// narrower project boundary, not another allowed root: project file and
+    /// shell tools may operate only below it until the turn ends.
+    task_scope: Option<PathBuf>,
     /// An additional allowed root (the app-managed document workspace, outside
     /// the project). Writes/reads are permitted here as well as under `root`.
     /// Canonical; `None` unless attached via [`Sandbox::with_docs`].
@@ -40,6 +44,7 @@ impl Sandbox {
         }
         Ok(Self {
             root: canon,
+            task_scope: None,
             docs: None,
             read_roots: Vec::new(),
         })
@@ -47,6 +52,29 @@ impl Sandbox {
 
     pub fn root(&self) -> &Path {
         &self.root
+    }
+
+    pub fn task_scope(&self) -> Option<&Path> {
+        self.task_scope.as_deref()
+    }
+
+    /// Narrow this cloned sandbox to an existing project subdirectory. The
+    /// session's canonical root and document workspace remain stable; only
+    /// model-facing project access is narrowed for this turn.
+    pub fn with_task_scope(mut self, path: &str) -> Result<Self, String> {
+        let joined = self.join(path);
+        let canonical = joined
+            .canonicalize()
+            .map_err(|error| format!("task scope {path}: {error}"))?;
+        if !canonical.is_dir() {
+            return Err(format!(
+                "task scope {} is not a directory",
+                canonical.display()
+            ));
+        }
+        self.ensure_write_contained(&canonical)?;
+        self.task_scope = Some(canonical);
+        Ok(self)
     }
 
     /// Attach an additional writable/readable root — the app-managed document
@@ -79,6 +107,7 @@ impl Sandbox {
         }
         let canon = joined.canonicalize().map_err(|e| format!("{path}: {e}"))?;
         self.ensure_read_contained(&canon)?;
+        self.ensure_task_contained(&canon, path)?;
         Ok(canon)
     }
 
@@ -119,6 +148,7 @@ impl Sandbox {
             }
         }
         self.ensure_write_contained_lexical(&normalized)?;
+        self.ensure_task_contained(&normalized, path)?;
         Ok(normalized)
     }
 
@@ -160,6 +190,22 @@ impl Sandbox {
         } else {
             self.root.join(p)
         }
+    }
+
+    fn ensure_task_contained(&self, path: &Path, display: &str) -> Result<(), String> {
+        let Some(scope) = &self.task_scope else {
+            return Ok(());
+        };
+        // Product-managed documents are a separate explicit root and remain
+        // available to document-first specialist flows. The narrower boundary
+        // applies only to paths inside the selected project.
+        if !path.starts_with(&self.root) || path.starts_with(scope) {
+            return Ok(());
+        }
+        Err(format!(
+            "{display}: outside the explicit task scope {}. Work inside that directory or ask the user before widening scope",
+            self.display(scope),
+        ))
     }
 
     /// Render a path relative to the root for display, falling back to absolute.
@@ -304,6 +350,28 @@ mod tests {
         let sb = Sandbox::new(dir.path()).unwrap();
         let p = sb.resolve_for_write("src/new_mod.rs").unwrap();
         assert!(p.ends_with("src/new_mod.rs"));
+    }
+
+    #[test]
+    fn task_scope_rejects_project_siblings_but_allows_scoped_reads_and_writes() {
+        let dir = temp_root();
+        std::fs::create_dir(dir.path().join("sibling")).unwrap();
+        std::fs::write(dir.path().join("sibling/example.txt"), "outside").unwrap();
+        let sandbox = Sandbox::new(dir.path())
+            .unwrap()
+            .with_task_scope("src")
+            .unwrap();
+
+        assert!(sandbox.resolve_existing("src/main.rs").is_ok());
+        assert!(sandbox.resolve_for_write("src/new.rs").is_ok());
+        assert!(sandbox
+            .resolve_existing(".")
+            .unwrap_err()
+            .contains("explicit task scope"));
+        assert!(sandbox
+            .resolve_existing("sibling/example.txt")
+            .unwrap_err()
+            .contains("explicit task scope"));
     }
 
     #[cfg(unix)]

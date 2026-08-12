@@ -741,9 +741,9 @@ dependencies = [
 
 [[package]]
 name = "clark-agent"
-version = "0.2.2"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5cd28d2d579c088372013519eaff0052dd76234d3a8c8f5519d81f24db1bcc8d"
+checksum = "04377b19bbf758dc684a12e2d03102a7b40610f017458f0777ddd2679a8efa03"
 dependencies = [
  "async-trait",
  "futures",

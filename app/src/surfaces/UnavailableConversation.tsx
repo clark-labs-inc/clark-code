@@ -35,12 +35,12 @@ export function UnavailableConversationPanel({
           className="font-display mt-1 text-2xl leading-tight text-ink"
         >
           {conversation.kind === "refresh_required"
-            ? "This chat changed on another device"
+            ? "This chat has a newer version"
             : "This chat isn’t available"}
         </h1>
         <p className="mt-2 text-sm leading-6 text-ink-muted">
           {conversation.kind === "refresh_required"
-            ? "Clark Code paused this local copy so it can’t overwrite newer history. The chat stays selected; reopen it to continue from the latest version."
+            ? "Clark Code stopped the stale copy so it can’t overwrite newer history. Reload the latest version to continue; your recent Spec prompts remain in Prompt history."
             : "Clark Code couldn’t reopen it. The chat stays selected so you can retry or remove the unavailable entry from your history."}
         </p>
 
@@ -97,7 +97,7 @@ export function UnavailableConversationPanel({
               className="flex min-h-9 items-center gap-2 rounded-lg bg-accent px-3 text-sm font-semibold text-on-accent transition hover:bg-accent-hover"
             >
               <RefreshCw className="size-4" />
-              Try again
+              {conversation.kind === "refresh_required" ? "Reload latest" : "Try again"}
             </button>
             {allowCleanup && (
               <button

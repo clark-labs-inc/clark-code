@@ -11,7 +11,7 @@ use scout_ingest_protocol::cartography::{
     SimulationOverlayQuery, TaskClaimRequest, TaskClaimResponse,
 };
 use serde::de::DeserializeOwned;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 
 pub use enrollment::{
@@ -32,6 +32,45 @@ use http::{
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
 const MAX_ERROR_BYTES: usize = 16 * 1024;
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct ScoutRunStartRequest {
+    pub organization_id: uuid::Uuid,
+    pub workspace_id: uuid::Uuid,
+    pub request_id: String,
+    pub objective: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ScoutRunStartReceipt {
+    pub organization_id: uuid::Uuid,
+    pub workspace_id: uuid::Uuid,
+    pub request_id: String,
+    pub run_id: uuid::Uuid,
+    pub charter_id: uuid::Uuid,
+    pub source_id: uuid::Uuid,
+    pub initial_task_id: uuid::Uuid,
+    pub created: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct ScoutRunAdvanceRequest {
+    pub organization_id: uuid::Uuid,
+    pub workspace_id: uuid::Uuid,
+    pub run_id: uuid::Uuid,
+    pub completed_task_id: uuid::Uuid,
+    pub batch_receipt_id: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ScoutRunAdvanceReceipt {
+    pub run_id: uuid::Uuid,
+    pub completed_task_id: uuid::Uuid,
+    pub continuation_task_id: Option<uuid::Uuid>,
+    pub child_task_ids: Vec<uuid::Uuid>,
+}
 
 /// Secret-bearing configuration for host-authoritative cartography API.
 ///
@@ -108,6 +147,20 @@ impl CartographyClient {
         request: &TaskClaimRequest,
     ) -> Result<TaskClaimResponse, String> {
         self.post_json(&self.route("tasks/claim"), request).await
+    }
+
+    pub async fn start_run(
+        &self,
+        request: &ScoutRunStartRequest,
+    ) -> Result<ScoutRunStartReceipt, String> {
+        self.post_json(&self.route("runs/start"), request).await
+    }
+
+    pub async fn advance_run(
+        &self,
+        request: &ScoutRunAdvanceRequest,
+    ) -> Result<ScoutRunAdvanceReceipt, String> {
+        self.post_json(&self.route("runs/advance"), request).await
     }
 
     pub async fn authorize_evidence(

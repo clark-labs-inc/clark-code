@@ -84,7 +84,6 @@ pub(super) struct SharedState {
 
 pub(crate) fn orchestration_tools(config: OrchestrationToolsConfig) -> Vec<Arc<dyn ToolExecutor>> {
     let writer_config = config.clone();
-    let scout_max_parallel_agents = config.policy.max_agents;
     let shared = Arc::new(SharedState {
         execution_slots: Arc::new(Semaphore::new(config.policy.max_agents)),
         config,
@@ -98,7 +97,6 @@ pub(crate) fn orchestration_tools(config: OrchestrationToolsConfig) -> Vec<Arc<d
     ];
     tools.extend(writer::tools(writer_config));
     tools.extend(scout::tools(
-        scout_max_parallel_agents,
         shared.config.scout_capsules.clone(),
         shared.config.clone(),
     ));

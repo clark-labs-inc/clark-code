@@ -6,7 +6,6 @@ mod conflict_append_eval;
 mod enterprise_eval;
 mod high_fan_in_eval;
 mod model;
-mod scenarios;
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -197,38 +196,6 @@ async fn run() -> Result<(), String> {
         high_fan_in_eval::high_fan_in_baseline(args.enterprise_fan_in, args.enterprise_fan_in_sweep)
     });
     if !args.high_fan_in_only {
-        recorder.case("complete_ledger_replay", scenarios::complete_replay);
-        recorder.case(
-            "unissued_assignment_rejected",
-            scenarios::unissued_assignment_rejected,
-        );
-        recorder.case(
-            "worker_self_certification_rejected",
-            scenarios::worker_self_certification_rejected,
-        );
-        recorder.case(
-            "missing_replay_recipe_rejected",
-            scenarios::missing_replay_recipe_rejected,
-        );
-        recorder.case(
-            "unverified_failed_test_rejected",
-            scenarios::unverified_failed_test_rejected,
-        );
-        recorder.case("t3_controls_required", scenarios::t3_controls_required);
-        recorder.case(
-            "underpowered_null_rejected",
-            scenarios::underpowered_null_rejected,
-        );
-        recorder.case(
-            "partial_seal_requires_gap",
-            scenarios::partial_requires_limit,
-        );
-        recorder.case("forged_actor_rejected", scenarios::forged_actor_rejected);
-        recorder.case("wilson_reference", scenarios::wilson_reference);
-        recorder.case(
-            "seeded_bootstrap_determinism",
-            scenarios::seeded_bootstrap_determinism,
-        );
         recorder.case("containment_controls", || containment_contract(&args));
     }
 
@@ -253,7 +220,7 @@ async fn skill_contract() -> Result<(String, serde_json::Value), String> {
         "scout_adapter fetch_page",
         "scout_enterprise submit_adapter_receipt",
         "scout_enterprise_query status",
-        "Commit a terminal page only through the coordinator's atomic page boundary",
+        "Submit a page only through the host acceptance workflow",
         "scout-capsule-core",
         "The simulation model must name business actors",
     ] {
@@ -266,14 +233,10 @@ async fn skill_contract() -> Result<(String, serde_json::Value), String> {
     let project = tempfile::tempdir().map_err(|error| error.to_string())?;
     let tools = HashSet::from([
         "scout_capabilities".to_string(),
+        "scout_repository_census".to_string(),
         "scout_adapter".to_string(),
-        "scout_ledger".to_string(),
         "scout_enterprise".to_string(),
         "scout_enterprise_query".to_string(),
-        "scout_probe".to_string(),
-        "scout_measure".to_string(),
-        "delegate_read_only".to_string(),
-        "resolve_delegation".to_string(),
     ]);
     let catalog = discover_skill_catalog_snapshot(
         &LocalExecutor,

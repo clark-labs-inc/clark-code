@@ -100,4 +100,20 @@ describe("GUI motion policy", () => {
     expect(cssEase("ease-agent")).toEqual([...EASE.out]);
     expect(cssEase("ease-agent-inout")).toEqual([...EASE.inOut]);
   });
+
+  it("keeps one transcript activity owner and one reduced-motion policy", () => {
+    const activityOwners = sources
+      .filter(({ source }) => source.includes('className="activity-dots'))
+      .map(({ path }) => path);
+
+    expect(activityOwners).toEqual(["../surfaces/Conversation.tsx"]);
+    expect(cssSource).toMatch(
+      /\.activity-dots > span\s*\{[^}]*animation: activity-dot-pulse/s,
+    );
+    expect(cssSource).toContain(".skeleton::after,\n.spec-writing-line::after");
+    expect(cssSource).not.toMatch(/\.spec-writing-line::after\s*\{[^}]*translateX/s);
+    expect(cssSource).toMatch(
+      /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.activity-dots > span,[\s\S]*\.reply-skeleton\s*\{\s*display: none !important;/,
+    );
+  });
 });

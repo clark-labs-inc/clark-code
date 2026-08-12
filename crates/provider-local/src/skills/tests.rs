@@ -281,6 +281,33 @@ async fn bundled_sentry_skill_is_read_only_and_resolves_through_its_alias() {
 }
 
 #[tokio::test]
+async fn bundled_spec_skill_requires_document_tools_and_stays_explicit() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut catalog = discover_catalog_with_home(&LocalExecutor, temp.path(), None).await;
+    catalog.resolve_capabilities(&HashSet::from(["read_file".to_string()]), &[]);
+    assert!(catalog.resolve_name("spec").is_err());
+
+    catalog.resolve_capabilities(
+        &HashSet::from([
+            "read_file".to_string(),
+            "write_file".to_string(),
+            "edit_file".to_string(),
+        ]),
+        &[],
+    );
+    let spec = catalog.resolve_name("spec").unwrap();
+    assert_eq!(spec.name, "spec:spec");
+    assert!(!spec.allow_implicit_invocation);
+    let body = catalog.read(&LocalExecutor, spec).await.unwrap();
+    assert!(body.contains("Conversation is the input method"));
+    assert!(body.contains("primary result"));
+    assert!(body.contains("Ask one short, high-information question at a time"));
+    assert!(body.contains("<selected_spec_content>"));
+    assert!(body.contains("state not verified"));
+    assert!(body.contains("Never\n  reverse-engineer a problem statement"));
+}
+
+#[tokio::test]
 async fn bundled_scout_skill_requires_the_typed_evidence_toolchain() {
     let temp = tempfile::tempdir().unwrap();
     let mut catalog = discover_catalog_with_home(&LocalExecutor, temp.path(), None).await;
@@ -290,12 +317,10 @@ async fn bundled_scout_skill_requires_the_typed_evidence_toolchain() {
     catalog.resolve_capabilities(
         &HashSet::from([
             "scout_capabilities".to_string(),
+            "scout_repository_census".to_string(),
             "scout_adapter".to_string(),
-            "scout_ledger".to_string(),
             "scout_enterprise".to_string(),
             "scout_enterprise_query".to_string(),
-            "scout_probe".to_string(),
-            "scout_measure".to_string(),
         ]),
         &[],
     );
@@ -336,10 +361,13 @@ async fn bundled_scout_skill_requires_the_typed_evidence_toolchain() {
     assert!(body.contains("with only that retained `task_id`\n   and `receipt_id`"));
     assert!(body.contains("Concurrent collectors share nothing directly"));
     assert!(body.contains("Private key bytes never enter tool"));
-    assert!(body.contains("Warm reads report an index receipt"));
     assert!(body.contains("Use `scout_enterprise_query snapshot`"));
-    assert!(body.contains("Workers propose"));
-    assert!(body.contains("independently checked reproduction"));
+    assert!(body.contains("Collectors observe"));
+    assert!(body.contains("There is exactly one run id"));
+    assert!(body.contains("scout_repository_census collect"));
+    assert!(!body.contains("scout_ledger"));
+    assert!(!body.contains("scout_probe"));
+    assert!(!body.contains("scout_measure"));
     assert!(body.contains("Exhaust the declared business-system graph, not the host filesystem"));
     assert!(body.contains("Stop only when every frontier row is terminal"));
     assert!(body.contains("The simulation model must name business actors"));
@@ -431,12 +459,10 @@ fn bundled_scout_openai_metadata_matches_runtime_dependencies() {
         tools,
         HashSet::from([
             "scout_capabilities",
+            "scout_repository_census",
             "scout_adapter",
-            "scout_ledger",
             "scout_enterprise",
             "scout_enterprise_query",
-            "scout_probe",
-            "scout_measure",
         ])
     );
 }

@@ -32,6 +32,21 @@ function snapshot(toolCall = "tool-1"): Snapshot {
   };
 }
 
+function specSnapshot(): Snapshot {
+  const value = snapshot();
+  const uri = "/Users/alice/.agent/workspace/desk-1/customer-segmentation_SPEC.md";
+  return {
+    ...value,
+    timeline: [{ item: "artifact", id: `doc:${uri}` }],
+    artifacts: [{
+      ...value.artifacts[0]!,
+      id: `doc:${uri}`,
+      title: "customer-segmentation_SPEC.md",
+      uri,
+    }],
+  };
+}
+
 beforeEach(() => {
   installProductModule({
     ...neutralProduct,
@@ -83,6 +98,26 @@ describe("mandatory generated artifact cloud sync", () => {
     });
     expect(snapshotForArtifactCloud("desk-1", local).artifacts[0].uri)
       .toBe("/product-artifacts/deskart_1");
+  });
+
+  it("waits for an idle snapshot before finalizing the temporary Spec file", async () => {
+    invoke.mockResolvedValue({
+      artifact_id: "spec:1",
+      logical_id: "doc:customer-segmentation_SPEC.md",
+      filename: "customer-segmentation_SPEC.md",
+      content_type: "text/markdown",
+      size_bytes: 12,
+      sha256: "a".repeat(64),
+      state: "uploaded",
+      uri: "/product-artifacts/spec-1",
+    });
+    const local = specSnapshot();
+    scheduleArtifactCloudSync(creds, "desk-1", local, () => {}, undefined, false);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(invoke).not.toHaveBeenCalled();
+
+    scheduleArtifactCloudSync(creds, "desk-1", local, () => {}, undefined, true);
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
   });
 
   it("treats a rewrite from a later tool call as a new immutable version", async () => {

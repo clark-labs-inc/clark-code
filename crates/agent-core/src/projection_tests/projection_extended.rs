@@ -183,6 +183,7 @@ fn every_event_variant_reduces_without_panic() {
                 status: ProposedPlanStatus::AwaitingDecision,
                 global_reminders: Vec::new(),
                 execution_contract: Vec::new(),
+                context_revisions: Vec::new(),
             },
         },
         AgentEvent::RunUsageUpdated {

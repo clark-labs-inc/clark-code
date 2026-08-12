@@ -41,6 +41,12 @@ export function ProposedPlanCard({ plan }: { plan: ProposedPlan }) {
         <MarkdownContent>{plan.markdown}</MarkdownContent>
       </div>
 
+      {Boolean(plan.context_revisions?.length) && (
+        <div className="border-t border-border-subtle px-4 py-2 text-xs text-ink-faint">
+          Enterprise context pinned to {plan.context_revisions?.length} immutable graph revision{plan.context_revisions?.length === 1 ? "" : "s"} for implementation.
+        </div>
+      )}
+
       {awaiting && (
         <div className="border-t border-border-subtle px-3 py-3">
           {feedbackOpen ? (

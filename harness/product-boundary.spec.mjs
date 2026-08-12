@@ -64,6 +64,11 @@ test("the default product module is locally usable", () => {
   assert.match(source, /defaultModel: "local-model"/);
 });
 
+test("downstream product entries share the renderer React runtime", () => {
+  const config = readFileSync(resolve(root, "app/vite.config.ts"), "utf8");
+  assert.match(config, /dedupe:\s*\["react",\s*"react-dom"\]/);
+});
+
 test("account operations cross one opaque renderer boundary", () => {
   const auth = readFileSync(resolve(root, "app/src/lib/auth.ts"), "utf8");
   assert.match(auth, /productRequest<.*>\("account\.(load|sign_in|refresh)"\)/);
@@ -78,7 +83,7 @@ test("specialist presentation is catalog-driven", () => {
   );
   assert.match(specialists, /definition\.runtime\.modelRoute/);
   assert.match(navigation, /specialistIcons/);
-  assert.match(navigation, /specialistBadge/);
+  assert.doesNotMatch(navigation, /specialistBadge|\.badge/);
   assert.doesNotMatch(`${specialists}\n${navigation}`, /FIRST_PARTY_SPECIALIST_CATALOG|\bPro\b/);
 });
 

@@ -69,6 +69,23 @@ impl ProductRequestContext<'_> {
         crate::commands::read_workspace_markdown(source_uri, conversation_id).await
     }
 
+    pub async fn write_workspace_markdown(
+        &self,
+        conversation_id: &str,
+        filename: &str,
+        markdown: &[u8],
+    ) -> Result<(), String> {
+        crate::commands::write_workspace_markdown(conversation_id, filename, markdown).await
+    }
+
+    pub async fn remove_workspace_markdown(
+        &self,
+        source_uri: &str,
+        conversation_id: &str,
+    ) -> Result<(), String> {
+        crate::commands::remove_workspace_markdown(source_uri, conversation_id).await
+    }
+
     pub async fn skill_catalog_service(&self) -> Arc<provider_local::SkillCatalogService> {
         self.state.runtime_registry.current_skill_catalogs().await
     }

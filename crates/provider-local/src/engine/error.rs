@@ -50,23 +50,28 @@ pub(super) fn map_loop_error_with_completion_state(
                 .is_some_and(|message| message.starts_with(crate::llm::REQUIRED_TOOL_CONTRACT_VIOLATION))
     );
     let mapped = map_loop_error(error);
+
+    // `update_goal(complete)` is a typed terminal receipt emitted before the
+    // model's final post-tool narration request. Once it was committed in this
+    // run, any failure of that delivery-only request (empty output, malformed
+    // tool choice, rate limit, or transport loss) cannot undo completed work.
+    // External effects still keep their independent verification obligation.
+    if goal_completed {
+        if !unresolved_effects.is_empty() {
+            return MappedLoopError::verification_incomplete(unresolved_effects);
+        }
+        return MappedLoopError::completed();
+    }
+
     if mapped.failure_kind != Some(RunFailureKind::EmptyResponse) && !completion_delivery_failed {
         return mapped;
     }
 
-    // A final answer or a typed goal-complete signal means the work itself
-    // has already been delivered. Pending external effects remain a distinct
-    // failure because they still need canonical verification.
-    if !unresolved_effects.is_empty() && (final_answer_committed || goal_completed) {
+    // A final answer means the response itself was delivered. Pending external
+    // effects remain a distinct failure because they still need canonical
+    // verification.
+    if !unresolved_effects.is_empty() && final_answer_committed {
         return MappedLoopError::verification_incomplete(unresolved_effects);
-    }
-
-    // `update_goal(complete)` is emitted before the model's final post-tool
-    // delivery. If that response is empty or exhausts required-tool repair,
-    // the completed goal is still the authoritative terminal receipt. A final
-    // answer alone is not enough: it can be followed by a user steering turn.
-    if goal_completed {
-        return MappedLoopError::completed();
     }
 
     mapped
@@ -129,6 +134,11 @@ fn map_stream_error(error: agent_loop::StreamError) -> MappedLoopError {
         agent_loop::StreamError::ZeroOutputTransport(message) => MappedLoopError::failed(
             RunFailureKind::EmptyResponse,
             "empty_agent_response",
+            message,
+        ),
+        agent_loop::StreamError::InconsistentToolHistory(message) => MappedLoopError::failed(
+            RunFailureKind::InconsistentToolHistory,
+            "inconsistent_tool_history",
             message,
         ),
         agent_loop::StreamError::Fatal(message) => {
@@ -209,6 +219,12 @@ mod tests {
                 RunFailureKind::ContextOverflow,
             ),
             (
+                agent_loop::StreamError::InconsistentToolHistory(
+                    "interleaved tool result batch".into(),
+                ),
+                RunFailureKind::InconsistentToolHistory,
+            ),
+            (
                 agent_loop::StreamError::Fatal(
                     "execution_budget_exhausted: preserved for follow-up".into(),
                 ),
@@ -219,6 +235,27 @@ mod tests {
         for (error, expected) in cases {
             assert_eq!(map_stream_error(error).failure_kind, Some(expected));
         }
+    }
+
+    #[test]
+    fn inconsistent_history_is_not_collapsed_into_empty_or_provider_failure() {
+        let mapped = map_loop_error_with_completion_state(
+            agent_loop::LoopError::Stream(agent_loop::StreamError::InconsistentToolHistory(
+                "tool result `call-2` interrupted the pending `call-1` batch".into(),
+            )),
+            false,
+            false,
+            &[],
+        );
+
+        assert_eq!(
+            mapped.failure_kind,
+            Some(RunFailureKind::InconsistentToolHistory)
+        );
+        assert_eq!(
+            mapped.ui_error.as_ref().map(|(code, _)| code.as_str()),
+            Some("inconsistent_tool_history")
+        );
     }
 
     #[test]
@@ -282,6 +319,22 @@ mod tests {
                 "provider_error:{} provider ignored required tool choice",
                 crate::llm::REQUIRED_TOOL_CONTRACT_VIOLATION
             ))),
+            false,
+            true,
+            &[],
+        );
+        assert_eq!(mapped.status, RunStatus::Done);
+        assert_eq!(mapped.failure_kind, None);
+        assert_eq!(mapped.run_error, None);
+        assert_eq!(mapped.ui_error, None);
+    }
+
+    #[test]
+    fn completed_goal_stays_done_when_post_completion_transport_closes() {
+        let mapped = map_loop_error_with_completion_state(
+            agent_loop::LoopError::Stream(agent_loop::StreamError::Transient(
+                "connection reset after update_goal complete".into(),
+            )),
             false,
             true,
             &[],

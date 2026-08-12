@@ -16,12 +16,87 @@ pub(super) fn environment_context(sandbox: &Sandbox, remote: bool) -> String {
     if let Some(docs) = sandbox.docs_root() {
         roots.push(docs.display().to_string());
     }
+    let read_only_roots = sandbox
+        .read_roots()
+        .iter()
+        .map(|root| root.display().to_string())
+        .collect::<Vec<_>>();
+    let task_scope = sandbox
+        .task_scope()
+        .map(|scope| sandbox.display(scope))
+        .unwrap_or_default();
     format!(
         "[runtime context — derived from the active session, not user instruction]\n\
-<environment_context>\n  <cwd>{}</cwd>\n  <workspace_roots>{}</workspace_roots>\n  <remote>{remote}</remote>\n</environment_context>",
+<environment_context>\n  <cwd>{}</cwd>\n  <workspace_roots>{}</workspace_roots>\n  <read_only_roots>{}</read_only_roots>\n  <task_scope>{task_scope}</task_scope>\n  <remote>{remote}</remote>\n</environment_context>",
         sandbox.root().display(),
-        roots.join(" | ")
+        roots.join(" | "),
+        read_only_roots.join(" | "),
     )
+}
+
+/// Find an unambiguous existing directory named by the user as the place work
+/// should happen. Only directory tokens immediately following scope language
+/// qualify; unrelated path mentions or multiple sibling directories leave the
+/// ordinary project root unchanged.
+pub(super) fn explicit_task_scope(sandbox: &Sandbox, user_request: &str) -> Option<String> {
+    fn clean_token(token: &str) -> &str {
+        token
+            .trim_matches(|character: char| {
+                character.is_ascii_punctuation()
+                    && character != '/'
+                    && character != '\\'
+                    && character != '-'
+                    && character != '_'
+                    && character != '.'
+            })
+            .trim_end_matches(['.', ',', ':', ';', '!', '?'])
+    }
+
+    let words = user_request.split_whitespace().collect::<Vec<_>>();
+    let mut candidates = Vec::<String>::new();
+    for (index, raw) in words.iter().enumerate() {
+        if index == 0 {
+            continue;
+        }
+        let previous = clean_token(words[index - 1]).to_ascii_lowercase();
+        if !matches!(
+            previous.as_str(),
+            "in" | "inside" | "within" | "under" | "from"
+        ) {
+            continue;
+        }
+        let candidate = clean_token(raw);
+        if candidate.is_empty()
+            || candidate == "."
+            || candidate.starts_with('/')
+            || candidate.split(['/', '\\']).any(|part| part == "..")
+        {
+            continue;
+        }
+        let Ok(path) = sandbox.resolve_existing(candidate) else {
+            continue;
+        };
+        if path.is_dir()
+            && path != sandbox.root()
+            && !candidates.iter().any(|item| item == candidate)
+        {
+            candidates.push(candidate.to_string());
+        }
+    }
+    if candidates.is_empty() {
+        return None;
+    }
+    candidates.sort_by_key(|candidate| candidate.split(['/', '\\']).count());
+    let narrowest = candidates.last()?.clone();
+    let narrowest_path = sandbox.resolve_existing(&narrowest).ok()?;
+    candidates
+        .into_iter()
+        .all(|candidate| {
+            sandbox
+                .resolve_existing(&candidate)
+                .is_ok_and(|path| narrowest_path.starts_with(path))
+        })
+        .then_some(narrowest)
 }
 
 /// Separate the user's request from attached text data so runtime context and
@@ -177,4 +252,37 @@ pub(super) fn decode_base64_text(data: &str) -> std::result::Result<String, ()> 
         }
     }
     String::from_utf8(out).map_err(|_| ())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn derives_one_existing_user_named_directory_and_projects_it_into_context() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path().join("developer-sweep-v9r2/src")).unwrap();
+        std::fs::create_dir(root.path().join("sibling")).unwrap();
+        let sandbox = Sandbox::new(root.path()).unwrap();
+        let request = "Work as a developer in developer-sweep-v9r2. Extend src/parser.js and run tests from developer-sweep-v9r2.";
+
+        let scope = explicit_task_scope(&sandbox, request).unwrap();
+        assert_eq!(scope, "developer-sweep-v9r2");
+        let scoped = sandbox.with_task_scope(&scope).unwrap();
+        let context = environment_context(&scoped, false);
+        assert!(context.contains("<task_scope>developer-sweep-v9r2</task_scope>"));
+    }
+
+    #[test]
+    fn unrelated_named_directories_do_not_silently_narrow_the_project() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir(root.path().join("app")).unwrap();
+        std::fs::create_dir(root.path().join("crates")).unwrap();
+        let sandbox = Sandbox::new(root.path()).unwrap();
+
+        assert_eq!(
+            explicit_task_scope(&sandbox, "Compare behavior in app with crates from crates."),
+            None,
+        );
+    }
 }

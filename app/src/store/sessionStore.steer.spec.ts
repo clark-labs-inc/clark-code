@@ -87,6 +87,57 @@ describe("queued follow-ups and explicit steering", () => {
     await first;
   });
 
+  it("does not queue a rapid duplicate after the first submit consumes an attachment", async () => {
+    let release!: () => void;
+    const promptGate = new Promise<void>((resolve) => { release = resolve; });
+    const bridge = stubBridge({
+      prompt: vi.fn(async () => {
+        await promptGate;
+        return { runId: "run-first" };
+      }),
+    });
+    liveSessions.set(localSession.id, newLiveEntry(localSession, {
+      historyPrefix: null,
+      remote: null,
+      remoteHost: null,
+      projectRoot: "/tmp/project",
+    }));
+    useSessionStore.setState({
+      bridge,
+      session: localSession,
+      snapshot: emptySnapshot(),
+      attachments: [{
+        id: "attachment-1",
+        filename: "benchmark.png",
+        content_type: "image/png",
+        data_base64: "cG5n",
+        size: 3,
+      }],
+    });
+
+    const first = useSessionStore.getState().send("explain this benchmark");
+    await Promise.resolve();
+    expect(useSessionStore.getState().attachments).toEqual([]);
+
+    const duplicate = useSessionStore.getState().send("explain this benchmark");
+
+    await expect(duplicate).resolves.toEqual({ kind: "not_sent" });
+    expect(bridge.prompt).toHaveBeenCalledTimes(1);
+    expect(bridge.prompt).toHaveBeenCalledWith(
+      localSession.id,
+      [{ type: "text", text: "explain this benchmark" }],
+      [{
+        filename: "benchmark.png",
+        content_type: "image/png",
+        data_base64: "cG5n",
+      }],
+    );
+    expect(useSessionStore.getState().queued).toEqual([]);
+    expect(useSessionStore.getState().snapshot.timeline).toHaveLength(1);
+    release();
+    await first;
+  });
+
   it("removes the optimistic bubble and restores the draft when dispatch fails", async () => {
     const bridge = stubBridge({
       prompt: vi.fn(async () => {

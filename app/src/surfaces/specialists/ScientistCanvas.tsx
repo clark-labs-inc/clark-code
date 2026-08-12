@@ -198,7 +198,7 @@ function ProjectionRow({
       <div className="min-w-0 flex-1">
         <div className="text-sm font-medium text-ink">{title}</div>
         <div className="mt-0.5 text-xs leading-5 text-ink-muted">{detail}</div>
-        <div className="mt-1 text-[0.68rem] text-ink-faint">{meta}</div>
+        <div className="mt-1 text-xs text-ink-faint">{meta}</div>
       </div>
       <StatusPill status={status} />
     </div>

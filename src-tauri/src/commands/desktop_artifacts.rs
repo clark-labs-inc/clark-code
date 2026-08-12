@@ -121,6 +121,59 @@ pub(crate) async fn read_workspace_markdown(
     Ok((filename, bytes))
 }
 
+pub(crate) async fn write_workspace_markdown(
+    conversation_id: &str,
+    filename: &str,
+    markdown: &[u8],
+) -> Result<(), String> {
+    validate_workspace_session(conversation_id)?;
+    let relative = Path::new(filename);
+    if relative.components().count() != 1
+        || !provider_local::is_markdown(relative)
+        || !filename.to_ascii_lowercase().ends_with("_spec.md")
+    {
+        return Err("invalid Spec workspace filename".into());
+    }
+    let workspace = session_workspace_path(conversation_id)?;
+    let destination = workspace.join(relative);
+    let temporary = workspace.join(format!(".{filename}.{}.tmp", uuid::Uuid::new_v4()));
+    let bytes = markdown.to_vec();
+    tokio::task::spawn_blocking(move || {
+        std::fs::create_dir_all(&workspace)
+            .map_err(|error| format!("could not prepare Spec workspace: {error}"))?;
+        std::fs::write(&temporary, bytes)
+            .map_err(|error| format!("could not materialize saved Spec: {error}"))?;
+        std::fs::rename(&temporary, &destination)
+            .map_err(|error| format!("could not publish saved Spec locally: {error}"))
+    })
+    .await
+    .map_err(|error| format!("Spec materialization task failed: {error}"))?
+}
+
+pub(crate) async fn remove_workspace_markdown(
+    source_uri: &str,
+    conversation_id: &str,
+) -> Result<(), String> {
+    let workspace = session_workspace_path(conversation_id)?;
+    let relative = workspace_relative_source(source_uri, conversation_id, &workspace)?;
+    if relative.components().count() != 1
+        || !relative
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.to_ascii_lowercase().ends_with("_spec.md"))
+    {
+        return Err("only the canonical Spec document can be removed".into());
+    }
+    let path = workspace.join(relative);
+    tokio::task::spawn_blocking(move || match std::fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!("could not remove temporary Spec document: {error}")),
+    })
+    .await
+    .map_err(|error| format!("Spec cleanup task failed: {error}"))?
+}
+
 #[tauri::command]
 pub async fn workspace_artifact_read(uri: String) -> Result<String, String> {
     let desktop_id = workspace_uri_session(&uri)?;

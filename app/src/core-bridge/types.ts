@@ -162,11 +162,22 @@ export interface ExecutionChecklist {
 
 export type ProposedPlanStatus = "awaiting_decision" | "approved" | "superseded";
 
+export interface PlanContextRevision {
+  context_kind: string;
+  organization_id?: string;
+  workspace_id?: string;
+  query: string;
+  effective_at_ms: number;
+  known_at_ms: number;
+  selector_sha256: string;
+}
+
 export interface ProposedPlan {
   id: string;
   revision: number;
   markdown: string;
   status: ProposedPlanStatus;
+  context_revisions?: PlanContextRevision[];
 }
 
 export type PermissionOptionKind =
@@ -247,6 +258,7 @@ export type RunStatus =
 export type RunFailureKind =
   | "session_expired"
   | "platform_key_rejected"
+  | "access_scope_required"
   | "provider_error"
   | "rate_limited"
   | "transport_error"
@@ -254,6 +266,7 @@ export type RunFailureKind =
   | "insufficient_credits"
   | "tool_fatal"
   | "local_state"
+  | "inconsistent_tool_history"
   | "iteration_limit"
   | "runtime_interrupted"
   | "verification_incomplete"

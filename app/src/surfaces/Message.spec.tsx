@@ -49,7 +49,7 @@ describe("assistant message actions", () => {
     expect(markup).toMatch(/space-y-4 whitespace-normal[^\"]*min-w-0 w-full/);
   });
 
-  it("uses the persisted low-glare reading contrast by default", () => {
+  it("uses the shared semantic text palette", () => {
     const markup = renderToStaticMarkup(
       <Message
         role="agent"
@@ -58,8 +58,7 @@ describe("assistant message actions", () => {
       />,
     );
 
-    expect(markup).toContain("chat-reading-contrast");
-    expect(markup).toContain('data-chat-contrast="low"');
+    expect(markup).toContain("text-ink");
   });
 
   it("marks new user and assistant rows with role-specific entrance motion", () => {

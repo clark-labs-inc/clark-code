@@ -426,6 +426,24 @@ fn organization_knowledge_is_an_explicit_read_only_registry_plugin() {
                 organizations: Vec::new(),
             })
         }
+
+        async fn feature_context(
+            &self,
+            request: &crate::platform::FeatureContextRequest,
+        ) -> Result<crate::platform::FeatureContextResponse, String> {
+            Ok(crate::platform::FeatureContextResponse {
+                query: request.query.clone(),
+                packets: Vec::new(),
+                unavailable_reason: Some("not configured".into()),
+            })
+        }
+
+        async fn submit_feature_context_feedback(
+            &self,
+            _request: &crate::platform::FeatureContextFeedbackRequest,
+        ) -> Result<crate::platform::FeatureContextFeedbackReceipt, String> {
+            Err("not configured".into())
+        }
     }
     let mut registry = ToolRegistry::new(None, None);
     assert!(registry.get("organization_knowledge").is_none());
@@ -433,6 +451,31 @@ fn organization_knowledge_is_an_explicit_read_only_registry_plugin() {
     let tool = registry.get("organization_knowledge").unwrap();
     assert!(!tool.mutating());
     assert_eq!(tool.kind(), ToolKind::Research);
+
+    registry.enable_feature_context(
+        Arc::new(EmptyContext),
+        crate::tools::feature_context::FeatureContextBinding {
+            repository_fingerprint: Some("repo-fingerprint".into()),
+            organization_id: Some("host-org".into()),
+            workspace_id: Some("host-workspace".into()),
+        },
+    );
+    let tool = registry.get("enterprise_context").unwrap();
+    assert!(!tool.mutating());
+    assert_eq!(tool.kind(), ToolKind::Research);
+    let schema = serde_json::to_string(&tool.parameters()).unwrap();
+    assert!(schema.find("\"action\"").unwrap() < schema.find("\"query\"").unwrap());
+    assert!(!schema.contains("organization_id"));
+    assert!(!schema.contains("workspace_id"));
+    assert!(!schema.contains("repository_fingerprint"));
+
+    let feedback = registry.get("enterprise_context_feedback").unwrap();
+    assert!(feedback.mutating());
+    assert_eq!(feedback.permission_class(), ToolPermissionClass::External);
+    let scope = feedback.permission_scope(&serde_json::json!({})).unwrap();
+    assert_eq!(scope.risk.as_deref(), Some("confirm"));
+    assert!(!scope.remember);
+    assert!(!scope.preapproved);
 }
 
 #[test]

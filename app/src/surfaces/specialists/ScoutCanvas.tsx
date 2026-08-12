@@ -41,8 +41,8 @@ export function ScoutCanvas({
   if (!workspace) {
     return (
       <EmptyState
-        title="No Scout workspace for this organization yet"
-        detail="Scout needs a cartography workspace before it can enroll and upload evidence to the backend. Start a Scout conversation and one will be created automatically, or pick an existing one from the workspace selector in the header."
+        title="Choose or create a Scout workspace"
+        detail="A workspace is the explicit cartography boundary. Scout will not infer one from the open folder and will not create one when a conversation starts."
       />
     );
   }
@@ -123,18 +123,18 @@ export function ScoutCanvas({
           <MetricCard label="Connected sources" value={workspace.source_count} detail="Actively observed" tone="good" />
           <MetricCard label="Collectors online" value={workspace.active_machine_count} detail="Healthy machines" tone="good" />
         </div>
-        <SectionCard title="Latest collection" detail="A bounded, receipt-backed refresh of connected sources">
+        <SectionCard title="Latest recorded activity" detail="Existing receipts only; opening this view does not refresh sources">
           <div className="flex items-center gap-4 px-4 py-4">
             <span className="grid size-10 place-items-center rounded-xl bg-success/10 text-success">
               <Activity className="size-5" />
             </span>
             <div className="min-w-0 flex-1">
-              <div className="text-sm font-medium text-ink">Production estate refresh</div>
+              <div className="text-sm font-medium text-ink">{workspace.display_name}</div>
               <div className="mt-1 text-xs text-ink-muted">
-                7 sources · 50 accepted observations · sealed {relativeTime(workspace.updated_at_ms)}
+                {workspace.source_count} connected sources · {entries.length} loaded graph objects · updated {relativeTime(workspace.updated_at_ms)}
               </div>
             </div>
-            <StatusPill status="complete" />
+            <StatusPill status={workspace.status} />
           </div>
         </SectionCard>
       </div>
@@ -177,7 +177,7 @@ export function ScoutCanvas({
     <div className="space-y-4 p-5">
       <div className="grid gap-3 sm:grid-cols-3">
         <MetricCard label="Mapped objects" value={entries.length} detail="Current evidence window" />
-        <MetricCard label="Sources" value={workspace.source_count} detail="GitHub, AWS, runtime" tone="good" />
+        <MetricCard label="Sources" value={workspace.source_count} detail="Connected control planes" tone="good" />
         <MetricCard label="Latest sequence" value={`#${workspace.latest_change_sequence}`} detail={relativeTime(workspace.updated_at_ms)} />
       </div>
       <SectionCard
@@ -185,7 +185,7 @@ export function ScoutCanvas({
         detail="Facts are shown with their evidence classification and acceptance time"
         action={
           <span className="flex items-center gap-1.5 text-xs text-ink-muted">
-            <Clock3 className="size-3.5" /> effective now
+            <Clock3 className="size-3.5" /> latest loaded cut
           </span>
         }
       >

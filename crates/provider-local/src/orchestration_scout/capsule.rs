@@ -203,11 +203,9 @@ mod tests {
     fn model_schema_has_no_approval_or_authority_fields() {
         let schema = ScoutCapsuleTool {
             state: Arc::new(ScoutToolState {
-                censuses: Default::default(),
-                ledgers: Default::default(),
                 target: Default::default(),
+                repositories: Default::default(),
                 adapter_gate: Default::default(),
-                max_parallel_agents: 1,
             }),
             policy: ScoutCapsulePolicyConfig {
                 authorized_tenant_id: "tenant-a".into(),

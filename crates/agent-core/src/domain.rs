@@ -342,6 +342,22 @@ pub struct PlanExecutionStep {
     pub reminders: Vec<String>,
 }
 
+/// One immutable external context cut used to author a proposed plan.
+///
+/// The neutral core does not interpret `context_kind`; providers use the
+/// typed temporal and selector fields to re-read the same evidence during
+/// execution instead of silently substituting newer context.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PlanContextRevision {
+    pub context_kind: String,
+    pub organization_id: Option<String>,
+    pub workspace_id: Option<String>,
+    pub query: String,
+    pub effective_at_ms: u64,
+    pub known_at_ms: u64,
+    pub selector_sha256: String,
+}
+
 /// A decision-complete implementation proposal produced in read-only Plan Mode.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ProposedPlan {
@@ -355,6 +371,9 @@ pub struct ProposedPlan {
     /// Typed obligations used to bind runtime checklists and reminders.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub execution_contract: Vec<PlanExecutionStep>,
+    /// Evidence/context revisions the human reviewed with this plan.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub context_revisions: Vec<PlanContextRevision>,
 }
 
 /// How a permission option resolves.
@@ -471,6 +490,9 @@ pub enum RunStatus {
 pub enum RunFailureKind {
     SessionExpired,
     PlatformKeyRejected,
+    /// The credential is valid, but the requested run needs an active account,
+    /// organization, or workspace scope that is not currently bound.
+    AccessScopeRequired,
     ProviderError,
     RateLimited,
     TransportError,
@@ -478,6 +500,11 @@ pub enum RunFailureKind {
     InsufficientCredits,
     ToolFatal,
     LocalState,
+    /// The durable conversation could not be projected into a provider
+    /// request without splitting, duplicating, or orphaning a tool-call/result
+    /// batch. Deterministic for the saved history and therefore not retryable
+    /// as an empty response or transport failure.
+    InconsistentToolHistory,
     /// The provider exhausted an explicitly configured model/tool step budget
     /// before producing a terminal answer. The saved conversation can be
     /// continued; this is not corrupt local state.

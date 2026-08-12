@@ -27,9 +27,13 @@ pub(crate) const REQUIRED_TOOL_CONTRACT_VIOLATION: &str = "required_tool_contrac
 
 pub(crate) use recovery::{now_ms, ProviderFailureContext};
 
-/// Bound the complete HTTP exchange, including a response stream that stops
-/// making progress. Provider retries remain separately bounded in `retry`.
-const DEFAULT_MODEL_REQUEST_TIMEOUT: Duration = Duration::from_secs(7 * 60);
+/// Bound the wait for response headers without imposing a deadline on a healthy
+/// long-running reasoning stream.
+const DEFAULT_MODEL_RESPONSE_START_TIMEOUT: Duration = Duration::from_secs(2 * 60);
+/// Once streaming starts, require transport progress at least this often. The
+/// deadline resets for every body chunk, so a productive multi-minute turn is
+/// allowed while a dead connection recovers invisibly within an ordinary wait.
+const DEFAULT_MODEL_STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(45);
 
 fn desktop_user_agent() -> String {
     let platform = match std::env::consts::OS {
@@ -208,6 +212,10 @@ impl ToolSchema {
 pub(crate) struct StreamChatOptions<'a> {
     pub(crate) cancel: &'a CancellationToken,
     pub(crate) force_tool_call: bool,
+    /// After a provider ignores the generic required-tool boundary, the
+    /// adapter can retry with one named delivery tool. This remains `None` for
+    /// ordinary turns so the model is free to choose the next work tool.
+    pub(crate) forced_tool_name: Option<&'a str>,
 }
 
 /// Token/cost accounting from the final streamed chunk (OpenRouter shape,
@@ -348,6 +356,8 @@ impl std::fmt::Display for LlmError {
 #[derive(Clone)]
 pub struct LlmClient {
     http: reqwest::Client,
+    response_start_timeout: Duration,
+    stream_idle_timeout: Duration,
     base_url: String,
     model: String,
     api_key: Option<String>,
@@ -355,6 +365,10 @@ pub struct LlmClient {
     /// Clark Code conversation UUID forwarded through the gateway for routing.
     session_id: Option<String>,
     temperature: Option<f32>,
+    /// Host-owned response ceiling. This bounds active-but-nonproductive
+    /// reasoning streams that transport-idle timeouts cannot distinguish from
+    /// useful progress.
+    max_output_tokens: Option<u32>,
     /// Reasoning-effort override forwarded to the passthrough ("low" … "xhigh").
     /// `None` → the server applies the model's default.
     reasoning_effort: Option<String>,
@@ -397,6 +411,7 @@ impl LlmClient {
             config.temperature,
         )?;
         client.reasoning_effort = config.reasoning_effort.clone();
+        client.max_output_tokens = config.max_output_tokens;
         client.model_reasoning_efforts = config
             .models
             .iter()
@@ -422,39 +437,43 @@ impl LlmClient {
         headers: Vec<(String, String)>,
         temperature: Option<f32>,
     ) -> Result<Self, String> {
-        Self::from_parts_with_timeout(
+        Self::from_parts_with_timeouts(
             base_url,
             model,
             api_key,
             headers,
             temperature,
-            DEFAULT_MODEL_REQUEST_TIMEOUT,
+            DEFAULT_MODEL_RESPONSE_START_TIMEOUT,
+            DEFAULT_MODEL_STREAM_IDLE_TIMEOUT,
         )
     }
 
-    pub(crate) fn from_parts_with_timeout(
+    pub(crate) fn from_parts_with_timeouts(
         base_url: &str,
         model: &str,
         api_key: Option<String>,
         headers: Vec<(String, String)>,
         temperature: Option<f32>,
-        request_timeout: Duration,
+        response_start_timeout: Duration,
+        stream_idle_timeout: Duration,
     ) -> Result<Self, String> {
         let user_agent = desktop_user_agent();
         let http = desktop_http::build_client(desktop_http::ClientOptions {
-            request_timeout: Some(request_timeout),
             user_agent: Some(&user_agent),
             ..Default::default()
         })
         .map_err(|e| format!("llm client build failed: {e}"))?;
         Ok(Self {
             http,
+            response_start_timeout,
+            stream_idle_timeout,
             base_url: base_url.trim_end_matches('/').to_string(),
             model: model.to_string(),
             api_key,
             headers,
             session_id: None,
             temperature,
+            max_output_tokens: None,
             reasoning_effort: None,
             model_reasoning_efforts: HashMap::new(),
             model_fallback: None,
@@ -519,12 +538,22 @@ impl LlmClient {
 
     #[cfg(test)]
     fn body(&self, messages: &[ChatMessage], tools: &[ToolSchema]) -> Value {
-        self.body_for_model(&self.model, messages, tools, false)
+        self.body_for_model(&self.model, messages, tools, false, None)
     }
 
     #[cfg(test)]
     fn body_requiring_tool(&self, messages: &[ChatMessage], tools: &[ToolSchema]) -> Value {
-        self.body_for_model(&self.model, messages, tools, true)
+        self.body_for_model(&self.model, messages, tools, true, None)
+    }
+
+    #[cfg(test)]
+    fn body_requiring_named_tool(
+        &self,
+        messages: &[ChatMessage],
+        tools: &[ToolSchema],
+        tool_name: &str,
+    ) -> Value {
+        self.body_for_model(&self.model, messages, tools, true, Some(tool_name))
     }
 
     fn body_for_model(
@@ -533,6 +562,7 @@ impl LlmClient {
         messages: &[ChatMessage],
         tools: &[ToolSchema],
         force_tool_call: bool,
+        forced_tool_name: Option<&str>,
     ) -> Value {
         let mut body = json!({
             "model": model,
@@ -541,7 +571,14 @@ impl LlmClient {
         });
         if !tools.is_empty() {
             body["tools"] = serde_json::to_value(tools).unwrap_or(Value::Null);
-            body["tool_choice"] = json!(if force_tool_call { "required" } else { "auto" });
+            body["tool_choice"] = if let Some(tool_name) = forced_tool_name {
+                json!({
+                    "type": "function",
+                    "function": { "name": tool_name },
+                })
+            } else {
+                json!(if force_tool_call { "required" } else { "auto" })
+            };
         }
         if let Some(t) = self.temperature {
             body["temperature"] = json!(t);
@@ -569,7 +606,10 @@ impl LlmClient {
         if let Some(provider_preferences) = &self.provider_preferences {
             body["provider"] = provider_preferences.clone();
         }
-        if let Some(max_tokens) = crate::config::model_max_output_tokens(model) {
+        if let Some(max_tokens) = self
+            .max_output_tokens
+            .or_else(|| crate::config::model_max_output_tokens(model))
+        {
             body["max_tokens"] = json!(max_tokens);
         }
         body

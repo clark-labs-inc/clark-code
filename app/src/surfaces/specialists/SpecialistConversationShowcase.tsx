@@ -89,13 +89,13 @@ function MetricStrip({
           transition={staggeredTransition(reduceMotion, index, 0.045)}
           className="min-w-0 px-1 py-1"
         >
-          <div className="truncate text-[0.62rem] font-semibold uppercase tracking-[0.08em] text-ink-faint">
+          <div className="truncate text-xs font-semibold uppercase tracking-[0.08em] text-ink-faint">
             {metric.label}
           </div>
           <div className={cn("mt-1 truncate text-sm font-semibold", toneText(metric.tone))}>
             {metric.value}
           </div>
-          <div className="mt-0.5 truncate text-[0.65rem] text-ink-muted">{metric.detail}</div>
+          <div className="mt-0.5 truncate text-xs text-ink-muted">{metric.detail}</div>
           <div
             role="progressbar"
             aria-label={`${metric.label}: ${metric.value}`}
@@ -143,12 +143,12 @@ function EvidenceRow({
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <span className="text-xs font-semibold text-ink">{item.title}</span>
-            <span className={cn("text-[0.6rem] font-medium", toneText(item.tone))}>
+            <span className={cn("text-xs font-medium", toneText(item.tone))}>
               {item.status}
             </span>
           </div>
-          <p className="mt-1 text-[0.7rem] leading-4 text-ink-muted">{item.detail}</p>
-          <div className="mt-2 flex items-center gap-2 text-[0.62rem] text-ink-faint">
+          <p className="mt-1 text-xs leading-4 text-ink-muted">{item.detail}</p>
+          <div className="mt-2 flex items-center gap-2 text-xs text-ink-faint">
             <span className="truncate">{item.source}</span>
             <span aria-hidden>·</span>
             <span className="shrink-0">{item.freshness}</span>
@@ -193,7 +193,7 @@ function StageRow({
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-xs font-semibold text-ink">{stage.title}</span>
           <span className={cn(
-            "text-[0.6rem] font-medium uppercase tracking-[0.08em]",
+            "text-xs font-medium uppercase tracking-[0.08em]",
             complete && "text-success",
             active && "text-accent",
             blocked && "text-warning",
@@ -202,7 +202,7 @@ function StageRow({
             {stage.status}
           </span>
         </div>
-        <p className="mt-1 text-[0.7rem] leading-4 text-ink-muted">{stage.detail}</p>
+        <p className="mt-1 text-xs leading-4 text-ink-muted">{stage.detail}</p>
       </div>
     </m.li>
   );
@@ -232,7 +232,7 @@ export function SpecialistConversationPresentationCard({
             <div className="text-xs font-semibold text-ink">
               {variant === "example" ? "Illustrative example" : "Specialist analysis"}
             </div>
-            <div className="truncate text-[0.65rem] text-ink-faint">
+            <div className="truncate text-xs text-ink-faint">
               {variant === "example" ? "Demo data · no work has run" : "Evidence and decision surface"}
             </div>
           </div>
@@ -288,7 +288,7 @@ export function SpecialistConversationPresentationCard({
               aria-controls={`${panelId}-${id}-panel`}
               onClick={() => setView(id)}
               className={cn(
-                "specialist-tab flex min-h-8 items-center justify-center gap-1.5 border-b-2 px-0 text-[0.68rem] font-medium transition-colors",
+                "specialist-tab flex min-h-8 items-center justify-center gap-1.5 border-b-2 px-0 text-xs font-medium transition-colors",
                 view === id
                   ? "border-accent text-accent"
                   : "border-transparent text-ink-muted hover:text-ink",
@@ -312,11 +312,11 @@ export function SpecialistConversationPresentationCard({
           >
             {view === "map" && (
               <div className="py-2">
-                <div className="text-[0.65rem] font-semibold uppercase tracking-[0.08em] text-ink-faint">
+                <div className="text-xs font-semibold uppercase tracking-[0.08em] text-ink-faint">
                   {presentation.diagramTitle}
                 </div>
                 <Mermaid code={presentation.diagram} />
-                <p className="text-[0.7rem] leading-4 text-ink-secondary">
+                <p className="text-xs leading-4 text-ink-secondary">
                   <span className="font-semibold text-accent">Decision signal:</span>{" "}
                   {presentation.takeaway}
                 </p>
@@ -349,7 +349,7 @@ export function SpecialistConversationPresentationCard({
           </m.div>
         </AnimatePresence>
 
-        <p className="mt-3 text-[0.65rem] leading-4 text-ink-faint">{presentation.limitation}</p>
+        <p className="mt-3 text-xs leading-4 text-ink-faint">{presentation.limitation}</p>
       </m.div>
     </section>
   );

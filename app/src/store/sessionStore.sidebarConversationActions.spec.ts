@@ -226,7 +226,7 @@ describe("sidebar conversation mutations", () => {
     expect(useSessionStore.getState().conversationMutation).toBeNull();
   });
 
-  it("cancels an opening target when that row is deleted", async () => {
+  it("deletes an opening specialist conversation and closes its lens", async () => {
     useSpecialistStore.getState().open("scout");
     useSessionStore.setState({
       connecting: true,
@@ -236,7 +236,11 @@ describe("sidebar conversation mutations", () => {
         title: "Opening",
         remoteHost: null,
       },
-      conversations: [conversation("opening")],
+      conversations: [{
+        ...conversation("opening"),
+        provider: "specialist",
+        specialist: { kind: "scout" },
+      }],
       composerPrefill: { text: "stale retry" },
       sideQuestion: {
         question: "old question",

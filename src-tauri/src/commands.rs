@@ -921,8 +921,17 @@ pub async fn respond(
     response: ClientResponse,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
+    tracing::info!(
+        event = "conversation_response_received",
+        conversation_id = %session_id,
+        response_kind = match &response {
+            ClientResponse::Permission { .. } => "permission",
+            ClientResponse::PlanDecision { .. } => "plan_decision",
+        },
+        "conversation response received"
+    );
     let _account_lifecycle = state.account_lifecycle.read().await;
-    let sid = SessionId::new(session_id);
+    let sid = SessionId::new(&session_id);
     let session_key = SessionKey::from_session(&sid)?;
     let entry = state
         .runtime_registry
@@ -933,7 +942,13 @@ pub async fn respond(
     s.provider
         .respond(&sid, response)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    tracing::info!(
+        event = "conversation_response_applied",
+        conversation_id = %session_id,
+        "conversation response applied"
+    );
+    Ok(())
 }
 
 #[tauri::command]

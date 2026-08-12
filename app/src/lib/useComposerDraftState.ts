@@ -40,19 +40,17 @@ export function useComposerDraftState(owner: string, conversationId: string | nu
 
   const acceptSubmitted = useCallback((submittedText: string) => {
     if (!clearComposerDraftIfUnchanged(owner, conversationId, submittedText)) return false;
-    void cloud.discard();
     if (valueRef.current === submittedText) {
       valueRef.current = "";
       setVisibleValue("");
     }
     return true;
-  }, [cloud.discard, conversationId, owner]);
+  }, [conversationId, owner]);
 
   return {
     value,
     valueRef,
     setValue,
-    setVisibleValue,
     acceptSubmitted,
     cloud,
   };

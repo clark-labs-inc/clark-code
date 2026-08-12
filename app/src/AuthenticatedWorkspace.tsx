@@ -4,6 +4,7 @@ import { useSessionStore } from "./store/sessionStore";
 import { useFanOutStore } from "./store/fanOutStore";
 import { useHotkeys } from "./lib/hotkeys";
 import type { TextSize } from "./lib/useTextSize";
+import type { InterfaceContrast } from "./lib/useAppearance";
 import { TopBar } from "./surfaces/TopBar";
 import { Sidebar } from "./surfaces/Sidebar";
 import { SpecialistWorkspace } from "./surfaces/specialists/SpecialistWorkspace";
@@ -63,6 +64,8 @@ export default function AuthenticatedWorkspace({
   onToggleTheme,
   colorblind,
   onToggleColorblind,
+  interfaceContrast,
+  onInterfaceContrastChange,
 }: {
   textSize: TextSize;
   onTextSizeChange: (size: TextSize) => void;
@@ -70,6 +73,8 @@ export default function AuthenticatedWorkspace({
   onToggleTheme: () => void;
   colorblind: boolean;
   onToggleColorblind: () => void;
+  interfaceContrast: InterfaceContrast;
+  onInterfaceContrastChange: (contrast: InterfaceContrast) => void;
 }) {
   const session = useSessionStore((state) => state.session);
   const activeSpecialist = useSpecialistStore((state) => state.active);
@@ -449,6 +454,8 @@ export default function AuthenticatedWorkspace({
               onToggleTheme={onToggleTheme}
               colorblind={colorblind}
               onToggleColorblind={onToggleColorblind}
+              interfaceContrast={interfaceContrast}
+              onInterfaceContrastChange={onInterfaceContrastChange}
               textSize={textSize}
               onTextSizeChange={onTextSizeChange}
             />

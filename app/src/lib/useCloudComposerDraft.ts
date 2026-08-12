@@ -7,9 +7,11 @@ import {
   shouldUseCloudComposerDraft,
 } from "./composerDraft";
 import {
-  clearCloudComposerDraft,
+  clearSubmittedCloudComposerDraft,
+  cloudComposerDraftBaseRevision,
   cloudComposerDraftGet,
   cloudComposerDraftPut,
+  type CloudDraftClearResult,
 } from "./cloudComposerDraft";
 import { cloudCreds, type CloudCreds } from "./cloudHistory";
 
@@ -50,57 +52,73 @@ export function useCloudComposerDraft({
   const desiredTextRef = useRef(text);
   const syncedTextRef = useRef("");
   const revRef = useRef(0);
-  const inflightRef = useRef(false);
+  const inflightPromiseRef = useRef<Promise<void> | null>(null);
+  const conflictPausedRef = useRef(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const onHydrateRef = useRef(onHydrate);
+  onHydrateRef.current = onHydrate;
 
-  const syncLatest = useCallback(async () => {
+  const syncLatest = useCallback((): Promise<void> => {
     const config = configRef.current;
-    if (!config || inflightRef.current || !readyRef.current) return;
-    inflightRef.current = true;
-    try {
-      while (
-        configRef.current?.generation === config.generation
-        && desiredTextRef.current !== syncedTextRef.current
-      ) {
-        const sending = desiredTextRef.current;
-        setStatus("saving");
-        const result = await cloudComposerDraftPut(
-          config.creds,
-          config.conversationId,
-          sending,
-          revRef.current,
-        );
-        if (configRef.current?.generation !== config.generation) return;
-        revRef.current = result.draft.rev;
-        if (result.conflict) {
-          if (result.draft.text === sending) {
-            syncedTextRef.current = sending;
-            markComposerDraftSynced(
-              config.owner,
-              config.conversationId,
-              sending,
-              result.draft.rev,
-            );
-            setStatus("saved");
-            continue;
-          }
-          syncedTextRef.current = result.draft.text;
-          continue;
-        }
-        syncedTextRef.current = sending;
-        markComposerDraftSynced(
-          config.owner,
-          config.conversationId,
-          sending,
-          result.draft.rev,
-        );
-        setStatus("saved");
-      }
-    } catch {
-      if (configRef.current?.generation === config.generation) setStatus("offline");
-    } finally {
-      inflightRef.current = false;
+    if (!config || !readyRef.current || conflictPausedRef.current) {
+      return Promise.resolve();
     }
+    if (inflightPromiseRef.current) return inflightPromiseRef.current;
+    const syncPromise = (async () => {
+      try {
+        while (
+          configRef.current?.generation === config.generation
+          && desiredTextRef.current !== syncedTextRef.current
+        ) {
+          const sending = desiredTextRef.current;
+          setStatus("saving");
+          const result = await cloudComposerDraftPut(
+            config.creds,
+            config.conversationId,
+            sending,
+            revRef.current,
+          );
+          if (configRef.current?.generation !== config.generation) return;
+          revRef.current = result.draft.rev;
+          if (result.conflict) {
+            if (result.draft.text === sending) {
+              syncedTextRef.current = sending;
+              markComposerDraftSynced(
+                config.owner,
+                config.conversationId,
+                sending,
+                result.draft.rev,
+              );
+              setStatus("saved");
+              continue;
+            }
+            syncedTextRef.current = result.draft.text;
+            // The current revision changed after our read. Retrying against
+            // that newer revision would silently overwrite another device's
+            // edit. Keep the local text in its local draft record and pause
+            // cloud writes for this mounted scope.
+            conflictPausedRef.current = true;
+            setStatus("conflict");
+            return;
+          }
+          conflictPausedRef.current = false;
+          syncedTextRef.current = sending;
+          markComposerDraftSynced(
+            config.owner,
+            config.conversationId,
+            sending,
+            result.draft.rev,
+          );
+          setStatus("saved");
+        }
+      } catch {
+        if (configRef.current?.generation === config.generation) setStatus("offline");
+      } finally {
+        inflightPromiseRef.current = null;
+      }
+    })();
+    inflightPromiseRef.current = syncPromise;
+    return syncPromise;
   }, []);
 
   useEffect(() => {
@@ -110,6 +128,7 @@ export function useCloudComposerDraft({
     const creds = cloudCreds(auth);
     desiredTextRef.current = text;
     readyRef.current = false;
+    conflictPausedRef.current = false;
     revRef.current = 0;
     syncedTextRef.current = "";
     if (timerRef.current) clearTimeout(timerRef.current);
@@ -126,7 +145,7 @@ export function useCloudComposerDraft({
       .then((remote) => {
         if (!active || configRef.current?.generation !== generation) return;
         const local = loadComposerDraftRecord(owner, conversationId);
-        revRef.current = remote?.rev ?? local.cloudRev;
+        revRef.current = cloudComposerDraftBaseRevision(remote);
         syncedTextRef.current = remote?.text ?? "";
         if (discardedGenerationRef.current === generation) {
           desiredTextRef.current = "";
@@ -166,8 +185,27 @@ export function useCloudComposerDraft({
   }, [auth, conversationId, onHydrate, owner, syncLatest]);
 
   useEffect(() => {
+    const activeGeneration = configRef.current?.generation;
+    if (
+      activeGeneration !== undefined
+      && discardedGenerationRef.current === activeGeneration
+      && text
+    ) {
+      // `acceptSubmitted()` already made the desired cloud value empty, while
+      // this effect is still seeing the previous render's non-empty prop. Do
+      // not enqueue that stale render after the clear; the textarea's empty
+      // render will arrive next and release the guard.
+      return;
+    }
+    if (!text && discardedGenerationRef.current === activeGeneration) {
+      discardedGenerationRef.current = null;
+    }
     desiredTextRef.current = text;
     if (!readyRef.current || !configRef.current) return;
+    if (conflictPausedRef.current) {
+      setStatus("conflict");
+      return;
+    }
     if (text === syncedTextRef.current) {
       setStatus("saved");
       return;
@@ -182,7 +220,11 @@ export function useCloudComposerDraft({
 
   useEffect(() => {
     const retry = () => {
-      if (readyRef.current && desiredTextRef.current !== syncedTextRef.current) {
+      if (
+        readyRef.current
+        && !conflictPausedRef.current
+        && desiredTextRef.current !== syncedTextRef.current
+      ) {
         void syncLatest();
       }
     };
@@ -196,29 +238,60 @@ export function useCloudComposerDraft({
     };
   }, [syncLatest]);
 
-  /** Make the current draft empty through the same serialized writer used for
-   * typing. If an older value is already in flight, its loop observes the new
-   * desired value and follows it with the clear instead of resurrecting it. */
-  const discard = useCallback(() => {
+  /** Settle pending writes, then conditionally remove only the submitted text.
+   * A newer edit from another device is preserved and a repeatedly rejected
+   * current revision is surfaced instead of entering a tight 409 loop. */
+  const acceptSubmitted = useCallback(async (
+    targetConversationId: string | null,
+    submittedText: string,
+  ): Promise<CloudDraftClearResult | null> => {
     desiredTextRef.current = "";
     if (timerRef.current) clearTimeout(timerRef.current);
     const config = configRef.current;
-    if (!config) return Promise.resolve();
-    discardedGenerationRef.current = config.generation;
-    if (!readyRef.current) {
-      // The initial read cannot be allowed to rehydrate the accepted text, and
-      // this best-effort CAS must survive an immediate Composer unmount.
-      return clearCloudComposerDraft(config.creds, config.conversationId);
+    if (config && config.conversationId === targetConversationId) {
+      discardedGenerationRef.current = config.generation;
+      if (readyRef.current) {
+        setStatus("saving");
+        await syncLatest();
+      } else if (inflightPromiseRef.current) {
+        await inflightPromiseRef.current;
+      }
     }
-    setStatus("saving");
-    return syncLatest();
+    const creds = cloudCreds(useSessionStore.getState().auth);
+    if (!creds) return null;
+    const result = await clearSubmittedCloudComposerDraft(
+      creds,
+      targetConversationId,
+      submittedText,
+    );
+    const active = configRef.current;
+    if (active && active.conversationId === targetConversationId) {
+      revRef.current = result.draft?.rev ?? 0;
+      syncedTextRef.current = result.draft?.text ?? "";
+      if (result.outcome === "preserved_newer") {
+        conflictPausedRef.current = true;
+        desiredTextRef.current = result.draft.text;
+        const updatedAt = Date.parse(result.draft.updatedAt) || Date.now();
+        replaceComposerDraftFromCloud(active.owner, targetConversationId, {
+          text: result.draft.text,
+          updatedAt,
+          cloudRev: result.draft.rev,
+        });
+        onHydrateRef.current(result.draft.text);
+        setStatus("conflict");
+      } else {
+        conflictPausedRef.current = false;
+        markComposerDraftSynced(
+          active.owner,
+          targetConversationId,
+          "",
+          result.draft?.rev ?? 0,
+        );
+        setStatus("saved");
+      }
+    }
+    return result;
   }, [syncLatest]);
 
-  const clearCreds = cloudCreds(auth);
-  const clear = useCallback((targetConversationId: string | null) => {
-    if (!clearCreds) return Promise.resolve();
-    return clearCloudComposerDraft(clearCreds, targetConversationId);
-  }, [clearCreds?.accountScope]);
-
-  return { status, clear, discard };
+  return { status, acceptSubmitted };
 }

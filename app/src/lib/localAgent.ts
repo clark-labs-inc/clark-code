@@ -29,6 +29,7 @@ export interface ScoutCartographyTarget {
   platform?: string;
   architecture?: string;
   targetId?: string;
+  runRequestId?: string;
 }
 
 export interface ProductSpecialistTarget {
@@ -55,13 +56,7 @@ export interface LocalAgentSettings {
    * to improve future product advisors. Operational telemetry is still retained
    * when off, but remains training-ineligible. */
   advisorTrainingEnabled?: boolean;
-  /** Reading contrast for assistant responses. This is intentionally separate
-   * from the global theme so controls and accessibility states stay crisp. */
-  chatContrast?: ChatContrast;
 }
-
-export const CHAT_CONTRASTS = ["low", "medium", "high"] as const;
-export type ChatContrast = (typeof CHAT_CONTRASTS)[number];
 
 const productModels = productModule().localAgent;
 
@@ -71,7 +66,6 @@ export const DEFAULT_LOCAL_SETTINGS: LocalAgentSettings = {
   reasoningEffort: productModels.defaultReasoningEffort,
   computerUseEnabled: false,
   advisorTrainingEnabled: false,
-  chatContrast: "low",
 };
 
 /** Reasoning effort ids accepted by the active product's models. */
@@ -176,9 +170,6 @@ function normalizeSettings(s: LocalAgentSettings): LocalAgentSettings {
     reasoningEffort,
     computerUseEnabled: s.computerUseEnabled === true,
     advisorTrainingEnabled: s.advisorTrainingEnabled === true,
-    chatContrast: CHAT_CONTRASTS.includes(s.chatContrast as ChatContrast)
-      ? s.chatContrast
-      : DEFAULT_LOCAL_SETTINGS.chatContrast,
   };
 }
 
@@ -373,6 +364,7 @@ export function localConnectConfig(
   scope?: string | null,
   productSpecialist?: ProductSpecialistTarget,
   specialistModel?: { model: string; reasoningEffort: string },
+  scoutReadRoots: string[] = [],
 ): ConnectConfig {
   // For a remote project the root lives on the remote host; tool I/O runs there
   // inside the durable worker. The command policy is keyed by the project path.
@@ -410,10 +402,14 @@ export function localConnectConfig(
       // workstreams. The engine keeps delegated read-only children on the remote
       // host inside the worker's account/project boundary.
       orchestration: { enabled: loadOrchestrationEnabled(scope) },
+      ...(scout && scoutReadRoots.length > 0
+        ? { sandbox_read_roots: [...new Set(scoutReadRoots.filter((root) => root.trim()))] }
+        : {}),
       ...(scout ? {
         scout_cartography: {
           organization_id: scout.organizationId,
           workspace_id: scout.workspaceId,
+          ...(scout.runRequestId ? { human_run_request_id: scout.runRequestId } : {}),
           ...(scout.platform ? { platform: scout.platform } : {}),
           ...(scout.architecture ? { architecture: scout.architecture } : {}),
           ...(scout.targetId ? { target_id: scout.targetId } : {}),

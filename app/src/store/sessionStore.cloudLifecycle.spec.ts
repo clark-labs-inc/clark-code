@@ -19,6 +19,7 @@ import { useSpecialistStore } from "./specialistStore";
 const bridge = {
   closeSession: vi.fn(async () => {}),
 } as unknown as CoreBridge;
+const originalOpenConversation = useSessionStore.getState().openConversation;
 
 function conversation(id: string) {
   return {
@@ -57,6 +58,7 @@ beforeEach(() => {
     activeRemote: null,
     activeRemoteHost: null,
     activeProjectRoot: null,
+    openConversation: originalOpenConversation,
   });
 });
 
@@ -261,10 +263,32 @@ describe("other-device conversation lifecycle events", () => {
     expect(state.unavailableConversation).toEqual({
       id: "changed",
       title: "Conversation changed",
-      detail: "product cloud has a newer revision of this conversation.",
+      detail: "Product cloud rejected a stale snapshot revision.",
       kind: "refresh_required",
     });
     expect(useSpecialistStore.getState().active).toBeNull();
+  });
+
+  it("automatically reloads the latest Spec revision after a conflict", async () => {
+    const openConversation = vi.fn(async () => {});
+    useSessionStore.setState({
+      session: { id: "spec-changed", provider: "specialist" } as Session,
+      conversations: [{
+        ...conversation("spec-changed"),
+        provider: "specialist",
+        specialist: { kind: "spec" as const },
+      }],
+      openConversation,
+    });
+
+    handleCloudHistoryConflict(
+      useSessionStore.setState,
+      useSessionStore.getState,
+      bridge,
+      "spec-changed",
+    );
+
+    await vi.waitFor(() => expect(openConversation).toHaveBeenCalledWith("spec-changed"));
   });
 
   it("does not replace an explicit cleanup with a conflict refresh screen", () => {

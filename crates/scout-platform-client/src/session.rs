@@ -14,7 +14,8 @@ use uuid::Uuid;
 
 use super::{
     enroll_machine, hex_lower, now_ms, CartographyClient, CartographyEnrollmentConfig,
-    CollectorMachineIdentity, MachineEnrollment, MachineEnrollmentRequest,
+    CollectorMachineIdentity, MachineEnrollment, MachineEnrollmentRequest, ScoutRunAdvanceReceipt,
+    ScoutRunAdvanceRequest, ScoutRunStartReceipt, ScoutRunStartRequest,
 };
 
 /// Host-owned binding for a protected collector identity.
@@ -114,6 +115,59 @@ impl ScoutCartographySession {
             self.identity.signing_key(),
         )?;
         self.client.claim_task(&request).await
+    }
+
+    pub async fn start_run(
+        &self,
+        request_id: String,
+        objective: String,
+    ) -> Result<ScoutRunStartReceipt, String> {
+        let request = ScoutRunStartRequest {
+            organization_id: self.enrollment.organization_id,
+            workspace_id: self.enrollment.workspace_id,
+            request_id,
+            objective,
+        };
+        let receipt = self.client.start_run(&request).await?;
+        if receipt.organization_id != request.organization_id
+            || receipt.workspace_id != request.workspace_id
+            || receipt.request_id != request.request_id
+            || receipt.run_id.is_nil()
+            || receipt.charter_id.is_nil()
+            || receipt.source_id.is_nil()
+            || receipt.initial_task_id.is_nil()
+        {
+            return Err("backend Scout run receipt does not match the requested binding".into());
+        }
+        Ok(receipt)
+    }
+
+    pub async fn advance_run(
+        &self,
+        run_id: Uuid,
+        completed_task_id: Uuid,
+        batch_receipt_id: String,
+    ) -> Result<ScoutRunAdvanceReceipt, String> {
+        let request = ScoutRunAdvanceRequest {
+            organization_id: self.enrollment.organization_id,
+            workspace_id: self.enrollment.workspace_id,
+            run_id,
+            completed_task_id,
+            batch_receipt_id,
+        };
+        let receipt = self.client.advance_run(&request).await?;
+        if receipt.run_id != request.run_id
+            || receipt.completed_task_id != request.completed_task_id
+            || receipt
+                .continuation_task_id
+                .is_some_and(|task_id| task_id.is_nil())
+            || receipt.child_task_ids.iter().any(Uuid::is_nil)
+        {
+            return Err(
+                "backend Scout run advance receipt does not match the submitted task".into(),
+            );
+        }
+        Ok(receipt)
     }
 
     pub async fn ingest(

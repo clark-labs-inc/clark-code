@@ -28,7 +28,7 @@ import {
   type SlashCommand,
 } from "../lib/slashCommands";
 import { listCustomCommands } from "../lib/customCommands";
-import { fuzzyFilter, fuzzyFilterProjectPaths } from "../lib/fuzzy";
+import { fuzzyFilter } from "../lib/fuzzy";
 import { cn } from "../lib/cn";
 import { humanizeError } from "../lib/errors";
 import { inTauri } from "../lib/pickFolder";
@@ -38,6 +38,8 @@ import {
   composerDraftOwner,
   loadComposerDraft,
   moveComposerDraft,
+  saveComposerDraft,
+  specialistStartComposerDraftId,
 } from "../lib/composerDraft";
 import { useComposerDraftState } from "../lib/useComposerDraftState";
 import { useSkillCatalog } from "../lib/useSkillCatalog";
@@ -45,6 +47,7 @@ import { useGatedWorkflowGate } from "../lib/useGatedWorkflowGate";
 import { AttachmentChips } from "./ComposerAttachments";
 import { ComposerContextBar } from "./ComposerContextBar";
 import { ComposerAttachmentMenu } from "./ComposerAttachmentMenu";
+import { ComposerVoiceButton } from "./ComposerVoiceButton";
 import { ComposerAutocomplete } from "./ComposerAutocomplete";
 import { ComposerPermissionPill } from "./ComposerPermissionPill";
 import { ComposerCollaborationPill } from "./ComposerCollaborationPill";
@@ -67,17 +70,39 @@ import {
 } from "../lib/attachments";
 import { specialistSlashIntent, specialistWorkflowAvailable, withActiveSpecialistSkill } from "../lib/specialists";
 import { useSpecialistStore } from "../store/specialistStore";
-import { productName } from "../product/productModule";
+import { productModule, productName } from "../product/productModule";
 import { composerBrandingCopy } from "./composerBranding";
+import { SpecComposerCodeContext, useSpecComposerCodeContext } from "./SpecComposerCodeContext";
+import { recordSpecPrompt } from "../lib/specPromptHistory";
 
 export function Composer() {
+  const sessionId = useSessionStore((state) => state.session?.id ?? null);
+  const auth = useSessionStore((state) => state.auth);
+  const activeSpecialist = useSpecialistStore((state) => state.active);
+  const owner = composerDraftOwner(auth?.user ?? null);
+  const conversationId = sessionId
+    ?? (activeSpecialist ? specialistStartComposerDraftId(activeSpecialist) : null);
+
+  // Draft state owns asynchronous local/cloud hydration. A React component
+  // whose draft key changes can otherwise render the previous scope's value
+  // once before its effects hydrate the new key, allowing cloud sync to save
+  // that stale value under the new conversation. Remount at the ownership
+  // boundary so state and in-flight synchronization never cross draft keys.
+  return <ScopedComposer key={`${owner}\u0000${conversationId ?? "new"}`} />;
+}
+
+function ScopedComposer() {
   const branding = composerBrandingCopy(productName());
   const session = useSessionStore((s) => s.session);
+  const sessionSpecialistKind = useSessionStore((s) => s.session
+    ? s.conversations.find((conversation) => conversation.id === s.session?.id)?.specialist?.kind
+    : undefined);
   const auth = useSessionStore((s) => s.auth);
   const draftOwner = composerDraftOwner(auth?.user ?? null);
   const sessionId = session?.id ?? null;
   const activeSpecialist = useSpecialistStore((state) => state.active);
-  const draftConversationId = sessionId ?? (activeSpecialist ? `specialist:${activeSpecialist}:new` : null);
+  const draftConversationId = sessionId
+    ?? (activeSpecialist ? specialistStartComposerDraftId(activeSpecialist) : null);
   const draft = useComposerDraftState(draftOwner, draftConversationId);
   const { value } = draft;
   const draftValueRef = draft.valueRef;
@@ -113,6 +138,12 @@ export function Composer() {
   );
   const localTarget = session ? session.provider === "local" : activeProvider === "local";
   const specialistSession = Boolean(activeSpecialist) || session?.provider === "specialist";
+  const specSession = activeSpecialist === "spec" || sessionSpecialistKind === "spec";
+  const usesConversationWorkspace = Boolean(
+    activeSpecialist
+    && productModule().specialistWorkspace?.isConversationBound(activeSpecialist),
+  );
+  const startsScoutRun = activeSpecialist === "scout" && !session;
   const [sandboxObservation, setSandboxObservation] =
     useState<LocalSandboxObservation | null>(null);
   const sandboxStatus = sandboxStatusForCwd(sandboxObservation, cwd);
@@ -128,7 +159,7 @@ export function Composer() {
     error: skillCatalogError,
     loading: skillsLoading,
     reload: reloadSkills,
-  } = useSkillCatalog(bridge, cwd, remote, localTarget);
+  } = useSkillCatalog(bridge, cwd, remote, localTarget || specSession);
   const busy = useSessionStore((s) =>
     Object.values(s.snapshot.runs).some((r) => r.status === "running" || r.status === "queued"),
   );
@@ -148,6 +179,7 @@ export function Composer() {
     setProjFiles([]);
     setCustomCommands([]);
   }, [draftConversationId, draftOwner]);
+  useEffect(() => setProjFiles([]), [cwd, remote?.id]);
   const start = useSessionStore((s) => s.startSession);
   const connecting = useSessionStore((s) => s.connecting);
   const startBlocked = useSessionStore((s) => (s.session ? null : s.startBlockedReason()));
@@ -157,10 +189,9 @@ export function Composer() {
 
   useComposerAutosize(taRef, value);
 
-  // Mirror the draft into a non-reactive ref so store actions can read the
-  // unsent text without making the textarea value reactive (typing must not
-  // re-render the store). `endSession` stages this as a prefill to carry a
-  // half-typed message across the composer remount a new session forces.
+  // Mirror the exact scoped draft into a non-reactive ref so store actions can
+  // read it without making the textarea value reactive (typing must not
+  // re-render the store). It must never be copied into another draft scope.
   useEffect(() => {
     composerDraftRef.current = value;
   }, [value]);
@@ -209,10 +240,22 @@ export function Composer() {
     });
   }, [prefill, setDraftValue, setPrefill, skillCatalog]);
 
+  const trigger = useMemo(() => detectComposerTrigger(value, caret), [value, caret]);
+  const specCodeContext = useSpecComposerCodeContext({
+    enabled: specSession,
+    draftKey: draftConversationId,
+    trigger,
+    value,
+    caret,
+    textareaRef: taRef,
+    setValue: setDraftValue,
+    setCaret,
+  });
   const hasContent = value.trim().length > 0
     || attachments.length > 0
     || pendingPastes.length > 0
-    || selectedSkills.length > 0;
+    || selectedSkills.length > 0
+    || specCodeContext.references.length > 0;
   const submission = composerSubmissionState({
     hasContent,
     hasSession: !!session,
@@ -222,8 +265,9 @@ export function Composer() {
     localCwd,
     startBlocked,
     canPickProjectFolder: inTauri(),
+    usesConversationWorkspace,
   });
-  const sandboxCheckRequired = sandboxGateRequired({
+  const sandboxCheckRequired = !usesConversationWorkspace && sandboxGateRequired({
     localTarget,
     remoteTarget: remote !== null,
     fullAccess: approvalPolicy === "full",
@@ -233,8 +277,6 @@ export function Composer() {
   });
   const sandboxBlocked = sandboxBlocksSubmission(sandboxCheckRequired, sandboxStatus);
   const canSend = submission.canSubmit && !sandboxBlocked;
-
-  const trigger = useMemo(() => detectComposerTrigger(value, caret), [value, caret]);
 
   useEffect(() => {
     if (trigger?.type !== "@" || projFiles.length > 0) return;
@@ -267,7 +309,7 @@ export function Composer() {
   const suggestions = useMemo<ComposerSuggestion[]>(() => {
     if (!trigger || dismissed) return [];
     if (trigger.type === "@") {
-      return fuzzyFilterProjectPaths(projFiles, trigger.query, 8);
+      return specCodeContext.suggestions(trigger.query, projFiles);
     }
     if (trigger.type === "$") {
       return fuzzyFilter(
@@ -295,6 +337,7 @@ export function Composer() {
     activeProvider,
     customCommands,
     skillCatalog,
+    specCodeContext,
   ]);
 
   useEffect(() => setSel(0), [trigger?.type, trigger?.query]);
@@ -318,6 +361,7 @@ export function Composer() {
 
   const accept = (s: ComposerSuggestion) => {
     if (!trigger) return;
+    if (specCodeContext.acceptSuggestion(s)) return;
     if (s.kind === "skill") {
       const before = value.slice(0, trigger.start);
       const after = value.slice(caret);
@@ -357,6 +401,7 @@ export function Composer() {
       s.cmd.run?.();
       return;
     }
+    if (s.kind === "spec_repository" || s.kind === "spec_folder") return;
     const insert = `@${s.path}${s.kind === "directory" ? "/" : ""} `;
     const before = value.slice(0, trigger.start);
     const after = value.slice(caret);
@@ -378,20 +423,26 @@ export function Composer() {
     const expandedPastes = expandPendingPastes(value, pendingPastes);
     const specialistIntent = specialistSlashIntent(expandedPastes);
     if (specialistIntent) {
-      const targetDraftId = `specialist:${specialistIntent.kind}:new`;
+      const targetDraftId = specialistStartComposerDraftId(specialistIntent.kind);
       const existing = loadComposerDraft(draftOwner, targetDraftId).trim();
       const nextDraft = [existing, specialistIntent.prompt].filter(Boolean).join("\n");
       moveComposerDraft(draftOwner, draftConversationId, targetDraftId, nextDraft);
-      void draft.cloud.clear(draftConversationId);
+      try {
+        const result = await draft.cloud.acceptSubmitted(draftConversationId, value);
+        if (result?.outcome === "preserved_newer") {
+          flashNotice("A newer cloud draft was preserved in the previous composer.");
+        }
+      } catch {
+        flashNotice("The specialist request moved, but its previous cloud draft still needs to sync.");
+      }
       if (useSpecialistStore.getState().active !== specialistIntent.kind) {
         useSessionStore.getState().endSession();
       }
       useSpecialistStore.getState().open(specialistIntent.kind, { workflow: specialistIntent.workflow });
       useSpecialistStore.getState().setTab(specialistIntent.tab);
-      draftValueRef.current = nextDraft;
-      draft.setVisibleValue(nextDraft);
       setPendingPastes([]);
       setSelectedSkills([]);
+      specCodeContext.reset();
       return;
     }
     const t = expandPromptSlashCommand(expandedPastes);
@@ -479,6 +530,7 @@ export function Composer() {
       setPendingPastes([]);
       setEditTimelineIndex(null);
       setSelectedSkills([]);
+      specCodeContext.reset();
       await askSideQuestion(sideQuestion);
       return;
     }
@@ -499,8 +551,23 @@ export function Composer() {
     }));
     const specialist = useSpecialistStore.getState();
     const workflow = specialist.active ? specialist.contexts[specialist.active]?.workflow : undefined;
+    let availableSkills = skillCatalog?.skills ?? [];
+    if (
+      specialist.active === "spec"
+      && !availableSkills.some((skill) => skill.enabled && skill.invocationName === "spec:spec")
+      && bridge?.reloadSkills
+    ) {
+      try {
+        const refreshed = await bridge.reloadSkills(cwd, remote);
+        setSkillCatalog(refreshed);
+        availableSkills = refreshed.skills;
+      } catch (error) {
+        flashNotice(`Could not load the Spec workflow: ${humanizeError(String(error))}`);
+        return;
+      }
+    }
     const skillReferences = withActiveSpecialistSkill(
-      selectedSkillReferences, skillCatalog?.skills ?? [], specialist.active, workflow,
+      selectedSkillReferences, availableSkills, specialist.active, workflow,
     );
     if (!specialistWorkflowAvailable(skillReferences, specialist.active, workflow)) {
       flashNotice("The selected specialist workflow is unavailable. Reload skills and try again.");
@@ -512,39 +579,115 @@ export function Composer() {
       setPendingPastes([]);
       setEditTimelineIndex(null);
       setSelectedSkills([]);
+      specCodeContext.reset();
       return true;
     };
     const startedNewSession = !session;
+    const settleAcceptedDraft = async (): Promise<"preserved_newer" | "failed" | null> => {
+      // Clear locally again after provider acceptance, settle any serialized
+      // writer, and remove only this submitted text from cloud persistence. A
+      // newer cross-device edit is preserved; a repeatedly rejected current
+      // revision is visible to the user instead of spinning in a 409 loop.
+      saveComposerDraft(draftOwner, draftConversationId, "");
+      try {
+        const result = await draft.cloud.acceptSubmitted(
+          draftConversationId,
+          submittedDraftText,
+        );
+        return result?.outcome === "preserved_newer" ? "preserved_newer" : null;
+      } catch {
+        return "failed";
+      }
+    };
+    const notifyDraftSettle = (result: Awaited<ReturnType<typeof settleAcceptedDraft>>) => {
+      if (result === "preserved_newer") {
+        flashNotice("Message sent. A newer cloud draft from another device was preserved.");
+      } else if (result === "failed") {
+        flashNotice("Message sent, but its cloud draft could not be cleared. Your local draft state is preserved.");
+      }
+    };
+    let startDraftSettled = false;
+    let startDraftSettleResult: Awaited<ReturnType<typeof settleAcceptedDraft>> = null;
     if (startedNewSession) {
       // Starting a session replaces the start-screen Composer with a new
       // instance. Do not move an accepted first prompt into that instance's
       // persisted draft: the new Composer would hydrate it (including from
       // cloud draft sync) after this submit handler's old instance unmounts.
       // Clear the start-screen draft first; if session creation stops or
-      // fails, the prefill below restores the user's text.
+      // fails, the prefill below restores the user's text. Await both the
+      // serialized writer and the residue check before `start()` unmounts this
+      // Composer. A long native input arrives in chunks, and letting the
+      // component unmount with a prefix PUT still in flight can leave that
+      // accepted prefix in the cloud to rehydrate the next start screen.
       draft.acceptSubmitted(submittedDraftText);
       // `startSession` can carry a non-reactive draft across the Composer
       // remount. This prompt is already being submitted, so clear that mirror
       // before opening the session or it would reappear in the new composer.
       composerDraftRef.current = "";
-      await start();
+      startDraftSettleResult = await settleAcceptedDraft();
+      startDraftSettled = true;
+      await start({ submittedDraft: t });
       const startedSession = useSessionStore.getState().session;
       if (!startedSession) {
         useSessionStore.getState().setComposerPrefill(t);
         return;
       }
     }
+    const prompt = specCodeContext.prompt(t);
+    if (specSession) {
+      const liveConversationId = useSessionStore.getState().session?.id;
+      if (liveConversationId) {
+        try {
+          await productModule().specialistWorkspace?.prepareDocument?.(
+            "spec",
+            liveConversationId,
+          );
+        } catch (error) {
+          flashNotice(`Could not load the saved spec: ${humanizeError(String(error))}`);
+          if (startedNewSession) useSessionStore.getState().setComposerPrefill(t);
+          return;
+        }
+      }
+    }
     if (editIndex !== null) {
-      const receipt = await resendFrom(editIndex, t.trim(), skillReferences);
-      if (receipt !== null && !startedNewSession) acceptCurrentDraft();
+      const receipt = await resendFrom(editIndex, prompt, skillReferences);
+      if (receipt !== null) {
+        if (specSession) {
+          recordSpecPrompt(
+            draftOwner,
+            useSessionStore.getState().session?.id ?? null,
+            t,
+          );
+        }
+        const acceptedDraft = startedNewSession || acceptCurrentDraft();
+        if (acceptedDraft) {
+          const result = startDraftSettled
+            ? startDraftSettleResult
+            : await settleAcceptedDraft();
+          notifyDraftSettle(result);
+        }
+      }
       return;
     }
-    const outcome = await send(t.trim(), skillReferences);
+    const outcome = await send(prompt, skillReferences);
     if (outcome.kind === "not_sent") {
       if (startedNewSession) useSessionStore.getState().setComposerPrefill(t);
       return;
     }
-    if (!startedNewSession) acceptCurrentDraft();
+    if (specSession) {
+      recordSpecPrompt(
+        draftOwner,
+        useSessionStore.getState().session?.id ?? null,
+        t,
+      );
+    }
+    const acceptedDraft = startedNewSession || acceptCurrentDraft();
+    if (acceptedDraft) {
+      const result = startDraftSettled
+        ? startDraftSettleResult
+        : await settleAcceptedDraft();
+      notifyDraftSettle(result);
+    }
   };
 
   const goalIntent = goalCommandObjective(value);
@@ -598,7 +741,13 @@ export function Composer() {
   };
 
   return (
-    <div className="min-w-0 bg-bg px-3 pb-4 pt-2.5 sm:px-6" {...handlers}>
+    <div
+      className={cn(
+        "min-w-0 bg-bg px-3 pb-4 pt-2.5 sm:px-6",
+        specialistSession && "specialist-composer",
+      )}
+      {...handlers}
+    >
       <ComposerQueuedMessages onEdit={editQueued} />
       {sandboxCheckRequired && (
         <SandboxSetupCard
@@ -630,7 +779,9 @@ export function Composer() {
       <ComposerContextBar />
       <div
         className={cn(
-          "conversation-column-width relative z-10 mx-auto w-full rounded-lg border px-2.5 py-[1.375rem] transition duration-200 ease-agent",
+          "relative z-10 mx-auto w-full rounded-lg border px-2.5 transition duration-200 ease-agent",
+          specSession ? "max-w-[70rem] py-3" : "conversation-column-width py-[1.375rem]",
+          specialistSession && "specialist-composer-surface",
           "border-border bg-composer-surface shadow-none",
           dragging
             ? "border-accent bg-accent-subtle"
@@ -678,6 +829,8 @@ export function Composer() {
           </div>
         )}
 
+        {specSession && <SpecComposerCodeContext controller={specCodeContext} />}
+
         {goalIntent !== null && (
           <div className="flex items-center gap-1.5 pb-1 pt-0.5 text-xs font-medium text-accent">
             <Target className="size-3.5" />
@@ -723,8 +876,10 @@ export function Composer() {
           autoCapitalize="off"
           spellCheck={false}
           placeholder={
-            !session
-              ? branding.initialPlaceholder
+            specSession
+              ? "Describe what should change, ask a question, or dictate an idea…"
+              : !session
+                ? branding.initialPlaceholder
               : busy
                 ? "Queue a follow-up…"
                 : branding.projectPlaceholder
@@ -737,22 +892,46 @@ export function Composer() {
           <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             <ComposerAttachmentMenu
               disabled={connecting}
+              paperclip={Boolean(specSession)}
               onFiles={(files) => void addFiles(files)}
             />
-            <ComposerPermissionPill />
-            <ComposerCollaborationPill />
+            {specSession && (
+              <ComposerVoiceButton
+                disabled={connecting}
+                onError={flashNotice}
+                onTranscript={(transcript) => {
+                  const current = draftValueRef.current.trimEnd();
+                  const next = `${current}${current ? " " : ""}${transcript}`;
+                  setDraftValue(next);
+                  requestAnimationFrame(() => {
+                    const textarea = taRef.current;
+                    textarea?.focus();
+                    textarea?.setSelectionRange(next.length, next.length);
+                  });
+                }}
+              />
+            )}
+            {!specSession && <ComposerPermissionPill />}
+            {!specSession && <ComposerCollaborationPill />}
           </div>
 
           <div className="flex shrink-0 items-center gap-2.5">
-            {specialistSession
+            {specSession
               ? <span
+                aria-label="Whole specification scope"
+                className="hidden shrink-0 px-1 text-xs font-medium text-ink-faint sm:inline-flex"
+              >
+                Whole spec
+              </span>
+              : specialistSession
+                ? <span
                 title={`${activeSpecialist ?? "Specialist"} specialist`}
                 aria-label={`${activeSpecialist ?? "Specialist"} specialist`}
                 className="hidden shrink-0 rounded-lg bg-accent-soft px-2.5 py-1.5 text-xs font-medium capitalize text-accent sm:inline-flex"
               >
                 {activeSpecialist ?? "Specialist"}
-              </span>
-              : <ModelPill />}
+                </span>
+                : <ModelPill />}
             {busy && !hasContent ? (
               <button
                 onClick={() => void cancelActive()}
@@ -770,18 +949,31 @@ export function Composer() {
                     ? "Choose project folder and send"
                     : busy
                       ? "Queue message"
-                      : "Send"
+                      : startsScoutRun
+                        ? "Start Scout run"
+                        : "Send"
                 }
                 title={
                   submission.shouldPickProjectFolder
                     ? "Choose project folder and send"
                     : busy
                       ? branding.queuedTitle
-                      : "Send · ⇧↵ newline"
+                      : startsScoutRun
+                        ? "Start Scout run · human initiated"
+                        : "Send · ⇧↵ newline"
                 }
-                className="grid size-8 shrink-0 place-items-center rounded-full bg-accent text-on-accent shadow-soft transition duration-200 ease-agent hover:-translate-y-0.5 hover:bg-accent-hover active:translate-y-0 disabled:translate-y-0 disabled:bg-bg-tertiary disabled:text-ink-muted disabled:shadow-none"
+                className={cn(
+                  "shrink-0 bg-accent text-on-accent shadow-soft transition duration-200 ease-agent hover:-translate-y-0.5 hover:bg-accent-hover active:translate-y-0 disabled:translate-y-0 disabled:bg-bg-tertiary disabled:text-ink-muted disabled:shadow-none",
+                  startsScoutRun
+                    ? "inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-xs font-semibold"
+                    : "grid size-8 place-items-center rounded-full",
+                )}
               >
-                {busy ? <CornerDownRight className="size-4" /> : <ArrowUp className="size-4" />}
+                {busy
+                  ? <CornerDownRight className="size-4" />
+                  : startsScoutRun
+                    ? <><ArrowUp className="size-3.5" /><span>Start run</span></>
+                    : <ArrowUp className="size-4" />}
               </button>
             )}
           </div>
@@ -790,7 +982,7 @@ export function Composer() {
       {/* One quiet status line: a connect failure (in red) wins over the
           "what's missing" readiness hint. Connecting itself never shows here —
           the OpeningScreen owns that state. */}
-      {!session && (startError || startBlocked) && (
+      {!session && !specSession && (startError || startBlocked) && (
         <p
           className={cn(
             "conversation-column-width mx-auto mt-2 w-full px-1 text-xs",
@@ -798,6 +990,14 @@ export function Composer() {
           )}
         >
           {startError ? humanizeError(startError) : startBlocked}
+        </p>
+      )}
+      {draft.cloud.status === "conflict" && (
+        <p
+          role="status"
+          className="conversation-column-width mx-auto mt-2 w-full px-1 text-xs text-warning"
+        >
+                Draft cloud sync is paused. Your text is safe on this device.
         </p>
       )}
       <SkillsPanel

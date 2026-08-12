@@ -89,6 +89,9 @@ pub struct LocalConfig {
     pub headers: HashMap<String, String>,
     /// Sampling temperature, if pinned.
     pub temperature: Option<f32>,
+    /// Host-owned ceiling for one model response, including provider-native
+    /// reasoning tokens. `None` leaves the endpoint default unchanged.
+    pub max_output_tokens: Option<u32>,
     /// Reasoning-effort override sent with each coding request ("low" …
     /// "xhigh"). `None` → the model's server-side default.
     pub reasoning_effort: Option<String>,
@@ -288,7 +291,7 @@ fn usize_field(extra: &Value, key: &str) -> Option<usize> {
 impl LocalConfig {
     /// Parse from the generic [`ProviderConfig`]. Unknown keys are ignored.
     ///
-    /// Recognized `extra` keys: `model`, `temperature`, `max_iterations`,
+    /// Recognized `extra` keys: `model`, `temperature`, `max_output_tokens`, `max_iterations`,
     /// `permissions` (map of tool→`allow|ask|deny`), `research` (bool, default
     /// true), `research_model`, `auto_compact` (bool),
     /// `auto_compact_token_limit`, `compact_request_token_limit`,
@@ -330,6 +333,11 @@ impl LocalConfig {
             .get("temperature")
             .and_then(Value::as_f64)
             .map(|t| t as f32);
+        let max_output_tokens = extra
+            .get("max_output_tokens")
+            .and_then(Value::as_u64)
+            .and_then(|value| u32::try_from(value).ok())
+            .filter(|value| *value > 0);
         let reasoning_effort = str_field(extra, "reasoning_effort");
         let response_format = extra
             .get("response_format")
@@ -485,6 +493,7 @@ impl LocalConfig {
             api_key,
             headers: config.headers.clone(),
             temperature,
+            max_output_tokens,
             reasoning_effort,
             response_format,
             provider_preferences,
@@ -561,6 +570,7 @@ mod tests {
         assert_eq!(cfg.base_url, DEFAULT_BASE_URL);
         assert_eq!(cfg.model, DEFAULT_MODEL);
         assert_eq!(cfg.max_iterations, None);
+        assert_eq!(cfg.max_output_tokens, None);
         assert!(cfg.response_format.is_none());
         assert!(cfg.provider_preferences.is_none());
         assert!(cfg.tools_enabled);
@@ -787,6 +797,7 @@ mod tests {
                 "base_url": "http://localhost:1234/v1",
                 "model": "research-model",
                 "temperature": 0.2,
+                "max_output_tokens": 16384,
                 "max_iterations": 8,
                 "permissions": { "bash": "deny", "edit_file": "allow" },
                 "research": false
@@ -797,6 +808,7 @@ mod tests {
         assert_eq!(cfg.base_url, "http://localhost:1234/v1");
         assert_eq!(cfg.model, "research-model");
         assert_eq!(cfg.temperature, Some(0.2));
+        assert_eq!(cfg.max_output_tokens, Some(16_384));
         assert_eq!(cfg.max_iterations, Some(8));
         assert_eq!(cfg.mode_for("bash"), PermissionMode::Deny);
         assert_eq!(cfg.mode_for("edit_file"), PermissionMode::Allow);

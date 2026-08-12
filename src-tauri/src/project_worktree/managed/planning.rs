@@ -97,7 +97,10 @@ pub(super) async fn source_checkout(project_path: &str) -> Result<SourceCheckout
         "Read current branch",
     )
     .await?;
-    let revision = checkout_revision(&root).await?;
+    // A valid Git checkout can be on an unborn branch before its first commit.
+    // That checkout is still a usable local-agent workspace; only operations
+    // that need an immutable worktree base require a revision.
+    let revision = revision_for(&root, "HEAD").await;
     let changes = change_summary(&root).await?;
     Ok(SourceCheckout {
         root,
@@ -153,11 +156,12 @@ fn parse_change_summary(status: &str) -> WorktreeChangeSummary {
     summary
 }
 
-pub(super) async fn base_options(root: &Path) -> Result<Vec<ManagedWorktreeBaseOption>, String> {
-    let current = resolve_current_base(root).await?;
-    let default = resolve_default_base(root, &current).await;
-    Ok([current, default]
+pub(super) async fn base_options(root: &Path) -> Vec<ManagedWorktreeBaseOption> {
+    let current = try_resolve_current_base(root).await;
+    let default = resolve_default_base(root, current.as_ref()).await;
+    current
         .into_iter()
+        .chain(default)
         .map(|base| ManagedWorktreeBaseOption {
             id: base.base,
             label: base.label,
@@ -165,7 +169,7 @@ pub(super) async fn base_options(root: &Path) -> Result<Vec<ManagedWorktreeBaseO
             revision: base.revision,
             fallback: base.fallback,
         })
-        .collect())
+        .collect()
 }
 
 pub(super) async fn resolve_base(
@@ -188,30 +192,41 @@ pub(super) async fn resolve_base(
             fallback: false,
         });
     }
-    let current = resolve_current_base(root).await?;
     match base {
-        ManagedWorktreeBase::Current => Ok(current),
+        ManagedWorktreeBase::Current => resolve_current_base(root).await,
         // The picker may render before a network round-trip. Refresh only at
         // the moment Clark Code actually creates the isolated checkout, with a
         // short bounded fallback to the locally advertised default branch.
-        ManagedWorktreeBase::Default => Ok(resolve_fresh_default_base(root, &current).await),
+        ManagedWorktreeBase::Default => {
+            let current = try_resolve_current_base(root).await;
+            resolve_fresh_default_base(root, current.as_ref())
+                .await
+                .ok_or_else(no_worktree_base_error)
+        }
     }
 }
 
 async fn resolve_current_base(root: &Path) -> Result<BaseResolution, String> {
-    let revision = checkout_revision(root).await?;
+    try_resolve_current_base(root)
+        .await
+        .ok_or_else(no_worktree_base_error)
+}
+
+async fn try_resolve_current_base(root: &Path) -> Option<BaseResolution> {
+    let revision = revision_for(root, "HEAD").await?;
     let branch = git_output(
         root,
         vec!["branch".into(), "--show-current".into()],
         "Read current branch",
     )
-    .await?;
+    .await
+    .ok()?;
     let reference = if branch.is_empty() {
         "HEAD".to_string()
     } else {
         branch
     };
-    Ok(BaseResolution {
+    Some(BaseResolution {
         base: ManagedWorktreeBase::Current,
         label: format!("Current checkout ({reference})"),
         reference,
@@ -220,7 +235,10 @@ async fn resolve_current_base(root: &Path) -> Result<BaseResolution, String> {
     })
 }
 
-async fn resolve_default_base(root: &Path, current: &BaseResolution) -> BaseResolution {
+async fn resolve_default_base(
+    root: &Path,
+    current: Option<&BaseResolution>,
+) -> Option<BaseResolution> {
     let mut candidates = Vec::new();
     if let Ok(remote_head) = git_output(
         root,
@@ -246,26 +264,29 @@ async fn resolve_default_base(root: &Path, current: &BaseResolution) -> BaseReso
 
     for candidate in candidates {
         if let Some(revision) = revision_for(root, &candidate).await {
-            return BaseResolution {
+            return Some(BaseResolution {
                 base: ManagedWorktreeBase::Default,
                 label: format!("Default branch ({candidate})"),
                 reference: candidate,
                 revision,
                 fallback: false,
-            };
+            });
         }
     }
 
-    BaseResolution {
+    current.map(|current| BaseResolution {
         base: ManagedWorktreeBase::Default,
         label: "Default branch unavailable; use current checkout".into(),
         reference: current.reference.clone(),
         revision: current.revision.clone(),
         fallback: true,
-    }
+    })
 }
 
-async fn resolve_fresh_default_base(root: &Path, current: &BaseResolution) -> BaseResolution {
+async fn resolve_fresh_default_base(
+    root: &Path,
+    current: Option<&BaseResolution>,
+) -> Option<BaseResolution> {
     let fallback = resolve_default_base(root, current).await;
     let advertised = match git_output_with_timeout(
         root,
@@ -310,13 +331,17 @@ async fn resolve_fresh_default_base(root: &Path, current: &BaseResolution) -> Ba
         return fallback;
     }
 
-    BaseResolution {
+    Some(BaseResolution {
         base: ManagedWorktreeBase::Default,
         label: format!("Fresh default branch (origin/{branch})"),
         reference: format!("origin/{branch}"),
         revision,
         fallback: false,
-    }
+    })
+}
+
+fn no_worktree_base_error() -> String {
+    "This repository has no commit to use as an isolated worktree base. Make the first commit or start the chat in this checkout.".into()
 }
 
 fn parse_remote_default(output: &str) -> Option<(String, String)> {

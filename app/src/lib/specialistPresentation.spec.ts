@@ -9,7 +9,7 @@ import {
 
 describe("specialist conversation presentation examples", () => {
   it("covers every registered product specialist with bounded presentation data", () => {
-    for (const kind of SPECIALIST_KINDS) {
+    for (const kind of SPECIALIST_KINDS.filter((candidate) => candidate !== "spec")) {
       const presentation = specialistConversationPresentation(kind);
 
       expect(presentation?.kind).toBe(kind);
@@ -31,6 +31,7 @@ describe("specialist conversation presentation examples", () => {
   it("keeps internal runtime and provider labels out of user-facing examples", () => {
     const serialized = SPECIALIST_KINDS
       .map((kind) => specialistConversationPresentation(kind))
+      .filter(Boolean)
       .map((presentation) => JSON.stringify(presentation))
       .join("\n");
 

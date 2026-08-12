@@ -52,7 +52,6 @@ beforeEach(() => {
 describe("product-supplied model settings", () => {
   it("uses the neutral product model by default", () => {
     expect(DEFAULT_LOCAL_SETTINGS.model).toBe("local-model");
-    expect(DEFAULT_LOCAL_SETTINGS.chatContrast).toBe("low");
     expect(modelLabel(DEFAULT_LOCAL_SETTINGS.model)).toBe("Local model");
   });
 
@@ -86,23 +85,31 @@ describe("product-supplied model settings", () => {
     });
   });
 
-  it("keeps the configured neutral route without rewriting it", () => {
-    saveLocalSettings({
-      ...DEFAULT_LOCAL_SETTINGS,
-      model: "local-model",
-      chatContrast: "medium",
-    });
-
-    expect(loadLocalSettings()).toMatchObject({
-      model: "local-model",
-      reasoningEffort: "high",
-      chatContrast: "medium",
-    });
-  });
-
 });
 
 describe("product specialist extension binding", () => {
+  it("exposes account-scoped recent checkouts to Scout as read-only census roots", () => {
+    const config = localConnectConfig(
+      { ...DEFAULT_LOCAL_SETTINGS, cwd: "/managed/scout-conversation" },
+      undefined,
+      {
+        organizationId: "018f8e8a-4722-7c68-b5b7-a4c6793c85b0",
+        workspaceId: "028f8e8a-4722-7c68-b5b7-a4c6793c85b0",
+      },
+      "scout",
+      "id:account",
+      undefined,
+      undefined,
+      ["/repos/payments", "/repos/identity", "/repos/payments", ""],
+    );
+
+    expect(config.extra?.sandbox_read_roots).toEqual([
+      "/repos/payments",
+      "/repos/identity",
+    ]);
+    expect(config.cwd).toBe("/managed/scout-conversation");
+  });
+
   it("keeps product provider extras empty in the neutral composition", () => {
     const config = localConnectConfig(
       { ...DEFAULT_LOCAL_SETTINGS, cwd: "/project" },

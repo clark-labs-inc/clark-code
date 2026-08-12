@@ -16,4 +16,14 @@ describe("managed worktree starting-point settings", () => {
     localStorage.setItem("agent-desktop:managed-worktree-base", "default");
     expect(loadManagedWorktreeBase("id:stan", "/repo/one")).toBe("current");
   });
+
+  it("keeps each specialist's starting point independent", () => {
+    saveManagedWorktreeBase("default", "id:stan", "/repo/one", "rsi");
+    saveManagedWorktreeBase("current", "id:stan", "/repo/one", "scientist");
+
+    expect(loadManagedWorktreeBase("id:stan", "/repo/one", "rsi")).toBe("default");
+    expect(loadManagedWorktreeBase("id:stan", "/repo/one", "scientist")).toBe("current");
+    expect(loadManagedWorktreeBase("id:stan", "/repo/one", "security")).toBe("current");
+    expect(loadManagedWorktreeBase("id:stan", "/repo/one")).toBe("current");
+  });
 });

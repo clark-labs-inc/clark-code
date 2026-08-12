@@ -18,6 +18,18 @@ fn config() -> CloudTrajectoryConfig {
     }
 }
 
+fn specialist_config() -> CloudTrajectoryConfig {
+    CloudTrajectoryConfig {
+        metadata: json!({
+            "specialistContext": {
+                "kind": "spec",
+                "workflow": "spec:spec"
+            }
+        }),
+        ..config()
+    }
+}
+
 fn request(run_id: &str) -> AppendRequest {
     let event = AgentEvent::RunStarted {
         run: RunId::new(run_id),
@@ -318,6 +330,87 @@ async fn successful_cloud_list_suppresses_deleted_cache_but_keeps_local_work() {
         offline.len(),
         1,
         "offline mode can use the acknowledged cache"
+    );
+}
+
+#[tokio::test]
+async fn cloud_list_recovers_a_missing_specialist_binding_from_owner_scoped_cache() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("outbox.sqlite3");
+    let outbox = TrajectoryOutbox::new(path.clone(), "owner", "spec-session");
+    outbox
+        .initialize(&specialist_config(), &Snapshot::new(), 7)
+        .await
+        .unwrap();
+
+    let rows = merge_local_summaries(
+        path,
+        "owner".into(),
+        vec![json!({
+            "id": "spec-session",
+            "title": "Sharing spec",
+            "provider": "local",
+            "rev": 7,
+            "createdAt": 1,
+            "updatedAt": 2
+        })],
+        true,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        rows[0]["specialistContext"],
+        json!({"kind": "spec", "workflow": "spec:spec"})
+    );
+}
+
+#[tokio::test]
+async fn cloud_list_recovers_legacy_spec_binding_from_typed_skill_reference() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("outbox.sqlite3");
+    let outbox = TrajectoryOutbox::new(path.clone(), "owner", "legacy-spec-session");
+    outbox
+        .initialize(&config(), &Snapshot::new(), 7)
+        .await
+        .unwrap();
+    let snapshot = json!({
+        "timeline": [{
+            "item": "message",
+            "role": "user",
+            "blocks": [{
+                "type": "skill_reference",
+                "name": "spec:spec"
+            }]
+        }]
+    });
+    open(&path)
+        .unwrap()
+        .execute(
+            "UPDATE journal_conversation SET base_snapshot_json = ?1",
+            params![serde_json::to_vec(&snapshot).unwrap()],
+        )
+        .unwrap();
+
+    let rows = merge_local_summaries(
+        path,
+        "owner".into(),
+        vec![json!({
+            "id": "legacy-spec-session",
+            "title": "Sharing spec",
+            "provider": "local",
+            "rev": 7,
+            "createdAt": 1,
+            "updatedAt": 2
+        })],
+        true,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        rows[0]["specialistContext"],
+        json!({"kind": "spec", "workflow": "spec:spec"})
     );
 }
 

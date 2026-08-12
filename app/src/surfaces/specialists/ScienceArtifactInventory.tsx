@@ -55,7 +55,7 @@ export function ScienceArtifactInventory({
                   <div className="mt-0.5 text-xs text-ink-muted">
                     {formatBytes(file.fileSizeBytes)} · {file.segmentCount} verified {file.segmentCount === 1 ? "segment" : "segments"}
                   </div>
-                  <div className="mt-1 truncate font-mono text-[0.68rem] text-ink-faint">
+                  <div className="mt-1 truncate font-mono text-xs text-ink-faint">
                     {file.sourceResidency.replaceAll("_", " ")} · sha256:{file.fileSha256}
                   </div>
                 </div>

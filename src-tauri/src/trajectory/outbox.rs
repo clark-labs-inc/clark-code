@@ -105,6 +105,7 @@ impl TrajectoryOutbox {
             "repositoryFingerprint": config.repository_fingerprint,
             "remoteHost": config.remote_host,
             "mode": config.mode,
+            "specialistContext": config.metadata.get("specialistContext").cloned(),
             "rev": base_rev,
             "archived": false,
             "titleLocked": false,
@@ -361,7 +362,7 @@ pub async fn quarantine_snapshot_branch(
 fn merge_summaries_sync(
     path: &Path,
     owner_scope: &str,
-    cloud: Vec<Value>,
+    mut cloud: Vec<Value>,
     cloud_available: bool,
 ) -> Result<Vec<Value>, String> {
     let conn = open(path)?;
@@ -370,9 +371,11 @@ fn merge_summaries_sync(
         .filter_map(|value| value.get("id").and_then(Value::as_str).map(str::to_string))
         .collect::<std::collections::HashSet<_>>();
     let mut local_only = Vec::new();
+    let mut local_specialists = std::collections::HashMap::new();
     let mut query = conn
         .prepare(
-            r#"SELECT conversation_id, metadata_json, created_at_ms, updated_at_ms,
+            r#"SELECT conversation_id, metadata_json, base_snapshot_json,
+                      created_at_ms, updated_at_ms,
                       base_rev, EXISTS(SELECT 1 FROM trajectory_outbox o
                         WHERE o.owner_key = journal_conversation.owner_key
                           AND o.conversation_id = journal_conversation.conversation_id)
@@ -384,25 +387,76 @@ fn merge_summaries_sync(
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, Vec<u8>>(1)?,
-                row.get::<_, i64>(2)?,
+                row.get::<_, Vec<u8>>(2)?,
                 row.get::<_, i64>(3)?,
                 row.get::<_, i64>(4)?,
-                row.get::<_, bool>(5)?,
+                row.get::<_, i64>(5)?,
+                row.get::<_, bool>(6)?,
             ))
         })
         .map_err(sql_error)?;
     for row in rows {
-        let (id, bytes, created, updated, base_rev, has_outbox) = row.map_err(sql_error)?;
+        let (id, bytes, snapshot_bytes, created, updated, base_rev, has_outbox) =
+            row.map_err(sql_error)?;
         let mut value: Value = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
         value["createdAt"] = created.into();
         value["updatedAt"] = updated.into();
+        let context = value
+            .get("specialistContext")
+            .filter(|context| !context.is_null())
+            .cloned()
+            .or_else(|| {
+                serde_json::from_slice(&snapshot_bytes)
+                    .ok()
+                    .and_then(|snapshot| specialist_context_from_snapshot(&snapshot))
+            });
+        if let Some(context) = context {
+            value["specialistContext"] = context.clone();
+            local_specialists.insert(id.clone(), context);
+        }
         if !cloud_ids.contains(&id) && (!cloud_available || base_rev == 0 || has_outbox) {
             local_only.push(value);
+        }
+    }
+    for value in &mut cloud {
+        let missing_specialist = value.get("specialistContext").is_none_or(Value::is_null);
+        if !missing_specialist {
+            continue;
+        }
+        let Some(id) = value.get("id").and_then(Value::as_str) else {
+            continue;
+        };
+        if let Some(context) = local_specialists.get(id) {
+            value["specialistContext"] = context.clone();
         }
     }
     let mut values = cloud;
     values.extend(local_only);
     Ok(values)
+}
+
+fn specialist_context_from_snapshot(snapshot: &Value) -> Option<Value> {
+    let timeline = snapshot.get("timeline")?.as_array()?;
+    for item in timeline.iter().rev() {
+        let Some(blocks) = item.get("blocks").and_then(Value::as_array) else {
+            continue;
+        };
+        for block in blocks.iter().rev() {
+            if block.get("type").and_then(Value::as_str) != Some("skill_reference") {
+                continue;
+            }
+            let Some(workflow) = block.get("name").and_then(Value::as_str) else {
+                continue;
+            };
+            let Some((kind, _)) = workflow.split_once(':') else {
+                continue;
+            };
+            if matches!(kind, "spec" | "scout" | "security" | "scientist" | "rsi") {
+                return Some(json!({"kind": kind, "workflow": workflow}));
+            }
+        }
+    }
+    None
 }
 
 fn now_ms() -> i64 {

@@ -19,6 +19,7 @@ import {
   loadSshHosts,
 } from "./sessionStore.runtime";
 import { loadManagedWorktreeBase } from "../lib/managedWorktreeSettings";
+import { useSpecialistStore } from "./specialistStore";
 
 const bootAccountScope = codeKeyAccountBinding(bootAuth);
 const bootLocalSettings = loadLocalSettings(bootAccountScope);
@@ -67,6 +68,7 @@ export const useSessionStore = create<import("./sessionStore.runtime").SessionSt
   worktreeTransition: null,
   dirtyWorktreeApproval: null,
   pendingManagedWorktreePath: null,
+  deferredSessionStartDraft: null,
   worktreePreparing: false,
   chatModels: loadChatModels(bootAccountScope),
   approvalPolicies: loadApprovalPolicies(bootAccountScope),
@@ -110,6 +112,22 @@ export const useSessionStore = create<import("./sessionStore.runtime").SessionSt
   ...createConversationActions(set, get),
   ...createInteractionActions(set, get),
 }));
+
+// A checkout starting point belongs to the specialist that will own the next
+// chat. Switching specialists restores that specialist's account + project
+// scoped choice synchronously, while ordinary Code chats retain their own
+// existing preference under the unqualified key.
+useSpecialistStore.subscribe((state, previous) => {
+  if (state.active === previous.active) return;
+  const sessionState = useSessionStore.getState();
+  useSessionStore.setState({
+    managedWorktreeBase: loadManagedWorktreeBase(
+      codeKeyAccountBinding(sessionState.auth),
+      sessionState.localSettings.cwd,
+      state.active,
+    ),
+  });
+});
 
 // Dev-only test seam: lets headless harnesses inject store state (e.g. a low
 // credit balance) to exercise UI that depends on the live backend. Stripped from

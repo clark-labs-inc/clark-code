@@ -103,6 +103,145 @@ async fn native_github_uses_only_target_token_and_paginates() {
         .any(|request| request.contains("/orgs/acme/repos?per_page=100&page=2")));
 }
 
+#[tokio::test]
+async fn native_github_enumerates_authenticated_organizations_before_repositories() {
+    let (base, captured, server) = github_server(2).await;
+    let directory = tempfile::tempdir().unwrap();
+    let service = ScoutAdapterService::open(config(
+        directory.path(),
+        environment([("GH_TOKEN", "target-token-canary")]),
+        None,
+        None,
+        None,
+        base,
+    ))
+    .unwrap();
+    let (target, candidate) = match service.census(CensusRequest::default()).await {
+        CensusResponse::Succeeded {
+            target, candidates, ..
+        } => {
+            let candidate = candidates
+                .into_iter()
+                .find(|candidate| candidate.source == AuthCandidateSource::TargetEnvironment)
+                .unwrap();
+            (*target, candidate)
+        }
+        other => panic!("unexpected census: {other:?}"),
+    };
+    let auth = match service
+        .verify_auth(VerifyAuthRequest {
+            runtime_protocol_version: RUNTIME_PROTOCOL_VERSION,
+            target_id: target.target_id.clone(),
+            target_identity_sha256: target.fingerprint_sha256().unwrap(),
+            candidate_handle: candidate.handle,
+            adapter_id: crate::github::adapter_id(),
+            requested_authority_scope: Some("global".into()),
+        })
+        .await
+    {
+        VerifyAuthResponse::Succeeded { auth_context, .. } => *auth_context,
+        other => panic!("unexpected verify: {other:?}"),
+    };
+    let page = request(
+        &target,
+        &auth,
+        "list_organizations",
+        "github.organization",
+        "organization",
+        "global",
+        &["login"],
+    );
+    let receipt = match service.fetch_page(page).await {
+        FetchPageResponse::Succeeded { receipt } => receipt,
+        other => panic!("unexpected page: {other:?}"),
+    };
+    assert_eq!(receipt.records.len(), 1);
+    assert_eq!(receipt.records[0].native_id, "github-organization:7");
+    assert_eq!(
+        receipt.records[0].fields.get("login"),
+        Some(&scout_adapter_protocol::SafeFieldValue::Text("acme".into()))
+    );
+    server.await.unwrap();
+    let requests = captured.lock().await;
+    assert!(requests
+        .iter()
+        .any(|request| request.contains("GET /user ")));
+    assert!(requests
+        .iter()
+        .any(|request| request.contains("GET /user/orgs?per_page=100&page=1")));
+    assert!(!requests
+        .iter()
+        .any(|request| request.contains("GET /orgs/acme ")));
+}
+
+#[tokio::test]
+async fn native_github_enumerates_every_repository_visible_to_the_authenticated_user() {
+    let (base, captured, server) = github_server(2).await;
+    let directory = tempfile::tempdir().unwrap();
+    let service = ScoutAdapterService::open(config(
+        directory.path(),
+        environment([("GH_TOKEN", "target-token-canary")]),
+        None,
+        None,
+        None,
+        base,
+    ))
+    .unwrap();
+    let (target, candidate) = match service.census(CensusRequest::default()).await {
+        CensusResponse::Succeeded {
+            target, candidates, ..
+        } => {
+            let candidate = candidates
+                .into_iter()
+                .find(|candidate| candidate.source == AuthCandidateSource::TargetEnvironment)
+                .unwrap();
+            (*target, candidate)
+        }
+        other => panic!("unexpected census: {other:?}"),
+    };
+    let auth = match service
+        .verify_auth(VerifyAuthRequest {
+            runtime_protocol_version: RUNTIME_PROTOCOL_VERSION,
+            target_id: target.target_id.clone(),
+            target_identity_sha256: target.fingerprint_sha256().unwrap(),
+            candidate_handle: candidate.handle,
+            adapter_id: crate::github::adapter_id(),
+            requested_authority_scope: Some("global".into()),
+        })
+        .await
+    {
+        VerifyAuthResponse::Succeeded { auth_context, .. } => *auth_context,
+        other => panic!("unexpected verify: {other:?}"),
+    };
+    let page = request(
+        &target,
+        &auth,
+        "list_accessible_repositories",
+        "github.repository",
+        "repository",
+        "global",
+        &["full_name", "owner_login"],
+    );
+    let receipt = match service.fetch_page(page).await {
+        FetchPageResponse::Succeeded { receipt } => receipt,
+        other => panic!("unexpected page: {other:?}"),
+    };
+    assert_eq!(receipt.records.len(), 1);
+    assert_eq!(receipt.records[0].native_id, "github-repository:9");
+    assert!(receipt.records[0].links.iter().any(|link| {
+        link.relationship_type == "canonical_remote"
+            && link.target_provider_type == "git.repository"
+            && link.target_native_id == "github.com/acme/clark"
+    }));
+    server.await.unwrap();
+    let requests = captured.lock().await;
+    assert!(requests.iter().any(|request| {
+        request.contains("GET /user/repos?")
+            && request.contains("affiliation=owner%2Ccollaborator%2Corganization_member")
+            && !request.contains("visibility=")
+    }));
+}
+
 #[test]
 fn verify_request_rejects_a_model_supplied_token_field() {
     let value = serde_json::json!({
@@ -146,6 +285,8 @@ async fn github_server(
                 (r#"{"id":42,"login":"scout"}"#, None)
             } else if first_line.contains("GET /orgs/acme ") {
                 (r#"{"id":7,"login":"acme"}"#, None)
+            } else if first_line.contains("GET /user/orgs?") {
+                (r#"[{"id":7,"login":"acme"}]"#, None)
             } else if first_line.contains("&page=1") {
                 (
                     r#"[{"id":9,"name":"clark","full_name":"acme/clark","private":true,"archived":false,"disabled":false,"fork":false,"default_branch":"main","visibility":"private","html_url":"https://github.com/acme/clark","owner":{"login":"acme"}}]"#,

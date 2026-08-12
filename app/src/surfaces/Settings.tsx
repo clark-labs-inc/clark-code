@@ -23,6 +23,7 @@ import { codeKeyAccountBinding } from "../lib/account";
 import { productModule } from "../product/productModule";
 import { useProductAccess } from "../lib/useProductAccess";
 import { stepTextSize, TEXT_SIZES, type TextSize } from "../lib/useTextSize";
+import type { InterfaceContrast } from "../lib/useAppearance";
 import { OrganizationKnowledgeSettings } from "./OrganizationKnowledgeSettings";
 import { SandboxSetupCard } from "./SandboxSetupCard";
 import { GroupLabel, Card, Row, Toggle } from "./settings/Primitives";
@@ -32,7 +33,7 @@ import {
 } from "./settings/SettingsNavigation";
 import { AboutSection } from "./settings/AboutSection";
 import { ComputerUseSection } from "./settings/ComputerUseSection";
-import { ChatContrastControl } from "./settings/ChatContrastControl";
+import { InterfaceContrastControl } from "./settings/InterfaceContrastControl";
 
 const input =
   "w-full rounded-lg bg-bg-secondary px-2.5 py-1.5 text-sm text-ink outline-none transition placeholder:text-ink-muted focus:ring-2 focus:ring-accent/20";
@@ -44,6 +45,8 @@ function GeneralSection({
   onToggleTheme,
   colorblind,
   onToggleColorblind,
+  interfaceContrast,
+  onInterfaceContrastChange,
   textSize,
   onTextSizeChange,
 }: {
@@ -51,6 +54,8 @@ function GeneralSection({
   onToggleTheme: () => void;
   colorblind: boolean;
   onToggleColorblind: () => void;
+  interfaceContrast: InterfaceContrast;
+  onInterfaceContrastChange: (contrast: InterfaceContrast) => void;
   textSize: TextSize;
   onTextSizeChange: (size: TextSize) => void;
 }) {
@@ -128,7 +133,10 @@ function GeneralSection({
               </button>
             </div>
           </Row>
-          <ChatContrastControl />
+          <InterfaceContrastControl
+            value={interfaceContrast}
+            onChange={onInterfaceContrastChange}
+          />
           <Row name="Colorblind-friendly colors" sub="Blue/orange status instead of red/green">
             <Toggle on={colorblind} onClick={onToggleColorblind} label="Toggle colorblind-friendly colors" />
           </Row>
@@ -575,6 +583,8 @@ export function Settings({
   onToggleTheme,
   colorblind,
   onToggleColorblind,
+  interfaceContrast,
+  onInterfaceContrastChange,
   textSize,
   onTextSizeChange,
 }: {
@@ -582,6 +592,8 @@ export function Settings({
   onToggleTheme: () => void;
   colorblind: boolean;
   onToggleColorblind: () => void;
+  interfaceContrast: InterfaceContrast;
+  onInterfaceContrastChange: (contrast: InterfaceContrast) => void;
   textSize: TextSize;
   onTextSizeChange: (size: TextSize) => void;
 }) {
@@ -647,6 +659,8 @@ export function Settings({
                   onToggleTheme={onToggleTheme}
                   colorblind={colorblind}
                   onToggleColorblind={onToggleColorblind}
+                  interfaceContrast={interfaceContrast}
+                  onInterfaceContrastChange={onInterfaceContrastChange}
                   textSize={textSize}
                   onTextSizeChange={onTextSizeChange}
                 />

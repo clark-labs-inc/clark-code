@@ -183,6 +183,20 @@ export async function specialistOrganizations(
   return productRequest<SpecialistOrganization[]>("specialist.organizations");
 }
 
+export async function specialistCreateOrganization(
+  _creds: CloudCreds,
+  name: string,
+  domain: string,
+): Promise<SpecialistOrganization> {
+  if (!inTauri()) {
+    return { id: "org-demo-created", name, role: "owner", status: "active" };
+  }
+  return productRequest<SpecialistOrganization>("specialist.create_organization", {
+    name,
+    domain,
+  });
+}
+
 export async function specialistEntitlement(
   _creds: CloudCreds,
   kind: SpecialistKind,
@@ -254,11 +268,8 @@ export interface ScoutCreatedWorkspace {
   status?: string;
 }
 
-/** Create a Scout cartography workspace for an organization. This reaches the
- * same host product request contract used by its operator client, so the first
- * Scout run for an organization that has no
- * workspace yet can enroll and upload evidence instead of failing with
- * "backend is not host-configured". */
+/** Create a Scout cartography workspace after the user presses the visible
+ * create control. Conversation start never invokes this operation. */
 export async function specialistCreateWorkspace(
   _creds: CloudCreds,
   organizationId: string,

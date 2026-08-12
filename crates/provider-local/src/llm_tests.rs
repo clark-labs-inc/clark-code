@@ -7,6 +7,16 @@ fn user_agent_identifies_desktop_version_and_platform() {
     assert!(user_agent.ends_with(&format!(" {})", std::env::consts::ARCH)));
 }
 
+#[test]
+fn default_model_deadlines_allow_productive_streams_and_bound_stalls() {
+    assert_eq!(
+        DEFAULT_MODEL_RESPONSE_START_TIMEOUT,
+        Duration::from_secs(2 * 60)
+    );
+    assert_eq!(DEFAULT_MODEL_STREAM_IDLE_TIMEOUT, Duration::from_secs(45));
+    assert!(DEFAULT_MODEL_STREAM_IDLE_TIMEOUT < DEFAULT_MODEL_RESPONSE_START_TIMEOUT);
+}
+
 fn feed(frames: &[&str]) -> AssistantTurn {
     let mut acc = Accumulator::default();
     let mut sink = |_: &str| {};
@@ -190,6 +200,21 @@ fn every_host_advertised_model_uses_its_own_reasoning_policy() {
 }
 
 #[test]
+fn host_output_ceiling_is_sent_on_every_model_request() {
+    let mut client = LlmClient::from_parts(
+        "https://api.example.test/v1",
+        "managed-model-standard",
+        None,
+        Vec::new(),
+        None,
+    )
+    .unwrap();
+    client.max_output_tokens = Some(16_384);
+
+    assert_eq!(client.body(&[], &[])["max_tokens"], json!(16_384));
+}
+
+#[test]
 fn openrouter_uses_unified_reasoning_and_strict_response_contracts() {
     let mut client = LlmClient::from_parts(
         "https://openrouter.ai/api/v1",
@@ -242,6 +267,13 @@ fn required_tool_choice_is_explicit_on_the_wire() {
     assert_eq!(
         client.body_requiring_tool(&[], &tools)["tool_choice"],
         json!("required")
+    );
+    assert_eq!(
+        client.body_requiring_named_tool(&[], &tools, "final_answer")["tool_choice"],
+        json!({
+            "type": "function",
+            "function": { "name": "final_answer" },
+        })
     );
 }
 

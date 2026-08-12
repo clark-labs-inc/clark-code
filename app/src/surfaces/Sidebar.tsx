@@ -398,6 +398,7 @@ export function Sidebar({
   const conversations = useSessionStore((s) => s.conversations);
   const conversationsLoading = useSessionStore((s) => s.conversationsLoading);
   const session = useSessionStore((s) => s.session);
+  const activeSpecialist = useSpecialistStore((state) => state.active);
   const activeProjectRoot = useSessionStore((s) => s.activeProjectRoot);
   const openingId = useSessionStore((s) => s.opening?.id ?? null);
   const unavailableId = useSessionStore((s) => s.unavailableConversation?.id ?? null);
@@ -592,10 +593,12 @@ export function Sidebar({
     [visible],
   );
   const rememberedProjects = useMemo(
-    () => defaultProject.trim()
+    () => activeSpecialist === "spec"
+      ? recentProjects.filter((path) => path !== defaultProject.trim())
+      : defaultProject.trim()
       ? [defaultProject.trim(), ...recentProjects.filter((path) => path !== defaultProject.trim())]
       : recentProjects,
-    [defaultProject, recentProjects],
+    [activeSpecialist, defaultProject, recentProjects],
   );
   const groups = useMemo(
     () => stableProjectOrder(
@@ -951,12 +954,12 @@ export function Sidebar({
     <aside
       ref={asideRef}
       className={cn(
-        "flex shrink-0 text-sm leading-5",
+        "flex min-h-0 shrink-0 overflow-hidden text-sm leading-5",
         resizingSidebar && "cursor-col-resize select-none",
       )}
       style={{ width: renderedWidth }}
     >
-      <div className="flex min-w-0 flex-1 flex-col bg-bg-secondary">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-bg-secondary">
       <div className="flex min-h-12 shrink-0 items-center gap-1 px-3 py-1">
         <span className="truncate text-base font-semibold tracking-[-0.01em] text-ink">{productName()}</span>
         <button

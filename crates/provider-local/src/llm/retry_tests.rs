@@ -126,6 +126,15 @@ fn success() -> Vec<u8> {
     sse_response(&body)
 }
 
+fn truncated_success_prefix() -> Vec<u8> {
+    let body = r#"data: {"choices":[{"delta":{"content":"partial"}}]}\n\n"#;
+    format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{body}",
+        body.len() + 512
+    )
+    .into_bytes()
+}
+
 fn success_with_transport_metadata() -> Vec<u8> {
     let body = [
         r#"data: {"id":"gen-123","model":"selected/free-model","provider":"free-provider","choices":[{"delta":{"content":"done"}}]}"#,
@@ -225,6 +234,35 @@ async fn stalled_endpoint(delay: Duration) -> String {
         let (mut stream, _) = listener.accept().await.unwrap();
         let _ = read_request(&mut stream).await;
         tokio::time::sleep(delay).await;
+    });
+    format!("http://{address}/v1")
+}
+
+async fn progressive_endpoint(chunks: Vec<(Duration, Vec<u8>)>) -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let body_len = chunks.iter().map(|(_, chunk)| chunk.len()).sum::<usize>();
+    tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let _ = read_request(&mut stream).await;
+        let headers = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\nContent-Length: {body_len}\r\n\r\n"
+        );
+        if stream.write_all(headers.as_bytes()).await.is_err() {
+            return;
+        }
+        if stream.flush().await.is_err() {
+            return;
+        }
+        for (delay, chunk) in chunks {
+            tokio::time::sleep(delay).await;
+            if stream.write_all(&chunk).await.is_err() {
+                return;
+            }
+            if stream.flush().await.is_err() {
+                return;
+            }
+        }
     });
     format!("http://{address}/v1")
 }
@@ -474,6 +512,19 @@ async fn retries_http_524_before_output() {
 }
 
 #[tokio::test]
+async fn retries_truncated_stream_after_quarantined_partial_output() {
+    let (base_url, calls) = endpoint(vec![truncated_success_prefix(), success()]).await;
+    let mut output = String::new();
+    let turn = run(&base_url, &mut output).await.unwrap();
+
+    assert_eq!(turn.text, "done");
+    assert_eq!(output, "done");
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    let metadata = turn.response_metadata.expect("retry receipt");
+    assert_eq!(metadata.transient_retries, Some(1));
+}
+
+#[tokio::test]
 async fn streaming_retries_keep_session_id_without_an_idempotency_header() {
     let (base_url, mut requests) =
         endpoint_capturing_requests(vec![http_gateway_timeout(), success()]).await;
@@ -634,12 +685,13 @@ async fn cancellation_interrupts_rate_limit_backoff() {
 #[tokio::test]
 async fn request_deadline_bounds_a_stalled_provider() {
     let base_url = stalled_endpoint(Duration::from_millis(500)).await;
-    let client = LlmClient::from_parts_with_timeout(
+    let client = LlmClient::from_parts_with_timeouts(
         &base_url,
         "fake-model",
         None,
         Vec::new(),
         None,
+        Duration::from_millis(40),
         Duration::from_millis(40),
     )
     .unwrap();
@@ -653,6 +705,7 @@ async fn request_deadline_bounds_a_stalled_provider() {
             cancel: &CancellationToken::new(),
             request_model: "fake-model",
             force_tool_call: false,
+            forced_tool_name: None,
             idempotency_key: "deadline-test",
             on_text: &mut on_text,
             on_reasoning: &mut on_reasoning,
@@ -663,13 +716,181 @@ async fn request_deadline_bounds_a_stalled_provider() {
 
     match error {
         AttemptError::Transient(failure) => {
-            assert!(failure.message.contains("model request failed"));
+            assert!(failure.message.contains("model response did not start"));
             assert!(failure.retry_safe);
             assert_eq!(failure.category, ProviderIncidentCategory::Timeout);
+            assert_eq!(
+                failure.provider_error_type.as_deref(),
+                Some("response_start_timeout")
+            );
             assert!(!failure.output_started);
         }
         _ => panic!("expected a retry-safe transient timeout"),
     }
+}
+
+#[tokio::test]
+async fn productive_stream_can_outlive_response_start_deadline() {
+    let chunks = [
+        concat!(r#"data: {"choices":[{"delta":{"content":"pro"}}]}"#, "\n\n"),
+        concat!(
+            r#"data: {"choices":[{"delta":{"content":"gress"}}]}"#,
+            "\n\n"
+        ),
+        concat!(
+            r#"data: {"choices":[{"delta":{},"finish_reason":"stop"}]}"#,
+            "\n\n"
+        ),
+        "data: [DONE]\n\n",
+    ]
+    .into_iter()
+    .map(|chunk| (Duration::from_millis(25), chunk.as_bytes().to_vec()))
+    .collect();
+    let base_url = progressive_endpoint(chunks).await;
+    let client = LlmClient::from_parts_with_timeouts(
+        &base_url,
+        "fake-model",
+        None,
+        Vec::new(),
+        None,
+        Duration::from_millis(40),
+        Duration::from_millis(60),
+    )
+    .unwrap();
+    let started = std::time::Instant::now();
+    let turn = client
+        .stream_chat(
+            &[ChatMessage::user("hello")],
+            &[],
+            &CancellationToken::new(),
+            |_| {},
+            |_| {},
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(turn.text, "progress");
+    assert!(started.elapsed() > Duration::from_millis(80));
+}
+
+#[tokio::test]
+async fn stream_idle_deadline_resets_after_every_chunk() {
+    let chunks = [
+        concat!(
+            r#"data: {"choices":[{"delta":{"content":"still "}}]}"#,
+            "\n\n"
+        ),
+        concat!(
+            r#"data: {"choices":[{"delta":{"content":"working"}}]}"#,
+            "\n\n"
+        ),
+        concat!(
+            r#"data: {"choices":[{"delta":{},"finish_reason":"stop"}]}"#,
+            "\n\n"
+        ),
+        "data: [DONE]\n\n",
+    ]
+    .into_iter()
+    .map(|chunk| (Duration::from_millis(30), chunk.as_bytes().to_vec()))
+    .collect();
+    let base_url = progressive_endpoint(chunks).await;
+    let client = LlmClient::from_parts_with_timeouts(
+        &base_url,
+        "fake-model",
+        None,
+        Vec::new(),
+        None,
+        Duration::from_millis(40),
+        Duration::from_millis(50),
+    )
+    .unwrap();
+    let turn = client
+        .stream_chat(
+            &[ChatMessage::user("hello")],
+            &[],
+            &CancellationToken::new(),
+            |_| {},
+            |_| {},
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(turn.text, "still working");
+}
+
+#[tokio::test]
+async fn stream_idle_deadline_quarantines_partial_output() {
+    let chunks = vec![
+        (
+            Duration::ZERO,
+            concat!(
+                r#"data: {"choices":[{"delta":{"content":"partial"}}]}"#,
+                "\n\n"
+            )
+            .as_bytes()
+            .to_vec(),
+        ),
+        (Duration::from_millis(200), b"data: [DONE]\n\n".to_vec()),
+    ];
+    let base_url = progressive_endpoint(chunks).await;
+    let client = LlmClient::from_parts_with_timeouts(
+        &base_url,
+        "fake-model",
+        None,
+        Vec::new(),
+        None,
+        Duration::from_millis(40),
+        Duration::from_millis(40),
+    )
+    .unwrap();
+    let mut output = String::new();
+    let mut on_text = |text: &str| output.push_str(text);
+    let mut on_reasoning = |_: &str| {};
+    let error = client
+        .stream_chat_once(StreamAttempt {
+            messages: &[ChatMessage::user("hello")],
+            tools: &[],
+            cancel: &CancellationToken::new(),
+            request_model: "fake-model",
+            force_tool_call: false,
+            forced_tool_name: None,
+            idempotency_key: "stream-idle-test",
+            on_text: &mut on_text,
+            on_reasoning: &mut on_reasoning,
+        })
+        .await
+        .unwrap_err();
+
+    let AttemptError::Transient(failure) = error else {
+        panic!("expected a retry-safe stream timeout");
+    };
+    assert_eq!(failure.category, ProviderIncidentCategory::Timeout);
+    assert_eq!(
+        failure.provider_error_type.as_deref(),
+        Some("stream_transport")
+    );
+    assert!(failure.retry_safe);
+    assert!(failure.output_started);
+    assert!(output.is_empty(), "partial output must remain quarantined");
+}
+
+#[tokio::test]
+async fn broken_stream_replay_is_bounded_to_one_retry() {
+    let (base_url, calls) =
+        endpoint(vec![truncated_success_prefix(), truncated_success_prefix()]).await;
+    let error = run(&base_url, &mut String::new()).await.unwrap_err();
+    let LlmError::Recoverable(context) = error else {
+        panic!("expected structured recoverable failure");
+    };
+
+    assert_eq!(
+        context.provider_error_type.as_deref(),
+        Some("stream_transport")
+    );
+    assert_eq!(context.retries.transient, 1);
+    assert_eq!(context.attempts, 2);
+    assert_eq!(context.max_attempts, 2);
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
 }
 
 #[tokio::test]

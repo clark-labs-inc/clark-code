@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { FileUp, FolderOpen, Plus } from "lucide-react";
+import { FileUp, FolderOpen, Paperclip, Plus } from "lucide-react";
 
 interface ComposerAttachmentMenuProps {
   disabled?: boolean;
+  paperclip?: boolean;
   onFiles: (files: File[]) => void;
 }
 
@@ -15,6 +16,7 @@ function pickedFiles(input: HTMLInputElement): File[] {
  * provider upload behavior. */
 export function ComposerAttachmentMenu({
   disabled = false,
+  paperclip = false,
   onFiles,
 }: ComposerAttachmentMenuProps) {
   const [open, setOpen] = useState(false);
@@ -85,10 +87,10 @@ export function ComposerAttachmentMenu({
         aria-label="Add attachments"
         aria-haspopup="menu"
         aria-expanded={open}
-        title="Add files or a folder"
+        title="Attach files or a folder"
         className="grid size-8 shrink-0 place-items-center rounded-full bg-bg-tertiary text-ink-muted transition duration-200 ease-agent hover:bg-accent-subtle hover:text-accent disabled:opacity-40"
       >
-        <Plus className="size-4" />
+        {paperclip ? <Paperclip className="size-4" /> : <Plus className="size-4" />}
       </button>
 
       {open && (

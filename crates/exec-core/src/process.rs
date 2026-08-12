@@ -118,7 +118,7 @@ pub async fn run_process_streaming(
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
     let mut pipes_open = true;
-    loop {
+    let status = loop {
         tokio::select! {
             _ = cancel.cancelled() => {
                 terminate_process_tree(&mut child, root_pid).await;
@@ -136,14 +136,41 @@ pub async fn run_process_streaming(
                 }
                 None => pipes_open = false,
             },
-            status = child.wait(), if !pipes_open => {
-                return match status {
-                    Ok(status) => Ok(ExecOutput { stdout, stderr, code: status.code() }),
-                    Err(error) => Err(format!("command failed: {error}")),
-                };
+            status = child.wait() => break status,
+        }
+    };
+    let status = status.map_err(|error| format!("command failed: {error}"))?;
+
+    // A descendant can outlive the shell while retaining an inherited stdout
+    // or stderr fd. Waiting for both pipes before observing the root exit then
+    // leaves a completed command stuck until its full tool timeout. Drain the
+    // ordinary buffered tail briefly after the root exits; if a descendant
+    // still owns a pipe, terminate the command's isolated process group and
+    // return the root result instead of presenting an indefinitely in-flight
+    // tool call.
+    if pipes_open {
+        let drained = tokio::time::timeout(Duration::from_millis(500), async {
+            while let Some((is_stderr, bytes)) = rx.recv().await {
+                on_output(is_stderr, &bytes);
+                if is_stderr {
+                    stderr.extend_from_slice(&bytes);
+                } else {
+                    stdout.extend_from_slice(&bytes);
+                }
             }
+        })
+        .await
+        .is_ok();
+        if !drained {
+            terminate_pid_tree(root_pid).await;
         }
     }
+
+    Ok(ExecOutput {
+        stdout,
+        stderr,
+        code: status.code(),
+    })
 }
 
 pub async fn run_process_streaming_pty(

@@ -81,6 +81,7 @@ impl CartographyBackendState {
                 "workspace_id": host.workspace_id,
                 "platform": host.platform,
                 "architecture": host.architecture,
+                "human_run_request_bound": host.human_run_request_id.is_some(),
             })
         });
         json!({
@@ -99,6 +100,10 @@ impl CartographyBackendState {
     pub(super) fn record_receipt(&self, receipt: AdapterPageReceipt) -> Result<(), String> {
         self.pending.record_receipt(receipt)
     }
+
+    pub(super) fn claimed_task_for_adapter(&self, adapter_id: &str) -> Result<ClaimedTask, String> {
+        self.pending.claimed_task_for_adapter(adapter_id)
+    }
 }
 
 pub(super) struct ScoutEnterpriseBackendTool {
@@ -109,6 +114,7 @@ pub(super) struct ScoutEnterpriseBackendTool {
 #[serde(rename_all = "snake_case")]
 enum EnterpriseAction {
     Enroll,
+    StartRun,
     ClaimTask,
     SubmitAdapterReceipt,
 }
@@ -117,6 +123,8 @@ enum EnterpriseAction {
 #[serde(deny_unknown_fields)]
 struct EnterpriseArgs {
     action: EnterpriseAction,
+    #[serde(default)]
+    objective: Option<String>,
     #[serde(default)]
     run_id: Option<Uuid>,
     #[serde(default)]
@@ -131,7 +139,17 @@ impl EnterpriseArgs {
     fn validate(&self) -> Result<(), String> {
         match self.action {
             EnterpriseAction::Enroll
-                if self.run_id.is_none()
+                if self.objective.is_none()
+                    && self.run_id.is_none()
+                    && self.lease_seconds.is_none()
+                    && self.task_id.is_none()
+                    && self.receipt_id.is_none() =>
+            {
+                Ok(())
+            }
+            EnterpriseAction::StartRun
+                if self.objective.is_some()
+                    && self.run_id.is_none()
                     && self.lease_seconds.is_none()
                     && self.task_id.is_none()
                     && self.receipt_id.is_none() =>
@@ -139,7 +157,8 @@ impl EnterpriseArgs {
                 Ok(())
             }
             EnterpriseAction::ClaimTask
-                if self.run_id.is_some()
+                if self.objective.is_none()
+                    && self.run_id.is_some()
                     && self.lease_seconds.is_some()
                     && self.task_id.is_none()
                     && self.receipt_id.is_none() =>
@@ -147,7 +166,8 @@ impl EnterpriseArgs {
                 Ok(())
             }
             EnterpriseAction::SubmitAdapterReceipt
-                if self.run_id.is_none()
+                if self.objective.is_none()
+                    && self.run_id.is_none()
                     && self.lease_seconds.is_none()
                     && self.task_id.is_some()
                     && self.receipt_id.is_some() =>
@@ -155,6 +175,9 @@ impl EnterpriseArgs {
                 Ok(())
             }
             EnterpriseAction::Enroll => Err("enroll does not accept task or run arguments".into()),
+            EnterpriseAction::StartRun => Err(
+                "start_run requires only the human objective; its idempotency binding is host-owned".into(),
+            ),
             EnterpriseAction::ClaimTask => {
                 Err("claim_task requires only a backend-issued run_id and lease_seconds".into())
             }
@@ -172,7 +195,7 @@ impl ToolExecutor for ScoutEnterpriseBackendTool {
     }
 
     fn description(&self) -> &str {
-        "Enroll this host's protected collector key with Clark Code's authoritative organization-scoped system-cartography backend, claim one fenced task from a backend-managed run, or submit a target-produced adapter receipt previously retained by this host. Submission uploads immutable evidence, translates the safe receipt under the backend-authored task scope, and ingests a signed batch. Organization, workspace, run binding, source, fence, Platform credential, signing key, and identity path are host-owned and cannot be supplied for submission."
+        "Enroll this host's protected collector key with Clark Code's authoritative organization-scoped system-cartography backend, explicitly start an idempotent human-requested run, claim one fenced task, or submit a target-produced adapter receipt retained by this host. Starting a run creates a backend charter and its first GitHub organization-discovery task; it never runs from navigation, a timer, or a background continuation. Organization, workspace, source, fence, Platform credential, signing key, and identity path are host-owned."
     }
 
     fn parameters(&self) -> Value {
@@ -181,8 +204,14 @@ impl ToolExecutor for ScoutEnterpriseBackendTool {
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["enroll", "claim_task", "submit_adapter_receipt"],
+                    "enum": ["enroll", "start_run", "claim_task", "submit_adapter_receipt"],
                     "description": "Choose the backend operation first."
+                },
+                "objective": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1000,
+                    "description": "The current human's enterprise-mapping objective; required only for start_run."
                 },
                 "run_id": {
                     "type": "string",
@@ -251,6 +280,42 @@ impl ToolExecutor for ScoutEnterpriseBackendTool {
                 }
                 Err(error) => ToolOutcome::error(error),
             },
+            EnterpriseAction::StartRun => {
+                let Some(objective) = args.objective else {
+                    return ToolOutcome::error("start_run requires objective");
+                };
+                let Some(request_id) = self
+                    .state
+                    .host
+                    .as_ref()
+                    .and_then(|host| host.human_run_request_id.clone())
+                else {
+                    return ToolOutcome::error(
+                        "this Scout session was not created by an explicit human Start run action",
+                    );
+                };
+                let session = match self.state.ready() {
+                    Ok(session) => session,
+                    Err(error) => return ToolOutcome::error(error),
+                };
+                match session.start_run(request_id, objective).await {
+                    Ok(receipt) => ToolOutcome::ok(if receipt.created {
+                        "Started the human-requested Scout run and queued its backend-fenced GitHub and local-checkout perimeter tasks."
+                    } else {
+                        "Recovered the existing Scout run for this human request; no duplicate run was created."
+                    })
+                    .with_details(json!({
+                        "authority": "host_system_cartography_backend",
+                        "request_id": receipt.request_id,
+                        "run_id": receipt.run_id,
+                        "charter_id": receipt.charter_id,
+                        "initial_task_id": receipt.initial_task_id,
+                        "created": receipt.created,
+                        "automation": "disabled",
+                    })),
+                    Err(error) => ToolOutcome::error(error),
+                }
+            }
             EnterpriseAction::ClaimTask => {
                 let Some(run_id) = args.run_id else {
                     return ToolOutcome::error("claim_task requires a backend-issued run_id");
@@ -296,6 +361,8 @@ impl ToolExecutor for ScoutEnterpriseBackendTool {
                         "outcome": submitted.acceptance.outcome,
                         "inserted_events": submitted.acceptance.inserted_events,
                         "recorded_conflicts": submitted.acceptance.recorded_conflicts,
+                        "continuation_task_id": submitted.advancement.continuation_task_id,
+                        "child_task_ids": submitted.advancement.child_task_ids,
                         "authority": "host_system_cartography_backend",
                     })),
                     Err(error) => ToolOutcome::error(error),

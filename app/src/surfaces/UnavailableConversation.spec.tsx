@@ -45,9 +45,9 @@ describe("UnavailableConversationPanel", () => {
       />,
     );
 
-    expect(markup).toContain("This chat changed on another device");
+    expect(markup).toContain("This chat has a newer version");
     expect(markup).toContain("can’t overwrite newer history");
-    expect(markup).toContain("Try again");
+    expect(markup).toContain("Reload latest");
     expect(markup).not.toContain("Clean up");
   });
 });

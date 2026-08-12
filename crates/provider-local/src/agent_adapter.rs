@@ -207,6 +207,8 @@ impl ca::StreamFn for AgentLoopStream {
                         crate::llm::StreamChatOptions {
                             cancel: &signal,
                             force_tool_call,
+                            forced_tool_name: (repair_attempts >= 2)
+                                .then_some(crate::tools::final_answer::FINAL_ANSWER_TOOL),
                         },
                         move |delta| {
                             if force_tool_call {
@@ -270,8 +272,15 @@ impl ca::StreamFn for AgentLoopStream {
                     ));
                     continue;
                 }
+                if repair_attempts == 1 {
+                    repair_attempts = 2;
+                    messages.push(crate::llm::ChatMessage::system(
+                        "Your second prose-only response was also discarded. The completed work and tool receipts are preserved. Deliver the complete user-facing result now by calling final_answer exactly once.",
+                    ));
+                    continue;
+                }
                 break Err(crate::llm::LlmError::Provider(format!(
-                    "{} provider ignored required tool choice after one isolated repair attempt",
+                    "{} provider ignored required tool choice after generic and named repair attempts",
                     crate::llm::REQUIRED_TOOL_CONTRACT_VIOLATION
                 )));
             };

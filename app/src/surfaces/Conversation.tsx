@@ -5,8 +5,12 @@ import { ArrowDown, X } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
 import { effectiveApprovalPolicy } from "../store/sessionStore.runtime";
 import { wouldAutoApprove } from "../lib/permissions";
-import { currentActivity, shouldShowPending } from "../lib/activity";
-import { humanizeError, humanizeRunFailure } from "../lib/errors";
+import { currentActivity, isThinkingOnlyMessage, shouldShowPending } from "../lib/activity";
+import {
+  humanizeError,
+  humanizeRunFailure,
+  isQuietRetryableRunFailure,
+} from "../lib/errors";
 import { cn } from "../lib/cn";
 import {
   commitChatRowKeys,
@@ -41,20 +45,14 @@ import type { Artifact, ToolCall } from "../core-bridge/types";
 import { effectiveModelSettings, isIncludedCodingModel } from "../lib/localAgent";
 import { specialistPresentationFromPayload } from "../lib/specialistPresentation";
 
-/** A row of pulsing dots — the model is generating. Memoized so its animation
- *  isn't re-evaluated on every streamed-token re-render of the parent. */
-const Dots = memo(function Dots() {
-  const reduce = useReducedMotion();
+/** The only live-work indicator in the transcript. CSS owns both its pulse and
+ * reduced-motion fallback so the visual policy cannot diverge from skeletons. */
+const ActivityDots = memo(function ActivityDots() {
   return (
-    <span className="flex items-center gap-[3px]" aria-hidden>
-      {[0, 1, 2].map((i) => (
-        <m.span
-          key={i}
-          className="size-1.5 rounded-full bg-accent"
-          animate={reduce ? undefined : { opacity: [0.3, 1, 0.3] }}
-          transition={reduce ? { duration: 0 } : { duration: 1.1, repeat: Infinity, delay: i * 0.18 }}
-        />
-      ))}
+    <span className="activity-dots flex shrink-0 items-center gap-[3px]" aria-hidden>
+      <span className="size-1.5 rounded-full bg-accent" />
+      <span className="size-1.5 rounded-full bg-accent" />
+      <span className="size-1.5 rounded-full bg-accent" />
     </span>
   );
 });
@@ -62,7 +60,7 @@ const Dots = memo(function Dots() {
 /** Skeleton render-preview of the assistant reply that's still streaming. */
 const ReplySkeleton = memo(function ReplySkeleton() {
   return (
-    <div className="space-y-2.5" aria-hidden>
+    <div className="reply-skeleton space-y-2.5" aria-hidden>
       <div className="skeleton h-3.5 w-[92%]" />
       <div className="skeleton h-3.5 w-[84%]" />
       <div className="skeleton h-3.5 w-[64%]" />
@@ -72,11 +70,19 @@ const ReplySkeleton = memo(function ReplySkeleton() {
 
 /** "Working now" — dots + label, plus a skeleton preview before the first
  *  tokens of the reply arrive. Hidden while a tool line shows its own spinner. */
-function Pending({ label, detail, skeleton }: { label: string; detail?: string; skeleton: boolean }) {
+function Pending({
+  label,
+  detail,
+  skeleton,
+}: {
+  label: string;
+  detail?: string;
+  skeleton: boolean;
+}) {
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2.5 text-sm text-ink-muted">
-        <Dots />
+        <ActivityDots />
         <span className="truncate">
           {label || "Thinking…"}
           {detail && <span className="ml-1.5 font-mono text-xs text-ink-faint">{detail}</span>}
@@ -353,6 +359,7 @@ export function Conversation({
   const interrupted = failed?.outcome?.failure_kind === "runtime_interrupted" ? failed : undefined;
   const verificationIncomplete =
     failed?.outcome?.failure_kind === "verification_incomplete" ? failed : undefined;
+  const quietRetryableFailure = isQuietRetryableRunFailure(failed?.outcome) ? failed : undefined;
 
   const renderBlock = (block: ConversationBlock) => {
     if (block.kind === "goal_work") {
@@ -370,6 +377,14 @@ export function Conversation({
     }
     const { item } = block;
     if (item.item === "message") {
+      const streaming =
+        activity.busy &&
+        block.timelineIndex === visible.length - 1 &&
+        item.role === "agent";
+      // The canonical live state is the pending row below. Do not mount an
+      // empty-looking second Thinking row until it becomes durable history or
+      // shares the message with actual answer text.
+      if (streaming && isThinkingOnlyMessage(item)) return null;
       return (
         <Message
           key={block.key}
@@ -378,11 +393,7 @@ export function Conversation({
           phase={item.phase}
           timelineIndex={block.timelineIndex}
           animateEntry={enteringRows.has(block.key)}
-          streaming={
-            activity.busy &&
-            block.timelineIndex === visible.length - 1 &&
-            item.role === "agent"
-          }
+          streaming={streaming}
         />
       );
     }
@@ -511,7 +522,7 @@ export function Conversation({
               />
             </m.div>
           )}
-          {failed && !outOfCredits && !interrupted && !verificationIncomplete && (
+          {failed && !outOfCredits && !interrupted && !verificationIncomplete && !quietRetryableFailure && (
             <m.div
               key="failed"
               {...transientMotion}
@@ -522,6 +533,19 @@ export function Conversation({
                 {humanizeRunFailure(failed.outcome)}
               </div>
               <DismissButton onClick={() => dismissFailedRun(failed.id)} />
+            </m.div>
+          )}
+          {quietRetryableFailure && (
+            <m.div
+              key="quiet-retryable-failure"
+              {...transientMotion}
+              className={cn(STOPPED_BANNER, "flex items-start gap-2")}
+            >
+              <div className="min-w-0 flex-1">
+                <span className="font-medium text-ink-secondary">Taking a little longer.</span>{" "}
+                {humanizeRunFailure(quietRetryableFailure.outcome)}
+              </div>
+              <DismissButton muted onClick={() => dismissFailedRun(quietRetryableFailure.id)} />
             </m.div>
           )}
           {interrupted && (

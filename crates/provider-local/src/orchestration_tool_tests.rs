@@ -27,29 +27,25 @@ fn tools_config() -> OrchestrationToolsConfig {
 #[test]
 fn orchestration_tools_share_a_bounded_control_plane() {
     let tools = orchestration_tools(tools_config());
-    assert_eq!(tools.len(), 11);
+    assert_eq!(tools.len(), 9);
     assert_eq!(tools[0].name(), "delegate_read_only");
     assert_eq!(tools[1].name(), "resolve_delegation");
     assert_eq!(tools[2].name(), "delegate_coding_workstreams");
     assert_eq!(tools[3].name(), "resolve_coding_workstreams");
     assert_eq!(tools[4].name(), "scout_capabilities");
-    assert_eq!(tools[5].name(), "scout_adapter");
-    assert_eq!(tools[6].name(), "scout_ledger");
+    assert_eq!(tools[5].name(), "scout_repository_census");
+    assert_eq!(tools[6].name(), "scout_adapter");
     assert_eq!(tools[7].name(), "scout_enterprise");
     assert_eq!(tools[8].name(), "scout_enterprise_query");
-    assert_eq!(tools[9].name(), "scout_probe");
-    assert_eq!(tools[10].name(), "scout_measure");
     assert!(!tools[0].mutating());
     assert!(!tools[1].mutating());
     assert!(tools[2].mutating());
     assert!(tools[3].mutating());
     assert!(!tools[4].mutating());
-    assert!(tools[5].mutating());
-    assert!(!tools[6].mutating());
+    assert!(!tools[5].mutating());
+    assert!(tools[6].mutating());
     assert!(tools[7].mutating());
     assert!(!tools[8].mutating());
-    assert!(!tools[9].mutating());
-    assert!(!tools[10].mutating());
 }
 
 #[test]
@@ -81,10 +77,6 @@ fn scout_schemas_commit_to_action_and_identity_before_payload() {
         let tool = tools.iter().find(|tool| tool.name() == name).unwrap();
         serde_json::to_string(&tool.parameters()).unwrap()
     };
-    let ledger = schema("scout_ledger");
-    assert!(ledger.find("\"action\"").unwrap() < ledger.find("\"run_id\"").unwrap());
-    assert!(ledger.find("\"run_id\"").unwrap() < ledger.find("\"data\"").unwrap());
-
     let enterprise = schema("scout_enterprise");
     assert!(enterprise.find("\"action\"").unwrap() < enterprise.find("\"run_id\"").unwrap());
     assert!(enterprise.contains("submit_adapter_receipt"));
@@ -115,23 +107,11 @@ fn scout_schemas_commit_to_action_and_identity_before_payload() {
         crate::tools::ToolPermissionClass::External
     );
 
-    let probe = schema("scout_probe");
-    for pair in [
-        ("\"action\"", "\"run_id\""),
-        ("\"run_id\"", "\"evidence_id\""),
-        ("\"evidence_id\"", "\"target_evidence_id\""),
-        ("\"target_evidence_id\"", "\"operation\""),
-        ("\"operation\"", "\"path\""),
-    ] {
-        assert!(probe.find(pair.0).unwrap() < probe.find(pair.1).unwrap());
-    }
-
-    let measure = schema("scout_measure");
-    assert!(measure.find("\"method\"").unwrap() < measure.find("\"run_id\"").unwrap());
-    assert!(measure.contains("\"path\""));
-    assert!(measure.contains("\"json_pointer\""));
-    assert!(!measure.contains("\"successes\""));
-    assert!(!measure.contains("\"trials\""));
+    let repositories = schema("scout_repository_census");
+    assert!(
+        repositories.find("\"action\"").unwrap() < repositories.find("\"checkout_id\"").unwrap()
+    );
+    assert!(repositories.contains("\"collect\""));
 }
 
 #[test]

@@ -27,6 +27,8 @@ export interface SpecialistContext {
   studyId?: string;
   experimentId?: string;
   runId?: string;
+  /** Host-issued idempotency binding for one explicit human Scout start. */
+  scoutRunRequestId?: string;
   targetId?: string;
 }
 
@@ -64,7 +66,6 @@ export interface SpecialistDefinition {
   engine: "skill" | "research_runtime";
   entitlement: "included" | "subscription";
   modelPolicy: "included" | "specialist";
-  badge?: string;
   runtime?: Readonly<{
     modelRoute: string;
     maxIterations: number;
@@ -195,9 +196,6 @@ export function parseSpecialistCatalog(value: unknown): SpecialistCatalogReceipt
       engine,
       entitlement,
       modelPolicy,
-      ...(manifest.badge === undefined
-        ? {}
-        : { badge: catalogString(manifest.badge, "specialist badge") }),
       ...(runtime
         ? {
           runtime: {
@@ -316,6 +314,9 @@ export function scoutCartographyTarget(
   return {
     organizationId: context.organizationId,
     workspaceId: context.workspaceId,
+    ...(context.scoutRunRequestId?.trim()
+      ? { runRequestId: context.scoutRunRequestId.trim() }
+      : {}),
     ...(separator > 0
       ? {
         platform: architecture!.slice(0, separator),
@@ -324,6 +325,11 @@ export function scoutCartographyTarget(
       : {}),
     ...(targetId?.trim() ? { targetId: targetId.trim() } : {}),
   };
+}
+
+export function newScoutRunRequestId(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  return `scout-run:${Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
 }
 
 /** Build the WebView-owned portion of the internal provider configuration.
@@ -376,6 +382,7 @@ export type SpecialistAccessState =
   | "free"
   | "ready"
   | "action_needed"
+  | "organization_required"
   | "scope_lost"
   | "offline";
 
@@ -391,6 +398,8 @@ export function specialistAccessBadge(state: SpecialistAccessState): string {
       return "Sign in";
     case "action_needed":
       return "Action needed";
+    case "organization_required":
+      return "Workspace required";
     case "scope_lost":
       return "Access changed";
     case "offline":
@@ -438,7 +447,7 @@ export function specialistAccessCopy(
 ): {
   title: string;
   detail: string;
-  action: "sign_in" | "product_action" | "retry" | null;
+  action: "sign_in" | "product_action" | "retry" | "setup_workspace" | null;
   actionLabel?: string;
 } {
   const brand = productModule().branding;
@@ -470,6 +479,13 @@ export function specialistAccessCopy(
         detail: "Review this capability in the active product account. Saved work remains available.",
         action: "product_action",
         actionLabel: "Review access",
+      };
+    case "organization_required":
+      return {
+        title: `Join a workspace to use ${label}`,
+        detail: `${label} journals and verified artifacts are workspace-scoped. Join or create a Clark workspace, then retry.`,
+        action: "setup_workspace",
+        actionLabel: "Set up workspace",
       };
     case "scope_lost":
       return {

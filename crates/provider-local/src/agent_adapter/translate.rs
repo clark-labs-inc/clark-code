@@ -424,11 +424,14 @@ pub(super) fn markdown_artifact(
     docs: &std::path::Path,
 ) -> Option<desktop::Artifact> {
     let path = std::path::Path::new(written);
-    if !path.is_absolute() {
-        return None;
-    }
-    let canon = path.canonicalize().ok()?;
-    if !canon.starts_with(docs) || !crate::workspace::is_markdown(&canon) {
+    let docs = docs.canonicalize().ok()?;
+    let candidate = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        docs.join(path)
+    };
+    let canon = candidate.canonicalize().ok()?;
+    if !canon.starts_with(&docs) || !crate::workspace::is_markdown(&canon) {
         return None;
     }
     let title = canon
@@ -436,7 +439,7 @@ pub(super) fn markdown_artifact(
         .and_then(|n| n.to_str())
         .unwrap_or("document.md")
         .to_string();
-    let relative = canon.strip_prefix(docs).ok()?.to_string_lossy();
+    let relative = canon.strip_prefix(&docs).ok()?.to_string_lossy();
     let uri = canon.to_string_lossy().to_string();
     Some(desktop::Artifact {
         // Identity is workspace-relative so a snapshot/artifact ID never embeds
@@ -460,11 +463,14 @@ pub(super) fn mobile_screenshot_artifact(
     docs: &std::path::Path,
 ) -> Option<desktop::Artifact> {
     let path = std::path::Path::new(written);
-    if !path.is_absolute() {
-        return None;
-    }
-    let canon = path.canonicalize().ok()?;
-    if !canon.starts_with(docs) {
+    let docs = docs.canonicalize().ok()?;
+    let candidate = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        docs.join(path)
+    };
+    let canon = candidate.canonicalize().ok()?;
+    if !canon.starts_with(&docs) {
         return None;
     }
     let ext = canon

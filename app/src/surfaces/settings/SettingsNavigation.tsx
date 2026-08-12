@@ -34,7 +34,7 @@ export const SETTINGS_GROUPS: SettingsNavGroup[] = [
         id: "general",
         label: "General",
         description: "Appearance, approvals, output, and memory",
-        keywords: ["theme", "font", "text size", "permissions", "browser", "agents"],
+        keywords: ["theme", "font", "text size", "contrast", "permissions", "browser", "agents"],
         icon: SlidersHorizontal,
       },
       {

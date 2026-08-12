@@ -1,7 +1,18 @@
 // Derive the single "what is happening right now" signal from a snapshot, so the
 // UI can always answer: happening now? progress? Pure + tested.
 
-import type { RunOutcome, Snapshot, ToolCall } from "../core-bridge/types";
+import type { RunOutcome, Snapshot, TimelineItem, ToolCall } from "../core-bridge/types";
+
+/** Private reasoning is durable history, not a second live-work surface. While
+ * it is the only agent output, Conversation keeps it hidden and lets the one
+ * pending row own the active state. */
+export function isThinkingOnlyMessage(item: TimelineItem | undefined): boolean {
+  return !!item
+    && item.item === "message"
+    && item.role === "agent"
+    && item.blocks.length > 0
+    && item.blocks.every((block) => block.type === "thinking");
+}
 
 /** Compact, typed diagnostics for the provider-local root execution receipt. */
 export function executionDiagnostic(outcome?: RunOutcome): string | undefined {
@@ -93,7 +104,9 @@ export function currentActivity(snapshot: Snapshot): Activity {
   const step = snapshot.execution_checklist?.steps.find((candidate) => candidate.status === "in_progress");
   if (step) return { busy: true, label: step.title, progress, steps };
 
-  return { busy: true, label: "Thinking…", progress, steps };
+  const last = snapshot.timeline[snapshot.timeline.length - 1];
+  const continuing = !!last && !(last.item === "message" && last.role === "user");
+  return { busy: true, label: continuing ? "Working…" : "Thinking…", progress, steps };
 }
 
 /** Whether the conversation needs a live activity row at its foot. Tool rows
@@ -109,12 +122,7 @@ export function shouldShowPending(snapshot: Snapshot): boolean {
 
   const last = snapshot.timeline[snapshot.timeline.length - 1];
   if (!last || (last.item === "message" && last.role === "user")) return true;
-  if (
-    last.item === "provider_incident"
-    && ["observed", "retrying"].includes(snapshot.provider_incidents[last.id]?.status)
-  ) {
-    return false;
-  }
   if (last.item !== "message") return true;
+  if (isThinkingOnlyMessage(last)) return true;
   return last.role === "agent" && last.phase === "commentary";
 }

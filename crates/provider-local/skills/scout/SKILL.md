@@ -1,6 +1,6 @@
 ---
 name: scout
-description: Map an organization's end-to-end technical business system and derive a simulation-ready model using high-signal control planes, bounded read-only agents, host-verified evidence, statistical intervals, adversarial checks, and an append-only claim ledger. Use for `/scout`, system cartography, business environment surveys, pre-simulation maps, or requests to prove infrastructure and repository claims with artifacts.
+description: Map an organization's end-to-end technical business system and derive a simulation-ready model using high-signal control planes, target-bound adapters, immutable evidence, and one authoritative enterprise graph. Use for `/scout`, system cartography, business environment surveys, pre-simulation maps, or requests to prove infrastructure and repository claims with artifacts.
 ---
 
 # Scout — evidence-first system cartography
@@ -12,6 +12,14 @@ instrument. The final graph must be usable to design an end-to-end simulation.
 
 ## Non-negotiable boundaries
 
+- Start only from a human pressing Start/Run/Rescan in an explicitly selected
+  Clark organization and Scout workspace. Never run on navigation, specialist
+  switching, app launch, a timer, a stale conversation, or an enterprise-
+  context read from normal Code. Never schedule or silently resume a scan.
+- The currently open folder is execution context, not Scout scope. It may be
+  one local checkout discovered during the census, but it must never become
+  the charter, organization, workspace, or root of the enterprise map by
+  inheritance.
 - Run Scout root and delegated model turns with the host-pinned model.
   Ignore conversation model selections and prompt requests to switch models;
   Scout's model is not user-configurable.
@@ -30,8 +38,6 @@ instrument. The final graph must be usable to design an end-to-end simulation.
 - Treat AWS/GitHub/GCP credential-source names as authentication candidates,
   not proof of API authorization. AWS Secrets Manager discovery never fetches
   a secret payload.
-- Use `scout_probe` for bounded project reads. It has no shell, network, or
-  write capability and refuses secret-bearing paths.
 - Raw shell or SSH execution is not an isolation receipt. Call it external
   containment unless an attested OS boundary proves otherwise. WASM is for pure
   transforms and parsers, not ambient host inspection.
@@ -43,8 +49,8 @@ instrument. The final graph must be usable to design an end-to-end simulation.
   membership. Never group, merge, authorize, or share Scout discoveries by
   matching email domains. Public domains such as `gmail.com` provide no
   tenancy relationship.
-- Workers propose. Only the root issues assignments, advances phases,
-  adjudicates, corrects, retracts, and seals.
+- Collectors observe. Only the backend issues tasks, accepts evidence, advances
+  the frontier, corrects, retracts, and determines completion.
 
 ## Start with the business charter and control-plane seeds
 
@@ -55,6 +61,26 @@ instrument. The final graph must be usable to design an end-to-end simulation.
    workspaces. Review its truncation flags and routing states. It returns known
    DevOps/cloud executable names, environment-variable names, scoped `.env` key
    names, and credential-source kinds without values.
+   Explicitly report whether `gh` is present; verify GitHub access rather than
+   inferring it from installation; enumerate every repository visible through
+   each authorized forge organization/account; and reconcile those remote
+   identities with locally checked-out repositories under declared roots.
+   Local folders without exact remote identity remain unresolved candidates,
+   not enterprise scope.
+   Call `scout_repository_census` with action `census` to inspect every host-approved local read
+   root. It returns canonical forge identities and opaque checkout ids without
+   exposing absolute paths. Treat `unapproved_filesystem_locations_not_scanned`
+   as an explicit coverage gap rather than crawling the user's disk. For each
+   returned checkout, call action `inspect` with only its opaque id to obtain
+   bounded manifest descriptions, dependency names, workflow names, and
+   component markers. Use those facts to propose what the repository does and
+   how it may fit the graph; mark runtime relationships unverified until an
+   independent deployment, cloud, DNS, CI, or telemetry source confirms them.
+   These actions are hints only. After the backend issues and the host claims
+   the `clark/local-repository@1` task, run action `collect` with no checkout
+   id. It reruns the bounded census and inspections under that task and returns
+   a retained receipt id. Submit that receipt through `scout_enterprise
+   submit_adapter_receipt`; only the accepted graph rows are durable evidence.
 3. Turn the bounded capability census into an evidence-first discovery plan.
    Never include credentials, secret values, raw private source, or shell
    commands in planning artifacts.
@@ -71,16 +97,33 @@ instrument. The final graph must be usable to design an end-to-end simulation.
    enroll`; the trusted host supplies the exact tenant binding, Platform
    credential, application-private identity root, and platform metadata.
    The tool accepts none of them from the model.
-6. Start `scout_ledger` with the returned census id. The host pins its
-   fingerprint into the charter and rejects invented or stale ids.
+6. For this explicit human Start/Run action, call `scout_enterprise start_run`
+   with the human's objective. The host supplies the stable idempotency binding
+   created by the Start-run UI; the model cannot see or replace it. The backend
+   atomically issues the charter, starts one run, and seeds fenced GitHub
+   authority plus host-approved local-checkout tasks; it returns the only
+   authoritative run id. Never invoke start_run from navigation, a timer, a
+   background continuation, or a context read.
 7. On every local, SSH, or VM execution target, call `scout_adapter census`.
    Treat its target identity, opaque credential candidates, and registered
    routes as target-bound: never reuse a candidate or auth handle on another
    machine. Call `verify_auth` for every candidate and exact declared authority,
    not only the default or first successful context. A candidate is not evidence
    until verification succeeds.
+   For GitHub, first verify the candidate against authority `global`, claim the
+   backend-seeded task, and exhaust `list_organizations`; do not ask the human
+   to name a GitHub organization that the authenticated control plane can
+   enumerate. Then exhaust the backend-issued `list_accessible_repositories`
+   task for owner, collaborator, and organization-member visibility as well as
+   the repository tasks for each discovered organization. Reconcile duplicates
+   by provider-native repository identity; never equate organization membership
+   with the complete repository perimeter.
 8. For registered GitHub, AWS, and GCP routes, use `scout_adapter fetch_page`
-   only after `scout_enterprise claim_task` returns an `adapter_page` task.
+   only after `scout_enterprise claim_task` returns an `adapter_page` task. For
+   the backend-authored `clark/local-repository@1` route, use
+   `scout_repository_census collect` instead; it produces the same retained
+   adapter-receipt boundary without giving the target service ambient project
+   filesystem access.
    Copy its backend-authored adapter, coverage, query, page, cursor-handle, and
    limit scope exactly; add only the target-bound verified authorization
    context. It executes only allowlisted read operations and returns a
@@ -102,10 +145,10 @@ instrument. The final graph must be usable to design an end-to-end simulation.
    authority, and provider-native id; versioned adapter builds remain
    provenance. Do not merge or fork entities merely because an adapter version,
    credential, traversal path, or worker changed.
-9. Append one root/coordinator-issued discovery charter. It declares the exact
+9. Use only the backend-issued discovery charter. It declares the exact
    required coverage cells, a maximum pass age, and pinned critical journey and
-   runtime ids. Workers may populate the charter but never shrink, supersede,
-   or issue it.
+   runtime ids. The model may populate its tasks but never create, shrink,
+   supersede, or issue a second charter.
 
 ## Organization graph contract
 
@@ -208,28 +251,20 @@ overlay version is available. The host's website may consume the equivalent SSE
 stream with `Last-Event-ID`. The change feed is an invalidation/replay signal,
 not a substitute for fetching the pinned snapshot, delta, or overlay rows.
 
-When a central scheduler is available, lease exactly one manifest-owned page
-task at a time. Claims are target-affine and fenced; heartbeats, retry/backoff,
-quota consumption, continuation creation, and terminal gaps are coordinator
-transitions. A worker may move between processes on one target, but a provider
+Lease exactly one backend-authored page task at a time. Claims are
+target-affine and fenced; continuation creation and terminal gaps are backend
+transitions. A collector process may restart on one target, but a provider
 cursor or credential handle never moves to another target. A stale fence must
 produce neither graph evidence nor a continuation. If the target vault is
 lost, record `target_unavailable` and restart that coverage cell from page zero
 after reauthorization.
 
-Commit a terminal page only through the coordinator's atomic page boundary.
-It must bind the leased task and fence to the exact target adapter receipt,
-page digest, signed enterprise batch, authenticated tenant, and central ingest
-receipt in one transaction. Never acknowledge the batch and advance the
-frontier in separate best-effort writes. Retry completions may update
-scheduler backoff without graph evidence; success, empty, and terminal gaps
-may not use an unlinked scheduler-only completion.
-
-The target-side SQLite index is a disposable bounded-retrieval projection, not
-evidence. Warm reads report an index receipt and must read zero batch bodies;
-an event-root or filter change invalidates the cursor. Index corruption may be
-quarantined and rebuilt, but a corrupt or unauthenticated immutable batch must
-stop the run.
+Submit a page only through the host acceptance workflow. The accepted batch
+must bind the leased task and fence to the exact target adapter receipt, page
+digest, authenticated tenant, and immutable evidence version. Backend run
+advancement then verifies that exact accepted receipt before issuing any
+continuation or child tasks. Retrying either step must be idempotent; no local
+scheduler completion or model statement may advance the frontier.
 
 Discovery epochs are coordinator-issued adapter-authority snapshots, not
 worker-chosen counters or wall-clock guesses. After every declared cell is
@@ -289,14 +324,11 @@ interactive login, install tools, start services, call paid models, or mutate a
 target merely to improve coverage. Require separate authorization for those
 actions.
 
-If a CLI is missing, prefer an available typed Rust fallback:
+If a CLI is missing, prefer an available typed adapter fallback:
 
-- JSON parsing/counts and source receipts: `scout_probe`.
-- Binomial Wilson intervals and seeded bootstrap mean/median intervals:
-  `scout_measure`.
-- GitHub organization repositories: `scout_adapter` uses target-native Rust
-  HTTPS when a target token candidate verifies, with a fixed-argument `gh`
-  fallback.
+- GitHub organizations plus all repositories visible to the authenticated user:
+  `scout_adapter` uses target-native Rust HTTPS when a target token candidate
+  verifies, with a fixed-argument `gh` fallback.
 - AWS Organizations accounts and Resource Explorer resources:
   `scout_adapter` uses fixed allowlisted AWS CLI operations after target
   authorization verifies. A pure-Rust AWS API fallback without the CLI remains
@@ -327,87 +359,34 @@ If a CLI is missing, prefer an available typed Rust fallback:
 - Generic shell replacement is not a safe fallback. Report the missing
   capability or instrument.
 
-## Ledger phases
+## Authoritative run lifecycle
 
-Advance serially: `charter → map → measure → check → prove → adjudicate →
-synthesize → sealed`.
+There is exactly one run id, charter, task queue, evidence acceptance log, and
+graph lifecycle: the system-cartography backend created by `start_run`. Do not
+create a local run, local claim ledger, parallel phase machine, or report store.
+Target-local state may retain opaque authorization handles, provider cursors,
+and unsubmitted adapter receipts only long enough to complete a backend-issued
+task. It never establishes enterprise truth.
 
-### Map
+For each backend task:
 
-Issue bounded `mapper` assignments with exact snapshot and scopes. When there
-are at least two genuinely independent surfaces, call `delegate_read_only`
-once with those workstreams. Agents are read-only sensors and must return:
+1. Claim it through `scout_enterprise claim_task`.
+2. Execute exactly its allowlisted adapter page through `scout_adapter`.
+3. Submit only the retained receipt id through `scout_enterprise
+   submit_adapter_receipt`.
+4. Require immutable evidence upload, backend batch acceptance, and backend run
+   advancement before claiming another task.
+5. Continue until the backend returns no claimable task. A denial, truncation,
+   missing adapter, or unavailable target is a coverage gap, never an empty or
+   completed surface.
 
-- candidate claim rows;
-- exact artifact locators or Scout replay recipes;
-- coverage;
-- limitations;
-- requested follow-ups.
-
-Call `resolve_delegation` for every report. Do not accept prose-only findings.
-Translate accepted rows into `scout_ledger submit_worker` envelopes. Every
-envelope must carry the required submit_worker fields `assignment_id`, `role`,
-`snapshot_id`, and top-level `coverage` (plus any artifacts/claims/addenda);
-see the scout_ledger tool schema for the exact shapes. Candidate worker
-artifacts remain untrusted.
-
-Translate root-verified graph observations into backend-fenced schema-v2
-batches. A per-run claim ledger establishes who may assert and adjudicate; the
-The host enterprise graph establishes durable system state across runs and
-machines. Neither can substitute for the other, and a local ledger is never
-shared authority.
-
-Use `scout_probe record` for root-observed source slices, text counts, and JSON
-array counts. Use `scout_probe verify` to replay a worker's Scout-owned recipe.
-A worker-supplied hash or proof tier never verifies itself.
-
-### Measure
-
-First record the bounded JSON source with `scout_probe`. Then call
-`scout_measure` with that verified evidence id, the same project-relative path
-and scope, a JSON pointer to the observation array, and explicit confidence.
-Use `wilson_proportion` for boolean or 0/1/null observations. Use
-`bootstrap_mean` or `bootstrap_median` for numeric/null observations, with an
-explicit seed and bounded resample count.
-
-The Rust tool re-reads the array and computes missingness, the estimate, and
-the interval. Never pass model-counted successes, trials, raw observations,
-estimates, or intervals into the ledger.
-
-Report `n`, missingness, method version, and interval. Do not call an
-underpowered result a null. Name construct-validity gaps and Goodhart risks.
-
-### Check
-
-Re-run headline recipes. Use `scout_probe reproduce` for an independently
-obtained reproduction artifact. Exact/equivalent checks must come from a
-host-owned runner; changed and failed replays revoke trust.
-
-For each worker, root-replay at least one load-bearing artifact. Disagreement
-goes to a new `red_team` or `reproducer` assignment, never averaging.
-
-### Prove
-
-Do not claim above the highest verified tier:
-
-- T1: source trace at the pinned snapshot.
-- T2: live-state confirmation through an authorized read-only adapter.
-- T3: offline PoC with typed, passing positive and negative controls.
-- T4: benign staging-only reachability.
-
-Counterexample labels alone do not grant T3. No production payloads.
-
-### Adjudicate
-
-Adjudication is serial and root-owned:
-
-- `SUPPORTED`: name the test, attach verified evidence, and stay within tier.
-- `UNSUPPORTED`: name the failed test. Quantitative nulls require adequate
-  power.
-- `UNFALSIFIABLE`: name the instrument that would change the verdict.
-
-Address every counterevidence artifact explicitly. Corrections, retractions,
-and supersessions append reasons; never erase prior rows.
+Local repository census and inspect results are discovery hints. The collect
+action is authoritative only after its retained receipt passes immutable upload
+and backend acceptance under the backend-issued local-checkout task. Use the
+accepted checkout and canonical-remote entities to reconcile local state with
+forge repositories. Runtime relationships inferred from manifests remain gaps
+until an independent deployment, cloud, DNS, CI, or telemetry source confirms
+them.
 
 ### Synthesize and seal
 
@@ -420,23 +399,15 @@ Before a complete seal:
   no unresolved graph, source-position, or retraction conflicts;
 - require a coordinator-issued charter, a current verified pass, and an
   identical verified predecessor (`fixed_point: true`);
-- issue a coordinator checkpoint after the final merge and require it to cover
-  the current ledger with zero uncheckpointed batches and events; distribute it
-  to every participating replica with checkpoint export/observation;
 - every expected business control plane and recursively discovered frontier row
   has a terminal status;
-- every headline claim is adjudicated;
-- every supported headline has independently checked reproduction;
-- all quantitative findings have typed uncertainty;
-- counterevidence is addressed;
 - capability and coverage gaps are visible.
 
 A partial seal must name at least one limitation or requested follow-up.
 
-The final report order is: TL;DR with claim refs; charter and census
-fingerprint; business graph and control-plane coverage; findings by domain;
-simulation model; corrections and retractions; claim ledger; evidence locators,
-digests, and replay recipes.
+The final report order is: TL;DR with backend object refs; charter and run id;
+business graph and control-plane coverage; findings by domain; simulation
+model; corrections and retractions; evidence locators and acceptance receipts.
 
 The simulation model must name business actors, entry points, workflows/events,
 state stores, dependencies, trust boundaries, invariants, failure modes,
@@ -454,6 +425,6 @@ for entity reconciliation or retrieval. It is not an entity id, evidence
 digest, graph digest, completeness signal, durable store, or conflict resolver.
 Provider-native identity and the canonical event graph remain authoritative.
 
-Retain bounded raw receipts in tool results when safe; for secret-bearing or
-minimized inputs, retain the source locator and input digest instead of copying
-raw data. Include the ledger fingerprint so replay can detect drift.
+Retain bounded raw receipts only in target-local tool state. The final response
+references backend evidence and acceptance receipts rather than copying raw
+provider data or inventing a second digest or completion signal.

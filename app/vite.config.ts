@@ -17,6 +17,12 @@ export default defineConfig({
     alias: {
       "@product-entry": productEntry,
     },
+    // A branded entry can live in a downstream workspace with its own
+    // node_modules tree. Keep React as one process-wide runtime anyway:
+    // components supplied by that entry (for example lucide icons) use hooks,
+    // and a second bundled React copy has no active dispatcher when the main
+    // renderer calls them from a lazy-loaded workspace.
+    dedupe: ["react", "react-dom"],
   },
   // Prevent Vite from obscuring Rust errors.
   clearScreen: false,

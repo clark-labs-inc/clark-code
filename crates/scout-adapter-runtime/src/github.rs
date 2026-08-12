@@ -5,8 +5,8 @@ use futures::StreamExt;
 use reqwest::header::{HeaderMap, AUTHORIZATION, LINK, USER_AGENT};
 use reqwest::{Client, StatusCode, Url};
 use scout_adapter_protocol::{
-    AdapterId, AdapterPageRequest, AuthContextDescriptor, AuthSourceKind, NormalizedRecord,
-    RedactionSummary, SafeFieldValue, TargetIdentity,
+    AdapterId, AdapterPageRequest, AuthContextDescriptor, AuthSourceKind, NormalizedLink,
+    NormalizedRecord, RedactionSummary, SafeFieldValue, TargetIdentity,
 };
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
@@ -102,8 +102,10 @@ impl GithubAdapter {
         requested_scope: Option<&str>,
         now_ms: u64,
     ) -> RuntimeResult<AuthContextDescriptor> {
-        let organization = requested_scope.ok_or(RuntimeError::InvalidRequest)?;
-        validate_organization(organization)?;
+        let authority = requested_scope.ok_or(RuntimeError::InvalidRequest)?;
+        if authority != "global" {
+            validate_organization(authority)?;
+        }
         let (user, verified_org, source_kind) = match reference {
             StoredAuthRef::GithubEnvironment { variable } => {
                 let token = runner
@@ -114,14 +116,25 @@ impl GithubAdapter {
                 let user = self
                     .native_json::<GithubUser>(&["user"], token, &[])
                     .await?;
-                let org = self
-                    .native_json::<GithubOrganization>(&["orgs", organization], token, &[])
-                    .await?;
+                let org = if authority == "global" {
+                    None
+                } else {
+                    Some(
+                        self.native_json::<GithubOrganization>(&["orgs", authority], token, &[])
+                            .await?,
+                    )
+                };
                 (user, org, AuthSourceKind::EnvironmentReference)
             }
             StoredAuthRef::GithubCli => {
                 let user = parse_cli_json::<GithubUser>(runner.gh_user().await?)?;
-                let org = parse_cli_json::<GithubOrganization>(runner.gh_org(organization).await?)?;
+                let org = if authority == "global" {
+                    None
+                } else {
+                    Some(parse_cli_json::<GithubOrganization>(
+                        runner.gh_org(authority).await?,
+                    )?)
+                };
                 (user, org, AuthSourceKind::CliProfile)
             }
             StoredAuthRef::AwsEnvironment
@@ -130,16 +143,26 @@ impl GithubAdapter {
             | StoredAuthRef::GitlabEnvironment { .. }
             | StoredAuthRef::GcpCli { .. } => return Err(RuntimeError::UnsupportedAdapter),
         };
-        if !verified_org.login.eq_ignore_ascii_case(organization) || verified_org.id == 0 {
+        if verified_org.as_ref().is_some_and(|organization| {
+            !organization.login.eq_ignore_ascii_case(authority) || organization.id == 0
+        }) {
             return Err(RuntimeError::AccessDenied);
         }
-        let grant_digest = digest(format!("github\0{}\0{}", verified_org.id, user.id).as_bytes());
+        let verified_authority = verified_org
+            .as_ref()
+            .map(|organization| organization.login.clone())
+            .unwrap_or_else(|| "global".to_owned());
+        let authority_identity = verified_org
+            .as_ref()
+            .map(|organization| organization.id)
+            .unwrap_or_default();
+        let grant_digest = digest(format!("github\0{authority_identity}\0{}", user.id).as_bytes());
         AuthContextDescriptor::new(
             random_auth_handle(),
             target.target_id.clone(),
             adapter_id(),
             "github".to_owned(),
-            verified_org.login,
+            verified_authority,
             format!("github-user:{}:{}", user.id, user.login),
             source_kind,
             grant_digest,
@@ -167,46 +190,104 @@ impl GithubAdapter {
             .page_size
             .min(request.limits.max_records)
             .min(MAX_GITHUB_PAGE);
-        let (repositories, has_next) = match reference {
+        let (records, has_next, source_field_count) = match reference {
             StoredAuthRef::GithubEnvironment { variable } => {
                 let token = runner
                     .environment()
                     .utf8(variable)
                     .filter(|token| !token.is_empty())
                     .ok_or(RuntimeError::AuthStale)?;
-                let response = self
-                    .native_get(
-                        &["orgs", &request.query.authority_scope, "repos"],
-                        token,
-                        &[
-                            ("per_page", page_size.to_string()),
-                            ("page", page.to_string()),
-                        ],
-                    )
-                    .await?;
+                let path = match request.query.operation.as_str() {
+                    "list_organizations" => vec!["user", "orgs"],
+                    "list_accessible_repositories" => vec!["user", "repos"],
+                    _ => vec!["orgs", request.query.authority_scope.as_str(), "repos"],
+                };
+                let mut query = vec![
+                    ("per_page", page_size.to_string()),
+                    ("page", page.to_string()),
+                ];
+                if request.query.operation == "list_accessible_repositories" {
+                    query.extend([
+                        (
+                            "affiliation",
+                            "owner,collaborator,organization_member".to_owned(),
+                        ),
+                        ("sort", "full_name".to_owned()),
+                        ("direction", "asc".to_owned()),
+                    ]);
+                }
+                let response = self.native_get(&path, token, &query).await?;
                 classify_http(&response)?;
                 let has_next = has_next_link(&response.headers);
-                let repositories = serde_json::from_slice(&response.body)
-                    .map_err(|_| RuntimeError::ProviderProtocol)?;
-                (repositories, has_next)
+                if request.query.operation == "list_organizations" {
+                    let organizations: Vec<GithubOrganization> =
+                        serde_json::from_slice(&response.body)
+                            .map_err(|_| RuntimeError::ProviderProtocol)?;
+                    (
+                        organizations
+                            .into_iter()
+                            .map(|organization| normalize_organization(request, organization))
+                            .collect::<RuntimeResult<Vec<_>>>()?,
+                        has_next,
+                        2_u64,
+                    )
+                } else {
+                    let repositories: Vec<GithubRepository> =
+                        serde_json::from_slice(&response.body)
+                            .map_err(|_| RuntimeError::ProviderProtocol)?;
+                    (
+                        repositories
+                            .into_iter()
+                            .map(|repository| normalize_repository(request, repository))
+                            .collect::<RuntimeResult<Vec<_>>>()?,
+                        has_next,
+                        10_u64,
+                    )
+                }
             }
             StoredAuthRef::GithubCli => {
-                let output = runner
-                    .gh_repositories(&request.query.authority_scope, page, page_size)
-                    .await?;
-                parse_gh_include(output)?
+                let output = match request.query.operation.as_str() {
+                    "list_organizations" => runner.gh_organizations(page, page_size).await?,
+                    "list_accessible_repositories" => {
+                        runner.gh_accessible_repositories(page, page_size).await?
+                    }
+                    _ => {
+                        runner
+                            .gh_repositories(&request.query.authority_scope, page, page_size)
+                            .await?
+                    }
+                };
+                let (body, has_next) = parse_gh_include_body(output)?;
+                if request.query.operation == "list_organizations" {
+                    let organizations: Vec<GithubOrganization> = serde_json::from_slice(&body)
+                        .map_err(|_| RuntimeError::ProviderProtocol)?;
+                    (
+                        organizations
+                            .into_iter()
+                            .map(|organization| normalize_organization(request, organization))
+                            .collect::<RuntimeResult<Vec<_>>>()?,
+                        has_next,
+                        2_u64,
+                    )
+                } else {
+                    let repositories: Vec<GithubRepository> = serde_json::from_slice(&body)
+                        .map_err(|_| RuntimeError::ProviderProtocol)?;
+                    (
+                        repositories
+                            .into_iter()
+                            .map(|repository| normalize_repository(request, repository))
+                            .collect::<RuntimeResult<Vec<_>>>()?,
+                        has_next,
+                        10_u64,
+                    )
+                }
             }
             _ => return Err(RuntimeError::UnsupportedAdapter),
         };
-        let repositories: Vec<GithubRepository> = repositories;
-        if repositories.len() > page_size as usize {
+        if records.len() > page_size as usize {
             return Err(RuntimeError::ProviderProtocol);
         }
-        let source_records_seen = repositories.len() as u64;
-        let records = repositories
-            .into_iter()
-            .map(|repository| normalize_repository(request, repository))
-            .collect::<RuntimeResult<Vec<_>>>()?;
+        let source_records_seen = records.len() as u64;
         let next_cursor = if has_next {
             Some(ProviderCursor::GithubPage(
                 page.checked_add(1).ok_or(RuntimeError::ProviderProtocol)?,
@@ -219,7 +300,7 @@ impl GithubAdapter {
                 source_records_seen,
                 records_emitted: records.len() as u64,
                 fields_omitted: source_records_seen.saturating_mul(
-                    (10_usize.saturating_sub(request.query.projection.len())) as u64,
+                    source_field_count.saturating_sub(request.query.projection.len() as u64),
                 ),
                 values_rejected: 0,
             },
@@ -287,6 +368,7 @@ impl GithubAdapter {
 fn validate_query(request: &AdapterPageRequest) -> RuntimeResult<()> {
     request.query.validate()?;
     let allowed = BTreeSet::from([
+        "login",
         "name",
         "full_name",
         "visibility",
@@ -298,9 +380,22 @@ fn validate_query(request: &AdapterPageRequest) -> RuntimeResult<()> {
         "html_url",
         "owner_login",
     ]);
+    let route_matches = matches!(
+        (
+            request.query.operation.as_str(),
+            request.query.provider_resource_type.as_str(),
+            request.query.authority_scope.as_str(),
+        ),
+        ("list_repositories", "github.repository", _)
+            | (
+                "list_accessible_repositories",
+                "github.repository",
+                "global"
+            )
+            | ("list_organizations", "github.organization", "global")
+    );
     if request.adapter_id != adapter_id()
-        || request.query.operation != "list_repositories"
-        || request.query.provider_resource_type != "github.repository"
+        || !route_matches
         || !request.query.filters.is_empty()
         || !request
             .query
@@ -310,7 +405,36 @@ fn validate_query(request: &AdapterPageRequest) -> RuntimeResult<()> {
     {
         return Err(RuntimeError::UnsupportedAdapter);
     }
-    validate_organization(&request.query.authority_scope)
+    if request.query.operation == "list_repositories" {
+        validate_organization(&request.query.authority_scope)
+    } else {
+        Ok(())
+    }
+}
+
+fn normalize_organization(
+    request: &AdapterPageRequest,
+    organization: GithubOrganization,
+) -> RuntimeResult<NormalizedRecord> {
+    if organization.id == 0 || organization.login.is_empty() {
+        return Err(RuntimeError::ProviderProtocol);
+    }
+    let mut fields = BTreeMap::new();
+    if request.query.projection.contains("login") {
+        fields.insert("login".to_owned(), SafeFieldValue::Text(organization.login));
+    }
+    NormalizedRecord::new(
+        request.adapter_id.clone(),
+        "github".to_owned(),
+        "github.organization".to_owned(),
+        "global".to_owned(),
+        format!("github-organization:{}", organization.id),
+        Some("source_organization".to_owned()),
+        BTreeSet::new(),
+        fields,
+        BTreeSet::new(),
+    )
+    .map_err(Into::into)
 }
 
 fn normalize_repository(
@@ -320,6 +444,7 @@ fn normalize_repository(
     if repository.id == 0 {
         return Err(RuntimeError::ProviderProtocol);
     }
+    let canonical_remote = format!("github.com/{}", repository.full_name.to_ascii_lowercase());
     let mut fields = BTreeMap::new();
     let mut insert = |name: &str, value: Option<SafeFieldValue>| {
         if request.query.projection.contains(name) {
@@ -367,7 +492,14 @@ fn normalize_repository(
         Some("code_repository".to_owned()),
         BTreeSet::new(),
         fields,
-        BTreeSet::new(),
+        BTreeSet::from([NormalizedLink {
+            relationship_type: "canonical_remote".into(),
+            target_provider_namespace: "git".into(),
+            target_provider_type: "git.repository".into(),
+            target_authority_scope: "global".into(),
+            target_native_id: canonical_remote,
+            qualifier: None,
+        }]),
     )
     .map_err(Into::into)
 }
@@ -377,9 +509,7 @@ fn parse_cli_json<T: DeserializeOwned>(output: crate::process::ProcessOutput) ->
     serde_json::from_slice(&output.stdout).map_err(|_| RuntimeError::ProviderProtocol)
 }
 
-fn parse_gh_include(
-    output: crate::process::ProcessOutput,
-) -> RuntimeResult<(Vec<GithubRepository>, bool)> {
+fn parse_gh_include_body(output: crate::process::ProcessOutput) -> RuntimeResult<(Vec<u8>, bool)> {
     classify_cli(&output)?;
     let split = find_header_boundary(&output.stdout).ok_or(RuntimeError::ProviderProtocol)?;
     let (headers, body) = output.stdout.split_at(split);
@@ -391,8 +521,7 @@ fn parse_gh_include(
     let has_next = String::from_utf8_lossy(headers)
         .lines()
         .any(|line| line.to_ascii_lowercase().contains("rel=\"next\""));
-    let repositories = serde_json::from_slice(body).map_err(|_| RuntimeError::ProviderProtocol)?;
-    Ok((repositories, has_next))
+    Ok((body.to_vec(), has_next))
 }
 
 fn find_header_boundary(bytes: &[u8]) -> Option<usize> {

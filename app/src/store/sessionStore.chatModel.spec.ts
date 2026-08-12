@@ -2,9 +2,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useSessionStore } from "./sessionStore";
 import type { CoreBridge } from "../core-bridge/bridge";
 import { emptySnapshot, type Session } from "../core-bridge/types";
-import { composerDraftOwner, loadComposerDraft, saveComposerDraft } from "../lib/composerDraft";
+import {
+  composerDraftRef,
+  composerDraftOwner,
+  loadComposerDraft,
+  saveComposerDraft,
+  specialistStartComposerDraftId,
+} from "../lib/composerDraft";
 import { DEFAULT_LOCAL_SETTINGS, effectiveModelSettings } from "../lib/localAgent";
 import { liveSessions, newLiveEntry } from "./sessionStore.runtime";
+import { useSpecialistStore } from "./specialistStore";
 
 // Each chat should keep its own model: switching models in one conversation
 // must not change what another conversation runs. Before the fix a single
@@ -18,6 +25,7 @@ const baseSettings = {
 
 const sessionA = { id: "chat-a", provider: "local" } as unknown as Session;
 const sessionB = { id: "chat-b", provider: "local" } as unknown as Session;
+const originalSpecialistOpen = useSpecialistStore.getState().open;
 
 function stubBridge(overrides: Partial<CoreBridge> = {}): CoreBridge {
   return {
@@ -38,6 +46,8 @@ function stubBridge(overrides: Partial<CoreBridge> = {}): CoreBridge {
 beforeEach(() => {
   liveSessions.clear();
   localStorage.clear();
+  useSpecialistStore.setState({ open: originalSpecialistOpen });
+  useSpecialistStore.getState().close();
   useSessionStore.setState({
     bridge: null,
     session: null,
@@ -57,14 +67,14 @@ beforeEach(() => {
 });
 
 describe("per-conversation model", () => {
-  it("preserves an active composer draft when detaching to a new chat", () => {
+  it("keeps an active composer draft scoped to its conversation when detaching", () => {
     const owner = composerDraftOwner(null);
     saveComposerDraft(owner, sessionA.id, "keep this draft");
     useSessionStore.setState({ session: sessionA });
 
     useSessionStore.getState().endSession();
 
-    expect(useSessionStore.getState().composerPrefill).toEqual({ text: "keep this draft" });
+    expect(useSessionStore.getState().composerPrefill).toBeNull();
     expect(loadComposerDraft(owner, sessionA.id)).toBe("keep this draft");
   });
 
@@ -76,6 +86,84 @@ describe("per-conversation model", () => {
     useSessionStore.getState().endSession({ force: true });
 
     expect(useSessionStore.getState().composerPrefill).toBeNull();
+  });
+
+  it("clears an abandoned specialist start draft when starting a new session", () => {
+    const owner = composerDraftOwner(null);
+    const draftId = specialistStartComposerDraftId("spec");
+    saveComposerDraft(owner, draftId, "unsent Spec request");
+    useSpecialistStore.setState({
+      active: "spec",
+      contexts: { spec: { kind: "spec" } },
+    });
+
+    useSessionStore.getState().endSession();
+
+    expect(loadComposerDraft(owner, draftId)).toBe("");
+    expect(useSpecialistStore.getState().active).toBeNull();
+  });
+
+  it("keeps the regular New session draft behind when opening a specialist conversation", async () => {
+    const bridge = stubBridge();
+    const securitySession = {
+      ...sessionA,
+      id: "security-chat",
+    } as Session;
+    const owner = composerDraftOwner(null);
+    const sentinel = "REGULAR NEW SESSION ONLY";
+    saveComposerDraft(owner, null, sentinel);
+    saveComposerDraft(owner, securitySession.id, "");
+    composerDraftRef.current = sentinel;
+    useSessionStore.setState({
+      bridge,
+      providers: await bridge.listProviders(),
+      conversations: [{
+        id: securitySession.id,
+        title: "Security review",
+        provider: "local",
+        project: baseSettings.cwd,
+        createdAt: 1,
+        updatedAt: 1,
+        specialist: { kind: "security" },
+      }],
+      composerPrefill: { text: sentinel },
+    });
+    useSpecialistStore.setState({
+      open: (kind, context = {}) => useSpecialistStore.setState((state) => ({
+        active: kind,
+        expanded: kind,
+        contexts: {
+          ...state.contexts,
+          [kind]: { ...state.contexts[kind], ...context, kind },
+        },
+      })),
+    });
+
+    const specialistOpenObservations: Array<{ active: string | null; session: string | null }> = [];
+    const unsubscribe = useSpecialistStore.subscribe((state) => {
+      specialistOpenObservations.push({
+        active: state.active,
+        session: useSessionStore.getState().session?.id ?? null,
+      });
+    });
+    expect(useSessionStore.getState()).toMatchObject({
+      activeProvider: "local",
+      session: null,
+      opening: null,
+    });
+    expect(useSessionStore.getState().bridge).toBe(bridge);
+    await useSessionStore.getState().openConversation(securitySession.id);
+    unsubscribe();
+
+    expect(useSessionStore.getState().session?.id).toBe(securitySession.id);
+    expect(specialistOpenObservations).toContainEqual({
+      active: "security",
+      session: securitySession.id,
+    });
+    expect(useSessionStore.getState().composerPrefill).toBeNull();
+    expect(composerDraftRef.current).toBe("");
+    expect(loadComposerDraft(owner, securitySession.id)).toBe("");
+    expect(loadComposerDraft(owner, null)).toBe(sentinel);
   });
 
   it("changing the model in one chat does not affect another", async () => {

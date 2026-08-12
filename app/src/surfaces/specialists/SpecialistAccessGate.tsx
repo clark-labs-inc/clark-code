@@ -12,23 +12,45 @@ import {
 import { useSessionStore } from "../../store/sessionStore";
 import { productModule } from "../../product/productModule";
 
+type SpecialistGateAction = "sign_in" | "product_action" | "retry" | "setup_workspace" | null;
+
+export function runSpecialistGateAction(
+  action: SpecialistGateAction,
+  handlers: {
+    signIn: () => void;
+    retry: () => void;
+    productAction: () => void;
+    setupWorkspace: () => void;
+  },
+): void {
+  if (action === "sign_in") handlers.signIn();
+  else if (action === "retry") handlers.retry();
+  else if (action === "product_action") handlers.productAction();
+  else if (action === "setup_workspace") handlers.setupWorkspace();
+}
+
 export function SpecialistAccessGate({
   kind,
   state,
   onRetry,
+  onProductAction,
+  onWorkspaceSetup,
 }: {
   kind: SpecialistKind;
   state: ReturnType<typeof projectedSpecialistAccess> | "offline";
   onRetry: () => void;
+  onProductAction: () => void;
+  onWorkspaceSetup: () => void;
 }) {
   const copy = specialistAccessCopy(state, kind);
   const signIn = useSessionStore((session) => session.signIn);
   const Icon = productModule().specialistIcons?.[kind] ?? Sparkles;
-  const action = () => {
-    if (copy.action === "sign_in") void signIn("google");
-    else if (copy.action === "retry") onRetry();
-    else onRetry();
-  };
+  const action = () => runSpecialistGateAction(copy.action, {
+    signIn: () => void signIn("google"),
+    retry: onRetry,
+    productAction: onProductAction,
+    setupWorkspace: onWorkspaceSetup,
+  });
 
   return (
     <div

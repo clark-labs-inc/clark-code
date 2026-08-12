@@ -325,7 +325,7 @@ export function scheduleCloudPut(
   scheduleArtifactCloudSync(creds, meta.id, snapshot, () => {
     const current = configuredCreds;
     if (current) scheduleCloudPut(current, meta, snapshot, status);
-  }, warningHandler ?? undefined);
+  }, warningHandler ?? undefined, status === "idle");
   const cloudSafeSnapshot = snapshotForArtifactCloud(meta.id, snapshot);
   clearRetry(meta.id);
   pending.set(meta.id, {

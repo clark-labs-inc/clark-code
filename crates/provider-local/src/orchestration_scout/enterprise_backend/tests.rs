@@ -66,6 +66,33 @@ fn submission_cannot_override_the_stored_run_or_fence_binding() {
 }
 
 #[test]
+fn run_start_accepts_no_model_selected_tenant_or_source_binding() {
+    let args: EnterpriseArgs = serde_json::from_value(json!({
+        "action": "start_run",
+        "objective": "Map the company code and infrastructure graph",
+    }))
+    .unwrap();
+    assert!(args.validate().is_ok());
+
+    let schema = serde_json::to_string(
+        &ScoutEnterpriseBackendTool {
+            state: Arc::new(CartographyBackendState::new(config())),
+        }
+        .parameters(),
+    )
+    .unwrap();
+    for forbidden in [
+        "organization_id",
+        "workspace_id",
+        "source_id",
+        "charter_id",
+        "request_id",
+    ] {
+        assert!(!schema.contains(forbidden));
+    }
+}
+
+#[test]
 fn claim_result_exposes_the_exact_safe_task_to_the_model() {
     let task_id = Uuid::new_v4();
     let source_id = Uuid::new_v4();

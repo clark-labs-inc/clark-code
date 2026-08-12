@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, ChevronDown, Folder, GitBranch, GitFork, Laptop, Server } from "lucide-react";
+import { AlertTriangle, ChevronDown, Folder, GitBranch, GitFork, Laptop, Network, Server } from "lucide-react";
 import type { ProjectContext, RemoteWorkerTarget } from "../core-bridge/bridge";
 import { projectDisplayName } from "../lib/projectSidebar";
 import { loadProjectContext } from "../lib/projectContext";
@@ -12,9 +12,18 @@ import { BranchPicker } from "./BranchPicker";
 import { EnvironmentPicker } from "./EnvironmentPicker";
 import { ManagedWorktreeBasePicker } from "./ManagedWorktreeJourney";
 import { ParallelWorkContext } from "./ParallelWorkContext";
+import { useSpecialistStore } from "../store/specialistStore";
 
 const ITEM =
   "flex h-[22px] min-w-0 items-center gap-1 rounded-md bg-composer-context px-1.5 text-xs font-medium leading-none";
+
+export function composerContextKind(
+  activeSpecialist: string | null,
+): "checkout" | "enterprise" | "hidden" {
+  if (activeSpecialist === "scout") return "enterprise";
+  if (activeSpecialist === "spec") return "hidden";
+  return "checkout";
+}
 
 export function contextLocationLabel({
   isRemoteContext,
@@ -33,6 +42,10 @@ export function contextLocationLabel({
  * project/environment fields remain interactive; once a session is live they
  * become read-only because that run is pinned to its original checkout. */
 export function ComposerContextBar() {
+  const activeSpecialist = useSpecialistStore((state) => state.active);
+  const specialistContext = useSpecialistStore((state) =>
+    state.active ? state.contexts[state.active] : undefined,
+  );
   const session = useSessionStore((state) => state.session);
   const activeProvider = useSessionStore((state) => state.activeProvider);
   const projectMode = useSessionStore((state) => state.projectMode);
@@ -91,6 +104,7 @@ export function ComposerContextBar() {
     [activeRemote, inspectionRemote, session],
   );
   const canInspect =
+    activeSpecialist !== "scout" &&
     activeProvider === "local" &&
     Boolean(cwd) &&
     (Boolean(session) || projectMode === "local" || Boolean(remote));
@@ -174,6 +188,31 @@ export function ComposerContextBar() {
       : undefined;
   const canSwitchBranch = !session && (projectMode === "local" || Boolean(remote));
 
+  const contextKind = composerContextKind(activeSpecialist);
+  if (contextKind === "hidden") return null;
+  if (contextKind === "enterprise") {
+    const authorityReady = Boolean(
+      specialistContext?.organizationId?.trim() && specialistContext.workspaceId?.trim(),
+    );
+    return (
+      <div
+        className="conversation-column-width relative mx-auto mb-1.5 flex w-full flex-wrap items-center gap-1.5"
+        data-testid="scout-enterprise-context"
+        aria-label="Scout enterprise context"
+      >
+        <span
+          className={`${ITEM} text-accent`}
+          title="Scout maps the selected enterprise perimeter, not the open checkout."
+        >
+          <Network className="size-3 shrink-0" aria-hidden="true" />
+          <span>Enterprise perimeter</span>
+        </span>
+        <span className={`${ITEM} text-ink-secondary`}>
+          {authorityReady ? "Organization + Scout workspace" : "Choose organization and workspace"}
+        </span>
+      </div>
+    );
+  }
   if (session && (activeProvider !== "local" || !checkoutRoot)) return null;
 
   return (

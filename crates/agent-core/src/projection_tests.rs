@@ -773,6 +773,7 @@ fn proposed_plan_revision_and_approval_update_one_durable_timeline_item() {
             status,
             global_reminders: Vec::new(),
             execution_contract: Vec::new(),
+            context_revisions: Vec::new(),
         },
     };
     let snap = reduce_all(&[

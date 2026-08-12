@@ -4,5 +4,7 @@
 <dict>
   <key>NSDocumentsFolderUsageDescription</key>
   <string>Clark Code needs access to the project folders you select so it can inspect and modify your code.</string>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Clark Code uses the microphone only when you choose to narrate an idea into the composer.</string>
 </dict>
 </plist>

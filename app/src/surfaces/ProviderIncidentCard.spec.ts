@@ -49,41 +49,34 @@ function render(value: ProviderIncident, onContinue?: () => void) {
   return renderToStaticMarkup(createElement(ProviderIncidentCard, {
     incident: value,
     onContinue,
-    modelRouteLabel: "the agent's cloud model gateway",
   }));
 }
 
 describe("ProviderIncidentCard", () => {
-  it("explains execution recovery and the local/cloud boundary", () => {
-    const markup = render(incident);
-    expect(markup).toContain("Completed tools: 49");
-    expect(markup).toContain("Retrying attempt 2 of 2");
-    expect(markup).toContain("Files and tools run on this computer");
-    expect(markup).toContain("the agent&#x27;s cloud model gateway");
-    expect(markup).toContain("upstream-1");
-    expect(markup).toContain("run-1:transcript-commit:52");
-  });
+  it.each(["observed", "retrying", "recovered"] as const)(
+    "keeps %s recovery invisible",
+    (status) => {
+      const markup = render({ ...incident, status });
+      expect(markup).toBe("");
+      expect(markup).not.toContain("Retrying");
+      expect(markup).not.toContain("upstream-1");
+    },
+  );
 
-  it("shows request-local retry progress before execution recovery", () => {
-    const markup = render({ ...incident, execution_recovery: undefined, request: { ...incident.request, attempts: 1 } });
-    expect(markup).toContain("Retrying request 2 of 17");
-  });
-
-  it("updates to recovered duration without offering continuation", () => {
-    const markup = render({ ...incident, status: "recovered", completed_at_ms: 14_100 }, vi.fn());
-    expect(markup).toContain("Recovered after 12 seconds");
-    expect(markup).not.toContain("Continue from saved progress");
-  });
-
-  it("offers honest continuation after recovery fails", () => {
-    const markup = render({ ...incident, status: "failed", completed_at_ms: 6_000 }, vi.fn());
-    expect(markup).toContain("Recovery failed");
-    expect(markup).toContain("Continue from saved progress");
-  });
-
-  it("does not invent a completion duration for interrupted recovery", () => {
-    const markup = render({ ...incident, status: "interrupted" }, vi.fn());
-    expect(markup).toContain("stopped before recovery completed");
-    expect(markup).not.toContain("Recovered after");
-  });
+  it.each(["failed", "interrupted"] as const)(
+    "offers a quiet continuation after terminal %s recovery",
+    (status) => {
+      const markup = render({ ...incident, status }, vi.fn());
+      expect(markup).toContain("Taking a little longer");
+      expect(markup).toContain("Your completed work is saved");
+      expect(markup).toContain("Keep going");
+      expect(markup).not.toContain("danger");
+      expect(markup).not.toContain("error");
+      expect(markup).not.toContain("Retrying");
+      expect(markup).not.toContain("attempt");
+      expect(markup).not.toContain("gateway");
+      expect(markup).not.toContain("upstream-1");
+      expect(markup).not.toContain("Details");
+    },
+  );
 });

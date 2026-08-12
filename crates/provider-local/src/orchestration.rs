@@ -170,6 +170,7 @@ pub(crate) struct ScoutCartographyHostConfig {
     pub platform: String,
     pub architecture: String,
     pub route_prefix: String,
+    pub human_run_request_id: Option<String>,
 }
 
 impl ScoutCartographyHostConfig {
@@ -202,6 +203,18 @@ impl ScoutCartographyHostConfig {
         {
             return None;
         }
+        let human_run_request_id = value
+            .get("human_run_request_id")
+            .and_then(Value::as_str)
+            .filter(|request_id| {
+                request_id.strip_prefix("scout-run:").is_some_and(|digest| {
+                    digest.len() == 64
+                        && digest
+                            .bytes()
+                            .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
+                })
+            })
+            .map(str::to_owned);
         Some(Self {
             organization_id,
             workspace_id,
@@ -209,6 +222,7 @@ impl ScoutCartographyHostConfig {
             platform,
             architecture,
             route_prefix: route_prefix.to_string(),
+            human_run_request_id,
         })
     }
 }

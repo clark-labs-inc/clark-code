@@ -426,11 +426,19 @@ export interface SessionState {
   dirtyWorktreeApproval: {
     sourceRoot: string;
     sourceBranch?: string | null;
-    sourceRevision: string;
+    sourceRevision: string | null;
     sourceChanges: WorktreeChangeSummary;
   } | null;
   /** A managed checkout already created for a start that can be retried. */
   pendingManagedWorktreePath: string | null;
+  /** The exact first prompt whose session start paused at the dirty-checkout
+   * decision. This is the only draft allowed to cross from the New session
+   * composer into the eventually created conversation; an unrelated or newer
+   * draft must remain owned by New session. */
+  deferredSessionStartDraft: {
+    owner: string;
+    text: string;
+  } | null;
   /** True while the host prepares a managed checkout for the next session. */
   worktreePreparing: boolean;
   /** Per-conversation model + reasoning-effort settings, keyed by conversation
@@ -543,7 +551,10 @@ export interface SessionState {
    *  host not ready…), or null when ready. Lets the composer gate a pre-session
    *  submit with the same logic the start screen uses. */
   startBlockedReason: () => string | null;
-  startSession: (options?: { quickChat?: { id: string; path: string } }) => Promise<void>;
+  startSession: (options?: {
+    quickChat?: { id: string; path: string };
+    submittedDraft?: string;
+  }) => Promise<void>;
   /** Start immediately in an app-managed workspace without selecting a repo. */
   startQuickChat: () => Promise<void>;
   /** Create the explicitly approved isolated checkout, then start the chat in it. */
@@ -896,7 +907,10 @@ export async function bindCloudTrajectory(
     repositoryFingerprint: repositoryFingerprint ?? undefined,
     remoteHost: meta.remoteHost,
     mode: meta.mode,
-    metadata,
+    metadata: {
+      ...metadata,
+      ...(meta.specialist ? { specialistContext: meta.specialist } : {}),
+    },
   };
   // Cloud history can contain snapshots written by the pre-checklist schema.
   // Normalize at the last boundary before Tauri deserializes Snapshot so a

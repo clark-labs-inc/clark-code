@@ -113,6 +113,24 @@ mod tests {
                 organizations: Vec::new(),
             })
         }
+
+        async fn feature_context(
+            &self,
+            request: &crate::platform::FeatureContextRequest,
+        ) -> Result<crate::platform::FeatureContextResponse, String> {
+            Ok(crate::platform::FeatureContextResponse {
+                query: request.query.clone(),
+                packets: Vec::new(),
+                unavailable_reason: Some("not configured".into()),
+            })
+        }
+
+        async fn submit_feature_context_feedback(
+            &self,
+            _request: &crate::platform::FeatureContextFeedbackRequest,
+        ) -> Result<crate::platform::FeatureContextFeedbackReceipt, String> {
+            Err("not configured".into())
+        }
     }
 
     #[test]

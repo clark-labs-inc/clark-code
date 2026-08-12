@@ -1,7 +1,10 @@
+import { useState } from "react";
 import {
   Loader2,
   MessageSquare,
   Network,
+  Plus,
+  Trash2,
 } from "lucide-react";
 import { useSessionStore } from "../../store/sessionStore";
 import { useSpecialistStore } from "../../store/specialistStore";
@@ -10,7 +13,9 @@ import {
   SPECIALIST_KINDS,
   type SpecialistKind,
 } from "../../lib/specialists";
+import type { ConversationMeta } from "../../lib/history";
 import { specialistConversationsForNavigation } from "../../lib/specialistNavigation";
+import { currentActivity } from "../../lib/activity";
 import { cn } from "../../lib/cn";
 import { productModule } from "../../product/productModule";
 
@@ -21,8 +26,104 @@ const ITEMS = SPECIALIST_KINDS.map((kind) => ({
   icon: product.specialistIcons?.[kind] ?? Network,
 }));
 
+export function SpecialistConversationRow({
+  conversation,
+  selected,
+  opening,
+  running,
+  deleting,
+  confirmingDelete,
+  onOpen,
+  onRequestDelete,
+  onConfirmDelete,
+  onCancelDelete,
+}: {
+  conversation: ConversationMeta;
+  selected: boolean;
+  opening: boolean;
+  running: boolean;
+  deleting: boolean;
+  confirmingDelete: boolean;
+  onOpen: () => void;
+  onRequestDelete: () => void;
+  onConfirmDelete: () => void;
+  onCancelDelete: () => void;
+}) {
+  const working = opening || running || deleting;
+  return (
+    <div
+      data-qa={`specialist-conversation-${conversation.specialist?.kind}-${conversation.id}`}
+      aria-busy={working || undefined}
+      className={cn(
+        "group relative flex h-8 w-full items-center gap-1 rounded-md px-1 text-xs leading-none transition",
+        selected
+          ? "bg-accent-subtle font-medium text-ink"
+          : "text-ink-muted hover:bg-bg-hover hover:text-ink",
+      )}
+    >
+      <button
+        type="button"
+        onClick={onOpen}
+        disabled={deleting}
+        aria-current={selected ? "page" : undefined}
+        aria-label={`${deleting ? "Deleting " : ""}${conversation.title}${selected ? ", selected" : ""}${running ? ", Clark is working" : ""}`}
+        className="flex min-w-0 flex-1 items-center gap-2 px-1 text-left disabled:cursor-wait"
+      >
+        {working ? (
+          <Loader2 className="size-3.5 shrink-0 animate-[spin_1s_linear_infinite] text-accent" aria-hidden="true" />
+        ) : (
+          <MessageSquare
+            className={cn("size-3.5 shrink-0", selected && "text-accent")}
+            aria-hidden="true"
+          />
+        )}
+        <span className="min-w-0 flex-1 truncate">{conversation.title}</span>
+        {running && (
+          <span className="breathe size-1.5 shrink-0 rounded-full bg-accent" aria-hidden="true" />
+        )}
+      </button>
+      {confirmingDelete ? (
+        <span className="flex shrink-0 items-center gap-0.5">
+          <button
+            type="button"
+            data-qa={`specialist-delete-confirm-${conversation.id}`}
+            onClick={onConfirmDelete}
+            disabled={deleting}
+            aria-label={`Permanently delete ${conversation.title}`}
+            className="rounded px-1 py-1 font-medium text-danger transition hover:bg-danger/10 disabled:cursor-wait"
+          >
+            Delete
+          </button>
+          <button
+            type="button"
+            onClick={onCancelDelete}
+            disabled={deleting}
+            aria-label="Cancel delete"
+            className="rounded px-1 py-1 text-ink-faint transition hover:bg-bg-sunken hover:text-ink disabled:cursor-wait"
+          >
+            Cancel
+          </button>
+        </span>
+      ) : (
+        <button
+          type="button"
+          data-qa={`specialist-delete-${conversation.id}`}
+          onClick={onRequestDelete}
+          disabled={deleting}
+          title="Delete conversation"
+          aria-label={`Delete ${conversation.title}`}
+          className="grid size-6 shrink-0 place-items-center rounded text-ink-faint opacity-0 transition hover:bg-danger/10 hover:text-danger group-hover:opacity-100 group-focus-within:opacity-100 disabled:cursor-wait"
+        >
+          <Trash2 className="size-3.5" />
+        </button>
+      )}
+    </div>
+  );
+}
+
 export function SpecialistNavigation({ rail = false }: { rail?: boolean }) {
   const active = useSpecialistStore((state) => state.active);
+  const expanded = useSpecialistStore((state) => state.expanded);
   const open = useSpecialistStore((state) => state.open);
   const endSession = useSessionStore((state) => state.endSession);
   const conversations = useSessionStore((state) => state.conversations);
@@ -31,11 +132,25 @@ export function SpecialistNavigation({ rail = false }: { rail?: boolean }) {
   const unavailableId = useSessionStore((state) => state.unavailableConversation?.id ?? null);
   const navigatedConversationId = openingId ?? unavailableId ?? sessionId;
   const runningIds = useSessionStore((state) => state.runningIds);
+  const mutatingIds = useSessionStore((state) => state.mutatingConversationIds);
+  const conversationMutation = useSessionStore((state) => state.conversationMutation);
+  const activeConversationBusy = useSessionStore((state) => currentActivity(state.snapshot).busy);
   const openConversation = useSessionStore((state) => state.openConversation);
+  const deleteConversation = useSessionStore((state) => state.deleteConversation);
+  const setComposerPrefill = useSessionStore((state) => state.setComposerPrefill);
+  const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
 
   const choose = (kind: SpecialistKind) => {
+    setConfirmingDeleteId(null);
     if (active !== kind) endSession();
     open(kind);
+  };
+
+  const newSpec = () => {
+    setConfirmingDeleteId(null);
+    endSession();
+    open("spec");
+    setComposerPrefill("");
   };
 
   if (rail) {
@@ -64,8 +179,8 @@ export function SpecialistNavigation({ rail = false }: { rail?: boolean }) {
   }
 
   return (
-    <section data-qa="specialist-navigation" aria-label="Specialist lenses" className="px-2 pb-3 pt-2">
-      <div className="px-2 pb-1.5 text-[0.68rem] font-semibold uppercase tracking-[0.12em] text-ink-faint">
+    <section data-qa="specialist-navigation" aria-label="Specialist lenses" className="px-2 pb-2 pt-1">
+      <div className="flex h-6 items-center px-2 text-xs font-semibold uppercase leading-none tracking-[0.12em] text-ink-faint">
         Specialist lenses
       </div>
       <div className="space-y-0.5">
@@ -80,49 +195,67 @@ export function SpecialistNavigation({ rail = false }: { rail?: boolean }) {
           );
           return (
             <div key={kind}>
-              <button
-                type="button"
-                data-qa={`specialist-nav-${kind}`}
-                onClick={() => choose(kind)}
-                aria-current={selected ? "page" : undefined}
-                className={cn(
-                  "relative flex min-h-9 w-full items-center gap-2.5 overflow-hidden border-l-2 px-2 text-sm font-medium transition",
-                  selected
-                    ? "border-accent bg-accent-subtle text-accent"
-                    : "border-transparent text-ink-secondary hover:bg-bg-hover hover:text-ink",
+              <div className="flex h-9 items-center">
+                <button
+                  type="button"
+                  data-qa={`specialist-nav-${kind}`}
+                  onClick={() => choose(kind)}
+                  aria-current={selected ? "page" : undefined}
+                  className={cn(
+                    "flex h-full min-w-0 flex-1 items-center gap-2.5 rounded-md px-2 text-sm font-medium leading-none transition",
+                    selected
+                      ? "text-ink"
+                      : "text-ink-secondary hover:bg-bg-hover hover:text-ink",
+                  )}
+                >
+                  <Icon className={cn("size-[18px] shrink-0", selected && "text-accent")} />
+                  <span className="truncate">{SPECIALISTS[kind].label}</span>
+                </button>
+                {selected && kind === "spec" && (
+                  <button
+                    type="button"
+                    data-qa="specialist-new-spec"
+                    onClick={newSpec}
+                    aria-label="New spec"
+                    title="New spec"
+                    className="mr-1 grid size-7 shrink-0 place-items-center rounded-md text-ink-faint transition hover:bg-accent-subtle hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-focus"
+                  >
+                    <Plus className="size-4" />
+                  </button>
                 )}
-              >
-                <Icon className="relative size-4 shrink-0" />
-                <span className="relative">{SPECIALISTS[kind].label}</span>
-                <span className="relative ml-auto text-[0.65rem] font-normal text-ink-faint">
-                  {product.specialistBadge ?? "Specialist"}
-                </span>
-              </button>
-              {selected && specialistConversations.length > 0 && (
-                <div className="ml-3 border-l border-border-subtle py-1 pl-2">
+              </div>
+              {expanded === kind && specialistConversations.length > 0 && (
+                <div className="relative ml-[17px] border-l border-accent/40 py-0.5 pl-[14px]">
                   {specialistConversations.map((conversation) => (
-                    <button
+                    <div
                       key={conversation.id}
-                      data-qa={`specialist-conversation-${kind}-${conversation.id}`}
-                      type="button"
-                      onClick={() => void openConversation(conversation.id)}
-                      className={cn(
-                        "flex min-h-7 w-full items-center gap-1.5 rounded-md px-2 text-left text-xs transition",
-                        navigatedConversationId === conversation.id
-                          ? "bg-bg-hover text-ink-secondary"
-                          : "text-ink-muted hover:bg-bg-hover hover:text-ink",
-                      )}
+                      className="relative before:absolute before:-left-[14px] before:top-1/2 before:w-[14px] before:border-t before:border-accent/40"
                     >
-                      {openingId === conversation.id ? (
-                        <Loader2 className="size-3 shrink-0 animate-[spin_1s_linear_infinite]" />
-                      ) : (
-                        <MessageSquare className={cn(
-                          "size-3 shrink-0",
-                          runningIds.includes(conversation.id) && "text-accent",
-                        )} />
-                      )}
-                      <span className="truncate">{conversation.title}</span>
-                    </button>
+                      <SpecialistConversationRow
+                        conversation={conversation}
+                        selected={navigatedConversationId === conversation.id}
+                        opening={openingId === conversation.id}
+                        running={
+                          runningIds.includes(conversation.id)
+                          || (sessionId === conversation.id && activeConversationBusy)
+                        }
+                        deleting={
+                          mutatingIds.has(conversation.id)
+                          && conversationMutation?.kind === "delete"
+                        }
+                        confirmingDelete={confirmingDeleteId === conversation.id}
+                        onOpen={() => {
+                          setConfirmingDeleteId(null);
+                          void openConversation(conversation.id);
+                        }}
+                        onRequestDelete={() => setConfirmingDeleteId(conversation.id)}
+                        onConfirmDelete={() => {
+                          setConfirmingDeleteId(null);
+                          void deleteConversation(conversation.id);
+                        }}
+                        onCancelDelete={() => setConfirmingDeleteId(null)}
+                      />
+                    </div>
                   ))}
                 </div>
               )}

@@ -7,16 +7,14 @@ beforeEach(() => {
   composerDraftRef.current = "";
 });
 
-describe("composer draft preservation across new sessions", () => {
-  it("stages a half-typed draft as the next composer's prefill", () => {
-    // The active-session composer mirrors its textarea into this ref on every
-    // keystroke; endSession reads it back to bridge the remount.
+describe("composer draft ownership across new sessions", () => {
+  it("does not copy a half-typed draft into the next composer", () => {
     composerDraftRef.current = "fix the login bug";
 
     useSessionStore.getState().endSession();
 
-    // The start-screen composer restores from this prefill on mount.
-    expect(useSessionStore.getState().composerPrefill).toEqual({ text: "fix the login bug" });
+    expect(useSessionStore.getState().composerPrefill).toBeNull();
+    expect(composerDraftRef.current).toBe("");
   });
 
   it("does not stage anything when the composer was empty", () => {
@@ -25,6 +23,7 @@ describe("composer draft preservation across new sessions", () => {
     useSessionStore.getState().endSession();
 
     expect(useSessionStore.getState().composerPrefill).toBeNull();
+    expect(composerDraftRef.current).toBe("");
   });
 
   it("discards the draft on sign-out so the next account starts clean", () => {

@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use agent_orchestration::ScoutLedger;
 use scout_adapter_protocol::TargetIdentity;
 
 use crate::tools::ToolExecutor;
@@ -10,57 +9,42 @@ mod adapter;
 mod capabilities;
 mod capsule;
 mod enterprise_backend;
-mod ledger;
-mod measure;
-mod probe;
-mod scope;
+mod repository_census;
 
 pub(super) struct ScoutToolState {
-    censuses: Mutex<HashMap<String, capabilities::CapabilityReport>>,
-    ledgers: Mutex<HashMap<String, ScoutLedger>>,
     target: Mutex<Option<TargetIdentity>>,
+    repositories: Mutex<HashMap<String, std::path::PathBuf>>,
     /// Target-service adapter calls share private state. Serialize a model
     /// tool batch so duplicate census/fetch calls cannot race that state.
     adapter_gate: tokio::sync::Mutex<()>,
-    max_parallel_agents: u16,
 }
 
 pub(super) fn tools(
-    max_parallel_agents: usize,
     capsule_policy: Option<crate::orchestration::ScoutCapsulePolicyConfig>,
     cartography_config: crate::orchestration::OrchestrationToolsConfig,
 ) -> Vec<Arc<dyn ToolExecutor>> {
     let state = Arc::new(ScoutToolState {
-        censuses: Mutex::new(HashMap::new()),
-        ledgers: Mutex::new(HashMap::new()),
         target: Mutex::new(None),
+        repositories: Mutex::new(HashMap::new()),
         adapter_gate: tokio::sync::Mutex::new(()),
-        max_parallel_agents: u16::try_from(max_parallel_agents).unwrap_or(4).clamp(1, 32),
     });
     let cartography = Arc::new(enterprise_backend::CartographyBackendState::new(
         cartography_config,
     ));
     let mut tools: Vec<Arc<dyn ToolExecutor>> = vec![
-        Arc::new(capabilities::ScoutCapabilitiesTool {
+        Arc::new(capabilities::ScoutCapabilitiesTool),
+        Arc::new(repository_census::ScoutRepositoryCensusTool {
             state: state.clone(),
+            cartography: cartography.clone(),
         }),
         Arc::new(adapter::ScoutAdapterTool {
             state: state.clone(),
             cartography: Some(cartography.clone()),
         }),
-        Arc::new(ledger::ScoutLedgerTool {
-            state: state.clone(),
-        }),
         Arc::new(enterprise_backend::ScoutEnterpriseBackendTool {
             state: cartography.clone(),
         }),
         Arc::new(enterprise_backend::ScoutEnterpriseBackendQueryTool { state: cartography }),
-        Arc::new(probe::ScoutProbeTool {
-            state: state.clone(),
-        }),
-        Arc::new(measure::ScoutMeasureTool {
-            state: state.clone(),
-        }),
     ];
     if let Some(policy) = capsule_policy {
         tools.push(Arc::new(capsule::ScoutCapsuleTool { state, policy }));
@@ -72,11 +56,9 @@ pub(super) fn capsule_tools(
     policy: crate::orchestration::ScoutCapsulePolicyConfig,
 ) -> Vec<Arc<dyn ToolExecutor>> {
     let state = Arc::new(ScoutToolState {
-        censuses: Mutex::new(HashMap::new()),
-        ledgers: Mutex::new(HashMap::new()),
         target: Mutex::new(None),
+        repositories: Mutex::new(HashMap::new()),
         adapter_gate: tokio::sync::Mutex::new(()),
-        max_parallel_agents: 1,
     });
     vec![
         Arc::new(adapter::ScoutAdapterTool {

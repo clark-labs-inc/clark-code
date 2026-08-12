@@ -44,6 +44,7 @@ import {
   loadComposerDraft,
   moveComposerDraft,
   saveComposerDraft,
+  specialistStartComposerDraftId,
 } from "../lib/composerDraft";
 import { clearCloudComposerDraft } from "../lib/cloudComposerDraft";
 import { saveSshHosts } from "../lib/sshHosts";
@@ -56,15 +57,16 @@ import {
   type RsiScoutContextSnapshot,
   scoutCartographyTarget,
   specialistConnectConfig,
+  newScoutRunRequestId,
 } from "../lib/specialists";
 import {
   specialistQuery,
-  specialistCreateWorkspace,
   type ScoutSnapshotEntry,
   type ScoutWorkspace,
 } from "../lib/specialistCloud";
 import { authAccountMatches } from "../lib/account";
 import { isQuickChatProject } from "../lib/projectSidebar";
+import { productModule } from "../product/productModule";
 
 type ConversationActions = Pick<
   SessionState,
@@ -86,6 +88,28 @@ type ConversationActions = Pick<
   | "archiveSelectedConversations"
   | "deleteSelectedConversations"
 >;
+
+const RSI_SCOUT_CONTEXT_BUDGET_MS = 3_000;
+
+export async function withinOptionalContextBudget<T>(
+  operation: Promise<T>,
+  budgetMs = RSI_SCOUT_CONTEXT_BUDGET_MS,
+): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<T>((_, reject) => {
+        timeout = setTimeout(
+          () => reject(new Error("optional specialist context timed out")),
+          budgetMs,
+        );
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
 
 function syncNextSessionTarget(
   get: SessionGet,
@@ -139,10 +163,12 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
   },
 
   setManagedWorktreeBase: (base) => {
+    const specialistKind = activeSpecialistContext()?.kind;
     saveManagedWorktreeBase(
       base,
       codeKeyAccountBinding(get().auth),
       get().localSettings.cwd,
+      specialistKind,
     );
     set({ managedWorktreeBase: base });
   },
@@ -250,6 +276,7 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
       projectMode: "local",
       error: null,
       pendingManagedWorktreePath: null,
+      deferredSessionStartDraft: null,
       worktreeTransition: null,
       dirtyWorktreeApproval: null,
     });
@@ -263,53 +290,63 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
     const epoch = nextSessionEpoch();
     let specialistContext = quickChat ? null : activeSpecialistContext();
     const specialistDefinition = researchRuntimeSpecialist(specialistContext);
+    if (specialistDefinition && !specialistContext?.organizationId?.trim()) {
+      set({
+        error: `Join or create a Clark workspace before starting ${specialistDefinition.label}.`,
+      });
+      return;
+    }
+    // Validate the human-selected Scout authority before allocating any local
+    // conversation workspace. This keeps a failed start entirely side-effect
+    // free and prevents the previous package from becoming an implicit scope.
+    if (specialistContext?.kind === "scout") {
+      if (!specialistContext.organizationId?.trim()) {
+        set({ error: "Pick or create a Scout workspace before starting." });
+        return;
+      }
+      if (!specialistContext.workspaceId?.trim()) {
+        set({ error: "Choose or create a Scout workspace before starting Scout." });
+        return;
+      }
+      specialistContext = {
+        ...specialistContext,
+        scoutRunRequestId: newScoutRunRequestId(),
+      };
+    }
+    const workspacePolicy = productModule().specialistWorkspace;
+    let specialistWorkspace: { id: string; path: string } | null = null;
+    if (specialistContext && workspacePolicy?.isConversationBound(specialistContext.kind)) {
+      if (activeProvider !== "local") {
+        set({ error: `${specialistContext.kind} runs through the local Clark Code environment.` });
+        return;
+      }
+      try {
+        specialistWorkspace = await bridge.prepareQuickChatWorkspace?.() ?? null;
+      } catch (error) {
+        set({ error: String(error) });
+        return;
+      }
+      if (!specialistWorkspace) {
+        set({ error: `${specialistContext.kind} requires Clark Code native workspace.` });
+        return;
+      }
+    }
     if (specialistDefinition && activeProvider !== "local") {
       set({
         error: `${specialistDefinition.label} runs through the local Clark Code environment.`,
       });
       return;
     }
-    // Scout runs through the local provider, whose scout_cartography host
-    // binding (gating ALL scout_enterprise enroll/claim/submit) is only attached
-    // when the context has both an organizationId and a workspaceId. The canvas
-    // fills workspaceId asynchronously — but a conversation can start before
-    // that completes, or before any workspace exists, leaving workspaceId empty.
-    // That silently omits the binding, so enroll() fails "not host-configured"
-    // and the backend stays empty. Resolve a workspace here so the binding is
-    // always present: reuse an existing workspace, or create one automatically
-    // for an organization that has none yet.
-    if (
-      specialistContext?.kind === "scout"
-      && !specialistDefinition
-      && !specialistContext.workspaceId?.trim()
-    ) {
-      const organizationId = specialistContext.organizationId?.trim();
-      if (!organizationId) {
-        throw new Error("Pick or create a Scout workspace before starting.");
-      }
-      const credentials = cloudCreds(auth);
-      if (!credentials) {
-        throw new Error("Sign in to prepare a Scout workspace.");
-      }
-      try {
-        const workspaces = await specialistQuery<ScoutWorkspace[]>(
-          credentials, "scout", "scout_workspaces", organizationId,
-        );
-        const workspace = workspaces.find((item) => item.status === "active") ?? workspaces[0];
-        const workspaceId = workspace
-          ? workspace.id
-          : (await specialistCreateWorkspace(credentials, organizationId, "Scout workspace")).id;
-        useSpecialistStore.getState().setContext({ workspaceId });
-        specialistContext = activeSpecialistContext();
-      } catch (cause) {
-        throw new Error(
-          `Could not prepare a Scout workspace: ${cause instanceof Error ? cause.message : String(cause)}`,
-        );
-      }
-    }
     const sessionProvider = specialistDefinition ? "specialist" : activeProvider;
     const isLocal = activeProvider === "local";
-    const isRemote = isLocal && get().projectMode === "remote";
+    // Scout is an organization/workspace coordinator, never a project worker.
+    // A globally selected remote project must not redirect Scout into the
+    // opaque coding-worker path, which cannot carry cartography authority.
+    // Remote machines are discovered and authorized as explicit Scout targets
+    // after the human starts the run from this neutral local workspace.
+    const isRemote = isLocal
+      && get().projectMode === "remote"
+      && specialistContext?.kind !== "scout";
     const startHost = isRemote
       ? (loadSshHosts(codeKeyAccountBinding(get().auth)).find((h) => h.id === get().selectedHostId)?.host.trim() ?? null)
       : null;
@@ -333,8 +370,8 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
       // in flight or failed).
       if (isLocal) await get().ensureCodeKey();
       const localSettings = get().localSettings;
-      let localSessionPath = quickChat?.path ?? localSettings.cwd.trim();
-      if (isLocal && !isRemote && !specialistDefinition && !quickChat) {
+      let localSessionPath = quickChat?.path ?? specialistWorkspace?.path ?? localSettings.cwd.trim();
+      if (isLocal && !isRemote && !specialistDefinition && !quickChat && !specialistWorkspace) {
         const pendingManagedWorktreePath = get().pendingManagedWorktreePath;
         if (pendingManagedWorktreePath) {
           localSessionPath = pendingManagedWorktreePath;
@@ -370,6 +407,12 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
                 worktreeTransition: plan,
                 worktreePreparing: false,
                 dirtyWorktreeApproval: null,
+                deferredSessionStartDraft: startOptions?.submittedDraft
+                  ? {
+                      owner: composerDraftOwner(auth?.user ?? null),
+                      text: startOptions.submittedDraft,
+                    }
+                  : get().deferredSessionStartDraft,
               });
               return;
             }
@@ -421,22 +464,25 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
         if (specialistDefinition.kind === "rsi" && specialistContext.organizationId) {
           const credentials = cloudCreds(auth);
           if (credentials) {
+            const organizationId = specialistContext.organizationId;
+            const preferredWorkspaceId = specialistContext.workspaceId;
             try {
-              const workspaces = await specialistQuery<ScoutWorkspace[]>(
-                credentials,
-                "scout",
-                "scout_workspaces",
-                specialistContext.organizationId,
-              );
-              const workspace = workspaces.find(
-                ({ id }) => id === specialistContext.workspaceId,
-              ) ?? workspaces[0];
-              if (workspace) {
+              scoutContext = await withinOptionalContextBudget((async () => {
+                const workspaces = await specialistQuery<ScoutWorkspace[]>(
+                  credentials,
+                  "scout",
+                  "scout_workspaces",
+                  organizationId,
+                );
+                const workspace = workspaces.find(
+                  ({ id }) => id === preferredWorkspaceId,
+                ) ?? workspaces[0];
+                if (!workspace) return undefined;
                 const snapshot = await specialistQuery<{ entries: ScoutSnapshotEntry[] }>(
                   credentials,
                   "scout",
                   "scout_snapshot",
-                  specialistContext.organizationId,
+                  organizationId,
                   workspace.id,
                 );
                 const entries = snapshot.entries.slice(0, 64).map((entry) => ({
@@ -455,15 +501,16 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
                 ) {
                   entries.pop();
                 }
-                scoutContext = {
+                return {
                   schemaVersion: 1,
                   workspaceId: workspace.id,
                   entries,
                 };
-              }
+              })());
             } catch {
               // RSI remains available with project-local context when Scout has
-              // no workspace or the read-only snapshot is temporarily offline.
+              // no workspace, the read-only snapshot is temporarily offline,
+              // or optional cloud context exceeds the bounded startup budget.
             }
           }
         }
@@ -490,6 +537,7 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
           codeKeyAccountBinding(get().auth),
           productSpecialistTarget(specialistContext, localSettings.advisorTrainingEnabled),
           specialistModelSettings(specialistContext) ?? undefined,
+          get().recentProjects,
         );
         options = { cwd: remote.cwd, mode, collaboration_mode };
       } else if (isLocal) {
@@ -502,6 +550,7 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
           codeKeyAccountBinding(get().auth),
           productSpecialistTarget(specialistContext, localSettings.advisorTrainingEnabled),
           specialistModelSettings(specialistContext) ?? undefined,
+          get().recentProjects,
         );
         options = { cwd: localSessionPath, mode, collaboration_mode };
       } else {
@@ -514,7 +563,7 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
         return;
       }
 
-      const requestedSessionId = quickChat?.id;
+      const requestedSessionId = quickChat?.id ?? specialistWorkspace?.id;
       const session = await bridge.openSession(sessionProvider, config, {
         kind: "new",
         options,
@@ -576,7 +625,7 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
         void bridge.closeSession?.(session.id);
         return;
       }
-      if (isLocal && !isRemote && !quickChat && localSettings.cwd.trim()) {
+      if (isLocal && !isRemote && !quickChat && !specialistWorkspace && localSettings.cwd.trim()) {
         set({
           recentProjects: addRecentProject(
             localSettings.cwd.trim(),
@@ -596,6 +645,7 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
         }),
       );
       nativeSession = null;
+      const deferredSessionStartDraft = get().deferredSessionStartDraft;
       set({
         session,
         snapshot: emptySnapshot(),
@@ -613,23 +663,31 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
         activeRemoteHost: remoteHost,
         activeProjectRoot: projectRoot,
         pendingManagedWorktreePath: null,
+        deferredSessionStartDraft: null,
         worktreePreparing: false,
         worktreeTransition: null,
       });
-      // A dirty-checkout / branch dialog can interrupt the very first send of a
-      // brand-new session. The submit flow clears the start-screen draft and
-      // re-hydrates it via `composerPrefill`, so it survives the pause — but the
-      // composer that mounts for the created session hydrates from its own
-      // conversation key, not "new". Carry the still-unsent text across that
-      // remount so choosing a checkout never makes the user retype a message.
-      if (isLocal && !isRemote && !quickChat && !specialistDefinition) {
-        const draftOwner = composerDraftOwner(get().auth?.user ?? null);
-        const pendingText =
-          loadComposerDraft(draftOwner, null).trim()
-          || composerDraftRef.current.trim();
-        if (pendingText) {
-          moveComposerDraft(draftOwner, null, session.id, pendingText);
-        }
+      // Only an explicitly deferred first prompt may cross the ownership
+      // boundary after a dirty-checkout decision. A different draft can be a
+      // newer edit from another device (or an old New session draft); moving it
+      // here leaks that text into the new conversation. The equality check is
+      // the local CAS: if the New session draft changed while the decision was
+      // open, preserve it under New session and start with an empty composer.
+      if (
+        isLocal
+        && !isRemote
+        && !quickChat
+        && !specialistContext
+        && deferredSessionStartDraft
+        && deferredSessionStartDraft.owner === composerDraftOwner(get().auth?.user ?? null)
+        && loadComposerDraft(deferredSessionStartDraft.owner, null) === deferredSessionStartDraft.text
+      ) {
+        moveComposerDraft(
+          deferredSessionStartDraft.owner,
+          null,
+          session.id,
+          deferredSessionStartDraft.text,
+        );
       }
     } catch (e) {
       // Brought up a tunnel but failed afterward → tear it back down.
@@ -649,6 +707,16 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
     // Leaving the active conversation: drop any swarm panel so it doesn't linger
     // on the start screen or the next conversation opened.
     resetFanOut();
+    const abandonedSpecialistStart = get().session
+      ? null
+      : activeSpecialistContext()?.kind;
+    if (abandonedSpecialistStart) {
+      const owner = composerDraftOwner(get().auth?.user ?? null);
+      const draftId = specialistStartComposerDraftId(abandonedSpecialistStart);
+      saveComposerDraft(owner, draftId, "");
+      const creds = cloudCreds(get().auth);
+      if (creds) void clearCloudComposerDraft(creds, draftId).catch(() => {});
+    }
     useSpecialistStore.getState().close();
     for (const a of get().attachments) if (a.previewUrl) URL.revokeObjectURL(a.previewUrl);
     if (opts?.force) {
@@ -657,22 +725,12 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
       for (const id of [...liveSessions.keys()]) closeLiveSession(bridge, id);
       set({ runningIds: [] });
     }
-    const activeSession = get().session;
-    let preservedDraft = null;
-    if (!opts?.force) {
-      const persistedDraft = activeSession
-        ? loadComposerDraft(
-            composerDraftOwner(get().auth?.user ?? null),
-            activeSession.id,
-          )
-        : "";
-      const draftText = persistedDraft || composerDraftRef.current;
-      if (draftText.trim()) preservedDraft = { text: draftText };
-    } else {
-      // Sign-out is an account boundary: the next account must never inherit
-      // a non-reactive draft that has not yet reached local persistence.
-      composerDraftRef.current = "";
-    }
+    // `useComposerDraftState` already persists text under the exact
+    // conversation (or specialist start-screen) key. A new session must
+    // hydrate its own key, never a global prefill copied from the surface the
+    // user just left. The old draft remains recoverable when that conversation
+    // is reopened.
+    composerDraftRef.current = "";
     set({
       session: null,
       snapshot: emptySnapshot(),
@@ -683,13 +741,14 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
       opening: null,
       unavailableConversation: null,
       unavailableCleanupId: null,
-      composerPrefill: preservedDraft,
+      composerPrefill: null,
       queued: [],
       terminalOpen: false,
       sideQuestion: null,
       activeRemote: null,
       activeRemoteHost: null,
       activeProjectRoot: null,
+      deferredSessionStartDraft: null,
       worktreeTransition: null,
       dirtyWorktreeApproval: null,
       worktreePreparing: false,
@@ -717,12 +776,21 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
       }
       return;
     }
-    if (targetMeta?.specialist) {
-      useSpecialistStore.getState().open(targetMeta.specialist.kind, targetMeta.specialist);
-    } else {
-      useSpecialistStore.getState().close();
-    }
     const targetProvider = targetMeta?.provider || activeProvider;
+    const showTargetSpecialist = () => {
+      if (targetMeta?.specialist) {
+        useSpecialistStore.getState().open(targetMeta.specialist.kind, targetMeta.specialist);
+      } else {
+        useSpecialistStore.getState().close();
+      }
+    };
+    // A prefill is staging for the composer that requested it, never navigation
+    // state. Clear it before changing targets so a failed send / edit retry from
+    // the previous surface cannot hydrate the conversation being opened. The
+    // user's actual text is already persisted under that surface's exact draft
+    // key and remains there when they return.
+    composerDraftRef.current = "";
+    set({ composerPrefill: null });
     // Leaving the current conversation: clear any swarm panel now. The reattach
     // branch re-syncs from the target's snapshot; a cold open stays cleared
     // until the resumed session streams its own fan-out.
@@ -776,6 +844,10 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
         error: null,
         dismissedFailedRuns: [],
       });
+      // Establish the target conversation id before switching specialist
+      // workspaces. Otherwise the specialist store can render its new-session
+      // composer for one frame and expose the wrong draft ownership boundary.
+      showTargetSpecialist();
       syncNextSessionTarget(
         get,
         id,
@@ -829,6 +901,10 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
         remoteHost: openingMeta?.remoteHost ?? null,
       },
     });
+    // The opening target (and, where available, its preview session) now owns
+    // the workspace. Only after that boundary exists may the specialist lens
+    // render, so it can never mount against the specialist start-draft key.
+    showTargetSpecialist();
     // Cloud-first: the transcript comes from the in-memory cache or a `cloudGet`.
     const restored = await fetchSnapshot(
       id,
@@ -880,6 +956,14 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
           throw new Error("Quick Chat requires Clark Code native workspace.");
         }
         requestedProjectRoot = (await bridge.prepareQuickChatWorkspace(id)).path;
+        const specialistKind = openingMeta?.specialist?.kind;
+        const workspacePolicy = productModule().specialistWorkspace;
+        if (
+          specialistKind
+          && workspacePolicy?.isConversationBound(specialistKind)
+        ) {
+          await workspacePolicy.prepareDocument?.(specialistKind, id);
+        }
       }
       let config;
       let options;
@@ -902,42 +986,15 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
         // a chat already pinned keeps its own level.
         pinApprovalPolicy(get, set, id, mode);
       }
-      // A Scout conversation saved before the workspace-auto-resolution fix may
-      // have an empty workspaceId. Reopening it would silently omit the
-      // scout_cartography binding again (the original "nothing showed up on
-      // the backend" failure). Resolve a workspace here so the reattached
-      // session re-enrolls with the same binding a freshly-started one gets.
-      // `openingMeta` stays const so the narrowing it carries for the remote
-      // branch survives; the resolved context rides in a separate variable.
+      // A legacy Scout conversation without an exact workspace binding cannot
+      // be repaired by silently selecting or creating cloud authority during
+      // reopen. The user must start a new Scout conversation and make that
+      // binding explicit.
       let resolvedSpecialist = openingMeta?.specialist;
       if (openingMeta?.specialist?.kind === "scout" && !openingMeta.specialist.workspaceId?.trim()) {
-        const organizationId = openingMeta.specialist.organizationId?.trim();
-        if (!organizationId) {
-          throw new Error("This Scout conversation has no organization. Start a new Scout session.");
-        }
-        const credentials = cloudCreds(auth);
-        if (!credentials) {
-          throw new Error("Sign in to prepare a Scout workspace.");
-        }
-        try {
-          const workspaces = await specialistQuery<ScoutWorkspace[]>(
-            credentials, "scout", "scout_workspaces", organizationId,
-          );
-          const workspace = workspaces.find((item) => item.status === "active") ?? workspaces[0];
-          const workspaceId = workspace
-            ? workspace.id
-            : (await specialistCreateWorkspace(credentials, organizationId, "Scout workspace")).id;
-          resolvedSpecialist = { ...openingMeta.specialist, workspaceId };
-          set({
-            conversations: get().conversations.map((c) =>
-              c.id === id ? { ...c, specialist: resolvedSpecialist } : c),
-          });
-          useSpecialistStore.getState().setContext({ workspaceId });
-        } catch (cause) {
-          throw new Error(
-            `Could not prepare a Scout workspace: ${cause instanceof Error ? cause.message : String(cause)}`,
-          );
-        }
+        throw new Error(
+          "This Scout conversation has no workspace binding. Start a new Scout conversation and choose a workspace.",
+        );
       }
       if (isSpecialist) {
         if (!openingMeta?.specialist) {
@@ -987,6 +1044,7 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
           codeKeyAccountBinding(get().auth),
           productSpecialistTarget(resolvedSpecialist, effSettings.advisorTrainingEnabled),
           specialistModelSettings(resolvedSpecialist) ?? undefined,
+          get().recentProjects,
         );
         options = { cwd: remote.cwd, mode, collaboration_mode };
       } else if (isLocal) {
@@ -1001,6 +1059,7 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
           codeKeyAccountBinding(get().auth),
           productSpecialistTarget(resolvedSpecialist, effSettings.advisorTrainingEnabled),
           specialistModelSettings(resolvedSpecialist) ?? undefined,
+          get().recentProjects,
         );
         options = { cwd: requestedProjectRoot, mode, collaboration_mode };
       } else {

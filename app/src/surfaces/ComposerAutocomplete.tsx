@@ -1,4 +1,4 @@
-import { FileText, Folder, Slash, Sparkles } from "lucide-react";
+import { FileText, Folder, FolderGit2, FolderSearch, Slash, Sparkles } from "lucide-react";
 import { useReducedMotion } from "motion/react";
 import * as m from "motion/react-m";
 import { cn } from "../lib/cn";
@@ -30,7 +30,9 @@ export function ComposerAutocomplete({
       className="popover-surface max-h-64 w-full overflow-y-auto rounded-2xl bg-bg-elevated p-1.5 shadow-lifted ring-1 ring-border-subtle sm:w-80"
     >
       {suggestions.map((suggestion, index) => {
-        const key = suggestion.kind === "file" || suggestion.kind === "directory"
+        const key = suggestion.kind === "spec_repository" || suggestion.kind === "spec_folder"
+          ? suggestion.kind
+          : suggestion.kind === "file" || suggestion.kind === "directory"
           ? `${suggestion.kind}:${suggestion.path}`
           : suggestion.kind === "slash"
             ? `/${suggestion.cmd.name}`
@@ -52,7 +54,23 @@ export function ComposerAutocomplete({
                 : "text-ink-secondary",
             )}
           >
-            {suggestion.kind === "file" || suggestion.kind === "directory" ? (
+            {suggestion.kind === "spec_repository" ? (
+              <>
+                <FolderGit2 className="size-3.5 shrink-0 text-accent" />
+                <span className="shrink-0 font-mono text-xs text-ink">@repo</span>
+                <span className="min-w-0 flex-1 truncate text-xs text-ink-faint">
+                  Focus this spec on a code repository
+                </span>
+              </>
+            ) : suggestion.kind === "spec_folder" ? (
+              <>
+                <FolderSearch className="size-3.5 shrink-0 text-accent" />
+                <span className="shrink-0 font-mono text-xs text-ink">@folder</span>
+                <span className="min-w-0 flex-1 truncate text-xs text-ink-faint">
+                  Add a folder inside the focused repository
+                </span>
+              </>
+            ) : suggestion.kind === "file" || suggestion.kind === "directory" ? (
               <>
                 {suggestion.kind === "directory" ? (
                   <Folder className="size-3.5 shrink-0 text-ink-faint" />

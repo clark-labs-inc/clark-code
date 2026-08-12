@@ -3,6 +3,7 @@ import {
   humanizeError,
   humanizeRunFailure,
   isAccountReconnectError,
+  isQuietRetryableRunFailure,
 } from "./errors";
 import { installProductModule, neutralProduct } from "../product/productModule";
 
@@ -10,6 +11,7 @@ describe("humanizeRunFailure", () => {
   it("keeps session expiry and platform-key rejection distinct", () => {
     expect(humanizeRunFailure({ failure_kind: "session_expired" })).toMatch(/sign-in expired/i);
     expect(humanizeRunFailure({ failure_kind: "platform_key_rejected" })).toMatch(/access key/i);
+    expect(humanizeRunFailure({ failure_kind: "access_scope_required" })).toMatch(/active Clark workspace/i);
   });
 
   it("trusts the typed category instead of misleading provider prose", () => {
@@ -17,8 +19,21 @@ describe("humanizeRunFailure", () => {
       failure_kind: "provider_error",
       error: "403 authentication failed upstream",
     });
-    expect(msg).toMatch(/provider/i);
+    expect(msg).toMatch(/taking longer/i);
+    expect(msg).not.toMatch(/provider|rate.limit|transport|error/i);
     expect(msg).not.toMatch(/sign-in|access key/i);
+  });
+
+  it("keeps transient infrastructure failures out of the danger surface", () => {
+    for (const failure_kind of [
+      "provider_error",
+      "rate_limited",
+      "transport_error",
+      "empty_response",
+    ] as const) {
+      expect(isQuietRetryableRunFailure({ failure_kind })).toBe(true);
+    }
+    expect(isQuietRetryableRunFailure({ failure_kind: "tool_fatal" })).toBe(false);
   });
 
   it("does not infer auth from an untyped legacy error", () => {
@@ -40,6 +55,14 @@ describe("humanizeRunFailure", () => {
     expect(msg).toMatch(/step limit/i);
     expect(msg).toMatch(/continue in this task/i);
     expect(msg).not.toMatch(/start another run/i);
+  });
+
+  it("does not recommend retrying deterministic inconsistent tool history", () => {
+    const msg = humanizeRunFailure({ failure_kind: "inconsistent_tool_history" });
+
+    expect(msg).toMatch(/incomplete coding-step record/i);
+    expect(msg).toMatch(/start a new task/i);
+    expect(msg).not.toMatch(/try again|temporary/i);
   });
 
   it("keeps provider usage failures product-neutral", () => {

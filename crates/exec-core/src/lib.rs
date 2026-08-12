@@ -600,6 +600,41 @@ mod tests {
         panic!("descendant process {pid} survived command timeout");
     }
 
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn completed_command_does_not_wait_for_descendant_output_pipe() {
+        let dir = tempfile::tempdir().unwrap();
+        let exec = LocalExecutor;
+        let out = tokio::time::timeout(
+            Duration::from_secs(2),
+            exec.exec_streaming(
+                "sleep 30 & echo $! > descendant.pid; printf done",
+                dir.path(),
+                Duration::from_secs(10),
+                &CancellationToken::new(),
+                &|_, _| {},
+            ),
+        )
+        .await
+        .expect("executor must settle after the root command exits")
+        .unwrap();
+        assert_eq!(out.code, Some(0));
+        assert_eq!(out.stdout, b"done");
+
+        let pid: i32 = std::fs::read_to_string(dir.path().join("descendant.pid"))
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        for _ in 0..20 {
+            if unsafe { libc::kill(pid, 0) } == -1 {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        panic!("pipe-holding descendant process {pid} survived root exit");
+    }
+
     #[tokio::test]
     async fn pty_execution_exposes_a_terminal_and_streams_output() {
         let dir = tempfile::tempdir().unwrap();

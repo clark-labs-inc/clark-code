@@ -75,6 +75,27 @@ export interface ProductLocalAgentExtensionContext {
   executionResidency: "local_only" | "remote_worker";
 }
 
+export interface ProductVoiceInput {
+  filename: string;
+  contentType: string;
+  dataBase64: string;
+}
+
+export interface ProductVoiceTranscription {
+  text: string;
+  model?: string;
+  format?: string;
+}
+
+export interface ProductVoicePolicy {
+  transcribe: (input: ProductVoiceInput) => Promise<ProductVoiceTranscription>;
+}
+
+export interface ProductSpecialistWorkspacePolicy {
+  isConversationBound: (kind: string) => boolean;
+  prepareDocument?: (kind: string, conversationId: string) => Promise<void>;
+}
+
 export interface ProductArtifactPolicy {
   isCloudUri: (uri: string) => boolean;
   cloudLabel: string;
@@ -93,7 +114,7 @@ export interface ProductUsageFailureProps {
 export interface ProductSpecialistAccessCopy {
   title: string;
   detail: string;
-  action: "sign_in" | "product_action" | "retry" | null;
+  action: "sign_in" | "product_action" | "retry" | "setup_workspace" | null;
   actionLabel?: string;
 }
 
@@ -110,6 +131,8 @@ export interface ProductModule {
   mark?: ComponentType<ProductMarkProps>;
   slots: ProductUiSlots;
   localAgent: ProductLocalAgentPolicy;
+  voice?: ProductVoicePolicy;
+  specialistWorkspace?: ProductSpecialistWorkspacePolicy;
   artifacts: ProductArtifactPolicy;
   errors: ProductErrorPolicy;
   usageFailure?: ComponentType<ProductUsageFailureProps>;
@@ -117,7 +140,6 @@ export interface ProductModule {
     input: ProductSpecialistAccessInput,
   ) => ProductSpecialistAccessCopy;
   specialistCatalog?: unknown;
-  specialistBadge?: string;
   specialistIcons?: Readonly<Record<string, ComponentType<ProductSpecialistIconProps>>>;
 }
 
@@ -169,6 +191,10 @@ export function installProductModule(product: ProductModule): void {
       ...product.localAgent,
       models: Object.freeze(product.localAgent.models.map((model) => Object.freeze({ ...model }))),
     }),
+    voice: product.voice ? Object.freeze({ ...product.voice }) : undefined,
+    specialistWorkspace: product.specialistWorkspace
+      ? Object.freeze({ ...product.specialistWorkspace })
+      : undefined,
     artifacts: Object.freeze({ ...product.artifacts }),
     errors: Object.freeze({ ...product.errors }),
     specialistIcons: product.specialistIcons

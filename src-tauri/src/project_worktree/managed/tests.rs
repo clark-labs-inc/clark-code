@@ -52,6 +52,47 @@ fn initialized_repo() -> tempfile::TempDir {
 }
 
 #[tokio::test]
+async fn unborn_main_checkout_can_start_without_a_worktree_commit() {
+    let temp = tempfile::tempdir().unwrap();
+    let repo = temp.path().join("project");
+    std::fs::create_dir(&repo).unwrap();
+    git(&repo, &["init", "-q", "--initial-branch=main"]);
+    std::fs::write(repo.join("README.md"), "uncommitted\n").unwrap();
+
+    let plan = project_worktree_transition_plan(repo.to_string_lossy().into_owned(), None)
+        .await
+        .unwrap();
+
+    assert_eq!(plan.source_branch.as_deref(), Some("main"));
+    assert_eq!(plan.source_revision, None);
+    assert_eq!(plan.source_changes.untracked_files, 1);
+    assert!(plan.base_options.is_empty());
+    assert!(plan.requires_confirmation);
+}
+
+#[tokio::test]
+async fn unborn_checkout_reports_an_actionable_isolation_error() {
+    let temp = tempfile::tempdir().unwrap();
+    let repo = temp.path().join("project");
+    std::fs::create_dir(&repo).unwrap();
+    git(&repo, &["init", "-q", "--initial-branch=main"]);
+
+    let error = project_managed_worktree_create(
+        repo.to_string_lossy().into_owned(),
+        ManagedWorktreeRequest {
+            base: ManagedWorktreeBase::Current,
+            label: None,
+            target_branch: None,
+        },
+    )
+    .await
+    .unwrap_err();
+
+    assert!(error.contains("no commit to use as an isolated worktree base"));
+    assert!(!error.contains("Needed a single revision"));
+}
+
+#[tokio::test]
 async fn dirty_checkout_plan_requires_explicit_preservation() {
     let temp = initialized_repo();
     let repo = temp.path().join("project");

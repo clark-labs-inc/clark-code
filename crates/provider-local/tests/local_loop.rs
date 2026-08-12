@@ -196,7 +196,6 @@ async fn scout_uses_its_host_route_when_the_conversation_uses_the_included_lane(
                 "skill_model_overrides": {
                     "scout": {"model": TEST_SCOUT_MODEL, "reasoning_effort": "max"}
                 },
-                "memories": false,
                 "sandbox_mode": "disabled"
             }),
             ..Default::default()
@@ -232,6 +231,39 @@ async fn scout_uses_its_host_route_when_the_conversation_uses_the_included_lane(
         request.get("reasoning_effort").and_then(Value::as_str),
         Some("max"),
         "Scout must use its host-pinned reasoning configuration"
+    );
+    let tools = request["tools"].as_array().expect("Scout request tools");
+    let has_tool = |name: &str| tools.iter().any(|tool| tool["function"]["name"] == name);
+    for name in [
+        "scout_capabilities",
+        "scout_repository_census",
+        "scout_adapter",
+        "scout_enterprise",
+        "scout_enterprise_query",
+        "update_plan",
+        "final_answer",
+    ] {
+        assert!(has_tool(name), "Scout must expose {name} on its first turn");
+    }
+    for name in [
+        "read_file",
+        "list_dir",
+        "grep",
+        "bash",
+        "tool_search",
+        "memory",
+        "memory_recall",
+        "write_file",
+    ] {
+        assert!(
+            !has_tool(name),
+            "Scout must not expose {name}, even with Full access"
+        );
+    }
+    let serialized = request.to_string();
+    assert!(
+        !serialized.contains("You have durable memory") && !serialized.contains("Personal memory"),
+        "Scout's model context must not contain session-global memory"
     );
 }
 

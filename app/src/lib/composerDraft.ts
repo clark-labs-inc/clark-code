@@ -1,5 +1,14 @@
 const DRAFT_KEY_PREFIX = "agent-desktop.composer-draft.v1.";
 const DRAFT_ENVELOPE_VERSION = 2;
+const NEW_CONVERSATION_DRAFT_KEY = "new.v3";
+
+/** Versioned because older builds copied one unbound draft across product
+ * surfaces, and v2 could leave an accepted native-input prefix behind during
+ * the first-session remount. Real conversation IDs stay stable; only fresh
+ * composers move to the clean namespace. */
+export function specialistStartComposerDraftId(kind: string): string {
+  return `specialist:${kind}:${NEW_CONVERSATION_DRAFT_KEY}`;
+}
 
 export interface ComposerDraftRecord {
   text: string;
@@ -30,7 +39,7 @@ export function composerDraftOwner(user: DraftOwner | null): string {
 }
 
 function draftKey(owner: string, conversationId: string | null): string {
-  return `${DRAFT_KEY_PREFIX}${encodeURIComponent(owner)}.${encodeURIComponent(conversationId ?? "new")}`;
+  return `${DRAFT_KEY_PREFIX}${encodeURIComponent(owner)}.${encodeURIComponent(conversationId ?? NEW_CONVERSATION_DRAFT_KEY)}`;
 }
 
 /** Read the local draft envelope. Legacy plain-text values remain valid. */
@@ -172,10 +181,8 @@ export function clearComposerDraftIfUnchanged(
 
 /** Mirror of the composer textarea's current draft. The Composer writes this on
  *  every edit so store actions can read the unsent text without making the draft
- *  itself reactive — typing must not re-render the whole store. `endSession`
- *  stages it as a `composerPrefill` to carry a half-typed message across the
- *  composer remount that starting a new session forces: the active-session
- *  composer unmounts and a fresh start-screen composer mounts, which would
- *  otherwise drop the local `useState` text. Non-reactive by design — the
- *  textarea remains the source of truth. */
+ *  itself reactive — typing must not re-render the whole store. Persistence is
+ *  owned by the exact conversation or specialist-start key; this ref must never
+ *  bridge text between those scopes. Non-reactive by design — the textarea
+ *  remains the source of truth. */
 export const composerDraftRef: { current: string } = { current: "" };

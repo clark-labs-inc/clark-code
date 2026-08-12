@@ -342,11 +342,9 @@ mod tests {
         .is_err());
         let tool = ScoutAdapterTool {
             state: Arc::new(ScoutToolState {
-                censuses: Default::default(),
-                ledgers: Default::default(),
                 target: Default::default(),
+                repositories: Default::default(),
                 adapter_gate: Default::default(),
-                max_parallel_agents: 1,
             }),
             cartography: None,
         };
@@ -359,11 +357,9 @@ mod tests {
     fn local_enterprise_append_actions_are_retired() {
         let tool = ScoutAdapterTool {
             state: Arc::new(ScoutToolState {
-                censuses: Default::default(),
-                ledgers: Default::default(),
                 target: Default::default(),
+                repositories: Default::default(),
                 adapter_gate: Default::default(),
-                max_parallel_agents: 1,
             }),
             cartography: None,
         };

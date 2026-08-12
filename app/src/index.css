@@ -148,27 +148,38 @@
   max-width: var(--conversation-column-max-width);
 }
 
-/* Assistant prose has its own contrast scale. Low is the default reading tone:
-   calmer than UI chrome while remaining comfortably legible. Descendant
-   overrides keep Markdown headings, links, and emphasis on the same tone. */
-.chat-reading-contrast[data-chat-contrast="low"] {
-  --chat-reading-color: #56514b;
+/* Contrast is an application-wide accessibility preference. The default
+   medium level is the base palette above; the other levels adjust every
+   semantic text tier and control boundary, so navigation, settings, chat,
+   code, and dialogs move together instead of singling out assistant prose. */
+:root[data-interface-contrast="low"] {
+  --color-ink: #403b35;
+  --color-ink-secondary: #625c55;
+  --color-ink-muted: #736c64;
+  --color-ink-faint: #7b746c;
+  --color-border: rgba(40, 36, 32, 0.09);
+  --color-border-subtle: rgba(40, 36, 32, 0.04);
+  --color-border-strong: rgba(40, 36, 32, 0.22);
 }
 
-.chat-reading-contrast[data-chat-contrast="medium"] {
-  --chat-reading-color: #3b3833;
+:root[data-interface-contrast="high"] {
+  --color-ink: #151310;
+  --color-ink-secondary: #38342f;
+  --color-ink-muted: #48433d;
+  --color-ink-faint: #504a43;
+  --color-border: rgba(30, 26, 22, 0.18);
+  --color-border-subtle: rgba(30, 26, 22, 0.09);
+  --color-border-strong: rgba(30, 26, 22, 0.42);
 }
 
-.chat-reading-contrast[data-chat-contrast="high"] {
-  --chat-reading-color: var(--color-ink);
-}
-
-.chat-reading-contrast {
-  color: var(--chat-reading-color) !important;
-}
-
-.chat-reading-contrast :where(a, strong, h1, h2, h3, h4, h5, h6) {
-  color: inherit !important;
+:root[data-interface-contrast="extra-high"] {
+  --color-ink: #000;
+  --color-ink-secondary: #1f1b17;
+  --color-ink-muted: #302b26;
+  --color-ink-faint: #38322c;
+  --color-border: rgba(0, 0, 0, 0.27);
+  --color-border-subtle: rgba(0, 0, 0, 0.15);
+  --color-border-strong: rgba(0, 0, 0, 0.58);
 }
 
 /* Dark keeps the same violet interaction contract on a warm graphite canvas. */
@@ -213,12 +224,34 @@ html.dark {
   --shadow-lifted: 0 10px 32px rgba(0, 0, 0, 0.26);
 }
 
-html.dark .chat-reading-contrast[data-chat-contrast="low"] {
-  --chat-reading-color: #aaa7a2;
+html.dark[data-interface-contrast="low"] {
+  --color-ink: #d6d3ce;
+  --color-ink-secondary: #aaa7a2;
+  --color-ink-muted: #918e89;
+  --color-ink-faint: #817e79;
+  --color-border: rgba(255, 255, 255, 0.065);
+  --color-border-subtle: rgba(255, 255, 255, 0.03);
+  --color-border-strong: rgba(255, 255, 255, 0.17);
 }
 
-html.dark .chat-reading-contrast[data-chat-contrast="medium"] {
-  --chat-reading-color: #c6c4bf;
+html.dark[data-interface-contrast="high"] {
+  --color-ink: #fff;
+  --color-ink-secondary: #deddda;
+  --color-ink-muted: #c6c3be;
+  --color-ink-faint: #b4b0aa;
+  --color-border: rgba(255, 255, 255, 0.17);
+  --color-border-subtle: rgba(255, 255, 255, 0.09);
+  --color-border-strong: rgba(255, 255, 255, 0.36);
+}
+
+html.dark[data-interface-contrast="extra-high"] {
+  --color-ink: #fff;
+  --color-ink-secondary: #f4f4f2;
+  --color-ink-muted: #e2e0dc;
+  --color-ink-faint: #d0ccc6;
+  --color-border: rgba(255, 255, 255, 0.27);
+  --color-border-subtle: rgba(255, 255, 255, 0.16);
+  --color-border-strong: rgba(255, 255, 255, 0.54);
 }
 
 /* Colorblind-friendly (daltonized) variant — layered on top of either light or
@@ -539,6 +572,49 @@ svg.lucide {
   border-bottom-color: var(--color-accent-focus);
 }
 
+/* A short desktop window has enough room for either the repeated specialist
+   introduction or its starting actions, not both. The header already carries
+   the specialist description, so preserve the actionable welcome content and
+   tighten its rhythm without changing the tall-window composition. */
+@media (max-height: 42rem) {
+  .specialist-composer {
+    padding-bottom: 0.75rem;
+    padding-top: 0.375rem;
+  }
+
+  .specialist-composer-surface {
+    padding-block: 0.75rem;
+  }
+
+  .specialist-welcome-copy {
+    display: none;
+  }
+
+  .specialist-welcome-tabs {
+    margin-top: 0.75rem;
+  }
+
+  .specialist-welcome-panel {
+    margin-top: 0.5rem;
+  }
+
+  .specialist-welcome-starters {
+    gap: 0;
+  }
+
+  .specialist-welcome-starter {
+    padding-block: 0.5rem;
+  }
+
+  .specialist-welcome-starter-detail {
+    display: none;
+  }
+
+  .specialist-welcome-footer {
+    margin-top: 0.5rem;
+  }
+}
+
 /* WKWebView (Tauri's macOS webview) re-rasterizes a box-shadow on every frame of
    an opacity/transform animation unless the element sits on its own *stable*
    compositing layer — which is why the shadowed popovers/menus flicker on macOS
@@ -593,30 +669,64 @@ svg.lucide {
 }
 .breathe { animation: breathe 1.6s ease-in-out infinite; }
 
+/* Conversation owns one live-work signal. Its three dots share the same CSS
+   motion policy as the reply skeleton, including the fallback below. */
+@keyframes activity-dot-pulse {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 1; }
+}
+.activity-dots > span {
+  animation: activity-dot-pulse 1.1s ease-in-out infinite;
+}
+.activity-dots > span:nth-child(2) { animation-delay: 0.18s; }
+.activity-dots > span:nth-child(3) { animation-delay: 0.36s; }
+
 /* Skeleton shimmer for render previews while content loads. Translate the
    highlight on its own layer instead of repainting background-position. */
 @keyframes shimmer {
-  from { transform: translateX(-100%); }
-  to { transform: translateX(100%); }
+  from { transform: translate3d(-100%, 0, 0); }
+  to { transform: translate3d(100%, 0, 0); }
 }
-.skeleton {
+.skeleton,
+.spec-writing-line {
   position: relative;
   overflow: hidden;
+  transform: translateZ(0);
+}
+.skeleton {
+  --loading-shimmer-color: color-mix(in oklab, var(--color-ink) 7%, transparent);
+  --loading-shimmer-duration: 1.5s;
+  --loading-shimmer-easing: ease-in-out;
+  --loading-shimmer-delay: 0ms;
   border-radius: var(--radius-sm);
   background-color: var(--color-bg-hover);
 }
-.skeleton::after {
+.skeleton::after,
+.spec-writing-line::after {
   position: absolute;
   inset: 0;
   content: "";
   background: linear-gradient(
     90deg,
     transparent 0%,
-    color-mix(in oklab, var(--color-ink) 7%, transparent) 50%,
+    var(--loading-shimmer-color) 50%,
     transparent 100%
   );
-  transform: translateX(-100%);
-  animation: shimmer 1.5s ease-in-out infinite;
+  transform: translate3d(-100%, 0, 0);
+  will-change: transform;
+  animation: shimmer var(--loading-shimmer-duration) var(--loading-shimmer-easing) infinite;
+  animation-delay: var(--loading-shimmer-delay);
+}
+
+/* Spec writing deliberately moves more slowly than a generic loading preview:
+   the traveling highlight makes ongoing work unmistakable without suggesting
+   that document sections are arriving at spinner speed. */
+.spec-writing-line {
+  --loading-shimmer-color: color-mix(in oklab, var(--color-accent) 32%, transparent);
+  --loading-shimmer-duration: 3.2s;
+  --loading-shimmer-easing: var(--ease-agent-inout);
+  --loading-shimmer-delay: var(--spec-writing-delay, 0ms);
+  background: color-mix(in oklab, var(--color-ink) 10%, transparent);
 }
 
 /* Gentle, uniform fade-in for content that mounts without a motion wrapper. */
@@ -659,11 +769,13 @@ svg.lucide {
   }
 
   .breathe,
+  .activity-dots > span,
   .desktop-bootstrap-mark,
   .fade-in,
   .appear-delayed,
   .skeleton,
   .skeleton::after,
+  .spec-writing-line::after,
   .permission-guide-step,
   .permission-guide-arrow,
   .permission-guide-cursor,
@@ -671,6 +783,13 @@ svg.lucide {
   .approval-spinner,
   [class*="animate-"] {
     animation: none !important;
+  }
+
+  /* A single steady dot remains as the accessible busy affordance; hiding the
+     skeleton avoids turning a paused animation into apparently loaded bars. */
+  .activity-dots > span:not(:first-child),
+  .reply-skeleton {
+    display: none !important;
   }
 
   [class*="hover:-translate"],

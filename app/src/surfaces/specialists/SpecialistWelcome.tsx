@@ -73,17 +73,17 @@ const STARTERS: Record<SpecialistKind, readonly SpecialistStarter[]> = {
   ],
   scout: [
     {
-      title: "Map this system",
-      detail: "Build an evidence-backed view of services and dependencies.",
-      prompt: "Map this system and show the evidence behind its important dependencies.",
+      title: "Map this organization",
+      detail: "Census authorized sources, repositories, systems, and dependencies.",
+      prompt: "Map the selected organization and workspace. Begin with an adapter and authenticated-context census, reconcile remote repositories with local checkouts, and show evidence and coverage gaps for the resulting system graph.",
       tab: "map",
       workflow: "scout:scout",
       icon: Map,
     },
     {
-      title: "Explain a change",
-      detail: "Trace downstream impact before implementation.",
-      prompt: "Explain the downstream impact of the current change and identify uncertain dependencies.",
+      title: "Assess a proposed change",
+      detail: "Trace impact through the selected enterprise graph before implementation.",
+      prompt: "Assess the downstream impact of the change I describe against the selected Scout workspace and identify uncertain, stale, or inaccessible dependencies.",
       tab: "changes",
       workflow: "scout:scout",
       icon: GitBranch,
@@ -167,17 +167,20 @@ export function SpecialistWelcome({
   const [mode, setMode] = useState<"start" | "example">("start");
   const definition = SPECIALISTS[kind];
   const workspaceCopy = {
-    scout: "Describe the system or decision you need to understand. Scout organizes evidence, uncertainty, changes, and impact in the canvas.",
+    scout: "Choose a Clark organization and Scout workspace, then explicitly start a run. Scout maps authorized source, delivery, runtime, data, identity, ownership, and observability evidence without treating the currently open folder as the system boundary.",
     security: "Choose a repository-level investigation. Security keeps coverage, validated findings, evidence, and remediation organized in the canvas.",
     scientist: "Describe the discovery you want to pursue. Scientist separates hypotheses, experiments, observations, claims, replications, and decisions.",
     rsi: "Describe a project, product, environment, or model. RSI uses research context to build evaluation worlds, search high-information tests, and preserve reproducible counterexamples.",
   }[kind] ?? definition.value;
 
   return (
-    <div data-qa={`specialist-welcome-${kind}`} className="mx-auto w-full max-w-xl">
+    <div
+      data-qa={`specialist-welcome-${kind}`}
+      className="specialist-welcome mx-auto w-full max-w-xl"
+    >
       <h2
         className={cn(
-          "font-serif text-[1.65rem] font-semibold leading-[1.05] tracking-[-0.025em] text-ink",
+          "font-serif text-2xl font-semibold leading-[1.05] tracking-[-0.025em] text-ink",
           mode === "example" && "hidden xl:block",
         )}
       >
@@ -185,7 +188,7 @@ export function SpecialistWelcome({
       </h2>
 
       <p className={cn(
-        "mt-3 max-w-lg text-sm leading-6 text-ink-secondary",
+        "specialist-welcome-copy mt-3 max-w-lg text-sm leading-6 text-ink-secondary",
         mode === "example" && "hidden xl:block",
       )}>
         {workspaceCopy}
@@ -194,7 +197,7 @@ export function SpecialistWelcome({
       <div
         role="tablist"
         aria-label={`${definition.label} conversation introduction`}
-        className="mt-6 flex w-fit items-center gap-5"
+        className="specialist-welcome-tabs mt-6 flex w-fit items-center gap-5"
       >
         {([
           ["start", "Start a conversation"],
@@ -230,10 +233,10 @@ export function SpecialistWelcome({
             aria-labelledby={`${introductionId}-start-tab`}
             {...accessibleMotion(SLIDE_LEFT, reduceMotion)}
             transition={staggeredTransition(reduceMotion, 0, 0.04, { duration: DUR.fast })}
-            className="mt-5"
+            className="specialist-welcome-panel mt-5"
           >
             <div className="mb-2 text-xs font-semibold text-ink-muted">Choose a starting point</div>
-            <div className="space-y-1">
+            <div className="specialist-welcome-starters flex flex-col gap-1">
               {specialistStarters(kind).map((starter, index) => {
                 const StarterIcon = starter.icon;
                 return (
@@ -241,25 +244,28 @@ export function SpecialistWelcome({
                     key={starter.title}
                     data-qa={`specialist-starter-${kind}-${index}`}
                     aria-label={`Start ${definition.label}: ${starter.title}`}
+                    title={starter.detail}
                     type="button"
                     {...accessibleMotion(RISE_SMALL, reduceMotion)}
                     transition={staggeredTransition(reduceMotion, index, 0.035)}
                     onClick={() => onStart(starter)}
-                    className="group flex w-full items-center gap-3 rounded-xl px-2 py-2.5 text-left transition-colors hover:bg-bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/40"
+                    className="specialist-welcome-starter group flex w-full items-center gap-3 rounded-xl px-2 py-2.5 text-left transition-colors hover:bg-bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/40"
                   >
                     <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-accent-soft text-accent transition-transform group-hover:scale-[1.03]">
                       <StarterIcon className="size-4" />
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="block text-sm font-medium text-ink">{starter.title}</span>
-                      <span className="mt-0.5 block text-xs leading-5 text-ink-muted">{starter.detail}</span>
+                      <span className="specialist-welcome-starter-detail mt-0.5 block text-xs leading-5 text-ink-muted">
+                        {starter.detail}
+                      </span>
                     </span>
                     <ArrowRight className="mr-1 size-4 shrink-0 text-ink-faint transition-transform group-hover:translate-x-0.5 group-hover:text-accent" />
                   </m.button>
                 );
               })}
             </div>
-            <p className="mt-3 text-xs leading-5 text-ink-faint">
+            <p className="specialist-welcome-footer mt-3 text-xs leading-5 text-ink-faint">
               Or describe your own investigation below. Nothing runs until you send it.
             </p>
           </m.div>

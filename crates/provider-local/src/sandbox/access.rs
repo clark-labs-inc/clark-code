@@ -15,6 +15,10 @@ impl Sandbox {
         self
     }
 
+    pub fn read_roots(&self) -> &[PathBuf] {
+        &self.read_roots
+    }
+
     fn writable(&self, path: &Path) -> bool {
         path.starts_with(&self.root)
             || self

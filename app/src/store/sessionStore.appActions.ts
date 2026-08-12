@@ -232,6 +232,7 @@ export function handleCloudHistoryConflict(
     const meta = before.conversations.find(
       (conversation) => conversation.id === conversationId,
     );
+    const autoReloadSpec = meta?.specialist?.kind === "spec";
     set({
       session: null,
       snapshot: emptySnapshot(),
@@ -240,7 +241,7 @@ export function handleCloudHistoryConflict(
       unavailableConversation: {
         id: conversationId,
         title: meta?.title || "Conversation",
-        detail: "product cloud has a newer revision of this conversation.",
+        detail: "Product cloud rejected a stale snapshot revision.",
         kind: "refresh_required",
       },
       unavailableCleanupId: null,
@@ -256,13 +257,24 @@ export function handleCloudHistoryConflict(
       activeProjectRoot: null,
       warning: null,
     });
+    if (autoReloadSpec) {
+      queueMicrotask(() => {
+        const current = get();
+        if (
+          current.unavailableConversation?.id === conversationId
+          && current.unavailableConversation.kind === "refresh_required"
+        ) {
+          void current.openConversation(conversationId);
+        }
+      });
+    }
     return;
   }
 
   set({
     runningIds: before.runningIds.filter((id) => id !== conversationId),
     warning: wasLive
-      ? "A conversation changed on another device, so Clark Code stopped its stale local session."
+      ? "A conversation received a newer cloud revision, so Clark Code stopped its stale local session."
       : before.warning,
   });
 }
@@ -762,6 +774,7 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
       ...(changedProject
         ? {
             pendingManagedWorktreePath: null,
+            deferredSessionStartDraft: null,
             worktreeTransition: null,
             dirtyWorktreeApproval: null,
             worktreePreparing: false,
@@ -770,6 +783,7 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
             managedWorktreeBase: loadManagedWorktreeBase(
               codeKeyAccountBinding(get().auth),
               next.cwd,
+              useSpecialistStore.getState().active,
             ),
           }
         : {}),
@@ -785,6 +799,7 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
       ...(changedMode
         ? {
             pendingManagedWorktreePath: null,
+            deferredSessionStartDraft: null,
             worktreeTransition: null,
             dirtyWorktreeApproval: null,
             worktreePreparing: false,
@@ -798,7 +813,14 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
     if (changedHost) nextSessionEpoch();
     set({
       selectedHostId: id,
-      ...(changedHost ? { dirtyWorktreeApproval: null, connecting: false, opening: null } : {}),
+      ...(changedHost
+        ? {
+            dirtyWorktreeApproval: null,
+            deferredSessionStartDraft: null,
+            connecting: false,
+            opening: null,
+          }
+        : {}),
     });
   },
 
@@ -916,6 +938,7 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
       memoryOverview: null,
       globalMemoryOverview: null,
       pendingManagedWorktreePath: null,
+      deferredSessionStartDraft: null,
       terminalLaunch: null,
       mcpOpen: false,
       sshOpen: false,
@@ -976,6 +999,7 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
       memoryOverview: null,
       globalMemoryOverview: null,
       pendingManagedWorktreePath: null,
+      deferredSessionStartDraft: null,
       terminalLaunch: null,
       mcpOpen: false,
       sshOpen: false,

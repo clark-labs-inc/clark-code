@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { currentActivity, executionDiagnostic, shouldShowPending } from "./activity";
+import {
+  currentActivity,
+  executionDiagnostic,
+  isThinkingOnlyMessage,
+  shouldShowPending,
+} from "./activity";
 import { emptySnapshot, type Snapshot } from "../core-bridge/types";
 
 function withRun(status: Snapshot["runs"][string]["status"]): Snapshot {
@@ -99,7 +104,9 @@ describe("currentActivity", () => {
       role: "agent",
       blocks: [{ type: "thinking", text: "Inspecting the request" }],
     });
-    expect(shouldShowPending(reasoningStarted)).toBe(false);
+    expect(isThinkingOnlyMessage(reasoningStarted.timeline.at(-1))).toBe(true);
+    expect(shouldShowPending(reasoningStarted)).toBe(true);
+    expect(currentActivity(reasoningStarted).label).toBe("Working…");
 
     const answerStarted = structuredClone(beforeResponse);
     answerStarted.timeline.push({
@@ -143,6 +150,7 @@ describe("currentActivity", () => {
       content: [],
     };
     expect(shouldShowPending(snapshot)).toBe(true);
+    expect(currentActivity(snapshot).label).toBe("Working…");
   });
 
   it("lets an active tool own the pending state", () => {
@@ -158,7 +166,7 @@ describe("currentActivity", () => {
     expect(shouldShowPending(snapshot)).toBe(false);
   });
 
-  it("lets the structured incident card own retry progress", () => {
+  it("keeps ordinary pending progress visible while recovery stays quiet", () => {
     const snapshot = withRun("running");
     snapshot.timeline.push({ item: "provider_incident", run: "r1", id: "incident-1" });
     snapshot.provider_incidents = {
@@ -184,7 +192,8 @@ describe("currentActivity", () => {
         updated_at_ms: 3,
       },
     };
-    expect(shouldShowPending(snapshot)).toBe(false);
+    expect(shouldShowPending(snapshot)).toBe(true);
+    expect(currentActivity(snapshot).label).toBe("Working…");
   });
 });
 

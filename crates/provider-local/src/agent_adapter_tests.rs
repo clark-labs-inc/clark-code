@@ -444,6 +444,14 @@ fn markdown_artifact_only_for_md_inside_the_workspace() {
     assert_eq!(art.title, "report.md");
     assert_eq!(art.id, "doc:report.md");
 
+    // Filesystem tools report project-relative locations. Resolve those
+    // against the document root so a successful `write_file` immediately
+    // becomes the document artifact shown by the Spec workspace.
+    let relative =
+        markdown_artifact("report.md", "call-2", &docs_canon).expect("relative markdown doc");
+    assert_eq!(relative.uri.as_deref(), Some(md.to_str().unwrap()));
+    assert_eq!(relative.id, "doc:report.md");
+
     // A non-markdown file in the workspace → no artifact.
     let txt = docs_canon.join("notes.txt");
     std::fs::write(&txt, "x").unwrap();
@@ -468,6 +476,7 @@ fn mobile_screenshot_artifact_only_for_images_inside_the_workspace() {
     assert_eq!(art.kind, desktop::ArtifactKind::Image);
     assert_eq!(art.mime_type.as_deref(), Some("image/png"));
     assert_eq!(art.uri.as_deref(), Some(png.to_str().unwrap()));
+    assert!(mobile_screenshot_artifact("sim.png", "call-2", &docs_canon).is_some());
 
     let jpg = docs_canon.join("sim.jpg");
     std::fs::write(&jpg, [0u8; 4]).unwrap();

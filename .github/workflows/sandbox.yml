@@ -35,7 +35,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
         with:
           toolchain: 1.97.1
-      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
       - name: Build verified release bubblewrap
         if: runner.os == 'Linux'
         run: |
@@ -59,18 +59,25 @@ jobs:
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
         with:
           toolchain: 1.97.1
-      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
       - run: cargo test -p exec-sandbox-protocol -p exec-sandbox-windows -p exec-sandbox --no-fail-fast
       - run: cargo build -p exec-sandbox-windows --release --bins
       - name: Verify clean-machine runtime boundary
         shell: pwsh
         run: |
-          $dumpbin = Get-Command dumpbin.exe -ErrorAction Stop
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $installation = & $vswhere -latest -property installationPath
+          $dumpbin = Get-ChildItem "$installation\VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe" |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+          if (-not $dumpbin) {
+            throw "dumpbin.exe was not found"
+          }
           foreach ($helper in @(
             "target/release/agent-command-runner.exe",
             "target/release/agent-windows-sandbox-setup.exe"
           )) {
-            $imports = (& $dumpbin.Source /dependents $helper | Out-String)
+            $imports = (& $dumpbin.FullName /dependents $helper | Out-String)
             if ($imports -match '(?im)^\s*(?:vcruntime|msvcp)[^\s]*\.dll\s*$') {
               throw "Clean-machine runtime invariant failed for ${helper}:`n$imports"
             }

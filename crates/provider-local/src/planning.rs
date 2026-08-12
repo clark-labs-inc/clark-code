@@ -68,6 +68,9 @@ pub(crate) struct PlanningState {
     full_instruction_sent: bool,
     pub execution_checklist: Option<ExecutionChecklist>,
     pub proposed_plan: Option<ProposedPlan>,
+    /// Most recent host-fetched, immutable context cuts available to a plan
+    /// proposal. Tools cannot author or alter these pins.
+    pub context_revisions: Vec<agent_core::domain::PlanContextRevision>,
     pending_execution_reminder: Option<ExecutionReminderReason>,
     completion_reminders: u8,
 }
@@ -123,12 +126,20 @@ impl PlanningState {
             status: ProposedPlanStatus::AwaitingDecision,
             global_reminders,
             execution_contract,
+            context_revisions: self.context_revisions.clone(),
         };
         self.proposed_plan = Some(plan.clone());
         self.execution_checklist = None;
         self.pending_execution_reminder = None;
         self.completion_reminders = 0;
         plan
+    }
+
+    pub fn set_context_revisions(
+        &mut self,
+        revisions: Vec<agent_core::domain::PlanContextRevision>,
+    ) {
+        self.context_revisions = revisions;
     }
 
     /// Record Clark Code's hidden Plan Mode artifact. The model-facing protocol is
@@ -921,6 +932,7 @@ mod tests {
                     reminders: vec!["Include the failure path".into()],
                 },
             ],
+            context_revisions: Vec::new(),
         }
     }
 
@@ -1168,6 +1180,7 @@ mod tests {
             status: ProposedPlanStatus::AwaitingDecision,
             global_reminders: Vec::new(),
             execution_contract: Vec::new(),
+            context_revisions: Vec::new(),
         };
         let prompt = plan_mode_instructions_for(PlanningPromptProfile::Concise, Some(&plan));
         assert!(
@@ -1214,6 +1227,7 @@ mod tests {
             status: ProposedPlanStatus::Approved,
             global_reminders: Vec::new(),
             execution_contract: Vec::new(),
+            context_revisions: Vec::new(),
         };
         let exit_note = plan_mode_exit_note(Some(&plan));
         assert!(exit_note.contains(&plan.markdown));
@@ -1240,11 +1254,31 @@ mod tests {
             status: ProposedPlanStatus::Approved,
             global_reminders: Vec::new(),
             execution_contract: Vec::new(),
+            context_revisions: Vec::new(),
         };
         let note = plan_mode_exit_note(Some(&plan));
         assert!(note.contains("plan-1"));
         assert!(note.contains("Change the boundary"));
         assert!(!note.contains("plan.md"));
+    }
+
+    #[test]
+    fn proposal_pins_host_fetched_context_revision() {
+        let mut state = PlanningState::default();
+        let revision = agent_core::domain::PlanContextRevision {
+            context_kind: "enterprise_feature_context".into(),
+            organization_id: Some("org-1".into()),
+            workspace_id: Some("workspace-1".into()),
+            query: "change checkout".into(),
+            effective_at_ms: 10,
+            known_at_ms: 11,
+            selector_sha256: "a".repeat(64),
+        };
+        state.set_context_revisions(vec![revision.clone()]);
+
+        let proposal = state.next_markdown_proposal("Implement checkout".into());
+
+        assert_eq!(proposal.context_revisions, vec![revision]);
     }
 
     #[test]

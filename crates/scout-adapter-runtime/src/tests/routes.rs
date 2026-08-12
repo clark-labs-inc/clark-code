@@ -94,6 +94,26 @@ fn routes() -> Vec<RouteFixture<'static>> {
         RouteFixture {
             adapter: "clark/github-organization@1",
             provider: "github",
+            authority: "global",
+            operation: "list_organizations",
+            provider_type: "github.organization",
+            resource_kind: "organization",
+            coverage_scope: "global",
+            projection: &["login"],
+        },
+        RouteFixture {
+            adapter: "clark/github-organization@1",
+            provider: "github",
+            authority: "global",
+            operation: "list_accessible_repositories",
+            provider_type: "github.repository",
+            resource_kind: "repository",
+            coverage_scope: "global",
+            projection: &["name", "owner_login"],
+        },
+        RouteFixture {
+            adapter: "clark/github-organization@1",
+            provider: "github",
             authority: "acme",
             operation: "list_repositories",
             provider_type: "github.repository",
@@ -233,7 +253,10 @@ fn every_registered_route_rejects_a_mislabeled_coverage_kind() {
 
 #[test]
 fn route_binding_rejects_wrong_type_projection_filter_and_scope() {
-    let fixture = routes().remove(0);
+    let fixture = routes()
+        .into_iter()
+        .find(|fixture| fixture.operation == "list_repositories")
+        .unwrap();
 
     let mut wrong_type = request(&fixture);
     wrong_type.query.provider_resource_type = "github.organization".to_owned();
@@ -268,7 +291,11 @@ fn project_scoped_gcp_assets_require_the_exact_project_coverage_scope() {
 
 #[test]
 fn route_registry_rejects_a_noncanonical_record_identity_authority() {
-    let request = request(&routes().remove(0));
+    let fixture = routes()
+        .into_iter()
+        .find(|fixture| fixture.operation == "list_repositories")
+        .unwrap();
+    let request = request(&fixture);
     let record = NormalizedRecord::new(
         request.adapter_id.clone(),
         "github".to_owned(),

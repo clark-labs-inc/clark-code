@@ -7,16 +7,12 @@ dependencies:
     - type: tool
       value: scout_capabilities
     - type: tool
-      value: scout_adapter
+      value: scout_repository_census
     - type: tool
-      value: scout_ledger
+      value: scout_adapter
     - type: tool
       value: scout_enterprise
     - type: tool
       value: scout_enterprise_query
-    - type: tool
-      value: scout_probe
-    - type: tool
-      value: scout_measure
 policy:
   allow_implicit_invocation: false
