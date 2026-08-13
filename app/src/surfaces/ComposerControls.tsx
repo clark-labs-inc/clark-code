@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
+import { createPortal } from "react-dom";
 import { Check, ChevronDown } from "lucide-react";
 
 import { cn } from "../lib/cn";
@@ -9,12 +10,17 @@ import {
 } from "../lib/localAgent";
 import { useSessionStore } from "../store/sessionStore";
 
-function useOutsideClose(ref: RefObject<HTMLElement | null>, onClose: () => void) {
+function useOutsideClose(
+  triggerRef: RefObject<HTMLElement | null>,
+  menuRef: RefObject<HTMLElement | null>,
+  onClose: () => void,
+) {
   const cb = useRef(onClose);
   cb.current = onClose;
   useEffect(() => {
     const handler = (event: Event) => {
-      if (ref.current && !ref.current.contains(event.target as Node)) cb.current();
+      const target = event.target as Node;
+      if (!triggerRef.current?.contains(target) && !menuRef.current?.contains(target)) cb.current();
     };
     const onKey = (event: globalThis.KeyboardEvent) => {
       if (event.key === "Escape") cb.current();
@@ -25,7 +31,7 @@ function useOutsideClose(ref: RefObject<HTMLElement | null>, onClose: () => void
       document.removeEventListener("mousedown", handler);
       document.removeEventListener("keydown", onKey);
     };
-  }, [ref]);
+  }, [menuRef, triggerRef]);
 }
 
 export function ModelPill() {
@@ -43,7 +49,39 @@ export function ModelPill() {
   const [open, setOpen] = useState(false);
   const [switching, setSwitching] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-  useOutsideClose(ref, () => setOpen(false));
+  const menuRef = useRef<HTMLDivElement>(null);
+  const itemRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const [menuPosition, setMenuPosition] = useState<{ left: number; bottom: number } | null>(null);
+  useOutsideClose(ref, menuRef, () => setOpen(false));
+
+  const positionMenu = () => {
+    const rect = ref.current?.getBoundingClientRect();
+    if (!rect) return;
+    const menuWidth = Math.min(288, window.innerWidth - 24);
+    setMenuPosition({
+      left: Math.max(12, Math.min(rect.right - menuWidth, window.innerWidth - menuWidth - 12)),
+      bottom: window.innerHeight - rect.top + 8,
+    });
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    positionMenu();
+    const reposition = () => positionMenu();
+    window.addEventListener("resize", reposition);
+    window.addEventListener("scroll", reposition, true);
+    return () => {
+      window.removeEventListener("resize", reposition);
+      window.removeEventListener("scroll", reposition, true);
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const selectedIndex = CODING_MODELS.findIndex((candidate) => candidate.id === model);
+    const frame = requestAnimationFrame(() => itemRefs.current[selectedIndex]?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [model, open]);
 
   return (
     <div ref={ref} className="relative">
@@ -54,7 +92,9 @@ export function ModelPill() {
             flashNotice("Finish the current run before changing models.");
             return;
           }
-          if (!switching) setOpen((value) => !value);
+          if (switching) return;
+          if (!open) positionMenu();
+          setOpen((value) => !value);
         }}
         disabled={busy || switching}
         aria-haspopup="menu"
@@ -66,20 +106,47 @@ export function ModelPill() {
         <ChevronDown className="size-3 opacity-70" />
       </button>
 
-      {open && (
+      {open && menuPosition && typeof document !== "undefined" && createPortal(
         <div
+          ref={menuRef}
           role="menu"
-          className="popover-surface absolute bottom-full right-0 z-30 mb-2 max-h-[calc(100vh-7rem)] w-72 overflow-y-auto rounded-2xl bg-bg-elevated p-1.5 shadow-lifted ring-1 ring-border-subtle"
+          aria-label="Model"
+          onKeyDown={(event) => {
+            const keys = ["ArrowDown", "ArrowUp", "Home", "End"];
+            if (!keys.includes(event.key)) return;
+            event.preventDefault();
+            const current = itemRefs.current.indexOf(
+              document.activeElement as HTMLButtonElement,
+            );
+            const last = CODING_MODELS.length - 1;
+            const next =
+              event.key === "Home"
+                ? 0
+                : event.key === "End"
+                  ? last
+                  : event.key === "ArrowDown"
+                    ? (Math.max(current, -1) + 1) % CODING_MODELS.length
+                    : current <= 0
+                      ? last
+                      : current - 1;
+            itemRefs.current[next]?.focus();
+          }}
+          style={{ left: menuPosition.left, bottom: menuPosition.bottom }}
+          className="popover-surface fixed z-[70] max-h-[calc(100vh-7rem)] w-72 max-w-[calc(100vw-1.5rem)] overflow-y-auto rounded-2xl bg-bg-elevated p-1.5 shadow-lifted ring-1 ring-border-subtle"
         >
           <div className="px-2.5 py-1.5 text-xs font-medium uppercase tracking-wide text-ink-faint">
             Model
           </div>
-          {CODING_MODELS.map((candidate) => (
+          {CODING_MODELS.map((candidate, index) => (
             <button
               key={candidate.id}
+              ref={(node) => {
+                itemRefs.current[index] = node;
+              }}
               type="button"
               role="menuitemradio"
               aria-checked={candidate.id === model}
+              tabIndex={candidate.id === model ? 0 : -1}
               onClick={() => {
                 if (busy || switching) return;
                 setSwitching(true);
@@ -101,7 +168,8 @@ export function ModelPill() {
               {candidate.id === model && <Check className="mt-0.5 size-4 shrink-0 text-accent" />}
             </button>
           ))}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
