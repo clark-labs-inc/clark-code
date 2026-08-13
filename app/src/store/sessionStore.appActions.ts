@@ -472,6 +472,7 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
             if (refreshed && authAccountMatches(get().auth, auth)) {
               configureCloudHistoryCredentials(cloudCreds(refreshed));
               set({ auth: refreshed });
+              await get().syncCloudIndex();
             }
           } finally {
             refreshingCloudToken = false;

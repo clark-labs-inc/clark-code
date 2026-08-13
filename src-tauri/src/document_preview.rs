@@ -1,3 +1,4 @@
+use base64::Engine as _;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use tauri::{ipc::Response, AppHandle, Manager};
@@ -48,16 +49,34 @@ pub enum DocumentPreview {
 #[tauri::command]
 pub async fn render_document_preview(
     app: AppHandle,
-    path: String,
+    source: String,
+    title: Option<String>,
 ) -> Result<DocumentPreview, String> {
-    let root = provider_local::workspace_root()
-        .ok_or_else(|| "no workspace directory".to_string())?
+    let workspace_root = provider_local::workspace_root().and_then(|path| path.canonicalize().ok());
+    let preview_root = preview_root(&app)?;
+    tokio::task::spawn_blocking(move || {
+        let (bytes, format) =
+            read_document_source(&source, title.as_deref(), workspace_root.as_deref())?;
+        render_preview(&bytes, &format, &preview_root)
+    })
+    .await
+    .map_err(|error| format!("preview failed: {error}"))?
+}
+
+fn read_document_source(
+    source: &str,
+    title: Option<&str>,
+    workspace_root: Option<&Path>,
+) -> Result<(Vec<u8>, String), String> {
+    if source.starts_with("data:") {
+        return read_embedded_document(source, title);
+    }
+
+    let root = workspace_root.ok_or_else(|| "no workspace directory".to_string())?;
+    let canon = PathBuf::from(source)
         .canonicalize()
-        .map_err(|error| format!("workspace: {error}"))?;
-    let canon = PathBuf::from(&path)
-        .canonicalize()
-        .map_err(|error| format!("{path}: {error}"))?;
-    if !canon.starts_with(&root) {
+        .map_err(|error| format!("{source}: {error}"))?;
+    if !canon.starts_with(root) {
         return Err("path is outside the document workspace".into());
     }
     let format = preview_format(&canon).ok_or_else(|| "unsupported preview format".to_string())?;
@@ -68,14 +87,36 @@ pub async fn render_document_preview(
     if metadata.len() > MAX_DOCUMENT_BYTES {
         return Err("document too large to preview".into());
     }
+    let bytes = std::fs::read(&canon).map_err(|error| format!("read failed: {error}"))?;
+    Ok((bytes, format))
+}
 
-    let preview_root = preview_root(&app)?;
-    tokio::task::spawn_blocking(move || {
-        let bytes = std::fs::read(&canon).map_err(|error| format!("read failed: {error}"))?;
-        render_preview(&bytes, &format, &preview_root)
-    })
-    .await
-    .map_err(|error| format!("preview failed: {error}"))?
+fn read_embedded_document(source: &str, title: Option<&str>) -> Result<(Vec<u8>, String), String> {
+    let (metadata, payload) = source
+        .split_once(',')
+        .ok_or_else(|| "embedded document is malformed".to_string())?;
+    if !metadata.split(';').any(|part| part == "base64") {
+        return Err("embedded document must use base64 encoding".into());
+    }
+    if payload.len() > (MAX_DOCUMENT_BYTES as usize).saturating_mul(4).div_ceil(3) + 4 {
+        return Err("embedded document is too large to preview".into());
+    }
+    let format = title
+        .and_then(|name| preview_format(Path::new(name)))
+        .or_else(
+            || match metadata.trim_start_matches("data:").split(';').next() {
+                Some("application/pdf") => Some("pdf".to_string()),
+                _ => None,
+            },
+        )
+        .ok_or_else(|| "unsupported embedded preview format".to_string())?;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(payload)
+        .map_err(|error| format!("embedded document is invalid base64: {error}"))?;
+    if bytes.len() as u64 > MAX_DOCUMENT_BYTES {
+        return Err("embedded document is too large to preview".into());
+    }
+    Ok((bytes, format))
 }
 
 /// Return one cached preview page as a raw IPC response. Tauri delivers this
@@ -205,7 +246,11 @@ fn render_html(bytes: &[u8], format: &str) -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{preview_format, render_html, render_preview, DocumentPreview};
+    use base64::Engine as _;
+
+    use super::{
+        preview_format, read_document_source, render_html, render_preview, DocumentPreview,
+    };
     use std::path::Path;
 
     #[test]
@@ -252,5 +297,27 @@ mod tests {
     #[test]
     fn rejects_invalid_document_bytes() {
         assert!(render_html(b"not a zip file", "docx").is_err());
+    }
+
+    #[test]
+    fn renders_an_embedded_pdf_artifact() {
+        let pdf = libreoffice_pure::convert_bytes(
+            b"# PDF artifact preview\n\nThe embedded payload rendered successfully.",
+            "md",
+            "pdf",
+        )
+        .expect("create PDF fixture");
+        let source = format!(
+            "data:application/pdf;base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(pdf)
+        );
+
+        let (bytes, format) =
+            read_document_source(&source, Some("report.pdf"), None).expect("read embedded PDF");
+        let html = render_html(&bytes, &format).expect("render embedded PDF");
+
+        assert_eq!(format, "pdf");
+        assert!(html.contains("PDF artifact preview"));
+        assert!(html.contains("embedded payload rendered successfully"));
     }
 }

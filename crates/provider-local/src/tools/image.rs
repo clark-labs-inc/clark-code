@@ -67,7 +67,25 @@ impl ToolExecutor for ViewImage {
             Err(error) => return ToolOutcome::error(error),
         };
         let display = ctx.sandbox.display(&image.path);
-        ToolOutcome::ok(format!(
+        let data_base64 = base64::engine::general_purpose::STANDARD.encode(&image.bytes);
+        let artifact = ctx.sandbox.docs_root().and_then(|docs| {
+            image.path.starts_with(docs).then(|| {
+                let uri = image.path.to_string_lossy().into_owned();
+                ProducedArtifact {
+                    id: format!("shot:{uri}"),
+                    title: image
+                        .path
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .unwrap_or("workspace-image")
+                        .to_string(),
+                    kind: ArtifactKind::Image,
+                    mime_type: Some(image.mime_type.to_string()),
+                    uri: Some(uri),
+                }
+            })
+        });
+        let mut outcome = ToolOutcome::ok(format!(
             "Viewed {display} ({}; {} bytes).",
             image.mime_type,
             image.bytes.len()
@@ -75,9 +93,13 @@ impl ToolExecutor for ViewImage {
         .with_location(display.clone(), None)
         .with_image(
             image.mime_type,
-            base64::engine::general_purpose::STANDARD.encode(image.bytes),
+            data_base64,
             Some(format!("Workspace image: {display}")),
-        )
+        );
+        if let Some(artifact) = artifact {
+            outcome = outcome.with_artifact(artifact);
+        }
+        outcome
     }
 }
 
@@ -553,6 +575,12 @@ mod tests {
         }
     }
 
+    fn docs_ctx(dir: &Path) -> ToolCtx {
+        let mut context = ctx(dir);
+        context.sandbox = Arc::new(Sandbox::new(dir).unwrap().with_docs(dir.to_path_buf()));
+        context
+    }
+
     #[tokio::test]
     async fn view_image_returns_a_typed_image_for_a_contained_png() {
         let dir = tempfile::tempdir().unwrap();
@@ -572,6 +600,34 @@ mod tests {
         assert_eq!(outcome.images.len(), 1);
         assert_eq!(outcome.images[0].mime_type, "image/png");
         assert_eq!(outcome.locations[0].path, "design.png");
+        assert!(outcome.artifacts.is_empty());
+    }
+
+    #[tokio::test]
+    async fn view_image_promotes_managed_workspace_image_to_a_durable_artifact() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("spectro.png");
+        std::fs::write(
+            &path,
+            base64::engine::general_purpose::STANDARD
+                .decode(PNG_1X1)
+                .unwrap(),
+        )
+        .unwrap();
+
+        let outcome = ViewImage
+            .invoke(json!({"path": "spectro.png"}), &docs_ctx(dir.path()))
+            .await;
+
+        assert!(!outcome.is_error, "{}", outcome.content);
+        assert_eq!(outcome.artifacts.len(), 1);
+        let artifact = &outcome.artifacts[0];
+        let canonical = path.canonicalize().unwrap();
+        assert_eq!(artifact.id, format!("shot:{}", canonical.display()));
+        assert_eq!(artifact.title, "spectro.png");
+        assert_eq!(artifact.kind, ArtifactKind::Image);
+        assert_eq!(artifact.mime_type.as_deref(), Some("image/png"));
+        assert_eq!(artifact.uri.as_deref(), canonical.to_str());
     }
 
     #[tokio::test]

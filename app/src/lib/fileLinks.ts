@@ -75,6 +75,10 @@ export function localFileName(path: string): string {
   return clean.split(/[\\/]/).pop() || "download";
 }
 
+function isTauri(): boolean {
+  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+}
+
 export async function openLocalPath(path: string, reveal = false): Promise<void> {
   const bridge = await getBridge();
   if (!bridge.openPath) throw new Error("Opening local files is unavailable.");
@@ -83,7 +87,7 @@ export async function openLocalPath(path: string, reveal = false): Promise<void>
 
 /** Save a copy of an existing local file through the OS save dialog. */
 export async function saveLocalFileCopy(path: string): Promise<boolean> {
-  if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) {
+  if (!isTauri()) {
     throw new Error("Saving local files is available in the desktop app.");
   }
   const { save } = await import("@tauri-apps/plugin-dialog");
@@ -93,5 +97,33 @@ export async function saveLocalFileCopy(path: string): Promise<boolean> {
   });
   if (!destination) return false;
   await invoke("copy_local_file", { source: path, destination });
+  return true;
+}
+
+/** Save a local or embedded artifact through one consistent UI action. The
+ * browser fallback intentionally supports only browser-readable sources; local
+ * filesystem paths remain a desktop capability. */
+export async function saveArtifactCopy(source: string, title?: string): Promise<boolean> {
+  const path = localPathFromHref(source, "");
+  const name = title?.trim() || (path ? localFileName(path) : "artifact");
+
+  if (isTauri()) {
+    const { save } = await import("@tauri-apps/plugin-dialog");
+    const destination = await save({ title: "Save a copy", defaultPath: name });
+    if (!destination) return false;
+    await invoke("save_artifact_copy", { source: path ?? source, destination });
+    return true;
+  }
+
+  if (!/^(?:data|blob|https?):/i.test(source)) {
+    throw new Error("Saving local files is available in the desktop app.");
+  }
+  const anchor = document.createElement("a");
+  anchor.href = source;
+  anchor.download = name;
+  anchor.rel = "noopener";
+  document.body.appendChild(anchor);
+  anchor.click();
+  document.body.removeChild(anchor);
   return true;
 }

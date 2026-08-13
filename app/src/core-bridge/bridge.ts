@@ -530,6 +530,13 @@ export async function getBridge(): Promise<CoreBridge> {
       const params =
         typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
 
+      // Deterministic native-WebView acceptance runs need the real Tauri shell
+      // without spending hosted-model tokens. Vite leaves this disabled unless
+      // an explicit acceptance build opts in at compile time.
+      if (import.meta.env.VITE_FORCE_MOCK_BRIDGE === "1") {
+        const { MockBridge } = await import("./mockBridge");
+        return new MockBridge();
+      }
       if (runningInTauri) {
         const { TauriBridge } = await import("./tauriBridge");
         return new TauriBridge();

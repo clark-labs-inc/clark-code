@@ -9,15 +9,9 @@ import {
   saveLocalFileCopy,
 } from "../lib/fileLinks";
 import { useSessionStore } from "../store/sessionStore";
+import { fileManagerLabel } from "./work/ArtifactFileActions";
 
 type MenuPosition = { x: number; y: number };
-
-function fileManagerLabel(): string {
-  if (typeof navigator === "undefined") return "Show in File Manager";
-  if (/mac/i.test(navigator.userAgent)) return "Open in Finder";
-  if (/windows/i.test(navigator.userAgent)) return "Show in File Explorer";
-  return "Show in File Manager";
-}
 
 function menuPosition(clientX: number, clientY: number): MenuPosition {
   const width = 224;

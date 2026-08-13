@@ -11,6 +11,36 @@ pub(crate) enum ProductCloudOutcome {
     Rejected(String),
 }
 
+struct ConversationListSource {
+    rows: Vec<Value>,
+    cloud_available: bool,
+    auth_expired: bool,
+}
+
+fn conversation_list_source(cloud: ProductCloudOutcome) -> Result<ConversationListSource, String> {
+    match cloud {
+        ProductCloudOutcome::Ok(Value::Array(rows)) => Ok(ConversationListSource {
+            rows,
+            cloud_available: true,
+            auth_expired: false,
+        }),
+        ProductCloudOutcome::Ok(_) => Err("product cloud conversation list is not an array".into()),
+        ProductCloudOutcome::Unavailable(_) => Ok(ConversationListSource {
+            rows: Vec::new(),
+            cloud_available: false,
+            auth_expired: false,
+        }),
+        ProductCloudOutcome::Unauthorized(_) => Ok(ConversationListSource {
+            rows: Vec::new(),
+            cloud_available: false,
+            auth_expired: true,
+        }),
+        ProductCloudOutcome::NotFound(error)
+        | ProductCloudOutcome::Conflict(error)
+        | ProductCloudOutcome::Rejected(error) => Err(error),
+    }
+}
+
 pub(crate) async fn product_cloud_request(
     operation: &str,
     payload: Value,
@@ -59,28 +89,61 @@ pub async fn desktop_conv_list(
         state.inner(),
     )
     .await?;
-    let (rows, cloud_available) = match cloud {
-        ProductCloudOutcome::Ok(Value::Array(summaries)) => (summaries, true),
-        ProductCloudOutcome::Ok(_) => {
-            return Err("product cloud conversation list is not an array".into())
-        }
-        ProductCloudOutcome::Unavailable(error) => {
-            tracing::warn!(%error, "desktop cloud list unavailable; using local acknowledged cache");
-            (Vec::new(), false)
-        }
-        ProductCloudOutcome::Unauthorized(error)
-        | ProductCloudOutcome::NotFound(error)
-        | ProductCloudOutcome::Conflict(error)
-        | ProductCloudOutcome::Rejected(error) => return Err(error),
-    };
+    let cloud_unavailable = matches!(&cloud, ProductCloudOutcome::Unavailable(_));
+    let source = conversation_list_source(cloud)?;
+    if source.auth_expired {
+        let _ = app.emit("cloud-auth-expired", ());
+        tracing::warn!(
+            "desktop cloud list authorization expired; refreshing and using local acknowledged cache"
+        );
+    } else if cloud_unavailable {
+        tracing::warn!("desktop cloud list unavailable; using local acknowledged cache");
+    }
     let merged = crate::trajectory::merge_local_summaries(
         crate::trajectory::outbox_path(&app)?,
         access.owner_scope,
-        rows,
-        cloud_available,
+        source.rows,
+        source.cloud_available,
     )
     .await?;
     Ok(Value::Array(merged))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{conversation_list_source, ProductCloudOutcome};
+    use serde_json::json;
+
+    #[test]
+    fn expired_list_authorization_uses_cache_and_requests_refresh() {
+        let source = conversation_list_source(ProductCloudOutcome::Unauthorized("expired".into()))
+            .expect("expired authorization should preserve readable local history");
+
+        assert!(source.rows.is_empty());
+        assert!(!source.cloud_available);
+        assert!(source.auth_expired);
+    }
+
+    #[test]
+    fn successful_list_remains_cloud_authoritative() {
+        let source = conversation_list_source(ProductCloudOutcome::Ok(json!([
+            { "id": "conversation-1" }
+        ])))
+        .expect("cloud list should decode");
+
+        assert_eq!(source.rows, vec![json!({ "id": "conversation-1" })]);
+        assert!(source.cloud_available);
+        assert!(!source.auth_expired);
+    }
+
+    #[test]
+    fn rejected_list_does_not_masquerade_as_offline_recovery() {
+        let error = conversation_list_source(ProductCloudOutcome::Rejected("forbidden".into()))
+            .err()
+            .expect("permanent rejection should remain terminal");
+
+        assert_eq!(error, "forbidden");
+    }
 }
 
 /// Fetch one desktop conversation including its full snapshot blob.

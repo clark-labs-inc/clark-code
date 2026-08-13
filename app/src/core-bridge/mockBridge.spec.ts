@@ -281,7 +281,8 @@ describe("MockBridge", () => {
 
     const snapshot = await waitFor((s) => s.artifacts.length === 3, b);
     expect(snapshot.artifacts.map((artifact) => artifact.kind)).toEqual(["file", "image", "pdf"]);
-    expect(snapshot.artifacts[0].tool_call).toBeTruthy();
+    expect(snapshot.artifacts.every((artifact) => artifact.uri && artifact.tool_call)).toBe(true);
+    expect(snapshot.artifacts[2].uri).toMatch(/^data:application\/pdf;base64,JVBERi0/);
     expect(snapshot.timeline.filter((item) => item.item === "artifact")).toHaveLength(3);
   });
 

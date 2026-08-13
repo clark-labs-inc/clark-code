@@ -31,7 +31,8 @@ export function toPath(uri: string): string {
 
 export type DocumentPreview =
   | { kind: "html"; html: string }
-  | { kind: "pages"; preview_id: string; page_count: number };
+  | { kind: "pages"; preview_id: string; page_count: number }
+  | { kind: "direct"; uri: string };
 
 export function isPreviewableDocument(uri?: string, title?: string, mimeType?: string): boolean {
   return (
@@ -42,12 +43,36 @@ export function isPreviewableDocument(uri?: string, title?: string, mimeType?: s
   );
 }
 
+export function directPdfPreviewUri(
+  uri?: string,
+  title?: string,
+  mimeType?: string,
+): string | null {
+  if (!uri) return null;
+  const isPdf = /application\/pdf/i.test(mimeType ?? "")
+    || /\.pdf(?:[?#]|$)/i.test(uri)
+    || /\.pdf$/i.test(title ?? "");
+  return isPdf && /^(?:data:application\/pdf;base64,|blob:|https?:)/i.test(uri) ? uri : null;
+}
+
 /** Render a local office document through the agent's bundled pure-Rust
  * libreoffice-rs engine. HTML remains inert inside the caller's sandbox. */
-export async function readDocumentPreview(uri?: string): Promise<DocumentPreview | null> {
-  if (!uri || !isTauri() || !isLocalDocUri(uri)) return null;
+export async function readDocumentPreview(
+  uri?: string,
+  title?: string,
+  mimeType?: string,
+): Promise<DocumentPreview | null> {
+  if (!uri) return null;
+  if (!isTauri()) {
+    const directUri = directPdfPreviewUri(uri, title, mimeType);
+    return directUri ? { kind: "direct", uri: directUri } : null;
+  }
+  if (!isLocalDocUri(uri) && !/^data:application\/pdf;base64,/i.test(uri)) return null;
   try {
-    return await invoke<DocumentPreview>("render_document_preview", { path: toPath(uri) });
+    return await invoke<DocumentPreview>("render_document_preview", {
+      source: isLocalDocUri(uri) ? toPath(uri) : uri,
+      title: title ?? null,
+    });
   } catch {
     return null;
   }
@@ -109,10 +134,16 @@ export async function readDocText(uri?: string): Promise<string | null> {
  *  it can't be read inline (browser preview, a remote URL, or an
  *  unreadable/oversized/unsupported file) — the caller falls back to an "Open"
  *  link or leaves the image unrendered. */
-export async function readImageDataUrl(uri?: string): Promise<string | null> {
+export async function readImageDataUrl(
+  uri?: string,
+  sessionId?: string,
+): Promise<string | null> {
   if (!uri || !isTauri() || !isLocalDocUri(uri)) return null;
   try {
-    return await invoke<string>("read_image_data_url", { path: toPath(uri) });
+    return await invoke<string>("read_image_data_url", {
+      path: toPath(uri),
+      sessionId: sessionId ?? null,
+    });
   } catch {
     return null;
   }

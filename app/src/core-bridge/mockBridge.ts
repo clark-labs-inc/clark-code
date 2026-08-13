@@ -37,6 +37,7 @@ import {
   fakeGitScenario,
   type FakeManagedScenario,
 } from "../lib/fakeGitRepository";
+import { PDF_ARTIFACT_DATA_URL } from "./mockArtifacts";
 
 // Mirrors the shipped app: Clark Code is the only environment choice, while
 // the product can route Scientist/RSI conversations through an internal
@@ -798,9 +799,10 @@ When inputs change while a computation is in progress, the system should follow 
         },
         {
           id: "artifact-sidebar",
-          title: "artifact-sidebar.png",
+          title: "artifact-preview.svg",
           kind: "image" as const,
-          mime_type: "image/png",
+          mime_type: "image/svg+xml",
+          uri: "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI5NjAiIGhlaWdodD0iNDgwIiB2aWV3Qm94PSIwIDAgOTYwIDQ4MCI+PGRlZnM+PGxpbmVhckdyYWRpZW50IGlkPSJnIiB4MT0iMCIgeTE9IjAiIHgyPSIxIiB5Mj0iMSI+PHN0b3Agc3RvcC1jb2xvcj0iIzRmNDZlNSIvPjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzE0YjhhNiIvPjwvbGluZWFyR3JhZGllbnQ+PC9kZWZzPjxyZWN0IHdpZHRoPSI5NjAiIGhlaWdodD0iNDgwIiByeD0iMzIiIGZpbGw9IiMxMTE4MjciLz48cmVjdCB4PSIzNiIgeT0iMzYiIHdpZHRoPSI4ODgiIGhlaWdodD0iNDA4IiByeD0iMjQiIGZpbGw9InVybCgjZykiIG9wYWNpdHk9Ii45MiIvPjxwYXRoIGQ9Ik05MCAzMzBsMTUwLTEzNSAxMTUgOTUgMTY1LTE3MCAxMzUgMTIwIDExMC05MCAxMDUgMTgweiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSJ3aGl0ZSIgc3Ryb2tlLXdpZHRoPSIxOCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIi8+PGNpcmNsZSBjeD0iNTIwIiBjeT0iMTIwIiByPSIxOCIgZmlsbD0id2hpdGUiLz48dGV4dCB4PSI5MCIgeT0iMTA1IiBmaWxsPSJ3aGl0ZSIgZm9udC1mYW1pbHk9InN5c3RlbS11aSxzYW5zLXNlcmlmIiBmb250LXNpemU9IjM4IiBmb250LXdlaWdodD0iNzAwIj5JTkxJTkUgQVJUSUZBQ1QgUFJFVklFVzwvdGV4dD48dGV4dCB4PSI5MCIgeT0iMzkwIiBmaWxsPSIjZTBmMmZlIiBmb250LWZhbWlseT0ic3lzdGVtLXVpLHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMjQiPk9wZW4gwrcgU2F2ZSBhIENvcHkgwrcgS2VlcCB3b3JraW5nPC90ZXh0Pjwvc3ZnPg==",
           tool_call: research,
         },
         {
@@ -808,6 +810,7 @@ When inputs change while a computation is in progress, the system should follow 
           title: "Research summary.pdf",
           kind: "pdf" as const,
           mime_type: "application/pdf",
+          uri: PDF_ARTIFACT_DATA_URL,
           tool_call: research,
         },
       ];

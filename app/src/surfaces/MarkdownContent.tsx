@@ -1,8 +1,9 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { Children, Fragment, isValidElement, useEffect, useState, type HTMLAttributes, type ReactNode } from "react";
 import rehypeKatex from "rehype-katex";
 import remarkMath from "remark-math";
 import {
   Streamdown,
+  defaultRehypePlugins,
   type Components as StreamdownComponents,
   type StreamdownProps,
 } from "streamdown";
@@ -11,6 +12,7 @@ import { useCopy } from "../lib/clipboard";
 import { markdownUrlTransform } from "../lib/fileLinks";
 import { highlight, resolveLang } from "../lib/highlight";
 import { MarkdownLink } from "./MarkdownLink";
+import { MarkdownImage } from "./MarkdownImage";
 import { Mermaid } from "./work/Mermaid";
 
 export const MARKDOWN_CLASSES =
@@ -76,11 +78,19 @@ function CodeBlock({ lang, code }: { lang?: string; code: string }) {
   );
 }
 
+function MarkdownParagraph({ children, ...props }: HTMLAttributes<HTMLParagraphElement>) {
+  const content = Children.toArray(children).filter((child) => child !== "");
+  if (content.length === 1 && isValidElement(content[0]) && content[0].type === MarkdownImage) {
+    return <Fragment>{children}</Fragment>;
+  }
+  return <p {...props}>{children}</p>;
+}
+
 function components(diagrams: boolean): StreamdownComponents {
   // Keep native semantic tags explicit: Streamdown's defaults may substitute
   // styled primitives, which changes both accessibility and inherited CSS.
   return {
-    p: "p",
+    p: ({ node: _node, ...props }) => <MarkdownParagraph {...props} />,
     section: "section",
     ol: "ol",
     ul: "ul",
@@ -100,7 +110,7 @@ function components(diagrams: boolean): StreamdownComponents {
     td: "td",
     blockquote: "blockquote",
     code: "code",
-    img: "img",
+    img: ({ node: _node, ...props }) => <MarkdownImage {...props} />,
     sup: "sup",
     sub: "sub",
     a: ({ node: _node, ...props }) => <MarkdownLink {...props} />,
@@ -122,6 +132,12 @@ function components(diagrams: boolean): StreamdownComponents {
 
 const STATIC_COMPONENTS = components(false);
 const DIAGRAM_COMPONENTS = components(true);
+// Streamdown's generic URL hardener replaces relative filesystem images before
+// our component can resolve them. Keep raw parsing + sanitization; our stricter
+// urlTransform and MarkdownImage own destination policy for this desktop app.
+const MARKDOWN_REHYPE_PLUGINS = Object.entries(defaultRehypePlugins)
+  .filter(([name]) => name !== "harden")
+  .map(([, plugin]) => plugin);
 
 export function MarkdownContent({
   children,
@@ -152,7 +168,7 @@ export function MarkdownContent({
       controls={false}
       isAnimating={isAnimating}
       parseIncompleteMarkdown={mode === "streaming" || repairIncomplete}
-      rehypePlugins={math ? [rehypeKatex] : undefined}
+      rehypePlugins={math ? [...MARKDOWN_REHYPE_PLUGINS, rehypeKatex] : MARKDOWN_REHYPE_PLUGINS}
       remarkPlugins={math ? [remarkMath] : undefined}
       skipHtml
       urlTransform={markdownUrlTransform}

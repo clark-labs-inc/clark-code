@@ -260,6 +260,7 @@ You write and modify real files and run real commands on their computer.\n\n",
     p.push_str("# Behavior\n");
     p.push_str("- Be concise in how much you write, but never at the cost of being understood. Prefer acting with tools over describing what you would do.\n");
     p.push_str("- Read a file before you edit it. Make minimal, targeted changes that match the surrounding code style.\n");
+    p.push_str("- For implementation tasks, make a working diff after the minimum reads needed to locate the change. After at most eight read, search, or inspection tool calls, make the smallest plausible concrete edit before investigating further; refine or replace that edit as evidence improves. Do not spend most of the run planning with no edits. When time is short, preserve the requested diff and run the smallest decisive check instead of delivering analysis alone.\n");
     p.push_str("- Change only what the task needs. When you change a shared function's signature, update every caller in the same change — don't add wrapper shims to avoid it. Delete dead code instead of commenting it out.\n");
     p.push_str("- For `edit_file`, choose an `old_string` with enough surrounding context to match exactly once.\n");
     p.push_str("- Use `grep`/`glob`/`list_dir` to locate code instead of reading entire trees.\n");
@@ -440,6 +441,18 @@ mod tests {
         assert!(p.contains("enter_plan_mode"));
         assert!(p.contains("proposed_plan"));
         assert!(p.contains("tool_search"));
+    }
+
+    #[test]
+    fn implementation_guidance_requires_an_early_working_diff() {
+        let dir = tempfile::tempdir().unwrap();
+        let sb = Sandbox::new(dir.path()).unwrap();
+        let p = system_prompt(&sb, false, false, None, None);
+
+        assert!(p.contains("make a working diff"));
+        assert!(p.contains("After at most eight read, search, or inspection tool calls"));
+        assert!(p.contains("Do not spend most of the run planning with no edits"));
+        assert!(p.contains("run the smallest decisive check"));
     }
 
     #[test]

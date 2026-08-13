@@ -31,15 +31,11 @@ import { useSessionStore } from "../../store/sessionStore";
 import { useCopy } from "../../lib/clipboard";
 import { cn } from "../../lib/cn";
 import {
-  isLocalDocUri,
   isPreviewableDocument,
   readDocText,
   saveDocPdf,
   saveDocText,
-  toPath,
 } from "../../lib/docs";
-import { openExternal } from "../../lib/account";
-import { openLocalPath } from "../../lib/fileLinks";
 import {
   artifactAvailability,
   artifactLocationLabel,
@@ -50,6 +46,7 @@ import { MarkdownContent, MARKDOWN_CLASSES } from "../MarkdownContent";
 import { LocalArtifactImage } from "./ArtifactCard";
 import { isMarkdownDoc } from "./MarkdownDoc";
 import { DocumentPreview } from "./DocumentPreview";
+import { ArtifactFileActions, openArtifactExternally } from "./ArtifactFileActions";
 
 const KIND_ICON: Record<ArtifactKind, typeof FileBox> = {
   website: Globe,
@@ -92,17 +89,6 @@ function isVideoArtifact(artifact: Artifact): boolean {
     artifact.kind === "video" ||
     (artifact.kind === "media" && /video|\.(mp4|webm|mov)/i.test(artifact.uri ?? artifact.mime_type ?? ""))
   );
-}
-
-async function openArtifactExternally(artifact: Artifact): Promise<void> {
-  if (!artifact.uri) return;
-  try {
-    if (isLocalDocUri(artifact.uri)) await openLocalPath(toPath(artifact.uri));
-    else await openExternal(artifact.uri);
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
-    useSessionStore.getState().flashNotice(`Could not open ${artifact.title}: ${detail}`);
-  }
 }
 
 function sourceTitle(call?: ToolCall): string {
@@ -293,7 +279,10 @@ function ArtifactPreview({
       <DocumentPreview
         title={artifact.title}
         uri={artifact.uri}
-        onOpen={() => void openArtifactExternally(artifact)}
+        mimeType={artifact.mime_type}
+        onOpen={canOpenArtifactExternally(artifact)
+          ? () => void openArtifactExternally(artifact)
+          : undefined}
       />
     );
   }
@@ -740,17 +729,7 @@ export function ArtifactWorkspace({
               {presenting ? <AlignLeft className="size-3.5" /> : <Presentation className="size-3.5" />} {presenting ? "Exit presentation" : "Present"}
             </button>
           )}
-          {canOpenArtifactExternally(active) && (
-            <button
-              type="button"
-              onClick={() => void openArtifactExternally(active)}
-              aria-label={`View ${active.title} externally`}
-              title={`View ${active.title} externally`}
-              className="grid size-8 place-items-center rounded-lg text-ink-muted transition hover:bg-bg-hover hover:text-ink"
-            >
-              <ExternalLink className="size-3.5" />
-            </button>
-          )}
+          <ArtifactFileActions artifact={active} compact />
         </div>
       </div>
 

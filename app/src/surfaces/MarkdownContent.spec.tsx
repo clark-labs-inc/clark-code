@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { MarkdownContent } from "./MarkdownContent";
+import { useSessionStore } from "../store/sessionStore";
 
 describe("MarkdownContent", () => {
   it("uses the same semantic renderer for static and streaming content", () => {
@@ -37,5 +38,19 @@ describe("MarkdownContent", () => {
     );
 
     expect(markup).toContain("<strong>partially written document</strong>");
+  });
+
+  it("turns a project-local Markdown image into an inline actionable preview", () => {
+    useSessionStore.setState({ activeProjectRoot: "/workspace/project", activeRemote: null });
+
+    const markup = renderToStaticMarkup(
+      <MarkdownContent>{"![Spectrogram](/workspace/project/results/spectro.png)"}</MarkdownContent>,
+    );
+
+    expect(markup).toContain('data-local-image="/workspace/project/results/spectro.png"');
+    expect(markup).toContain("Spectrogram");
+    expect(markup).toContain("Open");
+    expect(markup).toContain("Save a Copy");
+    expect(markup).toContain("Copy Path");
   });
 });

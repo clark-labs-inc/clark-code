@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { createServer } from "node:net";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -8,7 +8,9 @@ import { launch, VIEWPORT } from "./launch.mjs";
 
 const repoDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
-const outDir = path.join(repoDir, "target", "full-gui-smoke", `${stamp}-${process.pid}`);
+const outDir = process.env.ARTIFACT_E2E_OUTPUT_DIR
+  ? path.resolve(process.env.ARTIFACT_E2E_OUTPUT_DIR)
+  : path.join(repoDir, "target", "full-gui-smoke", `${stamp}-${process.pid}`);
 
 function reservePort() {
   return new Promise((resolve, reject) => {
@@ -177,7 +179,29 @@ try {
   await freshComposer.press("Enter");
   await approveIfNeeded(page);
   await page.getByText("Artifact UX recommendations.md", { exact: true }).waitFor();
-  checks.push("artifacts");
+  const inlineImage = page.getByRole("img", { name: "artifact-preview.svg" });
+  await inlineImage.waitFor({ state: "visible" });
+  const chatActions = page.getByLabel("Actions for artifact-preview.svg").first();
+  await chatActions.waitFor({ state: "visible" });
+  check(await chatActions.getByRole("button", { name: "Save a Copy" }).count() === 1, "inline image has no Save a Copy action");
+  const downloadPromise = page.waitForEvent("download");
+  await chatActions.getByRole("button", { name: "Save a Copy" }).click();
+  const download = await downloadPromise;
+  const downloadPath = await download.path();
+  check(download.suggestedFilename() === "artifact-preview.svg", "artifact download filename was not preserved");
+  check(Boolean(downloadPath) && (await stat(downloadPath)).size > 0, "artifact download was empty");
+  await page.screenshot({ path: path.join(outDir, "artifact-inline-chat.png"), animations: "disabled" });
+  await page.getByRole("button", { name: "View artifact-preview.svg" }).click();
+  const artifactWorkspace = page.getByRole("region", { name: "Artifact workspace" });
+  await artifactWorkspace.waitFor({ state: "visible" });
+  await artifactWorkspace.getByRole("img", { name: "artifact-preview.svg" }).waitFor({ state: "visible" });
+  check(
+    await artifactWorkspace.getByRole("button", { name: "Save a Copy" }).count() === 1,
+    "artifact workspace has no Save a Copy action",
+  );
+  await page.screenshot({ path: path.join(outDir, "artifact-workspace.png"), animations: "disabled" });
+  await artifactWorkspace.getByRole("button", { name: "Close artifact workspace" }).first().click();
+  checks.push("artifact_inline_image", "artifact_download", "artifact_workspace");
   await page.setViewportSize({ width: 375, height: 812 });
   const responsive = await page.evaluate(() => ({
     innerWidth: window.innerWidth,

@@ -2,13 +2,15 @@ import { useEffect, useState } from "react";
 import { useReducedMotion } from "motion/react";
 import * as m from "motion/react-m";
 import {
-  Globe, Film, FileText, Image as ImageIcon, Presentation, ExternalLink, FileBox,
+  Globe, Film, FileText, Image as ImageIcon, Presentation, FileBox,
   ArrowUpRight,
 } from "lucide-react";
 import type { Artifact, ArtifactKind } from "../../core-bridge/types";
 import { MarkdownDoc, isMarkdownDoc } from "./MarkdownDoc";
 import { isLocalDocUri, readImageDataUrl } from "../../lib/docs";
 import { RISE, accessibleMotion } from "../../lib/motion";
+import { ArtifactFileActions } from "./ArtifactFileActions";
+import { useSessionStore } from "../../store/sessionStore";
 
 const KIND_ICON: Record<ArtifactKind, typeof Globe> = {
   website: Globe, video: Film, media: Film, image: ImageIcon,
@@ -36,6 +38,7 @@ export function LocalArtifactImage({
 }: {
   uri: string; alt: string; className: string; onError: () => void;
 }) {
+  const sessionId = useSessionStore((state) => state.session?.id);
   const [src, setSrc] = useState<string | null>(isLocalDocUri(uri) ? null : uri);
 
   useEffect(() => {
@@ -45,7 +48,7 @@ export function LocalArtifactImage({
     }
     let alive = true;
     setSrc(null);
-    readImageDataUrl(uri).then((data) => {
+    readImageDataUrl(uri, sessionId).then((data) => {
       if (!alive) return;
       if (data == null) onError();
       else setSrc(data);
@@ -54,7 +57,7 @@ export function LocalArtifactImage({
       alive = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [uri]);
+  }, [sessionId, uri]);
 
   if (!src) return null;
   return (
@@ -148,18 +151,15 @@ export function ArtifactCard({
             View <ArrowUpRight className="size-3" />
           </button>
         )}
-        {uri && !onOpen && (
-          <a
-            href={uri}
-            target="_blank"
-            rel="noreferrer noopener"
-            className="flex shrink-0 items-center gap-1 rounded-lg bg-bg-secondary px-2.5 py-1.5 text-xs font-medium text-ink-secondary ring-1 ring-border-subtle transition hover:bg-bg-hover hover:text-ink"
-          >
-            View {artifact.title} <ExternalLink className="size-3" />
-          </a>
-        )}
       </header>
       {body && <div className="border-t border-border-subtle">{body}</div>}
+      {uri && (
+        <ArtifactFileActions
+          artifact={artifact}
+          compact
+          className="border-t border-border-subtle px-2 py-1.5"
+        />
+      )}
     </m.div>
   );
 }

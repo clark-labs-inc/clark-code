@@ -273,6 +273,11 @@ pub fn run_with_product_and_context(
     // writer flushes every accepted event before shutdown.
     let _diagnostics_guard = init_diagnostics();
 
+    // The neutral foundation intentionally has no updater authority. Register
+    // the plugin only when a downstream product supplies a concrete updater
+    // configuration; passing Tauri's absent `null` value into updater 2.10+
+    // aborts app construction before the first window can render.
+    let updater_configured = context.config().plugins.0.contains_key("updater");
     let mut builder = tauri::Builder::default();
 
     // Single-instance must be registered FIRST so a second launch (e.g. the OS
@@ -299,11 +304,14 @@ pub fn run_with_product_and_context(
             .on_menu_event(updater_menu::handle_menu_event);
     }
 
+    if updater_configured {
+        builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    }
+
     let app = builder
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_google_auth::init())
         .plugin(tauri_plugin_deep_link::init())
@@ -362,6 +370,7 @@ pub fn run_with_product_and_context(
             document_preview::cleanup_document_preview,
             commands::save_doc_text,
             file_actions::copy_local_file,
+            file_actions::save_artifact_copy,
             markdown_export::export_markdown_pdf,
             security_report::export_security_scan_pdf,
             commands::open_path,

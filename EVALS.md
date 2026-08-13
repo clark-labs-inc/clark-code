@@ -1,6 +1,6 @@
 # Clark Code evaluations, benchmarks, and simulations
 
-Last source-and-artifact audit: 2026-08-07.
+Last source-and-artifact audit: 2026-08-12.
 
 This catalog covers Clark Code's deterministic open-source checks. Hosted or
 paid provider runs are opt-in and require explicit authorization.
@@ -22,9 +22,11 @@ paid provider runs are opt-in and require explicit authorization.
 | --- | --- | --- | --- |
 | Open-source boundary | `node --test harness/product-boundary.spec.mjs` | deterministic repository-wide text, dependency, and metadata contract | Rejects hardcoded hosted-service policy, commercial access rules, release credentials, and deployment-specific transports |
 | Core domain and providers | `cargo test -p agent-core -p provider-acp -p provider-local` | deterministic Rust contracts | Proves provider-neutral projection, ACP translation, and local loop/tool behavior |
+| Public live benchmark interface | sibling `../clark-public-evals` package, with Clark Managed and the downstream Clark Code public CLI as separate targets | externally owned, opt-in Free-tier live evaluation | Routes Finance Agent v2, Terminal-Bench, DeepSWE, BrowseComp, WebTailBench, Online-Mind2Web, and OSWorld-Verified without importing branded policy into this foundation. Scores and release claims belong to the external package and downstream Clark release; this repository owns only the provider contracts they exercise. |
 | Native host | `cargo test -p desktop-foundation --lib` | deterministic native command contracts | A packaged application still requires platform verification |
 | WASM core | `cargo check -p agent-core --target wasm32-unknown-unknown` | compile contract | Proves the domain crate remains WASM-clean |
 | Frontend | `pnpm --dir app typecheck`, `pnpm --dir app test`, `pnpm --dir app build` | deterministic TypeScript, component, and bundle contracts | Proves the checked Clark Code frontend bundle |
+| Artifact delivery UI | `node harness/artifact-delivery-smoke.mjs` | deterministic browser-bound mock-provider journey with screenshot and download receipts | Proves inline image decoding, real PDF page rendering, visible artifact actions, image/PDF save-copy delivery, and artifact-workspace rendering; packaged native save dialogs remain a separate platform receipt |
 | Cloud composer drafts | `pnpm --dir app test -- cloudComposerDraft.network.spec.ts cloudComposerDraft.spec.ts layoutPolicy.spec.ts composerDraft.spec.ts sessionStore.composerDraft.spec.ts`; downstream `cargo test -p conversation-cloud`; `CLARK_REQUIRE_DESKTOP_DRAFT_DB=1 cargo test -p clark-service-db --test desktop_draft_cas_e2e`; and `CLARK_REQUIRE_DESKTOP_DRAFT_DB=1 cargo test -p clark-services --test desktop_draft_http_e2e` | deterministic frontend state-machine and native HTTP-codec checks plus real Axum/auth/Postgres CAS | Proves scoped keys, authoritative 204-to-revision-zero handling, conditional accepted-text clearing, bounded typed conflict handling, specialist-key URL encoding, create/update/payload-stable mutation replay/idempotent-clear/stale/concurrent CAS behavior, and authenticated HTTP response shapes; it does not prove the repaired service is deployed |
 | Local sandbox | `cargo test -p exec-sandbox` | deterministic policy and platform-adapter contracts | Packaged and signed binaries require a separate platform receipt |
 | Durable worker | `cargo test -p code-host -p code-worker -p code-remote -p provider-remote-worker` | deterministic protocol and confinement contracts | Ignored live SSH lanes require explicit authorization |

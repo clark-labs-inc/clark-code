@@ -38,8 +38,11 @@ destroys other agents' work with no recovery path.
   A failing test means fix the code, fix/delete the test, or confirm it's
   pre-existing — never stash-and-rerun.
 - **Live-model tests cost real money.** Anything that calls a hosted provider
-  is env-gated and ignored by default; run it only when the user explicitly
-  asks, with the model and key they name.
+  is env-gated and ignored by default. A request to add, replace, or ship an
+  active hosted-model route counts as authorization for the smallest bounded
+  live acceptance call using the named model and an already configured scoped
+  credential, unless the user says not to make live calls. Broader, repeated,
+  high-volume, or comparative paid evals still require explicit authorization.
 - **When in doubt, ask instead of acting.** Pausing costs seconds; a
   destructive command costs hours of recovery.
 
@@ -102,6 +105,25 @@ For foundation requests, "full evals", "full sims", and similar language means
 the public lanes cataloged in this repository's `EVALS.md`. Branded-product,
 cross-repository, high-volume, or paid runs require a separate explicit request
 and belong to the downstream product's own evaluation catalog.
+
+### Hosted-model route changes
+
+Do not change a production picker, alias, specialist default, or gateway route
+based only on catalog metadata, mocks, compilation, or deterministic tests.
+Before calling a hosted-model route implemented or working:
+
+1. Call the exact model identifier at the provider boundary with the production
+   privacy policy and the hardest required wire contract (for example tools,
+   forced tool choice, structured output, streaming, and reasoning controls).
+2. Call it through the real Clark gateway or specialist boundary that will own
+   authentication, routing, billing, parsing, and receipts.
+3. Record resolved model identity, contract result, usage/cost, and a
+   privacy-safe durable receipt in the downstream product's `EVALS.md`.
+
+If either live boundary cannot be run or fails, report the route as unvalidated
+or incompatible, keep the last working production route intact, and ask before
+weakening privacy policy or deploying. Never describe offline coverage as proof
+that a hosted model actually works.
 
 ## Commands
 

@@ -241,23 +241,57 @@ pub async fn read_doc_text(path: String) -> Result<String, String> {
 }
 
 /// Read a locally-captured screenshot (or other small image) from the
-/// app-managed workspace and return it as a `data:` URL for inline `<img>`
-/// rendering. Confined to `~/.agent/workspace`, same root and containment
-/// check as `read_doc_text`.
+/// app-managed workspace or this conversation's native-owned project roots and
+/// return it as a `data:` URL for inline `<img>` rendering.
 #[tauri::command]
-pub async fn read_image_data_url(path: String) -> Result<String, String> {
+pub async fn read_image_data_url(
+    path: String,
+    session_id: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let mut roots = provider_local::workspace_root()
+        .and_then(|root| root.canonicalize().ok())
+        .into_iter()
+        .collect::<Vec<_>>();
+    if let Some(session_id) = session_id {
+        let session_key = SessionKey::parse(session_id)?;
+        let entry = state
+            .runtime_registry
+            .current_session_entry(&session_key)
+            .await
+            .ok_or("no such conversation")?;
+        let session = entry.lock().await;
+        let environment = session
+            .session
+            .environment
+            .as_ref()
+            .ok_or("this conversation has no filesystem binding")?;
+        if environment.remote {
+            return Err("remote images cannot be read from this device".into());
+        }
+        roots.extend(
+            environment
+                .workspace_roots
+                .iter()
+                .chain(environment.checkout_root.iter())
+                .chain(environment.docs_root.iter())
+                .filter_map(|root| PathBuf::from(root).canonicalize().ok()),
+        );
+    }
+    tokio::task::spawn_blocking(move || read_image_from_roots(&path, &roots))
+        .await
+        .map_err(|error| format!("read failed: {error}"))?
+}
+
+fn read_image_from_roots(path: &str, roots: &[PathBuf]) -> Result<String, String> {
     use base64::Engine as _;
 
     const MAX_IMAGE_BYTES: u64 = 10 * 1024 * 1024;
-    let root = provider_local::workspace_root()
-        .ok_or_else(|| "no workspace directory".to_string())?
-        .canonicalize()
-        .map_err(|e| format!("workspace: {e}"))?;
     let canon = PathBuf::from(&path)
         .canonicalize()
         .map_err(|e| format!("{path}: {e}"))?;
-    if !canon.starts_with(&root) {
-        return Err("path is outside the document workspace".into());
+    if !roots.iter().any(|root| canon.starts_with(root)) {
+        return Err("path is outside this conversation's workspace".into());
     }
     let meta = std::fs::metadata(&canon).map_err(|e| e.to_string())?;
     if !meta.is_file() {
@@ -274,12 +308,11 @@ pub async fn read_image_data_url(path: String) -> Result<String, String> {
     {
         Some("jpg") | Some("jpeg") => "image/jpeg",
         Some("png") => "image/png",
+        Some("webp") => "image/webp",
+        Some("gif") => "image/gif",
         _ => return Err("not a supported image type".into()),
     };
-    let bytes =
-        tokio::task::spawn_blocking(move || std::fs::read(&canon).map_err(|e| e.to_string()))
-            .await
-            .map_err(|e| format!("read failed: {e}"))??;
+    let bytes = std::fs::read(&canon).map_err(|e| format!("read failed: {e}"))?;
     Ok(format!(
         "data:{mime};base64,{}",
         base64::engine::general_purpose::STANDARD.encode(bytes)
@@ -334,7 +367,10 @@ fn open_command(path: &str, reveal: bool) -> std::process::Command {
 
 #[cfg(test)]
 mod tests {
-    use super::{native_global_memory_dir, prepare_quick_chat_workspace_at, session_memory_root};
+    use super::{
+        native_global_memory_dir, prepare_quick_chat_workspace_at, read_image_from_roots,
+        session_memory_root,
+    };
     use crate::runtime_registry::{AccountKey, CloudAccountState};
     use crate::AppState;
     use agent_core::provider::SessionEnvironment;
@@ -402,6 +438,25 @@ mod tests {
         assert!(std::path::Path::new(&first.path).starts_with(root.path().canonicalize().unwrap()));
         assert!(std::path::Path::new(&first.path).is_dir());
         assert!(prepare_quick_chat_workspace_at(root.path(), Some("../escape")).is_err());
+    }
+
+    #[test]
+    fn image_preview_accepts_only_native_approved_roots() {
+        let approved = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let image = approved.path().join("result.png");
+        let escaped = outside.path().join("secret.png");
+        std::fs::write(&image, [1, 2, 3, 4]).unwrap();
+        std::fs::write(&escaped, [5, 6, 7, 8]).unwrap();
+        let roots = vec![approved.path().canonicalize().unwrap()];
+
+        assert_eq!(
+            read_image_from_roots(image.to_str().unwrap(), &roots).unwrap(),
+            "data:image/png;base64,AQIDBA=="
+        );
+        assert!(read_image_from_roots(escaped.to_str().unwrap(), &roots)
+            .unwrap_err()
+            .contains("outside this conversation's workspace"));
     }
 }
 

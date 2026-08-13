@@ -6,15 +6,18 @@ import {
   readDocumentPreviewPage,
   type DocumentPreview as Preview,
 } from "../../lib/docs";
+import { BrowserPdfPreview } from "./BrowserPdfPreview";
 
 export function DocumentPreview({
   title,
   uri,
+  mimeType,
   onOpen,
 }: {
   title: string;
   uri?: string;
-  onOpen: () => void;
+  mimeType?: string;
+  onOpen?: () => void;
 }) {
   const [preview, setPreview] = useState<Preview | null>(null);
   const [loading, setLoading] = useState(true);
@@ -24,7 +27,7 @@ export function DocumentPreview({
     let previewId: string | null = null;
     setPreview(null);
     setLoading(true);
-    void readDocumentPreview(uri).then((value) => {
+    void readDocumentPreview(uri, title, mimeType).then((value) => {
       if (value?.kind === "pages") previewId = value.preview_id;
       if (!alive) {
         if (previewId) void cleanupDocumentPreview(previewId).catch(() => undefined);
@@ -37,7 +40,7 @@ export function DocumentPreview({
       alive = false;
       if (previewId) void cleanupDocumentPreview(previewId).catch(() => undefined);
     };
-  }, [uri]);
+  }, [mimeType, title, uri]);
 
   if (loading) {
     return (
@@ -55,14 +58,20 @@ export function DocumentPreview({
         <div>
           <FileWarning className="mx-auto size-8 text-ink-faint" />
           <p className="mt-3 text-sm font-medium text-ink-secondary">Preview unavailable</p>
-          <p className="mt-1 text-xs text-ink-faint">Open the file in its default app.</p>
-          <button
-            type="button"
-            onClick={onOpen}
-            className="mt-5 inline-flex h-9 items-center gap-2 rounded-lg bg-accent px-3.5 text-sm font-medium text-on-accent transition hover:bg-accent-hover"
-          >
-            Open {title} <ExternalLink className="size-3.5" />
-          </button>
+          <p className="mt-1 text-xs text-ink-faint">
+            {uri
+              ? "Clark Code couldn’t render this file inline. Use the available file actions to open or save it."
+              : "This artifact has no attached file. Ask Clark Code to recreate it."}
+          </p>
+          {onOpen && (
+            <button
+              type="button"
+              onClick={onOpen}
+              className="mt-5 inline-flex h-9 items-center gap-2 rounded-lg bg-accent px-3.5 text-sm font-medium text-on-accent transition hover:bg-accent-hover"
+            >
+              Open {title} <ExternalLink className="size-3.5" />
+            </button>
+          )}
         </div>
       </div>
     );
@@ -79,6 +88,14 @@ export function DocumentPreview({
             title={title}
           />
         ))}
+      </div>
+    );
+  }
+
+  if (preview.kind === "direct") {
+    return (
+      <div className="h-full min-h-[40rem] bg-bg-sunken/45 p-3 sm:p-5">
+        <BrowserPdfPreview uri={preview.uri} title={title} />
       </div>
     );
   }

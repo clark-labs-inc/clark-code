@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  directPdfPreviewUri,
   isLocalDocUri,
   isPreviewableDocument,
   mdFileName,
   pdfFileName,
   readDocText,
+  readDocumentPreview,
   toPath,
 } from "./docs";
 
@@ -43,6 +45,18 @@ describe("document artifacts", () => {
     }
     expect(isPreviewableDocument(undefined, "report", "application/pdf")).toBe(true);
     expect(isPreviewableDocument("/workspace/image.png")).toBe(false);
+  });
+
+  it("previews embedded PDF bytes directly in a browser", async () => {
+    const uri = "data:application/pdf;base64,JVBERi0xLjQK";
+
+    expect(directPdfPreviewUri(uri, "report.pdf", "application/pdf")).toBe(uri);
+    await expect(readDocumentPreview(uri, "report.pdf", "application/pdf")).resolves.toEqual({
+      kind: "direct",
+      uri,
+    });
+    expect(directPdfPreviewUri("data:image/png;base64,AQ==", "image.png", "image/png"))
+      .toBeNull();
   });
 
   it("does not duplicate an existing markdown filename extension", () => {
