@@ -27,7 +27,8 @@ use windows_sys::Win32::System::StationsAndDesktops::{
 use windows_sys::Win32::System::Threading::{
     CreateProcessAsUserW, CreateProcessWithLogonW, GetCurrentProcess, GetExitCodeProcess,
     OpenProcessToken, ResumeThread, WaitForSingleObject, CREATE_NO_WINDOW, CREATE_SUSPENDED,
-    CREATE_UNICODE_ENVIRONMENT, LOGON_WITH_PROFILE, PROCESS_INFORMATION, STARTUPINFOW,
+    CREATE_UNICODE_ENVIRONMENT, DETACHED_PROCESS, LOGON_WITH_PROFILE, PROCESS_INFORMATION,
+    STARTUPINFOW,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::WINSTA_ALL_ACCESS;
 
@@ -41,7 +42,12 @@ use super::transport::{ParentTransport, WorkerTransport};
 
 const INFINITE: u32 = u32::MAX;
 const WORKER_SWITCH: &str = "--restricted-worker";
-const CHILD_CREATION_FLAGS: u32 = CREATE_UNICODE_ENVIRONMENT | CREATE_NO_WINDOW;
+// `CREATE_NO_WINDOW` is not sufficient for Windows PowerShell under a
+// restricted token: it can still request conhost and deadlock waiting for the
+// console LPC handshake. A detached console process keeps the explicit pipe
+// handles from STARTF_USESTDHANDLES while preventing console attachment.
+const CHILD_CREATION_FLAGS: u32 =
+    CREATE_UNICODE_ENVIRONMENT | CREATE_NO_WINDOW | DETACHED_PROCESS;
 const DESKTOP_ALL_ACCESS: u32 = 0x01ff;
 // Git for Windows and other normal desktop CLIs consult HKCU during startup.
 // `CreateProcessWithLogonW` leaves that hive unloaded by default; load only
@@ -654,6 +660,7 @@ mod tests {
     #[test]
     fn restricted_children_never_request_a_visible_console() {
         assert_ne!(CHILD_CREATION_FLAGS & CREATE_NO_WINDOW, 0);
+        assert_ne!(CHILD_CREATION_FLAGS & DETACHED_PROCESS, 0);
         assert_ne!(CHILD_CREATION_FLAGS & CREATE_UNICODE_ENVIRONMENT, 0);
     }
 
