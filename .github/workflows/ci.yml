@@ -237,9 +237,11 @@ jobs:
           if [[ "$LINKER_UNDER_TEST" == "wild" ]]; then
             readelf --string-dump .comment target/debug/clark-code \
               | tee "$RUNNER_TEMP/wild-link-proof.txt"
-            grep -F "Linker: Wild version 0.10.0" "$RUNNER_TEMP/wild-link-proof.txt"
+            grep -F "Linker: Wild 0.10.0" "$RUNNER_TEMP/wild-link-proof.txt"
           fi
           real_seconds="$(awk '$1 == "real" { print $2 }' "$RUNNER_TEMP/tauri-linker-time.txt")"
+          printf 'linker=%s seconds=%s version=%s\n' \
+            "$LINKER_UNDER_TEST" "$real_seconds" "$linker_version"
           {
             echo "## Tauri Linux linker benchmark"
             echo
