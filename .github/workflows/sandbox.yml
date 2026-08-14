@@ -22,9 +22,17 @@ on:
       - ".github/workflows/sandbox.yml"
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: sandbox-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   native-unix:
     name: Native containment (${{ matrix.os }})
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -43,8 +51,21 @@ jobs:
         with:
           version: 0.14.2
           cache-key-prefix: clark-code-sandbox-${{ matrix.os }}
+      - name: Restore pinned cargo-nextest
+        id: nextest-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cargo/bin/cargo-nextest*
+          key: cargo-nextest-${{ runner.os }}-${{ runner.arch }}-0.9.143
       - name: Install pinned cargo-nextest
+        if: steps.nextest-cache.outputs.cache-hit != 'true'
         run: cargo install cargo-nextest --version 0.9.143 --locked
+      - name: Cache pinned cargo-nextest
+        if: steps.nextest-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cargo/bin/cargo-nextest*
+          key: cargo-nextest-${{ runner.os }}-${{ runner.arch }}-0.9.143
       - name: Build verified release bubblewrap
         if: runner.os == 'Linux'
         run: |
@@ -63,14 +84,28 @@ jobs:
   windows-contract:
     name: Windows protocol and helper boundary
     runs-on: windows-2022
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
         with:
           toolchain: 1.97.1
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+      - name: Restore pinned cargo-nextest
+        id: nextest-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cargo/bin/cargo-nextest*
+          key: cargo-nextest-${{ runner.os }}-${{ runner.arch }}-0.9.143
       - name: Install pinned cargo-nextest
+        if: steps.nextest-cache.outputs.cache-hit != 'true'
         run: cargo install cargo-nextest --version 0.9.143 --locked
+      - name: Cache pinned cargo-nextest
+        if: steps.nextest-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cargo/bin/cargo-nextest*
+          key: cargo-nextest-${{ runner.os }}-${{ runner.arch }}-0.9.143
       - run: cargo nextest run -p exec-sandbox-protocol -p exec-sandbox-windows -p exec-sandbox --no-fail-fast
       - run: cargo build -p exec-sandbox-windows --release --bins
       - name: Verify clean-machine runtime boundary
