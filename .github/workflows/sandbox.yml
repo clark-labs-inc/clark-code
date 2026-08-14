@@ -36,6 +36,13 @@ jobs:
         with:
           toolchain: 1.97.1
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+        with:
+          cache-targets: false
+      - name: Set up pinned kache
+        uses: kunobi-ninja/kache-action@49398d37113c616fdb61be434cb497e3c2c8f3e6 # v1
+        with:
+          version: 0.14.2
+          cache-key-prefix: clark-code-sandbox-${{ matrix.os }}
       - name: Install pinned cargo-nextest
         run: cargo install cargo-nextest --version 0.9.143 --locked
       - name: Build verified release bubblewrap

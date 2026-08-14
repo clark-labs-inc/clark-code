@@ -114,10 +114,17 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: ". -> target"
+          cache-targets: ${{ matrix.os == 'windows-2022' }}
           # Native links dominate failure diagnosis time. Cargo still validates
           # dep-info before reuse, so preserve completed objects when a later
           # runtime contract fails.
           cache-on-failure: true
+      - name: Set up pinned kache
+        if: matrix.os != 'windows-2022'
+        uses: kunobi-ninja/kache-action@49398d37113c616fdb61be434cb497e3c2c8f3e6 # v1
+        with:
+          version: 0.14.2
+          cache-key-prefix: clark-code-tauri-${{ matrix.os }}
       - name: Install pinned cargo-nextest
         if: matrix.os != 'windows-2022'
         run: cargo install cargo-nextest --version 0.9.143 --locked
