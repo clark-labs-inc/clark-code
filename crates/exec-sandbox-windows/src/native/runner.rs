@@ -35,7 +35,7 @@ use crate::launch::LaunchHost;
 
 use super::process::{
     command_line, inner_environment, wide_os, wide_str, worker_environment, TRACE_ENV,
-    WORKER_REQUEST_ENV,
+    WORKER_DESKTOP_ENV, WORKER_REQUEST_ENV,
 };
 use super::transport::{ParentTransport, WorkerTransport};
 
@@ -116,6 +116,12 @@ fn spawn_worker(
         .map_err(|error| format!("resolve Windows sandbox runner: {error}"))?;
     let encoded = encode_request(request)?;
     let transport = ParentTransport::create(offline_sid)?;
+    // Window-station creation is an interactive-session authority and is
+    // denied to the deliberately offline worker account. The parent creates
+    // and owns this isolated namespace, while its DACL permits the offline
+    // base identity and every restricting capability SID to enter it.
+    let capability_sids = request.policy.write_capability_sids();
+    let desktop = PrivateDesktop::create(offline_sid, &capability_sids)?;
     // CreateProcessWithLogonW accepts a substantially shorter command line
     // than CreateProcessW. Keep the request in the private worker environment
     // and reserve argv for short transport endpoint names. The inner command
@@ -124,7 +130,7 @@ fn spawn_worker(
     let mut args = vec![OsString::from(WORKER_SWITCH)];
     args.extend(transport.worker_args());
     let command_line = command_line(&executable, &args);
-    let environment = worker_environment(&encoded);
+    let environment = worker_environment(&encoded, desktop.path());
     // The orchestration worker is logged on as the offline identity before its
     // restricted token exists. Do not start that worker in the caller's cwd:
     // hosted-runner temporary directories can be private to the interactive
@@ -202,7 +208,9 @@ pub fn run_restricted_worker(
         return Err("CreateRestrictedToken returned an unrestricted token".into());
     }
     transport.write_trace("restricted_worker:token_ready");
-    let desktop = PrivateDesktop::create(expected_sid, &capability_sids)?;
+    let desktop = std::env::var_os(WORKER_DESKTOP_ENV)
+        .ok_or_else(|| format!("missing {WORKER_DESKTOP_ENV}"))?;
+    let desktop = wide_os(&desktop);
     transport.write_trace("restricted_worker:desktop_ready");
     spawn_inner(request, restricted.0, transport, &desktop)
 }
@@ -211,7 +219,7 @@ fn spawn_inner(
     request: &WindowsRunnerRequest,
     token: HANDLE,
     transport: &WorkerTransport,
-    desktop: &PrivateDesktop,
+    desktop: &[u16],
 ) -> Result<i32, String> {
     transport.write_trace("inner:begin");
     let process = &request.process;
@@ -229,7 +237,7 @@ fn spawn_inner(
     let cwd = process.cwd.to_os_string();
     let cwd_w = wide_os(&cwd);
     let mut environment = inner_environment(request);
-    let startup = transport.startup_info(desktop.path());
+    let startup = transport.startup_info(desktop);
     let mut info: PROCESS_INFORMATION = unsafe { zeroed() };
     let created = unsafe {
         CreateProcessAsUserW(
@@ -258,7 +266,7 @@ fn spawn_inner(
 struct PrivateDesktop {
     station: HWINSTA,
     desktop: HDESK,
-    path: Vec<u16>,
+    path: OsString,
 }
 
 impl PrivateDesktop {
@@ -322,11 +330,11 @@ impl PrivateDesktop {
             // Console hosts and GUI-aware command-line tools must resolve the
             // desktop inside the same isolated window station. Keeping both
             // handles alive makes that namespace valid for the whole child.
-            path: wide_str(&format!("{station_name}\\{desktop_name}")),
+            path: OsString::from(format!("{station_name}\\{desktop_name}")),
         })
     }
 
-    fn path(&self) -> &[u16] {
+    fn path(&self) -> &OsStr {
         &self.path
     }
 }
