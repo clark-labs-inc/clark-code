@@ -20,12 +20,16 @@ use windows_sys::Win32::System::JobObjects::{
     SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
     JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
 };
-use windows_sys::Win32::System::StationsAndDesktops::{CloseDesktop, CreateDesktopW, HDESK};
+use windows_sys::Win32::System::StationsAndDesktops::{
+    CloseDesktop, CloseWindowStation, CreateDesktopW, CreateWindowStationW,
+    GetProcessWindowStation, SetProcessWindowStation, HDESK, HWINSTA,
+};
 use windows_sys::Win32::System::Threading::{
     CreateProcessAsUserW, CreateProcessWithLogonW, GetCurrentProcess, GetExitCodeProcess,
     OpenProcessToken, ResumeThread, WaitForSingleObject, CREATE_NO_WINDOW, CREATE_SUSPENDED,
     CREATE_UNICODE_ENVIRONMENT, LOGON_WITH_PROFILE, PROCESS_INFORMATION, STARTUPINFOW,
 };
+use windows_sys::Win32::UI::WindowsAndMessaging::WINSTA_ALL_ACCESS;
 
 use crate::launch::LaunchHost;
 
@@ -193,7 +197,6 @@ pub fn run_restricted_worker(
     // change (that would require administrator authority). Keep the check at
     // the parent boundary and proceed directly to the WRITE_RESTRICTED token.
     let capability_sids = request.policy.write_capability_sids();
-    super::acl::grant_current_window_station_access(&capability_sids)?;
     let restricted = restricted_write_token(base_token.0, &capability_sids)?;
     if unsafe { IsTokenRestricted(restricted.0) } == 0 {
         return Err("CreateRestrictedToken returned an unrestricted token".into());
@@ -253,6 +256,7 @@ fn spawn_inner(
 }
 
 struct PrivateDesktop {
+    station: HWINSTA,
     desktop: HDESK,
     path: Vec<u16>,
 }
@@ -260,7 +264,32 @@ struct PrivateDesktop {
 impl PrivateDesktop {
     fn create(user_sid: &str, capability_sids: &[String]) -> Result<Self, String> {
         let security = DesktopSecurity::new(user_sid, capability_sids)?;
-        let desktop_name = format!("AgentSandbox-{}", std::process::id());
+        let station_name = format!("AgentSandboxStation-{}", std::process::id());
+        let station_w = wide_str(&station_name);
+        let station = unsafe {
+            CreateWindowStationW(
+                station_w.as_ptr(),
+                0,
+                WINSTA_ALL_ACCESS as u32,
+                &security.attributes,
+            )
+        };
+        if station.is_null() {
+            return Err(last_error("CreateWindowStationW"));
+        }
+
+        let original_station = unsafe { GetProcessWindowStation() };
+        if original_station.is_null() {
+            unsafe { CloseWindowStation(station) };
+            return Err("GetProcessWindowStation returned null".to_string());
+        }
+        if unsafe { SetProcessWindowStation(station) } == 0 {
+            let error = last_error("SetProcessWindowStation(private)");
+            unsafe { CloseWindowStation(station) };
+            return Err(error);
+        }
+
+        let desktop_name = "Default";
         let desktop_w = wide_str(&desktop_name);
         let desktop = unsafe {
             CreateDesktopW(
@@ -272,14 +301,28 @@ impl PrivateDesktop {
                 &security.attributes,
             )
         };
+        let desktop_error = desktop
+            .is_null()
+            .then(|| last_error("CreateDesktopW"));
+        if unsafe { SetProcessWindowStation(original_station) } == 0 {
+            if !desktop.is_null() {
+                unsafe { CloseDesktop(desktop) };
+            }
+            // Keep the current station handle alive on this exceptional path;
+            // closing a station while it is assigned to the process is invalid.
+            return Err(last_error("SetProcessWindowStation(original)"));
+        }
         if desktop.is_null() {
-            return Err(last_error("CreateDesktopW"));
+            unsafe { CloseWindowStation(station) };
+            return Err(desktop_error.expect("null desktop records an error"));
         }
         Ok(Self {
+            station,
             desktop,
-            // A desktop name without a backslash resolves inside the worker's
-            // existing noninteractive window station.
-            path: desktop_w,
+            // Console hosts and GUI-aware command-line tools must resolve the
+            // desktop inside the same isolated window station. Keeping both
+            // handles alive makes that namespace valid for the whole child.
+            path: wide_str(&format!("{station_name}\\{desktop_name}")),
         })
     }
 
@@ -290,7 +333,10 @@ impl PrivateDesktop {
 
 impl Drop for PrivateDesktop {
     fn drop(&mut self) {
-        unsafe { CloseDesktop(self.desktop) };
+        unsafe {
+            CloseDesktop(self.desktop);
+            CloseWindowStation(self.station);
+        }
     }
 }
 
