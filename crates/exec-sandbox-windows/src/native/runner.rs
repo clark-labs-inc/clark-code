@@ -106,6 +106,8 @@ fn spawn_worker(
     password: &str,
 ) -> Result<i32, String> {
     trace("spawn_worker:begin");
+    let process_cwd = request.process.cwd.to_os_string();
+    super::acl::grant_runtime_cwd_read(Path::new(&process_cwd), offline_sid)?;
     let executable = std::env::current_exe()
         .map_err(|error| format!("resolve Windows sandbox runner: {error}"))?;
     let encoded = encode_request(request)?;
@@ -191,6 +193,7 @@ pub fn run_restricted_worker(
     // change (that would require administrator authority). Keep the check at
     // the parent boundary and proceed directly to the WRITE_RESTRICTED token.
     let capability_sids = request.policy.write_capability_sids();
+    super::acl::grant_current_window_station_access(&capability_sids)?;
     let restricted = restricted_write_token(base_token.0, &capability_sids)?;
     if unsafe { IsTokenRestricted(restricted.0) } == 0 {
         return Err("CreateRestrictedToken returned an unrestricted token".into());

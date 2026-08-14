@@ -7,8 +7,8 @@ use windows_sys::Win32::Foundation::{
 };
 use windows_sys::Win32::Security::Authorization::{
     ConvertStringSidToSidW, GetSecurityInfo, SetEntriesInAclW, SetSecurityInfo, DENY_ACCESS,
-    EXPLICIT_ACCESS_W, SET_ACCESS, SE_FILE_OBJECT, SE_KERNEL_OBJECT, TRUSTEE_IS_SID,
-    TRUSTEE_IS_UNKNOWN, TRUSTEE_W,
+    EXPLICIT_ACCESS_W, SET_ACCESS, SE_FILE_OBJECT, SE_KERNEL_OBJECT, SE_WINDOW_OBJECT,
+    TRUSTEE_IS_SID, TRUSTEE_IS_UNKNOWN, TRUSTEE_W,
 };
 use windows_sys::Win32::Security::{
     ACL, CONTAINER_INHERIT_ACE, DACL_SECURITY_INFORMATION, OBJECT_INHERIT_ACE,
@@ -18,6 +18,8 @@ use windows_sys::Win32::Storage::FileSystem::{
     FILE_GENERIC_EXECUTE, FILE_GENERIC_READ, FILE_GENERIC_WRITE, FILE_SHARE_DELETE,
     FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING, READ_CONTROL, WRITE_DAC,
 };
+use windows_sys::Win32::System::StationsAndDesktops::GetProcessWindowStation;
+use windows_sys::Win32::UI::WindowsAndMessaging::WINSTA_ALL_ACCESS;
 
 /// Install the one machine-wide object permission shared by every restricted
 /// token. This runs only in the elevated bootstrap helper.
@@ -76,6 +78,47 @@ pub fn grant_setup_marker_read(
     for sid in [offline_sid, device_capability.as_str()] {
         set_path_ace_with_inheritance(state_dir, sid, FILE_GENERIC_EXECUTE, SET_ACCESS, 0)?;
         set_path_ace_with_inheritance(marker_path, sid, FILE_GENERIC_READ, SET_ACCESS, 0)?;
+    }
+    Ok(())
+}
+
+/// Let the offline identity enter the requested working directory even when a
+/// hosted runner has placed it below an interactive-user-only temporary root.
+/// Windows mode deliberately permits host-wide reads, so this grants only the
+/// read/execute access needed to preserve the caller's working-directory
+/// contract; writable authority still comes exclusively from capability SIDs.
+pub fn grant_runtime_cwd_read(path: &Path, offline_sid: &str) -> Result<(), String> {
+    ensure_not_volume_root(path)?;
+    set_path_ace_with_inheritance(
+        path,
+        offline_sid,
+        FILE_GENERIC_READ | FILE_GENERIC_EXECUTE,
+        SET_ACCESS,
+        0,
+    )
+}
+
+/// `WRITE_RESTRICTED` checks the restricting SID list for window-station write
+/// access as well as filesystem writes. Console programs connect to the
+/// worker's noninteractive station during startup, so its synthetic capability
+/// SIDs must pass that second check or conhost can wait forever. The ordinary
+/// offline account must still pass the station DACL independently, so these
+/// ACEs cannot broaden the base token's authority.
+pub fn grant_current_window_station_access(capability_sids: &[String]) -> Result<(), String> {
+    let station = unsafe { GetProcessWindowStation() };
+    if station.is_null() {
+        return Err("GetProcessWindowStation returned null".to_string());
+    }
+    for sid in capability_sids {
+        set_handle_ace(
+            station,
+            SE_WINDOW_OBJECT,
+            sid,
+            WINSTA_ALL_ACCESS as u32,
+            SET_ACCESS,
+            0,
+            "Windows sandbox window station",
+        )?;
     }
     Ok(())
 }
