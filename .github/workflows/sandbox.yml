@@ -36,6 +36,8 @@ jobs:
         with:
           toolchain: 1.97.1
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+      - name: Install pinned cargo-nextest
+        run: cargo install cargo-nextest --version 0.9.143 --locked
       - name: Build verified release bubblewrap
         if: runner.os == 'Linux'
         run: |
@@ -47,7 +49,7 @@ jobs:
       - name: Run required native adversarial suite
         env:
           DESKTOP_SANDBOX_E2E_REQUIRED: "1"
-        run: cargo test -p exec-core -p exec-sandbox-protocol -p exec-sandbox -p desktop-install-context --no-fail-fast
+        run: cargo nextest run -p exec-core -p exec-sandbox-protocol -p exec-sandbox -p desktop-install-context --no-fail-fast
       - name: Capture native benchmark
         run: cargo run -p exec-sandbox --example sandbox_benchmark -- --iterations 5000 --launch-iterations 30
 
@@ -60,7 +62,9 @@ jobs:
         with:
           toolchain: 1.97.1
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
-      - run: cargo test -p exec-sandbox-protocol -p exec-sandbox-windows -p exec-sandbox --no-fail-fast
+      - name: Install pinned cargo-nextest
+        run: cargo install cargo-nextest --version 0.9.143 --locked
+      - run: cargo nextest run -p exec-sandbox-protocol -p exec-sandbox-windows -p exec-sandbox --no-fail-fast
       - run: cargo build -p exec-sandbox-windows --release --bins
       - name: Verify clean-machine runtime boundary
         shell: pwsh
@@ -90,7 +94,7 @@ jobs:
           $env:DESKTOP_WINDOWS_SANDBOX_E2E_REQUIRED = "1"
           $env:DESKTOP_WINDOWS_SANDBOX_RUNNER = (Resolve-Path "target/release/agent-command-runner.exe")
           $env:DESKTOP_WINDOWS_SANDBOX_SETUP = (Resolve-Path "target/release/agent-windows-sandbox-setup.exe")
-          cargo test -p exec-sandbox-windows --release --test windows_native -- --nocapture
+          cargo nextest run -p exec-sandbox-windows --release --test windows_native --no-capture
           $env:DESKTOP_SANDBOX_E2E_REQUIRED = "1"
           $env:DESKTOP_WINDOWS_SANDBOX_EXPERIMENTAL = "1"
-          cargo test -p exec-sandbox --release --test sandbox_e2e -- --nocapture
+          cargo nextest run -p exec-sandbox --release --test sandbox_e2e --no-capture

@@ -141,10 +141,13 @@ Run these before considering work done.
 
 ### Rust
 
+Install the CI-pinned test runner once with
+`cargo install cargo-nextest --version 0.9.143 --locked`.
+
 ```bash
 cargo fmt --all --check
 cargo clippy -p agent-core -p provider-acp -p provider-local -p devbridge --all-targets -- -D warnings
-cargo test -p agent-core -p provider-acp -p provider-local
+cargo nextest run -p agent-core -p provider-acp -p provider-local
 ```
 
 `agent-core` also builds for WASM:
