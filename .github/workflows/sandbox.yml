@@ -51,21 +51,10 @@ jobs:
         with:
           version: 0.14.2
           cache-key-prefix: clark-code-sandbox-${{ matrix.os }}
-      - name: Restore pinned cargo-nextest
-        id: nextest-cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - name: Install exact prebuilt cargo-nextest
+        uses: taiki-e/install-action@82cd3e7658a6f96c86c0234aeeda1748937cb0a1 # v2
         with:
-          path: ~/.cargo/bin/cargo-nextest*
-          key: cargo-nextest-${{ runner.os }}-${{ runner.arch }}-0.9.143
-      - name: Install pinned cargo-nextest
-        if: steps.nextest-cache.outputs.cache-hit != 'true'
-        run: cargo install cargo-nextest --version 0.9.143 --locked
-      - name: Cache pinned cargo-nextest
-        if: steps.nextest-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cargo/bin/cargo-nextest*
-          key: cargo-nextest-${{ runner.os }}-${{ runner.arch }}-0.9.143
+          tool: cargo-nextest@0.9.143
       - name: Build verified release bubblewrap
         if: runner.os == 'Linux'
         run: |
@@ -91,21 +80,10 @@ jobs:
         with:
           toolchain: 1.97.1
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
-      - name: Restore pinned cargo-nextest
-        id: nextest-cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - name: Install exact prebuilt cargo-nextest
+        uses: taiki-e/install-action@82cd3e7658a6f96c86c0234aeeda1748937cb0a1 # v2
         with:
-          path: ~/.cargo/bin/cargo-nextest*
-          key: cargo-nextest-${{ runner.os }}-${{ runner.arch }}-0.9.143
-      - name: Install pinned cargo-nextest
-        if: steps.nextest-cache.outputs.cache-hit != 'true'
-        run: cargo install cargo-nextest --version 0.9.143 --locked
-      - name: Cache pinned cargo-nextest
-        if: steps.nextest-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cargo/bin/cargo-nextest*
-          key: cargo-nextest-${{ runner.os }}-${{ runner.arch }}-0.9.143
+          tool: cargo-nextest@0.9.143
       - run: cargo nextest run -p exec-sandbox-protocol -p exec-sandbox-windows -p exec-sandbox --no-fail-fast
       - run: cargo build -p exec-sandbox-windows --release --bins
       - name: Verify clean-machine runtime boundary
