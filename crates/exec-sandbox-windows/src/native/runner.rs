@@ -119,7 +119,14 @@ fn spawn_worker(
     args.extend(transport.worker_args());
     let command_line = command_line(&executable, &args);
     let environment = worker_environment(&encoded);
-    let cwd = request.process.cwd.to_os_string();
+    // The orchestration worker is logged on as the offline identity before its
+    // restricted token exists. Do not start that worker in the caller's cwd:
+    // hosted-runner temporary directories can be private to the interactive
+    // account, causing CreateProcessWithLogonW to reject an otherwise valid
+    // request before the sandboxed command starts. The setup state directory
+    // has an explicit traversal grant for the offline identity. Only the inner,
+    // restricted child receives the requested cwd below.
+    let cwd = request.state_dir.as_os_str();
     let mut process = unsafe {
         create_with_logon(
             username,
