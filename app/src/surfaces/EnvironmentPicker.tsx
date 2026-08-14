@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import {
   Laptop, Server, Cloud, Folder, FolderOpen, Check, ChevronDown, ChevronRight, ArrowUp,
   Plus, Settings2, Loader2, AlertCircle,
@@ -12,18 +12,26 @@ import { inTauri } from "../lib/pickFolder";
 import { cn } from "../lib/cn";
 
 const CHIP =
-  "flex min-h-8 items-center gap-1.5 rounded-xl border border-accent/10 bg-accent-subtle px-2.5 py-1.5 text-sm font-medium text-ink-secondary transition duration-200 ease-agent hover:bg-accent-soft hover:text-ink";
+  "flex min-h-8 items-center gap-1.5 rounded-xl border border-accent/10 bg-accent-subtle px-2.5 py-1.5 text-sm font-medium text-ink-secondary transition duration-base ease-agent hover:bg-accent-soft hover:text-ink";
 const COMPACT_CHIP =
-  "flex min-h-7 items-center gap-1 rounded-md bg-composer-context px-1.5 text-xs font-medium leading-none text-ink-secondary transition duration-200 ease-agent hover:bg-bg-hover hover:text-ink";
+  "flex min-h-7 items-center gap-1 rounded-md bg-composer-context px-1.5 text-xs font-medium leading-none text-ink-secondary transition duration-base ease-agent hover:bg-bg-hover hover:text-ink";
 
 /** The "Local · Select folder…" control that sits above the start-screen
  *  composer. It maps the target machine (Local / a Cloud provider / an SSH host)
  *  and the project folder onto the same store state the session starts from. */
 export function EnvironmentPicker({
   compact = false,
+  allowCloud = true,
+  showLocalFolder = true,
   onEnvironmentChanged,
 }: {
   compact?: boolean;
+  /** Specialist workflows backed by the native worker can run locally or over
+   * SSH, but cannot be redirected into an unrelated cloud provider. */
+  allowCloud?: boolean;
+  /** Document-first workflows own their local workspace. They still need the
+   * remote folder picker when SSH is selected. */
+  showLocalFolder?: boolean;
   onEnvironmentChanged?: () => void;
 }) {
   const providers = useSessionStore((s) => s.providers);
@@ -50,7 +58,9 @@ export function EnvironmentPicker({
   const isLocal = activeProvider === null || activeProvider === "local";
   const isRemote = isLocal && projectMode === "remote";
   const selectedHost = hosts.find((h) => h.id === selectedHostId) ?? null;
-  const cloudProviders = providers.filter((p) => p.id !== "local" && !p.internal);
+  const cloudProviders = allowCloud
+    ? providers.filter((p) => p.id !== "local" && !p.internal)
+    : [];
 
   let label = "Local";
   let TargetIcon = Laptop;
@@ -75,6 +85,7 @@ export function EnvironmentPicker({
 
   const targetPicker = (
     <Popover
+      popupLabel="Execution targets"
       trigger={
         <span className={compact ? COMPACT_CHIP : CHIP}>
           <TargetIcon className={compact ? "size-3" : "size-4"} />
@@ -148,7 +159,7 @@ export function EnvironmentPicker({
     onEnvironmentChanged?.();
   };
 
-  const folderPicker = isLocal && !isRemote ? (
+  const folderPicker = isLocal && !isRemote && showLocalFolder ? (
     <FolderChip cwd={cwd} compact={compact} />
   ) : isRemote && selectedHost ? (
     <RemoteFolderChip
@@ -187,6 +198,7 @@ function RemoteFolderChip({
   const has = host.remoteRoot.trim().length > 0;
   return (
     <Popover
+      popupLabel={`Remote folders on ${hostLabel(host)}`}
       trigger={
         <span className={cn(compact ? COMPACT_CHIP : CHIP, has ? "text-ink" : "text-ink-faint")}>
           <Folder className={compact ? "size-3" : "size-4"} />
@@ -363,6 +375,7 @@ function FolderChip({ cwd, compact = false }: { cwd: string; compact?: boolean }
 
   return (
     <Popover
+      popupLabel="Project folder"
       trigger={
         <span
           className={cn(compact ? COMPACT_CHIP : CHIP, has ? "text-ink" : "text-ink-faint")}
@@ -383,7 +396,7 @@ function FolderChip({ cwd, compact = false }: { cwd: string; compact?: boolean }
                 void pick();
                 close();
               }}
-              className="mb-1 flex min-h-10 w-full items-center gap-2 rounded-xl bg-accent px-2.5 py-2 text-sm font-medium text-on-accent transition duration-200 ease-agent hover:bg-accent-hover"
+              className="mb-1 flex min-h-10 w-full items-center gap-2 rounded-xl bg-accent px-2.5 py-2 text-sm font-medium text-on-accent transition duration-base ease-agent hover:bg-accent-hover"
             >
               <FolderOpen className="size-4" /> Choose folder…
             </button>
@@ -447,7 +460,7 @@ function OptionRow({
     <button
       onClick={onClick}
       className={cn(
-        "flex min-h-9 w-full items-center gap-2.5 rounded-xl px-2 py-1.5 text-left transition duration-200 ease-agent hover:bg-accent-subtle",
+        "flex min-h-9 w-full items-center gap-2.5 rounded-xl px-2 py-1.5 text-left transition duration-base ease-agent hover:bg-accent-subtle",
         active && "bg-accent-subtle",
       )}
     >
@@ -465,19 +478,31 @@ function OptionRow({
  *  window, above the composer). */
 function Popover({
   trigger,
+  popupLabel,
   children,
 }: {
   trigger: React.ReactNode;
+  popupLabel: string;
   children: (close: () => void) => React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const popupId = useId();
+  const close = (restoreFocus = true) => {
+    setOpen(false);
+    if (restoreFocus) triggerRef.current?.focus();
+  };
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      if (ref.current && !ref.current.contains(e.target as Node)) close(false);
     };
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      close();
+    };
     document.addEventListener("mousedown", onDown);
     document.addEventListener("keydown", onKey);
     return () => {
@@ -488,12 +513,24 @@ function Popover({
 
   return (
     <div ref={ref} className="relative">
-      <button type="button" onClick={() => setOpen((o) => !o)}>
+      <button
+        ref={triggerRef}
+        type="button"
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        aria-controls={open ? popupId : undefined}
+        onClick={() => setOpen((o) => !o)}
+      >
         {trigger}
       </button>
       {open && (
-        <div className="popover-surface absolute bottom-full left-0 z-30 mb-2 rounded-2xl bg-bg-elevated p-1.5 shadow-lifted ring-1 ring-border-subtle">
-          {children(() => setOpen(false))}
+        <div
+          id={popupId}
+          role="dialog"
+          aria-label={popupLabel}
+          className="popover-surface absolute bottom-full left-0 z-30 mb-2 rounded-2xl bg-bg-elevated p-1.5 shadow-lifted ring-1 ring-border-subtle"
+        >
+          {children(close)}
         </div>
       )}
     </div>

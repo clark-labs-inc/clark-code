@@ -324,7 +324,6 @@ async fn paid_single_agent_control_completes_the_same_contract() {
                     "bash_kill": "allow"
                 },
                 "orchestration": false,
-                "research": false,
                 "memories": false,
                 "project_knowledge": false,
                 "browser_enabled": false,

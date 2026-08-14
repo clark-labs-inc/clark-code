@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useSessionStore } from "./sessionStore";
 import type { CoreBridge } from "../core-bridge/bridge";
 import { emptySnapshot, type Session } from "../core-bridge/types";
-import { loadSshHosts, type SshHost } from "../lib/sshHosts";
+import { loadSshHosts, saveSshHosts, type SshHost } from "../lib/sshHosts";
 import { liveSessions } from "./sessionStore.runtime";
 import { DEFAULT_LOCAL_SETTINGS } from "../lib/localAgent";
 
@@ -202,5 +202,30 @@ describe("startNewProject (remote SSH)", () => {
     expect(s.session).toBeNull();
     expect(vi.mocked(bridge.openSession)).not.toHaveBeenCalled();
     expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("attaches initial read-only roots after the remote session opens", async () => {
+    const addReadRoots = vi.fn(async () => {});
+    const bridge = stubBridge({ addReadRoots });
+    saveSshHosts([remoteHost], null);
+    useSessionStore.setState({
+      bridge,
+      providers: await bridge.listProviders(),
+      projectMode: "remote",
+      selectedHostId: remoteHost.id,
+    });
+
+    await useSessionStore.getState().startSession({
+      readRoots: ["/remote/shared/api", "/remote/shared/docs"],
+    });
+
+    expect(useSessionStore.getState().error).toBeNull();
+    expect(vi.mocked(bridge.openSession)).toHaveBeenCalledTimes(1);
+    expect(addReadRoots).toHaveBeenCalledWith("chat-a", [
+      "/remote/shared/api",
+      "/remote/shared/docs",
+    ]);
+    expect(vi.mocked(bridge.openSession).mock.invocationCallOrder[0])
+      .toBeLessThan(addReadRoots.mock.invocationCallOrder[0]);
   });
 });

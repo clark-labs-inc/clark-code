@@ -315,7 +315,6 @@ async fn paid_large_single_agent_control() {
                     "bash_kill": "allow"
                 },
                 "orchestration": false,
-                "research": false,
                 "memories": false,
                 "project_knowledge": false,
                 "browser_enabled": false,

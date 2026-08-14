@@ -285,8 +285,6 @@ async fn run() -> Result<(), String> {
                             api_key: live_api_key()?,
                             base_url: std::env::var("ORCHESTRATION_BENCH_BASE_URL")
                                 .unwrap_or_else(|_| provider_local::DEFAULT_BASE_URL.into()),
-                            research_model: std::env::var("ORCHESTRATION_BENCH_RESEARCH_MODEL")
-                                .unwrap_or_else(|_| provider_local::DEFAULT_RESEARCH_MODEL.into()),
                             acp_command: args.acp_command.clone(),
                             attempt_timeout: Duration::from_secs(args.attempt_timeout_secs),
                         },

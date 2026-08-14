@@ -1,4 +1,12 @@
-import { FileText, Folder, FolderGit2, FolderSearch, Slash, Sparkles } from "lucide-react";
+import {
+  FileText,
+  Folder,
+  FolderGit2,
+  FolderOpen,
+  FolderSearch,
+  Slash,
+  Sparkles,
+} from "lucide-react";
 import { useReducedMotion } from "motion/react";
 import * as m from "motion/react-m";
 import { cn } from "../lib/cn";
@@ -30,7 +38,14 @@ export function ComposerAutocomplete({
       className="popover-surface max-h-64 w-full overflow-y-auto rounded-2xl bg-bg-elevated p-1.5 shadow-lifted ring-1 ring-border-subtle sm:w-80"
     >
       {suggestions.map((suggestion, index) => {
-        const key = suggestion.kind === "spec_repository" || suggestion.kind === "spec_folder"
+        const key = suggestion.kind === "spec_repository"
+          ? `${suggestion.kind}:${suggestion.path}`
+          : suggestion.kind === "parent_directory"
+            ? `${suggestion.kind}:${suggestion.root}`
+          : suggestion.kind === "spec_repository_picker"
+            || suggestion.kind === "spec_folder"
+            || suggestion.kind === "parent_directory_menu"
+            || suggestion.kind === "parent_directory_picker"
           ? suggestion.kind
           : suggestion.kind === "file" || suggestion.kind === "directory"
           ? `${suggestion.kind}:${suggestion.path}`
@@ -48,18 +63,56 @@ export function ComposerAutocomplete({
             }}
             onMouseMove={() => onHover(index)}
             className={cn(
-              "flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-sm transition duration-200 ease-agent",
+              "flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-sm transition duration-base ease-agent",
               index === selectedIndex
                 ? "bg-accent-subtle text-ink"
                 : "text-ink-secondary",
             )}
           >
-            {suggestion.kind === "spec_repository" ? (
+            {suggestion.kind === "parent_directory_menu" ? (
+              <>
+                <FolderOpen className="size-3.5 shrink-0 text-accent" />
+                <span className="shrink-0 font-mono text-xs text-ink">../</span>
+                <span className="min-w-0 flex-1 truncate text-xs text-ink-faint">
+                  Browse folders beside this checkout
+                </span>
+              </>
+            ) : suggestion.kind === "parent_directory_picker" ? (
+              <>
+                <FolderOpen className="size-3.5 shrink-0 text-accent" />
+                <span className="shrink-0 text-xs font-medium text-ink">
+                  Choose another folder…
+                </span>
+                <span className="min-w-0 flex-1 truncate text-xs text-ink-faint">
+                  Read-only
+                </span>
+              </>
+            ) : suggestion.kind === "parent_directory" ? (
+              <>
+                <FolderOpen className="size-3.5 shrink-0 text-accent" />
+                <span className="min-w-0 flex-1 truncate font-mono text-xs text-ink">
+                  {suggestion.path}
+                </span>
+                <span className="min-w-0 flex-1 truncate text-xs text-ink-faint">
+                  Read-only
+                </span>
+              </>
+            ) : suggestion.kind === "spec_repository" ? (
               <>
                 <FolderGit2 className="size-3.5 shrink-0 text-accent" />
-                <span className="shrink-0 font-mono text-xs text-ink">@repo</span>
+                <span className="min-w-0 flex-1 truncate font-mono text-xs text-ink">
+                  {suggestion.path.split(/[\\/]/).filter(Boolean).at(-1)}
+                </span>
                 <span className="min-w-0 flex-1 truncate text-xs text-ink-faint">
-                  Focus this spec on a code repository
+                  {suggestion.current ? "Current folder" : suggestion.path}
+                </span>
+              </>
+            ) : suggestion.kind === "spec_repository_picker" ? (
+              <>
+                <FolderOpen className="size-3.5 shrink-0 text-accent" />
+                <span className="shrink-0 text-xs font-medium text-ink">Choose another folder…</span>
+                <span className="min-w-0 flex-1 truncate text-xs text-ink-faint">
+                  Open the folder picker
                 </span>
               </>
             ) : suggestion.kind === "spec_folder" ? (

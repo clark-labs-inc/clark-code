@@ -43,6 +43,16 @@ destroys other agents' work with no recovery path.
   live acceptance call using the named model and an already configured scoped
   credential, unless the user says not to make live calls. Broader, repeated,
   high-volume, or comparative paid evals still require explicit authorization.
+- **Local macOS runs must never request code-signing access.** Do not look up,
+  select, unlock, or invoke an Apple Development or Developer ID identity; do
+  not change Keychain ACLs or trigger a certificate/password approval prompt.
+  Use the unsigned `cargo tauri dev` path (`./script/build_and_run.sh` in this
+  foundation) for ordinary local testing. A branded repository may explicitly
+  seal a packaged debug helper with the noninteractive ad-hoc identity
+  `codesign --sign -`; never replace that with a named identity. If a local
+  test cannot proceed without credentialed signing, stop and report a harness
+  defect instead of escalating. Credentialed signing belongs only to an
+  explicitly requested release workflow in its disposable CI keychain.
 - **When in doubt, ask instead of acting.** Pausing costs seconds; a
   destructive command costs hours of recovery.
 

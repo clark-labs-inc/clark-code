@@ -123,6 +123,70 @@ impl Provider for LocalAgentProvider {
         self.resume_session_goal(session, token_budget).await
     }
 
+    async fn add_read_roots(&mut self, session: &SessionId, roots: Vec<String>) -> Result<()> {
+        if self.session_id.as_ref() != Some(session) {
+            return Err(Error::SessionNotFound(session.to_string()));
+        }
+        let state = self.session.lock().await;
+        if state.active_execution.is_some() {
+            return Err(Error::Unsupported(
+                "finish the active run before attaching repository context".into(),
+            ));
+        }
+        let plan_mode = state.planning.plan_mode();
+        drop(state);
+        let roots = roots
+            .into_iter()
+            .map(|root| {
+                let path = std::path::PathBuf::from(&root);
+                let canonical = path
+                    .canonicalize()
+                    .map_err(|error| Error::Other(format!("read-only root {root}: {error}")))?;
+                if !canonical.is_dir() {
+                    return Err(Error::Other(format!(
+                        "read-only root {} is not a directory",
+                        canonical.display()
+                    )));
+                }
+                Ok(canonical)
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let current = self.sandbox.as_ref().ok_or(Error::NotConnected)?;
+        let mut combined = current.read_roots().to_vec();
+        combined.extend(roots);
+        self.replace_read_roots(combined, plan_mode)
+    }
+
+    async fn remove_read_roots(&mut self, session: &SessionId, roots: Vec<String>) -> Result<()> {
+        if self.session_id.as_ref() != Some(session) {
+            return Err(Error::SessionNotFound(session.to_string()));
+        }
+        let state = self.session.lock().await;
+        if state.active_execution.is_some() {
+            return Err(Error::Unsupported(
+                "finish the active run before removing repository context".into(),
+            ));
+        }
+        let plan_mode = state.planning.plan_mode();
+        drop(state);
+        let remove = roots
+            .into_iter()
+            .map(|root| {
+                std::path::PathBuf::from(&root)
+                    .canonicalize()
+                    .map_err(|error| Error::Other(format!("read-only root {root}: {error}")))
+            })
+            .collect::<Result<std::collections::HashSet<_>>>()?;
+        let current = self.sandbox.as_ref().ok_or(Error::NotConnected)?;
+        let remaining = current
+            .read_roots()
+            .iter()
+            .filter(|root| !remove.contains(*root))
+            .cloned()
+            .collect();
+        self.replace_read_roots(remaining, plan_mode)
+    }
+
     async fn connect(&mut self, config: ProviderConfig) -> Result<()> {
         self.isolation = ProviderIsolation::from_provider_config(&config);
         let mut local = LocalConfig::from_provider_config(&config);
@@ -135,7 +199,7 @@ impl Provider for LocalAgentProvider {
         let memory =
             (local.tools_enabled && local.memories_enabled).then(|| self.memory_config(&local));
         let mut registry = if local.tools_enabled {
-            ToolRegistry::new(local.research.clone(), memory)
+            ToolRegistry::new(memory)
         } else {
             ToolRegistry::empty()
         };
@@ -199,8 +263,20 @@ impl Provider for LocalAgentProvider {
 
     async fn new_session(&mut self, options: SessionOptions) -> Result<Session> {
         let config = self.config()?.clone();
-        let collaboration_mode = options.collaboration_mode.unwrap_or_default();
-        let session_mode = options.mode.clone();
+        let scout_full_access = config.scout_cartography.is_some();
+        let collaboration_mode = if scout_full_access {
+            CollaborationMode::Default
+        } else {
+            options.collaboration_mode.unwrap_or_default()
+        };
+        // A Scout-bound provider spans the human-selected organization and
+        // workspace. Its Full Access authority is fixed by the product
+        // contract and cannot be weakened by stale or modified client state.
+        let session_mode = if scout_full_access {
+            Some("full".to_string())
+        } else {
+            options.mode.clone()
+        };
         let restored_goal = options.resume.as_ref().and_then(|resume| {
             resume.items.iter().rev().find_map(|item| match item {
                 agent_core::provider::ResumeItem::Goal { goal } => Some(goal.clone()),
@@ -370,10 +446,14 @@ impl Provider for LocalAgentProvider {
         let pr_body_attribution = project
             .include_git_instructions()
             .then(|| project.pr_body_attribution_or(&config.default_pr_body_attribution));
+        let brokered_research_available = self
+            .registry
+            .as_ref()
+            .is_some_and(|registry| registry.has_brokered_research());
         let mut prompt = config.system_prompt_override.clone().unwrap_or_else(|| {
             system_prompt(
                 &sandbox,
-                config.research.is_some(),
+                brokered_research_available,
                 false,
                 commit_attribution,
                 pr_body_attribution,
@@ -1106,6 +1186,15 @@ impl Provider for LocalAgentProvider {
     }
 
     async fn set_mode(&mut self, _session: &SessionId, mode: String) -> Result<()> {
+        let mode = if self
+            .config
+            .as_ref()
+            .is_some_and(|config| config.scout_cartography.is_some())
+        {
+            "full".to_string()
+        } else {
+            mode
+        };
         let plan_mode = self.session.lock().await.planning.plan_mode();
         if !plan_mode {
             if let (Some(config), Some(sandbox)) = (self.config.as_ref(), self.sandbox.as_ref()) {
@@ -1124,6 +1213,15 @@ impl Provider for LocalAgentProvider {
         _session: &SessionId,
         mode: CollaborationMode,
     ) -> Result<()> {
+        let mode = if self
+            .config
+            .as_ref()
+            .is_some_and(|config| config.scout_cartography.is_some())
+        {
+            CollaborationMode::Default
+        } else {
+            mode
+        };
         if let (Some(config), Some(sandbox)) = (self.config.as_ref(), self.sandbox.as_ref()) {
             let preset = match mode {
                 CollaborationMode::Plan => exec_sandbox::SandboxPreset::ReadOnly,

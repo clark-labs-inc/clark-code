@@ -66,8 +66,10 @@ describe("ComputerUseLiveCard", () => {
       }),
     );
 
-    expect(markup).toContain("Drag to move this panel");
-    expect(markup).toContain("Resize computer use panel");
+    expect(markup).toContain("Drag to move · Arrow keys move");
+    expect(markup).toContain("Move computer use panel with arrow keys");
+    expect(markup).toContain("Resize computer use panel with arrow keys");
+    expect(markup).toContain("Home resets");
     expect(markup).toContain("absolute");
   });
 

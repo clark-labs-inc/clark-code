@@ -88,6 +88,18 @@ describe("product-supplied model settings", () => {
 });
 
 describe("product specialist extension binding", () => {
+  it("passes the conversation recipe to native product capability composition", () => {
+    const config = localConnectConfig(
+      { ...DEFAULT_LOCAL_SETTINGS, cwd: "/managed/spec-document" },
+      undefined,
+      undefined,
+      "spec",
+      "id:account",
+    );
+
+    expect(config.extra).toMatchObject({ specialist_kind: "spec" });
+  });
+
   it("exposes account-scoped recent checkouts to Scout as read-only census roots", () => {
     const config = localConnectConfig(
       { ...DEFAULT_LOCAL_SETTINGS, cwd: "/managed/scout-conversation" },

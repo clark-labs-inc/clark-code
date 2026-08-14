@@ -12,6 +12,7 @@ import {
   X,
 } from "lucide-react";
 import { createPortal } from "react-dom";
+import { announce } from "@atlaskit/pragmatic-drag-and-drop-live-region";
 import { contentText, imageBlocks, imageSource } from "../../lib/contentBlocks";
 import { cn } from "../../lib/cn";
 import { useSessionStore } from "../../store/sessionStore";
@@ -46,6 +47,7 @@ export interface ComputerUseLiveCardProps {
 const MIN_PANEL_WIDTH = 300;
 const MIN_PANEL_HEIGHT = 340;
 const DEFAULT_PANEL_WIDTH = 432;
+const PANEL_KEYBOARD_STEP = 16;
 
 function isObservation(call: ToolCall): boolean {
   return call.tool_name === "computer_get_state" || call.tool_name === "computer_observe";
@@ -158,7 +160,7 @@ function FrameStack({
           <img
             src={visible[visible.length - 1].source}
             alt={`${visible[visible.length - 1].appName} current computer state`}
-            className="h-full w-full object-cover object-top transition duration-300 group-hover:scale-[1.01]"
+            className="h-full w-full object-cover object-top transition duration-slow group-hover:scale-[1.01]"
           />
           <span className="absolute left-2 top-2 inline-flex items-center gap-1 rounded-full border border-white/15 bg-black/65 px-2 py-1 text-xs font-medium uppercase tracking-[0.14em] text-white/80 backdrop-blur-sm">
             <span className="size-1.5 animate-pulse rounded-full bg-emerald-400" />
@@ -283,6 +285,58 @@ export function ComputerUseLiveCard({
     setInteraction("resize");
   };
 
+  const movePanelWithKeyboard = (event: React.KeyboardEvent<HTMLElement>) => {
+    if (!floating || event.target !== event.currentTarget) return;
+    const panel = panelRef.current;
+    if (!panel) return;
+    const step = event.shiftKey ? PANEL_KEYBOARD_STEP * 3 : PANEL_KEYBOARD_STEP;
+    const maxX = Math.max(0, window.innerWidth - panel.offsetWidth);
+    const maxY = Math.max(0, window.innerHeight - panel.offsetHeight);
+    let next = panelPosition;
+    if (event.key === "Home") next = { x: 0, y: 0 };
+    else if (event.key === "End") next = { x: maxX, y: maxY };
+    else if (event.key === "ArrowLeft") next = { ...panelPosition, x: panelPosition.x - step };
+    else if (event.key === "ArrowRight") next = { ...panelPosition, x: panelPosition.x + step };
+    else if (event.key === "ArrowUp") next = { ...panelPosition, y: panelPosition.y - step };
+    else if (event.key === "ArrowDown") next = { ...panelPosition, y: panelPosition.y + step };
+    else return;
+    event.preventDefault();
+    next = {
+      x: Math.max(0, Math.min(next.x, maxX)),
+      y: Math.max(0, Math.min(next.y, maxY)),
+    };
+    setPanelPosition(next);
+    announce(`Computer use panel moved to ${Math.round(next.x)} by ${Math.round(next.y)}.`);
+  };
+
+  const resizePanelWithKeyboard = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (!floating) return;
+    const panel = panelRef.current;
+    if (!panel) return;
+    const step = event.shiftKey ? PANEL_KEYBOARD_STEP * 3 : PANEL_KEYBOARD_STEP;
+    const currentHeight = panelSize.height ?? panel.offsetHeight;
+    let next = { width: panelSize.width, height: currentHeight };
+    if (event.key === "Home") {
+      event.preventDefault();
+      event.stopPropagation();
+      setPanelSize({ width: DEFAULT_PANEL_WIDTH, height: null });
+      announce("Computer use panel size reset.");
+      return;
+    } else if (event.key === "ArrowLeft") next.width -= step;
+    else if (event.key === "ArrowRight") next.width += step;
+    else if (event.key === "ArrowUp") next.height -= step;
+    else if (event.key === "ArrowDown") next.height += step;
+    else return;
+    event.preventDefault();
+    event.stopPropagation();
+    next = {
+      width: Math.max(MIN_PANEL_WIDTH, Math.min(next.width, window.innerWidth - panelPosition.x)),
+      height: Math.max(MIN_PANEL_HEIGHT, Math.min(next.height, window.innerHeight - panelPosition.y)),
+    };
+    setPanelSize(next);
+    announce(`Computer use panel resized to ${Math.round(next.width)} by ${Math.round(next.height)}.`);
+  };
+
   if (frames.length === 0) return null;
 
   const current = frames[selectedIndex] ?? frames[frames.length - 1];
@@ -319,7 +373,10 @@ export function ComputerUseLiveCard({
     >
       <header
         onPointerDown={beginDrag}
-        title={floating ? "Drag to move this panel" : undefined}
+        onKeyDown={movePanelWithKeyboard}
+        tabIndex={floating ? 0 : undefined}
+        aria-label={floating ? "Move computer use panel with arrow keys. Home moves to the top left and End moves to the bottom right." : undefined}
+        title={floating ? "Drag to move · Arrow keys move · Home/End move to corners" : undefined}
         className={cn(
           "flex items-center gap-3 px-3.5 py-3 sm:px-4",
           floating && "cursor-grab select-none",
@@ -412,8 +469,9 @@ export function ComputerUseLiveCard({
         <button
           type="button"
           onPointerDown={beginResize}
-          aria-label="Resize computer use panel"
-          title="Drag to resize"
+          onKeyDown={resizePanelWithKeyboard}
+          aria-label="Resize computer use panel with arrow keys. Home resets the size."
+          title="Drag to resize · Arrow keys resize · Home resets"
           className={cn(
             "absolute bottom-1 right-1 grid size-5 cursor-nwse-resize place-items-center rounded-md text-white/35 transition hover:bg-white/[0.08] hover:text-white/75",
             interaction === "resize" && "bg-white/[0.08] text-white/75",

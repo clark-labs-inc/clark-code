@@ -62,7 +62,7 @@ export function UpdatePillView({
       onClick={() => void onApply()}
       aria-label={`Ready to update ${productName()} to ${update.version}; restart now`}
       title={`${productName()} ${update.version} is ready — relaunch to update`}
-      className="flex shrink-0 items-center gap-1.5 rounded-xl bg-accent-soft px-3 py-1.5 text-xs font-semibold text-accent transition duration-200 ease-agent hover:bg-accent/20"
+      className="flex shrink-0 items-center gap-1.5 rounded-xl bg-accent-soft px-3 py-1.5 text-xs font-semibold text-accent transition duration-base ease-agent hover:bg-accent/20"
     >
       <RefreshCw className="size-3.5" />
       Ready to update
@@ -101,7 +101,7 @@ function DownloadingPill({ progress }: { progress: { downloaded: number; total: 
         <span
           className={cn(
             "block h-full rounded-full bg-accent",
-            pct !== null ? "transition-[width] duration-300" : "w-1/3 animate-pulse",
+            pct !== null ? "transition-[width] duration-slow" : "w-1/3 animate-pulse",
           )}
           style={pct !== null ? { width: `${Math.max(4, pct)}%` } : undefined}
         />
@@ -123,7 +123,7 @@ function ShareButton({ onShare }: { onShare: () => Promise<void> }) {
       disabled={sharing}
       aria-label="Share conversation"
       title="Copy a public read-only link (/unshare stops sharing)"
-      className="grid size-9 place-items-center rounded-xl text-ink-muted transition duration-200 ease-agent hover:bg-accent-subtle hover:text-accent disabled:opacity-60"
+      className="grid size-9 place-items-center rounded-xl text-ink-muted transition duration-base ease-agent hover:bg-accent-subtle hover:text-accent disabled:opacity-60"
     >
       {sharing ? (
         <RefreshCw className="size-4 animate-[spin_1s_linear_infinite]" />
@@ -185,7 +185,7 @@ export function TopBar({ dark, onToggleTheme }: { dark: boolean; onToggleTheme: 
           onClick={() => setSettingsOpen(true)}
           aria-label="Settings"
           title="Settings (⌘,)"
-          className="grid size-9 place-items-center rounded-xl text-ink-muted transition duration-200 ease-agent hover:bg-accent-subtle hover:text-accent"
+          className="grid size-9 place-items-center rounded-xl text-ink-muted transition duration-base ease-agent hover:bg-accent-subtle hover:text-accent"
         >
           <SettingsIcon className="size-4" />
         </button>
@@ -195,7 +195,7 @@ export function TopBar({ dark, onToggleTheme }: { dark: boolean; onToggleTheme: 
             aria-label={terminalOpen ? "Hide terminal" : "Show terminal"}
             title="Terminal (run commands in your project)"
             className={cn(
-              "grid size-9 place-items-center rounded-xl transition duration-200 ease-agent",
+              "grid size-9 place-items-center rounded-xl transition duration-base ease-agent",
               terminalOpen
                 ? "bg-accent-soft text-accent"
                 : "text-ink-muted hover:bg-accent-subtle hover:text-accent",
@@ -207,7 +207,7 @@ export function TopBar({ dark, onToggleTheme }: { dark: boolean; onToggleTheme: 
         <button
           onClick={onToggleTheme}
           aria-label={dark ? "Switch to light theme" : "Switch to dark theme"}
-          className="hidden size-9 place-items-center rounded-xl text-ink-muted transition duration-200 ease-agent hover:bg-accent-subtle hover:text-accent sm:grid"
+          className="hidden size-9 place-items-center rounded-xl text-ink-muted transition duration-base ease-agent hover:bg-accent-subtle hover:text-accent sm:grid"
         >
           {dark ? <Sun className="size-4" /> : <Moon className="size-4" />}
         </button>

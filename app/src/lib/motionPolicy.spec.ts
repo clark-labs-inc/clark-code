@@ -70,11 +70,35 @@ describe("GUI motion policy", () => {
     expect(violations.map(({ path }) => path)).toEqual([]);
   });
 
-  it("bans hand-rolled stagger arithmetic", () => {
-    // `delay: … index * 0.0X` must go through staggeredTransition so reduced
-    // motion can zero the choreography in one place.
+  it("keeps transform choreography in the shared vocabulary", () => {
+    // String transforms are the compositor-friendly form we want, but their
+    // direction and scale still belong in motion.ts so surfaces cannot grow
+    // one-off animation dialects.
     const violations = banSources.filter(({ source }) =>
-      /delay:\s*[^,}{\n]*index\s*\*/.test(source),
+      /transform:\s*["'](?:translate|scale)/.test(source),
+    );
+    expect(violations.map(({ path }) => path)).toEqual([]);
+  });
+
+  it("bans hand-rolled stagger arithmetic", () => {
+    // Any inline delay multiplication must go through the shared transition
+    // helpers so reduced motion can zero the choreography in one place.
+    const violations = banSources.filter(({ source }) =>
+      /delay:\s*[^,}{\n]*\b(?:i|index)\s*\*/.test(source),
+    );
+    expect(violations.map(({ path }) => path)).toEqual([]);
+  });
+
+  it("keeps indeterminate Motion loops in the shared vocabulary", () => {
+    const violations = banSources.filter(({ source }) =>
+      /repeat:\s*Infinity\b/.test(source),
+    );
+    expect(violations.map(({ path }) => path)).toEqual([]);
+  });
+
+  it("uses semantic CSS duration tokens instead of numeric utilities", () => {
+    const violations = banSources.filter(({ source }) =>
+      /\bduration-(?:75|100|150|200|300|500|700|1000)\b/.test(source),
     );
     expect(violations.map(({ path }) => path)).toEqual([]);
   });
@@ -91,6 +115,11 @@ describe("GUI motion policy", () => {
     expect(Number.parseFloat(cssVar("dur-fast"))).toBe(DUR.fast * 1000);
     expect(Number.parseFloat(cssVar("dur-base"))).toBe(DUR.base * 1000);
     expect(Number.parseFloat(cssVar("dur-slow"))).toBe(DUR.slow * 1000);
+    expect(cssVar("transition-duration-fast")).toBe("var(--dur-fast)");
+    expect(cssVar("transition-duration-base")).toBe("var(--dur-base)");
+    expect(cssVar("transition-duration-slow")).toBe("var(--dur-slow)");
+    expect(cssVar("default-transition-duration")).toBe("var(--dur-base)");
+    expect(cssVar("default-transition-timing-function")).toBe("var(--ease-agent)");
 
     const cssEase = (name: string): number[] => {
       const match = cssVar(name).match(/cubic-bezier\(\s*([^)]+)\)/);
@@ -114,6 +143,23 @@ describe("GUI motion policy", () => {
     expect(cssSource).not.toMatch(/\.spec-writing-line::after\s*\{[^}]*translateX/s);
     expect(cssSource).toMatch(
       /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.activity-dots > span,[\s\S]*\.reply-skeleton\s*\{\s*display: none !important;/,
+    );
+    expect(cssSource).toMatch(
+      /@media \(prefers-reduced-motion: reduce\)[\s\S]*animation-duration: 0\.001ms !important;[\s\S]*animation-iteration-count: 1 !important;/,
+    );
+    expect(cssSource).toContain('[class*="group-hover:scale"]');
+  });
+
+  it("wraps Sonner in the Clark motion vocabulary", () => {
+    expect(cssSource).toMatch(
+      /\.clark-toaster\[data-sonner-toaster\][\s\S]*transform var\(--dur-base\) var\(--ease-agent\)/,
+    );
+    expect(cssSource).toContain('[data-sonner-toast]:not([data-swiping="true"])');
+    expect(cssSource).toContain("transition-duration: var(--dur-base) !important");
+    expect(cssSource).toContain("background: var(--color-bg-elevated)");
+    expect(cssSource).toContain("box-shadow: var(--shadow-lifted)");
+    expect(cssSource).toMatch(
+      /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.clark-toaster\[data-sonner-toaster\] \[data-sonner-toast\][\s\S]*transition: none !important/,
     );
   });
 });

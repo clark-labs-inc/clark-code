@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { AnimatePresence, useReducedMotion } from "motion/react";
 import * as m from "motion/react-m";
 import { Archive, Check, Loader2, Trash2 } from "lucide-react";
-import { DUR, EASE } from "../lib/motion";
+import { DIALOG, OVERLAY, accessibleMotion } from "../lib/motion";
 import { useSessionStore } from "../store/sessionStore";
 
 type ExitKind = "archive" | "delete";
@@ -80,17 +80,11 @@ export function ConversationMutationTransition() {
           aria-atomic="true"
           aria-label={label}
           data-conversation-mutation-transition={visible.kind}
-          initial={reduceMotion ? false : { opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: reduceMotion ? 0 : DUR.fast, ease: EASE.out }}
+          {...accessibleMotion(OVERLAY, reduceMotion)}
           className="absolute inset-0 z-30 grid cursor-wait place-items-center bg-bg/45 backdrop-blur-[2px]"
         >
           <m.div
-            initial={reduceMotion ? false : { opacity: 0, transform: "translateY(8px) scale(0.98)" }}
-            animate={{ opacity: 1, transform: "translateY(0) scale(1)" }}
-            exit={{ opacity: 0, transform: "translateY(-3px) scale(0.99)" }}
-            transition={{ duration: reduceMotion ? 0 : DUR.base, ease: EASE.out }}
+            {...accessibleMotion(DIALOG, reduceMotion)}
             className="flex min-w-56 items-center gap-3 rounded-2xl border border-border-subtle bg-bg-elevated/95 px-4 py-3 text-sm font-medium text-ink shadow-elevated"
           >
             <span className="relative grid size-8 shrink-0 place-items-center rounded-full bg-bg-tertiary text-ink-muted">

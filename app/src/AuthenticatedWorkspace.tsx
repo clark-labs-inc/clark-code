@@ -1,5 +1,7 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from "react";
+import { AnimatePresence, useReducedMotion } from "motion/react";
+import * as m from "motion/react-m";
 import { useSessionStore } from "./store/sessionStore";
 import { useFanOutStore } from "./store/fanOutStore";
 import { useHotkeys } from "./lib/hotkeys";
@@ -23,6 +25,7 @@ import { ConversationMutationTransition } from "./surfaces/ConversationMutationT
 import { PanelErrorBoundary } from "./components/PanelErrorBoundary";
 import { ArtifactWorkspaceEmpty } from "./surfaces/work/ArtifactWorkspaceEmpty";
 import type { Artifact } from "./core-bridge/types";
+import { SCREEN_FADE, accessibleMotion } from "./lib/motion";
 import {
   DEFAULT_ARTIFACT_PANEL_WIDTH,
   MIN_ARTIFACT_PANEL_WIDTH,
@@ -109,12 +112,24 @@ export default function AuthenticatedWorkspace({
   const [subagentsPanelWidth, setSubagentsPanelWidth] = useState(480);
   const [resizingArtifactPanel, setResizingArtifactPanel] = useState(false);
   const [splitPaneWidth, setSplitPaneWidth] = useState(0);
+  const reduceMotion = useReducedMotion();
   const splitPaneRef = useRef<HTMLDivElement>(null);
   const artifactResizeCleanupRef = useRef<(() => void) | null>(null);
   const terminalTouched = useRef(false);
   if (terminalOpen) terminalTouched.current = true;
   const sidePanelOpen = subagentsOpen || artifactPanelOpen;
   const sidePanelWidth = subagentsOpen ? subagentsPanelWidth : artifactPanelWidth;
+  const workspaceStage = openingScreen
+    ? "opening"
+    : unavailableConversation
+      ? "unavailable"
+      : artifactPanelOpen && !session
+        ? "artifacts"
+        : activeSpecialist
+          ? "specialist"
+          : session
+            ? "conversation"
+            : "start";
 
   useEffect(() => {
     setArtifactPanelOpen(false);
@@ -295,116 +310,125 @@ export default function AuthenticatedWorkspace({
         {/* Cached target content stays visible while its native runtime
             reattaches. The full-pane screen is only for a start/open that has
             no target session metadata to render yet. */}
-        {openingScreen ? (
-          <OpeningScreen />
-        ) : unavailableConversation ? (
-          <UnavailableConversation />
-        ) : artifactPanelOpen && !session ? (
-          <ArtifactWorkspaceEmpty onClose={() => setArtifactPanelOpen(false)} />
-        ) : activeSpecialist ? (
-          <SpecialistWorkspace dark={dark} onToggleTheme={onToggleTheme} />
-        ) : session ? (
-          <div
-            ref={splitPaneRef}
-            className={`flex min-h-0 flex-1 ${
-              resizingArtifactPanel ? "cursor-col-resize select-none" : ""
-            }`}
+        <AnimatePresence initial={false} mode="popLayout">
+          <m.div
+            key={workspaceStage}
+            data-workspace-stage={workspaceStage}
+            {...accessibleMotion(SCREEN_FADE, reduceMotion)}
+            className="flex min-h-0 flex-1 flex-col"
           >
-            <div
-              className={
-                sidePanelOpen
-                  ? "hidden min-w-[20rem] flex-1 flex-col xl:flex"
-                  : "flex min-w-0 flex-1 flex-col"
-              }
-            >
-              <PanelErrorBoundary title="Conversation panel needs to restart" resetKey={session.id}>
-                <Suspense fallback={<div className="min-h-0 flex-1" />}>
-                  <Conversation activeArtifactId={activeArtifactId} onOpenArtifact={openArtifact} />
-                </Suspense>
-              </PanelErrorBoundary>
-              <GoalStatusRail />
-              <Composer />
-            </div>
-            {sidePanelOpen && (
-              <>
+            {openingScreen ? (
+              <OpeningScreen />
+            ) : unavailableConversation ? (
+              <UnavailableConversation />
+            ) : artifactPanelOpen && !session ? (
+              <ArtifactWorkspaceEmpty onClose={() => setArtifactPanelOpen(false)} />
+            ) : activeSpecialist ? (
+              <SpecialistWorkspace dark={dark} onToggleTheme={onToggleTheme} />
+            ) : session ? (
+              <div
+                ref={splitPaneRef}
+                className={`flex min-h-0 flex-1 ${
+                  resizingArtifactPanel ? "cursor-col-resize select-none" : ""
+                }`}
+              >
                 <div
-                  role="separator"
-                  aria-label="Resize details panel"
-                  aria-orientation="vertical"
-                  aria-valuemin={MIN_ARTIFACT_PANEL_WIDTH}
-                  aria-valuemax={Math.max(
-                    MIN_ARTIFACT_PANEL_WIDTH,
-                    splitPaneWidth - MIN_CONVERSATION_PANEL_WIDTH,
-                  )}
-                  aria-valuenow={sidePanelWidth}
-                  tabIndex={0}
-                  title="Drag to resize details panel · Double-click to reset"
-                  onDoubleClick={() => {
-                    const width = constrainArtifactPanelWidth(
-                      DEFAULT_ARTIFACT_PANEL_WIDTH,
-                      splitPaneRef.current?.clientWidth ??
-                        DEFAULT_ARTIFACT_PANEL_WIDTH + MIN_CONVERSATION_PANEL_WIDTH,
-                    );
-                    if (subagentsOpen) setSubagentsPanelWidth(480);
-                    else {
-                      setArtifactPanelWidth(width);
-                      saveArtifactPanelWidth(width);
-                    }
-                  }}
-                  onKeyDown={handleSidePanelResizeKey}
-                  onMouseDown={handleSidePanelResizeStart}
-                  className="group relative z-20 hidden w-2 shrink-0 touch-none cursor-col-resize outline-none xl:block"
+                  className={
+                    sidePanelOpen
+                      ? "hidden min-w-[20rem] flex-1 flex-col xl:flex"
+                      : "flex min-w-0 flex-1 flex-col"
+                  }
                 >
-                  <span
-                    className={`absolute inset-y-0 left-1/2 w-px -translate-x-1/2 transition-colors ${
-                      resizingArtifactPanel
-                        ? "bg-accent"
-                        : "bg-border-subtle group-hover:bg-accent/70 group-focus-visible:bg-accent"
-                    }`}
-                  />
-                </div>
-                <div
-                  className="flex min-w-0 flex-1 xl:flex-none"
-                  style={{ width: sidePanelWidth }}
-                >
-                  <PanelErrorBoundary
-                    title="Details panel needs to restart"
-                    resetKey={subagentsOpen ? "subagents" : activeArtifactId}
-                    onDismiss={() => {
-                      closeSubagents();
-                      setArtifactPanelOpen(false);
-                      setActiveArtifactId(null);
-                    }}
-                  >
-                    <Suspense fallback={<div className="min-w-0 flex-1 bg-bg-elevated" />}>
-                      {subagentsOpen ? (
-                        <SubagentsInspector />
-                      ) : activeArtifactId ? (
-                        <ArtifactWorkspace
-                          activeArtifactId={activeArtifactId}
-                          conversationTitle={conversationTitle ?? "Current conversation"}
-                          onSelect={setActiveArtifactId}
-                          onClose={() => {
-                            setArtifactPanelOpen(false);
-                            setActiveArtifactId(null);
-                          }}
-                          onJumpToSource={jumpToSource}
-                        />
-                      ) : (
-                        <ArtifactWorkspaceEmpty onClose={() => setArtifactPanelOpen(false)} />
-                      )}
+                  <PanelErrorBoundary title="Conversation panel needs to restart" resetKey={session.id}>
+                    <Suspense fallback={<div className="min-h-0 flex-1" />}>
+                      <Conversation activeArtifactId={activeArtifactId} onOpenArtifact={openArtifact} />
                     </Suspense>
                   </PanelErrorBoundary>
+                  <GoalStatusRail />
+                  <Composer />
                 </div>
+                {sidePanelOpen && (
+                  <>
+                    <div
+                      role="separator"
+                      aria-label="Resize details panel"
+                      aria-orientation="vertical"
+                      aria-valuemin={MIN_ARTIFACT_PANEL_WIDTH}
+                      aria-valuemax={Math.max(
+                        MIN_ARTIFACT_PANEL_WIDTH,
+                        splitPaneWidth - MIN_CONVERSATION_PANEL_WIDTH,
+                      )}
+                      aria-valuenow={sidePanelWidth}
+                      tabIndex={0}
+                      title="Drag to resize details panel · Double-click to reset"
+                      onDoubleClick={() => {
+                        const width = constrainArtifactPanelWidth(
+                          DEFAULT_ARTIFACT_PANEL_WIDTH,
+                          splitPaneRef.current?.clientWidth ??
+                            DEFAULT_ARTIFACT_PANEL_WIDTH + MIN_CONVERSATION_PANEL_WIDTH,
+                        );
+                        if (subagentsOpen) setSubagentsPanelWidth(480);
+                        else {
+                          setArtifactPanelWidth(width);
+                          saveArtifactPanelWidth(width);
+                        }
+                      }}
+                      onKeyDown={handleSidePanelResizeKey}
+                      onMouseDown={handleSidePanelResizeStart}
+                      className="group relative z-20 hidden w-2 shrink-0 touch-none cursor-col-resize outline-none xl:block"
+                    >
+                      <span
+                        className={`absolute inset-y-0 left-1/2 w-px -translate-x-1/2 transition-colors ${
+                          resizingArtifactPanel
+                            ? "bg-accent"
+                            : "bg-border-subtle group-hover:bg-accent/70 group-focus-visible:bg-accent"
+                        }`}
+                      />
+                    </div>
+                    <div
+                      className="flex min-w-0 flex-1 xl:flex-none"
+                      style={{ width: sidePanelWidth }}
+                    >
+                      <PanelErrorBoundary
+                        title="Details panel needs to restart"
+                        resetKey={subagentsOpen ? "subagents" : activeArtifactId}
+                        onDismiss={() => {
+                          closeSubagents();
+                          setArtifactPanelOpen(false);
+                          setActiveArtifactId(null);
+                        }}
+                      >
+                        <Suspense fallback={<div className="min-w-0 flex-1 bg-bg-elevated" />}>
+                          {subagentsOpen ? (
+                            <SubagentsInspector />
+                          ) : activeArtifactId ? (
+                            <ArtifactWorkspace
+                              activeArtifactId={activeArtifactId}
+                              conversationTitle={conversationTitle ?? "Current conversation"}
+                              onSelect={setActiveArtifactId}
+                              onClose={() => {
+                                setArtifactPanelOpen(false);
+                                setActiveArtifactId(null);
+                              }}
+                              onJumpToSource={jumpToSource}
+                            />
+                          ) : (
+                            <ArtifactWorkspaceEmpty onClose={() => setArtifactPanelOpen(false)} />
+                          )}
+                        </Suspense>
+                      </PanelErrorBoundary>
+                    </div>
+                  </>
+                )}
+              </div>
+            ) : (
+              <>
+                <StartCard />
+                <Composer />
               </>
             )}
-          </div>
-        ) : (
-          <>
-            <StartCard />
-            <Composer />
-          </>
-        )}
+          </m.div>
+        </AnimatePresence>
         {/* The terminal drawer lives at the shell level (not inside a branch)
             so it survives switching between the start screen and a session —
             and so the sidebar can open it in a freshly picked project folder

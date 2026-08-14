@@ -63,6 +63,8 @@ describe("human-bound Scout authority", () => {
       projectMode: "remote",
       localSettings: { ...DEFAULT_LOCAL_SETTINGS, cwd: "/repo/previous-package" },
       recentProjects: ["/repo/previous-package"],
+      approvalPolicy: "ask",
+      collaborationMode: "plan",
     });
   });
 
@@ -108,7 +110,11 @@ describe("human-bound Scout authority", () => {
       }),
       {
         kind: "new",
-        options: expect.objectContaining({ cwd: neutralPath }),
+        options: expect.objectContaining({
+          cwd: neutralPath,
+          mode: "full",
+          collaboration_mode: "default",
+        }),
         bindId: conversationId,
       },
     );

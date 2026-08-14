@@ -51,4 +51,20 @@ describe("ProjectHeader", () => {
 
     expect(html).not.toContain("New session");
   });
+
+  it("shows an explicit drag handle only for reorderable pinned projects", () => {
+    const html = renderToStaticMarkup(
+      <ProjectHeader
+        group={group({ key: "p:/repo", label: "Repo", kind: "local", path: "/repo" })}
+        menuOpen={false}
+        reorderable
+        onOpenMenu={vi.fn()}
+        onNewSession={vi.fn()}
+      />,
+    );
+
+    expect(html).toContain('data-project-drag-handle="p:/repo"');
+    expect(html).toContain("Drag Repo to reorder pinned projects");
+    expect(html).toContain("Project actions for Repo");
+  });
 });

@@ -23,6 +23,8 @@ describe("Scout conversation start failures", () => {
       opening: null,
       conversations: [],
       error: null,
+      approvalPolicy: "ask",
+      collaborationMode: "default",
       localSettings: { ...DEFAULT_LOCAL_SETTINGS, cwd: "/repo" },
     });
   });
@@ -39,5 +41,17 @@ describe("Scout conversation start failures", () => {
       connecting: false,
       error: "Pick or create a Scout workspace before starting.",
     });
+  });
+
+  it("does not let Shift+Tab change Scout's fixed Full access policy", () => {
+    useSessionStore.getState().cycleApprovalPolicy();
+
+    expect(useSessionStore.getState().approvalPolicy).toBe("ask");
+  });
+
+  it("does not let Scout enter read-only Plan mode", () => {
+    useSessionStore.getState().setCollaborationMode("plan");
+
+    expect(useSessionStore.getState().collaborationMode).toBe("default");
   });
 });

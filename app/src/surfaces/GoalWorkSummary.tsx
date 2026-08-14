@@ -36,7 +36,7 @@ export function GoalWorkSummary({
           {formatGoalDuration(goalElapsedSeconds(goal, Date.now(), working))}
         </span>
         <ChevronRight
-          className={`size-4 transition-transform duration-200 ${open ? "rotate-90" : ""}`}
+          className={`size-4 transition-transform duration-base ${open ? "rotate-90" : ""}`}
           aria-hidden
         />
       </button>

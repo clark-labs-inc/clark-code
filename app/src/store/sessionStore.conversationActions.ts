@@ -57,6 +57,7 @@ import {
   type RsiScoutContextSnapshot,
   scoutCartographyTarget,
   specialistConnectConfig,
+  specialistReadRoots,
   newScoutRunRequestId,
 } from "../lib/specialists";
 import {
@@ -67,6 +68,7 @@ import {
 import { authAccountMatches } from "../lib/account";
 import { isQuickChatProject } from "../lib/projectSidebar";
 import { productModule } from "../product/productModule";
+import { approvalPolicyForSpecialist } from "../lib/permissions";
 
 type ConversationActions = Pick<
   SessionState,
@@ -287,6 +289,7 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
     const { bridge, activeProvider, auth } = get();
     if (!bridge || !activeProvider) return;
     const quickChat = startOptions?.quickChat ?? null;
+    const requestedReadRoots = startOptions?.readRoots?.filter((root) => root.trim()) ?? [];
     const epoch = nextSessionEpoch();
     let specialistContext = quickChat ? null : activeSpecialistContext();
     const specialistDefinition = researchRuntimeSpecialist(specialistContext);
@@ -447,8 +450,13 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
       let config;
       let options;
       let remoteHost: string | null = null;
-      const collaboration_mode = get().collaborationMode;
-      const mode = get().approvalPolicy;
+      const collaboration_mode = specialistContext?.kind === "scout"
+        ? "default" as const
+        : get().collaborationMode;
+      const mode = approvalPolicyForSpecialist(
+        get().approvalPolicy,
+        specialistContext?.kind,
+      );
       if (specialistDefinition && specialistContext) {
         const specialistHost = isRemote
           ? loadSshHosts(codeKeyAccountBinding(get().auth)).find((h) => h.id === get().selectedHostId)
@@ -523,7 +531,11 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
             : undefined,
           localSettings.advisorTrainingEnabled === true,
         );
-        options = { cwd: localSessionPath, collaboration_mode: "default" as const };
+        options = {
+          cwd: localSessionPath,
+          mode,
+          collaboration_mode: "default" as const,
+        };
       } else if (isRemote) {
         const host = loadSshHosts(codeKeyAccountBinding(get().auth)).find((h) => h.id === get().selectedHostId);
         if (!host) throw new Error("Pick a remote host first, or add one.");
@@ -537,7 +549,10 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
           codeKeyAccountBinding(get().auth),
           productSpecialistTarget(specialistContext, localSettings.advisorTrainingEnabled),
           specialistModelSettings(specialistContext) ?? undefined,
-          get().recentProjects,
+          [
+            ...specialistReadRoots(specialistContext, get().recentProjects),
+            ...requestedReadRoots,
+          ],
         );
         options = { cwd: remote.cwd, mode, collaboration_mode };
       } else if (isLocal) {
@@ -550,7 +565,10 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
           codeKeyAccountBinding(get().auth),
           productSpecialistTarget(specialistContext, localSettings.advisorTrainingEnabled),
           specialistModelSettings(specialistContext) ?? undefined,
-          get().recentProjects,
+          [
+            ...specialistReadRoots(specialistContext, get().recentProjects),
+            ...requestedReadRoots,
+          ],
         );
         options = { cwd: localSessionPath, mode, collaboration_mode };
       } else {
@@ -570,6 +588,12 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
         ...(requestedSessionId ? { bindId: requestedSessionId } : {}),
       });
       nativeSession = session;
+      if (isRemote && requestedReadRoots.length > 0) {
+        if (!bridge.addReadRoots) {
+          throw new Error("This Clark Code build cannot attach remote read-only folders.");
+        }
+        await bridge.addReadRoots(session.id, requestedReadRoots);
+      }
       if (epochStale(epoch)) {
         void bridge.closeSession?.(session.id);
         return;
@@ -614,7 +638,7 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
             : sessionProvider === "local"
               ? localSettings.reasoningEffort
               : undefined,
-          approvalPolicy: get().approvalPolicy,
+          approvalPolicy: mode,
           outputStyle: get().outputStyle,
           memoriesEnabled: get().memoriesEnabled,
           browserEnabled: get().browserEnabled,
@@ -972,12 +996,17 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
       // The model comes from the conversation's per-chat override when one was
       // set, else the global default — so reopening a chat that ran a different
       // model starts it on that model again, not the current default.
-      const collaboration_mode = get().collaborationMode;
+      const collaboration_mode = openingMeta?.specialist?.kind === "scout"
+        ? "default" as const
+        : get().collaborationMode;
       // The approval level likewise comes from this chat's own override when it
       // has one, else the global default — so reopening a chat you'd set to
       // "Full access" restarts it there, not on whatever the composer happens
       // to show now.
-      const mode = effectiveApprovalPolicy(get().approvalPolicy, get().approvalPolicies, id);
+      const mode = approvalPolicyForSpecialist(
+        effectiveApprovalPolicy(get().approvalPolicy, get().approvalPolicies, id),
+        openingMeta?.specialist?.kind,
+      );
       const effSettings = effectiveModelSettings(localSettings, get().chatModels, id);
       if (isLocal && !openingMeta?.specialist) {
         pinChatModel(get, set, id, effSettings);
@@ -1024,7 +1053,11 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
           get().localSettings.advisorTrainingEnabled === true,
         );
         remoteHost = specialistHost?.host.trim() ?? null;
-        options = { cwd: requestedProjectRoot, collaboration_mode: "default" as const };
+        options = {
+          cwd: requestedProjectRoot,
+          mode,
+          collaboration_mode: "default" as const,
+        };
       } else if (wantRemote) {
         const host = loadSshHosts(codeKeyAccountBinding(get().auth)).find((h) => h.host.trim() === openingMeta!.remoteHost);
         if (!host) {
@@ -1044,7 +1077,7 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
           codeKeyAccountBinding(get().auth),
           productSpecialistTarget(resolvedSpecialist, effSettings.advisorTrainingEnabled),
           specialistModelSettings(resolvedSpecialist) ?? undefined,
-          get().recentProjects,
+          specialistReadRoots(resolvedSpecialist, get().recentProjects),
         );
         options = { cwd: remote.cwd, mode, collaboration_mode };
       } else if (isLocal) {
@@ -1059,7 +1092,7 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
           codeKeyAccountBinding(get().auth),
           productSpecialistTarget(resolvedSpecialist, effSettings.advisorTrainingEnabled),
           specialistModelSettings(resolvedSpecialist) ?? undefined,
-          get().recentProjects,
+          specialistReadRoots(resolvedSpecialist, get().recentProjects),
         );
         options = { cwd: requestedProjectRoot, mode, collaboration_mode };
       } else {
@@ -1125,7 +1158,7 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
           : isLocal
             ? effSettings.reasoningEffort
             : undefined,
-        approvalPolicy: get().approvalPolicy,
+        approvalPolicy: mode,
         outputStyle: get().outputStyle,
       }, restored ?? emptySnapshot());
       if (epochStale(epoch)) {

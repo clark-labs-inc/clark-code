@@ -116,31 +116,41 @@ export function latestSpecArtifact(artifacts: readonly Artifact[]): Artifact | n
 export function initialSpecMarkdown(title?: string | null): string {
   return `# ${specDisplayTitle(title)}
 
-## Overview
+## Problem and outcome
 
-Describe the feature in your own words. Clark will keep this document updated while you talk.
+Describe what is difficult today and what should feel meaningfully better.
 
-## Main problems to solve
+## People and roles
 
-- What is difficult or confusing today?
-- Who experiences the problem?
-- What outcome should feel meaningfully better?
+Who should benefit first, and who else is involved?
 
-## User experience
+## End-to-end experience
 
-Capture what the user sees, does, and understands from beginning to end.
+Describe what the person sees, does, and understands from beginning to end.
 
-## Interaction rules
+## Expected behavior
 
 Record the behaviors that must stay predictable, including what the product must never do.
 
-## Edge cases
+## Edge cases and recovery
 
 Cover empty, loading, error, interruption, permission, duplicate, and large-data states.
 
+## Boundaries and constraints
+
+Capture non-goals, dependencies, privacy needs, and limits the team must respect.
+
 ## Acceptance criteria
 
-Turn the agreed behavior into observable, testable outcomes.`;
+Turn the agreed behavior into observable, testable outcomes.
+
+## Success measures
+
+Describe the signal that will show whether this solved the problem.
+
+## Open questions and decision log
+
+Clark will keep unresolved choices and settled decisions here as the document evolves.`;
 }
 
 export function scopedSpecPrompt(selection: string, question: string): string {

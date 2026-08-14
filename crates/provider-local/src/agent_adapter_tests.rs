@@ -88,7 +88,7 @@ async fn desktop_sink_preserves_stream_lifecycle_events_as_trace() {
     let sink = DesktopEventSink::new(
         send,
         RunId::new("run-1"),
-        Arc::new(ToolRegistry::new(None, None)),
+        Arc::new(ToolRegistry::new(None)),
         None,
     );
     ca::EventSink::emit(
@@ -121,7 +121,7 @@ async fn desktop_sink_announces_each_compaction_checkpoint_once() {
     let sink = DesktopEventSink::new(
         send,
         RunId::new("run-1"),
-        Arc::new(ToolRegistry::new(None, None)),
+        Arc::new(ToolRegistry::new(None)),
         None,
     );
     let before = vec![ca::AgentMessage::User {
@@ -190,7 +190,7 @@ async fn desktop_sink_marks_text_with_tool_calls_as_commentary() {
     let sink = DesktopEventSink::new(
         send,
         RunId::new("run-1"),
-        Arc::new(ToolRegistry::new(None, None)),
+        Arc::new(ToolRegistry::new(None)),
         None,
     );
     ca::EventSink::emit(
@@ -233,7 +233,7 @@ async fn desktop_sink_projects_final_answer_as_text_without_a_tool_row() {
     let sink = DesktopEventSink::new(
         send,
         RunId::new("run-1"),
-        Arc::new(ToolRegistry::new(None, None)),
+        Arc::new(ToolRegistry::new(None)),
         None,
     );
     ca::EventSink::emit(
@@ -288,7 +288,7 @@ async fn desktop_sink_captures_only_canonical_completed_turns() {
     let sink = DesktopEventSink::new(
         send,
         RunId::new("run-1"),
-        Arc::new(ToolRegistry::new(None, None)),
+        Arc::new(ToolRegistry::new(None)),
         None,
     );
     let completed = sink.completed_transcript();

@@ -95,6 +95,7 @@ async-trait.workspace = true
 tracing.workspace = true
 tracing-appender = { version = "0.2", optional = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+glob = "0.3"
 
 # Route a second launch (e.g. Windows/Linux opening a product URL) into the
 # already-running process instead of spawning a new window; the `deep-link`

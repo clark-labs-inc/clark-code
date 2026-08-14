@@ -2,68 +2,77 @@
 // picked files into one `onFiles` callback, so the composer stays agnostic to
 // where files come from (drag-drop, paste, file picker, … add more freely).
 
-import { useCallback, useEffect, useRef, useState, type DragEvent } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { combine } from "@atlaskit/pragmatic-drag-and-drop/combine";
+import {
+  dropTargetForExternal,
+  monitorForExternal,
+} from "@atlaskit/pragmatic-drag-and-drop/external/adapter";
+import {
+  containsFiles,
+  getFiles,
+} from "@atlaskit/pragmatic-drag-and-drop/external/file";
+import { preventUnhandled } from "@atlaskit/pragmatic-drag-and-drop/prevent-unhandled";
 
-/** Drag-and-drop source: returns drag state + handlers to spread on a region. */
+const COMPOSER_FILE_DROP_TARGET = "composer-file-drop-target";
+
+/** Pragmatic Drag and Drop target for files dragged from the desktop. The
+ * returned ref belongs on the composer's outer region; file-picker and paste
+ * sources remain equivalent non-drag alternatives. */
 export function useFileDrop(onFiles: (files: File[]) => void) {
   const [dragging, setDragging] = useState(false);
-  const depth = useRef(0);
+  const [element, setElement] = useState<HTMLElement | null>(null);
+  const callback = useRef(onFiles);
+  callback.current = onFiles;
 
-  const onDragEnter = useCallback((e: DragEvent) => {
-    if (!Array.from(e.dataTransfer.types).includes("Files")) return;
-    e.preventDefault();
-    depth.current += 1;
-    setDragging(true);
-  }, []);
-  const onDragOver = useCallback((e: DragEvent) => {
-    if (Array.from(e.dataTransfer.types).includes("Files")) e.preventDefault();
-  }, []);
-  const onDragLeave = useCallback((e: DragEvent) => {
-    e.preventDefault();
-    depth.current = Math.max(0, depth.current - 1);
-    if (depth.current === 0) setDragging(false);
-  }, []);
-  const onDrop = useCallback(
-    (e: DragEvent) => {
-      e.preventDefault();
-      depth.current = 0;
-      setDragging(false);
-      const files = Array.from(e.dataTransfer.files);
-      if (files.length) onFiles(files);
-    },
-    [onFiles],
-  );
+  useEffect(() => {
+    if (!element) return;
+    return dropTargetForExternal({
+      element,
+      canDrop: containsFiles,
+      getData: () => ({ type: COMPOSER_FILE_DROP_TARGET }),
+      getDropEffect: () => "copy",
+      onDragEnter: () => setDragging(true),
+      onDragLeave: () => setDragging(false),
+      onDrop: ({ source }) => {
+        setDragging(false);
+        const files = getFiles({ source });
+        if (files.length) callback.current(files);
+      },
+    });
+  }, [element]);
 
-  return { dragging, handlers: { onDragEnter, onDragOver, onDragLeave, onDrop } };
+  const dropTargetRef = useCallback((node: HTMLElement | null) => setElement(node), []);
+  return { dragging, dropTargetRef };
 }
 
-/** Window-level safety net for OS file drops. Tauri's native drag-drop is
- *  disabled (so the composer's HTML5 drop target works), and with it gone an
- *  unhandled file drop would navigate the webview to the file — wiping the UI.
- *  Swallow every file drop no other target handled (React handlers run before
- *  this window listener, so `defaultPrevented` marks the composer's drops) and
- *  optionally forward it, giving drop-anywhere-in-the-window attach. */
+/** Window-level Pragmatic Drag and Drop target. Tauri's native drag-drop is
+ * disabled, so this both preserves drop-anywhere attachment and prevents an
+ * unhandled desktop file from navigating the webview away. */
 export function useWindowFileDropGuard(onFiles?: (files: File[]) => void) {
   const cb = useRef(onFiles);
   cb.current = onFiles;
   useEffect(() => {
-    const hasFiles = (e: globalThis.DragEvent) =>
-      Array.from(e.dataTransfer?.types ?? []).includes("Files");
-    const onDragOver = (e: globalThis.DragEvent) => {
-      if (hasFiles(e)) e.preventDefault();
-    };
-    const onDrop = (e: globalThis.DragEvent) => {
-      if (!hasFiles(e) || e.defaultPrevented) return;
-      e.preventDefault();
-      const files = Array.from(e.dataTransfer?.files ?? []);
-      if (files.length) cb.current?.(files);
-    };
-    window.addEventListener("dragover", onDragOver);
-    window.addEventListener("drop", onDrop);
-    return () => {
-      window.removeEventListener("dragover", onDragOver);
-      window.removeEventListener("drop", onDrop);
-    };
+    return combine(
+      dropTargetForExternal({
+        element: document.body,
+        canDrop: containsFiles,
+        getData: () => ({ type: "window-file-drop-target" }),
+        getDropEffect: () => "copy",
+        onDrop: ({ source, location }) => {
+          const composerHandledDrop = location.current.dropTargets.some(
+            (target) => target.data.type === COMPOSER_FILE_DROP_TARGET,
+          );
+          if (composerHandledDrop) return;
+          const files = getFiles({ source });
+          if (files.length) cb.current?.(files);
+        },
+      }),
+      monitorForExternal({
+        canMonitor: containsFiles,
+        onDragStart: () => preventUnhandled.start(),
+      }),
+    );
   }, []);
 }
 

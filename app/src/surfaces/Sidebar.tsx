@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, useReducedMotion } from "motion/react";
 import * as m from "motion/react-m";
 import {
@@ -29,6 +29,7 @@ import {
   saveProjectSidebarPreferences,
   withProjectAlias,
   withProjectPinned,
+  withPinnedProjectMoved,
   withoutProjectPreferences,
   projectDisplayName,
   type ProjectGroup,
@@ -53,12 +54,15 @@ import { ProfileMenu } from "./ProfileMenu";
 import {
   ProjectActionsMenu,
   ProjectHeader,
+  type ProjectMoveDestination,
   type ProjectMenuPosition,
 } from "./ProjectActionsMenu";
+import { ProjectDragAndDrop, type ProjectDropEdge } from "./ProjectDragAndDrop";
 import type { ConversationMeta } from "../lib/history";
 import { useSpecialistStore } from "../store/specialistStore";
 import { SpecialistNavigation } from "./specialists/SpecialistNavigation";
 import { productName } from "../product/productModule";
+import { announce } from "@atlaskit/pragmatic-drag-and-drop-live-region";
 
 type ConversationSelectionIntent = "open" | "toggle" | "range";
 
@@ -67,6 +71,25 @@ interface SidebarScrollAnchor {
   offset: number;
   order: string[];
   index: number;
+}
+
+function projectMoveDestinations(
+  pinnedGroups: ProjectGroup[],
+  currentKey: string,
+  pinnedKeys: string[],
+): ProjectMoveDestination[] {
+  const currentIndex = pinnedKeys.indexOf(currentKey);
+  if (currentIndex < 0) return [];
+  const remainingKeys = pinnedKeys.filter((key) => key !== currentKey);
+  return [
+    { index: 0, label: "First", current: currentIndex === 0 },
+    ...pinnedGroups
+      .filter((group) => group.key !== currentKey)
+      .map((group) => {
+        const index = remainingKeys.indexOf(group.key) + 1;
+        return { index, label: `After ${group.label}`, current: index === currentIndex };
+      }),
+  ];
 }
 
 function ConversationRow({
@@ -115,7 +138,7 @@ function ConversationRow({
       }}
       aria-busy={mutating || undefined}
       className={cn(
-        "group relative flex min-h-7 items-center gap-1 rounded-lg px-2 py-0.5 text-sm transition duration-150 ease-agent",
+        "group relative flex min-h-7 items-center gap-1 rounded-lg px-2 py-0.5 text-sm transition duration-fast ease-agent",
         mutating && "opacity-60",
         selected
           ? "bg-bg-tertiary text-ink"
@@ -459,6 +482,7 @@ export function Sidebar({
   const [projectMenu, setProjectMenu] = useState<{
     group: ProjectGroup;
     position: ProjectMenuPosition;
+    trigger: HTMLButtonElement;
   } | null>(null);
   // The right-click menu: positioned at the cursor; acts on the selection when
   // the right-clicked row is in it, else just that row.
@@ -609,6 +633,10 @@ export function Sidebar({
       },
     ),
     [activeConvos, rememberedProjects, rank, projectPreferences, filter],
+  );
+  const pinnedGroups = useMemo(
+    () => groups.filter((group) => projectPreferences.pinned.includes(group.key)),
+    [groups, projectPreferences.pinned],
   );
   const activeWorktreePaths = useMemo(() => {
     const activePaths = conversations
@@ -829,6 +857,27 @@ export function Sidebar({
     setProjectPreferences(next);
   };
 
+  const movePinnedProjectTo = useCallback((key: string, index: number, label: string) => {
+    const next = withPinnedProjectMoved(projectPreferences, key, index);
+    if (next === projectPreferences) return;
+    saveProjectSidebarPreferences(next, undefined, accountScope);
+    setProjectPreferences(next);
+    announce(`Project ${label} moved to position ${index + 1} of ${next.pinned.length}.`);
+  }, [accountScope, projectPreferences]);
+
+  const dropPinnedProject = useCallback((
+    sourceKey: string,
+    targetKey: string,
+    edge: ProjectDropEdge,
+  ) => {
+    const remaining = projectPreferences.pinned.filter((key) => key !== sourceKey);
+    const targetIndex = remaining.indexOf(targetKey);
+    if (targetIndex < 0) return;
+    const destinationIndex = targetIndex + (edge === "bottom" ? 1 : 0);
+    const label = groups.find((group) => group.key === sourceKey)?.label ?? "Project";
+    movePinnedProjectTo(sourceKey, destinationIndex, label);
+  }, [groups, movePinnedProjectTo, projectPreferences.pinned]);
+
   const openProjectMenu = (group: ProjectGroup, button: HTMLButtonElement) => {
     if (projectMenu?.group.key === group.key) {
       setProjectMenu(null);
@@ -840,7 +889,7 @@ export function Sidebar({
     const estimatedHeight = group.path ? 212 : 152;
     const left = Math.max(8, Math.min(rect.right + 6, window.innerWidth - width - 8));
     const top = Math.max(8, Math.min(rect.top - 8, window.innerHeight - estimatedHeight - 8));
-    setProjectMenu({ group, position: { left, top } });
+    setProjectMenu({ group, position: { left, top }, trigger: button });
   };
 
   const archiveProjectChats = (group: ProjectGroup) => {
@@ -1103,54 +1152,65 @@ export function Sidebar({
             )}
             <AnimatePresence initial={false} mode="popLayout">
               {groups.map((g) => (
-                <m.section
+                <ProjectDragAndDrop
                   key={g.key}
-                  layout={reduceMotion ? false : "position"}
-                  {...accessibleMotion(RISE_SMALL, reduceMotion)}
-                  transition={staggeredTransition(reduceMotion, 0, 0.04, { duration: DUR.fast })}
+                  projectKey={g.key}
+                  label={g.label}
+                  enabled={!filter && pinnedGroups.length > 1 && projectPreferences.pinned.includes(g.key)}
+                  onDropProject={dropPinnedProject}
                 >
-                  <ProjectHeader
-                    group={g}
-                    menuOpen={projectMenu?.group.key === g.key}
-                    onOpenMenu={(button) => openProjectMenu(g, button)}
-                    onNewSession={() => startProjectSession(g)}
-                  />
-                  <div className="flex flex-col">
-                    <AnimatePresence initial={false} mode="popLayout">
-                      {g.convos.map((c) => {
-                        const mutation = mutatingIds.has(c.id)
-                          ? conversationMutation?.kind ?? "archive"
-                          : null;
-                        return (
-                          <m.div
-                            key={c.id}
-                            data-sidebar-conversation-id={c.id}
-                            layout={reduceMotion ? false : "position"}
-                            {...accessibleMotion(RISE_SMALL, reduceMotion)}
-                            transition={staggeredTransition(reduceMotion, 0, 0.04, { duration: DUR.fast })}
-                          >
-                            <ConversationRow
-                              c={c}
-                              active={navigatedConversationId === c.id}
-                              streaming={runningIds.includes(c.id)}
-                              unseen={
-                                unseenWorkIds.includes(c.id) &&
-                                navigatedConversationId !== c.id
-                              }
-                              opening={openingId === c.id}
-                              selected={selectedIds.has(c.id)}
-                              mutation={mutation}
-                              onSelect={selectConversation}
-                              onRangeStep={extendSelectionWithKeyboard}
-                              onArchive={archiveConversationWithFocus}
-                              onContextMenu={openContextMenu}
-                            />
-                          </m.div>
-                        );
-                      })}
-                    </AnimatePresence>
-                  </div>
-                </m.section>
+                  {(dragHandleRef) => (
+                    <m.section
+                      layout={reduceMotion ? false : "position"}
+                      {...accessibleMotion(RISE_SMALL, reduceMotion)}
+                      transition={staggeredTransition(reduceMotion, 0, 0.04, { duration: DUR.fast })}
+                    >
+                      <ProjectHeader
+                        group={g}
+                        menuOpen={projectMenu?.group.key === g.key}
+                        reorderable={!filter && pinnedGroups.length > 1 && projectPreferences.pinned.includes(g.key)}
+                        dragHandleRef={dragHandleRef}
+                        onOpenMenu={(button) => openProjectMenu(g, button)}
+                        onNewSession={() => startProjectSession(g)}
+                      />
+                      <div className="flex flex-col">
+                        <AnimatePresence initial={false} mode="popLayout">
+                          {g.convos.map((c) => {
+                            const mutation = mutatingIds.has(c.id)
+                              ? conversationMutation?.kind ?? "archive"
+                              : null;
+                            return (
+                              <m.div
+                                key={c.id}
+                                data-sidebar-conversation-id={c.id}
+                                layout={reduceMotion ? false : "position"}
+                                {...accessibleMotion(RISE_SMALL, reduceMotion)}
+                                transition={staggeredTransition(reduceMotion, 0, 0.04, { duration: DUR.fast })}
+                              >
+                                <ConversationRow
+                                  c={c}
+                                  active={navigatedConversationId === c.id}
+                                  streaming={runningIds.includes(c.id)}
+                                  unseen={
+                                    unseenWorkIds.includes(c.id) &&
+                                    navigatedConversationId !== c.id
+                                  }
+                                  opening={openingId === c.id}
+                                  selected={selectedIds.has(c.id)}
+                                  mutation={mutation}
+                                  onSelect={selectConversation}
+                                  onRangeStep={extendSelectionWithKeyboard}
+                                  onArchive={archiveConversationWithFocus}
+                                  onContextMenu={openContextMenu}
+                                />
+                              </m.div>
+                            );
+                          })}
+                        </AnimatePresence>
+                      </div>
+                    </m.section>
+                  )}
+                </ProjectDragAndDrop>
               ))}
             </AnimatePresence>
 
@@ -1312,12 +1372,24 @@ export function Sidebar({
           group={projectMenu.group}
           position={projectMenu.position}
           pinned={projectPreferences.pinned.includes(projectMenu.group.key)}
+          moveDestinations={projectMoveDestinations(
+            pinnedGroups,
+            projectMenu.group.key,
+            projectPreferences.pinned,
+          )}
           onClose={() => setProjectMenu(null)}
           onPin={(pinned) =>
             commitProjectPreferences(
               withProjectPinned(projectPreferences, projectMenu.group.key, pinned),
             )
           }
+          onMove={(destinationIndex) => {
+            const { group, trigger } = projectMenu;
+            movePinnedProjectTo(group.key, destinationIndex, group.label);
+            requestAnimationFrame(() => {
+              if (trigger.isConnected) trigger.focus();
+            });
+          }}
           onReveal={() => {
             const path = projectMenu.group.path;
             if (path) void openProjectPath(path, "", true);

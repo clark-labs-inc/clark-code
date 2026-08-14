@@ -17,6 +17,15 @@ export interface ProductSpecialistIconProps {
   className?: string;
 }
 
+export type ProductExceptionalState = "loading" | "empty" | "recovery";
+
+export interface ProductExceptionalStateIllustrationProps {
+  state: ProductExceptionalState;
+  size?: number;
+  className?: string;
+  label?: string;
+}
+
 export interface ProductUiContext {
   access: ProductAccessProjection | null;
   accessLoading: boolean;
@@ -87,8 +96,20 @@ export interface ProductVoiceTranscription {
   format?: string;
 }
 
+export interface ProductVoiceStreamSession {
+  id: string;
+}
+
+export interface ProductVoiceStreamPolicy {
+  start: () => Promise<ProductVoiceStreamSession>;
+  send: (id: string, dataBase64: string) => Promise<void>;
+  finish: (id: string) => Promise<ProductVoiceTranscription>;
+  cancel: (id: string) => Promise<void>;
+}
+
 export interface ProductVoicePolicy {
-  transcribe: (input: ProductVoiceInput) => Promise<ProductVoiceTranscription>;
+  transcribe?: (input: ProductVoiceInput) => Promise<ProductVoiceTranscription>;
+  stream?: ProductVoiceStreamPolicy;
 }
 
 export interface ProductSpecialistWorkspacePolicy {
@@ -129,6 +150,7 @@ export interface ProductModule {
   branding: ProductBranding;
   authRequired: boolean;
   mark?: ComponentType<ProductMarkProps>;
+  exceptionalStateIllustration?: ComponentType<ProductExceptionalStateIllustrationProps>;
   slots: ProductUiSlots;
   localAgent: ProductLocalAgentPolicy;
   voice?: ProductVoicePolicy;
@@ -191,7 +213,12 @@ export function installProductModule(product: ProductModule): void {
       ...product.localAgent,
       models: Object.freeze(product.localAgent.models.map((model) => Object.freeze({ ...model }))),
     }),
-    voice: product.voice ? Object.freeze({ ...product.voice }) : undefined,
+    voice: product.voice
+      ? Object.freeze({
+          ...product.voice,
+          stream: product.voice.stream ? Object.freeze({ ...product.voice.stream }) : undefined,
+        })
+      : undefined,
     specialistWorkspace: product.specialistWorkspace
       ? Object.freeze({ ...product.specialistWorkspace })
       : undefined,

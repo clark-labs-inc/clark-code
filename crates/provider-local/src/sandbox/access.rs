@@ -15,6 +15,13 @@ impl Sandbox {
         self
     }
 
+    /// Replace the complete host-approved read-only set while preserving the
+    /// writable checkout, task scope, and document workspace.
+    pub fn replacing_read_roots(mut self, roots: impl IntoIterator<Item = PathBuf>) -> Self {
+        self.read_roots.clear();
+        self.with_read_roots(roots)
+    }
+
     pub fn read_roots(&self) -> &[PathBuf] {
         &self.read_roots
     }

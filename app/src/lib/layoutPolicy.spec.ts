@@ -45,7 +45,7 @@ describe("responsive GUI layout policy", () => {
       "startDraftSettleResult = await settleAcceptedDraft()",
       branch,
     );
-    const start = composer.indexOf("await start({ submittedDraft: t })", settle);
+    const start = composer.indexOf("await start({ submittedDraft: t", settle);
 
     expect(settle).toBeGreaterThan(branch);
     expect(start).toBeGreaterThan(settle);

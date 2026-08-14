@@ -20,6 +20,19 @@ describe("detectComposerTrigger", () => {
     expect(detectComposerTrigger("me@example.com", 14)).toBeNull();
     expect(detectComposerTrigger("@src done", 9)).toBeNull();
   });
+
+  it("keeps slashes inside file and parent-folder mentions", () => {
+    expect(detectComposerTrigger("@../", 4)).toEqual({
+      type: "@",
+      query: "../",
+      start: 0,
+    });
+    expect(detectComposerTrigger("inspect @src/lib/", 17)).toEqual({
+      type: "@",
+      query: "src/lib/",
+      start: 8,
+    });
+  });
 });
 
 describe("composerSubmissionState", () => {
@@ -35,6 +48,20 @@ describe("composerSubmissionState", () => {
       canPickProjectFolder: true,
       usesConversationWorkspace: true,
     })).toEqual({ canSubmit: true, shouldPickProjectFolder: false });
+  });
+
+  it("keeps a conversation-bound specialist blocked until its SSH target is ready", () => {
+    expect(composerSubmissionState({
+      hasContent: true,
+      hasSession: false,
+      connecting: false,
+      activeProvider: "local",
+      projectMode: "remote",
+      localCwd: "",
+      startBlocked: "Add a remote host.",
+      canPickProjectFolder: true,
+      usesConversationWorkspace: true,
+    })).toEqual({ canSubmit: false, shouldPickProjectFolder: false });
   });
 
   const ready = {

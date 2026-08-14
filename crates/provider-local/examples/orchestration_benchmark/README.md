@@ -23,7 +23,7 @@ The summary also includes an eight-case default-agent recovery A/B: clean comple
 | `reviewed` | readers, writer, reviewer, rework, verifier | maximum reliability lane |
 | `cheap-subagents` | cheap parallel readers, strong writer | cost-quality tradeoff |
 | `homogeneous-strong` | strong readers and writer | strong-model ceiling |
-| `brokered-cloud` | cloud-eligible research reader plus local writer | host-injected cloud-agent integration |
+| `brokered-cloud` | scripted research reader plus local writer | validates the host-injected boundary contract offline; live ownership stays in the product composition |
 | `mixed-harness` | OS-sandboxed ACP readers plus local writer | compares an external coding harness at the same read-only boundary |
 
 Only one task may hold the writer lease. Readers, reviewers, and verifiers have a read-only permission ceiling. Result reporting and acceptance are separate control-plane transitions so a reviewer can reject a reported writer attempt and accept a later rework attempt.
@@ -38,7 +38,7 @@ The catalog uses freshly seeded Git repositories (plus a non-Git case), private 
 - hidden cross-module contracts, decoys, and misleading docs;
 - worker crash, missing/false/duplicate handoff, flaky verification, and reviewer bugs;
 - permission escalation, tree-budget exhaustion, context truncation, and restart/resume;
-- remote/non-Git execution and host-injected cloud-agent research.
+- remote/non-Git execution and the scripted host-injected cloud-agent boundary.
 
 The hidden rubric prefers behavioral checks when several implementations are valid. Exact-file checks are reserved for tasks whose requested output is exact.
 
@@ -51,7 +51,7 @@ Offline is the default. Live mode requires all of the following:
 3. `MODEL_API_KEY` or `PRODUCT_API_KEY` (the runner loads the root `.env` without logging values);
 4. a scenario and/or lane filter, unless `--full-live-matrix` is explicit.
 
-Live defaults add further bounds: 600 seconds per agent, 400k tokens per orchestration tree, 12 benchmark runs per invocation, and a $2 inter-run cost stop. Each is configurable. Cost caps are checked between retained runs because providers report authoritative cost only after a run finishes. `product_research` currently returns findings but not nested-call usage, so reports count those calls explicitly as unmetered external work and never pretend the displayed metered total is complete. The normalized Provider usage also does not expose cache-hit tokens, so `non_cached_input_available` is false and the benchmark records zero rather than relabeling total input as non-cached input.
+Live defaults add further bounds: 600 seconds per agent, 400k tokens per orchestration tree, 12 benchmark runs per invocation, and a $2 inter-run cost stop. Each is configurable. Cost caps are checked between retained runs because providers report authoritative cost only after a run finishes. The neutral foundation rejects live `brokered-cloud` runs because it owns no product research tool; that lane must be run by the product composition that installs the brokered ToolPack. The normalized Provider usage also does not expose cache-hit tokens, so `non_cached_input_available` is false and the benchmark records zero rather than relabeling total input as non-cached input.
 
 The live mixed-harness lane takes an explicit ACP command as a JSON string array. The benchmark wraps it in macOS `sandbox-exec` with filesystem writes denied, uses a scratch `HOME`, rejects permission requests, snapshots the repository around the parallel reader batch, and never routes the writer through ACP. It is deliberately unavailable on platforms where that boundary is not implemented.
 

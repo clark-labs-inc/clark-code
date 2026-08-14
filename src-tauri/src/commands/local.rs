@@ -195,6 +195,44 @@ pub async fn local_list_files(
     Ok(provider_local::list_project_files(exec.as_ref(), &root).await)
 }
 
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectDirectory {
+    pub name: String,
+    pub path: String,
+}
+
+/// List the immediate directories beside `cwd` for Spec's repository picker.
+/// This is intentionally shallow: typing `@` must not walk every sibling repo.
+#[tauri::command]
+pub async fn local_list_sibling_directories(
+    cwd: String,
+    remote: Option<RemoteArg>,
+    state: State<'_, AppState>,
+) -> Result<Vec<ProjectDirectory>, String> {
+    let current = PathBuf::from(cwd.trim());
+    let parent = current.parent().ok_or("the current folder has no parent")?;
+    let current_name = current.file_name().map(|name| name.to_os_string());
+    let exec = project_executor(remote, state.inner()).await?;
+    let mut directories = exec
+        .read_dir(parent)
+        .await
+        .map_err(|error| format!("list {}: {error}", parent.display()))?
+        .into_iter()
+        .filter(|entry| {
+            entry.is_dir
+                && !entry.is_symlink
+                && current_name.as_deref() != Some(std::ffi::OsStr::new(&entry.name))
+        })
+        .map(|entry| ProjectDirectory {
+            path: parent.join(&entry.name).to_string_lossy().into_owned(),
+            name: entry.name,
+        })
+        .collect::<Vec<_>>();
+    directories.sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
+    Ok(directories)
+}
+
 /// Read sealed and in-progress Security scanner artifacts from the selected
 /// checkout. The provider owns parsing and bounds; the desktop receives only
 /// canonical scan records, never arbitrary project files.

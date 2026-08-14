@@ -174,7 +174,6 @@ impl ProviderProfile {
             "max_iterations": self.max_iterations,
             "permissions": permissions,
             "command_allowlist": self.allowed_command_prefixes,
-            "research": false,
             "memories": false,
             "orchestration": false,
             "browser_enabled": false,

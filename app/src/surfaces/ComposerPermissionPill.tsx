@@ -8,9 +8,14 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { cn } from "../lib/cn";
-import { APPROVAL_POLICIES, type ApprovalPolicy } from "../lib/permissions";
+import {
+  APPROVAL_POLICIES,
+  approvalPolicyForSpecialist,
+  type ApprovalPolicy,
+} from "../lib/permissions";
 import { effectiveApprovalPolicy } from "../store/sessionStore.runtime";
 import { useSessionStore } from "../store/sessionStore";
+import { useSpecialistStore } from "../store/specialistStore";
 
 const MODE_ICON: Record<ApprovalPolicy, typeof Shield> = {
   ask: Shield,
@@ -18,14 +23,32 @@ const MODE_ICON: Record<ApprovalPolicy, typeof Shield> = {
   full: ShieldAlert,
 };
 
+export function ScoutFullAccessIndicator() {
+  return (
+    <div
+      aria-label="Scout uses Full access"
+      title="Scout always uses Full access"
+      className="flex min-h-8 items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-medium text-warning"
+    >
+      <ShieldAlert className="size-3.5" />
+      Full access
+    </div>
+  );
+}
+
 /** Approval policy selector. Sandboxed "Approve for me" is the default. */
 export function ComposerPermissionPill() {
   const session = useSessionStore((s) => s.session);
   const globalDefault = useSessionStore((s) => s.approvalPolicy);
   const approvalPolicies = useSessionStore((s) => s.approvalPolicies);
+  const activeSpecialist = useSpecialistStore((s) => s.active);
+  const scout = activeSpecialist === "scout";
   // The pill shows THIS chat's level — its own override when it has one, else
   // the account default — so switching chats never displays a sibling's mode.
-  const mode = effectiveApprovalPolicy(globalDefault, approvalPolicies, session?.id);
+  const mode = approvalPolicyForSpecialist(
+    effectiveApprovalPolicy(globalDefault, approvalPolicies, session?.id),
+    activeSpecialist,
+  );
   const setMode = useSessionStore((s) => s.setApprovalPolicy);
   // Permission modes govern the LOCAL engine's gate; a product cloud session
   // runs every tool server-side in its own sandbox and never consults them.
@@ -85,7 +108,11 @@ export function ComposerPermissionPill() {
 
   const info = APPROVAL_POLICIES.find((item) => item.id === mode) ?? APPROVAL_POLICIES[1];
   const Icon = MODE_ICON[mode];
-  if (!isLocalTarget) return null;
+  if (!isLocalTarget && !scout) return null;
+
+  if (scout) {
+    return <ScoutFullAccessIndicator />;
+  }
 
   return (
     <div ref={ref} className="relative">
@@ -99,7 +126,7 @@ export function ComposerPermissionPill() {
         aria-expanded={open}
         title="How the agent's actions are approved (Shift+Tab to cycle)"
         className={cn(
-          "flex min-h-8 items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-medium transition duration-200 ease-agent hover:bg-accent-subtle",
+          "flex min-h-8 items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-medium transition duration-base ease-agent hover:bg-accent-subtle",
           mode === "full" ? "text-warning" : "text-ink-secondary",
         )}
       >
@@ -156,7 +183,7 @@ export function ComposerPermissionPill() {
                   setOpen(false);
                 }}
                 className={cn(
-                  "flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 text-left transition duration-200 ease-agent hover:bg-accent-subtle",
+                  "flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 text-left transition duration-base ease-agent hover:bg-accent-subtle",
                   item.id === mode && "bg-accent-subtle",
                 )}
               >

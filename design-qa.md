@@ -46,6 +46,51 @@ passed
 
 ---
 
+# Design QA — live Spec editing
+
+- Source visual truth: `/var/folders/sx/5vx_xn5j0c31t3jw27sjtnqc0000gn/T/TemporaryItems/NSIRD_screencaptureui_3QCEwD/Screenshot 2026-08-13 at 4.49.01 PM.png`
+- Browser-rendered implementation: `/Users/stan/Documents/git/clark-desktop/spec-live-editing-implementation-dark.png`
+- Combined comparison: `/Users/stan/Documents/git/clark-desktop/spec-live-editing-comparison-dark.png`
+- Viewport: 1276 x 956 CSS px at device scale 1.
+- Source pixels: 1276 x 957, normalized to 1276 x 956. Implementation pixels: 1276 x 956.
+- State: dark theme, active Spec run after the canonical Markdown artifact changed and before terminal settlement.
+
+## Findings and fixes
+
+- [P1] Indefinite working state — the static “Shaping the next section” skeleton did not prove that the document was changing.
+  - Fixed by polling the canonical document during active work, rendering saved revisions immediately, and showing real added and removed lines with applied totals.
+- [P1] Editable-looking processing state — selection remained available while the agent owned document edits.
+  - Fixed with `aria-busy`, a wait cursor, cleared ranges, and `select-none` while active; selection restores after settlement.
+- Remaining P0/P1/P2 findings: none.
+
+## Required fidelity surfaces
+
+- Fonts and typography: Clark's DM Sans, Newsreader, JetBrains Mono, and semantic type ramp are preserved.
+- Spacing and layout rhythm: the live receipt keeps the prior bottom-center placement and reading-rail width while showing useful content.
+- Colors and visual tokens: existing accent, success, danger, surface, and border tokens are used; signs and strike-through keep changes legible without relying on color alone.
+- Image quality and asset fidelity: no raster assets are involved; the editing indicator uses the existing icon library.
+- Copy and content: “Editing specification,” actual changed lines, and `+ / −` totals replace the indefinite skeleton copy.
+- Focused-region comparison was unnecessary because the receipt and surrounding document/composer remain readable in the equal-size full-view comparison.
+
+## Browser checks
+
+- The branded Clark product composition rendered the updated document and live change receipt.
+- The active document exposed `aria-busy="true"` and `select-none`.
+- Reduced-motion behavior remains owned by the app's shared motion policy.
+- The preview used the deterministic mock provider and made no hosted-model call.
+
+## Comparison history
+
+1. The source showed a static skeleton over an otherwise unchanged document.
+2. The implementation replaced it with a live revision receipt and updated document content.
+3. A dark-theme capture at the source viewport found no actionable P0/P1/P2 mismatch for the requested redesign.
+
+## Final result
+
+passed
+
+---
+
 # Design QA — compact specialist navigation tree
 
 - Source visual truth: `/Users/stan/.codex/generated_images/019ff26c-b1de-7e42-a7e2-e6222d3cfa7d/exec-ec855f16-b1c7-44f4-816a-c9a37be60e6a.png`
@@ -127,3 +172,152 @@ passed
 ## Final result
 
 passed
+
+---
+
+# Design QA — parent-folder references and removable Spec focus
+
+- Source visual truth: `/var/folders/sx/5vx_xn5j0c31t3jw27sjtnqc0000gn/T/TemporaryItems/NSIRD_screencaptureui_hLH1te/Screenshot 2026-08-13 at 5.00.04 PM.png`
+- Scout source finding: `/var/folders/sx/5vx_xn5j0c31t3jw27sjtnqc0000gn/T/TemporaryItems/NSIRD_screencaptureui_xfYmWN/Screenshot 2026-08-13 at 5.00.30 PM.png`
+- Browser-rendered implementation: `/tmp/clark-parent-ref-qa.KgEwRY/parent-folder-autocomplete.png`
+- Focused implementation crop: `/tmp/clark-parent-ref-qa.KgEwRY/implementation-crop.png`
+- Combined comparison: `/tmp/clark-parent-ref-qa.KgEwRY/comparison.png`
+- Viewport: 1280 × 720 CSS px, device scale factor 1
+- Source pixels: 833 × 222; implementation pixels: 1280 × 720; comparison regions: 833 × 300 each
+- State: dark theme, local `clark-desktop` checkout, new-session composer focused, `@../` typed
+
+## Full-view and focused comparison evidence
+
+The full browser capture preserves the existing new-session layout and composer proportions. The
+focused combined comparison shows the reported empty `@../` state above and the corrected state
+below at equal width: sibling folders appear in the existing autocomplete surface, are explicitly
+labeled read-only, and retain a folder-picker fallback.
+
+## Findings and fixes
+
+- [P1] Parent-path trigger ended at the slash, so `@../` produced no suggestions.
+  - Fixed by treating slashes inside an `@` token as mention content and adding the parent submenu.
+- [P1] A background Spec session leaked its repository chip into Scout.
+  - Fixed by making the visible specialist lens authoritative for composer context.
+- [P1] Repository focus had no removal affordance or access revocation.
+  - Fixed with an accessible × action that revokes the live provider read root before removing the chip.
+- Remaining P0/P1/P2 findings: none.
+
+Required fidelity surfaces:
+
+- Fonts and typography: existing sans and monospace composer hierarchy is preserved.
+- Spacing and layout rhythm: existing popover row padding, radius, elevation, and composer geometry are reused.
+- Colors and visual tokens: existing dark, accent, border, and muted-ink tokens are unchanged.
+- Image and asset fidelity: existing Lucide folder and close icons are reused; no raster assets were introduced.
+- Copy and content: sibling paths use `../name`, access is labeled `Read-only`, and the fallback is `Choose another folder…`.
+
+## Interaction verification
+
+- Bare `@` exposes `../ Browse folders beside this checkout`.
+- Selecting that row opens `../clark`, `../clark-public-evals`, and `Choose another folder…`.
+- Selecting `../clark` inserts `@../clark/`.
+- Opening Scout no longer renders the background Spec repository chip.
+- Spec renders `Remove repository focus clark-desktop`; activating it removes the chip.
+- Browser console had no current errors; the only current warning was the expected reduced-motion development warning.
+
+## Native verification
+
+The provider regression proves an admitted external repository is readable but non-writable, then
+becomes unreadable again after revocation. The desktop Tauri command surface compiles with both add
+and remove operations.
+
+final result: passed
+
+---
+
+# Design QA — guided Spec interview
+
+- Source visual truth: `/Users/stan/.codex/generated_images/019ffd8e-bbb4-71f2-a09a-7ca052b61fc0/exec-19537d0b-f922-4339-aeb1-fc54b4f5c1ba.png`
+- Browser-rendered implementation: `/Users/stan/Documents/git/clark-desktop/target/spec-guided-final.png`
+- Selected-answer state: `/Users/stan/Documents/git/clark-desktop/target/spec-guided-selected.png`
+- Compact implementation: `/Users/stan/Documents/git/clark-desktop/target/spec-guided-compact-final.png`
+- Combined comparison: `/Users/stan/Documents/git/clark-desktop/target/spec-guided-final-comparison.png`
+- Desktop viewport and source pixels: 1479 × 1064.
+- Compact viewport: 900 × 900 CSS px.
+- State: dark theme, canonical Clark product composition, new Spec before its first substantive turn, deterministic mock bridge, no hosted-model call.
+
+## Findings and fixes
+
+- [P1] The document-first surface exposed open questions but did not give a nontechnical person an approachable path through them.
+  - Fixed with one plain-language, high-information question at a time, three concrete choices, and a free-form answer.
+- [P1] A decorative completion count could imply agent readiness without evidence.
+  - Fixed by deriving eight decision areas from substantive sections in the canonical Markdown; empty headings and starter prompts do not count.
+- [P1] The selected answer did not visibly affect the document until an agent turn completed.
+  - Fixed with a lifted in-document shaping cue: selected or narrated words morph into the affected decision area and acceptance coverage before the real Spec workflow reconciles them into the file. The existing full-document revision animation remains the saved-change boundary.
+- [P1] A separate interview control risked becoming a local-only wizard.
+  - Fixed by routing established conversations through the pinned `spec:spec` skill and the same durable send path. Before a session exists, the first answer moves into and focuses the persistent whole-spec composer so project selection and first-turn setup remain authoritative.
+- [P2] Stacking the full-height interview below the document at narrower desktop widths initially left too little reading room and clipped the current question.
+  - Fixed with a bounded 56/44 split, a scrollable interview body, two-column choices where space permits, and a compact primary action. Horizontal overflow remains zero at 900px.
+- Remaining P0/P1/P2 findings: none.
+
+## Required fidelity surfaces
+
+- Typography: Clark's Newsreader document hierarchy and DM Sans interface text match the reference's editorial document-plus-margin-question composition.
+- Layout: the canonical document remains primary, the guided interview occupies the right margin on desktop, and the persistent whole-spec composer remains available.
+- Color: the existing violet accent, green readiness tokens, graphite surfaces, and subtle borders are reused without a new palette or gradient.
+- Motion: option selection uses the shared rise/layout vocabulary; saved Markdown changes use the existing full-document revision transition; reduced-motion users get the same state changes without spatial movement.
+- Image and asset fidelity: no raster illustration was needed; controls use the product's existing icon library.
+- Copy and content: questions avoid implementation jargon while generated prompts explicitly preserve unrelated content, the semantic `*_SPEC.md` filename, a decision log, testability, and the no-implementation boundary.
+
+## Browser verification
+
+- Choosing a suggested answer set `aria-pressed`, enabled `Next question`, and projected the answer into the in-document shaping cue.
+- A custom answer cleared the selected choice and replaced the cue content after the morph transition settled.
+- Before a session exists, `Next question` moved the plain-language decision into the whole-spec composer and focused it without sending or selecting a hosted model.
+- Clicking existing document text still opened the exact-selection discussion with `Ask about this` and `Suggest edit` actions.
+- Desktop and compact captures had no horizontal overflow or clipped primary controls.
+- Browser console errors: none. The only warning was the expected Motion development notice for the system reduced-motion preference.
+- Frontend verification: 724 tests passed; typecheck and production build passed.
+
+final result: passed
+
+---
+
+# Design QA — full-document Spec revision animation
+
+- Source visual truth: `/var/folders/sx/5vx_xn5j0c31t3jw27sjtnqc0000gn/T/TemporaryItems/NSIRD_screencaptureui_R5cv9s/Screenshot 2026-08-13 at 5.35.06 PM.png`
+- Active implementation: `/Users/stan/Documents/git/clark-desktop/spec-document-diff-active.png`
+- Removal-collapse state: `/Users/stan/Documents/git/clark-desktop/spec-document-diff-settling.png`
+- Stabilized document: `/Users/stan/Documents/git/clark-desktop/spec-document-stable.png`
+- Source-and-implementation comparison: `/Users/stan/Documents/git/clark-desktop/spec-document-diff-comparison.png`
+- Transition sequence: `/Users/stan/Documents/git/clark-desktop/spec-document-transition.gif`
+- Source pixels: 1020 × 855; implementation viewport: 1280 × 720 CSS px.
+- State: dark theme, real Clark product entry, deterministic mock Spec run, system reduced-motion preference enabled.
+
+## Findings and fixes
+
+- [P1] The git-style receipt floated above the document and obscured the content it was meant to explain.
+  - Fixed by removing the overlay entirely. The document column becomes the revision surface, so each deletion and addition appears at its actual reading position.
+- [P1] Large replacements initially grouped all removed lines before all added lines, producing a red block followed by a green block.
+  - Fixed by pairing replacement rows around the longest-common-subsequence anchors. Whole-document rewrites now read as old line followed by new line throughout the page.
+- [P1] The document remained selectable while the agent owned the edit.
+  - Fixed with `aria-busy`, `select-none`, a wait cursor, selection clearing, and guarded click, double-click, and mouse-selection handlers for the duration of the run.
+- [P2] Blank diff rows inherited line-number height and color, stretching the transition vertically.
+  - Fixed by preserving compact document spacing while suppressing change chrome for whitespace-only rows.
+- [P2] Persistent change chrome made the finished document feel like a code-review tool rather than a readable specification.
+  - Fixed with a two-phase transition: removed rows collapse first, additions settle into their final positions, and the canonical Markdown replaces the transient surface after 2.05 seconds. Reduced-motion users get the same understandable states without spatial animation.
+- Remaining P0/P1/P2 findings: none.
+
+## Required fidelity surfaces
+
+- Typography: the existing Newsreader heading hierarchy, DM Sans body text, and JetBrains Mono diff gutter are retained.
+- Layout: the existing document measure and scroll surface remain authoritative; no floating card or parallel diff panel is introduced.
+- Color: additions and removals reuse Clark's semantic success and danger tokens at low-opacity backgrounds, with no gradient or new palette.
+- Motion: additions use the shared small-rise preset, removals use the shared fade/expand presets, rows use layout motion, and the stable document uses the shared rise preset.
+- Accessibility: the transient document is a polite status, non-selectability is semantic and visual, and the reduced-motion path preserves content and timing cues while removing spatial motion.
+
+## Browser verification
+
+- The active state rendered 19 meaningful additions and 19 meaningful removals inside `[data-qa="spec-document"]`.
+- Replacement rows alternated remove/add around unchanged anchors; no floating live-edit component existed.
+- While processing, `aria-busy="true"` and computed `user-select: none` were present.
+- After stabilization, the diff surface count returned to zero, `aria-busy="false"`, and computed `user-select: text` was restored.
+- The canonical document title and headings rendered after stabilization.
+- Browser console errors: none. The only warning was the expected Motion development notice for the system reduced-motion preference.
+
+final result: passed

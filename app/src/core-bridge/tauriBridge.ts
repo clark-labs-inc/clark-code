@@ -23,6 +23,7 @@ import type {
   ProjectWorktreeTransitionPlan,
   LocalSandboxStatus,
   PromptReceipt,
+  ProjectDirectory,
   ProjectInstructions,
   RemoteWorkerTarget,
   InstalledSkillPack,
@@ -65,6 +66,14 @@ export class TauriBridge implements CoreBridge {
 
   reconfigure(sessionId: string, config: ConnectConfig): Promise<void> {
     return invoke("provider_reconfigure", { sessionId, config });
+  }
+
+  addReadRoots(sessionId: string, roots: string[]): Promise<void> {
+    return invoke("provider_add_read_roots", { sessionId, roots });
+  }
+
+  removeReadRoots(sessionId: string, roots: string[]): Promise<void> {
+    return invoke("provider_remove_read_roots", { sessionId, roots });
   }
 
   openSession(
@@ -188,6 +197,16 @@ export class TauriBridge implements CoreBridge {
 
   listFiles(cwd: string, remote?: RemoteWorkerTarget | null): Promise<string[]> {
     return invoke<string[]>("local_list_files", { cwd, remote: remote ?? null });
+  }
+
+  listSiblingDirectories(
+    cwd: string,
+    remote?: RemoteWorkerTarget | null,
+  ): Promise<ProjectDirectory[]> {
+    return invoke<ProjectDirectory[]>("local_list_sibling_directories", {
+      cwd,
+      remote: remote ?? null,
+    });
   }
 
   listSecurityScans(

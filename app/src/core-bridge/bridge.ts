@@ -45,6 +45,11 @@ export interface QuickChatWorkspace {
   path: string;
 }
 
+export interface ProjectDirectory {
+  name: string;
+  path: string;
+}
+
 /** Authoritative identity allocated by the provider for one submitted turn. */
 export interface PromptReceipt {
   runId: string;
@@ -328,6 +333,11 @@ export interface CoreBridge {
    *  session + transcript) — used to hot-swap model / reasoning effort
    *  mid-conversation. Native bridge only. */
   reconfigure?(sessionId: string, config: ConnectConfig): Promise<void>;
+  /** Add explicit read-only filesystem roots without replacing the live
+   * conversation, transcript, or writable document workspace. */
+  addReadRoots?(sessionId: string, roots: string[]): Promise<void>;
+  /** Revoke explicit read-only filesystem roots from a live conversation. */
+  removeReadRoots?(sessionId: string, roots: string[]): Promise<void>;
   /** Atomically construct, connect, and bind one provider/session. `bindId`
    * keys a non-resumable provider by the durable conversation id. */
   openSession(
@@ -401,6 +411,11 @@ export interface CoreBridge {
   listGlobalMemory?(): Promise<MemoryOverview>;
   /** Project-relative file paths under `cwd`, for the `@`-mention picker. */
   listFiles?(cwd: string, remote?: RemoteWorkerTarget | null): Promise<string[]>;
+  /** Immediate folders beside `cwd`, for repository-aware `@` autocomplete. */
+  listSiblingDirectories?(
+    cwd: string,
+    remote?: RemoteWorkerTarget | null,
+  ): Promise<ProjectDirectory[]>;
   /** Canonical Security scanner bundles and seals under the selected checkout. */
   listSecurityScans?(
     cwd: string,

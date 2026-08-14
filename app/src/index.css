@@ -126,6 +126,14 @@
   --dur-fast: 120ms;   /* hovers, taps, small icon/color changes */
   --dur-base: 200ms;   /* the default — enters, popovers, most UI */
   --dur-slow: 300ms;   /* large surfaces, deliberate reveals */
+  /* Tailwind's transition utilities read these namespaces. Keep the semantic
+     utilities and the unqualified `transition` default on the same house
+     vocabulary as Motion for React. */
+  --transition-duration-fast: var(--dur-fast);
+  --transition-duration-base: var(--dur-base);
+  --transition-duration-slow: var(--dur-slow);
+  --default-transition-duration: var(--dur-base);
+  --default-transition-timing-function: var(--ease-agent);
 }
 
 /* Keep the conversation and its composer on one shared reading rail. The
@@ -146,6 +154,108 @@
 
 .conversation-column-width {
   max-width: var(--conversation-column-max-width);
+}
+
+/* Sonner owns notification behavior; Clark owns the visual and motion system.
+   Keep these selectors more specific than Sonner's injected defaults so its
+   queue/focus/swipe mechanics remain intact while every visible value comes
+   from the same tokens as the rest of the desktop UI. */
+.clark-toaster[data-sonner-toaster] {
+  font-family: var(--font-sans);
+}
+
+.clark-toaster[data-sonner-toaster] [data-sonner-toast]:not([data-swiping="true"]) {
+  /* Sonner has higher-specificity 400–500ms removal states. Pin every queued
+     state to Clark's base cadence, but leave pointer-driven swipes immediate. */
+  transition-duration: var(--dur-base) !important;
+  transition-timing-function: var(--ease-agent) !important;
+}
+
+.clark-toaster[data-sonner-toaster] [data-sonner-toast][data-styled="true"] {
+  gap: 0.625rem;
+  padding: 0.625rem 2.25rem 0.625rem 0.75rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-2xl);
+  background: var(--color-bg-elevated);
+  box-shadow: var(--shadow-lifted);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  transition:
+    transform var(--dur-base) var(--ease-agent),
+    opacity var(--dur-base) var(--ease-agent),
+    height var(--dur-base) var(--ease-agent),
+    box-shadow var(--dur-fast) var(--ease-agent);
+}
+
+.clark-toaster[data-sonner-toaster] [data-sonner-toast] [data-content] {
+  gap: 0.125rem;
+}
+
+.clark-toaster[data-sonner-toaster] [data-sonner-toast] [data-title] {
+  color: var(--color-ink);
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+.clark-toaster[data-sonner-toaster] [data-sonner-toast] [data-description] {
+  color: var(--color-ink-muted);
+  line-height: 1.4;
+}
+
+.clark-toaster[data-sonner-toaster] [data-sonner-toast] [data-icon] {
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+  color: var(--color-accent);
+}
+
+.clark-toaster[data-sonner-toaster] [data-sonner-toast][data-type="success"] [data-icon] {
+  color: var(--color-success);
+}
+
+.clark-toaster[data-sonner-toaster] [data-sonner-toast][data-type="warning"] [data-icon] {
+  color: var(--color-warning);
+}
+
+.clark-toaster[data-sonner-toaster] [data-sonner-toast][data-type="error"] [data-icon] {
+  color: var(--color-danger);
+}
+
+.clark-toaster[data-sonner-toaster] [data-sonner-toast] [data-close-button] {
+  top: 50%;
+  right: auto;
+  left: auto;
+  inset-inline-end: 0.5rem;
+  width: 1.5rem;
+  height: 1.5rem;
+  border: 0;
+  background: transparent;
+  color: var(--color-ink-muted);
+  transform: translateY(-50%);
+  transition:
+    color var(--dur-fast) var(--ease-agent),
+    background-color var(--dur-fast) var(--ease-agent),
+    box-shadow var(--dur-fast) var(--ease-agent);
+}
+
+.clark-toaster[data-sonner-toaster] [data-sonner-toast] [data-close-button]:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-ink);
+}
+
+.clark-toaster[data-sonner-toaster] [data-sonner-toast] [data-close-button]:focus-visible {
+  box-shadow: 0 0 0 2px var(--color-accent-focus);
+}
+
+.clark-toaster[data-sonner-toaster] [data-sonner-toast].clark-toast--text-size {
+  width: auto;
+  min-width: 4.5rem;
+  margin-left: auto;
+  padding-right: 0.75rem;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
 }
 
 /* Contrast is an application-wide accessibility preference. The default
@@ -734,11 +844,11 @@ svg.lucide {
   from { opacity: 0; transform: translateY(3px); }
   to { opacity: 1; transform: none; }
 }
-.fade-in { animation: fade-in 0.22s ease both; }
+.fade-in { animation: fade-in var(--dur-base) var(--ease-agent) both; }
 /* Like .fade-in, but invisible for the first 150ms — loading screens use this
    so a fast (local) connect resolves before the spinner ever paints, while a
    slow (SSH) connect fades it in smoothly. */
-.appear-delayed { animation: fade-in 0.2s ease 0.15s both; }
+.appear-delayed { animation: fade-in var(--dur-base) var(--ease-agent) var(--dur-fast) both; }
 
 /* macOS privacy walkthrough: the pointer and target gently guide attention
    without competing with the actual Settings handoff. */
@@ -754,10 +864,10 @@ svg.lucide {
   0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--color-accent) 0%, transparent); }
   50% { box-shadow: 0 0 0 3px color-mix(in oklab, var(--color-accent) 18%, transparent); }
 }
-.permission-guide-step { animation: permission-guide-step-in 0.24s var(--ease-agent) both; }
+.permission-guide-step { animation: permission-guide-step-in var(--dur-base) var(--ease-agent) both; }
 .permission-guide-arrow { animation: permission-guide-arrow-nudge 1.15s var(--ease-agent-inout) infinite; }
-.permission-guide-cursor { animation: permission-guide-arrow-nudge 1.15s var(--ease-agent-inout) 0.12s infinite; }
-.permission-guide-target { animation: permission-guide-target-pulse 1.8s ease-in-out infinite; }
+.permission-guide-cursor { animation: permission-guide-arrow-nudge 1.15s var(--ease-agent-inout) var(--dur-fast) infinite; }
+.permission-guide-target { animation: permission-guide-target-pulse 1.8s var(--ease-agent-inout) infinite; }
 
 /* Respect reduced-motion across both bespoke effects and Tailwind's animation
    utilities. Loading state is still conveyed by the visible control and its
@@ -765,6 +875,8 @@ svg.lucide {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     transition-duration: 0.001ms !important;
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
     scroll-behavior: auto !important;
   }
 
@@ -793,8 +905,17 @@ svg.lucide {
   }
 
   [class*="hover:-translate"],
-  [class*="group-hover:translate"] {
+  [class*="group-hover:translate"],
+  [class*="hover:scale"],
+  [class*="group-hover:scale"] {
     transform: none !important;
     translate: none !important;
+    scale: none !important;
+  }
+
+  .clark-toaster[data-sonner-toaster] [data-sonner-toast]:not([data-swiping="true"]),
+  .clark-toaster[data-sonner-toaster] [data-sonner-toast] > * {
+    transition: none !important;
+    animation: none !important;
   }
 }

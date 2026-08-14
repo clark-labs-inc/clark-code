@@ -178,7 +178,6 @@ async fn connect(
         "base_url": format!("http://{address}/v1"),
         "model": "deterministic-stress-model",
         "memories": false,
-        "research": false,
         "sandbox_mode": "disabled"
     });
     base.as_object_mut()

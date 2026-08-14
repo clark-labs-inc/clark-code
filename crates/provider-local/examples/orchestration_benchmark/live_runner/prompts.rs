@@ -24,19 +24,14 @@ fn contract(task: &TaskContract, attempt_id: &str) -> String {
         .replace("ATTEMPT_ID", attempt_id)
 }
 
-pub fn reader(scenario: &Scenario, task: &TaskContract, attempt_id: &str, cloud: bool) -> String {
-    let cloud_instruction = if cloud {
-        "You MUST call product_research exactly once. Give it the synthetic compatibility statement and ask it to independently challenge the proposed interpretation. Treat its response as advisory evidence and reconcile it with the local files."
-    } else {
-        "Do not edit files or run mutating commands. Inspect only the scoped repository evidence."
-    };
+pub fn reader(scenario: &Scenario, task: &TaskContract, attempt_id: &str) -> String {
     format!(
         "You are a bounded read-only coding subagent in an orchestration benchmark.\n\
          Overall task: {}\n\
          Your subtask: {}\n\
          Allowed scope: {:?}\n\
          Expected deliverable: {:?}\n\
-         {cloud_instruction}\n\
+         Do not edit files or run mutating commands. Inspect only the scoped repository evidence.\n\
          Report concrete path-level evidence useful to the writer.\n\n{}",
         scenario.prompt,
         task.instruction,

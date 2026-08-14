@@ -475,7 +475,6 @@ async fn production_harness_path_is_parallel_isolated_reviewed_and_replayed() {
     assert_eq!(configs.len(), 5);
     for config in configs.iter() {
         assert_eq!(config.extra["isolated_writer"], true);
-        assert_eq!(config.extra["research"], false);
         assert_eq!(config.extra["memories"], false);
         assert_eq!(config.extra["project_knowledge"], false);
         assert_eq!(config.extra["browser_enabled"], false);

@@ -1,15 +1,21 @@
-import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import { SpecWritingSkeleton } from "./SpecWorkspace";
+import { specDocumentInteraction } from "../../lib/specDiff";
 
-describe("SpecWritingSkeleton", () => {
-  it("renders a semantic repository-focused working state with animated writing lines", () => {
-    const markup = renderToStaticMarkup(<SpecWritingSkeleton repositoryFocused />);
+describe("SpecWorkspace live editing contract", () => {
+  it("locks selection while the agent is changing the document", () => {
+    expect(specDocumentInteraction(true)).toEqual({
+      ariaBusy: true,
+      className: "cursor-wait select-none",
+      canSelect: false,
+    });
+  });
 
-    expect(markup).toContain('role="status"');
-    expect(markup).toContain("Clark is reading the focused repository and writing the specification");
-    expect(markup).toContain("Reading the focused code and shaping the next section");
-    expect(markup.match(/spec-writing-line/g)).toHaveLength(4);
+  it("restores ordinary selection when the agent settles", () => {
+    expect(specDocumentInteraction(false)).toEqual({
+      ariaBusy: false,
+      className: "cursor-text select-text",
+      canSelect: true,
+    });
   });
 });

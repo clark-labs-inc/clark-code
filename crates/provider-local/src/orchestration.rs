@@ -428,7 +428,6 @@ fn read_only_provider_config(mut config: ProviderConfig) -> ProviderConfig {
         json!(["git", "rm", "mv", "cp", "curl", "wget", "ssh"]),
     );
     extra.insert("mcp_servers".to_string(), json!([]));
-    extra.insert("research".to_string(), Value::Bool(false));
     extra.insert("memories".to_string(), Value::Bool(false));
     extra.insert("project_knowledge".to_string(), Value::Bool(false));
     extra.insert("browser_enabled".to_string(), Value::Bool(false));
@@ -486,7 +485,6 @@ mod tests {
             extra: json!({
                 "max_iterations": 500,
                 "permissions": {"write_file": "allow"},
-                "research": true,
                 "browser_enabled": true,
                 "memories": true
             }),
@@ -499,7 +497,6 @@ mod tests {
             crate::tools::PermissionMode::Deny
         );
         assert_eq!(local.mode_for("bash"), crate::tools::PermissionMode::Deny);
-        assert!(local.research.is_none());
         assert!(!local.browser_enabled);
         assert!(!local.memories_enabled);
         assert!(local.mcp_servers.is_empty());

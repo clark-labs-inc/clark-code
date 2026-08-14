@@ -1276,6 +1276,7 @@ dependencies = [
  "exec-sandbox-windows",
  "futures",
  "getrandom 0.4.3",
+ "glob",
  "hex",
  "libc",
  "libreoffice-pure",

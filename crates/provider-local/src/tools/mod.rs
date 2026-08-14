@@ -22,7 +22,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
-use crate::config::AuxiliaryModelConfig;
 use crate::sandbox::Sandbox;
 
 pub mod android_emulator;
@@ -504,14 +503,10 @@ impl ToolRegistry {
         }
     }
 
-    /// The standard local coding tools, plus Clark Code research tool when a
-    /// research endpoint is configured, plus the `memory` tool when memories are
-    /// enabled (`memory` is `Some` with the local global dir + optional Clark Code
-    /// personal-recall config).
-    pub fn new(
-        research: Option<AuxiliaryModelConfig>,
-        memory: Option<memory::MemoryConfig>,
-    ) -> Self {
+    /// The standard local coding tools, plus the `memory` tool when memories
+    /// are enabled. Product capabilities are installed only through
+    /// [`ToolPack`].
+    pub fn new(memory: Option<memory::MemoryConfig>) -> Self {
         let deferred_catalog = deferred::DeferredToolCatalog::default();
         let mut registry = Self {
             tools: Vec::new(),
@@ -582,7 +577,6 @@ impl ToolRegistry {
                 registry.register_deferred(tool);
             }
         }
-        let _ = research;
         if let Some(cfg) = memory {
             registry.register_deferred(Arc::new(memory::MemoryRecallTool::new(
                 cfg.global_dir.clone(),
@@ -670,6 +664,16 @@ impl ToolRegistry {
             .iter()
             .map(|tool| tool.name().to_string())
             .collect()
+    }
+
+    /// Whether the installed tool set contains product-brokered external
+    /// research. Prompt capability claims must come from this executable
+    /// boundary, not from provider metadata.
+    pub(crate) fn has_brokered_research(&self) -> bool {
+        self.tools.iter().any(|tool| {
+            tool.kind() == ToolKind::Research
+                && tool.permission_class() == ToolPermissionClass::BrokeredProduct
+        })
     }
 
     /// Register the opt-in, host-configured browser tool, downloaded on first

@@ -4,13 +4,13 @@ export const COMPOSER_MAX_HEIGHT = 200;
 
 type AutosizeTextarea = Pick<HTMLTextAreaElement, "scrollHeight" | "style">;
 
-/** Reset before reading scrollHeight so an old inline height cannot become the
- * next measurement. This is especially important in WebKit after submission. */
+/** Return to intrinsic content sizing before reading scrollHeight so WebKit
+ * does not preserve the previous scroll box as the next measurement. */
 export function resizeComposerTextarea(
   textarea: AutosizeTextarea,
   maxHeight = COMPOSER_MAX_HEIGHT,
 ): void {
-  textarea.style.height = "0px";
+  textarea.style.height = "auto";
   textarea.style.height = `${Math.min(textarea.scrollHeight, maxHeight)}px`;
 }
 
@@ -18,6 +18,28 @@ type WidthObserver = Pick<ResizeObserver, "observe" | "disconnect">;
 type WidthObserverFactory = (callback: ResizeObserverCallback) => WidthObserver;
 type FrameScheduler = (callback: FrameRequestCallback) => number;
 type FrameCanceller = (handle: number) => void;
+
+/** WebKit can expose the textarea's previous scrollHeight while it updates the
+ * native form control after a programmatic value change. Settle across two
+ * frames so the second measurement runs after that internal layout catches up. */
+export function settleComposerTextareaSize(
+  textarea: HTMLTextAreaElement,
+  scheduleFrame: FrameScheduler = requestAnimationFrame,
+  cancelFrame: FrameCanceller = cancelAnimationFrame,
+): () => void {
+  let finalFrame: number | null = null;
+  const initialFrame = scheduleFrame(() => {
+    resizeComposerTextarea(textarea);
+    finalFrame = scheduleFrame(() => {
+      finalFrame = null;
+      resizeComposerTextarea(textarea);
+    });
+  });
+  return () => {
+    cancelFrame(initialFrame);
+    if (finalFrame !== null) cancelFrame(finalFrame);
+  };
+}
 
 /** Remeasure when wrapping width changes. Height-only observer notifications
  * are ignored so updating the inline height cannot start an observer loop. */
@@ -59,7 +81,12 @@ export function useComposerAutosize(
     if (ref.current) resizeComposerTextarea(ref.current);
   }, [ref]);
 
-  useLayoutEffect(resize, [resize, value]);
+  useLayoutEffect(() => {
+    resize();
+    const textarea = ref.current;
+    if (!textarea) return;
+    return settleComposerTextareaSize(textarea);
+  }, [ref, resize, value]);
 
   useLayoutEffect(() => {
     const textarea = ref.current;

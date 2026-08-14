@@ -6,9 +6,11 @@ import {
   cleanVoiceContentType,
   preferredVoiceMimeType,
   supportsVoiceRecording,
+  startVoicePcmCapture,
   voiceCaptureMessage,
   voiceElapsed,
   voiceRecordingFilename,
+  type VoicePcmCapture,
   type VoiceRecordingPhase,
 } from "../lib/voiceNarration";
 import { cn } from "../lib/cn";
@@ -22,17 +24,30 @@ export function ComposerVoiceButton({
   onTranscript: (text: string) => void;
   onError: (message: string) => void;
 }) {
-  const transcriber = productModule().voice?.transcribe;
+  const voice = productModule().voice;
+  const transcriber = voice?.transcribe;
+  const streamer = voice?.stream;
   const [phase, setPhase] = useState<VoiceRecordingPhase>("idle");
   const [elapsed, setElapsed] = useState(0);
+  const [levels, setLevels] = useState(() => Array.from({ length: 18 }, () => 0.08));
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const pcmCaptureRef = useRef<VoicePcmCapture | null>(null);
+  const streamSessionRef = useRef<string | null>(null);
+  const streamSendQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const streamFailureRef = useRef<unknown>(null);
   const chunksRef = useRef<Blob[]>([]);
   const startedAtRef = useRef(0);
 
   const stopStream = useCallback(() => {
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
+  }, []);
+
+  const stopPcmCapture = useCallback(async () => {
+    const capture = pcmCaptureRef.current;
+    pcmCaptureRef.current = null;
+    if (capture) await capture.close();
   }, []);
 
   const stopToBlob = useCallback(() => new Promise<Blob>((resolve, reject) => {
@@ -68,16 +83,54 @@ export function ComposerVoiceButton({
 
   const start = useCallback(async () => {
     if (disabled || phase !== "idle") return;
-    if (!transcriber) {
+    if (!transcriber && !streamer) {
       onError("Voice narration is unavailable in this Clark Code build.");
       return;
     }
-    if (!supportsVoiceRecording()) {
+    if (!supportsVoiceRecording(Boolean(streamer))) {
       onError("Voice recording is unavailable on this device.");
       return;
     }
+    setPhase("connecting");
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          autoGainControl: true,
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: true,
+        },
+      });
+      streamRef.current = stream;
+      setElapsed(0);
+      setLevels(Array.from({ length: 18 }, () => 0.08));
+
+      if (streamer) {
+        const session = await streamer.start();
+        streamSessionRef.current = session.id;
+        streamFailureRef.current = null;
+        streamSendQueueRef.current = Promise.resolve();
+        pcmCaptureRef.current = await startVoicePcmCapture(
+          stream,
+          (dataBase64) => {
+            const id = streamSessionRef.current;
+            if (!id || streamFailureRef.current) return;
+            streamSendQueueRef.current = streamSendQueueRef.current.then(async () => {
+              if (streamFailureRef.current) return;
+              try {
+                await streamer.send(id, dataBase64);
+              } catch (error) {
+                streamFailureRef.current = error;
+              }
+            });
+          },
+          (level) => setLevels((current) => [...current.slice(1), level]),
+        );
+        startedAtRef.current = Date.now();
+        setPhase("recording");
+        return;
+      }
+
       const mimeType = preferredVoiceMimeType();
       const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
       chunksRef.current = [];
@@ -89,24 +142,40 @@ export function ComposerVoiceButton({
         setPhase("idle");
         onError("Voice recording failed.");
       });
-      streamRef.current = stream;
       recorderRef.current = recorder;
       startedAtRef.current = Date.now();
-      setElapsed(0);
       setPhase("recording");
       recorder.start(1_000);
     } catch (error) {
+      const sessionId = streamSessionRef.current;
+      streamSessionRef.current = null;
+      if (sessionId && streamer) await streamer.cancel(sessionId).catch(() => undefined);
+      await stopPcmCapture().catch(() => undefined);
       stopStream();
       recorderRef.current = null;
       setPhase("idle");
       onError(voiceCaptureMessage(error));
     }
-  }, [disabled, onError, phase, stopStream, transcriber]);
+  }, [disabled, onError, phase, stopPcmCapture, stopStream, streamer, transcriber]);
 
   const finish = useCallback(async () => {
-    if (phase !== "recording" || !transcriber) return;
+    if (phase !== "recording" || (!transcriber && !streamer)) return;
     setPhase("transcribing");
     try {
+      if (streamer) {
+        const sessionId = streamSessionRef.current;
+        if (!sessionId) throw new Error("No active voice recording");
+        await stopPcmCapture();
+        await streamSendQueueRef.current;
+        if (streamFailureRef.current) throw streamFailureRef.current;
+        const result = await streamer.finish(sessionId);
+        streamSessionRef.current = null;
+        if (!result.text.trim()) throw new Error("No speech was detected.");
+        onTranscript(result.text.trim());
+        return;
+      }
+
+      if (!transcriber) throw new Error("Voice transcription is unavailable.");
       const blob = await stopToBlob();
       stopStream();
       recorderRef.current = null;
@@ -121,15 +190,19 @@ export function ComposerVoiceButton({
       if (!result.text.trim()) throw new Error("No speech was detected.");
       onTranscript(result.text.trim());
     } catch (error) {
+      const sessionId = streamSessionRef.current;
+      streamSessionRef.current = null;
+      if (sessionId && streamer) await streamer.cancel(sessionId).catch(() => undefined);
       onError(error instanceof Error ? error.message : "Voice transcription failed.");
     } finally {
+      await stopPcmCapture().catch(() => undefined);
       stopStream();
       recorderRef.current = null;
       chunksRef.current = [];
       setElapsed(0);
       setPhase("idle");
     }
-  }, [onError, onTranscript, phase, stopStream, stopToBlob, transcriber]);
+  }, [onError, onTranscript, phase, stopPcmCapture, stopStream, stopToBlob, streamer, transcriber]);
 
   useEffect(() => {
     if (phase !== "recording") return;
@@ -139,36 +212,56 @@ export function ComposerVoiceButton({
 
   useEffect(() => () => {
     if (recorderRef.current?.state === "recording") recorderRef.current.stop();
+    void stopPcmCapture().catch(() => undefined);
+    const sessionId = streamSessionRef.current;
+    streamSessionRef.current = null;
+    if (sessionId && streamer) void streamer.cancel(sessionId).catch(() => undefined);
     stopStream();
-  }, [stopStream]);
+  }, [stopPcmCapture, stopStream, streamer]);
 
-  if (!transcriber) return null;
+  if (!transcriber && !streamer) return null;
 
   const recording = phase === "recording";
+  const connecting = phase === "connecting";
   const transcribing = phase === "transcribing";
   return (
     <button
       type="button"
       onClick={() => recording ? void finish() : void start()}
-      disabled={disabled || transcribing}
-      aria-label={recording ? "Stop voice narration and transcribe" : "Start voice narration"}
+      disabled={disabled || connecting || transcribing}
+      aria-label={recording ? "Stop voice recording and transcribe" : "Start voice dictation"}
       title={recording ? `Stop and transcribe · ${voiceElapsed(elapsed)}` : "Narrate your idea"}
       className={cn(
         "flex h-8 shrink-0 items-center gap-1.5 rounded-full px-2 text-xs font-medium transition",
         recording
-          ? "bg-danger/12 text-danger"
+          ? "bg-accent-subtle text-accent ring-1 ring-accent/20"
           : "text-ink-muted hover:bg-accent-subtle hover:text-accent",
-        transcribing && "text-accent",
+        (connecting || transcribing) && "text-accent",
       )}
     >
-      {transcribing ? (
+      {connecting || transcribing ? (
         <Loader2 className="size-4 animate-[spin_1s_linear_infinite]" />
       ) : recording ? (
         <Square className="size-3.5 fill-current" />
       ) : (
         <Mic className="size-4" />
       )}
-      {recording && <span className="tabular-nums">{voiceElapsed(elapsed)}</span>}
+      {recording && (
+        <>
+          <span className="flex h-4 w-20 items-center justify-center gap-px" aria-hidden="true">
+            {levels.map((level, index) => (
+              <span
+                key={index}
+                className="w-0.5 rounded-full bg-current transition-[height] duration-fast"
+                style={{ height: `${Math.max(2, Math.round(level * 16))}px` }}
+              />
+            ))}
+          </span>
+          <span className="tabular-nums">{voiceElapsed(elapsed)}</span>
+        </>
+      )}
+      {connecting && <span>Connecting…</span>}
+      {transcribing && <span>Transcribing…</span>}
     </button>
   );
 }

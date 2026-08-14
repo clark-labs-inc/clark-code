@@ -17,8 +17,6 @@ use crate::tools::PermissionMode;
 /// Neutral local endpoint used when a host does not provide product policy.
 pub const DEFAULT_BASE_URL: &str = "http://127.0.0.1:11434/v1";
 pub const DEFAULT_MODEL: &str = "local-model";
-/// Neutral auxiliary model used for research when a host does not override it.
-pub const DEFAULT_RESEARCH_MODEL: &str = "research-model";
 /// Neutral auxiliary model used for image understanding.
 pub const DEFAULT_VISION_MODEL: &str = "vision-model";
 /// Approximate transcript-token threshold where the local loop checkpoints old
@@ -148,11 +146,8 @@ pub struct LocalConfig {
     pub command_denylist: Vec<String>,
     /// MCP servers to connect and expose as tools.
     pub mcp_servers: Vec<crate::mcp::McpServerConfig>,
-    /// Optional brokered research config, when research is enabled.
-    pub research: Option<AuxiliaryModelConfig>,
     /// Vision-fallback config for coding models without native image support.
-    /// Independent of the `research` toggle — gated only on a key being
-    /// present.
+    /// Gated only on a key being present.
     pub vision: Option<AuxiliaryModelConfig>,
     /// Product-owned model ids that must not receive image-generation tools.
     pub image_generation_excluded_models: Vec<String>,
@@ -238,17 +233,14 @@ impl LocalSandboxMode {
     }
 }
 
-/// Config for calling a host-advertised model tier (for example
-/// `research-model`) as an auxiliary, non-coding call over the same model API and
-/// key as the coding model — used by optional brokered research, the `web_fetch`
-/// long-page condenser, and the image-description vision fallback. Clark Code runs
-/// web search / planning / browsing / vision server-side and returns the
-/// final answer with no client tools involved.
+/// Config for calling a host-advertised image-understanding tier as an
+/// auxiliary, non-coding call over the same model API and key as the coding
+/// model.
 #[derive(Clone, Debug)]
 pub struct AuxiliaryModelConfig {
     pub base_url: String,
     pub api_key: Option<String>,
-    /// Agentic model tier this call uses (e.g. `research-model`).
+    /// Model tier this call uses (for example `vision-model`).
     pub model: String,
 }
 
@@ -292,8 +284,7 @@ impl LocalConfig {
     /// Parse from the generic [`ProviderConfig`]. Unknown keys are ignored.
     ///
     /// Recognized `extra` keys: `model`, `temperature`, `max_output_tokens`, `max_iterations`,
-    /// `permissions` (map of tool→`allow|ask|deny`), `research` (bool, default
-    /// true), `research_model`, `auto_compact` (bool),
+    /// `permissions` (map of tool→`allow|ask|deny`), `auto_compact` (bool),
     /// `auto_compact_token_limit`, `compact_request_token_limit`,
     /// `compact_recent_user_token_budget`, and `base_url` (tests only). The key
     /// rides on `auth_token`.
@@ -394,22 +385,8 @@ impl LocalConfig {
             }
         }
 
-        // Research is on by default and uses the same Platform API + key; it only
-        // needs a key to function.
-        let research_enabled = extra
-            .get("research")
-            .and_then(Value::as_bool)
-            .unwrap_or(true);
-        let research = (research_enabled && api_key.is_some()).then(|| AuxiliaryModelConfig {
-            base_url: base_url.clone(),
-            api_key: api_key.clone(),
-            model: str_field(extra, "research_model")
-                .unwrap_or_else(|| DEFAULT_RESEARCH_MODEL.to_string()),
-        });
-
         // Vision fallback is core functionality for models without native
-        // image support, not the opt-out-able research feature — gated only on
-        // a key.
+        // image support and is gated only on a key.
         let vision = api_key.is_some().then(|| AuxiliaryModelConfig {
             base_url: base_url.clone(),
             api_key: api_key.clone(),
@@ -515,7 +492,6 @@ impl LocalConfig {
                 .get("mcp_servers")
                 .and_then(|v| serde_json::from_value(v.clone()).ok())
                 .unwrap_or_default(),
-            research,
             vision,
             image_generation_excluded_models: str_vec(extra, "image_generation_excluded_models"),
             cwd,
@@ -565,7 +541,7 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn defaults_to_neutral_local_endpoint_and_no_research_without_key() {
+    fn defaults_to_neutral_local_endpoint_without_a_key() {
         let cfg = LocalConfig::from_provider_config(&ProviderConfig::default());
         assert_eq!(cfg.base_url, DEFAULT_BASE_URL);
         assert_eq!(cfg.model, DEFAULT_MODEL);
@@ -592,8 +568,6 @@ mod tests {
             cfg.orchestration.mode,
             crate::orchestration::DelegationMode::ExplicitRequestOnly
         );
-        // No key → research can't run, so it's disabled.
-        assert!(cfg.research.is_none());
         // No key → vision fallback can't run either.
         assert!(cfg.vision.is_none());
     }
@@ -615,7 +589,7 @@ mod tests {
     }
 
     #[test]
-    fn default_auto_sandbox_enables_auxiliary_research_with_a_key() {
+    fn default_auto_sandbox_preserves_the_host_key() {
         let pc = ProviderConfig {
             auth_token: Some("product_test_token".into()),
             ..Default::default()
@@ -623,12 +597,6 @@ mod tests {
         let cfg = LocalConfig::from_provider_config(&pc);
         assert_eq!(cfg.sandbox_mode, LocalSandboxMode::Auto);
         assert_eq!(cfg.api_key.as_deref(), Some("product_test_token"));
-        let research = cfg
-            .research
-            .expect("research enabled when a key is present");
-        assert_eq!(research.base_url, DEFAULT_BASE_URL);
-        assert_eq!(research.api_key.as_deref(), Some("product_test_token"));
-        assert_eq!(research.model, DEFAULT_RESEARCH_MODEL);
     }
 
     #[test]
@@ -675,24 +643,6 @@ mod tests {
         assert_eq!(vision.api_key.as_deref(), Some("product_test_token"));
         assert_eq!(vision.model, DEFAULT_VISION_MODEL);
         assert_eq!(vision.model, "vision-model");
-    }
-
-    #[test]
-    fn vision_stays_enabled_when_research_is_disabled() {
-        let pc = ProviderConfig {
-            auth_token: Some("product_test_token".into()),
-            extra: json!({ "research": false }),
-            ..Default::default()
-        };
-        let cfg = LocalConfig::from_provider_config(&pc);
-        assert!(
-            cfg.research.is_none(),
-            "research:false disables the research config"
-        );
-        assert!(
-            cfg.vision.is_some(),
-            "vision fallback is core functionality, not gated by the research toggle"
-        );
     }
 
     #[test]
@@ -790,33 +740,28 @@ mod tests {
     }
 
     #[test]
-    fn extra_overrides_model_permissions_and_can_disable_research() {
+    fn extra_overrides_model_and_permissions() {
         let pc = ProviderConfig {
             auth_token: Some("product_test_token".into()),
             extra: json!({
                 "base_url": "http://localhost:1234/v1",
-                "model": "research-model",
+                "model": "host-model",
                 "temperature": 0.2,
                 "max_output_tokens": 16384,
                 "max_iterations": 8,
-                "permissions": { "bash": "deny", "edit_file": "allow" },
-                "research": false
+                "permissions": { "bash": "deny", "edit_file": "allow" }
             }),
             ..Default::default()
         };
         let cfg = LocalConfig::from_provider_config(&pc);
         assert_eq!(cfg.base_url, "http://localhost:1234/v1");
-        assert_eq!(cfg.model, "research-model");
+        assert_eq!(cfg.model, "host-model");
         assert_eq!(cfg.temperature, Some(0.2));
         assert_eq!(cfg.max_output_tokens, Some(16_384));
         assert_eq!(cfg.max_iterations, Some(8));
         assert_eq!(cfg.mode_for("bash"), PermissionMode::Deny);
         assert_eq!(cfg.mode_for("edit_file"), PermissionMode::Allow);
         assert_eq!(cfg.mode_for("write_file"), PermissionMode::Ask);
-        assert!(
-            cfg.research.is_none(),
-            "research:false disables it even with a key"
-        );
     }
 
     #[test]

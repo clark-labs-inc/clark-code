@@ -7,8 +7,14 @@ import { useAppearance } from "./lib/useAppearance";
 import { useAppVersion } from "./lib/appInfo";
 import { SignInScreen } from "./surfaces/SignInScreen";
 import { UpdateStatus } from "./surfaces/UpdateStatus";
-import { NoticeToast, TextSizeToast, WarningToast } from "./surfaces/Toast";
+import {
+  ClarkToaster,
+  NoticeToast,
+  TextSizeToast,
+  WarningToast,
+} from "./surfaces/Toast";
 import { productModule } from "./product/productModule";
+import { ProductExceptionalStateIllustration } from "./components/ProductExceptionalStateIllustration";
 
 const AuthenticatedWorkspace = lazy(() => import("./AuthenticatedWorkspace"));
 
@@ -16,8 +22,20 @@ function WorkspaceLoadingScreen() {
   const initial = productModule().branding.shortName.slice(0, 1).toLowerCase();
   return (
     <div className="grid h-screen w-screen place-items-center bg-bg text-ink">
-      <div className="breathe grid size-12 place-items-center rounded-xl border border-border-subtle bg-bg-elevated text-lg font-semibold">
-        {initial}
+      <div className="flex flex-col items-center text-center">
+        <ProductExceptionalStateIllustration
+          state="loading"
+          size={176}
+          label={`${productModule().branding.shortName} is getting things ready`}
+          fallback={(
+            <div className="breathe grid size-12 place-items-center rounded-xl border border-border-subtle bg-bg-elevated text-lg font-semibold">
+              {initial}
+            </div>
+          )}
+        />
+        {productModule().exceptionalStateIllustration && (
+          <p className="mt-2 font-display text-xl text-ink">Getting things ready…</p>
+        )}
       </div>
     </div>
   );
@@ -83,6 +101,7 @@ export default function App() {
       <>
         <SignInScreen />
         <UpdateStatus />
+        <ClarkToaster dark={dark} />
         <NoticeToast />
         <TextSizeToast textSize={textSize} signal={textSizeToastSignal} />
         <AppVersionBadge />
@@ -104,6 +123,7 @@ export default function App() {
         />
       </Suspense>
       <UpdateStatus />
+      <ClarkToaster dark={dark} />
       <NoticeToast />
       <WarningToast />
       <TextSizeToast textSize={textSize} signal={textSizeToastSignal} />

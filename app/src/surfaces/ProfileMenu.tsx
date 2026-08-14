@@ -8,7 +8,7 @@ import { isAccountReconnectError } from "../lib/errors";
 import { productModule } from "../product/productModule";
 import { useProductAccess } from "../lib/useProductAccess";
 const ACTION =
-  "flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-sm text-ink-secondary transition duration-200 ease-agent hover:bg-accent-subtle hover:text-ink";
+  "flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-sm text-ink-secondary transition duration-base ease-agent hover:bg-accent-subtle hover:text-ink";
 
 /** Account trigger → product-owned account popover. Product access state and
  * management destinations are supplied by the active product module.

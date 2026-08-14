@@ -1,5 +1,7 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import { captureFrontendException } from "../lib/localCapture";
+import { productModule } from "../product/productModule";
+import { ProductExceptionalStateIllustration } from "./ProductExceptionalStateIllustration";
 
 interface Props {
   title?: string;
@@ -57,6 +59,12 @@ export class PanelErrorBoundary extends Component<Props, State> {
     return (
       <div className="grid min-h-40 min-w-0 flex-1 place-items-center bg-bg p-5">
         <div className="max-w-sm rounded-xl border border-danger/25 bg-danger/5 p-5 text-center">
+          <ProductExceptionalStateIllustration
+            state="recovery"
+            size={96}
+            label={`${productModule().branding.shortName} is reconnecting this panel`}
+            className="mx-auto mb-2"
+          />
           <h2 className="text-sm font-semibold text-ink">
             {this.props.title ?? "This panel needs to restart"}
           </h2>

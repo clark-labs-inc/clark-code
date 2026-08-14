@@ -210,7 +210,6 @@ async fn run_attachment_benchmark(mode: EvalMode, local_cwd: Option<PathBuf>) {
         "model": "attachment-benchmark-model",
         "memories": false,
         "project_knowledge": false,
-        "research": false
     });
     let mut provider = provider_local::LocalAgentProvider::new();
     provider

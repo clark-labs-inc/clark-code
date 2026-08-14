@@ -2,6 +2,8 @@ import { useState } from "react";
 import { AlertTriangle, Loader2, RefreshCw, Trash2 } from "lucide-react";
 import type { UnavailableConversation as UnavailableConversationState } from "../store/sessionStore.runtime";
 import { useSessionStore } from "../store/sessionStore";
+import { ProductExceptionalStateIllustration } from "../components/ProductExceptionalStateIllustration";
+import { productModule } from "../product/productModule";
 
 export function UnavailableConversationPanel({
   conversation,
@@ -24,11 +26,19 @@ export function UnavailableConversationPanel({
     <main className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto p-6">
       <section
         aria-labelledby="unavailable-conversation-title"
-        className="w-full max-w-lg rounded-2xl border border-border-subtle bg-bg-elevated p-6 shadow-soft"
+        className="w-full max-w-lg text-center"
       >
-        <span className="mb-4 grid size-10 place-items-center rounded-xl bg-warning/10 text-warning">
-          <AlertTriangle className="size-5" />
-        </span>
+        <ProductExceptionalStateIllustration
+          state="recovery"
+          size={176}
+          className="mx-auto mb-2"
+          label={`${productModule().branding.shortName} is reconnecting this conversation`}
+          fallback={(
+            <span className="mx-auto mb-4 grid size-10 place-items-center rounded-xl bg-warning/10 text-warning">
+              <AlertTriangle className="size-5" />
+            </span>
+          )}
+        />
         <p className="truncate text-sm font-medium text-ink-muted">{conversation.title}</p>
         <h1
           id="unavailable-conversation-title"
@@ -50,7 +60,7 @@ export function UnavailableConversationPanel({
           </p>
         )}
 
-        <details className="mt-4 text-xs text-ink-faint">
+        <details className="mx-auto mt-4 max-w-md text-left text-xs text-ink-faint">
           <summary className="cursor-pointer select-none font-medium text-ink-muted">
             Technical details
           </summary>
@@ -60,7 +70,7 @@ export function UnavailableConversationPanel({
         </details>
 
         {allowCleanup && confirmingCleanup ? (
-          <div className="mt-5 rounded-xl border border-danger/20 bg-danger/5 p-3">
+          <div className="mx-auto mt-5 max-w-md rounded-xl border border-danger/20 bg-danger/5 p-3 text-left">
             <p className="text-sm font-medium text-ink">Remove this chat from history?</p>
             <p className="mt-1 text-xs leading-5 text-ink-muted">
               This permanently deletes the unavailable entry and can’t be undone.
@@ -90,7 +100,7 @@ export function UnavailableConversationPanel({
             </div>
           </div>
         ) : (
-          <div className="mt-5 flex flex-wrap items-center gap-2">
+          <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
             <button
               type="button"
               onClick={onRetry}

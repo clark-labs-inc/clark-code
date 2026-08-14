@@ -25,6 +25,46 @@ fn provider_test_config_with_extra(mut extra: serde_json::Value) -> ProviderConf
     }
 }
 
+#[tokio::test]
+async fn scout_sessions_cannot_be_downgraded_from_full_access() {
+    let identity = tempfile::tempdir().unwrap();
+    let mut provider = LocalAgentProvider::new();
+    provider
+        .connect(provider_test_config_with_extra(serde_json::json!({
+            "scout_cartography": {
+                "organization_id": uuid::Uuid::new_v4(),
+                "workspace_id": uuid::Uuid::new_v4(),
+                "identity_root": identity.path(),
+                "platform": "macos",
+                "architecture": "aarch64",
+                "route_prefix": "/v1/cartography"
+            }
+        })))
+        .await
+        .unwrap();
+
+    let session = provider
+        .new_session(SessionOptions {
+            cwd: Some(identity.path().to_string_lossy().into_owned()),
+            mode: Some("ask".into()),
+            collaboration_mode: Some(CollaborationMode::Plan),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(session.mode.as_deref(), Some("full"));
+    assert_eq!(session.collaboration_mode, CollaborationMode::Default);
+
+    provider.set_mode(&session.id, "auto".into()).await.unwrap();
+    assert_eq!(provider.session_mode.as_deref(), Some("full"));
+
+    provider
+        .set_collaboration_mode(&session.id, CollaborationMode::Plan)
+        .await
+        .unwrap();
+    assert!(!provider.session.lock().await.planning.plan_mode());
+}
+
 #[test]
 fn prompt_text_joins_blocks() {
     let input = PromptInput {
@@ -182,6 +222,64 @@ async fn new_session_requires_cwd() {
 }
 
 #[tokio::test]
+async fn live_session_can_admit_and_revoke_an_explicit_read_only_repository() {
+    let workspace = tempfile::tempdir().unwrap();
+    let repository = tempfile::tempdir().unwrap();
+    std::fs::write(repository.path().join("README.md"), "code evidence").unwrap();
+    let mut provider = LocalAgentProvider::new();
+    provider.connect(provider_test_config()).await.unwrap();
+    let session = provider
+        .new_session(SessionOptions {
+            cwd: Some(workspace.path().to_string_lossy().into_owned()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let readme = repository.path().join("README.md");
+    assert!(provider
+        .sandbox
+        .as_ref()
+        .unwrap()
+        .resolve_existing(readme.to_string_lossy().as_ref())
+        .is_err());
+
+    provider
+        .add_read_roots(
+            &session.id,
+            vec![repository.path().to_string_lossy().into_owned()],
+        )
+        .await
+        .unwrap();
+
+    assert!(provider
+        .sandbox
+        .as_ref()
+        .unwrap()
+        .resolve_existing(readme.to_string_lossy().as_ref())
+        .is_ok());
+    assert!(provider
+        .sandbox
+        .as_ref()
+        .unwrap()
+        .resolve_for_write(readme.to_string_lossy().as_ref())
+        .is_err());
+
+    provider
+        .remove_read_roots(
+            &session.id,
+            vec![repository.path().to_string_lossy().into_owned()],
+        )
+        .await
+        .unwrap();
+    assert!(provider
+        .sandbox
+        .as_ref()
+        .unwrap()
+        .resolve_existing(readme.to_string_lossy().as_ref())
+        .is_err());
+}
+
+#[tokio::test]
 async fn isolated_orchestration_session_has_no_ambient_writable_surfaces() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(dir.path().join(".agent")).unwrap();
@@ -199,7 +297,6 @@ async fn isolated_orchestration_session_has_no_ambient_writable_surfaces() {
         .connect(provider_test_config_with_extra(serde_json::json!({
             "isolated_writer": true,
             "memories": false,
-            "research": false,
             "browser_enabled": false,
             "mcp_servers": [],
             "permissions": {
@@ -272,7 +369,6 @@ async fn strict_toolless_session_uses_the_host_owned_cache_identity() {
             "response_format": {"type": "json_object"},
             "cache_session_id": "product-specialist-cache-1",
             "memories": false,
-            "research": false
         })))
         .await
         .unwrap();
@@ -321,7 +417,6 @@ async fn live_configuration_uses_only_provider_advertised_choices() {
             ],
             "memories": false,
             "browser_enabled": false,
-            "research": false,
             "browser_binary": {
                 "version": "1.0.0",
                 "release_tag": "browser-v1",
@@ -375,7 +470,6 @@ async fn memory_and_browser_toggles_change_the_active_tool_contract() {
         .connect(provider_test_config_with_extra(serde_json::json!({
             "memories": false,
             "browser_enabled": false,
-            "research": false,
             "browser_binary": {
                 "version": "1.0.0",
                 "release_tag": "browser-v1",
@@ -609,7 +703,7 @@ async fn prompt_admission_accepts_same_blocked_goal_and_rejects_conflicting_goal
 #[test]
 fn next_run_registry_forks_while_prior_run_snapshot_is_still_held() {
     let mut provider = LocalAgentProvider::new();
-    provider.registry = Some(Arc::new(ToolRegistry::new(None, None)));
+    provider.registry = Some(Arc::new(ToolRegistry::new(None)));
     let prior_run = provider.registry.as_ref().unwrap().clone();
 
     provider
@@ -1187,7 +1281,6 @@ async fn paid_explicit_vs_proactive_delegation_trigger_precision() {
                         "token_budget": 80_000,
                         "subagent_model": subagent_model
                     },
-                    "research": false,
                     "memories": false,
                     "project_knowledge": false,
                     "browser_enabled": false,

@@ -4,7 +4,7 @@ import * as m from "motion/react-m";
 import { ArrowDown, X } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
 import { effectiveApprovalPolicy } from "../store/sessionStore.runtime";
-import { wouldAutoApprove } from "../lib/permissions";
+import { approvalPolicyForSpecialist, wouldAutoApprove } from "../lib/permissions";
 import { currentActivity, isThinkingOnlyMessage, shouldShowPending } from "../lib/activity";
 import {
   humanizeError,
@@ -15,11 +15,11 @@ import { cn } from "../lib/cn";
 import {
   commitChatRowKeys,
   createChatRowMotionState,
-  DUR,
-  EASE,
   enteringChatRowKeys,
   EXPAND,
   EXPAND_REDUCED,
+  FADE,
+  accessibleMotion,
 } from "../lib/motion";
 import {
   conversationScrollTarget,
@@ -145,6 +145,9 @@ export function Conversation({
   const session = useSessionStore((s) => s.session);
   const approvalPolicy = useSessionStore((s) => s.approvalPolicy);
   const approvalPolicies = useSessionStore((s) => s.approvalPolicies);
+  const specialistKind = useSessionStore((s) => s.conversations.find(
+    (conversation) => conversation.id === s.session?.id,
+  )?.specialist?.kind);
   const includedModel = useSessionStore((s) =>
     isIncludedCodingModel(
       effectiveModelSettings(s.localSettings, s.chatModels, s.session?.id ?? null).model,
@@ -279,7 +282,10 @@ export function Conversation({
   // still never mount here.
   const permissionAutoGranted = pending_permission
     ? wouldAutoApprove(
-        effectiveApprovalPolicy(approvalPolicy, approvalPolicies, sessionId),
+        approvalPolicyForSpecialist(
+          effectiveApprovalPolicy(approvalPolicy, approvalPolicies, sessionId),
+          specialistKind,
+        ),
         pending_permission,
       )
     : false;
@@ -595,10 +601,7 @@ export function Conversation({
         {!atBottom && visible.length > 0 && (
           <m.button
             onClick={scrollToBottom}
-            initial={reduce ? false : { opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0, transition: { duration: DUR.fast } }}
-            transition={{ duration: reduce ? 0 : DUR.fast, ease: EASE.out }}
+            {...accessibleMotion(FADE, reduce)}
             className="popover-surface absolute bottom-4 left-1/2 z-10 flex w-fit -translate-x-1/2 items-center gap-1.5 rounded-full bg-bg-elevated px-3 py-1.5 text-xs font-medium text-ink-secondary shadow-lg ring-1 ring-border-subtle transition-colors hover:text-ink"
           >
             <ArrowDown className="size-3.5" /> Jump to latest

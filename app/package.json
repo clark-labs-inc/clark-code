@@ -11,6 +11,9 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@atlaskit/pragmatic-drag-and-drop": "^2.0.2",
+    "@atlaskit/pragmatic-drag-and-drop-hitbox": "^2.0.0",
+    "@atlaskit/pragmatic-drag-and-drop-live-region": "^2.0.0",
     "@fontsource-variable/dm-sans": "^5.3.0",
     "@fontsource-variable/newsreader": "^5.3.0",
     "@fontsource/jetbrains-mono": "^5.3.0",
@@ -34,6 +37,7 @@
     "rehype-katex": "^7.0.1",
     "remark-math": "^6.0.0",
     "shiki": "4.4.1",
+    "sonner": "^2.0.8",
     "streamdown": "^2.5.0",
     "tailwind-merge": "^3.6.0",
     "zustand": "^5.0.14"

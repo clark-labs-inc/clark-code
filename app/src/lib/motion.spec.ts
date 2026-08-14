@@ -9,6 +9,7 @@ import {
   EXPAND_REDUCED,
   REDUCED_EXIT,
   RISE_SMALL,
+  SCREEN_FADE,
   SLIDE_LEFT,
   SLIDE_RIGHT,
   accessibleMotion,
@@ -16,6 +17,7 @@ import {
   commitChatRowKeys,
   createChatRowMotionState,
   enteringChatRowKeys,
+  indeterminateTransition,
   staggeredTransition,
 } from "./motion";
 
@@ -59,6 +61,14 @@ describe("motion policy", () => {
     expect(SLIDE_RIGHT.animate).toMatchObject({ transform: "translateX(0)" });
   });
 
+  it("keeps primary screen changes spatially stable", () => {
+    expect(SCREEN_FADE.initial).toEqual({ opacity: 0 });
+    expect(SCREEN_FADE.animate).toEqual({ opacity: 1 });
+    expect(SCREEN_FADE.exit).toMatchObject({ opacity: 0 });
+    expect(JSON.stringify(SCREEN_FADE)).not.toContain("translate");
+    expect(JSON.stringify(SCREEN_FADE)).not.toContain("scale");
+  });
+
   it("staggeredTransition preserves per-index choreography and overrides", () => {
     const base = staggeredTransition(false, 2, 0.045);
     expect(base.duration).toBe(DUR.base);
@@ -85,19 +95,25 @@ describe("motion policy", () => {
       expect(JSON.stringify(reduced)).not.toContain("translate");
       expect(reduced.transition).toMatchObject({ duration: 0 });
       expect(reduced.initial).toBe(false);
+      expect(reduced.animate).toEqual({ opacity: 1 });
+      expect(reduced.animate).not.toHaveProperty("transform");
     }
   });
 
   it("uses word-level fades instead of character-by-character typing", () => {
     expect(CHAT_TEXT_ANIMATION).toMatchObject({ animation: "fadeIn", sep: "word" });
     expect(CHAT_TEXT_ANIMATION.stagger).toBeGreaterThan(0);
-    expect(CHAT_REDUCED_TEXT_ANIMATION).toMatchObject({
-      animation: "fadeIn",
-      sep: "word",
+    expect(CHAT_REDUCED_TEXT_ANIMATION).toBe(false);
+  });
+
+  it("uses one accessible cadence for indeterminate progress", () => {
+    expect(indeterminateTransition(false)).toEqual({
+      duration: 1.1,
+      ease: EASE.inOut,
+      repeat: Infinity,
     });
-    expect(CHAT_REDUCED_TEXT_ANIMATION.stagger).toBeLessThan(
-      CHAT_TEXT_ANIMATION.stagger,
-    );
+    expect(indeterminateTransition(false, 0.18)).toMatchObject({ delay: 0.18 });
+    expect(indeterminateTransition(true, 0.18)).toEqual({ duration: 0 });
   });
 
   it("gives user and assistant rows distinct compositor-friendly entrances", () => {

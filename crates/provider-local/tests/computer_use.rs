@@ -90,7 +90,6 @@ async fn coding_and_vision_models_are_host_configured_independently() {
                 "model": "local-model-large",
                 "vision_model": "vision-model",
                 "memories": false,
-                "research": false,
                 "sandbox_mode": "disabled",
                 "orchestration": {"enabled": false},
                 "computer_use_enabled": true,

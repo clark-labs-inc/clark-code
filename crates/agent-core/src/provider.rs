@@ -391,6 +391,22 @@ pub trait Provider: Send + Sync {
         ))
     }
 
+    /// Admit additional host-approved read-only roots to a live session.
+    /// Providers that cannot safely change their filesystem boundary keep the
+    /// default rejection instead of presenting a UI-only attachment.
+    async fn add_read_roots(&mut self, _session: &SessionId, _roots: Vec<String>) -> Result<()> {
+        Err(crate::error::Error::Unsupported(
+            "this provider cannot add read-only roots to a live session".into(),
+        ))
+    }
+
+    /// Revoke host-approved read-only roots from a live session.
+    async fn remove_read_roots(&mut self, _session: &SessionId, _roots: Vec<String>) -> Result<()> {
+        Err(crate::error::Error::Unsupported(
+            "this provider cannot remove read-only roots from a live session".into(),
+        ))
+    }
+
     /// Establish the connection / spawn the agent. Idempotent.
     async fn connect(&mut self, config: ProviderConfig) -> Result<()>;
 

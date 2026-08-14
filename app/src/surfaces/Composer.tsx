@@ -6,14 +6,19 @@ import {
 } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
 import type { QueuedMessage, SkillReferenceBlock } from "../store/sessionStore";
-import { effectiveApprovalPolicy } from "../store/sessionStore.runtime";
+import { effectiveApprovalPolicy, openRemote } from "../store/sessionStore.runtime";
 import {
   getBridge,
   type LocalSandboxStatus,
+  type ProjectDirectory,
   type SkillCatalogEntry,
 } from "../core-bridge/bridge";
 import { useFileDrop, usePaste } from "../lib/attachmentSources";
 import { projectFiles } from "../lib/projectFiles";
+import {
+  parentDirectoryReadRoots,
+  parentDirectorySuggestions,
+} from "../lib/parentDirectoryAutocomplete";
 import {
   composerSubmissionState,
   detectComposerTrigger,
@@ -31,7 +36,9 @@ import { listCustomCommands } from "../lib/customCommands";
 import { fuzzyFilter } from "../lib/fuzzy";
 import { cn } from "../lib/cn";
 import { humanizeError } from "../lib/errors";
-import { inTauri } from "../lib/pickFolder";
+import { inTauri, pickFolder } from "../lib/pickFolder";
+import { codeKeyAccountBinding } from "../lib/account";
+import { loadSshHosts } from "../lib/sshHosts";
 import { useComposerAutosize } from "../lib/composerAutosize";
 import {
   composerDraftRef,
@@ -49,6 +56,7 @@ import { ComposerContextBar } from "./ComposerContextBar";
 import { ComposerAttachmentMenu } from "./ComposerAttachmentMenu";
 import { ComposerVoiceButton } from "./ComposerVoiceButton";
 import { ComposerAutocomplete } from "./ComposerAutocomplete";
+import { ComposerParentFolderDialog } from "./ComposerParentFolderDialog";
 import { ComposerPermissionPill } from "./ComposerPermissionPill";
 import { ComposerCollaborationPill } from "./ComposerCollaborationPill";
 import { ComposerQueuedMessages } from "./ComposerQueuedMessages";
@@ -68,12 +76,18 @@ import {
   shouldThumbnailPastedText,
   type PendingPaste,
 } from "../lib/attachments";
-import { specialistSlashIntent, specialistWorkflowAvailable, withActiveSpecialistSkill } from "../lib/specialists";
+import {
+  isSpecComposerSession,
+  specialistSlashIntent,
+  specialistWorkflowAvailable,
+  withActiveSpecialistSkill,
+} from "../lib/specialists";
 import { useSpecialistStore } from "../store/specialistStore";
 import { productModule, productName } from "../product/productModule";
 import { composerBrandingCopy } from "./composerBranding";
 import { SpecComposerCodeContext, useSpecComposerCodeContext } from "./SpecComposerCodeContext";
 import { recordSpecPrompt } from "../lib/specPromptHistory";
+import { approvalPolicyForSpecialist } from "../lib/permissions";
 
 export function Composer() {
   const sessionId = useSessionStore((state) => state.session?.id ?? null);
@@ -94,9 +108,6 @@ export function Composer() {
 function ScopedComposer() {
   const branding = composerBrandingCopy(productName());
   const session = useSessionStore((s) => s.session);
-  const sessionSpecialistKind = useSessionStore((s) => s.session
-    ? s.conversations.find((conversation) => conversation.id === s.session?.id)?.specialist?.kind
-    : undefined);
   const auth = useSessionStore((s) => s.auth);
   const draftOwner = composerDraftOwner(auth?.user ?? null);
   const sessionId = session?.id ?? null;
@@ -109,6 +120,16 @@ function ScopedComposer() {
   const setDraftValue = draft.setValue;
   const [caret, setCaret] = useState(0);
   const [projFiles, setProjFiles] = useState<string[]>([]);
+  const [parentDirectories, setParentDirectories] = useState<ProjectDirectory[]>([]);
+  const [parentReferences, setParentReferences] = useState<
+    { path: string; root: string }[]
+  >([]);
+  const [parentFolderRequest, setParentFolderRequest] = useState<{
+    suggestedBase: string;
+    remoteHost: string | null;
+    before: string;
+    after: string;
+  } | null>(null);
   const [customCommands, setCustomCommands] = useState<SlashCommand[]>([]);
   const [selectedSkills, setSelectedSkills] = useState<SkillCatalogEntry[]>([]);
   const [skillsOpen, setSkillsOpen] = useState(false);
@@ -118,11 +139,14 @@ function ScopedComposer() {
   const taRef = useRef<HTMLTextAreaElement>(null);
   const bridge = useSessionStore((s) => s.bridge);
   const activeProvider = useSessionStore((s) => s.activeProvider);
-  const approvalPolicy = useSessionStore((s) =>
+  const approvalPolicy = useSessionStore((s) => approvalPolicyForSpecialist(
     effectiveApprovalPolicy(s.approvalPolicy, s.approvalPolicies, s.session?.id),
-  );
+    activeSpecialist,
+  ));
   const projectMode = useSessionStore((s) => s.projectMode);
-  const localCwd = useSessionStore((s) => s.localSettings.cwd);
+  const localSettings = useSessionStore((s) => s.localSettings);
+  const localCwd = localSettings.cwd;
+  const selectedHostId = useSessionStore((s) => s.selectedHostId);
   const send = useSessionStore((s) => s.send);
   const compactConversation = useSessionStore((s) => s.compactConversation);
   const pickProjectFolder = useSessionStore((s) => s.pickProjectFolder);
@@ -130,15 +154,57 @@ function ScopedComposer() {
   const removeQueued = useSessionStore((s) => s.removeQueued);
   const cancelActive = useSessionStore((s) => s.cancelActive);
   const askSideQuestion = useSessionStore((s) => s.askSideQuestion);
-  const cwd = useSessionStore((s) => s.activeProjectRoot ?? s.localSettings.cwd);
+  const activeProjectRoot = useSessionStore((s) => s.activeProjectRoot);
   const activeRemote = useSessionStore((s) => s.activeRemote);
+  const activeRemoteHost = useSessionStore((s) => s.activeRemoteHost);
+  const selectedRemoteHost = loadSshHosts(codeKeyAccountBinding(auth))
+    .find((host) => host.id === selectedHostId) ?? null;
+  const isRemoteSelection = !session
+    && activeProvider === "local"
+    && projectMode === "remote";
+  const cwd = session
+    ? activeProjectRoot?.trim() || localSettings.cwd.trim()
+    : isRemoteSelection
+      ? selectedRemoteHost?.remoteRoot.trim() ?? ""
+      : localSettings.cwd.trim();
+  const [inspectionRemote, setInspectionRemote] = useState<typeof activeRemote>(null);
+
+  useEffect(() => {
+    let current = true;
+    setInspectionRemote(null);
+    if (!isRemoteSelection || !selectedRemoteHost || !cwd) {
+      return () => { current = false; };
+    }
+    void openRemote(selectedRemoteHost, localSettings, cwd).then((next) => {
+      if (current) setInspectionRemote(next);
+    }).catch(() => {
+      // The normal start/connect surface owns connection errors. Autocomplete
+      // remains usable through the explicit absolute-path entry fallback.
+    });
+    return () => { current = false; };
+  }, [
+    cwd,
+    isRemoteSelection,
+    localSettings.model,
+    localSettings.reasoningEffort,
+    selectedRemoteHost?.host,
+    selectedRemoteHost?.id,
+  ]);
   const remote = useMemo(
-    () => activeRemote ? { id: activeRemote.id } : null,
-    [activeRemote],
+    () => {
+      const target = session ? activeRemote : inspectionRemote;
+      return target ? { id: target.id } : null;
+    },
+    [activeRemote, inspectionRemote, session],
   );
+  const isRemoteContext = Boolean(activeRemoteHost) || isRemoteSelection;
+  const remoteHostLabel = activeRemoteHost
+    ?? selectedRemoteHost?.host.trim()
+    ?? "SSH host";
+  const projectInspectionReady = !isRemoteContext || Boolean(remote);
   const localTarget = session ? session.provider === "local" : activeProvider === "local";
   const specialistSession = Boolean(activeSpecialist) || session?.provider === "specialist";
-  const specSession = activeSpecialist === "spec" || sessionSpecialistKind === "spec";
+  const specSession = isSpecComposerSession(activeSpecialist);
   const usesConversationWorkspace = Boolean(
     activeSpecialist
     && productModule().specialistWorkspace?.isConversationBound(activeSpecialist),
@@ -177,6 +243,9 @@ function ScopedComposer() {
     setSelectedSkills([]);
     setEditTimelineIndex(null);
     setProjFiles([]);
+    setParentDirectories([]);
+    setParentReferences([]);
+    setParentFolderRequest(null);
     setCustomCommands([]);
   }, [draftConversationId, draftOwner]);
   useEffect(() => setProjFiles([]), [cwd, remote?.id]);
@@ -184,7 +253,7 @@ function ScopedComposer() {
   const connecting = useSessionStore((s) => s.connecting);
   const startBlocked = useSessionStore((s) => (s.session ? null : s.startBlockedReason()));
   const startError = useSessionStore((s) => (s.session ? null : s.error));
-  const { dragging, handlers } = useFileDrop((files) => void addFiles(files));
+  const { dragging, dropTargetRef } = useFileDrop((files) => void addFiles(files));
   usePaste((files) => void addFiles(files), !connecting);
 
   useComposerAutosize(taRef, value);
@@ -267,9 +336,12 @@ function ScopedComposer() {
     canPickProjectFolder: inTauri(),
     usesConversationWorkspace,
   });
+  const visibleStartBlocked = usesConversationWorkspace && projectMode === "local"
+    ? null
+    : startBlocked;
   const sandboxCheckRequired = !usesConversationWorkspace && sandboxGateRequired({
     localTarget,
-    remoteTarget: remote !== null,
+    remoteTarget: isRemoteContext,
     fullAccess: approvalPolicy === "full",
     cwd,
     nativeHost: inTauri(),
@@ -278,19 +350,35 @@ function ScopedComposer() {
   const sandboxBlocked = sandboxBlocksSubmission(sandboxCheckRequired, sandboxStatus);
   const canSend = submission.canSubmit && !sandboxBlocked;
 
+  const mentionProjectRoot = specSession ? specCodeContext.repositoryRoot : cwd;
+
+  useEffect(() => setProjFiles([]), [mentionProjectRoot, remote?.id]);
+  useEffect(() => setParentDirectories([]), [cwd, remote?.id]);
+
   useEffect(() => {
-    if (trigger?.type !== "@" || projFiles.length > 0) return;
+    if (trigger?.type !== "@" || projFiles.length > 0 || !projectInspectionReady) return;
     let cancelled = false;
-    void projectFiles(cwd, remote).then((files) => {
+    void projectFiles(mentionProjectRoot, remote).then((files) => {
       if (!cancelled) setProjFiles(files);
     });
     return () => {
       cancelled = true;
     };
-  }, [trigger, cwd, projFiles.length, remote]);
+  }, [trigger, mentionProjectRoot, projFiles.length, projectInspectionReady, remote]);
 
   useEffect(() => {
-    if (!cwd.trim()) {
+    if (trigger?.type !== "@" || !cwd.trim() || !projectInspectionReady) return;
+    let cancelled = false;
+    void (bridge?.listSiblingDirectories?.(cwd, remote) ?? Promise.resolve([])).then((directories) => {
+      if (!cancelled) setParentDirectories(directories);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [bridge, cwd, projectInspectionReady, remote, trigger?.type]);
+
+  useEffect(() => {
+    if (!cwd.trim() || !projectInspectionReady) {
       setCustomCommands([]);
       return;
     }
@@ -304,12 +392,20 @@ function ScopedComposer() {
     return () => {
       cancelled = true;
     };
-  }, [cwd, remote]);
+  }, [cwd, projectInspectionReady, remote]);
 
   const suggestions = useMemo<ComposerSuggestion[]>(() => {
     if (!trigger || dismissed) return [];
     if (trigger.type === "@") {
-      return specCodeContext.suggestions(trigger.query, projFiles);
+      const parentSuggestions = specialistSession
+        ? []
+        : parentDirectorySuggestions(trigger.query, parentDirectories);
+      if (trigger.query.startsWith("..")) return parentSuggestions;
+      if (specSession) return specCodeContext.suggestions(trigger.query, projFiles);
+      return [
+        ...parentSuggestions,
+        ...specCodeContext.suggestions(trigger.query, projFiles),
+      ].slice(0, 8);
     }
     if (trigger.type === "$") {
       return fuzzyFilter(
@@ -333,11 +429,14 @@ function ScopedComposer() {
     trigger,
     dismissed,
     projFiles,
+    parentDirectories,
     session,
     activeProvider,
     customCommands,
     skillCatalog,
     specCodeContext,
+    specSession,
+    specialistSession,
   ]);
 
   useEffect(() => setSel(0), [trigger?.type, trigger?.query]);
@@ -359,9 +458,68 @@ function ScopedComposer() {
     setPendingPastes((current) => current.filter((paste) => paste.id !== id));
   };
 
+  const insertParentFolder = (
+    picked: string,
+    insertion: { before: string; after: string },
+  ) => {
+    setParentReferences((current) => current.some(({ root }) => root === picked)
+      ? current
+      : [...current, { path: picked, root: picked }]);
+    const insert = `@${picked.replace(/[\\/]+$/, "")}/ `;
+    const next = insertion.before + insert + insertion.after;
+    const pos = (insertion.before + insert).length;
+    setDraftValue(next);
+    requestAnimationFrame(() => {
+      taRef.current?.focus();
+      taRef.current?.setSelectionRange(pos, pos);
+      setCaret(pos);
+    });
+  };
+
   const accept = (s: ComposerSuggestion) => {
     if (!trigger) return;
     if (specCodeContext.acceptSuggestion(s)) return;
+    if (s.kind === "parent_directory_menu") {
+      const before = value.slice(0, trigger.start);
+      const after = value.slice(caret);
+      const next = `${before}@../${after}`;
+      const pos = before.length + 4;
+      setDraftValue(next);
+      requestAnimationFrame(() => {
+        taRef.current?.focus();
+        taRef.current?.setSelectionRange(pos, pos);
+        setCaret(pos);
+      });
+      return;
+    }
+    if (s.kind === "parent_directory_picker") {
+      const parent = cwd.replace(/[\\/][^\\/]+[\\/]?$/, "");
+      const insertion = {
+        before: value.slice(0, trigger.start),
+        after: value.slice(caret),
+      };
+      if (isRemoteContext || !inTauri()) {
+        setParentFolderRequest({
+          suggestedBase: parent || cwd,
+          remoteHost: isRemoteContext ? remoteHostLabel : null,
+          ...insertion,
+        });
+        return;
+      }
+      void pickFolder(parent || cwd)
+        .then((picked) => {
+          if (picked) insertParentFolder(picked, insertion);
+        })
+        .catch((error) => {
+          flashNotice(`Could not open the folder picker: ${humanizeError(String(error))}`);
+        });
+      return;
+    }
+    if (s.kind === "parent_directory") {
+      setParentReferences((current) => current.some(({ root }) => root === s.root)
+        ? current
+        : [...current, { path: s.path, root: s.root }]);
+    }
     if (s.kind === "skill") {
       const before = value.slice(0, trigger.start);
       const after = value.slice(caret);
@@ -401,8 +559,14 @@ function ScopedComposer() {
       s.cmd.run?.();
       return;
     }
-    if (s.kind === "spec_repository" || s.kind === "spec_folder") return;
-    const insert = `@${s.path}${s.kind === "directory" ? "/" : ""} `;
+    if (
+      s.kind === "spec_repository"
+      || s.kind === "spec_repository_picker"
+      || s.kind === "spec_folder"
+    ) return;
+    const insert = `@${s.path}${
+      s.kind === "directory" || s.kind === "parent_directory" ? "/" : ""
+    } `;
     const before = value.slice(0, trigger.start);
     const after = value.slice(caret);
     const next = before + insert + after;
@@ -573,12 +737,30 @@ function ScopedComposer() {
       flashNotice("The selected specialist workflow is unavailable. Reload skills and try again.");
       return;
     }
+    const composerReadRoots = parentDirectoryReadRoots(
+      t,
+      parentReferences,
+      parentDirectories,
+    );
+    if (session && composerReadRoots.length > 0) {
+      if (!bridge?.addReadRoots) {
+        flashNotice("This Clark Code build cannot attach parent folders to a live chat.");
+        return;
+      }
+      try {
+        await bridge.addReadRoots(session.id, composerReadRoots);
+      } catch (error) {
+        flashNotice(`Could not attach that parent folder: ${humanizeError(String(error))}`);
+        return;
+      }
+    }
     const submittedDraftText = value;
     const acceptCurrentDraft = () => {
       if (!draft.acceptSubmitted(submittedDraftText)) return false;
       setPendingPastes([]);
       setEditTimelineIndex(null);
       setSelectedSkills([]);
+      setParentReferences([]);
       specCodeContext.reset();
       return true;
     };
@@ -626,7 +808,7 @@ function ScopedComposer() {
       composerDraftRef.current = "";
       startDraftSettleResult = await settleAcceptedDraft();
       startDraftSettled = true;
-      await start({ submittedDraft: t });
+      await start({ submittedDraft: t, readRoots: composerReadRoots });
       const startedSession = useSessionStore.getState().session;
       if (!startedSession) {
         useSessionStore.getState().setComposerPrefill(t);
@@ -742,13 +924,29 @@ function ScopedComposer() {
 
   return (
     <div
+      ref={dropTargetRef}
+      data-file-drop-target="composer"
       className={cn(
         "min-w-0 bg-bg px-3 pb-4 pt-2.5 sm:px-6",
         specialistSession && "specialist-composer",
       )}
-      {...handlers}
     >
       <ComposerQueuedMessages onEdit={editQueued} />
+      <ComposerParentFolderDialog
+        open={parentFolderRequest !== null}
+        suggestedBase={parentFolderRequest?.suggestedBase ?? ""}
+        remoteHost={parentFolderRequest?.remoteHost}
+        onCancel={() => {
+          setParentFolderRequest(null);
+          requestAnimationFrame(() => taRef.current?.focus());
+        }}
+        onChoose={(path) => {
+          const request = parentFolderRequest;
+          if (!request) return;
+          setParentFolderRequest(null);
+          insertParentFolder(path, request);
+        }}
+      />
       {sandboxCheckRequired && (
         <SandboxSetupCard
           compact
@@ -779,7 +977,7 @@ function ScopedComposer() {
       <ComposerContextBar />
       <div
         className={cn(
-          "relative z-10 mx-auto w-full rounded-lg border px-2.5 transition duration-200 ease-agent",
+          "relative z-10 mx-auto w-full rounded-lg border px-2.5 transition duration-base ease-agent",
           specSession ? "max-w-[70rem] py-3" : "conversation-column-width py-[1.375rem]",
           specialistSession && "specialist-composer-surface",
           "border-border bg-composer-surface shadow-none",
@@ -912,7 +1110,7 @@ function ScopedComposer() {
               />
             )}
             {!specSession && <ComposerPermissionPill />}
-            {!specSession && <ComposerCollaborationPill />}
+            {!specSession && activeSpecialist !== "scout" && <ComposerCollaborationPill />}
           </div>
 
           <div className="flex shrink-0 items-center gap-2.5">
@@ -936,7 +1134,7 @@ function ScopedComposer() {
               <button
                 onClick={() => void cancelActive()}
                 aria-label="Stop"
-                className="grid size-8 shrink-0 place-items-center rounded-full bg-danger/12 text-danger transition duration-200 ease-agent hover:bg-danger/20"
+                className="grid size-8 shrink-0 place-items-center rounded-full bg-danger/12 text-danger transition duration-base ease-agent hover:bg-danger/20"
               >
                 <Square className="size-3 fill-current" />
               </button>
@@ -963,7 +1161,7 @@ function ScopedComposer() {
                         : "Send · ⇧↵ newline"
                 }
                 className={cn(
-                  "shrink-0 bg-accent text-on-accent shadow-soft transition duration-200 ease-agent hover:-translate-y-0.5 hover:bg-accent-hover active:translate-y-0 disabled:translate-y-0 disabled:bg-bg-tertiary disabled:text-ink-muted disabled:shadow-none",
+                  "shrink-0 bg-accent text-on-accent shadow-soft transition duration-base ease-agent hover:-translate-y-0.5 hover:bg-accent-hover active:translate-y-0 disabled:translate-y-0 disabled:bg-bg-tertiary disabled:text-ink-muted disabled:shadow-none",
                   startsScoutRun
                     ? "inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-xs font-semibold"
                     : "grid size-8 place-items-center rounded-full",
@@ -982,14 +1180,15 @@ function ScopedComposer() {
       {/* One quiet status line: a connect failure (in red) wins over the
           "what's missing" readiness hint. Connecting itself never shows here —
           the OpeningScreen owns that state. */}
-      {!session && !specSession && (startError || startBlocked) && (
+      {!session && (startError || visibleStartBlocked) && (
         <p
           className={cn(
-            "conversation-column-width mx-auto mt-2 w-full px-1 text-xs",
+            "mx-auto mt-2 w-full px-1 text-xs",
+            specSession ? "max-w-[70rem]" : "conversation-column-width",
             startError ? "text-danger" : "text-ink-faint",
           )}
         >
-          {startError ? humanizeError(startError) : startBlocked}
+          {startError ? humanizeError(startError) : visibleStartBlocked}
         </p>
       )}
       {draft.cloud.status === "conflict" && (

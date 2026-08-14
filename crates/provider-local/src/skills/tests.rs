@@ -304,6 +304,8 @@ async fn bundled_spec_skill_requires_document_tools_and_stays_explicit() {
     assert!(body.contains("Ask one short, high-information question at a time"));
     assert!(body.contains("<selected_spec_content>"));
     assert!(body.contains("state not verified"));
+    assert!(body.contains("installed brokered research capability"));
+    assert!(body.contains("do not block document work"));
     assert!(body.contains("Never\n  reverse-engineer a problem statement"));
 }
 

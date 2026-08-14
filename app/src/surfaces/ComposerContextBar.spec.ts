@@ -20,9 +20,9 @@ describe("composer execution location", () => {
 });
 
 describe("composer context authority", () => {
-  it("never represents Scout as a checkout-scoped conversation", () => {
+  it("keeps Scout enterprise-scoped and gives Spec an execution target", () => {
     expect(composerContextKind("scout")).toBe("enterprise");
-    expect(composerContextKind("spec")).toBe("hidden");
+    expect(composerContextKind("spec")).toBe("spec");
     expect(composerContextKind(null)).toBe("checkout");
   });
 });

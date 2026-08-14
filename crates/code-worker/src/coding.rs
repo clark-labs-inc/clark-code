@@ -17,6 +17,8 @@ use crate::config::{ExecutionResidency, ProviderProfile};
 const SESSION_OPEN: &str = "session.open";
 const SESSION_PROMPT: &str = "session.prompt";
 const SESSION_RESPOND: &str = "session.respond";
+const SESSION_ADD_READ_ROOTS: &str = "session.add_read_roots";
+const SESSION_REMOVE_READ_ROOTS: &str = "session.remove_read_roots";
 const SESSION_CLOSE: &str = "session.close";
 
 struct CodingSession {
@@ -47,6 +49,8 @@ impl CodingPlugin {
                     SESSION_OPEN.into(),
                     SESSION_PROMPT.into(),
                     SESSION_RESPOND.into(),
+                    SESSION_ADD_READ_ROOTS.into(),
+                    SESSION_REMOVE_READ_ROOTS.into(),
                     SESSION_CLOSE.into(),
                 ]),
                 capabilities: BTreeSet::from([
@@ -250,6 +254,51 @@ impl CodingPlugin {
         Ok(json!({"session_id": request.session_id, "accepted": true}))
     }
 
+    async fn update_read_roots(
+        &self,
+        context: PluginContext,
+        input: Value,
+        add: bool,
+    ) -> Result<Value, PluginError> {
+        let request: ReadRootsRequest = decode(input)?;
+        if request.roots.is_empty() {
+            return Err(PluginError::InvalidInput(
+                "read-only roots must contain at least one path".into(),
+            ));
+        }
+        let handle = self
+            .sessions
+            .lock()
+            .await
+            .get(&request.session_id)
+            .cloned()
+            .ok_or_else(|| {
+                PluginError::InvalidInput(format!("unknown session: {}", request.session_id))
+            })?;
+        let mut state = handle.lock().await;
+        if context.project_id.as_deref() != Some(state.project_id.as_str()) {
+            return Err(PluginError::InvalidInput(
+                "read-only roots project_id does not match the session checkout".into(),
+            ));
+        }
+        let provider_session = state.session.id.clone();
+        let roots = request.roots;
+        if add {
+            state
+                .provider
+                .add_read_roots(&provider_session, roots)
+                .await
+                .map_err(provider_error)?;
+        } else {
+            state
+                .provider
+                .remove_read_roots(&provider_session, roots)
+                .await
+                .map_err(provider_error)?;
+        }
+        Ok(json!({"session_id": request.session_id, "updated": true}))
+    }
+
     async fn close(&self, input: Value) -> Result<Value, PluginError> {
         let request: CloseRequest = decode(input)?;
         let handle = self
@@ -292,6 +341,8 @@ impl HeadlessPlugin for CodingPlugin {
             SESSION_OPEN => self.open(context, input).await,
             SESSION_PROMPT => self.prompt(context, input).await,
             SESSION_RESPOND => self.respond(context, input).await,
+            SESSION_ADD_READ_ROOTS => self.update_read_roots(context, input, true).await,
+            SESSION_REMOVE_READ_ROOTS => self.update_read_roots(context, input, false).await,
             SESSION_CLOSE => self.close(input).await,
             _ => Err(PluginError::UnsupportedOperation {
                 plugin: self.manifest.id.clone(),
@@ -322,6 +373,13 @@ struct PromptRequest {
 struct RespondRequest {
     session_id: String,
     response: ClientResponse,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ReadRootsRequest {
+    session_id: String,
+    roots: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -415,5 +473,16 @@ mod tests {
             request.response,
             ClientResponse::Permission { .. }
         ));
+    }
+
+    #[test]
+    fn read_root_updates_keep_paths_and_session_identity_typed() {
+        let request: ReadRootsRequest = decode(json!({
+            "session_id": "conversation-1",
+            "roots": ["/srv/shared/api", "/srv/shared/docs"]
+        }))
+        .unwrap();
+        assert_eq!(request.session_id, "conversation-1");
+        assert_eq!(request.roots, ["/srv/shared/api", "/srv/shared/docs"]);
     }
 }

@@ -554,6 +554,8 @@ export interface SessionState {
   startSession: (options?: {
     quickChat?: { id: string; path: string };
     submittedDraft?: string;
+    /** Explicit user-selected folders outside the writable checkout. */
+    readRoots?: string[];
   }) => Promise<void>;
   /** Start immediately in an app-managed workspace without selecting a repo. */
   startQuickChat: () => Promise<void>;

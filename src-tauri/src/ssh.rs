@@ -2,7 +2,11 @@
 //! Coding, file execution, and lifecycle live exclusively in `code-remote` and
 //! the account-partitioned runtime registry.
 
-use std::process::Stdio;
+use std::{
+    collections::{HashMap, HashSet},
+    path::{Path, PathBuf},
+    process::Stdio,
+};
 
 use tokio::process::Command;
 
@@ -61,6 +65,241 @@ pub struct RemoteDirectoryListing {
     pub path: String,
     pub parent: Option<String>,
     pub directories: Vec<RemoteDirectory>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct SshConfigHost {
+    pub alias: String,
+    pub hostname: Option<String>,
+    pub user: Option<String>,
+}
+
+/// Return the named hosts that OpenSSH can resolve from the user's config.
+/// Wildcard-only patterns are intentionally omitted because they are useful to
+/// OpenSSH's resolver but are not concrete destinations a person can choose.
+pub fn config_hosts() -> Result<Vec<SshConfigHost>, String> {
+    let home = std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from)
+        .ok_or("could not resolve the home folder")?;
+    let ssh_dir = home.join(".ssh");
+    let config = ssh_dir.join("config");
+    if !config.exists() {
+        return Ok(Vec::new());
+    }
+
+    config_hosts_from_path(&config, &ssh_dir, &home)
+}
+
+fn config_hosts_from_path(
+    config: &Path,
+    ssh_dir: &Path,
+    home: &Path,
+) -> Result<Vec<SshConfigHost>, String> {
+    let mut aliases = Vec::new();
+    let mut alias_indexes = HashMap::new();
+    let mut visited_files = HashSet::new();
+    collect_config_hosts(
+        config,
+        ssh_dir,
+        home,
+        &mut visited_files,
+        &mut alias_indexes,
+        &mut aliases,
+    )?;
+    aliases.sort_by(|left, right| {
+        left.alias
+            .to_lowercase()
+            .cmp(&right.alias.to_lowercase())
+            .then_with(|| left.alias.cmp(&right.alias))
+    });
+    Ok(aliases)
+}
+
+fn collect_config_hosts(
+    path: &Path,
+    ssh_dir: &Path,
+    home: &Path,
+    visited_files: &mut HashSet<PathBuf>,
+    alias_indexes: &mut HashMap<String, usize>,
+    aliases: &mut Vec<SshConfigHost>,
+) -> Result<(), String> {
+    // Bound recursive Include expansion even if a config contains a large or
+    // cyclic glob. Canonicalization below also prevents ordinary cycles.
+    if visited_files.len() >= 256 {
+        return Ok(());
+    }
+    let canonical = match path.canonicalize() {
+        Ok(path) => path,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(format!("reading SSH config {}: {error}", path.display())),
+    };
+    if !visited_files.insert(canonical.clone()) {
+        return Ok(());
+    }
+    let bytes = std::fs::read(&canonical)
+        .map_err(|error| format!("reading SSH config {}: {error}", canonical.display()))?;
+    let source = String::from_utf8_lossy(&bytes);
+
+    let mut active_aliases = Vec::new();
+    for line in source.lines() {
+        let words = ssh_config_words(line);
+        let Some((keyword, values)) = words.split_first() else {
+            continue;
+        };
+        if keyword.eq_ignore_ascii_case("host") {
+            active_aliases.clear();
+            for alias in values.iter().filter(|value| literal_host_alias(value)) {
+                let key = alias.to_lowercase();
+                active_aliases.push(key.clone());
+                if !alias_indexes.contains_key(&key) {
+                    alias_indexes.insert(key, aliases.len());
+                    aliases.push(SshConfigHost {
+                        alias: alias.clone(),
+                        hostname: None,
+                        user: None,
+                    });
+                }
+            }
+        } else if keyword.eq_ignore_ascii_case("hostname") {
+            set_config_host_value(
+                aliases,
+                alias_indexes,
+                &active_aliases,
+                values.first(),
+                |host, value| {
+                    if host.hostname.is_none() {
+                        host.hostname = Some(value);
+                    }
+                },
+            );
+        } else if keyword.eq_ignore_ascii_case("user") {
+            set_config_host_value(
+                aliases,
+                alias_indexes,
+                &active_aliases,
+                values.first(),
+                |host, value| {
+                    if host.user.is_none() {
+                        host.user = Some(value);
+                    }
+                },
+            );
+        } else if keyword.eq_ignore_ascii_case("include") {
+            for include in values {
+                for included_path in expand_include(include, ssh_dir, home) {
+                    collect_config_hosts(
+                        &included_path,
+                        ssh_dir,
+                        home,
+                        visited_files,
+                        alias_indexes,
+                        aliases,
+                    )?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn set_config_host_value(
+    aliases: &mut [SshConfigHost],
+    alias_indexes: &HashMap<String, usize>,
+    active_aliases: &[String],
+    value: Option<&String>,
+    set: impl Fn(&mut SshConfigHost, String),
+) {
+    let Some(value) = value else {
+        return;
+    };
+    for alias in active_aliases {
+        let Some(index) = alias_indexes.get(alias) else {
+            continue;
+        };
+        set(&mut aliases[*index], value.clone());
+    }
+}
+
+fn ssh_config_words(line: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut current = String::new();
+    let mut quote = None;
+    let mut escaped = false;
+
+    for character in line.chars() {
+        if escaped {
+            current.push(character);
+            escaped = false;
+            continue;
+        }
+        if character == '\\' {
+            escaped = true;
+            continue;
+        }
+        if let Some(active_quote) = quote {
+            if character == active_quote {
+                quote = None;
+            } else {
+                current.push(character);
+            }
+            continue;
+        }
+        if character == '\'' || character == '"' {
+            quote = Some(character);
+        } else if character == '#' && current.is_empty() {
+            break;
+        } else if character.is_whitespace() {
+            if !current.is_empty() {
+                words.push(std::mem::take(&mut current));
+            }
+        } else if character == '=' && words.is_empty() && !current.is_empty() {
+            words.push(std::mem::take(&mut current));
+        } else if character == '=' && words.len() == 1 && current.is_empty() {
+            // OpenSSH permits whitespace around the optional keyword separator.
+        } else {
+            current.push(character);
+        }
+    }
+    if escaped {
+        current.push('\\');
+    }
+    if !current.is_empty() {
+        words.push(current);
+    }
+    words
+}
+
+fn literal_host_alias(alias: &&String) -> bool {
+    !alias.is_empty()
+        && !alias.starts_with('!')
+        && !alias
+            .chars()
+            .any(|character| matches!(character, '*' | '?' | '[' | ']'))
+}
+
+fn expand_include(pattern: &str, ssh_dir: &Path, home: &Path) -> Vec<PathBuf> {
+    let expanded = if pattern == "~" {
+        home.to_path_buf()
+    } else if let Some(relative) = pattern.strip_prefix("~/") {
+        home.join(relative)
+    } else {
+        let path = PathBuf::from(pattern);
+        if path.is_absolute() {
+            path
+        } else {
+            ssh_dir.join(path)
+        }
+    };
+    let Some(pattern) = expanded.to_str() else {
+        return Vec::new();
+    };
+    let Ok(paths) = glob::glob(pattern) else {
+        return Vec::new();
+    };
+    let mut paths = paths.filter_map(Result::ok).collect::<Vec<_>>();
+    paths.sort();
+    paths
 }
 
 pub async fn probe(host: &str) -> Result<Probe, String> {

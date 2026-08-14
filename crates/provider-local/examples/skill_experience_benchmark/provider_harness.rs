@@ -32,7 +32,6 @@ pub async fn launch_and_prompt(
         "model": "benchmark-scripted-model",
         "max_iterations": 2,
         "memories": false,
-        "research": false,
         "auto_compact": false,
         // This benchmark talks only to its in-process scripted model and never
         // executes a model-authored tool call. Make that host boundary explicit

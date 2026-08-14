@@ -151,7 +151,7 @@ function CatalogCard({ preset, onAdd }: { preset: (typeof MCP_PRESETS)[number]; 
       </div>
       <button
         onClick={onAdd}
-        className="min-h-8 shrink-0 rounded-lg bg-accent px-2.5 py-1 text-xs font-medium text-on-accent transition duration-200 ease-agent hover:bg-accent-hover"
+        className="min-h-8 shrink-0 rounded-lg bg-accent px-2.5 py-1 text-xs font-medium text-on-accent transition duration-base ease-agent hover:bg-accent-hover"
       >
         Add
       </button>
@@ -359,7 +359,7 @@ export function McpSettings() {
                 onClick={() => void test()}
                 disabled={testing || enabledCount === 0}
                 title={enabledCount === 0 ? "Add and enable a server first" : "Connect each server and list its tools"}
-                className="ml-auto flex min-h-8 items-center gap-1.5 rounded-lg bg-bg-tertiary px-3 py-1.5 text-sm font-medium text-ink-secondary transition duration-200 ease-agent hover:bg-bg-hover disabled:text-ink-muted disabled:opacity-50"
+                className="ml-auto flex min-h-8 items-center gap-1.5 rounded-lg bg-bg-tertiary px-3 py-1.5 text-sm font-medium text-ink-secondary transition duration-base ease-agent hover:bg-bg-hover disabled:text-ink-muted disabled:opacity-50"
               >
                 {testing && <Loader2 className="size-3.5 animate-[spin_1s_linear_infinite]" />}
                 Test connections
@@ -375,7 +375,7 @@ export function McpSettings() {
                 type="button"
                 onClick={() => void save()}
                 disabled={saving}
-                className="min-h-8 rounded-lg bg-accent px-3 py-1.5 text-sm font-semibold text-on-accent transition duration-200 ease-agent hover:bg-accent-hover"
+                className="min-h-8 rounded-lg bg-accent px-3 py-1.5 text-sm font-semibold text-on-accent transition duration-base ease-agent hover:bg-accent-hover"
               >
                 {saving ? "Saving…" : "Save"}
               </button>

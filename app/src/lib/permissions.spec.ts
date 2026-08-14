@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
+  approvalPolicyForSpecialist,
   loadApprovalPolicy,
   loadApprovalPolicies,
   loadCollaborationMode,
@@ -95,6 +96,14 @@ describe("nextApprovalPolicy", () => {
     expect(nextApprovalPolicy("ask")).toBe("auto");
     expect(nextApprovalPolicy("auto")).toBe("full");
     expect(nextApprovalPolicy("full")).toBe("ask");
+  });
+});
+
+describe("specialist approval policy", () => {
+  it("forces Scout to full access without changing other specialists", () => {
+    expect(approvalPolicyForSpecialist("ask", "scout")).toBe("full");
+    expect(approvalPolicyForSpecialist("auto", "security")).toBe("auto");
+    expect(approvalPolicyForSpecialist("ask", null)).toBe("ask");
   });
 });
 

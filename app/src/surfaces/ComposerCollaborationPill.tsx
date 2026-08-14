@@ -20,7 +20,7 @@ export function ComposerCollaborationPill() {
       onClick={() => setMode(planning ? "default" : "plan")}
       title={planning ? "Leave Plan Mode" : "Enter read-only Plan Mode"}
       className={cn(
-        "flex min-h-8 items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-medium transition duration-200 ease-agent hover:bg-accent-subtle",
+        "flex min-h-8 items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-medium transition duration-base ease-agent hover:bg-accent-subtle",
         planning ? "bg-accent-subtle text-accent" : "text-ink-secondary",
       )}
     >

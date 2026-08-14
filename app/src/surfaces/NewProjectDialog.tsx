@@ -24,7 +24,7 @@ import { loadManagedWorktreeBase } from "../lib/managedWorktreeSettings";
 const input =
   "w-full rounded-lg border border-border bg-bg px-2.5 py-1.5 text-sm text-ink outline-none transition focus:border-accent placeholder:text-ink-muted";
 const CHIP =
-  "flex min-h-9 flex-1 items-center justify-center gap-2 rounded-xl px-3 py-1.5 text-sm font-medium transition duration-200 ease-agent";
+  "flex min-h-9 flex-1 items-center justify-center gap-2 rounded-xl px-3 py-1.5 text-sm font-medium transition duration-base ease-agent";
 
 /** The "New project…" chooser: pick where the new project runs (this machine,
  *  or a remote SSH host) and auto-start its first session. Starting a session
@@ -220,7 +220,7 @@ export function NewProjectDialog() {
                     <button
                       type="button"
                       onClick={() => void chooseLocal()}
-                      className="flex min-h-10 w-full items-center gap-2 rounded-xl bg-accent px-2.5 py-2 text-sm font-medium text-on-accent transition duration-200 ease-agent hover:bg-accent-hover"
+                      className="flex min-h-10 w-full items-center gap-2 rounded-xl bg-accent px-2.5 py-2 text-sm font-medium text-on-accent transition duration-base ease-agent hover:bg-accent-hover"
                     >
                       <FolderOpen className="size-4" /> Choose folder…
                     </button>
@@ -253,7 +253,7 @@ export function NewProjectDialog() {
                             type="button"
                             onClick={() => setLocalPath(p)}
                             className={cn(
-                              "flex min-h-9 items-center gap-2.5 rounded-xl px-2 py-1.5 text-left transition duration-200 ease-agent hover:bg-accent-subtle",
+                              "flex min-h-9 items-center gap-2.5 rounded-xl px-2 py-1.5 text-left transition duration-base ease-agent hover:bg-accent-subtle",
                               p === localPath && "bg-accent-subtle",
                             )}
                           >
@@ -305,7 +305,7 @@ export function NewProjectDialog() {
                             type="button"
                             onClick={() => pickHost(h.id)}
                             className={cn(
-                              "flex min-h-9 items-center gap-2.5 rounded-xl px-2 py-1.5 text-left transition duration-200 ease-agent hover:bg-accent-subtle",
+                              "flex min-h-9 items-center gap-2.5 rounded-xl px-2 py-1.5 text-left transition duration-base ease-agent hover:bg-accent-subtle",
                               h.id === selectedHostId && "bg-accent-subtle",
                             )}
                           >

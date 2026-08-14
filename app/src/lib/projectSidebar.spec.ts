@@ -10,6 +10,7 @@ import {
   saveProjectSidebarPreferences,
   withProjectAlias,
   withProjectPinned,
+  withPinnedProjectMoved,
   withoutProjectPreferences,
 } from "./projectSidebar";
 
@@ -85,6 +86,24 @@ describe("project sidebar preferences", () => {
       pinned: [],
       aliases: {},
     });
+  });
+
+  it("uses the same exact pinned-project movement for drag and menu actions", () => {
+    const preferences = {
+      pinned: ["p:/repo/one", "p:/repo/two", "p:/repo/three"],
+      aliases: { "p:/repo/two": "Second repo" },
+    };
+
+    expect(withPinnedProjectMoved(preferences, "p:/repo/three", 0)).toEqual({
+      pinned: ["p:/repo/three", "p:/repo/one", "p:/repo/two"],
+      aliases: preferences.aliases,
+    });
+    expect(withPinnedProjectMoved(preferences, "p:/repo/one", 99).pinned).toEqual([
+      "p:/repo/two",
+      "p:/repo/three",
+      "p:/repo/one",
+    ]);
+    expect(withPinnedProjectMoved(preferences, "p:/repo/missing", 1)).toBe(preferences);
   });
 
   it("keeps sidebar preferences separate between accounts", () => {

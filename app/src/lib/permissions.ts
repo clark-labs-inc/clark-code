@@ -46,6 +46,16 @@ export function nextApprovalPolicy(policy: ApprovalPolicy): ApprovalPolicy {
 export const DEFAULT_APPROVAL_POLICY: ApprovalPolicy = "auto";
 export const DEFAULT_COLLABORATION_MODE: CollaborationMode = "default";
 
+/** Scout owns an organization-wide cartography run rather than a bounded
+ * project checkout, so its execution authority is a product invariant rather
+ * than a user-selectable conversation preference. */
+export function approvalPolicyForSpecialist(
+  policy: ApprovalPolicy,
+  specialistKind?: string | null,
+): ApprovalPolicy {
+  return specialistKind === "scout" ? "full" : policy;
+}
+
 /** The option that grants the request, preferring a one-time allow. */
 export function pickAllowOption(req: PermissionRequest): PermissionOption | undefined {
   return (

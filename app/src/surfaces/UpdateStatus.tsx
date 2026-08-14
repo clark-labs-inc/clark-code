@@ -4,7 +4,14 @@ import { AnimatePresence, useReducedMotion } from "motion/react";
 import * as m from "motion/react-m";
 import { CheckCircle2, X } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
-import { DUR, EASE, REDUCED_EXIT, RISE, accessibleMotion } from "../lib/motion";
+import {
+  DUR,
+  EASE,
+  REDUCED_EXIT,
+  RISE,
+  accessibleMotion,
+  indeterminateTransition,
+} from "../lib/motion";
 import { ProductMark } from "./ProductMark";
 
 /** Full-window "applying update" overlay. The staged bundle is already on disk,
@@ -39,7 +46,7 @@ function UpdateOverlay() {
               <m.span
                 className="absolute inset-y-0 left-0 w-1/3 rounded-full bg-accent"
                 animate={reduce ? { x: 0 } : { x: ["-100%", "300%"] }}
-                transition={reduce ? { duration: 0 } : { duration: 1.1, repeat: Infinity, ease: "easeInOut" }}
+                transition={indeterminateTransition(reduce)}
               />
             </div>
           </div>

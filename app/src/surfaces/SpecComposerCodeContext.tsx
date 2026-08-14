@@ -4,6 +4,8 @@ import { FileCode2, Folder, FolderGit2, X } from "lucide-react";
 import type { ComposerSuggestion, ComposerTrigger } from "../lib/composerInput";
 import { fuzzyFilterProjectPaths } from "../lib/fuzzy";
 import { pickFolder } from "../lib/pickFolder";
+import { siblingProjectDirectories } from "../lib/projectDirectories";
+import { specRepositorySuggestions } from "../lib/specRepositoryAutocomplete";
 import {
   specCodeContextPrompt,
   specRelativePath,
@@ -33,6 +35,7 @@ export interface SpecComposerCodeContextController {
   reset: () => void;
   prompt: (message: string) => string;
   chooseRepository: () => Promise<void>;
+  removeRepository: () => Promise<void>;
   removeReference: (reference: SpecCodeReference) => void;
 }
 
@@ -49,16 +52,50 @@ export function useSpecComposerCodeContext({
   const session = useSessionStore((state) => state.session);
   const cwd = useSessionStore((state) => state.activeProjectRoot ?? state.localSettings.cwd);
   const localCwd = useSessionStore((state) => state.localSettings.cwd);
-  const setProjectFolder = useSessionStore((state) => state.setProjectFolder);
-  const setProjectMode = useSessionStore((state) => state.setProjectMode);
   const flashNotice = useSessionStore((state) => state.flashNotice);
+  const bridge = useSessionStore((state) => state.bridge);
+  const activeRemote = useSessionStore((state) => state.activeRemote);
+  const recentProjects = useSessionStore((state) => state.recentProjects);
   const context = useSpecialistStore((state) => state.active
     ? state.contexts[state.active]
     : undefined);
   const setSpecialistContext = useSpecialistStore((state) => state.setContext);
   const [references, setReferences] = useState<SpecCodeReference[]>([]);
+  const [repositoryChoices, setRepositoryChoices] = useState<
+    { path: string; current: boolean }[]
+  >([]);
   const repositoryPath = enabled ? context?.repositoryPath?.trim() ?? "" : "";
-  const repositoryRoot = enabled ? (session ? cwd : repositoryPath) : "";
+  const repositoryRoot = enabled ? repositoryPath : "";
+
+  useEffect(() => {
+    if (!enabled) {
+      setRepositoryChoices([]);
+      return;
+    }
+    const current = (activeRemote ? cwd : repositoryPath || localCwd).trim();
+    if (!current) {
+      setRepositoryChoices([]);
+      return;
+    }
+    let cancelled = false;
+    void siblingProjectDirectories(
+      current,
+      activeRemote ? { id: activeRemote.id } : null,
+    ).then((siblings) => {
+      if (cancelled) return;
+      const paths = [current, ...siblings.map((entry) => entry.path), ...recentProjects];
+      const seen = new Set<string>();
+      setRepositoryChoices(paths.flatMap((path) => {
+        const normalized = path.trim().replace(/[\\/]+$/, "");
+        if (!normalized || seen.has(normalized)) return [];
+        seen.add(normalized);
+        return [{ path: normalized, current: normalized === current.replace(/[\\/]+$/, "") }];
+      }));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeRemote, cwd, enabled, localCwd, recentProjects, repositoryPath]);
 
   useEffect(() => setReferences([]), [draftKey]);
 
@@ -74,17 +111,54 @@ export function useSpecComposerCodeContext({
     });
   };
 
-  const chooseRepository = async () => {
-    if (session) {
-      flashNotice("Repository focus is locked for this spec. Start a new spec to use another repository.");
-      return;
-    }
-    const picked = await pickFolder(repositoryPath || localCwd || undefined);
+  const chooseRepository = async (suggestedPath?: string) => {
+    const picked = suggestedPath
+      ?? await pickFolder(repositoryPath || localCwd || undefined);
     if (!picked) return;
-    setProjectMode("local");
-    setProjectFolder(picked);
+    if (session) {
+      if (!bridge?.addReadRoots) {
+        flashNotice("This Clark Code build cannot attach a repository to a live spec.");
+        return;
+      }
+      try {
+        await bridge.addReadRoots(session.id, [picked]);
+      } catch (error) {
+        flashNotice(`Could not attach that repository: ${String(error)}`);
+        return;
+      }
+      if (
+        repositoryPath
+        && repositoryPath !== picked
+        && bridge.removeReadRoots
+      ) {
+        try {
+          await bridge.removeReadRoots(session.id, [repositoryPath]);
+        } catch (error) {
+          flashNotice(`Changed focus, but could not revoke the previous repository: ${String(error)}`);
+        }
+      }
+    }
     setSpecialistContext({ repositoryPath: picked });
+    setReferences([]);
     removeTrigger();
+  };
+
+  const removeRepository = async () => {
+    if (!repositoryPath) return;
+    if (session) {
+      if (!bridge?.removeReadRoots) {
+        flashNotice("This Clark Code build cannot remove repository access from a live spec.");
+        return;
+      }
+      try {
+        await bridge.removeReadRoots(session.id, [repositoryPath]);
+      } catch (error) {
+        flashNotice(`Could not remove repository focus: ${String(error)}`);
+        return;
+      }
+    }
+    setSpecialistContext({ repositoryPath: undefined });
+    setReferences([]);
   };
 
   const chooseFolder = async () => {
@@ -107,11 +181,7 @@ export function useSpecComposerCodeContext({
 
   const suggestions = (query: string, projectPaths: string[]): ComposerSuggestion[] => {
     if (!enabled) return fuzzyFilterProjectPaths(projectPaths, query, 8);
-    const normalized = query.toLowerCase();
-    const actions: ComposerSuggestion[] = [
-      ...("repo".includes(normalized) ? [{ kind: "spec_repository" as const }] : []),
-      ...("folder".includes(normalized) ? [{ kind: "spec_folder" as const }] : []),
-    ];
+    const actions = specRepositorySuggestions(query, repositoryChoices, repositoryRoot);
     return [
       ...actions,
       ...fuzzyFilterProjectPaths(repositoryRoot ? projectPaths : [], query, 8 - actions.length),
@@ -121,6 +191,10 @@ export function useSpecComposerCodeContext({
   const acceptSuggestion = (suggestion: ComposerSuggestion): boolean => {
     if (!enabled) return false;
     if (suggestion.kind === "spec_repository") {
+      void chooseRepository(suggestion.path);
+      return true;
+    }
+    if (suggestion.kind === "spec_repository_picker") {
       void chooseRepository();
       return true;
     }
@@ -150,7 +224,8 @@ export function useSpecComposerCodeContext({
     prompt: (message) => enabled
       ? specCodeContextPrompt(message, repositoryRoot, references)
       : message.trim(),
-    chooseRepository,
+    chooseRepository: () => chooseRepository(),
+    removeRepository,
     removeReference: (reference) => setReferences((current) => current.filter(
       (candidate) => candidate.kind !== reference.kind || candidate.path !== reference.path,
     )),
@@ -166,18 +241,28 @@ export function SpecComposerCodeContext({
   return (
     <div className="flex flex-wrap items-center gap-1.5 pb-1.5" data-qa="spec-code-context">
       {controller.repositoryPath && (
-        <button
-          type="button"
-          onClick={() => void controller.chooseRepository()}
-          disabled={Boolean(useSessionStore.getState().session)}
-          title={useSessionStore.getState().session
-            ? `This spec is grounded in ${controller.repositoryPath}`
-            : "Change repository focus"}
-          className="flex items-center gap-1.5 rounded-lg bg-accent-subtle px-2 py-1 text-xs font-medium text-accent disabled:cursor-default disabled:opacity-100"
+        <span
+          title={`Change repository focus · current: ${controller.repositoryPath}`}
+          className="flex items-center rounded-lg bg-accent-subtle text-xs font-medium text-accent"
         >
-          <FolderGit2 className="size-3.5" />
-          @repo {specRepositoryLabel(controller.repositoryPath)}
-        </button>
+          <button
+            type="button"
+            onClick={() => void controller.chooseRepository()}
+            className="flex items-center gap-1.5 rounded-l-lg py-1 pl-2 pr-1.5 transition hover:bg-accent-soft"
+          >
+            <FolderGit2 className="size-3.5" />
+            @repo {specRepositoryLabel(controller.repositoryPath)}
+          </button>
+          <button
+            type="button"
+            onClick={() => void controller.removeRepository()}
+            aria-label={`Remove repository focus ${specRepositoryLabel(controller.repositoryPath)}`}
+            title="Remove repository focus"
+            className="rounded-r-lg py-1 pl-1 pr-1.5 transition hover:bg-accent-soft"
+          >
+            <X className="size-3" />
+          </button>
+        </span>
       )}
       {controller.references.map((reference) => (
         <span

@@ -23,6 +23,14 @@ document is the primary result.
   clarifies, or rejects a requirement.
 - Treat attached files as source material. Distinguish what they state from
   what the user decided in conversation.
+- When an installed brokered research capability is available, use it for
+  external facts, current documentation, market or competitor context, and
+  other questions where fresh web evidence would materially improve the spec.
+  Treat its findings as source material rather than product decisions, retain
+  useful source URLs in the document, and label unresolved or conflicting
+  evidence instead of silently resolving it. If research is unavailable or
+  fails, continue the specification and mark the affected external claims as
+  unverified; do not block document work or invent a substitute finding.
 - When a turn includes `<spec_code_context>`, inspect every referenced file or
   folder that is relevant to the request before editing the specification.
   Resolve paths relative to the supplied repository root and use `list_dir`,

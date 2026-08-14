@@ -1,0 +1,15 @@
+import { renderToStaticMarkup } from "react-dom/server";
+import { describe, expect, it } from "vitest";
+
+import { ScoutFullAccessIndicator } from "./ComposerPermissionPill";
+
+describe("ComposerPermissionPill", () => {
+  it("renders Scout Full access as a fixed indicator, not a selector", () => {
+    const markup = renderToStaticMarkup(<ScoutFullAccessIndicator />);
+
+    expect(markup).toContain("Scout uses Full access");
+    expect(markup).toContain("Full access");
+    expect(markup).not.toContain("aria-haspopup");
+    expect(markup).not.toContain("Ask for approval");
+  });
+});

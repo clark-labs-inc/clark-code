@@ -23,7 +23,7 @@ vi.mock("motion/react-m", () => ({
 import { Message } from "./Message";
 
 describe("message reduced motion", () => {
-  it("keeps a short opacity fade while removing spatial movement", () => {
+  it("keeps a short row fade while removing spatial and word-level motion", () => {
     const markup = renderToStaticMarkup(
       <Message
         role="agent"
@@ -36,8 +36,8 @@ describe("message reduced motion", () => {
 
     expect(markup).toContain('data-motion-initial="[object Object]"');
     expect(markup).toContain('data-chat-message-motion="fade"');
-    expect(markup).toContain('data-sd-animate="true"');
+    expect(markup).not.toContain('data-sd-animate="true"');
     expect(markup).not.toContain("translate3d");
-    expect(markup).toContain(">accessible</span>");
+    expect(markup).toContain("A calm accessible response.");
   });
 });

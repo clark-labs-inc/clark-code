@@ -23,7 +23,7 @@ async fn desktop_sink_retains_readable_reasoning_details_for_resume_and_compacti
     let sink = DesktopEventSink::new(
         send,
         RunId::new("reasoning-run"),
-        Arc::new(ToolRegistry::new(None, None)),
+        Arc::new(ToolRegistry::new(None)),
         None,
     );
     ca::EventSink::emit(

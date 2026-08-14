@@ -9,7 +9,7 @@ import * as m from "motion/react-m";
 import { X } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
 import { MarkdownContent } from "./MarkdownContent";
-import { DUR, EASE, REDUCED_EXIT } from "../lib/motion";
+import { DUR, EASE, REDUCED_EXIT, indeterminateTransition } from "../lib/motion";
 
 /** A short spinner — three pulsing dots, matching the conversation pending row. */
 function Spinner({ reduce }: { reduce: boolean | null }) {
@@ -20,7 +20,7 @@ function Spinner({ reduce }: { reduce: boolean | null }) {
           key={i}
           className="size-1.5 rounded-full bg-accent"
           animate={reduce ? undefined : { opacity: [0.3, 1, 0.3] }}
-          transition={reduce ? { duration: 0 } : { duration: 1.1, repeat: Infinity, delay: i * 0.18 }}
+          transition={indeterminateTransition(reduce, i * 0.18)}
         />
       ))}
     </span>

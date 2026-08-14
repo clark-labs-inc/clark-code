@@ -13,6 +13,7 @@ import type {
   PromptReceipt,
   ProjectBranch,
   ProjectContext,
+  ProjectDirectory,
   ProjectWorktreeTransitionPlan,
   SkillCatalogEntry,
   SkillCatalogSnapshot,
@@ -328,6 +329,15 @@ export class MockBridge implements CoreBridge {
 
   async setCollaborationMode(_sessionId: string, _mode: "default" | "plan"): Promise<void> {}
 
+  async addReadRoots(_sessionId: string, _roots: string[]): Promise<void> {}
+
+  async removeReadRoots(_sessionId: string, _roots: string[]): Promise<void> {}
+
+  async prepareQuickChatWorkspace(id?: string): Promise<{ id: string; path: string }> {
+    const workspaceId = id ?? `mock-workspace-${Date.now()}`;
+    return { id: workspaceId, path: `/mock/workspaces/${workspaceId}` };
+  }
+
   subscribe(handler: (s: Snapshot) => void): () => void {
     this.handlers.add(handler);
     handler(this.snapshot);
@@ -347,6 +357,13 @@ export class MockBridge implements CoreBridge {
       "src/surfaces/Conversation.tsx",
       "src/lib/fuzzy.ts",
       "tests/integration.rs",
+    ];
+  }
+
+  async listSiblingDirectories(): Promise<ProjectDirectory[]> {
+    return [
+      { name: "clark", path: "/Users/demo/git/clark" },
+      { name: "clark-public-evals", path: "/Users/demo/git/clark-public-evals" },
     ];
   }
 
@@ -527,6 +544,11 @@ When inputs change while a computation is in progress, the system should follow 
       mime_type: "text/markdown",
       uri: `data:text/markdown;charset=utf-8,${encodeURIComponent(markdown)}`,
     }];
+    // Keep the run active long enough for the Spec workspace to render the
+    // saved revision as a live edit. This mirrors native runs, where the agent
+    // can write the document before its terminal narration settles.
+    this.emit();
+    await sleep(900);
     this.snapshot.timeline.push({
       item: "message",
       run,

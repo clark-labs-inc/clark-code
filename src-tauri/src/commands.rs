@@ -418,6 +418,60 @@ pub async fn provider_reconfigure(
     s.provider.connect(config).await.map_err(|e| e.to_string())
 }
 
+/// Extend a live provider's model-facing filesystem boundary with explicit
+/// read-only roots selected by the user.
+#[tauri::command]
+pub async fn provider_add_read_roots(
+    session_id: String,
+    roots: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let _account_lifecycle = state.account_lifecycle.read().await;
+    let session_key = SessionKey::parse(session_id)?;
+    let entry = state
+        .runtime_registry
+        .current_session_entry(&session_key)
+        .await
+        .ok_or("no such session")?;
+    let session_id = SessionId::new(session_key.as_str());
+    let mut provider = entry.lock().await;
+    provider
+        .provider
+        .add_read_roots(&session_id, roots)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+/// Revoke explicit read-only roots while preserving the live transcript and
+/// writable conversation workspace.
+#[tauri::command]
+pub async fn provider_remove_read_roots(
+    session_id: String,
+    roots: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let _account_lifecycle = state.account_lifecycle.read().await;
+    let session_key = SessionKey::parse(session_id)?;
+    let entry = state
+        .runtime_registry
+        .current_session_entry(&session_key)
+        .await
+        .ok_or("no such session")?;
+    let session_id = SessionId::new(session_key.as_str());
+    let mut provider = entry.lock().await;
+    provider
+        .provider
+        .remove_read_roots(&session_id, roots)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+/// List concrete aliases from the user's OpenSSH config without connecting.
+#[tauri::command]
+pub fn ssh_config_hosts() -> Result<Vec<ssh::SshConfigHost>, String> {
+    ssh::config_hosts()
+}
+
 /// Read-only "test connection": reach `host` and report its architecture + home,
 /// without deploying or tunneling. Backs the SSH-host settings test button.
 #[tauri::command]

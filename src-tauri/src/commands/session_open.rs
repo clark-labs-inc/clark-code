@@ -89,6 +89,22 @@ pub enum SessionOpenRequest {
     },
 }
 
+fn scout_requires_full_access(config: &ProviderConfig) -> bool {
+    config.extra.get("scout_cartography").is_some()
+        || config
+            .extra
+            .get("specialist")
+            .and_then(Value::as_str)
+            .is_some_and(|kind| kind == "scout")
+        || config
+            .extra
+            .get("specialist")
+            .and_then(Value::as_object)
+            .and_then(|specialist| specialist.get("kind"))
+            .and_then(Value::as_str)
+            .is_some_and(|kind| kind == "scout")
+}
+
 /// One native transaction that constructs, configures, connects, and binds a
 /// provider to exactly one session. No unbound provider is ever published in
 /// shared state, so concurrent opens cannot consume or overwrite each other.
@@ -103,6 +119,10 @@ pub async fn session_open(
     tracing::info!(provider = %provider_id, "session_open");
     let _account_lifecycle = state.account_lifecycle.read().await;
     let config = config.into_provider_config(&provider_id)?;
+    // Scout maps an explicitly selected organization/workspace rather than a
+    // single checkout. Full access is therefore part of the native session
+    // contract, not a mutable WebView preference.
+    let scout_full_access = scout_requires_full_access(&config);
     let (mut provider, account) = open_provider(&provider_id, &app, state.inner(), config).await?;
     let account = match account {
         Some(account) => Some(account),
@@ -114,7 +134,14 @@ pub async fn session_open(
     };
 
     let session = match request {
-        SessionOpenRequest::New { options, bind_id } => {
+        SessionOpenRequest::New {
+            mut options,
+            bind_id,
+        } => {
+            if scout_full_access {
+                options.mode = Some("full".into());
+                options.collaboration_mode = Some(agent_core::CollaborationMode::Default);
+            }
             let mut session = provider
                 .new_session(options)
                 .await
@@ -147,7 +174,10 @@ pub async fn session_open(
 
 #[cfg(test)]
 mod tests {
-    use super::SessionOpenRequest;
+    use agent_core::ProviderConfig;
+    use serde_json::json;
+
+    use super::{scout_requires_full_access, SessionOpenRequest};
 
     #[test]
     fn new_request_requires_the_native_bind_id_wire_name() {
@@ -178,5 +208,23 @@ mod tests {
             SessionOpenRequest::Load { id } => assert_eq!(id, "conversation-2"),
             SessionOpenRequest::New { .. } => panic!("expected load request"),
         }
+    }
+
+    #[test]
+    fn scout_bindings_require_full_access() {
+        for extra in [
+            json!({ "scout_cartography": { "workspace_id": "workspace-1" } }),
+            json!({ "specialist": "scout" }),
+            json!({ "specialist": { "kind": "scout" } }),
+        ] {
+            assert!(scout_requires_full_access(&ProviderConfig {
+                extra,
+                ..ProviderConfig::default()
+            }));
+        }
+        assert!(!scout_requires_full_access(&ProviderConfig {
+            extra: json!({ "specialist": { "kind": "security" } }),
+            ..ProviderConfig::default()
+        }));
     }
 }

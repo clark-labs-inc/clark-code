@@ -54,8 +54,10 @@ import { specialistModelSettings } from "../lib/specialistModel";
 import {
   scoutCartographyTarget,
   productSpecialistTarget,
+  specialistReadRoots,
 } from "../lib/specialists";
 import { authAccountMatches } from "../lib/account";
+import { approvalPolicyForSpecialist } from "../lib/permissions";
 import { projectDisplayName } from "../lib/projectSidebar";
 import {
   loadSshHosts,
@@ -247,7 +249,7 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
           codeKeyAccountBinding(get().auth),
           productSpecialistTarget(activeSpecialistContext(), effSettings.advisorTrainingEnabled),
           specialistModelSettings(activeSpecialistContext()) ?? undefined,
-          get().recentProjects,
+          specialistReadRoots(activeSpecialistContext(), get().recentProjects),
         )
         : localConnectConfig(
           effSettings,
@@ -257,7 +259,7 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
           codeKeyAccountBinding(get().auth),
           productSpecialistTarget(activeSpecialistContext(), effSettings.advisorTrainingEnabled),
           specialistModelSettings(activeSpecialistContext()) ?? undefined,
-          get().recentProjects,
+          specialistReadRoots(activeSpecialistContext(), get().recentProjects),
         );
       await queueModelReconfigure(session.id, () => bridge.reconfigure!(session.id, config));
       drainQueuedPromptAfterReconfigure(session.id, bridge, get, set);
@@ -411,7 +413,7 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
         codeKeyAccountBinding(state.auth),
         productSpecialistTarget(previousMeta?.specialist, settings.advisorTrainingEnabled),
         specialistModelSettings(previousMeta?.specialist) ?? undefined,
-        state.recentProjects,
+        specialistReadRoots(previousMeta?.specialist, state.recentProjects),
       )
       : localConnectConfig(
         settings,
@@ -421,7 +423,7 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
         codeKeyAccountBinding(state.auth),
         productSpecialistTarget(previousMeta?.specialist, settings.advisorTrainingEnabled),
         specialistModelSettings(previousMeta?.specialist) ?? undefined,
-        state.recentProjects,
+        specialistReadRoots(previousMeta?.specialist, state.recentProjects),
       );
     const options: SessionOptions = {
       cwd: projectRoot,
@@ -746,6 +748,10 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
 
   setApprovalPolicy: (mode) => {
     const { auth, bridge, session, approvalPolicies } = get();
+    const focusedSpecialist = session
+      ? get().conversations.find((conversation) => conversation.id === session.id)?.specialist?.kind
+      : activeSpecialistContext()?.kind;
+    if (focusedSpecialist === "scout") return;
     // With an open local chat, change THAT chat's level — not every live
     // conversation's. Other chats keep running under whatever they were pinned
     // with; only the focused conversation's override (and its host mode) move.
@@ -799,6 +805,11 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
 
   cycleApprovalPolicy: () => {
     const { approvalPolicy, approvalPolicies, setApprovalPolicy, session, activeProvider } = get();
+    const specialistKind = session
+      ? get().conversations.find((conversation) => conversation.id === session.id)?.specialist?.kind
+      : activeSpecialistContext()?.kind;
+    if (approvalPolicyForSpecialist(approvalPolicy, specialistKind) === "full"
+      && specialistKind === "scout") return;
     // Permission modes only govern the local engine; with a cloud session (or
     // a cloud target on the start screen) the pill is hidden and Shift+Tab
     // cycling an invisible mode would just surprise the next local session.
@@ -812,6 +823,12 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
   },
 
   setCollaborationMode: (mode) => {
+    const focusedSpecialist = get().session
+      ? get().conversations.find(
+        (conversation) => conversation.id === get().session?.id,
+      )?.specialist?.kind
+      : activeSpecialistContext()?.kind;
+    if (focusedSpecialist === "scout" && mode !== "default") return;
     saveCollaborationMode(mode, codeKeyAccountBinding(get().auth));
     const { auth, bridge, session } = get();
     set({

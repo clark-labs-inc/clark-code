@@ -131,7 +131,7 @@ function SessionRow({ c }: { c: ConversationMeta }) {
   return (
     <button
       onClick={() => void open(c.id)}
-      className="group flex min-h-11 items-center gap-3 px-4 py-2.5 text-left transition duration-200 ease-agent hover:bg-accent-subtle"
+      className="group flex min-h-11 items-center gap-3 px-4 py-2.5 text-left transition duration-base ease-agent hover:bg-accent-subtle"
     >
       <Icon className="size-4 shrink-0 text-ink-faint" />
       <span className="min-w-0 flex-1 truncate text-sm text-ink">{c.title}</span>
@@ -139,7 +139,7 @@ function SessionRow({ c }: { c: ConversationMeta }) {
         <span className="hidden shrink-0 truncate text-xs text-ink-faint sm:block">{context}</span>
       )}
       <span className="shrink-0 text-xs tabular-nums text-ink-faint">{relativeTime(c.updatedAt)}</span>
-      <ChevronRight className="size-4 shrink-0 text-ink-faint opacity-0 transition duration-200 group-hover:translate-x-0.5 group-hover:text-accent group-hover:opacity-100" />
+      <ChevronRight className="size-4 shrink-0 text-ink-faint opacity-0 transition duration-base group-hover:translate-x-0.5 group-hover:text-accent group-hover:opacity-100" />
     </button>
   );
 }

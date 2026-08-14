@@ -1,5 +1,6 @@
 import type { ConversationMeta } from "./history";
 import { projectName } from "./localAgent";
+import { reorder } from "@atlaskit/pragmatic-drag-and-drop/reorder";
 
 const STORAGE_KEY = "agent-desktop:project-sidebar";
 const ANONYMOUS_SCOPE = "anonymous";
@@ -142,6 +143,24 @@ export function withProjectPinned(
 ): ProjectSidebarPreferences {
   const without = preferences.pinned.filter((candidate) => candidate !== key);
   return { ...preferences, pinned: pinned ? [...without, key] : without };
+}
+
+/** Move one already-pinned project to an exact position. This pure preference
+ * update is shared by pointer dragging and the Project actions menu so both
+ * interaction paths always have identical outcomes. */
+export function withPinnedProjectMoved(
+  preferences: ProjectSidebarPreferences,
+  key: string,
+  destinationIndex: number,
+): ProjectSidebarPreferences {
+  const startIndex = preferences.pinned.indexOf(key);
+  if (startIndex < 0 || preferences.pinned.length < 2) return preferences;
+  const finishIndex = Math.max(0, Math.min(destinationIndex, preferences.pinned.length - 1));
+  if (startIndex === finishIndex) return preferences;
+  return {
+    ...preferences,
+    pinned: reorder({ list: preferences.pinned, startIndex, finishIndex }),
+  };
 }
 
 export function withProjectAlias(

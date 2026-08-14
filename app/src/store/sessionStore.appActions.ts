@@ -1,4 +1,5 @@
 import { deferredSnapshotPersistIsCurrent } from "../lib/snapshotPersistence";
+import { approvalPolicyForSpecialist } from "../lib/permissions";
 import { sidebarFixtureConversations, sidebarFixtureEnabled } from "../lib/sidebarFixture";
 import {
   type SessionState,
@@ -658,7 +659,13 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
         // conversation isn't on screen.
         const pend = live.pending_permission;
         if (pend) {
-          const policy = effectiveApprovalPolicy(get().approvalPolicy, get().approvalPolicies, id);
+          const specialistKind = get().conversations.find(
+            (conversation) => conversation.id === id,
+          )?.specialist?.kind;
+          const policy = approvalPolicyForSpecialist(
+            effectiveApprovalPolicy(get().approvalPolicy, get().approvalPolicies, id),
+            specialistKind,
+          );
           if (pend.id !== entry.autoResolvedId && wouldAutoApprove(policy, pend)) {
             const opt = pickAllowOption(pend);
             if (opt) {

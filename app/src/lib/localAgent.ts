@@ -364,7 +364,7 @@ export function localConnectConfig(
   scope?: string | null,
   productSpecialist?: ProductSpecialistTarget,
   specialistModel?: { model: string; reasoningEffort: string },
-  scoutReadRoots: string[] = [],
+  sandboxReadRoots: string[] = [],
 ): ConnectConfig {
   // For a remote project the root lives on the remote host; tool I/O runs there
   // inside the durable worker. The command policy is keyed by the project path.
@@ -402,8 +402,8 @@ export function localConnectConfig(
       // workstreams. The engine keeps delegated read-only children on the remote
       // host inside the worker's account/project boundary.
       orchestration: { enabled: loadOrchestrationEnabled(scope) },
-      ...(scout && scoutReadRoots.length > 0
-        ? { sandbox_read_roots: [...new Set(scoutReadRoots.filter((root) => root.trim()))] }
+      ...(sandboxReadRoots.length > 0
+        ? { sandbox_read_roots: [...new Set(sandboxReadRoots.filter((root) => root.trim()))] }
         : {}),
       ...(scout ? {
         scout_cartography: {
@@ -426,6 +426,12 @@ export function localConnectConfig(
         trainingOptIn: productSpecialist?.trainingOptIn === true,
         executionResidency: "local_only",
       }) ?? {}),
+      // Native product composition may use the canonical conversation recipe
+      // to expose read-only capabilities, but never as entitlement authority.
+      // Keep this after product extras so they cannot replace the active recipe.
+      ...(specialistKind?.trim()
+        ? { specialist_kind: specialistKind.trim() }
+        : {}),
       // When present, the provider runs this session's tools on the remote host.
     },
   };

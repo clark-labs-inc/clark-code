@@ -212,7 +212,7 @@ export function CommandPalette({
                       onMouseMove={() => setActive(i)}
                       onClick={() => run(item)}
                       className={cn(
-                        "flex min-h-9 w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left text-sm transition duration-200 ease-agent",
+                        "flex min-h-9 w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left text-sm transition duration-base ease-agent",
                         i === active ? "bg-accent-subtle text-ink" : "text-ink-secondary",
                       )}
                     >

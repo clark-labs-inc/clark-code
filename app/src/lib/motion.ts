@@ -36,6 +36,19 @@ export const FADE = {
   transition: { duration: DUR.fast, ease: EASE.out },
 } as const;
 
+/** A restrained crossfade for primary workspace screen changes. Large reading
+ * surfaces stay spatially stable so switching context does not disturb scroll
+ * position or feel like the whole application is sliding around. */
+export const SCREEN_FADE = {
+  initial: { opacity: 0 },
+  animate: { opacity: 1 },
+  exit: {
+    opacity: 0,
+    transition: { duration: DUR.fast, ease: EASE.inOut },
+  },
+  transition: TRANSITION,
+} satisfies MotionProps;
+
 /** A gentle rise: fade + a few px up. The canonical "a card/row appeared"
  * motion. A direct transform string gives every supported WebView the best
  * chance to keep it on the compositor; it never changes layout height. */
@@ -141,7 +154,10 @@ export function accessibleMotion(
   if (!reduce) return preset;
   return {
     initial: false,
-    animate: { opacity: 1, transform: "none" },
+    // Do not write an inline transform here. Static Tailwind transforms (for
+    // example `-translate-x-1/2` on a centered toast) remain part of layout
+    // under reduced motion and must not be overwritten by the animation layer.
+    animate: { opacity: 1 },
     exit: { opacity: 0, transition: { duration: DUR.fast } },
     transition: { duration: 0 },
   };
@@ -155,6 +171,22 @@ export const REDUCED_EXIT = {
   opacity: 0,
   transition: { duration: DUR.fast },
 } as const;
+
+/** Shared cadence for indeterminate progress. Continuous motion is reserved
+ * for a real pending state, stops when that state unmounts, and becomes a
+ * static affordance under the user's reduced-motion preference. */
+export function indeterminateTransition(
+  reduce: boolean | null,
+  delay = 0,
+): Transition {
+  if (reduce) return { duration: 0 };
+  return {
+    duration: 1.1,
+    ease: EASE.inOut,
+    repeat: Infinity,
+    ...(delay > 0 ? { delay } : {}),
+  };
+}
 
 /** The transition a surface should use for the `index`th row of a staggered
  * reveal. Under reduced motion the choreography snaps to zero (duration 0);
@@ -186,14 +218,9 @@ export const CHAT_TEXT_ANIMATION = {
   stagger: 18,
 } as const;
 
-/** Reduced motion preserves a readable opacity cue without spatial movement. */
-export const CHAT_REDUCED_TEXT_ANIMATION = {
-  animation: "fadeIn",
-  duration: DUR.base * 1000,
-  easing: "ease-out",
-  sep: "word",
-  stagger: 6,
-} as const;
+/** Streaming text is immediately readable under reduced motion. The settled
+ * row still receives one quiet opacity cue, but words never ripple in. */
+export const CHAT_REDUCED_TEXT_ANIMATION = false;
 
 const USER_MESSAGE_ROW: MotionProps = {
   initial: { opacity: 0, transform: "translate3d(8px, 2px, 0) scale(0.995)" },

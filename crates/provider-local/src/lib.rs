@@ -67,7 +67,7 @@ pub use changes::{changes_diff, changes_revert, changes_summary, ChangedFile};
 pub use checkpoint::{create_checkpoint, is_git_repo, release_checkpoints};
 // Discover compatible setup from other coding agents without mutating it.
 pub use commands::{discover_commands, CustomCommand};
-pub use config::{LocalConfig, DEFAULT_BASE_URL, DEFAULT_MODEL, DEFAULT_RESEARCH_MODEL};
+pub use config::{LocalConfig, DEFAULT_BASE_URL, DEFAULT_MODEL};
 pub use configuration::defaults as configuration_capabilities;
 pub use exec::{Executor, LocalExecutor};
 pub use external_import::{

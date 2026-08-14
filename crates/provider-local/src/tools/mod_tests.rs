@@ -38,9 +38,38 @@ impl ToolPack for ExtensionPack {
     }
 }
 
+struct BrokeredResearchTool;
+
+#[async_trait::async_trait]
+impl ToolExecutor for BrokeredResearchTool {
+    fn name(&self) -> &str {
+        "brokered_research"
+    }
+
+    fn description(&self) -> &str {
+        "Test-only product research boundary."
+    }
+
+    fn parameters(&self) -> Value {
+        serde_json::json!({ "type": "object", "properties": {} })
+    }
+
+    fn kind(&self) -> ToolKind {
+        ToolKind::Research
+    }
+
+    fn permission_class(&self) -> ToolPermissionClass {
+        ToolPermissionClass::BrokeredProduct
+    }
+
+    async fn invoke(&self, _args: Value, _ctx: &ToolCtx) -> ToolOutcome {
+        ToolOutcome::ok("ok")
+    }
+}
+
 #[test]
 fn product_tool_packs_extend_without_shadowing_core_tools() {
-    let mut registry = ToolRegistry::new(None, None);
+    let mut registry = ToolRegistry::new(None);
     registry.install_tool_pack(&ExtensionPack).unwrap();
     assert!(registry.get("example_extension").is_some());
 
@@ -107,7 +136,7 @@ fn schema_property_order_survives_serialization() {
             "{tool}: properties out of order on the wire: {wire}"
         );
     }
-    let reg = ToolRegistry::new(None, Some(memory::MemoryConfig::default()));
+    let reg = ToolRegistry::new(Some(memory::MemoryConfig::default()));
     let model_visible_schemas = serde_json::to_string(&reg.schemas())
         .unwrap()
         .to_ascii_lowercase();
@@ -241,7 +270,7 @@ fn schema_property_order_survives_serialization() {
         ],
     );
 
-    let mut image_registry = ToolRegistry::new(None, None);
+    let mut image_registry = ToolRegistry::new(None);
     image_registry.enable_image_generation(image::ImageGenerationConfig {
         base_url: "https://product.example/v1".into(),
         api_key: "ck_live_test".into(),
@@ -255,7 +284,7 @@ fn schema_property_order_survives_serialization() {
 
 #[test]
 fn registry_lists_neutral_local_tools_without_product_extensions() {
-    let local = ToolRegistry::new(None, None);
+    let local = ToolRegistry::new(None);
     let names: Vec<_> = local
         .schemas()
         .iter()
@@ -270,26 +299,22 @@ fn registry_lists_neutral_local_tools_without_product_extensions() {
     assert!(!names.contains(&"memory".to_string()));
     assert!(local.get("read_file").is_some());
     assert!(local.get("nope").is_none());
+    assert!(!local.has_brokered_research());
+}
 
-    let product_config_does_not_implicitly_install_tools = ToolRegistry::new(
-        Some(AuxiliaryModelConfig {
-            base_url: "https://product.example/v1".into(),
-            api_key: Some("ck_live_x".into()),
-            model: "local-model".into(),
-        }),
-        None,
-    );
-    let names: Vec<_> = product_config_does_not_implicitly_install_tools
-        .schemas()
-        .iter()
-        .map(|s| s.function.name.clone())
-        .collect();
-    assert!(!names.contains(&"product_research".to_string()));
+#[test]
+fn brokered_research_availability_comes_from_the_installed_tool() {
+    let mut registry = ToolRegistry::new(None);
+    registry
+        .register_extension_tool(ToolExposure::Eager, Arc::new(BrokeredResearchTool))
+        .unwrap();
+
+    assert!(registry.has_brokered_research());
 }
 
 #[tokio::test]
 async fn copy_on_write_registry_isolates_prior_run_and_rebinds_tool_search() {
-    let mut next = Arc::new(ToolRegistry::new(None, None));
+    let mut next = Arc::new(ToolRegistry::new(None));
     let prior_run = next.clone();
 
     Arc::make_mut(&mut next).enable_browser(crate::browser_binary::test_browser_config());
@@ -325,7 +350,7 @@ async fn copy_on_write_registry_isolates_prior_run_and_rebinds_tool_search() {
 
 #[tokio::test]
 async fn runtime_catalog_keeps_core_eager_and_defers_specialized_tools() {
-    let registry = ToolRegistry::new(None, None);
+    let registry = ToolRegistry::new(None);
     let session = Arc::new(tokio::sync::Mutex::new(SessionState::default()));
     let gate = registry.deferred_tool_gate(session.clone());
     let available = registry
@@ -388,10 +413,10 @@ async fn runtime_catalog_keeps_core_eager_and_defers_specialized_tools() {
 
 #[test]
 fn memory_tool_registered_only_when_enabled() {
-    let off = ToolRegistry::new(None, None);
+    let off = ToolRegistry::new(None);
     assert!(off.get("memory").is_none());
     assert!(off.get("memory_recall").is_none());
-    let on = ToolRegistry::new(None, Some(memory::MemoryConfig::default()));
+    let on = ToolRegistry::new(Some(memory::MemoryConfig::default()));
     assert!(on.get("memory").is_some());
     let recall = on.get("memory_recall").unwrap();
     assert!(!recall.mutating());
@@ -445,7 +470,7 @@ fn organization_knowledge_is_an_explicit_read_only_registry_plugin() {
             Err("not configured".into())
         }
     }
-    let mut registry = ToolRegistry::new(None, None);
+    let mut registry = ToolRegistry::new(None);
     assert!(registry.get("organization_knowledge").is_none());
     registry.enable_organization_knowledge(Arc::new(EmptyContext));
     let tool = registry.get("organization_knowledge").unwrap();
@@ -480,7 +505,7 @@ fn organization_knowledge_is_an_explicit_read_only_registry_plugin() {
 
 #[test]
 fn mutating_tools_are_flagged() {
-    let reg = ToolRegistry::new(None, None);
+    let reg = ToolRegistry::new(None);
     assert!(reg.get("write_file").unwrap().mutating());
     assert!(reg.get("edit_file").unwrap().mutating());
     assert!(reg.get("bash").unwrap().mutating());
@@ -488,7 +513,7 @@ fn mutating_tools_are_flagged() {
     assert!(!reg.get("grep").unwrap().mutating());
     assert!(!reg.get("view_image").unwrap().mutating());
 
-    let mut signed_in = ToolRegistry::new(None, None);
+    let mut signed_in = ToolRegistry::new(None);
     signed_in.enable_image_generation(image::ImageGenerationConfig {
         base_url: "https://product.example/v1".into(),
         api_key: "ck_live_test".into(),
@@ -498,7 +523,7 @@ fn mutating_tools_are_flagged() {
 
 #[test]
 fn plan_tools_are_registered_with_correct_mutating_flags() {
-    let reg = ToolRegistry::new(None, None);
+    let reg = ToolRegistry::new(None);
     assert!(!reg.get("propose_plan").unwrap().mutating());
     assert!(reg.get("enter_plan_mode").unwrap().mutating());
     assert!(!reg.get("update_plan").unwrap().mutating());
@@ -506,7 +531,7 @@ fn plan_tools_are_registered_with_correct_mutating_flags() {
 
 #[test]
 fn web_fetch_is_registered_non_mutating_but_requires_external_consent() {
-    let reg = ToolRegistry::new(None, None);
+    let reg = ToolRegistry::new(None);
     let t = reg.get("web_fetch").unwrap();
     assert!(!t.mutating());
     assert_eq!(t.permission_class(), ToolPermissionClass::External);
@@ -514,7 +539,7 @@ fn web_fetch_is_registered_non_mutating_but_requires_external_consent() {
 
 #[test]
 fn android_tools_are_registered_with_correct_mutating_flags() {
-    let reg = ToolRegistry::new(None, None);
+    let reg = ToolRegistry::new(None);
     // Read-only: never gate the user.
     assert!(!reg.get("android_list_devices").unwrap().mutating());
     assert!(!reg.get("android_screenshot").unwrap().mutating());
@@ -540,7 +565,7 @@ fn android_tools_are_registered_with_correct_mutating_flags() {
 #[test]
 #[cfg(target_os = "macos")]
 fn ios_tools_are_registered_with_correct_mutating_flags() {
-    let reg = ToolRegistry::new(None, None);
+    let reg = ToolRegistry::new(None);
     // Read-only: never gate the user.
     assert!(!reg.get("ios_list_simulators").unwrap().mutating());
     assert!(!reg.get("ios_screenshot").unwrap().mutating());
@@ -566,6 +591,6 @@ fn ios_tools_are_registered_with_correct_mutating_flags() {
 #[test]
 #[cfg(not(target_os = "macos"))]
 fn ios_tools_are_absent_on_non_macos() {
-    let reg = ToolRegistry::new(None, None);
+    let reg = ToolRegistry::new(None);
     assert!(reg.get("ios_list_simulators").is_none());
 }

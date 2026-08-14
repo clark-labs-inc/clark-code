@@ -1,12 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Archive,
+  Check,
+  ChevronLeft,
   FolderGit2,
   FolderOpen,
   GitBranchPlus,
   Loader2,
   MessageSquare,
   MoreHorizontal,
+  GripVertical,
+  MoveVertical,
   Pencil,
   Pin,
   PinOff,
@@ -22,14 +26,24 @@ export interface ProjectMenuPosition {
   top: number;
 }
 
+export interface ProjectMoveDestination {
+  index: number;
+  label: string;
+  current: boolean;
+}
+
 export function ProjectHeader({
   group,
   menuOpen,
+  reorderable = false,
+  dragHandleRef,
   onOpenMenu,
   onNewSession,
 }: {
   group: ProjectGroup;
   menuOpen: boolean;
+  reorderable?: boolean;
+  dragHandleRef?: (element: HTMLElement | null) => void;
   onOpenMenu: (button: HTMLButtonElement) => void;
   onNewSession: () => void;
 }) {
@@ -44,6 +58,17 @@ export function ProjectHeader({
       title={group.title}
       className="group mb-0.5 mt-2 flex h-7 items-center gap-2 rounded-lg px-2 text-sm font-medium text-ink-secondary first:mt-0 hover:bg-bg-hover"
     >
+      {reorderable && (
+        <span
+          ref={dragHandleRef}
+          data-project-drag-handle={group.key}
+          aria-hidden="true"
+          title={`Drag ${group.label} to reorder pinned projects`}
+          className="-ml-1 grid size-5 shrink-0 cursor-grab place-items-center rounded-md text-ink-faint opacity-0 transition hover:bg-bg-sunken hover:text-ink group-hover:opacity-100 group-focus-within:opacity-100 active:cursor-grabbing"
+        >
+          <GripVertical className="size-3.5" />
+        </span>
+      )}
       <Icon className="size-3.5 shrink-0 text-ink-muted" />
       <span className="flex min-w-0 flex-1 items-baseline gap-1.5 overflow-hidden">
         <span className="min-w-0 truncate">{group.label}</span>
@@ -97,12 +122,14 @@ function MenuItem({
   children,
   danger = false,
   disabled = false,
+  autoFocus = false,
   onClick,
 }: {
   icon: typeof Pin;
   children: React.ReactNode;
   danger?: boolean;
   disabled?: boolean;
+  autoFocus?: boolean;
   onClick: () => void;
 }) {
   return (
@@ -110,6 +137,7 @@ function MenuItem({
       type="button"
       role="menuitem"
       disabled={disabled}
+      autoFocus={autoFocus}
       onClick={onClick}
       className={`flex h-8 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-sm transition disabled:cursor-not-allowed disabled:opacity-40 ${
         danger
@@ -127,8 +155,10 @@ export function ProjectActionsMenu({
   group,
   position,
   pinned,
+  moveDestinations = [],
   onClose,
   onPin,
+  onMove,
   onReveal,
   onCreateWorktree,
   onListManagedWorktrees,
@@ -143,8 +173,10 @@ export function ProjectActionsMenu({
   group: ProjectGroup;
   position: ProjectMenuPosition;
   pinned: boolean;
+  moveDestinations?: ProjectMoveDestination[];
   onClose: () => void;
   onPin: (pinned: boolean) => void;
+  onMove?: (destinationIndex: number) => void;
   onReveal: () => void;
   onCreateWorktree: (name: string) => Promise<void>;
   onListManagedWorktrees: () => Promise<import("../core-bridge/bridge").ManagedWorktree[]>;
@@ -157,7 +189,7 @@ export function ProjectActionsMenu({
   onArchive: () => void;
   onRemove: () => void;
 }) {
-  const [mode, setMode] = useState<"menu" | "rename" | "worktree" | "managed" | "remove">("menu");
+  const [mode, setMode] = useState<"menu" | "move" | "rename" | "worktree" | "managed" | "remove">("menu");
   const [name, setName] = useState(group.label);
   const [worktreeName, setWorktreeName] = useState("");
   const [creating, setCreating] = useState(false);
@@ -197,8 +229,12 @@ export function ProjectActionsMenu({
       ref={ref}
       role="menu"
       aria-label={`Project actions for ${group.label}`}
-      style={{ left: position.left, top: position.top }}
-      className={"popover-surface fixed z-50 rounded-xl bg-bg-elevated p-1.5 shadow-lifted ring-1 ring-border-subtle " + (
+      style={{
+        left: position.left,
+        top: position.top,
+        maxHeight: `calc(100vh - ${position.top + 8}px)`,
+      }}
+      className={"popover-surface fixed z-50 overflow-y-auto rounded-xl bg-bg-elevated p-1.5 shadow-lifted ring-1 ring-border-subtle " + (
         mode === "managed" ? "w-[23rem] max-w-[calc(100vw-1rem)]" : "w-60"
       )}
     >
@@ -206,6 +242,7 @@ export function ProjectActionsMenu({
         <>
           <MenuItem
             icon={pinned ? PinOff : Pin}
+            autoFocus
             onClick={() => {
               onPin(!pinned);
               onClose();
@@ -213,6 +250,11 @@ export function ProjectActionsMenu({
           >
             {pinned ? "Unpin project" : "Pin project"}
           </MenuItem>
+          {pinned && moveDestinations.length > 1 && onMove && (
+            <MenuItem icon={MoveVertical} onClick={() => setMode("move")}>
+              Move project…
+            </MenuItem>
+          )}
           {group.path && (
             <>
               <MenuItem
@@ -256,6 +298,43 @@ export function ProjectActionsMenu({
             Remove
           </MenuItem>
         </>
+      )}
+
+      {mode === "move" && onMove && (
+        <div className="p-1">
+          <div className="mb-1 flex items-center gap-1 px-0.5">
+            <button
+              type="button"
+              autoFocus
+              onClick={() => setMode("menu")}
+              aria-label="Back to project actions"
+              className="grid size-7 place-items-center rounded-lg text-ink-muted transition hover:bg-bg-hover hover:text-ink"
+            >
+              <ChevronLeft className="size-4" />
+            </button>
+            <span className="text-xs font-medium text-ink-muted">Move {group.label}</span>
+          </div>
+          {moveDestinations.map((destination) => (
+            <button
+              key={destination.index}
+              type="button"
+              role="menuitem"
+              disabled={destination.current}
+              aria-current={destination.current ? "true" : undefined}
+              onClick={() => {
+                onMove(destination.index);
+                onClose();
+              }}
+              className="flex min-h-8 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-sm text-ink-secondary transition hover:bg-bg-hover hover:text-ink disabled:cursor-default disabled:bg-bg-sunken disabled:text-ink-muted"
+            >
+              <span className="grid size-4 shrink-0 place-items-center">
+                {destination.current && <Check className="size-3.5" />}
+              </span>
+              <span>{destination.label}</span>
+              {destination.current && <span className="ml-auto text-xs text-ink-faint">Current</span>}
+            </button>
+          ))}
+        </div>
       )}
 
       {mode === "rename" && (

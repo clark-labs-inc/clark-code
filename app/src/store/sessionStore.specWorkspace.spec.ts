@@ -8,13 +8,28 @@ import {
   saveComposerDraft,
 } from "../lib/composerDraft";
 import { installProductModule, neutralProduct } from "../product/productModule";
+import { saveSshHosts } from "../lib/sshHosts";
 import { useSessionStore } from "./sessionStore";
 import { liveSessions } from "./sessionStore.runtime";
 import { useSpecialistStore } from "./specialistStore";
 
+const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }));
+vi.mock("@tauri-apps/api/core", () => ({ invoke }));
+
 describe("conversation-bound Spec workspace", () => {
   beforeEach(() => {
     liveSessions.clear();
+    localStorage.clear();
+    invoke.mockReset();
+    invoke.mockResolvedValue({
+      id: "worker-spec-1",
+      cwd: "/srv/enterprise/project",
+      arch: "linux-x86_64",
+      sshTransport: "control_master",
+      connectionKind: "started",
+      connectDurationMs: 42,
+      accountWorkerCount: 1,
+    });
     installProductModule({
       ...neutralProduct,
       specialistWorkspace: {
@@ -37,6 +52,12 @@ describe("conversation-bound Spec workspace", () => {
       conversations: [],
       localSettings: { ...DEFAULT_LOCAL_SETTINGS, cwd: "/repo/remembered-project" },
       recentProjects: ["/repo/remembered-project"],
+      projectMode: "local",
+      selectedHostId: null,
+      activeRemote: null,
+      activeRemoteHost: null,
+      activeProjectRoot: null,
+      error: null,
     });
   });
 
@@ -98,5 +119,90 @@ describe("conversation-bound Spec workspace", () => {
     expect(state.conversations[0]?.specialist?.kind).toBe("spec");
     expect(loadComposerDraft(draftOwner, id)).toBe("");
     expect(loadComposerDraft(draftOwner, null)).toBe("ordinary chat draft");
+  });
+
+  it("runs Spec on the selected SSH project while retaining its document workspace", async () => {
+    const id = "remote-spec-document";
+    const documentPath = `/Users/test/.agent/workspace/${id}`;
+    saveSshHosts([{
+      id: "enterprise-host",
+      label: "Enterprise machine",
+      host: "ubuntu@enterprise",
+      remoteRoot: "/srv/enterprise/project",
+    }], null);
+    const openSession = vi.fn(async (
+      _provider: string,
+      _config: object,
+      request: SessionOpenRequest,
+    ): Promise<Session> => {
+      if (request.kind !== "new") throw new Error("expected new session");
+      return {
+        id: request.bindId!,
+        provider: "local",
+        capabilities: {
+          streaming: true,
+          permissions: true,
+          fs: true,
+          terminal: true,
+          load_session: false,
+          modes: [],
+          collaboration_modes: [],
+        },
+        collaboration_mode: request.options.collaboration_mode ?? "default",
+        environment: {
+          checkout_root: "/srv/enterprise/project",
+          workspace_roots: ["/srv/enterprise/project"],
+          docs_root: "/srv/enterprise/project",
+          remote: true,
+        },
+      };
+    });
+    const bridge = {
+      prepareQuickChatWorkspace: vi.fn(async () => ({ id, path: documentPath })),
+      openSession,
+      subscribe: () => () => {},
+    } as unknown as CoreBridge;
+    useSessionStore.setState({
+      bridge,
+      projectMode: "remote",
+      selectedHostId: "enterprise-host",
+    });
+
+    await useSessionStore.getState().startSession();
+
+    expect(invoke).toHaveBeenCalledWith("remote_worker_connect", {
+      input: expect.objectContaining({
+        host: "ubuntu@enterprise",
+        remoteRoot: "/srv/enterprise/project",
+      }),
+    });
+    expect(openSession).toHaveBeenCalledWith(
+      "local",
+      {
+        extra: {
+          remote_worker: {
+            worker_handle: "worker-spec-1",
+            cwd: "/srv/enterprise/project",
+          },
+        },
+      },
+      {
+        kind: "new",
+        options: expect.objectContaining({ cwd: "/srv/enterprise/project" }),
+        bindId: id,
+      },
+    );
+    expect(bridge.prepareQuickChatWorkspace).toHaveBeenCalledTimes(1);
+    expect(useSessionStore.getState()).toMatchObject({
+      activeRemoteHost: "ubuntu@enterprise",
+      activeProjectRoot: "/srv/enterprise/project",
+      conversations: [expect.objectContaining({
+        id,
+        provider: "local",
+        project: "/srv/enterprise/project",
+        remoteHost: "ubuntu@enterprise",
+        specialist: { kind: "spec" },
+      })],
+    });
   });
 });

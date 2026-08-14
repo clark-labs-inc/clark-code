@@ -96,6 +96,29 @@ impl RemoteWorkerProvider {
             },
         }
     }
+
+    async fn update_read_roots(
+        &self,
+        operation: &str,
+        roots: Vec<String>,
+    ) -> agent_core::Result<()> {
+        if !self.active.lock().await.is_empty() {
+            return Err(Error::Unsupported(
+                "finish the active run before changing repository context".into(),
+            ));
+        }
+        let worker_session = self.worker_session.as_deref().ok_or(Error::NotConnected)?;
+        let response = self
+            .worker
+            .request(self.request(
+                operation,
+                json!({"session_id": worker_session, "roots": roots}),
+            ))
+            .await
+            .map_err(Error::Transport)?;
+        terminal_data(response, "plugin_result")?;
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -307,6 +330,24 @@ impl Provider for RemoteWorkerProvider {
         Ok(())
     }
 
+    async fn add_read_roots(
+        &mut self,
+        _session: &SessionId,
+        roots: Vec<String>,
+    ) -> agent_core::Result<()> {
+        self.update_read_roots("session.add_read_roots", roots)
+            .await
+    }
+
+    async fn remove_read_roots(
+        &mut self,
+        _session: &SessionId,
+        roots: Vec<String>,
+    ) -> agent_core::Result<()> {
+        self.update_read_roots("session.remove_read_roots", roots)
+            .await
+    }
+
     async fn close_session(&mut self, _session: &SessionId) -> agent_core::Result<()> {
         let active = self.active.lock().await.clone();
         let mut cancellations = FuturesUnordered::new();
@@ -504,6 +545,13 @@ mod tests {
                             "plugin_result",
                             json!({"accepted": true}),
                         )),
+                        "session.add_read_roots" | "session.remove_read_roots" => {
+                            Ok(Response::result(
+                                Some(request.request_id),
+                                "plugin_result",
+                                json!({"updated": true}),
+                            ))
+                        }
                         other => Err(format!("unexpected operation: {other}")),
                     }
                 }
@@ -641,5 +689,40 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(error, Error::Protocol(_)));
+    }
+
+    #[tokio::test]
+    async fn adapter_updates_read_roots_through_the_remote_worker() {
+        let worker = Arc::new(FakeWorker::new(Vec::new()));
+        let mut provider = RemoteWorkerProvider::with_client(
+            worker.clone(),
+            "project-1".into(),
+            PathBuf::from("/srv/project"),
+        );
+        provider.connect(ProviderConfig::default()).await.unwrap();
+        let session = provider
+            .new_session(SessionOptions {
+                cwd: Some("/srv/project".into()),
+                ..SessionOptions::default()
+            })
+            .await
+            .unwrap();
+
+        provider
+            .add_read_roots(&session.id, vec!["/srv/shared/api".into()])
+            .await
+            .unwrap();
+        provider
+            .remove_read_roots(&session.id, vec!["/srv/shared/api".into()])
+            .await
+            .unwrap();
+
+        let requests = worker.requests.lock().unwrap();
+        assert!(requests
+            .iter()
+            .any(|operation| operation == "session.add_read_roots"));
+        assert!(requests
+            .iter()
+            .any(|operation| operation == "session.remove_read_roots"));
     }
 }

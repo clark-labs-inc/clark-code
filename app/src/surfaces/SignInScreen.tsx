@@ -152,7 +152,7 @@ export function SignInScreen() {
             data-qa="sign-in-google"
             onClick={() => void go()}
             disabled={busy}
-            className="flex min-h-11 w-full items-center justify-center gap-3 rounded-xl bg-accent px-4 py-3 text-sm font-semibold text-on-accent shadow-soft transition duration-200 ease-agent hover:-translate-y-0.5 hover:bg-accent-hover active:translate-y-0 disabled:translate-y-0 disabled:opacity-60"
+            className="flex min-h-11 w-full items-center justify-center gap-3 rounded-xl bg-accent px-4 py-3 text-sm font-semibold text-on-accent shadow-soft transition duration-base ease-agent hover:-translate-y-0.5 hover:bg-accent-hover active:translate-y-0 disabled:translate-y-0 disabled:opacity-60"
           >
             {busy ? (
               <Loader2 className="size-4 animate-[spin_1s_linear_infinite]" />

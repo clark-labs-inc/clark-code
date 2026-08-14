@@ -3,6 +3,7 @@ import {
   COMPOSER_MAX_HEIGHT,
   observeTextareaWidth,
   resizeComposerTextarea,
+  settleComposerTextareaSize,
 } from "./composerAutosize";
 
 describe("composer autosizing", () => {
@@ -11,7 +12,7 @@ describe("composer autosizing", () => {
     const textarea = {
       style,
       get scrollHeight() {
-        return style.height === "0px" ? 24 : 200;
+        return style.height === "auto" ? 24 : 200;
       },
     } as Pick<HTMLTextAreaElement, "scrollHeight" | "style">;
 
@@ -24,6 +25,34 @@ describe("composer autosizing", () => {
     const style = { height: "" } as CSSStyleDeclaration;
     resizeComposerTextarea({ style, scrollHeight: 600 });
     expect(style.height).toBe(`${COMPOSER_MAX_HEIGHT}px`);
+  });
+
+  it("settles a stale WebKit measurement after a programmatic value update", () => {
+    const style = { height: "" } as CSSStyleDeclaration;
+    let measurement = 0;
+    const textarea = {
+      style,
+      get scrollHeight() {
+        measurement += 1;
+        return measurement <= 2 ? COMPOSER_MAX_HEIGHT : 24;
+      },
+    } as HTMLTextAreaElement;
+    const scheduled: FrameRequestCallback[] = [];
+    const cancel = vi.fn();
+
+    resizeComposerTextarea(textarea);
+    const stop = settleComposerTextareaSize(textarea, (callback) => {
+      scheduled.push(callback);
+      return 7 + scheduled.length;
+    }, cancel);
+
+    expect(style.height).toBe(`${COMPOSER_MAX_HEIGHT}px`);
+    scheduled.shift()?.(0);
+    expect(style.height).toBe(`${COMPOSER_MAX_HEIGHT}px`);
+    scheduled.shift()?.(16);
+    expect(style.height).toBe("24px");
+    stop();
+    expect(cancel).toHaveBeenCalledWith(8);
   });
 
   it("remeasures after width changes but ignores height-only notifications", () => {

@@ -184,6 +184,28 @@ impl LocalAgentProvider {
     pub(super) fn config(&self) -> Result<&LocalConfig> {
         self.config.as_ref().ok_or(Error::NotConnected)
     }
+
+    pub(super) fn replace_read_roots(
+        &mut self,
+        roots: Vec<std::path::PathBuf>,
+        plan_mode: bool,
+    ) -> Result<()> {
+        let current = self.sandbox.as_ref().ok_or(Error::NotConnected)?;
+        let sandbox = Arc::new(current.as_ref().clone().replacing_read_roots(roots));
+        let mut config = self.config()?.clone();
+        config.sandbox_read_roots = sandbox.read_roots().to_vec();
+        let preset = if plan_mode {
+            exec_sandbox::SandboxPreset::ReadOnly
+        } else {
+            exec_sandbox::SandboxPreset::for_session_mode(self.session_mode.as_deref())
+        };
+        let (executor, sandbox_temp) = build_local_executor(&config, &sandbox, preset)?;
+        self.executor = executor;
+        self.sandbox_temp = sandbox_temp;
+        self.sandbox = Some(sandbox);
+        self.config = Some(config);
+        Ok(())
+    }
 }
 
 impl Default for LocalAgentProvider {

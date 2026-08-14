@@ -31,7 +31,6 @@ pub struct LiveRunOptions {
     pub repetition: u32,
     pub api_key: String,
     pub base_url: String,
-    pub research_model: String,
     pub acp_command: Option<Vec<String>>,
     pub attempt_timeout: Duration,
 }
@@ -41,7 +40,6 @@ struct LiveAttemptRequest {
     model: String,
     role: String,
     prompt: String,
-    research: bool,
     acp: bool,
 }
 
@@ -50,6 +48,12 @@ pub async fn run_live(
     lane: &LaneSpec,
     options: &LiveRunOptions,
 ) -> Result<BenchmarkRecord, String> {
+    if lane.cloud_agents {
+        return Err(
+            "the brokered-cloud lane is scripted-only in this neutral foundation; a live run must be owned by a product composition that installs its research ToolPack"
+                .into(),
+        );
+    }
     let run_id = format!(
         "{}-{}-live-r{}-{}",
         scenario.id,
@@ -93,7 +97,6 @@ pub async fn run_live(
             .map(|reader| {
                 let task = reader_task(reader);
                 tasks.push(task.clone());
-                let research = lane.cloud_agents && reader.cloud_eligible;
                 let attempt_id = Uuid::new_v4().to_string();
                 let model = if reader.cheap_model_eligible {
                     lane.subagent_model
@@ -103,11 +106,10 @@ pub async fn run_live(
                     lane.root_model.clone()
                 };
                 LiveAttemptRequest {
-                    prompt: prompts::reader(scenario, &task, &attempt_id, research),
+                    prompt: prompts::reader(scenario, &task, &attempt_id),
                     task,
                     model,
-                    role: if research { "cloud-reader" } else { "reader" }.into(),
-                    research,
+                    role: "reader".into(),
                     acp: matches!(lane.kind, LaneKind::MixedHarness),
                 }
             })
@@ -167,7 +169,6 @@ pub async fn run_live(
             } else {
                 "writer-retry".into()
             },
-            research: false,
             acp: false,
         };
         match run_attempt(
@@ -216,7 +217,6 @@ pub async fn run_live(
             task,
             model: lane.root_model.clone(),
             role: "reviewer".into(),
-            research: false,
             acp: false,
         };
         match run_attempt(
@@ -252,7 +252,6 @@ pub async fn run_live(
                             task: writer_task.clone(),
                             model: lane.root_model.clone(),
                             role: "writer-rework".into(),
-                            research: false,
                             acp: false,
                         };
                         match run_attempt(
@@ -303,7 +302,6 @@ pub async fn run_live(
             task,
             model: lane.root_model.clone(),
             role: "verifier".into(),
-            research: false,
             acp: false,
         };
         match run_attempt(
@@ -508,9 +506,7 @@ async fn run_attempt(
         )
         .map_err(|error| error.to_string())?;
         let profile = ScriptedProfile {
-            provider: if request.research {
-                "local+brokered-cloud".into()
-            } else if request.acp {
+            provider: if request.acp {
                 "acp".into()
             } else {
                 "local".into()
@@ -601,8 +597,6 @@ fn provider_config(
             "max_iterations": 24,
             "permissions": permissions,
             "command_denylist": ["rm", "git clean", "git reset", "git checkout", "git restore", "git commit", "git push", "curl", "wget", "ssh"],
-            "research": request.research,
-            "research_model": options.research_model,
             "memories": false,
             "project_knowledge": false,
             "auto_compact": false,

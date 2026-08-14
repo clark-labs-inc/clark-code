@@ -11,8 +11,12 @@ export interface ComposerTrigger {
 }
 
 export type ComposerSuggestion =
-  | { kind: "spec_repository" }
+  | { kind: "spec_repository"; path: string; current: boolean }
+  | { kind: "spec_repository_picker" }
   | { kind: "spec_folder" }
+  | { kind: "parent_directory_menu" }
+  | { kind: "parent_directory_picker" }
+  | { kind: "parent_directory"; path: string; root: string }
   | { kind: "directory"; path: string }
   | { kind: "file"; path: string }
   | { kind: "slash"; cmd: SlashCommand }
@@ -21,10 +25,12 @@ export type ComposerSuggestion =
 export function detectComposerTrigger(text: string, caret: number): ComposerTrigger | null {
   for (let i = caret - 1; i >= 0; i--) {
     const ch = text[i];
+    // Slashes inside an `@` path are query content, not failed slash-command
+    // triggers. Keep scanning until the leading `@` (or whitespace) decides.
+    if (ch === "/" && i !== 0) continue;
     if (ch === "@" || ch === "/" || ch === "$") {
       const before = i === 0 ? "" : text[i - 1];
       if (i !== 0 && !/\s/.test(before)) return null;
-      if (ch === "/" && i !== 0) return null;
       const query = text.slice(i + 1, caret);
       if (/\s/.test(query)) return null;
       return { type: ch, query, start: i };
@@ -54,12 +60,14 @@ export function composerSubmissionState(input: ComposerSubmissionInput) {
     !input.usesConversationWorkspace &&
     !input.localCwd.trim();
   const canResolveBlockedStart = needsProjectFolder && input.canPickProjectFolder;
+  const conversationWorkspaceResolvesStart = Boolean(input.usesConversationWorkspace)
+    && input.projectMode === "local";
   const canSubmit =
     input.hasContent &&
     (input.hasSession ||
       (!input.connecting &&
         input.activeProvider !== null &&
-        (!input.startBlocked || canResolveBlockedStart || Boolean(input.usesConversationWorkspace))));
+        (!input.startBlocked || canResolveBlockedStart || conversationWorkspaceResolvesStart)));
 
   return { canSubmit, shouldPickProjectFolder: canSubmit && needsProjectFolder };
 }

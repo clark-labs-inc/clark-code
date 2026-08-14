@@ -10,11 +10,12 @@
 // the permission gate, then flips approval to "Full access" via the composer
 // pill while a rAF recorder samples the gate's computed opacity each frame.
 //
-// Usage: node harness/motion-exit-probe.mjs
+// Usage: node harness/motion-exit-probe.mjs [chromium|webkit|both]
 import { spawn } from "node:child_process";
 import { createServer } from "node:net";
 import { fileURLToPath } from "node:url";
 import { setTimeout as sleep } from "node:timers/promises";
+import { webkit } from "playwright";
 import { launch, VIEWPORT } from "./launch.mjs";
 
 const repoDir = new URL("..", import.meta.url).pathname;
@@ -42,7 +43,7 @@ const seedLocalStorage = `
   localStorage.setItem('agent-desktop:project-context:' + scope, JSON.stringify({ cwd: "/tmp" }));
 `;
 
-async function scenario(browser, reduce) {
+async function scenario(browser, engine, reduce) {
   const context = await browser.newContext({
     viewport: VIEWPORT,
     reducedMotion: reduce ? "reduce" : "no-preference",
@@ -56,6 +57,22 @@ async function scenario(browser, reduce) {
   await page.goto(devUrl, { waitUntil: "domcontentloaded" });
   await page.getByLabel("Message Clark Code").waitFor({ state: "visible" });
 
+  // The text-size shortcut is a deterministic path into the global Sonner
+  // host. Verify the token wrapper and reduced-motion override in both engines
+  // before the permission-gate scenario changes the workspace state.
+  await page.getByLabel("Message Clark Code").press("Meta+=");
+  await page.locator("[data-sonner-toast]").waitFor({ state: "visible" });
+  const toastProbe = await page.locator("[data-sonner-toast]").evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      transitionDuration: style.transitionDuration,
+      animationDuration: style.animationDuration,
+      background: style.backgroundColor,
+      borderRadius: style.borderRadius,
+      live: element.closest("section")?.getAttribute("aria-live") ?? null,
+    };
+  });
+
   // The account default is "Approve for me" (auto), which auto-approves the
   // mock's routine edit. Pin "Ask for approval" first so every pending request
   // shows the gate; the flip to "Full access" later is then observable.
@@ -68,10 +85,10 @@ async function scenario(browser, reduce) {
   try {
     await page.getByRole("button", { name: "Allow once" }).waitFor({ state: "visible", timeout: 15000 });
   } catch (e) {
-    await page.screenshot({ path: `target/motion-probe-${reduce ? "reduced" : "full"}-gate-missing.png` });
+    await page.screenshot({ path: `target/motion-probe-${engine}-${reduce ? "reduced" : "full"}-gate-missing.png` });
     const body = await page.locator("body").innerText().catch(() => "");
     console.log(
-      `[${reduce ? "reduced" : "full"}] gate not visible; body excerpt:\n`,
+      `[${engine}/${reduce ? "reduced" : "full"}] gate not visible; body excerpt:\n`,
       body.slice(0, 1200),
     );
     throw e;
@@ -114,15 +131,15 @@ async function scenario(browser, reduce) {
   await page.locator('[title*="Shift+Tab to cycle"]').first().click();
   await page.getByRole("menuitemradio", { name: "Full access" }).click();
   await sleep(450);
-  await page.screenshot({ path: `target/motion-probe-${reduce ? "reduced" : "full"}.png` });
+  await page.screenshot({ path: `target/motion-probe-${engine}-${reduce ? "reduced" : "full"}.png` });
 
   const probe = await page.evaluate(() => window.__motionProbe ?? { samples: [] });
   const errorsNow = [...errors];
   await context.close();
-  return { reduce, samples: probe.samples, errors: errorsNow };
+  return { engine, reduce, samples: probe.samples, errors: errorsNow, toastProbe };
 }
 
-function analyze(reduce, samples) {
+function analyze(engine, reduce, samples) {
   const opacities = samples.filter((s) => !Number.isNaN(s.o));
   const intermediate = opacities.filter((s) => s.o > 0.02 && s.o < 0.98);
   const spatial = opacities.filter((s) => s.tr && s.tr !== "none" && s.tr !== "");
@@ -136,6 +153,7 @@ function analyze(reduce, samples) {
     }
   }
   return {
+    engine,
     mode: reduce ? "reduced" : "full",
     frames: opacities.length,
     intermediateFrames: intermediate.length,
@@ -166,16 +184,25 @@ async function waitForServer() {
   throw new Error(`vite did not start\n${devOutput}`);
 }
 
+const requestedEngine = process.argv[2] ?? "chromium";
+if (!["chromium", "webkit", "both"].includes(requestedEngine)) {
+  throw new Error(`Unknown engine ${requestedEngine}; expected chromium, webkit, or both`);
+}
+const engines = requestedEngine === "both" ? ["chromium", "webkit"] : [requestedEngine];
 let browser;
 const results = [];
 try {
   await waitForServer();
-  browser = await launch();
-  for (const reduce of [false, true]) {
-    const r = await scenario(browser, reduce);
-    r.res = analyze(r.reduce, r.samples);
-    r.errors = r.errors.filter((e) => !e.includes("deprecated")); // motion notices are warnings
-    results.push(r);
+  for (const engine of engines) {
+    browser = engine === "webkit" ? await webkit.launch() : await launch();
+    for (const reduce of [false, true]) {
+      const r = await scenario(browser, engine, reduce);
+      r.res = analyze(r.engine, r.reduce, r.samples);
+      r.errors = r.errors.filter((e) => !e.includes("deprecated")); // motion notices are warnings
+      results.push(r);
+    }
+    await browser.close();
+    browser = undefined;
   }
 } finally {
   await browser?.close();
@@ -183,15 +210,34 @@ try {
 }
 
 for (const r of results) {
-  const bad = r.res.intermediateFrames === 0 || !r.res.fades || (r.reduce && r.res.spatialFrames > 0);
+  const toastDurationMs = Number.parseFloat(r.toastProbe.transitionDuration) * 1000;
+  const toastMotionValid = r.reduce
+    ? toastDurationMs === 0 && Number.parseFloat(r.toastProbe.animationDuration) === 0
+    : toastDurationMs > 0 && toastDurationMs <= 300;
+  const toastSemanticsValid = r.toastProbe.live === "polite" && r.toastProbe.borderRadius === "12px";
+  const bad = r.res.intermediateFrames === 0
+    || !r.res.fades
+    || (r.reduce && r.res.spatialFrames > 0)
+    || !toastMotionValid
+    || !toastSemanticsValid;
   console.log(
-    `${bad ? "FAIL" : "PASS"} ${r.res.mode}: frames=${r.res.frames} ` +
+    `${bad ? "FAIL" : "PASS"} ${r.res.engine}/${r.res.mode}: frames=${r.res.frames} ` +
     `intermediate=${r.res.intermediateFrames} fadeMs=${r.res.fadeCompleteMs} ` +
     `firstO=${r.res.first.toFixed(2)} lastReadO=${r.res.lastRead.toFixed(2)} ` +
-    `spatialFrames=${r.res.spatialFrames} errors=${r.errors.length}`,
+    `spatialFrames=${r.res.spatialFrames} toastMs=${Math.round(toastDurationMs)} ` +
+    `toastLive=${r.toastProbe.live} errors=${r.errors.length}`,
   );
   if (r.errors.length) console.log("  console errors:", r.errors.join(" | "));
 }
 process.exitCode = results.some((r) =>
-  r.res.intermediateFrames === 0 || !r.res.fades || (r.reduce && r.res.spatialFrames > 0),
+  r.res.intermediateFrames === 0
+  || !r.res.fades
+  || (r.reduce && r.res.spatialFrames > 0)
+  || (r.reduce
+    ? Number.parseFloat(r.toastProbe.transitionDuration) !== 0
+      || Number.parseFloat(r.toastProbe.animationDuration) !== 0
+    : Number.parseFloat(r.toastProbe.transitionDuration) <= 0
+      || Number.parseFloat(r.toastProbe.transitionDuration) > 0.3)
+  || r.toastProbe.live !== "polite"
+  || r.toastProbe.borderRadius !== "12px",
 ) ? 1 : 0;

@@ -1,6 +1,62 @@
 use super::*;
 
 #[test]
+fn discovers_literal_hosts_from_config_and_includes() {
+    let temp = tempfile::tempdir().unwrap();
+    let ssh_dir = temp.path().join(".ssh");
+    std::fs::create_dir_all(ssh_dir.join("config.d")).unwrap();
+    std::fs::write(
+        ssh_dir.join("config"),
+        "# shared defaults\nHost *\n  ServerAliveInterval 30\nInclude config.d/*.conf\nHost gpu-box gpu-backup !gpu-old\n",
+    )
+    .unwrap();
+    std::fs::write(
+        ssh_dir.join("config.d/work.conf"),
+        "Host=dev-box\n  HostName 192.0.2.1\n  User deploy\nHost staging-*\n",
+    )
+    .unwrap();
+
+    let hosts = config_hosts_from_path(&ssh_dir.join("config"), &ssh_dir, temp.path()).unwrap();
+    assert_eq!(
+        hosts
+            .iter()
+            .map(|host| host.alias.as_str())
+            .collect::<Vec<_>>(),
+        vec!["dev-box", "gpu-backup", "gpu-box"]
+    );
+    assert_eq!(hosts[0].hostname.as_deref(), Some("192.0.2.1"));
+    assert_eq!(hosts[0].user.as_deref(), Some("deploy"));
+}
+
+#[test]
+fn config_parser_handles_quotes_comments_and_duplicate_aliases() {
+    let words = ssh_config_words("  Host \"build box\" build-box # comment");
+    assert_eq!(words, vec!["Host", "build box", "build-box"]);
+    assert_eq!(
+        ssh_config_words("Host = spaced-equals"),
+        vec!["Host", "spaced-equals"]
+    );
+
+    let temp = tempfile::tempdir().unwrap();
+    let ssh_dir = temp.path().join(".ssh");
+    std::fs::create_dir_all(&ssh_dir).unwrap();
+    std::fs::write(
+        ssh_dir.join("config"),
+        "Host Production\nHost production\nInclude config\n",
+    )
+    .unwrap();
+    let hosts = config_hosts_from_path(&ssh_dir.join("config"), &ssh_dir, temp.path()).unwrap();
+    assert_eq!(
+        hosts,
+        vec![SshConfigHost {
+            alias: "Production".into(),
+            hostname: None,
+            user: None,
+        }]
+    );
+}
+
+#[test]
 fn parses_uname_to_arch() {
     assert_eq!(
         RemoteArch::from_uname("Linux x86_64\n").unwrap(),

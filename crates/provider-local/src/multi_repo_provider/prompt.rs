@@ -22,7 +22,6 @@ pub(super) fn isolated_provider_config(
     let permission = if writable { "allow" } else { "deny" };
     extra.insert("model".into(), Value::String(model.to_string()));
     extra.insert("isolated_writer".into(), Value::Bool(true));
-    extra.insert("research".into(), Value::Bool(false));
     extra.insert("memories".into(), Value::Bool(false));
     extra.insert("project_knowledge".into(), Value::Bool(false));
     extra.insert("browser_enabled".into(), Value::Bool(false));
