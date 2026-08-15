@@ -866,10 +866,21 @@ pub async fn prompt(
         run_id = %run_id,
         "provider allocated a conversation run"
     );
+    // Project the allocated identity before the durable append can block on
+    // cloud history. The provider is already running at this point; keeping
+    // the UI in the anonymous `starting` state makes its visible Stop control
+    // inert because cancellation requires this exact run id. Returning from
+    // the command still waits for the append below, so the prompt receipt does
+    // not weaken the durable command boundary.
+    let allocated_snapshot = {
+        let mut session = entry.lock().await;
+        apply(&mut session.snapshot, &first);
+        session.snapshot.clone()
+    };
+    let _ = app.emit("snapshot", &allocated_snapshot);
     let checkpoint = trajectory.append(std::slice::from_ref(&first)).await?;
     let snapshot = {
         let mut session = entry.lock().await;
-        apply(&mut session.snapshot, &first);
         session.snapshot.history_checkpoint = Some(checkpoint);
         session.snapshot.clone()
     };

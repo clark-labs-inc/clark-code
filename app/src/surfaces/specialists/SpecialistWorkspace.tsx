@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  AlertTriangle,
   Building2,
   ChevronDown,
   MessageSquareText,
@@ -149,6 +150,7 @@ export function SpecialistWorkspace({
   const [data, setData] = useState<SpecialistData>(EMPTY_DATA);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [projectionWarning, setProjectionWarning] = useState<string | null>(null);
   const [serverAccess, setServerAccess] = useState<"unknown" | "ready" | "free" | "action_needed" | "organization_required" | "scope_lost" | "offline">("unknown");
   const [mobilePane, setMobilePane] = useState<"chat" | "canvas">("chat");
   const [canvasOpen, setCanvasOpen] = useState(false);
@@ -189,6 +191,7 @@ export function SpecialistWorkspace({
     }
     setLoading(true);
     setError(null);
+    setProjectionWarning(null);
     let entitlementVerified = false;
     try {
       const orgs = (await specialistOrganizations(credentials)).filter((organization) => organization.status === "active");
@@ -318,7 +321,7 @@ export function SpecialistWorkspace({
           localSecurityScans,
         });
       } else if (active === "scientist") {
-        const [researchOverview, scienceArtifacts] = await Promise.all([
+        const [overviewResult, artifactsResult] = await Promise.allSettled([
           specialistQuery<ResearchOverview>(
             credentials,
             active,
@@ -332,9 +335,21 @@ export function SpecialistWorkspace({
             organization.id,
           ),
         ]);
-        setData({ ...EMPTY_DATA, researchOverview, scienceArtifacts });
+        if (overviewResult.status === "rejected" && artifactsResult.status === "rejected") {
+          throw overviewResult.reason;
+        }
+        setData({
+          ...EMPTY_DATA,
+          researchOverview: overviewResult.status === "fulfilled" ? overviewResult.value : null,
+          scienceArtifacts: artifactsResult.status === "fulfilled" ? artifactsResult.value : [],
+        });
+        if (overviewResult.status === "rejected") {
+          setProjectionWarning("The research overview is temporarily unavailable. Verified cloud artifacts remain available below.");
+        } else if (artifactsResult.status === "rejected") {
+          setProjectionWarning("Cloud artifacts are temporarily unavailable. The latest accepted research overview remains visible.");
+        }
       } else if (active === "rsi") {
-        const [rsiOverview, scienceArtifacts] = await Promise.all([
+        const [overviewResult, artifactsResult] = await Promise.allSettled([
           specialistQuery<RsiOverview>(
             credentials,
             active,
@@ -348,11 +363,24 @@ export function SpecialistWorkspace({
             organization.id,
           ),
         ]);
-        setData({ ...EMPTY_DATA, rsiOverview, scienceArtifacts });
+        if (overviewResult.status === "rejected" && artifactsResult.status === "rejected") {
+          throw overviewResult.reason;
+        }
+        setData({
+          ...EMPTY_DATA,
+          rsiOverview: overviewResult.status === "fulfilled" ? overviewResult.value : null,
+          scienceArtifacts: artifactsResult.status === "fulfilled" ? artifactsResult.value : [],
+        });
+        if (overviewResult.status === "rejected") {
+          setProjectionWarning("The RSI overview is temporarily unavailable. Verified cloud artifacts remain available below.");
+        } else if (artifactsResult.status === "rejected") {
+          setProjectionWarning("Cloud artifacts are temporarily unavailable. The latest accepted RSI overview remains visible.");
+        }
       } else {
         throw new Error(`No data adapter is registered for specialist ${active}`);
       }
     } catch (cause) {
+      setProjectionWarning(null);
       setServerAccess(specialistAccessAfterLoadFailure(entitlementVerified));
       clearSensitiveData();
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -460,6 +488,12 @@ export function SpecialistWorkspace({
   const canvas = (
     <div className="min-h-0 flex-1 overflow-y-auto bg-bg-secondary/30">
       <CanvasStatus loading={(loading || creatingWorkspace) && serverAccess === "ready"} error={error} onRetry={() => void load()} />
+      {!loading && !error && projectionWarning && (
+        <div className="mx-5 mt-4 flex items-start gap-2 border-y border-warning/25 py-3 text-xs leading-5 text-ink-muted">
+          <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" aria-hidden="true" />
+          <span>{projectionWarning}</span>
+        </div>
+      )}
       {!loading && !creatingWorkspace && !error && serverAccess === "ready" && (
         active === "scout" ? (
           <ScoutCanvas

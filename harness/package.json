@@ -6,6 +6,7 @@
     "test:webkit": "node webkit-smoke.mjs",
     "test:attachments": "node attachment-smoke.mjs",
     "test:full-gui": "node full-gui-smoke.mjs",
+    "test:ssh-settings": "node ssh-settings-smoke.mjs",
     "test:model-picker": "node model-picker-smoke.mjs",
     "test:pragmatic-dnd": "node pragmatic-dnd-smoke.mjs",
     "test:product-boundary": "node --test product-boundary.spec.mjs"

@@ -143,7 +143,7 @@ export function EnvironmentPicker({
             icon={<Plus className="size-4" />}
             label="Add SSH host…"
             onClick={() => {
-              setSshOpen(true);
+              setSshOpen(true, "select_execution_target");
               close();
             }}
           />
@@ -268,7 +268,7 @@ export function RemoteFolderBrowser({
   }, [host.id]);
 
   return (
-    <div className="w-[22rem] p-1">
+    <div className="w-[22rem] max-w-full p-1">
       <div className="mb-1 flex items-center gap-1.5 px-1">
         <Server className="size-3.5 shrink-0 text-ink-muted" />
         <span className="truncate text-xs font-medium text-ink-secondary">{hostLabel(host)}</span>

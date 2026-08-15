@@ -241,6 +241,14 @@ fn confined(raw: &str, root: &Path) -> Result<PathBuf, PluginError> {
             "project path escapes its registered root".into(),
         ));
     }
+    // The project root itself is already the registered confinement boundary.
+    // Checking its parent would necessarily inspect a directory outside that
+    // boundary and reject every operation whose cwd is exactly the project
+    // root (including Git repository discovery).
+    if path == root {
+        std::fs::canonicalize(root).map_err(|error| failed(error.to_string()))?;
+        return Ok(path);
+    }
     if let Some(parent) = path.parent().filter(|parent| parent.exists()) {
         ensure_resolved(
             &std::fs::canonicalize(parent).map_err(|error| failed(error.to_string()))?,
@@ -283,7 +291,7 @@ fn to_millis(time: SystemTime) -> Option<u64> {
 mod tests {
     use base64::Engine;
     use code_host::{ProjectRegistration, Request, RequestCommand, Response, PROTOCOL_VERSION};
-    use exec_protocol::{method, PathParams};
+    use exec_protocol::{method, PathParams, ProcessStartParams};
 
     use crate::config::WorkerConfig;
 
@@ -353,6 +361,26 @@ mod tests {
         )
         .await;
         assert!(matches!(response, Response::Error { .. }));
+    }
+
+    #[tokio::test]
+    async fn starts_process_at_the_exact_registered_project_root() {
+        let project = tempfile::tempdir().unwrap();
+        let root = project.path().canonicalize().unwrap();
+        let response = invoke(
+            &root,
+            method::PROCESS_START,
+            serde_json::to_value(ProcessStartParams {
+                process_id: "root-cwd".into(),
+                command: "pwd".into(),
+                cwd: root.to_string_lossy().into_owned(),
+                timeout_ms: 1_000,
+                pty: false,
+            })
+            .unwrap(),
+        )
+        .await;
+        assert!(matches!(response, Response::Result { .. }));
     }
 
     #[cfg(unix)]

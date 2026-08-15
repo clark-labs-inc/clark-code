@@ -12,6 +12,7 @@ mod spec;
 mod transport;
 
 pub use artifact::{RemoteArch, RemoteArtifact, RemoteArtifactError};
+pub use code_host::PROTOCOL_VERSION;
 pub use process::{
     RemoteWorker, RemoteWorkerError, RemoteWorkerFrame, RemoteWorkerInfo, RemoteWorkerProgress,
     RemoteWorkerRequest, RemoteWorkerSlot,

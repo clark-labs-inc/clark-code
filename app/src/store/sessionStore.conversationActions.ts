@@ -19,7 +19,6 @@ import {
   emptySnapshot,
   epochStale,
   fetchSnapshot,
-  hostReady,
   liveProjectRoot,
   liveSessions,
   loadSshHosts,
@@ -55,6 +54,7 @@ import {
   researchRuntimeSpecialist,
   productSpecialistTarget,
   type RsiScoutContextSnapshot,
+  type SpecialistContext,
   scoutCartographyTarget,
   specialistConnectConfig,
   specialistReadRoots,
@@ -69,6 +69,22 @@ import { authAccountMatches } from "../lib/account";
 import { isQuickChatProject } from "../lib/projectSidebar";
 import { productModule } from "../product/productModule";
 import { approvalPolicyForSpecialist } from "../lib/permissions";
+import type { CoreBridge, RemoteWorkerTarget } from "../core-bridge/bridge";
+
+async function requireSecurityRepository(
+  bridge: CoreBridge,
+  specialist: SpecialistContext | null | undefined,
+  cwd: string,
+  remote: RemoteWorkerTarget | null = null,
+): Promise<void> {
+  if (specialist?.kind !== "security") return;
+  const project = await bridge.projectContext?.(cwd, remote);
+  if (!project) {
+    throw new Error(
+      "Choose a Git repository before starting Security. The selected folder is not a repository checkout.",
+    );
+  }
+}
 
 type ConversationActions = Pick<
   SessionState,
@@ -158,7 +174,8 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
     if (projectMode === "remote") {
       const host = loadSshHosts(codeKeyAccountBinding(get().auth)).find((h) => h.id === selectedHostId);
       if (!host) return "Add a remote host.";
-      if (!hostReady(host)) return "This host needs an SSH destination and remote folder.";
+      if (!host.host.trim()) return "This host needs an SSH destination.";
+      if (!host.remoteRoot.trim()) return "Choose a remote folder before starting.";
       return null;
     }
     return localSettingsReady(localSettings);
@@ -539,7 +556,16 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
       } else if (isRemote) {
         const host = loadSshHosts(codeKeyAccountBinding(get().auth)).find((h) => h.id === get().selectedHostId);
         if (!host) throw new Error("Pick a remote host first, or add one.");
-        remote = await openRemote(host, localSettings);
+        const specialistSettings = specialistModelSettings(specialistContext);
+        remote = await openRemote(host, specialistSettings
+          ? { ...localSettings, ...specialistSettings }
+          : localSettings);
+        await requireSecurityRepository(
+          bridge,
+          specialistContext,
+          remote.cwd,
+          { id: remote.id },
+        );
         remoteHost = host.host.trim();
         config = localConnectConfig(
           localSettings,
@@ -557,6 +583,7 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
         options = { cwd: remote.cwd, mode, collaboration_mode };
       } else if (isLocal) {
         const sessionSettings = { ...localSettings, cwd: localSessionPath };
+        await requireSecurityRepository(bridge, specialistContext, localSessionPath);
         config = localConnectConfig(
           sessionSettings,
           undefined,
@@ -1068,6 +1095,12 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
           effSettings,
           conversationProjectRoot(openingMeta?.project, host.remoteRoot),
         );
+        await requireSecurityRepository(
+          bridge,
+          resolvedSpecialist,
+          remote.cwd,
+          { id: remote.id },
+        );
         remoteHost = host.host.trim();
         config = localConnectConfig(
           effSettings,
@@ -1084,6 +1117,7 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
         if (!quickChat && !requestedProjectRoot) {
           throw new Error("This conversation has no project folder. Choose one before reopening it.");
         }
+        await requireSecurityRepository(bridge, resolvedSpecialist, requestedProjectRoot);
         config = localConnectConfig(
           { ...effSettings, cwd: requestedProjectRoot },
           undefined,

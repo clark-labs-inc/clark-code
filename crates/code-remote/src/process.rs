@@ -3,7 +3,7 @@ use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
 
-use code_host::{Request, Response, PROTOCOL_VERSION};
+use code_host::{Request, Response};
 use serde::Serialize;
 use thiserror::Error;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader, BufWriter};
@@ -143,6 +143,7 @@ impl RemoteWorkerRequest {
 #[derive(Clone)]
 pub struct RemoteWorker {
     info: RemoteWorkerInfo,
+    protocol_version: u32,
     stdin: Arc<Mutex<BufWriter<ChildStdin>>>,
     pending: Pending,
     child: Arc<Mutex<Child>>,
@@ -273,7 +274,7 @@ impl RemoteWorker {
         };
         let pending = Arc::new(Mutex::new(HashMap::new()));
         let stderr_store = Arc::new(Mutex::new(Vec::new()));
-        let reader = spawn_reader(stdout, pending.clone());
+        let reader = spawn_reader(stdout, pending.clone(), spec.protocol_version);
         let stderr_reader = tokio::spawn(drain_stderr(stderr, stderr_store.clone()));
         let mut worker = Self {
             info: RemoteWorkerInfo {
@@ -288,6 +289,7 @@ impl RemoteWorker {
                 advisor_version: String::new(),
                 execution_residency: String::new(),
             },
+            protocol_version: spec.protocol_version,
             stdin: Arc::new(Mutex::new(BufWriter::new(stdin))),
             pending,
             child: Arc::new(Mutex::new(child)),
@@ -312,7 +314,7 @@ impl RemoteWorker {
             }
         }
         let ping = Request {
-            schema_version: code_host::PROTOCOL_VERSION,
+            schema_version: worker.protocol_version,
             request_id: format!("ping-{}", uuid::Uuid::new_v4().simple()),
             command: code_host::RequestCommand::Ping,
         };
@@ -386,7 +388,7 @@ impl RemoteWorker {
         let response = tokio::time::timeout(
             HEALTH_CHECK_TIMEOUT,
             self.request(Request {
-                schema_version: PROTOCOL_VERSION,
+                schema_version: self.protocol_version,
                 request_id: format!("health-{}", uuid::Uuid::new_v4().simple()),
                 command: code_host::RequestCommand::Ping,
             }),
@@ -418,7 +420,7 @@ impl RemoteWorker {
         &self,
         request: Request,
     ) -> Result<RemoteWorkerRequest, RemoteWorkerError> {
-        if request.schema_version != PROTOCOL_VERSION {
+        if request.schema_version != self.protocol_version {
             return Err(RemoteWorkerError::UnsupportedSchema(request.schema_version));
         }
         if !portable_request_id(&request.request_id) {
@@ -464,7 +466,7 @@ impl RemoteWorker {
 
     pub async fn disconnect(&self) -> Result<(), RemoteWorkerError> {
         let shutdown = Request {
-            schema_version: code_host::PROTOCOL_VERSION,
+            schema_version: self.protocol_version,
             request_id: format!("shutdown-{}", uuid::Uuid::new_v4().simple()),
             command: code_host::RequestCommand::Shutdown,
         };
@@ -526,7 +528,11 @@ impl Drop for RemoteWorker {
     }
 }
 
-fn spawn_reader(stdout: tokio::process::ChildStdout, pending: Pending) -> JoinHandle<()> {
+fn spawn_reader(
+    stdout: tokio::process::ChildStdout,
+    pending: Pending,
+    protocol_version: u32,
+) -> JoinHandle<()> {
     tokio::spawn(async move {
         let mut reader = BufReader::new(stdout);
         let mut line = Vec::with_capacity(4096);
@@ -551,7 +557,7 @@ fn spawn_reader(stdout: tokio::process::ChildStdout, pending: Pending) -> JoinHa
                         }
                     };
                     let schema_version = response.schema_version();
-                    if schema_version != PROTOCOL_VERSION {
+                    if schema_version != protocol_version {
                         fail_pending(
                             &pending,
                             RemoteWorkerError::UnsupportedSchema(schema_version),

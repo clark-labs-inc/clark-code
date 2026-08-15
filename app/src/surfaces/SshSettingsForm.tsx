@@ -255,7 +255,8 @@ export function SshSettingsForm({
 
       <section aria-labelledby="ssh-folder-step" className={cn(!activeHost && "opacity-55")}>
         <h3 id="ssh-folder-step" className="mb-2 text-sm font-semibold text-ink">
-          2. Project folder{activeHost?.host.trim() ? ` on ${activeHost.host.trim()}` : ""}
+          2. Default project folder (optional)
+          {activeHost?.host.trim() ? ` on ${activeHost.host.trim()}` : ""}
         </h3>
         <div className="relative">
           <label htmlFor="remote-project-folder" className="sr-only">Remote project folder</label>

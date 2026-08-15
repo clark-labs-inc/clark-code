@@ -88,6 +88,7 @@ import { composerBrandingCopy } from "./composerBranding";
 import { SpecComposerCodeContext, useSpecComposerCodeContext } from "./SpecComposerCodeContext";
 import { recordSpecPrompt } from "../lib/specPromptHistory";
 import { approvalPolicyForSpecialist } from "../lib/permissions";
+import { specialistModelSettings } from "../lib/specialistModel";
 
 export function Composer() {
   const sessionId = useSessionStore((state) => state.session?.id ?? null);
@@ -112,6 +113,9 @@ function ScopedComposer() {
   const draftOwner = composerDraftOwner(auth?.user ?? null);
   const sessionId = session?.id ?? null;
   const activeSpecialist = useSpecialistStore((state) => state.active);
+  const specialistContext = useSpecialistStore((state) =>
+    state.active ? state.contexts[state.active] : undefined,
+  );
   const draftConversationId = sessionId
     ?? (activeSpecialist ? specialistStartComposerDraftId(activeSpecialist) : null);
   const draft = useComposerDraftState(draftOwner, draftConversationId);
@@ -145,6 +149,10 @@ function ScopedComposer() {
   ));
   const projectMode = useSessionStore((s) => s.projectMode);
   const localSettings = useSessionStore((s) => s.localSettings);
+  const selectedSpecialistSettings = specialistModelSettings(specialistContext);
+  const executionSettings = selectedSpecialistSettings
+    ? { ...localSettings, ...selectedSpecialistSettings }
+    : localSettings;
   const localCwd = localSettings.cwd;
   const selectedHostId = useSessionStore((s) => s.selectedHostId);
   const send = useSessionStore((s) => s.send);
@@ -175,7 +183,7 @@ function ScopedComposer() {
     if (!isRemoteSelection || !selectedRemoteHost || !cwd) {
       return () => { current = false; };
     }
-    void openRemote(selectedRemoteHost, localSettings, cwd).then((next) => {
+    void openRemote(selectedRemoteHost, executionSettings, cwd).then((next) => {
       if (current) setInspectionRemote(next);
     }).catch(() => {
       // The normal start/connect surface owns connection errors. Autocomplete
@@ -185,8 +193,8 @@ function ScopedComposer() {
   }, [
     cwd,
     isRemoteSelection,
-    localSettings.model,
-    localSettings.reasoningEffort,
+    executionSettings.model,
+    executionSettings.reasoningEffort,
     selectedRemoteHost?.host,
     selectedRemoteHost?.id,
   ]);

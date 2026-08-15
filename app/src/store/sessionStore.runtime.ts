@@ -151,6 +151,8 @@ export type {
   ContentBlock,
 };
 
+export type SshOpenPurpose = "manage" | "select_execution_target";
+
 /** A follow-up message the user sent while a run was active. It sends
  *  automatically when the run finishes, never interrupting. */
 /** The sections of the unified Settings view (left-rail order). */
@@ -501,6 +503,9 @@ export interface SessionState {
   mcpOpen: boolean;
   /** Whether the remote-hosts (SSH) settings modal is open. */
   sshOpen: boolean;
+  /** Why the SSH modal was opened. Adding a host from the execution picker
+   *  must return that host to the picker; Settings only manages presets. */
+  sshOpenPurpose: SshOpenPurpose;
   /** Whether the "New project" chooser modal is open. */
   newProjectOpen: boolean;
   /** Whether the unified Settings modal is open, and which section it shows. */
@@ -647,7 +652,7 @@ export interface SessionState {
    *  its first session immediately instead of waiting for a typed prompt. */
   startNewProject: (target: NewProjectTarget) => Promise<void>;
   setMcpOpen: (open: boolean) => void;
-  setSshOpen: (open: boolean) => void;
+  setSshOpen: (open: boolean, purpose?: SshOpenPurpose) => void;
   /** Open/close the "New project" chooser modal. */
   setNewProjectOpen: (open: boolean) => void;
   /** Open/close the unified Settings modal, optionally jumping to a section. */

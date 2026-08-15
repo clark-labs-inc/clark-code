@@ -16,6 +16,17 @@ function relativeTime(timestamp: number): string {
   return `${Math.round(hours / 24)}d ago`;
 }
 
+export function scoutSequenceLabel(sequence: number): string {
+  return sequence > 0 ? `#${sequence}` : "None yet";
+}
+
+export function scoutLoadedCutLabel(workspace: ScoutWorkspace): string {
+  const age = relativeTime(workspace.updated_at_ms);
+  return workspace.latest_change_sequence > 0
+    ? `loaded evidence cut #${workspace.latest_change_sequence} · workspace updated ${age}`
+    : `no accepted evidence changes · workspace updated ${age}`;
+}
+
 function entryName(entry: ScoutSnapshotEntry): string {
   const value = entry.event.fact.attributes.name;
   return typeof value === "string" && value.trim() ? value : entry.object_id;
@@ -147,7 +158,7 @@ export function ScoutCanvas({
         <div className="grid gap-3 sm:grid-cols-3">
           <MetricCard label="Accepted facts" value={entries.length} detail="Current snapshot" tone="good" />
           <MetricCard label="Source connections" value={workspace.source_count} detail="Permission filtered" />
-          <MetricCard label="Latest receipt" value={`#${workspace.latest_change_sequence}`} detail={relativeTime(workspace.updated_at_ms)} />
+          <MetricCard label="Latest receipt" value={scoutSequenceLabel(workspace.latest_change_sequence)} detail={`Workspace updated ${relativeTime(workspace.updated_at_ms)}`} />
         </div>
         <SectionCard title="Evidence ledger" detail="Accepted observations retain classification and time">
           <div className="divide-y divide-border-subtle">
@@ -178,14 +189,14 @@ export function ScoutCanvas({
       <div className="grid gap-3 sm:grid-cols-3">
         <MetricCard label="Mapped objects" value={entries.length} detail="Current evidence window" />
         <MetricCard label="Sources" value={workspace.source_count} detail="Connected control planes" tone="good" />
-        <MetricCard label="Latest sequence" value={`#${workspace.latest_change_sequence}`} detail={relativeTime(workspace.updated_at_ms)} />
+        <MetricCard label="Latest sequence" value={scoutSequenceLabel(workspace.latest_change_sequence)} detail={`Workspace updated ${relativeTime(workspace.updated_at_ms)}`} />
       </div>
       <SectionCard
         title="Observed system"
         detail="Facts are shown with their evidence classification and acceptance time"
         action={
           <span className="flex items-center gap-1.5 text-xs text-ink-muted">
-            <Clock3 className="size-3.5" /> latest loaded cut
+            <Clock3 className="size-3.5" /> {scoutLoadedCutLabel(workspace)}
           </span>
         }
       >

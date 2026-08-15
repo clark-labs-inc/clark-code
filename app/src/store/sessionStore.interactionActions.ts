@@ -985,7 +985,10 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
     }
   },
   setMcpOpen: (open) => set({ mcpOpen: open }),
-  setSshOpen: (open) => set({ sshOpen: open }),
+  setSshOpen: (open, purpose = "manage") => set({
+    sshOpen: open,
+    sshOpenPurpose: open ? purpose : "manage",
+  }),
   setNewProjectOpen: (open) => set({ newProjectOpen: open }),
   setSettingsOpen: (open, section) =>
     set({ settingsOpen: open, ...(section ? { settingsSection: section } : {}) }),

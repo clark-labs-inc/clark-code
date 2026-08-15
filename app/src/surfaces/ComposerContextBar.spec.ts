@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { composerContextKind, contextLocationLabel } from "./ComposerContextBar";
+import {
+  composerContextKind,
+  contextLocationLabel,
+  hasSessionContextAuthority,
+} from "./ComposerContextBar";
 
 describe("composer execution location", () => {
   it("never labels a local session with the selected SSH host", () => {
@@ -24,5 +28,21 @@ describe("composer context authority", () => {
     expect(composerContextKind("scout")).toBe("enterprise");
     expect(composerContextKind("spec")).toBe("spec");
     expect(composerContextKind(null)).toBe("checkout");
+  });
+
+  it("keeps a remote specialist authority visible without a checkout root", () => {
+    expect(hasSessionContextAuthority({
+      activeProvider: "local",
+      checkoutRoot: "",
+      activeRemoteHost: "engineer@example.invalid",
+    })).toBe(true);
+  });
+
+  it("does not invent context for a rootless local session", () => {
+    expect(hasSessionContextAuthority({
+      activeProvider: "local",
+      checkoutRoot: "",
+      activeRemoteHost: null,
+    })).toBe(false);
   });
 });

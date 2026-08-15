@@ -6,13 +6,14 @@ import { loadProjectContext } from "../lib/projectContext";
 import { codeKeyAccountBinding } from "../lib/account";
 import { openRemote } from "../store/sessionStore.runtime";
 import type { RemoteInfo } from "../lib/remoteWorker";
-import { loadSshHosts, saveSshHosts } from "../lib/sshHosts";
+import { hostReady, loadSshHosts, saveSshHosts } from "../lib/sshHosts";
 import { useSessionStore } from "../store/sessionStore";
 import { BranchPicker } from "./BranchPicker";
 import { EnvironmentPicker } from "./EnvironmentPicker";
 import { ManagedWorktreeBasePicker } from "./ManagedWorktreeJourney";
 import { ParallelWorkContext } from "./ParallelWorkContext";
 import { useSpecialistStore } from "../store/specialistStore";
+import { specialistModelSettings } from "../lib/specialistModel";
 
 const ITEM =
   "flex h-[22px] min-w-0 items-center gap-1 rounded-md bg-composer-context px-1.5 text-xs font-medium leading-none";
@@ -36,6 +37,19 @@ export function contextLocationLabel({
 }): string {
   if (!isRemoteContext) return "Local";
   return activeRemoteHost?.trim() || selectedRemoteHost?.trim() || "Remote";
+}
+
+export function hasSessionContextAuthority({
+  activeProvider,
+  checkoutRoot,
+  activeRemoteHost,
+}: {
+  activeProvider: string | null;
+  checkoutRoot: string;
+  activeRemoteHost?: string | null;
+}): boolean {
+  return activeProvider === "local"
+    && (Boolean(checkoutRoot.trim()) || Boolean(activeRemoteHost?.trim()));
 }
 
 /** Checkout identity attached to the composer. Before a session starts the
@@ -75,14 +89,20 @@ export function ComposerContextBar() {
       : localCwd.trim();
   const [inspectionRemote, setInspectionRemote] = useState<RemoteInfo | null>(null);
   const [inspectionError, setInspectionError] = useState<string | null>(null);
+  const selectedSpecialistSettings = specialistModelSettings(specialistContext);
+  const executionSettings = selectedSpecialistSettings
+    ? { ...localSettings, ...selectedSpecialistSettings }
+    : localSettings;
 
   useEffect(() => {
     let current = true;
     setInspectionRemote(null);
     setInspectionError(null);
-    if (!isRemoteSelection || !selectedHost) return () => { current = false; };
+    if (!isRemoteSelection || !selectedHost || !hostReady(selectedHost)) {
+      return () => { current = false; };
+    }
 
-    void openRemote(selectedHost, localSettings, cwd).then((next) => {
+    void openRemote(selectedHost, executionSettings, cwd).then((next) => {
       if (current) setInspectionRemote(next);
     }).catch((cause) => {
       if (current) {
@@ -92,7 +112,14 @@ export function ComposerContextBar() {
     return () => {
       current = false;
     };
-  }, [cwd, isRemoteSelection, localSettings.model, localSettings.reasoningEffort, selectedHost?.host, selectedHost?.id]);
+  }, [
+    cwd,
+    executionSettings.model,
+    executionSettings.reasoningEffort,
+    isRemoteSelection,
+    selectedHost?.host,
+    selectedHost?.id,
+  ]);
 
   const remote = useMemo<RemoteWorkerTarget | null>(
     () =>
@@ -248,7 +275,11 @@ export function ComposerContextBar() {
       </div>
     );
   }
-  if (session && (activeProvider !== "local" || !checkoutRoot)) return null;
+  if (session && !hasSessionContextAuthority({
+    activeProvider,
+    checkoutRoot,
+    activeRemoteHost,
+  })) return null;
 
   return (
     // Keep this wrapper out of its own stacking layer. The context popovers
@@ -288,13 +319,15 @@ export function ComposerContextBar() {
               <LocationIcon className="size-3 shrink-0" />
               <span className="max-w-36 truncate">{locationLabel}</span>
             </span>
-            <span
-              className={`${ITEM} text-ink-secondary`}
-              title={`${context?.isWorktree ? "Linked worktree" : "Project"}: ${checkoutRoot}`}
-            >
-              <Folder className="size-3 shrink-0" />
-              <span className="max-w-48 truncate">{projectDisplayName(checkoutRoot)}</span>
-            </span>
+            {checkoutRoot && (
+              <span
+                className={`${ITEM} text-ink-secondary`}
+                title={`${context?.isWorktree ? "Linked worktree" : "Project"}: ${checkoutRoot}`}
+              >
+                <Folder className="size-3 shrink-0" />
+                <span className="max-w-48 truncate">{projectDisplayName(checkoutRoot)}</span>
+              </span>
+            )}
           </>
         ) : (
           <EnvironmentPicker

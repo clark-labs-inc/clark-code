@@ -291,7 +291,12 @@ impl Provider for RemoteWorkerProvider {
                         break;
                     }
                     Ok(RemoteWorkerFrame::Terminal(Response::Error { code, message, .. })) => {
-                        emit_failure(&tx, &public_run, &format!("worker {code}: {message}")).await;
+                        if code == "cancelled" {
+                            emit_cancelled(&tx, &public_run).await;
+                        } else {
+                            emit_failure(&tx, &public_run, &format!("worker {code}: {message}"))
+                                .await;
+                        }
                         break;
                     }
                     Ok(RemoteWorkerFrame::Terminal(_)) => {
@@ -477,6 +482,22 @@ async fn emit_failure(tx: &async_channel::Sender<AgentEvent>, run: &RunId, messa
         .await;
 }
 
+async fn emit_cancelled(tx: &async_channel::Sender<AgentEvent>, run: &RunId) {
+    let _ = tx
+        .send(AgentEvent::RunFinished {
+            run: run.clone(),
+            outcome: RunOutcome {
+                status: RunStatus::Cancelled,
+                stop_reason: Some("cancelled".into()),
+                error: None,
+                failure_kind: None,
+                usage: None,
+                execution: None,
+            },
+        })
+        .await;
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Mutex as StdMutex;
@@ -513,6 +534,19 @@ mod tests {
             ))));
             Self {
                 frames: StdMutex::new(Some(frames)),
+                requests: StdMutex::new(Vec::new()),
+            }
+        }
+
+        fn cancelled() -> Self {
+            Self {
+                frames: StdMutex::new(Some(vec![Ok(RemoteWorkerFrame::Terminal(
+                    Response::error(
+                        Some("prompt".into()),
+                        "cancelled",
+                        "plugin invocation cancelled",
+                    ),
+                ))])),
                 requests: StdMutex::new(Vec::new()),
             }
         }
@@ -689,6 +723,42 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(error, Error::Protocol(_)));
+    }
+
+    #[tokio::test]
+    async fn adapter_projects_a_worker_cancellation_as_cancelled_not_failed() {
+        let worker = Arc::new(FakeWorker::cancelled());
+        let mut provider = RemoteWorkerProvider::with_client(
+            worker,
+            "project-1".into(),
+            PathBuf::from("/srv/project"),
+        );
+        provider.connect(ProviderConfig::default()).await.unwrap();
+        let session = provider
+            .new_session(SessionOptions {
+                cwd: Some("/srv/project".into()),
+                ..SessionOptions::default()
+            })
+            .await
+            .unwrap();
+
+        let events = provider
+            .prompt(&session.id, PromptInput::text("inspect"))
+            .await
+            .unwrap()
+            .collect::<Vec<_>>()
+            .await;
+
+        assert!(matches!(
+            events.last(),
+            Some(AgentEvent::RunFinished { outcome, .. })
+                if outcome.status == RunStatus::Cancelled
+                    && outcome.failure_kind.is_none()
+                    && outcome.error.is_none()
+        ));
+        assert!(!events
+            .iter()
+            .any(|event| matches!(event, AgentEvent::Error { .. })));
     }
 
     #[tokio::test]

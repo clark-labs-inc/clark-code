@@ -1011,6 +1011,7 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
       terminalLaunch: null,
       mcpOpen: false,
       sshOpen: false,
+      sshOpenPurpose: "manage",
       newProjectOpen: false,
       paletteOpen: false,
       error: null,

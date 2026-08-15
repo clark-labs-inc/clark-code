@@ -10,6 +10,11 @@ use thiserror::Error;
 pub struct RemoteWorkerSpec {
     pub host: String,
     pub project_id: String,
+    /// Exact request/response envelope version spoken by this worker.
+    pub protocol_version: u32,
+    /// Stable filename identity for this worker family. Different worker
+    /// protocols must never overwrite one another in the remote cache.
+    pub remote_binary_name: String,
     pub remote_root: PathBuf,
     pub trajectory_root: PathBuf,
     pub worker_config: Value,
@@ -35,6 +40,14 @@ impl RemoteWorkerSpec {
         }
         if !portable_id(&self.project_id) {
             return Err(SpecError::InvalidProject(self.project_id.clone()));
+        }
+        if self.protocol_version == 0 || self.protocol_version > code_host::PROTOCOL_VERSION {
+            return Err(SpecError::InvalidProtocolVersion(self.protocol_version));
+        }
+        if !portable_id(&self.remote_binary_name) {
+            return Err(SpecError::InvalidRemoteBinaryName(
+                self.remote_binary_name.clone(),
+            ));
         }
         if !self.remote_root.is_absolute() || !self.trajectory_root.is_absolute() {
             return Err(SpecError::AbsoluteRootsRequired);
@@ -253,6 +266,10 @@ pub enum SpecError {
     InvalidHost(String),
     #[error("invalid project id: {0}")]
     InvalidProject(String),
+    #[error("unsupported remote worker protocol version: {0}")]
+    InvalidProtocolVersion(u32),
+    #[error("invalid remote worker binary name: {0}")]
+    InvalidRemoteBinaryName(String),
     #[error("remote_root and trajectory_root must be absolute")]
     AbsoluteRootsRequired,
     #[error("project and trajectory roots may not be the filesystem root")]
@@ -281,6 +298,8 @@ mod tests {
         RemoteWorkerSpec {
             host: "cpu".into(),
             project_id: "fixture".into(),
+            protocol_version: code_host::PROTOCOL_VERSION,
+            remote_binary_name: "agent-code-worker".into(),
             remote_root: PathBuf::from("/workspace/fixture"),
             trajectory_root: PathBuf::from("/workspace/.agent-desktop/trajectory"),
             worker_config: config,
@@ -313,6 +332,24 @@ mod tests {
     }
 
     #[test]
+    fn protocol_version_is_explicit_and_bounded() {
+        let mut legacy = spec(config());
+        legacy.protocol_version = 1;
+        assert!(legacy.validate().is_ok());
+
+        legacy.protocol_version = 0;
+        assert!(matches!(
+            legacy.validate(),
+            Err(SpecError::InvalidProtocolVersion(0))
+        ));
+        legacy.protocol_version = code_host::PROTOCOL_VERSION + 1;
+        assert!(matches!(
+            legacy.validate(),
+            Err(SpecError::InvalidProtocolVersion(_))
+        ));
+    }
+
+    #[test]
     fn rejects_shell_and_path_injection() {
         let mut invalid = spec(config());
         invalid.host = "cpu;touch /tmp/pwned".into();
@@ -335,6 +372,12 @@ mod tests {
         invalid = spec(config());
         invalid.host = "-oProxyCommand=bad".into();
         assert!(matches!(invalid.validate(), Err(SpecError::InvalidHost(_))));
+        invalid = spec(config());
+        invalid.remote_binary_name = "../worker".into();
+        assert!(matches!(
+            invalid.validate(),
+            Err(SpecError::InvalidRemoteBinaryName(_))
+        ));
     }
 
     #[test]

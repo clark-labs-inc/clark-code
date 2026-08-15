@@ -9,7 +9,7 @@ import {
 import { useSessionStore } from "../store/sessionStore";
 import {
   blankHost,
-  hostReady,
+  hostCanSave,
   loadSshHosts,
   saveSshHosts,
   type SshHost,
@@ -21,6 +21,7 @@ import {
 } from "../lib/ssh";
 import { codeKeyAccountBinding } from "../lib/account";
 import { DIALOG, OVERLAY, accessibleMotion } from "../lib/motion";
+import type { SshOpenPurpose } from "../store/sessionStore.runtime";
 import {
   sameDestination,
   SshSettingsForm,
@@ -36,6 +37,35 @@ export function sshDialogKeyboardIntent(key: string): "close" | "cycle_focus" | 
   return "none";
 }
 
+export function sshConfigSelectionKey(mode: SetupMode, host: SshHost | null): string | null {
+  return mode === "config" ? host?.host.trim().toLowerCase() || null : null;
+}
+
+export function sshTargetAfterSave({
+  purpose,
+  selectedHostId,
+  committedHostId,
+  hosts,
+}: {
+  purpose: SshOpenPurpose;
+  selectedHostId: string | null;
+  committedHostId: string | null;
+  hosts: SshHost[];
+}): { selectedHostId: string | null; activateRemote: boolean } {
+  const selectedStillExists = selectedHostId
+    ? hosts.some((host) => host.id === selectedHostId)
+    : false;
+  const nextSelectedHostId = purpose === "select_execution_target" && committedHostId
+    ? committedHostId
+    : selectedStillExists
+      ? selectedHostId
+      : hosts[0]?.id ?? null;
+  return {
+    selectedHostId: nextSelectedHostId,
+    activateRemote: purpose === "select_execution_target" && Boolean(committedHostId),
+  };
+}
+
 function configuredPreset(alias: string): SshHost {
   return { ...blankHost(), label: alias, host: alias };
 }
@@ -45,6 +75,8 @@ export function SshSettings() {
   const setOpen = useSessionStore((state) => state.setSshOpen);
   const selectedHostId = useSessionStore((state) => state.selectedHostId);
   const setSelectedHostId = useSessionStore((state) => state.setSelectedHostId);
+  const setProjectMode = useSessionStore((state) => state.setProjectMode);
+  const purpose = useSessionStore((state) => state.sshOpenPurpose);
   const auth = useSessionStore((state) => state.auth);
   const accountScope = codeKeyAccountBinding(auth);
   const reduce = useReducedMotion();
@@ -162,11 +194,12 @@ export function SshSettings() {
     };
   }, [close, open]);
 
+  const configSelectionKey = sshConfigSelectionKey(mode, activeHost);
   useEffect(() => {
-    if (!open || mode !== "config" || !activeHost) return;
+    if (!open || !configSelectionKey) return;
     const focusFrame = requestAnimationFrame(() => selectedConfigHostRef.current?.focus());
     return () => cancelAnimationFrame(focusFrame);
-  }, [activeHost, mode, open]);
+  }, [configSelectionKey, open]);
 
   const configuredAliases = new Set(configHosts.map((host) => host.alias.toLowerCase()));
   const manualHosts = hosts.filter((host) => !configuredAliases.has(host.host.trim().toLowerCase()));
@@ -179,7 +212,7 @@ export function SshSettings() {
     !savedMatch || JSON.stringify({ ...activeHost, id: savedMatch.id }) !== JSON.stringify(savedMatch)
   ));
   const dirty = stagedChanges || activeChanged;
-  const canCommit = Boolean(activeHost && hostReady(activeHost)) || stagedChanges;
+  const canCommit = Boolean(activeHost && hostCanSave(activeHost)) || stagedChanges;
   const primaryLabel = savedMatch || stagedChanges ? "Save changes" : "Add remote host";
 
   const chooseMode = (nextMode: SetupMode) => {
@@ -245,20 +278,25 @@ export function SshSettings() {
 
   const save = () => {
     let next = hosts;
-    let committedId = selectedHostId;
-    if (activeHost && hostReady(activeHost)) {
+    let committedHostId: string | null = null;
+    if (activeHost && hostCanSave(activeHost)) {
       const match = savedMatch;
       const committed = match ? { ...activeHost, id: match.id } : activeHost;
       next = match
         ? hosts.map((host) => host.id === match.id ? committed : host)
         : [...hosts, committed];
-      committedId ??= committed.id;
+      committedHostId = committed.id;
     }
     saveSshHosts(next, accountScope);
     setSavedHosts(next);
-    setSelectedHostId(
-      committedId && next.some((host) => host.id === committedId) ? committedId : next[0]?.id ?? null,
-    );
+    const target = sshTargetAfterSave({
+      purpose,
+      selectedHostId,
+      committedHostId,
+      hosts: next,
+    });
+    setSelectedHostId(target.selectedHostId);
+    if (target.activateRemote) setProjectMode("remote");
     close();
   };
 

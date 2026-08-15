@@ -80,13 +80,10 @@ impl RemoteArtifact {
                 return Err(RemoteArtifactError::InvalidRemoteBinary(binary.clone()));
             }
         }
-        let expected_binary_path = spec.remote_binary.clone().unwrap_or_else(|| {
-            format!(
-                "{home}/{WORKER_BIN_DIR}/agent-code-worker-v{}-{}",
-                env!("CARGO_PKG_VERSION"),
-                arch.slug()
-            )
-        });
+        let expected_binary_path = spec
+            .remote_binary
+            .clone()
+            .unwrap_or_else(|| default_binary_path(&home, &spec.remote_binary_name, arch));
         let local_binary =
             select_local_binary(spec.local_binary.as_ref(), &spec.local_binaries, arch);
         let binary_path = if let Some(local_binary) = local_binary {
@@ -120,6 +117,14 @@ impl RemoteArtifact {
             config_path,
         })
     }
+}
+
+fn default_binary_path(home: &str, binary_name: &str, arch: RemoteArch) -> String {
+    format!(
+        "{home}/{WORKER_BIN_DIR}/{binary_name}-v{}-{}",
+        env!("CARGO_PKG_VERSION"),
+        arch.slug()
+    )
 }
 
 fn cached_config_path(home: &str, bytes: &[u8]) -> String {
@@ -426,6 +431,16 @@ mod tests {
             select_local_binary(None, &workers, RemoteArch::DarwinArm64),
             None
         );
+    }
+
+    #[test]
+    fn worker_families_have_distinct_remote_cache_paths() {
+        let coding = default_binary_path("/home/me", "agent-code-worker", RemoteArch::LinuxX86_64);
+        let specialist =
+            default_binary_path("/home/me", "clark-code-headless", RemoteArch::LinuxX86_64);
+        assert_ne!(coding, specialist);
+        assert!(coding.contains("/agent-code-worker-v"));
+        assert!(specialist.contains("/clark-code-headless-v"));
     }
 
     #[test]

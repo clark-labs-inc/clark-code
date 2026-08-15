@@ -14,7 +14,7 @@ export interface SshHost {
   label: string;
   /** ssh destination: a ~/.ssh/config alias or `user@host`. */
   host: string;
-  /** Absolute project root on the remote. */
+  /** Optional default project root on the remote. */
   remoteRoot: string;
 }
 
@@ -48,6 +48,11 @@ export function saveSshHosts(list: SshHost[], scope?: string | null): void {
 
 export function blankHost(): SshHost {
   return { id: crypto.randomUUID(), label: "", host: "", remoteRoot: "" };
+}
+
+/** A connection preset can be saved before a default project folder is chosen. */
+export function hostCanSave(h: SshHost): boolean {
+  return Boolean(h.host.trim());
 }
 
 /** Everything a host needs to connect is filled in. The binary path is optional

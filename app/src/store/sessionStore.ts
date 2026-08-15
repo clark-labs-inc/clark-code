@@ -94,6 +94,7 @@ export const useSessionStore = create<import("./sessionStore.runtime").SessionSt
   terminalLaunch: null,
   mcpOpen: false,
   sshOpen: false,
+  sshOpenPurpose: "manage",
   newProjectOpen: false,
   settingsOpen: false,
   settingsSection: "general",

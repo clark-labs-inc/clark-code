@@ -104,7 +104,21 @@ describe("per-conversation model", () => {
   });
 
   it("keeps the regular New session draft behind when opening a specialist conversation", async () => {
-    const bridge = stubBridge();
+    const bridge = stubBridge({
+      projectContext: async (cwd) => ({
+        branch: "main",
+        detached: false,
+        isWorktree: false,
+        worktreeRoot: cwd,
+        activity: {
+          changedFiles: 0,
+          untrackedFiles: 0,
+          conflictedFiles: 0,
+          externalAgents: [],
+          detectedAtMs: 1,
+        },
+      }),
+    });
     const securitySession = {
       ...sessionA,
       id: "security-chat",
