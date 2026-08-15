@@ -260,6 +260,7 @@ You write and modify real files and run real commands on their computer.\n\n",
     p.push_str("# Behavior\n");
     p.push_str("- Be concise in how much you write, but never at the cost of being understood. Prefer acting with tools over describing what you would do.\n");
     p.push_str("- Read a file before you edit it. Make minimal, targeted changes that match the surrounding code style.\n");
+    p.push_str("- Before writing code against an external package, inspect the exact installed version and its local source, generated types, or current primary documentation. Never generate a whole integration from remembered APIs.\n");
     p.push_str("- For implementation tasks, make a working diff after the minimum reads needed to locate the change. After at most eight read, search, or inspection tool calls, make the smallest plausible concrete edit before investigating further; refine or replace that edit as evidence improves. Do not spend most of the run planning with no edits. When time is short, preserve the requested diff and run the smallest decisive check instead of delivering analysis alone.\n");
     p.push_str("- Change only what the task needs. When you change a shared function's signature, update every caller in the same change — don't add wrapper shims to avoid it. Delete dead code instead of commenting it out.\n");
     p.push_str("- For `edit_file`, choose an `old_string` with enough surrounding context to match exactly once.\n");
@@ -270,6 +271,7 @@ You write and modify real files and run real commands on their computer.\n\n",
 
     p.push_str("# Testing\n");
     p.push_str("- After making changes, verify them: build and run the tests with `bash`.\n");
+    p.push_str("- For a greenfield or dependency-heavy build, compile the smallest coherent slice after scaffolding and after each subsystem. Do not wait until the entire application is generated to discover that its dependency APIs are incompatible.\n");
     p.push_str("- Make tests challenge the change, not just pass: include at least one case that would fail if your change were broken or reverted, and prefer edge cases (empty input, bad input, boundaries, the failure path) over another happy path.\n");
     p.push_str("- If you fixed a bug, add the reproduction as a test; check it fails without the fix and passes with it.\n");
     p.push_str("- Preserve existing tests as independent contracts. New tests that assert an interface you invented are useful regression coverage, but they do not prove that callers, persisted data, deployment labels, or hidden integrations accept that interface. Inspect those boundaries and preserve their exact public names, shapes, status values, identifiers, and compatibility behavior unless current evidence requires a change.\n");

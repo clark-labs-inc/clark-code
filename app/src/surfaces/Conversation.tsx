@@ -5,7 +5,12 @@ import { ArrowDown, X } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
 import { effectiveApprovalPolicy } from "../store/sessionStore.runtime";
 import { approvalPolicyForSpecialist, wouldAutoApprove } from "../lib/permissions";
-import { currentActivity, isThinkingOnlyMessage, shouldShowPending } from "../lib/activity";
+import {
+  currentActivity,
+  isAwaitingAssistantReply,
+  isThinkingOnlyMessage,
+  shouldShowPending,
+} from "../lib/activity";
 import {
   humanizeError,
   humanizeRunFailure,
@@ -41,9 +46,11 @@ import { SideQuestionCard } from "./SideQuestionCard";
 import { GoalWorkSummary } from "./GoalWorkSummary";
 import { ProviderIncidentCard } from "./ProviderIncidentCard";
 import { SpecialistConversationPresentationCard } from "./specialists/SpecialistConversationShowcase";
+import { ReplySkeleton, STREAMING_REPLY_RESERVE_LINES } from "./StreamingReply";
 import type { Artifact, ToolCall } from "../core-bridge/types";
 import { effectiveModelSettings, isIncludedCodingModel } from "../lib/localAgent";
 import { specialistPresentationFromPayload } from "../lib/specialistPresentation";
+import { hasTerminalProviderIncident } from "../lib/providerIncidentPresentation";
 
 /** The only live-work indicator in the transcript. CSS owns both its pulse and
  * reduced-motion fallback so the visual policy cannot diverge from skeletons. */
@@ -54,17 +61,6 @@ const ActivityDots = memo(function ActivityDots() {
       <span className="size-1.5 rounded-full bg-accent" />
       <span className="size-1.5 rounded-full bg-accent" />
     </span>
-  );
-});
-
-/** Skeleton render-preview of the assistant reply that's still streaming. */
-const ReplySkeleton = memo(function ReplySkeleton() {
-  return (
-    <div className="reply-skeleton space-y-2.5" aria-hidden>
-      <div className="skeleton h-3.5 w-[92%]" />
-      <div className="skeleton h-3.5 w-[84%]" />
-      <div className="skeleton h-3.5 w-[64%]" />
-    </div>
   );
 });
 
@@ -79,17 +75,27 @@ function Pending({
   detail?: string;
   skeleton: boolean;
 }) {
-  return (
-    <div className="space-y-3">
-      <div className="flex items-center gap-2.5 text-sm text-ink-muted">
-        <ActivityDots />
-        <span className="truncate">
-          {label || "Thinking…"}
-          {detail && <span className="ml-1.5 font-mono text-xs text-ink-faint">{detail}</span>}
-        </span>
-      </div>
-      {skeleton && <ReplySkeleton />}
+  const activity = (
+    <div className="flex items-center gap-2.5 text-sm text-ink-muted">
+      <ActivityDots />
+      <span className="truncate">
+        {label || "Thinking…"}
+        {detail && <span className="ml-1.5 font-mono text-xs text-ink-faint">{detail}</span>}
+      </span>
     </div>
+  );
+
+  if (skeleton) {
+    return (
+      <div className="reply-stream-reserve text-base" data-qa="reply-skeleton-reserve">
+        <div className="reply-stream-line">{activity}</div>
+        <ReplySkeleton lines={STREAMING_REPLY_RESERVE_LINES - 1} startIndex={1} />
+      </div>
+    );
+  }
+
+  return (
+    activity
   );
 }
 
@@ -134,10 +140,8 @@ const TIMELINE_WINDOW = 80;
 const scrollByConversation = new Map<string, ConversationScrollState>();
 
 export function Conversation({
-  activeArtifactId,
   onOpenArtifact,
 }: {
-  activeArtifactId?: string | null;
   onOpenArtifact?: (artifact: Artifact) => void;
 }) {
   const reduce = useReducedMotion();
@@ -341,11 +345,11 @@ export function Conversation({
   // Long transcripts: render only the recent window. A 400-item DOM makes every
   // style/layout pass (and each streamed frame) pay for history the user isn't
   // reading — the dominant cost on slower machines. "Show earlier" reveals all.
-  const last = visible[visible.length - 1];
-  const awaitingReply = !last || (last.item === "message" && last.role === "user");
+  const awaitingReply = isAwaitingAssistantReply(visible);
   // Tool rows and actively streaming unphased responses own their live state;
   // completed commentary keeps this row visible until the run advances or ends.
   const showPending = shouldShowPending(snapshot);
+  const toolReplyReserve = awaitingReply && activity.busy && !showPending;
   // The "Run failed" banner reflects only the MOST RECENT run — so it clears
   // on its own once the next turn starts, instead of every past failure
   // lingering below the messages forever. It can also be dismissed outright.
@@ -366,6 +370,11 @@ export function Conversation({
   const verificationIncomplete =
     failed?.outcome?.failure_kind === "verification_incomplete" ? failed : undefined;
   const quietRetryableFailure = isQuietRetryableRunFailure(failed?.outcome) ? failed : undefined;
+  const terminalProviderFailure = hasTerminalProviderIncident(
+    timeline,
+    providerIncidents,
+    latestRun?.id,
+  );
 
   const renderBlock = (block: ConversationBlock) => {
     if (block.kind === "goal_work") {
@@ -420,15 +429,10 @@ export function Conversation({
           id={`artifact-${artifact.id}`}
           key={block.key}
           tabIndex={-1}
-          className={cn(
-            "relative outline-none focus-visible:ring-2 focus-visible:ring-accent",
-            artifact.id === activeArtifactId &&
-              "after:absolute after:left-full after:top-1/2 after:h-px after:w-5 after:bg-accent after:content-['']",
-          )}
+          className="group/artifact relative outline-none"
         >
           <ArtifactCard
             artifact={artifact}
-            active={artifact.id === activeArtifactId}
             onOpen={onOpenArtifact}
           />
         </div>
@@ -487,6 +491,12 @@ export function Conversation({
 
         {blocks.map(renderBlock)}
 
+        {toolReplyReserve && (
+          <div data-qa="reply-tool-reserve">
+            <ReplySkeleton lines={1} startIndex={STREAMING_REPLY_RESERVE_LINES - 1} />
+          </div>
+        )}
+
         <FanOutPanel />
 
         {/* Default (sync) mode, not popLayout: popLayout yanks an exiting
@@ -528,7 +538,7 @@ export function Conversation({
               />
             </m.div>
           )}
-          {failed && !outOfCredits && !interrupted && !verificationIncomplete && !quietRetryableFailure && (
+          {failed && !outOfCredits && !interrupted && !verificationIncomplete && !quietRetryableFailure && !terminalProviderFailure && (
             <m.div
               key="failed"
               {...transientMotion}
@@ -541,7 +551,7 @@ export function Conversation({
               <DismissButton onClick={() => dismissFailedRun(failed.id)} />
             </m.div>
           )}
-          {quietRetryableFailure && (
+          {quietRetryableFailure && !terminalProviderFailure && (
             <m.div
               key="quiet-retryable-failure"
               {...transientMotion}
@@ -580,7 +590,7 @@ export function Conversation({
               <DismissButton muted onClick={() => dismissFailedRun(stopped.id)} />
             </m.div>
           )}
-          {error && (
+          {error && !terminalProviderFailure && (
             <m.div
               key="error"
               {...transientMotion}

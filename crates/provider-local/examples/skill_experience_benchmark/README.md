@@ -58,7 +58,7 @@ The example contains a synthetic 12-skill fixture so CI does not depend on an
 external checkout:
 
 ```bash
-cargo test -p provider-local --example skill_experience_benchmark
+cargo nextest run -p provider-local --example skill_experience_benchmark
 ```
 
 This uses the same 10-stage journey as the real repository run. Passing it

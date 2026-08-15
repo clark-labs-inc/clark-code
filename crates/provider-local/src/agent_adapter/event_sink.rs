@@ -367,6 +367,13 @@ impl ca::EventSink for DesktopEventSink {
                         {
                             let _ = self
                                 .events
+                                .send(desktop::AgentEvent::MessagePhase {
+                                    run: self.run.clone(),
+                                    phase: desktop::MessagePhase::FinalAnswer,
+                                })
+                                .await;
+                            let _ = self
+                                .events
                                 .send(desktop::AgentEvent::MessageChunk {
                                     run: self.run.clone(),
                                     role: desktop::Role::Agent,

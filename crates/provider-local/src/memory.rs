@@ -17,6 +17,9 @@ use std::path::{Path, PathBuf};
 use crate::exec::Executor;
 use sha2::{Digest, Sha256};
 
+mod imported;
+pub(crate) use imported::{upsert_imported_memory, ImportedMemoryChange};
+
 /// Directory (relative to a scope root) holding memory files.
 pub const MEMORY_SUBDIR: &str = ".agent/memory";
 /// Always-loaded index / project-memory file.
@@ -223,8 +226,15 @@ pub async fn load_facts(exec: &dyn Executor, mem_dir: &Path) -> Vec<MemoryFact> 
             },
         ));
     }
-    out.sort_by_key(|x| std::cmp::Reverse(x.0));
+    out.sort_by_key(|(mtime, fact)| (is_imported(fact), std::cmp::Reverse(*mtime)));
     out.into_iter().map(|(_, f)| f).collect()
+}
+
+fn is_imported(fact: &MemoryFact) -> bool {
+    fact.header
+        .source
+        .as_deref()
+        .is_some_and(|source| source.starts_with("imported-"))
 }
 
 /// Human age label for a note: prefers the `saved:` frontmatter date, falls
@@ -253,10 +263,12 @@ fn age_label(fact: &MemoryFact) -> String {
     }
 }
 
-/// `[inferred]` marker for facts the agent concluded rather than was told.
+/// Trust/provenance marker for facts not stated directly in this Clark session.
 fn source_marker(fact: &MemoryFact) -> &'static str {
     match fact.header.source.as_deref() {
         Some("inferred") => " [inferred — verify before relying]",
+        Some("imported-claude") => " [imported from Claude Code — verify before relying]",
+        Some("imported-openai") => " [imported from OpenAI Codex — verify before relying]",
         _ => "",
     }
 }
@@ -331,6 +343,9 @@ pub async fn scope_listing(
 /// Whether a fact reads as a standing decision/rule rather than a code fact:
 /// typed as user/feedback, or carrying rule-shaped wording.
 fn is_decision(fact: &MemoryFact) -> bool {
+    if is_imported(fact) {
+        return false;
+    }
     if matches!(
         fact.header.kind,
         Some(MemoryType::User) | Some(MemoryType::Feedback)
@@ -666,11 +681,12 @@ skepticism to CODE facts only (paths, commands, stack — verify against the rep
 relying on them). The user's own decisions and preferences — vocabulary, tone, rules, \
 who their product is for — are not verifiable in code and stay binding until the user \
 changes them: apply them as written.\n\
-- Notes record what THIS user said HERE. Never blend in facts from Clark Code's cloud \
-profile, other projects, or your own guesses — a note that mixes sources becomes \
-impossible to trust or correct.\n\
+- Notes created in this conversation record what THIS user said HERE. Clark may also expose \
+compatible memories imported from Claude Code or OpenAI Codex; those remain explicitly labeled \
+with their source and must never be blended into an unlabeled local fact.\n\
 - Precedence: what the user says in this conversation outranks local saved notes, which \
-outrank Clark Code's cloud profile (\"Personal memory\"). Cloud-profile facts were extracted \
+outrank labeled compatible-agent imports, which outrank Clark Code's cloud profile \
+(\"Personal memory\"). Cloud-profile facts were extracted \
 from the user's other work — when you cite them, attribute them to Clark Code's profile, and \
 never let them override what the user tells you here. Never use cloud-profile facts to \
 fill gaps in THIS project either — its product, audience, and copy come from this repo \

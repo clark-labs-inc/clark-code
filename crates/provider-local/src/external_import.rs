@@ -7,8 +7,11 @@
 //! that can drift from the source agent's setup.
 
 mod claude;
+mod memories;
 #[path = "external_import/codex.rs"]
 mod openai;
+
+pub(crate) use memories::migrate as migrate_memories;
 
 use std::path::Path;
 

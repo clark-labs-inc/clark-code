@@ -56,6 +56,10 @@ struct Entry {
     /// `None` while running; `Some(exit_code)` after completion.
     exit_code: Arc<Mutex<Option<Option<i32>>>>,
     error: Arc<Mutex<Option<String>>>,
+    /// True after the agent explicitly waited for process completion. A wait
+    /// timeout must not sever that ownership: provider recovery can still wait
+    /// for and surface the eventual terminal receipt.
+    awaiting_completion: bool,
 }
 
 #[derive(Default)]
@@ -159,6 +163,7 @@ impl BackgroundTasks {
                 output,
                 exit_code,
                 error,
+                awaiting_completion: false,
             },
         );
         Ok(id)
@@ -293,6 +298,13 @@ impl BackgroundTasks {
         poll_interval: Duration,
         cancel: &CancellationToken,
     ) -> Result<TaskWaitResult, String> {
+        if output_contains.is_none() {
+            let mut tasks = self.tasks.lock().unwrap();
+            let entry = tasks
+                .get_mut(id)
+                .ok_or_else(|| format!("no background task `{id}`"))?;
+            entry.awaiting_completion = true;
+        }
         let started = tokio::time::Instant::now();
         loop {
             let status = self
@@ -307,6 +319,7 @@ impl BackgroundTasks {
                 });
             }
             if status.exit_code.is_some() {
+                self.acknowledge_completion(id);
                 return Ok(TaskWaitResult {
                     outcome: TaskWaitOutcome::Finished,
                     status,
@@ -327,6 +340,66 @@ impl BackgroundTasks {
                     ));
                 }
                 _ = tokio::time::sleep(poll_interval) => {}
+            }
+        }
+    }
+
+    pub fn acknowledge_completion(&self, id: &str) {
+        if let Some(entry) = self.tasks.lock().unwrap().get_mut(id) {
+            entry.awaiting_completion = false;
+        }
+    }
+
+    /// Wait for a terminal receipt from any still-running task that the agent
+    /// explicitly awaited. This keeps transient model recovery attached to the
+    /// host-owned command lifecycle instead of finalizing the run while a build
+    /// is about to finish. Returned receipts are acknowledged exactly once.
+    pub async fn wait_for_awaited_completion(
+        &self,
+        timeout: Duration,
+        cancel: &CancellationToken,
+    ) -> Vec<(String, TaskStatus)> {
+        let started = tokio::time::Instant::now();
+        loop {
+            let ids = self
+                .tasks
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|(_, entry)| entry.awaiting_completion)
+                .map(|(id, _)| id.clone())
+                .collect::<Vec<_>>();
+            if ids.is_empty() {
+                return Vec::new();
+            }
+
+            let mut completed = Vec::new();
+            for id in ids {
+                if let Some(status) = self.status(&id).await {
+                    if status.exit_code.is_some() {
+                        completed.push((id, status));
+                    }
+                }
+            }
+            if !completed.is_empty() {
+                let completed_ids = completed
+                    .iter()
+                    .map(|(id, _)| id.as_str())
+                    .collect::<std::collections::HashSet<_>>();
+                let mut tasks = self.tasks.lock().unwrap();
+                for (id, entry) in tasks.iter_mut() {
+                    if completed_ids.contains(id.as_str()) {
+                        entry.awaiting_completion = false;
+                    }
+                }
+                return completed;
+            }
+            if started.elapsed() >= timeout {
+                return Vec::new();
+            }
+            tokio::select! {
+                _ = cancel.cancelled() => return Vec::new(),
+                _ = tokio::time::sleep(Duration::from_millis(250)) => {}
             }
         }
     }
@@ -511,6 +584,47 @@ mod tests {
             .unwrap();
         let status = wait_for_finish(&tasks, &id).await;
         assert!(status.output.contains("FINAL"), "{}", status.output);
+    }
+
+    #[tokio::test]
+    async fn timed_out_completion_wait_preserves_one_terminal_receipt() {
+        let tasks = BackgroundTasks::default();
+        let dir = tempfile::tempdir().unwrap();
+        let id = tasks
+            .spawn(
+                Arc::new(LocalExecutor),
+                platform_command(
+                    "sleep 0.08; echo COMPLETE",
+                    "Start-Sleep -Milliseconds 80; Write-Output 'COMPLETE'",
+                ),
+                dir.path(),
+            )
+            .await
+            .unwrap();
+        let first_wait = tasks
+            .wait(
+                &id,
+                None,
+                Duration::from_millis(5),
+                Duration::from_millis(1),
+                &CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(first_wait.outcome, TaskWaitOutcome::TimedOut);
+
+        let receipts = tasks
+            .wait_for_awaited_completion(Duration::from_secs(5), &CancellationToken::new())
+            .await;
+        assert_eq!(receipts.len(), 1);
+        assert_eq!(receipts[0].0, id);
+        assert_eq!(receipts[0].1.exit_code, Some(Some(0)));
+        assert!(receipts[0].1.output.contains("COMPLETE"));
+
+        let duplicate = tasks
+            .wait_for_awaited_completion(Duration::from_millis(10), &CancellationToken::new())
+            .await;
+        assert!(duplicate.is_empty());
     }
 
     #[tokio::test]

@@ -490,11 +490,13 @@ impl LlmClient {
         let mut stream = response.bytes_stream();
         let mut buffer = Vec::new();
         let mut accumulator = Accumulator::default();
-        // A provider turn is an atomic trust boundary. Stage every field until
-        // the complete response passes isolation validation; otherwise a late
-        // control marker could leave an earlier sensitive delta in UI/history.
-        let mut stage_text = |_: &str| {};
-        let mut stage_reasoning = |_: &str| {};
+        // Publish completed words as their SSE deltas arrive. The open word is
+        // retained so reserved provider-control markers remain quarantined
+        // even when their bytes are fragmented across network frames. Tool
+        // arguments and structured reasoning remain staged in `accumulator`
+        // until the complete turn passes validation below.
+        let mut text_guard = output_quarantine::StreamingGuard::new(on_text);
+        let mut reasoning_guard = output_quarantine::StreamingGuard::new(on_reasoning);
         loop {
             let next = tokio::select! {
                 _ = cancel.cancelled() => return Err(LlmError::Cancelled.into()),
@@ -508,7 +510,7 @@ impl LlmClient {
                                 self.stream_idle_timeout.as_secs()
                             ),
                             retry_after: None,
-                            retry_safe: true,
+                            retry_safe: !text_guard.published() && !reasoning_guard.published(),
                             provider_status: None,
                             provider_error_type: Some("stream_transport".to_string()),
                             provider_request_id: provider_request_id.clone(),
@@ -528,14 +530,10 @@ impl LlmClient {
                         },
                         message: format!("model stream error: {error}"),
                         retry_after: None,
-                        // The turn is quarantined in `accumulator` until the
-                        // complete response passes validation below. A body
-                        // decode failure therefore cannot have published text
-                        // or executed a tool, even when some SSE chunks were
-                        // received, so replaying this stateless completion is
-                        // safe. Explicit in-band provider failures keep their
-                        // stricter partial-output policy below.
-                        retry_safe: true,
+                        // Replaying is safe only while every received word is
+                        // still held by the guard. Once visible output exists,
+                        // a retry would duplicate the assistant response.
+                        retry_safe: !text_guard.published() && !reasoning_guard.published(),
                         provider_status: None,
                         provider_error_type: Some("stream_transport".to_string()),
                         provider_request_id: provider_request_id.clone(),
@@ -547,8 +545,8 @@ impl LlmClient {
                     if drain_lines(
                         &mut buffer,
                         &mut accumulator,
-                        &mut stage_text,
-                        &mut stage_reasoning,
+                        &mut |delta| text_guard.push(delta),
+                        &mut |delta| reasoning_guard.push(delta),
                     ) {
                         break;
                     }
@@ -613,7 +611,7 @@ impl LlmClient {
                 generation_id = metadata.generation_id.as_deref().unwrap_or("unknown"),
                 resolved_model = metadata.resolved_model.as_deref().unwrap_or("unknown"),
                 provider = metadata.provider.as_deref().unwrap_or("unknown"),
-                "provider response quarantined before publication",
+                "provider response rejected before settlement",
             );
             return Err(LlmError::OutputQuarantined {
                 reason: violation.code(),
@@ -621,12 +619,8 @@ impl LlmClient {
             }
             .into());
         }
-        if !turn.reasoning.is_empty() {
-            on_reasoning(&turn.reasoning);
-        }
-        if !turn.text.is_empty() {
-            on_text(&turn.text);
-        }
+        reasoning_guard.flush();
+        text_guard.flush();
         Ok(turn)
     }
 }
@@ -715,3 +709,7 @@ fn is_transient_status(status: u16) -> bool {
 #[cfg(test)]
 #[path = "retry_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "retry_streaming_tests.rs"]
+mod streaming_tests;

@@ -172,6 +172,9 @@ pub struct LocalConfig {
     /// Stable authenticated account binding used only to partition local
     /// global-memory files. Missing scope disables that local global scope.
     pub memory_scope: Option<String>,
+    /// Host-owned policy allowing startup import from compatible desktop-agent
+    /// memory stores. Neutral hosts leave this off; Clark enables it by default.
+    pub compatible_memory_import_enabled: bool,
     /// Whether this opted-in session may retrieve private repository evidence
     /// previously synced to the user's Clark Code account.
     pub project_knowledge_enabled: bool,
@@ -286,8 +289,8 @@ impl LocalConfig {
     /// Recognized `extra` keys: `model`, `temperature`, `max_output_tokens`, `max_iterations`,
     /// `permissions` (map of tool→`allow|ask|deny`), `auto_compact` (bool),
     /// `auto_compact_token_limit`, `compact_request_token_limit`,
-    /// `compact_recent_user_token_budget`, and `base_url` (tests only). The key
-    /// rides on `auth_token`.
+    /// `compact_recent_user_token_budget`, `compatible_memory_import` (bool),
+    /// and `base_url` (tests only). The key rides on `auth_token`.
     pub fn from_provider_config(config: &ProviderConfig) -> Self {
         let extra = &config.extra;
 
@@ -402,6 +405,10 @@ impl LocalConfig {
             .and_then(Value::as_bool)
             .unwrap_or(true);
         let memory_scope = str_field(extra, "memory_scope").filter(|scope| scope.len() <= 512);
+        let compatible_memory_import_enabled = extra
+            .get("compatible_memory_import")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
         let project_knowledge_enabled = extra
             .get("project_knowledge")
             .and_then(Value::as_bool)
@@ -500,6 +507,7 @@ impl LocalConfig {
             sandbox_read_roots,
             memories_enabled,
             memory_scope,
+            compatible_memory_import_enabled,
             project_knowledge_enabled,
             compaction,
             browser_enabled,
@@ -665,6 +673,18 @@ mod tests {
         assert!(LocalConfig::from_provider_config(&oversized)
             .memory_scope
             .is_none());
+    }
+
+    #[test]
+    fn compatible_memory_import_requires_explicit_host_policy() {
+        let neutral = LocalConfig::from_provider_config(&ProviderConfig::default());
+        assert!(!neutral.compatible_memory_import_enabled);
+
+        let opted_in = ProviderConfig {
+            extra: json!({ "compatible_memory_import": true }),
+            ..Default::default()
+        };
+        assert!(LocalConfig::from_provider_config(&opted_in).compatible_memory_import_enabled);
     }
 
     #[test]

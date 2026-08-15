@@ -62,7 +62,7 @@ hosts without masking a working setuid distro helper on hardened hosts.
 ## Verification
 
 ```bash
-cargo test -p exec-sandbox
+cargo nextest run -p exec-sandbox
 cargo run -p exec-sandbox --example sandbox_benchmark -- \
   --iterations 5000 --launch-iterations 30
 ```
@@ -82,6 +82,6 @@ The paid model receipt is separately ignored and cost-capped:
 ```bash
 DESKTOP_CODE_API_KEY=... \
 DESKTOP_SANDBOX_E2E_MODEL=host-managed-model \
-cargo test -p provider-local --test sandbox_live \
+cargo nextest run -p provider-local --test sandbox_live \
   paid_cheapest_model_cannot_escape_workspace -- --ignored --exact --nocapture
 ```

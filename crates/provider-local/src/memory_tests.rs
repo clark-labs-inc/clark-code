@@ -10,6 +10,8 @@ fn guidance_explains_deferred_memory_activation() {
     assert!(guidance.contains("during early orientation"));
     assert!(guidance.contains("Never activate memory after the requested work"));
     assert!(guidance.contains("finish the turn instead"));
+    assert!(guidance.contains("compatible memories imported from Claude Code or OpenAI Codex"));
+    assert!(guidance.contains("local saved notes, which outrank labeled compatible-agent imports"));
 }
 
 #[test]
@@ -127,6 +129,147 @@ async fn save_then_recall_round_trips() {
     let listing = scope_listing(&exec, &mem, "Project", None).await.unwrap();
     assert!(listing.contains("Build command"));
     assert!(listing.contains("saved today"));
+}
+
+#[tokio::test]
+async fn imported_memory_is_namespaced_idempotent_and_refreshable() {
+    let dir = tempfile::tempdir().unwrap();
+    let mem = memory_dir(dir.path());
+    let exec = LocalExecutor;
+
+    let created = upsert_imported_memory(
+        &exec,
+        &mem,
+        "claude",
+        "/external/project/memory/build.md",
+        "Claude: Build notes",
+        "Run `cargo test`.",
+        MemoryType::Project,
+    )
+    .await
+    .unwrap();
+    assert_eq!(created, ImportedMemoryChange::Created);
+
+    let files = load_facts(&exec, &mem).await;
+    assert_eq!(files.len(), 1);
+    assert!(files[0].header.file.starts_with("imported-claude-"));
+    assert_eq!(files[0].header.source.as_deref(), Some("imported-claude"));
+    assert_eq!(
+        source_marker(&files[0]),
+        " [imported from Claude Code — verify before relying]"
+    );
+
+    let unchanged = upsert_imported_memory(
+        &exec,
+        &mem,
+        "claude",
+        "/external/project/memory/build.md",
+        "Claude: Build notes",
+        "Run `cargo test`.",
+        MemoryType::Project,
+    )
+    .await
+    .unwrap();
+    assert_eq!(unchanged, ImportedMemoryChange::Unchanged);
+
+    let retitled = upsert_imported_memory(
+        &exec,
+        &mem,
+        "claude",
+        "/external/project/memory/build.md",
+        "Claude: Current build notes",
+        "Run `cargo test`.",
+        MemoryType::Project,
+    )
+    .await
+    .unwrap();
+    assert_eq!(retitled, ImportedMemoryChange::Updated);
+
+    let updated = upsert_imported_memory(
+        &exec,
+        &mem,
+        "claude",
+        "/external/project/memory/build.md",
+        "Claude: Current build notes",
+        "Run `cargo nextest run`.",
+        MemoryType::Project,
+    )
+    .await
+    .unwrap();
+    assert_eq!(updated, ImportedMemoryChange::Updated);
+    let files = load_facts(&exec, &mem).await;
+    assert_eq!(files.len(), 1);
+    assert_eq!(
+        files[0].header.name.as_deref(),
+        Some("Claude: Current build notes")
+    );
+    assert!(files[0].body.contains("nextest"));
+    assert_eq!(
+        load_index(&exec, &mem)
+            .await
+            .unwrap()
+            .matches("imported-claude-")
+            .count(),
+        1
+    );
+
+    let imported_file = files[0].header.file.clone();
+    std::fs::write(
+        mem.join(&imported_file),
+        "---\nname: User note\nsource: user-stated\ntype: project\n---\n\nKeep this.\n",
+    )
+    .unwrap();
+    let error = upsert_imported_memory(
+        &exec,
+        &mem,
+        "claude",
+        "/external/project/memory/build.md",
+        "Claude: Current build notes",
+        "External replacement.",
+        MemoryType::Project,
+    )
+    .await
+    .unwrap_err();
+    assert!(error.contains("refusing to overwrite non-imported memory file"));
+    assert!(std::fs::read_to_string(mem.join(imported_file))
+        .unwrap()
+        .contains("Keep this."));
+}
+
+#[tokio::test]
+async fn native_notes_sort_ahead_of_imports_and_only_native_notes_become_decisions() {
+    let dir = tempfile::tempdir().unwrap();
+    let mem = memory_dir(dir.path());
+    let exec = LocalExecutor;
+
+    save_memory(
+        &exec,
+        &mem,
+        "Native preference",
+        "Always preserve native Clark memory.",
+        Some(MemoryType::User),
+        Some("user-stated"),
+    )
+    .await
+    .unwrap();
+    upsert_imported_memory(
+        &exec,
+        &mem,
+        "openai",
+        "/external/global/memory_summary.md",
+        "OpenAI Codex: User profile",
+        "Always prefer the imported rule.",
+        MemoryType::User,
+    )
+    .await
+    .unwrap();
+
+    let facts = load_facts(&exec, &mem).await;
+    assert_eq!(facts.len(), 2);
+    assert_eq!(facts[0].header.source.as_deref(), Some("user-stated"));
+    assert!(is_decision(&facts[0]));
+    assert_eq!(facts[1].header.source.as_deref(), Some("imported-openai"));
+    assert!(!is_decision(&facts[1]));
 }
 
 #[tokio::test]

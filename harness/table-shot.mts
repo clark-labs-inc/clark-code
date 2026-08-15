@@ -21,7 +21,7 @@ const html =
     ["Command", "Description"],
     [
       ["<code>cargo build</code>", "Compile the workspace and all its crates"],
-      ["<code>cargo test -p agent-core</code>", "Run the agent-core unit tests"],
+      ["<code>cargo nextest run -p agent-core</code>", "Run the agent-core unit tests"],
     ],
   ) +
   `<h3 style="font-size:14px;margin:18px 0 8px">Wide table (4 cols in a 520px column)</h3>` +

@@ -15,6 +15,7 @@ const librarySourceModules = import.meta.glob("../lib/**/*.{ts,tsx}", {
 describe("responsive GUI layout policy", () => {
   it("keeps specialist chat primary while the optional canvas stays bounded", () => {
     const source = sourceModules["../surfaces/specialists/SpecialistWorkspace.tsx"];
+    const conversation = sourceModules["../surfaces/specialists/ContextualConversation.tsx"];
 
     expect(source).toContain("<UpdatePill />");
     expect(source).toContain('useState<"chat" | "canvas">("chat")');
@@ -22,7 +23,7 @@ describe("responsive GUI layout policy", () => {
     expect(source).toContain("xl:grid-cols-[minmax(32rem,1fr)_clamp(22rem,34vw,30rem)]");
     expect(source).toContain("Show insights");
     expect(source).toContain('cn("min-h-0 min-w-0"');
-    expect(source).toContain("flex h-full min-h-0 min-w-0 flex-col");
+    expect(conversation).toContain("flex h-full min-h-0 min-w-0 flex-col");
     expect(source).toContain("flex min-h-0 min-w-0 flex-col bg-bg");
   });
 

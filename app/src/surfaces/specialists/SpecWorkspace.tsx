@@ -356,7 +356,7 @@ export function SpecWorkspace() {
             </div>
           </aside>
         )}
-        <m.main layout={!reduceMotion} className="relative min-h-0 min-w-0 flex-1 overflow-y-auto px-5 pb-28 pt-6 sm:px-7">
+        <main className="relative min-h-0 min-w-0 flex-1 overflow-y-auto px-5 pb-28 pt-6 sm:px-7">
           <div
             ref={documentRef}
             data-qa="spec-document"
@@ -406,7 +406,7 @@ export function SpecWorkspace() {
               )}
             </AnimatePresence>
           </div>
-        </m.main>
+        </main>
         <AnimatePresence initial={false}>
           {guidedOpen && (
             <SpecGuidedInterview report={guidance} busy={activity.busy} onPreview={setGuidedPreview} />

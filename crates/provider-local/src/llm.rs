@@ -4,9 +4,9 @@
 //! ubiquitous `POST {base}/chat/completions` contract (OpenRouter, vLLM,
 //! llama.cpp, LM Studio, a future Clark Code passthrough, …): streamed
 //! `chat.completion.chunk` SSE frames carrying assistant text deltas and
-//! fragmented tool-call deltas. The parser reassembles those into a single
-//! [`AssistantTurn`], validates the complete provider-owned object, and only
-//! then publishes its text through the UI callback.
+//! fragmented tool-call deltas. The parser publishes guarded text and reasoning
+//! words as they arrive, while it reassembles tool calls and the complete
+//! [`AssistantTurn`] for validation before execution or transcript settlement.
 
 use std::{
     collections::{BTreeMap, HashMap},

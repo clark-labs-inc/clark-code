@@ -23,6 +23,11 @@ use super::{arg_str, ToolCtx, ToolExecutor, ToolOutcome, ToolPermissionClass};
 const MAX_BYTES: usize = 3_000_000;
 const FETCH_TIMEOUT: Duration = Duration::from_secs(20);
 const MAX_REDIRECTS: u8 = 5;
+const WEB_FETCH_USER_AGENT: &str = concat!(
+    "agent-desktop/",
+    env!("CARGO_PKG_VERSION"),
+    " (+https://github.com/clark-labs-inc/clark-desktop)"
+);
 
 pub struct WebFetchTool;
 
@@ -90,6 +95,7 @@ async fn fetch_markdown(url_str: &str, cancel: &CancellationToken) -> Result<Str
 
         let client = desktop_http::client_builder(desktop_http::ClientOptions {
             request_timeout: Some(FETCH_TIMEOUT),
+            user_agent: Some(WEB_FETCH_USER_AGENT),
             ..Default::default()
         })
         .resolve(&host, addr)
@@ -123,11 +129,73 @@ async fn fetch_markdown(url_str: &str, cancel: &CancellationToken) -> Result<Str
             }
         }
 
+        let content_type = resp
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_string);
         let bytes = read_capped(resp, cancel).await?;
-        let html = String::from_utf8_lossy(&bytes).to_string();
-        return htmd::convert(&html).map_err(|e| format!("HTML->Markdown conversion failed: {e}"));
+        return decode_response_body(&bytes, content_type.as_deref());
     }
     Err("too many redirects".to_string())
+}
+
+fn decode_response_body(bytes: &[u8], content_type: Option<&str>) -> Result<String, String> {
+    if let Some(content_type) = content_type {
+        let media_type = content_type
+            .split(';')
+            .next()
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase();
+        if !is_textual_media_type(&media_type) {
+            return Err(format!(
+                "unsupported binary content type `{media_type}`; use a document-capable tool"
+            ));
+        }
+    } else if binary_magic(bytes) {
+        return Err(
+            "unsupported binary response with no content type; use a document-capable tool"
+                .to_string(),
+        );
+    }
+
+    let text = std::str::from_utf8(bytes)
+        .map_err(|_| "response is not valid UTF-8 text; use a document-capable tool".to_string())?;
+    let media_type = content_type
+        .and_then(|value| value.split(';').next())
+        .unwrap_or("text/html")
+        .trim()
+        .to_ascii_lowercase();
+    if media_type == "text/html" || media_type == "application/xhtml+xml" {
+        return htmd::HtmlToMarkdown::builder()
+            .skip_tags(vec!["script", "style", "template", "noscript", "svg"])
+            .build()
+            .convert(text)
+            .map_err(|error| format!("HTML->Markdown conversion failed: {error}"));
+    }
+    Ok(text.to_string())
+}
+
+fn is_textual_media_type(media_type: &str) -> bool {
+    media_type.starts_with("text/")
+        || matches!(
+            media_type,
+            "application/json"
+                | "application/ld+json"
+                | "application/xml"
+                | "application/rss+xml"
+                | "application/atom+xml"
+                | "application/xhtml+xml"
+        )
+}
+
+fn binary_magic(bytes: &[u8]) -> bool {
+    bytes.starts_with(b"\x1f\x8b")
+        || bytes.starts_with(b"PK\x03\x04")
+        || bytes.starts_with(b"%PDF-")
+        || bytes.starts_with(b"\x89PNG\r\n\x1a\n")
+        || bytes.starts_with(b"\xff\xd8\xff")
 }
 
 /// Resolve `host` and return the first address that isn't private/internal.
@@ -212,6 +280,36 @@ mod tests {
         let markdown = "long page\n".repeat(2_000);
         let outcome = tool.finish_markdown(markdown.clone());
         assert_eq!(outcome.content, markdown);
+    }
+
+    #[test]
+    fn html_conversion_drops_executable_and_template_payloads() {
+        let markdown = decode_response_body(
+            b"<html><body><h1>Useful</h1><script>hugeState()</script><template>hidden</template><p>Evidence</p></body></html>",
+            Some("text/html; charset=utf-8"),
+        )
+        .unwrap();
+        assert!(markdown.contains("Useful"));
+        assert!(markdown.contains("Evidence"));
+        assert!(!markdown.contains("hugeState"));
+        assert!(!markdown.contains("hidden"));
+    }
+
+    #[test]
+    fn json_is_returned_as_text_instead_of_html_conversion() {
+        let json = r#"{"value":42}"#;
+        assert_eq!(
+            decode_response_body(json.as_bytes(), Some("application/json")).unwrap(),
+            json
+        );
+    }
+
+    #[test]
+    fn binary_payload_is_an_ordinary_tool_error() {
+        let error = decode_response_body(b"PK\x03\x04binary", None).unwrap_err();
+        assert!(error.contains("binary response"));
+        let error = decode_response_body(b"%PDF-1.7", Some("application/pdf")).unwrap_err();
+        assert!(error.contains("document-capable tool"));
     }
 
     #[test]

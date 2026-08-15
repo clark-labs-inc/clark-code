@@ -130,6 +130,42 @@ fn reasoning_details_replay_unmodified_during_the_tool_exchange() {
 }
 
 #[test]
+fn malformed_provider_reasoning_replays_byte_exact_during_the_tool_exchange() {
+    let malformed = "The\n check is running i\nn the backg\nro\nund.";
+    let raw_only = assistant_message(turn("working", malformed));
+    let raw_wire = to_wire_messages("", &[raw_only]);
+    assert_eq!(raw_wire[0].reasoning.as_deref(), Some(malformed));
+
+    let details = vec![
+        json!({
+            "type": "reasoning.text",
+            "text": "The\n check is running i\nn the ",
+            "format": "unknown",
+            "index": 0
+        }),
+        json!({
+            "type": "reasoning.text",
+            "text": "backg\nro\nund.",
+            "format": "unknown",
+            "index": 1
+        }),
+    ];
+    let mut turn = turn("working", malformed);
+    turn.reasoning_details = details.clone();
+    let message = assistant_message(turn);
+
+    let ca::AgentMessage::Assistant { content, .. } = &message else {
+        panic!("expected assistant message");
+    };
+    assert_eq!(reasoning_text(content).as_deref(), Some(malformed));
+    assert_eq!(content.reasoning_details_values(), details);
+
+    let wire = to_wire_messages("", &[message]);
+    assert_eq!(wire[0].reasoning_details, details);
+    assert_eq!(wire[0].reasoning, None);
+}
+
+#[test]
 fn reasoning_replays_only_for_the_in_flight_exchange() {
     let old_assistant = assistant_message(turn("old turn", "old reasoning"));
     let user = ca::AgentMessage::User {

@@ -341,7 +341,7 @@ export default function AuthenticatedWorkspace({
                 >
                   <PanelErrorBoundary title="Conversation panel needs to restart" resetKey={session.id}>
                     <Suspense fallback={<div className="min-h-0 flex-1" />}>
-                      <Conversation activeArtifactId={activeArtifactId} onOpenArtifact={openArtifact} />
+                      <Conversation onOpenArtifact={openArtifact} />
                     </Suspense>
                   </PanelErrorBoundary>
                   <GoalStatusRail />

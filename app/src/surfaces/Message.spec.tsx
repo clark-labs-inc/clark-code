@@ -29,9 +29,28 @@ describe("assistant message actions", () => {
     );
 
     expect(markup).toContain('data-sd-animate="true"');
+    expect(markup).toContain('data-streaming-reply="true"');
+    expect(markup.match(/reply-stream-bar/g)).toHaveLength(3);
     expect(markup).toContain("<strong><span");
     expect(markup).toContain(">streaming</span></strong>");
     expect(markup).not.toContain("--streamdown-caret");
+  });
+
+  it("trades reserved skeleton rows for streamed Markdown lines", () => {
+    const markup = renderToStaticMarkup(
+      <Message
+        role="agent"
+        blocks={[{ type: "text", text: "First line.\nSecond line.\nThird line." }]}
+        timelineIndex={0}
+        streaming
+      />,
+    );
+
+    expect(markup).toContain('data-streaming-reply="true"');
+    expect(markup.match(/reply-stream-bar/g)).toHaveLength(1);
+    expect(markup).toContain(">First</span>");
+    expect(markup).toContain(">Second</span>");
+    expect(markup).toContain(">Third</span>");
   });
 
   it("keeps every assistant markdown layer on the full message rail", () => {
@@ -49,16 +68,18 @@ describe("assistant message actions", () => {
     expect(markup).toMatch(/space-y-4 whitespace-normal[^\"]*min-w-0 w-full/);
   });
 
-  it("uses the shared semantic text palette", () => {
+  it("uses the softer semantic reading color with stronger emphasis", () => {
     const markup = renderToStaticMarkup(
       <Message
         role="agent"
-        blocks={[{ type: "text", text: "A calmer response." }]}
+        blocks={[{ type: "text", text: "A calmer **response**." }]}
         timelineIndex={0}
       />,
     );
 
+    expect(markup).toContain("text-ink-secondary");
     expect(markup).toContain("text-ink");
+    expect(markup).toContain("leading-[1.72]");
   });
 
   it("marks new user and assistant rows with role-specific entrance motion", () => {

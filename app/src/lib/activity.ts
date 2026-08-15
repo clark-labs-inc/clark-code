@@ -14,6 +14,28 @@ export function isThinkingOnlyMessage(item: TimelineItem | undefined): boolean {
     && item.blocks.every((block) => block.type === "thinking");
 }
 
+/** Whether the latest user turn still has no visible assistant prose. Plans,
+ * checklists, and completed tool rows may arrive first; they must not consume
+ * the reply skeleton before the reply itself has begun. */
+export function isAwaitingAssistantReply(timeline: readonly TimelineItem[]): boolean {
+  let latestUser = -1;
+  for (let index = timeline.length - 1; index >= 0; index -= 1) {
+    const item = timeline[index];
+    if (item.item === "message" && item.role === "user") {
+      latestUser = index;
+      break;
+    }
+  }
+  if (latestUser < 0) return timeline.length === 0;
+
+  return !timeline.slice(latestUser + 1).some((item) =>
+    item.item === "message"
+    && item.role === "agent"
+    && item.phase !== "commentary"
+    && item.blocks.some((block) => block.type === "text" && block.text.trim().length > 0)
+  );
+}
+
 /** Compact, typed diagnostics for the provider-local root execution receipt. */
 export function executionDiagnostic(outcome?: RunOutcome): string | undefined {
   const execution = outcome?.execution;

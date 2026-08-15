@@ -25,7 +25,7 @@ registrations and an absolute trajectory directory:
     "model": "local-model",
     "api_key_env": "DESKTOP_MODEL_API_KEY",
     "allowed_tools": ["bash", "write_file", "edit_file"],
-    "allowed_command_prefixes": ["git ", "cargo test"]
+    "allowed_command_prefixes": ["git ", "cargo nextest run"]
   }
 }
 ```

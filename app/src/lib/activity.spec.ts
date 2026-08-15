@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   currentActivity,
   executionDiagnostic,
+  isAwaitingAssistantReply,
   isThinkingOnlyMessage,
   shouldShowPending,
 } from "./activity";
@@ -126,6 +127,7 @@ describe("currentActivity", () => {
       blocks: [{ type: "text", text: "Coverage is complete. Writing the report now." }],
     });
     expect(shouldShowPending(commentaryFinished)).toBe(true);
+    expect(isAwaitingAssistantReply(commentaryFinished.timeline)).toBe(true);
 
     const finalAnswer = structuredClone(beforeResponse);
     finalAnswer.timeline.push({
@@ -136,6 +138,40 @@ describe("currentActivity", () => {
       blocks: [{ type: "text", text: "Here is the report." }],
     });
     expect(shouldShowPending(finalAnswer)).toBe(false);
+    expect(isAwaitingAssistantReply(finalAnswer.timeline)).toBe(false);
+  });
+
+  it("keeps the reply reserve through plans and reasoning until prose begins", () => {
+    const snapshot = withRun("running");
+    snapshot.timeline.push(
+      {
+        item: "message",
+        run: "r1",
+        role: "user",
+        blocks: [{ type: "text", text: "Explain this project" }],
+      },
+      {
+        item: "execution_checklist",
+        run: "r1",
+        checklist: { revision: 1, steps: [{ title: "Inspect", status: "in_progress" }] },
+      },
+      {
+        item: "message",
+        run: "r1",
+        role: "agent",
+        blocks: [{ type: "thinking", text: "Tracing the entrypoint" }],
+      },
+    );
+
+    expect(isAwaitingAssistantReply(snapshot.timeline)).toBe(true);
+
+    snapshot.timeline.push({
+      item: "message",
+      run: "r1",
+      role: "agent",
+      blocks: [{ type: "text", text: "The entrypoint is in src/main.rs." }],
+    });
+    expect(isAwaitingAssistantReply(snapshot.timeline)).toBe(false);
   });
 
   it("shows pending after a completed timeline item while the next step starts", () => {

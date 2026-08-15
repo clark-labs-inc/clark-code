@@ -541,6 +541,79 @@ html.dark .shiki-inline span {
   background-color: var(--shiki-dark-bg, transparent) !important;
 }
 
+/* Streamdown keeps incomplete GitHub-Flavored Markdown tables structurally
+   stable while tokens arrive. This shell owns their finished visual contract:
+   a readable data ledger rather than a faint spreadsheet grid. */
+.markdown-table-shell {
+  margin-block: 1rem;
+  overflow-x: auto;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-elevated);
+  scrollbar-width: thin;
+}
+
+.markdown-table-shell:focus-visible {
+  outline: 2px solid var(--color-accent-focus);
+  outline-offset: 2px;
+}
+
+.markdown-data-table {
+  min-width: 32rem;
+  border-collapse: collapse;
+  color: var(--color-ink);
+  font-size: var(--text-sm);
+  line-height: 1.55;
+}
+
+.markdown-data-table th,
+.markdown-data-table td {
+  padding: 0.7rem 0.875rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.markdown-data-table thead th {
+  border-bottom: 1px solid var(--color-border-strong);
+  background: var(--color-bg-tertiary);
+  color: var(--color-ink-secondary);
+  font-weight: 500;
+}
+
+.markdown-data-table:has(> thead > tr > th:nth-child(2):last-child) tr > :first-child {
+  width: 40%;
+}
+
+.markdown-data-table:has(> thead > tr > th:nth-child(2):last-child) tr > :last-child {
+  width: 60%;
+}
+
+.markdown-data-table tr > * + * {
+  border-left: 1px solid var(--color-border);
+}
+
+.markdown-data-table tbody tr + tr td {
+  border-top: 1px solid var(--color-border);
+}
+
+.markdown-data-table tbody tr:nth-child(even) td {
+  background: color-mix(in oklab, var(--color-bg-secondary) 52%, var(--color-bg-elevated));
+}
+
+.markdown-data-table tbody td:first-child {
+  background: color-mix(in oklab, var(--color-bg-tertiary) 64%, var(--color-bg-elevated));
+  color: var(--color-ink-secondary);
+  font-weight: 500;
+}
+
+.markdown-data-table tbody tr:nth-child(even) td:first-child {
+  background: color-mix(in oklab, var(--color-bg-tertiary) 78%, var(--color-bg-elevated));
+}
+
+.markdown-data-table code {
+  white-space: nowrap;
+}
+
 /* Structured diff body (DiffBody) — a file header, hunk rows, and per-line
    tinted code with an old/new line-number gutter. Tints use the semantic
    success/danger tokens so they read in both themes; the gutter is faint. */
@@ -811,6 +884,30 @@ svg.lucide {
   border-radius: var(--radius-sm);
   background-color: var(--color-bg-hover);
 }
+
+/* The waiting row and the first streamed Markdown share the same four-line
+   geometry. As text grows, each real line consumes one placeholder line, so
+   the transcript fills in instead of replacing a tall loader with a short
+   first token. */
+.reply-stream-reserve,
+.streaming-reply-frame[data-streaming-reply="true"] {
+  min-height: calc(4 * 1.72em);
+}
+
+.streaming-reply-frame {
+  min-height: 0;
+  transition: min-height var(--dur-slow) var(--ease-agent);
+}
+
+.reply-stream-line {
+  display: flex;
+  height: 1.72em;
+  align-items: center;
+}
+
+.reply-stream-bar {
+  height: 0.68rem;
+}
 .skeleton::after,
 .spec-writing-line::after {
   position: absolute;
@@ -897,10 +994,9 @@ svg.lucide {
     animation: none !important;
   }
 
-  /* A single steady dot remains as the accessible busy affordance; hiding the
-     skeleton avoids turning a paused animation into apparently loaded bars. */
-  .activity-dots > span:not(:first-child),
-  .reply-skeleton {
+  /* A single steady dot remains as the accessible busy affordance. Skeleton
+     bars remain visible but still, preserving layout without implying motion. */
+  .activity-dots > span:not(:first-child) {
     display: none !important;
   }
 

@@ -88,7 +88,7 @@ const REPLY_BLOCK = [
     "    bridge.load_session(&provider, &id).await\n" +
     "}\n",
   "Shell:\n",
-  "```bash\ncargo test -p agent-core -p provider-local\npnpm --dir app build\n",
+  "```bash\ncargo nextest run -p agent-core -p provider-local\npnpm --dir app build\n",
   "Config:\n",
   "```toml\n[project]\nname = \"example-desktop\"\nversion = \"0.1.0\"\n\n[dependencies]\ntauri = \"2\"\nserde = { version = \"1\", features = [\"derive\"] }\n",
   "Payload:\n",

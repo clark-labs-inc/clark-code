@@ -28,7 +28,10 @@ pub(crate) struct RootExecutionConfig {
 impl Default for RootExecutionConfig {
     fn default() -> Self {
         Self {
-            max_attempts: 2,
+            // Two recovery boundaries: one can settle an awaited host command,
+            // while the next still gives the provider a bounded chance to
+            // recover after that durable receipt is committed.
+            max_attempts: 3,
             weighted_token_limit: Some(DEFAULT_ROOT_WEIGHTED_TOKEN_LIMIT),
             max_cost_usd: None,
         }
@@ -401,9 +404,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn execution_config_is_bounded_and_defaults_to_one_recovery() {
+    fn execution_config_is_bounded_and_defaults_to_two_recoveries() {
         let defaults = RootExecutionConfig::from_extra(&serde_json::json!({}));
-        assert_eq!(defaults.max_attempts, 2);
+        assert_eq!(defaults.max_attempts, 3);
         assert_eq!(
             defaults.weighted_token_limit,
             Some(DEFAULT_ROOT_WEIGHTED_TOKEN_LIMIT)

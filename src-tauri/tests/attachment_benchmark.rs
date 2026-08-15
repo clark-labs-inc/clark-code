@@ -5,7 +5,7 @@
 //! to the durable worker protocol used by the coding provider.
 //!
 //! ```sh
-//! cargo test -p desktop-foundation --test attachment_benchmark -- --nocapture
+//! cargo nextest run -p desktop-foundation --test attachment_benchmark --no-capture
 //!
 //! ```
 

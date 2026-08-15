@@ -238,35 +238,6 @@ async fn stalled_endpoint(delay: Duration) -> String {
     format!("http://{address}/v1")
 }
 
-async fn progressive_endpoint(chunks: Vec<(Duration, Vec<u8>)>) -> String {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let address = listener.local_addr().unwrap();
-    let body_len = chunks.iter().map(|(_, chunk)| chunk.len()).sum::<usize>();
-    tokio::spawn(async move {
-        let (mut stream, _) = listener.accept().await.unwrap();
-        let _ = read_request(&mut stream).await;
-        let headers = format!(
-            "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\nContent-Length: {body_len}\r\n\r\n"
-        );
-        if stream.write_all(headers.as_bytes()).await.is_err() {
-            return;
-        }
-        if stream.flush().await.is_err() {
-            return;
-        }
-        for (delay, chunk) in chunks {
-            tokio::time::sleep(delay).await;
-            if stream.write_all(&chunk).await.is_err() {
-                return;
-            }
-            if stream.flush().await.is_err() {
-                return;
-            }
-        }
-    });
-    format!("http://{address}/v1")
-}
-
 async fn run(base_url: &str, output: &mut String) -> Result<AssistantTurn, LlmError> {
     let client = LlmClient::from_parts(base_url, "fake-model", None, Vec::new(), None).unwrap();
     client
@@ -597,14 +568,12 @@ async fn successful_turn_maps_cache_and_provider_request_identities() {
 }
 
 #[tokio::test]
-async fn contaminated_turn_is_atomic_and_never_reaches_callbacks() {
+async fn contaminated_turn_withholds_the_reserved_marker() {
     let (base_url, calls) = endpoint(vec![contaminated_response()]).await;
     let mut output = String::new();
     let error = run(&base_url, &mut output).await.unwrap_err();
-    assert!(
-        output.is_empty(),
-        "no prefix from a rejected turn may escape"
-    );
+    assert_eq!(output, "apparently safe prefix ");
+    assert!(!output.contains("begin__of"));
     let LlmError::OutputQuarantined { reason, metadata } = error else {
         panic!("expected typed quarantine error");
     };
@@ -727,151 +696,6 @@ async fn request_deadline_bounds_a_stalled_provider() {
         }
         _ => panic!("expected a retry-safe transient timeout"),
     }
-}
-
-#[tokio::test]
-async fn productive_stream_can_outlive_response_start_deadline() {
-    let chunks = [
-        concat!(r#"data: {"choices":[{"delta":{"content":"pro"}}]}"#, "\n\n"),
-        concat!(
-            r#"data: {"choices":[{"delta":{"content":"gress"}}]}"#,
-            "\n\n"
-        ),
-        concat!(
-            r#"data: {"choices":[{"delta":{},"finish_reason":"stop"}]}"#,
-            "\n\n"
-        ),
-        "data: [DONE]\n\n",
-    ]
-    .into_iter()
-    .map(|chunk| (Duration::from_millis(25), chunk.as_bytes().to_vec()))
-    .collect();
-    let base_url = progressive_endpoint(chunks).await;
-    let client = LlmClient::from_parts_with_timeouts(
-        &base_url,
-        "fake-model",
-        None,
-        Vec::new(),
-        None,
-        Duration::from_millis(40),
-        Duration::from_millis(60),
-    )
-    .unwrap();
-    let started = std::time::Instant::now();
-    let turn = client
-        .stream_chat(
-            &[ChatMessage::user("hello")],
-            &[],
-            &CancellationToken::new(),
-            |_| {},
-            |_| {},
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(turn.text, "progress");
-    assert!(started.elapsed() > Duration::from_millis(80));
-}
-
-#[tokio::test]
-async fn stream_idle_deadline_resets_after_every_chunk() {
-    let chunks = [
-        concat!(
-            r#"data: {"choices":[{"delta":{"content":"still "}}]}"#,
-            "\n\n"
-        ),
-        concat!(
-            r#"data: {"choices":[{"delta":{"content":"working"}}]}"#,
-            "\n\n"
-        ),
-        concat!(
-            r#"data: {"choices":[{"delta":{},"finish_reason":"stop"}]}"#,
-            "\n\n"
-        ),
-        "data: [DONE]\n\n",
-    ]
-    .into_iter()
-    .map(|chunk| (Duration::from_millis(30), chunk.as_bytes().to_vec()))
-    .collect();
-    let base_url = progressive_endpoint(chunks).await;
-    let client = LlmClient::from_parts_with_timeouts(
-        &base_url,
-        "fake-model",
-        None,
-        Vec::new(),
-        None,
-        Duration::from_millis(40),
-        Duration::from_millis(50),
-    )
-    .unwrap();
-    let turn = client
-        .stream_chat(
-            &[ChatMessage::user("hello")],
-            &[],
-            &CancellationToken::new(),
-            |_| {},
-            |_| {},
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(turn.text, "still working");
-}
-
-#[tokio::test]
-async fn stream_idle_deadline_quarantines_partial_output() {
-    let chunks = vec![
-        (
-            Duration::ZERO,
-            concat!(
-                r#"data: {"choices":[{"delta":{"content":"partial"}}]}"#,
-                "\n\n"
-            )
-            .as_bytes()
-            .to_vec(),
-        ),
-        (Duration::from_millis(200), b"data: [DONE]\n\n".to_vec()),
-    ];
-    let base_url = progressive_endpoint(chunks).await;
-    let client = LlmClient::from_parts_with_timeouts(
-        &base_url,
-        "fake-model",
-        None,
-        Vec::new(),
-        None,
-        Duration::from_millis(40),
-        Duration::from_millis(40),
-    )
-    .unwrap();
-    let mut output = String::new();
-    let mut on_text = |text: &str| output.push_str(text);
-    let mut on_reasoning = |_: &str| {};
-    let error = client
-        .stream_chat_once(StreamAttempt {
-            messages: &[ChatMessage::user("hello")],
-            tools: &[],
-            cancel: &CancellationToken::new(),
-            request_model: "fake-model",
-            force_tool_call: false,
-            forced_tool_name: None,
-            idempotency_key: "stream-idle-test",
-            on_text: &mut on_text,
-            on_reasoning: &mut on_reasoning,
-        })
-        .await
-        .unwrap_err();
-
-    let AttemptError::Transient(failure) = error else {
-        panic!("expected a retry-safe stream timeout");
-    };
-    assert_eq!(failure.category, ProviderIncidentCategory::Timeout);
-    assert_eq!(
-        failure.provider_error_type.as_deref(),
-        Some("stream_transport")
-    );
-    assert!(failure.retry_safe);
-    assert!(failure.output_started);
-    assert!(output.is_empty(), "partial output must remain quarantined");
 }
 
 #[tokio::test]

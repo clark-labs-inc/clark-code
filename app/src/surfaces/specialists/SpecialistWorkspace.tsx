@@ -1,6 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
-import { AnimatePresence, useReducedMotion } from "motion/react";
-import * as m from "motion/react-m";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Building2,
   ChevronDown,
@@ -26,7 +24,6 @@ import {
   type SecurityTab,
   type ScientistTab,
   type RsiTab,
-  type SpecialistKind,
 } from "../../lib/specialists";
 import {
   specialistEntitlement,
@@ -54,23 +51,21 @@ import { syncSecurityInsights } from "../../lib/securityCloud";
 import { saveSecurityScanPdf } from "../../lib/securityReport";
 import type { SecurityScanRecord } from "../../core-bridge/types";
 import { cn } from "../../lib/cn";
-import { RISE, accessibleMotion } from "../../lib/motion";
-import { Composer } from "../Composer";
-import { GoalStatusRail } from "../GoalStatusRail";
 import { UpdatePill } from "../TopBar";
-import { PanelErrorBoundary } from "../../components/PanelErrorBoundary";
 import { ScoutCanvas } from "./ScoutCanvas";
 import { SecurityCanvas } from "./SecurityCanvas";
 import { ScientistCanvas } from "./ScientistCanvas";
 import { RsiCanvas } from "./RsiCanvas";
 import { CanvasStatus } from "./SpecialistPrimitives";
-import { SpecialistWelcome, type SpecialistStarter } from "./SpecialistWelcome";
 import { SpecialistAccessGate } from "./SpecialistAccessGate";
 import { SpecWorkspace } from "./SpecWorkspace";
-
-const Conversation = lazy(() =>
-  import("../Conversation").then((module) => ({ default: module.Conversation })),
-);
+import { ScoutOrganizationDialog } from "./ScoutOrganizationDialog";
+import { ContextualConversation } from "./ContextualConversation";
+import {
+  ScoutWorkspaceControl,
+  ScoutWorkspaceNotice,
+  type ScoutWorkspaceNoticeValue,
+} from "./ScoutWorkspaceControl";
 
 interface SpecialistData {
   workspaces: ScoutWorkspace[];
@@ -116,54 +111,6 @@ function previewCredentials(): CloudCreds {
   return { accountScope: "preview:specialist" };
 }
 
-function ContextualConversation({ kind }: { kind: SpecialistKind }) {
-  const session = useSessionStore((state) => state.session);
-  const setComposerPrefill = useSessionStore((state) => state.setComposerPrefill);
-  const setTab = useSpecialistStore((state) => state.setTab);
-  const setContext = useSpecialistStore((state) => state.setContext);
-  const reduceMotion = useReducedMotion();
-  const definition = SPECIALISTS[kind];
-  const start = (starter: SpecialistStarter) => {
-    setContext({ workflow: starter.workflow });
-    setTab(starter.tab);
-    setComposerPrefill(starter.prompt);
-  };
-
-  return (
-    <section
-      data-qa={`specialist-conversation-${kind}`}
-      aria-label={`${definition.label} contextual conversation`}
-      className="flex h-full min-h-0 min-w-0 flex-col bg-bg"
-    >
-      <AnimatePresence initial={false} mode="wait">
-        {session ? (
-          <m.div
-            key={`conversation:${session.id}`}
-            {...accessibleMotion(RISE, reduceMotion)}
-            className="flex min-h-0 flex-1 flex-col overflow-hidden"
-          >
-            <PanelErrorBoundary title={`${definition.label} conversation needs to restart`} resetKey={session.id}>
-              <Suspense fallback={<div className="h-full min-h-0" />}>
-                <Conversation />
-              </Suspense>
-            </PanelErrorBoundary>
-          </m.div>
-        ) : (
-          <m.div
-            key={`${kind}:welcome`}
-            {...accessibleMotion(RISE, reduceMotion)}
-            className="min-h-0 flex-1 overflow-y-auto px-5 py-6"
-          >
-            <SpecialistWelcome kind={kind} onStart={start} />
-          </m.div>
-        )}
-      </AnimatePresence>
-      {session && <GoalStatusRail />}
-      <Composer />
-    </section>
-  );
-}
-
 export function SpecialistWorkspace({
   dark,
   onToggleTheme,
@@ -206,6 +153,7 @@ export function SpecialistWorkspace({
   const [mobilePane, setMobilePane] = useState<"chat" | "canvas">("chat");
   const [canvasOpen, setCanvasOpen] = useState(false);
   const [creatingWorkspace, setCreatingWorkspace] = useState(false);
+  const [workspaceCreateNotice, setWorkspaceCreateNotice] = useState<ScoutWorkspaceNoticeValue | null>(null);
   const [organizationDialogOpen, setOrganizationDialogOpen] = useState(false);
   const [creatingOrganization, setCreatingOrganization] = useState(false);
   const [organizationName, setOrganizationName] = useState("");
@@ -448,6 +396,7 @@ export function SpecialistWorkspace({
   const createWorkspace = useCallback(async () => {
     if (!credentials || !context.organizationId?.trim()) return;
     setCreatingWorkspace(true);
+    setWorkspaceCreateNotice(null);
     setError(null);
     try {
       const created = await specialistCreateWorkspace(
@@ -455,14 +404,27 @@ export function SpecialistWorkspace({
         context.organizationId,
         "Scout workspace",
       );
+      setData((current) => ({
+        ...current,
+        workspaces: [
+          created,
+          ...current.workspaces.filter((workspace) => workspace.id !== created.id),
+        ],
+      }));
       setContext({ workspaceId: created.id });
-      await load();
+      setWorkspaceCreateNotice({
+        tone: "success",
+        message: `${created.display_name} is ready and selected.`,
+      });
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setWorkspaceCreateNotice({
+        tone: "error",
+        message: cause instanceof Error ? cause.message : String(cause),
+      });
     } finally {
       setCreatingWorkspace(false);
     }
-  }, [context.organizationId, credentials, load, setContext]);
+  }, [context.organizationId, credentials, setContext]);
 
   const createOrganization = useCallback(async () => {
     if (!credentials || !organizationName.trim() || !organizationDomain.trim()) return;
@@ -493,7 +455,6 @@ export function SpecialistWorkspace({
     () => data.workspaces.find((workspace) => workspace.id === context.workspaceId) ?? null,
     [context.workspaceId, data.workspaces],
   );
-
   if (active === "spec") return <SpecWorkspace />;
 
   const canvas = (
@@ -645,35 +606,18 @@ export function SpecialistWorkspace({
               <Plus className="size-4" />
             </button>
           )}
-          {active === "scout" && context.organizationId && organizations.length > 0 && serverAccess === "ready" && (
-            data.workspaces.length > 0 ? (
-              <label className="relative hidden md:block">
-                <span className="sr-only">Workspace</span>
-                <select
-                  value={context.workspaceId ?? ""}
-                  onChange={(event) => setContext({ workspaceId: event.target.value || undefined })}
-                  disabled={boundContext?.kind === active}
-                  title={boundContext?.kind === active ? "Start a new specialist conversation to change workspace" : undefined}
-                  className="h-9 appearance-none rounded-xl bg-bg-secondary pl-8 pr-8 text-xs font-medium text-ink-secondary outline-none transition focus:ring-2 focus:ring-accent/20"
-                >
-                  <option value="">Choose workspace…</option>
-                  {data.workspaces.map((workspace) => (
-                    <option key={workspace.id} value={workspace.id}>{workspace.display_name}</option>
-                  ))}
-                </select>
-                <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 size-3.5 -translate-y-1/2 text-ink-faint" />
-              </label>
-            ) : boundContext?.kind !== active ? (
-              <button
-                type="button"
-                onClick={() => void createWorkspace()}
-                disabled={creatingWorkspace}
-                className="flex h-9 items-center gap-1.5 rounded-xl bg-accent px-3 text-xs font-semibold text-on-accent transition hover:bg-accent/90 disabled:opacity-50"
-              >
-                <Plus className="size-3.5" />
-                {creatingWorkspace ? "Creating…" : "Create workspace"}
-              </button>
-            ) : null
+          {active === "scout" && (
+            <ScoutWorkspaceControl
+              organizationId={context.organizationId}
+              organizations={organizations}
+              workspaces={data.workspaces}
+              workspaceId={context.workspaceId}
+              serverReady={serverAccess === "ready"}
+              bound={boundContext?.kind === active}
+              creating={creatingWorkspace}
+              onSelect={(workspaceId) => setContext({ workspaceId })}
+              onCreate={() => void createWorkspace()}
+            />
           )}
           <span className={cn(
             "hidden rounded-full px-2.5 py-1 text-xs font-medium sm:inline-flex",
@@ -700,50 +644,23 @@ export function SpecialistWorkspace({
         </div>
       </header>
 
+      {active === "scout" && workspaceCreateNotice && (
+        <ScoutWorkspaceNotice
+          notice={workspaceCreateNotice}
+          onDismiss={() => setWorkspaceCreateNotice(null)}
+        />
+      )}
+
       {organizationDialogOpen && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4" role="presentation">
-          <form
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="create-scout-organization-title"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void createOrganization();
-            }}
-            className="w-full max-w-md rounded-2xl border border-border bg-bg-elevated p-5 shadow-xl"
-          >
-            <h2 id="create-scout-organization-title" className="text-base font-semibold text-ink">Create Scout organization</h2>
-            <p className="mt-1 text-xs leading-5 text-ink-muted">This creates the explicit tenant boundary. Scout will still wait for you to create a workspace and press Start run.</p>
-            <label className="mt-4 block text-xs font-medium text-ink-secondary">
-              Organization name
-              <input
-                value={organizationName}
-                onChange={(event) => setOrganizationName(event.target.value)}
-                autoFocus
-                className="mt-1.5 h-10 w-full rounded-xl border border-border bg-bg px-3 text-sm text-ink outline-none focus:border-accent"
-              />
-            </label>
-            <label className="mt-3 block text-xs font-medium text-ink-secondary">
-              Company domain
-              <input
-                value={organizationDomain}
-                onChange={(event) => setOrganizationDomain(event.target.value)}
-                placeholder="example.com"
-                className="mt-1.5 h-10 w-full rounded-xl border border-border bg-bg px-3 text-sm text-ink outline-none focus:border-accent"
-              />
-            </label>
-            <div className="mt-5 flex justify-end gap-2">
-              <button type="button" onClick={() => setOrganizationDialogOpen(false)} className="rounded-xl px-3 py-2 text-xs font-medium text-ink-muted hover:bg-bg-hover">Cancel</button>
-              <button
-                type="submit"
-                disabled={creatingOrganization || !organizationName.trim() || !organizationDomain.trim()}
-                className="rounded-xl bg-accent px-3 py-2 text-xs font-semibold text-on-accent disabled:opacity-50"
-              >
-                {creatingOrganization ? "Creating…" : "Create organization"}
-              </button>
-            </div>
-          </form>
-        </div>
+        <ScoutOrganizationDialog
+          name={organizationName}
+          domain={organizationDomain}
+          creating={creatingOrganization}
+          onNameChange={setOrganizationName}
+          onDomainChange={setOrganizationDomain}
+          onCancel={() => setOrganizationDialogOpen(false)}
+          onCreate={() => void createOrganization()}
+        />
       )}
 
       {access !== "ready" ? (

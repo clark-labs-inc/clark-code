@@ -343,6 +343,45 @@ impl Provider for LocalAgentProvider {
         self.session_mode = session_mode.clone();
         let sandbox = Arc::new(sandbox);
 
+        // Compatible desktop memories are host-owned startup state, not an
+        // agent filesystem action. Import them before rendering the memory
+        // prompt so Plan Mode receives the same migrated context as Full
+        // Access, while remote workers never read the desktop user's home.
+        if config.tools_enabled
+            && config.memories_enabled
+            && config.compatible_memory_import_enabled
+            && !config.remote_worker
+            && !self.isolation.disposable_writer()
+        {
+            let home = std::env::var_os("HOME")
+                .or_else(|| std::env::var_os("USERPROFILE"))
+                .filter(|value| !value.is_empty())
+                .map(std::path::PathBuf::from);
+            let global_dir = config
+                .memory_scope
+                .as_deref()
+                .and_then(crate::memory::global_memory_dir_for_scope);
+            let report = crate::external_import::migrate_memories(
+                &LocalExecutor,
+                sandbox.root(),
+                home.as_deref(),
+                global_dir.as_deref(),
+            )
+            .await;
+            if report.discovered() > 0 || !report.failures.is_empty() {
+                tracing::info!(
+                    created = report.created,
+                    updated = report.updated,
+                    unchanged = report.unchanged,
+                    failures = report.failures.len(),
+                    "compatible desktop memory migration completed"
+                );
+            }
+            for error in report.failures {
+                tracing::warn!(error, "compatible desktop memory migration was incomplete");
+            }
+        }
+
         // Configured MCP stdio servers are trusted connector processes. Their
         // individual tool calls remain permission-gated as External, but a
         // network connector itself cannot work inside the offline project

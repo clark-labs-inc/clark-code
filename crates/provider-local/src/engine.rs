@@ -30,7 +30,6 @@ const GRACE_ITERATIONS: usize = 40;
 /// Consecutive prose-only stops that follow-up plugins may recover from. Tool
 /// execution resets this counter, so long productive runs are unaffected.
 const EMPTY_OUTCOME_RETRY_BUDGET: usize = 3;
-
 /// What the goal loop does after a cleanly completed iteration.
 enum GoalStep {
     /// Launch another continuation turn with this prompt text.
@@ -221,7 +220,7 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
     }
 
     let hide_propose_plan = tc.hidden_plan_protocol && tc.session.lock().await.planning.plan_mode();
-    let tools = desktop_tool_registry(
+    let tools = Arc::new(desktop_tool_registry(
         tc.registry.clone(),
         tc.ctx.clone(),
         DesktopToolRegistryOptions {
@@ -234,7 +233,7 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
             image_policy: tc.tool_image_policy.clone(),
             hide_plan_mode_tools: hide_propose_plan,
         },
-    );
+    ));
     // Documents the agent writes into this workspace become inline artifacts.
     let docs_dir = tc.ctx.sandbox.docs_root().map(std::path::Path::to_path_buf);
     let desktop_sink = Arc::new(
@@ -280,7 +279,7 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
     let compactor = CheckpointCompactor::new(tc.llm.clone(), tc.compaction.clone());
     let mut builder = agent_loop::AgentBuilder::new()
         .stream(Arc::new(stream))
-        .tools(tools)
+        .tools_arc(tools.clone())
         .event_sink(sink)
         .default_execution_mode(agent_loop::ExecutionMode::Parallel)
         .grace_iterations(GRACE_ITERATIONS)
@@ -294,6 +293,10 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
         .model_id(tc.model.clone())
         .empty_outcome_retry_budget(EMPTY_OUTCOME_RETRY_BUDGET)
         .steering_arc(steering.clone())
+        // Project every oversized re-fetchable result before the first model
+        // request that can contain it. The complete event remains durable;
+        // the model chooses whether a bounded result needs a narrower refetch.
+        .context_transform(agent_loop::ToolResultBudget::new(tools))
         .context_transform(compactor.clone())
         // Transparent context-window recovery: a provider overflow mid-run
         // force-compacts the live transcript and retries the same call
@@ -433,13 +436,19 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
                 incidents.mark_failed();
                 break Err(error);
             }
+            incidents.attach_execution_recovery(recovery::execution_recovery(boundary));
+            let completed_background =
+                recovery::await_background_completion(&tc.ctx.background, &cancel).await;
             {
                 let mut session = tc.session.lock().await;
                 compactor.commit_appended(&mut session.transcript, completed_transcript.drain());
-                session.transcript.push(recovery::transcript_marker());
+                session
+                    .transcript
+                    .push(recovery::transcript_marker(&completed_background));
             }
-            incidents.attach_execution_recovery(recovery::execution_recovery(boundary));
-            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            if completed_background.is_empty() {
+                recovery::provider_backoff(&cancel).await;
+            }
         };
 
         match attempt_result {

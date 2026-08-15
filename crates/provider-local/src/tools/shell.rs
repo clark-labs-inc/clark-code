@@ -232,6 +232,9 @@ impl ToolExecutor for BashOutput {
         let Some(status) = ctx.background.status(&task_id).await else {
             return ToolOutcome::error(format!("no background task `{task_id}`"));
         };
+        if status.exit_code.is_some() {
+            ctx.background.acknowledge_completion(&task_id);
+        }
         let is_error =
             status.error.is_some() || matches!(status.exit_code, Some(code) if code != Some(0));
         let mut body = format!("command: {}\n", status.command);

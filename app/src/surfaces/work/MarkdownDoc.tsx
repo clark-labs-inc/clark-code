@@ -29,11 +29,9 @@ function excerpt(markdown: string): string {
  *  workspace, so the conversation keeps one scroll axis and remains skimmable. */
 export function MarkdownDoc({
   artifact,
-  active = false,
   onOpen,
 }: {
   artifact: Artifact;
-  active?: boolean;
   onOpen?: (artifact: Artifact) => void;
 }) {
   const reduce = useReducedMotion();
@@ -67,11 +65,9 @@ export function MarkdownDoc({
   return (
     <m.div
       {...accessibleMotion(RISE, reduce)}
-      className={`overflow-hidden border-y bg-transparent ${
-        active ? "border-accent shadow-[inset_3px_0_0_var(--color-accent)]" : "border-border-subtle"
-      }`}
+      className="overflow-hidden border-y border-border-subtle bg-transparent"
     >
-      <header className="flex items-center gap-2 px-3 py-2">
+      <header className="flex items-center gap-2 px-3 py-2 transition-colors group-focus-visible/artifact:bg-accent-subtle">
         <FileText className="size-4 shrink-0 text-accent" />
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-medium text-ink">{artifact.title}</div>

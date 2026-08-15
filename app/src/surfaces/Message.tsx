@@ -15,7 +15,9 @@ import { cn } from "../lib/cn";
 import { useCopy } from "../lib/clipboard";
 import { userAttachmentBlocks, userTextBody } from "../lib/messageBlocks";
 import { parseNarration, presentationKind } from "../lib/narration";
+import { thinkingForDisplay } from "../lib/thinkingPresentation";
 import { MarkdownContent, MARKDOWN_CLASSES } from "./MarkdownContent";
+import { StreamingReplyFrame } from "./StreamingReply";
 import type { ContentBlock, MessagePhase, Role } from "../core-bridge/types";
 
 function text(blocks: ContentBlock[]): string {
@@ -61,6 +63,7 @@ function CopyButton({
 function ThinkingBlock({ text }: { text: string }) {
   const [open, setOpen] = useState(false);
   const reduce = useReducedMotion();
+  const displayedText = thinkingForDisplay(text);
   return (
     <div>
       <button
@@ -79,7 +82,7 @@ function ThinkingBlock({ text }: { text: string }) {
             className="overflow-hidden"
           >
             <div className={cn("mt-1 max-h-52 overflow-auto border-l border-border-subtle pl-3 text-xs leading-relaxed text-ink-muted", MARKDOWN_CLASSES)}>
-              <MarkdownContent>{text}</MarkdownContent>
+              <MarkdownContent>{displayedText}</MarkdownContent>
             </div>
           </m.div>
         )}
@@ -224,19 +227,21 @@ function MessageImpl({
             <div
               key={i}
               className={cn(
-                "min-w-0 w-full text-base leading-[1.6] [overflow-wrap:anywhere]",
+                "min-w-0 w-full text-base leading-[1.72] [overflow-wrap:anywhere]",
                 MARKDOWN_CLASSES,
                 kind === "narrate" && "text-ink-secondary",
               )}
             >
-              <MarkdownContent
-                mode={live ? "streaming" : "static"}
-                className="min-w-0 w-full"
-                animated={reduce ? CHAT_REDUCED_TEXT_ANIMATION : CHAT_TEXT_ANIMATION}
-                isAnimating={live || animateEntry}
-              >
-                {span.text}
-              </MarkdownContent>
+              <StreamingReplyFrame text={span.text} streaming={live}>
+                <MarkdownContent
+                  mode={live ? "streaming" : "static"}
+                  className="min-w-0 w-full"
+                  animated={reduce ? CHAT_REDUCED_TEXT_ANIMATION : CHAT_TEXT_ANIMATION}
+                  isAnimating={live || animateEntry}
+                >
+                  {span.text}
+                </MarkdownContent>
+              </StreamingReplyFrame>
             </div>
           );
         })}

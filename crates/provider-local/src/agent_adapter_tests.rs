@@ -261,6 +261,13 @@ async fn desktop_sink_projects_final_answer_as_text_without_a_tool_row() {
     .await;
 
     let events = std::iter::from_fn(|| receive.try_recv().ok()).collect::<Vec<_>>();
+    assert!(events.iter().any(|event| matches!(
+        event,
+        desktop::AgentEvent::MessagePhase {
+            phase: desktop::MessagePhase::FinalAnswer,
+            ..
+        }
+    )));
     assert_eq!(
         events
             .iter()

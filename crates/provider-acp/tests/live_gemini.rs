@@ -5,7 +5,7 @@
 //! makes a real (billed, non-deterministic) model call. Run manually:
 //!
 //! ```sh
-//! cargo test -p provider-acp --test live_gemini -- --ignored --nocapture
+//! cargo nextest run -p provider-acp --test live_gemini --run-ignored only --no-capture
 //! ```
 
 use std::time::Duration;

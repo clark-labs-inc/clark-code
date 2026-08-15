@@ -62,6 +62,81 @@ fn contains_reserved_protocol_marker(text: &str) -> bool {
     .any(|marker| normalized.contains(marker))
 }
 
+/// Holds the initial token and then only the currently-generating word while
+/// publishing completed words.
+///
+/// Reserved provider-control markers are identifier-like and never contain
+/// whitespace. Keeping the open word private preserves marker quarantine
+/// across arbitrary SSE chunk boundaries. Retaining the first token until a
+/// second begins also preserves the complete-turn check for unprompted
+/// identity residue, which is structurally a single identifier-like token.
+pub(super) struct StreamingGuard<'a, Sink> {
+    pending: String,
+    sink: &'a mut Sink,
+    violation: Option<OutputViolation>,
+    published: bool,
+}
+
+impl<'a, Sink> StreamingGuard<'a, Sink>
+where
+    Sink: FnMut(&str),
+{
+    pub(super) fn new(sink: &'a mut Sink) -> Self {
+        Self {
+            pending: String::new(),
+            sink,
+            violation: None,
+            published: false,
+        }
+    }
+
+    pub(super) fn push(&mut self, delta: &str) {
+        if delta.is_empty() || self.violation.is_some() {
+            return;
+        }
+        self.pending.push_str(delta);
+        if !self.published && self.pending.split_whitespace().nth(1).is_none() {
+            return;
+        }
+        let Some(boundary) = self
+            .pending
+            .char_indices()
+            .rev()
+            .find_map(|(index, character)| {
+                character
+                    .is_whitespace()
+                    .then_some(index + character.len_utf8())
+            })
+        else {
+            return;
+        };
+        let completed = self.pending[..boundary].to_string();
+        if contains_reserved_protocol_marker(&completed) {
+            self.violation = Some(OutputViolation::ReservedProtocolMarker);
+            self.pending.clear();
+            return;
+        }
+        self.pending.drain(..boundary);
+        if !completed.is_empty() {
+            (self.sink)(&completed);
+            self.published = true;
+        }
+    }
+
+    pub(super) fn flush(&mut self) {
+        if self.violation.is_some() || self.pending.is_empty() {
+            return;
+        }
+        let pending = std::mem::take(&mut self.pending);
+        (self.sink)(&pending);
+        self.published = true;
+    }
+
+    pub(super) fn published(&self) -> bool {
+        self.published
+    }
+}
+
 fn collapse_underscores(text: &str) -> String {
     let mut normalized = String::with_capacity(text.len());
     let mut previous_underscore = false;
@@ -218,5 +293,48 @@ mod tests {
                 "safe text rejected: {text}"
             );
         }
+    }
+
+    #[test]
+    fn streaming_guard_publishes_completed_words_one_delta_behind() {
+        let mut published = Vec::new();
+        {
+            let mut publish = |text: &str| published.push(text.to_string());
+            let mut guard = StreamingGuard::new(&mut publish);
+            guard.push("Clark");
+            guard.push(" streams");
+            guard.push(" smoothly");
+            guard.flush();
+            assert!(guard.published());
+        }
+        assert_eq!(published, ["Clark ", "streams ", "smoothly"]);
+    }
+
+    #[test]
+    fn streaming_guard_withholds_reserved_marker_split_across_deltas() {
+        let mut published = Vec::new();
+        {
+            let mut publish = |text: &str| published.push(text.to_string());
+            let mut guard = StreamingGuard::new(&mut publish);
+            guard.push("apparently safe ");
+            guard.push("<|begin__of");
+            guard.push("__sentence|> ");
+            guard.push("must stay hidden");
+            guard.flush();
+        }
+        assert_eq!(published, ["apparently safe "]);
+    }
+
+    #[test]
+    fn streaming_guard_keeps_a_single_identity_token_private() {
+        let mut published = Vec::new();
+        {
+            let mut publish = |text: &str| published.push(text.to_string());
+            let mut guard = StreamingGuard::new(&mut publish);
+            guard.push("foreign_identity.example.com");
+            guard.push("\n");
+            assert!(!guard.published());
+        }
+        assert!(published.is_empty());
     }
 }

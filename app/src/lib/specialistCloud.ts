@@ -258,14 +258,47 @@ export async function specialistPublishOverview(
     : parseRsiOverview(result);
 }
 
-/** A workspace created through `POST /cli/scout/workspaces`. The create
- * endpoint returns a minimal camelCase shape (id, displayName, status); the
- * full workspace with snapshot/sequence counts arrives on the next
- * `scout_workspaces` list refresh. */
+/** The server's direct cartography create response. Counts and status arrive
+ * from the workspace catalog, so the desktop projects their known initial
+ * values immediately instead of rendering a dead control until a refetch. */
 export interface ScoutCreatedWorkspace {
   id: string;
-  displayName?: string;
-  status?: string;
+  organization_id: string;
+  stable_key: string;
+  display_name: string;
+  coordinator_public_key: string;
+}
+
+function createdScoutWorkspace(
+  value: unknown,
+  organizationId: string,
+): ScoutWorkspace {
+  if (!value || typeof value !== "object") {
+    throw new Error("Clark returned an invalid Scout workspace");
+  }
+  const created = value as Partial<ScoutCreatedWorkspace>;
+  if (
+    typeof created.id !== "string" || !created.id.trim()
+    || created.organization_id !== organizationId
+    || typeof created.stable_key !== "string" || !created.stable_key.trim()
+    || typeof created.display_name !== "string" || !created.display_name.trim()
+    || typeof created.coordinator_public_key !== "string" || !created.coordinator_public_key.trim()
+  ) {
+    throw new Error("Clark returned an invalid Scout workspace");
+  }
+  return {
+    id: created.id,
+    organization_id: created.organization_id,
+    stable_key: created.stable_key,
+    display_name: created.display_name,
+    status: "active",
+    latest_change_sequence: 0,
+    source_count: 0,
+    active_machine_count: 0,
+    run_count: 0,
+    simulation_count: 0,
+    updated_at_ms: Date.now(),
+  };
 }
 
 /** Create a Scout cartography workspace after the user presses the visible
@@ -274,18 +307,27 @@ export async function specialistCreateWorkspace(
   _creds: CloudCreds,
   organizationId: string,
   displayName: string,
-): Promise<ScoutCreatedWorkspace> {
+): Promise<ScoutWorkspace> {
   if (!inTauri()) {
     return {
       id: "ws-demo-created",
-      displayName,
+      organization_id: organizationId,
+      stable_key: "cli-scout-workspace",
+      display_name: displayName,
       status: "active",
+      latest_change_sequence: 0,
+      source_count: 0,
+      active_machine_count: 0,
+      run_count: 0,
+      simulation_count: 0,
+      updated_at_ms: Date.now(),
     };
   }
-  return productRequest<ScoutCreatedWorkspace>("specialist.create_workspace", {
+  const created = await productRequest<unknown>("specialist.create_workspace", {
     organizationId,
     displayName,
   });
+  return createdScoutWorkspace(created, organizationId);
 }
 
 export async function specialistCreateSecurityCampaign(

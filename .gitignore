@@ -55,4 +55,5 @@ service-account*.json
 
 # Agent local state (memory, scratch screenshots) — never committed
 .claude/
+.agent/
 .clark/

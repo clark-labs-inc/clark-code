@@ -53,4 +53,41 @@ describe("MarkdownContent", () => {
     expect(markup).toContain("Save a Copy");
     expect(markup).toContain("Copy Path");
   });
+
+  it("renders tables as a readable semantic ledger in static and streaming modes", () => {
+    const markdown = [
+      "| Field | Value |",
+      "| --- | --- |",
+      "| Vendor ID | `0x17E9` (6121) |",
+      "| Connection | Running through USB |",
+    ].join("\n");
+    const staticMarkup = renderToStaticMarkup(
+      <MarkdownContent>{markdown}</MarkdownContent>,
+    );
+    const streamingMarkup = renderToStaticMarkup(
+      <MarkdownContent mode="streaming">{markdown}</MarkdownContent>,
+    );
+    const mathMarkup = renderToStaticMarkup(
+      <MarkdownContent math>{markdown}</MarkdownContent>,
+    );
+
+    for (const markup of [staticMarkup, streamingMarkup, mathMarkup]) {
+      expect(markup).toContain('data-markdown-table="true"');
+      expect(markup).toContain('aria-label="Scrollable table"');
+      expect(markup).toContain('class="markdown-data-table"');
+      expect(markup).toContain("<thead>");
+      expect(markup).toContain("<tbody>");
+      expect(markup).toContain("<th>Field</th>");
+      expect(markup).toContain("<td>Vendor ID</td>");
+      expect(markup).toContain("<code>0x17E9</code>");
+    }
+
+    const incompleteMarkup = renderToStaticMarkup(
+      <MarkdownContent mode="streaming">
+        {"| Field | Value |\n| --- | --- |\n| Vendor ID | `0x17"}
+      </MarkdownContent>,
+    );
+    expect(incompleteMarkup).toContain('data-markdown-table="true"');
+    expect(incompleteMarkup).toContain("<td>Vendor ID</td>");
+  });
 });

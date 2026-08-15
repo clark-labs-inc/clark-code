@@ -19,6 +19,23 @@ fn tool_call_body() -> String {
     .join("\n\n")
 }
 
+fn named_tool_call_body(call_id: &str, name: &str, arguments: Value) -> String {
+    let chunk = json!({
+        "choices": [{"delta": {"tool_calls": [{
+            "index": 0,
+            "id": call_id,
+            "function": {"name": name, "arguments": arguments.to_string()}
+        }]}}]
+    });
+    [
+        format!("data: {chunk}"),
+        r#"data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}"#.to_string(),
+        "data: [DONE]".to_string(),
+        String::new(),
+    ]
+    .join("\n\n")
+}
+
 fn final_body() -> String {
     let arguments = json!({"content": "continued"}).to_string();
     [
@@ -109,7 +126,8 @@ async fn new_provider(
                 "base_url": format!("http://{addr}/v1"),
                 "model": "fake-model",
                 "memories": false,
-                "sandbox_mode": "disabled"
+                "sandbox_mode": "disabled",
+                "permissions": {"bash": "allow", "bash_wait": "allow"}
             }),
             ..Default::default()
         })
@@ -372,7 +390,7 @@ async fn exhausted_transport_retries_update_one_provider_incident_that_settles()
         .expect("execution recovery update");
     let recovery = recovering.execution_recovery.as_ref().unwrap();
     assert_eq!(recovery.attempt, 2);
-    assert_eq!(recovery.max_attempts, 2);
+    assert_eq!(recovery.max_attempts, 3);
     assert_eq!(recovering.request.retries.transient, 3);
     assert_eq!(recovery.boundary.completed_tools, 1);
     assert_eq!(
@@ -409,6 +427,120 @@ async fn exhausted_transport_retries_update_one_provider_incident_that_settles()
                 .as_str()
                 .is_some_and(|content| content.contains("runtime recovery"))
         }));
+}
+
+/// Deterministic continuity eval for the production failure shape: a build is
+/// still session-owned after its host wait times out, the model transport then
+/// disappears, and whole-run recovery must consume the eventual terminal
+/// receipt and finish without a second user prompt.
+#[tokio::test]
+async fn eval_awaited_build_survives_provider_outage_without_keep_going() {
+    let dir = tempfile::tempdir().unwrap();
+    let command = if cfg!(windows) {
+        "Start-Sleep -Milliseconds 150; Write-Output 'BUILD_COMPLETE'"
+    } else {
+        "sleep 0.15; echo BUILD_COMPLETE"
+    };
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let mut requests = Vec::new();
+
+        let (mut start_build, _) = listener.accept().await.unwrap();
+        requests.push(read_request(&mut start_build).await);
+        start_build
+            .write_all(&http_response(&named_tool_call_body(
+                "build-1",
+                "bash",
+                json!({"command": command, "run_in_background": true}),
+            )))
+            .await
+            .unwrap();
+
+        let (mut wait_for_build, _) = listener.accept().await.unwrap();
+        requests.push(read_request(&mut wait_for_build).await);
+        wait_for_build
+            .write_all(&http_response(&named_tool_call_body(
+                "wait-1",
+                "bash_wait",
+                json!({
+                    "task_id": "bg-1",
+                    "timeout_ms": 5,
+                    "poll_interval_ms": 50
+                }),
+            )))
+            .await
+            .unwrap();
+
+        // The next model request and all three request-local retries fail
+        // before output, forcing the whole-run recovery boundary.
+        for _ in 0..4 {
+            let (mut interrupted, _) = listener.accept().await.unwrap();
+            requests.push(read_request(&mut interrupted).await);
+            drop(interrupted);
+        }
+
+        let (mut recovered, _) = listener.accept().await.unwrap();
+        requests.push(read_request(&mut recovered).await);
+        recovered
+            .write_all(&http_response(&final_body()))
+            .await
+            .unwrap();
+        requests
+    });
+    let (mut provider, session) = new_provider(addr, dir.path()).await;
+
+    // One user prompt must be sufficient. A Done outcome is the typed proof
+    // that the runtime did not surface a Keep going boundary.
+    let stream = provider
+        .prompt(
+            &session.id,
+            PromptInput::text("Run the build, wait for it, fix failures, and finish."),
+        )
+        .await
+        .unwrap();
+    let events = run_events(stream).await;
+
+    let outcome = events
+        .iter()
+        .find_map(|event| match event {
+            AgentEvent::RunFinished { outcome, .. } => Some(outcome),
+            _ => None,
+        })
+        .expect("eval has a typed terminal outcome");
+    assert_eq!(outcome.status, RunStatus::Done, "events: {events:#?}");
+    let execution = outcome.execution.as_ref().expect("execution receipt");
+    assert_eq!(execution.attempts, 2);
+    assert_eq!(execution.recoveries, 1);
+
+    let incidents = events
+        .iter()
+        .filter_map(|event| match event {
+            AgentEvent::ProviderIncidentUpdated { incident, .. } => Some(incident),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        incidents.last().map(|incident| incident.status),
+        Some(agent_core::recovery::ProviderIncidentStatus::Recovered)
+    );
+
+    let requests = server.await.unwrap();
+    assert_eq!(requests.len(), 7);
+    let recovered = request_json(&requests[6]);
+    let messages = recovered["messages"]
+        .as_array()
+        .expect("recovered request has messages");
+    let recovery_receipts = messages
+        .iter()
+        .filter_map(|message| message["content"].as_str())
+        .filter(|content| content.contains("Host-observed background completion `bg-1`"))
+        .collect::<Vec<_>>();
+    assert_eq!(recovery_receipts.len(), 1, "messages: {messages:#?}");
+    let receipt = recovery_receipts[0];
+    assert!(receipt.contains("exit 0"), "{receipt}");
+    assert!(receipt.contains("BUILD_COMPLETE"), "{receipt}");
+    assert!(receipt.contains("fix failures, and continue"), "{receipt}");
 }
 
 #[tokio::test]
