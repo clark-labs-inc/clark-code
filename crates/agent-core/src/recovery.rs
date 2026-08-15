@@ -85,7 +85,6 @@ pub struct ExecutionBoundaryReceipt {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExecutionRecovery {
     pub attempt: u32,
-    pub max_attempts: u32,
     pub boundary: ExecutionBoundaryReceipt,
     pub started_at_ms: u64,
 }

@@ -82,6 +82,53 @@ describe("assistant message actions", () => {
     expect(markup).toContain("leading-[1.72]");
   });
 
+  it("omits native reasoning blocks from the UI and copied Markdown", () => {
+    const markup = renderToStaticMarkup(
+      <Message
+        role="agent"
+        blocks={[
+          { type: "thinking", text: "Private chain of thought." },
+          { type: "text", text: "The visible answer." },
+        ]}
+        timelineIndex={0}
+      />,
+    );
+
+    expect(markup).toContain("The visible answer.");
+    expect(markup).not.toContain("Thinking");
+    expect(markup).not.toContain("Private chain of thought.");
+  });
+
+  it("omits legacy inline thinking spans without hiding adjacent answers", () => {
+    const markup = renderToStaticMarkup(
+      <Message
+        role="agent"
+        blocks={[{
+          type: "text",
+          text: "Before. <thinking>Private deliberation.</thinking> After.",
+        }]}
+        timelineIndex={0}
+      />,
+    );
+
+    expect(markup).toContain("Before.");
+    expect(markup).toContain("After.");
+    expect(markup).not.toContain("Thinking");
+    expect(markup).not.toContain("Private deliberation.");
+  });
+
+  it("renders no row for a reasoning-only assistant event", () => {
+    const markup = renderToStaticMarkup(
+      <Message
+        role="agent"
+        blocks={[{ type: "thinking", text: "Private chain of thought." }]}
+        timelineIndex={0}
+      />,
+    );
+
+    expect(markup).toBe("");
+  });
+
   it("marks new user and assistant rows with role-specific entrance motion", () => {
     const user = renderToStaticMarkup(
       <Message

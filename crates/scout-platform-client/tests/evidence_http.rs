@@ -115,6 +115,111 @@ async fn enrolled_session_signs_claims_with_a_host_private_bound_identity() {
 }
 
 #[tokio::test]
+async fn session_claims_with_the_exact_run_id_issued_by_start_run() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let base_url = format!("http://{address}");
+    let organization_id = Uuid::new_v4();
+    let workspace_id = Uuid::new_v4();
+    let run_id = Uuid::new_v4();
+    let identity_root = tempfile::tempdir().unwrap();
+    let binding = format!("{base_url}|{organization_id}|{workspace_id}");
+    let identity =
+        CollectorMachineIdentity::load_or_create(identity_root.path(), &binding).unwrap();
+    let enrollment = MachineEnrollment {
+        id: Uuid::new_v4(),
+        organization_id,
+        workspace_id,
+        signer_id: identity.signer_id(),
+        public_key: identity.public_key_hex(),
+        platform: "linux".into(),
+        architecture: "x86_64".into(),
+        coordinator_public_key: "ab".repeat(32),
+    };
+    let enrollment_json = serde_json::to_vec(&enrollment).unwrap();
+    let recorded = Arc::new(Mutex::new(Vec::new()));
+    let server_recorded = recorded.clone();
+    let server = thread::spawn(move || {
+        let (mut enroll_stream, _) = listener.accept().unwrap();
+        server_recorded
+            .lock()
+            .unwrap()
+            .push(read_request(&mut enroll_stream));
+        write_response(
+            &mut enroll_stream,
+            "201 Created",
+            "application/json",
+            &enrollment_json,
+        );
+
+        let (mut start_stream, _) = listener.accept().unwrap();
+        let start_request = read_request(&mut start_stream);
+        let start: serde_json::Value = serde_json::from_slice(&start_request.body).unwrap();
+        let receipt = serde_json::json!({
+            "organization_id": organization_id,
+            "workspace_id": workspace_id,
+            "request_id": start["request_id"],
+            "run_id": run_id,
+            "charter_id": Uuid::new_v4(),
+            "source_id": Uuid::new_v4(),
+            "initial_task_id": Uuid::new_v4(),
+            "created": true,
+        });
+        server_recorded.lock().unwrap().push(start_request);
+        write_response(
+            &mut start_stream,
+            "201 Created",
+            "application/json",
+            &serde_json::to_vec(&receipt).unwrap(),
+        );
+
+        let (mut claim_stream, _) = listener.accept().unwrap();
+        let claim_request = read_request(&mut claim_stream);
+        let claim: TaskClaimRequest = serde_json::from_slice(&claim_request.body).unwrap();
+        let response = TaskClaimResponse {
+            request_id: claim.request_id.clone(),
+            task: None,
+        };
+        server_recorded.lock().unwrap().push(claim_request);
+        write_response(
+            &mut claim_stream,
+            "200 OK",
+            "application/json",
+            &serde_json::to_vec(&response).unwrap(),
+        );
+    });
+
+    let session = ScoutCartographySession::enroll(
+        ScoutCartographySessionConfig::new(
+            &base_url,
+            "platform-test-key",
+            "/v1/cartography",
+            identity_root.path(),
+            organization_id,
+            workspace_id,
+            "linux",
+            "x86_64",
+        )
+        .unwrap(),
+    )
+    .await
+    .unwrap();
+    let receipt = session
+        .start_run("scout-run:exact".into(), "Map the system".into())
+        .await
+        .unwrap();
+    assert_eq!(receipt.run_id, run_id);
+    session.claim_next_task(receipt.run_id, 30).await.unwrap();
+    server.join().unwrap();
+
+    let requests = recorded.lock().unwrap();
+    assert_eq!(requests[1].path, "/v1/cartography/runs/start");
+    assert_eq!(requests[2].path, "/v1/cartography/tasks/claim");
+    let posted_claim: TaskClaimRequest = serde_json::from_slice(&requests[2].body).unwrap();
+    assert_eq!(posted_claim.run_id, run_id);
+}
+
+#[tokio::test]
 async fn enrollment_pins_the_exact_backend_and_machine_binding() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();

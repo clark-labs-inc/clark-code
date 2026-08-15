@@ -174,3 +174,15 @@ export function ModelPill() {
     </div>
   );
 }
+
+export function QuickChatModelLabel() {
+  return (
+    <span
+      aria-label="Quick Chat uses the Free tier"
+      title="Quick Chat always uses the Free tier"
+      className="flex min-h-8 items-center rounded-lg px-2.5 py-1 text-xs font-medium text-ink-secondary"
+    >
+      Free
+    </span>
+  );
+}

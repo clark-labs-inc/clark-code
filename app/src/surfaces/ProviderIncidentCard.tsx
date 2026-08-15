@@ -21,7 +21,20 @@ export function ProviderIncidentCard({
   modelRouteLabel?: string;
 }) {
   const terminal = incident.status === "failed" || incident.status === "interrupted";
-  if (!terminal) return null;
+  if (!terminal || !onContinue) return null;
+  const serviceUnavailable = Boolean(
+    incident.provider_status && incident.provider_status >= 500,
+  ) || incident.provider_error_type === "upstream_unavailable";
+  const title = serviceUnavailable
+    ? "Clark service was unavailable."
+    : incident.category === "rate_limit"
+      ? "The model is busy right now."
+      : incident.category === "timeout"
+        ? "The model did not respond in time."
+        : "The run paused before it could finish.";
+  const detail = serviceUnavailable
+    ? "Your local work is saved. Resume this task when the service is back."
+    : "Your local work is saved. Resume this task when you’re ready.";
 
   return (
     <section
@@ -32,18 +45,16 @@ export function ProviderIncidentCard({
       <div className="flex items-start gap-2.5">
         <Clock3 className="mt-0.5 size-4 shrink-0 text-ink-muted" aria-hidden />
         <div className="min-w-0 flex-1">
-          <p className="font-medium text-ink">Taking a little longer.</p>
-          <p className="mt-0.5 text-ink-muted">Your completed work is saved. Keep going when you&apos;re ready.</p>
-          {onContinue && (
-            <button
-              type="button"
-              onClick={onContinue}
-              className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-border bg-bg-elevated px-2.5 py-1.5 text-xs font-medium text-ink-secondary transition hover:bg-bg-hover hover:text-ink"
-            >
-              <RotateCcw className="size-3.5" aria-hidden />
-              Keep going
-            </button>
-          )}
+          <p className="font-medium text-ink">{title}</p>
+          <p className="mt-0.5 text-ink-muted">{detail}</p>
+          <button
+            type="button"
+            onClick={onContinue}
+            className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-border bg-bg-elevated px-2.5 py-1.5 text-xs font-medium text-ink-secondary transition hover:bg-bg-hover hover:text-ink"
+          >
+            <RotateCcw className="size-3.5" aria-hidden />
+            Resume task
+          </button>
         </div>
       </div>
     </section>

@@ -78,7 +78,6 @@ fn completed_goal_settles_only_its_current_run_checklist() {
             objective: "ship the feature".into(),
             status: GoalStatus::Complete,
             run: None,
-            token_budget: None,
             tokens_used: 0,
             time_used_seconds: 1,
             continuations: 0,

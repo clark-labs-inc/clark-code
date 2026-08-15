@@ -340,7 +340,7 @@ async fn set_collaboration_mode_flips_plan_mode_flag() {
     {
         let mut state = p.session.lock().await;
         assert!(!state.planning.plan_mode());
-        crate::tools::goal::start_goal(&mut state, "finish the migration".into(), None).unwrap();
+        crate::tools::goal::start_goal(&mut state, "finish the migration".into()).unwrap();
     }
 
     p.set_collaboration_mode(&session_id, CollaborationMode::Plan)
@@ -607,7 +607,7 @@ async fn provider_lists_stops_and_cleans_exact_background_task_ids() {
 }
 
 #[tokio::test]
-async fn typed_goal_state_resumes_blocked_and_rebudgets_budget_limited_goals() {
+async fn typed_goal_state_resumes_blocked_goals() {
     let directory = tempfile::tempdir().unwrap();
     let mut provider = LocalAgentProvider::new();
     provider.connect(provider_test_config()).await.unwrap();
@@ -623,7 +623,6 @@ async fn typed_goal_state_resumes_blocked_and_rebudgets_budget_limited_goals() {
         crate::tools::goal::start_goal(
             &mut state,
             "finish Clark Code-owned terminal parity".into(),
-            Some(10_000),
         )
         .unwrap();
         let goal = state.goal.as_mut().unwrap();
@@ -637,29 +636,11 @@ async fn typed_goal_state_resumes_blocked_and_rebudgets_budget_limited_goals() {
     let restored = provider.goal_state(&session.id).await.unwrap().unwrap();
     assert_eq!(restored.status, agent_core::GoalStatus::Blocked);
     assert_eq!(restored.continuations, 3);
-    let resumed = provider.resume_goal(&session.id, None).await.unwrap();
+    let resumed = provider.resume_goal(&session.id).await.unwrap();
     assert_eq!(resumed.status, agent_core::GoalStatus::Active);
     assert_eq!(resumed.tokens_used, 4_000);
     assert_eq!(resumed.continuations, 3);
     assert!(resumed.blocker_reason.is_none());
-
-    {
-        let mut state = provider.session.lock().await;
-        let goal = state.goal.as_mut().unwrap();
-        goal.status = agent_core::GoalStatus::BudgetLimited;
-        goal.tokens_used = 10_000;
-    }
-    assert!(provider.resume_goal(&session.id, None).await.is_err());
-    assert!(provider
-        .resume_goal(&session.id, Some(10_000))
-        .await
-        .is_err());
-    let rebudgeted = provider
-        .resume_goal(&session.id, Some(20_000))
-        .await
-        .unwrap();
-    assert_eq!(rebudgeted.status, agent_core::GoalStatus::Active);
-    assert_eq!(rebudgeted.token_budget, Some(20_000));
 }
 
 #[tokio::test]
@@ -676,7 +657,7 @@ async fn prompt_admission_accepts_same_blocked_goal_and_rejects_conflicting_goal
         .unwrap();
     {
         let mut state = provider.session.lock().await;
-        crate::tools::goal::start_goal(&mut state, "finish the migration".into(), None).unwrap();
+        crate::tools::goal::start_goal(&mut state, "finish the migration".into()).unwrap();
         state.goal.as_mut().unwrap().status = agent_core::GoalStatus::Blocked;
     }
 
@@ -891,8 +872,7 @@ async fn project_settings_customize_claude_style_commit_attribution() {
 }
 
 #[tokio::test]
-async fn orchestration_tools_are_default_available_but_can_be_disabled() {
-    let dir = tempfile::tempdir().unwrap();
+async fn orchestration_tools_are_always_available_to_the_root_agent() {
     let mut enabled = LocalAgentProvider::new();
     enabled.connect(provider_test_config()).await.unwrap();
     let registry = enabled.registry.as_ref().unwrap();
@@ -908,43 +888,32 @@ async fn orchestration_tools_are_default_available_but_can_be_disabled() {
     assert!(registry.get("scout_ledger").is_none());
     assert!(registry.get("scout_probe").is_none());
     assert!(registry.get("scout_measure").is_none());
-    enabled
-        .new_session(SessionOptions {
-            cwd: Some(dir.path().to_string_lossy().into_owned()),
-            ..Default::default()
-        })
-        .await
-        .unwrap();
-    let state = enabled.session.lock().await;
-    assert!(!state.system_prompt.contains("bounded delegation"));
-    drop(state);
-
-    let mut disabled = LocalAgentProvider::new();
-    disabled
+    let mut legacy_disable_request = LocalAgentProvider::new();
+    legacy_disable_request
         .connect(ProviderConfig {
             extra: serde_json::json!({"orchestration": {"enabled": false}}),
             ..Default::default()
         })
         .await
         .unwrap();
-    assert!(disabled
+    assert!(legacy_disable_request
         .registry
         .as_ref()
         .unwrap()
         .get("delegate_read_only")
-        .is_none());
-    assert!(disabled
+        .is_some());
+    assert!(legacy_disable_request
         .registry
         .as_ref()
         .unwrap()
         .get("delegate_coding_workstreams")
-        .is_none());
-    assert!(disabled
+        .is_some());
+    assert!(legacy_disable_request
         .registry
         .as_ref()
         .unwrap()
         .get("scout_capabilities")
-        .is_none());
+        .is_some());
 }
 
 #[tokio::test]
@@ -1122,7 +1091,6 @@ async fn new_session_replays_typed_resume_into_history() {
                         objective: "finish the installation".into(),
                         status: agent_core::domain::GoalStatus::Blocked,
                         run: Some(RunId::new("old-run")),
-                        token_budget: Some(20_000),
                         tokens_used: 4_000,
                         time_used_seconds: 43,
                         continuations: 2,
@@ -1157,7 +1125,6 @@ async fn session_transcript_exports_canonical_history_and_typed_goal() {
         objective: "preserve the experiment".into(),
         status: agent_core::domain::GoalStatus::Blocked,
         run: Some(RunId::new("old-run")),
-        token_budget: Some(10_000),
         tokens_used: 2_500,
         time_used_seconds: 20,
         continuations: 1,
@@ -1207,7 +1174,7 @@ async fn session_transcript_exports_canonical_history_and_typed_goal() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "paid trigger-precision A/B; run only with explicit model and API-key authorization"]
-async fn paid_explicit_vs_proactive_delegation_trigger_precision() {
+async fn paid_autonomous_delegation_trigger_precision() {
     use agent_core::domain::RunUsage;
     use futures::StreamExt as _;
 
@@ -1234,32 +1201,18 @@ async fn paid_explicit_vs_proactive_delegation_trigger_precision() {
     }
     let cases = [
         (
-            "explicit_ordinary",
-            "explicit",
-            "Inspect alpha and beta and summarize their contracts with file citations.",
-            false,
-        ),
-        (
-            "explicit_requested",
-            "explicit",
-            "Use exactly two read-only subagents in parallel. Have one inspect alpha and one inspect beta. Wait for both, verify their citations, then compare the contracts.",
-            true,
-        ),
-        (
-            "proactive_parallel",
-            "proactive",
+            "autonomous_parallel",
             "Inspect alpha and beta independently and compare their contracts with file citations.",
             true,
         ),
         (
-            "proactive_trivial",
-            "proactive",
+            "autonomous_trivial",
             "Read alpha/module_0.txt and summarize it in one sentence.",
             false,
         ),
     ];
     let mut records = Vec::new();
-    for (id, mode, prompt, expected_delegate) in cases {
+    for (id, prompt, expected_delegate) in cases {
         let mut provider = LocalAgentProvider::new();
         provider
             .connect(ProviderConfig {
@@ -1270,13 +1223,9 @@ async fn paid_explicit_vs_proactive_delegation_trigger_precision() {
                     "model": root_model,
                     "reasoning_effort": "low",
                     "temperature": 0.0,
-                    "max_iterations": 64,
                     "permissions": {"write_file":"deny","edit_file":"deny","apply_patch":"deny","bash":"deny"},
                     "orchestration": {
-                        "enabled": true,
-                        "mode": mode,
                         "max_agents": 2,
-                        "max_attempts": 1,
                         "minimum_context_tokens": 1,
                         "token_budget": 80_000,
                         "subagent_model": subagent_model
@@ -1323,7 +1272,6 @@ async fn paid_explicit_vs_proactive_delegation_trigger_precision() {
         }
         records.push(serde_json::json!({
             "case": id,
-            "mode": mode,
             "expected_delegate": expected_delegate,
             "actual_delegate": delegated,
             "root_model": root_model,

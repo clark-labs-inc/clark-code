@@ -318,6 +318,34 @@ describe("per-conversation model", () => {
     });
   });
 
+  it("keeps an active Quick Chat on the free model when a caller requests another tier", async () => {
+    const reconfigure = vi.fn(async () => {});
+    const bridge = stubBridge({ reconfigure });
+    const quickChatId = "912a9700-7f5f-4f18-9785-b5d9315a41b4";
+    const quickChatSession = { ...sessionA, id: quickChatId } as Session;
+    useSessionStore.setState({
+      bridge,
+      session: quickChatSession,
+      activeProjectRoot: `/Users/test/.agent/workspace/${quickChatId}`,
+      localSettings: {
+        ...baseSettings,
+        model: "local-model-large",
+        reasoningEffort: "max",
+      },
+      chatModels: {
+        [quickChatId]: { model: "local-model-large", reasoningEffort: "max" },
+      },
+    });
+
+    await useSessionStore.getState().updateModelSettings({ model: "local-model-large" });
+
+    expect(useSessionStore.getState().chatModels[quickChatId]).toEqual({
+      model: "local-model",
+      reasoningEffort: "high",
+    });
+    expect(reconfigure).not.toHaveBeenCalled();
+  });
+
   it("with no active chat, updating the model edits the global default", async () => {
     const bridge = stubBridge();
     useSessionStore.setState({ bridge, session: null, localSettings: { ...baseSettings }, chatModels: {} });

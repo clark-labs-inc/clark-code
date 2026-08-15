@@ -654,13 +654,12 @@ async fn cancellation_interrupts_rate_limit_backoff() {
 #[tokio::test]
 async fn request_deadline_bounds_a_stalled_provider() {
     let base_url = stalled_endpoint(Duration::from_millis(500)).await;
-    let client = LlmClient::from_parts_with_timeouts(
+    let client = LlmClient::from_parts_with_response_start_timeout(
         &base_url,
         "fake-model",
         None,
         Vec::new(),
         None,
-        Duration::from_millis(40),
         Duration::from_millis(40),
     )
     .unwrap();

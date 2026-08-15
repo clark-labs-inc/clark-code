@@ -1,5 +1,6 @@
 use super::cloud_authority::current_account_access;
 use super::*;
+use serde::Deserialize;
 use tauri::Emitter;
 
 pub(crate) enum ProductCloudOutcome {
@@ -360,4 +361,66 @@ pub async fn desktop_conv_put(
     )
     .await?;
     Ok(summary)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct LocalConversationCheckpoint {
+    id: String,
+    title: String,
+    provider: String,
+    project: Option<String>,
+    repository_fingerprint: Option<String>,
+    remote_host: Option<String>,
+    mode: Option<String>,
+    title_locked: bool,
+    specialist_context: Option<Value>,
+    base_rev: i64,
+    snapshot: Value,
+    status: Option<String>,
+}
+
+/// Compact the account-scoped local journal independently of the cloud's full
+/// snapshot size limit. The trajectory prefix remains the cloud authority;
+/// this checkpoint only prevents already-acknowledged batches from occupying
+/// unbounded local disk when a transcript is too large for a snapshot PUT.
+#[tauri::command]
+pub async fn desktop_conv_checkpoint_local(
+    app: AppHandle,
+    checkpoint: LocalConversationCheckpoint,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let access = current_account_access(state.inner()).await?;
+    let checkpoint_seq = checkpoint
+        .snapshot
+        .get("history_checkpoint")
+        .and_then(Value::as_i64)
+        .unwrap_or_default();
+    let snapshot = crate::trajectory::normalize_snapshot_value(checkpoint.snapshot);
+    let typed_snapshot: Snapshot = serde_json::from_value(snapshot)
+        .map_err(|error| format!("local checkpoint desktop snapshot: {error}"))?;
+    let metadata = serde_json::json!({
+        "id": checkpoint.id,
+        "title": checkpoint.title,
+        "provider": checkpoint.provider,
+        "project": checkpoint.project,
+        "repositoryFingerprint": checkpoint.repository_fingerprint,
+        "remoteHost": checkpoint.remote_host,
+        "mode": checkpoint.mode,
+        "titleLocked": checkpoint.title_locked,
+        "specialistContext": checkpoint.specialist_context,
+        "rev": checkpoint.base_rev,
+        "archived": false,
+    });
+    crate::trajectory::checkpoint_snapshot(
+        crate::trajectory::outbox_path(&app)?,
+        access.owner_scope,
+        checkpoint.id,
+        metadata,
+        typed_snapshot,
+        checkpoint.base_rev,
+        checkpoint_seq,
+        checkpoint.status.as_deref() == Some("running"),
+    )
+    .await
 }

@@ -168,9 +168,7 @@ async fn paid_large_four_writer_workstreams() {
     let shared = Arc::new(SharedState {
         config: OrchestrationToolsConfig {
             policy: crate::orchestration::OrchestrationConfig {
-                enabled: true,
                 max_agents: 4,
-                max_attempts: 1,
                 token_budget: 320_000,
                 ..Default::default()
             },
@@ -305,7 +303,6 @@ async fn paid_large_single_agent_control() {
                 "model": model,
                 "reasoning_effort": "low",
                 "temperature": 0.0,
-                "max_iterations": 128,
                 "permissions": {
                     "write_file": "allow",
                     "edit_file": "allow",

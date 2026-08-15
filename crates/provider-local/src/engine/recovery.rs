@@ -100,7 +100,6 @@ mod tests;
 pub(super) fn execution_recovery(boundary: RecoveryBoundary) -> ExecutionRecovery {
     ExecutionRecovery {
         attempt: boundary.attempt,
-        max_attempts: boundary.max_attempts,
         boundary: boundary.receipt,
         started_at_ms: crate::llm::now_ms(),
     }

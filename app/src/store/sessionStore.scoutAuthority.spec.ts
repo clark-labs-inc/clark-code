@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CoreBridge, SessionOpenRequest } from "../core-bridge/bridge";
 import { emptySnapshot, type Session } from "../core-bridge/types";
 import { DEFAULT_LOCAL_SETTINGS } from "../lib/localAgent";
+import { saveSshHosts } from "../lib/sshHosts";
 import { installProductModule, neutralProduct } from "../product/productModule";
 import { useSessionStore } from "./sessionStore";
 import { liveSessions } from "./sessionStore.runtime";
@@ -10,6 +11,9 @@ import { useSpecialistStore } from "./specialistStore";
 
 const organizationId = "59b8fe20-6072-4c16-9dae-9d7cbbf2533c";
 const workspaceId = "2fac2db5-20d6-499c-b691-47ad19fc0ca8";
+
+const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }));
+vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 
 function session(id: string, path: string): Session {
   return {
@@ -37,6 +41,17 @@ function session(id: string, path: string): Session {
 describe("human-bound Scout authority", () => {
   beforeEach(() => {
     liveSessions.clear();
+    localStorage.clear();
+    invoke.mockReset();
+    invoke.mockResolvedValue({
+      id: "worker-neon",
+      cwd: "/srv/client/neon",
+      arch: "linux-x86_64",
+      sshTransport: "control_master",
+      connectionKind: "started",
+      connectDurationMs: 42,
+      accountWorkerCount: 1,
+    });
     installProductModule({
       ...neutralProduct,
       specialistWorkspace: {
@@ -60,7 +75,8 @@ describe("human-bound Scout authority", () => {
       opening: null,
       conversations: [],
       error: null,
-      projectMode: "remote",
+      projectMode: "local",
+      selectedHostId: null,
       localSettings: { ...DEFAULT_LOCAL_SETTINGS, cwd: "/repo/previous-package" },
       recentProjects: ["/repo/previous-package"],
       approvalPolicy: "ask",
@@ -149,5 +165,89 @@ describe("human-bound Scout authority", () => {
     expect(useSessionStore.getState().error).toBe(
       "Choose or create a Scout workspace before starting Scout.",
     );
+  });
+
+  it("runs Scout on the selected on-prem SSH instance with its exact authority", async () => {
+    const conversationId = "remote-scout-conversation";
+    saveSshHosts([{
+      id: "neon",
+      label: "Neon",
+      host: "neon",
+      remoteRoot: "/srv/client/neon",
+    }], null);
+    const openSession = vi.fn(async (
+      _provider: string,
+      _config: object,
+      request: SessionOpenRequest,
+    ) => ({
+      ...session(request.kind === "new" ? request.bindId! : conversationId, "/srv/client/neon"),
+      environment: {
+        checkout_root: "/srv/client/neon",
+        workspace_roots: ["/srv/client/neon"],
+        remote: true,
+      },
+    }));
+    const bridge = {
+      prepareQuickChatWorkspace: vi.fn(async () => ({
+        id: conversationId,
+        path: `/Users/test/.agent/workspace/${conversationId}`,
+      })),
+      openSession,
+      subscribe: () => () => {},
+    } as unknown as CoreBridge;
+    useSessionStore.setState({
+      bridge,
+      projectMode: "remote",
+      selectedHostId: "neon",
+    });
+
+    expect(useSessionStore.getState().startBlockedReason()).toBeNull();
+    await useSessionStore.getState().startSession();
+
+    expect(invoke).toHaveBeenCalledWith("remote_worker_connect", {
+      input: expect.objectContaining({
+        host: "neon",
+        remoteRoot: "/srv/client/neon",
+      }),
+    });
+    expect(openSession).toHaveBeenCalledWith(
+      "local",
+      {
+        extra: {
+          remote_worker: {
+            worker_handle: "worker-neon",
+            cwd: "/srv/client/neon",
+          },
+          specialist_kind: "scout",
+          scout_cartography: expect.objectContaining({
+            organization_id: organizationId,
+            workspace_id: workspaceId,
+            target_id: "neon",
+            platform: "linux",
+            architecture: "x86_64",
+            human_run_request_id: expect.stringMatching(/^scout-run:[0-9a-f]{64}$/),
+          }),
+        },
+      },
+      {
+        kind: "new",
+        options: expect.objectContaining({
+          cwd: "/srv/client/neon",
+          mode: "full",
+          collaboration_mode: "default",
+        }),
+        bindId: conversationId,
+      },
+    );
+    expect(useSessionStore.getState()).toMatchObject({
+      activeRemoteHost: "neon",
+      activeProjectRoot: "/srv/client/neon",
+      conversations: [expect.objectContaining({
+        id: conversationId,
+        project: "/srv/client/neon",
+        remoteHost: "neon",
+        specialist: expect.objectContaining({ kind: "scout", organizationId, workspaceId }),
+      })],
+    });
   });
 });

@@ -5,6 +5,7 @@ import {
 import { useSessionStore } from "../store/sessionStore";
 import { cn } from "../lib/cn";
 import { isAccountReconnectError } from "../lib/errors";
+import { authConnection } from "../lib/auth";
 import { productModule } from "../product/productModule";
 import { useProductAccess } from "../lib/useProductAccess";
 const ACTION =
@@ -19,6 +20,7 @@ export function ProfileMenu({ variant = "topbar" }: { variant?: "topbar" | "rail
   const auth = useSessionStore((s) => s.auth);
   const error = useSessionStore((s) => s.error);
   const signOut = useSessionStore((s) => s.signOutAuth);
+  const reconnect = useSessionStore((s) => s.reconnectAuth);
   const memoriesEnabled = useSessionStore((s) => s.memoriesEnabled);
   const setMemoriesEnabled = useSessionStore((s) => s.setMemoriesEnabled);
   const setSettingsOpen = useSessionStore((s) => s.setSettingsOpen);
@@ -43,7 +45,9 @@ export function ProfileMenu({ variant = "topbar" }: { variant?: "topbar" | "rail
 
   if (!auth) return null;
   const user = auth.user;
-  const accountNeedsReconnect = isAccountReconnectError(error);
+  const connection = authConnection(auth);
+  const accountNeedsReconnect = connection === "reconnect_required" || isAccountReconnectError(error);
+  const accountOffline = connection === "offline";
   return (
     <div ref={ref} className={cn("relative", variant === "sidebar" && "w-full")}>
       {variant === "sidebar" ? (
@@ -97,15 +101,28 @@ export function ProfileMenu({ variant = "topbar" }: { variant?: "topbar" | "rail
               {user.email && <div className="truncate text-xs text-ink-muted">{user.email}</div>}
             </div>
 
-            {accountNeedsReconnect && (
+            {(accountNeedsReconnect || accountOffline) && (
               <div
                 role="alert"
                 className="mx-2 rounded-xl border border-danger/20 bg-danger/10 px-3 py-2.5"
               >
-                <div className="text-sm font-medium text-danger">Session needs reconnecting</div>
-                <div className="mt-0.5 text-xs leading-4 text-ink-secondary">
-                  Sign out, then sign in again to reconnect this account.
+                <div className="text-sm font-medium text-danger">
+                  {accountNeedsReconnect ? "Account needs reconnecting" : "Account service unavailable"}
                 </div>
+                <div className="mt-0.5 text-xs leading-4 text-ink-secondary">
+                  {accountNeedsReconnect
+                    ? "Local work is safe. Reconnect this account to restore cloud features."
+                    : "Local work remains available while Clark reconnects."}
+                </div>
+                {accountNeedsReconnect && (
+                  <button
+                    type="button"
+                    onClick={() => void reconnect()}
+                    className="mt-2 text-xs font-semibold text-accent hover:underline"
+                  >
+                    Reconnect account
+                  </button>
+                )}
               </div>
             )}
 
@@ -113,6 +130,7 @@ export function ProfileMenu({ variant = "topbar" }: { variant?: "topbar" | "rail
               <AccountSlot
                 access={productAccess.access}
                 accessLoading={productAccess.loading}
+                accessError={productAccess.error}
                 reloadAccess={productAccess.reload}
               />
             )}
@@ -156,7 +174,7 @@ export function ProfileMenu({ variant = "topbar" }: { variant?: "topbar" | "rail
               className={cn(ACTION, "hover:text-danger")}
             >
               <LogOut className="size-4" />
-              {accountNeedsReconnect ? "Sign out to reconnect" : "Sign out"}
+              Sign out
             </button>
         </div>
       )}

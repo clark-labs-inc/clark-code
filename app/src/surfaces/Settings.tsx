@@ -9,6 +9,7 @@ import {
 import { useSessionStore } from "../store/sessionStore";
 import { cn } from "../lib/cn";
 import { isAccountReconnectError } from "../lib/errors";
+import { authConnection } from "../lib/auth";
 import { OVERLAY, accessibleMotion } from "../lib/motion";
 import { useModalFocus } from "../lib/modalFocus";
 import { APPROVAL_POLICIES } from "../lib/permissions";
@@ -509,13 +510,16 @@ function AccountSection() {
   const auth = useSessionStore((s) => s.auth);
   const error = useSessionStore((s) => s.error);
   const signOut = useSessionStore((s) => s.signOutAuth);
+  const reconnect = useSessionStore((s) => s.reconnectAuth);
   const setSettingsOpen = useSessionStore((s) => s.setSettingsOpen);
   const SettingsSlot = productModule().slots.settings;
   const productAccess = useProductAccess(Boolean(SettingsSlot));
 
   if (!auth) return null;
   const user = auth.user;
-  const accountNeedsReconnect = isAccountReconnectError(error);
+  const connection = authConnection(auth);
+  const accountNeedsReconnect = connection === "reconnect_required" || isAccountReconnectError(error);
+  const accountOffline = connection === "offline";
 
   return (
     <div className="space-y-6">
@@ -535,17 +539,30 @@ function AccountSection() {
               {user.email && <div className="truncate text-xs text-ink-muted">{user.email}</div>}
             </div>
           </div>
-          {accountNeedsReconnect && (
+          {(accountNeedsReconnect || accountOffline) && (
             <div
               role="alert"
               className="flex gap-2.5 border-t border-danger/15 bg-danger/10 px-3.5 py-3"
             >
               <AlertTriangle className="mt-0.5 size-4 shrink-0 text-danger" />
               <div>
-                <div className="text-sm font-medium text-danger">Session needs reconnecting</div>
-                <div className="mt-0.5 text-xs leading-4 text-ink-secondary">
-                  Sign out, then sign in again to reconnect this account.
+                <div className="text-sm font-medium text-danger">
+                  {accountNeedsReconnect ? "Account needs reconnecting" : "Account service unavailable"}
                 </div>
+                <div className="mt-0.5 text-xs leading-4 text-ink-secondary">
+                  {accountNeedsReconnect
+                    ? "Local work is safe. Reconnect this account to restore cloud features."
+                    : "Local work remains available while Clark reconnects."}
+                </div>
+                {accountNeedsReconnect && (
+                  <button
+                    type="button"
+                    onClick={() => void reconnect()}
+                    className="mt-2 text-xs font-semibold text-accent hover:underline"
+                  >
+                    Reconnect account
+                  </button>
+                )}
               </div>
             </div>
           )}
@@ -556,6 +573,7 @@ function AccountSection() {
         <SettingsSlot
           access={productAccess.access}
           accessLoading={productAccess.loading}
+          accessError={productAccess.error}
           reloadAccess={productAccess.reload}
         />
       )}
@@ -569,7 +587,7 @@ function AccountSection() {
           className="flex w-full items-center gap-2.5 rounded-lg border border-border-subtle px-3.5 py-2.5 text-sm text-ink-secondary transition hover:bg-danger/10 hover:text-danger"
         >
           <LogOut className="size-4" />
-          {accountNeedsReconnect ? "Sign out to reconnect" : "Sign out"}
+          Sign out
         </button>
       </div>
     </div>

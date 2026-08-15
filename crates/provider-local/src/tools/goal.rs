@@ -1,9 +1,7 @@
 //! Session goal tools. `create_goal` starts a
 //! standing objective the engine then pursues autonomously (continuation
 //! turns after each clean completion); `update_goal` is restricted to
-//! `complete`/`blocked` so the model can never grant itself more runway
-//! (budgets and stopping are user/engine-owned); `get_goal` reports status
-//! and usage.
+//! `complete`/`blocked`; `get_goal` reports status and usage.
 
 use agent_core::domain::ToolKind;
 use async_trait::async_trait;
@@ -16,19 +14,11 @@ mod command;
 pub(crate) use command::{apply_goal_command, validate_goal_command};
 
 fn goal_summary(goal: &SessionGoal) -> String {
-    let budget = match goal.token_budget {
-        Some(budget) => format!(
-            "{} of {} tokens used ({} remaining)",
-            goal.tokens_used,
-            budget,
-            budget.saturating_sub(goal.tokens_used)
-        ),
-        None => format!("{} tokens used, no budget", goal.tokens_used),
-    };
     format!(
-        "Goal is {}. Objective: {} — {budget}; {}s elapsed; {} continuation turn(s).",
+        "Goal is {}. Objective: {} — {} tokens used; {}s elapsed; {} continuation turn(s).",
         goal.status_label(),
         goal.objective,
+        goal.tokens_used,
         goal.time_used_seconds,
         goal.continuations
     )
@@ -51,7 +41,6 @@ fn validated_objective(objective: &str) -> Result<String, String> {
 pub(crate) fn start_goal(
     session: &mut crate::loop_state::SessionState,
     objective: String,
-    token_budget: Option<u64>,
 ) -> Result<(), String> {
     let objective = validated_objective(&objective)?;
     if session.planning.plan_mode() {
@@ -76,7 +65,6 @@ pub(crate) fn start_goal(
         id: uuid::Uuid::new_v4().to_string(),
         objective,
         status: GoalStatus::Active,
-        token_budget,
         tokens_used: 0,
         time_used_seconds: 0,
         continuations: 0,
@@ -102,8 +90,7 @@ impl ToolExecutor for CreateGoal {
         completes, the runtime automatically gives you another continuation turn toward the \
         objective until you prove it complete with update_goal. Call this ONLY when the user \
         explicitly asks for autonomous or keep-going-until-done work — never infer a goal from \
-        an ordinary task. Set token_budget only when the user gave one. Fails while an \
-        unfinished goal exists."
+        an ordinary task. Fails while an unfinished goal exists."
     }
     fn parameters(&self) -> Value {
         json!({
@@ -112,10 +99,6 @@ impl ToolExecutor for CreateGoal {
                 "objective": {
                     "type": "string",
                     "description": "The concrete end state to pursue, in full."
-                },
-                "token_budget": {
-                    "type": "integer",
-                    "description": "Optional positive token cap for the goal. Omit unless the user asked for one."
                 }
             },
             "required": ["objective"]
@@ -128,31 +111,18 @@ impl ToolExecutor for CreateGoal {
         let Ok(objective) = arg_str(&args, "objective") else {
             return ToolOutcome::error("missing required string argument `objective`");
         };
-        let token_budget = match args.get("token_budget") {
-            None | Some(Value::Null) => None,
-            Some(value) => match value.as_u64().filter(|budget| *budget > 0) {
-                Some(budget) => Some(budget),
-                None => {
-                    return ToolOutcome::error("`token_budget` must be a positive integer");
-                }
-            },
-        };
-
         let mut session = ctx.session.lock().await;
-        if let Err(error) = start_goal(&mut session, objective.to_string(), token_budget) {
+        if let Err(error) = start_goal(&mut session, objective.to_string()) {
             return ToolOutcome::error(error);
         }
-        let budget_note = match token_budget {
-            Some(budget) => format!(" Token budget: {budget}."),
-            None => String::new(),
-        };
         let state = session.goal.as_ref().expect("goal was created").state(None);
-        ToolOutcome::ok(format!(
-            "Goal created and active.{budget_note} The runtime will keep giving you \
+        ToolOutcome::ok(
+            "Goal created and active. The runtime will keep giving you \
              continuation turns toward it after each completed turn. Work toward the full \
              objective; call update_goal with status \"complete\" only when current evidence \
              proves every requirement is satisfied."
-        ))
+                .to_string(),
+        )
         .with_signal(ToolSignal::Goal(state))
     }
 }
@@ -171,8 +141,7 @@ impl ToolExecutor for UpdateGoal {
         completion, not merely fail to show remaining work. Set \"blocked\" only after the \
         same blocking condition repeated for at least three consecutive goal turns and no \
         progress is possible without the user. Never use \"blocked\" because the work is \
-        hard, slow, or unclear, and never mark complete because the budget is nearly gone. \
-        You cannot pause or re-budget a goal — that belongs to the user."
+        hard, slow, or unclear."
     }
     fn parameters(&self) -> Value {
         json!({
@@ -337,17 +306,13 @@ mod tests {
         let ctx = test_ctx(dir.path());
 
         let created = CreateGoal
-            .invoke(
-                json!({"objective": "build the whole site", "token_budget": 50_000}),
-                &ctx,
-            )
+            .invoke(json!({"objective": "build the whole site"}), &ctx)
             .await;
         assert!(!created.is_error);
         {
             let s = ctx.session.lock().await;
             let goal = s.goal.as_ref().unwrap();
             assert_eq!(goal.status, GoalStatus::Active);
-            assert_eq!(goal.token_budget, Some(50_000));
         }
 
         // A second unfinished goal is refused.

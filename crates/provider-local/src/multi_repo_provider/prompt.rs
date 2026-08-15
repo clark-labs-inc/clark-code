@@ -26,7 +26,6 @@ pub(super) fn isolated_provider_config(
     extra.insert("project_knowledge".into(), Value::Bool(false));
     extra.insert("browser_enabled".into(), Value::Bool(false));
     extra.insert("mcp_servers".into(), Value::Array(Vec::new()));
-    extra.insert("orchestration".into(), json!({"enabled": false}));
     extra.insert("command_allowlist".into(), Value::Array(Vec::new()));
     extra.insert("command_denylist".into(), Value::Array(Vec::new()));
     extra.remove("remote");

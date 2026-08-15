@@ -84,7 +84,10 @@ async function verifyStartup(browser, authenticated) {
     if (message.type() === "error") errors.push(message.text());
   });
   await page.goto(url, { waitUntil: "networkidle" });
-  const expected = authenticated ? "New session" : "Continue with Google";
+  // The neutral foundation has no branded authentication gate. Exercise both
+  // an empty browser profile and a restored local profile, but require the
+  // same provider-neutral startup surface in each case.
+  const expected = "New session";
   try {
     await page.waitForFunction(
       (text) => document.body.innerText.includes(text),
@@ -115,7 +118,7 @@ try {
   browser = await webkit.launch();
   await verifyStartup(browser, false);
   await verifyStartup(browser, true);
-  console.log("WebKit production startup passed (signed out + authenticated)");
+  console.log("WebKit foundation startup passed (empty + restored profile)");
 } finally {
   await browser?.close();
   preview.kill("SIGTERM");

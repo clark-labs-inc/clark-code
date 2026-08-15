@@ -2,19 +2,22 @@ use super::*;
 
 #[test]
 fn user_agent_identifies_desktop_version_and_platform() {
-    let user_agent = desktop_user_agent();
+    let user_agent = desktop_user_agent(env!("CARGO_PKG_VERSION"));
     assert!(user_agent.starts_with(&format!("agent-desktop/{} (", env!("CARGO_PKG_VERSION"))));
     assert!(user_agent.ends_with(&format!(" {})", std::env::consts::ARCH)));
 }
 
 #[test]
-fn default_model_deadlines_allow_productive_streams_and_bound_stalls() {
+fn user_agent_accepts_the_composed_product_version() {
+    assert!(desktop_user_agent("0.1.154").starts_with("agent-desktop/0.1.154 ("));
+}
+
+#[test]
+fn response_start_deadline_bounds_only_a_request_that_never_starts() {
     assert_eq!(
         DEFAULT_MODEL_RESPONSE_START_TIMEOUT,
         Duration::from_secs(2 * 60)
     );
-    assert_eq!(DEFAULT_MODEL_STREAM_IDLE_TIMEOUT, Duration::from_secs(45));
-    assert!(DEFAULT_MODEL_STREAM_IDLE_TIMEOUT < DEFAULT_MODEL_RESPONSE_START_TIMEOUT);
 }
 
 fn feed(frames: &[&str]) -> AssistantTurn {

@@ -70,7 +70,7 @@ fn incident(status: crate::recovery::ProviderIncidentStatus) -> crate::recovery:
             idempotency_key: "request-1".into(),
             provider_request_id: Some("upstream-1".into()),
             attempts: 4,
-            max_attempts: 17,
+            max_attempts: 4,
             retries: crate::recovery::ProviderRetryCounts {
                 transient: 3,
                 ..Default::default()
@@ -206,7 +206,6 @@ fn goal_update_projects_authoritative_state_and_run() {
         objective: "ship the feature".into(),
         status: GoalStatus::Blocked,
         run: None,
-        token_budget: Some(50_000),
         tokens_used: 12_345,
         time_used_seconds: 43,
         continuations: 2,

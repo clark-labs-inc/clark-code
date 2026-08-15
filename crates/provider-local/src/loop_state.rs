@@ -66,22 +66,19 @@ pub(crate) struct SessionState {
     /// Standing objective the session pursues autonomously: while `Active`, the
     /// engine keeps continuing the run
     /// with goal-continuation turns after each clean completion, until the
-    /// model proves the goal complete, gets genuinely blocked, or the token
-    /// budget runs out.
+    /// model proves the goal complete or gets genuinely blocked.
     pub goal: Option<SessionGoal>,
 }
 
 /// One session goal. Created by the model's `create_goal` tool (only on an
 /// explicit user request); status transitions to `Complete`/`Blocked` come
-/// from `update_goal`, and to `Blocked`/`BudgetLimited` from the engine
-/// (errors, iteration caps, budget crossings).
+/// from `update_goal`, and to `Blocked` from the engine after repeated
+/// unrecoverable failures.
 #[derive(Clone, Debug)]
 pub(crate) struct SessionGoal {
     pub id: String,
     pub objective: String,
     pub status: GoalStatus,
-    /// Optional cap on tokens (input+output) spent pursuing the goal.
-    pub token_budget: Option<u64>,
     /// Tokens (input+output) attributed to the goal so far.
     pub tokens_used: u64,
     /// Wall-clock seconds spent in goal-driven turns.
@@ -102,7 +99,6 @@ impl SessionGoal {
             id: state.id,
             objective: state.objective,
             status: state.status,
-            token_budget: state.token_budget,
             tokens_used: state.tokens_used,
             time_used_seconds: state.time_used_seconds,
             continuations: state.continuations,
@@ -119,7 +115,6 @@ impl SessionGoal {
             objective: self.objective.clone(),
             status: self.status,
             run: run.cloned(),
-            token_budget: self.token_budget,
             tokens_used: self.tokens_used,
             time_used_seconds: self.time_used_seconds,
             continuations: self.continuations,
@@ -145,10 +140,6 @@ impl SessionGoal {
                 status: GoalStatus::Blocked,
                 ..
             } => "blocked",
-            Self {
-                status: GoalStatus::BudgetLimited,
-                ..
-            } => "budget-limited",
             Self {
                 status: GoalStatus::Complete,
                 ..

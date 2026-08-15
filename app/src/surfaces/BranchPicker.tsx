@@ -70,6 +70,7 @@ export function BranchPicker({
   const [switching, setSwitching] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const Icon = context.isWorktree ? GitFork : GitBranch;
   const tone = context.isWorktree ? "text-checkout-worktree" : "text-checkout-branch";
   const currentLabel = context.detached ? `detached@${context.branch}` : context.branch;
@@ -151,6 +152,10 @@ export function BranchPicker({
         if (!onTransitionPlan) {
           throw new Error("Preserving changes in an isolated continuation is available in the desktop app.");
         }
+        // The selected menu item is about to unmount. Move focus back to the
+        // durable trigger before the transition modal captures its opener so
+        // dismissing the safety gate returns the user to the branch control.
+        triggerRef.current?.focus({ preventScroll: true });
         onTransitionPlan(plan);
         setOpen(false);
         return;
@@ -183,6 +188,7 @@ export function BranchPicker({
   return (
     <div ref={ref} className="relative shrink-0">
       <button
+        ref={triggerRef}
         type="button"
         aria-haspopup="menu"
         aria-expanded={open}

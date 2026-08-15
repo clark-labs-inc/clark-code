@@ -594,7 +594,6 @@ fn provider_config(
             "base_url": options.base_url,
             "model": request.model,
             "temperature": 0.0,
-            "max_iterations": 24,
             "permissions": permissions,
             "command_denylist": ["rm", "git clean", "git reset", "git checkout", "git restore", "git commit", "git push", "curl", "wget", "ssh"],
             "memories": false,

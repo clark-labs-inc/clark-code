@@ -368,7 +368,7 @@ export async function specialistCreateSecurityCampaign(
 }
 
 export const demoOrganizations: SpecialistOrganization[] = [
-  { id: "11111111-1111-4111-8111-111111111111", name: "the agent Labs", role: "owner", status: "active" },
+  { id: "11111111-1111-4111-8111-111111111111", name: "Clark Labs", role: "owner", status: "active" },
 ];
 
 const demoWorkspaces: ScoutWorkspace[] = [{

@@ -280,8 +280,7 @@ async fn run_workstreams(
             "base_url": shared.config.base_url,
             "model": shared.config.root_model,
             "reasoning_effort": shared.config.reasoning_effort,
-            "temperature": 0.0,
-            "max_iterations": 96
+            "temperature": 0.0
         }),
         ..Default::default()
     };
@@ -309,7 +308,6 @@ async fn run_workstreams(
             limit_weighted_tokens: shared.config.policy.token_budget,
             ..Default::default()
         })?,
-        shared.config.policy.max_attempts,
         integrator,
     )?;
     coordinator.register_writer(Arc::new(runtime.writer_harness("isolated-writer")?))?;

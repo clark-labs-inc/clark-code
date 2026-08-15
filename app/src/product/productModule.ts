@@ -29,6 +29,7 @@ export interface ProductExceptionalStateIllustrationProps {
 export interface ProductUiContext {
   access: ProductAccessProjection | null;
   accessLoading: boolean;
+  accessError: string | null;
   reloadAccess: () => Promise<void>;
 }
 

@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
+use crate::exec::Executor;
 use agent_core::domain::{AgentEvent, RunExecutionSummary, RunUsage};
 use agent_core::ids::{RunId, SessionId};
 use agent_orchestration::{
@@ -9,81 +10,6 @@ use agent_orchestration::{
     UsageCharge,
 };
 use async_channel::Sender;
-use serde_json::Value;
-
-use crate::exec::Executor;
-
-/// High product-level circuit breaker. Productive runs remain iteration-
-/// uncapped; this bounds cumulative model work only after substantially more
-/// usage than the retained long-run samples require.
-pub(crate) const DEFAULT_ROOT_WEIGHTED_TOKEN_LIMIT: f64 = 10_000_000.0;
-
-#[derive(Clone, Debug)]
-pub(crate) struct RootExecutionConfig {
-    pub max_attempts: u32,
-    pub weighted_token_limit: Option<f64>,
-    pub max_cost_usd: Option<f64>,
-}
-
-impl Default for RootExecutionConfig {
-    fn default() -> Self {
-        Self {
-            // Two recovery boundaries: one can settle an awaited host command,
-            // while the next still gives the provider a bounded chance to
-            // recover after that durable receipt is committed.
-            max_attempts: 3,
-            weighted_token_limit: Some(DEFAULT_ROOT_WEIGHTED_TOKEN_LIMIT),
-            max_cost_usd: None,
-        }
-    }
-}
-
-impl RootExecutionConfig {
-    pub(crate) fn from_extra(extra: &Value) -> Self {
-        let Some(object) = extra.get("execution").and_then(Value::as_object) else {
-            return Self::default();
-        };
-        let defaults = Self::default();
-        let max_attempts = object
-            .get("max_attempts")
-            .and_then(Value::as_u64)
-            .and_then(|value| u32::try_from(value).ok())
-            .unwrap_or(defaults.max_attempts)
-            .clamp(1, 3);
-        let weighted_token_limit = match object.get("weighted_token_limit") {
-            Some(value) if value.as_f64() == Some(0.0) => None,
-            Some(value) => positive_f64(Some(value)).or(defaults.weighted_token_limit),
-            None => defaults.weighted_token_limit,
-        };
-        let max_cost_usd = non_negative_f64(object.get("max_cost_usd"));
-        Self {
-            max_attempts,
-            weighted_token_limit,
-            max_cost_usd,
-        }
-    }
-
-    fn policy(&self) -> ExecutionPolicy {
-        ExecutionPolicy {
-            max_attempts: self.max_attempts,
-            weighted_token_limit: self.weighted_token_limit,
-            max_cost_usd: self.max_cost_usd,
-            ..Default::default()
-        }
-    }
-}
-
-fn positive_f64(value: Option<&Value>) -> Option<f64> {
-    value
-        .and_then(Value::as_f64)
-        .filter(|value| value.is_finite() && *value > 0.0)
-}
-
-fn non_negative_f64(value: Option<&Value>) -> Option<f64> {
-    value
-        .and_then(Value::as_f64)
-        .filter(|value| value.is_finite() && *value >= 0.0)
-}
 
 /// Provider-local adapter for the provider-neutral root execution ledger.
 /// Recording is synchronous and deterministic; normalized Trace delivery uses
@@ -97,7 +23,6 @@ pub(crate) struct RootExecutionTrace {
 
 pub(crate) struct RecoveryBoundary {
     pub attempt: u32,
-    pub max_attempts: u32,
     pub receipt: agent_core::recovery::ExecutionBoundaryReceipt,
 }
 
@@ -105,11 +30,10 @@ impl RootExecutionTrace {
     pub(crate) fn new(
         session: &SessionId,
         run: &RunId,
-        config: &RootExecutionConfig,
         events: Sender<AgentEvent>,
     ) -> Result<Self, String> {
         let id = ExecutionId::new(format!("{}:{}", session.as_str(), run.as_str()))?;
-        let ledger = Arc::new(ExecutionLedger::new_root(id, config.policy())?);
+        let ledger = Arc::new(ExecutionLedger::new_root(id, ExecutionPolicy::default())?);
         let trace = Self {
             ledger,
             events,
@@ -217,7 +141,6 @@ impl RootExecutionTrace {
         let event_sequence = events.last().map(|event| event.sequence).unwrap_or(0);
         RecoveryBoundary {
             attempt,
-            max_attempts: snapshot.policy.max_attempts,
             receipt: agent_core::recovery::ExecutionBoundaryReceipt {
                 execution_id: snapshot.id.to_string(),
                 attempt_sequence: snapshot
@@ -396,36 +319,5 @@ fn summary(snapshot: &ExecutionSnapshot) -> RunExecutionSummary {
         changed_paths: snapshot.evidence.changed_paths.iter().cloned().collect(),
         completed_tools: completed_tools.into_iter().collect(),
         failed_tools: failed_tools.into_iter().collect(),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn execution_config_is_bounded_and_defaults_to_two_recoveries() {
-        let defaults = RootExecutionConfig::from_extra(&serde_json::json!({}));
-        assert_eq!(defaults.max_attempts, 3);
-        assert_eq!(
-            defaults.weighted_token_limit,
-            Some(DEFAULT_ROOT_WEIGHTED_TOKEN_LIMIT)
-        );
-
-        let bounded = RootExecutionConfig::from_extra(&serde_json::json!({
-            "execution": {
-                "max_attempts": 99,
-                "weighted_token_limit": 50_000,
-                "max_cost_usd": 0.5
-            }
-        }));
-        assert_eq!(bounded.max_attempts, 3);
-        assert_eq!(bounded.weighted_token_limit, Some(50_000.0));
-        assert_eq!(bounded.max_cost_usd, Some(0.5));
-
-        let explicitly_unlimited = RootExecutionConfig::from_extra(&serde_json::json!({
-            "execution": { "weighted_token_limit": 0 }
-        }));
-        assert_eq!(explicitly_unlimited.weighted_token_limit, None);
     }
 }

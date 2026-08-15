@@ -307,6 +307,20 @@ async fn inventory_is_sorted_and_excludes_scan_outputs() {
 }
 
 #[tokio::test]
+async fn inventory_accepts_an_explicit_single_file_scope() {
+    let temp = tempfile::tempdir().unwrap();
+    let target = temp.path().join("focused.rs");
+    std::fs::write(&target, "fn focused() {}").unwrap();
+
+    let inventory = collect_security_inventory(&crate::exec::LocalExecutor, temp.path(), &target)
+        .await
+        .unwrap();
+
+    assert_eq!(inventory.scope, "focused.rs");
+    assert_eq!(inventory.paths, vec!["focused.rs"]);
+}
+
+#[tokio::test]
 async fn inventory_id_is_stable_when_a_file_is_rewritten_with_identical_bytes() {
     let temp = tempfile::tempdir().unwrap();
     std::fs::write(temp.path().join("same.rs"), "identical bytes").unwrap();

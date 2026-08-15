@@ -137,6 +137,27 @@ async function cloudPut(
   return summary.rev;
 }
 
+async function checkpointLocal(job: PendingPush, snapshot: Snapshot): Promise<void> {
+  await invoke("desktop_conv_checkpoint_local", {
+    checkpoint: {
+      id: job.meta.id,
+      title: job.meta.title,
+      provider: job.meta.provider,
+      project: job.meta.project ?? null,
+      repositoryFingerprint: job.meta.project
+        ? repositoryIdentityForRoot(job.meta.project)?.fingerprint ?? null
+        : null,
+      remoteHost: job.meta.remoteHost ?? null,
+      mode: job.meta.mode ?? null,
+      titleLocked: job.meta.titleLocked ?? false,
+      specialistContext: job.meta.specialist ?? null,
+      baseRev: serverRevisions.get(job.meta.id) ?? job.meta.rev ?? 0,
+      snapshot,
+      status: job.status,
+    },
+  });
+}
+
 // --- Single-flight, coalescing write pipeline -----------------------------
 //
 // Per conversation we keep at most one PUT in flight and at most one queued
@@ -372,14 +393,27 @@ async function drainPush(id: string): Promise<void> {
     const prepared = prepareSnapshotForUpload(job.snapshot);
     const mark = fingerprint(job, prepared.json);
     if (prepared.bytes > MAX_SNAPSHOT_BYTES) {
+      if (oversized.has(id) && lastSent.get(id) === mark) {
+        ok = true;
+        if (pending.has(id)) queueMicrotask(() => void drainPush(id));
+        return;
+      }
       oversized.add(id);
-      // Keep the job queued. Marking this successful would let the native
-      // trajectory outbox advance its checkpoint while the cloud snapshot
-      // stayed stale, permanently losing cross-device reconstruction.
-      if (jobIsCurrent(id, job) && !pending.has(id)) pending.set(id, job);
+      // Compact the local read model even though the full cloud snapshot is
+      // intentionally not advanced. Acknowledged trajectory events remain the
+      // cross-device authority, while the local checkpoint prevents the same
+      // event payloads from accumulating forever on this machine.
+      await checkpointLocal(job, prepared.snapshot);
+      // This exact snapshot is locally durable and its ordered events are
+      // already cloud-authoritative. A later changed or compacted snapshot is
+      // scheduled normally; retaining this one would make every flush look
+      // permanently unfinished.
+      lastSent.set(id, mark);
+      ok = true;
       warningHandler?.(
-        "This conversation is too large to sync safely. Its latest history remains on this device; start a new conversation to restore cloud sync.",
+        "This task’s full transcript is too large for cross-device sync. Its trajectory is safe in Clark cloud and the latest view stays on this device; start a new task to restore full transcript sync.",
       );
+      if (pending.has(id)) queueMicrotask(() => void drainPush(id));
       return;
     }
     oversized.delete(id);

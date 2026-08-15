@@ -69,6 +69,7 @@ import { authAccountMatches } from "../lib/account";
 import { isQuickChatProject } from "../lib/projectSidebar";
 import { productModule } from "../product/productModule";
 import { approvalPolicyForSpecialist } from "../lib/permissions";
+import { quickChatModelSettings } from "../lib/localAgent";
 import type { CoreBridge, RemoteWorkerTarget } from "../core-bridge/bridge";
 
 async function requireSecurityRepository(
@@ -233,12 +234,15 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
       }
       const baseLabel = transition.baseOptions.find((option) => option.id === managedWorktreeBase)?.label
         ?? "the selected base";
+      const continuationBase = transition.action === "preserve_changes"
+        ? created.baseReference
+        : baseLabel;
       set({
         pendingManagedWorktreePath: created.path,
         worktreeTransition: null,
         worktreePreparing: false,
         notice: transition.action === "preserve_changes"
-          ? `Started an isolated continuation from ${baseLabel}. Your source changes remain in ${transition.sourceRoot}.`
+          ? `Started an isolated continuation from ${continuationBase}. Your source changes remain in ${transition.sourceRoot}.`
           : `Started an isolated chat from ${baseLabel}. Your source changes remain in ${transition.sourceRoot}.`,
       });
       await get().startSession();
@@ -359,14 +363,11 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
     }
     const sessionProvider = specialistDefinition ? "specialist" : activeProvider;
     const isLocal = activeProvider === "local";
-    // Scout is an organization/workspace coordinator, never a project worker.
-    // A globally selected remote project must not redirect Scout into the
-    // opaque coding-worker path, which cannot carry cartography authority.
-    // Remote machines are discovered and authorized as explicit Scout targets
-    // after the human starts the run from this neutral local workspace.
+    // Specialists use the same explicit execution target as ordinary coding
+    // sessions. Scout's organization/workspace remains a separate authority;
+    // the native host carries that trusted recipe into the selected worker.
     const isRemote = isLocal
-      && get().projectMode === "remote"
-      && specialistContext?.kind !== "scout";
+      && get().projectMode === "remote";
     const startHost = isRemote
       ? (loadSshHosts(codeKeyAccountBinding(get().auth)).find((h) => h.id === get().selectedHostId)?.host.trim() ?? null)
       : null;
@@ -390,6 +391,9 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
       // in flight or failed).
       if (isLocal) await get().ensureCodeKey();
       const localSettings = get().localSettings;
+      const executionSettings = quickChat
+        ? quickChatModelSettings(localSettings)
+        : localSettings;
       let localSessionPath = quickChat?.path ?? specialistWorkspace?.path ?? localSettings.cwd.trim();
       if (isLocal && !isRemote && !specialistDefinition && !quickChat && !specialistWorkspace) {
         const pendingManagedWorktreePath = get().pendingManagedWorktreePath;
@@ -582,7 +586,7 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
         );
         options = { cwd: remote.cwd, mode, collaboration_mode };
       } else if (isLocal) {
-        const sessionSettings = { ...localSettings, cwd: localSessionPath };
+        const sessionSettings = { ...executionSettings, cwd: localSessionPath };
         await requireSecurityRepository(bridge, specialistContext, localSessionPath);
         config = localConnectConfig(
           sessionSettings,
@@ -642,7 +646,7 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
         specialist: specialistContext ?? undefined,
       };
       if (sessionProvider === "local" && !specialistContext) {
-        pinChatModel(get, set, session.id, localSettings);
+        pinChatModel(get, set, session.id, executionSettings);
         // Pin this new chat to the approval level it was created with, so a
         // later change to the global default never silently rewrites what an
         // already-running chat executes under (same invariant as the model).
@@ -658,12 +662,12 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
           model: specialistContext
             ? specialistModelSettings(specialistContext)?.model
             : sessionProvider === "local"
-              ? localSettings.model
+              ? executionSettings.model
               : undefined,
           reasoningEffort: specialistContext
             ? specialistModelSettings(specialistContext)?.reasoningEffort
             : sessionProvider === "local"
-              ? localSettings.reasoningEffort
+              ? executionSettings.reasoningEffort
               : undefined,
           approvalPolicy: mode,
           outputStyle: get().outputStyle,
@@ -1034,7 +1038,10 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
         effectiveApprovalPolicy(get().approvalPolicy, get().approvalPolicies, id),
         openingMeta?.specialist?.kind,
       );
-      const effSettings = effectiveModelSettings(localSettings, get().chatModels, id);
+      const savedSettings = effectiveModelSettings(localSettings, get().chatModels, id);
+      const effSettings = quickChat
+        ? quickChatModelSettings(savedSettings)
+        : savedSettings;
       if (isLocal && !openingMeta?.specialist) {
         pinChatModel(get, set, id, effSettings);
         // Pin this chat to its (effective) approval level the first time it

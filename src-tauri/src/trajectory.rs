@@ -10,11 +10,24 @@ use tokio::sync::Mutex;
 
 use crate::state::AppState;
 
+mod cloud_compaction;
 mod outbox;
 pub(crate) use outbox::{
     checkpoint_snapshot, delete_conversation, interrupt_live_runs, merge_local_summaries,
-    quarantine_snapshot_branch, recover_snapshot, set_archived, wait_for_acknowledged_prefix,
+    migrate_legacy_database, quarantine_snapshot_branch, recover_snapshot, set_archived,
+    wait_for_acknowledged_prefix,
 };
+
+const BUILD_GIT_SHA: &str = env!("CLARK_BUILD_GIT_SHA");
+const BUILD_GIT_DIRTY: &str = env!("CLARK_BUILD_GIT_DIRTY");
+
+pub(crate) fn build_git_sha() -> &'static str {
+    BUILD_GIT_SHA
+}
+
+pub(crate) fn build_git_dirty() -> bool {
+    BUILD_GIT_DIRTY == "true"
+}
 
 pub(crate) fn outbox_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
     app.path()
@@ -139,9 +152,10 @@ impl CloudTrajectoryClient {
             .iter()
             .enumerate()
             .map(|(offset, event)| {
-                let event_value = serde_json::to_value(event)
+                let mut event_value = serde_json::to_value(event)
                     .map_err(|error| format!("serialize trajectory event: {error}"))?;
                 let event_kind = event_kind(&event_value);
+                cloud_compaction::compact_event(&event_kind, &mut event_value);
                 let run_id = event_value
                     .get("run")
                     .and_then(Value::as_str)
@@ -155,6 +169,8 @@ impl CloudTrajectoryClient {
                         "schemaVersion": 1,
                         "sessionId": self.conversation_id,
                         "appVersion": env!("CARGO_PKG_VERSION"),
+                        "buildGitSha": build_git_sha(),
+                        "buildGitDirty": build_git_dirty(),
                         "platform": std::env::consts::OS,
                         "arch": std::env::consts::ARCH,
                         "metadata": self.config.metadata.clone(),
@@ -356,7 +372,7 @@ fn event_kind(event: &Value) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{event_kind, normalize_snapshot_value};
+    use super::{build_git_dirty, build_git_sha, event_kind, normalize_snapshot_value};
     use serde_json::json;
 
     #[test]
@@ -369,6 +385,16 @@ mod tests {
             })),
             "trace.agent_loop.context_transform_applied"
         );
+    }
+
+    #[test]
+    fn build_provenance_is_always_available_to_trajectory_envelopes() {
+        let revision = build_git_sha();
+        assert!(
+            revision == "unknown"
+                || (revision.len() == 40 && revision.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        );
+        assert_eq!(build_git_dirty(), env!("CLARK_BUILD_GIT_DIRTY") == "true");
     }
 
     #[test]

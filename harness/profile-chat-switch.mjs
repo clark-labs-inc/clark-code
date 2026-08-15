@@ -51,6 +51,7 @@ async function waitForServer() {
 // ready (MockBridge needs no real creds).
 const SEED = () => {
   localStorage.clear();
+  const scope = encodeURIComponent("id:profiler");
   localStorage.setItem(
     "agent-desktop.dev-account",
     JSON.stringify({
@@ -58,12 +59,14 @@ const SEED = () => {
     }),
   );
   localStorage.setItem(
-    "agent-desktop:project-context:id%3Aprofiler",
+    `agent-desktop:local-agent:${scope}`,
+    JSON.stringify({ cwd: "/tmp/agent-profiling", model: "local-model", reasoningEffort: "high" }),
+  );
+  localStorage.setItem(
+    `agent-desktop:project-context:${scope}`,
     JSON.stringify({ cwd: "/tmp/agent-profiling" }),
   );
 };
-
-const store = `window.__clarkProfiling.store`;
 
 // A single realistic agent turn: prose + fenced code blocks in the languages
 // Shiki preloads + a markdown table. One turn ≈ 1.4k chars, ≈ 6 code fences.
@@ -103,7 +106,7 @@ const REPLY_BLOCK = [
 async function growTranscript(page, turnCount, tag) {
   await page.evaluate(
     ({ turnCount, tag, block }) => {
-      const st = window.__clarkProfiling.store;
+      const st = window.__agentDesktopStore;
       const snap = st.getState().snapshot;
       const timeline = [...snap.timeline];
       const runs = { ...snap.runs };
@@ -125,25 +128,25 @@ const heavyPrompt = (i) =>
   `Write a long Rust + TypeScript walkthrough #${i}. Include many fenced code blocks in rust, typescript, bash, json, toml and several markdown tables. Be thorough.`;
 
 async function buildConversation(page, turns) {
-  await page.evaluate(() => window.__clarkProfiling.store.getState().startSession());
+  await page.evaluate(() => window.__agentDesktopStore.getState().startSession());
   await page.waitForFunction(
     () => {
-      const s = window.__clarkProfiling.store.getState();
+      const s = window.__agentDesktopStore.getState();
       return s.session?.id && !s.connecting;
     },
     null,
     { timeout: 15_000 },
   );
-  const id = await page.evaluate(() => window.__clarkProfiling.store.getState().session.id);
+  const id = await page.evaluate(() => window.__agentDesktopStore.getState().session.id);
   for (let t = 0; t < turns; t += 1) {
-    await page.evaluate((p) => window.__clarkProfiling.store.getState().send(p), heavyPrompt(t + 1));
+    await page.evaluate((p) => window.__agentDesktopStore.getState().send(p), heavyPrompt(t + 1));
     // The mock's scripted run passes through its permission gate and finishes
     // on its own (~3.5s) — resolvePermission clears the gate only when it's
     // up; the run does not wait on it. Just drive the run to done, and clear
     // the gate if we happen to catch it.
     await page.waitForFunction(
       () => {
-        const st = window.__clarkProfiling.store.getState();
+        const st = window.__agentDesktopStore.getState();
         if (st.snapshot.pending_permission) st.resolvePermission("allow_once");
         const runs = Object.values(st.snapshot.runs);
         return runs.length > 0 && runs.every((r) => r.status !== "running" && r.status !== "queued");
@@ -170,7 +173,7 @@ try {
   });
 
   await page.goto(url, { waitUntil: "domcontentloaded" });
-  await page.waitForFunction(() => window.__clarkProfiling?.store, null, { timeout: 30_000 });
+  await page.waitForFunction(() => window.__agentDesktopStore, null, { timeout: 30_000 });
   // Give init() a beat, then dump the store state the flow depends on.
   await page.waitForTimeout(1_500);
   // Verify the Conversation chunk is preloaded by the idle effect: a direct
@@ -183,7 +186,7 @@ try {
   console.log(`[preload-check] Conversation chunk import after idle: ${chunkMs}ms`);
   results.conversationChunkMs = chunkMs;
   const dbg = await page.evaluate(() => {
-    const s = window.__clarkProfiling.store.getState();
+    const s = window.__agentDesktopStore.getState();
     return {
       auth: !!s.auth,
       provider: s.activeProvider,
@@ -203,7 +206,7 @@ try {
   console.log(`[seed] conversation A (${turns} heavy turns)…`);
   const idA = await buildConversation(page, turns);
   console.log(`[seed] A = ${idA}`);
-  await page.evaluate(() => window.__clarkProfiling.store.getState().endSession());
+  await page.evaluate(() => window.__agentDesktopStore.getState().endSession());
   console.log(`[seed] conversation B (${turns} heavy turns)…`);
   const idB = await buildConversation(page, turns);
   console.log(`[seed] B = ${idB}`);
@@ -213,7 +216,7 @@ try {
   await growTranscript(page, fatTurns, "fatB");
   await page.waitForTimeout(2_000);
   const fatStats = await page.evaluate(() => {
-    const s = window.__clarkProfiling.store.getState().snapshot;
+    const s = window.__agentDesktopStore.getState().snapshot;
     return {
       timeline: s.timeline.length,
       chars: s.timeline.reduce((n, i) => n + (i.item === "message" ? i.blocks.reduce((m, b) => m + (b.text?.length ?? 0), 0) : 0), 0),
@@ -227,7 +230,7 @@ try {
   results.seed = { idA, idB, a: null, b: null };
   const stats = (id) =>
     page.evaluate((cid) => {
-      const s = window.__clarkProfiling.store.getState();
+      const s = window.__agentDesktopStore.getState();
       const snap = s.session?.id === cid ? s.snapshot : null;
       if (!snap) return null;
       const textLen = snap.timeline.reduce(
@@ -249,8 +252,8 @@ try {
     const switched = page.evaluate(
       (id) => new Promise((resolve, reject) => {
         const timeout = setTimeout(() => reject(new Error(`switch to ${id} timed out`)), 30_000);
-        const st = window.__clarkProfiling.store.getState();
-        const unsub = window.__clarkProfiling.store.subscribe((s) => {
+        const st = window.__agentDesktopStore.getState();
+        const unsub = window.__agentDesktopStore.subscribe((s) => {
           if (s.session?.id === id && !s.connecting) {
             clearTimeout(timeout);
             unsub();
@@ -289,8 +292,8 @@ try {
     await cdp.send("Profiler.enable");
     await cdp.send("Profiler.setSamplingInterval", { interval: 100 });
     await cdp.send("Profiler.start");
-    await page.evaluate((id) => window.__clarkProfiling.store.getState().openConversation(id), idA);
-    await page.waitForFunction((id) => window.__clarkProfiling.store.getState().session?.id === id, idA, { timeout: 15_000 });
+    await page.evaluate((id) => window.__agentDesktopStore.getState().openConversation(id), idA);
+    await page.waitForFunction((id) => window.__agentDesktopStore.getState().session?.id === id, idA, { timeout: 15_000 });
     await page.waitForTimeout(300);
     const { profile: prof } = await cdp.send("Profiler.stop");
     await cdp.detach();
@@ -304,7 +307,7 @@ try {
   // 40-turn conversation. This isolates the pure React/markdown/shiki cost of
   // one switch's render, independent of the store plumbing.
   const renderCost = await page.evaluate(async () => {
-    const st = window.__clarkProfiling.store;
+    const st = window.__agentDesktopStore;
     const snap = st.getState().snapshot;
     const samples = [];
     for (let i = 0; i < 6; i += 1) {
@@ -326,10 +329,10 @@ try {
   // Now switch to A (light) then back to B (heavy) with the CPU profiler on,
   // so we capture the real reattach path while the heavy transcript is live.
   // Warm both first.
-  await page.evaluate((id) => window.__clarkProfiling.store.getState().openConversation(id), idA);
-  await page.waitForFunction((id) => window.__clarkProfiling.store.getState().session?.id === id, idA, { timeout: 15_000 });
-  await page.evaluate((id) => window.__clarkProfiling.store.getState().openConversation(id), idB);
-  await page.waitForFunction((id) => window.__clarkProfiling.store.getState().session?.id === id, idB, { timeout: 15_000 });
+  await page.evaluate((id) => window.__agentDesktopStore.getState().openConversation(id), idA);
+  await page.waitForFunction((id) => window.__agentDesktopStore.getState().session?.id === id, idA, { timeout: 15_000 });
+  await page.evaluate((id) => window.__agentDesktopStore.getState().openConversation(id), idB);
+  await page.waitForFunction((id) => window.__agentDesktopStore.getState().session?.id === id, idB, { timeout: 15_000 });
   for (let r = 0; r < rounds; r += 1) {
     await measureSwitch(idA, `r${r + 1}-A`, r === 0 || r === rounds - 1);
     await measureSwitch(idB, `r${r + 1}-B`, r === 0);

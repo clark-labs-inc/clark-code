@@ -93,6 +93,32 @@ fn run_start_accepts_no_model_selected_tenant_or_source_binding() {
 }
 
 #[test]
+fn run_start_result_exposes_the_exact_backend_continuation_ids() {
+    let run_id = Uuid::new_v4();
+    let charter_id = Uuid::new_v4();
+    let source_id = Uuid::new_v4();
+    let initial_task_id = Uuid::new_v4();
+    let outcome = start_run_outcome(ScoutRunStartReceipt {
+        organization_id: Uuid::new_v4(),
+        workspace_id: Uuid::new_v4(),
+        request_id: "scout-run:exact".into(),
+        run_id,
+        charter_id,
+        source_id,
+        initial_task_id,
+        created: false,
+    });
+
+    assert!(!outcome.is_error);
+    assert!(outcome.content.contains(&run_id.to_string()));
+    assert!(outcome.content.contains(&charter_id.to_string()));
+    assert!(outcome.content.contains(&source_id.to_string()));
+    assert!(outcome.content.contains(&initial_task_id.to_string()));
+    assert_eq!(outcome.details["run_id"], run_id.to_string());
+    assert!(outcome.content.contains("\"created\":false"));
+}
+
+#[test]
 fn claim_result_exposes_the_exact_safe_task_to_the_model() {
     let task_id = Uuid::new_v4();
     let source_id = Uuid::new_v4();
@@ -127,9 +153,9 @@ fn empty_claim_result_remains_explicit_and_terminal() {
     });
 
     assert!(!outcome.is_error);
-    assert_eq!(
-        outcome.content,
-        "Clark Code reports no claimable Scout task for this run."
-    );
+    assert!(outcome
+        .content
+        .starts_with("Clark Code reports no claimable Scout task for this run.\n\n"));
+    assert!(outcome.content.contains("\"task\":null"));
     assert!(outcome.details["task"].is_null());
 }

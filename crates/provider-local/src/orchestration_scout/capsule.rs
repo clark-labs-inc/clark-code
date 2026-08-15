@@ -152,7 +152,7 @@ fn outcome(response: CapsuleServiceResponse) -> ToolOutcome {
             "Target registry generation {generation} exposes {} administrator-approved capsules.",
             capsules.len()
         ))
-        .with_details(json!({
+        .with_model_visible_details(json!({
             "registry_sha256": registry_sha256,
             "generation": generation,
             "capsules": capsules
@@ -178,7 +178,7 @@ fn outcome(response: CapsuleServiceResponse) -> ToolOutcome {
             ToolOutcome::ok(format!(
                 "Administrator-approved capsule `{capsule_id}` completed for `{enterprise_id}`."
             ))
-            .with_details(json!({
+            .with_model_visible_details(json!({
                 "registry_sha256": registry_sha256,
                 "generation": generation,
                 "capsule_id": capsule_id,

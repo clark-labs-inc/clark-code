@@ -726,6 +726,7 @@ pub async fn prompt(
     session_id: String,
     blocks: Vec<ContentBlock>,
     attachments: Vec<PendingUpload>,
+    internal_resume: Option<bool>,
     state: State<'_, AppState>,
 ) -> Result<PromptReceipt, String> {
     let _account_lifecycle = state.account_lifecycle.read().await;
@@ -740,11 +741,21 @@ pub async fn prompt(
         .await
         .ok_or("no such session")?;
 
+    let internal_resume = internal_resume.unwrap_or(false);
+    const RESUME_PROMPT: &str = "Continue from the saved progress. Re-read current state, do not repeat completed writes, and finish the task.";
+    let valid_resume_prompt = matches!(
+        blocks.as_slice(),
+        [ContentBlock::Text { text }] if text == RESUME_PROMPT
+    );
+    if internal_resume && (!attachments.is_empty() || !valid_resume_prompt) {
+        return Err("invalid internal provider-resume request".into());
+    }
     tracing::info!(
         event = "conversation_prompt_received",
         conversation_id = %sid,
         block_count = blocks.len(),
         attachment_count = attachments.len(),
+        internal_resume,
         "conversation prompt received"
     );
 
@@ -757,14 +768,22 @@ pub async fn prompt(
     // The visible user turn is the text PLUS an echo of each attachment
     // (image thumbnail / file chip) — without it the timeline shows only the
     // text and the files the user attached seem to vanish on send.
-    let echo_blocks: Vec<ContentBlock> = blocks
-        .iter()
-        .cloned()
-        .chain(attachments.iter().map(PendingUpload::echo_block))
-        .collect();
+    let echo_blocks: Vec<ContentBlock> = if internal_resume {
+        Vec::new()
+    } else {
+        blocks
+            .iter()
+            .cloned()
+            .chain(attachments.iter().map(PendingUpload::echo_block))
+            .collect()
+    };
     let mut durable_prompt = vec![AgentEvent::Trace {
         run: None,
-        source: "desktop_prompt".into(),
+        source: if internal_resume {
+            "desktop_provider_resume".into()
+        } else {
+            "desktop_prompt".into()
+        },
         payload: serde_json::json!({
             "blocks": blocks.clone(),
             "attachments": attachments.clone(),

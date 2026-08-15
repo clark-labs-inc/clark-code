@@ -102,7 +102,8 @@ describe("cloud history size backstop", () => {
     expect("plan" in (snapshot as Snapshot & { plan?: unknown })).toBe(false);
   });
 
-  it("keeps an oversized UTF-8 snapshot pending and surfaces the failure", async () => {
+  it("checkpoints an oversized UTF-8 snapshot without leaving flush permanently pending", async () => {
+    invoke.mockResolvedValueOnce(undefined);
     const warning = vi.fn();
     const unsubscribe = onCloudHistoryWarning(warning);
     const snapshot: Snapshot = {
@@ -130,13 +131,20 @@ describe("cloud history size backstop", () => {
       snapshot,
     );
 
-    await expect(flushCloudPuts(100)).resolves.toBe(false);
-    expect(invoke).not.toHaveBeenCalled();
-    expect(warning).toHaveBeenCalledWith(expect.stringContaining("too large to sync safely"));
+    await expect(flushCloudPuts(100)).resolves.toBe(true);
+    expect(invoke).toHaveBeenCalledOnce();
+    expect(invoke).toHaveBeenCalledWith(
+      "desktop_conv_checkpoint_local",
+      expect.objectContaining({
+        checkpoint: expect.objectContaining({ id: "oversized-utf8", snapshot }),
+      }),
+    );
+    expect(warning).toHaveBeenCalledWith(expect.stringContaining("too large for cross-device sync"));
     unsubscribe();
   });
 
   it("does not repeatedly serialize an already-oversized running transcript", async () => {
+    invoke.mockResolvedValueOnce(undefined);
     const warning = vi.fn();
     const unsubscribe = onCloudHistoryWarning(warning);
     const snapshot: Snapshot = {
@@ -165,7 +173,13 @@ describe("cloud history size backstop", () => {
     await Promise.resolve();
 
     expect(warning).toHaveBeenCalledOnce();
-    expect(invoke).not.toHaveBeenCalled();
+    expect(invoke).toHaveBeenCalledOnce();
+    expect(invoke).toHaveBeenCalledWith(
+      "desktop_conv_checkpoint_local",
+      expect.objectContaining({
+        checkpoint: expect.objectContaining({ id: "oversized-running", snapshot }),
+      }),
+    );
     unsubscribe();
   });
 

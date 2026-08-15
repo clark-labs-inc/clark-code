@@ -107,7 +107,6 @@ async fn run_async(
             limit_weighted_tokens: lane.token_budget,
             ..Default::default()
         })?,
-        2,
         integrator,
     )?;
     coordinator.register_reader(Arc::new(local.reader_harness("local-reader")?))?;

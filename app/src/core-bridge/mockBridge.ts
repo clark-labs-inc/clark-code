@@ -308,9 +308,42 @@ export class MockBridge implements CoreBridge {
   async cancel(): Promise<void> {
     const last = this.lastRunId();
     if (last && this.snapshot.runs[last]) {
-      this.snapshot.runs[last] = { id: last, status: "cancelled" };
+      this.snapshot.runs[last] = {
+        id: last,
+        status: "cancelled",
+        outcome: { status: "cancelled", stop_reason: "user_cancelled" },
+      };
+      for (const [id, call] of Object.entries(this.snapshot.tool_calls)) {
+        if (call.status === "in_progress") {
+          this.snapshot.tool_calls[id] = { ...call, status: "cancelled" };
+        }
+      }
+      if (this.snapshot.fan_out) {
+        const agents = this.snapshot.fan_out.agents.map((agent) =>
+          agent.status === "done" || agent.status === "failed"
+            ? agent
+            : {
+                ...agent,
+                status: "failed" as const,
+                activity: "Cancelled with parent run",
+                result: "The parent run was stopped before this delegated task completed.",
+                updated_at_ms: Date.now(),
+              },
+        );
+        this.snapshot.fan_out = {
+          ...this.snapshot.fan_out,
+          done: agents.filter((agent) => agent.status === "done").length,
+          running: 0,
+          agents,
+        };
+      }
+      this.snapshot.pending_permission = undefined;
       this.emit();
     }
+  }
+
+  private runCancelled(run: string): boolean {
+    return this.snapshot.runs[run]?.status === "cancelled";
   }
 
   async respond(_sessionId: string, response: ClientResponse): Promise<void> {
@@ -572,6 +605,7 @@ When inputs change while a computation is in progress, the system should follow 
     });
     this.emit();
     await sleep(250);
+    if (this.runCancelled(run)) return;
 
     const resilienceCase = loadStoredResilienceCase();
     if (resilienceCase) {
@@ -632,6 +666,7 @@ When inputs change while a computation is in progress, the system should follow 
     }
     this.emit();
     await sleep(300);
+    if (this.runCancelled(run)) return;
 
     if (parallelDemo) {
       const now = Date.now();
@@ -676,6 +711,7 @@ When inputs change while a computation is in progress, the system should follow 
       // Keep the live state visible long enough to exercise selection, elapsed
       // time, and the inspector before the scripted run settles.
       await sleep(20_000);
+      if (this.runCancelled(run)) return;
     }
 
     this.snapshot.timeline.push({
@@ -706,6 +742,7 @@ When inputs change while a computation is in progress, the system should follow 
     this.snapshot.focus = { surface: "files", path: "src/main.rs" };
     this.emit();
     await sleep(400);
+    if (this.runCancelled(run)) return;
 
     this.snapshot.tool_calls[tc] = {
       ...this.snapshot.tool_calls[tc],
@@ -714,6 +751,7 @@ When inputs change while a computation is in progress, the system should follow 
     };
     this.emit();
     await sleep(250);
+    if (this.runCancelled(run)) return;
 
     // An edit tool call produces a diff in the Files surface.
     const edit = `tc-edit-${Date.now()}`;
@@ -740,6 +778,7 @@ When inputs change while a computation is in progress, the system should follow 
     this.snapshot.timeline.push({ item: "tool_call", id: edit });
     this.emit();
     await sleep(250);
+    if (this.runCancelled(run)) return;
 
     // A the agent research call — keep the cloud phase live in browser demos long
     // enough to inspect its compact progress surface before cited findings land.
@@ -760,6 +799,7 @@ When inputs change while a computation is in progress, the system should follow 
     this.snapshot.timeline.push({ item: "tool_call", id: research });
     this.emit();
     await sleep(userText.toLowerCase().includes("research") ? 10_000 : 250);
+    if (this.runCancelled(run)) return;
 
     this.snapshot.tool_calls[research] = {
       ...this.snapshot.tool_calls[research],
@@ -840,6 +880,7 @@ When inputs change while a computation is in progress, the system should follow 
       this.snapshot.timeline.push(...artifacts.map((artifact) => ({ item: "artifact" as const, id: artifact.id })));
       this.emit();
       await sleep(150);
+      if (this.runCancelled(run)) return;
     }
 
     this.snapshot.pending_permission = {
@@ -857,6 +898,7 @@ When inputs change while a computation is in progress, the system should follow 
     };
     this.emit();
     await sleep(50);
+    if (this.runCancelled(run)) return;
 
     const answer =
       "I read `src/main.rs`. It defines a `main` that prints a greeting. " +
@@ -865,6 +907,7 @@ When inputs change while a computation is in progress, the system should follow 
       this.appendAgentText(run, word + " ");
       this.emit();
       await sleep(28);
+      if (this.runCancelled(run)) return;
     }
     const finalMessage = this.snapshot.timeline[this.snapshot.timeline.length - 1];
     if (finalMessage?.item === "message" && finalMessage.role === "agent") {
@@ -973,9 +1016,7 @@ When inputs change while a computation is in progress, the system should follow 
     const lower = userText.toLowerCase();
     const requestedStatus = lower.includes("complete")
       ? "complete" as const
-      : lower.includes("budget")
-        ? "budget_limited" as const
-        : lower.includes("active")
+      : lower.includes("active")
           ? "active" as const
           : "blocked" as const;
     const goalId = "mock-goal";
@@ -986,7 +1027,6 @@ When inputs change while a computation is in progress, the system should follow 
       objective,
       status: "active",
       run,
-      token_budget: 100_000,
       tokens_used: 18_420,
       time_used_seconds: 0,
       continuations: 0,

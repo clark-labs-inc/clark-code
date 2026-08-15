@@ -118,8 +118,6 @@ pub(super) fn apply(
             if snapshot.state != ExecutionState::Running
                 || !failure_class.recoverable()
                 || !snapshot.active_tools.is_empty()
-                || snapshot.attempts.len() as u32 >= snapshot.policy.max_attempts
-                || snapshot.usage.exhausted(&snapshot.policy)
             {
                 return Err("recovery was scheduled outside a proven safe boundary".to_string());
             }

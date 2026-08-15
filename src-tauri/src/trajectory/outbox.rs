@@ -19,6 +19,7 @@ mod schema;
 mod storage;
 pub(crate) use barrier::wait_for_acknowledged_prefix;
 pub(crate) use recovery::interrupt_live_runs;
+pub(crate) use storage::migrate_legacy_database;
 use storage::{open, owner_key, reclaim_free_pages, sql_error};
 
 #[derive(Clone)]

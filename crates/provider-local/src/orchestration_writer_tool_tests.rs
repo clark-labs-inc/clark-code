@@ -66,7 +66,6 @@ fn paid_config() -> (String, String, String) {
 fn config() -> OrchestrationToolsConfig {
     OrchestrationToolsConfig {
         policy: crate::orchestration::OrchestrationConfig {
-            enabled: true,
             max_agents: 3,
             ..Default::default()
         },
@@ -187,9 +186,7 @@ async fn paid_single_repo_workstreams_complete_and_apply() {
     let shared = Arc::new(SharedState {
         config: OrchestrationToolsConfig {
             policy: crate::orchestration::OrchestrationConfig {
-                enabled: true,
                 max_agents: 2,
-                max_attempts: 1,
                 token_budget: 60_000,
                 ..Default::default()
             },
@@ -314,7 +311,6 @@ async fn paid_single_agent_control_completes_the_same_contract() {
                 "model": model,
                 "reasoning_effort": "low",
                 "temperature": 0.0,
-                "max_iterations": 96,
                 "permissions": {
                     "write_file": "allow",
                     "edit_file": "allow",

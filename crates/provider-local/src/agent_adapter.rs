@@ -11,7 +11,7 @@ use agent_core::ids::{RunId, SessionId, ToolCallId};
 use agent_loop as ca;
 use async_channel::Sender;
 use async_trait::async_trait;
-use futures::{stream::BoxStream, StreamExt};
+use futures::stream::BoxStream;
 use serde_json::{json, Value};
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
@@ -72,33 +72,6 @@ pub(crate) struct AgentLoopStream {
     session: Arc<Mutex<SessionState>>,
     run: RunId,
     context_limit: Option<u64>,
-    weighted_token_limit: Option<f64>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ExecutionBudgetState {
-    Within,
-    Approaching,
-    Exhausted,
-}
-
-fn execution_budget_state(
-    usage: Option<agent_core::domain::RunUsage>,
-    limit: Option<f64>,
-) -> ExecutionBudgetState {
-    let Some(limit) = limit.filter(|limit| limit.is_finite() && *limit > 0.0) else {
-        return ExecutionBudgetState::Within;
-    };
-    let used = usage
-        .map(|usage| usage.input_tokens.saturating_add(usage.output_tokens) as f64)
-        .unwrap_or(0.0);
-    if used >= limit {
-        ExecutionBudgetState::Exhausted
-    } else if used >= limit * 0.9 {
-        ExecutionBudgetState::Approaching
-    } else {
-        ExecutionBudgetState::Within
-    }
 }
 
 impl AgentLoopStream {
@@ -109,7 +82,6 @@ impl AgentLoopStream {
         session: Arc<Mutex<SessionState>>,
         run: RunId,
         context_limit: Option<u64>,
-        weighted_token_limit: Option<f64>,
     ) -> Self {
         Self {
             llm,
@@ -119,7 +91,6 @@ impl AgentLoopStream {
             session,
             run,
             context_limit,
-            weighted_token_limit,
         }
     }
 
@@ -136,21 +107,6 @@ impl ca::StreamFn for AgentLoopStream {
         request: ca::StreamRequest,
         signal: CancellationToken,
     ) -> BoxStream<'static, ca::StreamEvent> {
-        let budget_state =
-            execution_budget_state(self.totals.snapshot(), self.weighted_token_limit);
-        if budget_state == ExecutionBudgetState::Exhausted {
-            return futures::stream::iter([
-                ca::StreamEvent::Start {
-                    partial: empty_assistant(ca::StopReason::EndTurn, None),
-                },
-                ca::StreamEvent::Error {
-                    partial: empty_assistant(ca::StopReason::Error, None),
-                    kind: ca::stream::StreamErrorKind::Fatal,
-                    message: "execution_budget_exhausted: cumulative model-token safety limit reached; the conversation and completed work are preserved, so continue in a follow-up run".to_string(),
-                },
-            ])
-            .boxed();
-        }
         let llm = self.llm.clone();
         let totals = self.totals.clone();
         let incidents = self.incidents.clone();
@@ -173,11 +129,6 @@ impl ca::StreamFn for AgentLoopStream {
                     .any(|tool| tool.name == crate::tools::final_answer::FINAL_ANSWER_TOOL)
         };
         let mut messages = to_wire_messages(&request.system_prompt, &request.messages);
-        if budget_state == ExecutionBudgetState::Approaching {
-            messages.push(crate::llm::ChatMessage::system(
-                "Execution budget is nearly exhausted. Stop broad exploration, complete only essential verification, then call final_answer with a concise handoff. Do not start another large task in this run.",
-            ));
-        }
         let tools = request
             .tools
             .iter()
@@ -625,8 +576,8 @@ impl ca::AgentTool for DesktopToolAdapter {
         }));
         let effect_intent = self.exec.effect_intent(&args);
         let mut outcome = self.exec.invoke(args.clone(), &call_ctx).await;
-        let terminates_run = self.exec.terminates_run();
-        if terminates_run && !outcome.is_error {
+        let static_terminator = self.exec.terminates_run();
+        if static_terminator && !outcome.is_error {
             let unresolved = self
                 .ctx
                 .session
@@ -638,6 +589,14 @@ impl ca::AgentTool for DesktopToolAdapter {
                 outcome = ToolOutcome::error(reminder);
             }
         }
+        let terminates_run = static_terminator
+            || outcome.signals.iter().any(|signal| {
+                matches!(
+                    signal,
+                    ToolSignal::Goal(goal)
+                        if goal.status == crate::loop_state::GoalStatus::Complete
+                )
+            });
         if !outcome.is_error {
             if let Some(intent) = effect_intent {
                 let receipt = self.ctx.session.lock().await.effects.register(

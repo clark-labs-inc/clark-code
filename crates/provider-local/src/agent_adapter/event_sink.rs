@@ -132,14 +132,6 @@ impl CompletedRunTranscript {
         self.messages.lock().expect("run transcript lock").clone()
     }
 
-    pub fn has_commit_boundary(&self) -> bool {
-        !self
-            .messages
-            .lock()
-            .expect("run transcript lock")
-            .is_empty()
-    }
-
     /// Whether this run already committed a user-visible final answer. A
     /// later hidden follow-up (for example effect verification) must not turn
     /// that answer into an "empty model response" if the follow-up itself

@@ -61,7 +61,7 @@ import { ComposerPermissionPill } from "./ComposerPermissionPill";
 import { ComposerCollaborationPill } from "./ComposerCollaborationPill";
 import { ComposerQueuedMessages } from "./ComposerQueuedMessages";
 import { ComposerGatedWorkflowGate } from "./ComposerGatedWorkflowGate";
-import { ModelPill } from "./ComposerControls";
+import { ModelPill, QuickChatModelLabel } from "./ComposerControls";
 import {
   SandboxSetupCard,
   sandboxBlocksSubmission,
@@ -89,6 +89,7 @@ import { SpecComposerCodeContext, useSpecComposerCodeContext } from "./SpecCompo
 import { recordSpecPrompt } from "../lib/specPromptHistory";
 import { approvalPolicyForSpecialist } from "../lib/permissions";
 import { specialistModelSettings } from "../lib/specialistModel";
+import { isQuickChatProject } from "../lib/projectSidebar";
 
 export function Composer() {
   const sessionId = useSessionStore((state) => state.session?.id ?? null);
@@ -212,6 +213,9 @@ function ScopedComposer() {
   const projectInspectionReady = !isRemoteContext || Boolean(remote);
   const localTarget = session ? session.provider === "local" : activeProvider === "local";
   const specialistSession = Boolean(activeSpecialist) || session?.provider === "specialist";
+  const quickChatSession = Boolean(
+    session && isQuickChatProject(activeProjectRoot ?? undefined, session.id),
+  );
   const specSession = isSpecComposerSession(activeSpecialist);
   const usesConversationWorkspace = Boolean(
     activeSpecialist
@@ -1137,7 +1141,9 @@ function ScopedComposer() {
               >
                 {activeSpecialist ?? "Specialist"}
                 </span>
-                : <ModelPill />}
+                : quickChatSession
+                  ? <QuickChatModelLabel />
+                  : <ModelPill />}
             {busy && !hasContent ? (
               <button
                 onClick={() => void cancelActive()}

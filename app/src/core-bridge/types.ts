@@ -366,7 +366,6 @@ export interface ExecutionBoundaryReceipt {
 
 export interface ExecutionRecovery {
   attempt: number;
-  max_attempts: number;
   boundary: ExecutionBoundaryReceipt;
   started_at_ms: number;
 }
@@ -391,7 +390,7 @@ export interface ProviderIncident {
   completed_at_ms?: number;
 }
 
-export type GoalStatus = "active" | "blocked" | "budget_limited" | "complete";
+export type GoalStatus = "active" | "blocked" | "complete";
 
 /** Provider-owned receipt for a standing goal that can span many runs. */
 export interface GoalState {
@@ -399,7 +398,6 @@ export interface GoalState {
   objective: string;
   status: GoalStatus;
   run?: string;
-  token_budget?: number;
   tokens_used: number;
   time_used_seconds: number;
   continuations: number;

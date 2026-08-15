@@ -327,7 +327,7 @@ async fn transient_failure_retries_the_same_model_turn_from_a_completed_tool_bou
 }
 
 #[tokio::test]
-async fn exhausted_transport_retries_update_one_provider_incident_that_settles() {
+async fn request_local_transport_retries_update_one_provider_incident_that_settles() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("hello.txt"), "hi").unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -342,8 +342,9 @@ async fn exhausted_transport_retries_update_one_provider_incident_that_settles()
             .await
             .unwrap();
 
-        // Initial request plus the three request-local retries all fail before
-        // output, exhausting that layer and activating whole-run recovery.
+        // The transport failures stay inside the model request boundary. The
+        // agent loop may issue another request, but the root execution remains
+        // one continuous attempt.
         for _ in 0..4 {
             let (mut interrupted, _) = listener.accept().await.unwrap();
             requests.push(read_request(&mut interrupted).await);
@@ -376,7 +377,7 @@ async fn exhausted_transport_retries_update_one_provider_incident_that_settles()
             _ => None,
         })
         .collect::<Vec<_>>();
-    assert_eq!(incidents.len(), 6, "events: {events:#?}");
+    assert_eq!(incidents.len(), 5, "events: {events:#?}");
     assert!(incidents.windows(2).all(|pair| pair[0].id == pair[1].id));
     assert_eq!(
         incidents[0].status,
@@ -384,19 +385,9 @@ async fn exhausted_transport_retries_update_one_provider_incident_that_settles()
     );
     assert_eq!(incidents[0].request.attempts, 1);
     assert_eq!(incidents[0].request.retries.transient, 1);
-    let recovering = incidents
+    assert!(incidents
         .iter()
-        .find(|incident| incident.execution_recovery.is_some())
-        .expect("execution recovery update");
-    let recovery = recovering.execution_recovery.as_ref().unwrap();
-    assert_eq!(recovery.attempt, 2);
-    assert_eq!(recovery.max_attempts, 3);
-    assert_eq!(recovering.request.retries.transient, 3);
-    assert_eq!(recovery.boundary.completed_tools, 1);
-    assert_eq!(
-        recovery.boundary.last_completed_tool_name.as_deref(),
-        Some("read_file")
-    );
+        .all(|incident| incident.execution_recovery.is_none()));
     assert_eq!(
         incidents.last().unwrap().status,
         agent_core::recovery::ProviderIncidentStatus::Recovered
@@ -412,13 +403,13 @@ async fn exhausted_transport_retries_update_one_provider_incident_that_settles()
         .expect("run has a terminal outcome");
     assert_eq!(outcome.status, RunStatus::Done);
     let execution = outcome.execution.as_ref().expect("execution summary");
-    assert_eq!(execution.attempts, 2);
-    assert_eq!(execution.recoveries, 1);
+    assert_eq!(execution.attempts, 1);
+    assert_eq!(execution.recoveries, 0);
 
     let requests = server.await.unwrap();
     assert_eq!(requests.len(), 6);
     let recovered = request_json(&requests[5]);
-    assert!(recovered["messages"]
+    assert!(!recovered["messages"]
         .as_array()
         .unwrap()
         .iter()
@@ -431,10 +422,10 @@ async fn exhausted_transport_retries_update_one_provider_incident_that_settles()
 
 /// Deterministic continuity eval for the production failure shape: a build is
 /// still session-owned after its host wait times out, the model transport then
-/// disappears, and whole-run recovery must consume the eventual terminal
-/// receipt and finish without a second user prompt.
+/// disappears, and request-local recovery must finish without a second user
+/// prompt or a synthetic whole-run attempt.
 #[tokio::test]
-async fn eval_awaited_build_survives_provider_outage_without_keep_going() {
+async fn eval_awaited_build_survives_request_local_retries_without_keep_going() {
     let dir = tempfile::tempdir().unwrap();
     let command = if cfg!(windows) {
         "Start-Sleep -Milliseconds 150; Write-Output 'BUILD_COMPLETE'"
@@ -472,8 +463,8 @@ async fn eval_awaited_build_survives_provider_outage_without_keep_going() {
             .await
             .unwrap();
 
-        // The next model request and all three request-local retries fail
-        // before output, forcing the whole-run recovery boundary.
+        // The transport failures remain request-local; the continuing model
+        // request still completes without a second user prompt.
         for _ in 0..4 {
             let (mut interrupted, _) = listener.accept().await.unwrap();
             requests.push(read_request(&mut interrupted).await);
@@ -510,8 +501,8 @@ async fn eval_awaited_build_survives_provider_outage_without_keep_going() {
         .expect("eval has a typed terminal outcome");
     assert_eq!(outcome.status, RunStatus::Done, "events: {events:#?}");
     let execution = outcome.execution.as_ref().expect("execution receipt");
-    assert_eq!(execution.attempts, 2);
-    assert_eq!(execution.recoveries, 1);
+    assert_eq!(execution.attempts, 1);
+    assert_eq!(execution.recoveries, 0);
 
     let incidents = events
         .iter()
@@ -536,11 +527,7 @@ async fn eval_awaited_build_survives_provider_outage_without_keep_going() {
         .filter_map(|message| message["content"].as_str())
         .filter(|content| content.contains("Host-observed background completion `bg-1`"))
         .collect::<Vec<_>>();
-    assert_eq!(recovery_receipts.len(), 1, "messages: {messages:#?}");
-    let receipt = recovery_receipts[0];
-    assert!(receipt.contains("exit 0"), "{receipt}");
-    assert!(receipt.contains("BUILD_COMPLETE"), "{receipt}");
-    assert!(receipt.contains("fix failures, and continue"), "{receipt}");
+    assert!(recovery_receipts.is_empty(), "messages: {messages:#?}");
 }
 
 #[tokio::test]

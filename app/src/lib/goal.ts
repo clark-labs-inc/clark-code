@@ -26,8 +26,6 @@ export function goalStatusLabel(goal: GoalState): string {
       return "Goal active";
     case "blocked":
       return "Goal blocked";
-    case "budget_limited":
-      return "Goal budget reached";
     case "complete":
       return "Goal complete";
   }

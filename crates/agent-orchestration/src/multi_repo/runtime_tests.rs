@@ -416,7 +416,6 @@ fn coordinator(
     let mut coordinator = MultiRepoCoordinator::new(
         plan,
         budget,
-        2,
         Arc::new(FakeIntegrator {
             baselines,
             checks,

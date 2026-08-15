@@ -19,7 +19,6 @@ struct State {
 pub struct ControlSnapshot {
     pub max_agents: usize,
     pub max_depth: usize,
-    pub max_attempts: u32,
     pub agents: BTreeMap<AgentPath, AgentRecord>,
     pub budget: BudgetSnapshot,
 }
@@ -29,31 +28,21 @@ pub struct ControlSnapshot {
 pub struct ControlPlane {
     max_agents: usize,
     max_depth: usize,
-    max_attempts: u32,
     budget: SharedBudget,
     state: Arc<Mutex<State>>,
 }
 
 impl ControlPlane {
-    pub fn new(
-        max_agents: usize,
-        max_depth: usize,
-        max_attempts: u32,
-        budget: SharedBudget,
-    ) -> Result<Self, String> {
+    pub fn new(max_agents: usize, max_depth: usize, budget: SharedBudget) -> Result<Self, String> {
         if max_agents == 0 {
             return Err("max_agents must be greater than zero".to_string());
         }
         if max_depth == 0 {
             return Err("max_depth must be greater than zero".to_string());
         }
-        if max_attempts == 0 {
-            return Err("max_attempts must be greater than zero".to_string());
-        }
         Ok(Self {
             max_agents,
             max_depth,
-            max_attempts,
             budget,
             state: Arc::new(Mutex::new(State {
                 agents: BTreeMap::new(),
@@ -182,9 +171,6 @@ impl ControlPlane {
                 Ok(record.attempt)
             }
             ReportDecision::Rework => {
-                if record.attempt >= self.max_attempts {
-                    return Err("maximum rework attempts reached".to_string());
-                }
                 record.attempt += 1;
                 record.status = AgentStatus::Interrupted;
                 record.report_status = ReportStatus::Rework;
@@ -244,7 +230,6 @@ impl ControlPlane {
         ControlSnapshot {
             max_agents: self.max_agents,
             max_depth: self.max_depth,
-            max_attempts: self.max_attempts,
             agents: self.state.lock().expect("control lock").agents.clone(),
             budget: self.budget.snapshot(),
         }
@@ -312,7 +297,6 @@ mod tests {
         ControlPlane::new(
             max_agents,
             1,
-            2,
             SharedBudget::new(BudgetConfig::default()).unwrap(),
         )
         .unwrap()
@@ -334,7 +318,7 @@ mod tests {
     }
 
     #[test]
-    fn report_must_precede_accept_and_rework_is_bounded() {
+    fn report_must_precede_accept_and_rework_remains_available() {
         let control = control(1);
         let path = AgentPath::parse("/root/reader").unwrap();
         control
@@ -363,6 +347,5 @@ mod tests {
             )
             .unwrap();
         assert_eq!(control.decide(&path, ReportDecision::Rework).unwrap(), 2);
-        assert!(control.decide(&path, ReportDecision::Rework).is_err());
     }
 }

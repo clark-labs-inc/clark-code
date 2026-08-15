@@ -8,7 +8,9 @@ use scout_ingest_protocol::cartography::{
     ClaimedTask, GraphDeltaCursor, GraphObjectKind, GraphSnapshotCursor, SimulationOverlayCursor,
     TaskClaimResponse,
 };
-use scout_platform_client::{ScoutCartographySession, ScoutCartographySessionConfig};
+use scout_platform_client::{
+    ScoutCartographySession, ScoutCartographySessionConfig, ScoutRunStartReceipt,
+};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use tokio::sync::OnceCell;
@@ -267,7 +269,7 @@ impl ToolExecutor for ScoutEnterpriseBackendTool {
                     ToolOutcome::ok(
                         "Scout collector is enrolled with Clark Code's authoritative backend.",
                     )
-                    .with_details(json!({
+                    .with_model_visible_details(json!({
                         "authority": "host_system_cartography_backend",
                         "organization_id": enrollment.organization_id,
                         "workspace_id": enrollment.workspace_id,
@@ -299,20 +301,7 @@ impl ToolExecutor for ScoutEnterpriseBackendTool {
                     Err(error) => return ToolOutcome::error(error),
                 };
                 match session.start_run(request_id, objective).await {
-                    Ok(receipt) => ToolOutcome::ok(if receipt.created {
-                        "Started the human-requested Scout run and queued its backend-fenced GitHub and local-checkout perimeter tasks."
-                    } else {
-                        "Recovered the existing Scout run for this human request; no duplicate run was created."
-                    })
-                    .with_details(json!({
-                        "authority": "host_system_cartography_backend",
-                        "request_id": receipt.request_id,
-                        "run_id": receipt.run_id,
-                        "charter_id": receipt.charter_id,
-                        "initial_task_id": receipt.initial_task_id,
-                        "created": receipt.created,
-                        "automation": "disabled",
-                    })),
+                    Ok(receipt) => start_run_outcome(receipt),
                     Err(error) => ToolOutcome::error(error),
                 }
             }
@@ -350,7 +339,7 @@ impl ToolExecutor for ScoutEnterpriseBackendTool {
                     Ok(submitted) => ToolOutcome::ok(
                         "Uploaded immutable adapter evidence and ingested its backend-fenced cartography batch.",
                     )
-                    .with_details(json!({
+                    .with_model_visible_details(json!({
                         "task_id": submitted.task_id,
                         "adapter_receipt_id": submitted.adapter_receipt_id,
                         "evidence_id": submitted.evidence.evidence_id,
@@ -372,22 +361,30 @@ impl ToolExecutor for ScoutEnterpriseBackendTool {
     }
 }
 
+fn start_run_outcome(receipt: ScoutRunStartReceipt) -> ToolOutcome {
+    ToolOutcome::ok(if receipt.created {
+        "Started the human-requested Scout run and queued its backend-fenced GitHub and local-checkout perimeter tasks."
+    } else {
+        "Recovered the existing Scout run for this human request; no duplicate run was created."
+    })
+    .with_model_visible_details(json!({
+        "authority": "host_system_cartography_backend",
+        "request_id": receipt.request_id,
+        "run_id": receipt.run_id,
+        "charter_id": receipt.charter_id,
+        "source_id": receipt.source_id,
+        "initial_task_id": receipt.initial_task_id,
+        "created": receipt.created,
+        "automation": "disabled",
+    }))
+}
+
 fn claim_task_outcome(response: TaskClaimResponse) -> ToolOutcome {
     let content = match &response.task {
-        Some(task) => match serde_json::to_string(task) {
-            Ok(task) => format!(
-                "Claimed one fenced Scout task from Clark Code. Copy this exact backend-issued task \
-                 into the next adapter step; do not infer or replace any field:\n{task}"
-            ),
-            Err(_) => {
-                return ToolOutcome::error(
-                    "failed to encode the backend-issued Scout task for the model",
-                )
-            }
-        },
+        Some(_) => "Claimed one fenced Scout task from Clark Code. Copy the exact backend-issued task from the typed result into the next adapter step; do not infer or replace any field.".to_string(),
         None => "Clark Code reports no claimable Scout task for this run.".to_string(),
     };
-    ToolOutcome::ok(content).with_details(json!({
+    ToolOutcome::ok(content).with_model_visible_details(json!({
         "request_id": response.request_id,
         "task": response.task,
     }))
@@ -406,7 +403,7 @@ impl ScoutEnterpriseBackendQueryTool {
             "Scout enterprise authority is Clark Code's organization-scoped backend; \
              configured={configured}, session_enrolled={enrolled}."
         ))
-        .with_details(status)
+        .with_model_visible_details(status)
     }
 }
 
@@ -593,7 +590,7 @@ impl ToolExecutor for ScoutEnterpriseBackendQueryTool {
                         "Read {} bounded graph rows from Clark Code.",
                         page.entries.len()
                     ))
-                    .with_details(json!({
+                    .with_model_visible_details(json!({
                         "organization_id": page.organization_id,
                         "workspace_id": page.workspace_id,
                         "effective_at_ms": page.effective_at_ms,
@@ -637,7 +634,7 @@ impl ToolExecutor for ScoutEnterpriseBackendQueryTool {
                         "Read {} temporal graph changes from Clark Code.",
                         page.entries.len()
                     ))
-                    .with_details(json!({
+                    .with_model_visible_details(json!({
                         "organization_id": page.organization_id,
                         "workspace_id": page.workspace_id,
                         "from_snapshot": page.from_snapshot,
@@ -670,7 +667,7 @@ impl ToolExecutor for ScoutEnterpriseBackendQueryTool {
                         "Read {} simulation overlay memberships from Clark Code.",
                         page.memberships.len()
                     ))
-                    .with_details(json!({
+                    .with_model_visible_details(json!({
                         "overlay": page.overlay,
                         "memberships": page.memberships,
                         "next_cursor": page.next_cursor,
@@ -692,7 +689,7 @@ impl ToolExecutor for ScoutEnterpriseBackendQueryTool {
                         "Read {} realtime cartography changes from Clark Code.",
                         page.changes.len()
                     ))
-                    .with_details(json!({
+                    .with_model_visible_details(json!({
                         "organization_id": page.organization_id,
                         "workspace_id": page.workspace_id,
                         "changes": page.changes,

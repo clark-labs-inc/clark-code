@@ -58,6 +58,58 @@ fn request_with_event(run_id: &str, event: AgentEvent) -> AppendRequest {
 }
 
 #[tokio::test]
+async fn legacy_compaction_folds_acknowledged_events_before_reclaiming_disk() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("outbox.sqlite3");
+    {
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute_batch(schema::SCHEMA).unwrap();
+        assert_eq!(
+            conn.query_row("PRAGMA auto_vacuum", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            0,
+        );
+    }
+    let outbox = TrajectoryOutbox::new(path.clone(), "owner", "session-legacy");
+    let mut base = Snapshot::new();
+    base.session = Some(SessionId::new("session-legacy"));
+    outbox.initialize(&config(), &base, 0).await.unwrap();
+    let batch = outbox.enqueue(&request("run-legacy")).await.unwrap();
+    outbox.acknowledge(&batch.batch_id).await.unwrap();
+
+    assert!(storage::migrate_legacy_database(&path).unwrap());
+    let conn = open(&path).unwrap();
+    assert_eq!(
+        conn.query_row("SELECT COUNT(*) FROM trajectory_outbox", [], |row| {
+            row.get::<_, i64>(0)
+        })
+        .unwrap(),
+        0,
+    );
+    assert_eq!(
+        conn.query_row("PRAGMA auto_vacuum", [], |row| row.get::<_, i64>(0))
+            .unwrap(),
+        2,
+    );
+    let snapshot: Vec<u8> = conn
+        .query_row(
+            "SELECT base_snapshot_json FROM journal_conversation WHERE conversation_id = 'session-legacy'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let snapshot: Snapshot = serde_json::from_slice(&snapshot).unwrap();
+    assert_eq!(snapshot.history_checkpoint, Some(batch.local_seq));
+    assert_eq!(
+        snapshot
+            .runs
+            .get(&RunId::new("run-legacy"))
+            .map(|run| run.status),
+        Some(RunStatus::Running),
+    );
+}
+
+#[tokio::test]
 async fn crash_recovery_replays_uncheckpointed_batches_and_marks_run_interrupted() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("outbox.sqlite3");
@@ -225,6 +277,43 @@ async fn checkpoint_discards_only_acknowledged_covered_batches() {
         .collect::<Result<_, _>>()
         .unwrap();
     assert_eq!(remaining, vec![second.local_seq]);
+}
+
+#[tokio::test]
+async fn equal_cloud_revision_prefers_the_newer_local_read_model() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("outbox.sqlite3");
+    let mut local = Snapshot::new();
+    local.session = Some(SessionId::new("local-checkpoint"));
+    checkpoint_snapshot(
+        path.clone(),
+        "owner".into(),
+        "conversation".into(),
+        json!({"id":"conversation"}),
+        local,
+        7,
+        0,
+        false,
+    )
+    .await
+    .unwrap();
+
+    let mut cloud = Snapshot::new();
+    cloud.session = Some(SessionId::new("older-cloud-snapshot"));
+    let recovered = recover_snapshot(
+        path,
+        "owner".into(),
+        "conversation".into(),
+        Some((cloud, 7)),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+
+    assert_eq!(
+        recovered.snapshot.session.as_ref().map(SessionId::as_str),
+        Some("local-checkpoint")
+    );
 }
 
 #[tokio::test]

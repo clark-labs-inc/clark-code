@@ -11,7 +11,6 @@ use crate::orchestration::OrchestrationConfig;
 fn tools_config() -> OrchestrationToolsConfig {
     OrchestrationToolsConfig {
         policy: OrchestrationConfig {
-            enabled: true,
             ..Default::default()
         },
         base_url: "https://example.invalid/v1".to_string(),

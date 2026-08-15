@@ -1,5 +1,5 @@
 import type { RunOutcome } from "../core-bridge/types";
-import { productModule } from "../product/productModule";
+import { productModule, productName } from "../product/productModule";
 
 // Run failures use the typed provider contract below. `humanizeError` remains
 // only for non-run errors and legacy records that predate `failure_kind`.
@@ -18,7 +18,7 @@ export function humanizeRunFailure(
 ): string {
   switch (outcome?.failure_kind) {
     case "session_expired":
-      return "Your the agent sign-in expired. Sign in again.";
+      return `Your ${productName()} sign-in expired. Reconnect your account.`;
     case "platform_key_rejected":
       return "Clark Code’s access key was rejected. Reconnect Clark Code and try again.";
     case "access_scope_required":
@@ -42,9 +42,9 @@ export function humanizeRunFailure(
     case "iteration_limit":
       return "This run reached its step limit. Continue in this task to resume from the saved work.";
     case "runtime_interrupted":
-      return "the agent restarted before this run finished. Continue from the saved history.";
+      return `${productName()} restarted before this run finished. Resume from the saved history.`;
     case "verification_incomplete":
-      return "the agent finished its answer, but couldn’t independently verify one or more external changes. Review those actions before relying on them.";
+      return `${productName()} finished its answer, but couldn’t independently verify one or more external changes. Review those actions before relying on them.`;
     case "empty_response":
       return "This response is taking longer than expected. Your completed work is saved; continue in this task.";
     default:
@@ -71,7 +71,7 @@ export function humanizeError(raw?: string | null): string {
   const lower = s.toLowerCase();
 
   if (isAccountReconnectError(s)) {
-    return "the agent needs to reconnect your account. Sign out and sign in again.";
+    return `${productName()} needs to reconnect your account. Use Reconnect account in the account menu.`;
   }
 
   // Defense in depth for older hosts or an accidentally reintroduced goal
@@ -125,6 +125,20 @@ export function humanizeError(raw?: string | null): string {
     return "The request was cancelled.";
   }
 
+  // A server status is authoritative even when a proxy error also contains
+  // transport words such as "connection". Do not blame the user's network for
+  // a Clark/model-service outage.
+  if (
+    /\b5\d\d\b/.test(s) ||
+    lower.includes("provider returned error") ||
+    lower.includes("internal server error") ||
+    lower.includes("bad gateway") ||
+    lower.includes("service unavailable") ||
+    lower.includes("overloaded")
+  ) {
+    return "Clark’s model service is temporarily unavailable. Your local work is saved; try again when the service recovers.";
+  }
+
   // Network / timeout.
   if (
     lower.includes("timed out") ||
@@ -136,18 +150,6 @@ export function humanizeError(raw?: string | null): string {
     lower.includes("failed to fetch")
   ) {
     return "Couldn’t reach the model. Check your connection and try again.";
-  }
-
-  // Any 5xx / generic provider error.
-  if (
-    /\b5\d\d\b/.test(s) ||
-    lower.includes("provider returned error") ||
-    lower.includes("internal server error") ||
-    lower.includes("bad gateway") ||
-    lower.includes("service unavailable") ||
-    lower.includes("overloaded")
-  ) {
-    return "The model provider hit a temporary error. Please try again in a moment.";
   }
 
   // Unknown — pull a human sentence out of the noise (JSON blobs, status dumps)

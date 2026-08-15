@@ -12,6 +12,12 @@ tests. Writing the canonical scan bundle under `.agent/security-scans/` is
 permitted. `security_poc_execute` may write and execute controls only in its
 automatically provisioned disposable offline copy.
 
+If the user explicitly forbids every filesystem write, that prohibition also
+covers the host-managed scan bundle. Do not write or finalize a bundle in that
+case. Perform the requested read-only review, label it preliminary and
+unsealed, and explain that a completed diff scan requires permission to write
+the excluded receipt.
+
 The host selects the Security model through trusted runtime policy.
 The workflow model is not chosen from the conversation model setting.
 

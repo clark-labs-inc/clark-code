@@ -30,7 +30,6 @@ pub async fn launch_and_prompt(
     let extra = json!({
         "base_url": base_url,
         "model": "benchmark-scripted-model",
-        "max_iterations": 2,
         "memories": false,
         "auto_compact": false,
         // This benchmark talks only to its in-process scripted model and never

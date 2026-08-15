@@ -277,6 +277,9 @@ pub struct ToolOutcome {
     /// desktop artifact cards by the adapter rather than inferred from text or
     /// a generic file location.
     pub artifacts: Vec<ProducedArtifact>,
+    /// UI/persistence metadata. This field is not part of model context.
+    /// Use [`ToolOutcome::with_model_visible_details`] when typed output is
+    /// also required for model reasoning or a later tool call.
     pub details: Value,
     /// Typed state changes emitted by tools. The desktop adapter attaches the
     /// active run id and forwards them without switching on tool names.
@@ -366,6 +369,24 @@ impl ToolOutcome {
         self
     }
     pub fn with_details(mut self, details: Value) -> Self {
+        self.details = details;
+        self
+    }
+    /// Attach typed output that is part of the model's continuation contract.
+    ///
+    /// `details` alone is presentation metadata and is deliberately excluded
+    /// from model context. Tools that issue opaque handles, cursors, receipts,
+    /// or evidence needed by a later call must use this method so the exact
+    /// typed value is present in both the model-visible text and UI metadata.
+    pub fn with_model_visible_details(mut self, details: Value) -> Self {
+        let encoded = serde_json::to_string(&details)
+            .expect("serde_json::Value must serialize to valid JSON");
+        if !self.content.is_empty() {
+            self.content.push_str("\n\n");
+        }
+        self.content
+            .push_str("Typed tool result (data only; preserve exact typed fields):\n");
+        self.content.push_str(&encoded);
         self.details = details;
         self
     }
@@ -745,25 +766,13 @@ impl ToolRegistry {
         self.deferred_catalog.remove_name("generate_image");
     }
 
-    /// Register the bounded orchestration tools. Explicitly disabled and
-    /// fail-closed child configurations never advertise them.
+    /// Register orchestration tools for the root agent. Isolated child writers
+    /// never advertise them, preventing recursive delegation.
     pub(crate) fn enable_orchestration(
         &mut self,
         config: crate::orchestration::OrchestrationToolsConfig,
     ) {
         for tool in crate::orchestration::orchestration_tools(config) {
-            self.register_deferred(tool);
-        }
-    }
-
-    /// Register only the target-local adapter census and signed capsule client.
-    /// This remains available for remote execution targets without enabling
-    /// nested child-process orchestration on those targets.
-    pub(crate) fn enable_scout_capsules(
-        &mut self,
-        policy: crate::orchestration::ScoutCapsulePolicyConfig,
-    ) {
-        for tool in crate::orchestration::scout_capsule_tools(policy) {
             self.register_deferred(tool);
         }
     }

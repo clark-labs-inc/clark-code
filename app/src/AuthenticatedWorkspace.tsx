@@ -310,7 +310,11 @@ export default function AuthenticatedWorkspace({
         {/* Cached target content stays visible while its native runtime
             reattaches. The full-pane screen is only for a start/open that has
             no target session metadata to render yet. */}
-        <AnimatePresence initial={false} mode="popLayout">
+        {/* Keep only one interactive workspace mounted at a time.  popLayout
+            briefly left both the start and conversation composers in the
+            accessibility tree during a session transition, so keyboard and
+            automation could target the exiting textarea. */}
+        <AnimatePresence initial={false} mode="wait">
           <m.div
             key={workspaceStage}
             data-workspace-stage={workspaceStage}

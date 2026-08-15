@@ -741,16 +741,16 @@ dependencies = [
 
 [[package]]
 name = "clark-agent"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "04377b19bbf758dc684a12e2d03102a7b40610f017458f0777ddd2679a8efa03"
+checksum = "77cf67f476cdb0c38670386de3a7659a6e8c912970019b0313d93c330f654100"
 dependencies = [
  "async-trait",
  "futures",
  "schemars 0.8.22",
  "serde",
  "serde_json",
- "thiserror 1.0.69",
+ "thiserror 2.0.19",
  "tokio",
  "tokio-util",
  "tracing",

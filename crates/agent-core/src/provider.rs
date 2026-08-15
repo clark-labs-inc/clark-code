@@ -379,13 +379,8 @@ pub trait Provider: Send + Sync {
         Ok(None)
     }
 
-    /// Resume a blocked goal. A budget-limited goal requires a new total token
-    /// budget greater than its recorded usage; providers validate that policy.
-    async fn resume_goal(
-        &mut self,
-        _session: &SessionId,
-        _token_budget: Option<u64>,
-    ) -> Result<GoalState> {
+    /// Resume a blocked goal.
+    async fn resume_goal(&mut self, _session: &SessionId) -> Result<GoalState> {
         Err(crate::error::Error::Unsupported(
             "this provider does not expose durable goal controls".into(),
         ))

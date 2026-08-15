@@ -147,7 +147,6 @@ pub trait MultiRepoIntegrationHarness: Send + Sync {
 pub struct MultiRepoCoordinator {
     plan: MultiRepoPlan,
     budget: SharedBudget,
-    max_attempts: u32,
     readers: HashMap<String, Arc<dyn MultiRepoReaderHarness>>,
     writers: HashMap<String, Arc<dyn MultiRepoWriterHarness>>,
     reviewer: Option<Arc<dyn MultiRepoReviewHarness>>,
@@ -158,15 +157,11 @@ impl MultiRepoCoordinator {
     pub fn new(
         plan: MultiRepoPlan,
         budget: SharedBudget,
-        max_attempts: u32,
         integrator: Arc<dyn MultiRepoIntegrationHarness>,
     ) -> Result<Self, String> {
         plan.validate()?;
         if plan.decomposition_decision()?.delegated && plan.integration_checks.is_empty() {
             return Err("delegated plans require at least one behavioral integration check".into());
-        }
-        if max_attempts == 0 {
-            return Err("multi-repository max_attempts must be greater than zero".into());
         }
         let integration_task = plan
             .tasks
@@ -179,7 +174,6 @@ impl MultiRepoCoordinator {
         Ok(Self {
             plan,
             budget,
-            max_attempts,
             readers: HashMap::new(),
             writers: HashMap::new(),
             reviewer: None,

@@ -28,7 +28,6 @@ const incident: ProviderIncident = {
   },
   execution_recovery: {
     attempt: 2,
-    max_attempts: 2,
     started_at_ms: 2_100,
     boundary: {
       execution_id: "run-1",
@@ -67,9 +66,9 @@ describe("ProviderIncidentCard", () => {
     "offers a quiet continuation after terminal %s recovery",
     (status) => {
       const markup = render({ ...incident, status }, vi.fn());
-      expect(markup).toContain("Taking a little longer");
-      expect(markup).toContain("Your completed work is saved");
-      expect(markup).toContain("Keep going");
+      expect(markup).toContain("Clark service was unavailable");
+      expect(markup).toContain("Your local work is saved");
+      expect(markup).toContain("Resume task");
       expect(markup).not.toContain("danger");
       expect(markup).not.toContain("error");
       expect(markup).not.toContain("Retrying");
@@ -79,4 +78,8 @@ describe("ProviderIncidentCard", () => {
       expect(markup).not.toContain("Details");
     },
   );
+
+  it("hides terminal incidents that are no longer the active recovery point", () => {
+    expect(render({ ...incident, status: "failed" })).toBe("");
+  });
 });

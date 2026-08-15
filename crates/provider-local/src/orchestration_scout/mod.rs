@@ -51,20 +51,3 @@ pub(super) fn tools(
     }
     tools
 }
-
-pub(super) fn capsule_tools(
-    policy: crate::orchestration::ScoutCapsulePolicyConfig,
-) -> Vec<Arc<dyn ToolExecutor>> {
-    let state = Arc::new(ScoutToolState {
-        target: Mutex::new(None),
-        repositories: Mutex::new(HashMap::new()),
-        adapter_gate: tokio::sync::Mutex::new(()),
-    });
-    vec![
-        Arc::new(adapter::ScoutAdapterTool {
-            state: state.clone(),
-            cartography: None,
-        }),
-        Arc::new(capsule::ScoutCapsuleTool { state, policy }),
-    ]
-}

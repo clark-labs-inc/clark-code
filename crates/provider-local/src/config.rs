@@ -70,6 +70,9 @@ pub const DEFAULT_COMPACT_RECENT_USER_TOKEN_BUDGET: usize = 20_000;
 /// Resolved configuration for one local-agent session.
 #[derive(Clone, Debug)]
 pub struct LocalConfig {
+    /// Product bundle version reported at the model boundary. Foundations that
+    /// do not compose a product fall back to this crate's own version.
+    pub client_version: String,
     /// OpenAI-compatible base URL (no trailing `/chat/completions`).
     pub base_url: String,
     /// Model id sent in the request body.
@@ -112,9 +115,6 @@ pub struct LocalConfig {
     /// disable either value without learning product policy from this crate.
     pub default_commit_attribution: String,
     pub default_pr_body_attribution: String,
-    /// Optional hard cap on model<->tool iterations per turn. Production leaves
-    /// this unbounded; tests and evals may set an explicit cap.
-    pub max_iterations: Option<u32>,
     /// Hidden A/B switch used by the paid planning benchmark. Production and
     /// normal tests always use the decision-complete profile.
     pub(crate) planning_prompt_profile: crate::planning::PlanningPromptProfile,
@@ -196,9 +196,6 @@ pub struct LocalConfig {
     pub(crate) orchestration: crate::orchestration::OrchestrationConfig,
     pub(crate) scout_capsules: Option<crate::orchestration::ScoutCapsulePolicyConfig>,
     pub(crate) scout_cartography: Option<crate::orchestration::ScoutCartographyHostConfig>,
-    /// Universal root execution lifecycle. This is always present; its limits
-    /// control bounded recovery and accounting rather than tool permissions.
-    pub(crate) execution: crate::root_execution::RootExecutionConfig,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -286,7 +283,7 @@ fn usize_field(extra: &Value, key: &str) -> Option<usize> {
 impl LocalConfig {
     /// Parse from the generic [`ProviderConfig`]. Unknown keys are ignored.
     ///
-    /// Recognized `extra` keys: `model`, `temperature`, `max_output_tokens`, `max_iterations`,
+    /// Recognized `extra` keys: `model`, `temperature`, `max_output_tokens`,
     /// `permissions` (map of tool→`allow|ask|deny`), `auto_compact` (bool),
     /// `auto_compact_token_limit`, `compact_request_token_limit`,
     /// `compact_recent_user_token_budget`, `compatible_memory_import` (bool),
@@ -296,6 +293,14 @@ impl LocalConfig {
 
         let base_url = str_field(extra, "base_url").unwrap_or_else(|| DEFAULT_BASE_URL.to_string());
         let model = str_field(extra, "model").unwrap_or_else(|| DEFAULT_MODEL.to_string());
+        let client_version = str_field(extra, "client_version")
+            .filter(|value| {
+                value.len() <= 64
+                    && value.bytes().all(|byte| {
+                        byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'+')
+                    })
+            })
+            .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string());
         let models = extra
             .get("models")
             .and_then(|value| serde_json::from_value::<Vec<ModelCapability>>(value.clone()).ok())
@@ -357,11 +362,6 @@ impl LocalConfig {
             .unwrap_or_else(|| crate::project_settings::DEFAULT_COMMIT_ATTRIBUTION.to_string());
         let default_pr_body_attribution = str_field(extra, "default_pr_body_attribution")
             .unwrap_or_else(|| crate::project_settings::DEFAULT_PR_BODY_ATTRIBUTION.to_string());
-        let max_iterations = extra
-            .get("max_iterations")
-            .and_then(Value::as_u64)
-            .map(|n| n as u32)
-            .filter(|n| *n > 0);
         let planning_prompt_profile = crate::planning::PlanningPromptProfile::from_extra(
             extra.get("planning_prompt_profile").and_then(Value::as_str),
         );
@@ -430,7 +430,6 @@ impl LocalConfig {
         let orchestration = crate::orchestration::OrchestrationConfig::from_extra(extra);
         let scout_capsules = crate::orchestration::ScoutCapsulePolicyConfig::from_extra(extra);
         let scout_cartography = crate::orchestration::ScoutCartographyHostConfig::from_extra(extra);
-        let execution = crate::root_execution::RootExecutionConfig::from_extra(extra);
 
         let compaction = if extra
             .get("auto_compact")
@@ -468,6 +467,7 @@ impl LocalConfig {
             .and_then(Value::as_str)
             .is_some_and(|value| value == "remote_worker");
         Self {
+            client_version,
             base_url,
             model,
             models,
@@ -486,7 +486,6 @@ impl LocalConfig {
             system_prompt_override,
             default_commit_attribution,
             default_pr_body_attribution,
-            max_iterations,
             planning_prompt_profile,
             hidden_plan_protocol,
             planning_eval_preactivated_tools,
@@ -517,7 +516,6 @@ impl LocalConfig {
             orchestration,
             scout_capsules,
             scout_cartography,
-            execution,
         }
     }
 
@@ -553,7 +551,6 @@ mod tests {
         let cfg = LocalConfig::from_provider_config(&ProviderConfig::default());
         assert_eq!(cfg.base_url, DEFAULT_BASE_URL);
         assert_eq!(cfg.model, DEFAULT_MODEL);
-        assert_eq!(cfg.max_iterations, None);
         assert_eq!(cfg.max_output_tokens, None);
         assert!(cfg.response_format.is_none());
         assert!(cfg.provider_preferences.is_none());
@@ -571,11 +568,7 @@ mod tests {
         assert_eq!(cfg.mode_for("bash"), PermissionMode::Ask);
         assert!(!cfg.computer_use_enabled);
         assert_eq!(cfg.computer_use_backend, ComputerUseBackend::Native);
-        assert!(cfg.orchestration.enabled);
-        assert_eq!(
-            cfg.orchestration.mode,
-            crate::orchestration::DelegationMode::ExplicitRequestOnly
-        );
+        assert_eq!(cfg.orchestration.max_agents, 3);
         // No key → vision fallback can't run either.
         assert!(cfg.vision.is_none());
     }
@@ -768,7 +761,6 @@ mod tests {
                 "model": "host-model",
                 "temperature": 0.2,
                 "max_output_tokens": 16384,
-                "max_iterations": 8,
                 "permissions": { "bash": "deny", "edit_file": "allow" }
             }),
             ..Default::default()
@@ -778,7 +770,6 @@ mod tests {
         assert_eq!(cfg.model, "host-model");
         assert_eq!(cfg.temperature, Some(0.2));
         assert_eq!(cfg.max_output_tokens, Some(16_384));
-        assert_eq!(cfg.max_iterations, Some(8));
         assert_eq!(cfg.mode_for("bash"), PermissionMode::Deny);
         assert_eq!(cfg.mode_for("edit_file"), PermissionMode::Allow);
         assert_eq!(cfg.mode_for("write_file"), PermissionMode::Ask);

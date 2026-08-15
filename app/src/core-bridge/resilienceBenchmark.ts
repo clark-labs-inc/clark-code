@@ -265,7 +265,6 @@ export async function playResilienceSimulation(
     );
     processIncident.execution_recovery = {
       attempt: 1,
-      max_attempts: 2,
       started_at_ms: started,
       boundary: {
         execution_id: `${run}-execution`,

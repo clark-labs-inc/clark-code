@@ -20,6 +20,7 @@ export interface AuthUser {
 
 export interface AuthSession {
   user: AuthUser;
+  connection?: "ready" | "offline" | "reconnect_required";
 }
 
 const DEV_SESSION_KEY = "agent-desktop.dev-account";
@@ -39,6 +40,10 @@ function parseDescriptor(raw: string | null): AuthSession | null {
       !descriptor.user.id ||
       typeof descriptor.user.name !== "string" ||
       (descriptor.user.method !== "google" && descriptor.user.method !== "local") ||
+      (descriptor.connection !== undefined
+        && descriptor.connection !== "ready"
+        && descriptor.connection !== "offline"
+        && descriptor.connection !== "reconnect_required") ||
       ["token", "bearer", "credentials"].some((field) => Object.hasOwn(descriptor, field))
     ) return null;
     return descriptor as AuthSession;
@@ -80,6 +85,16 @@ export function loadAuthSession(): AuthSession | null {
   return cachedSession;
 }
 
+export function authConnection(session: AuthSession | null): NonNullable<AuthSession["connection"]> | null {
+  return session ? session.connection ?? "ready" : null;
+}
+
+export function markAuthReconnectRequired(session: AuthSession): AuthSession {
+  const reconnecting = { ...session, connection: "reconnect_required" as const };
+  cachedSession = reconnecting;
+  return reconnecting;
+}
+
 export async function signInWithGoogle(): Promise<AuthSession> {
   if (!isTauri()) throw new Error("Google sign-in requires the native desktop app.");
   const descriptor = await productRequest<AuthSession>("account.sign_in");
@@ -103,13 +118,12 @@ export function isAuthExpiredError(error: unknown): boolean {
   );
 }
 
-export async function refreshAuthSession(_session: AuthSession): Promise<AuthSession | null> {
-  if (!isTauri()) return null;
-  try {
-    const descriptor = await productRequest<AuthSession>("account.refresh");
-    cachedSession = descriptor;
-    return descriptor;
-  } catch {
-    return null;
+export async function refreshAuthSession(session: AuthSession): Promise<AuthSession> {
+  if (!isTauri()) throw new Error("Account refresh requires the native desktop app.");
+  const descriptor = await productRequest<AuthSession>("account.refresh");
+  if (descriptor.user.id !== session.user.id) {
+    throw new Error("Clark refreshed a different account than the active session.");
   }
+  cachedSession = descriptor;
+  return descriptor;
 }

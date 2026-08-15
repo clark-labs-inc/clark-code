@@ -243,7 +243,6 @@ mod tests {
         let terminal_cause = next_incident(&receiver);
         tracker.attach_execution_recovery(ExecutionRecovery {
             attempt: 2,
-            max_attempts: 2,
             boundary: ExecutionBoundaryReceipt {
                 execution_id: "run-1".into(),
                 attempt_sequence: 1,

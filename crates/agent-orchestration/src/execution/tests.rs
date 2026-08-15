@@ -1,19 +1,16 @@
 use super::*;
 
-fn ledger(max_attempts: u32) -> ExecutionLedger {
+fn ledger() -> ExecutionLedger {
     ExecutionLedger::new_root(
         ExecutionId::new("run-1").unwrap(),
-        ExecutionPolicy {
-            max_attempts,
-            ..Default::default()
-        },
+        ExecutionPolicy::default(),
     )
     .unwrap()
 }
 
 #[test]
 fn root_execution_replays_to_the_same_snapshot() {
-    let ledger = ledger(2);
+    let ledger = ledger();
     ledger.start_attempt().unwrap();
     ledger.checkpoint("checkpoint-1").unwrap();
     ledger.record_steering().unwrap();
@@ -55,8 +52,8 @@ fn root_execution_replays_to_the_same_snapshot() {
 }
 
 #[test]
-fn recovery_requires_a_transient_failure_and_proven_tool_boundary() {
-    let ledger = ledger(2);
+fn recovery_requires_a_transient_failure_and_keeps_the_proven_tool_boundary() {
+    let ledger = ledger();
     ledger.start_attempt().unwrap();
     ledger.tool_started("read-1", "read_file", false).unwrap();
     assert!(
@@ -87,15 +84,36 @@ fn recovery_requires_a_transient_failure_and_proven_tool_boundary() {
         .unwrap();
     ledger.start_attempt().unwrap();
     assert!(
-        !ledger
+        ledger
             .recovery_decision(FailureClass::TransientTransport)
             .allowed
     );
 }
 
 #[test]
+fn root_recovery_has_no_implicit_attempt_ceiling() {
+    let ledger = ledger();
+    ledger.start_attempt().unwrap();
+
+    for attempt in 1..=8 {
+        assert!(
+            ledger
+                .recovery_decision(FailureClass::TransientTransport)
+                .allowed,
+            "attempt {attempt} must remain recoverable"
+        );
+        ledger
+            .schedule_recovery(FailureClass::TransientTransport, "temporary outage")
+            .unwrap();
+        ledger.start_attempt().unwrap();
+    }
+
+    assert_eq!(ledger.snapshot().attempts.len(), 9);
+}
+
+#[test]
 fn awaiting_permission_is_not_a_recovery_boundary() {
-    let ledger = ledger(2);
+    let ledger = ledger();
     ledger.start_attempt().unwrap();
     ledger
         .transition(ExecutionState::AwaitingInput, None)
@@ -110,7 +128,7 @@ fn awaiting_permission_is_not_a_recovery_boundary() {
 
 #[test]
 fn children_attach_beneath_the_same_root_identity_without_a_writer_role() {
-    let ledger = ledger(2);
+    let ledger = ledger();
     let path = AgentPath::parse("/root/reviewer").unwrap();
     ledger
         .attach_child(path.clone(), AgentRole::Reviewer)

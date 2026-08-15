@@ -58,7 +58,8 @@ import {
 } from "../lib/specialists";
 import { authAccountMatches } from "../lib/account";
 import { approvalPolicyForSpecialist } from "../lib/permissions";
-import { projectDisplayName } from "../lib/projectSidebar";
+import { isQuickChatProject, projectDisplayName } from "../lib/projectSidebar";
+import { quickChatModelSettings } from "../lib/localAgent";
 import {
   loadSshHosts,
   saveSshHosts,
@@ -187,6 +188,23 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
       )
     ) {
       get().flashNotice("Finish the current run before changing models.");
+      return;
+    }
+    if (
+      id
+      && session?.provider === "local"
+      && isQuickChatProject(get().activeProjectRoot ?? undefined, id)
+    ) {
+      const quickChatSettings = quickChatModelSettings(localSettings);
+      const nextChatModels = {
+        ...chatModels,
+        [id]: {
+          model: quickChatSettings.model,
+          reasoningEffort: quickChatSettings.reasoningEffort,
+        },
+      };
+      saveChatModels(nextChatModels, codeKeyAccountBinding(auth));
+      set({ chatModels: nextChatModels });
       return;
     }
 
@@ -697,6 +715,15 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
     if (incident.status !== "failed" && incident.status !== "interrupted") return;
     if (isBusy(snapshot)) {
       set({ error: "Wait for the active run to finish before continuing saved progress." });
+      return;
+    }
+    const { bridge, session } = get();
+    if (bridge?.resumeProviderIncident && session) {
+      try {
+        await bridge.resumeProviderIncident(session.id);
+      } catch (error) {
+        set({ error: String(error) });
+      }
       return;
     }
     await get().send(

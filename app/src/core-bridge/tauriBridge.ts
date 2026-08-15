@@ -146,6 +146,18 @@ export class TauriBridge implements CoreBridge {
     return invoke("prompt", { sessionId, blocks, attachments });
   }
 
+  resumeProviderIncident(sessionId: string): Promise<PromptReceipt> {
+    return invoke("prompt", {
+      sessionId,
+      blocks: [{
+        type: "text",
+        text: "Continue from the saved progress. Re-read current state, do not repeat completed writes, and finish the task.",
+      }],
+      attachments: [],
+      internalResume: true,
+    });
+  }
+
   compact(sessionId: string): Promise<void> {
     return invoke("compact", { sessionId });
   }

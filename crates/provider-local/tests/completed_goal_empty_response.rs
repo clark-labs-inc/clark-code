@@ -9,10 +9,6 @@ use serde_json::json;
 
 use support::{plain_body, scripted_model, tool_call_body};
 
-fn empty_sse_body() -> String {
-    "data: [DONE]\n\n".to_string()
-}
-
 #[tokio::test]
 async fn completed_goal_is_not_reclassified_as_an_empty_response_failure() {
     let (base_url, captured) = scripted_model(vec![
@@ -32,10 +28,6 @@ async fn completed_goal_is_not_reclassified_as_an_empty_response_failure() {
             "update_goal",
             json!({"status": "complete"}),
         ),
-        // `agent-loop` retries a zero-output transport response once before
-        // returning it to the provider engine.
-        empty_sse_body(),
-        empty_sse_body(),
     ])
     .await;
 
@@ -99,5 +91,5 @@ async fn completed_goal_is_not_reclassified_as_an_empty_response_failure() {
         "completed goal must not emit an error: {events:#?}"
     );
 
-    assert_eq!(captured.await.expect("scripted model").len(), 6);
+    assert_eq!(captured.await.expect("scripted model").len(), 4);
 }

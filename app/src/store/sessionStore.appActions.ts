@@ -45,6 +45,7 @@ import {
   liveSessions,
   liveUpdateBlockerCount,
   markUnseenFinished,
+  markAuthReconnectRequired,
   mergeConversations,
   mergeHistory,
   minLoadDuration,
@@ -105,6 +106,7 @@ type AppActions = Pick<
   | "toggleMemoryViewer"
   | "setMemoryViewerOpen"
   | "signIn"
+  | "reconnectAuth"
   | "signOutAuth"
 >;
 
@@ -132,6 +134,65 @@ export function authAccountChanged(
   const nextOwner = codeKeyAccountBinding(next);
   if (currentOwner && nextOwner) return currentOwner !== nextOwner;
   return true;
+}
+
+function activateSignedInAccount(
+  set: SessionSet,
+  get: SessionGet,
+  auth: NonNullable<SessionState["auth"]>,
+): void {
+  const replacingAccount = authAccountChanged(get().auth, auth);
+  const accountScope = codeKeyAccountBinding(auth);
+  resetCloudHistory();
+  resetStableOrder();
+  if (replacingAccount) {
+    get().endSession({ force: true });
+    snapshotCache.clear();
+  }
+  useSpecialistStore.getState().setAccountScope(accountScope);
+  configureCloudHistoryCredentials(cloudCreds(auth));
+  const accountLocalSettings = loadLocalSettings(accountScope);
+  set({
+    auth,
+    localSettings: accountLocalSettings,
+    managedWorktreeBase: loadManagedWorktreeBase(accountScope, accountLocalSettings.cwd),
+    chatModels: loadChatModels(accountScope),
+    approvalPolicies: loadApprovalPolicies(accountScope),
+    memoriesEnabled: loadMemoriesEnabled(accountScope),
+    browserEnabled: loadBrowserEnabled(accountScope),
+    orchestrationEnabled: loadOrchestrationEnabled(accountScope),
+    approvalPolicy: loadApprovalPolicy(accountScope),
+    collaborationMode: loadCollaborationMode(accountScope),
+    outputStyle: loadOutputStyle(accountScope),
+    selectedHostId: loadSshHosts(accountScope)[0]?.id ?? null,
+    projectMode: "local",
+    recentProjects: loadRecentProjects(accountScope),
+    memoryStatus: null,
+    memoryViewerOpen: false,
+    loadingMemory: false,
+    memoryOverview: null,
+    globalMemoryOverview: null,
+    pendingManagedWorktreePath: null,
+    deferredSessionStartDraft: null,
+    terminalLaunch: null,
+    mcpOpen: false,
+    sshOpen: false,
+    newProjectOpen: false,
+    paletteOpen: false,
+    error: null,
+    notice: null,
+    warning: null,
+    dismissedFailedRuns: [],
+    conversations: [],
+    conversationsLoading: true,
+    runningIds: [],
+    unseenWorkIds: [],
+    selectedConversationIds: new Set(),
+    mutatingConversationIds: new Set(),
+    conversationMutation: null,
+  });
+  void get().ensureCodeKey();
+  void get().syncCloudIndex();
 }
 
 export function handleCloudConversationDeleted(
@@ -474,6 +535,14 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
               configureCloudHistoryCredentials(cloudCreds(refreshed));
               set({ auth: refreshed });
               await get().syncCloudIndex();
+            }
+          } catch {
+            const auth = get().auth;
+            if (auth) {
+              set({
+                auth: markAuthReconnectRequired(auth),
+                warning: "Your account needs reconnecting. Local work remains available.",
+              });
             }
           } finally {
             refreshingCloudToken = false;
@@ -907,66 +976,31 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
 
   signIn: async () => {
     const auth = await signInWithGoogle();
-    const replacingAccount = authAccountChanged(get().auth, auth);
-    const accountScope = codeKeyAccountBinding(auth);
-    // A new authenticated principal starts with no inherited retry queue or
-    // cached write revision from the prior account.
-    resetCloudHistory();
-    resetStableOrder();
-    if (replacingAccount) {
-      // Do not rely on the sign-in screen being the only caller: an account
-      // handoff must stop every old provider session before its snapshots can
-      // reach the new account's sidebar or cloud queue.
-      get().endSession({ force: true });
-      snapshotCache.clear();
+    activateSignedInAccount(set, get, auth);
+  },
+
+  reconnectAuth: async () => {
+    const current = get().auth;
+    if (!current) return;
+    try {
+      const refreshed = await refreshAuthSession(current);
+      if (!authAccountMatches(get().auth, current)) return;
+      configureCloudHistoryCredentials(cloudCreds(refreshed));
+      set({ auth: refreshed, error: null, warning: null });
+      await get().syncCloudIndex();
+      return;
+    } catch {
+      // A retained refresh token may no longer be usable. Re-authenticate the
+      // same account interactively without destroying its local task state.
     }
-    useSpecialistStore.getState().setAccountScope(accountScope);
-    configureCloudHistoryCredentials(cloudCreds(auth));
-    // Start from an empty list for the new account; the cloud fetch below is the
-    // authoritative source (a different account never inherits the prior list).
-    const accountLocalSettings = loadLocalSettings(accountScope);
-    set({
-      auth,
-      localSettings: accountLocalSettings,
-      managedWorktreeBase: loadManagedWorktreeBase(accountScope, accountLocalSettings.cwd),
-      chatModels: loadChatModels(accountScope),
-      approvalPolicies: loadApprovalPolicies(accountScope),
-      memoriesEnabled: loadMemoriesEnabled(accountScope),
-      browserEnabled: loadBrowserEnabled(accountScope),
-      orchestrationEnabled: loadOrchestrationEnabled(accountScope),
-      approvalPolicy: loadApprovalPolicy(accountScope),
-      collaborationMode: loadCollaborationMode(accountScope),
-      outputStyle: loadOutputStyle(accountScope),
-      selectedHostId: loadSshHosts(accountScope)[0]?.id ?? null,
-      projectMode: "local",
-      recentProjects: loadRecentProjects(accountScope),
-      memoryStatus: null,
-      memoryViewerOpen: false,
-      loadingMemory: false,
-      memoryOverview: null,
-      globalMemoryOverview: null,
-      pendingManagedWorktreePath: null,
-      deferredSessionStartDraft: null,
-      terminalLaunch: null,
-      mcpOpen: false,
-      sshOpen: false,
-      newProjectOpen: false,
-      paletteOpen: false,
-      error: null,
-      notice: null,
-      warning: null,
-      dismissedFailedRuns: [],
-      conversations: [],
-      conversationsLoading: true,
-      runningIds: [],
-      unseenWorkIds: [],
-      selectedConversationIds: new Set(),
-      mutatingConversationIds: new Set(),
-      conversationMutation: null,
-    });
-    // Provision Clark Code key, then pull the cloud/native-cached list.
-    void get().ensureCodeKey();
-    void get().syncCloudIndex();
+    const reauthenticated = await signInWithGoogle();
+    if (!authAccountMatches(reauthenticated, current)) {
+      activateSignedInAccount(set, get, reauthenticated);
+      return;
+    }
+    configureCloudHistoryCredentials(cloudCreds(reauthenticated));
+    set({ auth: reauthenticated, error: null, warning: null });
+    await get().syncCloudIndex();
   },
 
   signOutAuth: async () => {

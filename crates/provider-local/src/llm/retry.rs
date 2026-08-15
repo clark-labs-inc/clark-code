@@ -415,24 +415,7 @@ impl LlmClient {
             let retry_after = retry_after_header(response.headers());
             let body = tokio::select! {
                 _ = cancel.cancelled() => return Err(LlmError::Cancelled.into()),
-                body = tokio::time::timeout(self.stream_idle_timeout, response.text()) => {
-                    match body {
-                        Ok(body) => body.unwrap_or_default(),
-                        Err(_) => return Err(AttemptError::Transient(RetryableFailure {
-                            category: ProviderIncidentCategory::Timeout,
-                            message: format!(
-                                "model error response made no progress for {} seconds",
-                                self.stream_idle_timeout.as_secs()
-                            ),
-                            retry_after: None,
-                            retry_safe: true,
-                            provider_status: Some(status.as_u16()),
-                            provider_error_type: Some("error_body_idle_timeout".to_string()),
-                            provider_request_id,
-                            output_started: false,
-                        })),
-                    }
-                },
+                body = response.text() => body.unwrap_or_default(),
             };
             let access_failure = classify_provider_access_failure(Some(status.as_u16()), &body);
             if access_failure == Some(RunFailureKind::InsufficientCredits) {
@@ -500,24 +483,7 @@ impl LlmClient {
         loop {
             let next = tokio::select! {
                 _ = cancel.cancelled() => return Err(LlmError::Cancelled.into()),
-                next = tokio::time::timeout(self.stream_idle_timeout, stream.next()) => {
-                    match next {
-                        Ok(next) => next,
-                        Err(_) => return Err(AttemptError::Transient(RetryableFailure {
-                            category: ProviderIncidentCategory::Timeout,
-                            message: format!(
-                                "model stream made no progress for {} seconds",
-                                self.stream_idle_timeout.as_secs()
-                            ),
-                            retry_after: None,
-                            retry_safe: !text_guard.published() && !reasoning_guard.published(),
-                            provider_status: None,
-                            provider_error_type: Some("stream_transport".to_string()),
-                            provider_request_id: provider_request_id.clone(),
-                            output_started: accumulator.emitted_output(),
-                        })),
-                    }
-                },
+                next = stream.next() => next,
             };
             match next {
                 None => break,
@@ -681,7 +647,7 @@ fn transient_delay(server_hint: Option<Duration>, retry: usize) -> Duration {
 fn transient_retry_limit(failure: &RetryableFailure) -> usize {
     if matches!(
         failure.provider_error_type.as_deref(),
-        Some("stream_transport" | "error_body_idle_timeout")
+        Some("stream_transport")
     ) {
         MAX_STREAM_TRANSIENT_RETRIES
     } else {

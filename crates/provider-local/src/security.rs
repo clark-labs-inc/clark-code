@@ -247,23 +247,28 @@ pub async fn collect_security_inventory(
         ));
     }
     let metadata = exec.metadata(scope).await?;
-    if !metadata.is_dir {
-        return Err("security scan scope must be a directory".into());
-    }
     let scope_name = display_relative(root, scope);
-    let mut snapshot = exec
-        .walk(scope)
-        .await?
-        .into_iter()
-        .filter_map(|entry| {
-            let relative = entry.path.strip_prefix(root).ok()?;
-            let path = model_path(relative);
-            if is_security_output(&path) {
-                return None;
-            }
-            Some((entry.path.clone(), path))
-        })
-        .collect::<Vec<_>>();
+    if metadata.is_symlink {
+        return Err("security scan scope must not be a symlink".into());
+    }
+    let mut snapshot = if metadata.is_dir {
+        exec.walk(scope)
+            .await?
+            .into_iter()
+            .filter_map(|entry| {
+                let relative = entry.path.strip_prefix(root).ok()?;
+                let path = model_path(relative);
+                if is_security_output(&path) {
+                    return None;
+                }
+                Some((entry.path.clone(), path))
+            })
+            .collect::<Vec<_>>()
+    } else if is_security_output(&scope_name) {
+        Vec::new()
+    } else {
+        vec![(scope.to_path_buf(), scope_name.clone())]
+    };
     snapshot.sort_by(|left, right| left.1.cmp(&right.1));
     snapshot.dedup_by(|left, right| left.1 == right.1);
     if snapshot.len() > MAX_INVENTORY_FILES {

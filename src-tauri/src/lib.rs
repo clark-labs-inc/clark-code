@@ -398,6 +398,7 @@ pub fn run_with_product_and_context(
             commands::desktop_conv_list,
             commands::desktop_conv_get,
             commands::desktop_conv_put,
+            commands::desktop_conv_checkpoint_local,
             commands::desktop_conv_delete,
             commands::desktop_conv_set_archived,
             commands::workspace_artifact_read,
@@ -407,6 +408,20 @@ pub fn run_with_product_and_context(
             terminal::terminal_close,
         ])
         .setup(|app| {
+            let local_history_path = app
+                .path()
+                .app_data_dir()?
+                .join("cloud-history-outbox.sqlite3");
+            if let Err(error) = std::thread::Builder::new()
+                .name("local-history-maintenance".into())
+                .spawn(move || {
+                    if let Err(error) = trajectory::migrate_legacy_database(&local_history_path) {
+                        tracing::warn!(%error, "legacy local history compaction was deferred");
+                    }
+                })
+            {
+                tracing::warn!(%error, "could not start local history maintenance");
+            }
             let credential_root = app.path().app_data_dir()?.join("credentials");
             app.state::<AppState>()
                 .credentials

@@ -31,8 +31,6 @@ enum Boundary {
     CompletedWrite,
     ActiveWrite,
     AwaitingPermission,
-    BudgetExhausted,
-    AttemptLimit,
 }
 
 pub(crate) fn recovery_matrix() -> Vec<LifecycleRecoveryCase> {
@@ -63,18 +61,6 @@ pub(crate) fn recovery_matrix() -> Vec<LifecycleRecoveryCase> {
             false,
         ),
         (
-            "transient_after_budget_exhaustion",
-            Boundary::BudgetExhausted,
-            Some(FailureClass::TransientTransport),
-            false,
-        ),
-        (
-            "transient_at_attempt_limit",
-            Boundary::AttemptLimit,
-            Some(FailureClass::TransientTransport),
-            false,
-        ),
-        (
             "non_transient_provider_failure",
             Boundary::Clean,
             Some(FailureClass::Provider),
@@ -92,15 +78,7 @@ fn evaluate_case(
     failure: Option<FailureClass>,
     recovery_expected: bool,
 ) -> LifecycleRecoveryCase {
-    let policy = ExecutionPolicy {
-        max_attempts: if matches!(boundary, Boundary::AttemptLimit) {
-            1
-        } else {
-            2
-        },
-        weighted_token_limit: matches!(boundary, Boundary::BudgetExhausted).then_some(10.0),
-        ..Default::default()
-    };
+    let policy = ExecutionPolicy::default();
     let ledger = ExecutionLedger::new_root(
         ExecutionId::new(format!("benchmark-{case}")).unwrap(),
         policy,

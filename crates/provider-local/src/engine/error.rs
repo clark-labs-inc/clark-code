@@ -24,15 +24,6 @@ pub(super) fn map_loop_error(error: agent_loop::LoopError) -> MappedLoopError {
         agent_loop::LoopError::InvalidContinuation(message) => {
             MappedLoopError::failed(RunFailureKind::LocalState, "local_agent_state", message)
         }
-        agent_loop::LoopError::EmptyOutcomeBudgetExhausted { budget, observed } => {
-            MappedLoopError::failed(
-                RunFailureKind::EmptyResponse,
-                "empty_agent_response",
-                format!(
-                    "empty assistant outcome retry budget exhausted: observed {observed}, budget {budget}"
-                ),
-            )
-        }
     }
 }
 
@@ -107,20 +98,6 @@ fn map_stream_error(error: agent_loop::StreamError) -> MappedLoopError {
                 .trim()
                 .to_string();
             MappedLoopError::failed(RunFailureKind::ProviderError, "provider_error", message)
-        }
-        agent_loop::StreamError::Fatal(message)
-            if message.starts_with("execution_budget_exhausted:") =>
-        {
-            let message = message
-                .strip_prefix("execution_budget_exhausted:")
-                .unwrap_or(&message)
-                .trim()
-                .to_string();
-            MappedLoopError::failed(
-                RunFailureKind::LocalState,
-                "execution_budget_exhausted",
-                message,
-            )
         }
         agent_loop::StreamError::ProviderRateLimited(message) => {
             MappedLoopError::failed(RunFailureKind::RateLimited, "rate_limited", message)
@@ -224,12 +201,6 @@ mod tests {
                 ),
                 RunFailureKind::InconsistentToolHistory,
             ),
-            (
-                agent_loop::StreamError::Fatal(
-                    "execution_budget_exhausted: preserved for follow-up".into(),
-                ),
-                RunFailureKind::LocalState,
-            ),
         ];
 
         for (error, expected) in cases {
@@ -261,10 +232,9 @@ mod tests {
     #[test]
     fn incomplete_verification_has_its_own_failure_category() {
         let mapped = map_loop_error_with_completion_state(
-            agent_loop::LoopError::EmptyOutcomeBudgetExhausted {
-                budget: 1,
-                observed: 2,
-            },
+            agent_loop::LoopError::Stream(agent_loop::StreamError::ZeroOutputTransport(
+                "provider returned no content".into(),
+            )),
             true,
             false,
             &["`effect-1` pending".into(), "`effect-2` mismatched".into()],
@@ -348,10 +318,9 @@ mod tests {
     #[test]
     fn final_answer_alone_does_not_hide_a_later_empty_turn() {
         let mapped = map_loop_error_with_completion_state(
-            agent_loop::LoopError::EmptyOutcomeBudgetExhausted {
-                budget: 1,
-                observed: 2,
-            },
+            agent_loop::LoopError::Stream(agent_loop::StreamError::ZeroOutputTransport(
+                "provider returned no content".into(),
+            )),
             true,
             false,
             &[],
@@ -362,10 +331,9 @@ mod tests {
     #[test]
     fn genuinely_empty_first_answer_stays_an_empty_response() {
         let mapped = map_loop_error_with_completion_state(
-            agent_loop::LoopError::EmptyOutcomeBudgetExhausted {
-                budget: 1,
-                observed: 2,
-            },
+            agent_loop::LoopError::Stream(agent_loop::StreamError::ZeroOutputTransport(
+                "provider returned no content".into(),
+            )),
             false,
             false,
             &["`effect-1` pending".into()],

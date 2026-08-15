@@ -13,7 +13,7 @@ Every lane emits the same `BenchmarkRecord` schema and is paired by scenario, va
 
 Every local or scripted attempt also emits the default `/root` execution lifecycle. The benchmark replays that trace independently and records root executions, attempts, recoveries, duplicate terminal tool receipts, and missing/invalid lifecycle traces. ACP readers remain an explicit exception because their harness does not expose the foundation lifecycle contract.
 
-The summary also includes an eight-case default-agent recovery A/B: clean completion, safe transient and rate-limit recovery, active mutation, pending permission, exhausted budget, exhausted attempt count, and non-transient provider failure. It compares correctness, attempts, weighted tokens, cost, replay validity, and duplicate tool receipts against a one-attempt baseline.
+The summary also includes an eight-case default-agent recovery A/B: clean completion, safe transient and rate-limit recovery, active mutation, pending permission, reached cost limit, exhausted attempt count, and non-transient provider failure. It compares correctness, attempts, weighted tokens, cost, replay validity, and duplicate tool receipts against a one-attempt baseline.
 
 | Lane | Shape | Purpose |
 | --- | --- | --- |

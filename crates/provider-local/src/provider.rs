@@ -115,12 +115,8 @@ impl Provider for LocalAgentProvider {
         self.current_goal(session).await
     }
 
-    async fn resume_goal(
-        &mut self,
-        session: &SessionId,
-        token_budget: Option<u64>,
-    ) -> Result<agent_core::GoalState> {
-        self.resume_session_goal(session, token_budget).await
+    async fn resume_goal(&mut self, session: &SessionId) -> Result<agent_core::GoalState> {
+        self.resume_session_goal(session).await
     }
 
     async fn add_read_roots(&mut self, session: &SessionId, roots: Vec<String>) -> Result<()> {
@@ -189,12 +185,7 @@ impl Provider for LocalAgentProvider {
 
     async fn connect(&mut self, config: ProviderConfig) -> Result<()> {
         self.isolation = ProviderIsolation::from_provider_config(&config);
-        let mut local = LocalConfig::from_provider_config(&config);
-        // Child writers must never see orchestration tools or policy, even now
-        // that the root capability is available by default.
-        if self.isolation.disposable_writer() {
-            local.orchestration.enabled = false;
-        }
+        let local = LocalConfig::from_provider_config(&config);
         let llm = LlmClient::new(&local).map_err(Error::Other)?;
         let memory =
             (local.tools_enabled && local.memories_enabled).then(|| self.memory_config(&local));
@@ -238,14 +229,10 @@ impl Provider for LocalAgentProvider {
                     };
                 registry.enable_computer_use(backend);
             }
-            if local.orchestration.enabled {
+            if !self.isolation.disposable_writer() {
                 registry.enable_orchestration(
                     crate::orchestration::OrchestrationToolsConfig::from_local(&local),
                 );
-            } else if !self.isolation.disposable_writer() {
-                if let Some(policy) = local.scout_capsules.clone() {
-                    registry.enable_scout_capsules(policy);
-                }
             }
             if !self.isolation.disposable_writer() {
                 for pack in &self.tool_packs {
@@ -699,8 +686,6 @@ impl Provider for LocalAgentProvider {
             }
         }
         let session_id = self.session_id.clone().ok_or(Error::NotConnected)?;
-        let max_iterations = config.max_iterations;
-
         // Fresh cancellation scope for this run — created early so it can also
         // gate the attachment pre-processing below (vision call / doc parsing).
         let cancel = CancellationToken::new();
@@ -805,10 +790,8 @@ impl Provider for LocalAgentProvider {
         }
         let native_image_support = crate::config::model_supports_images(&effective_model);
         let mut context_sections = Vec::new();
-        if config.orchestration.enabled {
-            context_sections.push(
-                crate::orchestration::turn_policy_section(config.orchestration.mode).to_string(),
-            );
+        if !self.isolation.disposable_writer() {
+            context_sections.push(crate::orchestration::turn_policy_section().to_string());
         }
         if let Ok(current_instructions) =
             crate::instructions::load(self.executor.as_ref(), sandbox.root()).await
@@ -1044,7 +1027,6 @@ impl Provider for LocalAgentProvider {
             session: self.session.clone(),
             control: self.control.clone(),
             session_id,
-            max_iterations,
             compaction: config.compaction,
             plan_execution_reminders: config.plan_execution_reminders,
             hidden_plan_protocol: config.hidden_plan_protocol,
@@ -1066,7 +1048,6 @@ impl Provider for LocalAgentProvider {
                 })
                 .collect(),
             memory_extraction,
-            execution: config.execution,
             run_cancellations: self.run_cancellations.clone(),
             tool_image_policy: crate::agent_adapter::ToolImagePolicy {
                 native_image_support,

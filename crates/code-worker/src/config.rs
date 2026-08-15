@@ -103,16 +103,12 @@ pub struct ProviderProfile {
     pub api_key_env: String,
     #[serde(default)]
     pub reasoning_effort: Option<String>,
-    #[serde(default = "default_iterations")]
-    pub max_iterations: u32,
     #[serde(default)]
     pub allowed_tools: BTreeSet<String>,
     /// Bash remains permission-gated even when the tool is enabled. Only an
     /// exact configured prefix may be auto-approved by the worker.
     #[serde(default)]
     pub allowed_command_prefixes: Vec<String>,
-    #[serde(default = "default_turn_timeout")]
-    pub turn_timeout_seconds: u64,
 }
 
 impl ProviderProfile {
@@ -123,15 +119,9 @@ impl ProviderProfile {
                 "provider base_url must use HTTPS (or loopback HTTP for tests)".into(),
             ));
         }
-        if self.model.trim().is_empty()
-            || self.model.len() > 256
-            || self.max_iterations == 0
-            || self.max_iterations > 256
-            || self.turn_timeout_seconds == 0
-            || self.turn_timeout_seconds > 24 * 60 * 60
-        {
+        if self.model.trim().is_empty() || self.model.len() > 256 {
             return Err(ConfigError::InvalidProvider(
-                "provider model, iteration, and timeout limits are invalid".into(),
+                "provider model is invalid".into(),
             ));
         }
         if !portable_env_name(&self.api_key_env) {
@@ -171,7 +161,6 @@ impl ProviderProfile {
             "base_url": self.base_url,
             "model": self.model,
             "reasoning_effort": self.reasoning_effort,
-            "max_iterations": self.max_iterations,
             "permissions": permissions,
             "command_allowlist": self.allowed_command_prefixes,
             "memories": false,
@@ -229,10 +218,8 @@ impl Default for ProviderProfile {
             model: default_model(),
             api_key_env: default_key_env(),
             reasoning_effort: None,
-            max_iterations: default_iterations(),
             allowed_tools: BTreeSet::new(),
             allowed_command_prefixes: Vec::new(),
-            turn_timeout_seconds: default_turn_timeout(),
         }
     }
 }
@@ -285,18 +272,6 @@ fn default_key_env() -> String {
     "DESKTOP_MODEL_API_KEY".into()
 }
 
-fn default_iterations() -> u32 {
-    // Remote turns are already bounded by the turn timeout and the provider's
-    // cumulative-token circuit breaker. Twelve model/tool exchanges is too
-    // small for ordinary repository diagnosis and turns recoverable tool
-    // failures into terminal runs before the model can adjust.
-    64
-}
-
-fn default_turn_timeout() -> u64 {
-    15 * 60
-}
-
 fn portable_name(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 128
@@ -319,16 +294,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_remote_turn_budget_allows_long_productive_investigations() {
+    fn remote_turns_do_not_inject_hidden_lifetime_limits() {
         let profile = ProviderProfile::default();
 
-        assert_eq!(profile.max_iterations, 64);
-        assert_eq!(
-            profile
-                .provider_config(ExecutionResidency::RemoteWorker)
-                .extra["max_iterations"],
-            64
-        );
+        let extra = profile
+            .provider_config(ExecutionResidency::RemoteWorker)
+            .extra;
+        assert!(extra.get("turn_timeout_seconds").is_none());
     }
 
     #[test]
@@ -358,13 +330,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_unbounded_provider_limits() {
-        let profile = ProviderProfile {
-            max_iterations: 0,
-            ..ProviderProfile::default()
-        };
-        assert!(profile.validate().is_err());
-
+    fn rejects_invalid_command_prefixes() {
         let prefix = ProviderProfile {
             allowed_command_prefixes: vec![" ".into()],
             ..ProviderProfile::default()

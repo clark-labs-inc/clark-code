@@ -46,6 +46,8 @@ function savePersisted(
 interface SpecialistState {
   accountScope: string | null;
   active: SpecialistKind | null;
+  /** Visible Scout authority chooser opened from the composer context chip. */
+  scoutScopeOpen: boolean;
   /** The specialist whose saved-session branch remains expanded in the sidebar.
    * Navigation expansion is intentionally independent from the active workspace:
    * opening a regular session leaves the branch available for the next switch. */
@@ -54,6 +56,7 @@ interface SpecialistState {
   contexts: Partial<Record<SpecialistKind, SpecialistContext>>;
   open: (kind: SpecialistKind, context?: Partial<SpecialistContext>) => void;
   close: () => void;
+  setScoutScopeOpen: (open: boolean) => void;
   setTab: (tab: SpecialistTab) => void;
   setContext: (patch: Partial<SpecialistContext>) => void;
   setAccountScope: (scope: string | null) => void;
@@ -89,6 +92,7 @@ const initialContexts = contextsFrom(persisted);
 export const useSpecialistStore = create<SpecialistState>((set, get) => ({
   accountScope: initialScope,
   active: null,
+  scoutScopeOpen: false,
   expanded: null,
   tabs: initialTabs,
   contexts: initialContexts,
@@ -98,10 +102,16 @@ export const useSpecialistStore = create<SpecialistState>((set, get) => ({
       ...get().contexts,
       [kind]: { ...get().contexts[kind], ...context, kind },
     };
-    set({ active: kind, expanded: kind, contexts });
+    set({
+      active: kind,
+      expanded: kind,
+      contexts,
+      ...(kind === "scout" ? {} : { scoutScopeOpen: false }),
+    });
     savePersisted(get().accountScope, get().tabs, contexts);
   },
-  close: () => set({ active: null }),
+  close: () => set({ active: null, scoutScopeOpen: false }),
+  setScoutScopeOpen: (scoutScopeOpen) => set({ scoutScopeOpen }),
   setTab: (tab) => {
     const kind = get().active;
     if (!kind || !isSpecialistTab(kind, tab)) return;
@@ -125,6 +135,7 @@ export const useSpecialistStore = create<SpecialistState>((set, get) => ({
     set({
       accountScope: scope,
       active: null,
+      scoutScopeOpen: false,
       expanded: null,
       tabs: tabsFrom(next),
       contexts: contextsFrom(next),

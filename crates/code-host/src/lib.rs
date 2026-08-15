@@ -13,7 +13,10 @@ mod plugin;
 mod protocol;
 mod trajectory;
 
-pub use contract::{ProjectRegistration, ProjectRegistry, RegistryError};
+pub use contract::{
+    CodingSessionRecipe, ProjectRegistration, ProjectRegistry, RegistryError,
+    ScoutCartographyRecipe,
+};
 pub use host::{HeadlessHost, HostError};
 pub use plugin::{
     HeadlessPlugin, PluginContext, PluginError, PluginManifest, PluginRegistry, ProgressReporter,

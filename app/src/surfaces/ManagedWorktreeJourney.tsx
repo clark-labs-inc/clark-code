@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import {
   ArrowRight,
   Check,
@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import type { ManagedWorktreeBase, ProjectWorktreeTransitionPlan } from "../core-bridge/bridge";
 import { useSessionStore } from "../store/sessionStore";
+import { useModalFocus } from "../lib/modalFocus";
 
 const CHIP =
   "flex h-[22px] min-w-0 items-center gap-1 rounded-md bg-composer-context px-1.5 text-xs font-medium leading-none text-checkout-worktree transition hover:bg-bg-hover";
@@ -153,6 +154,7 @@ export function ManagedWorktreeTransitionContent({
   dismiss: () => void;
   preparing: boolean;
 }) {
+  const dialogRef = useModalFocus<HTMLElement>(true);
   const selected = plan.baseOptions.find((option) => option.id === base) ?? plan.baseOptions[0];
   const changes = changeSummary(plan.sourceChanges);
   const targetBranch = plan.action === "preserve_changes" ? plan.targetBranch : null;
@@ -160,15 +162,42 @@ export function ManagedWorktreeTransitionContent({
   const currentBranch = plan.sourceBranch ?? "detached HEAD";
   const isBranchChange = Boolean(targetBranch);
 
+  const handleKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      dismiss();
+      return;
+    }
+    if (event.key !== "Tab" || !dialogRef.current) return;
+    const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>(
+      "button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])",
+    ));
+    if (focusable.length === 0) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    const active = document.activeElement;
+    if (event.shiftKey && (active === first || !dialogRef.current.contains(active))) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && (active === last || !dialogRef.current.contains(active))) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
+
   return (
     <div
       className="fixed inset-0 z-[70] flex items-center justify-center bg-black/35 p-4 backdrop-blur-[1px]"
       role="presentation"
     >
       <section
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="managed-worktree-title"
+        tabIndex={-1}
+        onKeyDown={handleKeyDown}
         className="w-full max-w-md rounded-2xl bg-bg-elevated p-5 shadow-lifted ring-1 ring-border-subtle"
       >
         <div className="flex items-start gap-3">

@@ -10,7 +10,7 @@ description = "Product-extensible local coding-agent provider with sandboxed too
 agent-core = { path = "../agent-core", features = ["native"] }
 agent-orchestration = { path = "../agent-orchestration" }
 provider-acp = { path = "../provider-acp" }
-agent-loop = { package = "clark-agent", version = "0.3.0" }
+agent-loop = { package = "clark-agent", version = "0.4.0" }
 agent-loop-compaction = { package = "clark-agent-compaction", git = "https://github.com/clark-labs-inc/clark-agent-compaction", rev = "e5f4a4b7d122f73adc362c4a5395355ac95e540c" }
 # The Executor trait + LocalExecutor live in a dependency-light crate shared by
 # native composition roots and remote workers.

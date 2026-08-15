@@ -144,7 +144,7 @@ export function SignInScreen() {
         <h1 className="text-2xl font-semibold tracking-tight text-ink">{productName()}</h1>
         <p className="mt-2 text-sm text-ink-muted">
           A coding agent on your machine — your files, your shell, your model,
-          with the agent for research.
+          with {productName()} for research.
         </p>
 
         <div className="mt-8">

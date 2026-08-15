@@ -4,6 +4,104 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+/// Trusted, credential-free recipe attached to one coding session on a shared
+/// remote worker. The desktop product prepares this recipe after validating
+/// account and specialist authority; the worker applies it only to the new
+/// session rather than replacing the durable project worker.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CodingSessionRecipe {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub specialist_kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scout_cartography: Option<ScoutCartographyRecipe>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ScoutCartographyRecipe {
+    pub organization_id: String,
+    pub workspace_id: String,
+    pub identity_root: PathBuf,
+    pub platform: String,
+    pub architecture: String,
+    pub route_prefix: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub human_run_request_id: Option<String>,
+}
+
+impl CodingSessionRecipe {
+    pub fn validate(&self, project_root: &Path) -> Result<(), String> {
+        if let Some(kind) = self.specialist_kind.as_deref() {
+            validate_portable_value("specialist_kind", kind, 64)?;
+        }
+        let Some(scout) = self.scout_cartography.as_ref() else {
+            return Ok(());
+        };
+        if self.specialist_kind.as_deref() != Some("scout") {
+            return Err("Scout cartography requires specialist_kind=scout".into());
+        }
+        if !uuid_shape(&scout.organization_id) || !uuid_shape(&scout.workspace_id) {
+            return Err("Scout organization and workspace ids are invalid".into());
+        }
+        validate_portable_value("Scout platform", &scout.platform, 64)?;
+        validate_portable_value("Scout architecture", &scout.architecture, 64)?;
+        if !scout.identity_root.is_absolute()
+            || scout.identity_root == project_root
+            || !scout.identity_root.starts_with(project_root)
+            || scout
+                .identity_root
+                .components()
+                .any(|component| matches!(component, std::path::Component::ParentDir))
+        {
+            return Err("Scout identity root must be inside the registered remote project".into());
+        }
+        if !scout.route_prefix.starts_with('/')
+            || scout.route_prefix.len() < 2
+            || scout.route_prefix.len() > 128
+            || scout.route_prefix.contains(['?', '#'])
+            || scout.route_prefix.contains("..")
+        {
+            return Err("Scout route prefix is invalid".into());
+        }
+        if let Some(request_id) = scout.human_run_request_id.as_deref() {
+            let valid = request_id.strip_prefix("scout-run:").is_some_and(|digest| {
+                digest.len() == 64
+                    && digest
+                        .bytes()
+                        .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
+            });
+            if !valid {
+                return Err("Scout human run request id is invalid".into());
+            }
+        }
+        Ok(())
+    }
+}
+
+fn validate_portable_value(field: &str, value: &str, max_len: usize) -> Result<(), String> {
+    if value.is_empty()
+        || value.len() > max_len
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+    {
+        return Err(format!("{field} is invalid"));
+    }
+    Ok(())
+}
+
+fn uuid_shape(value: &str) -> bool {
+    value.len() == 36
+        && value.bytes().enumerate().all(|(index, byte)| {
+            if matches!(index, 8 | 13 | 18 | 23) {
+                byte == b'-'
+            } else {
+                byte.is_ascii_hexdigit()
+            }
+        })
+}
+
 /// A project is registered by a trusted launcher, never by a request payload.
 /// Requests refer to the stable `id`; this prevents a caller from turning a
 /// generic worker into an arbitrary-path file service.
@@ -117,5 +215,28 @@ mod tests {
     fn identifier_and_relative_path_rules_are_portable() {
         assert!(validate_identifier("task", "task-1.v1").is_ok());
         assert!(validate_identifier("task", "../escape").is_err());
+    }
+
+    #[test]
+    fn remote_session_recipe_is_project_scoped_and_strict() {
+        let project = Path::new("/srv/client/neon");
+        let recipe = CodingSessionRecipe {
+            specialist_kind: Some("scout".into()),
+            scout_cartography: Some(ScoutCartographyRecipe {
+                organization_id: "59b8fe20-6072-4c16-9dae-9d7cbbf2533c".into(),
+                workspace_id: "2fac2db5-20d6-499c-b691-47ad19fc0ca8".into(),
+                identity_root: project.join(".clark/scout/identity/binding"),
+                platform: "linux".into(),
+                architecture: "x86_64".into(),
+                route_prefix: "/v1/system-cartography".into(),
+                human_run_request_id: Some(format!("scout-run:{}", "a".repeat(64))),
+            }),
+        };
+        recipe.validate(project).unwrap();
+
+        let mut escaped = recipe;
+        escaped.scout_cartography.as_mut().unwrap().identity_root =
+            PathBuf::from("/tmp/other-client");
+        assert!(escaped.validate(project).is_err());
     }
 }

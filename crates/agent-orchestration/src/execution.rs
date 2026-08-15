@@ -108,9 +108,6 @@ pub enum ToolExecutionStatus {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ExecutionPolicy {
-    pub max_attempts: u32,
-    pub weighted_token_limit: Option<f64>,
-    pub max_cost_usd: Option<f64>,
     pub non_cached_input_weight: f64,
     pub cached_input_weight: f64,
     pub output_weight: f64,
@@ -119,9 +116,6 @@ pub struct ExecutionPolicy {
 impl Default for ExecutionPolicy {
     fn default() -> Self {
         Self {
-            max_attempts: 2,
-            weighted_token_limit: None,
-            max_cost_usd: None,
             non_cached_input_weight: 1.0,
             cached_input_weight: 0.1,
             output_weight: 4.0,
@@ -131,9 +125,6 @@ impl Default for ExecutionPolicy {
 
 impl ExecutionPolicy {
     pub fn validate(&self) -> Result<(), String> {
-        if self.max_attempts == 0 {
-            return Err("execution max_attempts must be greater than zero".to_string());
-        }
         for (name, value) in [
             ("non_cached_input_weight", self.non_cached_input_weight),
             ("cached_input_weight", self.cached_input_weight),
@@ -142,18 +133,6 @@ impl ExecutionPolicy {
             if !value.is_finite() || value < 0.0 {
                 return Err(format!("{name} must be finite and non-negative"));
             }
-        }
-        if self
-            .weighted_token_limit
-            .is_some_and(|value| !value.is_finite() || value <= 0.0)
-        {
-            return Err("weighted token limit must be finite and positive".to_string());
-        }
-        if self
-            .max_cost_usd
-            .is_some_and(|value| !value.is_finite() || value < 0.0)
-        {
-            return Err("cost limit must be finite and non-negative".to_string());
         }
         Ok(())
     }
@@ -179,15 +158,6 @@ impl ExecutionUsage {
             + cached as f64 * policy.cached_input_weight
             + usage.output_tokens as f64 * policy.output_weight;
         self.cost_usd += usage.cost_usd.max(0.0);
-    }
-
-    pub fn exhausted(&self, policy: &ExecutionPolicy) -> bool {
-        policy
-            .weighted_token_limit
-            .is_some_and(|limit| self.weighted_tokens >= limit)
-            || policy
-                .max_cost_usd
-                .is_some_and(|limit| self.cost_usd >= limit)
     }
 }
 
@@ -443,9 +413,6 @@ impl ExecutionLedger {
         if !failure_class.recoverable() {
             reasons.push("failure class is not recoverable".to_string());
         }
-        if snapshot.attempts.len() as u32 >= snapshot.policy.max_attempts {
-            reasons.push("execution attempt limit reached".to_string());
-        }
         if snapshot.state != ExecutionState::Running {
             reasons.push(format!(
                 "execution is not at a running boundary: {:?}",
@@ -454,9 +421,6 @@ impl ExecutionLedger {
         }
         if !snapshot.active_tools.is_empty() {
             reasons.push("a tool has no terminal receipt".to_string());
-        }
-        if snapshot.usage.exhausted(&snapshot.policy) {
-            reasons.push("execution budget is exhausted".to_string());
         }
         RecoveryDecision {
             allowed: reasons.is_empty(),

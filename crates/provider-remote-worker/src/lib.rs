@@ -12,7 +12,7 @@ use agent_core::{
     ProviderId, RunFailureKind, RunId, RunOutcome, RunStatus, Session, SessionId, SessionOptions,
 };
 use async_trait::async_trait;
-use code_host::{Request, RequestCommand, Response, PROTOCOL_VERSION};
+use code_host::{CodingSessionRecipe, Request, RequestCommand, Response, PROTOCOL_VERSION};
 use code_remote::{RemoteWorkerFrame, RemoteWorkerSlot};
 use futures::stream::{self, BoxStream};
 use futures::{stream::FuturesUnordered, StreamExt};
@@ -58,6 +58,7 @@ pub struct RemoteWorkerProvider {
     project_id: String,
     project_root: PathBuf,
     worker_session: Option<String>,
+    session_recipe: Option<CodingSessionRecipe>,
     capabilities: ProviderCapabilities,
     active: Arc<Mutex<HashMap<RunId, String>>>,
     connected: bool,
@@ -78,10 +79,16 @@ impl RemoteWorkerProvider {
             project_id,
             project_root,
             worker_session: None,
+            session_recipe: None,
             capabilities: ProviderCapabilities::default(),
             active: Arc::new(Mutex::new(HashMap::new())),
             connected: false,
         }
+    }
+
+    pub fn with_session_recipe(mut self, recipe: CodingSessionRecipe) -> Self {
+        self.session_recipe = Some(recipe);
+        self
     }
 
     fn request(&self, operation: &str, input: Value) -> Request {
@@ -167,13 +174,14 @@ impl Provider for RemoteWorkerProvider {
             ));
         }
         options.cwd = Some(self.project_root.to_string_lossy().into_owned());
-        let request = self.request(
-            "session.open",
-            json!({
-                "session_id": format!("session-{}", uuid::Uuid::new_v4().simple()),
-                "options": options,
-            }),
-        );
+        let mut input = json!({
+            "session_id": format!("session-{}", uuid::Uuid::new_v4().simple()),
+            "options": options,
+        });
+        if let Some(recipe) = self.session_recipe.as_ref() {
+            input["recipe"] = serde_json::to_value(recipe)?;
+        }
+        let request = self.request("session.open", input);
         let response = self
             .worker
             .request(request)

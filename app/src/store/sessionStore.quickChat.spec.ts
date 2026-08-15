@@ -19,7 +19,13 @@ describe("Quick Chat", () => {
       connecting: false,
       opening: null,
       conversations: [],
-      localSettings: { ...DEFAULT_LOCAL_SETTINGS, cwd: "/repo/remembered-project" },
+      localSettings: {
+        ...DEFAULT_LOCAL_SETTINGS,
+        cwd: "/repo/remembered-project",
+        model: "local-model-large",
+        reasoningEffort: "max",
+      },
+      chatModels: {},
       recentProjects: ["/repo/remembered-project"],
     });
   });
@@ -68,6 +74,9 @@ describe("Quick Chat", () => {
     await useSessionStore.getState().startQuickChat();
 
     expect(openSession).toHaveBeenCalledTimes(1);
+    expect(openSession.mock.calls[0]?.[1]).toMatchObject({
+      extra: { model: "local-model", reasoning_effort: "high" },
+    });
     const request = openSession.mock.calls[0]?.[2];
     expect(request).toMatchObject({
       kind: "new",
@@ -81,6 +90,10 @@ describe("Quick Chat", () => {
     expect(state.recentProjects).toEqual(["/repo/remembered-project"]);
     expect(isQuickChatProject(state.activeProjectRoot ?? undefined, state.session!.id)).toBe(true);
     expect(state.conversations[0]?.project).toBe(state.activeProjectRoot);
+    expect(state.chatModels[state.session!.id]).toEqual({
+      model: "local-model",
+      reasoningEffort: "high",
+    });
   });
 
   it("reopens a cloud-saved Quick Chat under this device's workspace root", async () => {
@@ -141,6 +154,9 @@ describe("Quick Chat", () => {
         createdAt: 1,
         updatedAt: 1,
       }],
+      chatModels: {
+        [id]: { model: "local-model-large", reasoningEffort: "max" },
+      },
     });
 
     await useSessionStore.getState().openConversation(id);
@@ -148,9 +164,18 @@ describe("Quick Chat", () => {
     expect(prepareQuickChatWorkspace).toHaveBeenCalledWith(id);
     expect(openSession).toHaveBeenCalledWith(
       "local",
-      expect.any(Object),
+      expect.objectContaining({
+        extra: expect.objectContaining({
+          model: "local-model",
+          reasoning_effort: "high",
+        }),
+      }),
       { kind: "new", options: expect.objectContaining({ cwd: currentPath }), bindId: id },
     );
     expect(useSessionStore.getState().activeProjectRoot).toBe(currentPath);
+    expect(useSessionStore.getState().chatModels[id]).toEqual({
+      model: "local-model",
+      reasoningEffort: "high",
+    });
   });
 });

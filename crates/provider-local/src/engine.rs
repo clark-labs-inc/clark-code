@@ -21,15 +21,10 @@ use crate::compaction::{CheckpointCompactor, CompactionConfig};
 use crate::llm::LlmClient;
 use crate::loop_breaker::LoopBreaker;
 use crate::loop_state::{GoalStatus, RunControl, SessionState};
-use crate::root_execution::{RootExecutionConfig, RootExecutionTrace};
+use crate::root_execution::RootExecutionTrace;
 use crate::tools::{ToolCtx, ToolRegistry};
 use error::map_loop_error_with_completion_state;
 
-/// Headroom for graceful wrap-up when an explicit iteration cap is configured.
-const GRACE_ITERATIONS: usize = 40;
-/// Consecutive prose-only stops that follow-up plugins may recover from. Tool
-/// execution resets this counter, so long productive runs are unaffected.
-const EMPTY_OUTCOME_RETRY_BUDGET: usize = 3;
 /// What the goal loop does after a cleanly completed iteration.
 enum GoalStep {
     /// Launch another continuation turn with this prompt text.
@@ -54,7 +49,6 @@ pub(crate) struct TurnContext {
     pub session: Arc<Mutex<SessionState>>,
     pub control: Arc<Mutex<RunControl>>,
     pub session_id: SessionId,
-    pub max_iterations: Option<u32>,
     pub compaction: CompactionConfig,
     pub plan_execution_reminders: bool,
     pub hidden_plan_protocol: bool,
@@ -74,7 +68,6 @@ pub(crate) struct TurnContext {
     pub initial_events: Vec<AgentEvent>,
     /// When memories are enabled: post-turn durable-fact extraction context.
     pub memory_extraction: Option<crate::memory_extraction::ExtractionCtx>,
-    pub execution: RootExecutionConfig,
     pub run_cancellations: crate::provider::RunCancellationRegistry,
     pub tool_image_policy: ToolImagePolicy,
     pub runtime_plugin_packs: Vec<Arc<dyn crate::runtime_plugins::RuntimePluginPack>>,
@@ -155,7 +148,7 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
             .await;
     }
 
-    let execution = match RootExecutionTrace::new(&tc.session_id, &run, &tc.execution, tx.clone()) {
+    let execution = match RootExecutionTrace::new(&tc.session_id, &run, tx.clone()) {
         Ok(execution) => execution,
         Err(error) => {
             let message = format!("failed to create root execution ledger: {error}");
@@ -263,7 +256,6 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
         tc.session.clone(),
         run.clone(),
         context_limit,
-        tc.execution.weighted_token_limit,
     );
     let usage = stream.usage();
     // Breaks stuck same-action/same-result loops early (nudge → hard block).
@@ -282,7 +274,6 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
         .tools_arc(tools.clone())
         .event_sink(sink)
         .default_execution_mode(agent_loop::ExecutionMode::Parallel)
-        .grace_iterations(GRACE_ITERATIONS)
         .before_tool_call_arc(loop_breaker.clone())
         .after_tool_call_arc(loop_breaker.clone())
         .tool_gate_arc(tc.registry.deferred_tool_gate(tc.session.clone()))
@@ -291,7 +282,6 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
             run.clone(),
         ))
         .model_id(tc.model.clone())
-        .empty_outcome_retry_budget(EMPTY_OUTCOME_RETRY_BUDGET)
         .steering_arc(steering.clone())
         // Project every oversized re-fetchable result before the first model
         // request that can contain it. The complete event remains durable;
@@ -324,9 +314,6 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
             .context_transform(crate::planning::PlanReminderTransform::new(
                 tc.session.clone(),
             ));
-    }
-    if let Some(max_iterations) = tc.max_iterations {
-        builder = builder.max_iterations(max_iterations as usize);
     }
     if let Some(temperature) = tc.temperature {
         builder = builder.temperature(temperature);
@@ -419,10 +406,7 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
                 break Err(error);
             };
             let permission_pending = tc.control.lock().await.has_pending();
-            if cancel.is_cancelled()
-                || permission_pending
-                || !completed_transcript.has_commit_boundary()
-                || !execution.can_recover(failure_class)
+            if cancel.is_cancelled() || permission_pending || !execution.can_recover(failure_class)
             {
                 incidents.mark_failed();
                 break Err(error);
@@ -452,7 +436,7 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
         };
 
         match attempt_result {
-            Ok(result) if result.outcome.is_complete() => {
+            Ok(result) => {
                 {
                     let mut session = tc.session.lock().await;
                     compactor.commit_appended(
@@ -488,19 +472,6 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
                                 || cancel.is_cancelled()
                             {
                                 None
-                            } else if goal
-                                .token_budget
-                                .is_some_and(|budget| goal.tokens_used >= budget)
-                            {
-                                goal.status = GoalStatus::BudgetLimited;
-                                goal.continuations = goal.continuations.saturating_add(1);
-                                Some(GoalStep::Continue {
-                                    text: crate::prompt::goal_budget_limit_reminder(goal),
-                                    note: format!(
-                                        "Goal budget exhausted ({} tokens) — wrapping up.",
-                                        goal.tokens_used
-                                    ),
-                                })
                             } else {
                                 // Render BEFORE incrementing: the reminder
                                 // numbers the turn it introduces.
@@ -552,46 +523,6 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
                     None => break 'goal Ok(result.outcome),
                 }
             }
-            Ok(result) => {
-                // HitMaxIterations: fold what we have and stop any goal.
-                {
-                    let mut session = tc.session.lock().await;
-                    compactor.commit_appended(
-                        &mut session.transcript,
-                        crate::agent_adapter::redaction::messages(result.messages),
-                    );
-                    if let Some(goal) = session
-                        .goal
-                        .as_mut()
-                        .filter(|goal| !is_completed_before_run(goal))
-                    {
-                        if goal.status == GoalStatus::Active {
-                            goal.status = GoalStatus::Blocked;
-                            goal.blocker_reason =
-                                Some("The agent loop reached its per-turn step limit".to_string());
-                            goal.touch();
-                        }
-                    }
-                }
-                let goal_state = tc
-                    .session
-                    .lock()
-                    .await
-                    .goal
-                    .as_ref()
-                    .filter(|goal| !is_completed_before_run(goal))
-                    .map(|goal| goal.state(Some(&run)));
-                if let Some(goal) = goal_state {
-                    let _ = tx
-                        .send(AgentEvent::GoalUpdated {
-                            run: run.clone(),
-                            goal,
-                        })
-                        .await;
-                }
-                let _ = completed_transcript.drain();
-                break 'goal Ok(result.outcome);
-            }
             Err(error) => {
                 // Failed iterations still consumed the user's time and model
                 // budget. Record them before the terminal error path pauses the
@@ -637,43 +568,18 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
                     crate::memory_extraction::extract_and_store(ctx, &user_text).await;
                 });
             }
-            if outcome.is_complete() {
-                finish_root(
-                    &tx,
-                    &run,
-                    &execution,
-                    &finish_context,
-                    RunStatus::Done,
-                    Some(outcome.label().to_string()),
-                    None,
-                    None,
-                    with_limit(final_usage, context_limit),
-                )
-                .await;
-            } else {
-                // Only `HitMaxIterations` lands here — a natural finish and
-                // the graceful wrap-up both count as complete above. This is
-                // resumable saved work, not corrupt provider or local state.
-                finish_root(
-                    &tx,
-                    &run,
-                    &execution,
-                    &finish_context,
-                    RunStatus::Failed,
-                    Some(outcome.label().to_string()),
-                    Some(format!(
-                        "This run reached its configured safety limit of {} steps before finishing. \
-                         Everything so far is saved above; continue in this task to resume from that \
-                         work.",
-                        tc.max_iterations
-                            .map(|limit| limit.to_string())
-                            .unwrap_or_else(|| "unknown".to_string())
-                    )),
-                    Some(RunFailureKind::IterationLimit),
-                    with_limit(final_usage, context_limit),
-                )
-                .await;
-            }
+            finish_root(
+                &tx,
+                &run,
+                &execution,
+                &finish_context,
+                RunStatus::Done,
+                Some(outcome.label().to_string()),
+                None,
+                None,
+                with_limit(final_usage, context_limit),
+            )
+            .await;
         }
         Err(error) => {
             // A post-tool final-answer request can fail after the model has

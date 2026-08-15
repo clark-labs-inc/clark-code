@@ -315,6 +315,29 @@ describe("MockBridge", () => {
     ]);
   });
 
+  it("settles parallel descendants when the parent run is cancelled", async () => {
+    const bridge = new MockBridge();
+    await bridge.openSession("local", {}, { kind: "new", options: {} });
+    await bridge.prompt("mock-session", [{ type: "text", text: "build this in parallel" }]);
+
+    const active = await waitFor((state) => state.fan_out?.running === 1, bridge);
+    const runId = Object.keys(active.runs)[0];
+    await bridge.cancel();
+    const cancelled = await waitFor(
+      (state) => state.runs[runId]?.status === "cancelled",
+      bridge,
+    );
+
+    expect(cancelled.runs[runId]?.status).toBe("cancelled");
+    expect(cancelled.fan_out?.running).toBe(0);
+    expect(cancelled.fan_out?.agents.map((agent) => agent.status)).toEqual([
+      "done",
+      "failed",
+      "failed",
+    ]);
+    expect(cancelled.fan_out?.agents[0]?.result).toContain("Confirmed");
+  });
+
   it("emits a typed blocked-goal receipt for deterministic UI simulation", async () => {
     const bridge = new MockBridge();
     await bridge.openSession("local", {}, { kind: "new", options: {} });

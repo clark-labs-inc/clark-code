@@ -12,7 +12,7 @@ fn recoverable(category: agent_core::recovery::ProviderIncidentCategory) -> LlmE
         idempotency_key: "request-1".into(),
         provider_request_id: Some("upstream-1".into()),
         attempts: 2,
-        max_attempts: 17,
+        max_attempts: 4,
         retries: agent_core::recovery::ProviderRetryCounts {
             transient: 1,
             ..Default::default()
@@ -249,5 +249,40 @@ fn model_tool_result_preserves_large_text_byte_for_byte() {
     assert!(matches!(
         result.content.as_slice(),
         [ca::ToolResultBlock::Text(text)] if text.text == expected
+    ));
+}
+
+#[test]
+fn model_visible_typed_details_survive_tool_result_translation() {
+    let run_id = "019c9a79-72ba-7192-bd1b-8a2d3ad24dc1";
+    let outcome = crate::tools::ToolOutcome::ok("Started Scout.")
+        .with_model_visible_details(serde_json::json!({"run_id": run_id}));
+    let result = tool_result_from_outcome(outcome, false, false);
+
+    assert!(matches!(
+        result.content.as_slice(),
+        [ca::ToolResultBlock::Text(text)] if text.text.contains(run_id)
+    ));
+    assert_eq!(result.details["run_id"], run_id);
+
+    let messages = [
+        assistant_call("scout-start"),
+        ca::AgentMessage::ToolResult {
+            tool_call_id: "scout-start".into(),
+            tool_name: "scout_enterprise".into(),
+            content: ca::ToolResultContent {
+                blocks: result.content,
+            },
+            is_error: result.is_error,
+            narration: result.narration,
+            details: Some(result.details),
+            timestamp: None,
+        },
+    ];
+    let wire = to_wire_messages("", &messages);
+
+    assert!(matches!(
+        &wire[1].content,
+        Some(ChatContent::Text(text)) if text.contains(run_id)
     ));
 }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
 import { AnimatePresence, useReducedMotion } from "motion/react";
 import * as m from "motion/react-m";
 import {
@@ -20,6 +20,8 @@ import { DIALOG, OVERLAY, accessibleMotion } from "../lib/motion";
 import { RemoteFolderBrowser } from "./EnvironmentPicker";
 import type { ManagedWorktreeBase } from "../core-bridge/bridge";
 import { loadManagedWorktreeBase } from "../lib/managedWorktreeSettings";
+import { useModalFocus } from "../lib/modalFocus";
+import { newProjectDialogKeyboardIntent } from "../lib/newProjectDialog";
 
 const input =
   "w-full rounded-lg border border-border bg-bg px-2.5 py-1.5 text-sm text-ink outline-none transition focus:border-accent placeholder:text-ink-muted";
@@ -43,6 +45,7 @@ export function NewProjectDialog() {
   const sshOpen = useSessionStore((s) => s.sshOpen);
   const initialHostId = useSessionStore((s) => s.selectedHostId);
   const reduce = useReducedMotion();
+  const dialogRef = useModalFocus<HTMLDivElement>(open);
 
   const [mode, setMode] = useState<"local" | "remote">("local");
   const [localPath, setLocalPath] = useState(localCwd);
@@ -95,6 +98,31 @@ export function NewProjectDialog() {
 
   const close = () => setOpen(false);
 
+  const handleDialogKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    const intent = newProjectDialogKeyboardIntent(event.key);
+    if (intent === "close") {
+      event.preventDefault();
+      event.stopPropagation();
+      close();
+      return;
+    }
+    if (intent !== "cycle_focus" || !dialogRef.current) return;
+    const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>(
+      "button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])",
+    ));
+    if (focusable.length === 0) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    const active = document.activeElement;
+    if (event.shiftKey && (active === first || !dialogRef.current.contains(active))) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && (active === last || !dialogRef.current.contains(active))) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
+
   const chooseLocal = async () => {
     setPickerError(null);
     try {
@@ -143,12 +171,15 @@ export function NewProjectDialog() {
           onClick={close}
         >
           <m.div
+            ref={dialogRef}
             {...accessibleMotion(DIALOG, reduce)}
             role="dialog"
             aria-modal="true"
             aria-labelledby="new-project-title"
+            tabIndex={-1}
+            onKeyDown={handleDialogKeyDown}
             onClick={(e) => e.stopPropagation()}
-            className="popover-surface flex max-h-[84vh] w-full max-w-xl flex-col rounded-2xl border border-border bg-bg-elevated shadow-2xl"
+            className="popover-surface flex max-h-[84vh] min-w-0 w-full max-w-[calc(100vw-3rem)] flex-col rounded-2xl border border-border bg-bg-elevated shadow-2xl sm:max-w-xl"
           >
             <div className="flex items-center justify-between border-b border-border-subtle px-5 py-4">
               <h2 id="new-project-title" className="text-base font-semibold text-ink">
@@ -156,7 +187,7 @@ export function NewProjectDialog() {
               </h2>
             </div>
 
-            <div className="flex min-h-0 flex-1 flex-col gap-4 px-5 py-4">
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-y-auto px-5 py-4">
               {/* Target machine */}
               <div className="flex gap-1.5 rounded-xl bg-bg-secondary p-1">
                 <button

@@ -18,7 +18,11 @@ import type { PendingAttachment } from "../lib/attachments";
 import { loadSshHosts, hostLabel, hostReady } from "../lib/sshHosts";
 import { pickAllowOption } from "../lib/permissions";
 import { notify } from "../lib/notify";
-import { isAuthExpiredError, refreshAuthSession } from "../lib/auth";
+import {
+  isAuthExpiredError,
+  markAuthReconnectRequired,
+  refreshAuthSession,
+} from "../lib/auth";
 import {
   discoverRepositories,
   projectKnowledgeEnabled,
@@ -594,7 +598,7 @@ export function MobileRemoteAgent() {
     const hostId = desktopHostId();
     const instanceId = desktopInstanceId();
     let stopped = false;
-    let authRefresh: Promise<void> | null = null;
+    let authRefresh: Promise<boolean> | null = null;
     let appVersion: Promise<string> | null = null;
     consecutiveFailuresRef.current = 0;
     retryAtRef.current = 0;
@@ -610,13 +614,20 @@ export function MobileRemoteAgent() {
       if (!authRefresh) {
         const attempt = (async () => {
           const currentAuth = useSessionStore.getState().auth;
-          const refreshed = currentAuth ? await refreshAuthSession(currentAuth) : null;
-          if (stopped || !accountStillCurrent()) return;
-          if (refreshed) {
+          if (!currentAuth) return false;
+          try {
+            const refreshed = await refreshAuthSession(currentAuth);
+            if (stopped || !accountStillCurrent()) return false;
             useSessionStore.setState({ auth: refreshed });
-          } else {
-            useSessionStore.getState().signOutAuth();
-            void notify("the agent sign-in expired", "Sign in again to keep Clark Code remote control online.");
+            return true;
+          } catch {
+            if (stopped || !accountStillCurrent()) return false;
+            useSessionStore.setState({ auth: markAuthReconnectRequired(currentAuth) });
+            void notify(
+              "Clark account needs reconnecting",
+              "Local work is still available. Reconnect from the account menu to restore remote control.",
+            );
+            return false;
           }
         })();
         authRefresh = attempt;
@@ -624,8 +635,7 @@ export function MobileRemoteAgent() {
           if (authRefresh === attempt) authRefresh = null;
         });
       }
-      await authRefresh;
-      return true;
+      return await authRefresh;
     };
 
     const refreshPresence = async () => {

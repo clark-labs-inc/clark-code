@@ -373,7 +373,7 @@ fn runtime(
                     "mcp_servers": [{"name":"bad"}],
                     "memories": true,
                     "browser_enabled": true,
-                    "orchestration": {"enabled": true}
+                    "orchestration": {}
                 }),
                 ..Default::default()
             },
@@ -413,7 +413,6 @@ async fn production_harness_path_is_parallel_isolated_reviewed_and_replayed() {
             ..Default::default()
         })
         .unwrap(),
-        2,
         integrator,
     )
     .unwrap();
@@ -611,7 +610,6 @@ async fn six_parallel_writers_retry_one_preserve_five_and_apply_all_packages() {
             ..Default::default()
         })
         .unwrap(),
-        2,
         integrator,
     )
     .unwrap();

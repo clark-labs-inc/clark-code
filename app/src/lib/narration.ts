@@ -1,8 +1,8 @@
 // Split assistant text into spans of plain answer, `<narrate>` commentary, and
-// `<thinking>` reasoning. the agent (and some ACP agents) embed these tags inline in
-// the message stream; we render each kind differently (answer = markdown,
-// narrate = running commentary, thinking = collapsible). Tolerant of unclosed
-// tags so it works mid-stream.
+// legacy `<thinking>` reasoning. The agent (and some ACP agents) embed these
+// tags inline in the message stream. Keeping the reasoning span typed lets the
+// UI suppress it without leaking its text into adjacent visible Markdown.
+// Tolerant of unclosed tags so it works mid-stream.
 
 import type { MessagePhase } from "../core-bridge/types";
 

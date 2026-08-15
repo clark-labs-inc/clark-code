@@ -61,8 +61,7 @@ async function approveIfNeeded(page) {
 }
 
 const expectedSlashCommands = [
-  "new", "goal", "compact", "skills", "scout", "security", "security-diff",
-  "security-deep", "scientist", "rsi", "sentry", "terminal", "mcp", "copy",
+  "new", "goal", "compact", "skills", "sentry", "terminal", "mcp", "copy",
   "share", "unshare", "memory", "btw",
 ];
 
@@ -181,23 +180,23 @@ try {
   await page.getByText("Artifact UX recommendations.md", { exact: true }).waitFor();
   const inlineImage = page.getByRole("img", { name: "artifact-preview.svg" });
   await inlineImage.waitFor({ state: "visible" });
-  const chatActions = page.getByLabel("Actions for artifact-preview.svg").first();
-  await chatActions.waitFor({ state: "visible" });
-  check(await chatActions.getByRole("button", { name: "Save a Copy" }).count() === 1, "inline image has no Save a Copy action");
+  const chatSaveCopy = page.getByRole("button", { name: /save a copy of artifact-preview\.svg/i });
+  await chatSaveCopy.waitFor({ state: "visible" });
+  check(await chatSaveCopy.count() === 1, "inline image has no Save a copy action");
   const downloadPromise = page.waitForEvent("download");
-  await chatActions.getByRole("button", { name: "Save a Copy" }).click();
+  await chatSaveCopy.click();
   const download = await downloadPromise;
   const downloadPath = await download.path();
   check(download.suggestedFilename() === "artifact-preview.svg", "artifact download filename was not preserved");
   check(Boolean(downloadPath) && (await stat(downloadPath)).size > 0, "artifact download was empty");
   await page.screenshot({ path: path.join(outDir, "artifact-inline-chat.png"), animations: "disabled" });
-  await page.getByRole("button", { name: "View artifact-preview.svg" }).click();
+  await page.getByRole("button", { name: "Open artifact-preview.svg in workspace" }).click();
   const artifactWorkspace = page.getByRole("region", { name: "Artifact workspace" });
   await artifactWorkspace.waitFor({ state: "visible" });
   await artifactWorkspace.getByRole("img", { name: "artifact-preview.svg" }).waitFor({ state: "visible" });
   check(
-    await artifactWorkspace.getByRole("button", { name: "Save a Copy" }).count() === 1,
-    "artifact workspace has no Save a Copy action",
+    await artifactWorkspace.getByRole("button", { name: /save a copy/i }).count() === 1,
+    "artifact workspace has no Save a copy action",
   );
   await page.screenshot({ path: path.join(outDir, "artifact-workspace.png"), animations: "disabled" });
   await artifactWorkspace.getByRole("button", { name: "Close artifact workspace" }).first().click();

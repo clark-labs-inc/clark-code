@@ -207,7 +207,7 @@ describe("activity icon restraint", () => {
     expect(cancelled).toContain("Cancelled");
   });
 
-  it("renders thinking as text and disclosure only", () => {
+  it("omits reasoning-only messages from the activity UI", () => {
     const markup = renderToStaticMarkup(
       <Message
         role="agent"
@@ -216,8 +216,6 @@ describe("activity icon restraint", () => {
       />,
     );
 
-    expect(markup).toContain("Thinking");
-    expect(markup).toContain('aria-expanded="false"');
-    expect(markup).not.toContain("lucide-brain");
+    expect(markup).toBe("");
   });
 });

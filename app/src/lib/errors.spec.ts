@@ -85,7 +85,7 @@ describe("humanizeError", () => {
     expect(isAccountReconnectError(current)).toBe(true);
     expect(isAccountReconnectError(unrelated)).toBe(false);
     expect(humanizeError(current)).toBe(
-      "the agent needs to reconnect your account. Sign out and sign in again.",
+      "Clark Code needs to reconnect your account. Use Reconnect account in the account menu.",
     );
     installProductModule(neutralProduct);
   });

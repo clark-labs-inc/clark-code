@@ -57,18 +57,37 @@ pub(super) fn recover_sync(
             }));
         }
         (
-            Some((snapshot, cloud_rev)),
-            Some((metadata, _, cached_rev, checkpoint, local_live, created_at_ms, updated_at_ms)),
-        ) if cloud_rev == cached_rev => (
-            metadata,
-            snapshot,
-            checkpoint,
-            true,
-            local_live,
-            cached_rev,
-            created_at_ms,
-            updated_at_ms,
-        ),
+            Some((_, cloud_rev)),
+            Some((
+                metadata,
+                bytes,
+                cached_rev,
+                checkpoint,
+                local_live,
+                created_at_ms,
+                updated_at_ms,
+            )),
+        ) if cloud_rev == cached_rev => {
+            // A local checkpoint may be ahead of the last full cloud snapshot
+            // while its individual trajectory events are already durable in
+            // cloud. Equal server revisions therefore select the newer local
+            // read model; a different revision still means another device won
+            // authority and enters the divergence branch below.
+            let snapshot = serde_json::from_value(normalize_snapshot_value(
+                serde_json::from_slice(&bytes).map_err(|e| e.to_string())?,
+            ))
+            .map_err(|e| e.to_string())?;
+            (
+                metadata,
+                snapshot,
+                checkpoint,
+                true,
+                local_live,
+                cached_rev,
+                created_at_ms,
+                updated_at_ms,
+            )
+        }
         (Some((snapshot, cloud_rev)), Some((metadata, _, _, _, _, created_at_ms, _))) => {
             // Another device advanced the authority. Preserve this device's
             // batches for idempotent trajectory delivery, but never overlay the
@@ -181,7 +200,12 @@ pub(super) fn recover_sync(
                         event_kind: event_kind(&event_value),
                         recorded_at_unix_ms: first_timestamp + offset as i64,
                         payload: json!({"schemaVersion": 1, "sessionId": conversation_id,
-                            "appVersion": env!("CARGO_PKG_VERSION"), "event": event_value}),
+                            "appVersion": env!("CARGO_PKG_VERSION"),
+                            "buildGitSha": crate::trajectory::build_git_sha(),
+                            "buildGitDirty": crate::trajectory::build_git_dirty(),
+                            "platform": std::env::consts::OS,
+                            "arch": std::env::consts::ARCH,
+                            "event": event_value}),
                     })
                 })
                 .collect::<Result<Vec<_>, String>>()?;

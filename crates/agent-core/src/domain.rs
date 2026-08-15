@@ -589,7 +589,6 @@ pub struct RunUsage {
 pub enum GoalStatus {
     Active,
     Blocked,
-    BudgetLimited,
     Complete,
 }
 
@@ -602,8 +601,6 @@ pub struct GoalState {
     /// Most recent run that advanced or changed this goal.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub run: Option<RunId>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub token_budget: Option<u64>,
     pub tokens_used: u64,
     pub time_used_seconds: u64,
     pub continuations: u32,

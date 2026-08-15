@@ -113,6 +113,7 @@ try {
   });
   const context = await browser.newContext({ viewport: { width: 1360, height: 880 } });
   await context.addInitScript(() => {
+    const scope = encodeURIComponent("id:selection-qa");
     localStorage.setItem(
       "agent-desktop.dev-account",
       JSON.stringify({
@@ -120,17 +121,20 @@ try {
       }),
     );
     localStorage.setItem(
-      "agent-desktop:local-agent",
-      JSON.stringify({ cwd: "/tmp", model: "local-model", reasoningEffort: "", apiKey: "" }),
+      `agent-desktop:local-agent:${scope}`,
+      JSON.stringify({ cwd: "/tmp", model: "local-model", reasoningEffort: "high" }),
+    );
+    localStorage.setItem(
+      `agent-desktop:project-context:${scope}`,
+      JSON.stringify({ cwd: "/tmp" }),
     );
   });
   const page = await context.newPage();
   page.on("pageerror", (e) => console.log("PAGEERROR:", e.message));
   await page.goto(url, { waitUntil: "domcontentloaded" });
 
-  await page.getByLabel("New session").first().click();
-  await sleep(600);
   const input = page.locator("textarea.composer-input");
+  await input.waitFor({ state: "visible" });
   await input.click();
   await input.fill("hello selection repro");
   await input.press("Enter");
@@ -167,14 +171,14 @@ try {
   await page.waitForSelector("text=want me to proceed?", { timeout: 15000 });
   await sleep(500);
 
-  // Drag-select across part of the agent's final answer (a real mouse drag).
-  const answer = page.locator("text=I read").last();
+  // Select the settled final answer through Playwright's browser selection
+  // primitive. The earlier mid-stream probe already covers a real mouse drag;
+  // using selectText here avoids a wrapped-line coordinate collapsing the
+  // selection before the empty-area click matrix begins.
+  const answer = page.getByText("I read src/main.rs", { exact: false }).last();
   const box = await answer.boundingBox();
   if (!box) throw new Error("answer element not found");
-  await page.mouse.move(box.x + 4, box.y + box.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(box.x + Math.min(box.width - 8, 240), box.y + box.height / 2, { steps: 12 });
-  await page.mouse.up();
+  await answer.selectText();
   await sleep(120);
   const sel0 = await selectionState(page);
   console.log(`[engine=${engineName}] after drag-select: len=${sel0.len} "${sel0.text}"`);

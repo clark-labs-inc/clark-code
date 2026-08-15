@@ -121,14 +121,13 @@ async fn productive_stream_can_outlive_response_start_deadline() {
     .map(|chunk| (Duration::from_millis(25), chunk))
     .collect();
     let base_url = progressive_endpoint(chunks).await;
-    let client = LlmClient::from_parts_with_timeouts(
+    let client = LlmClient::from_parts_with_response_start_timeout(
         &base_url,
         "fake-model",
         None,
         Vec::new(),
         None,
         Duration::from_millis(40),
-        Duration::from_millis(60),
     )
     .unwrap();
     let started = std::time::Instant::now();
@@ -148,102 +147,37 @@ async fn productive_stream_can_outlive_response_start_deadline() {
 }
 
 #[tokio::test]
-async fn stream_idle_deadline_resets_after_every_chunk() {
-    let chunks = [
-        frame(r#"{"choices":[{"delta":{"content":"still "}}]}"#),
-        frame(r#"{"choices":[{"delta":{"content":"working"}}]}"#),
-        frame(r#"{"choices":[{"delta":{},"finish_reason":"stop"}]}"#),
+async fn provider_owns_stream_silence_and_the_user_can_still_cancel() {
+    let base_url = progressive_endpoint(vec![(
+        Duration::from_millis(250),
         b"data: [DONE]\n\n".to_vec(),
-    ]
-    .into_iter()
-    .map(|chunk| (Duration::from_millis(30), chunk))
-    .collect();
-    let base_url = progressive_endpoint(chunks).await;
-    let client = LlmClient::from_parts_with_timeouts(
+    )])
+    .await;
+    let client = LlmClient::from_parts_with_response_start_timeout(
         &base_url,
         "fake-model",
         None,
         Vec::new(),
         None,
         Duration::from_millis(40),
-        Duration::from_millis(50),
     )
     .unwrap();
-    let turn = client
-        .stream_chat(
-            &[ChatMessage::user("hello")],
-            &[],
-            &CancellationToken::new(),
-            |_| {},
-            |_| {},
-        )
-        .await
-        .unwrap();
+    let cancel = CancellationToken::new();
+    let task_cancel = cancel.clone();
+    let task = tokio::spawn(async move {
+        client
+            .stream_chat(
+                &[ChatMessage::user("hello")],
+                &[],
+                &task_cancel,
+                |_| {},
+                |_| {},
+            )
+            .await
+    });
 
-    assert_eq!(turn.text, "still working");
-}
-
-async fn idle_failure(content: &str) -> (AttemptError, String) {
-    let chunks = vec![
-        (
-            Duration::ZERO,
-            frame(&format!(
-                r#"{{"choices":[{{"delta":{{"content":{content:?}}}}}]}}"#
-            )),
-        ),
-        (Duration::from_millis(200), b"data: [DONE]\n\n".to_vec()),
-    ];
-    let base_url = progressive_endpoint(chunks).await;
-    let client = LlmClient::from_parts_with_timeouts(
-        &base_url,
-        "fake-model",
-        None,
-        Vec::new(),
-        None,
-        Duration::from_millis(40),
-        Duration::from_millis(40),
-    )
-    .unwrap();
-    let mut output = String::new();
-    let mut on_text = |text: &str| output.push_str(text);
-    let mut on_reasoning = |_: &str| {};
-    let error = client
-        .stream_chat_once(StreamAttempt {
-            messages: &[ChatMessage::user("hello")],
-            tools: &[],
-            cancel: &CancellationToken::new(),
-            request_model: "fake-model",
-            force_tool_call: false,
-            forced_tool_name: None,
-            idempotency_key: "stream-idle-test",
-            on_text: &mut on_text,
-            on_reasoning: &mut on_reasoning,
-        })
-        .await
-        .unwrap_err();
-    (error, output)
-}
-
-#[tokio::test]
-async fn stream_idle_deadline_keeps_an_open_word_retry_safe() {
-    let (error, output) = idle_failure("partial").await;
-    let AttemptError::Transient(failure) = error else {
-        panic!("expected a retry-safe stream timeout");
-    };
-    assert_eq!(failure.category, ProviderIncidentCategory::Timeout);
-    assert!(failure.retry_safe);
-    assert!(failure.output_started);
-    assert!(output.is_empty());
-}
-
-#[tokio::test]
-async fn stream_idle_deadline_never_retries_after_published_text() {
-    let (error, output) = idle_failure("partial text ").await;
-    let AttemptError::Transient(failure) = error else {
-        panic!("expected a terminal stream timeout");
-    };
-    assert_eq!(failure.category, ProviderIncidentCategory::Timeout);
-    assert!(!failure.retry_safe);
-    assert!(failure.output_started);
-    assert_eq!(output, "partial text ");
+    tokio::time::sleep(Duration::from_millis(80)).await;
+    assert!(!task.is_finished(), "stream silence must not end the run");
+    cancel.cancel();
+    assert!(matches!(task.await.unwrap(), Err(LlmError::Cancelled)));
 }

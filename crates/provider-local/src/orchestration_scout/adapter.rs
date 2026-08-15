@@ -245,10 +245,6 @@ fn outcome(response: ScoutAdapterResponse) -> ToolOutcome {
         Ok(details) => details,
         Err(_) => return ToolOutcome::error("Scout adapter response encoding failed"),
     };
-    let typed_result = match model_visible_typed_result(&details) {
-        Ok(typed_result) => typed_result,
-        Err(error) => return ToolOutcome::error(error),
-    };
     let content = match &response {
         ScoutAdapterResponse::Census(CensusResponse::Succeeded {
             target,
@@ -264,10 +260,9 @@ fn outcome(response: ScoutAdapterResponse) -> ToolOutcome {
                 "Target adapter census found {} opaque authentication candidates and {} registered \
                  tool routes. The required canonical target_identity_sha256 is \
                  `{target_identity_sha256}`. Copy that exact digest, safe target, and opaque \
-                 candidate handles into verify_auth; never derive or invent them:\n{}",
+                 candidate handles from the typed result into verify_auth; never derive or invent them.",
                 candidates.len(),
                 tools.iter().filter(|tool| tool.available).count(),
-                typed_result,
             )
         }
         ScoutAdapterResponse::VerifyAuth(VerifyAuthResponse::Succeeded {
@@ -281,9 +276,9 @@ fn outcome(response: ScoutAdapterResponse) -> ToolOutcome {
             format!(
                 "Verified target-bound `{}` authorization for authority `{}`. The required \
                  canonical target_identity_sha256 is `{target_identity_sha256}`. Copy that exact \
-                 digest, safe target, and opaque auth-context fields into fetch_page; never derive \
-                 or invent them:\n{}",
-                auth_context.adapter_id, auth_context.authority_scope, typed_result,
+                 digest, safe target, and opaque auth-context fields from the typed result into \
+                 fetch_page; never derive or invent them.",
+                auth_context.adapter_id, auth_context.authority_scope,
             )
         }
         ScoutAdapterResponse::FetchPage(FetchPageResponse::Succeeded { receipt }) => format!(
@@ -300,14 +295,10 @@ fn outcome(response: ScoutAdapterResponse) -> ToolOutcome {
                 "Scout adapter operation failed safely: {:?}",
                 failure.code
             ))
-            .with_details(details)
+            .with_model_visible_details(details)
         }
     };
-    ToolOutcome::ok(content).with_details(details)
-}
-
-fn model_visible_typed_result(details: &Value) -> Result<String, String> {
-    serde_json::to_string(details).map_err(|_| "Scout adapter response encoding failed".to_string())
+    ToolOutcome::ok(content).with_model_visible_details(details)
 }
 
 fn target_identity_sha256(target: &TargetIdentity) -> Result<String, String> {
@@ -383,12 +374,11 @@ mod tests {
             "target": {"target_id": target_id},
             "candidates": [{"handle": candidate}],
         });
-        let typed_result = model_visible_typed_result(&details).unwrap();
-        let content =
-            format!("Copy the exact safe target and opaque candidate handles:\n{typed_result}");
+        let outcome = ToolOutcome::ok("Copy the exact safe target and opaque candidate handles.")
+            .with_model_visible_details(details);
 
-        assert!(content.contains(target_id));
-        assert!(content.contains(candidate));
+        assert!(outcome.content.contains(target_id));
+        assert!(outcome.content.contains(candidate));
     }
 
     #[test]

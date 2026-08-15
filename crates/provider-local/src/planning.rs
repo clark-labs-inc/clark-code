@@ -28,7 +28,6 @@ pub(crate) use research::{available_source_tools, source_tool_names};
 pub(crate) const DEVELOPER_INSTRUCTION_MESSAGE_KIND: &str = "developer_instruction";
 const MAX_EXECUTION_CONTRACT_CHARS: usize = 12_000;
 const PERIODIC_EXECUTION_REMINDER_TURNS: usize = 3;
-const MAX_COMPLETION_REMINDERS: u8 = 3;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum PlanModeInstructionKind {
@@ -72,7 +71,6 @@ pub(crate) struct PlanningState {
     /// proposal. Tools cannot author or alter these pins.
     pub context_revisions: Vec<agent_core::domain::PlanContextRevision>,
     pending_execution_reminder: Option<ExecutionReminderReason>,
-    completion_reminders: u8,
 }
 
 impl PlanningState {
@@ -131,7 +129,6 @@ impl PlanningState {
         self.proposed_plan = Some(plan.clone());
         self.execution_checklist = None;
         self.pending_execution_reminder = None;
-        self.completion_reminders = 0;
         plan
     }
 
@@ -153,7 +150,6 @@ impl PlanningState {
     pub fn approve_execution(&mut self) {
         self.execution_checklist = None;
         self.pending_execution_reminder = None;
-        self.completion_reminders = 0;
     }
 
     fn queue_execution_reminder(&mut self, reason: ExecutionReminderReason) {
@@ -189,7 +185,6 @@ impl PlanningState {
             .collect::<Vec<_>>();
         self.execution_checklist = Some(checklist);
         if !newly_completed.is_empty() {
-            self.completion_reminders = 0;
             self.queue_execution_reminder(ExecutionReminderReason::StepCompleted(newly_completed));
         }
     }
@@ -719,16 +714,14 @@ impl Plugin for PlanCompletionGuard {
 impl FollowUpSource for PlanCompletionGuard {
     async fn next_follow_up_messages(&self) -> Vec<AgentMessage> {
         let reminder = {
-            let mut session = self.session.lock().await;
+            let session = self.session.lock().await;
             let resolved = execution_contract_resolved(
                 session.planning.proposed_plan.as_ref(),
                 session.planning.execution_checklist.as_ref(),
             );
-            if resolved || session.planning.completion_reminders >= MAX_COMPLETION_REMINDERS {
+            if resolved {
                 None
             } else {
-                session.planning.completion_reminders =
-                    session.planning.completion_reminders.saturating_add(1);
                 session.planning.proposed_plan.as_ref().and_then(|plan| {
                     render_execution_reminder(
                         plan,

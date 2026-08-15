@@ -2,10 +2,12 @@ import { describe, expect, it, beforeEach } from "vitest";
 import {
   CODING_MODELS,
   DEFAULT_LOCAL_SETTINGS,
+  QUICK_CHAT_MODEL_ID,
   SPECIALIST_MODEL_ID,
   SPECIALIST_MODEL_LABEL,
   SPECIALIST_REASONING_EFFORT,
   normalizeReasoningEffort,
+  quickChatModelSettings,
   modelLabel,
   effectiveModelSettings,
   addRecentProject,
@@ -53,6 +55,18 @@ describe("product-supplied model settings", () => {
   it("uses the neutral product model by default", () => {
     expect(DEFAULT_LOCAL_SETTINGS.model).toBe("local-model");
     expect(modelLabel(DEFAULT_LOCAL_SETTINGS.model)).toBe("Local model");
+  });
+
+  it("pins Quick Chat to the free/default lane instead of a selected larger model", () => {
+    expect(QUICK_CHAT_MODEL_ID).toBe("local-model");
+    expect(quickChatModelSettings({
+      ...DEFAULT_LOCAL_SETTINGS,
+      model: "local-model-large",
+      reasoningEffort: "max",
+    })).toMatchObject({
+      model: "local-model",
+      reasoningEffort: "high",
+    });
   });
 
   it("exposes the neutral host model choices without a downstream product", () => {

@@ -103,12 +103,6 @@ pub(crate) fn orchestration_tools(config: OrchestrationToolsConfig) -> Vec<Arc<d
     tools
 }
 
-pub(crate) fn scout_capsule_tools(
-    policy: crate::orchestration::ScoutCapsulePolicyConfig,
-) -> Vec<Arc<dyn ToolExecutor>> {
-    scout::capsule_tools(policy)
-}
-
 struct DelegateReadOnly {
     shared: Arc<SharedState>,
 }
@@ -278,12 +272,7 @@ async fn run_delegation(
         limit_weighted_tokens: shared.config.policy.token_budget,
         ..Default::default()
     })?;
-    let control = ControlPlane::new(
-        shared.config.policy.max_agents,
-        1,
-        shared.config.policy.max_attempts,
-        budget,
-    )?;
+    let control = ControlPlane::new(shared.config.policy.max_agents, 1, budget)?;
     let mut coordinator = Coordinator::new(policy, control);
     register_harnesses(
         &mut coordinator,

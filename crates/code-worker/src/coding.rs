@@ -1,6 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
-use std::time::Duration;
 
 use agent_core::provider::{ClientResponse, PromptInput, Provider, Session, SessionOptions};
 use agent_core::{apply, AgentEvent, Error as AgentError, RunId, RunStatus, Snapshot};
@@ -10,7 +9,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use tokio::sync::Mutex;
 
-use code_host::{HeadlessPlugin, PluginContext, PluginError, PluginManifest};
+use code_host::{CodingSessionRecipe, HeadlessPlugin, PluginContext, PluginError, PluginManifest};
 
 use crate::config::{ExecutionResidency, ProviderProfile};
 
@@ -89,9 +88,16 @@ impl CodingPlugin {
             .session_id
             .unwrap_or_else(|| format!("session-{}", uuid::Uuid::new_v4().simple()));
         portable_session_id(&id)?;
+        let mut provider_config = self.profile.provider_config(self.execution_residency);
+        if let Some(recipe) = request.recipe.as_ref() {
+            recipe
+                .validate(&project_root)
+                .map_err(PluginError::InvalidInput)?;
+            apply_session_recipe(&mut provider_config, recipe)?;
+        }
         let mut provider = provider_local::LocalAgentProvider::new();
         provider
-            .connect(self.profile.provider_config(self.execution_residency))
+            .connect(provider_config)
             .await
             .map_err(provider_error)?;
         let session = provider
@@ -166,8 +172,6 @@ impl CodingPlugin {
                 .map_err(provider_error)?;
             (session_id, stream)
         };
-        let deadline =
-            tokio::time::Instant::now() + Duration::from_secs(self.profile.turn_timeout_seconds);
         let mut outcome = None;
         let mut run_id: Option<RunId> = None;
         loop {
@@ -178,12 +182,7 @@ impl CodingPlugin {
                     }
                     return Err(PluginError::Cancelled);
                 }
-                next = tokio::time::timeout_at(deadline, stream.next()) => {
-                    next.map_err(|_| PluginError::Failed(format!(
-                        "coding turn exceeded {} seconds",
-                        self.profile.turn_timeout_seconds
-                    )))?
-                }
+                next = stream.next() => next,
             };
             let Some(event) = next else {
                 break;
@@ -359,6 +358,32 @@ struct OpenRequest {
     session_id: Option<String>,
     #[serde(default)]
     options: SessionOptions,
+    #[serde(default)]
+    recipe: Option<CodingSessionRecipe>,
+}
+
+fn apply_session_recipe(
+    config: &mut agent_core::ProviderConfig,
+    recipe: &CodingSessionRecipe,
+) -> Result<(), PluginError> {
+    let extra = config.extra.as_object_mut().ok_or_else(|| {
+        PluginError::InvalidInput("worker provider configuration is not an object".into())
+    })?;
+    if let Some(kind) = recipe.specialist_kind.as_ref() {
+        extra.insert("specialist_kind".into(), Value::String(kind.clone()));
+        // Specialist skill instructions extend the canonical remote prompt.
+        // The generic headless override would otherwise hide that base policy.
+        extra.remove("system_prompt_override");
+    }
+    if let Some(scout) = recipe.scout_cartography.as_ref() {
+        extra.insert(
+            "scout_cartography".into(),
+            serde_json::to_value(scout)
+                .map_err(|error| PluginError::InvalidInput(error.to_string()))?,
+        );
+        extra.insert("orchestration".into(), json!({ "enabled": true }));
+    }
+    Ok(())
 }
 
 #[derive(Debug, Deserialize)]
@@ -484,5 +509,35 @@ mod tests {
         .unwrap();
         assert_eq!(request.session_id, "conversation-1");
         assert_eq!(request.roots, ["/srv/shared/api", "/srv/shared/docs"]);
+    }
+
+    #[test]
+    fn scout_recipe_enables_the_remote_enterprise_boundary() {
+        let project = std::path::Path::new("/srv/client/neon");
+        let recipe = CodingSessionRecipe {
+            specialist_kind: Some("scout".into()),
+            scout_cartography: Some(code_host::ScoutCartographyRecipe {
+                organization_id: "59b8fe20-6072-4c16-9dae-9d7cbbf2533c".into(),
+                workspace_id: "2fac2db5-20d6-499c-b691-47ad19fc0ca8".into(),
+                identity_root: project.join(".clark/scout/identity/binding"),
+                platform: "linux".into(),
+                architecture: "x86_64".into(),
+                route_prefix: "/v1/system-cartography".into(),
+                human_run_request_id: Some(format!("scout-run:{}", "a".repeat(64))),
+            }),
+        };
+        let mut config =
+            ProviderProfile::default().provider_config(ExecutionResidency::RemoteWorker);
+
+        recipe.validate(project).unwrap();
+        apply_session_recipe(&mut config, &recipe).unwrap();
+
+        assert_eq!(config.extra["specialist_kind"], "scout");
+        assert_eq!(
+            config.extra["scout_cartography"]["workspace_id"],
+            "2fac2db5-20d6-499c-b691-47ad19fc0ca8"
+        );
+        assert_eq!(config.extra["orchestration"]["enabled"], true);
+        assert!(config.extra.get("system_prompt_override").is_none());
     }
 }

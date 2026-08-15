@@ -28,9 +28,18 @@ skill is explicitly selected. Start by calling:
 2. `security_scan_contract(action="inventory", scope=".")`, paging until
    `nextCursor` is null.
 
-Use a narrower `scope` only when the user explicitly requested one. Write the
+Use a narrower directory or single-file `scope` when the user explicitly
+requested one. Do not widen an explicit file target to its parent repository.
+Write the
 canonical bundle to `.agent/security-scans/<scan-id>/scan.json`; this path is
 local host-managed state and is excluded from its own target inventory.
+
+If the user explicitly forbids every filesystem write, that prohibition also
+covers the host-managed scan bundle. Do not write or finalize a bundle in that
+case. Perform the requested read-only review, clearly label it preliminary and
+unsealed, and explain that a durable completed scan requires permission to
+write the excluded scan receipt. Never silently override the prohibition in
+order to satisfy the completion contract below.
 
 After inventory and policy discovery, build a bounded threat model from the
 repository evidence. Do not place credentials, raw secrets, private source

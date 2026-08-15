@@ -34,6 +34,7 @@ import {
 import { minLoadDuration } from "../lib/minLoadDuration";
 import {
   loadAuthSession,
+  markAuthReconnectRequired,
   refreshAuthSession,
   signInWithGoogle,
   signOut as authSignOut,
@@ -134,7 +135,7 @@ export {
   liveProjectRoot, loadApprovalPolicy, loadApprovalPolicies, loadAuthSession, loadBrowserEnabled, loadChatModels,
   loadCollaborationMode, loadLocalSettings, loadMemoriesEnabled, loadOrchestrationEnabled, loadOutputStyle, loadRecentProjects,
   loadSshHosts, localConnectConfig, localSettingsReady, minLoadDuration, nextApprovalPolicy, normalizeCodingModel, normalizeReasoningEffort,
-  notify, onCloudHistoryConflict, onCloudHistoryWarning, onSettingsMenuRequested, onUpdateMenuRequested, pickAllowOption,
+  markAuthReconnectRequired, notify, onCloudHistoryConflict, onCloudHistoryWarning, onSettingsMenuRequested, onUpdateMenuRequested, pickAllowOption,
   pickFolder, provisionCodeKey, refreshAuthSession, refreshStagedUpdate, relaunchApp, releaseSnapshotCheckpoints, remoteTarget,
   repositoryFingerprintForRoot, resetCloudHistory, resetFanOut, saveApprovalPolicy, saveApprovalPolicies, saveBrowserEnabled, saveChatModels, saveCollaborationMode,
   saveLocalSettings, saveMemoriesEnabled, saveOrchestrationEnabled, saveOutputStyle, scheduleCloudPut, settleRuns,
@@ -547,6 +548,7 @@ export interface SessionState {
   toggleMemoryViewer: () => void;
   setMemoryViewerOpen: (open: boolean) => void;
   signIn: (method: AuthMethod) => Promise<void>;
+  reconnectAuth: () => Promise<void>;
   signOutAuth: () => Promise<void>;
   /** Mint + store an Clark Code API key for the signed-in user if none yet. */
   ensureCodeKey: () => Promise<void>;
@@ -757,13 +759,17 @@ export function pinChatModel(
   settings: LocalAgentSettings,
 ): void {
   const current = get().chatModels;
-  if (current[id]) return;
   const model = normalizeCodingModel(settings.model);
+  const reasoningEffort = normalizeReasoningEffort(model, settings.reasoningEffort);
+  if (
+    current[id]?.model === model
+    && current[id]?.reasoningEffort === reasoningEffort
+  ) return;
   const next = {
     ...current,
     [id]: {
       model,
-      reasoningEffort: normalizeReasoningEffort(model, settings.reasoningEffort),
+      reasoningEffort,
     },
   };
   saveChatModels(next, codeKeyAccountBinding(get().auth));

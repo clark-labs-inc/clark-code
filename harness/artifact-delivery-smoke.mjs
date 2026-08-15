@@ -88,28 +88,26 @@ try {
   check(await inlineImage.evaluate((image) => image.complete && image.naturalWidth > 0), "inline artifact image did not decode");
   checks.push("inline_image_decoded");
 
-  const chatActions = page.getByLabel("Actions for artifact-preview.svg").first();
-  for (const label of ["Save a Copy"]) {
-    check(await chatActions.getByRole("button", { name: label }).count() === 1, `missing inline ${label} action`);
-  }
+  const chatSaveCopy = page.getByRole("button", { name: /save a copy of artifact-preview\.svg/i });
+  check(await chatSaveCopy.count() === 1, "missing inline Save a copy action");
   await page.screenshot({ path: path.join(outDir, "01-inline-chat.png"), animations: "disabled" });
   checks.push("inline_actions_visible");
 
   const downloadPromise = page.waitForEvent("download");
-  await chatActions.getByRole("button", { name: "Save a Copy" }).click();
+  await chatSaveCopy.click();
   const download = await downloadPromise;
   const downloadPath = await download.path();
   check(download.suggestedFilename() === "artifact-preview.svg", "download did not preserve filename");
   check(Boolean(downloadPath) && (await stat(downloadPath)).size > 0, "downloaded artifact is empty");
   checks.push("save_copy_downloaded");
 
-  await page.getByRole("button", { name: "View artifact-preview.svg" }).click();
+  await page.getByRole("button", { name: "Open artifact-preview.svg in workspace" }).click();
   const workspace = page.getByRole("region", { name: "Artifact workspace" });
   await workspace.waitFor({ state: "visible" });
   const workspaceImage = workspace.getByRole("img", { name: "artifact-preview.svg" });
   await workspaceImage.waitFor({ state: "visible" });
   check(await workspaceImage.evaluate((image) => image.complete && image.naturalWidth > 0), "workspace image did not decode");
-  check(await workspace.getByRole("button", { name: "Save a Copy" }).count() === 1, "workspace download action is missing");
+  check(await workspace.getByRole("button", { name: /save a copy/i }).count() === 1, "workspace download action is missing");
   await page.screenshot({ path: path.join(outDir, "02-artifact-workspace.png"), animations: "disabled" });
   checks.push("workspace_preview_and_actions");
 
@@ -125,12 +123,12 @@ try {
     "PDF fell back to an unavailable preview",
   );
   const pdfActions = workspace.getByLabel("Actions for Research summary.pdf");
-  check(await pdfActions.getByRole("button", { name: "Save a Copy" }).count() === 1, "PDF save action is missing");
+  check(await pdfActions.getByRole("button", { name: /save a copy/i }).count() === 1, "PDF save action is missing");
   await page.screenshot({ path: path.join(outDir, "03-pdf-workspace.png"), animations: "disabled" });
   checks.push("pdf_preview_and_actions");
 
   const pdfDownloadPromise = page.waitForEvent("download");
-  await pdfActions.getByRole("button", { name: "Save a Copy" }).click();
+  await pdfActions.getByRole("button", { name: /save a copy/i }).click();
   const pdfDownload = await pdfDownloadPromise;
   const pdfDownloadPath = await pdfDownload.path();
   check(pdfDownload.suggestedFilename() === "Research summary.pdf", "PDF download did not preserve filename");

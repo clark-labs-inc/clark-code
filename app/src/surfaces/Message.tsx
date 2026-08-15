@@ -1,21 +1,18 @@
-import { memo, useState } from "react";
-import { AnimatePresence, useReducedMotion } from "motion/react";
+import { memo } from "react";
+import { useReducedMotion } from "motion/react";
 import * as m from "motion/react-m";
-import { ChevronRight, Copy, Check, FileText, Pencil, Sparkles } from "lucide-react";
+import { Copy, Check, FileText, Pencil, Sparkles } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
 import {
   CHAT_REDUCED_ROW_MOTION,
   CHAT_REDUCED_TEXT_ANIMATION,
   CHAT_TEXT_ANIMATION,
-  EXPAND,
-  EXPAND_REDUCED,
   chatRowMotion,
 } from "../lib/motion";
 import { cn } from "../lib/cn";
 import { useCopy } from "../lib/clipboard";
 import { userAttachmentBlocks, userTextBody } from "../lib/messageBlocks";
 import { parseNarration, presentationKind } from "../lib/narration";
-import { thinkingForDisplay } from "../lib/thinkingPresentation";
 import { MarkdownContent, MARKDOWN_CLASSES } from "./MarkdownContent";
 import { StreamingReplyFrame } from "./StreamingReply";
 import type { ContentBlock, MessagePhase, Role } from "../core-bridge/types";
@@ -24,9 +21,9 @@ function text(blocks: ContentBlock[]): string {
   return blocks
     .map((b) => {
       if (b.type === "text") return b.text;
-      // A native reasoning block (GLM `delta.reasoning`) → wrap in the inline
-      // `<thinking>` tag parseNarration splits into a collapsible Thinking row.
-      if (b.type === "thinking") return `<thinking>${b.text}</thinking>`;
+      // Reasoning remains available in the durable trajectory for provider
+      // continuity, but it is deliberately absent from the user-facing UI.
+      if (b.type === "thinking") return "";
       return `\`[${b.type}]\``;
     })
     .join("");
@@ -56,38 +53,6 @@ function CopyButton({
     >
       {copied ? <Check className="size-3.5 text-success" /> : <Copy className="size-3.5" />}
     </button>
-  );
-}
-
-/** Collapsible reasoning ("thinking") block — Manus-style. */
-function ThinkingBlock({ text }: { text: string }) {
-  const [open, setOpen] = useState(false);
-  const reduce = useReducedMotion();
-  const displayedText = thinkingForDisplay(text);
-  return (
-    <div>
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        className="group/think flex items-center gap-1 rounded-md py-0.5 text-xs text-ink-faint transition hover:text-ink-muted"
-      >
-        <span className="font-medium">Thinking</span>
-        <ChevronRight className={cn("size-3 opacity-60 transition-transform group-hover/think:opacity-100", open && "rotate-90")} />
-      </button>
-      <AnimatePresence initial={false}>
-        {open && (
-          <m.div
-            {...(reduce ? EXPAND_REDUCED : EXPAND)}
-            className="overflow-hidden"
-          >
-            <div className={cn("mt-1 max-h-52 overflow-auto border-l border-border-subtle pl-3 text-xs leading-relaxed text-ink-muted", MARKDOWN_CLASSES)}>
-              <MarkdownContent>{displayedText}</MarkdownContent>
-            </div>
-          </m.div>
-        )}
-      </AnimatePresence>
-    </div>
   );
 }
 
@@ -174,7 +139,22 @@ function MessageImpl({
   const reduce = useReducedMotion();
   // User turns carry attachment echo blocks (image / resource_link) alongside
   // the text; keep those out of the flattened copy/edit body.
-  const body = role === "user" ? userTextBody(blocks) : text(blocks);
+  const source = role === "user" ? "" : text(blocks);
+  const assistantSpans = role === "agent"
+    ? parseNarration(source)
+      .map((span) => ({ ...span, kind: presentationKind(span.kind, phase) }))
+      .filter((span) => span.kind !== "thinking")
+    : [];
+  const body = role === "user"
+    ? userTextBody(blocks)
+    : role === "agent"
+      ? assistantSpans.map((span) => span.text).join("\n\n")
+      : source;
+
+  // A reasoning-only assistant event is retained in state but has no visual
+  // row, spacing, copy action, or accessibility surface.
+  if (role === "agent" && assistantSpans.length === 0) return null;
+
   const inner = (() => {
     if (role === "user") {
       // Keep this a quiet right-aligned pill, not a loud accent bubble.
@@ -213,15 +193,15 @@ function MessageImpl({
         <div className="border-l-2 border-border pl-3 text-sm italic text-ink-muted">{body}</div>
       );
     }
-    // Assistant: full-width text (no avatar), split into answer, narration,
-    // and thinking spans. Streamdown repairs and memoizes incomplete Markdown
-    // while animating only the newly arrived words in each live span.
-    const spans = parseNarration(body);
+    // Assistant: full-width text (no avatar), split into answer and narration
+    // spans. Private reasoning was filtered before this render boundary.
+    // Streamdown repairs and memoizes incomplete Markdown while animating only
+    // the newly arrived words in each live span.
+    const spans = assistantSpans;
     return (
       <div className="min-w-0 w-full space-y-1.5">
         {spans.map((span, i) => {
-          const kind = presentationKind(span.kind, phase);
-          if (kind === "thinking") return <ThinkingBlock key={i} text={span.text} />;
+          const kind = span.kind;
           const live = streaming && i === spans.length - 1;
           return (
             <div

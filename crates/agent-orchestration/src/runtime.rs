@@ -530,8 +530,7 @@ mod tests {
 
     fn coordinator(harness: FakeHarness) -> Coordinator {
         let control =
-            ControlPlane::new(3, 1, 2, SharedBudget::new(BudgetConfig::default()).unwrap())
-                .unwrap();
+            ControlPlane::new(3, 1, SharedBudget::new(BudgetConfig::default()).unwrap()).unwrap();
         let mut coordinator = Coordinator::new(AdmissionPolicy::default(), control);
         coordinator.register_harness(Arc::new(harness)).unwrap();
         coordinator

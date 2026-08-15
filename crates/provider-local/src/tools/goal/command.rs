@@ -37,13 +37,7 @@ pub(crate) fn validate_goal_command(
     };
     if existing.objective == objective {
         return match existing.status {
-            GoalStatus::Active | GoalStatus::Blocked => {
-                Ok(GoalCommandAction::ContinueExisting)
-            }
-            GoalStatus::BudgetLimited => Err(
-                "This goal reached its token budget — resume it with a larger total budget, or start a new conversation for a different goal."
-                    .into(),
-            ),
+            GoalStatus::Active | GoalStatus::Blocked => Ok(GoalCommandAction::ContinueExisting),
             GoalStatus::Complete => unreachable!("completed goals were filtered above"),
         };
     }
@@ -59,7 +53,7 @@ pub(crate) fn apply_goal_command(
 ) -> Result<GoalCommandAction, String> {
     let action = validate_goal_command(session, objective)?;
     if action == GoalCommandAction::Start {
-        start_goal(session, objective.trim().to_string(), None)?;
+        start_goal(session, objective.trim().to_string())?;
     }
     Ok(action)
 }

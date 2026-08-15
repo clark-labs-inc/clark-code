@@ -90,6 +90,12 @@ export const SPECIALIST_REASONING_EFFORT: ReasoningEffortId =
 /** The single choice included with the product's default usage policy. */
 export const INCLUDED_CODING_MODEL_ID = productModels.includedModel ?? "";
 
+/** Quick Chat is the product's no-project, no-tier-selection lane. Keep its
+ * execution contract on included usage even when the account's ordinary new
+ * chat default or a stale per-chat override points at a paid model. Products
+ * without an included route fall back to their default model. */
+export const QUICK_CHAT_MODEL_ID = INCLUDED_CODING_MODEL_ID || DEFAULT_LOCAL_SETTINGS.model;
+
 /** The coding models the active product exposes in the composer picker.
  *  `defaultReasoningEffort` is the highest effort supported by that model. */
 export const CODING_MODELS = productModels.models;
@@ -117,6 +123,14 @@ export function normalizeReasoningEffort(model: string, _effort: string): Reason
   }
   const config = CODING_MODELS.find((candidate) => candidate.id === model);
   return config?.defaultReasoningEffort ?? "xhigh";
+}
+
+export function quickChatModelSettings(settings: LocalAgentSettings): LocalAgentSettings {
+  return {
+    ...settings,
+    model: QUICK_CHAT_MODEL_ID,
+    reasoningEffort: normalizeReasoningEffort(QUICK_CHAT_MODEL_ID, ""),
+  };
 }
 
 /** Short display label for the current model id. */

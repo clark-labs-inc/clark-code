@@ -483,10 +483,6 @@ impl ca::ContextOverflowRecovery for CheckpointCompactor {
         }
     }
 
-    fn max_attempts(&self) -> u8 {
-        2
-    }
-
     fn name(&self) -> &'static str {
         "checkpoint_compactor"
     }

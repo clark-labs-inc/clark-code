@@ -193,7 +193,7 @@ impl ToolExecutor for ScoutCapabilitiesTool {
             details["environment"].as_array().map_or(0, Vec::len),
             details["dotenv_files"].as_array().map_or(0, Vec::len),
         ))
-        .with_details(details)
+        .with_model_visible_details(details)
     }
 }
 

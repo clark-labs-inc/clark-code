@@ -32,7 +32,7 @@ mod tests {
     #[test]
     fn failed_goal_iterations_preserve_usage_and_elapsed_time() {
         let mut session = crate::loop_state::SessionState::default();
-        crate::tools::goal::start_goal(&mut session, "finish the migration".into(), None).unwrap();
+        crate::tools::goal::start_goal(&mut session, "finish the migration".into()).unwrap();
         let goal = session.goal.as_mut().unwrap();
 
         account_goal_iteration(goal, 12_500, 47);

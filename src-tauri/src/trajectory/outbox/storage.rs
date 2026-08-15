@@ -4,7 +4,10 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use rusqlite::{Connection, Error, ErrorCode};
+use agent_core::{apply, AgentEvent, Snapshot};
+use rusqlite::{params, Connection, Error, ErrorCode};
+
+use super::AppendRequest;
 
 use super::schema::SCHEMA;
 
@@ -87,6 +90,151 @@ pub(super) fn reclaim_free_pages(conn: &Connection) -> Result<(), String> {
         .map_err(sql_error)?;
     }
     Ok(())
+}
+
+/// One-time conversion for databases created before incremental auto-vacuum.
+///
+/// Old clients retained every acknowledged event batch until a full cloud
+/// snapshot happened to fit their upload limit. Rebuild each local read model
+/// from its ordered journal first, then delete only cloud-acknowledged batches
+/// and compact the file. The transaction makes event folding + deletion
+/// atomic; a crash cannot leave a checkpoint that skipped unmaterialized work.
+pub(crate) fn migrate_legacy_database(path: &Path) -> Result<bool, String> {
+    if !path.exists() {
+        return Ok(false);
+    }
+    let mut conn = open(path)?;
+    let auto_vacuum: i64 = conn
+        .query_row("PRAGMA auto_vacuum", [], |row| row.get(0))
+        .map_err(sql_error)?;
+    if auto_vacuum == 2 {
+        return Ok(false);
+    }
+    let acknowledged_bytes: i64 = conn
+        .query_row(
+            "SELECT COALESCE(SUM(length(request_json)), 0) FROM trajectory_outbox WHERE acknowledged = 1",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(sql_error)?;
+    if acknowledged_bytes == 0 {
+        return Ok(false);
+    }
+
+    tracing::info!(
+        database = %path.display(),
+        acknowledged_bytes,
+        "compacting legacy Clark Code local history"
+    );
+    let tx = conn.transaction().map_err(sql_error)?;
+    let conversations = {
+        let mut statement = tx
+            .prepare(
+                r#"SELECT owner_key, conversation_id, base_snapshot_json, checkpoint_seq
+                   FROM journal_conversation AS conversation
+                   WHERE local_live = 0
+                     AND EXISTS (
+                       SELECT 1 FROM trajectory_outbox AS batch
+                       WHERE batch.owner_key = conversation.owner_key
+                         AND batch.conversation_id = conversation.conversation_id
+                         AND batch.acknowledged = 1
+                     )
+                     AND NOT EXISTS (
+                       SELECT 1 FROM trajectory_outbox AS batch
+                       WHERE batch.owner_key = conversation.owner_key
+                         AND batch.conversation_id = conversation.conversation_id
+                         AND batch.acknowledged = 0
+                     )"#,
+            )
+            .map_err(sql_error)?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Vec<u8>>(2)?,
+                    row.get::<_, i64>(3)?,
+                ))
+            })
+            .map_err(sql_error)?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(sql_error)?
+    };
+
+    let mut folded_batches = 0_u64;
+    let mut migrated_conversations = Vec::new();
+    for (owner, conversation_id, snapshot_bytes, checkpoint_seq) in conversations {
+        let mut snapshot: Snapshot =
+            serde_json::from_value(crate::trajectory::normalize_snapshot_value(
+                serde_json::from_slice(&snapshot_bytes).map_err(|error| error.to_string())?,
+            ))
+            .map_err(|error| error.to_string())?;
+        let mut highest_seq = checkpoint_seq;
+        {
+            let mut statement = tx
+                .prepare(
+                    r#"SELECT local_seq, request_json FROM trajectory_outbox
+                       WHERE owner_key = ?1 AND conversation_id = ?2
+                         AND replayable = 1 AND local_seq > ?3
+                       ORDER BY local_seq"#,
+                )
+                .map_err(sql_error)?;
+            let rows = statement
+                .query_map(params![owner, conversation_id, checkpoint_seq], |row| {
+                    Ok((row.get::<_, i64>(0)?, row.get::<_, Vec<u8>>(1)?))
+                })
+                .map_err(sql_error)?;
+            for row in rows {
+                let (local_seq, bytes) = row.map_err(sql_error)?;
+                let request: AppendRequest =
+                    serde_json::from_slice(&bytes).map_err(|error| error.to_string())?;
+                for record in request.events {
+                    let event: AgentEvent = serde_json::from_value(record.payload["event"].clone())
+                        .map_err(|error| format!("decode journal event: {error}"))?;
+                    apply(&mut snapshot, &event);
+                }
+                highest_seq = highest_seq.max(local_seq);
+                folded_batches += 1;
+            }
+        }
+        if highest_seq > checkpoint_seq {
+            snapshot.history_checkpoint = Some(highest_seq);
+            tx.execute(
+                r#"UPDATE journal_conversation
+                   SET base_snapshot_json = ?3, checkpoint_seq = ?4
+                   WHERE owner_key = ?1 AND conversation_id = ?2"#,
+                params![
+                    owner,
+                    conversation_id,
+                    serde_json::to_vec(&snapshot).map_err(|error| error.to_string())?,
+                    highest_seq
+                ],
+            )
+            .map_err(sql_error)?;
+        }
+        migrated_conversations.push((owner, conversation_id));
+    }
+    for (owner, conversation_id) in &migrated_conversations {
+        tx.execute(
+            r#"DELETE FROM trajectory_outbox
+               WHERE owner_key = ?1 AND conversation_id = ?2 AND acknowledged = 1"#,
+            params![owner, conversation_id],
+        )
+        .map_err(sql_error)?;
+    }
+    tx.commit().map_err(sql_error)?;
+
+    conn.execute_batch(
+        "PRAGMA wal_checkpoint(TRUNCATE); PRAGMA auto_vacuum=INCREMENTAL; VACUUM; PRAGMA optimize;",
+    )
+    .map_err(sql_error)?;
+    tracing::info!(
+        database = %path.display(),
+        folded_batches,
+        migrated_conversations = migrated_conversations.len(),
+        acknowledged_bytes,
+        "compacted legacy Clark Code local history"
+    );
+    Ok(true)
 }
 
 fn is_corruption(error: &Error) -> bool {

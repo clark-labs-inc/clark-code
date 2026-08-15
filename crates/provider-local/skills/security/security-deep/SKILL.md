@@ -17,6 +17,12 @@ security discovery and verification passes. Do not use coding delegates, do not
 recurse, and do not widen repository scope or permissions. The host selects
 the root and delegated models through trusted runtime policy.
 
+If the user explicitly forbids every filesystem write, that prohibition also
+covers the host-managed scan bundle. Do not start a deep run, write PoC
+receipts, or finalize a bundle in that case. Perform only a bounded preliminary
+read-only review and explain that sealed deep-scan evidence requires permission
+to write the excluded receipts.
+
 ## Start and inventory
 
 1. Call `security_scan_contract(action="schema")`.

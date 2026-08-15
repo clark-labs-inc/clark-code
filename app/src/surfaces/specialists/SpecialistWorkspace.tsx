@@ -14,6 +14,7 @@ import {
 import { useSessionStore } from "../../store/sessionStore";
 import { useSpecialistStore } from "../../store/specialistStore";
 import { useProductAccess } from "../../lib/useProductAccess";
+import { productModule } from "../../product/productModule";
 import { capabilityAccess } from "../../lib/productAccess";
 import { openExternal } from "../../lib/externalLinks";
 import {
@@ -61,6 +62,7 @@ import { CanvasStatus } from "./SpecialistPrimitives";
 import { SpecialistAccessGate } from "./SpecialistAccessGate";
 import { SpecWorkspace } from "./SpecWorkspace";
 import { ScoutOrganizationDialog } from "./ScoutOrganizationDialog";
+import { ScoutScopeDialog } from "./ScoutScopeDialog";
 import { ContextualConversation } from "./ContextualConversation";
 import {
   ScoutWorkspaceControl,
@@ -124,6 +126,8 @@ export function SpecialistWorkspace({
   const contexts = useSpecialistStore((state) => state.contexts);
   const setTab = useSpecialistStore((state) => state.setTab);
   const setContext = useSpecialistStore((state) => state.setContext);
+  const scoutScopeOpen = useSpecialistStore((state) => state.scoutScopeOpen);
+  const setScoutScopeOpen = useSpecialistStore((state) => state.setScoutScopeOpen);
   const openSpecialist = useSpecialistStore((state) => state.open);
   const auth = useSessionStore((state) => state.auth);
   const bridge = useSessionStore((state) => state.bridge);
@@ -594,7 +598,9 @@ export function SpecialistWorkspace({
     <div data-qa={`specialist-workspace-${active}`} className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-bg">
       <header className="flex min-h-16 shrink-0 items-center gap-4 px-5 py-2.5">
         <div className="min-w-0">
-          <h1 className="font-serif text-2xl font-semibold tracking-[-0.03em] text-ink">the agent {definition.label}</h1>
+          <h1 className="font-serif text-2xl font-semibold tracking-[-0.03em] text-ink">
+            {productModule().branding.shortName} {definition.label}
+          </h1>
           <p className="mt-0.5 line-clamp-2 max-w-2xl text-xs leading-4 text-ink-muted">{definition.value}</p>
         </div>
         <div className="ml-auto flex items-center gap-2">
@@ -682,6 +688,29 @@ export function SpecialistWorkspace({
         <ScoutWorkspaceNotice
           notice={workspaceCreateNotice}
           onDismiss={() => setWorkspaceCreateNotice(null)}
+        />
+      )}
+
+      {active === "scout" && scoutScopeOpen && boundContext?.kind !== active && (
+        <ScoutScopeDialog
+          organizations={organizations}
+          workspaces={data.workspaces}
+          organizationId={context.organizationId}
+          workspaceId={context.workspaceId}
+          loading={loading}
+          creatingWorkspace={creatingWorkspace}
+          onSelectOrganization={(organizationId) => setContext({
+            organizationId,
+            workspaceId: undefined,
+            repositoryId: undefined,
+          })}
+          onSelectWorkspace={(workspaceId) => setContext({ workspaceId })}
+          onCreateOrganization={() => {
+            setScoutScopeOpen(false);
+            setOrganizationDialogOpen(true);
+          }}
+          onCreateWorkspace={() => void createWorkspace()}
+          onClose={() => setScoutScopeOpen(false)}
         />
       )}
 

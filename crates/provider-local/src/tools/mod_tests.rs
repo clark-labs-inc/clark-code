@@ -103,6 +103,20 @@ fn permission_mode_parses_synonyms() {
 }
 
 #[test]
+fn model_visible_details_are_present_in_text_and_ui_metadata() {
+    let details = serde_json::json!({
+        "run_id": "run-exact",
+        "cursor": {"sequence": 7},
+    });
+    let outcome = ToolOutcome::ok("Started the run.").with_model_visible_details(details.clone());
+
+    assert_eq!(outcome.details, details);
+    assert!(outcome.content.starts_with("Started the run.\n\n"));
+    assert!(outcome.content.contains("\"run_id\":\"run-exact\""));
+    assert!(outcome.content.contains("\"cursor\":{\"sequence\":7}"));
+}
+
+#[test]
 fn empty_registry_exposes_and_executes_no_tools() {
     let registry = ToolRegistry::empty();
     assert!(registry.schemas().is_empty());

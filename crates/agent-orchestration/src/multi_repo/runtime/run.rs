@@ -107,31 +107,10 @@ impl MultiRepoCoordinator {
                 Err(failure) => failed_readers.push((task, failure)),
             }
         }
-        for (mut task, failure) in failed_readers {
-            if self.max_attempts < 2 || self.budget.snapshot().exhausted {
-                return Ok(self.failed_result(
-                    decomposition,
-                    planning.clone(),
-                    FailedRunState {
-                        tasks: task_receipts,
-                        reader_reports,
-                        packages,
-                        recoveries,
-                    },
-                    format!("reader {} failed: {}", task.id, failure.message),
-                ));
-            }
-            task.objective = format!(
-                "{}\n\nTargeted reader recovery feedback:\n{}",
-                task.objective, failure.message
-            );
-            let (task, receipt, result) = self
-                .run_reader(task, 2, cancel.child_token(), events.clone())
-                .await;
-            task_receipts.push(receipt);
-            let attempt = match result {
-                Ok(attempt) => attempt,
-                Err(retry) => {
+        for (mut task, mut failure) in failed_readers {
+            let mut attempt_number = 2_u32;
+            loop {
+                if cancel.is_cancelled() {
                     return Ok(self.failed_result(
                         decomposition,
                         planning.clone(),
@@ -141,19 +120,34 @@ impl MultiRepoCoordinator {
                             packages,
                             recoveries,
                         },
-                        format!(
-                            "reader {} failed after targeted retry: {}",
-                            task.id, retry.message
-                        ),
+                        format!("reader {} cancelled", task.id),
                     ));
                 }
-            };
-            self.validate_reader_report(&task, &attempt.report)?;
-            events(MultiRepoCoordinatorEvent::ReaderReported {
-                task_id: task.id,
-                repository_id: attempt.report.repository_id.clone(),
-            });
-            reader_reports.push(attempt.report);
+                task.objective = format!(
+                    "{}\n\nTargeted reader recovery feedback:\n{}",
+                    task.objective, failure.message
+                );
+                let (returned_task, receipt, result) = self
+                    .run_reader(task, attempt_number, cancel.child_token(), events.clone())
+                    .await;
+                task_receipts.push(receipt);
+                match result {
+                    Ok(attempt) => {
+                        self.validate_reader_report(&returned_task, &attempt.report)?;
+                        events(MultiRepoCoordinatorEvent::ReaderReported {
+                            task_id: returned_task.id,
+                            repository_id: attempt.report.repository_id.clone(),
+                        });
+                        reader_reports.push(attempt.report);
+                        break;
+                    }
+                    Err(next_failure) => {
+                        task = returned_task;
+                        failure = next_failure;
+                        attempt_number = attempt_number.saturating_add(1);
+                    }
+                }
+            }
         }
 
         for batch in &decomposition.parallel_writer_batches {
@@ -176,41 +170,11 @@ impl MultiRepoCoordinator {
                     Err(failure) => failed.push((task, failure)),
                 }
             }
-            for (task, failure) in failed {
-                if self.max_attempts < 2 || self.budget.snapshot().exhausted {
-                    return Ok(self.failed_result(
-                        decomposition,
-                        planning.clone(),
-                        FailedRunState {
-                            tasks: task_receipts,
-                            reader_reports,
-                            packages,
-                            recoveries,
-                        },
-                        format!("writer {} failed: {}", task.id, failure.message),
-                    ));
-                }
-                let replacement = retry_task_id(&task.id, 2)?;
-                events(MultiRepoCoordinatorEvent::RecoveryScheduled {
-                    failed_task_id: task.id.clone(),
-                    replacement_task_id: replacement.clone(),
-                });
-                let preserved = packages
-                    .values()
-                    .map(|package| package.patch_sha256.clone())
-                    .collect();
-                let mut retry_with_feedback = task.clone();
-                retry_with_feedback.objective = format!(
-                    "{}\n\nTargeted recovery feedback from the failed attempt:\n{}",
-                    retry_with_feedback.objective, failure.message
-                );
-                let (retry_task, receipt, retry_result) = self
-                    .run_writer(retry_with_feedback, 2, cancel.child_token(), events.clone())
-                    .await;
-                task_receipts.push(receipt);
-                let retry = match retry_result {
-                    Ok(attempt) => attempt,
-                    Err(retry_failure) => {
+            for (mut task, mut failure) in failed {
+                let failed_task_id = task.id.clone();
+                let mut attempt_number = 2_u32;
+                loop {
+                    if cancel.is_cancelled() {
                         return Ok(self.failed_result(
                             decomposition,
                             planning.clone(),
@@ -220,20 +184,44 @@ impl MultiRepoCoordinator {
                                 packages,
                                 recoveries,
                             },
-                            format!(
-                                "writer {} failed after targeted retry: {}",
-                                task.id, retry_failure.message
-                            ),
+                            format!("writer {failed_task_id} cancelled"),
                         ));
                     }
-                };
-                recoveries.push(RecoveryReceipt {
-                    failed_task_id: task.id.clone(),
-                    replacement_task_id: replacement,
-                    preserved_package_sha256: preserved,
-                    reused_artifact_sha256: failure.reusable_artifact_sha256,
-                });
-                self.accept_package(&retry_task, retry, &mut packages, &events)?;
+                    let replacement = retry_task_id(&failed_task_id, attempt_number)?;
+                    events(MultiRepoCoordinatorEvent::RecoveryScheduled {
+                        failed_task_id: failed_task_id.clone(),
+                        replacement_task_id: replacement.clone(),
+                    });
+                    let preserved = packages
+                        .values()
+                        .map(|package| package.patch_sha256.clone())
+                        .collect();
+                    task.objective = format!(
+                        "{}\n\nTargeted recovery feedback from the failed attempt:\n{}",
+                        task.objective, failure.message
+                    );
+                    let (retry_task, receipt, retry_result) = self
+                        .run_writer(task, attempt_number, cancel.child_token(), events.clone())
+                        .await;
+                    task_receipts.push(receipt);
+                    match retry_result {
+                        Ok(attempt) => {
+                            recoveries.push(RecoveryReceipt {
+                                failed_task_id: failed_task_id.clone(),
+                                replacement_task_id: replacement,
+                                preserved_package_sha256: preserved,
+                                reused_artifact_sha256: failure.reusable_artifact_sha256,
+                            });
+                            self.accept_package(&retry_task, attempt, &mut packages, &events)?;
+                            break;
+                        }
+                        Err(next_failure) => {
+                            task = retry_task;
+                            failure = next_failure;
+                            attempt_number = attempt_number.saturating_add(1);
+                        }
+                    }
+                }
             }
         }
 
@@ -286,7 +274,7 @@ impl MultiRepoCoordinator {
                     review = Some(review_attempt.receipt);
                     break;
                 }
-                if attempt >= self.max_attempts || self.budget.snapshot().exhausted {
+                if cancel.is_cancelled() {
                     return Ok(self.failed_result(
                         decomposition,
                         planning.clone(),
@@ -296,7 +284,7 @@ impl MultiRepoCoordinator {
                             packages,
                             recoveries,
                         },
-                        "independent review rejected the bounded final attempt".into(),
+                        "independent review cancelled".into(),
                     ));
                 }
                 let review_feedback = review_attempt.receipt.findings.join("\n- ");

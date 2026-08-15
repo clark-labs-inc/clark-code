@@ -82,4 +82,21 @@ describe("TauriBridge remote project Git", () => {
     expect(invoke).toHaveBeenCalledTimes(1);
     expect(invoke).toHaveBeenCalledWith("local_list_global_memory");
   });
+
+  it("resumes a provider incident without echoing a synthetic user turn", async () => {
+    const bridge = new TauriBridge();
+
+    await bridge.resumeProviderIncident("conversation-3");
+
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(invoke).toHaveBeenCalledWith("prompt", {
+      sessionId: "conversation-3",
+      blocks: [{
+        type: "text",
+        text: "Continue from the saved progress. Re-read current state, do not repeat completed writes, and finish the task.",
+      }],
+      attachments: [],
+      internalResume: true,
+    });
+  });
 });

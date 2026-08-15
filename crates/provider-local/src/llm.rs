@@ -30,19 +30,14 @@ pub(crate) use recovery::{now_ms, ProviderFailureContext};
 /// Bound the wait for response headers without imposing a deadline on a healthy
 /// long-running reasoning stream.
 const DEFAULT_MODEL_RESPONSE_START_TIMEOUT: Duration = Duration::from_secs(2 * 60);
-/// Once streaming starts, require transport progress at least this often. The
-/// deadline resets for every body chunk, so a productive multi-minute turn is
-/// allowed while a dead connection recovers invisibly within an ordinary wait.
-const DEFAULT_MODEL_STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(45);
-
-fn desktop_user_agent() -> String {
+fn desktop_user_agent(version: &str) -> String {
     let platform = match std::env::consts::OS {
         "macos" => "darwin",
         other => other,
     };
     format!(
         "agent-desktop/{} ({} {})",
-        env!("CARGO_PKG_VERSION"),
+        version,
         platform,
         std::env::consts::ARCH,
     )
@@ -357,7 +352,6 @@ impl std::fmt::Display for LlmError {
 pub struct LlmClient {
     http: reqwest::Client,
     response_start_timeout: Duration,
-    stream_idle_timeout: Duration,
     base_url: String,
     model: String,
     api_key: Option<String>,
@@ -403,12 +397,13 @@ impl LlmClient {
     }
 
     pub fn new(config: &LocalConfig) -> Result<Self, String> {
-        let mut client = Self::from_parts(
+        let mut client = Self::from_parts_with_client_version(
             &config.base_url,
             &config.model,
             config.api_key.clone(),
             config.headers.clone().into_iter().collect(),
             config.temperature,
+            &config.client_version,
         )?;
         client.reasoning_effort = config.reasoning_effort.clone();
         client.max_output_tokens = config.max_output_tokens;
@@ -437,27 +432,65 @@ impl LlmClient {
         headers: Vec<(String, String)>,
         temperature: Option<f32>,
     ) -> Result<Self, String> {
-        Self::from_parts_with_timeouts(
+        Self::from_parts_with_client_version(
+            base_url,
+            model,
+            api_key,
+            headers,
+            temperature,
+            env!("CARGO_PKG_VERSION"),
+        )
+    }
+
+    fn from_parts_with_client_version(
+        base_url: &str,
+        model: &str,
+        api_key: Option<String>,
+        headers: Vec<(String, String)>,
+        temperature: Option<f32>,
+        client_version: &str,
+    ) -> Result<Self, String> {
+        Self::from_parts_with_response_start_timeout_and_client_version(
             base_url,
             model,
             api_key,
             headers,
             temperature,
             DEFAULT_MODEL_RESPONSE_START_TIMEOUT,
-            DEFAULT_MODEL_STREAM_IDLE_TIMEOUT,
+            client_version,
         )
     }
 
-    pub(crate) fn from_parts_with_timeouts(
+    #[cfg(test)]
+    pub(crate) fn from_parts_with_response_start_timeout(
         base_url: &str,
         model: &str,
         api_key: Option<String>,
         headers: Vec<(String, String)>,
         temperature: Option<f32>,
         response_start_timeout: Duration,
-        stream_idle_timeout: Duration,
     ) -> Result<Self, String> {
-        let user_agent = desktop_user_agent();
+        Self::from_parts_with_response_start_timeout_and_client_version(
+            base_url,
+            model,
+            api_key,
+            headers,
+            temperature,
+            response_start_timeout,
+            env!("CARGO_PKG_VERSION"),
+        )
+    }
+
+    fn from_parts_with_response_start_timeout_and_client_version(
+        base_url: &str,
+        model: &str,
+        api_key: Option<String>,
+        headers: Vec<(String, String)>,
+        temperature: Option<f32>,
+        response_start_timeout: Duration,
+        client_version: &str,
+    ) -> Result<Self, String> {
+        let user_agent = desktop_user_agent(client_version);
         let http = desktop_http::build_client(desktop_http::ClientOptions {
             user_agent: Some(&user_agent),
             ..Default::default()
@@ -466,7 +499,6 @@ impl LlmClient {
         Ok(Self {
             http,
             response_start_timeout,
-            stream_idle_timeout,
             base_url: base_url.trim_end_matches('/').to_string(),
             model: model.to_string(),
             api_key,

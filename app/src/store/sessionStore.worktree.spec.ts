@@ -310,6 +310,10 @@ describe("managed worktree session journeys", () => {
       base: "current",
       targetBranch: "feature/target",
     });
+    expect(useSessionStore.getState().notice).toContain(
+      "Started an isolated continuation from feature/target",
+    );
+    expect(useSessionStore.getState().notice).not.toContain("Current checkout");
     expect(useSessionStore.getState().localSettings.cwd).toBe(sourceRoot);
     expect(useSessionStore.getState().activeProjectRoot).toBe(managedRoot);
   });

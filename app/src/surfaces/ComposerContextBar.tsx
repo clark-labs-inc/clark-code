@@ -60,6 +60,7 @@ export function ComposerContextBar() {
   const specialistContext = useSpecialistStore((state) =>
     state.active ? state.contexts[state.active] : undefined,
   );
+  const setScoutScopeOpen = useSpecialistStore((state) => state.setScoutScopeOpen);
   const session = useSessionStore((state) => state.session);
   const activeProvider = useSessionStore((state) => state.activeProvider);
   const projectMode = useSessionStore((state) => state.projectMode);
@@ -233,9 +234,37 @@ export function ComposerContextBar() {
           <Network className="size-3 shrink-0" aria-hidden="true" />
           <span>Enterprise perimeter</span>
         </span>
-        <span className={`${ITEM} text-ink-secondary`}>
-          {authorityReady ? "Organization + Scout workspace" : "Choose organization and workspace"}
-        </span>
+        {session ? (
+          <span className={`${ITEM} text-ink-secondary`}>
+            Organization + Scout workspace
+          </span>
+        ) : (
+          <button
+            type="button"
+            aria-haspopup="dialog"
+            onClick={() => setScoutScopeOpen(true)}
+            className={`${ITEM} text-ink-secondary transition hover:bg-bg-hover hover:text-ink`}
+          >
+            {authorityReady ? "Organization + Scout workspace" : "Choose organization and workspace"}
+            <ChevronDown className="size-3 shrink-0 text-ink-faint" aria-hidden="true" />
+          </button>
+        )}
+        {!session && (
+          <EnvironmentPicker
+            compact
+            allowCloud={false}
+            showLocalFolder={false}
+          />
+        )}
+        {session && (
+          <span
+            className={`${ITEM} text-ink-secondary`}
+            title={isRemoteSession ? `Remote execution: ${locationLabel}` : "Runs on this Mac"}
+          >
+            <LocationIcon className="size-3 shrink-0" />
+            <span className="max-w-36 truncate">{locationLabel}</span>
+          </span>
+        )}
       </div>
     );
   }
