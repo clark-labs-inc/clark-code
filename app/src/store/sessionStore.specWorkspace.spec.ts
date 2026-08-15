@@ -184,6 +184,7 @@ describe("conversation-bound Spec workspace", () => {
             worker_handle: "worker-spec-1",
             cwd: "/srv/enterprise/project",
           },
+          specialist_kind: "spec",
         },
       },
       {
