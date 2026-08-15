@@ -376,8 +376,39 @@ export function localConnectConfig(
     ?? (isSpecialist
       ? SPECIALIST_REASONING_EFFORT
       : normalizeReasoningEffort(model, s.reasoningEffort));
+  const productExtra = productModels.providerExtra?.({
+    ...(productSpecialist ? {
+      specialist: {
+        organizationId: productSpecialist.organizationId,
+        kind: productSpecialist.kind,
+        workflow: productSpecialist.workflow,
+      },
+    } : {}),
+    trainingOptIn: productSpecialist?.trainingOptIn === true,
+    executionResidency: remote ? "remote_worker" : "local_only",
+  }) ?? {};
   if (remote) {
-    return { extra: { remote_worker: remote } };
+    return {
+      extra: {
+        // Product metadata describes the bounded specialist recipe but cannot
+        // replace the native-owned worker capability or specialist identity.
+        ...productExtra,
+        remote_worker: remote,
+        ...(specialistKind?.trim()
+          ? { specialist_kind: specialistKind.trim() }
+          : {}),
+        ...(scout ? {
+          scout_cartography: {
+            organization_id: scout.organizationId,
+            workspace_id: scout.workspaceId,
+            ...(scout.runRequestId ? { human_run_request_id: scout.runRequestId } : {}),
+            ...(scout.platform ? { platform: scout.platform } : {}),
+            ...(scout.architecture ? { architecture: scout.architecture } : {}),
+            ...(scout.targetId ? { target_id: scout.targetId } : {}),
+          },
+        } : {}),
+      },
+    };
   }
   return {
     cwd: project || undefined,
@@ -415,17 +446,7 @@ export function localConnectConfig(
           ...(scout.targetId ? { target_id: scout.targetId } : {}),
         },
       } : {}),
-      ...(productModels.providerExtra?.({
-        ...(productSpecialist ? {
-          specialist: {
-            organizationId: productSpecialist.organizationId,
-            kind: productSpecialist.kind,
-            workflow: productSpecialist.workflow,
-          },
-        } : {}),
-        trainingOptIn: productSpecialist?.trainingOptIn === true,
-        executionResidency: "local_only",
-      }) ?? {}),
+      ...productExtra,
       // Native product composition may use the canonical conversation recipe
       // to expose read-only capabilities, but never as entitlement authority.
       // Keep this after product extras so they cannot replace the active recipe.

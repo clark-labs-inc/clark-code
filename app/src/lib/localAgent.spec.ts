@@ -138,7 +138,7 @@ describe("product specialist extension binding", () => {
     expect(config.extra).toMatchObject({ model: "local-model" });
   });
 
-  it("sends only an opaque native binding for a remote worker", () => {
+  it("sends an opaque worker binding plus a credential-free specialist recipe", () => {
     const config = localConnectConfig(
       { ...DEFAULT_LOCAL_SETTINGS, cwd: "/local" },
       { worker_handle: "worker-remote", cwd: "/remote/project" },
@@ -155,6 +155,7 @@ describe("product specialist extension binding", () => {
     expect(config.cwd).toBeUndefined();
     expect(config.extra).toEqual({
       remote_worker: { worker_handle: "worker-remote", cwd: "/remote/project" },
+      specialist_kind: "security",
     });
   });
 });
