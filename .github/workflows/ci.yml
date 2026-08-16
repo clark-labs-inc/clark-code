@@ -99,7 +99,7 @@ jobs:
       matrix:
         # Pin Windows to the VS 2022 image. `windows-latest` now follows the
         # VS 2026 image and can silently raise the runtime ABI of produced apps.
-        os: [macos-latest, ubuntu-latest, windows-2022]
+        os: [macos-15-xlarge, ubuntu-latest, windows-2022]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 25
     env:
