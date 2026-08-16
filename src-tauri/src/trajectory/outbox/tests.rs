@@ -121,7 +121,6 @@ async fn crash_recovery_replays_uncheckpointed_batches_and_marks_run_interrupted
         objective: "finish the work".into(),
         status: GoalStatus::Active,
         run: Some(RunId::new("run-1")),
-        token_budget: None,
         tokens_used: 0,
         time_used_seconds: 0,
         continuations: 0,
