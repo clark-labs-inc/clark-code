@@ -43,7 +43,7 @@ version = "0.1.134"
 edition = "2021"
 license = "Apache-2.0"
 repository = "https://github.com/clark-labs-inc/clark-desktop"
-rust-version = "1.85"
+rust-version = "1.94"
 
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }

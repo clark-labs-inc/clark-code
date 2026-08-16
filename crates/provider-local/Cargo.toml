@@ -27,7 +27,7 @@ scout-platform-client = { path = "../scout-platform-client" }
 desktop-install-context = { path = "../install-context" }
 computer-use = { path = "../computer-use" }
 desktop-http = { path = "../desktop-http" }
-libreoffice-pure = "0.5.4"
+libreoffice-pure = "0.5.5"
 serde.workspace = true
 serde_json.workspace = true
 serde_yaml = "0.9"

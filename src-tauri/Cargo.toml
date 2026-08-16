@@ -41,7 +41,7 @@ computer-use = { path = "../crates/computer-use" }
 desktop-install-context = { path = "../crates/install-context" }
 desktop-http = { path = "../crates/desktop-http" }
 diagnostic-capture = { package = "clark-capture", path = "../vendor/clark-capture", features = ["tracing"], optional = true }
-libreoffice-pure = "0.5.4"
+libreoffice-pure = "0.5.5"
 
 tauri = { version = "2", features = [] }
 tauri-plugin-shell = "2"
