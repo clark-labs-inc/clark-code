@@ -282,13 +282,18 @@ mod tests {
             }),
             ..ProviderConfig::default()
         };
-        let recipe = remote_session_recipe(&config, std::path::Path::new("/srv/neon"))
+        let project_root = if cfg!(windows) {
+            std::path::PathBuf::from(r"C:\srv\neon")
+        } else {
+            std::path::PathBuf::from("/srv/neon")
+        };
+        let recipe = remote_session_recipe(&config, &project_root)
             .unwrap()
             .unwrap();
         assert_eq!(recipe.specialist_kind.as_deref(), Some("scout"));
         assert_eq!(
             recipe.scout_cartography.unwrap().identity_root,
-            std::path::PathBuf::from("/srv/neon/.clark/scout/identity/binding-1")
+            project_root.join(".clark/scout/identity/binding-1")
         );
     }
 
