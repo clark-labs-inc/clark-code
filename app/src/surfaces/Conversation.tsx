@@ -505,16 +505,27 @@ export function Conversation({
 
         <FanOutPanel />
 
-        {/* Default (sync) mode, not popLayout: popLayout yanks an exiting
-            banner OUT of the layout flow, so a collapsing Pending briefly
-            floats over the content below it. In-flow exit collapses height in
-            place — no overlap. */}
-        <AnimatePresence initial={false}>
+        {/* The waiting reserve and the first streamed reply intentionally share
+            the same four-line geometry. When prose begins, replace the reserve
+            in the same commit instead of retaining its exiting height beside
+            the new reply: that temporary double-height made a bottom-pinned
+            transcript jump up and then back down. Keeping this presence keyed
+            to the waiting phase still gives true no-reply exits (stop/failure)
+            the normal in-flow collapse. */}
+        <AnimatePresence
+          key={awaitingReply ? "awaiting-reply" : "reply-started"}
+          initial={false}
+        >
           {showPending && (
             <m.div key="pending" {...transientMotion}>
               <Pending label={activity.label} detail={activity.detail} skeleton={awaitingReply} />
             </m.div>
           )}
+        </AnimatePresence>
+
+        {/* Default (sync) mode, not popLayout: transient notices collapse in
+            flow so they never float over a following notice or receipt. */}
+        <AnimatePresence initial={false}>
           {pending_permission && showPermissionGate && (
             <m.div key="permission" {...transientMotion}>
               <PermissionGate req={pending_permission} />

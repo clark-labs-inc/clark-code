@@ -963,6 +963,11 @@ function ScopedComposer() {
     }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
+      if (busy && editTimelineIndex !== null) {
+        flashNotice("Stopping Clark — send the edit when the current run has stopped.");
+        void cancelActive();
+        return;
+      }
       void submit();
     }
     if (e.key === "Escape" && busy && !value.trim()) {
@@ -1089,7 +1094,11 @@ function ScopedComposer() {
         {editTimelineIndex !== null && (
           <div className="flex items-center gap-1.5 pb-1 pt-0.5 text-xs text-ink-muted">
             <Pencil className="size-3" />
-            <span>Editing message — later turns will be replaced</span>
+            <span>
+              {busy
+                ? "Editing message — stop Clark before replacing this turn"
+                : "Editing message — later turns will be replaced"}
+            </span>
             <button
               type="button"
               onClick={() => {
@@ -1192,6 +1201,7 @@ function ScopedComposer() {
             <ComposerSendAction
               submitting={submitting}
               busy={busy}
+              editing={editTimelineIndex !== null}
               hasContent={hasContent}
               canSend={canSend}
               shouldPickProjectFolder={submission.shouldPickProjectFolder}

@@ -131,11 +131,15 @@ describe("GUI motion policy", () => {
   });
 
   it("keeps one transcript activity owner and one reduced-motion policy", () => {
+    const conversationSource = sourceModules["../surfaces/Conversation.tsx"];
     const activityOwners = sources
       .filter(({ source }) => source.includes('className="activity-dots'))
       .map(({ path }) => path);
 
     expect(activityOwners).toEqual(["../surfaces/Conversation.tsx"]);
+    expect(conversationSource).toContain(
+      'key={awaitingReply ? "awaiting-reply" : "reply-started"}',
+    );
     expect(cssSource).toMatch(
       /\.activity-dots > span\s*\{[^}]*animation: activity-dot-pulse/s,
     );

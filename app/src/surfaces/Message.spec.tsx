@@ -1,6 +1,39 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
-import { Message } from "./Message";
+import { beforeEach, describe, expect, it } from "vitest";
+import { emptySnapshot } from "../core-bridge/types";
+import { useSessionStore } from "../store/sessionStore";
+import { beginMessageEdit, Message } from "./Message";
+
+beforeEach(() => {
+  useSessionStore.setState({
+    snapshot: emptySnapshot(),
+    composerPrefill: null,
+    notice: null,
+  });
+});
+
+describe("user message actions", () => {
+  it("does not enter edit mode while the current run is active", () => {
+    useSessionStore.setState({
+      snapshot: {
+        ...emptySnapshot(),
+        runs: { active: { id: "active", status: "running" } },
+      },
+    });
+
+    expect(beginMessageEdit("co", 0)).toBe(false);
+    expect(useSessionStore.getState().composerPrefill).toBeNull();
+    expect(useSessionStore.getState().notice).toContain("Stop Clark before editing");
+  });
+
+  it("stages an edit after the run has stopped", () => {
+    expect(beginMessageEdit("co", 0)).toBe(true);
+    expect(useSessionStore.getState().composerPrefill).toEqual({
+      text: "co",
+      timelineIndex: 0,
+    });
+  });
+});
 
 describe("assistant message actions", () => {
   it("overlays Copy as Markdown without adding a footer row", () => {

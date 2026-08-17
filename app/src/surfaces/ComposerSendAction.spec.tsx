@@ -5,6 +5,7 @@ import { ComposerSendAction } from "./ComposerSendAction";
 const baseProps = {
   submitting: false,
   busy: false,
+  editing: false,
   hasContent: true,
   canSend: true,
   shouldPickProjectFolder: false,
@@ -42,5 +43,14 @@ describe("ComposerSendAction", () => {
     );
 
     expect(html).toContain('aria-label="Queue message"');
+  });
+
+  it("offers Stop instead of Queue when an edit races with an active run", () => {
+    const html = renderToStaticMarkup(
+      <ComposerSendAction {...baseProps} busy editing />,
+    );
+
+    expect(html).toContain('aria-label="Stop Clark to continue editing"');
+    expect(html).not.toContain('aria-label="Queue message"');
   });
 });

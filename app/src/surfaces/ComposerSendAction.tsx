@@ -4,6 +4,7 @@ import { cn } from "../lib/cn";
 export function ComposerSendAction({
   submitting,
   busy,
+  editing,
   hasContent,
   canSend,
   shouldPickProjectFolder,
@@ -14,6 +15,7 @@ export function ComposerSendAction({
 }: {
   submitting: boolean;
   busy: boolean;
+  editing: boolean;
   hasContent: boolean;
   canSend: boolean;
   shouldPickProjectFolder: boolean;
@@ -36,12 +38,14 @@ export function ComposerSendAction({
     );
   }
 
-  if (busy && !hasContent) {
+  if (busy && (editing || !hasContent)) {
+    const label = editing ? "Stop Clark to continue editing" : "Stop";
     return (
       <button
         type="button"
         onClick={onCancel}
-        aria-label="Stop"
+        aria-label={label}
+        title={label}
         className="grid size-8 shrink-0 place-items-center rounded-full bg-danger/12 text-danger transition duration-base ease-agent hover:bg-danger/20"
       >
         <Square aria-hidden="true" className="size-3 fill-current" />

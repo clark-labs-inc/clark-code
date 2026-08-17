@@ -11,6 +11,7 @@ import {
 } from "../lib/motion";
 import { cn } from "../lib/cn";
 import { useCopy } from "../lib/clipboard";
+import { currentActivity } from "../lib/activity";
 import { userAttachmentBlocks, userTextBody } from "../lib/messageBlocks";
 import { parseNarration, presentationKind } from "../lib/narration";
 import { MarkdownContent, MARKDOWN_CLASSES } from "./MarkdownContent";
@@ -27,6 +28,18 @@ function text(blocks: ContentBlock[]): string {
       return `\`[${b.type}]\``;
     })
     .join("");
+}
+
+/** Editing replaces the selected turn and every later turn, so it cannot be
+ * staged as a queued follow-up while that suffix is still being produced. */
+export function beginMessageEdit(body: string, timelineIndex: number): boolean {
+  const state = useSessionStore.getState();
+  if (currentActivity(state.snapshot).busy) {
+    state.flashNotice("Stop Clark before editing an earlier message.");
+    return false;
+  }
+  state.setComposerPrefill(body, timelineIndex);
+  return true;
 }
 
 /** A small icon button that copies and briefly confirms. */
@@ -166,9 +179,7 @@ function MessageImpl({
           <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition group-hover/user:opacity-100">
             <button
               type="button"
-              onClick={() =>
-                useSessionStore.getState().setComposerPrefill(body, timelineIndex)
-              }
+              onClick={() => beginMessageEdit(body, timelineIndex)}
               aria-label="Edit and resend"
               title="Edit & resend"
               className="grid size-7 place-items-center rounded-md text-ink-faint transition hover:bg-bg-hover hover:text-ink-secondary"
