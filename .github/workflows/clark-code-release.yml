@@ -585,7 +585,6 @@ jobs:
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
       APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-      CLARK_CELL_RELEASE_SIGNING_KEY: ${{ secrets.CLARK_CELL_RELEASE_SIGNING_KEY }}
       APPLE_ID: ${{ secrets.APPLE_ID }}
       APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
@@ -804,21 +803,6 @@ jobs:
         run: |
           "$PRODUCT_DIR/scripts/build-release-platform.sh" "${{ matrix.platform }}"
 
-      - name: Build signed enterprise execution cell
-        if: runner.os == 'Linux' && steps.platform-record-cache.outputs.cache-hit != 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -n "$CLARK_CELL_RELEASE_SIGNING_KEY"
-          artifact_name="clark-execution-cell-${{ inputs.version }}.tar.gz"
-          artifact_url="$CLARK_DESKTOP_DOWNLOAD_BASE_URL/execution-cells/releases/$CLARK_RELEASE_TAG/$artifact_name"
-          node prototypes/clark-slack-code-runner/scripts/build-release.js \
-            --version "${{ inputs.version }}" \
-            --clark "$PRODUCT_DIR/binaries/clark-execution-cell-x86_64-unknown-linux-gnu" \
-            --headless-worker "$PRODUCT_DIR/binaries/clark-code-headless-x86_64-unknown-linux-musl" \
-            --artifact-url "$artifact_url" \
-            --output "$PRODUCT_DIR/target/execution-cell-release"
-
       - name: Sign and repackage the standalone macOS Clark TUI
         if: runner.os == 'macOS' && steps.platform-record-cache.outputs.cache-hit != 'true'
         shell: bash
@@ -924,24 +908,6 @@ jobs:
         with:
           role-to-assume: ${{ env.CLARK_DESKTOP_DOWNLOAD_UPLOAD_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
-      - name: Publish immutable enterprise execution-cell release
-        if: runner.os == 'Linux' && steps.platform-record-cache.outputs.cache-hit != 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          release_dir="$PRODUCT_DIR/target/execution-cell-release"
-          for file in "$release_dir"/*; do
-            name="$(basename "$file")"
-            key="desktop/execution-cells/releases/$CLARK_RELEASE_TAG/$name"
-            sha="$(sha256sum "$file" | awk '{print $1}')"
-            if remote_sha="$(aws s3api head-object --bucket "$CLARK_DESKTOP_DOWNLOAD_BUCKET" --key "$key" --query 'Metadata.sha256' --output text 2>/dev/null)"; then
-              test "$remote_sha" = "$sha"
-            else
-              aws s3 cp "$file" "s3://$CLARK_DESKTOP_DOWNLOAD_BUCKET/$key" \
-                --only-show-errors --metadata "sha256=$sha" \
-                --content-type "$(case "$name" in *.json) echo application/json;; *) echo application/gzip;; esac)"
-            fi
-          done
       - name: Publish source-bound immutable platform files
         if: steps.platform-record-cache.outputs.cache-hit != 'true'
         shell: bash
@@ -965,13 +931,6 @@ jobs:
         with:
           name: desktop-download-records-${{ matrix.platform }}
           path: crates/clark-desktop-product/public-release-records/*.json
-          if-no-files-found: error
-          retention-days: 90
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-        if: runner.os == 'Linux' && steps.platform-record-cache.outputs.cache-hit != 'true'
-        with:
-          name: execution-cell-release-linux
-          path: crates/clark-desktop-product/target/execution-cell-release
           if-no-files-found: error
           retention-days: 90
       - name: Remove private Cargo credentials
@@ -1042,11 +1001,6 @@ jobs:
           pattern: desktop-download-records-*
           path: crates/clark-desktop-product/release-records
           merge-multiple: true
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v7.0.0
-        if: contains(needs.preflight.outputs.release_platforms, 'linux')
-        with:
-          name: execution-cell-release-linux
-          path: crates/clark-desktop-product/execution-cell-release
       - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
@@ -1105,35 +1059,6 @@ jobs:
             scripts/advance-release-channel.sh rollback
             exit "$verification_status"
           fi
-      - name: Advance the enterprise execution-cell update channel
-        if: contains(needs.preflight.outputs.release_platforms, 'linux')
-        shell: bash
-        run: |
-          set -euo pipefail
-          manifest="$(find "$PRODUCT_DIR/execution-cell-release" -maxdepth 1 -type f -name '*.json' -print -quit)"
-          test -s "$manifest"
-          aws s3 cp "$manifest" \
-            "s3://$CLARK_DESKTOP_DOWNLOAD_BUCKET/desktop/execution-cells/current.json" \
-            --only-show-errors --content-type application/json --cache-control no-cache
-          aws s3 cp prototypes/clark-slack-code-runner/scripts/install.sh \
-            "s3://$CLARK_DESKTOP_DOWNLOAD_BUCKET/desktop/execution-cells/install.sh" \
-            --only-show-errors --content-type text/x-shellscript --cache-control no-cache
-          if [[ -n "$CLARK_DESKTOP_DOWNLOAD_DISTRIBUTION_ID" ]]; then
-            aws cloudfront create-invalidation \
-              --distribution-id "$CLARK_DESKTOP_DOWNLOAD_DISTRIBUTION_ID" \
-              --paths \
-                '/desktop/execution-cells/current.json' \
-                '/desktop/execution-cells/install.sh' >/dev/null
-          fi
-          curl --proto '=https' --tlsv1.2 --retry 5 --fail --silent --show-error \
-            "$CLARK_DESKTOP_DOWNLOAD_BASE_URL/execution-cells/current.json" \
-            --output "$RUNNER_TEMP/execution-cell-current.json"
-          cmp "$manifest" "$RUNNER_TEMP/execution-cell-current.json"
-          curl --proto '=https' --tlsv1.2 --retry 5 --fail --silent --show-error \
-            "$CLARK_DESKTOP_DOWNLOAD_BASE_URL/execution-cells/install.sh" \
-            --output "$RUNNER_TEMP/execution-cell-install.sh"
-          cmp prototypes/clark-slack-code-runner/scripts/install.sh \
-            "$RUNNER_TEMP/execution-cell-install.sh"
       - name: Record the authenticated external finalization handoff
         shell: bash
         working-directory: crates/clark-desktop-product
