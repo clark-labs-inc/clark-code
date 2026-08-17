@@ -33,6 +33,7 @@ jobs:
   product-changes:
     name: Clark Code product change scope
     runs-on: ubuntu-22.04
+    environment: release
     timeout-minutes: 5
     outputs:
       required: ${{ steps.scope.outputs.required }}
@@ -63,6 +64,7 @@ jobs:
     needs: product-changes
     if: always()
     runs-on: ubuntu-22.04
+    environment: release
     timeout-minutes: 8
     steps:
       - name: Require a valid product scope classification
