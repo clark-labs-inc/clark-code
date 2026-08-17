@@ -13,9 +13,7 @@ permissions:
   contents: read
 
 concurrency:
-  # A release is authorized by green checks on one immutable source SHA.
-  # Preserve every mainline receipt even when unrelated commits land while a
-  # larger runner is starting; only supersede stale iterations of the same PR.
+  # A release is authorized by one immutable private product source SHA.
   group: clark-code-product-ci-${{ inputs.product_revision }}
   cancel-in-progress: false
 
@@ -48,38 +46,16 @@ jobs:
       - name: Classify the Clark Code product boundary
         id: scope
         shell: bash
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          PULL_REQUEST_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          PUSH_BASE_SHA: ${{ github.event.before }}
         run: |
           set -euo pipefail
-          if [[ "$EVENT_NAME" == pull_request ]]; then
-            base_sha="$PULL_REQUEST_BASE_SHA"
-          else
-            base_sha="$PUSH_BASE_SHA"
-          fi
-          if [[ ! "$base_sha" =~ ^[0-9a-f]{40}$ || "$base_sha" == 0000000000000000000000000000000000000000 ]]; then
-            base_sha="$(git rev-parse HEAD^)"
-          fi
-          required=false
-          while IFS= read -r -d '' path; do
-            case "$path" in
-              .github/workflows/clark-code-ci.yml|\
-              .github/workflows/clark-code-release.yml|\
-              .github/workflows/clark-code-windows-release.yml|\
-              prototypes/clark-slack-code-runner/*|\
-              crates/clark-desktop-product/*)
-                required=true
-                break
-                ;;
-            esac
-          done < <(git diff --name-only -z "$base_sha" HEAD)
-          echo "required=$required" >> "$GITHUB_OUTPUT"
+          [[ "$CLARK_PRODUCT_SOURCE_REVISION" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$CLARK_PRODUCT_SOURCE_REVISION"
+          echo "required=true" >> "$GITHUB_OUTPUT"
           {
             echo "## Clark Code product scope"
             echo
-            echo "Product composition required: $required"
+            echo "Exact product revision: \`$CLARK_PRODUCT_SOURCE_REVISION\`"
+            echo "Product composition required: true"
           } >> "$GITHUB_STEP_SUMMARY"
 
   release-contracts:
@@ -133,7 +109,7 @@ jobs:
   composed-build:
     name: Composed Rust and frontend build
     needs: [product-changes, release-contracts]
-    if: ${{ (github.event_name != 'pull_request' || !startsWith(github.head_ref, 'dependabot/github_actions/')) && needs.product-changes.outputs.required == 'true' && needs.release-contracts.result == 'success' }}
+    if: ${{ needs.product-changes.outputs.required == 'true' && needs.release-contracts.result == 'success' }}
     runs-on: clark-release-linux
     environment: release
     timeout-minutes: 60
@@ -324,30 +300,21 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 2
     steps:
-      - name: Require product composition only for product changes
+      - name: Require complete product qualification
         env:
-          ACTIONS_DEPENDABOT_PR: ${{ github.event_name == 'pull_request' && startsWith(github.head_ref, 'dependabot/github_actions/') }}
           PRODUCT_REQUIRED: ${{ needs.product-changes.outputs.required }}
           RELEASE_CONTRACTS_RESULT: ${{ needs.release-contracts.result }}
           COMPOSED_BUILD_RESULT: ${{ needs.composed-build.result }}
         run: |
           set -euo pipefail
-          if [[ "$ACTIONS_DEPENDABOT_PR" == true ]]; then
-            test "$RELEASE_CONTRACTS_RESULT" = success
-            test "$COMPOSED_BUILD_RESULT" = skipped
-          elif [[ "$PRODUCT_REQUIRED" == true ]]; then
-            test "$RELEASE_CONTRACTS_RESULT" = success
-            test "$COMPOSED_BUILD_RESULT" = success
-          else
-            test "$RELEASE_CONTRACTS_RESULT" = success
-            test "$COMPOSED_BUILD_RESULT" = skipped
-          fi
+          test "$PRODUCT_REQUIRED" = true
+          test "$RELEASE_CONTRACTS_RESULT" = success
+          test "$COMPOSED_BUILD_RESULT" = success
           {
             echo "## Clark Code product CI receipt"
             echo
             echo "| Contract | Result |"
             echo "| --- | --- |"
-            echo "| GitHub Actions Dependabot PR | $ACTIONS_DEPENDABOT_PR |"
             echo "| Product composition required | $PRODUCT_REQUIRED |"
             echo "| Release contracts | $RELEASE_CONTRACTS_RESULT |"
             echo "| Composed Rust and frontend build | $COMPOSED_BUILD_RESULT |"
