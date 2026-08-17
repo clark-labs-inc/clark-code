@@ -1,0 +1,354 @@
+name: Clark Code product CI
+run-name: Clark Code product CI / ${{ inputs.product_revision }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      product_revision:
+        description: Exact 40-character private product commit to qualify
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  # A release is authorized by green checks on one immutable source SHA.
+  # Preserve every mainline receipt even when unrelated commits land while a
+  # larger runner is starting; only supersede stale iterations of the same PR.
+  group: clark-code-product-ci-${{ inputs.product_revision }}
+  cancel-in-progress: false
+
+env:
+  PRODUCT_REPOSITORY: clark-labs-inc/clark
+  CLARK_PRODUCT_SOURCE_REVISION: ${{ inputs.product_revision }}
+  PRODUCT_DIR: crates/clark-desktop-product
+  CARGO_INCREMENTAL: 0
+  CARGO_TERM_COLOR: always
+  # Bound the single archived compiler cache so it coexists with release caches
+  # under GitHub's repository-wide 10 GiB limit.
+  KACHE_CACHE_EXECUTABLES: "0"
+  KACHE_MAX_SIZE: 6GiB
+  KACHE_MIN_STORE_COMPILE_MS: "1000"
+
+jobs:
+  product-changes:
+    name: Clark Code product change scope
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    outputs:
+      required: ${{ steps.scope.outputs.required }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ env.PRODUCT_REPOSITORY }}
+          ref: ${{ env.CLARK_PRODUCT_SOURCE_REVISION }}
+          token: ${{ secrets.CLARK_SCIENTIST_READ_TOKEN }}
+          fetch-depth: 0
+      - name: Classify the Clark Code product boundary
+        id: scope
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PULL_REQUEST_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BASE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT_NAME" == pull_request ]]; then
+            base_sha="$PULL_REQUEST_BASE_SHA"
+          else
+            base_sha="$PUSH_BASE_SHA"
+          fi
+          if [[ ! "$base_sha" =~ ^[0-9a-f]{40}$ || "$base_sha" == 0000000000000000000000000000000000000000 ]]; then
+            base_sha="$(git rev-parse HEAD^)"
+          fi
+          required=false
+          while IFS= read -r -d '' path; do
+            case "$path" in
+              .github/workflows/clark-code-ci.yml|\
+              .github/workflows/clark-code-release.yml|\
+              .github/workflows/clark-code-windows-release.yml|\
+              prototypes/clark-slack-code-runner/*|\
+              crates/clark-desktop-product/*)
+                required=true
+                break
+                ;;
+            esac
+          done < <(git diff --name-only -z "$base_sha" HEAD)
+          echo "required=$required" >> "$GITHUB_OUTPUT"
+          {
+            echo "## Clark Code product scope"
+            echo
+            echo "Product composition required: $required"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  release-contracts:
+    name: Release contracts
+    needs: product-changes
+    if: always()
+    runs-on: ubuntu-22.04
+    timeout-minutes: 8
+    steps:
+      - name: Require a valid product scope classification
+        env:
+          PRODUCT_REQUIRED: ${{ needs.product-changes.outputs.required }}
+        run: |
+          [[ "$PRODUCT_REQUIRED" == true || "$PRODUCT_REQUIRED" == false ]]
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: needs.product-changes.outputs.required == 'true'
+        with:
+          repository: ${{ env.PRODUCT_REPOSITORY }}
+          ref: ${{ env.CLARK_PRODUCT_SOURCE_REVISION }}
+          token: ${{ secrets.CLARK_SCIENTIST_READ_TOKEN }}
+      - name: Bind the exact public foundation revision
+        if: needs.product-changes.outputs.required == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          revision="$(tr -d '[:space:]' < "$PRODUCT_DIR/foundation-revision.txt")"
+          [[ "$revision" =~ ^[0-9a-f]{40}$ ]]
+          git clone --filter=blob:none --no-checkout https://github.com/clark-labs-inc/clark-code.git "$GITHUB_WORKSPACE/../clark-desktop"
+          git -C "$GITHUB_WORKSPACE/../clark-desktop" fetch --depth=1 origin "$revision"
+          git -C "$GITHUB_WORKSPACE/../clark-desktop" checkout --detach "$revision"
+          test "$(git -C "$GITHUB_WORKSPACE/../clark-desktop" rev-parse HEAD)" = "$revision"
+      - name: Validate every composed platform path before compilation
+        if: needs.product-changes.outputs.required == 'true'
+        run: |
+          node "$PRODUCT_DIR/scripts/preflight-release-configs.mjs" \
+            --product-root "$GITHUB_WORKSPACE/$PRODUCT_DIR" \
+            --foundation-root "$GITHUB_WORKSPACE/../clark-desktop"
+      - name: Validate release orchestration contracts
+        if: needs.product-changes.outputs.required == 'true'
+        working-directory: crates/clark-desktop-product
+        run: |
+          node --test \
+            harness/ci-composition-runner.spec.mjs \
+            harness/composition-boundary.spec.mjs \
+            harness/macos-release-ui-smoke.spec.mjs \
+            harness/public-release-journey.spec.mjs \
+            harness/release-environment-preflight.spec.mjs
+          bash -n scripts/*.sh
+          bash -n scientist/scripts/*.sh
+
+  composed-build:
+    name: Composed Rust and frontend build
+    needs: [product-changes, release-contracts]
+    if: ${{ (github.event_name != 'pull_request' || !startsWith(github.head_ref, 'dependabot/github_actions/')) && needs.product-changes.outputs.required == 'true' && needs.release-contracts.result == 'success' }}
+    runs-on: clark-release-linux
+    environment: release
+    timeout-minutes: 60
+    services:
+      postgres:
+        image: postgres:16.4
+        env:
+          POSTGRES_USER: clark
+          POSTGRES_PASSWORD: clark
+          POSTGRES_DB: clark
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U clark -d clark"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgresql://clark:clark@localhost:5432/clark
+      CLARK_REQUIRE_PLATFORM_IDEMPOTENCY_DB: "1"
+      CARGO_INCREMENTAL: 0
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ env.PRODUCT_REPOSITORY }}
+          ref: ${{ env.CLARK_PRODUCT_SOURCE_REVISION }}
+          token: ${{ secrets.CLARK_SCIENTIST_READ_TOKEN }}
+      - name: Authenticate private Clark Cargo sources
+        shell: bash
+        env:
+          CLARK_PRIVATE_READ_TOKEN: ${{ secrets.CLARK_SCIENTIST_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$CLARK_PRIVATE_READ_TOKEN"
+          git config --global \
+            url."https://x-access-token:${CLARK_PRIVATE_READ_TOKEN}@github.com/clark-labs-inc/".insteadOf \
+            "https://github.com/clark-labs-inc/"
+      - name: Bind the exact public foundation revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          revision="$(tr -d '[:space:]' < "$PRODUCT_DIR/foundation-revision.txt")"
+          git clone --filter=blob:none --no-checkout https://github.com/clark-labs-inc/clark-code.git "$GITHUB_WORKSPACE/../clark-desktop"
+          git -C "$GITHUB_WORKSPACE/../clark-desktop" fetch --depth=1 origin "$revision"
+          git -C "$GITHUB_WORKSPACE/../clark-desktop" checkout --detach "$revision"
+          mkdir -p "$GITHUB_WORKSPACE/.release-cache"
+          cp "$GITHUB_WORKSPACE/../clark-desktop/app/pnpm-lock.yaml" "$GITHUB_WORKSPACE/.release-cache/foundation-pnpm-lock.yaml"
+      - name: Bind the exact private worker revision from Cargo.lock
+        shell: bash
+        run: |
+          set -euo pipefail
+          revision="$(node "$PRODUCT_DIR/scripts/product-composition-contract.mjs" \
+            locked-autoresearch-revision \
+            --product-root "$PRODUCT_DIR")"
+          git clone --filter=blob:none --no-checkout \
+            https://github.com/clark-labs-inc/clark-autoresearch.git \
+            "$GITHUB_WORKSPACE/../clark-autoresearch"
+          git -C "$GITHUB_WORKSPACE/../clark-autoresearch" fetch --depth=1 origin "$revision"
+          git -C "$GITHUB_WORKSPACE/../clark-autoresearch" checkout --detach "$revision"
+          test "$(git -C "$GITHUB_WORKSPACE/../clark-autoresearch" rev-parse HEAD)" = "$revision"
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
+        with:
+          toolchain: 1.97.1
+          targets: x86_64-unknown-linux-musl
+      - name: Set up pinned bounded kache
+        uses: kunobi-ninja/kache-action@49398d37113c616fdb61be434cb497e3c2c8f3e6 # v1
+        with:
+          version: 0.14.2
+          cache-executables: false
+          cache-key-prefix: clark-code-product-ci-linux-v2
+      - name: Restore the exact cargo-nextest executable
+        id: cargo-nextest-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: cargo-nextest-${{ runner.os }}-0.9.143
+          path: ~/.cargo/bin/cargo-nextest
+      - name: Install the exact cargo-nextest executable
+        if: steps.cargo-nextest-cache.outputs.cache-hit != 'true'
+        run: cargo install cargo-nextest --version 0.9.143 --locked
+      - name: Cache the exact cargo-nextest executable
+        if: steps.cargo-nextest-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: cargo-nextest-${{ runner.os }}-0.9.143
+          path: ~/.cargo/bin/cargo-nextest
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+          cache-dependency-path: .release-cache/foundation-pnpm-lock.yaml
+      - name: Install native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libssl-dev \
+            libdbus-1-dev \
+            libasound2-dev \
+            libgl1-mesa-dev \
+            libglib2.0-dev \
+            libopus-dev \
+            libva-dev \
+            libx11-dev \
+            libxext-dev \
+            build-essential \
+            clang \
+            file \
+            jq \
+            patchelf \
+            meson \
+            mold \
+            ninja-build \
+            pkg-config \
+            libcap-dev
+          pnpm --dir "$GITHUB_WORKSPACE/../clark-desktop/app" install --frozen-lockfile
+          ln -s "$GITHUB_WORKSPACE/../clark-desktop/app/node_modules" "$GITHUB_WORKSPACE/node_modules"
+      - name: Install the exact Linux cross-build toolchain
+        shell: bash
+        env:
+          ZIG_VERSION: 0.16.0
+          ZIG_SHA256: 70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/zig.tar.xz"
+          install_dir="$RUNNER_TEMP/zig-$ZIG_VERSION"
+          curl --proto '=https' --tlsv1.2 --retry 5 --location --fail --silent --show-error \
+            "https://ziglang.org/download/$ZIG_VERSION/zig-x86_64-linux-$ZIG_VERSION.tar.xz" \
+            --output "$archive"
+          printf '%s  %s\n' "$ZIG_SHA256" "$archive" | sha256sum --check --strict
+          mkdir -p "$install_dir"
+          tar -xJf "$archive" --strip-components=1 -C "$install_dir"
+          echo "$install_dir" >> "$GITHUB_PATH"
+      - name: Restore the exact cargo-zigbuild executable
+        id: cargo-zigbuild-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: cargo-zigbuild-${{ runner.os }}-clark-release-linux-x86_64-0.23.0-v3
+          path: ~/.cargo/bin/cargo-zigbuild
+      - name: Install the exact cargo-zigbuild executable
+        if: steps.cargo-zigbuild-cache.outputs.cache-hit != 'true'
+        run: cargo install cargo-zigbuild --version 0.23.0 --locked
+      - name: Cache the exact cargo-zigbuild executable
+        if: steps.cargo-zigbuild-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: cargo-zigbuild-${{ runner.os }}-clark-release-linux-x86_64-0.23.0-v3
+          path: ~/.cargo/bin/cargo-zigbuild
+      - name: Verify the exact cargo-zigbuild executable
+        run: |
+          test -x "$HOME/.cargo/bin/cargo-zigbuild"
+          cargo zigbuild --help >/dev/null
+      - name: Compose and verify the shipped Linux product
+        shell: bash
+        env:
+          CLARK_COMPOSITION_RECLAIM_INTERMEDIATES: "1"
+          CARGO_PROFILE_DEV_DEBUG: "0"
+          CARGO_PROFILE_TEST_DEBUG: "0"
+        run: |
+          "$PRODUCT_DIR/scripts/verify-product-composition.sh" \
+            --foundation-root "$GITHUB_WORKSPACE/../clark-desktop" \
+            --autoresearch-source "$GITHUB_WORKSPACE/../clark-autoresearch" \
+            --target x86_64-unknown-linux-gnu
+      - name: Retain the exact composition receipts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: product-composition-receipts
+          path: |
+            crates/clark-desktop-product/target/product-composition/*.json
+            crates/clark-desktop-product/binaries/shared-worker-receipt.json
+          if-no-files-found: error
+          retention-days: 7
+      - name: Remove private Cargo credentials
+        if: always()
+        shell: bash
+        env:
+          CLARK_PRIVATE_READ_TOKEN: ${{ secrets.CLARK_SCIENTIST_READ_TOKEN }}
+        run: |
+          git config --global --unset-all \
+            url."https://x-access-token:${CLARK_PRIVATE_READ_TOKEN}@github.com/clark-labs-inc/".insteadOf || true
+
+  required:
+    name: Clark Code product CI required
+    if: always()
+    needs: [product-changes, release-contracts, composed-build]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 2
+    steps:
+      - name: Require product composition only for product changes
+        env:
+          ACTIONS_DEPENDABOT_PR: ${{ github.event_name == 'pull_request' && startsWith(github.head_ref, 'dependabot/github_actions/') }}
+          PRODUCT_REQUIRED: ${{ needs.product-changes.outputs.required }}
+          RELEASE_CONTRACTS_RESULT: ${{ needs.release-contracts.result }}
+          COMPOSED_BUILD_RESULT: ${{ needs.composed-build.result }}
+        run: |
+          set -euo pipefail
+          if [[ "$ACTIONS_DEPENDABOT_PR" == true ]]; then
+            test "$RELEASE_CONTRACTS_RESULT" = success
+            test "$COMPOSED_BUILD_RESULT" = skipped
+          elif [[ "$PRODUCT_REQUIRED" == true ]]; then
+            test "$RELEASE_CONTRACTS_RESULT" = success
+            test "$COMPOSED_BUILD_RESULT" = success
+          else
+            test "$RELEASE_CONTRACTS_RESULT" = success
+            test "$COMPOSED_BUILD_RESULT" = skipped
+          fi
+          {
+            echo "## Clark Code product CI receipt"
+            echo
+            echo "| Contract | Result |"
+            echo "| --- | --- |"
+            echo "| GitHub Actions Dependabot PR | $ACTIONS_DEPENDABOT_PR |"
+            echo "| Product composition required | $PRODUCT_REQUIRED |"
+            echo "| Release contracts | $RELEASE_CONTRACTS_RESULT |"
+            echo "| Composed Rust and frontend build | $COMPOSED_BUILD_RESULT |"
+          } >> "$GITHUB_STEP_SUMMARY"

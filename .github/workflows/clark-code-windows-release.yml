@@ -1,0 +1,708 @@
+name: Clark Code Windows release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Exact SemVer declared in windows-version.txt
+        required: true
+        type: string
+      source_revision:
+        description: Frozen 40-character product source commit to release
+        required: true
+        type: string
+      release_mode:
+        description: Authenticode publication policy
+        required: true
+        default: signed
+        type: choice
+        options:
+          - signed
+          - preview
+      artifact_run_id:
+        description: Existing source-bound Windows run to publish without rebuilding
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  actions: read
+  checks: read
+  contents: read
+  id-token: write
+
+concurrency:
+  group: clark-code-windows-release
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-west-2
+  PRODUCT_REPOSITORY: clark-labs-inc/clark
+  PRODUCT_DIR: crates/clark-desktop-product
+  SCCACHE_IGNORE_SERVER_IO_ERROR: "1"
+  CLARK_RELEASE_TAG: ${{ format('v{0}', inputs.version) }}
+  CLARK_RELEASE_SOURCE_REVISION: ${{ inputs.source_revision }}
+  CLARK_WINDOWS_VERSION: ${{ inputs.version }}
+  CLARK_WINDOWS_RELEASE_MODE: ${{ inputs.release_mode }}
+  CLARK_AUTORESEARCH_RELEASE_REF: ${{ vars.CLARK_AUTORESEARCH_RELEASE_REF }}
+  CLARK_DESKTOP_DOWNLOAD_BUCKET: ${{ vars.CLARK_DESKTOP_DOWNLOAD_BUCKET }}
+  CLARK_DESKTOP_DOWNLOAD_BASE_URL: ${{ vars.CLARK_DESKTOP_DOWNLOAD_BASE_URL }}
+  CLARK_DESKTOP_DOWNLOAD_UPLOAD_ROLE_ARN: ${{ vars.CLARK_DESKTOP_DOWNLOAD_UPLOAD_ROLE_ARN }}
+  CLARK_DESKTOP_DOWNLOAD_DISTRIBUTION_ID: ${{ vars.CLARK_DESKTOP_DOWNLOAD_DISTRIBUTION_ID }}
+  AZURE_ARTIFACT_SIGNING_ENDPOINT: ${{ vars.AZURE_ARTIFACT_SIGNING_ENDPOINT }}
+  AZURE_ARTIFACT_SIGNING_ACCOUNT: ${{ vars.AZURE_ARTIFACT_SIGNING_ACCOUNT }}
+  AZURE_ARTIFACT_SIGNING_RESOURCE_GROUP: ${{ vars.AZURE_ARTIFACT_SIGNING_RESOURCE_GROUP }}
+  AZURE_ARTIFACT_SIGNING_PROFILE: ${{ vars.AZURE_ARTIFACT_SIGNING_PROFILE }}
+  CLARK_WINDOWS_SIGNER_SUBJECT: ${{ vars.CLARK_WINDOWS_SIGNER_SUBJECT }}
+  CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS: -C target-feature=+crt-static
+
+jobs:
+  preflight:
+    name: Exact Windows source and release authority
+    runs-on: ubuntu-22.04
+    environment: release
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ env.PRODUCT_REPOSITORY }}
+          ref: ${{ inputs.source_revision }}
+          token: ${{ secrets.CLARK_SCIENTIST_READ_TOKEN }}
+          fetch-depth: 0
+
+      - name: Require a Windows-compatible Git tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          import subprocess
+          import sys
+
+          forbidden = set('<>:"\\|?*')
+          reserved = {"CON", "PRN", "AUX", "NUL"}
+          reserved.update(f"COM{number}" for number in range(1, 10))
+          reserved.update(f"LPT{number}" for number in range(1, 10))
+          invalid = []
+          tree = subprocess.check_output(
+              ["git", "ls-tree", "-rz", "--name-only", "HEAD"]
+          )
+          for raw_path in filter(None, tree.split(b"\0")):
+              path = os.fsdecode(raw_path)
+              for component in path.split("/"):
+                  stem = component.split(".", 1)[0].upper()
+                  if (
+                      any(character in forbidden or ord(character) < 32 for character in component)
+                      or component.endswith((" ", "."))
+                      or stem in reserved
+                  ):
+                      invalid.append(path)
+                      break
+          if invalid:
+              print("Windows-incompatible tracked paths:", file=sys.stderr)
+              for path in invalid:
+                  print(f"  {path!r}", file=sys.stderr)
+              raise SystemExit(1)
+          PY
+
+      - name: Require green CI for the exact Windows source
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          expected_title="Clark Code product CI / $CLARK_RELEASE_SOURCE_REVISION"
+          for attempt in {1..100}; do
+            runs="$(gh api \
+              -H 'Accept: application/vnd.github+json' \
+              "/repos/$GITHUB_REPOSITORY/actions/workflows/clark-code-product-ci.yml/runs?event=workflow_dispatch&per_page=100")"
+            state="$(jq -r --arg title "$expected_title" '
+              [.workflow_runs[] | select(.display_title == $title)][0]
+              | if . == null then "missing\t"
+                else [.status, (.conclusion // "")] | @tsv
+                end
+            ' <<< "$runs")"
+            IFS=$'\t' read -r status conclusion <<< "$state"
+            if [[ "$status" == completed && "$conclusion" != success ]]; then
+              echo "::error::Exact product CI failed ($conclusion)"
+              exit 1
+            fi
+            if [[ "$status" == completed && "$conclusion" == success ]]; then
+              break
+            fi
+            if [[ "$attempt" == 100 ]]; then
+              echo "::error::Timed out waiting for exact candidate CI"
+              exit 1
+            fi
+            sleep 15
+          done
+
+      - name: Bind the exact public foundation revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          foundation_revision="$(tr -d '[:space:]' < "$PRODUCT_DIR/foundation-revision.txt")"
+          [[ "$foundation_revision" =~ ^[0-9a-f]{40}$ ]]
+          git clone --filter=blob:none --no-checkout \
+            https://github.com/clark-labs-inc/clark-code.git \
+            "$GITHUB_WORKSPACE/../clark-desktop"
+          git -C "$GITHUB_WORKSPACE/../clark-desktop" fetch --depth=1 origin "$foundation_revision"
+          git -C "$GITHUB_WORKSPACE/../clark-desktop" checkout --detach "$foundation_revision"
+          test "$(git -C "$GITHUB_WORKSPACE/../clark-desktop" rev-parse HEAD)" = "$foundation_revision"
+
+      - name: Require the independent Windows release contract
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+        run: |
+          set -euo pipefail
+          [[ "$CLARK_RELEASE_SOURCE_REVISION" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$CLARK_RELEASE_SOURCE_REVISION"
+          git fetch origin main
+          git merge-base --is-ancestor "$CLARK_RELEASE_SOURCE_REVISION" origin/main
+          [[ "$CLARK_WINDOWS_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          test "$(tr -d '[:space:]' < "$PRODUCT_DIR/windows-version.txt")" = "$CLARK_WINDOWS_VERSION"
+          case "$CLARK_WINDOWS_RELEASE_MODE" in
+            preview|signed) ;;
+            *) echo "::error::release_mode must be preview or signed"; exit 1 ;;
+          esac
+          required=(
+            CLARK_AUTORESEARCH_RELEASE_REF
+            CLARK_DESKTOP_DOWNLOAD_BUCKET
+            CLARK_DESKTOP_DOWNLOAD_BASE_URL
+            CLARK_DESKTOP_DOWNLOAD_UPLOAD_ROLE_ARN
+            TAURI_SIGNING_PRIVATE_KEY
+            TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+          )
+          if [[ "$CLARK_WINDOWS_RELEASE_MODE" == signed ]]; then
+            required+=(
+              AZURE_CLIENT_ID
+              AZURE_TENANT_ID
+              AZURE_SUBSCRIPTION_ID
+              AZURE_ARTIFACT_SIGNING_ENDPOINT
+              AZURE_ARTIFACT_SIGNING_ACCOUNT
+              AZURE_ARTIFACT_SIGNING_RESOURCE_GROUP
+              AZURE_ARTIFACT_SIGNING_PROFILE
+              CLARK_WINDOWS_SIGNER_SUBJECT
+            )
+          fi
+          for name in "${required[@]}"; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "::error::$name is required for this Windows release"
+              exit 1
+            fi
+          done
+          node "$PRODUCT_DIR/scripts/preflight-release-configs.mjs" \
+            --product-root "$GITHUB_WORKSPACE/$PRODUCT_DIR" \
+            --foundation-root "$GITHUB_WORKSPACE/../clark-desktop"
+
+      - name: Authenticate the independent Windows publisher
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
+        with:
+          role-to-assume: ${{ env.CLARK_DESKTOP_DOWNLOAD_UPLOAD_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Reject conflicting immutable Windows identities
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(aws sts get-caller-identity --query Account --output text)" = 293723385520
+          prefix="desktop/windows/releases/$CLARK_RELEASE_TAG/"
+          mapfile -t keys < <(aws s3api list-objects-v2 \
+            --bucket "$CLARK_DESKTOP_DOWNLOAD_BUCKET" \
+            --prefix "$prefix" \
+            --query 'Contents[].Key' \
+            --output text | tr '\t' '\n' | sed '/^None$/d;/^$/d')
+          for key in "${keys[@]}"; do
+            [[ "$key" == "${prefix}_rollback/"* ]] && continue
+            existing_revision="$(aws s3api head-object \
+              --bucket "$CLARK_DESKTOP_DOWNLOAD_BUCKET" \
+              --key "$key" \
+              --query 'Metadata."source-revision"' \
+              --output text)"
+            if [[ "$existing_revision" != "$CLARK_RELEASE_SOURCE_REVISION" ]]; then
+              echo "::error::Windows $CLARK_RELEASE_TAG is occupied by $existing_revision at $key"
+              exit 1
+            fi
+          done
+
+      - name: Validate resumed Windows package authority
+        if: inputs.artifact_run_id != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [[ "${{ inputs.artifact_run_id }}" =~ ^[0-9]+$ ]]
+          source_run="$(gh api "/repos/$GITHUB_REPOSITORY/actions/runs/${{ inputs.artifact_run_id }}")"
+          test "$(jq -r .head_sha <<< "$source_run")" = "$CLARK_RELEASE_SOURCE_REVISION"
+          test "$(jq -r .path <<< "$source_run")" = ".github/workflows/clark-code-windows-release.yml"
+          jobs="$(gh api "/repos/$GITHUB_REPOSITORY/actions/runs/${{ inputs.artifact_run_id }}/jobs?per_page=100")"
+          test "$(jq -r '[.jobs[] | select(.name == "Build, sign, and package Windows")][0].conclusion' <<< "$jobs")" = success
+          artifacts="$(gh api "/repos/$GITHUB_REPOSITORY/actions/runs/${{ inputs.artifact_run_id }}/artifacts?per_page=100")"
+          test "$(jq -r '[.artifacts[] | select(.name == "windows-release-records" and .expired == false)] | length' <<< "$artifacts")" = 1
+
+  remote_worker:
+    name: Build source-bound Windows package workers
+    needs: preflight
+    if: inputs.artifact_run_id == ''
+    runs-on: ubuntu-22.04
+    environment: release
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: ${{ env.PRODUCT_REPOSITORY }}
+          ref: ${{ inputs.source_revision }}
+          token: ${{ secrets.CLARK_SCIENTIST_READ_TOKEN }}
+      - name: Bind release sources
+        shell: bash
+        env:
+          CLARK_PRIVATE_READ_TOKEN: ${{ secrets.CLARK_SCIENTIST_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          foundation_revision="$(tr -d '[:space:]' < "$PRODUCT_DIR/foundation-revision.txt")"
+          git clone --filter=blob:none --no-checkout https://github.com/clark-labs-inc/clark-code.git "$GITHUB_WORKSPACE/../clark-desktop"
+          git -C "$GITHUB_WORKSPACE/../clark-desktop" fetch --depth=1 origin "$foundation_revision"
+          git -C "$GITHUB_WORKSPACE/../clark-desktop" checkout --detach "$foundation_revision"
+          test -n "$CLARK_PRIVATE_READ_TOKEN"
+          git config --global \
+            url."https://x-access-token:${CLARK_PRIVATE_READ_TOKEN}@github.com/clark-labs-inc/clark-autoresearch".insteadOf \
+            "https://github.com/clark-labs-inc/clark-autoresearch"
+          git clone --filter=blob:none --no-checkout https://github.com/clark-labs-inc/clark-autoresearch.git "$GITHUB_WORKSPACE/../clark-autoresearch"
+          git -C "$GITHUB_WORKSPACE/../clark-autoresearch" fetch --depth=1 origin "$CLARK_AUTORESEARCH_RELEASE_REF"
+          git -C "$GITHUB_WORKSPACE/../clark-autoresearch" checkout --detach "$CLARK_AUTORESEARCH_RELEASE_REF"
+          "$PRODUCT_DIR/scripts/validate-scientist-lock.sh" \
+            --product-root "$GITHUB_WORKSPACE/$PRODUCT_DIR" \
+            --autoresearch-source "$GITHUB_WORKSPACE/../clark-autoresearch"
+      - name: Calculate the exact shared-worker identity
+        id: worker-identity
+        shell: bash
+        run: |
+          node "$PRODUCT_DIR/scripts/shared-worker-cache.mjs" key \
+            --product-root "$GITHUB_WORKSPACE" \
+            --foundation-root "$GITHUB_WORKSPACE/../clark-desktop" \
+            --autoresearch-root "$GITHUB_WORKSPACE/../clark-autoresearch" \
+            --out "$RUNNER_TEMP/shared-worker-identity.json"
+      - name: Restore immutable shared workers
+        id: worker-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          key: ${{ steps.worker-identity.outputs.cache-key }}
+          path: |
+            crates/clark-desktop-product/binaries/agent-code-worker-x86_64-unknown-linux-musl
+            crates/clark-desktop-product/binaries/clark-code-headless-x86_64-unknown-linux-musl
+            crates/clark-desktop-product/binaries/clark-execution-cell-x86_64-unknown-linux-gnu
+            crates/clark-desktop-product/binaries/shared-worker-receipt.json
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
+        if: steps.worker-cache.outputs.cache-hit != 'true'
+        with:
+          toolchain: 1.97.1
+          targets: x86_64-unknown-linux-musl
+      - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba
+        if: steps.worker-cache.outputs.cache-hit != 'true'
+      - name: Install release worker toolchains
+        if: steps.worker-cache.outputs.cache-hit != 'true'
+        shell: bash
+        env:
+          ZIG_VERSION: 0.16.0
+          ZIG_SHA256: 70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y mold
+          archive="$RUNNER_TEMP/zig.tar.xz"
+          install_dir="$HOME/.cache/clark-release-tools/zig-$ZIG_VERSION"
+          if [[ ! -x "$install_dir/zig" ]]; then
+            curl --proto '=https' --tlsv1.2 --retry 5 --location --fail --silent --show-error \
+              "https://ziglang.org/download/$ZIG_VERSION/zig-x86_64-linux-$ZIG_VERSION.tar.xz" \
+              --output "$archive"
+            printf '%s  %s\n' "$ZIG_SHA256" "$archive" | sha256sum --check --strict
+            mkdir -p "$install_dir"
+            tar -xJf "$archive" --strip-components=1 -C "$install_dir"
+          fi
+          echo "$install_dir" >> "$GITHUB_PATH"
+          cargo install cargo-zigbuild --version 0.23.0 --locked
+      - name: Build source-bound shared workers
+        if: steps.worker-cache.outputs.cache-hit != 'true'
+        shell: bash
+        env:
+          SCCACHE_GHA_ENABLED: "true"
+          RUSTC_WRAPPER: sccache
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/.cache/clark-release-tools/zig-0.16.0:$PATH"
+          (
+            cd "$GITHUB_WORKSPACE/../clark-desktop"
+            AGENT_CODE_WORKER_TARGET_DIR="$GITHUB_WORKSPACE/$PRODUCT_DIR/target/remote-worker" \
+              AGENT_CODE_WORKER_OUTPUT_DIR="$GITHUB_WORKSPACE/$PRODUCT_DIR/binaries" \
+              scripts/stage-code-worker.sh --target x86_64-unknown-linux-musl --profile release
+          )
+          CLARK_SCIENTIST_TARGET_DIR="$GITHUB_WORKSPACE/$PRODUCT_DIR/target/scientist" \
+            "$PRODUCT_DIR/scripts/stage-scientist-worker.sh" \
+              --autoresearch-source "$GITHUB_WORKSPACE/../clark-autoresearch" \
+              --target x86_64-unknown-linux-musl \
+              --profile release
+          CARGO_TARGET_DIR="$GITHUB_WORKSPACE/$PRODUCT_DIR/target/execution-cell-cli" \
+            cargo build --locked --manifest-path "$PRODUCT_DIR/Cargo.toml" --release \
+              -p clark-cli --target x86_64-unknown-linux-gnu
+          install -m 0755 \
+            "$PRODUCT_DIR/target/execution-cell-cli/x86_64-unknown-linux-gnu/release/clark" \
+            "$PRODUCT_DIR/binaries/clark-execution-cell-x86_64-unknown-linux-gnu"
+          node "$PRODUCT_DIR/scripts/shared-worker-cache.mjs" receipt \
+            --manifest "$RUNNER_TEMP/shared-worker-identity.json" \
+            --agent-code-worker "$PRODUCT_DIR/binaries/agent-code-worker-x86_64-unknown-linux-musl" \
+            --scientist-worker "$PRODUCT_DIR/binaries/clark-code-headless-x86_64-unknown-linux-musl" \
+            --execution-cli "$PRODUCT_DIR/binaries/clark-execution-cell-x86_64-unknown-linux-gnu" \
+            --out "$PRODUCT_DIR/binaries/shared-worker-receipt.json"
+      - name: Verify shared-worker receipt
+        shell: bash
+        run: |
+          node "$PRODUCT_DIR/scripts/shared-worker-cache.mjs" verify \
+            --manifest "$RUNNER_TEMP/shared-worker-identity.json" \
+            --receipt "$PRODUCT_DIR/binaries/shared-worker-receipt.json" \
+            --agent-code-worker "$PRODUCT_DIR/binaries/agent-code-worker-x86_64-unknown-linux-musl" \
+            --scientist-worker "$PRODUCT_DIR/binaries/clark-code-headless-x86_64-unknown-linux-musl" \
+            --execution-cli "$PRODUCT_DIR/binaries/clark-execution-cell-x86_64-unknown-linux-gnu"
+      - name: Save immutable shared workers
+        if: steps.worker-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          key: ${{ steps.worker-identity.outputs.cache-key }}
+          path: |
+            crates/clark-desktop-product/binaries/agent-code-worker-x86_64-unknown-linux-musl
+            crates/clark-desktop-product/binaries/clark-code-headless-x86_64-unknown-linux-musl
+            crates/clark-desktop-product/binaries/clark-execution-cell-x86_64-unknown-linux-gnu
+            crates/clark-desktop-product/binaries/shared-worker-receipt.json
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: windows-release-shared-workers
+          path: |
+            crates/clark-desktop-product/binaries/agent-code-worker-x86_64-unknown-linux-musl
+            crates/clark-desktop-product/binaries/clark-code-headless-x86_64-unknown-linux-musl
+            crates/clark-desktop-product/binaries/clark-execution-cell-x86_64-unknown-linux-gnu
+            crates/clark-desktop-product/binaries/shared-worker-receipt.json
+          if-no-files-found: error
+          retention-days: 2
+      - name: Remove private Cargo credentials
+        if: always()
+        shell: bash
+        env:
+          CLARK_PRIVATE_READ_TOKEN: ${{ secrets.CLARK_SCIENTIST_READ_TOKEN }}
+        run: |
+          git config --global --unset-all \
+            url."https://x-access-token:${CLARK_PRIVATE_READ_TOKEN}@github.com/clark-labs-inc/clark-autoresearch".insteadOf || true
+
+  build:
+    name: Build, sign, and package Windows
+    needs: [preflight, remote_worker]
+    runs-on: windows-2022
+    environment: release
+    timeout-minutes: 100
+    env:
+      SCCACHE_GHA_VERSION: clark-code-windows-native-unpruned-v1
+      CLARK_AUTORESEARCH_SOURCE: ${{ github.workspace }}/../clark-autoresearch
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+    steps:
+      - name: Enable Git for Windows long paths
+        shell: pwsh
+        run: git config --global core.longpaths true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: ${{ env.PRODUCT_REPOSITORY }}
+          ref: ${{ inputs.source_revision }}
+          token: ${{ secrets.CLARK_SCIENTIST_READ_TOKEN }}
+      - name: Bind release sources
+        shell: bash
+        env:
+          CLARK_PRIVATE_READ_TOKEN: ${{ secrets.CLARK_SCIENTIST_READ_TOKEN }}
+        run: |
+          set -euo pipefail
+          foundation_revision="$(tr -d '[:space:]' < "$PRODUCT_DIR/foundation-revision.txt")"
+          git clone --filter=blob:none --no-checkout https://github.com/clark-labs-inc/clark-code.git "$GITHUB_WORKSPACE/../clark-desktop"
+          git -C "$GITHUB_WORKSPACE/../clark-desktop" fetch --depth=1 origin "$foundation_revision"
+          git -C "$GITHUB_WORKSPACE/../clark-desktop" checkout --detach "$foundation_revision"
+          test -n "$CLARK_PRIVATE_READ_TOKEN"
+          git config --global \
+            url."https://x-access-token:${CLARK_PRIVATE_READ_TOKEN}@github.com/clark-labs-inc/clark-autoresearch".insteadOf \
+            "https://github.com/clark-labs-inc/clark-autoresearch"
+          git clone --filter=blob:none --no-checkout https://github.com/clark-labs-inc/clark-autoresearch.git "$GITHUB_WORKSPACE/../clark-autoresearch"
+          git -C "$GITHUB_WORKSPACE/../clark-autoresearch" fetch --depth=1 origin "$CLARK_AUTORESEARCH_RELEASE_REF"
+          git -C "$GITHUB_WORKSPACE/../clark-autoresearch" checkout --detach "$CLARK_AUTORESEARCH_RELEASE_REF"
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4
+        with:
+          toolchain: 1.97.1
+      - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24.18.0
+      - name: Install frontend dependencies
+        shell: bash
+        run: pnpm --dir "$GITHUB_WORKSPACE/../clark-desktop/app" install --frozen-lockfile
+      - name: Bind product frontend dependencies
+        shell: pwsh
+        run: New-Item -ItemType Junction -Path "$env:GITHUB_WORKSPACE/node_modules" -Target "$env:GITHUB_WORKSPACE/../clark-desktop/app/node_modules" | Out-Null
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: windows-release-shared-workers
+          path: crates/clark-desktop-product/binaries
+      - name: Validate private worker lock
+        shell: bash
+        run: |
+          "$PRODUCT_DIR/scripts/validate-scientist-lock.sh" \
+            --product-root "$GITHUB_WORKSPACE/$PRODUCT_DIR" \
+            --autoresearch-source "$CLARK_AUTORESEARCH_SOURCE"
+      - name: Authenticate Windows signing through Azure OIDC
+        if: env.CLARK_WINDOWS_RELEASE_MODE == 'signed'
+        uses: azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Initialize Artifact Signing
+        if: env.CLARK_WINDOWS_RELEASE_MODE == 'signed'
+        shell: pwsh
+        run: |
+          $directory = Join-Path $env:RUNNER_TEMP "clark-release-signing"
+          New-Item -ItemType Directory -Force -Path $directory | Out-Null
+          $source = Join-Path $directory "Program.cs"
+          $probe = Join-Path $directory "probe.exe"
+          Set-Content -LiteralPath $source -Value 'public static class Program { public static int Main() { return 0; } }' -Encoding utf8
+          & "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe" /nologo /target:exe "/out:$probe" $source
+          if ($LASTEXITCODE -ne 0) { throw "Windows signing probe compilation failed" }
+      - name: Sign the release probe
+        if: env.CLARK_WINDOWS_RELEASE_MODE == 'signed'
+        uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82
+        with:
+          endpoint: ${{ env.AZURE_ARTIFACT_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ env.AZURE_ARTIFACT_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ env.AZURE_ARTIFACT_SIGNING_PROFILE }}
+          files: ${{ runner.temp }}\clark-release-signing\probe.exe
+          description: Clark Code
+          correlation-id: windows-release-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Verify the initialized signer
+        if: env.CLARK_WINDOWS_RELEASE_MODE == 'signed'
+        shell: pwsh
+        run: |
+          $signature = Get-AuthenticodeSignature "$env:RUNNER_TEMP\clark-release-signing\probe.exe"
+          if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -ne $env:CLARK_WINDOWS_SIGNER_SUBJECT) {
+            throw "Artifact Signing returned the wrong Clark publisher identity"
+          }
+      - name: Build the independently versioned Windows package
+        shell: bash
+        env:
+          SCCACHE_GHA_ENABLED: "true"
+          RUSTC_WRAPPER: sccache
+        run: |
+          "$PRODUCT_DIR/scripts/build-release-platform.sh" windows
+      - name: Verify every shipped Windows publisher identity
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem "$env:PRODUCT_DIR/target" -Recurse -File -Filter *-setup.exe |
+            Where-Object { $_.FullName -match '[\\/]bundle[\\/]nsis[\\/]' } |
+            Select-Object -First 1
+          if (-not $installer) { throw "Windows NSIS installer was not produced" }
+          $application = Get-ChildItem "$env:PRODUCT_DIR/target" -Recurse -File -Filter clark-code.exe |
+            Where-Object { $_.FullName -match '[\\/]release[\\/]' } |
+            Select-Object -First 1
+          if (-not $application) { throw "Windows application executable was not produced" }
+          $artifacts = @($installer, $application) + @(Get-ChildItem "$env:PRODUCT_DIR/binaries" -Recurse -File -Include *.exe,*.dll)
+          foreach ($artifact in $artifacts) {
+            $signature = Get-AuthenticodeSignature $artifact.FullName
+            if ($env:CLARK_WINDOWS_RELEASE_MODE -eq 'signed') {
+              if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -ne $env:CLARK_WINDOWS_SIGNER_SUBJECT) {
+                $subject = if ($signature.SignerCertificate) { $signature.SignerCertificate.Subject } else { '<none>' }
+                throw "Windows artifact has the wrong publisher: $($artifact.FullName); status=$($signature.Status); subject=$subject; message=$($signature.StatusMessage)"
+              }
+            } elseif ($signature.Status -ne 'NotSigned') {
+              throw "Windows preview unexpectedly claims a publisher signature: $($artifact.FullName)"
+            }
+          }
+          $receipt = @{
+            status = 'passed'
+            version = $env:CLARK_WINDOWS_VERSION
+            source_revision = $env:CLARK_RELEASE_SOURCE_REVISION
+            release_mode = $env:CLARK_WINDOWS_RELEASE_MODE
+            signer_subject = if ($env:CLARK_WINDOWS_RELEASE_MODE -eq 'signed') { $env:CLARK_WINDOWS_SIGNER_SUBJECT } else { $null }
+            installer = $installer.FullName
+          }
+          $receipt | ConvertTo-Json | Set-Content "$env:PRODUCT_DIR/target/windows-signing-receipt.json" -Encoding utf8
+      - name: Install and exercise the packaged Windows executable
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem "$env:PRODUCT_DIR/target" -Recurse -File -Filter *-setup.exe |
+            Where-Object { $_.FullName -match '[\\/]bundle[\\/]nsis[\\/]' } |
+            Select-Object -First 1
+          $installDirectory = Join-Path $env:RUNNER_TEMP 'ClarkCodeWindowsRelease'
+          $install = Start-Process -FilePath $installer.FullName -ArgumentList @('/S', ('/D=' + $installDirectory)) -Wait -PassThru -WindowStyle Hidden
+          if ($install.ExitCode -ne 0) { throw "Silent NSIS install failed with $($install.ExitCode)" }
+          $application = Get-ChildItem $installDirectory -Recurse -File -Filter clark-code.exe | Select-Object -First 1
+          if (-not $application) { throw "Installed Clark Code executable is missing" }
+          $smoke = Join-Path $env:RUNNER_TEMP 'windows-packaged-smoke.json'
+          $process = Start-Process $application.FullName -ArgumentList @('--windows-console-smoke', $smoke) -Wait -PassThru
+          if ($process.ExitCode -ne 0 -or -not (Test-Path $smoke)) { throw "Packaged Windows smoke failed" }
+          $receipt = Get-Content $smoke | ConvertFrom-Json
+          if ($receipt.status -ne 'passed' -or -not $receipt.ordinary_output_seen -or -not $receipt.pty_output_seen) {
+            throw "Packaged Windows process smoke receipt failed"
+          }
+          Copy-Item $smoke "$env:PRODUCT_DIR/target/windows-packaged-smoke.json"
+      - name: Authenticate immutable Windows publisher
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c
+        with:
+          role-to-assume: ${{ env.CLARK_DESKTOP_DOWNLOAD_UPLOAD_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Publish immutable Windows artifacts
+        shell: bash
+        env:
+          CLARK_DESKTOP_DOWNLOAD_BASE_URL: ${{ format('{0}/windows', env.CLARK_DESKTOP_DOWNLOAD_BASE_URL) }}
+          CLARK_DESKTOP_RELEASE_OBJECT_PREFIX: desktop/windows/releases
+          CLARK_DESKTOP_PUBLISH_CLI: "0"
+        run: |
+          "$PRODUCT_DIR/scripts/publish-platform-artifacts.sh"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: windows-release-records
+          path: |
+            crates/clark-desktop-product/public-release-records/*.json
+            crates/clark-desktop-product/target/windows-signing-receipt.json
+            crates/clark-desktop-product/target/windows-packaged-smoke.json
+          if-no-files-found: error
+          retention-days: 90
+      - name: Remove private Cargo credentials
+        if: always()
+        shell: bash
+        env:
+          CLARK_PRIVATE_READ_TOKEN: ${{ secrets.CLARK_SCIENTIST_READ_TOKEN }}
+        run: |
+          git config --global --unset-all \
+            url."https://x-access-token:${CLARK_PRIVATE_READ_TOKEN}@github.com/clark-labs-inc/clark-autoresearch".insteadOf || true
+
+  publish:
+    name: Atomically advance the independent Windows channel
+    needs: [preflight, build]
+    if: >-
+      ${{ always() && needs.preflight.result == 'success' &&
+          (needs.build.result == 'success' ||
+           (inputs.artifact_run_id != '' && needs.build.result == 'skipped')) }}
+    runs-on: ubuntu-22.04
+    environment: release
+    timeout-minutes: 25
+    concurrency:
+      group: clark-code-windows-channel-publish
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: ${{ env.PRODUCT_REPOSITORY }}
+          ref: ${{ inputs.source_revision }}
+          token: ${{ secrets.CLARK_SCIENTIST_READ_TOKEN }}
+          fetch-depth: 0
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: windows-release-records
+          path: crates/clark-desktop-product/release-records
+          run-id: ${{ inputs.artifact_run_id || github.run_id }}
+          github-token: ${{ github.token }}
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24.18.0
+      - name: Prepare the Windows-only updater and download channel
+        working-directory: crates/clark-desktop-product
+        shell: bash
+        run: |
+          published_at="$(git -C "$GITHUB_WORKSPACE" show -s --format=%cI "$CLARK_RELEASE_SOURCE_REVISION" | node -e 'process.stdin.once("data", value => console.log(new Date(String(value).trim()).toISOString()))')"
+          node harness/prepare-release-channel.mjs \
+            --records release-records/public-release-records \
+            --out target/release-channel \
+            --tag "$CLARK_RELEASE_TAG" \
+            --base-url "$CLARK_DESKTOP_DOWNLOAD_BASE_URL/windows" \
+            --source-revision "$CLARK_RELEASE_SOURCE_REVISION" \
+            --platforms windows \
+            --repository "$GITHUB_REPOSITORY" \
+            --published-at "$published_at"
+      - name: Install public Windows release verifier
+        working-directory: crates/clark-desktop-product/harness
+        run: |
+          pnpm install --frozen-lockfile --filter @clark/code-release-harness...
+          pnpm exec playwright install --with-deps chromium
+      - name: Authenticate atomic Windows publisher
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c
+        with:
+          role-to-assume: ${{ env.CLARK_DESKTOP_DOWNLOAD_UPLOAD_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Advance the Windows aliases and updater documents together
+        shell: bash
+        env:
+          CLARK_DESKTOP_CHANNEL_OBJECT_PREFIX: desktop/windows/latest
+          CLARK_DESKTOP_RELEASE_OBJECT_PREFIX: desktop/windows/releases
+          CLARK_DESKTOP_LEGACY_UPDATER_MODE: retire
+        run: |
+          "$PRODUCT_DIR/scripts/advance-release-channel.sh"
+      - name: Verify the public Windows installer, updater, and website twice
+        working-directory: crates/clark-desktop-product
+        shell: bash
+        run: |
+          set -euo pipefail
+          verification_status=0
+          for confirmation in 1 2; do
+            node harness/public-release-journey.mjs \
+              --tag "$CLARK_RELEASE_TAG" \
+              --base-url "$CLARK_DESKTOP_DOWNLOAD_BASE_URL/windows" \
+              --site-url https://www.clarkchat.com/clark-code \
+              --source-revision "$CLARK_RELEASE_SOURCE_REVISION" \
+              --repository "$GITHUB_REPOSITORY" \
+              --platforms windows \
+              --assets target/release-channel/assets.json \
+              --out "target/release-channel/journey-$confirmation" || {
+                verification_status=$?
+                break
+              }
+            sleep 5
+          done
+          if (( verification_status != 0 )); then
+            CLARK_DESKTOP_CHANNEL_OBJECT_PREFIX=desktop/windows/latest \
+              CLARK_DESKTOP_RELEASE_OBJECT_PREFIX=desktop/windows/releases \
+              CLARK_DESKTOP_LEGACY_UPDATER_MODE=retire \
+              scripts/advance-release-channel.sh rollback
+            exit "$verification_status"
+          fi
+      - name: Migrate legacy installations to the independent Windows updater
+        working-directory: crates/clark-desktop-product
+        shell: bash
+        run: |
+          if ! scripts/migrate-windows-updater-fallback.sh; then
+            scripts/migrate-windows-updater-fallback.sh rollback || true
+            CLARK_DESKTOP_CHANNEL_OBJECT_PREFIX=desktop/windows/latest \
+              CLARK_DESKTOP_RELEASE_OBJECT_PREFIX=desktop/windows/releases \
+              CLARK_DESKTOP_LEGACY_UPDATER_MODE=retire \
+              scripts/advance-release-channel.sh rollback
+            exit 1
+          fi
+      - name: Record Windows release finalization handoff
+        working-directory: crates/clark-desktop-product
+        shell: bash
+        run: |
+          jq -n \
+            --arg tag "$CLARK_RELEASE_TAG" \
+            --arg version "$CLARK_WINDOWS_VERSION" \
+            --arg source_revision "$CLARK_RELEASE_SOURCE_REVISION" \
+            --arg run_id "$GITHUB_RUN_ID" \
+            --arg artifact_run_id "${{ inputs.artifact_run_id || github.run_id }}" \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --arg channel "desktop/windows/latest" \
+            '{status:"ready",tag:$tag,version:$version,source_revision:$source_revision,run_id:$run_id,artifact_run_id:$artifact_run_id,repository:$repository,channel:$channel}' \
+            > target/release-channel/windows-release-finalization-handoff.json
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: windows-public-release-receipts
+          path: crates/clark-desktop-product/target/release-channel
+          if-no-files-found: error
+          retention-days: 90
