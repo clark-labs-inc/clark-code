@@ -107,6 +107,7 @@ function specialistPresentationForPrompt(userText: string) {
       : lower.includes("latency") || lower.includes("replication") || lower.includes("falsification")
         ? "scientist"
         : lower.includes("counterexample") || lower.includes("evaluation world") || lower.includes("identity-loss")
+          || lower.includes("improv") || lower.includes("planning reliability")
           ? "rsi"
           : null;
   const presentation = kind ? specialistConversationPresentation(kind) : null;
@@ -278,7 +279,7 @@ export class MockBridge implements CoreBridge {
   async prompt(
     _sessionId: string,
     blocks: ContentBlock[],
-    _attachments: import("../lib/attachments").Upload[] = [],
+    attachments: import("../lib/attachments").Upload[] = [],
   ): Promise<PromptReceipt> {
     const specWorkflow = blocks.some(
       (block) => block.type === "skill_reference" && block.name === "spec:spec",
@@ -290,6 +291,10 @@ export class MockBridge implements CoreBridge {
     const runId = `run-${Date.now()}`;
     if (specWorkflow) void this.playSpecRun(userText, runId);
     else void this.playRun(userText, runId);
+    // Native attachment admission can remain pending after the optimistic user
+    // turn is visible. Keep that boundary realistic so the browser smoke proves
+    // the composer clears before the provider receipt, not merely after it.
+    if (attachments.length > 0) await sleep(500);
     return { runId };
   }
 
@@ -972,6 +977,7 @@ When inputs change while a computation is in progress, the system should follow 
     run: string,
     presentation: ReturnType<typeof specialistPresentationPayload>,
   ) {
+    const rsi = presentation.kind === "rsi";
     this.snapshot.timeline.push({
       item: "message",
       run,
@@ -979,7 +985,9 @@ When inputs change while a computation is in progress, the system should follow 
       phase: "commentary",
       blocks: [{
         type: "text",
-        text: "I’ve assembled the evidence and decision surface so you can inspect the result, not just the narration.",
+        text: rsi
+          ? "I’m improving the system now. I’ll keep a change only when the objective improves and every safety guardrail still passes."
+          : "I’ve assembled the evidence and decision surface so you can inspect the result, not just the narration.",
       }],
     });
     this.emit();
@@ -998,7 +1006,9 @@ When inputs change while a computation is in progress, the system should follow 
       phase: "final_answer",
       blocks: [{
         type: "text",
-        text: "The presentation is ready. Use the view tabs to move from the map to supporting evidence and the run lifecycle.",
+        text: rsi
+          ? "This improvement run is complete. The best safe version and its receipts are retained in the inline loop above."
+          : "The presentation is ready. Use the view tabs to move from the map to supporting evidence and the run lifecycle.",
       }],
     });
     this.snapshot.runs[run] = {

@@ -35,7 +35,7 @@ export interface SpecialistEntitlement {
   organizationId?: string | null;
 }
 
-export interface ScoutWorkspace {
+export interface CompanyScoutMap {
   id: string;
   organization_id: string;
   stable_key: string;
@@ -47,6 +47,18 @@ export interface ScoutWorkspace {
   run_count: number;
   simulation_count: number;
   updated_at_ms: number;
+}
+
+/** Workspace ids remain an internal cartography storage key. The product has
+ * one Company Scout per organization: preserve an exact conversation binding,
+ * otherwise use the server's current organization map (returned first). */
+export function companyScoutMap(
+  maps: CompanyScoutMap[],
+  preferredWorkspaceId?: string,
+): CompanyScoutMap | null {
+  return maps.find((map) => map.id === preferredWorkspaceId)
+    ?? maps[0]
+    ?? null;
 }
 
 export interface ScoutSnapshotEntry {
@@ -258,10 +270,10 @@ export async function specialistPublishOverview(
     : parseRsiOverview(result);
 }
 
-/** The server's direct cartography create response. Counts and status arrive
- * from the workspace catalog, so the desktop projects their known initial
+/** The server's direct cartography setup response. Counts and status arrive
+ * from the internal catalog, so the desktop projects their known initial
  * values immediately instead of rendering a dead control until a refetch. */
-export interface ScoutCreatedWorkspace {
+interface CreatedCompanyScoutMap {
   id: string;
   organization_id: string;
   stable_key: string;
@@ -269,14 +281,14 @@ export interface ScoutCreatedWorkspace {
   coordinator_public_key: string;
 }
 
-function createdScoutWorkspace(
+function createdCompanyScoutMap(
   value: unknown,
   organizationId: string,
-): ScoutWorkspace {
+): CompanyScoutMap {
   if (!value || typeof value !== "object") {
-    throw new Error("Clark returned an invalid Scout workspace");
+    throw new Error("Clark returned an invalid Company Scout setup");
   }
-  const created = value as Partial<ScoutCreatedWorkspace>;
+  const created = value as Partial<CreatedCompanyScoutMap>;
   if (
     typeof created.id !== "string" || !created.id.trim()
     || created.organization_id !== organizationId
@@ -284,7 +296,7 @@ function createdScoutWorkspace(
     || typeof created.display_name !== "string" || !created.display_name.trim()
     || typeof created.coordinator_public_key !== "string" || !created.coordinator_public_key.trim()
   ) {
-    throw new Error("Clark returned an invalid Scout workspace");
+    throw new Error("Clark returned an invalid Company Scout setup");
   }
   return {
     id: created.id,
@@ -301,18 +313,20 @@ function createdScoutWorkspace(
   };
 }
 
-/** Create a Scout cartography workspace after the user presses the visible
- * create control. Conversation start never invokes this operation. */
-export async function specialistCreateWorkspace(
+/** Set up the organization's Company Scout after a visible user action.
+ * Conversation start never invokes this operation. The platform still calls
+ * the opaque cartography storage boundary a workspace. */
+export async function specialistSetupCompanyScout(
   _creds: CloudCreds,
   organizationId: string,
-  displayName: string,
-): Promise<ScoutWorkspace> {
+  companyName: string,
+): Promise<CompanyScoutMap> {
+  const displayName = `${companyName.trim() || "Company"} Scout`;
   if (!inTauri()) {
     return {
       id: "ws-demo-created",
       organization_id: organizationId,
-      stable_key: "cli-scout-workspace",
+      stable_key: "company-scout",
       display_name: displayName,
       status: "active",
       latest_change_sequence: 0,
@@ -323,11 +337,11 @@ export async function specialistCreateWorkspace(
       updated_at_ms: Date.now(),
     };
   }
-  const created = await productRequest<unknown>("specialist.create_workspace", {
+  const created = await productRequest<unknown>("specialist.setup_company_scout", {
     organizationId,
     displayName,
   });
-  return createdScoutWorkspace(created, organizationId);
+  return createdCompanyScoutMap(created, organizationId);
 }
 
 export async function specialistCreateSecurityCampaign(
@@ -371,11 +385,11 @@ export const demoOrganizations: SpecialistOrganization[] = [
   { id: "11111111-1111-4111-8111-111111111111", name: "Clark Labs", role: "owner", status: "active" },
 ];
 
-const demoWorkspaces: ScoutWorkspace[] = [{
+const demoCompanyScoutMaps: CompanyScoutMap[] = [{
   id: "22222222-2222-4222-8222-222222222222",
   organization_id: demoOrganizations[0].id,
-  stable_key: "production",
-  display_name: "Production estate",
+  stable_key: "company-scout",
+  display_name: "Clark Labs Scout",
   status: "active",
   latest_change_sequence: 1842,
   source_count: 7,
@@ -655,7 +669,7 @@ const demoRsiOverview: RsiOverview = {
 
 function demoSpecialistQuery(operation: string): unknown {
   switch (operation) {
-    case "scout_workspaces": return demoWorkspaces;
+    case "scout_workspaces": return demoCompanyScoutMaps;
     case "scout_snapshot": return { entries: demoEntries, next_cursor: null };
     case "scout_changes": return { changes: demoChanges, next_after_sequence: 1842 };
     case "scout_simulations": return demoSimulations;

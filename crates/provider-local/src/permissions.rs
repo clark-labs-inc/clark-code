@@ -406,19 +406,23 @@ impl PermissionGate {
     }
 
     async fn hard_refusal(&self, name: &str, info: &GateInfo) -> Option<String> {
-        if name != "bash" {
-            return None;
-        }
-        if matches!(info.risk, Some(CommandRisk::Blocked)) {
+        if name == "bash" && matches!(info.risk, Some(CommandRisk::Blocked)) {
             return Some(
                 info.reason
                     .clone()
                     .unwrap_or_else(|| "blocked for safety".to_string()),
             );
         }
-        let cmd = info.detail.clone().unwrap_or_default();
-        let segments = crate::safety::split_segments(&cmd);
         let s = self.session.lock().await;
+        let detail = info.detail.as_deref().unwrap_or("");
+        if let Some(reason) = crate::hard_constraints::refusal(name, detail, &s.hard_constraints) {
+            return Some(reason);
+        }
+        if name != "bash" {
+            return None;
+        }
+        let cmd = detail.to_string();
+        let segments = crate::safety::split_segments(&cmd);
         s.deny_commands
             .iter()
             .any(|denied| {

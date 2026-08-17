@@ -1,4 +1,5 @@
 mod event_sink;
+mod final_answer_stream;
 mod proposed_plan_stream;
 pub(crate) mod redaction;
 mod tool_title;
@@ -114,19 +115,22 @@ impl ca::StreamFn for AgentLoopStream {
         let session = self.session.clone();
         let run = self.run.clone();
         let context_limit = self.context_limit;
-        let force_tool_call = {
+        let (force_tool_call, stream_terminal_tool) = {
             let session = session.lock().await;
             let autonomous_goal_in_progress = session
                 .goal
                 .as_ref()
                 .is_some_and(|goal| goal.status != crate::loop_state::GoalStatus::Complete);
-            request.force_tool_call
+            let force_tool_call = request.force_tool_call
                 && !session.planning.plan_mode()
                 && !autonomous_goal_in_progress
                 && request
                     .tools
                     .iter()
-                    .any(|tool| tool.name == crate::tools::final_answer::FINAL_ANSWER_TOOL)
+                    .any(|tool| tool.name == crate::tools::final_answer::FINAL_ANSWER_TOOL);
+            let stream_terminal_tool =
+                force_tool_call && session.effects.unresolved_diagnostics(&run).is_empty();
+            (force_tool_call, stream_terminal_tool)
         };
         let mut messages = to_wire_messages(&request.system_prompt, &request.messages);
         let tools = request
@@ -161,32 +165,53 @@ impl ca::StreamFn for AgentLoopStream {
                             forced_tool_name: (repair_attempts >= 2)
                                 .then_some(crate::tools::final_answer::FINAL_ANSWER_TOOL),
                         },
-                        move |delta| {
-                            if force_tool_call {
-                                return;
-                            }
-                            let visible = proposal_filter_for_text
-                                .lock()
-                                .map(|mut filter| filter.feed(delta))
-                                .unwrap_or_else(|_| delta.to_string());
-                            if !visible.is_empty() {
-                                let _ = chunk_tx.send(ca::StreamEvent::Chunk(
-                                    ca::AssistantStreamChunk::Text { delta: visible },
-                                ));
-                            }
-                        },
-                        move |delta| {
-                            // Required-tool responses remain staged until the
-                            // complete turn proves it honored that contract.
-                            if !force_tool_call {
-                                let _ = reasoning_tx.send(ca::StreamEvent::Chunk(
-                                    ca::AssistantStreamChunk::Reasoning {
-                                        delta: delta.to_string(),
-                                    },
-                                ));
-                            }
-                        },
-                        move |context| incidents_for_retry.observe_retry(context),
+                        crate::llm::StreamObservers::new(
+                            move |delta: &str| {
+                                if force_tool_call {
+                                    return;
+                                }
+                                let visible = proposal_filter_for_text
+                                    .lock()
+                                    .map(|mut filter| filter.feed(delta))
+                                    .unwrap_or_else(|_| delta.to_string());
+                                if !visible.is_empty() {
+                                    let _ = chunk_tx.send(ca::StreamEvent::Chunk(
+                                        ca::AssistantStreamChunk::Text { delta: visible },
+                                    ));
+                                }
+                            },
+                            move |delta: &str| {
+                                // Required-tool responses remain staged until the
+                                // complete turn proves it honored that contract.
+                                if !force_tool_call {
+                                    let _ = reasoning_tx.send(ca::StreamEvent::Chunk(
+                                        ca::AssistantStreamChunk::Reasoning {
+                                            delta: delta.to_string(),
+                                        },
+                                    ));
+                                }
+                            },
+                            {
+                                let tool_tx = tx.clone();
+                                move |delta: crate::llm::WireToolCallDelta| {
+                                    // The effect completion gate can reject a premature
+                                    // final_answer after generation. Keep those arguments
+                                    // staged so rejected answer text never reaches the UI.
+                                    if !stream_terminal_tool {
+                                        return;
+                                    }
+                                    let _ = tool_tx.send(ca::StreamEvent::Chunk(
+                                        ca::AssistantStreamChunk::ToolCallDelta {
+                                            index: delta.index,
+                                            id_delta: delta.id_delta,
+                                            name_delta: delta.name_delta,
+                                            arguments_delta: delta.arguments_delta,
+                                        },
+                                    ));
+                                }
+                            },
+                            move |context| incidents_for_retry.observe_retry(context),
+                        ),
                     )
                     .await;
 

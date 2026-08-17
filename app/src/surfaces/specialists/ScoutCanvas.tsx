@@ -1,9 +1,9 @@
 import { Activity, Box, Clock3, Database, FileCheck2, GitCompareArrows, Layers3, PlayCircle } from "lucide-react";
 import type {
   ScoutChange,
+  CompanyScoutMap,
   ScoutSimulation,
   ScoutSnapshotEntry,
-  ScoutWorkspace,
 } from "../../lib/specialistCloud";
 import type { ScoutTab } from "../../lib/specialists";
 import { EmptyState, MetricCard, SectionCard, StatusPill } from "./SpecialistPrimitives";
@@ -20,11 +20,11 @@ export function scoutSequenceLabel(sequence: number): string {
   return sequence > 0 ? `#${sequence}` : "None yet";
 }
 
-export function scoutLoadedCutLabel(workspace: ScoutWorkspace): string {
-  const age = relativeTime(workspace.updated_at_ms);
-  return workspace.latest_change_sequence > 0
-    ? `loaded evidence cut #${workspace.latest_change_sequence} · workspace updated ${age}`
-    : `no accepted evidence changes · workspace updated ${age}`;
+export function scoutLoadedCutLabel(companyMap: CompanyScoutMap): string {
+  const age = relativeTime(companyMap.updated_at_ms);
+  return companyMap.latest_change_sequence > 0
+    ? `loaded evidence cut #${companyMap.latest_change_sequence} · company map updated ${age}`
+    : `no accepted evidence changes · company map updated ${age}`;
 }
 
 function entryName(entry: ScoutSnapshotEntry): string {
@@ -34,7 +34,7 @@ function entryName(entry: ScoutSnapshotEntry): string {
 
 export function ScoutCanvas({
   tab,
-  workspace,
+  companyMap,
   entries,
   changes,
   simulations,
@@ -42,18 +42,18 @@ export function ScoutCanvas({
   onSelectEntry,
 }: {
   tab: ScoutTab;
-  workspace: ScoutWorkspace | null;
+  companyMap: CompanyScoutMap | null;
   entries: ScoutSnapshotEntry[];
   changes: ScoutChange[];
   simulations: ScoutSimulation[];
   onStartSimulation: () => void;
   onSelectEntry: (entry: ScoutSnapshotEntry) => void;
 }) {
-  if (!workspace) {
+  if (!companyMap) {
     return (
       <EmptyState
-        title="Choose or create a Scout workspace"
-        detail="A workspace is the explicit cartography boundary. Scout will not infer one from the open folder and will not create one when a conversation starts."
+        title="Set up Company Scout"
+        detail="Company Scout builds one shared map of the organization's connected Git, cloud, data, identity, delivery, and observability systems."
       />
     );
   }
@@ -130,9 +130,9 @@ export function ScoutCanvas({
     return (
       <div className="space-y-4 p-5">
         <div className="grid gap-3 sm:grid-cols-3">
-          <MetricCard label="Evidence runs" value={workspace.run_count} detail="All time" />
-          <MetricCard label="Connected sources" value={workspace.source_count} detail="Actively observed" tone="good" />
-          <MetricCard label="Collectors online" value={workspace.active_machine_count} detail="Healthy machines" tone="good" />
+          <MetricCard label="Evidence runs" value={companyMap.run_count} detail="All time" />
+          <MetricCard label="Connected sources" value={companyMap.source_count} detail="Actively observed" tone="good" />
+          <MetricCard label="Collectors online" value={companyMap.active_machine_count} detail="Healthy machines" tone="good" />
         </div>
         <SectionCard title="Latest recorded activity" detail="Existing receipts only; opening this view does not refresh sources">
           <div className="flex items-center gap-4 px-4 py-4">
@@ -140,12 +140,12 @@ export function ScoutCanvas({
               <Activity className="size-5" />
             </span>
             <div className="min-w-0 flex-1">
-              <div className="text-sm font-medium text-ink">{workspace.display_name}</div>
+              <div className="text-sm font-medium text-ink">Company Scout</div>
               <div className="mt-1 text-xs text-ink-muted">
-                {workspace.source_count} connected sources · {entries.length} loaded graph objects · updated {relativeTime(workspace.updated_at_ms)}
+                {companyMap.source_count} connected sources · {entries.length} loaded graph objects · updated {relativeTime(companyMap.updated_at_ms)}
               </div>
             </div>
-            <StatusPill status={workspace.status} />
+            <StatusPill status={companyMap.status} />
           </div>
         </SectionCard>
       </div>
@@ -157,8 +157,8 @@ export function ScoutCanvas({
       <div className="space-y-4 p-5">
         <div className="grid gap-3 sm:grid-cols-3">
           <MetricCard label="Accepted facts" value={entries.length} detail="Current snapshot" tone="good" />
-          <MetricCard label="Source connections" value={workspace.source_count} detail="Permission filtered" />
-          <MetricCard label="Latest receipt" value={scoutSequenceLabel(workspace.latest_change_sequence)} detail={`Workspace updated ${relativeTime(workspace.updated_at_ms)}`} />
+          <MetricCard label="Source connections" value={companyMap.source_count} detail="Permission filtered" />
+          <MetricCard label="Latest receipt" value={scoutSequenceLabel(companyMap.latest_change_sequence)} detail={`Company map updated ${relativeTime(companyMap.updated_at_ms)}`} />
         </div>
         <SectionCard title="Evidence ledger" detail="Accepted observations retain classification and time">
           <div className="divide-y divide-border-subtle">
@@ -188,15 +188,15 @@ export function ScoutCanvas({
     <div className="space-y-4 p-5">
       <div className="grid gap-3 sm:grid-cols-3">
         <MetricCard label="Mapped objects" value={entries.length} detail="Current evidence window" />
-        <MetricCard label="Sources" value={workspace.source_count} detail="Connected control planes" tone="good" />
-        <MetricCard label="Latest sequence" value={scoutSequenceLabel(workspace.latest_change_sequence)} detail={`Workspace updated ${relativeTime(workspace.updated_at_ms)}`} />
+        <MetricCard label="Sources" value={companyMap.source_count} detail="Connected control planes" tone="good" />
+        <MetricCard label="Latest sequence" value={scoutSequenceLabel(companyMap.latest_change_sequence)} detail={`Company map updated ${relativeTime(companyMap.updated_at_ms)}`} />
       </div>
       <SectionCard
         title="Observed system"
         detail="Facts are shown with their evidence classification and acceptance time"
         action={
           <span className="flex items-center gap-1.5 text-xs text-ink-muted">
-            <Clock3 className="size-3.5" /> {scoutLoadedCutLabel(workspace)}
+            <Clock3 className="size-3.5" /> {scoutLoadedCutLabel(companyMap)}
           </span>
         }
       >

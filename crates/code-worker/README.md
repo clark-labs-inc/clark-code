@@ -47,6 +47,11 @@ The first-party `coding` operations are:
 Other capabilities should be implemented as `HeadlessPlugin` crates and
 registered by a worker composition root. This keeps research, evaluation,
 simulation, and future GPU-specific plugins separate from the coding loop.
+Product-owned capabilities that extend the coding provider for one session use
+the narrower compile-time `CodingSessionExtension` seam. The native host sends
+a bounded, credential-free extension recipe; a branded worker must register the
+exact extension id and strictly authorize its payload. This generic binary
+rejects every unregistered extension instead of silently dropping it.
 
 For a worker resident on a CPU/GPU host, set `execution_residency` to
 `remote_worker` and launch it through [`code-remote`](../code-remote/README.md).

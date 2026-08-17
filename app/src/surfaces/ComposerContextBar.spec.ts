@@ -3,6 +3,7 @@ import {
   composerContextKind,
   contextLocationLabel,
   hasSessionContextAuthority,
+  shouldInspectProjectContext,
 } from "./ComposerContextBar";
 
 describe("composer execution location", () => {
@@ -44,5 +45,40 @@ describe("composer context authority", () => {
       checkoutRoot: "",
       activeRemoteHost: null,
     })).toBe(false);
+  });
+});
+
+describe("project context inspection consent", () => {
+  const local = {
+    activeSpecialist: null,
+    activeProvider: "local",
+    cwd: "/Users/test/Documents/project",
+    hasSession: false,
+    projectMode: "local" as const,
+    remoteReady: false,
+    authorizedLocalRoot: null,
+  };
+
+  it("does not probe a remembered local project on the start screen", () => {
+    expect(shouldInspectProjectContext(local)).toBe(false);
+  });
+
+  it("probes after an explicit folder interaction", () => {
+    expect(shouldInspectProjectContext({
+      ...local,
+      authorizedLocalRoot: local.cwd,
+    })).toBe(true);
+  });
+
+  it("probes the checkout owned by an active session", () => {
+    expect(shouldInspectProjectContext({ ...local, hasSession: true })).toBe(true);
+  });
+
+  it("keeps remote inspection available after the remote connection is ready", () => {
+    expect(shouldInspectProjectContext({
+      ...local,
+      projectMode: "remote",
+      remoteReady: true,
+    })).toBe(true);
   });
 });

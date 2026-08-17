@@ -5,7 +5,9 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct BudgetConfig {
-    pub limit_weighted_tokens: u64,
+    /// Optional caller-owned lifetime ceiling. Productive orchestration leaves
+    /// this unset; reservations still serialize concurrent accounting.
+    pub limit_weighted_tokens: Option<u64>,
     pub max_cost_usd: Option<f64>,
     pub non_cached_input_weight: f64,
     pub cached_input_weight: f64,
@@ -16,7 +18,7 @@ pub struct BudgetConfig {
 impl Default for BudgetConfig {
     fn default() -> Self {
         Self {
-            limit_weighted_tokens: 120_000,
+            limit_weighted_tokens: None,
             max_cost_usd: None,
             non_cached_input_weight: 1.0,
             cached_input_weight: 0.1,
@@ -61,7 +63,7 @@ pub struct BudgetReservation {
 
 impl SharedBudget {
     pub fn new(config: BudgetConfig) -> Result<Self, String> {
-        if config.limit_weighted_tokens == 0 {
+        if config.limit_weighted_tokens == Some(0) {
             return Err("token budget must be greater than zero".to_string());
         }
         for (name, value) in [
@@ -106,7 +108,10 @@ impl SharedBudget {
         let projected = state.snapshot.weighted_tokens_used
             + state.snapshot.weighted_tokens_reserved
             + weighted_tokens;
-        if projected > self.config.limit_weighted_tokens as f64
+        if self
+            .config
+            .limit_weighted_tokens
+            .is_some_and(|limit| projected > limit as f64)
             || self
                 .config
                 .max_cost_usd
@@ -131,7 +136,8 @@ impl SharedBudget {
 
     pub fn take_reminder(&self, agent: &str) -> Option<u64> {
         let mut state = self.state.lock().expect("budget lock");
-        let remaining = (self.config.limit_weighted_tokens as f64
+        let limit = self.config.limit_weighted_tokens?;
+        let remaining = (limit as f64
             - state.snapshot.weighted_tokens_used
             - state.snapshot.weighted_tokens_reserved)
             .max(0.0) as u64;
@@ -185,11 +191,11 @@ fn weighted_usage(config: &BudgetConfig, usage: &UsageCharge) -> f64 {
 }
 
 fn update_exhausted(config: &BudgetConfig, snapshot: &mut BudgetSnapshot) {
-    snapshot.exhausted = snapshot.weighted_tokens_used + snapshot.weighted_tokens_reserved
-        >= config.limit_weighted_tokens as f64
-        || config
-            .max_cost_usd
-            .is_some_and(|limit| snapshot.cost_usd >= limit);
+    snapshot.exhausted = config.limit_weighted_tokens.is_some_and(|limit| {
+        snapshot.weighted_tokens_used + snapshot.weighted_tokens_reserved >= limit as f64
+    }) || config
+        .max_cost_usd
+        .is_some_and(|limit| snapshot.cost_usd >= limit);
 }
 
 #[cfg(test)]
@@ -197,9 +203,23 @@ mod tests {
     use super::*;
 
     #[test]
+    fn default_budget_accounts_without_imposing_a_lifetime_ceiling() {
+        let budget = SharedBudget::new(BudgetConfig::default()).unwrap();
+        let reservation = budget.try_reserve(u64::MAX).unwrap();
+        let snapshot = reservation.settle(&UsageCharge {
+            input_tokens: u64::MAX,
+            output_tokens: u64::MAX,
+            ..Default::default()
+        });
+
+        assert!(!snapshot.exhausted);
+        assert!(budget.take_reminder("worker").is_none());
+    }
+
+    #[test]
     fn budget_weights_uncached_and_output_tokens() {
         let budget = SharedBudget::new(BudgetConfig {
-            limit_weighted_tokens: 100,
+            limit_weighted_tokens: Some(100),
             ..Default::default()
         })
         .unwrap();
@@ -217,7 +237,7 @@ mod tests {
     #[test]
     fn concurrent_reservations_fail_before_they_can_oversubscribe() {
         let budget = SharedBudget::new(BudgetConfig {
-            limit_weighted_tokens: 100,
+            limit_weighted_tokens: Some(100),
             ..Default::default()
         })
         .unwrap();
@@ -232,7 +252,7 @@ mod tests {
     #[test]
     fn settling_replaces_a_reservation_with_authoritative_usage() {
         let budget = SharedBudget::new(BudgetConfig {
-            limit_weighted_tokens: 100,
+            limit_weighted_tokens: Some(100),
             ..Default::default()
         })
         .unwrap();

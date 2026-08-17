@@ -12,7 +12,7 @@ describe("composer voice dictation", () => {
       voice: {
         stream: {
           start: vi.fn(async () => ({ id: "voice-1" })),
-          send: vi.fn(async () => undefined),
+          send: vi.fn(async () => ({ text: "An editable dictated" })),
           finish: vi.fn(async () => ({ text: "An editable dictated idea." })),
           cancel: vi.fn(async () => undefined),
         },

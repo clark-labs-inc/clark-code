@@ -208,6 +208,31 @@ async fn desktop_sink_projects_final_answer_as_text_without_a_tool_row() {
     );
     ca::EventSink::emit(
         &sink,
+        ca::AgentEvent::MessageStart {
+            message: empty_assistant(ca::StopReason::EndTurn, None),
+        },
+    )
+    .await;
+    for (name_delta, arguments_delta) in [
+        (Some("final_answer"), Some("{\"content\":\"Fixed ")),
+        (None, Some("and verified.\"}")),
+    ] {
+        ca::EventSink::emit(
+            &sink,
+            ca::AgentEvent::MessageUpdate {
+                partial: empty_assistant(ca::StopReason::EndTurn, None),
+                chunk: ca::AssistantStreamChunk::ToolCallDelta {
+                    index: 0,
+                    id_delta: None,
+                    name_delta: name_delta.map(str::to_string),
+                    arguments_delta: arguments_delta.map(str::to_string),
+                },
+            },
+        )
+        .await;
+    }
+    ca::EventSink::emit(
+        &sink,
         ca::AgentEvent::ToolExecutionStart {
             tool_call_id: "answer-1".into(),
             tool_name: crate::tools::final_answer::FINAL_ANSWER_TOOL.into(),
@@ -238,21 +263,28 @@ async fn desktop_sink_projects_final_answer_as_text_without_a_tool_row() {
             ..
         }
     )));
+    let streamed = events
+        .iter()
+        .filter_map(|event| match event {
+            desktop::AgentEvent::MessageChunk {
+                delta: desktop::ContentBlock::Text { text },
+                ..
+            } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect::<String>();
+    assert_eq!(
+        streamed, "Fixed and verified.",
+        "unexpected events: {events:?}"
+    );
     assert_eq!(
         events
             .iter()
             .filter(|event| matches!(event, desktop::AgentEvent::MessageChunk { .. }))
             .count(),
-        1,
-        "unexpected projected events: {events:?}"
+        2,
+        "the provider's two completed-word deltas must stay incremental without a terminal duplicate: {events:?}",
     );
-    assert!(events.iter().any(|event| matches!(
-        event,
-        desktop::AgentEvent::MessageChunk {
-            delta: desktop::ContentBlock::Text { text },
-            ..
-        } if text == "Fixed and verified."
-    )));
     assert!(!events.iter().any(|event| matches!(
         event,
         desktop::AgentEvent::ToolCall { .. } | desktop::AgentEvent::ToolCallUpdate { .. }

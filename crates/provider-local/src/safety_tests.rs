@@ -176,6 +176,28 @@ fn git_global_directory_option_preserves_read_only_classification() {
 }
 
 #[test]
+fn protected_workflow_constraints_detect_delete_and_push_variants() {
+    for command in [
+        "rm notes.txt",
+        "sudo rm -rf build",
+        "find . -delete",
+        "git clean -fd",
+        "Remove-Item notes.txt",
+    ] {
+        assert!(command_attempts_delete(command), "{command}");
+    }
+    for command in [
+        "git push origin main",
+        "git -C nested push origin main",
+        "true && git --git-dir=.git --work-tree=. push origin HEAD",
+    ] {
+        assert!(command_attempts_github_push(command), "{command}");
+    }
+    assert!(!command_attempts_delete("git status && cargo test"));
+    assert!(!command_attempts_github_push("git fetch origin"));
+}
+
+#[test]
 fn unknown_is_caution() {
     assert_eq!(risk("frobnicate --all"), CommandRisk::Caution);
 }

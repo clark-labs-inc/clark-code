@@ -54,6 +54,7 @@ export interface ProductLocalAgentPolicy {
   includedModel?: string;
   specialistModel?: ProductModelOption;
   providerExtra?: (context: ProductLocalAgentExtensionContext) => Record<string, unknown>;
+  remoteSessionExtra?: (context: ProductLocalAgentExtensionContext) => Record<string, unknown>;
   gatedWorkflows?: readonly ProductGatedWorkflow[];
   workflowAccess?: ProductWorkflowAccessCopy;
 }
@@ -82,7 +83,6 @@ export interface ProductLocalAgentExtensionContext {
     workflow: string;
   };
   trainingOptIn: boolean;
-  executionResidency: "local_only" | "remote_worker";
 }
 
 export interface ProductVoiceInput {
@@ -103,7 +103,7 @@ export interface ProductVoiceStreamSession {
 
 export interface ProductVoiceStreamPolicy {
   start: () => Promise<ProductVoiceStreamSession>;
-  send: (id: string, dataBase64: string) => Promise<void>;
+  send: (id: string, dataBase64: string) => Promise<ProductVoiceTranscription>;
   finish: (id: string) => Promise<ProductVoiceTranscription>;
   cancel: (id: string) => Promise<void>;
 }

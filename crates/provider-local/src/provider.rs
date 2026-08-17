@@ -485,6 +485,9 @@ impl Provider for LocalAgentProvider {
                 pr_body_attribution,
             )
         });
+        if let Some(preamble) = crate::hard_constraints::prompt_preamble(&config.hard_constraints) {
+            prompt.insert_str(0, &preamble);
+        }
         if config.tools_enabled {
             if let Some(docs) = sandbox.docs_root() {
                 prompt.push_str(&crate::workspace::prompt_section(docs));
@@ -523,6 +526,7 @@ impl Provider for LocalAgentProvider {
                 config.command_denylist.clone(),
                 project.permissions.deny.clone(),
             );
+            s.hard_constraints = config.hard_constraints.clone();
             s.output_style = String::new();
             s.hooks = project.hooks;
             s.check_command = project.check_command;

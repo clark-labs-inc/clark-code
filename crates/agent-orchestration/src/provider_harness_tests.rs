@@ -11,6 +11,7 @@ use agent_core::provider::{
     EventStream, ProviderCapabilities, Session, SessionEnvironment, SessionOptions,
 };
 use futures::stream;
+use tokio::sync::Notify;
 
 use crate::contract::{AgentPath, OrchestrationId, ReadOnlyTask, ReportStatus, TaskId};
 
@@ -23,6 +24,59 @@ struct FakeState {
 
 struct FakeProvider {
     shared: Arc<Mutex<FakeState>>,
+}
+
+struct PendingProvider {
+    prompt_started: Arc<Notify>,
+    cancels: Arc<AtomicUsize>,
+}
+
+#[async_trait]
+impl Provider for PendingProvider {
+    fn id(&self) -> ProviderId {
+        ProviderId::new("pending")
+    }
+
+    fn capabilities(&self) -> ProviderCapabilities {
+        ProviderCapabilities::default()
+    }
+
+    async fn connect(&mut self, _config: ProviderConfig) -> CoreResult<()> {
+        Ok(())
+    }
+
+    async fn new_session(&mut self, _options: SessionOptions) -> CoreResult<Session> {
+        Ok(Session {
+            id: SessionId::new("pending-session"),
+            provider: self.id(),
+            capabilities: self.capabilities(),
+            mode: None,
+            collaboration_mode: Default::default(),
+            environment: Some(SessionEnvironment::default()),
+        })
+    }
+
+    async fn load_session(&mut self, _id: SessionId) -> CoreResult<Session> {
+        Err(Error::Unsupported("no".to_string()))
+    }
+
+    async fn prompt(
+        &mut self,
+        _session: &SessionId,
+        _input: PromptInput,
+    ) -> CoreResult<EventStream> {
+        self.prompt_started.notify_one();
+        Ok(Box::pin(stream::pending()))
+    }
+
+    async fn cancel(&mut self, _session: &SessionId, _run: &RunId) -> CoreResult<()> {
+        self.cancels.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+
+    async fn respond(&mut self, _session: &SessionId, _response: ClientResponse) -> CoreResult<()> {
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -191,7 +245,7 @@ async fn provider_harness_rejects_permissions_and_extracts_report() {
             model: "fake".to_string(),
             provider_config: ProviderConfig::default(),
             cwd: "/tmp".to_string(),
-            timeout: Duration::from_secs(1),
+            response_timeout: None,
             enforcement: ReadOnlyEnforcement::HostToolGate,
         },
         Arc::new(move || {
@@ -231,6 +285,68 @@ async fn provider_harness_rejects_permissions_and_extracts_report() {
 }
 
 #[tokio::test]
+async fn unbounded_provider_harness_remains_cancellable_while_the_stream_is_idle() {
+    let prompt_started = Arc::new(Notify::new());
+    let cancels = Arc::new(AtomicUsize::new(0));
+    let factory_prompt_started = prompt_started.clone();
+    let factory_cancels = cancels.clone();
+    let harness = ProviderHarness::new(
+        ProviderHarnessConfig {
+            id: "local".to_string(),
+            kind: HarnessKind::Local,
+            provider: "pending".to_string(),
+            model: "pending".to_string(),
+            provider_config: ProviderConfig::default(),
+            cwd: "/tmp".to_string(),
+            response_timeout: None,
+            enforcement: ReadOnlyEnforcement::HostToolGate,
+        },
+        Arc::new(move || {
+            Box::new(PendingProvider {
+                prompt_started: factory_prompt_started.clone(),
+                cancels: factory_cancels.clone(),
+            }) as Box<dyn Provider>
+        }),
+        Arc::new(StaticGuard("same")),
+    )
+    .unwrap();
+    let cancel = tokio_util::sync::CancellationToken::new();
+    let run_cancel = cancel.clone();
+    let run = tokio::spawn(async move {
+        harness
+            .run(
+                AttemptContext {
+                    orchestration_id: OrchestrationId::new("fanout").unwrap(),
+                    agent_path: AgentPath::parse("/root/reader").unwrap(),
+                    task: ReadOnlyTask {
+                        id: TaskId::new("reader").unwrap(),
+                        role: AgentRole::Explorer,
+                        objective: "inspect".to_string(),
+                        scopes: BTreeSet::from(["src".to_string()]),
+                        acceptance: vec!["cite".to_string()],
+                        harness: "local".to_string(),
+                    },
+                    attempt: 1,
+                    parent_context: "overall".to_string(),
+                    feedback: None,
+                    cancel: run_cancel,
+                },
+                Arc::new(|_| {}),
+            )
+            .await
+    });
+
+    prompt_started.notified().await;
+    cancel.cancel();
+    let result = tokio::time::timeout(Duration::from_secs(1), run)
+        .await
+        .expect("cancellation must not wait for another stream event")
+        .unwrap();
+    assert_eq!(result, Err(HarnessError::Cancelled));
+    assert_eq!(cancels.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
 async fn provider_harness_discards_a_report_when_the_workspace_digest_changes() {
     let state = Arc::new(Mutex::new(FakeState::default()));
     let factory_state = state.clone();
@@ -242,7 +358,7 @@ async fn provider_harness_discards_a_report_when_the_workspace_digest_changes() 
             model: "fake".to_string(),
             provider_config: ProviderConfig::default(),
             cwd: "/tmp".to_string(),
-            timeout: Duration::from_secs(1),
+            response_timeout: Some(Duration::from_secs(1)),
             enforcement: ReadOnlyEnforcement::HostToolGate,
         },
         Arc::new(move || {
@@ -289,7 +405,7 @@ fn acp_requires_stronger_boundary_than_host_tool_gating() {
             model: "external".to_string(),
             provider_config: ProviderConfig::default(),
             cwd: "/tmp".to_string(),
-            timeout: Duration::from_secs(1),
+            response_timeout: Some(Duration::from_secs(1)),
             enforcement: ReadOnlyEnforcement::HostToolGate,
         },
         Arc::new(|| panic!("must not create provider")),

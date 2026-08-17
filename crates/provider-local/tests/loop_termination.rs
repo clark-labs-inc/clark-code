@@ -4,7 +4,7 @@
 //! provider composition root rather than only the underlying `agent-loop`
 //! loop, so production builder defaults and completion plugins are in scope.
 
-use agent_core::domain::{AgentEvent, ContentBlock, RunFailureKind, RunStatus};
+use agent_core::domain::{AgentEvent, ContentBlock, GoalStatus, RunFailureKind, RunStatus};
 use agent_core::provider::{PromptInput, Provider, ProviderConfig, SessionOptions};
 use futures::StreamExt;
 use serde_json::{json, Value};
@@ -156,17 +156,40 @@ async fn read_request(socket: &mut TcpStream) -> Vec<u8> {
 }
 
 async fn serve(listener: TcpListener, bodies: Vec<String>) -> Vec<Vec<u8>> {
-    let mut requests = Vec::with_capacity(bodies.len());
-    for body in bodies {
+    serve_responses(
+        listener,
+        bodies
+            .into_iter()
+            .map(|body| http_response(&body))
+            .collect(),
+    )
+    .await
+}
+
+async fn serve_responses(listener: TcpListener, responses: Vec<Vec<u8>>) -> Vec<Vec<u8>> {
+    let mut requests = Vec::with_capacity(responses.len());
+    for response in responses {
         let (mut socket, _) = listener.accept().await.expect("accept model request");
         requests.push(read_request(&mut socket).await);
         socket
-            .write_all(&http_response(&body))
+            .write_all(&response)
             .await
             .expect("write model response");
         socket.flush().await.expect("flush model response");
     }
     requests
+}
+
+fn error_response(status: u16, message: &str) -> Vec<u8> {
+    let body = json!({
+        "error": {"message": message, "type": "invalid_request_error"}
+    })
+    .to_string();
+    format!(
+        "HTTP/1.1 {status} Bad Request\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{body}",
+        body.len()
+    )
+    .into_bytes()
 }
 
 async fn connect(
@@ -263,6 +286,64 @@ async fn structured_final_answer_is_terminal_after_one_model_response() {
         1,
         "the typed final-answer tool is the natural completion boundary"
     );
+}
+
+#[tokio::test]
+async fn one_failed_run_does_not_override_the_goal_blocker_contract() {
+    let root = tempfile::tempdir().expect("temporary project");
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind model endpoint");
+    let address = listener.local_addr().expect("model endpoint address");
+    let server = tokio::spawn(serve_responses(
+        listener,
+        vec![
+            http_response(&tool_call_body(
+                "discover-goal",
+                "tool_search",
+                json!({"query": "goal autonomy"}),
+            )),
+            http_response(&tool_call_body(
+                "create-goal",
+                "create_goal",
+                json!({"objective": "finish durable work"}),
+            )),
+            http_response(&plain_text_body("Goal created; continuing.")),
+            error_response(400, "deterministic provider rejection"),
+        ],
+    ));
+    let mut provider = connect(address, root.path(), json!({})).await;
+    let session = new_session(&mut provider, root.path()).await;
+    let mut events = provider
+        .prompt(
+            &session.id,
+            PromptInput::text("Create a standing goal and finish durable work."),
+        )
+        .await
+        .expect("start prompt");
+
+    let mut last_goal = None;
+    let mut outcome = None;
+    while let Some(event) = events.next().await {
+        match event {
+            AgentEvent::GoalUpdated { goal, .. } => last_goal = Some(goal),
+            AgentEvent::RunFinished {
+                outcome: finished, ..
+            } => {
+                outcome = Some(finished);
+                break;
+            }
+            _ => {}
+        }
+    }
+
+    let outcome = outcome.expect("run finished");
+    assert_eq!(outcome.status, RunStatus::Failed);
+    assert_eq!(outcome.failure_kind, Some(RunFailureKind::ProviderError));
+    let goal = last_goal.expect("typed goal state");
+    assert_eq!(goal.status, GoalStatus::Active);
+    assert_eq!(goal.blocker_reason, None);
+    assert_eq!(server.await.expect("model server task").len(), 4);
 }
 
 #[tokio::test]

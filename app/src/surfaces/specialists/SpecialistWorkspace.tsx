@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   AlertTriangle,
   Building2,
@@ -25,19 +25,19 @@ import {
   type ScoutTab,
   type SecurityTab,
   type ScientistTab,
-  type RsiTab,
 } from "../../lib/specialists";
 import {
   specialistEntitlement,
   specialistOrganizations,
   specialistCreateOrganization,
   specialistQuery,
-  specialistCreateWorkspace,
+  specialistSetupCompanyScout,
   specialistCreateSecurityCampaign,
+  companyScoutMap,
   type ScoutChange,
   type ScoutSimulation,
   type ScoutSnapshotEntry,
-  type ScoutWorkspace,
+  type CompanyScoutMap,
   type SecurityFinding,
   type SecurityCampaign,
   type SecurityPosture,
@@ -46,7 +46,6 @@ import {
   type SpecialistOrganization,
   type ScienceArtifactSegment,
   type ResearchOverview,
-  type RsiOverview,
 } from "../../lib/specialistCloud";
 import { cloudCreds, type CloudCreds } from "../../lib/cloudHistory";
 import { syncSecurityInsights } from "../../lib/securityCloud";
@@ -57,7 +56,6 @@ import { UpdatePill } from "../TopBar";
 import { ScoutCanvas } from "./ScoutCanvas";
 import { SecurityCanvas } from "./SecurityCanvas";
 import { ScientistCanvas } from "./ScientistCanvas";
-import { RsiCanvas } from "./RsiCanvas";
 import { CanvasStatus } from "./SpecialistPrimitives";
 import { SpecialistAccessGate } from "./SpecialistAccessGate";
 import { SpecWorkspace } from "./SpecWorkspace";
@@ -65,13 +63,13 @@ import { ScoutOrganizationDialog } from "./ScoutOrganizationDialog";
 import { ScoutScopeDialog } from "./ScoutScopeDialog";
 import { ContextualConversation } from "./ContextualConversation";
 import {
-  ScoutWorkspaceControl,
-  ScoutWorkspaceNotice,
-  type ScoutWorkspaceNoticeValue,
-} from "./ScoutWorkspaceControl";
+  CompanyScoutSetupControl,
+  CompanyScoutSetupNotice,
+  type CompanyScoutSetupNoticeValue,
+} from "./ScoutCompanySetup";
 
 interface SpecialistData {
-  workspaces: ScoutWorkspace[];
+  companyMap: CompanyScoutMap | null;
   entries: ScoutSnapshotEntry[];
   changes: ScoutChange[];
   simulations: ScoutSimulation[];
@@ -83,12 +81,11 @@ interface SpecialistData {
   campaigns: SecurityCampaign[];
   localSecurityScans: SecurityScanRecord[];
   researchOverview: ResearchOverview | null;
-  rsiOverview: RsiOverview | null;
   scienceArtifacts: ScienceArtifactSegment[];
 }
 
 const EMPTY_DATA: SpecialistData = {
-  workspaces: [],
+  companyMap: null,
   entries: [],
   changes: [],
   simulations: [],
@@ -100,7 +97,6 @@ const EMPTY_DATA: SpecialistData = {
   campaigns: [],
   localSecurityScans: [],
   researchOverview: null,
-  rsiOverview: null,
   scienceArtifacts: [],
 };
 
@@ -158,13 +154,14 @@ export function SpecialistWorkspace({
   const [serverAccess, setServerAccess] = useState<"unknown" | "ready" | "free" | "action_needed" | "organization_required" | "scope_lost" | "offline">("unknown");
   const [mobilePane, setMobilePane] = useState<"chat" | "canvas">("chat");
   const [canvasOpen, setCanvasOpen] = useState(false);
-  const [creatingWorkspace, setCreatingWorkspace] = useState(false);
-  const [workspaceCreateNotice, setWorkspaceCreateNotice] = useState<ScoutWorkspaceNoticeValue | null>(null);
+  const [settingUpCompanyScout, setSettingUpCompanyScout] = useState(false);
+  const [companyScoutSetupNotice, setCompanyScoutSetupNotice] = useState<CompanyScoutSetupNoticeValue | null>(null);
   const [organizationDialogOpen, setOrganizationDialogOpen] = useState(false);
   const [creatingOrganization, setCreatingOrganization] = useState(false);
   const [organizationName, setOrganizationName] = useState("");
   const [organizationDomain, setOrganizationDomain] = useState("");
   const definition = SPECIALISTS[active];
+  const supportsCanvas = active !== "rsi";
   const context = boundContext?.kind === active ? boundContext : contexts[active] ?? { kind: active };
   const preview = previewAccess();
   const projected = preview
@@ -180,6 +177,12 @@ export function SpecialistWorkspace({
     setData(EMPTY_DATA);
     setOrganizations([]);
   }, []);
+
+  const selectOrganization = useCallback((organizationId?: string) => {
+    setData(EMPTY_DATA);
+    setCompanyScoutSetupNotice(null);
+    setContext({ organizationId, workspaceId: undefined, repositoryId: undefined });
+  }, [setContext]);
 
   const load = useCallback(async () => {
     if (active === "spec") {
@@ -209,11 +212,11 @@ export function SpecialistWorkspace({
         return;
       }
       const organization = orgs.find((item) => item.id === context.organizationId)
-        ?? (active === "scout" ? undefined : orgs[0]);
+        ?? (active === "scout" && orgs.length !== 1 ? undefined : orgs[0]);
       setOrganizations(orgs);
       if (!organization) {
         setData(EMPTY_DATA);
-        // Scout owns an explicit create/select scope flow in this workspace.
+        // Scout owns an explicit company setup/selection flow in this surface.
         // Do not hide that human action behind the generic access gate.
         setServerAccess(active === "scout" ? "ready" : orgs.length === 0 ? "organization_required" : "ready");
         return;
@@ -226,37 +229,43 @@ export function SpecialistWorkspace({
       }
       entitlementVerified = true;
       setServerAccess("ready");
-      if (active !== "scout" && context.organizationId !== organization.id) {
+      if (context.organizationId !== organization.id && boundContext?.kind !== active) {
         setContext({ organizationId: organization.id });
       }
       if (active === "scout") {
-        const workspaces = await specialistQuery<ScoutWorkspace[]>(
+        const maps = await specialistQuery<CompanyScoutMap[]>(
           credentials, active, "scout_workspaces", organization.id,
         );
-        const workspace = workspaces.find((item) => item.id === context.workspaceId);
-        if (!workspace) {
+        const exactMap = maps.find((item) => item.id === context.workspaceId);
+        const map = boundContext?.kind === active
+          ? exactMap ?? null
+          : companyScoutMap(maps, context.workspaceId);
+        if (!map) {
           if (boundContext?.kind === active && context.workspaceId) {
             clearSensitiveData();
             setServerAccess("scope_lost");
             return;
           }
-          setData({ ...EMPTY_DATA, workspaces });
+          setData({ ...EMPTY_DATA, companyMap: null });
           return;
+        }
+        if (!exactMap && boundContext?.kind !== active) {
+          setContext({ workspaceId: map.id });
         }
         const [snapshot, changes, simulations] = await Promise.all([
           specialistQuery<{ entries: ScoutSnapshotEntry[] }>(
-            credentials, active, "scout_snapshot", organization.id, workspace.id,
+            credentials, active, "scout_snapshot", organization.id, map.id,
           ),
           specialistQuery<{ changes: ScoutChange[] }>(
-            credentials, active, "scout_changes", organization.id, workspace.id,
+            credentials, active, "scout_changes", organization.id, map.id,
           ),
           specialistQuery<ScoutSimulation[]>(
-            credentials, active, "scout_simulations", organization.id, workspace.id,
+            credentials, active, "scout_simulations", organization.id, map.id,
           ),
         ]);
         setData({
           ...EMPTY_DATA,
-          workspaces,
+          companyMap: map,
           entries: snapshot.entries,
           changes: changes.changes,
           simulations,
@@ -353,33 +362,9 @@ export function SpecialistWorkspace({
           setProjectionWarning("Cloud artifacts are temporarily unavailable. The latest accepted research overview remains visible.");
         }
       } else if (active === "rsi") {
-        const [overviewResult, artifactsResult] = await Promise.allSettled([
-          specialistQuery<RsiOverview>(
-            credentials,
-            active,
-            "rsi_overview",
-            organization.id,
-          ),
-          specialistQuery<ScienceArtifactSegment[]>(
-            credentials,
-            active,
-            "rsi_artifacts",
-            organization.id,
-          ),
-        ]);
-        if (overviewResult.status === "rejected" && artifactsResult.status === "rejected") {
-          throw overviewResult.reason;
-        }
-        setData({
-          ...EMPTY_DATA,
-          rsiOverview: overviewResult.status === "fulfilled" ? overviewResult.value : null,
-          scienceArtifacts: artifactsResult.status === "fulfilled" ? artifactsResult.value : [],
-        });
-        if (overviewResult.status === "rejected") {
-          setProjectionWarning("The RSI overview is temporarily unavailable. Verified cloud artifacts remain available below.");
-        } else if (artifactsResult.status === "rejected") {
-          setProjectionWarning("Cloud artifacts are temporarily unavailable. The latest accepted RSI overview remains visible.");
-        }
+        // RSI state is a typed live object in the conversation timeline. It
+        // does not own a parallel dashboard projection or artifact browser.
+        setData(EMPTY_DATA);
       } else {
         throw new Error(`No data adapter is registered for specialist ${active}`);
       }
@@ -410,6 +395,12 @@ export function SpecialistWorkspace({
     void load();
   }, [load, securityCompletionKey]);
 
+  useEffect(() => {
+    if (supportsCanvas) return;
+    setCanvasOpen(false);
+    setMobilePane("chat");
+  }, [supportsCanvas]);
+
   useEffect(() => bridge?.onSpecialistProjectionPublished?.((receipt) => {
     if (
       receipt.specialist === active
@@ -423,40 +414,40 @@ export function SpecialistWorkspace({
     if (projected !== "ready") clearSensitiveData();
   }, [clearSensitiveData, projected]);
 
-  // Workspace creation is always a visible human action. Session startup never
-  // creates or silently selects cloud authority on the user's behalf.
-  const createWorkspace = useCallback(async () => {
+  // Company Scout setup is always a visible human action. Session startup never
+  // creates cloud authority on the user's behalf; its internal storage id is
+  // selected after the user chooses a company.
+  const setupCompanyScout = useCallback(async () => {
     if (!credentials || !context.organizationId?.trim()) return;
-    setCreatingWorkspace(true);
-    setWorkspaceCreateNotice(null);
+    const organization = organizations.find((item) => item.id === context.organizationId);
+    if (!organization) return;
+    setSettingUpCompanyScout(true);
+    setCompanyScoutSetupNotice(null);
     setError(null);
     try {
-      const created = await specialistCreateWorkspace(
+      const created = await specialistSetupCompanyScout(
         credentials,
         context.organizationId,
-        "Scout workspace",
+        organization.name,
       );
       setData((current) => ({
         ...current,
-        workspaces: [
-          created,
-          ...current.workspaces.filter((workspace) => workspace.id !== created.id),
-        ],
+        companyMap: created,
       }));
       setContext({ workspaceId: created.id });
-      setWorkspaceCreateNotice({
+      setCompanyScoutSetupNotice({
         tone: "success",
-        message: `${created.display_name} is ready and selected.`,
+        message: "Company Scout is ready.",
       });
     } catch (cause) {
-      setWorkspaceCreateNotice({
+      setCompanyScoutSetupNotice({
         tone: "error",
         message: cause instanceof Error ? cause.message : String(cause),
       });
     } finally {
-      setCreatingWorkspace(false);
+      setSettingUpCompanyScout(false);
     }
-  }, [context.organizationId, credentials, setContext]);
+  }, [context.organizationId, credentials, organizations, setContext]);
 
   const createOrganization = useCallback(async () => {
     if (!credentials || !organizationName.trim() || !organizationDomain.trim()) return;
@@ -472,7 +463,7 @@ export function SpecialistWorkspace({
         created,
         ...current.filter((organization) => organization.id !== created.id),
       ]);
-      setContext({ organizationId: created.id, workspaceId: undefined, repositoryId: undefined });
+      selectOrganization(created.id);
       setOrganizationDialogOpen(false);
       setOrganizationName("");
       setOrganizationDomain("");
@@ -481,28 +472,24 @@ export function SpecialistWorkspace({
     } finally {
       setCreatingOrganization(false);
     }
-  }, [credentials, organizationDomain, organizationName, setContext]);
+  }, [credentials, organizationDomain, organizationName, selectOrganization]);
 
-  const activeWorkspace = useMemo(
-    () => data.workspaces.find((workspace) => workspace.id === context.workspaceId) ?? null,
-    [context.workspaceId, data.workspaces],
-  );
   if (active === "spec") return <SpecWorkspace />;
 
   const canvas = (
     <div className="min-h-0 flex-1 overflow-y-auto bg-bg-secondary/30">
-      <CanvasStatus loading={(loading || creatingWorkspace) && serverAccess === "ready"} error={error} onRetry={() => void load()} />
+      <CanvasStatus loading={(loading || settingUpCompanyScout) && serverAccess === "ready"} error={error} onRetry={() => void load()} />
       {!loading && !error && projectionWarning && (
         <div className="mx-5 mt-4 flex items-start gap-2 border-y border-warning/25 py-3 text-xs leading-5 text-ink-muted">
           <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" aria-hidden="true" />
           <span>{projectionWarning}</span>
         </div>
       )}
-      {!loading && !creatingWorkspace && !error && serverAccess === "ready" && (
+      {!loading && !settingUpCompanyScout && !error && serverAccess === "ready" && (
         active === "scout" ? (
           <ScoutCanvas
             tab={tabs[active] as ScoutTab}
-            workspace={activeWorkspace}
+            companyMap={data.companyMap}
             entries={data.entries}
             changes={data.changes}
             simulations={data.simulations}
@@ -515,7 +502,7 @@ export function SpecialistWorkspace({
               const name = entry.event.fact.attributes.name;
               const label = typeof name === "string" && name.trim() ? name : entry.object_id;
               setContext({
-                workspaceId: activeWorkspace?.id,
+                workspaceId: data.companyMap?.id,
                 objectKind: entry.object_kind,
                 objectId: entry.object_id,
                 workflow: "scout:scout",
@@ -577,16 +564,10 @@ export function SpecialistWorkspace({
               await load();
             }}
           />
-        ) : active === "scientist" ? (
+        ) : (
           <ScientistCanvas
             tab={tabs[active] as ScientistTab}
             overview={data.researchOverview}
-            artifacts={data.scienceArtifacts}
-          />
-        ) : (
-          <RsiCanvas
-            tab={tabs[active] as RsiTab}
-            overview={data.rsiOverview}
             artifacts={data.scienceArtifacts}
           />
         )
@@ -605,29 +586,31 @@ export function SpecialistWorkspace({
         </div>
         <div className="ml-auto flex items-center gap-2">
           <UpdatePill />
-          <button
-            type="button"
-            data-qa={`specialist-show-insights-${active}`}
-            onClick={() => setCanvasOpen((open) => !open)}
-            aria-label={canvasOpen ? `Hide ${definition.label} sidebar` : `Show ${definition.label} sidebar`}
-            aria-expanded={canvasOpen}
-            className="hidden h-9 items-center gap-2 rounded-xl px-3 text-xs font-medium text-ink-muted transition hover:bg-bg-hover hover:text-ink xl:flex"
-          >
-            {canvasOpen ? <PanelRightClose className="size-4" /> : <PanelRightOpen className="size-4" />}
-            {canvasOpen ? "Hide insights" : "Show insights"}
-          </button>
+          {supportsCanvas && (
+            <button
+              type="button"
+              data-qa={`specialist-show-insights-${active}`}
+              onClick={() => setCanvasOpen((open) => !open)}
+              aria-label={canvasOpen ? `Hide ${definition.label} sidebar` : `Show ${definition.label} sidebar`}
+              aria-expanded={canvasOpen}
+              className="hidden h-9 items-center gap-2 rounded-xl px-3 text-xs font-medium text-ink-muted transition hover:bg-bg-hover hover:text-ink xl:flex"
+            >
+              {canvasOpen ? <PanelRightClose className="size-4" /> : <PanelRightOpen className="size-4" />}
+              {canvasOpen ? "Hide insights" : "Show insights"}
+            </button>
+          )}
           {organizations.length > 0 && serverAccess === "ready" && (
             <label className="relative hidden md:block">
-              <span className="sr-only">Organization</span>
+              <span className="sr-only">{active === "scout" ? "Company" : "Organization"}</span>
               <Building2 className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-ink-faint" />
               <select
                 value={active === "scout" ? context.organizationId ?? "" : context.organizationId ?? organizations[0]?.id}
-                onChange={(event) => setContext({ organizationId: event.target.value, workspaceId: undefined, repositoryId: undefined })}
+                onChange={(event) => selectOrganization(event.target.value || undefined)}
                 disabled={boundContext?.kind === active}
                 title={boundContext?.kind === active ? "Start a new specialist conversation to change organization" : undefined}
                 className="h-9 appearance-none rounded-xl bg-bg-secondary pl-8 pr-8 text-xs font-medium text-ink-secondary outline-none transition focus:ring-2 focus:ring-accent/20"
               >
-                {active === "scout" && <option value="">Choose organization…</option>}
+                {active === "scout" && <option value="">Choose company…</option>}
                 {organizations.map((organization) => (
                   <option key={organization.id} value={organization.id}>{organization.name}</option>
                 ))}
@@ -639,24 +622,22 @@ export function SpecialistWorkspace({
             <button
               type="button"
               onClick={() => setOrganizationDialogOpen(true)}
-              aria-label="Create organization"
-              title="Create organization"
+              aria-label="Create company"
+              title="Create company"
               className="grid size-9 place-items-center rounded-xl text-ink-muted transition hover:bg-bg-hover hover:text-ink"
             >
               <Plus className="size-4" />
             </button>
           )}
           {active === "scout" && (
-            <ScoutWorkspaceControl
+            <CompanyScoutSetupControl
               organizationId={context.organizationId}
               organizations={organizations}
-              workspaces={data.workspaces}
-              workspaceId={context.workspaceId}
+              companyScoutReady={Boolean(data.companyMap)}
               serverReady={serverAccess === "ready"}
               bound={boundContext?.kind === active}
-              creating={creatingWorkspace}
-              onSelect={(workspaceId) => setContext({ workspaceId })}
-              onCreate={() => void createWorkspace()}
+              settingUp={settingUpCompanyScout}
+              onSetup={() => void setupCompanyScout()}
             />
           )}
           <span className={cn(
@@ -684,32 +665,26 @@ export function SpecialistWorkspace({
         </div>
       </header>
 
-      {active === "scout" && workspaceCreateNotice && (
-        <ScoutWorkspaceNotice
-          notice={workspaceCreateNotice}
-          onDismiss={() => setWorkspaceCreateNotice(null)}
+      {active === "scout" && companyScoutSetupNotice && (
+        <CompanyScoutSetupNotice
+          notice={companyScoutSetupNotice}
+          onDismiss={() => setCompanyScoutSetupNotice(null)}
         />
       )}
 
       {active === "scout" && scoutScopeOpen && boundContext?.kind !== active && (
         <ScoutScopeDialog
           organizations={organizations}
-          workspaces={data.workspaces}
+          companyScoutReady={Boolean(data.companyMap)}
           organizationId={context.organizationId}
-          workspaceId={context.workspaceId}
           loading={loading}
-          creatingWorkspace={creatingWorkspace}
-          onSelectOrganization={(organizationId) => setContext({
-            organizationId,
-            workspaceId: undefined,
-            repositoryId: undefined,
-          })}
-          onSelectWorkspace={(workspaceId) => setContext({ workspaceId })}
+          settingUpCompanyScout={settingUpCompanyScout}
+          onSelectOrganization={selectOrganization}
           onCreateOrganization={() => {
             setScoutScopeOpen(false);
             setOrganizationDialogOpen(true);
           }}
-          onCreateWorkspace={() => void createWorkspace()}
+          onSetupCompanyScout={() => void setupCompanyScout()}
           onClose={() => setScoutScopeOpen(false)}
         />
       )}
@@ -744,7 +719,7 @@ export function SpecialistWorkspace({
         />
       ) : (
           <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-            <div className={cn(
+            {supportsCanvas && <div className={cn(
               "flex h-10 shrink-0 items-end px-3",
               canvasOpen ? "xl:justify-end" : "xl:h-0 xl:overflow-hidden",
             )}>
@@ -796,15 +771,15 @@ export function SpecialistWorkspace({
                   </button>
                 ))}
               </div>
-            </div>
+            </div>}
             <div className={cn(
               "grid min-h-0 min-w-0 flex-1",
-              canvasOpen && "xl:grid-cols-[minmax(32rem,1fr)_clamp(22rem,34vw,30rem)]",
+              supportsCanvas && canvasOpen && "xl:grid-cols-[minmax(32rem,1fr)_clamp(22rem,34vw,30rem)]",
             )}>
-              <div className={cn("min-h-0 min-w-0", mobilePane !== "chat" && "hidden xl:block")}>
+              <div className={cn("min-h-0 min-w-0", supportsCanvas && mobilePane !== "chat" && "hidden xl:block")}>
                 <ContextualConversation kind={active} />
               </div>
-              <section
+              {supportsCanvas && <section
                 data-qa={`specialist-canvas-${active}`}
                 aria-label={`${definition.label} canvas`}
                 className={cn(
@@ -814,7 +789,7 @@ export function SpecialistWorkspace({
                 )}
               >
                 {canvas}
-              </section>
+              </section>}
             </div>
           </div>
       )}

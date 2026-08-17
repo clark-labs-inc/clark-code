@@ -54,7 +54,9 @@ pub struct ProviderHarnessConfig {
     pub model: String,
     pub provider_config: ProviderConfig,
     pub cwd: String,
-    pub timeout: Duration,
+    /// Optional caller-owned response deadline. Productive delegation leaves
+    /// this unset so only explicit cancellation ends an in-flight attempt.
+    pub response_timeout: Option<Duration>,
     pub enforcement: ReadOnlyEnforcement,
 }
 
@@ -76,7 +78,10 @@ impl ProviderHarness {
         if config.cwd.trim().is_empty() {
             return Err("provider harness cwd must not be empty".to_string());
         }
-        if config.timeout.is_zero() {
+        if config
+            .response_timeout
+            .is_some_and(|timeout| timeout.is_zero())
+        {
             return Err("provider harness timeout must be greater than zero".to_string());
         }
         if config.kind == HarnessKind::Acp
@@ -177,26 +182,30 @@ impl ProviderHarness {
                 return Err(HarnessError::Failed(error.to_string()));
             }
         };
-        let collected = tokio::time::timeout(
-            self.config.timeout,
-            collect_events(
-                provider,
-                &session.id,
-                stream,
-                context.cancel.clone(),
-                events,
-            ),
-        )
-        .await;
-        let collected = match collected {
-            Ok(result) => result,
-            Err(_) => {
-                let _ = provider
-                    .cancel(&session.id, &RunId::new("orchestration-timeout"))
-                    .await;
-                Err(HarnessError::TimedOut(self.config.id.clone()))
-            }
+        let collect = collect_events(
+            provider,
+            &session.id,
+            stream,
+            context.cancel.clone(),
+            events,
+        );
+        let collected = match self.config.response_timeout {
+            Some(timeout) => match tokio::time::timeout(timeout, collect).await {
+                Ok(result) => result,
+                Err(_) => {
+                    let _ = provider
+                        .cancel(&session.id, &RunId::new("orchestration-timeout"))
+                        .await;
+                    Err(HarnessError::TimedOut(self.config.id.clone()))
+                }
+            },
+            None => collect.await,
         };
+        if matches!(collected, Err(HarnessError::Cancelled)) {
+            let _ = provider
+                .cancel(&session.id, &RunId::new("orchestration-cancelled"))
+                .await;
+        }
         let _ = provider.close_session(&session.id).await;
         collected
     }
@@ -217,10 +226,14 @@ async fn collect_events(
     let mut final_message = String::new();
     let mut usage = RunUsage::default();
     let mut failure = None;
-    while let Some(event) = stream.next().await {
-        if cancel.is_cancelled() {
-            return Err(HarnessError::Cancelled);
-        }
+    loop {
+        let event = tokio::select! {
+            _ = cancel.cancelled() => return Err(HarnessError::Cancelled),
+            event = stream.next() => event,
+        };
+        let Some(event) = event else {
+            break;
+        };
         match event {
             AgentEvent::MessageChunk {
                 role: Role::Agent,

@@ -35,6 +35,22 @@ function bridgeStub(): CoreBridge {
   };
 }
 
+function editableSnapshot(): Snapshot {
+  return {
+    session: session.id,
+    runs: { r1: { id: "r1", status: "done" }, r2: { id: "r2", status: "failed" } },
+    timeline: [
+      { item: "message", run: "user", role: "user", blocks: [{ type: "text", text: "first" }] },
+      { item: "message", run: "r1", role: "agent", blocks: [{ type: "text", text: "first reply" }] },
+      { item: "message", run: "user", role: "user", blocks: [{ type: "text", text: "old second" }] },
+      { item: "message", run: "r2", role: "agent", blocks: [{ type: "text", text: "failed reply" }] },
+    ],
+    tool_calls: {},
+    artifacts: [],
+    provider_incidents: {},
+  };
+}
+
 beforeEach(() => {
   useSessionStore.getState().endSession({ force: true });
   useSessionStore.setState({
@@ -67,19 +83,7 @@ describe("edit and resend", () => {
     useSessionStore.setState({ bridge });
     await useSessionStore.getState().startSession();
 
-    const snapshot: Snapshot = {
-      session: session.id,
-      runs: { r1: { id: "r1", status: "done" }, r2: { id: "r2", status: "failed" } },
-      timeline: [
-        { item: "message", run: "user", role: "user", blocks: [{ type: "text", text: "first" }] },
-        { item: "message", run: "r1", role: "agent", blocks: [{ type: "text", text: "first reply" }] },
-        { item: "message", run: "user", role: "user", blocks: [{ type: "text", text: "old second" }] },
-        { item: "message", run: "r2", role: "agent", blocks: [{ type: "text", text: "failed reply" }] },
-      ],
-      tool_calls: {},
-      artifacts: [],
-      provider_incidents: {},
-    };
+    const snapshot = editableSnapshot();
     useSessionStore.setState({ snapshot });
 
     await useSessionStore.getState().resendFrom(2, "edited second");
@@ -108,5 +112,33 @@ describe("edit and resend", () => {
       [],
     );
     expect(useSessionStore.getState().snapshot.timeline).toEqual(snapshot.timeline.slice(0, 2));
+  });
+
+  it("restores the attachment and edit draft when replacement dispatch fails", async () => {
+    const bridge = bridgeStub();
+    useSessionStore.setState({ bridge });
+    await useSessionStore.getState().startSession();
+    vi.mocked(bridge.prompt).mockRejectedValueOnce(new Error("replacement upload failed"));
+    const attachment = {
+      id: "edit-attachment",
+      filename: "routing.png",
+      content_type: "image/png",
+      data_base64: "cG5n",
+      size: 3,
+    };
+    useSessionStore.setState({
+      snapshot: editableSnapshot(),
+      attachments: [attachment],
+    });
+
+    const receipt = await useSessionStore.getState().resendFrom(2, "edited with attachment");
+
+    expect(receipt).toBeNull();
+    expect(useSessionStore.getState().attachments).toEqual([attachment]);
+    expect(useSessionStore.getState().composerPrefill).toEqual({
+      text: "edited with attachment",
+      timelineIndex: 2,
+    });
+    expect(useSessionStore.getState().error).toContain("replacement upload failed");
   });
 });

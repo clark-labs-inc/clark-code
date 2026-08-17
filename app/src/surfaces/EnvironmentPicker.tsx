@@ -32,7 +32,9 @@ export function EnvironmentPicker({
   /** Document-first workflows own their local workspace. They still need the
    * remote folder picker when SSH is selected. */
   showLocalFolder?: boolean;
-  onEnvironmentChanged?: () => void;
+  /** Signals explicit user intent to inspect the selected folder. Remembered
+   * paths remain display-only until this fires. */
+  onEnvironmentChanged?: (path: string) => void;
 }) {
   const providers = useSessionStore((s) => s.providers);
   const activeProvider = useSessionStore((s) => s.activeProvider);
@@ -156,11 +158,15 @@ export function EnvironmentPicker({
     const next = hosts.map((entry) => entry.id === host.id ? { ...entry, remoteRoot } : entry);
     setHosts(next);
     saveSshHosts(next, accountScope);
-    onEnvironmentChanged?.();
+    onEnvironmentChanged?.(remoteRoot);
   };
 
   const folderPicker = isLocal && !isRemote && showLocalFolder ? (
-    <FolderChip cwd={cwd} compact={compact} />
+    <FolderChip
+      cwd={cwd}
+      compact={compact}
+      onFolderSelected={onEnvironmentChanged}
+    />
   ) : isRemote && selectedHost ? (
     <RemoteFolderChip
       host={selectedHost}
@@ -365,7 +371,15 @@ export function RemoteFolderBrowser({
 
 /** Folder chip: shows the project name, opens a popover with a native picker
  *  (Tauri), a path field, and recent projects. */
-function FolderChip({ cwd, compact = false }: { cwd: string; compact?: boolean }) {
+function FolderChip({
+  cwd,
+  compact = false,
+  onFolderSelected,
+}: {
+  cwd: string;
+  compact?: boolean;
+  onFolderSelected?: (path: string) => void;
+}) {
   const pick = useSessionStore((s) => s.pickProjectFolder);
   const setProject = useSessionStore((s) => s.setProjectFolder);
   const setLocal = useSessionStore((s) => s.setLocalSettings);
@@ -393,8 +407,10 @@ function FolderChip({ cwd, compact = false }: { cwd: string; compact?: boolean }
           {tauri && (
             <button
               onClick={() => {
-                void pick();
-                close();
+                void pick().then((path) => {
+                  if (path) onFolderSelected?.(path);
+                  close();
+                });
               }}
               className="mb-1 flex min-h-10 w-full items-center gap-2 rounded-xl bg-accent px-2.5 py-2 text-sm font-medium text-on-accent transition duration-base ease-agent hover:bg-accent-hover"
             >
@@ -405,6 +421,13 @@ function FolderChip({ cwd, compact = false }: { cwd: string; compact?: boolean }
             type="text"
             value={cwd}
             onChange={(e) => setLocal({ cwd: e.target.value })}
+            onKeyDown={(event) => {
+              if (event.key !== "Enter") return;
+              event.preventDefault();
+              const path = cwd.trim();
+              if (path) onFolderSelected?.(path);
+              close();
+            }}
             placeholder={tauri ? "…or paste an absolute path" : "/Users/you/code/my-project"}
             autoCorrect="off"
             autoCapitalize="off"
@@ -423,6 +446,7 @@ function FolderChip({ cwd, compact = false }: { cwd: string; compact?: boolean }
                   active={p === cwd}
                   onClick={() => {
                     setProject(p);
+                    onFolderSelected?.(p);
                     close();
                   }}
                 />

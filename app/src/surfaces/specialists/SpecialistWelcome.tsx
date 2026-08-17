@@ -12,9 +12,7 @@ import {
   Map,
   Radar,
   Repeat2,
-  Route,
   ShieldCheck,
-  TriangleAlert,
   type LucideIcon,
 } from "lucide-react";
 
@@ -73,9 +71,9 @@ const STARTERS: Record<SpecialistKind, readonly SpecialistStarter[]> = {
   ],
   scout: [
     {
-      title: "Map this organization",
+      title: "Map this company",
       detail: "Census authorized sources, repositories, systems, and dependencies.",
-      prompt: "Map the selected organization and workspace. Begin with an adapter and authenticated-context census, reconcile remote repositories with local checkouts, and show evidence and coverage gaps for the resulting system graph.",
+      prompt: "Map the selected company. Begin with an adapter and authenticated-context census across authorized Git, cloud, data, identity, delivery, and observability systems; reconcile remote repositories with local checkouts; and show evidence and coverage gaps for the company graph.",
       tab: "map",
       workflow: "scout:scout",
       icon: Map,
@@ -83,7 +81,7 @@ const STARTERS: Record<SpecialistKind, readonly SpecialistStarter[]> = {
     {
       title: "Assess a proposed change",
       detail: "Trace impact through the selected enterprise graph before implementation.",
-      prompt: "Assess the downstream impact of the change I describe against the selected Scout workspace and identify uncertain, stale, or inaccessible dependencies.",
+      prompt: "Assess the downstream impact of the change I describe against the company-wide Scout map and identify uncertain, stale, or inaccessible dependencies.",
       tab: "changes",
       workflow: "scout:scout",
       icon: GitBranch,
@@ -125,28 +123,28 @@ const STARTERS: Record<SpecialistKind, readonly SpecialistStarter[]> = {
   ],
   rsi: [
     {
-      title: "Create a great evaluation",
-      detail: "Research the target and generate high-information evaluations.",
-      prompt: "Research this target, map its important behaviors with Scout, create a bounded evaluation world, and run the highest-information safe evaluation.",
+      title: "Improve this system",
+      detail: "Set a measurable goal and keep only safe changes.",
+      prompt: "Recursively improve this system. First state the measurable goal, editable scope, protected guardrails, and stop conditions. Then inspect, propose one bounded change, implement it, measure it independently, and keep or undo it before repeating.",
       tab: "evaluations",
-      workflow: "rsi:create-evals",
-      icon: TriangleAlert,
+      workflow: "rsi:research",
+      icon: Repeat2,
     },
     {
-      title: "Build a regression world",
-      detail: "Turn incidents, invariants, and memory into deterministic coverage.",
-      prompt: "Build a reproducible regression evaluation world from target invariants, incidents, Scout context, and known failure modes.",
-      tab: "frontier",
-      workflow: "rsi:regression",
+      title: "Optimize within guardrails",
+      detail: "Improve one result without letting protected checks regress.",
+      prompt: "Improve the most important measurable result in this project without worsening reliability, memory use, security, or existing tests. Show the recursive loop inline and undo any unsafe change.",
+      tab: "evaluations",
+      workflow: "rsi:research",
       icon: Gauge,
     },
     {
-      title: "Build an evaluation world",
-      detail: "Model actors, perturbations, telemetry, safety, and oracles.",
-      prompt: "Build an evaluation world with explicit actors, perturbations, telemetry, safety constraints, and measurable independent oracles.",
-      tab: "worlds",
-      workflow: "rsi:build-world",
-      icon: Route,
+      title: "Continue from the best version",
+      detail: "Resume the loop from the strongest verified checkpoint.",
+      prompt: "Continue recursively improving from the best verified checkpoint. Reconfirm the objective and safety guardrails, make one small change at a time, and stop when the budget or target is reached.",
+      tab: "evaluations",
+      workflow: "rsi:research",
+      icon: ArrowRight,
     },
   ],
 };
@@ -166,11 +164,11 @@ export function SpecialistWelcome({
   const introductionId = useId();
   const [mode, setMode] = useState<"start" | "example">("start");
   const definition = SPECIALISTS[kind];
-  const workspaceCopy = {
-    scout: "Choose a Clark organization and Scout workspace, then explicitly start a run. Scout maps authorized source, delivery, runtime, data, identity, ownership, and observability evidence without treating the currently open folder as the system boundary.",
+  const introductionCopy = {
+    scout: "Choose the company, then explicitly start a run. Company Scout maintains one shared map across authorized source, delivery, runtime, data, identity, ownership, and observability systems without treating the open folder as the company boundary.",
     security: "Choose a repository-level investigation. Security keeps coverage, validated findings, evidence, and remediation organized in the canvas.",
     scientist: "Describe the discovery you want to pursue. Scientist separates hypotheses, experiments, observations, claims, replications, and decisions.",
-    rsi: "Describe a project, product, environment, or model. RSI uses research context to build evaluation worlds, search high-information tests, and preserve reproducible counterexamples.",
+    rsi: "Describe what should improve and what must never get worse. RSI inspects the system, proposes one bounded code change, asks Clark Engineer to implement it, measures it independently, then keeps or undoes it and repeats.",
   }[kind] ?? definition.value;
 
   return (
@@ -191,7 +189,7 @@ export function SpecialistWelcome({
         "specialist-welcome-copy mt-3 max-w-lg text-sm leading-6 text-ink-secondary",
         mode === "example" && "hidden xl:block",
       )}>
-        {workspaceCopy}
+        {introductionCopy}
       </p>
 
       <div

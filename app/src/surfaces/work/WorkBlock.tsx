@@ -12,7 +12,7 @@ function WorkBlockImpl({ calls }: { calls: ToolCall[] }) {
   const edits = summarizeEdits(calls);
   const computerCalls = calls.filter(isComputerUseCall);
   return (
-    <div className="flex flex-col gap-1">
+    <div className="flex flex-col gap-1" data-clark-work-receipt="true">
       {computerCalls.length > 0 && <ComputerUseLiveCard calls={computerCalls} />}
       {calls.map((call) => (
         <WorkLine key={call.id} call={call} active={call.status === "in_progress"} />

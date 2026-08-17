@@ -39,4 +39,24 @@ describe("SpecialistConversationShowcase", () => {
     expect(markup).not.toContain("Use prompt");
     expect(markup).toContain("Validated attack path");
   });
+
+  it("renders RSI as one compact recursive loop instead of a tabbed dashboard", () => {
+    const presentation = specialistConversationPresentation("rsi");
+    expect(presentation).not.toBeNull();
+    if (!presentation) return;
+
+    const markup = renderToStaticMarkup(
+      <SpecialistConversationPresentationCard presentation={presentation} />,
+    );
+
+    expect(markup).toContain('data-qa="rsi-loop-pulse"');
+    expect(markup).toContain("Measuring the latest change");
+    expect(markup).toContain("Best safe result");
+    expect(markup).toContain("72.3");
+    expect(markup).toContain("Guardrails passing");
+    expect(markup).toContain("Production unchanged");
+    expect(markup).not.toContain('role="tablist"');
+    expect(markup).not.toContain(">Worlds<");
+    expect(markup).not.toContain(">Evidence<");
+  });
 });

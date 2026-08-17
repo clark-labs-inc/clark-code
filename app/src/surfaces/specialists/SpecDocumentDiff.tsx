@@ -5,6 +5,7 @@ import * as m from "motion/react-m";
 import type { SpecDiffRow, SpecDocumentDiff as SpecDocumentDiffValue } from "../../lib/specDiff";
 import {
   accessibleMotion,
+  DUR,
   EXPAND,
   FADE,
   RISE_SMALL,
@@ -100,7 +101,7 @@ function DiffLine({
       {...(enter ? accessibleMotion(enter, reduceMotion) : { initial: false })}
       exit={exit}
       transition={row.kind === "equal"
-        ? { duration: reduceMotion ? 0 : 0.2 }
+        ? { duration: reduceMotion ? DUR.fast : 0.2 }
         : staggeredTransition(reduceMotion, changeIndex, 0.035)}
       className={cn(
         "grid min-w-0 grid-cols-[1.5rem_minmax(0,1fr)] rounded-md",

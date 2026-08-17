@@ -96,6 +96,12 @@ export const INCLUDED_CODING_MODEL_ID = productModels.includedModel ?? "";
  * without an included route fall back to their default model. */
 export const QUICK_CHAT_MODEL_ID = INCLUDED_CODING_MODEL_ID || DEFAULT_LOCAL_SETTINGS.model;
 
+const SPEC_HARD_CONSTRAINTS = ["no_delete", "no_github_push"] as const;
+
+function specialistHardConstraints(specialistKind?: string): readonly string[] {
+  return specialistKind?.trim() === "spec" ? SPEC_HARD_CONSTRAINTS : [];
+}
+
 /** The coding models the active product exposes in the composer picker.
  *  `defaultReasoningEffort` is the highest effort supported by that model. */
 export const CODING_MODELS = productModels.models;
@@ -390,26 +396,27 @@ export function localConnectConfig(
     ?? (isSpecialist
       ? SPECIALIST_REASONING_EFFORT
       : normalizeReasoningEffort(model, s.reasoningEffort));
-  const productExtra = productModels.providerExtra?.({
-    ...(productSpecialist ? {
-      specialist: {
-        organizationId: productSpecialist.organizationId,
-        kind: productSpecialist.kind,
-        workflow: productSpecialist.workflow,
-      },
-    } : {}),
-    trainingOptIn: productSpecialist?.trainingOptIn === true,
-    executionResidency: remote ? "remote_worker" : "local_only",
-  }) ?? {};
+  const hardConstraints = specialistHardConstraints(specialistKind);
   if (remote) {
+    const remoteSessionExtra = productModels.remoteSessionExtra?.({
+      ...(productSpecialist ? {
+        specialist: {
+          organizationId: productSpecialist.organizationId,
+          kind: productSpecialist.kind,
+          workflow: productSpecialist.workflow,
+        },
+      } : {}),
+      trainingOptIn: productSpecialist?.trainingOptIn === true,
+    }) ?? {};
     return {
       extra: {
-        // Product metadata describes the bounded specialist recipe but cannot
-        // replace the native-owned worker capability or specialist identity.
-        ...productExtra,
+        ...remoteSessionExtra,
         remote_worker: remote,
         ...(specialistKind?.trim()
           ? { specialist_kind: specialistKind.trim() }
+          : {}),
+        ...(hardConstraints.length > 0
+          ? { hard_constraints: [...hardConstraints] }
           : {}),
         ...(scout ? {
           scout_cartography: {
@@ -424,6 +431,18 @@ export function localConnectConfig(
       },
     };
   }
+  // Local provider extras are consumed only by the branded native provider.
+  // Remote products use the separate credential-free recipe hook above.
+  const productExtra = productModels.providerExtra?.({
+    ...(productSpecialist ? {
+      specialist: {
+        organizationId: productSpecialist.organizationId,
+        kind: productSpecialist.kind,
+        workflow: productSpecialist.workflow,
+      },
+    } : {}),
+    trainingOptIn: productSpecialist?.trainingOptIn === true,
+  }) ?? {};
   return {
     cwd: project || undefined,
     extra: {
@@ -432,6 +451,9 @@ export function localConnectConfig(
       // Per-project shell-command policy the engine consults to skip / block the gate.
       command_allowlist: loadAllowlist(project, scope),
       command_denylist: loadDenylist(project, scope),
+      ...(hardConstraints.length > 0
+        ? { hard_constraints: [...hardConstraints] }
+        : {}),
       // MCP servers to spawn + expose as tools.
       mcp_servers: enabledMcpConfigs(loadMcpServers(scope)),
       // Durable memory: exposes the `memory` tool + injects saved facts.

@@ -1,5 +1,25 @@
 export type VoiceRecordingPhase = "idle" | "connecting" | "recording" | "transcribing";
 
+export interface VoiceDraftSession {
+  prefix: string;
+}
+
+export function mergeVoiceTranscriptDraft(
+  current: string,
+  session: VoiceDraftSession | null,
+  transcript: string,
+): { value: string; session: VoiceDraftSession } {
+  const text = transcript.trim();
+  const nextSession = session ?? (() => {
+    const existing = current.trimEnd();
+    return { prefix: `${existing}${existing ? " " : ""}` };
+  })();
+  return {
+    value: `${nextSession.prefix}${text}`,
+    session: nextSession,
+  };
+}
+
 const MIME_TYPES = [
   "audio/webm;codecs=opus",
   "audio/webm",

@@ -24,8 +24,8 @@ use crate::tools::final_answer::{FINAL_ANSWER_DETAILS_KEY, FINAL_ANSWER_TOOL};
 use crate::tools::ToolRegistry;
 
 use super::{
-    locations_from_details, markdown_artifact, mobile_screenshot_artifact, tool_result_to_content,
-    tool_title,
+    final_answer_stream::FinalAnswerStreams, locations_from_details, markdown_artifact,
+    mobile_screenshot_artifact, tool_result_to_content, tool_title,
 };
 
 pub(crate) struct DesktopEventSink {
@@ -38,6 +38,7 @@ pub(crate) struct DesktopEventSink {
     /// the summary at the checkpoint boundary so only a genuinely new
     /// checkpoint produces another user-visible notice.
     last_compaction_checkpoint: std::sync::Mutex<Option<String>>,
+    final_answer_streams: std::sync::Mutex<FinalAnswerStreams>,
     /// The app-managed document workspace (canonical), when this is a local
     /// session. Markdown files written here are surfaced as inline artifacts.
     docs_dir: Option<std::path::PathBuf>,
@@ -56,6 +57,7 @@ impl DesktopEventSink {
             completed_transcript: CompletedRunTranscript::default(),
             execution: None,
             last_compaction_checkpoint: std::sync::Mutex::new(None),
+            final_answer_streams: std::sync::Mutex::new(FinalAnswerStreams::default()),
             docs_dir,
         }
     }
@@ -166,6 +168,23 @@ impl CompletedRunTranscript {
 #[async_trait]
 impl ca::EventSink for DesktopEventSink {
     async fn emit(&self, event: ca::AgentEvent) {
+        // Tool arguments remain redacted in durable traces, but the terminal
+        // answer's private live bytes are needed briefly to render its content
+        // stream. Capture only this typed delta before redaction and never
+        // persist it outside the ordinary MessageChunk projection below.
+        let private_tool_delta = match &event {
+            ca::AgentEvent::MessageUpdate {
+                chunk:
+                    ca::AssistantStreamChunk::ToolCallDelta {
+                        index,
+                        name_delta,
+                        arguments_delta,
+                        ..
+                    },
+                ..
+            } => Some((*index, name_delta.clone(), arguments_delta.clone())),
+            _ => None,
+        };
         let event = super::redaction::event(event);
         self.completed_transcript.observe(&event);
         if let Ok(payload) = serde_json::to_value(&event) {
@@ -179,6 +198,14 @@ impl ca::EventSink for DesktopEventSink {
                 .await;
         }
         match event {
+            ca::AgentEvent::MessageStart {
+                message: ca::AgentMessage::Assistant { .. },
+            } => {
+                self.final_answer_streams
+                    .lock()
+                    .expect("final answer stream lock")
+                    .reset_message();
+            }
             // The in-loop compactor rewrote the model-visible transcript.
             // Surface it — a silent context rewrite reads as the agent
             // "forgetting" for no reason.
@@ -245,6 +272,34 @@ impl ca::EventSink for DesktopEventSink {
             }
             ca::AgentEvent::MessageUpdate {
                 chunk:
+                    ca::AssistantStreamChunk::ToolCallDelta {
+                        index,
+                        name_delta,
+                        arguments_delta,
+                        ..
+                    },
+                ..
+            } => {
+                let (index, name_delta, arguments_delta) =
+                    private_tool_delta.unwrap_or((index, name_delta, arguments_delta));
+                let delta = self
+                    .final_answer_streams
+                    .lock()
+                    .expect("final answer stream lock")
+                    .observe_delta(index, name_delta.as_deref(), arguments_delta.as_deref());
+                if let Some(delta) = delta {
+                    let _ = self
+                        .events
+                        .send(desktop::AgentEvent::MessageChunk {
+                            run: self.run.clone(),
+                            role: desktop::Role::Agent,
+                            delta: desktop::ContentBlock::text(delta),
+                        })
+                        .await;
+                }
+            }
+            ca::AgentEvent::MessageUpdate {
+                chunk:
                     ca::AssistantStreamChunk::Reasoning { delta }
                     | ca::AssistantStreamChunk::Thinking { delta },
                 ..
@@ -291,6 +346,10 @@ impl ca::EventSink for DesktopEventSink {
                 args,
             } => {
                 if tool_name == FINAL_ANSWER_TOOL {
+                    self.final_answer_streams
+                        .lock()
+                        .expect("final answer stream lock")
+                        .begin(&tool_call_id, &args);
                     return;
                 }
                 let executor = self.registry.get(&tool_name);
@@ -364,14 +423,21 @@ impl ca::EventSink for DesktopEventSink {
                                     phase: desktop::MessagePhase::FinalAnswer,
                                 })
                                 .await;
-                            let _ = self
-                                .events
-                                .send(desktop::AgentEvent::MessageChunk {
-                                    run: self.run.clone(),
-                                    role: desktop::Role::Agent,
-                                    delta: desktop::ContentBlock::text(answer),
-                                })
-                                .await;
+                            let suffix = self
+                                .final_answer_streams
+                                .lock()
+                                .expect("final answer stream lock")
+                                .finish(&tool_call_id, answer);
+                            if !suffix.is_empty() {
+                                let _ = self
+                                    .events
+                                    .send(desktop::AgentEvent::MessageChunk {
+                                        run: self.run.clone(),
+                                        role: desktop::Role::Agent,
+                                        delta: desktop::ContentBlock::text(suffix),
+                                    })
+                                    .await;
+                            }
                         }
                     }
                     return;

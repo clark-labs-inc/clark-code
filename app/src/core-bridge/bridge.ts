@@ -377,9 +377,9 @@ export interface CoreBridge {
     blocks: ContentBlock[],
     attachments?: Upload[],
   ): Promise<PromptReceipt>;
-  /** Resume the latest saved provider recovery point without manufacturing a
-   * visible user message in the transcript. Native bridge only. */
-  resumeProviderIncident?(sessionId: string): Promise<PromptReceipt>;
+  /** Resume an active standing goal from its latest durable recovery point
+   * without manufacturing a visible user message. Native bridge only. */
+  resumeSavedProgress?(sessionId: string): Promise<PromptReceipt>;
   /** Replace the provider's model-visible history with a compact summary.
    *  This is a standalone control operation, not a user prompt. */
   compact?(sessionId: string): Promise<void>;

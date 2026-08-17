@@ -5,6 +5,7 @@ import {
   expandPendingPastes,
   fileToAttachment,
   prettySize,
+  restorePendingAttachments,
   shouldThumbnailPastedText,
   toUpload,
 } from "./attachments";
@@ -67,6 +68,31 @@ describe("prettySize", () => {
     expect(prettySize(500)).toBe("500 B");
     expect(prettySize(2048)).toBe("2 KB");
     expect(prettySize(3 * 1024 * 1024)).toBe("3.0 MB");
+  });
+});
+
+describe("restorePendingAttachments", () => {
+  it("restores a rejected payload ahead of newly staged files without duplicates", () => {
+    const submitted = {
+      id: "submitted",
+      filename: "submitted.png",
+      content_type: "image/png",
+      data_base64: "cG5n",
+      size: 3,
+    };
+    const current = {
+      id: "current",
+      filename: "current.txt",
+      content_type: "text/plain",
+      data_base64: "dHh0",
+      size: 3,
+    };
+
+    expect(restorePendingAttachments([submitted], [current])).toEqual([submitted, current]);
+    expect(restorePendingAttachments([submitted], [submitted, current])).toEqual([
+      submitted,
+      current,
+    ]);
   });
 });
 

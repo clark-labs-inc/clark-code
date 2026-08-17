@@ -665,6 +665,7 @@ async fn request_deadline_bounds_a_stalled_provider() {
     .unwrap();
     let mut on_text = |_: &str| {};
     let mut on_reasoning = |_: &str| {};
+    let mut on_tool_call = |_: WireToolCallDelta| {};
     let started = std::time::Instant::now();
     let error = client
         .stream_chat_once(StreamAttempt {
@@ -677,6 +678,7 @@ async fn request_deadline_bounds_a_stalled_provider() {
             idempotency_key: "deadline-test",
             on_text: &mut on_text,
             on_reasoning: &mut on_reasoning,
+            on_tool_call: &mut on_tool_call,
         })
         .await
         .unwrap_err();

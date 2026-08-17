@@ -152,9 +152,9 @@ You write and modify real files and run real commands on their computer.\n\n",
 
     p.push_str("# Communication\n");
     p.push_str("- End every completed non-Plan-Mode turn by calling `final_answer` with the complete user-facing answer. Plain assistant prose is not a delivery boundary. Do not call `final_answer` while an effect receipt, requested check, or approved-plan obligation is unresolved.\n");
-    p.push_str("- Before the first non-trivial tool batch, give the user one short preamble explaining what you are starting and what comes next. Skip it for a trivial single read or action.\n");
-    p.push_str("- During longer work, update only at meaningful milestones: a load-bearing finding, a changed direction, a completed phase, a blocker, or upcoming high-latency work. Do not narrate routine reads, searches, edits, or every tool call.\n");
-    p.push_str("- Keep each update to one or two sentences with concrete progress and the immediate next action. The Terse output style means at most one short line. Write updates as plain text; do not add narration markup tags.\n");
+    p.push_str("- Before the first non-trivial tool batch, write one natural sentence saying what you are doing and why it helps. Skip it for a trivial single read or action.\n");
+    p.push_str("- Before each later meaningful batch, write one sentence saying what changed or was found, what comes next, and why. Do not narrate routine reads, searches, edits, or every tool call.\n");
+    p.push_str("- These updates are narration, not categorical sections: never label them \"Starting point\", \"What I'm learning\", \"Why search further\", \"Progress\", or similar. The Terse output style means at most one short line. Write plain text without narration markup tags.\n");
     p.push_str("- If work continues, put the update and at least one corresponding tool call in the same assistant response. Reserve text-only responses for the final answer, a genuine question, or a blocker that prevents further action.\n");
     p.push_str("- Never say an action started, ran, passed, failed, or completed without matching tool-call evidence. When you state the next action, make that tool call in the same response.\n\n");
 
@@ -255,7 +255,7 @@ You write and modify real files and run real commands on their computer.\n\n",
     p.push('\n');
 
     p.push_str("# Goals\n");
-    p.push_str("- For \"build the whole thing and keep going until it's done\" requests, the user can ask for autonomous work: activate the goal tools with `tool_search`, then call `create_goal` with the full objective ONLY when they explicitly ask for it (never infer a goal from an ordinary task). The runtime keeps giving you continuation turns until you prove the goal complete with `update_goal` — or it stops the goal on repeated blockers or budget exhaustion.\n");
+    p.push_str("- For \"build the whole thing and keep going until it's done\" requests, the user can ask for autonomous work: activate the goal tools with `tool_search`, then call `create_goal` with the full objective ONLY when they explicitly ask for it (never infer a goal from an ordinary task). The runtime keeps giving you continuation turns until you prove the goal complete with `update_goal`, the same blocker repeats across three goal turns, or the user cancels.\n");
     p.push_str("- If the user explicitly tells you to create or use a goal, activate the goal tools and call `create_goal` before any implementation tool. Do not substitute a checklist or silently finish the task without the requested goal lifecycle.\n");
     p.push('\n');
 
@@ -346,11 +346,12 @@ mod tests {
         );
 
         assert!(p.contains("Before the first non-trivial tool batch"));
-        assert!(p.contains("update only at meaningful milestones"));
+        assert!(p.contains("what changed or was found"));
+        assert!(p.contains("not categorical sections"));
         assert!(p.contains("Do not narrate routine reads"));
         assert!(p.contains("same assistant response"));
         assert!(p.contains("matching tool-call evidence"));
-        assert!(p.contains("do not add narration markup tags"));
+        assert!(p.contains("without narration markup tags"));
     }
 
     #[test]

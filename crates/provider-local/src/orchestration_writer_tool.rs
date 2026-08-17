@@ -1,7 +1,7 @@
 use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use agent_core::domain::{FanOutAgent, FanOutStatus, ToolKind};
 use agent_core::provider::{Provider, ProviderConfig};
@@ -24,8 +24,6 @@ use crate::{
     LocalAgentProvider, LocalMultiRepoRuntime, LocalMultiRepoRuntimeConfig, RepositorySelection,
     RepositorySelectionRequest,
 };
-
-const WRITER_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 
 #[derive(Clone)]
 struct PendingRun {
@@ -291,7 +289,7 @@ async fn run_workstreams(
     let runtime = LocalMultiRepoRuntime::new(
         LocalMultiRepoRuntimeConfig {
             provider_config,
-            timeout: WRITER_TIMEOUT,
+            response_timeout: None,
             scratch_root: scratch_root.clone(),
             artifact_root,
             selection: selection.clone(),
@@ -526,16 +524,21 @@ fn build_plan(
     let writer_count = args.workstreams.len() as u64;
     let lifecycle_minimum = 1 + u64::from(args.independent_review);
     let minimum_budget = writer_count + lifecycle_minimum;
-    if shared.config.policy.token_budget < minimum_budget {
-        return Err(format!(
-            "coding workstream budget must be at least {minimum_budget} weighted tokens"
-        ));
-    }
-    let lifecycle_headroom = (shared.config.policy.token_budget / 10)
-        .max(lifecycle_minimum)
-        .min(shared.config.policy.token_budget - writer_count);
-    let writer_pool = shared.config.policy.token_budget - lifecycle_headroom;
-    let reservation = (writer_pool / writer_count).max(1);
+    let reservation = match shared.config.policy.token_budget {
+        Some(token_budget) => {
+            if token_budget < minimum_budget {
+                return Err(format!(
+                    "coding workstream budget must be at least {minimum_budget} weighted tokens"
+                ));
+            }
+            let lifecycle_headroom = (token_budget / 10)
+                .max(lifecycle_minimum)
+                .min(token_budget - writer_count);
+            let writer_pool = token_budget - lifecycle_headroom;
+            (writer_pool / writer_count).max(1)
+        }
+        None => 1,
+    };
     let mut tasks = vec![global_task(
         planner.clone(),
         MultiRepoTaskRole::Planner,

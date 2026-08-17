@@ -138,6 +138,42 @@ describe("queued follow-ups and explicit steering", () => {
     await first;
   });
 
+  it("suppresses the same message for the full admission window", async () => {
+    let release!: () => void;
+    const promptGate = new Promise<void>((resolve) => { release = resolve; });
+    const bridge = stubBridge({
+      prompt: vi.fn(async () => {
+        await promptGate;
+        return { runId: "run-first" };
+      }),
+    });
+    const entry = newLiveEntry(localSession, {
+      historyPrefix: null,
+      remote: null,
+      remoteHost: null,
+      projectRoot: "/tmp/project",
+    });
+    liveSessions.set(localSession.id, entry);
+    useSessionStore.setState({
+      bridge,
+      session: localSession,
+      snapshot: emptySnapshot(),
+    });
+
+    const first = useSessionStore.getState().send("explain the attachment");
+    await Promise.resolve();
+    entry.lastSubmittedAt = Date.now() - 10_000;
+
+    await expect(
+      useSessionStore.getState().send("explain the attachment"),
+    ).resolves.toEqual({ kind: "not_sent" });
+    expect(bridge.prompt).toHaveBeenCalledTimes(1);
+    expect(useSessionStore.getState().queued).toEqual([]);
+
+    release();
+    await first;
+  });
+
   it("removes the optimistic bubble and restores the draft when dispatch fails", async () => {
     const bridge = stubBridge({
       prompt: vi.fn(async () => {
@@ -158,6 +194,39 @@ describe("queued follow-ups and explicit steering", () => {
     expect(useSessionStore.getState().snapshot.timeline).toEqual([]);
     expect(useSessionStore.getState().composerPrefill).toEqual({ text: "keep my message" });
     expect(useSessionStore.getState().error).toContain("transport unavailable");
+  });
+
+  it("restores consumed attachments when dispatch fails", async () => {
+    const attachment = {
+      id: "attachment-retry",
+      filename: "routing.png",
+      content_type: "image/png",
+      data_base64: "cG5n",
+      size: 3,
+    };
+    const bridge = stubBridge({
+      prompt: vi.fn(async () => {
+        throw new Error("upload transport unavailable");
+      }),
+    });
+    liveSessions.set(localSession.id, newLiveEntry(localSession, {
+      historyPrefix: null,
+      remote: null,
+      remoteHost: null,
+      projectRoot: "/tmp/project",
+    }));
+    useSessionStore.setState({
+      bridge,
+      session: localSession,
+      snapshot: emptySnapshot(),
+      attachments: [attachment],
+    });
+
+    const outcome = await useSessionStore.getState().send("explain this");
+
+    expect(outcome).toEqual({ kind: "not_sent" });
+    expect(useSessionStore.getState().attachments).toEqual([attachment]);
+    expect(useSessionStore.getState().composerPrefill).toEqual({ text: "explain this" });
   });
 
   it("queues during an active local run instead of steering it", async () => {

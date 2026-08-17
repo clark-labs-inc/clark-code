@@ -914,10 +914,13 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
     const requestAuth = get().auth;
     try {
       const picked = await pickFolder(get().localSettings.cwd || undefined);
-      if (picked && authAccountMatches(requestAuth, get().auth)) get().setProjectFolder(picked);
+      if (!picked || !authAccountMatches(requestAuth, get().auth)) return null;
+      get().setProjectFolder(picked);
+      return picked;
     } catch (e) {
-      if (!authAccountMatches(requestAuth, get().auth)) return;
+      if (!authAccountMatches(requestAuth, get().auth)) return null;
       set({ error: String(e) });
+      return null;
     }
   },
 

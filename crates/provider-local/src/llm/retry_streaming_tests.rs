@@ -73,6 +73,61 @@ async fn publishes_openrouter_text_deltas_as_completed_words() {
 }
 
 #[tokio::test]
+async fn forwards_openrouter_tool_arguments_as_provider_deltas() {
+    let chunks = vec![
+        (
+            Duration::ZERO,
+            frame(
+                r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"answer-1","function":{"name":"final_","arguments":"{\"content\":\"Clark "}}]}}]}"#,
+            ),
+        ),
+        (
+            Duration::from_millis(20),
+            frame(
+                r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"answer","arguments":"streams\"}"}}]},"finish_reason":"tool_calls"}]}"#,
+            ),
+        ),
+        (Duration::ZERO, b"data: [DONE]\n\n".to_vec()),
+    ];
+    let base_url = progressive_endpoint(chunks).await;
+    let client = LlmClient::from_parts(&base_url, "fake-model", None, Vec::new(), None).unwrap();
+    let cancel = CancellationToken::new();
+    let mut callbacks = Vec::new();
+    let turn = client
+        .stream_chat_observed_with_tool_choice(
+            &[ChatMessage::user("hello")],
+            &[],
+            StreamChatOptions {
+                cancel: &cancel,
+                force_tool_call: true,
+                forced_tool_name: None,
+            },
+            StreamObservers::new(
+                |_: &str| {},
+                |_: &str| {},
+                |delta| callbacks.push(delta),
+                |_| {},
+            ),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(turn.tool_calls[0].function.name, "final_answer");
+    assert_eq!(
+        turn.tool_calls[0].function.arguments,
+        r#"{"content":"Clark streams"}"#
+    );
+    assert_eq!(callbacks.len(), 2);
+    assert_eq!(callbacks[0].name_delta.as_deref(), Some("final_"));
+    assert_eq!(
+        callbacks[0].arguments_delta.as_deref(),
+        Some(r#"{"content":"Clark "#)
+    );
+    assert_eq!(callbacks[1].name_delta.as_deref(), Some("answer"));
+    assert_eq!(callbacks[1].arguments_delta.as_deref(), Some("streams\"}"));
+}
+
+#[tokio::test]
 async fn never_publishes_single_token_identity_residue() {
     let chunks = vec![
         (

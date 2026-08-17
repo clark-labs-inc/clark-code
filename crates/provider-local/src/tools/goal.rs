@@ -257,8 +257,8 @@ impl ToolExecutor for GetGoal {
         "get_goal"
     }
     fn description(&self) -> &str {
-        "Get the current session goal: objective, status, token budget and usage, elapsed \
-        time, and continuation count."
+        "Get the current session goal: objective, status, tokens used, elapsed time, and \
+        continuation count."
     }
     fn parameters(&self) -> Value {
         json!({"type": "object", "properties": {}})

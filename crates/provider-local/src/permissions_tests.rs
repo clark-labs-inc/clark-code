@@ -143,6 +143,65 @@ fn browser_gate_info_is_marked_external_like_mcp_tools() {
     assert!(info.detail.unwrap().contains("navigate"));
 }
 
+#[tokio::test]
+async fn protected_full_access_refuses_deletion_and_github_push_without_prompting() {
+    let dir = tempfile::tempdir().unwrap();
+    let session = Arc::new(Mutex::new(SessionState {
+        hard_constraints: vec!["no_delete".into(), "no_github_push".into()],
+        ..Default::default()
+    }));
+    let control = Arc::new(Mutex::new(RunControl::default()));
+    let (tx, rx) = async_channel::unbounded::<AgentEvent>();
+    let gate = PermissionGate::new(session, control, SessionId::new("protected"), tx);
+
+    assert_eq!(
+        gate.hard_refusal("bash", &bash_gate("git -C repo push origin main"))
+            .await
+            .as_deref(),
+        Some("this Spec's protected Full access never pushes or merges changes on GitHub")
+    );
+    assert_eq!(
+        gate.hard_refusal("bash", &bash_gate("rm notes.txt"))
+            .await
+            .as_deref(),
+        Some("this Spec's protected Full access never deletes files or resources")
+    );
+
+    let mut patch = gate_info("apply_patch", &Value::Null);
+    patch.detail = Some("*** Begin Patch\n*** Delete File: notes.txt\n*** End Patch".to_string());
+    assert!(gate.hard_refusal("apply_patch", &patch).await.is_some());
+    assert!(gate
+        .hard_refusal(
+            "web_fetch",
+            &gate_info(
+                "web_fetch",
+                &serde_json::json!({
+                    "url": "https://github.com/example/project"
+                })
+            )
+        )
+        .await
+        .is_none());
+
+    let outcome = gate
+        .check(
+            &ToolCallId::new("delete-1"),
+            "bash",
+            &FakeMutating,
+            &serde_json::json!({"command": "rm notes.txt"}),
+            &test_ctx(dir.path()),
+            &CancellationToken::new(),
+        )
+        .await;
+    assert!(
+        matches!(outcome, PermissionOutcome::Denied(message) if message.contains("never deletes"))
+    );
+    assert!(
+        rx.try_recv().is_err(),
+        "hard refusal must not create a permission prompt"
+    );
+}
+
 #[test]
 fn connected_service_permission_does_not_expose_its_internal_name() {
     let info = gate_info(

@@ -50,7 +50,7 @@ pub(super) fn inspect(
     None
 }
 
-fn contains_reserved_protocol_marker(text: &str) -> bool {
+pub(crate) fn contains_reserved_protocol_marker(text: &str) -> bool {
     let normalized = collapse_underscores(text);
     [
         "begin_of_sentence",

@@ -26,7 +26,7 @@ describe("activity icon restraint", () => {
     expect(markup).not.toContain("lucide-square-terminal");
   });
 
-  it("renders the product-neutral identity for research", () => {
+  it("renders research as a compact work receipt", () => {
     const markup = renderToStaticMarkup(
       <WorkLine
         call={toolCall({
@@ -38,9 +38,10 @@ describe("activity icon restraint", () => {
       />,
     );
 
-    expect(markup).toContain("Research agent");
-    expect(markup).toContain("Research complete");
-    expect(markup).toContain('aria-label="Clark Code"');
+    expect(markup).toContain("WKWebView selection");
+    expect(markup).toContain('data-clark-work-receipt="true"');
+    expect(markup).toContain("lucide-earth");
+    expect(markup).not.toContain("Research agent");
     expect(markup).not.toContain("lucide-telescope");
   });
 
@@ -58,7 +59,7 @@ describe("activity icon restraint", () => {
     );
 
     expect(markup).toContain("Live");
-    expect(markup).toContain("Starting research agent");
+    expect(markup).toContain("WKWebView selection");
     expect(markup).not.toContain("Web search");
     expect(markup).not.toContain("Source reading");
     expect(markup).not.toContain("Cited synthesis");
@@ -108,21 +109,9 @@ describe("activity icon restraint", () => {
         },
       ],
     };
-    const markup = renderToStaticMarkup(
-      <WorkLine
-        call={toolCall({
-          kind: "research",
-          status: "in_progress",
-          title: "brokered_research: Deep-dive on Vorflux and verify sources",
-          raw_input: { query: "Deep-dive on Vorflux and verify example.test" },
-          progress,
-        })}
-        active
-      />,
-    );
+    const markup = renderToStaticMarkup(<ResearchOutline progress={progress} />);
 
     expect(markup).toContain("Reading API and architecture pages");
-    expect(markup).toContain('aria-live="polite"');
     expect(markup).toContain("Plan research");
     expect(markup).toContain("Search and verify sources");
     expect(markup).toContain("Search official Vorflux sources");
@@ -169,7 +158,7 @@ describe("activity icon restraint", () => {
     );
 
     expect(markup).toContain("2 sources");
-    expect(markup).toContain("View research brief");
+    expect(markup).toContain('data-clark-work-receipt="true"');
   });
 
   it("shows explicit failed and cancelled terminal states", () => {

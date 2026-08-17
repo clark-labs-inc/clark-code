@@ -30,11 +30,12 @@ export function ComposerAutocomplete({
 
   return (
     <m.div
-      // Appear instantly: fading a shadowed popover in WKWebView reads as flicker.
-      initial={false}
+      // Normal motion appears instantly to avoid shadow flicker in WKWebView;
+      // reduced motion keeps the product-wide short opacity cue.
+      initial={reduce ? { opacity: 0 } : false}
       animate={{ opacity: 1 }}
       exit={reduce ? REDUCED_EXIT : { opacity: 0 }}
-      transition={{ duration: reduce ? 0 : DUR.fast, ease: EASE.out }}
+      transition={{ duration: DUR.fast, ease: EASE.out }}
       className="popover-surface max-h-64 w-full overflow-y-auto rounded-2xl bg-bg-elevated p-1.5 shadow-lifted ring-1 ring-border-subtle sm:w-80"
     >
       {suggestions.map((suggestion, index) => {

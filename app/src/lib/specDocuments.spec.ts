@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  initialSpecMarkdown,
   latestSpecArtifact,
   scopedSpecPrompt,
   specCodeContextPrompt,
@@ -11,6 +12,10 @@ import {
 } from "./specDocuments";
 
 describe("spec document conventions", () => {
+  it("starts without template boilerplate or a prompt-derived title", () => {
+    expect(initialSpecMarkdown("A raw submitted prompt")).toBe("");
+  });
+
   it("creates semantic Markdown and PDF filenames", () => {
     expect(specFilename("Customer Segmentation Spec", "md"))
       .toBe("customer-segmentation_SPEC.md");

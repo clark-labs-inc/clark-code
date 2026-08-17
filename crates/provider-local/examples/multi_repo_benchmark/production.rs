@@ -90,7 +90,7 @@ async fn run_async(
     let local = LocalMultiRepoRuntime::new(
         provider_local::LocalMultiRepoRuntimeConfig {
             provider_config: provider_config.clone(),
-            timeout: Duration::from_secs(10),
+            response_timeout: Some(Duration::from_secs(10)),
             scratch_root: scratch_root.clone(),
             artifact_root: artifact_root.clone(),
             selection: selection.clone(),
@@ -104,7 +104,7 @@ async fn run_async(
     let mut coordinator = MultiRepoCoordinator::new(
         (*plan).clone(),
         SharedBudget::new(BudgetConfig {
-            limit_weighted_tokens: lane.token_budget,
+            limit_weighted_tokens: Some(lane.token_budget),
             ..Default::default()
         })?,
         integrator,

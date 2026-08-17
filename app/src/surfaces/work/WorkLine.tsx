@@ -333,10 +333,10 @@ function WorkLineImpl({ call, active }: { call: ToolCall; active: boolean }) {
       <AnimatePresence initial={false}>
         {open && hasDetail && (
           <m.div
-            initial={reduce ? false : { height: 0, opacity: 0 }}
+            initial={reduce ? { opacity: 0 } : { height: 0, opacity: 0 }}
             animate={{ height: "auto", opacity: 1 }}
             exit={reduce ? REDUCED_EXIT : { height: 0, opacity: 0 }}
-            transition={{ duration: reduce ? 0 : DUR.fast, ease: EASE.inOut }}
+            transition={{ duration: DUR.fast, ease: reduce ? EASE.out : EASE.inOut }}
             className="ml-[0.55rem] overflow-hidden border-l border-border-subtle"
           >
             {target && <FileActions path={target} />}

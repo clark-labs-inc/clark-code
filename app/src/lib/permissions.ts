@@ -46,14 +46,20 @@ export function nextApprovalPolicy(policy: ApprovalPolicy): ApprovalPolicy {
 export const DEFAULT_APPROVAL_POLICY: ApprovalPolicy = "auto";
 export const DEFAULT_COLLABORATION_MODE: CollaborationMode = "default";
 
-/** Scout owns an organization-wide cartography run rather than a bounded
- * project checkout, so its execution authority is a product invariant rather
- * than a user-selectable conversation preference. */
+/** These specialists need uninterrupted tool access to complete their core
+ * workflow. Spec pairs that authority with native hard constraints against
+ * deletion and GitHub pushes; those constraints are not approval prompts. */
+export function specialistUsesProtectedFullAccess(
+  specialistKind?: string | null,
+): boolean {
+  return specialistKind === "scout" || specialistKind === "spec";
+}
+
 export function approvalPolicyForSpecialist(
   policy: ApprovalPolicy,
   specialistKind?: string | null,
 ): ApprovalPolicy {
-  return specialistKind === "scout" ? "full" : policy;
+  return specialistUsesProtectedFullAccess(specialistKind) ? "full" : policy;
 }
 
 /** The option that grants the request, preferring a one-time allow. */

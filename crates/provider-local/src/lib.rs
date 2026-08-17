@@ -28,6 +28,7 @@ mod exec;
 mod external_import;
 mod files;
 mod git_metadata;
+mod hard_constraints;
 mod hooks;
 mod incidents;
 mod instructions;

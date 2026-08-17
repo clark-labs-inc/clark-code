@@ -37,6 +37,8 @@ import {
   pickFolder,
   remoteTarget,
   resetFanOut,
+  restorePendingAttachments,
+  revokeAttachmentPreviews,
   saveApprovalPolicy,
   saveApprovalPolicies,
   saveChatModels,
@@ -57,7 +59,9 @@ import {
   specialistReadRoots,
 } from "../lib/specialists";
 import { authAccountMatches } from "../lib/account";
-import { approvalPolicyForSpecialist } from "../lib/permissions";
+import {
+  specialistUsesProtectedFullAccess,
+} from "../lib/permissions";
 import { isQuickChatProject, projectDisplayName } from "../lib/projectSidebar";
 import { quickChatModelSettings } from "../lib/localAgent";
 import {
@@ -449,7 +453,8 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
       collaboration_mode: state.collaborationMode,
       ...(resume ? { resume } : {}),
     };
-    const uploads = state.attachments.map(toUpload);
+    const submittedAttachments = state.attachments;
+    const uploads = submittedAttachments.map(toUpload);
     const meta: ConversationMeta = previousMeta ?? {
       id: session.id,
       title: deriveTitle(snapshot),
@@ -509,9 +514,6 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
       liveSessions.set(session.id, nextEntry);
       snapshotCache.set(session.id, prefix);
       resetFanOut();
-      for (const attachment of state.attachments) {
-        if (attachment.previewUrl) URL.revokeObjectURL(attachment.previewUrl);
-      }
       set({
         session: opened,
         snapshot: prefix,
@@ -528,21 +530,32 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
       ready = true;
       nextEntry.starting = true;
       try {
-        return await bridge.prompt(
+        const receipt = await bridge.prompt(
           session.id,
           [{ type: "text", text }, ...skills],
           uploads,
         );
+        revokeAttachmentPreviews(submittedAttachments);
+        return receipt;
       } finally {
         nextEntry.starting = false;
       }
     } catch (error) {
       if (epochStale(operationEpoch) || !authAccountMatches(requestAuth, get().auth)) {
+        if (ready) revokeAttachmentPreviews(submittedAttachments);
         if (opened) void bridge.closeSession?.(opened.id);
         return null;
       }
       if (ready) {
-        set({ error: String(error), connecting: false });
+        set((current) => ({
+          error: String(error),
+          connecting: false,
+          composerPrefill: { text, timelineIndex },
+          attachments: restorePendingAttachments(
+            submittedAttachments,
+            current.attachments,
+          ),
+        }));
         return null;
       }
       if (detached && !replaced) liveSessions.set(session.id, previousEntry);
@@ -624,13 +637,14 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
       entry &&
       entry.lastSubmittedText === normalizedText &&
       Date.now() - entry.lastSubmittedAt < RAPID_DUPLICATE_WINDOW_MS;
-    if (rapidDuplicate) return { kind: "not_sent" };
+    const duplicateStillStarting =
+      entry?.starting === true && entry.lastSubmittedText === normalizedText;
+    if (rapidDuplicate || duplicateStillStarting) return { kind: "not_sent" };
     if (entry) {
       entry.lastSubmittedText = normalizedText;
       entry.lastSubmittedAt = Date.now();
     }
     const uploads = attachments.map(toUpload);
-    for (const a of attachments) if (a.previewUrl) URL.revokeObjectURL(a.previewUrl);
     set({ attachments: [], error: null });
     // A run is active in THIS conversation: queue by default. The queue drains
     // in order after each run settles, so a follow-up never changes the work
@@ -644,6 +658,7 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
       const queuedMessage = { id: crypto.randomUUID(), text, uploads, skills };
       if (entry) entry.queued = [...entry.queued, queuedMessage];
       set((s) => ({ queued: [...s.queued, queuedMessage] }));
+      revokeAttachmentPreviews(attachments);
       return { kind: "queued", queueId: queuedMessage.id };
     }
     const optimisticRun = text.trim() ? `optimistic-user-${crypto.randomUUID()}` : null;
@@ -671,6 +686,7 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
           [{ type: "text", text }, ...skills],
           uploads,
         );
+        revokeAttachmentPreviews(attachments);
         return { kind: "started", receipt };
       } finally {
         if (entry) entry.starting = false;
@@ -682,11 +698,13 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
       }
       // Surface the failure instead of silently doing nothing.
       if (!authAccountMatches(auth, get().auth) || get().session?.id !== session.id) {
+        revokeAttachmentPreviews(attachments);
         return { kind: "not_sent" };
       }
       set((state) => ({
         error: String(e),
         composerPrefill: { text },
+        attachments: restorePendingAttachments(attachments, state.attachments),
         snapshot: {
           ...state.snapshot,
           // A rejected invoke can leave the transient `starting` flag set if
@@ -718,9 +736,9 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
       return;
     }
     const { bridge, session } = get();
-    if (bridge?.resumeProviderIncident && session) {
+    if (bridge?.resumeSavedProgress && session) {
       try {
-        await bridge.resumeProviderIncident(session.id);
+        await bridge.resumeSavedProgress(session.id);
       } catch (error) {
         set({ error: String(error) });
       }
@@ -835,8 +853,7 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
     const specialistKind = session
       ? get().conversations.find((conversation) => conversation.id === session.id)?.specialist?.kind
       : activeSpecialistContext()?.kind;
-    if (approvalPolicyForSpecialist(approvalPolicy, specialistKind) === "full"
-      && specialistKind === "scout") return;
+    if (specialistUsesProtectedFullAccess(specialistKind)) return;
     // Permission modes only govern the local engine; with a cloud session (or
     // a cloud target on the start screen) the pill is hidden and Shift+Tab
     // cycling an invisible mode would just surprise the next local session.

@@ -1,7 +1,6 @@
 use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use agent_core::domain::ToolKind;
 use agent_core::provider::ProviderConfig;
@@ -35,9 +34,6 @@ mod writer;
 
 use schema::delegate_schema;
 use support::{event_sink, role_for_purpose};
-
-const ACP_TIMEOUT: Duration = Duration::from_secs(20 * 60);
-const LOCAL_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 
 #[derive(Debug, PartialEq, Eq)]
 struct DelegationModelPolicy {
@@ -252,7 +248,11 @@ async fn run_delegation(
         minimum_parallel_context_tokens: shared.config.policy.minimum_context_tokens,
         child_system_prompt_tokens: shared.config.policy.child_system_prompt_tokens,
         max_projected_cost_ratio: shared.config.policy.max_projected_cost_ratio,
-        max_projected_weighted_tokens: Some(shared.config.policy.token_budget as f64),
+        max_projected_weighted_tokens: shared
+            .config
+            .policy
+            .token_budget
+            .map(|budget| budget as f64),
         output_token_weight: 4.0,
         require_explicit_authorization: true,
     };
@@ -415,7 +415,7 @@ fn register_harnesses(
                 ..Default::default()
             },
             cwd: root.clone(),
-            timeout: LOCAL_TIMEOUT,
+            response_timeout: None,
             enforcement: ReadOnlyEnforcement::HostToolGate,
         },
         workspace.clone(),
@@ -444,7 +444,7 @@ fn acp_harness(
                 ..Default::default()
             },
             cwd: root.to_string(),
-            timeout: ACP_TIMEOUT,
+            response_timeout: None,
             enforcement: acp.enforcement,
         },
         workspace,

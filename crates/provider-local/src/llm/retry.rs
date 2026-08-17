@@ -12,7 +12,7 @@ use agent_core::{classify_provider_access_failure, RunFailureKind};
 use super::{
     drain_lines, output_quarantine, recovery, retry_after_from_metadata, Accumulator,
     AssistantTurn, ChatMessage, LlmClient, LlmError, ProviderFailureContext, StreamChatOptions,
-    ToolSchema,
+    ToolSchema, WireToolCallDelta,
 };
 
 const MAX_RATE_LIMIT_RETRIES: usize = 12;
@@ -70,10 +70,36 @@ struct RetryState {
     auth_retries: usize,
 }
 
-struct StreamAttempt<'a, OnText, OnReasoning>
+pub(crate) struct StreamObservers<OnText, OnReasoning, OnToolCall, OnRetry> {
+    on_text: OnText,
+    on_reasoning: OnReasoning,
+    on_tool_call: OnToolCall,
+    on_retry: OnRetry,
+}
+
+impl<OnText, OnReasoning, OnToolCall, OnRetry>
+    StreamObservers<OnText, OnReasoning, OnToolCall, OnRetry>
+{
+    pub(crate) fn new(
+        on_text: OnText,
+        on_reasoning: OnReasoning,
+        on_tool_call: OnToolCall,
+        on_retry: OnRetry,
+    ) -> Self {
+        Self {
+            on_text,
+            on_reasoning,
+            on_tool_call,
+            on_retry,
+        }
+    }
+}
+
+struct StreamAttempt<'a, OnText, OnReasoning, OnToolCall>
 where
     OnText: FnMut(&str),
     OnReasoning: FnMut(&str),
+    OnToolCall: FnMut(WireToolCallDelta),
 {
     messages: &'a [ChatMessage],
     tools: &'a [ToolSchema],
@@ -84,6 +110,7 @@ where
     idempotency_key: &'a str,
     on_text: &'a mut OnText,
     on_reasoning: &'a mut OnReasoning,
+    on_tool_call: &'a mut OnToolCall,
 }
 
 impl RetryState {
@@ -132,22 +159,29 @@ impl LlmClient {
                 force_tool_call: false,
                 forced_tool_name: None,
             },
-            on_text,
-            on_reasoning,
-            on_retry,
+            StreamObservers::new(on_text, on_reasoning, |_| {}, on_retry),
         )
         .await
     }
 
-    pub(crate) async fn stream_chat_observed_with_tool_choice(
+    pub(crate) async fn stream_chat_observed_with_tool_choice<
+        OnText,
+        OnReasoning,
+        OnToolCall,
+        OnRetry,
+    >(
         &self,
         messages: &[ChatMessage],
         tools: &[ToolSchema],
         options: StreamChatOptions<'_>,
-        mut on_text: impl FnMut(&str),
-        mut on_reasoning: impl FnMut(&str),
-        mut on_retry: impl FnMut(ProviderFailureContext),
-    ) -> Result<AssistantTurn, LlmError> {
+        mut observers: StreamObservers<OnText, OnReasoning, OnToolCall, OnRetry>,
+    ) -> Result<AssistantTurn, LlmError>
+    where
+        OnText: FnMut(&str),
+        OnReasoning: FnMut(&str),
+        OnToolCall: FnMut(WireToolCallDelta),
+        OnRetry: FnMut(ProviderFailureContext),
+    {
         let StreamChatOptions {
             cancel,
             force_tool_call,
@@ -173,8 +207,9 @@ impl LlmClient {
                     force_tool_call,
                     forced_tool_name,
                     idempotency_key: &retry.idempotency_key,
-                    on_text: &mut on_text,
-                    on_reasoning: &mut on_reasoning,
+                    on_text: &mut observers.on_text,
+                    on_reasoning: &mut observers.on_reasoning,
+                    on_tool_call: &mut observers.on_tool_call,
                 })
                 .await
             {
@@ -226,7 +261,7 @@ impl LlmClient {
                 {
                     let delay = rate_limit_delay(failure.retry_after, retry.rate_limit_retries);
                     retry.rate_limit_retries += 1;
-                    on_retry(self.failure_context(&failure, &retry, &request_model));
+                    (observers.on_retry)(self.failure_context(&failure, &retry, &request_model));
                     tracing::warn!(
                         model = request_model,
                         retry = retry.rate_limit_retries,
@@ -255,7 +290,7 @@ impl LlmClient {
                     let max_retries = transient_retry_limit(&failure);
                     let delay = transient_delay(failure.retry_after, retry.transient_retries);
                     retry.transient_retries += 1;
-                    on_retry(self.failure_context(&failure, &retry, &request_model));
+                    (observers.on_retry)(self.failure_context(&failure, &retry, &request_model));
                     tracing::warn!(
                         model = request_model,
                         retry = retry.transient_retries,
@@ -325,13 +360,14 @@ impl LlmClient {
         }
     }
 
-    async fn stream_chat_once<OnText, OnReasoning>(
+    async fn stream_chat_once<OnText, OnReasoning, OnToolCall>(
         &self,
-        attempt: StreamAttempt<'_, OnText, OnReasoning>,
+        attempt: StreamAttempt<'_, OnText, OnReasoning, OnToolCall>,
     ) -> Result<AssistantTurn, AttemptError>
     where
         OnText: FnMut(&str),
         OnReasoning: FnMut(&str),
+        OnToolCall: FnMut(WireToolCallDelta),
     {
         let StreamAttempt {
             messages,
@@ -343,6 +379,7 @@ impl LlmClient {
             idempotency_key,
             on_text,
             on_reasoning,
+            on_tool_call,
         } = attempt;
         let url = format!("{}/chat/completions", self.base_url);
         let mut request = self.http.post(&url).json(&self.body_for_model(
@@ -476,8 +513,10 @@ impl LlmClient {
         // Publish completed words as their SSE deltas arrive. The open word is
         // retained so reserved provider-control markers remain quarantined
         // even when their bytes are fragmented across network frames. Tool
-        // arguments and structured reasoning remain staged in `accumulator`
-        // until the complete turn passes validation below.
+        // Structured reasoning remains staged in `accumulator` until the
+        // complete turn passes validation below. Tool deltas also stay
+        // assembled there while a typed observer may project terminal-answer
+        // arguments incrementally.
         let mut text_guard = output_quarantine::StreamingGuard::new(on_text);
         let mut reasoning_guard = output_quarantine::StreamingGuard::new(on_reasoning);
         loop {
@@ -499,7 +538,13 @@ impl LlmClient {
                         // Replaying is safe only while every received word is
                         // still held by the guard. Once visible output exists,
                         // a retry would duplicate the assistant response.
-                        retry_safe: !text_guard.published() && !reasoning_guard.published(),
+                        // Tool-call deltas now cross the typed stream boundary
+                        // too. Replaying after any such delta would append a
+                        // duplicate partial `final_answer` (or corrupt another
+                        // observer's tool-call projection) to the same message.
+                        retry_safe: !text_guard.published()
+                            && !reasoning_guard.published()
+                            && !accumulator.emitted_tool_call(),
                         provider_status: None,
                         provider_error_type: Some("stream_transport".to_string()),
                         provider_request_id: provider_request_id.clone(),
@@ -513,6 +558,7 @@ impl LlmClient {
                         &mut accumulator,
                         &mut |delta| text_guard.push(delta),
                         &mut |delta| reasoning_guard.push(delta),
+                        on_tool_call,
                     ) {
                         break;
                     }

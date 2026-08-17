@@ -19,9 +19,11 @@ use tokio_util::sync::CancellationToken;
 
 use crate::config::LocalConfig;
 
-mod output_quarantine;
+pub(crate) mod output_quarantine;
 mod recovery;
 mod retry;
+
+pub(crate) use retry::StreamObservers;
 
 pub(crate) const REQUIRED_TOOL_CONTRACT_VIOLATION: &str = "required_tool_contract_violation:";
 
@@ -655,6 +657,7 @@ fn drain_lines(
     acc: &mut Accumulator,
     on_text: &mut impl FnMut(&str),
     on_reasoning: &mut impl FnMut(&str),
+    on_tool_call: &mut impl FnMut(WireToolCallDelta),
 ) -> bool {
     let mut done = false;
     while let Some(pos) = buf.iter().position(|&b| b == b'\n') {
@@ -673,7 +676,7 @@ fn drain_lines(
             break;
         }
         if let Ok(chunk) = serde_json::from_str::<Value>(payload) {
-            acc.push_chunk(&chunk, on_text, on_reasoning);
+            acc.push_chunk(&chunk, on_text, on_reasoning, on_tool_call);
         }
     }
     done
@@ -726,12 +729,25 @@ struct PartialToolCall {
     arguments: String,
 }
 
+/// One provider-native tool-call delta, forwarded without waiting for the
+/// complete arguments object. The agent loop already has a typed streaming
+/// variant for this shape; retaining it here lets terminal tools such as
+/// `final_answer` render their string payload while OpenRouter generates it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct WireToolCallDelta {
+    pub index: usize,
+    pub id_delta: Option<String>,
+    pub name_delta: Option<String>,
+    pub arguments_delta: Option<String>,
+}
+
 impl Accumulator {
     fn push_chunk(
         &mut self,
         chunk: &Value,
         on_text: &mut impl FnMut(&str),
         on_reasoning: &mut impl FnMut(&str),
+        on_tool_call: &mut impl FnMut(WireToolCallDelta),
     ) {
         let metadata = self
             .response_metadata
@@ -854,20 +870,39 @@ impl Accumulator {
                 for tc in calls {
                     let index = tc.get("index").and_then(Value::as_u64).unwrap_or(0);
                     let entry = self.tool_calls.entry(index).or_default();
-                    if let Some(id) = tc.get("id").and_then(Value::as_str) {
+                    let id_delta = tc
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .filter(|id| !id.is_empty())
+                        .map(str::to_string);
+                    if let Some(id) = &id_delta {
                         if !id.is_empty() {
-                            entry.id = id.to_string();
+                            entry.id.push_str(id);
                         }
                     }
+                    let mut name_delta = None;
+                    let mut arguments_delta = None;
                     if let Some(func) = tc.get("function") {
                         if let Some(name) = func.get("name").and_then(Value::as_str) {
                             if !name.is_empty() {
                                 entry.name.push_str(name);
+                                name_delta = Some(name.to_string());
                             }
                         }
                         if let Some(args) = func.get("arguments").and_then(Value::as_str) {
-                            entry.arguments.push_str(args);
+                            if !args.is_empty() {
+                                entry.arguments.push_str(args);
+                                arguments_delta = Some(args.to_string());
+                            }
                         }
+                    }
+                    if id_delta.is_some() || name_delta.is_some() || arguments_delta.is_some() {
+                        on_tool_call(WireToolCallDelta {
+                            index: index.try_into().unwrap_or(usize::MAX),
+                            id_delta,
+                            name_delta,
+                            arguments_delta,
+                        });
                     }
                 }
             }
@@ -908,6 +943,10 @@ impl Accumulator {
             || !self.reasoning.is_empty()
             || !self.reasoning_details.is_empty()
             || !self.tool_calls.is_empty()
+    }
+
+    fn emitted_tool_call(&self) -> bool {
+        !self.tool_calls.is_empty()
     }
 }
 

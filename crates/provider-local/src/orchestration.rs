@@ -21,7 +21,7 @@ pub(crate) use tool::orchestration_tools;
 #[derive(Clone, Debug)]
 pub(crate) struct OrchestrationConfig {
     pub max_agents: usize,
-    pub token_budget: u64,
+    pub token_budget: Option<u64>,
     pub minimum_context_tokens: u64,
     pub child_system_prompt_tokens: u64,
     pub max_projected_cost_ratio: f64,
@@ -45,7 +45,7 @@ impl Default for OrchestrationConfig {
     fn default() -> Self {
         Self {
             max_agents: 3,
-            token_budget: 120_000,
+            token_budget: None,
             minimum_context_tokens: 40_000,
             child_system_prompt_tokens: 6_000,
             max_projected_cost_ratio: 1.25,
@@ -69,7 +69,10 @@ impl OrchestrationConfig {
         let mut config = Self::default();
         config.max_agents =
             integer(object, "max_agents", config.max_agents as u64).clamp(1, 4) as usize;
-        config.token_budget = integer(object, "token_budget", config.token_budget).max(1);
+        config.token_budget = object
+            .get("token_budget")
+            .and_then(Value::as_u64)
+            .filter(|budget| *budget > 0);
         config.minimum_context_tokens = integer(
             object,
             "minimum_context_tokens",
@@ -450,6 +453,7 @@ mod tests {
     fn orchestration_is_always_available_and_refuses_unproved_disposable_acp() {
         let defaults = OrchestrationConfig::from_extra(&json!({}));
         assert_eq!(defaults.max_agents, 3);
+        assert_eq!(defaults.token_budget, None);
 
         let config = OrchestrationConfig::from_extra(&json!({
             "orchestration": {
@@ -478,7 +482,7 @@ mod tests {
             }
         }));
         assert_eq!(config.max_agents, 4);
-        assert_eq!(config.token_budget, 75_000);
+        assert_eq!(config.token_budget, Some(75_000));
         assert_eq!(config.subagent_model.as_deref(), Some("cheap-model"));
         assert_eq!(config.read_only_harness, "sandboxed");
         assert_eq!(config.acp_harnesses.len(), 1);

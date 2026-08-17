@@ -228,6 +228,47 @@ and remove operations.
 
 final result: passed
 
+---
+
+# Design QA — inline RSI Loop Pulse
+
+- Selected visual truth: `/Users/stan/.codex/generated_images/01a00a05-b1be-7732-b1fb-dc8fd69097cb/exec-0029105e-bf85-4cc9-823b-523f9e6a21f1.png`
+- Browser-rendered implementation: `/Users/stan/.codex/visualizations/2026/08/16/01a00a05-b1be-7732-b1fb-dc8fd69097cb/rsi-loop-final.jpg`
+- Full normalized comparison: `/Users/stan/.codex/visualizations/2026/08/16/01a00a05-b1be-7732-b1fb-dc8fd69097cb/rsi-loop-comparison-final.jpg`
+- Focused card comparison: `/Users/stan/.codex/visualizations/2026/08/16/01a00a05-b1be-7732-b1fb-dc8fd69097cb/rsi-loop-card-comparison-final.jpg`
+- Source pixels: 1630 × 965; implementation viewport: 1280 × 720 CSS px at device scale factor 2; the source was contained on a 1280 × 720 dark canvas for the full comparison and both cards were normalized to 1200 × 456 for the focused comparison.
+- State: dark theme, deterministic RSI iteration 4, Measure active, guardrails passing, production unchanged, real lazy Three.js renderer.
+
+## Findings and fixes
+
+- [P1] The previous RSI experience split one improvement run across five dashboard tabs, raw identifiers, and a parallel inspector, so a non-technical user could not answer “what is happening now?” from the conversation.
+  - Removed the RSI dashboard canvas and its Worlds/Evaluations/Runs/Frontier/Evidence controls. The same typed timeline item now renders one inline Inspect → Propose → Code → Measure → Decide loop.
+- [P2] The first Three.js implementation pulled the whole namespace into a 184.68 kB gzip lazy chunk.
+  - Moved named Three primitives into a separately lazy runtime, reducing the gzip chunk to 129.67 kB. One low-power off-DOM WebGL context renders every loop into ordinary 2D canvases, with a 20 fps ceiling, 1.5× DPR cap, intersection/visibility suspension, and a reduced-motion static state.
+- [P2] The first browser capture made the loop read as a status ornament rather than the card’s primary state visualization.
+  - Increased the loop’s reserved measure and canvas while retaining the intentionally denser footprint requested for an inline chat widget.
+- Remaining P0/P1/P2 findings: none.
+
+## Required fidelity surfaces
+
+- Typography: existing Newsreader display and DM Sans body typography preserve the target’s editorial heading/body contrast.
+- Spacing and layout: the target’s loop-left, live-state-right, guardrail-footer hierarchy is retained in a smaller 848 px conversation measure; at 390 px it stacks without horizontal overflow.
+- Colors and tokens: the implementation maps active purple, completed blue, warning amber, muted gray, borders, and surfaces to existing product tokens in both themes.
+- Image quality and assets: the visualization is live Three.js geometry with Lucide product icons; no raster recreation, handcrafted SVG, or placeholder art is used.
+- Copy and content: the widget names the current activity in plain language, shows the best safe result and retained/undone decisions, and keeps technical receipts behind one disclosure.
+- Icons: Inspect, Propose, Code, Measure, Decide, guardrail, pause, rollback, and disclosure controls use the existing Lucide family with consistent stroke weight.
+- Accessibility: the canvas is decorative, the five-stage loop has a semantic DOM fallback and screen-reader summary, live status is announced politely, controls are labeled and keyboard reachable, and reduced motion remains visibly static rather than disappearing.
+
+## Browser verification
+
+- The Three canvas reached `opacity-100`; the semantic fallback remained available to assistive technology and non-WebGL environments.
+- Expanding the disclosure exposed all five stage details and the rollback/stop boundary; Pause safely removed the active control and displayed the checkpoint status.
+- At 768 px and 390 px, document width equaled scroll width and the details control remained visible.
+- Browser console errors: none. The only warning was the expected Motion development notice for the system reduced-motion preference.
+- Frontend verification: 175 test files and 778 tests passed; typecheck, production build, and `git diff --check` passed.
+
+final result: passed
+
 # Design QA — artifact card edge cleanup
 
 - Source visual truth: `/var/folders/sx/5vx_xn5j0c31t3jw27sjtnqc0000gn/T/TemporaryItems/NSIRD_screencaptureui_1fqo02/Screenshot 2026-08-13 at 9.54.25 PM.png`

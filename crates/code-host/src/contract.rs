@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -13,8 +13,22 @@ use thiserror::Error;
 pub struct CodingSessionRecipe {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub specialist_kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hard_constraints: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scout_cartography: Option<ScoutCartographyRecipe>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub extensions: Vec<CodingSessionExtensionRecipe>,
+}
+
+/// A compile-time product extension envelope. The public host validates the
+/// bounded identifier and payload size; the branded worker registered for the
+/// exact id must strictly deserialize and authorize the payload before use.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CodingSessionExtensionRecipe {
+    pub id: String,
+    pub config: serde_json::Value,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -35,44 +49,76 @@ impl CodingSessionRecipe {
         if let Some(kind) = self.specialist_kind.as_deref() {
             validate_portable_value("specialist_kind", kind, 64)?;
         }
-        let Some(scout) = self.scout_cartography.as_ref() else {
-            return Ok(());
-        };
-        if self.specialist_kind.as_deref() != Some("scout") {
-            return Err("Scout cartography requires specialist_kind=scout".into());
-        }
-        if !uuid_shape(&scout.organization_id) || !uuid_shape(&scout.workspace_id) {
-            return Err("Scout organization and workspace ids are invalid".into());
-        }
-        validate_portable_value("Scout platform", &scout.platform, 64)?;
-        validate_portable_value("Scout architecture", &scout.architecture, 64)?;
-        if !scout.identity_root.is_absolute()
-            || scout.identity_root == project_root
-            || !scout.identity_root.starts_with(project_root)
-            || scout
-                .identity_root
-                .components()
-                .any(|component| matches!(component, std::path::Component::ParentDir))
+        let hard_constraints = self.hard_constraints.iter().collect::<BTreeSet<_>>();
+        if self.hard_constraints.len() > 2
+            || hard_constraints.len() != self.hard_constraints.len()
+            || self
+                .hard_constraints
+                .iter()
+                .any(|constraint| !matches!(constraint.as_str(), "no_delete" | "no_github_push"))
         {
-            return Err("Scout identity root must be inside the registered remote project".into());
+            return Err("coding session hard constraints are invalid".into());
         }
-        if !scout.route_prefix.starts_with('/')
-            || scout.route_prefix.len() < 2
-            || scout.route_prefix.len() > 128
-            || scout.route_prefix.contains(['?', '#'])
-            || scout.route_prefix.contains("..")
-        {
-            return Err("Scout route prefix is invalid".into());
+        if let Some(scout) = self.scout_cartography.as_ref() {
+            if self.specialist_kind.as_deref() != Some("scout") {
+                return Err("Scout cartography requires specialist_kind=scout".into());
+            }
+            if !uuid_shape(&scout.organization_id) || !uuid_shape(&scout.workspace_id) {
+                return Err("Scout organization and workspace ids are invalid".into());
+            }
+            validate_portable_value("Scout platform", &scout.platform, 64)?;
+            validate_portable_value("Scout architecture", &scout.architecture, 64)?;
+            if !scout.identity_root.is_absolute()
+                || scout.identity_root == project_root
+                || !scout.identity_root.starts_with(project_root)
+                || scout
+                    .identity_root
+                    .components()
+                    .any(|component| matches!(component, std::path::Component::ParentDir))
+            {
+                return Err(
+                    "Scout identity root must be inside the registered remote project".into(),
+                );
+            }
+            if !scout.route_prefix.starts_with('/')
+                || scout.route_prefix.len() < 2
+                || scout.route_prefix.len() > 128
+                || scout.route_prefix.contains(['?', '#'])
+                || scout.route_prefix.contains("..")
+            {
+                return Err("Scout route prefix is invalid".into());
+            }
+            if let Some(request_id) = scout.human_run_request_id.as_deref() {
+                let valid = request_id.strip_prefix("scout-run:").is_some_and(|digest| {
+                    digest.len() == 64
+                        && digest
+                            .bytes()
+                            .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
+                });
+                if !valid {
+                    return Err("Scout human run request id is invalid".into());
+                }
+            }
         }
-        if let Some(request_id) = scout.human_run_request_id.as_deref() {
-            let valid = request_id.strip_prefix("scout-run:").is_some_and(|digest| {
-                digest.len() == 64
-                    && digest
-                        .bytes()
-                        .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
-            });
-            if !valid {
-                return Err("Scout human run request id is invalid".into());
+        if self.extensions.len() > 8 {
+            return Err("remote session recipe has too many product extensions".into());
+        }
+        let mut ids = BTreeSet::new();
+        for extension in &self.extensions {
+            validate_portable_value("session extension id", &extension.id, 64)?;
+            if !ids.insert(extension.id.as_str()) {
+                return Err(format!(
+                    "remote session recipe repeats extension {}",
+                    extension.id
+                ));
+            }
+            let bytes = serde_json::to_vec(&extension.config)
+                .map_err(|error| format!("session extension is invalid: {error}"))?;
+            if bytes.len() > 64 * 1024 {
+                return Err(format!(
+                    "remote session extension {} exceeds 65536 bytes",
+                    extension.id
+                ));
             }
         }
         Ok(())
@@ -222,6 +268,7 @@ mod tests {
         let project = Path::new("/srv/client/neon");
         let recipe = CodingSessionRecipe {
             specialist_kind: Some("scout".into()),
+            hard_constraints: vec!["no_delete".into()],
             scout_cartography: Some(ScoutCartographyRecipe {
                 organization_id: "59b8fe20-6072-4c16-9dae-9d7cbbf2533c".into(),
                 workspace_id: "2fac2db5-20d6-499c-b691-47ad19fc0ca8".into(),
@@ -231,6 +278,10 @@ mod tests {
                 route_prefix: "/v1/system-cartography".into(),
                 human_run_request_id: Some(format!("scout-run:{}", "a".repeat(64))),
             }),
+            extensions: vec![CodingSessionExtensionRecipe {
+                id: "example_advisor".into(),
+                config: serde_json::json!({ "organization_id": "org-1" }),
+            }],
         };
         recipe.validate(project).unwrap();
 
@@ -238,5 +289,29 @@ mod tests {
         escaped.scout_cartography.as_mut().unwrap().identity_root =
             PathBuf::from("/tmp/other-client");
         assert!(escaped.validate(project).is_err());
+    }
+
+    #[test]
+    fn remote_session_extension_envelope_is_bounded_and_unique() {
+        let project = Path::new("/srv/client/neon");
+        let extension = CodingSessionExtensionRecipe {
+            id: "example_advisor".into(),
+            config: serde_json::json!({ "enabled": true }),
+        };
+        let mut recipe = CodingSessionRecipe {
+            extensions: vec![extension.clone(), extension],
+            ..CodingSessionRecipe::default()
+        };
+        assert!(recipe.validate(project).is_err());
+
+        recipe.extensions.truncate(1);
+        recipe.extensions[0].config = serde_json::json!({ "payload": "x".repeat(65_536) });
+        assert!(recipe.validate(project).is_err());
+
+        let constraints = CodingSessionRecipe {
+            hard_constraints: vec!["no_delete".into(), "no_delete".into()],
+            ..CodingSessionRecipe::default()
+        };
+        assert!(constraints.validate(project).is_err());
     }
 }

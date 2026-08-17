@@ -39,7 +39,7 @@ describe("Scout conversation start failures", () => {
     expect(useSessionStore.getState()).toMatchObject({
       session: null,
       connecting: false,
-      error: "Pick or create a Scout workspace before starting.",
+      error: "Choose a company before starting Scout.",
     });
   });
 

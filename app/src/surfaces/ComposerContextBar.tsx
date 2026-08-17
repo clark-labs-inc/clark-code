@@ -52,6 +52,29 @@ export function hasSessionContextAuthority({
     && (Boolean(checkoutRoot.trim()) || Boolean(activeRemoteHost?.trim()));
 }
 
+export function shouldInspectProjectContext({
+  activeSpecialist,
+  activeProvider,
+  cwd,
+  hasSession,
+  projectMode,
+  remoteReady,
+  authorizedLocalRoot,
+}: {
+  activeSpecialist: string | null;
+  activeProvider: string | null;
+  cwd: string;
+  hasSession: boolean;
+  projectMode: "local" | "remote";
+  remoteReady: boolean;
+  authorizedLocalRoot: string | null;
+}): boolean {
+  if (activeSpecialist === "scout" || activeProvider !== "local" || !cwd.trim()) return false;
+  if (hasSession) return true;
+  if (projectMode === "remote") return remoteReady;
+  return authorizedLocalRoot === cwd.trim();
+}
+
 /** Checkout identity attached to the composer. Before a session starts the
  * project/environment fields remain interactive; once a session is live they
  * become read-only because that run is pinned to its original checkout. */
@@ -94,6 +117,17 @@ export function ComposerContextBar() {
   const executionSettings = selectedSpecialistSettings
     ? { ...localSettings, ...selectedSpecialistSettings }
     : localSettings;
+  // A persisted path is only display state. Probing it on mount can trigger
+  // macOS Files & Folders consent (and Windows protected-folder checks) before
+  // the user has asked Clark Code to touch the checkout. Keep explicit access
+  // for this mounted workspace after the picker or path field is used.
+  const [authorizedLocal, setAuthorizedLocal] = useState<{
+    accountScope: string | null;
+    root: string;
+  } | null>(null);
+  const authorizedLocalRoot = authorizedLocal?.accountScope === accountScope
+    ? authorizedLocal.root
+    : null;
 
   useEffect(() => {
     let current = true;
@@ -131,11 +165,15 @@ export function ComposerContextBar() {
           : null,
     [activeRemote, inspectionRemote, session],
   );
-  const canInspect =
-    activeSpecialist !== "scout" &&
-    activeProvider === "local" &&
-    Boolean(cwd) &&
-    (Boolean(session) || projectMode === "local" || Boolean(remote));
+  const canInspect = shouldInspectProjectContext({
+    activeSpecialist,
+    activeProvider,
+    cwd,
+    hasSession: Boolean(session),
+    projectMode,
+    remoteReady: Boolean(remote),
+    authorizedLocalRoot,
+  });
   const inspectionKey = `${cwd}\u0000${remote?.id ?? "local"}`;
   const [loadedContext, setLoadedContext] = useState<{
     key: string;
@@ -229,14 +267,14 @@ export function ComposerContextBar() {
       >
         <span
           className={`${ITEM} text-accent`}
-          title="Scout maps the selected enterprise perimeter, not the open checkout."
+          title="Company Scout maps the organization's connected systems, not the open checkout."
         >
           <Network className="size-3 shrink-0" aria-hidden="true" />
-          <span>Enterprise perimeter</span>
+          <span>Company Scout</span>
         </span>
         {session ? (
           <span className={`${ITEM} text-ink-secondary`}>
-            Organization + Scout workspace
+            Company-wide map
           </span>
         ) : (
           <button
@@ -245,7 +283,7 @@ export function ComposerContextBar() {
             onClick={() => setScoutScopeOpen(true)}
             className={`${ITEM} text-ink-secondary transition hover:bg-bg-hover hover:text-ink`}
           >
-            {authorityReady ? "Organization + Scout workspace" : "Choose organization and workspace"}
+            {authorityReady ? "Company-wide map" : "Choose company"}
             <ChevronDown className="size-3 shrink-0 text-ink-faint" aria-hidden="true" />
           </button>
         )}
@@ -361,7 +399,12 @@ export function ComposerContextBar() {
         ) : (
           <EnvironmentPicker
             compact
-            onEnvironmentChanged={() => setRefreshTick((tick) => tick + 1)}
+            onEnvironmentChanged={(path) => {
+              if (projectMode === "local") {
+                setAuthorizedLocal({ accountScope, root: path.trim() });
+              }
+              setRefreshTick((tick) => tick + 1);
+            }}
           />
         )}
 

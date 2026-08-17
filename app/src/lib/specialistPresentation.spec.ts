@@ -16,9 +16,10 @@ describe("specialist conversation presentation examples", () => {
       expect(presentation?.diagram).toContain("flowchart LR");
       expect(presentation?.metrics).toHaveLength(3);
       expect(presentation?.evidence).toHaveLength(3);
-      expect(presentation?.stages).toHaveLength(4);
+      const stageCount = kind === "rsi" ? 5 : 4;
+      expect(presentation?.stages).toHaveLength(stageCount);
       expect(new Set(presentation?.evidence.map(({ id }) => id)).size).toBe(3);
-      expect(new Set(presentation?.stages.map(({ id }) => id)).size).toBe(4);
+      expect(new Set(presentation?.stages.map(({ id }) => id)).size).toBe(stageCount);
       expect(
         presentation?.metrics.every(({ progress }) => progress >= 0 && progress <= 100),
       ).toBe(true);

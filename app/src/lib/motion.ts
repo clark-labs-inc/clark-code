@@ -27,6 +27,10 @@ export const EASE = {
  *  reason not to. */
 export const TRANSITION: Transition = { duration: DUR.base, ease: EASE.out };
 
+/** Reduced motion is still motion: one brief opacity cue, without translation,
+ * scale, rotation, or staggered choreography. */
+export const REDUCED_TRANSITION: Transition = { duration: DUR.fast, ease: EASE.out };
+
 /** Fade only — no movement. For overlays, popovers, and anything where a
  *  positional shift would fight the layout. */
 export const FADE = {
@@ -89,14 +93,13 @@ export const EXPAND = {
   style: { overflow: "hidden" },
 } satisfies MotionProps;
 
-/** Reduced-motion counterpart to EXPAND. Keeps a short opacity-only fade on
- * exit — a hard cut reads as a glitch — but never spatial movement; the enter
- * still snaps in. */
+/** Reduced-motion counterpart to EXPAND. The surface fades in and out without
+ * animating position or layout geometry. */
 export const EXPAND_REDUCED = {
-  initial: false,
+  initial: { opacity: 0 },
   animate: { opacity: 1, y: 0, height: "auto" as const },
   exit: { opacity: 0, transition: { duration: DUR.fast } },
-  transition: { duration: 0 },
+  transition: REDUCED_TRANSITION,
 } as const;
 
 /** Full-viewport scrims should only fade. Moving a page-sized layer costs more
@@ -144,22 +147,21 @@ export const SLIDE_RIGHT = {
   transition: TRANSITION,
 } satisfies MotionProps;
 
-/** Apply one vocabulary everywhere while keeping the stronger the agent policy:
- * reduced motion removes spatial movement but keeps a short opacity-only fade
- * on exit so disappearing surfaces don't cut out like a glitch. */
+/** Apply one vocabulary everywhere. Reduced motion removes spatial movement
+ * while retaining a brief opacity cue on both entry and exit. */
 export function accessibleMotion(
   preset: MotionProps,
   reduce: boolean | null,
 ): MotionProps {
   if (!reduce) return preset;
   return {
-    initial: false,
+    initial: { opacity: 0 },
     // Do not write an inline transform here. Static Tailwind transforms (for
     // example `-translate-x-1/2` on a centered toast) remain part of layout
     // under reduced motion and must not be overwritten by the animation layer.
     animate: { opacity: 1 },
     exit: { opacity: 0, transition: { duration: DUR.fast } },
-    transition: { duration: 0 },
+    transition: REDUCED_TRANSITION,
   };
 }
 
@@ -169,17 +171,24 @@ export function accessibleMotion(
  * fades out consistently while reveals still snap in. */
 export const REDUCED_EXIT = {
   opacity: 0,
-  transition: { duration: DUR.fast },
+  transition: REDUCED_TRANSITION,
 } as const;
 
 /** Shared cadence for indeterminate progress. Continuous motion is reserved
- * for a real pending state, stops when that state unmounts, and becomes a
- * static affordance under the user's reduced-motion preference. */
+ * for a real pending state and stops when that state unmounts. Reduced motion
+ * keeps a slower opacity cadence while callers remove spatial travel. */
 export function indeterminateTransition(
   reduce: boolean | null,
   delay = 0,
 ): Transition {
-  if (reduce) return { duration: 0 };
+  if (reduce) {
+    return {
+      duration: 2.8,
+      ease: EASE.inOut,
+      repeat: Infinity,
+      ...(delay > 0 ? { delay } : {}),
+    };
+  }
   return {
     duration: 1.1,
     ease: EASE.inOut,
@@ -189,7 +198,7 @@ export function indeterminateTransition(
 }
 
 /** The transition a surface should use for the `index`th row of a staggered
- * reveal. Under reduced motion the choreography snaps to zero (duration 0);
+ * reveal. Under reduced motion rows share one brief fade with no stagger;
  * otherwise rows land `perIndex * index` apart at the given duration and ease.
  * Pass `overrides` for a per-site duration or a fixed delay (e.g. `{ duration:
  * DUR.slow }` or `{ delay: 0.08 }`). */
@@ -199,7 +208,7 @@ export function staggeredTransition(
   perIndex = 0.04,
   overrides?: Partial<Transition>,
 ): Transition {
-  if (reduce) return { duration: 0 };
+  if (reduce) return REDUCED_TRANSITION;
   return {
     duration: DUR.base,
     ease: EASE.out,
@@ -218,9 +227,15 @@ export const CHAT_TEXT_ANIMATION = {
   stagger: 18,
 } as const;
 
-/** Streaming text is immediately readable under reduced motion. The settled
- * row still receives one quiet opacity cue, but words never ripple in. */
-export const CHAT_REDUCED_TEXT_ANIMATION = false;
+/** Streaming text keeps a short simultaneous fade under reduced motion. Words
+ * never ripple in one after another, but newly rendered text is not a hard cut. */
+export const CHAT_REDUCED_TEXT_ANIMATION = {
+  animation: "fadeIn",
+  duration: DUR.fast * 1000,
+  easing: "cubic-bezier(0.22, 1, 0.36, 1)",
+  sep: "word",
+  stagger: 0,
+} as const;
 
 const USER_MESSAGE_ROW: MotionProps = {
   initial: { opacity: 0, transform: "translate3d(8px, 2px, 0) scale(0.995)" },
@@ -243,7 +258,7 @@ const SYSTEM_MESSAGE_ROW: MotionProps = {
 export const CHAT_REDUCED_ROW_MOTION: MotionProps = {
   initial: { opacity: 0 },
   animate: { opacity: 1 },
-  transition: TRANSITION,
+  transition: REDUCED_TRANSITION,
 };
 
 export type ChatMessageRole = "user" | "agent" | "system";

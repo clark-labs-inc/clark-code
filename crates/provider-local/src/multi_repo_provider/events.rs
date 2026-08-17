@@ -25,7 +25,7 @@ pub(super) async fn run_provider(
     config: ProviderConfig,
     cwd: &Path,
     input: PromptInput,
-    timeout: Duration,
+    response_timeout: Option<Duration>,
     cancel: CancellationToken,
 ) -> Result<CollectedProviderRun, ProviderRunFailure> {
     if cancel.is_cancelled() {
@@ -54,22 +54,21 @@ pub(super) async fn run_provider(
             return Err(failure(error.to_string(), RunUsage::default()));
         }
     };
-    let collected = tokio::time::timeout(
-        timeout,
-        collect_events(provider.as_mut(), &session.id, stream, cancel),
-    )
-    .await;
-    let collected = match collected {
-        Ok(result) => result,
-        Err(_) => {
-            let _ = provider
-                .cancel(&session.id, &RunId::new("multi-repo-timeout"))
-                .await;
-            Err(failure(
-                "isolated provider run timed out",
-                RunUsage::default(),
-            ))
-        }
+    let collect = collect_events(provider.as_mut(), &session.id, stream, cancel);
+    let collected = match response_timeout {
+        Some(timeout) => match tokio::time::timeout(timeout, collect).await {
+            Ok(result) => result,
+            Err(_) => {
+                let _ = provider
+                    .cancel(&session.id, &RunId::new("multi-repo-timeout"))
+                    .await;
+                Err(failure(
+                    "isolated provider run timed out",
+                    RunUsage::default(),
+                ))
+            }
+        },
+        None => collect.await,
     };
     let _ = provider.close_session(&session.id).await;
     collected

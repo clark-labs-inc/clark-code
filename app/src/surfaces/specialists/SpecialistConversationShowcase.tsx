@@ -34,6 +34,7 @@ import {
   staggeredTransition,
 } from "../../lib/motion";
 import { Mermaid } from "../work/Mermaid";
+import { RsiLoopPulseCard } from "./RsiLoopPulse";
 
 type PresentationView = "map" | "evidence" | "run";
 
@@ -108,7 +109,7 @@ function MetricStrip({
               className={cn("h-full rounded-full", toneFill(metric.tone))}
               initial={reduceMotion ? { width: `${metric.progress}%` } : { width: 0 }}
               animate={{ width: `${metric.progress}%` }}
-              transition={{ duration: reduceMotion ? 0 : DUR.slow, ease: EASE.out }}
+              transition={{ duration: reduceMotion ? DUR.fast : DUR.slow, ease: EASE.out }}
             />
           </div>
         </m.div>
@@ -208,7 +209,7 @@ function StageRow({
   );
 }
 
-export function SpecialistConversationPresentationCard({
+function DefaultSpecialistConversationPresentationCard({
   presentation,
   variant = "conversation",
   onUsePrompt,
@@ -352,6 +353,36 @@ export function SpecialistConversationPresentationCard({
         <p className="mt-3 text-xs leading-4 text-ink-faint">{presentation.limitation}</p>
       </m.div>
     </section>
+  );
+}
+
+export function SpecialistConversationPresentationCard({
+  presentation,
+  variant = "conversation",
+  onUsePrompt,
+  onPause,
+}: {
+  presentation: NonNullable<ReturnType<typeof specialistConversationPresentation>>;
+  variant?: "example" | "conversation";
+  onUsePrompt?: (prompt: string) => void;
+  onPause?: () => void;
+}) {
+  if (presentation.kind === "rsi") {
+    return (
+      <RsiLoopPulseCard
+        presentation={presentation}
+        variant={variant}
+        onUsePrompt={onUsePrompt}
+        onPause={onPause}
+      />
+    );
+  }
+  return (
+    <DefaultSpecialistConversationPresentationCard
+      presentation={presentation}
+      variant={variant}
+      onUsePrompt={onUsePrompt}
+    />
   );
 }
 

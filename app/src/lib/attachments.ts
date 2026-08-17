@@ -105,6 +105,25 @@ export function toUpload(a: PendingAttachment): Upload {
   return { filename: a.filename, content_type: a.content_type, data_base64: a.data_base64 };
 }
 
+export function revokeAttachmentPreviews(attachments: readonly PendingAttachment[]): void {
+  for (const attachment of attachments) {
+    if (attachment.previewUrl) URL.revokeObjectURL(attachment.previewUrl);
+  }
+}
+
+/** Put a rejected submission back ahead of any newly staged files without
+ * duplicating an attachment that another state transition already restored. */
+export function restorePendingAttachments(
+  submitted: readonly PendingAttachment[],
+  current: readonly PendingAttachment[],
+): PendingAttachment[] {
+  const currentIds = new Set(current.map((attachment) => attachment.id));
+  return [
+    ...submitted.filter((attachment) => !currentIds.has(attachment.id)),
+    ...current,
+  ];
+}
+
 function blobToBase64(blob: Blob): Promise<string> {
   if (typeof FileReader === "undefined") {
     // Non-browser test/dev runtimes do not expose FileReader. Keep a bounded

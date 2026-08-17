@@ -193,11 +193,8 @@ async fn crash_recovery_replays_uncheckpointed_batches_and_marks_run_interrupted
     assert!(recovered.pending);
     assert!(recovered.needs_snapshot_publication);
     let recovered_goal = recovered.snapshot.goal.as_ref().unwrap();
-    assert_eq!(recovered_goal.status, GoalStatus::Blocked);
-    assert_eq!(
-        recovered_goal.blocker_reason.as_deref(),
-        Some("Clark Code restarted before the goal finished. Continue from the saved history.")
-    );
+    assert_eq!(recovered_goal.status, GoalStatus::Active);
+    assert_eq!(recovered_goal.blocker_reason, None);
     let metadata = recovered.metadata.as_ref().unwrap();
     assert_eq!(metadata["id"], "session-1");
     assert_eq!(metadata["title"], "Test");
@@ -220,13 +217,9 @@ async fn crash_recovery_replays_uncheckpointed_batches_and_marks_run_interrupted
     let terminal_events = pending.last().unwrap().request.events.iter().map(|record| {
         serde_json::from_value::<AgentEvent>(record.payload["event"].clone()).unwrap()
     });
-    assert!(terminal_events.into_iter().any(|event| matches!(
-        event,
-        AgentEvent::GoalUpdated { goal, .. }
-            if goal.status == GoalStatus::Blocked
-                && goal.blocker_reason.as_deref()
-                    == Some("Clark Code restarted before the goal finished. Continue from the saved history.")
-    )));
+    assert!(terminal_events
+        .into_iter()
+        .all(|event| !matches!(event, AgentEvent::GoalUpdated { .. })));
 
     for batch in &pending {
         outbox.acknowledge(&batch.batch_id).await.unwrap();

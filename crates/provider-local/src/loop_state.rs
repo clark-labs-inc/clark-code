@@ -24,6 +24,8 @@ pub(crate) struct SessionState {
     /// Shell-command prefixes that are always refused. Union of the global
     /// denylist and the project's `.agent/settings.json` `permissions.deny`.
     pub deny_commands: Vec<String>,
+    /// Host-owned boundaries that remain refusals under every permission mode.
+    pub hard_constraints: Vec<String>,
     /// Collaboration-mode and execution-checklist state. Kept independent
     /// from permission policy and standing goals.
     pub planning: crate::planning::PlanningState,

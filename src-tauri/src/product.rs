@@ -6,6 +6,7 @@
 
 use agent_core::{Provider, ProviderConfig};
 use async_trait::async_trait;
+use code_host::CodingSessionExtensionRecipe;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -44,6 +45,13 @@ pub struct ProductRemoteWorkerLaunch {
     pub owner_scope: String,
     pub spec: code_remote::RemoteWorkerSpec,
     pub credentials: HashMap<String, String>,
+}
+
+pub struct ProductRemoteSessionRequest {
+    pub extra: Value,
+    pub prepared_config: ProviderConfig,
+    pub project_root: PathBuf,
+    pub account_id: String,
 }
 
 impl ProductAccountAuthority {
@@ -318,6 +326,26 @@ pub trait ProductIntegration: Send + Sync {
         _context: ProductRequestContext<'_>,
     ) -> Result<Option<ProductRemoteWorkerLaunch>, String> {
         Ok(None)
+    }
+
+    /// Strictly translate renderer product metadata into bounded,
+    /// credential-free recipes understood by this product's compiled remote
+    /// worker. The neutral product rejects every product extension.
+    async fn prepare_remote_session_extensions(
+        &self,
+        request: ProductRemoteSessionRequest,
+        _context: ProductRequestContext<'_>,
+    ) -> Result<Vec<CodingSessionExtensionRecipe>, String> {
+        let extra = request
+            .extra
+            .as_object()
+            .ok_or("remote product session metadata must be an object")?;
+        if let Some(field) = extra.keys().next() {
+            return Err(format!(
+                "remote worker configuration contains an unsupported renderer-owned field: extra.{field}"
+            ));
+        }
+        Ok(Vec::new())
     }
 
     async fn request(

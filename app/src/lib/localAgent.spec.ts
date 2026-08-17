@@ -111,7 +111,10 @@ describe("product specialist extension binding", () => {
       "id:account",
     );
 
-    expect(config.extra).toMatchObject({ specialist_kind: "spec" });
+    expect(config.extra).toMatchObject({
+      specialist_kind: "spec",
+      hard_constraints: ["no_delete", "no_github_push"],
+    });
   });
 
   it("exposes account-scoped recent checkouts to Scout as read-only census roots", () => {
@@ -170,6 +173,21 @@ describe("product specialist extension binding", () => {
     expect(config.extra).toEqual({
       remote_worker: { worker_handle: "worker-remote", cwd: "/remote/project" },
       specialist_kind: "security",
+    });
+  });
+
+  it("carries Spec hard constraints into a remote worker recipe", () => {
+    const config = localConnectConfig(
+      { ...DEFAULT_LOCAL_SETTINGS, cwd: "/local" },
+      { worker_handle: "worker-remote", cwd: "/remote/project" },
+      undefined,
+      "spec",
+    );
+
+    expect(config.extra).toEqual({
+      remote_worker: { worker_handle: "worker-remote", cwd: "/remote/project" },
+      specialist_kind: "spec",
+      hard_constraints: ["no_delete", "no_github_push"],
     });
   });
 });

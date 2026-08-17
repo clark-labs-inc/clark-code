@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use agent_core::{apply, AgentEvent, GoalStatus, RunFailureKind, RunOutcome, RunStatus, Snapshot};
+use agent_core::{apply, AgentEvent, RunFailureKind, RunOutcome, RunStatus, Snapshot};
 use rusqlite::{params, OptionalExtension};
 use serde_json::{json, Value};
 
@@ -179,7 +179,6 @@ pub(super) fn recover_sync(
             &mut snapshot,
             "desktop_restart",
             "Clark Code restarted before this run finished. You can continue from the saved history.",
-            "Clark Code restarted before the goal finished. Continue from the saved history.",
         );
         if !events.is_empty() {
             needs_snapshot_publication = true;
@@ -265,15 +264,17 @@ fn recovered_metadata(
     Ok(metadata)
 }
 
-/// Turn any active run (and its active goal) into durable terminal events.
+/// Turn any active run into durable terminal events.
 ///
 /// Restart recovery and an explicit host-side close use the same transition so
-/// neither can leave another device rendering a session as still working.
+/// neither can leave another device rendering a run as still working. A
+/// standing goal remains active: process lifetime is not evidence that the
+/// objective is blocked, and reopening can safely continue from the typed
+/// transcript plus current workspace state.
 pub(crate) fn interrupt_live_runs(
     snapshot: &mut Snapshot,
     stop_reason: &str,
     error: &str,
-    goal_blocker_reason: &str,
 ) -> Vec<AgentEvent> {
     let interrupted_runs = snapshot
         .runs
@@ -301,24 +302,6 @@ pub(crate) fn interrupt_live_runs(
             },
         })
         .collect::<Vec<_>>();
-    let goal_run = snapshot
-        .goal
-        .as_ref()
-        .filter(|goal| goal.status == GoalStatus::Active)
-        .and_then(|goal| {
-            goal.run
-                .as_ref()
-                .filter(|run| interrupted_runs.contains(run))
-                .cloned()
-                .or_else(|| interrupted_runs.last().cloned())
-        });
-    if let Some(run) = goal_run {
-        let mut goal = snapshot.goal.clone().expect("active goal is present");
-        goal.status = GoalStatus::Blocked;
-        goal.blocker_reason = Some(goal_blocker_reason.into());
-        goal.updated_at_ms = reserve_timestamps(1) as u64;
-        events.push(AgentEvent::GoalUpdated { run, goal });
-    }
     for item in snapshot.timeline.clone() {
         let agent_core::TimelineItem::ProviderIncident { run, id } = item else {
             continue;

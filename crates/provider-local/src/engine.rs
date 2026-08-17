@@ -19,7 +19,7 @@ use crate::agent_adapter::{
 };
 use crate::compaction::{CheckpointCompactor, CompactionConfig};
 use crate::llm::LlmClient;
-use crate::loop_breaker::LoopBreaker;
+use crate::loop_breaker::LoopProgressAdvisory;
 use crate::loop_state::{GoalStatus, RunControl, SessionState};
 use crate::root_execution::RootExecutionTrace;
 use crate::tools::{ToolCtx, ToolRegistry};
@@ -110,9 +110,8 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
     for event in tc.initial_events.iter().cloned() {
         let _ = tx.send(event).await;
     }
-    // An explicit user turn resumes a previously blocked goal. Budget-limited
-    // and complete goals remain terminal because only the user can grant more
-    // runway or create the next goal.
+    // An explicit user turn resumes a previously blocked goal. Complete goals
+    // remain terminal because only the user can create the next goal.
     let (starting_goal, completed_goal_id) = {
         let mut session = tc.session.lock().await;
         let completed = session
@@ -258,9 +257,11 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
         context_limit,
     );
     let usage = stream.usage();
-    // Breaks stuck same-action/same-result loops early (nudge → hard block).
-    // One instance is shared across the before- and after-tool-call hook lists.
-    let loop_breaker = Arc::new(LoopBreaker::new());
+    // Repeated same-action/same-result observations receive model-visible
+    // progress advice, but never a heuristic host veto. Long-running polling
+    // and external convergence remain governed by explicit cancellation and
+    // typed tool/provider failures.
+    let loop_advisory = Arc::new(LoopProgressAdvisory::new());
     // Parallel batches: read-only tools in one assistant turn run concurrently,
     // as expected by the local model. Mutating tools set `requires_exclusive_sandbox`, which
     // downgrades their whole batch to sequential, so edits/shell keep today's
@@ -274,8 +275,7 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
         .tools_arc(tools.clone())
         .event_sink(sink)
         .default_execution_mode(agent_loop::ExecutionMode::Parallel)
-        .before_tool_call_arc(loop_breaker.clone())
-        .after_tool_call_arc(loop_breaker.clone())
+        .after_tool_call_arc(loop_advisory)
         .tool_gate_arc(tc.registry.deferred_tool_gate(tc.session.clone()))
         .follow_up(crate::effects::EffectCompletionGuard::new(
             tc.session.clone(),
@@ -362,7 +362,7 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
     // Drive the run and, when a session goal is active, CONTINUE it after each
     // clean completion with a goal-continuation turn (the thread-goal
     // loop): the run keeps going until the model proves the goal complete, gets
-    // blocked, or the budget runs out. Context-window overflows are recovered
+    // explicitly blocked, or the user cancels it. Context-window overflows are recovered
     // transparently inside `agent_loop::run` (the checkpoint compactor hook
     // registered above), so there is no overflow bookkeeping here. Steering and
     // cancel keep working throughout — it is all one desktop run.
@@ -525,8 +525,8 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
             }
             Err(error) => {
                 // Failed iterations still consumed the user's time and model
-                // budget. Record them before the terminal error path pauses the
-                // goal, otherwise a long run can misleadingly collapse to 0s.
+                // usage. Record them before the terminal error path, otherwise
+                // a long run can misleadingly collapse to 0s.
                 let usage_now = usage
                     .snapshot()
                     .map(|u| u.input_tokens + u.output_tokens)
@@ -614,31 +614,12 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
                 let mut completed = completed_transcript.drain();
                 completed.extend(leftover_steering);
                 compactor.commit_appended(&mut session.transcript, completed);
-                // A goal must never auto-continue into a wall: a failed run
-                // blocks it to prevent automatic continuation from looping and
-                // consuming tokens. A user
-                // cancel merely pauses pursuit — also expressed as Blocked,
-                // resumed by the user's next explicit ask.
-                if let Some(goal) = session
-                    .goal
-                    .as_mut()
-                    .filter(|goal| !is_completed_before_run(goal))
-                {
-                    if goal.status == GoalStatus::Active {
-                        goal.status = GoalStatus::Blocked;
-                        goal.blocker_reason = Some(if aborted {
-                            "The user stopped the run before it finished".to_string()
-                        } else if mapped.failure_kind
-                            == Some(RunFailureKind::VerificationIncomplete)
-                        {
-                            "The answer was produced, but its external effects remain unverified"
-                                .to_string()
-                        } else {
-                            "The provider run failed before the goal finished".to_string()
-                        });
-                        goal.touch();
-                    }
-                }
+                // Run and goal lifecycles have separate authorities. A typed
+                // run failure ends this attempt, but cannot bypass update_goal's
+                // repeated-blocker contract and declare the standing objective
+                // blocked after one observation. The goal remains resumable;
+                // only explicit goal completion/blocking or a later user turn
+                // changes its status.
                 // Tell the model the turn was cut off and record that marker:
                 // without it, the next turn continues as if the last
                 // one finished cleanly, re-trusting steps that never ran.

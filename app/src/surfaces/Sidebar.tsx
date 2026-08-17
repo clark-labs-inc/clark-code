@@ -600,8 +600,8 @@ export function Sidebar({
       ).map((m) => m.item),
     [conversations, filter],
   );
-  // One stable rank per conversation, shared by the group + row ordering so a
-  // parallel run's timestamp bump never reshuffles the list mid-session.
+  // Rank by immutable creation time, shared by the group + row ordering: the
+  // newest-created chat stays on top and activity never reshuffles the list.
   const rank = useMemo(() => {
     const m = stableRankMap(visible);
     return (id: string) => m.get(id) ?? 0;

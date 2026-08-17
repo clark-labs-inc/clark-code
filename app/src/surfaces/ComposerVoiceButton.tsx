@@ -21,7 +21,7 @@ export function ComposerVoiceButton({
   onError,
 }: {
   disabled?: boolean;
-  onTranscript: (text: string) => void;
+  onTranscript: (text: string, state: "partial" | "final") => void;
   onError: (message: string) => void;
 }) {
   const voice = productModule().voice;
@@ -30,12 +30,14 @@ export function ComposerVoiceButton({
   const [phase, setPhase] = useState<VoiceRecordingPhase>("idle");
   const [elapsed, setElapsed] = useState(0);
   const [levels, setLevels] = useState(() => Array.from({ length: 18 }, () => 0.08));
+  const [liveTranscript, setLiveTranscript] = useState("");
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const pcmCaptureRef = useRef<VoicePcmCapture | null>(null);
   const streamSessionRef = useRef<string | null>(null);
   const streamSendQueueRef = useRef<Promise<void>>(Promise.resolve());
   const streamFailureRef = useRef<unknown>(null);
+  const streamLastTranscriptRef = useRef("");
   const chunksRef = useRef<Blob[]>([]);
   const startedAtRef = useRef(0);
 
@@ -104,11 +106,13 @@ export function ComposerVoiceButton({
       streamRef.current = stream;
       setElapsed(0);
       setLevels(Array.from({ length: 18 }, () => 0.08));
+      setLiveTranscript("");
 
       if (streamer) {
         const session = await streamer.start();
         streamSessionRef.current = session.id;
         streamFailureRef.current = null;
+        streamLastTranscriptRef.current = "";
         streamSendQueueRef.current = Promise.resolve();
         pcmCaptureRef.current = await startVoicePcmCapture(
           stream,
@@ -118,7 +122,13 @@ export function ComposerVoiceButton({
             streamSendQueueRef.current = streamSendQueueRef.current.then(async () => {
               if (streamFailureRef.current) return;
               try {
-                await streamer.send(id, dataBase64);
+                const result = await streamer.send(id, dataBase64);
+                const text = result.text.trim();
+                if (text && text !== streamLastTranscriptRef.current) {
+                  streamLastTranscriptRef.current = text;
+                  setLiveTranscript(text);
+                  onTranscript(text, "partial");
+                }
               } catch (error) {
                 streamFailureRef.current = error;
               }
@@ -156,7 +166,7 @@ export function ComposerVoiceButton({
       setPhase("idle");
       onError(voiceCaptureMessage(error));
     }
-  }, [disabled, onError, phase, stopPcmCapture, stopStream, streamer, transcriber]);
+  }, [disabled, onError, onTranscript, phase, stopPcmCapture, stopStream, streamer, transcriber]);
 
   const finish = useCallback(async () => {
     if (phase !== "recording" || (!transcriber && !streamer)) return;
@@ -171,7 +181,7 @@ export function ComposerVoiceButton({
         const result = await streamer.finish(sessionId);
         streamSessionRef.current = null;
         if (!result.text.trim()) throw new Error("No speech was detected.");
-        onTranscript(result.text.trim());
+        onTranscript(result.text.trim(), "final");
         return;
       }
 
@@ -188,7 +198,7 @@ export function ComposerVoiceButton({
         dataBase64: await blobToBase64(blob),
       });
       if (!result.text.trim()) throw new Error("No speech was detected.");
-      onTranscript(result.text.trim());
+      onTranscript(result.text.trim(), "final");
     } catch (error) {
       const sessionId = streamSessionRef.current;
       streamSessionRef.current = null;
@@ -199,6 +209,8 @@ export function ComposerVoiceButton({
       stopStream();
       recorderRef.current = null;
       chunksRef.current = [];
+      streamLastTranscriptRef.current = "";
+      setLiveTranscript("");
       setElapsed(0);
       setPhase("idle");
     }
@@ -248,15 +260,19 @@ export function ComposerVoiceButton({
       )}
       {recording && (
         <>
-          <span className="flex h-4 w-20 items-center justify-center gap-px" aria-hidden="true">
-            {levels.map((level, index) => (
-              <span
-                key={index}
-                className="w-0.5 rounded-full bg-current transition-[height] duration-fast"
-                style={{ height: `${Math.max(2, Math.round(level * 16))}px` }}
-              />
-            ))}
-          </span>
+          {liveTranscript ? (
+            <span className="max-w-48 truncate" aria-live="polite">{liveTranscript}</span>
+          ) : (
+            <span className="flex h-4 w-20 items-center justify-center gap-px" aria-hidden="true">
+              {levels.map((level, index) => (
+                <span
+                  key={index}
+                  className="w-0.5 rounded-full bg-current transition-[height] duration-fast"
+                  style={{ height: `${Math.max(2, Math.round(level * 16))}px` }}
+                />
+              ))}
+            </span>
+          )}
           <span className="tabular-nums">{voiceElapsed(elapsed)}</span>
         </>
       )}

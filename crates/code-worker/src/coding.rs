@@ -13,6 +13,10 @@ use code_host::{CodingSessionRecipe, HeadlessPlugin, PluginContext, PluginError,
 
 use crate::config::{ExecutionResidency, ProviderProfile};
 
+mod session_extension;
+pub use session_extension::CodingSessionExtension;
+use session_extension::{apply_session_extensions, apply_session_recipe, register_extension};
+
 const SESSION_OPEN: &str = "session.open";
 const SESSION_PROMPT: &str = "session.prompt";
 const SESSION_RESPOND: &str = "session.respond";
@@ -34,6 +38,7 @@ pub struct CodingPlugin {
     manifest: PluginManifest,
     profile: ProviderProfile,
     execution_residency: ExecutionResidency,
+    session_extensions: BTreeMap<String, Arc<dyn CodingSessionExtension>>,
     sessions: Arc<Mutex<BTreeMap<String, Arc<Mutex<CodingSession>>>>>,
 }
 
@@ -61,8 +66,17 @@ impl CodingPlugin {
             },
             profile,
             execution_residency,
+            session_extensions: BTreeMap::new(),
             sessions: Arc::new(Mutex::new(BTreeMap::new())),
         }
+    }
+
+    pub fn with_session_extension(
+        mut self,
+        extension: Arc<dyn CodingSessionExtension>,
+    ) -> Result<Self, String> {
+        register_extension(&mut self.session_extensions, extension)?;
+        Ok(self)
     }
 
     async fn open(&self, context: PluginContext, input: Value) -> Result<Value, PluginError> {
@@ -89,13 +103,19 @@ impl CodingPlugin {
             .unwrap_or_else(|| format!("session-{}", uuid::Uuid::new_v4().simple()));
         portable_session_id(&id)?;
         let mut provider_config = self.profile.provider_config(self.execution_residency);
+        let mut provider = provider_local::LocalAgentProvider::new();
         if let Some(recipe) = request.recipe.as_ref() {
             recipe
                 .validate(&project_root)
                 .map_err(PluginError::InvalidInput)?;
             apply_session_recipe(&mut provider_config, recipe)?;
+            provider = apply_session_extensions(
+                provider,
+                recipe,
+                &project_root,
+                &self.session_extensions,
+            )?;
         }
-        let mut provider = provider_local::LocalAgentProvider::new();
         provider
             .connect(provider_config)
             .await
@@ -362,30 +382,6 @@ struct OpenRequest {
     recipe: Option<CodingSessionRecipe>,
 }
 
-fn apply_session_recipe(
-    config: &mut agent_core::ProviderConfig,
-    recipe: &CodingSessionRecipe,
-) -> Result<(), PluginError> {
-    let extra = config.extra.as_object_mut().ok_or_else(|| {
-        PluginError::InvalidInput("worker provider configuration is not an object".into())
-    })?;
-    if let Some(kind) = recipe.specialist_kind.as_ref() {
-        extra.insert("specialist_kind".into(), Value::String(kind.clone()));
-        // Specialist skill instructions extend the canonical remote prompt.
-        // The generic headless override would otherwise hide that base policy.
-        extra.remove("system_prompt_override");
-    }
-    if let Some(scout) = recipe.scout_cartography.as_ref() {
-        extra.insert(
-            "scout_cartography".into(),
-            serde_json::to_value(scout)
-                .map_err(|error| PluginError::InvalidInput(error.to_string()))?,
-        );
-        extra.insert("orchestration".into(), json!({ "enabled": true }));
-    }
-    Ok(())
-}
-
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PromptRequest {
@@ -516,6 +512,7 @@ mod tests {
         let project = std::path::Path::new("/srv/client/neon");
         let recipe = CodingSessionRecipe {
             specialist_kind: Some("scout".into()),
+            hard_constraints: Vec::new(),
             scout_cartography: Some(code_host::ScoutCartographyRecipe {
                 organization_id: "59b8fe20-6072-4c16-9dae-9d7cbbf2533c".into(),
                 workspace_id: "2fac2db5-20d6-499c-b691-47ad19fc0ca8".into(),
@@ -525,6 +522,7 @@ mod tests {
                 route_prefix: "/v1/system-cartography".into(),
                 human_run_request_id: Some(format!("scout-run:{}", "a".repeat(64))),
             }),
+            extensions: Vec::new(),
         };
         let mut config =
             ProviderProfile::default().provider_config(ExecutionResidency::RemoteWorker);

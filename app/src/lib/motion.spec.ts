@@ -8,6 +8,7 @@ import {
   EXPAND,
   EXPAND_REDUCED,
   REDUCED_EXIT,
+  REDUCED_TRANSITION,
   RISE_SMALL,
   SCREEN_FADE,
   SLIDE_LEFT,
@@ -24,8 +25,8 @@ import {
 describe("motion policy", () => {
   it("uses one expand policy for conversation transients", () => {
     expect(EXPAND.initial).toMatchObject({ opacity: 0, height: 0 });
-    expect(EXPAND_REDUCED.initial).toBe(false);
-    expect(EXPAND_REDUCED.transition.duration).toBe(0);
+    expect(EXPAND_REDUCED.initial).toEqual({ opacity: 0 });
+    expect(EXPAND_REDUCED.transition.duration).toBe(DUR.fast);
   });
 
   it("keeps reduced-motion transients as a short opacity-only exit fade", () => {
@@ -84,17 +85,17 @@ describe("motion policy", () => {
     expect(staggeredTransition(false, 0, 0.04, { delay: 0.08 }).delay).toBe(0.08);
   });
 
-  it("staggeredTransition zeroes choreography under reduced motion", () => {
-    expect(staggeredTransition(true, 5, 0.05)).toEqual({ duration: 0 });
-    expect(staggeredTransition(true, 0, 0.04, { delay: 0.08 })).toEqual({ duration: 0 });
+  it("staggeredTransition keeps one unstaggered opacity cadence under reduced motion", () => {
+    expect(staggeredTransition(true, 5, 0.05)).toEqual(REDUCED_TRANSITION);
+    expect(staggeredTransition(true, 0, 0.04, { delay: 0.08 })).toEqual(REDUCED_TRANSITION);
   });
 
   it("accessibleMotion keeps the new transform presets spatial-movement-free under reduce", () => {
     for (const preset of [RISE_SMALL, SLIDE_LEFT, SLIDE_RIGHT]) {
       const reduced = accessibleMotion(preset, true);
       expect(JSON.stringify(reduced)).not.toContain("translate");
-      expect(reduced.transition).toMatchObject({ duration: 0 });
-      expect(reduced.initial).toBe(false);
+      expect(reduced.transition).toMatchObject({ duration: DUR.fast });
+      expect(reduced.initial).toEqual({ opacity: 0 });
       expect(reduced.animate).toEqual({ opacity: 1 });
       expect(reduced.animate).not.toHaveProperty("transform");
     }
@@ -103,7 +104,11 @@ describe("motion policy", () => {
   it("uses word-level fades instead of character-by-character typing", () => {
     expect(CHAT_TEXT_ANIMATION).toMatchObject({ animation: "fadeIn", sep: "word" });
     expect(CHAT_TEXT_ANIMATION.stagger).toBeGreaterThan(0);
-    expect(CHAT_REDUCED_TEXT_ANIMATION).toBe(false);
+    expect(CHAT_REDUCED_TEXT_ANIMATION).toMatchObject({
+      animation: "fadeIn",
+      duration: DUR.fast * 1000,
+      stagger: 0,
+    });
   });
 
   it("uses one accessible cadence for indeterminate progress", () => {
@@ -113,7 +118,12 @@ describe("motion policy", () => {
       repeat: Infinity,
     });
     expect(indeterminateTransition(false, 0.18)).toMatchObject({ delay: 0.18 });
-    expect(indeterminateTransition(true, 0.18)).toEqual({ duration: 0 });
+    expect(indeterminateTransition(true, 0.18)).toEqual({
+      duration: 2.8,
+      ease: EASE.inOut,
+      repeat: Infinity,
+      delay: 0.18,
+    });
   });
 
   it("gives user and assistant rows distinct compositor-friendly entrances", () => {

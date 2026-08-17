@@ -145,7 +145,7 @@ describe("human-bound Scout authority", () => {
     expect(openSession.mock.calls[0]?.[1]).not.toHaveProperty("extra.remote_worker");
   });
 
-  it("refuses to infer or create a workspace during run submission", async () => {
+  it("waits for the company map instead of creating it during run submission", async () => {
     useSpecialistStore.setState({
       contexts: { scout: { kind: "scout", organizationId } },
     });
@@ -163,7 +163,7 @@ describe("human-bound Scout authority", () => {
     expect(prepareQuickChatWorkspace).not.toHaveBeenCalled();
     expect(openSession).not.toHaveBeenCalled();
     expect(useSessionStore.getState().error).toBe(
-      "Choose or create a Scout workspace before starting Scout.",
+      "Company Scout is still being prepared. Wait a moment and try again.",
     );
   });
 

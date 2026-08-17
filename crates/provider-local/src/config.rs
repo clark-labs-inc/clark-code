@@ -144,6 +144,10 @@ pub struct LocalConfig {
     pub command_allowlist: Vec<String>,
     /// Shell-command prefixes that are always refused.
     pub command_denylist: Vec<String>,
+    /// Host-owned, non-overridable action boundaries for a bounded workflow.
+    /// Unlike permission modes, these refuse matching actions even under Full
+    /// access and cannot be changed by the model or an approval response.
+    pub hard_constraints: Vec<String>,
     /// MCP servers to connect and expose as tools.
     pub mcp_servers: Vec<crate::mcp::McpServerConfig>,
     /// Vision-fallback config for coding models without native image support.
@@ -494,6 +498,7 @@ impl LocalConfig {
             permissions,
             command_allowlist: str_vec(extra, "command_allowlist"),
             command_denylist: str_vec(extra, "command_denylist"),
+            hard_constraints: str_vec(extra, "hard_constraints"),
             mcp_servers: extra
                 .get("mcp_servers")
                 .and_then(|v| serde_json::from_value(v.clone()).ok())
@@ -628,6 +633,21 @@ mod tests {
             ]
         );
         assert_eq!(cfg.mode_for("bash"), PermissionMode::Deny);
+    }
+
+    #[test]
+    fn host_hard_constraints_are_parsed_separately_from_approval_modes() {
+        let pc = ProviderConfig {
+            extra: serde_json::json!({
+                "hard_constraints": ["no_delete", "no_github_push"],
+                "permissions": {"bash": "allow"}
+            }),
+            ..ProviderConfig::default()
+        };
+        let cfg = LocalConfig::from_provider_config(&pc);
+
+        assert_eq!(cfg.hard_constraints, ["no_delete", "no_github_push"]);
+        assert_eq!(cfg.mode_for("bash"), PermissionMode::Allow);
     }
 
     #[test]

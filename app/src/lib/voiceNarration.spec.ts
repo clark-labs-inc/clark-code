@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   cleanVoiceContentType,
   createVoiceResamplerState,
+  mergeVoiceTranscriptDraft,
   pcm16Bytes,
   resampleVoiceSamples,
   voiceElapsed,
@@ -10,6 +11,18 @@ import {
 } from "./voiceNarration";
 
 describe("voice narration metadata", () => {
+  it("replaces streaming hypotheses inside one dictated draft span", () => {
+    const partial = mergeVoiceTranscriptDraft("Existing idea", null, "a focused spec");
+    expect(partial.value).toBe("Existing idea a focused spec");
+
+    const revised = mergeVoiceTranscriptDraft(
+      partial.value,
+      partial.session,
+      "a focused spec for search",
+    );
+    expect(revised.value).toBe("Existing idea a focused spec for search");
+  });
+
   it("normalizes recorder content types", () => {
     expect(cleanVoiceContentType("audio/webm;codecs=opus")).toBe("audio/webm");
     expect(cleanVoiceContentType()).toBe("audio/webm");

@@ -26,10 +26,10 @@ function UpdateOverlay() {
       {applying && (
         <m.div
           key="update-overlay"
-          initial={reduce ? false : { opacity: 0 }}
+          initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={reduce ? REDUCED_EXIT : { opacity: 0 }}
-          transition={{ duration: reduce ? 0 : DUR.base, ease: EASE.out }}
+          transition={{ duration: reduce ? DUR.fast : DUR.base, ease: EASE.out }}
           className="fixed inset-0 z-[100] grid place-items-center bg-bg/80 backdrop-blur-sm"
         >
           <div
@@ -45,7 +45,7 @@ function UpdateOverlay() {
             <div className="relative h-1 w-full overflow-hidden rounded-full bg-bg-tertiary">
               <m.span
                 className="absolute inset-y-0 left-0 w-1/3 rounded-full bg-accent"
-                animate={reduce ? { x: 0 } : { x: ["-100%", "300%"] }}
+                animate={reduce ? { opacity: [0.58, 1, 0.58] } : { x: ["-100%", "300%"] }}
                 transition={indeterminateTransition(reduce)}
               />
             </div>

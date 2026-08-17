@@ -26,7 +26,7 @@ fn feed(frames: &[&str]) -> AssistantTurn {
     let mut rsink = |_: &str| {};
     for f in frames {
         let v: Value = serde_json::from_str(f).unwrap();
-        acc.push_chunk(&v, &mut sink, &mut rsink);
+        acc.push_chunk(&v, &mut sink, &mut rsink, &mut |_| {});
     }
     acc.finish()
 }
@@ -37,7 +37,12 @@ fn accumulates_streamed_text() {
     let mut acc = Accumulator::default();
     for c in ["Hel", "lo ", "world"] {
         let v = json!({"choices":[{"delta":{"content": c}}]});
-        acc.push_chunk(&v, &mut |s: &str| collected.push_str(s), &mut |_| {});
+        acc.push_chunk(
+            &v,
+            &mut |s: &str| collected.push_str(s),
+            &mut |_| {},
+            &mut |_| {},
+        );
     }
     let turn = acc.finish();
     assert_eq!(turn.text, "Hello world");
@@ -71,7 +76,12 @@ fn accumulates_streamed_reasoning_and_forwards_it_live() {
             delta["content"] = json!(c);
         }
         let v = json!({"choices":[{"delta":delta}]});
-        acc.push_chunk(&v, &mut |_| {}, &mut |s: &str| collected.push_str(s));
+        acc.push_chunk(
+            &v,
+            &mut |_| {},
+            &mut |s: &str| collected.push_str(s),
+            &mut |_| {},
+        );
     }
     let turn = acc.finish();
     assert_eq!(turn.reasoning, "Thinking…");
@@ -87,7 +97,7 @@ fn reasoning_content_alias_is_also_read() {
     let mut acc = Accumulator::default();
     // Some providers stream reasoning as `delta.reasoning_content`.
     let v = json!({"choices":[{"delta":{"reasoning_content":"alt"}}]});
-    acc.push_chunk(&v, &mut |_| {}, &mut |_| {});
+    acc.push_chunk(&v, &mut |_| {}, &mut |_| {}, &mut |_| {});
     assert_eq!(acc.finish().reasoning, "alt");
 }
 
@@ -95,7 +105,7 @@ fn reasoning_content_alias_is_also_read() {
 fn reasoning_is_preferred_over_reasoning_content_when_both_present() {
     let mut acc = Accumulator::default();
     let v = json!({"choices":[{"delta":{"reasoning":"primary","reasoning_content":"secondary"}}]});
-    acc.push_chunk(&v, &mut |_| {}, &mut |_| {});
+    acc.push_chunk(&v, &mut |_| {}, &mut |_| {}, &mut |_| {});
     assert_eq!(acc.finish().reasoning, "primary");
 }
 
@@ -155,7 +165,7 @@ fn captures_in_band_openrouter_stream_error() {
         },
         "choices": [{"delta": {"content": ""}, "finish_reason": "error"}]
     });
-    acc.push_chunk(&v, &mut |_| {}, &mut |_| {});
+    acc.push_chunk(&v, &mut |_| {}, &mut |_| {}, &mut |_| {});
     assert_eq!(
         acc.stream_error
             .as_ref()
@@ -325,11 +335,29 @@ fn drain_lines_handles_split_frames_and_done() {
     // A frame split across two network chunks, then [DONE].
     let mut buf = Vec::new();
     buf.extend_from_slice(b"data: {\"choices\":[{\"delta\":{\"content\":\"hi");
-    assert!(!drain_lines(&mut buf, &mut acc, &mut sink, &mut rsink));
+    assert!(!drain_lines(
+        &mut buf,
+        &mut acc,
+        &mut sink,
+        &mut rsink,
+        &mut |_| {},
+    ));
     buf.extend_from_slice(b"\"}}]}\n");
-    assert!(!drain_lines(&mut buf, &mut acc, &mut sink, &mut rsink));
+    assert!(!drain_lines(
+        &mut buf,
+        &mut acc,
+        &mut sink,
+        &mut rsink,
+        &mut |_| {},
+    ));
     buf.extend_from_slice(b"data: [DONE]\n");
-    assert!(drain_lines(&mut buf, &mut acc, &mut sink, &mut rsink));
+    assert!(drain_lines(
+        &mut buf,
+        &mut acc,
+        &mut sink,
+        &mut rsink,
+        &mut |_| {},
+    ));
     assert_eq!(acc.finish().text, "hi");
 }
 

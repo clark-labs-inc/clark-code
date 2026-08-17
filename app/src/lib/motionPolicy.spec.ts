@@ -141,14 +141,17 @@ describe("GUI motion policy", () => {
     );
     expect(cssSource).toContain(".skeleton::after,\n.spec-writing-line::after");
     expect(cssSource).not.toMatch(/\.spec-writing-line::after\s*\{[^}]*translateX/s);
-    expect(cssSource).toMatch(
-      /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.activity-dots > span:not\(:first-child\)\s*\{\s*display: none !important;/,
-    );
     expect(cssSource).not.toMatch(
       /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.reply-skeleton\s*\{\s*display: none !important;/,
     );
     expect(cssSource).toMatch(
-      /@media \(prefers-reduced-motion: reduce\)[\s\S]*animation-duration: 0\.001ms !important;[\s\S]*animation-iteration-count: 1 !important;/,
+      /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.skeleton,[\s\S]*animation: reduced-motion-breathe 3\.2s/,
+    );
+    expect(cssSource).toMatch(
+      /@media \(prefers-reduced-motion: reduce\)[\s\S]*transition-duration: var\(--dur-fast\) !important;/,
+    );
+    expect(cssSource).not.toMatch(
+      /@media \(prefers-reduced-motion: reduce\)[\s\S]*animation-duration: 0\.001ms !important/,
     );
     expect(cssSource).toContain('[class*="group-hover:scale"]');
   });
@@ -162,7 +165,7 @@ describe("GUI motion policy", () => {
     expect(cssSource).toContain("background: var(--color-bg-elevated)");
     expect(cssSource).toContain("box-shadow: var(--shadow-lifted)");
     expect(cssSource).toMatch(
-      /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.clark-toaster\[data-sonner-toaster\] \[data-sonner-toast\][\s\S]*transition: none !important/,
+      /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.clark-toaster\[data-sonner-toaster\] \[data-sonner-toast\][\s\S]*transition: opacity var\(--dur-fast\)/,
     );
   });
 });

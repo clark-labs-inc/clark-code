@@ -19,7 +19,7 @@ function Spinner({ reduce }: { reduce: boolean | null }) {
         <m.span
           key={i}
           className="size-1.5 rounded-full bg-accent"
-          animate={reduce ? undefined : { opacity: [0.3, 1, 0.3] }}
+          animate={{ opacity: reduce ? [0.58, 1, 0.58] : [0.3, 1, 0.3] }}
           transition={indeterminateTransition(reduce, i * 0.18)}
         />
       ))}
@@ -63,10 +63,10 @@ export function SideQuestionCard() {
       {sideQuestion && (
         <m.div
           className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 px-4 pt-[12vh]"
-          initial={reduce ? false : { opacity: 0 }}
+          initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={reduce ? REDUCED_EXIT : { opacity: 0 }}
-          transition={{ duration: reduce ? 0 : DUR.fast, ease: EASE.out }}
+          transition={{ duration: DUR.fast, ease: EASE.out }}
           onMouseDown={(e) => e.target === e.currentTarget && dismiss()}
         >
           <div

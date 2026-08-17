@@ -8,9 +8,9 @@
 //! built-ins. The server process is killed when its client is dropped.
 //!
 //! Newline-delimited JSON-RPC 2.0 is used (the MCP stdio framing). The client is
-//! robust to slow/dead servers: requests time out, a closed stream fails all
-//! pending calls, and a failing server is skipped rather than breaking the
-//! session.
+//! robust to slow/dead servers: connection setup is bounded, a closed stream
+//! fails all pending calls, and an in-flight tool remains owned by the run
+//! until the server responds or the user cancels it.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -31,7 +31,6 @@ use crate::tools::{ToolCtx, ToolExecutor, ToolOutcome};
 
 const PROTOCOL_VERSION: &str = "2024-11-05";
 const INIT_TIMEOUT: Duration = Duration::from_secs(15);
-const CALL_TIMEOUT: Duration = Duration::from_secs(300);
 
 /// One stdio MCP server the user has configured.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -76,6 +75,17 @@ struct McpToolAnnotations {
 }
 
 type Pending = Arc<Mutex<HashMap<i64, oneshot::Sender<Result<Value, String>>>>>;
+
+struct PendingRequest {
+    id: i64,
+    pending: Pending,
+}
+
+impl Drop for PendingRequest {
+    fn drop(&mut self) {
+        self.pending.lock().unwrap().remove(&self.id);
+    }
+}
 
 /// A live connection to one MCP server.
 pub struct McpClient {
@@ -216,18 +226,15 @@ impl McpClient {
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
         let (tx, rx) = oneshot::channel();
         self.pending.lock().unwrap().insert(id, tx);
+        let _pending_request = PendingRequest {
+            id,
+            pending: self.pending.clone(),
+        };
         let req = json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params });
-        if let Err(e) = self.send_line(req.to_string()).await {
-            self.pending.lock().unwrap().remove(&id);
-            return Err(e);
-        }
-        match tokio::time::timeout(CALL_TIMEOUT, rx).await {
-            Ok(Ok(res)) => res,
-            Ok(Err(_)) => Err("MCP request was dropped".into()),
-            Err(_) => {
-                self.pending.lock().unwrap().remove(&id);
-                Err("MCP request timed out".into())
-            }
+        self.send_line(req.to_string()).await?;
+        match rx.await {
+            Ok(res) => res,
+            Err(_) => Err("MCP request was dropped".into()),
         }
     }
 
@@ -482,7 +489,11 @@ rl.on('line', (line) => {
   if (m.id === undefined || m.id === null) return; // notification
   let result = {};
   if (m.method === 'initialize') result = { protocolVersion: '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'mock', version: '0' } };
-  else if (m.method === 'tools/list') result = { tools: [{ name: 'echo', description: 'Echo the message', inputSchema: { type: 'object', properties: { message: { type: 'string' } }, required: ['message'] } }] };
+  else if (m.method === 'tools/list') result = { tools: [
+    { name: 'echo', description: 'Echo the message', inputSchema: { type: 'object', properties: { message: { type: 'string' } }, required: ['message'] } },
+    { name: 'wait', description: 'Never answers', inputSchema: { type: 'object', properties: {} } }
+  ] };
+  else if (m.method === 'tools/call' && m.params.name === 'wait') return;
   else if (m.method === 'tools/call') result = { content: [{ type: 'text', text: String(m.params.arguments.message) }] };
   process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: m.id, result }) + '\n');
 });
@@ -515,8 +526,11 @@ rl.on('line', (line) => {
         let client = McpClient::connect(&cfg, &exec_core::LocalExecutor, dir.path())
             .await
             .expect("connect");
-        assert_eq!(client.tool_count(), 1);
-        assert_eq!(client.tool_names(), vec!["mcp_mock_echo".to_string()]);
+        assert_eq!(client.tool_count(), 2);
+        assert_eq!(
+            client.tool_names(),
+            vec!["mcp_mock_echo".to_string(), "mcp_mock_wait".to_string()]
+        );
 
         let (text, is_error) = client
             .call_tool("echo", json!({ "message": "hello mcp" }))
@@ -524,6 +538,42 @@ rl.on('line', (line) => {
             .expect("call");
         assert_eq!(text, "hello mcp");
         assert!(!is_error);
+    }
+
+    #[tokio::test]
+    async fn dropping_an_unanswered_call_removes_its_pending_request() {
+        if !node_available() {
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("mock-mcp.js");
+        std::fs::write(&script, MOCK_SERVER_JS).unwrap();
+        let cfg = McpServerConfig {
+            credential_ref: None,
+            name: "mock".into(),
+            command: "node".into(),
+            args: vec![script.to_string_lossy().into_owned()],
+            env: HashMap::new(),
+        };
+        let client = Arc::new(
+            McpClient::connect(&cfg, &exec_core::LocalExecutor, dir.path())
+                .await
+                .expect("connect"),
+        );
+        let call_client = client.clone();
+        let task = tokio::spawn(async move { call_client.call_tool("wait", json!({})).await });
+
+        for _ in 0..100 {
+            if !client.pending.lock().unwrap().is_empty() {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(client.pending.lock().unwrap().len(), 1);
+
+        task.abort();
+        let _ = task.await;
+        assert!(client.pending.lock().unwrap().is_empty());
     }
 
     #[tokio::test]

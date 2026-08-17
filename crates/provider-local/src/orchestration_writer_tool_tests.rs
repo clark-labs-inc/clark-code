@@ -67,6 +67,7 @@ fn config() -> OrchestrationToolsConfig {
     OrchestrationToolsConfig {
         policy: crate::orchestration::OrchestrationConfig {
             max_agents: 3,
+            token_budget: Some(120_000),
             ..Default::default()
         },
         base_url: "https://example.invalid/v1".into(),
@@ -172,7 +173,7 @@ fn builds_a_parallel_single_repository_plan_with_exact_leases() {
         .filter(|task| task.role == MultiRepoTaskRole::Writer)
         .map(|task| task.budget_reservation)
         .sum::<u64>();
-    assert!(writer_reservations <= config().policy.token_budget * 9 / 10);
+    assert!(writer_reservations <= config().policy.token_budget.unwrap() * 9 / 10);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -187,7 +188,7 @@ async fn paid_single_repo_workstreams_complete_and_apply() {
         config: OrchestrationToolsConfig {
             policy: crate::orchestration::OrchestrationConfig {
                 max_agents: 2,
-                token_budget: 60_000,
+                token_budget: Some(60_000),
                 ..Default::default()
             },
             base_url,

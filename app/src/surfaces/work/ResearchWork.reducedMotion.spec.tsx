@@ -50,7 +50,7 @@ vi.mock("motion/react-m", () => {
 import { ResearchWork } from "./ResearchWork";
 
 describe("ResearchWork reduced motion", () => {
-  it("mounts the live card without entrance motion while retaining essential progress feedback", () => {
+  it("mounts the live card with low-motion progress feedback", () => {
     const call: ToolCall = {
       id: "research-reduced-motion",
       title: "brokered_research: Verify official sources",
@@ -77,8 +77,10 @@ describe("ResearchWork reduced motion", () => {
 
     const markup = renderToStaticMarkup(<ResearchWork call={call} active />);
 
-    expect(markup).toContain('data-motion-initial="false"');
+    expect(markup).toContain('data-motion-initial="[object Object]"');
     expect(markup).toContain("animate-[spin_1s_linear_infinite]");
+    expect(markup).toContain('data-clark-work-receipt="true"');
+    expect(markup).not.toContain("Verify sources");
     expect(markup).not.toContain("translateY");
   });
 });

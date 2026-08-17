@@ -185,11 +185,16 @@ describe("conversation-bound Spec workspace", () => {
             cwd: "/srv/enterprise/project",
           },
           specialist_kind: "spec",
+          hard_constraints: ["no_delete", "no_github_push"],
         },
       },
       {
         kind: "new",
-        options: expect.objectContaining({ cwd: "/srv/enterprise/project" }),
+        options: {
+          cwd: "/srv/enterprise/project",
+          mode: "full",
+          collaboration_mode: "default",
+        },
         bindId: id,
       },
     );

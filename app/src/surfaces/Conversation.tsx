@@ -414,11 +414,17 @@ export function Conversation({
     }
     if (item.item === "specialist_presentation") {
       const presentation = specialistPresentationFromPayload(item.presentation);
+      const presentationRun = runs[item.run];
+      const canPausePresentation = presentationRun?.status === "running"
+        || presentationRun?.status === "queued";
       return presentation ? (
         <SpecialistConversationPresentationCard
           key={block.key}
           presentation={presentation}
           variant="conversation"
+          onPause={canPausePresentation
+            ? () => void useSessionStore.getState().cancelActive()
+            : undefined}
         />
       ) : null;
     }

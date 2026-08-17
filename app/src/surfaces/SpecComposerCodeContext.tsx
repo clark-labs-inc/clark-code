@@ -33,6 +33,7 @@ export interface SpecComposerCodeContextController {
   suggestions: (query: string, projectPaths: string[]) => ComposerSuggestion[];
   acceptSuggestion: (suggestion: ComposerSuggestion) => boolean;
   reset: () => void;
+  replaceReferences: (references: SpecCodeReference[]) => void;
   prompt: (message: string) => string;
   chooseRepository: () => Promise<void>;
   removeRepository: () => Promise<void>;
@@ -221,6 +222,7 @@ export function useSpecComposerCodeContext({
     suggestions,
     acceptSuggestion,
     reset: () => setReferences([]),
+    replaceReferences: setReferences,
     prompt: (message) => enabled
       ? specCodeContextPrompt(message, repositoryRoot, references)
       : message.trim(),

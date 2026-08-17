@@ -61,9 +61,10 @@ import {
   newScoutRunRequestId,
 } from "../lib/specialists";
 import {
+  companyScoutMap,
   specialistQuery,
+  type CompanyScoutMap,
   type ScoutSnapshotEntry,
-  type ScoutWorkspace,
 } from "../lib/specialistCloud";
 import { authAccountMatches } from "../lib/account";
 import { isQuickChatProject } from "../lib/projectSidebar";
@@ -71,6 +72,18 @@ import { productModule } from "../product/productModule";
 import { approvalPolicyForSpecialist } from "../lib/permissions";
 import { quickChatModelSettings } from "../lib/localAgent";
 import type { CoreBridge, RemoteWorkerTarget } from "../core-bridge/bridge";
+import type { Snapshot } from "../core-bridge/types";
+
+export function shouldResumeSavedProgress(snapshot: Snapshot): boolean {
+  const goal = snapshot.goal;
+  if (goal?.status !== "active") return false;
+  if (goal.run) {
+    return snapshot.runs[goal.run]?.outcome?.failure_kind === "runtime_interrupted";
+  }
+  return Object.values(snapshot.runs).some(
+    (run) => run.outcome?.failure_kind === "runtime_interrupted",
+  );
+}
 
 async function requireSecurityRepository(
   bridge: CoreBridge,
@@ -320,16 +333,16 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
       });
       return;
     }
-    // Validate the human-selected Scout authority before allocating any local
+    // Validate the human-selected company authority before allocating any local
     // conversation workspace. This keeps a failed start entirely side-effect
     // free and prevents the previous package from becoming an implicit scope.
     if (specialistContext?.kind === "scout") {
       if (!specialistContext.organizationId?.trim()) {
-        set({ error: "Pick or create a Scout workspace before starting." });
+        set({ error: "Choose a company before starting Scout." });
         return;
       }
       if (!specialistContext.workspaceId?.trim()) {
-        set({ error: "Choose or create a Scout workspace before starting Scout." });
+        set({ error: "Company Scout is still being prepared. Wait a moment and try again." });
         return;
       }
       specialistContext = {
@@ -364,7 +377,7 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
     const sessionProvider = specialistDefinition ? "specialist" : activeProvider;
     const isLocal = activeProvider === "local";
     // Specialists use the same explicit execution target as ordinary coding
-    // sessions. Scout's organization/workspace remains a separate authority;
+    // sessions. Scout's company map remains a separate authority;
     // the native host carries that trusted recipe into the selected worker.
     const isRemote = isLocal
       && get().projectMode === "remote";
@@ -497,22 +510,20 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
             const preferredWorkspaceId = specialistContext.workspaceId;
             try {
               scoutContext = await withinOptionalContextBudget((async () => {
-                const workspaces = await specialistQuery<ScoutWorkspace[]>(
+                const maps = await specialistQuery<CompanyScoutMap[]>(
                   credentials,
                   "scout",
                   "scout_workspaces",
                   organizationId,
                 );
-                const workspace = workspaces.find(
-                  ({ id }) => id === preferredWorkspaceId,
-                ) ?? workspaces[0];
-                if (!workspace) return undefined;
+                const map = companyScoutMap(maps, preferredWorkspaceId);
+                if (!map) return undefined;
                 const snapshot = await specialistQuery<{ entries: ScoutSnapshotEntry[] }>(
                   credentials,
                   "scout",
                   "scout_snapshot",
                   organizationId,
-                  workspace.id,
+                  map.id,
                 );
                 const entries = snapshot.entries.slice(0, 64).map((entry) => ({
                   objectKind: entry.object_kind,
@@ -524,7 +535,7 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
                   entries.length > 0
                   && new TextEncoder().encode(JSON.stringify({
                     schemaVersion: 1,
-                    workspaceId: workspace.id,
+                    workspaceId: map.id,
                     entries,
                   })).length > 16 * 1024
                 ) {
@@ -532,13 +543,13 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
                 }
                 return {
                   schemaVersion: 1,
-                  workspaceId: workspace.id,
+                  workspaceId: map.id,
                   entries,
                 };
               })());
             } catch {
               // RSI remains available with project-local context when Scout has
-              // no workspace, the read-only snapshot is temporarily offline,
+              // no company map, the read-only snapshot is temporarily offline,
               // or optional cloud context exceeds the bounded startup budget.
             }
           }
@@ -900,7 +911,7 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
         dismissedFailedRuns: [],
       });
       // Establish the target conversation id before switching specialist
-      // workspaces. Otherwise the specialist store can render its new-session
+      // surfaces. Otherwise the specialist store can render its new-session
       // composer for one frame and expose the wrong draft ownership boundary.
       showTargetSpecialist();
       syncNextSessionTarget(
@@ -1049,14 +1060,12 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
         // a chat already pinned keeps its own level.
         pinApprovalPolicy(get, set, id, mode);
       }
-      // A legacy Scout conversation without an exact workspace binding cannot
-      // be repaired by silently selecting or creating cloud authority during
-      // reopen. The user must start a new Scout conversation and make that
-      // binding explicit.
+      // A legacy Scout conversation without an exact company-map binding cannot
+      // be repaired by silently selecting cloud authority during reopen.
       let resolvedSpecialist = openingMeta?.specialist;
       if (openingMeta?.specialist?.kind === "scout" && !openingMeta.specialist.workspaceId?.trim()) {
         throw new Error(
-          "This Scout conversation has no workspace binding. Start a new Scout conversation and choose a workspace.",
+          "This Scout conversation predates the company-wide Scout map. Start a new Scout conversation.",
         );
       }
       if (isSpecialist) {
@@ -1239,6 +1248,19 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
           : get().warning,
       });
       syncNextSessionTarget(get, id, targetProvider, projectRoot, remoteHost);
+      if (
+        restored
+        && shouldResumeSavedProgress(restored)
+        && bridge.resumeSavedProgress
+      ) {
+        try {
+          await bridge.resumeSavedProgress(opened.id);
+        } catch (error) {
+          set({
+            error: `Saved goal is ready, but automatic continuation did not start: ${String(error)}`,
+          });
+        }
+      }
     } catch (e) {
       if (nativeSession) void bridge.closeSession?.(nativeSession.id);
       if (epochStale(epoch)) return;

@@ -1,9 +1,10 @@
 use agent_core::{Provider, ProviderConfig, SessionId, SessionOptions};
-use code_host::{CodingSessionRecipe, ScoutCartographyRecipe};
+use code_host::{CodingSessionExtensionRecipe, CodingSessionRecipe, ScoutCartographyRecipe};
 use serde_json::Value;
 use tauri::{AppHandle, State};
 
 use super::{make_provider, prepare_provider_config, register_session, ProviderLaunchRequest};
+use crate::product::{ProductRemoteSessionRequest, ProductRequestContext};
 use crate::runtime_registry::{AccountKey, WorkerHandle};
 use crate::state::AppState;
 
@@ -17,12 +18,21 @@ struct RemoteWorkerBinding {
 fn remote_session_recipe(
     config: &ProviderConfig,
     project_root: &std::path::Path,
+    extensions: Vec<CodingSessionExtensionRecipe>,
 ) -> Result<Option<CodingSessionRecipe>, String> {
     let specialist_kind = config
         .extra
         .get("specialist_kind")
         .and_then(Value::as_str)
         .map(str::to_string);
+    let hard_constraints = config
+        .extra
+        .get("hard_constraints")
+        .cloned()
+        .map(serde_json::from_value::<Vec<String>>)
+        .transpose()
+        .map_err(|error| format!("prepared coding hard constraints are invalid: {error}"))?
+        .unwrap_or_default();
     let scout_cartography = config
         .extra
         .get("scout_cartography")
@@ -55,16 +65,59 @@ fn remote_session_recipe(
                 .map_err(|error| format!("prepared Scout cartography recipe is invalid: {error}"))
         })
         .transpose()?;
-    if specialist_kind.is_none() && scout_cartography.is_none() {
+    if specialist_kind.is_none()
+        && hard_constraints.is_empty()
+        && scout_cartography.is_none()
+        && extensions.is_empty()
+    {
         return Ok(None);
     }
     let recipe = CodingSessionRecipe {
         specialist_kind: specialist_kind
             .or_else(|| scout_cartography.as_ref().map(|_| "scout".into())),
         scout_cartography,
+        hard_constraints,
+        extensions,
     };
     recipe.validate(project_root)?;
     Ok(Some(recipe))
+}
+
+fn unsupported_remote_renderer_field(config: &ProviderConfig) -> Option<String> {
+    for (present, field) in [
+        (config.endpoint.is_some(), "endpoint"),
+        (config.command.is_some(), "command"),
+        (config.cwd.is_some(), "cwd"),
+        (config.auth_token.is_some(), "auth_token"),
+        (!config.headers.is_empty(), "headers"),
+    ] {
+        if present {
+            return Some(field.into());
+        }
+    }
+    if !config.extra.is_object() {
+        return Some("extra".into());
+    }
+    None
+}
+
+fn split_remote_renderer_extra(extra: Value) -> Result<(Value, Value), String> {
+    let object = extra
+        .as_object()
+        .ok_or("remote worker configuration extra must be an object")?;
+    let mut foundation = serde_json::Map::new();
+    let mut product = serde_json::Map::new();
+    for (key, value) in object {
+        if matches!(
+            key.as_str(),
+            "specialist_kind" | "scout_cartography" | "hard_constraints"
+        ) {
+            foundation.insert(key.clone(), value.clone());
+        } else {
+            product.insert(key.clone(), value.clone());
+        }
+    }
+    Ok((Value::Object(foundation), Value::Object(product)))
 }
 
 async fn open_provider(
@@ -92,22 +145,13 @@ async fn open_provider(
     }
     let binding: RemoteWorkerBinding = serde_json::from_value(remote_binding)
         .map_err(|error| format!("remote worker binding is invalid: {error}"))?;
-    let renderer_extra_is_bounded = config.extra.as_object().is_some_and(|extra| {
-        extra
-            .keys()
-            .all(|key| matches!(key.as_str(), "specialist_kind" | "scout_cartography"))
-    });
-    if config.endpoint.is_some()
-        || config.command.is_some()
-        || config.cwd.is_some()
-        || config.auth_token.is_some()
-        || !config.headers.is_empty()
-        || !renderer_extra_is_bounded
-    {
-        return Err(
-            "remote worker configuration contains an unsupported renderer-owned field".into(),
-        );
+    if let Some(field) = unsupported_remote_renderer_field(&config) {
+        return Err(format!(
+            "remote worker configuration contains an unsupported renderer-owned field: {field}"
+        ));
     }
+    let (foundation_extra, product_extra) = split_remote_renderer_extra(config.extra)?;
+    config.extra = foundation_extra;
     let (prepared, prepared_account) =
         prepare_provider_config(provider_id, app, config, state).await?;
     let registry_account = state
@@ -128,7 +172,19 @@ async fn open_provider(
     if std::path::Path::new(&binding.cwd) != runtime.project_root() {
         return Err("remote session root does not match its native worker registration".into());
     }
-    let recipe = remote_session_recipe(&prepared, runtime.project_root())?;
+    let extensions = state
+        .product
+        .prepare_remote_session_extensions(
+            ProductRemoteSessionRequest {
+                extra: product_extra,
+                prepared_config: prepared.clone(),
+                project_root: runtime.project_root().to_path_buf(),
+                account_id: account.as_str().to_string(),
+            },
+            ProductRequestContext { app, state },
+        )
+        .await?;
+    let recipe = remote_session_recipe(&prepared, runtime.project_root(), extensions)?;
     let mut provider = provider_remote_worker::RemoteWorkerProvider::new(
         runtime.worker(),
         runtime.project_id().as_str().to_string(),
@@ -157,20 +213,25 @@ pub enum SessionOpenRequest {
     },
 }
 
-fn scout_requires_full_access(config: &ProviderConfig) -> bool {
+fn specialist_requires_full_access(config: &ProviderConfig) -> bool {
     config.extra.get("scout_cartography").is_some()
+        || config
+            .extra
+            .get("specialist_kind")
+            .and_then(Value::as_str)
+            .is_some_and(|kind| matches!(kind, "scout" | "spec"))
         || config
             .extra
             .get("specialist")
             .and_then(Value::as_str)
-            .is_some_and(|kind| kind == "scout")
+            .is_some_and(|kind| matches!(kind, "scout" | "spec"))
         || config
             .extra
             .get("specialist")
             .and_then(Value::as_object)
             .and_then(|specialist| specialist.get("kind"))
             .and_then(Value::as_str)
-            .is_some_and(|kind| kind == "scout")
+            .is_some_and(|kind| matches!(kind, "scout" | "spec"))
 }
 
 /// One native transaction that constructs, configures, connects, and binds a
@@ -187,10 +248,10 @@ pub async fn session_open(
     tracing::info!(provider = %provider_id, "session_open");
     let _account_lifecycle = state.account_lifecycle.read().await;
     let config = config.into_provider_config(&provider_id)?;
-    // Scout maps an explicitly selected organization/workspace rather than a
-    // single checkout. Full access is therefore part of the native session
-    // contract, not a mutable WebView preference.
-    let scout_full_access = scout_requires_full_access(&config);
+    // Uninterrupted specialists own a native Full-access contract rather than
+    // a mutable WebView preference. Their hard constraints remain enforced by
+    // the provider before any permission mode is consulted.
+    let protected_full_access = specialist_requires_full_access(&config);
     let (mut provider, account) = open_provider(&provider_id, &app, state.inner(), config).await?;
     let account = match account {
         Some(account) => Some(account),
@@ -206,7 +267,7 @@ pub async fn session_open(
             mut options,
             bind_id,
         } => {
-            if scout_full_access {
+            if protected_full_access {
                 options.mode = Some("full".into());
                 options.collaboration_mode = Some(agent_core::CollaborationMode::Default);
             }
@@ -245,7 +306,10 @@ mod tests {
     use agent_core::ProviderConfig;
     use serde_json::json;
 
-    use super::{remote_session_recipe, scout_requires_full_access, SessionOpenRequest};
+    use super::{
+        remote_session_recipe, specialist_requires_full_access, split_remote_renderer_extra,
+        unsupported_remote_renderer_field, SessionOpenRequest,
+    };
 
     #[test]
     fn new_request_requires_the_native_bind_id_wire_name() {
@@ -287,13 +351,52 @@ mod tests {
         } else {
             std::path::PathBuf::from("/srv/neon")
         };
-        let recipe = remote_session_recipe(&config, &project_root)
+        let recipe = remote_session_recipe(&config, &project_root, Vec::new())
             .unwrap()
             .unwrap();
         assert_eq!(recipe.specialist_kind.as_deref(), Some("scout"));
         assert_eq!(
             recipe.scout_cartography.unwrap().identity_root,
             project_root.join(".clark/scout/identity/binding-1")
+        );
+    }
+
+    #[test]
+    fn remote_renderer_config_splits_product_metadata_from_the_typed_recipe() {
+        let config = ProviderConfig {
+            extra: json!({
+                "specialist_kind": "scout",
+                "hard_constraints": ["no_delete", "no_github_push"],
+                "scout_cartography": { "workspace_id": "workspace-1" },
+                "cloud_advisor": { "organization_id": "org-1" }
+            }),
+            ..ProviderConfig::default()
+        };
+        assert_eq!(unsupported_remote_renderer_field(&config), None);
+        let (foundation, product) = split_remote_renderer_extra(config.extra).unwrap();
+        assert_eq!(foundation["specialist_kind"], "scout");
+        assert_eq!(foundation["hard_constraints"][0], "no_delete");
+        assert!(foundation.get("cloud_advisor").is_none());
+        assert_eq!(product["cloud_advisor"]["organization_id"], "org-1");
+
+        let invalid_constraints = ProviderConfig {
+            extra: json!({ "hard_constraints": ["no_delete", 7] }),
+            ..ProviderConfig::default()
+        };
+        assert!(remote_session_recipe(
+            &invalid_constraints,
+            std::path::Path::new("/srv/neon"),
+            Vec::new()
+        )
+        .is_err());
+
+        let renderer_owned_route = ProviderConfig {
+            cwd: Some("/renderer/chosen".into()),
+            ..ProviderConfig::default()
+        };
+        assert_eq!(
+            unsupported_remote_renderer_field(&renderer_owned_route).as_deref(),
+            Some("cwd")
         );
     }
 
@@ -312,18 +415,19 @@ mod tests {
     }
 
     #[test]
-    fn scout_bindings_require_full_access() {
+    fn protected_specialist_bindings_require_full_access() {
         for extra in [
             json!({ "scout_cartography": { "workspace_id": "workspace-1" } }),
+            json!({ "specialist_kind": "spec" }),
             json!({ "specialist": "scout" }),
             json!({ "specialist": { "kind": "scout" } }),
         ] {
-            assert!(scout_requires_full_access(&ProviderConfig {
+            assert!(specialist_requires_full_access(&ProviderConfig {
                 extra,
                 ..ProviderConfig::default()
             }));
         }
-        assert!(!scout_requires_full_access(&ProviderConfig {
+        assert!(!specialist_requires_full_access(&ProviderConfig {
             extra: json!({ "specialist": { "kind": "security" } }),
             ..ProviderConfig::default()
         }));

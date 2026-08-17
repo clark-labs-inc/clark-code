@@ -37,7 +37,7 @@ use prompt::{
 #[derive(Clone)]
 pub struct LocalMultiRepoRuntime {
     provider_config: ProviderConfig,
-    timeout: Duration,
+    response_timeout: Option<Duration>,
     scratch_root: PathBuf,
     artifact_root: PathBuf,
     selection: Arc<RepositorySelection>,
@@ -49,7 +49,9 @@ pub struct LocalMultiRepoRuntime {
 
 pub struct LocalMultiRepoRuntimeConfig {
     pub provider_config: ProviderConfig,
-    pub timeout: Duration,
+    /// Optional caller-owned response deadline. Normal delegated work leaves
+    /// this unset and relies on the orchestration cancellation token.
+    pub response_timeout: Option<Duration>,
     pub scratch_root: PathBuf,
     pub artifact_root: PathBuf,
     pub selection: Arc<RepositorySelection>,
@@ -69,14 +71,17 @@ impl LocalMultiRepoRuntime {
         executor: Arc<dyn Executor>,
     ) -> Result<Self, String> {
         config.plan.validate()?;
-        if config.timeout.is_zero() {
+        if config
+            .response_timeout
+            .is_some_and(|timeout| timeout.is_zero())
+        {
             return Err("multi-repository provider timeout must be greater than zero".into());
         }
         validate_runtime_root(&config.scratch_root, &config.selection, "scratch")?;
         validate_runtime_root(&config.artifact_root, &config.selection, "artifact")?;
         Ok(Self {
             provider_config: config.provider_config,
-            timeout: config.timeout,
+            response_timeout: config.response_timeout,
             scratch_root: config.scratch_root,
             artifact_root: config.artifact_root,
             selection: config.selection,
@@ -89,7 +94,7 @@ impl LocalMultiRepoRuntime {
 
     pub fn local(
         provider_config: ProviderConfig,
-        timeout: Duration,
+        response_timeout: Option<Duration>,
         scratch_root: PathBuf,
         artifact_root: PathBuf,
         selection: Arc<RepositorySelection>,
@@ -98,7 +103,7 @@ impl LocalMultiRepoRuntime {
         Self::new(
             LocalMultiRepoRuntimeConfig {
                 provider_config,
-                timeout,
+                response_timeout,
                 scratch_root,
                 artifact_root,
                 selection,
@@ -241,7 +246,7 @@ impl LocalReaderHarness {
             config,
             &workspace.root,
             agent_core::provider::PromptInput::text(reader_prompt(&task)),
-            self.runtime.timeout,
+            self.runtime.response_timeout,
             cancel,
         )
         .await
@@ -328,7 +333,7 @@ impl LocalWriterHarness {
             config,
             &workspace.root,
             agent_core::provider::PromptInput::text(prompt),
-            self.runtime.timeout,
+            self.runtime.response_timeout,
             cancel,
         )
         .await
@@ -396,7 +401,7 @@ impl MultiRepoReviewHarness for LocalReviewHarness {
             config,
             &workspace.root,
             agent_core::provider::PromptInput::text(review_prompt(&task, &packages)),
-            self.runtime.timeout,
+            self.runtime.response_timeout,
             cancel,
         )
         .await

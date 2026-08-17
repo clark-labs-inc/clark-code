@@ -169,7 +169,7 @@ async fn paid_large_four_writer_workstreams() {
         config: OrchestrationToolsConfig {
             policy: crate::orchestration::OrchestrationConfig {
                 max_agents: 4,
-                token_budget: 320_000,
+                token_budget: Some(320_000),
                 ..Default::default()
             },
             base_url,

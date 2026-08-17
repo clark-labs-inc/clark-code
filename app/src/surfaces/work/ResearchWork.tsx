@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { AnimatePresence, useReducedMotion } from "motion/react";
 import * as m from "motion/react-m";
 import {
@@ -23,7 +23,6 @@ import {
 } from "../../lib/motion";
 import { extractSources } from "../../lib/sources";
 import { openExternal } from "../../lib/account";
-import { ProductMark } from "../ProductMark";
 import { MarkdownContent, MARKDOWN_CLASSES } from "../MarkdownContent";
 import type {
   ContentBlock,
@@ -240,36 +239,35 @@ function Status({ call, sourceCount }: { call: ToolCall; sourceCount: number }) 
   );
 }
 
-function completedSubtitle(call: ToolCall): string {
+function receiptLabel(call: ToolCall): string {
   if (call.status === "failed") return call.progress?.latest_activity || "Research failed";
   if (call.status === "cancelled") return "Research cancelled";
-  if (call.status === "completed") return "Research complete";
-  return call.progress?.latest_activity || "Starting research agent";
+  if (call.status === "in_progress" || call.status === "pending") {
+    return call.progress?.latest_activity || researchQuery(call) || "Researching";
+  }
+  return researchQuery(call) || "Research results";
 }
 
 export function ResearchWork({ call, active }: { call: ToolCall; active: boolean }) {
   const reduce = useReducedMotion();
-  const [open, setOpen] = useState(active);
+  const [open, setOpen] = useState(false);
   const [activityOpen, setActivityOpen] = useState(false);
-  const wasActive = useRef(active);
   const findings = blocksText(call.content).trim();
   const sources = extractSources(findings);
   const hasFindings = findings.length > 0;
   const canOpen = active || hasFindings || Boolean(call.progress);
 
-  useEffect(() => {
-    if (active) setOpen(true);
-    else if (wasActive.current) setOpen(false);
-    wasActive.current = active;
-  }, [active]);
-
   return (
     <m.section
       id={`tool-call-${call.id}`}
       data-tool-call-id={call.id}
+      data-clark-work-receipt="true"
       {...accessibleMotion(RISE_SMALL, reduce)}
-      className="mb-1 mt-3 overflow-hidden rounded-xl border border-border-subtle bg-bg-secondary/45"
-      aria-label="Research agent"
+      className={cn(
+        "overflow-hidden rounded-md",
+        open && "border border-border-subtle bg-bg-secondary/35",
+      )}
+      aria-label="Research activity"
     >
       <button
         type="button"
@@ -277,16 +275,13 @@ export function ResearchWork({ call, active }: { call: ToolCall; active: boolean
         disabled={!canOpen}
         aria-expanded={open}
         className={cn(
-          "group flex w-full items-center gap-2.5 px-3 py-2.5 text-left",
+          "group flex w-full items-center gap-2 rounded-md px-1 py-1 text-left text-sm text-ink-muted",
           canOpen && "cursor-pointer transition hover:bg-bg-hover/45",
         )}
       >
-        <ProductMark size={30} className="shrink-0" />
-        <span className="min-w-0 flex-1">
-          <span className="block text-sm font-medium leading-5 text-ink">Research agent</span>
-          <span aria-live="polite" className="block truncate text-xs leading-4 text-ink-faint">
-            {completedSubtitle(call)}
-          </span>
+        <Globe2 aria-hidden className="size-3.5 shrink-0 text-ink-faint" />
+        <span aria-live="polite" className="min-w-0 flex-1 truncate leading-5">
+          {receiptLabel(call)}
         </span>
         <span className="flex shrink-0 items-center gap-2">
           <Status call={call} sourceCount={sources.length} />
@@ -299,10 +294,10 @@ export function ResearchWork({ call, active }: { call: ToolCall; active: boolean
       <AnimatePresence initial={false}>
         {open && (
           <m.div
-            initial={reduce ? false : { height: 0, opacity: 0 }}
+            initial={reduce ? { opacity: 0 } : { height: 0, opacity: 0 }}
             animate={{ height: "auto", opacity: 1 }}
             exit={reduce ? REDUCED_EXIT : { height: 0, opacity: 0 }}
-            transition={{ duration: reduce ? 0 : DUR.fast, ease: EASE.inOut }}
+            transition={{ duration: DUR.fast, ease: reduce ? EASE.out : EASE.inOut }}
             className="overflow-hidden border-t border-border-subtle"
           >
             <div className="space-y-2 px-3 py-2.5">
@@ -326,10 +321,10 @@ export function ResearchWork({ call, active }: { call: ToolCall; active: boolean
                       <AnimatePresence initial={false}>
                         {activityOpen && (
                           <m.div
-                            initial={reduce ? false : { height: 0, opacity: 0 }}
+                            initial={reduce ? { opacity: 0 } : { height: 0, opacity: 0 }}
                             animate={{ height: "auto", opacity: 1 }}
                             exit={reduce ? REDUCED_EXIT : { height: 0, opacity: 0 }}
-                            transition={{ duration: reduce ? 0 : DUR.fast, ease: EASE.inOut }}
+                            transition={{ duration: DUR.fast, ease: reduce ? EASE.out : EASE.inOut }}
                             className="overflow-hidden pt-2"
                           >
                             <ResearchOutline progress={call.progress} />
@@ -345,16 +340,6 @@ export function ResearchWork({ call, active }: { call: ToolCall; active: boolean
         )}
       </AnimatePresence>
 
-      {!open && hasFindings && (
-        <button
-          type="button"
-          onClick={() => setOpen(true)}
-          className="flex w-full items-center justify-between gap-3 border-t border-border-subtle px-3 py-2 text-left transition hover:bg-bg-hover/45"
-        >
-          <span className="min-w-0 truncate text-xs text-ink-muted">{researchQuery(call)}</span>
-          <span className="shrink-0 text-xs font-medium text-accent">View research brief</span>
-        </button>
-      )}
     </m.section>
   );
 }

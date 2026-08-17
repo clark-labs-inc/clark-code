@@ -377,7 +377,7 @@ fn runtime(
                 }),
                 ..Default::default()
             },
-            timeout: Duration::from_secs(2),
+            response_timeout: None,
             scratch_root: temp.path().join("scratch"),
             artifact_root: temp.path().join("artifacts"),
             selection,
@@ -409,7 +409,7 @@ async fn production_harness_path_is_parallel_isolated_reviewed_and_replayed() {
     let mut coordinator = MultiRepoCoordinator::new(
         (*plan).clone(),
         SharedBudget::new(BudgetConfig {
-            limit_weighted_tokens: 10_000,
+            limit_weighted_tokens: Some(10_000),
             ..Default::default()
         })
         .unwrap(),
@@ -606,7 +606,7 @@ async fn six_parallel_writers_retry_one_preserve_five_and_apply_all_packages() {
     let mut coordinator = MultiRepoCoordinator::new(
         (*plan).clone(),
         SharedBudget::new(BudgetConfig {
-            limit_weighted_tokens: 20_000,
+            limit_weighted_tokens: Some(20_000),
             ..Default::default()
         })
         .unwrap(),

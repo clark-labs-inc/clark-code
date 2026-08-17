@@ -1,14 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { ScoutWorkspace } from "../../lib/specialistCloud";
+import type { CompanyScoutMap } from "../../lib/specialistCloud";
 import { scoutLoadedCutLabel, scoutSequenceLabel } from "./ScoutCanvas";
 
-function workspace(overrides: Partial<ScoutWorkspace> = {}): ScoutWorkspace {
+function companyMap(overrides: Partial<CompanyScoutMap> = {}): CompanyScoutMap {
   return {
-    id: "workspace-1",
+    id: "company-map-1",
     organization_id: "organization-1",
-    stable_key: "workspace",
-    display_name: "Workspace",
+    stable_key: "company-scout",
+    display_name: "Example Company Scout",
     status: "active",
     latest_change_sequence: 0,
     source_count: 0,
@@ -24,20 +24,20 @@ describe("Scout evidence freshness copy", () => {
   it("does not present sequence zero as a latest evidence receipt", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-08-15T12:00:00Z"));
-    const empty = workspace({
+    const empty = companyMap({
       updated_at_ms: new Date("2026-07-31T12:00:00Z").getTime(),
     });
 
     expect(scoutSequenceLabel(empty.latest_change_sequence)).toBe("None yet");
     expect(scoutLoadedCutLabel(empty)).toBe(
-      "no accepted evidence changes · workspace updated 15d ago",
+      "no accepted evidence changes · company map updated 15d ago",
     );
     vi.useRealTimers();
   });
 
   it("names the exact loaded evidence cut when one exists", () => {
     expect(scoutSequenceLabel(42)).toBe("#42");
-    expect(scoutLoadedCutLabel(workspace({ latest_change_sequence: 42 }))).toContain(
+    expect(scoutLoadedCutLabel(companyMap({ latest_change_sequence: 42 }))).toContain(
       "loaded evidence cut #42",
     );
   });

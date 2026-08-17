@@ -25,6 +25,7 @@ import { PermissionGate } from "../PermissionGate";
 import { cn } from "../../lib/cn";
 import { currentActivity } from "../../lib/activity";
 import { composerDraftOwner } from "../../lib/composerDraft";
+import { wouldAutoApprove } from "../../lib/permissions";
 import {
   loadSpecPromptHistory,
   recentSpecPrompts,
@@ -32,8 +33,11 @@ import {
 } from "../../lib/specPromptHistory";
 import { specDocumentDiff, specDocumentInteraction } from "../../lib/specDiff";
 import { specGuidance } from "../../lib/specGuidance";
+import { currentSpecToolCalls } from "../../lib/specProgress";
 import { accessibleMotion, RISE } from "../../lib/motion";
 import { SpecDocumentDiff, type LiveSpecDocumentDiff } from "./SpecDocumentDiff";
+import { SpecRunProgress } from "./SpecRunProgress";
+import { SpecWorkingState } from "./SpecWorkingState";
 import {
   SpecGuidedDocumentCue,
   SpecGuidedInterview,
@@ -58,7 +62,9 @@ export function SpecWorkspace() {
   const setComposerPrefill = useSessionStore((state) => state.setComposerPrefill);
   const renameConversation = useSessionStore((state) => state.renameConversation);
   const documentRef = useRef<HTMLDivElement>(null);
+  const loadedArtifactUriRef = useRef<string | null>(null);
   const [markdown, setMarkdown] = useState(() => initialSpecMarkdown(title));
+  const [documentLoadState, setDocumentLoadState] = useState<"idle" | "loading" | "ready" | "unavailable">("idle");
   const markdownRef = useRef(markdown);
   const revisionRef = useRef(0);
   const [documentRevision, setDocumentRevision] = useState(0);
@@ -72,17 +78,26 @@ export function SpecWorkspace() {
   const [downloadOpen, setDownloadOpen] = useState(false);
   const artifact = useMemo(() => latestSpecArtifact(snapshot.artifacts), [snapshot.artifacts]);
   const activity = useMemo(() => currentActivity(snapshot), [snapshot]);
-  const documentTitle = useMemo(
-    () => specDocumentTitle(markdown) ?? title,
-    [markdown, title],
-  );
-  const displayTitle = specDisplayTitle(documentTitle);
+  const documentTitle = useMemo(() => specDocumentTitle(markdown), [markdown]);
+  const displayTitle = documentTitle ? specDisplayTitle(documentTitle) : "New specification";
   const promptHistory = useMemo(() => recentSpecPrompts(
     loadSpecPromptHistory(composerDraftOwner(auth?.user ?? null), session?.id ?? null),
     snapshot.timeline,
   ), [auth?.user, historyRevision, session?.id, snapshot.timeline]);
   const reduceMotion = useReducedMotion();
   const documentInteraction = specDocumentInteraction(activity.busy);
+  const hasDocument = Boolean(artifact?.uri && markdown.trim());
+  const hasSubmittedPrompt = promptHistory.length > 0 || snapshot.timeline.some(
+    (item) => item.item === "message" && item.role === "user",
+  );
+  const visibleActivity = artifact && !hasDocument && documentLoadState === "loading"
+    ? { busy: true, label: "Opening your saved spec…" }
+    : activity;
+  const runCalls = useMemo(() => currentSpecToolCalls(snapshot), [snapshot]);
+  const blockingPermission = snapshot.pending_permission
+    && !wouldAutoApprove("full", snapshot.pending_permission)
+    ? snapshot.pending_permission
+    : null;
   const guidance = useMemo(() => specGuidance(markdown), [markdown]);
   const documentParts = useMemo(() => {
     const match = /^#\s+.+$/m.exec(markdown);
@@ -123,10 +138,20 @@ export function SpecWorkspace() {
   useEffect(() => {
     let alive = true;
     if (!artifact?.uri) {
+      loadedArtifactUriRef.current = null;
       const initial = initialSpecMarkdown(title);
       markdownRef.current = initial;
       setMarkdown(initial);
+      setDocumentLoadState("idle");
       return () => { alive = false; };
+    }
+    if (loadedArtifactUriRef.current !== artifact.uri) {
+      loadedArtifactUriRef.current = artifact.uri;
+      markdownRef.current = "";
+      setMarkdown("");
+      setDocumentLoadState("loading");
+    } else {
+      setDocumentLoadState(markdownRef.current.trim() ? "ready" : "loading");
     }
     let reading = false;
     const refresh = async () => {
@@ -134,7 +159,13 @@ export function SpecWorkspace() {
       reading = true;
       const text = await readDocText(artifact.uri);
       reading = false;
-      if (alive && text) applyDocumentText(text, activity.busy);
+      if (!alive) return;
+      if (text?.trim()) {
+        applyDocumentText(text, activity.busy);
+        setDocumentLoadState("ready");
+      } else if (!activity.busy) {
+        setDocumentLoadState("unavailable");
+      }
     };
     void refresh();
     const poll = activity.busy ? window.setInterval(() => void refresh(), 350) : null;
@@ -203,7 +234,7 @@ export function SpecWorkspace() {
             )}
           </div>
           <div className="mt-1 flex items-center gap-2 text-xs leading-4 text-ink-faint">
-            <span className="min-w-0 truncate">{specFilename(documentTitle, "md")}</span>
+            <span className="min-w-0 truncate">{specFilename(documentTitle ?? displayTitle, "md")}</span>
             <span className="hidden lg:inline [[data-text-size='150']_&]:hidden [[data-text-size='175']_&]:hidden [[data-text-size='200']_&]:hidden" aria-hidden>·</span>
             <span className="hidden shrink-0 items-center gap-1.5 lg:flex [[data-text-size='150']_&]:hidden [[data-text-size='175']_&]:hidden [[data-text-size='200']_&]:hidden">
               <span className={cn(
@@ -212,7 +243,7 @@ export function SpecWorkspace() {
                   ? "breathe bg-accent"
                   : "bg-ink-faint",
               )} />
-              {activity.busy ? "Updating document" : "Living document"}
+              {activity.busy ? "Working live" : hasDocument ? "Saved locally" : "Ready for your prompt"}
             </span>
           </div>
         </div>
@@ -357,55 +388,64 @@ export function SpecWorkspace() {
           </aside>
         )}
         <main className="relative min-h-0 min-w-0 flex-1 overflow-y-auto px-5 pb-28 pt-6 sm:px-7">
-          <div
-            ref={documentRef}
-            data-qa="spec-document"
-            aria-busy={documentInteraction.ariaBusy}
-            onMouseUp={() => {
-              if (!documentInteraction.canSelect) return;
-              const next = selectionWithin(documentRef.current);
-              if (next) setSelection(next);
-            }}
-            onClick={(event) => {
-              if (!documentInteraction.canSelect) return;
-              const next = selectionWithin(documentRef.current) ?? selectionFromClick(event.target);
-              if (next) setSelection(next);
-            }}
-            onDoubleClick={(event) => {
-              if (!documentInteraction.canSelect) return;
-              const next = selectionWithin(documentRef.current) ?? selectionFromClick(event.target);
-              if (next) setSelection(next);
-            }}
-            className={cn(
-              MARKDOWN_CLASSES,
-              "mx-auto max-w-[44rem] pb-16 text-sm leading-7",
-              documentInteraction.className,
-              "[&_h1]:font-serif [&_h1]:text-4xl [&_h1]:font-semibold [&_h1]:tracking-[-0.035em]",
-              "[&_h2]:mt-8 [&_h2]:border-t [&_h2]:border-border-subtle [&_h2]:pt-6 [&_h2]:font-serif [&_h2]:text-xl",
-              "[&_h1]:cursor-pointer [&_h2]:cursor-pointer [&_h3]:cursor-pointer [&_li]:cursor-text [&_p]:cursor-text",
-              "[&_tbody_tr]:cursor-pointer [&_tbody_tr]:transition-colors [&_tbody_tr:hover]:bg-accent-subtle/60",
-              "[&_p]:rounded-md [&_p]:transition-colors [&_p:hover]:bg-accent-subtle/40",
-              "[&_li]:rounded-md [&_li]:transition-colors [&_li:hover]:bg-accent-subtle/40",
-              "selection:bg-accent/20 selection:text-ink",
-            )}
-          >
-            <AnimatePresence initial={false} mode="wait">
-              {documentDiff ? (
-                <SpecDocumentDiff key={`diff:${documentDiff.revision}`} diff={documentDiff} />
-              ) : (
-                <m.div
-                  key={`stable:${documentRevision}`}
-                  {...documentMotion}
-                >
-                  {documentParts.title && <MarkdownContent diagrams>{documentParts.title}</MarkdownContent>}
-                  {guidedOpen && (
-                    <SpecGuidedDocumentCue report={guidance} preview={guidedPreview} busy={activity.busy} />
+          {hasDocument ? (
+            <>
+              {activity.busy && <SpecRunProgress activity={activity} calls={runCalls} compact />}
+              <div
+                ref={documentRef}
+                data-qa="spec-document"
+                aria-busy={documentInteraction.ariaBusy}
+                onMouseUp={() => {
+                  if (!documentInteraction.canSelect) return;
+                  const next = selectionWithin(documentRef.current);
+                  if (next) setSelection(next);
+                }}
+                onClick={(event) => {
+                  if (!documentInteraction.canSelect) return;
+                  const next = selectionWithin(documentRef.current) ?? selectionFromClick(event.target);
+                  if (next) setSelection(next);
+                }}
+                onDoubleClick={(event) => {
+                  if (!documentInteraction.canSelect) return;
+                  const next = selectionWithin(documentRef.current) ?? selectionFromClick(event.target);
+                  if (next) setSelection(next);
+                }}
+                className={cn(
+                  MARKDOWN_CLASSES,
+                  "mx-auto max-w-[44rem] pb-16 text-sm leading-7",
+                  documentInteraction.className,
+                  "[&_h1]:font-serif [&_h1]:text-4xl [&_h1]:font-semibold [&_h1]:tracking-[-0.035em]",
+                  "[&_h2]:mt-8 [&_h2]:border-t [&_h2]:border-border-subtle [&_h2]:pt-6 [&_h2]:font-serif [&_h2]:text-xl",
+                  "[&_h1]:cursor-pointer [&_h2]:cursor-pointer [&_h3]:cursor-pointer [&_li]:cursor-text [&_p]:cursor-text",
+                  "[&_tbody_tr]:cursor-pointer [&_tbody_tr]:transition-colors [&_tbody_tr:hover]:bg-accent-subtle/60",
+                  "[&_p]:rounded-md [&_p]:transition-colors [&_p:hover]:bg-accent-subtle/40",
+                  "[&_li]:rounded-md [&_li]:transition-colors [&_li:hover]:bg-accent-subtle/40",
+                  "selection:bg-accent/20 selection:text-ink",
+                )}
+              >
+                <AnimatePresence initial={false} mode="wait">
+                  {documentDiff ? (
+                    <SpecDocumentDiff key={`diff:${documentDiff.revision}`} diff={documentDiff} />
+                  ) : (
+                    <m.div key={`stable:${documentRevision}`} {...documentMotion}>
+                      {documentParts.title && <MarkdownContent diagrams>{documentParts.title}</MarkdownContent>}
+                      {guidedOpen && (
+                        <SpecGuidedDocumentCue report={guidance} preview={guidedPreview} busy={activity.busy} />
+                      )}
+                      {documentParts.body && <MarkdownContent diagrams>{documentParts.body}</MarkdownContent>}
+                    </m.div>
                   )}
-                  {documentParts.body && <MarkdownContent diagrams>{documentParts.body}</MarkdownContent>}
-                </m.div>
-              )}
-            </AnimatePresence>
-          </div>
+                </AnimatePresence>
+              </div>
+            </>
+          ) : (
+            <SpecWorkingState
+              activity={visibleActivity}
+              calls={runCalls}
+              hasSubmittedPrompt={hasSubmittedPrompt}
+              documentUnavailable={documentLoadState === "unavailable"}
+            />
+          )}
         </main>
         <AnimatePresence initial={false}>
           {guidedOpen && (
@@ -416,9 +456,9 @@ export function SpecWorkspace() {
       </div>
 
       <div className="shrink-0 border-t border-border-subtle bg-bg">
-        {snapshot.pending_permission && (
+        {blockingPermission && (
           <div className="mx-auto max-w-[70rem] px-7 pt-3">
-            <PermissionGate req={snapshot.pending_permission} />
+            <PermissionGate req={blockingPermission} />
           </div>
         )}
         <div className="mx-auto -mb-1 flex max-w-[70rem] items-center gap-2 px-7 pt-2 text-xs text-ink-faint">

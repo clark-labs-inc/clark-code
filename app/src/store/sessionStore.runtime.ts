@@ -26,6 +26,8 @@ import {
   attachmentKind,
   fileToAttachment,
   LOCAL_ATTACHMENT_KINDS,
+  restorePendingAttachments,
+  revokeAttachmentPreviews,
   toUpload,
   MAX_ATTACHMENT_BYTES,
   type PendingAttachment,
@@ -137,7 +139,7 @@ export {
   loadSshHosts, localConnectConfig, localSettingsReady, minLoadDuration, nextApprovalPolicy, normalizeCodingModel, normalizeReasoningEffort,
   markAuthReconnectRequired, notify, onCloudHistoryConflict, onCloudHistoryWarning, onSettingsMenuRequested, onUpdateMenuRequested, pickAllowOption,
   pickFolder, provisionCodeKey, refreshAuthSession, refreshStagedUpdate, relaunchApp, releaseSnapshotCheckpoints, remoteTarget,
-  repositoryFingerprintForRoot, resetCloudHistory, resetFanOut, saveApprovalPolicy, saveApprovalPolicies, saveBrowserEnabled, saveChatModels, saveCollaborationMode,
+  repositoryFingerprintForRoot, resetCloudHistory, resetFanOut, restorePendingAttachments, revokeAttachmentPreviews, saveApprovalPolicy, saveApprovalPolicies, saveBrowserEnabled, saveChatModels, saveCollaborationMode,
   saveLocalSettings, saveMemoriesEnabled, saveOrchestrationEnabled, saveOutputStyle, scheduleCloudPut, settleRuns,
   signInWithGoogle, snapshotBeforeTimelineItem, syncFanOut, toUpload,
   updateDrainBlockerCount, wouldAutoApprove,
@@ -540,7 +542,9 @@ export interface SessionState {
   setProjectMode: (mode: "local" | "remote") => void;
   setSelectedHostId: (id: string | null) => void;
   setProjectFolder: (path: string) => void;
-  pickProjectFolder: () => Promise<void>;
+  /** Open the native folder picker and return the selected path after it has
+   *  been committed to account-scoped project state. */
+  pickProjectFolder: () => Promise<string | null>;
   setMemoriesEnabled: (on: boolean) => void;
   setBrowserEnabled: (on: boolean) => void;
   setOrchestrationEnabled: (on: boolean) => void;

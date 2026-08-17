@@ -11,6 +11,7 @@ import { cn } from "../lib/cn";
 import {
   APPROVAL_POLICIES,
   approvalPolicyForSpecialist,
+  specialistUsesProtectedFullAccess,
   type ApprovalPolicy,
 } from "../lib/permissions";
 import { effectiveApprovalPolicy } from "../store/sessionStore.runtime";
@@ -23,17 +24,26 @@ const MODE_ICON: Record<ApprovalPolicy, typeof Shield> = {
   full: ShieldAlert,
 };
 
-export function ScoutFullAccessIndicator() {
+export function SpecialistFullAccessIndicator({ specialist }: { specialist: string }) {
+  const isSpec = specialist === "spec";
+  const name = isSpec ? "Spec" : "Scout";
+  const explanation = isSpec
+    ? "Spec can research, read, and write without asking. File deletion and GitHub pushes stay blocked."
+    : "Scout always uses Full access";
   return (
     <div
-      aria-label="Scout uses Full access"
-      title="Scout always uses Full access"
+      aria-label={`${name} uses protected Full access`}
+      title={explanation}
       className="flex min-h-8 items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-medium text-warning"
     >
       <ShieldAlert className="size-3.5" />
-      Full access
+      {isSpec ? "Full access · protected" : "Full access"}
     </div>
   );
+}
+
+export function ScoutFullAccessIndicator() {
+  return <SpecialistFullAccessIndicator specialist="scout" />;
 }
 
 /** Approval policy selector. Sandboxed "Approve for me" is the default. */
@@ -42,12 +52,16 @@ export function ComposerPermissionPill() {
   const globalDefault = useSessionStore((s) => s.approvalPolicy);
   const approvalPolicies = useSessionStore((s) => s.approvalPolicies);
   const activeSpecialist = useSpecialistStore((s) => s.active);
-  const scout = activeSpecialist === "scout";
+  const conversationSpecialist = useSessionStore((s) => s.session
+    ? s.conversations.find((conversation) => conversation.id === s.session?.id)?.specialist?.kind
+    : null);
+  const specialist = conversationSpecialist ?? activeSpecialist;
+  const protectedFullAccess = specialistUsesProtectedFullAccess(specialist);
   // The pill shows THIS chat's level — its own override when it has one, else
   // the account default — so switching chats never displays a sibling's mode.
   const mode = approvalPolicyForSpecialist(
     effectiveApprovalPolicy(globalDefault, approvalPolicies, session?.id),
-    activeSpecialist,
+    specialist,
   );
   const setMode = useSessionStore((s) => s.setApprovalPolicy);
   // Permission modes govern the LOCAL engine's gate; a product cloud session
@@ -108,10 +122,10 @@ export function ComposerPermissionPill() {
 
   const info = APPROVAL_POLICIES.find((item) => item.id === mode) ?? APPROVAL_POLICIES[1];
   const Icon = MODE_ICON[mode];
-  if (!isLocalTarget && !scout) return null;
+  if (!isLocalTarget && !protectedFullAccess) return null;
 
-  if (scout) {
-    return <ScoutFullAccessIndicator />;
+  if (protectedFullAccess && specialist) {
+    return <SpecialistFullAccessIndicator specialist={specialist} />;
   }
 
   return (

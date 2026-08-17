@@ -1,31 +1,18 @@
 // Stable ordering for the conversation lists.
 //
-// Both the sidebar and the start screen re-derive their order from the live
-// `conversations` array, whose `updatedAt` is bumped on every streamed token
-// of EVERY running conversation. With several chats running in parallel a pure
-// `sort by updatedAt desc` re-ranks on each flush, so rows and whole project
-// groups leap-frog each other — the "keeps reordering" bug.
+// Both the sidebar and the start screen receive a live `conversations` array
+// whose `updatedAt` is bumped while work streams. Activity time is therefore
+// not a stable display key: sorting on it makes rows leap-frog each other.
 //
-// The fix ranks each conversation by when it was FIRST SEEN this session, not
-// by its current timestamp:
-//   • ids present on the very first call are treated as pre-existing history —
-//     they keep their incoming (store = newest-first) order, and never move.
-//   • an id that appears LATER is genuinely new activity (a freshly started
-//     chat, prepended by the store) — it lands on top of the history block.
-// After that every id keeps its slot forever, so a streaming conversation's
-// ticking `updatedAt` can never reshuffle the list mid-session.
-//
-// The rank table is module-level (persists across re-renders, shared by every
-// surface in the session) and keyed by conversation id. Each id maps to ONE
-// ascending sort key, so callers sort with a plain `keyA - keyB`.
+// `createdAt` expresses the actual UI contract instead: the latest-created
+// conversation is on top, and that conversation never moves as messages arrive.
+// Unlike a first-seen session rank, creation order also survives relaunches and
+// does not depend on whatever ordering the cloud list happened to return.
 
-// Each id's ascending sort key. History (first-sight) ids occupy
-// `0 .. historyCount-1` in store order. New-activity ids get NEGATIVE keys
-// counting down (-1, -2, …), so the newest new conversation has the smallest
-// key and sorts on top, above all history — and never collides with history.
-const ranks = new Map<string, number>();
-let initialized = false;
-let newSeen = 0;
+interface CreatedItem {
+  id: string;
+  createdAt: number;
+}
 
 // Project groups need their own rank table. Reusing conversation ranks would
 // make a coincidentally identical project key and conversation id share a
@@ -35,46 +22,25 @@ const projectRanks = new Map<string, number>();
 let projectsInitialized = false;
 let newProjectsSeen = 0;
 
-function assignRanks(items: { id: string }[]): void {
-  if (!initialized) {
-    // First sight = session history, already newest-first from the store.
-    // Rank by index so each keeps its slot; none ever moves again.
-    items.forEach((item, i) => {
-      if (!ranks.has(item.id)) ranks.set(item.id, i);
-    });
-    initialized = true;
-    return;
-  }
-  for (const item of items) {
-    if (!ranks.has(item.id)) {
-      // New after session start → above all history, newest-of-new first.
-      ranks.set(item.id, -(++newSeen));
-    }
-  }
+function ordered<T extends CreatedItem>(items: T[]): T[] {
+  // IDs provide an immutable tie-breaker for conversations created in the same
+  // millisecond. Relying on input order would let an updated row move within
+  // that tie when the store prepends it.
+  return [...items].sort((a, b) => b.createdAt - a.createdAt || a.id.localeCompare(b.id));
 }
 
-function ordered<T extends { id: string }>(items: T[]): T[] {
-  assignRanks(items);
-  // A stable sort keeps arrival order for any (clamped) equal keys.
-  return [...items].sort((a, b) => ranks.get(a.id)! - ranks.get(b.id)!);
-}
-
-/** Return `items` in stable session order. The live array the store holds is
- *  used only to (a) seed history order on first call and (b) detect brand-new
- *  conversations; already-seen ids keep their original slot regardless of how
- *  their `updatedAt` has since moved. */
-export function stableOrderIds<T extends { id: string }>(items: T[]): T[] {
+/** Return conversations newest-created first. `updatedAt` is deliberately not
+ * consulted, so streaming, reopening, and background completion cannot move a
+ * row. */
+export function stableOrderIds<T extends CreatedItem>(items: T[]): T[] {
   return ordered(items);
 }
 
 /** Like `stableOrderIds`, but returns an id→ascending-sort-key lookup so
  *  callers can order many buckets (project groups, rows within a group)
  *  consistently in one pass with a plain `keyA - keyB`. */
-export function stableRankMap<T extends { id: string }>(items: T[]): Map<string, number> {
-  assignRanks(items);
-  const m = new Map<string, number>();
-  for (const item of items) m.set(item.id, ranks.get(item.id)!);
-  return m;
+export function stableRankMap<T extends CreatedItem>(items: T[]): Map<string, number> {
+  return new Map(ordered(items).map((item, index) => [item.id, index]));
 }
 
 /** Keep project groups in their first-seen session order. New projects land at
@@ -104,9 +70,6 @@ export function stableProjectOrder<T extends { key: string }>(
 
 /** Reset process-local ordering at an authenticated-account boundary. */
 export function resetStableOrder(): void {
-  initialized = false;
-  newSeen = 0;
-  ranks.clear();
   projectsInitialized = false;
   newProjectsSeen = 0;
   projectRanks.clear();

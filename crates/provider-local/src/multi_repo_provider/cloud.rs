@@ -149,7 +149,7 @@ impl BrokeredCloudWriterHarness {
             provider_config,
             &workspace.root,
             input,
-            self.config.timeout,
+            Some(self.config.timeout),
             cancel,
         )
         .await

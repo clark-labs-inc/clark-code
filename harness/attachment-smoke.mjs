@@ -113,6 +113,8 @@ try {
     ),
   });
   await page.waitForTimeout(300);
+  const submittedText = "Explain which interface macOS will use for this route.";
+  await composer.fill(submittedText);
 
   const paste = `LARGE_PASTE_UI_BEGIN-${"x".repeat(1_001)}-LARGE_PASTE_UI_END`;
   await composer.evaluate((element, text) => {
@@ -125,7 +127,10 @@ try {
   await page.waitForTimeout(200);
 
   const placeholder = `[Pasted Content ${Array.from(paste).length} chars]`;
-  check((await composer.inputValue()) === "", "large paste leaked into the textarea");
+  check(
+    (await composer.inputValue()) === submittedText,
+    "large paste leaked into the textarea",
+  );
   check(
     await page.getByText(`Pasted Content ${Array.from(paste).length} chars`, { exact: true }).isVisible(),
     "large-paste thumbnail chip is missing",
@@ -134,12 +139,22 @@ try {
   await page.screenshot({ path: "/tmp/agent-desktop-attachment-smoke.png" });
 
   await composer.press("Enter");
-  await page.waitForTimeout(250);
+  await page.waitForTimeout(50);
+  check((await composer.inputValue()) === "", "submitted text remained in the composer");
+  check(await page.getByLabel("Sending message").isVisible(), "sending state is missing");
+  check(
+    (await page.locator('[aria-label="Attachments"]').count()) === 0,
+    "chips did not clear during admission",
+  );
+  await page.waitForTimeout(500);
   const body = await page.locator("body").innerText();
   check(body.includes("LARGE_PASTE_UI_BEGIN"), "expanded paste beginning did not reach the turn");
   check(body.includes("LARGE_PASTE_UI_END"), "expanded paste ending did not reach the turn");
   check(!body.includes(placeholder), "composer placeholder leaked into the submitted turn");
-  check((await page.locator('[aria-label="Attachments"]').count()) === 0, "chips did not clear");
+  check(
+    (await page.getByLabel("Sending message").count()) === 0,
+    "sending state did not settle",
+  );
   check(errors.length === 0, `browser errors:\n${errors.join("\n")}`);
 
   console.log(
@@ -147,7 +162,7 @@ try {
       eval: "attachment_ui",
       mode: "webkit_mock_desktop",
       status: "pass",
-      checks: 7,
+      checks: 11,
       screenshot: "/tmp/agent-desktop-attachment-smoke.png",
     }),
   );

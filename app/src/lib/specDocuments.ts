@@ -113,44 +113,11 @@ export function latestSpecArtifact(artifacts: readonly Artifact[]): Artifact | n
   )) ?? markdown.at(-1) ?? null;
 }
 
-export function initialSpecMarkdown(title?: string | null): string {
-  return `# ${specDisplayTitle(title)}
-
-## Problem and outcome
-
-Describe what is difficult today and what should feel meaningfully better.
-
-## People and roles
-
-Who should benefit first, and who else is involved?
-
-## End-to-end experience
-
-Describe what the person sees, does, and understands from beginning to end.
-
-## Expected behavior
-
-Record the behaviors that must stay predictable, including what the product must never do.
-
-## Edge cases and recovery
-
-Cover empty, loading, error, interruption, permission, duplicate, and large-data states.
-
-## Boundaries and constraints
-
-Capture non-goals, dependencies, privacy needs, and limits the team must respect.
-
-## Acceptance criteria
-
-Turn the agreed behavior into observable, testable outcomes.
-
-## Success measures
-
-Describe the signal that will show whether this solved the problem.
-
-## Open questions and decision log
-
-Clark will keep unresolved choices and settled decisions here as the document evolves.`;
+/** A new Spec starts visually empty. The canonical skill grows only sections
+ * backed by the user's decisions, so the UI must not present template prompts
+ * as if they were already part of the generated document. */
+export function initialSpecMarkdown(_title?: string | null): string {
+  return "";
 }
 
 export function scopedSpecPrompt(selection: string, question: string): string {

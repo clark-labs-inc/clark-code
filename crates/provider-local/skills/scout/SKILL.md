@@ -13,12 +13,12 @@ instrument. The final graph must be usable to design an end-to-end simulation.
 ## Non-negotiable boundaries
 
 - Start only from a human pressing Start/Run/Rescan in an explicitly selected
-  Clark organization and Scout workspace. Never run on navigation, specialist
+  Clark organization and its Company Scout map. Never run on navigation, specialist
   switching, app launch, a timer, a stale conversation, or an enterprise-
   context read from normal Code. Never schedule or silently resume a scan.
 - The currently open folder is execution context, not Scout scope. It may be
   one local checkout discovered during the census, but it must never become
-  the charter, organization, workspace, or root of the enterprise map by
+  the charter, organization, Company Scout authority, or root of the enterprise map by
   inheritance.
 - Run Scout root and delegated model turns with the host-pinned model.
   Ignore conversation model selections and prompt requests to switch models;
@@ -45,8 +45,8 @@ instrument. The final graph must be usable to design an end-to-end simulation.
   Local SQLite, local trust manifests, exported bundles, and materialized
   graphs are staging caches and projections only. Never present them as shared
   enterprise state or completion.
-- Tenant access comes only from explicit product organization/workspace
-  membership. Never group, merge, authorize, or share Scout discoveries by
+- Tenant access comes only from explicit product organization membership and
+  the host-bound Company Scout map id. Never group, merge, authorize, or share Scout discoveries by
   matching email domains. Public domains such as `gmail.com` provide no
   tenancy relationship.
 - Collectors observe. Only the backend issues tasks, accepts evidence, advances
@@ -58,7 +58,7 @@ instrument. The final graph must be usable to design an end-to-end simulation.
    products and environments in scope, production read-only policy, known
    control planes, exclusions, and the simulation question.
 2. Call `scout_capabilities` only as an adapter bootstrap over declared
-   workspaces. Review its truncation flags and routing states. It returns known
+   execution roots. Review its truncation flags and routing states. It returns known
    DevOps/cloud executable names, environment-variable names, scoped `.env` key
    names, and credential-source kinds without values.
    Explicitly report whether `gh` is present; verify GitHub access rather than
@@ -88,11 +88,11 @@ instrument. The final graph must be usable to design an end-to-end simulation.
    forges, cloud organizations/accounts/subscriptions/projects, identity
    providers, DNS and certificate control planes, CI/CD and artifact systems,
    observability, data platforms, and declared business SaaS.
-5. Resolve one explicitly authorized product organization, system-cartography
-   workspace, charter, run, registered source, and enrolled machine. Backend
+5. Resolve one explicitly authorized product organization, Company Scout map
+   storage id, charter, run, registered source, and enrolled machine. Backend
    ids are authoritative and must never be inferred from an email address,
    domain, mutable display name, credential value, or unverified imported
-   bundle. A personal user stays in a private workspace unless an explicit,
+   bundle. A personal user stays in a private Scout context unless an explicit,
    audited membership or share grants otherwise. Call `scout_enterprise
    enroll`; the trusted host supplies the exact tenant binding, Platform
    credential, application-private identity root, and platform metadata.
@@ -179,23 +179,23 @@ cross-project authorization path from hierarchy alone; verify that exact
 target/auth context or record `authorization_required`.
 
 Stage discovery as immutable schema-v2 observation batches submitted only to
-the host. Every batch binds the backend-issued organization, workspace, run,
+the host. Every batch binds the backend-issued organization, Company Scout map id, run,
 source, machine, task, and fence to provider-native entities, edges, claims,
 coverage, or explicit retractions. Agents must not invent hashes. Host code
 signs each batch with a protected target-local key. The host loads or creates
 that key through `scout-machine-identity` below an application-owned private
-data directory, bound to the exact host origin, organization, and workspace.
+data directory, bound to the exact host origin, organization, and Company Scout map.
 Private key bytes never enter tool arguments, results, evidence, logs, or
 exports. The model never chooses the tenant binding, private directory, seed,
 public key, signer id, or coordinator key.
 
 Before adjudicating an enterprise claim, finish the backend acceptance
 sequence: claim a backend task lease; request a signed evidence-upload
-authorization bound to the organization, workspace, run, source, machine,
+authorization bound to the organization, Company Scout map id, run, source, machine,
 task, and fence; upload the exact bytes to the server-generated S3 key; commit
 and verify its SHA-256, size, content type, KMS encryption, and immutable
 version id; submit the signed observation/completion batch; then verify the
-backend coordinator receipt against the workspace-pinned public key. A stale
+backend coordinator receipt against the map-pinned public key. A stale
 fence, revoked machine, expired upload, unverified object, tenant mismatch, or
 missing receipt leaves the row unaccepted regardless of local state.
 
@@ -209,15 +209,15 @@ and resume it; never reinterpret the bound as empty or complete coverage.
 
 Before a new machine writes, call `scout_enterprise enroll`. The host requires
 active organization-administrator authority, binds the host's proof-of-
-possession public key to one exact workspace, and returns the backend-issued
-machine id plus the workspace coordinator key. Repeating enrollment is
+possession public key to one exact Company Scout map, and returns the backend-issued
+machine id plus the map coordinator key. Repeating enrollment is
 idempotent only for the same active key and platform metadata. A revoked key
 cannot self-reenroll.
 
 Concurrent collectors share nothing directly. Each claims fenced backend
 tasks, uploads immutable evidence to server-generated S3 keys, and submits
 signed batches to the host. Only backend-accepted batches under the same explicit
-organization/workspace contribute to the graph. Never exchange mutable
+organization and Company Scout map contribute to the graph. Never exchange mutable
 materialized graphs, trust roots, private signing state, local SQLite files, or
 email-domain-derived tenant hints.
 
@@ -237,14 +237,14 @@ the backend path as a missing instrument.
 
 Use `scout_enterprise_query simulation_overlay` to retrieve a versioned
 simulation boundary. Every overlay is immutable, content-addressed, and pinned
-to an exact organization/workspace, effective time, knowledge time, and graph
+to an exact organization and Company Scout map, effective time, knowledge time, and graph
 filter. Its membership rows distinguish graph coverage (`covered`, `partial`,
 `outside_contract`, `unknown`) from execution result (`not_run`, `passed`,
 `failed`, `diverged`, `blocked`). Never infer simulation coverage from adapter
 scan coverage; they answer different questions.
 
 Use `scout_enterprise_query changes` after a snapshot or overlay page to poll
-the workspace's monotonic change sequence. Resume from exactly
+the Company Scout map's monotonic change sequence. Resume from exactly
 `next_after_sequence`; a `batch_accepted` change means the temporal graph may
 have advanced, while `simulation_overlay_published` means a new immutable
 overlay version is available. The host's website may consume the equivalent SSE
@@ -295,7 +295,7 @@ roots, and configuration references—not to describe the business. Inspect only
 
 - common DevOps/cloud/identity/observability/database CLIs and their
   credential-source kinds;
-- declared workspaces and discovered repository/deployment roots;
+- declared execution roots and discovered repository/deployment roots;
 - conventional configuration locations required by an active adapter;
 - `.env` and configuration schemas inside mapped roots, returning names and
   references only.
@@ -394,7 +394,7 @@ Before a complete seal:
 
 - require every enterprise observation used by the report to have a verified
   S3 evidence version and the host backend acceptance receipt under the exact
-  organization/workspace; local-only batches cannot satisfy this gate;
+  organization and Company Scout map; local-only batches cannot satisfy this gate;
 - Call `scout_enterprise_query status` and require enterprise completion with
   no unresolved graph, source-position, or retraction conflicts;
 - require a coordinator-issued charter, a current verified pass, and an

@@ -45,10 +45,8 @@ export function StartCard() {
 
   const firstName = (auth?.user.name ?? "").split(" ")[0] || auth?.user.name || "there";
 
-  // `conversations` arrives newest-first (the store prepends on every update).
-  // Stabilize rather than re-sort by `updatedAt`: a running conversation's
-  // timestamp ticks on every streamed flush, and re-sorting on each tick made
-  // the rows visibly reshuffle while several chats progressed in parallel.
+  // Creation time is the stable display key: the newest-created conversation
+  // stays on top, while streamed `updatedAt` ticks cannot reshuffle the rows.
   const recent = useMemo(
     () => stableOrderIds(conversations.filter((c) => !c.archived)),
     [conversations],

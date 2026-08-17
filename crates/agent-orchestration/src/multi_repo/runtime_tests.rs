@@ -409,7 +409,7 @@ fn coordinator(
         .map(|(id, repository)| (id.clone(), repository.head_oid.clone()))
         .collect();
     let budget = SharedBudget::new(BudgetConfig {
-        limit_weighted_tokens: 100_000,
+        limit_weighted_tokens: Some(100_000),
         ..Default::default()
     })
     .unwrap();

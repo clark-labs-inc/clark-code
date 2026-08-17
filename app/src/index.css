@@ -870,6 +870,14 @@ svg.lucide {
   from { transform: translate3d(-100%, 0, 0); }
   to { transform: translate3d(100%, 0, 0); }
 }
+@keyframes reduced-motion-breathe {
+  0%, 100% { opacity: 0.58; }
+  50% { opacity: 1; }
+}
+@keyframes reduced-motion-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
 .skeleton,
 .spec-writing-line {
   position: relative;
@@ -966,39 +974,43 @@ svg.lucide {
 .permission-guide-cursor { animation: permission-guide-arrow-nudge 1.15s var(--ease-agent-inout) var(--dur-fast) infinite; }
 .permission-guide-target { animation: permission-guide-target-pulse 1.8s var(--ease-agent-inout) infinite; }
 
-/* Respect reduced-motion across both bespoke effects and Tailwind's animation
-   utilities. Loading state is still conveyed by the visible control and its
-   semantic status text; it must not require perpetual visual motion. */
+/* Reduced motion is a low-motion vocabulary, not a no-motion mode. Entrances
+   and exits use a short opacity cue; continuous activity uses a slow breathe.
+   Large spatial travel, perpetual spin, and shimmer movement remain disabled. */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
-    transition-duration: 0.001ms !important;
-    animation-duration: 0.001ms !important;
-    animation-iteration-count: 1 !important;
+    transition-duration: var(--dur-fast) !important;
     scroll-behavior: auto !important;
   }
 
-  .breathe,
-  .activity-dots > span,
-  .desktop-bootstrap-mark,
+  .skeleton::after,
+  .spec-writing-line::after {
+    animation: none !important;
+  }
+
   .fade-in,
   .appear-delayed,
+  .permission-guide-step {
+    animation: reduced-motion-fade-in var(--dur-fast) var(--ease-agent) both !important;
+  }
+
+  .breathe,
+  .desktop-bootstrap-mark,
   .skeleton,
-  .skeleton::after,
-  .spec-writing-line::after,
-  .permission-guide-step,
+  .spec-writing-line,
   .permission-guide-arrow,
   .permission-guide-cursor,
   .permission-guide-target,
   .approval-spinner,
   [class*="animate-"] {
-    animation: none !important;
+    animation: reduced-motion-breathe 3.2s var(--ease-agent-inout) infinite !important;
   }
 
-  /* A single steady dot remains as the accessible busy affordance. Skeleton
-     bars remain visible but still, preserving layout without implying motion. */
-  .activity-dots > span:not(:first-child) {
-    display: none !important;
+  .activity-dots > span {
+    animation: reduced-motion-breathe 2.8s var(--ease-agent-inout) infinite !important;
   }
+  .activity-dots > span:nth-child(2) { animation-delay: 0.24s !important; }
+  .activity-dots > span:nth-child(3) { animation-delay: 0.48s !important; }
 
   [class*="hover:-translate"],
   [class*="group-hover:translate"],
@@ -1011,7 +1023,8 @@ svg.lucide {
 
   .clark-toaster[data-sonner-toaster] [data-sonner-toast]:not([data-swiping="true"]),
   .clark-toaster[data-sonner-toaster] [data-sonner-toast] > * {
-    transition: none !important;
+    transition: opacity var(--dur-fast) var(--ease-agent),
+      background-color var(--dur-fast) var(--ease-agent) !important;
     animation: none !important;
   }
 }

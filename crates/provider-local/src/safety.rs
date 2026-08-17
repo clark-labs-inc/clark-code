@@ -435,6 +435,63 @@ fn git_subcommand_index(tokens: &[&str]) -> Option<usize> {
     None
 }
 
+fn normalized_program_token(token: &str) -> String {
+    program(
+        token.trim_matches(|character: char| {
+            matches!(character, '\'' | '"' | '(' | ')' | '$' | '`')
+        }),
+    )
+    .to_ascii_lowercase()
+}
+
+/// Detect direct filesystem-deletion intent for host-owned workflow
+/// constraints. This is deliberately independent from the ordinary risk
+/// grade: a bounded workflow may allow every routine action while refusing
+/// deletion outright.
+pub(crate) fn command_attempts_delete(command: &str) -> bool {
+    let normalized = normalize_fd_merge(command);
+    split_segments(&normalized).iter().any(|segment| {
+        let lower = segment.to_ascii_lowercase();
+        let tokens = segment.split_whitespace().collect::<Vec<_>>();
+        let programs = tokens
+            .iter()
+            .map(|token| normalized_program_token(token))
+            .collect::<Vec<_>>();
+        programs.iter().any(|program| {
+            matches!(
+                program.as_str(),
+                "rm" | "rmdir" | "unlink" | "del" | "erase" | "remove-item"
+            )
+        }) || (programs.first().is_some_and(|program| program == "find")
+            && (tokens
+                .iter()
+                .any(|token| token.eq_ignore_ascii_case("-delete"))
+                || lower.contains("-exec rm")))
+            || programs
+                .iter()
+                .position(|program| program == "git")
+                .and_then(|index| git_subcommand_index(&tokens[index..]).map(|sub| index + sub))
+                .is_some_and(|index| normalized_program_token(tokens[index]) == "clean")
+    })
+}
+
+/// Detect a Git push even when global options such as `git -C <path>` appear
+/// before the subcommand.
+pub(crate) fn command_attempts_github_push(command: &str) -> bool {
+    let normalized = normalize_fd_merge(command);
+    split_segments(&normalized).iter().any(|segment| {
+        let tokens = segment.split_whitespace().collect::<Vec<_>>();
+        tokens.iter().enumerate().any(|(index, token)| {
+            if normalized_program_token(token) != "git" {
+                return false;
+            }
+            git_subcommand_index(&tokens[index..])
+                .map(|subcommand| normalized_program_token(tokens[index + subcommand]))
+                .is_some_and(|subcommand| subcommand == "push")
+        })
+    })
+}
+
 fn classify_cargo(tokens: &[&str]) -> Classification {
     let sub = tokens.get(1).map(|s| s.to_lowercase()).unwrap_or_default();
     match sub.as_str() {

@@ -52,7 +52,6 @@ pub async fn session_close(
             &mut live.snapshot,
             "desktop_session_closed",
             "Clark Code closed this session before the run finished. You can continue from the saved history.",
-            "Clark Code closed this session before the goal finished. Continue from the saved history.",
         );
         (
             live.session.id.clone(),

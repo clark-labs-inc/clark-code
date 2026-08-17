@@ -10,7 +10,6 @@ export type SpecialistTab = string;
 export type ScoutTab = "map" | "changes" | "simulations" | "evidence" | "runs";
 export type SecurityTab = "posture" | "findings" | "zero-days" | "campaigns" | "scans";
 export type ScientistTab = "programs" | "campaigns" | "experiments" | "evidence" | "runs";
-export type RsiTab = "worlds" | "evaluations" | "runs" | "frontier" | "evidence";
 
 export interface SpecialistContext {
   kind: SpecialistKind;
@@ -88,7 +87,6 @@ export interface SpecialistDefinition {
   modelPolicy: "included" | "specialist";
   runtime?: Readonly<{
     modelRoute: string;
-    maxIterations: number;
   }>;
   tabs: ReadonlyArray<{ id: SpecialistTab; label: string }>;
   defaultTab: SpecialistTab;
@@ -194,8 +192,6 @@ export function parseSpecialistCatalog(value: unknown): SpecialistCatalogReceipt
       || (runtime !== undefined && (
         typeof runtime.modelRoute !== "string"
         || !runtime.modelRoute
-        || !Number.isInteger(runtime.maxIterations)
-        || (runtime.maxIterations as number) < 1
       ))
     ) {
       throw new Error(`Specialist manifest ${index} has an invalid runtime policy`);
@@ -220,7 +216,6 @@ export function parseSpecialistCatalog(value: unknown): SpecialistCatalogReceipt
         ? {
           runtime: {
             modelRoute: runtime.modelRoute as string,
-            maxIterations: runtime.maxIterations as number,
           },
         }
         : {}),
@@ -385,7 +380,6 @@ export function specialistConnectConfig(
         ? { scoutContext }
         : {}),
       modelRoute: definition.runtime.modelRoute,
-      maxIterations: definition.runtime.maxIterations,
       ...(advisorTrainingEnabled ? { advisorTrainingEnabled: true } : {}),
       ...(remote ? { remote } : {}),
     },

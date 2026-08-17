@@ -1,5 +1,5 @@
-//! Loop breaker: stop an agent that is stuck re-running the same action
-//! and getting the same result.
+//! Progress advisory for an agent re-running the same action and getting the
+//! same result.
 //!
 //! ## Why
 //!
@@ -30,28 +30,21 @@
 //! message" doom-loop check (which is per-message and result-blind) and than
 //! zcode (which has no semantic loop detection at all).
 //!
-//! ## Escalation
+//! ## Behavior
 //!
-//! - [`AfterToolCall`] (soft): once a call has yielded the same result
-//!   [`Self::nudge_at`] times, append a one-line note to the result the
-//!   model sees, telling it to change approach (or use a bounded wait if it
-//!   is intentionally polling). Non-destructive — the real tool output is
-//!   preserved above the note.
-//! - [`BeforeToolCall`] (hard): once the recent window already holds
-//!   [`Self::block_at`] identical-result repeats, block the next identical
-//!   call entirely with a corrective error, forcing a different action.
-//!
-//! Both decisions are pure functions of the message history handed to the
-//! hook, so the plugin holds no mutable state and is safe to share across
-//! the two hook lists.
+//! Once a call has yielded the same result [`Self::nudge_at`] times, append a
+//! one-line note to the result the model sees, telling it to change approach
+//! or use a bounded wait if it is intentionally polling. The host never blocks
+//! the tool from this heuristic: an autonomous run may legitimately observe
+//! unchanged external state many times over days or weeks. Explicit user
+//! cancellation and typed provider/tool failures remain the stop authorities.
 
 use std::collections::HashMap;
 
 use agent_loop as ca;
 use async_trait::async_trait;
 use ca::plugin::{
-    AfterToolCall, AfterToolCallContext, AfterToolDecision, BeforeToolCall, BeforeToolCallContext,
-    BeforeToolDecision, Plugin, PluginCapabilities,
+    AfterToolCall, AfterToolCallContext, AfterToolDecision, Plugin, PluginCapabilities,
 };
 use ca::tool::ToolResult;
 use ca::types::{AgentMessage, TextContent, ToolResultBlock};
@@ -61,9 +54,6 @@ use serde_json::Value;
 /// high enough that a short intentional poll loop just gets a heads-up, not
 /// a false alarm.
 const DEFAULT_NUDGE_AT: usize = 3;
-/// Same tool+args+result already in the window this many times ⇒ block the
-/// next identical call (hard). By this point it is not a poll, it is a rut.
-const DEFAULT_BLOCK_AT: usize = 8;
 /// Only consider this many most-recent completed tool calls when counting
 /// repeats, so an early identical pair can't haunt a long, healthy run.
 const DEFAULT_WINDOW: usize = 30;
@@ -75,24 +65,22 @@ const DEFAULT_WINDOW: usize = 30;
 /// detection).
 const GUARD_MARK: &str = "[agent:loop-guard]";
 
-/// Detects and breaks stuck same-action/same-result loops. See module docs.
-pub struct LoopBreaker {
+/// Advises on repeated same-action/same-result observations. See module docs.
+pub struct LoopProgressAdvisory {
     nudge_at: usize,
-    block_at: usize,
     window: usize,
 }
 
-impl Default for LoopBreaker {
+impl Default for LoopProgressAdvisory {
     fn default() -> Self {
         Self {
             nudge_at: DEFAULT_NUDGE_AT,
-            block_at: DEFAULT_BLOCK_AT,
             window: DEFAULT_WINDOW,
         }
     }
 }
 
-impl LoopBreaker {
+impl LoopProgressAdvisory {
     pub fn new() -> Self {
         Self::default()
     }
@@ -143,19 +131,6 @@ impl LoopBreaker {
             .filter(|c| c.fp == fp && c.identity == identity)
             .count()
     }
-
-    /// The identity the *next* call of `fp` is expected to reproduce: the
-    /// most recent same-fingerprint result in the window. `None` when the
-    /// window holds no prior call for this fingerprint.
-    fn expected_identity(&self, messages: &[AgentMessage], fp: &str) -> Option<String> {
-        let all = Self::prior_calls(messages);
-        let start = all.len().saturating_sub(self.window);
-        all[start..]
-            .iter()
-            .rev()
-            .find(|c| c.fp == fp)
-            .map(|c| c.identity.clone())
-    }
 }
 
 /// One completed tool call, reduced to its comparison keys.
@@ -164,14 +139,13 @@ struct PriorCall {
     identity: String,
 }
 
-impl Plugin for LoopBreaker {
+impl Plugin for LoopProgressAdvisory {
     fn name(&self) -> &'static str {
-        "loop_breaker"
+        "loop_progress_advisory"
     }
 
     fn capabilities(&self) -> PluginCapabilities {
         PluginCapabilities {
-            before_tool_call: true,
             after_tool_call: true,
             ..PluginCapabilities::default()
         }
@@ -179,32 +153,7 @@ impl Plugin for LoopBreaker {
 }
 
 #[async_trait]
-impl BeforeToolCall for LoopBreaker {
-    async fn on_before_tool_call(&self, ctx: BeforeToolCallContext<'_>) -> BeforeToolDecision {
-        let fp = fingerprint(&ctx.tool_call.name, ctx.args);
-        // We haven't run this call yet, so assume it reproduces the most
-        // recent same-fingerprint result (same command, nothing changed).
-        let Some(expected) = self.expected_identity(ctx.messages, &fp) else {
-            return BeforeToolDecision::allow();
-        };
-        let prior = self.repeat_count(ctx.messages, &fp, &expected);
-        if prior >= self.block_at {
-            BeforeToolDecision::block(format!(
-                "{GUARD_MARK} Blocked to break a stuck loop: this exact action has already \
-                 produced the same result {prior} times in a row and is not advancing the task. \
-                 Do NOT repeat it. Take a materially different approach, or stop and tell the user \
-                 what you've found and what is blocking progress. (If you were polling for a state \
-                 change, use a bounded wait/retry with backoff instead of re-issuing the identical \
-                 call.)"
-            ))
-        } else {
-            BeforeToolDecision::allow()
-        }
-    }
-}
-
-#[async_trait]
-impl AfterToolCall for LoopBreaker {
+impl AfterToolCall for LoopProgressAdvisory {
     async fn on_after_tool_call(&self, ctx: AfterToolCallContext<'_>) -> AfterToolDecision {
         let fp = fingerprint(&ctx.tool_call.name, ctx.args);
         let identity = output_identity(&result_plain_text(ctx.result)).to_string();
@@ -339,174 +288,17 @@ mod tests {
         pairs.into_iter().flatten().collect()
     }
 
-    fn before_ctx<'a>(
-        messages: &'a [AgentMessage],
-        call: &'a ToolCall,
-        args: &'a Value,
-        assistant: &'a AgentMessage,
-        content: &'a AssistantContent,
-    ) -> BeforeToolCallContext<'a> {
-        BeforeToolCallContext {
-            assistant_message: assistant,
-            assistant_content: content,
-            tool_call: call,
-            args,
-            messages,
-        }
-    }
-
-    #[tokio::test]
-    async fn allows_a_novel_call() {
-        let breaker = LoopBreaker::new();
-        let messages: Vec<AgentMessage> = Vec::new();
-        let args = json!({"cmd": "ls"});
-        let call = ToolCall {
-            id: "x".into(),
-            name: "shell".into(),
-            arguments: args.clone(),
-        };
-        let assistant = AgentMessage::Assistant {
-            content: AssistantContent::text(""),
-            stop_reason: StopReason::ToolUse,
-            error_message: None,
-            timestamp: None,
-            usage: None,
-        };
-        let AgentMessage::Assistant { content, .. } = &assistant else {
-            unreachable!()
-        };
-        let decision = breaker
-            .on_before_tool_call(before_ctx(&messages, &call, &args, &assistant, content))
-            .await;
-        assert!(!decision.block);
-    }
-
-    #[tokio::test]
-    async fn blocks_after_block_at_identical_results() {
-        let breaker = LoopBreaker::new(); // block_at = 8
-        let args = json!({"cmd": "ls empty/"});
-        // 8 prior identical calls with the same empty output.
-        let messages = history(
-            (0..8).map(|i| call_pair(&format!("c{i}"), "shell", args.clone(), "total 0\n", false)),
-        );
-        let call = ToolCall {
-            id: "c8".into(),
-            name: "shell".into(),
-            arguments: args.clone(),
-        };
-        let assistant = AgentMessage::Assistant {
-            content: AssistantContent::text(""),
-            stop_reason: StopReason::ToolUse,
-            error_message: None,
-            timestamp: None,
-            usage: None,
-        };
-        let AgentMessage::Assistant { content, .. } = &assistant else {
-            unreachable!()
-        };
-        let decision = breaker
-            .on_before_tool_call(before_ctx(&messages, &call, &args, &assistant, content))
-            .await;
-        assert!(decision.block, "9th identical call must be blocked");
-        assert!(decision.reason.unwrap().contains("stuck loop"));
-    }
-
-    #[tokio::test]
-    async fn does_not_block_when_results_differ() {
-        let breaker = LoopBreaker::new();
-        let args = json!({"cmd": "cargo test"});
-        // Same command, but each run reports a different result — real
-        // progress, must never be blocked (the cargo-test-after-edit case).
-        let messages = history((0..10).map(|i| {
-            call_pair(
-                &format!("c{i}"),
-                "shell",
-                args.clone(),
-                &format!("{i} failed\n"),
-                false,
-            )
-        }));
-        let call = ToolCall {
-            id: "cN".into(),
-            name: "shell".into(),
-            arguments: args.clone(),
-        };
-        let assistant = AgentMessage::Assistant {
-            content: AssistantContent::text(""),
-            stop_reason: StopReason::ToolUse,
-            error_message: None,
-            timestamp: None,
-            usage: None,
-        };
-        let AgentMessage::Assistant { content, .. } = &assistant else {
-            unreachable!()
-        };
-        let decision = breaker
-            .on_before_tool_call(before_ctx(&messages, &call, &args, &assistant, content))
-            .await;
-        assert!(
-            !decision.block,
-            "changing results are progress, never a loop"
-        );
-    }
-
-    #[tokio::test]
-    async fn interleaved_cycle_is_still_detected() {
-        // The screenshot's failure was a *cycle* (ls, re-seed, lock-check,
-        // ls, …), not literally consecutive identical calls. Result-keying
-        // over the window catches it where opencode's per-message check
-        // would not.
-        let breaker = LoopBreaker::new();
-        let ls = json!({"cmd": "ls baselines/"});
-        let seed = json!({"cmd": "re-seed"});
-        let mut pairs: Vec<Vec<AgentMessage>> = Vec::new();
-        for i in 0..8 {
-            pairs.push(call_pair(
-                &format!("l{i}"),
-                "shell",
-                ls.clone(),
-                "empty\n",
-                false,
-            ));
-            pairs.push(call_pair(
-                &format!("s{i}"),
-                "shell",
-                seed.clone(),
-                &format!("seeded {i}\n"),
-                false,
-            ));
-        }
-        let messages = history(pairs);
-        // The `ls` fingerprint has 8 identical "empty" results interleaved
-        // with the varying re-seed output.
-        let ls_args = ls.clone();
-        let call = ToolCall {
-            id: "lN".into(),
-            name: "shell".into(),
-            arguments: ls.clone(),
-        };
-        let assistant = AgentMessage::Assistant {
-            content: AssistantContent::text(""),
-            stop_reason: StopReason::ToolUse,
-            error_message: None,
-            timestamp: None,
-            usage: None,
-        };
-        let AgentMessage::Assistant { content, .. } = &assistant else {
-            unreachable!()
-        };
-        let decision = breaker
-            .on_before_tool_call(before_ctx(&messages, &call, &ls_args, &assistant, content))
-            .await;
-        assert!(
-            decision.block,
-            "the repeated leg of the cycle must be blocked"
-        );
+    #[test]
+    fn repeated_observations_have_no_before_tool_veto() {
+        let advisory = LoopProgressAdvisory::new();
+        let capabilities = advisory.capabilities();
+        assert!(!capabilities.before_tool_call);
+        assert!(capabilities.after_tool_call);
     }
 
     #[tokio::test]
     async fn nudge_fires_at_threshold_and_preserves_output() {
-        let breaker = LoopBreaker::new(); // nudge_at = 3
+        let breaker = LoopProgressAdvisory::new(); // nudge_at = 3
         let args = json!({"cmd": "ls"});
         // 2 prior identical → this (3rd) result should be nudged.
         let messages = history(
@@ -547,7 +339,7 @@ mod tests {
 
     #[tokio::test]
     async fn no_nudge_before_threshold() {
-        let breaker = LoopBreaker::new();
+        let breaker = LoopProgressAdvisory::new();
         let args = json!({"cmd": "ls"});
         let messages: Vec<AgentMessage> = Vec::new(); // first call ever
         let call = ToolCall {

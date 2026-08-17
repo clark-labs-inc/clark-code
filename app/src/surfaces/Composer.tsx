@@ -1,9 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ClipboardEvent, KeyboardEvent } from "react";
 import { AnimatePresence } from "motion/react";
-import {
-  ArrowUp, Square, X, CornerDownRight, Pencil, Target, Sparkles,
-} from "lucide-react";
+import { X, Pencil, Target, Sparkles } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
 import type { QueuedMessage, SkillReferenceBlock } from "../store/sessionStore";
 import { effectiveApprovalPolicy, openRemote } from "../store/sessionStore.runtime";
@@ -62,6 +60,7 @@ import { ComposerCollaborationPill } from "./ComposerCollaborationPill";
 import { ComposerQueuedMessages } from "./ComposerQueuedMessages";
 import { ComposerGatedWorkflowGate } from "./ComposerGatedWorkflowGate";
 import { ModelPill, QuickChatModelLabel } from "./ComposerControls";
+import { ComposerSendAction } from "./ComposerSendAction";
 import {
   SandboxSetupCard,
   sandboxBlocksSubmission,
@@ -76,6 +75,7 @@ import {
   shouldThumbnailPastedText,
   type PendingPaste,
 } from "../lib/attachments";
+import { mergeVoiceTranscriptDraft, type VoiceDraftSession } from "../lib/voiceNarration";
 import {
   isSpecComposerSession,
   specialistSlashIntent,
@@ -141,7 +141,9 @@ function ScopedComposer() {
   const [sel, setSel] = useState(0);
   const [dismissed, setDismissed] = useState(false);
   const [pendingPastes, setPendingPastes] = useState<PendingPaste[]>([]);
+  const [submitting, setSubmitting] = useState(false);
   const taRef = useRef<HTMLTextAreaElement>(null);
+  const voiceDraftSessionRef = useRef<VoiceDraftSession | null>(null);
   const bridge = useSessionStore((s) => s.bridge);
   const activeProvider = useSessionStore((s) => s.activeProvider);
   const approvalPolicy = useSessionStore((s) => approvalPolicyForSpecialist(
@@ -265,8 +267,10 @@ function ScopedComposer() {
   const connecting = useSessionStore((s) => s.connecting);
   const startBlocked = useSessionStore((s) => (s.session ? null : s.startBlockedReason()));
   const startError = useSessionStore((s) => (s.session ? null : s.error));
-  const { dragging, dropTargetRef } = useFileDrop((files) => void addFiles(files));
-  usePaste((files) => void addFiles(files), !connecting);
+  const { dragging, dropTargetRef } = useFileDrop((files) => {
+    if (!connecting && !submitting) void addFiles(files);
+  });
+  usePaste((files) => void addFiles(files), !connecting && !submitting);
 
   useComposerAutosize(taRef, value);
 
@@ -360,7 +364,7 @@ function ScopedComposer() {
     statusSupported: bridge?.localSandboxStatus !== undefined,
   });
   const sandboxBlocked = sandboxBlocksSubmission(sandboxCheckRequired, sandboxStatus);
-  const canSend = submission.canSubmit && !sandboxBlocked;
+  const canSend = submission.canSubmit && !sandboxBlocked && !submitting;
 
   const mentionProjectRoot = specSession ? specCodeContext.repositoryRoot : cwd;
 
@@ -767,6 +771,10 @@ function ScopedComposer() {
       }
     }
     const submittedDraftText = value;
+    const submittedPastes = pendingPastes;
+    const submittedSkills = selectedSkills;
+    const submittedParentReferences = parentReferences;
+    const submittedSpecReferences = specCodeContext.references;
     const acceptCurrentDraft = () => {
       if (!draft.acceptSubmitted(submittedDraftText)) return false;
       setPendingPastes([]);
@@ -776,7 +784,23 @@ function ScopedComposer() {
       specCodeContext.reset();
       return true;
     };
+    const restoreCurrentDraft = () => {
+      setPrefill(null);
+      setDraftValue(submittedDraftText);
+      setPendingPastes(submittedPastes);
+      setEditTimelineIndex(editIndex);
+      setSelectedSkills(submittedSkills);
+      setParentReferences(submittedParentReferences);
+      specCodeContext.replaceReferences(submittedSpecReferences);
+    };
     const startedNewSession = !session;
+    let composerReleased = false;
+    const releaseComposer = () => {
+      if (startedNewSession || composerReleased) return;
+      composerReleased = true;
+      setSubmitting(false);
+      requestAnimationFrame(() => taRef.current?.focus());
+    };
     const settleAcceptedDraft = async (): Promise<"preserved_newer" | "failed" | null> => {
       // Clear locally again after provider acceptance, settle any serialized
       // writer, and remove only this submitted text from cloud persistence. A
@@ -843,9 +867,21 @@ function ScopedComposer() {
         }
       }
     }
-    if (editIndex !== null) {
-      const receipt = await resendFrom(editIndex, prompt, skillReferences);
-      if (receipt !== null) {
+    if (!startedNewSession) {
+      if (!acceptCurrentDraft()) {
+        flashNotice("The draft changed before it could be sent. Review it and try again.");
+        return;
+      }
+      composerDraftRef.current = "";
+      setSubmitting(true);
+    }
+    try {
+      if (editIndex !== null) {
+        const receipt = await resendFrom(editIndex, prompt, skillReferences);
+        if (receipt === null) {
+          if (!startedNewSession) restoreCurrentDraft();
+          return;
+        }
         if (specSession) {
           recordSpecPrompt(
             draftOwner,
@@ -853,34 +889,35 @@ function ScopedComposer() {
             t,
           );
         }
-        const acceptedDraft = startedNewSession || acceptCurrentDraft();
-        if (acceptedDraft) {
-          const result = startDraftSettled
-            ? startDraftSettleResult
-            : await settleAcceptedDraft();
-          notifyDraftSettle(result);
-        }
+        const settling = startDraftSettled
+          ? Promise.resolve(startDraftSettleResult)
+          : settleAcceptedDraft();
+        releaseComposer();
+        const result = await settling;
+        notifyDraftSettle(result);
+        return;
       }
-      return;
-    }
-    const outcome = await send(prompt, skillReferences);
-    if (outcome.kind === "not_sent") {
-      if (startedNewSession) useSessionStore.getState().setComposerPrefill(t);
-      return;
-    }
-    if (specSession) {
-      recordSpecPrompt(
-        draftOwner,
-        useSessionStore.getState().session?.id ?? null,
-        t,
-      );
-    }
-    const acceptedDraft = startedNewSession || acceptCurrentDraft();
-    if (acceptedDraft) {
-      const result = startDraftSettled
-        ? startDraftSettleResult
-        : await settleAcceptedDraft();
+      const outcome = await send(prompt, skillReferences);
+      if (outcome.kind === "not_sent") {
+        if (startedNewSession) useSessionStore.getState().setComposerPrefill(t);
+        else restoreCurrentDraft();
+        return;
+      }
+      if (specSession) {
+        recordSpecPrompt(
+          draftOwner,
+          useSessionStore.getState().session?.id ?? null,
+          t,
+        );
+      }
+      const settling = startDraftSettled
+        ? Promise.resolve(startDraftSettleResult)
+        : settleAcceptedDraft();
+      releaseComposer();
+      const result = await settling;
       notifyDraftSettle(result);
+    } finally {
+      releaseComposer();
     }
   };
 
@@ -1094,29 +1131,37 @@ function ScopedComposer() {
                 ? "Queue a follow-up…"
                 : branding.projectPlaceholder
           }
-          disabled={connecting}
+          disabled={connecting || submitting}
+          aria-busy={submitting || undefined}
           className="composer-input max-h-52 w-full resize-none overflow-y-auto bg-transparent px-0.5 py-0.5 text-base leading-[1.5] text-ink outline-none placeholder:text-ink-muted disabled:opacity-50"
         />
 
         <div className="mt-0.5 flex min-w-0 items-center gap-2">
           <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             <ComposerAttachmentMenu
-              disabled={connecting}
+              disabled={connecting || submitting}
               paperclip={Boolean(specSession)}
               onFiles={(files) => void addFiles(files)}
             />
             {specSession && (
               <ComposerVoiceButton
-                disabled={connecting}
-                onError={flashNotice}
-                onTranscript={(transcript) => {
-                  const current = draftValueRef.current.trimEnd();
-                  const next = `${current}${current ? " " : ""}${transcript}`;
-                  setDraftValue(next);
+                disabled={connecting || submitting}
+                onError={(message) => {
+                  voiceDraftSessionRef.current = null;
+                  flashNotice(message);
+                }}
+                onTranscript={(transcript, state) => {
+                  const merged = mergeVoiceTranscriptDraft(
+                    draftValueRef.current,
+                    voiceDraftSessionRef.current,
+                    transcript,
+                  );
+                  voiceDraftSessionRef.current = state === "partial" ? merged.session : null;
+                  setDraftValue(merged.value);
                   requestAnimationFrame(() => {
                     const textarea = taRef.current;
                     textarea?.focus();
-                    textarea?.setSelectionRange(next.length, next.length);
+                    textarea?.setSelectionRange(merged.value.length, merged.value.length);
                   });
                 }}
               />
@@ -1144,53 +1189,23 @@ function ScopedComposer() {
                 : quickChatSession
                   ? <QuickChatModelLabel />
                   : <ModelPill />}
-            {busy && !hasContent ? (
-              <button
-                onClick={() => void cancelActive()}
-                aria-label="Stop"
-                className="grid size-8 shrink-0 place-items-center rounded-full bg-danger/12 text-danger transition duration-base ease-agent hover:bg-danger/20"
-              >
-                <Square className="size-3 fill-current" />
-              </button>
-            ) : (
-              <button
-                onClick={() => void submit()}
-                disabled={!canSend}
-                aria-label={
-                  submission.shouldPickProjectFolder
-                    ? "Choose project folder and send"
-                    : busy
-                      ? "Queue message"
-                      : startsScoutRun
-                        ? "Start Scout run"
-                        : "Send"
-                }
-                title={
-                  submission.shouldPickProjectFolder
-                    ? "Choose project folder and send"
-                    : busy
-                      ? branding.queuedTitle
-                      : startsScoutRun
-                        ? "Start Scout run · human initiated"
-                        : "Send · ⇧↵ newline"
-                }
-                className={cn(
-                  "shrink-0 bg-accent text-on-accent shadow-soft transition duration-base ease-agent hover:-translate-y-0.5 hover:bg-accent-hover active:translate-y-0 disabled:translate-y-0 disabled:bg-bg-tertiary disabled:text-ink-muted disabled:shadow-none",
-                  startsScoutRun
-                    ? "inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-xs font-semibold"
-                    : "grid size-8 place-items-center rounded-full",
-                )}
-              >
-                {busy
-                  ? <CornerDownRight className="size-4" />
-                  : startsScoutRun
-                    ? <><ArrowUp className="size-3.5" /><span>Start run</span></>
-                    : <ArrowUp className="size-4" />}
-              </button>
-            )}
+            <ComposerSendAction
+              submitting={submitting}
+              busy={busy}
+              hasContent={hasContent}
+              canSend={canSend}
+              shouldPickProjectFolder={submission.shouldPickProjectFolder}
+              startsScoutRun={startsScoutRun}
+              queuedTitle={branding.queuedTitle}
+              onCancel={() => void cancelActive()}
+              onSubmit={() => void submit()}
+            />
           </div>
         </div>
       </div>
+      <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+        {submitting ? "Sending message." : ""}
+      </p>
       {/* One quiet status line: a connect failure (in red) wins over the
           "what's missing" readiness hint. Connecting itself never shows here —
           the OpeningScreen owns that state. */}
