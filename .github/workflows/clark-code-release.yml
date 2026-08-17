@@ -837,8 +837,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          dmg="$(find "$PRODUCT_DIR/target" -type f -path '*/bundle/dmg/*.dmg' -print -quit)"
-          app="$(find "$PRODUCT_DIR/target" -type d -path '*/bundle/macos/*.app' -print -quit)"
+          bundle_root="$PRODUCT_DIR/target/universal-apple-darwin/release/bundle"
+          dmg="$(find "$bundle_root/dmg" -maxdepth 1 -type f -name '*.dmg' -print -quit)"
+          app="$bundle_root/macos/Clark Code.app"
           test -s "$dmg"
           test -d "$app"
           xcrun notarytool submit "$dmg" --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID" --wait
@@ -869,7 +870,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          app="$(find "$PRODUCT_DIR/target" -type d -path '*/bundle/macos/*.app' -print -quit)"
+          app="$PRODUCT_DIR/target/universal-apple-darwin/release/bundle/macos/Clark Code.app"
           test -d "$app"
           node "$PRODUCT_DIR/harness/macos-release-ui-smoke.mjs" \
             --updater-only \
@@ -894,7 +895,7 @@ jobs:
           CLARK_QA_AUTH_PASSWORD: ${{ secrets.CLARK_QA_AUTH_PASSWORD }}
         run: |
           set -euo pipefail
-          app="$(find "$PRODUCT_DIR/target" -type d -path '*/bundle/macos/*.app' -print -quit)"
+          app="$PRODUCT_DIR/target/universal-apple-darwin/release/bundle/macos/Clark Code.app"
           test -d "$app"
           node "$PRODUCT_DIR/harness/macos-release-ui-smoke.mjs" \
             --app "$app" \
