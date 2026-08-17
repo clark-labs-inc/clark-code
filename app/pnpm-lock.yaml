@@ -17,6 +17,9 @@ importers:
       '@atlaskit/pragmatic-drag-and-drop-live-region':
         specifier: ^2.0.0
         version: 2.0.0
+      '@chenglou/pretext':
+        specifier: ^0.0.8
+        version: 0.0.8
       '@fontsource-variable/dm-sans':
         specifier: ^5.3.0
         version: 5.3.0
@@ -150,6 +153,9 @@ packages:
 
   '@braintree/sanitize-url@7.1.2':
     resolution: {integrity: sha512-jigsZK+sMF/cuiB7sERuo9V7N9jx+dhmHHnQyDSVdpZwVutaBu7WvNYqMDLSgFgfB30n452TP3vjDAvFC973mA==}
+
+  '@chenglou/pretext@0.0.8':
+    resolution: {integrity: sha512-yqm2GMxnPI7VHcHwe84P8ZF0JK/2d2DMKPqMN+s95jQhwDMYYXKVFVJUMEaVWckQStdsjdLav/0Vu+d9YbtGxA==}
 
   '@chevrotain/types@11.1.2':
     resolution: {integrity: sha512-U+HFai5+zmJCkK86QsaJtoITlboZHBqrVketcO2ROv865xfCMSFpELQoz1GkX5GzME8pTa+3kbKrZHQtI0gdbw==}
@@ -2011,6 +2017,8 @@ snapshots:
   '@babel/runtime@7.29.7': {}
 
   '@braintree/sanitize-url@7.1.2': {}
+
+  '@chenglou/pretext@0.0.8': {}
 
   '@chevrotain/types@11.1.2': {}
 

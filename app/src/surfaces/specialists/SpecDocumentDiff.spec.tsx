@@ -32,6 +32,8 @@ describe("SpecDocumentDiff", () => {
     expect(markup).toContain("Acceptance criteria");
     expect(markup).toContain('data-diff-kind="remove"');
     expect(markup).toContain('data-diff-kind="add"');
+    expect(markup).toContain('data-qa="spec-pretext-reveal"');
+    expect(markup).toContain('data-pretext-complete="false"');
     expect(markup).not.toContain("Editing specification");
   });
 });

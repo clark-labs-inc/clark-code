@@ -120,8 +120,34 @@ export function initialSpecMarkdown(_title?: string | null): string {
   return "";
 }
 
-export function scopedSpecPrompt(selection: string, question: string): string {
+export interface ScopedSpecPromptDetails {
+  selection: string;
+  section: string;
+  comment: string;
+}
+
+function scopedPromptField(text: string, field: string): string {
+  return text.match(new RegExp(`<${field}>\\s*([\\s\\S]*?)\\s*</${field}>`, "i"))?.[1]?.trim() ?? "";
+}
+
+export function parseScopedSpecPrompt(text: string): ScopedSpecPromptDetails | null {
+  const selection = scopedPromptField(text, "selected_spec_content");
+  const comment = scopedPromptField(text, "scoped_comment");
+  if (!selection || !comment) return null;
+  return {
+    selection,
+    section: scopedPromptField(text, "selected_spec_section") || selection.slice(0, 80),
+    comment,
+  };
+}
+
+export function scopedSpecPrompt(selection: string, question: string, section = selection.slice(0, 80)): string {
   return `Continue the feature-specification workflow for the current SPEC.md.
+
+The user is discussing this document section:
+<selected_spec_section>
+${section.trim()}
+</selected_spec_section>
 
 The user selected this exact document content:
 <selected_spec_content>

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   initialSpecMarkdown,
   latestSpecArtifact,
+  parseScopedSpecPrompt,
   scopedSpecPrompt,
   specCodeContextPrompt,
   specDocumentTitle,
@@ -41,10 +42,16 @@ describe("spec document conventions", () => {
   });
 
   it("binds a scoped chat to exact selected content", () => {
-    const prompt = scopedSpecPrompt("Do not drag right.", "Should it wrap?");
+    const prompt = scopedSpecPrompt("Do not drag right.", "Should it wrap?", "Drag behavior");
+    expect(prompt).toContain("<selected_spec_section>\nDrag behavior\n</selected_spec_section>");
     expect(prompt).toContain("<selected_spec_content>\nDo not drag right.\n</selected_spec_content>");
     expect(prompt).toContain("<scoped_comment>\nShould it wrap?\n</scoped_comment>");
     expect(prompt).toContain("Preserve unrelated sections");
+    expect(parseScopedSpecPrompt(prompt)).toEqual({
+      selection: "Do not drag right.",
+      section: "Drag behavior",
+      comment: "Should it wrap?",
+    });
   });
 
   it("grounds referenced code inside the selected repository", () => {

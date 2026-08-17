@@ -34,6 +34,7 @@ import {
 import { specDocumentDiff, specDocumentInteraction } from "../../lib/specDiff";
 import { specGuidance } from "../../lib/specGuidance";
 import { currentSpecToolCalls } from "../../lib/specProgress";
+import { specSelectionConversations } from "../../lib/specSelectionThreads";
 import { accessibleMotion, RISE } from "../../lib/motion";
 import { SpecDocumentDiff, type LiveSpecDocumentDiff } from "./SpecDocumentDiff";
 import { SpecRunProgress } from "./SpecRunProgress";
@@ -72,6 +73,7 @@ export function SpecWorkspace() {
   const [guidedOpen, setGuidedOpen] = useState(false);
   const [guidedPreview, setGuidedPreview] = useState<SpecGuidedPreview | null>(null);
   const [selection, setSelection] = useState<SpecSelection | null>(null);
+  const [selectionDrafts, setSelectionDrafts] = useState<Record<string, string>>({});
   const [outlineOpen, setOutlineOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyRevision, setHistoryRevision] = useState(0);
@@ -94,6 +96,10 @@ export function SpecWorkspace() {
     ? { busy: true, label: "Opening your saved spec…" }
     : activity;
   const runCalls = useMemo(() => currentSpecToolCalls(snapshot), [snapshot]);
+  const selectionConversations = useMemo(
+    () => specSelectionConversations(snapshot.timeline),
+    [snapshot.timeline],
+  );
   const blockingPermission = snapshot.pending_permission
     && !wouldAutoApprove("full", snapshot.pending_permission)
     ? snapshot.pending_permission
@@ -185,10 +191,8 @@ export function SpecWorkspace() {
   }, [documentDiff, reduceMotion]);
 
   useEffect(() => {
-    if (!activity.busy) return;
-    setSelection(null);
-    window.getSelection()?.removeAllRanges();
-  }, [activity.busy]);
+    setSelectionDrafts({});
+  }, [session?.id]);
 
   useEffect(() => {
     if (!session || activity.busy) return;
@@ -402,12 +406,14 @@ export function SpecWorkspace() {
                 }}
                 onClick={(event) => {
                   if (!documentInteraction.canSelect) return;
-                  const next = selectionWithin(documentRef.current) ?? selectionFromClick(event.target);
+                  const next = selectionWithin(documentRef.current)
+                    ?? selectionFromClick(documentRef.current, event.target);
                   if (next) setSelection(next);
                 }}
                 onDoubleClick={(event) => {
                   if (!documentInteraction.canSelect) return;
-                  const next = selectionWithin(documentRef.current) ?? selectionFromClick(event.target);
+                  const next = selectionWithin(documentRef.current)
+                    ?? selectionFromClick(documentRef.current, event.target);
                   if (next) setSelection(next);
                 }}
                 className={cn(
@@ -452,10 +458,21 @@ export function SpecWorkspace() {
             <SpecGuidedInterview report={guidance} busy={activity.busy} onPreview={setGuidedPreview} />
           )}
         </AnimatePresence>
-        {selection && <SpecSelectionThread selection={selection} onClose={() => setSelection(null)} />}
+        {selection && (
+          <SpecSelectionThread
+            selection={selection}
+            turns={selectionConversations[selection.key]?.turns ?? []}
+            draft={selectionDrafts[selection.key] ?? ""}
+            onDraftChange={(draft) => setSelectionDrafts((current) => ({
+              ...current,
+              [selection.key]: draft,
+            }))}
+            onClose={() => setSelection(null)}
+          />
+        )}
       </div>
 
-      <div className="shrink-0 border-t border-border-subtle bg-bg">
+      <div className={cn("shrink-0 border-t border-border-subtle bg-bg", selection && "hidden lg:block")}>
         {blockingPermission && (
           <div className="mx-auto max-w-[70rem] px-7 pt-3">
             <PermissionGate req={blockingPermission} />

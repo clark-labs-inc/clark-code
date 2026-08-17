@@ -12,6 +12,7 @@ import {
   staggeredTransition,
 } from "../../lib/motion";
 import { cn } from "../../lib/cn";
+import { PretextRevealText } from "./PretextRevealText";
 
 export interface LiveSpecDocumentDiff extends SpecDocumentDiffValue {
   revision: number;
@@ -127,10 +128,21 @@ function DiffLine({
           row.kind === "equal" && "text-ink",
         )}
       >
-        {presentation.style === "list" && (
-          <span aria-hidden="true" className="mr-2 text-ink-faint">{presentation.marker}</span>
+        {presentation.style === "list" && row.kind === "add" && presentation.text ? (
+          <span className="grid grid-cols-[auto_minmax(0,1fr)]">
+            <span aria-hidden="true" className="mr-2 text-ink-faint">{presentation.marker}</span>
+            <PretextRevealText text={presentation.text} reduceMotion={reduceMotion} />
+          </span>
+        ) : (
+          <>
+            {presentation.style === "list" && (
+              <span aria-hidden="true" className="mr-2 text-ink-faint">{presentation.marker}</span>
+            )}
+            {row.kind === "add" && presentation.text ? (
+              <PretextRevealText text={presentation.text} reduceMotion={reduceMotion} />
+            ) : presentation.text}
+          </>
         )}
-        {presentation.text}
       </div>
     </m.div>
   );
