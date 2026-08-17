@@ -128,7 +128,7 @@ impl ToolExecutor for Grep {
                 break;
             }
             scanned += 1;
-            if scanned % 64 == 0 {
+            if scanned.is_multiple_of(64) {
                 ctx.report(format!(
                     "searched {scanned}/{candidate_count} files · {total} matches\n"
                 ));

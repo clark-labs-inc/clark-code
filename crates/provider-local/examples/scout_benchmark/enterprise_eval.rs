@@ -535,7 +535,11 @@ fn add_service(
 ) -> Result<(), String> {
     let machine = index % machine_count;
     let machine_id = format!("machine-{machine}");
-    let adapter = if machine % 2 == 0 { "aws" } else { "gcp" };
+    let adapter = if machine.is_multiple_of(2) {
+        "aws"
+    } else {
+        "gcp"
+    };
     let entity_specs = [
         (EnterpriseEntityKind::Service, "service"),
         (EnterpriseEntityKind::Repository, "repo"),
@@ -737,7 +741,11 @@ fn add_coverage_pass(
 
 fn coverage_key(machine: usize) -> CoverageKey {
     CoverageKey::new(
-        if machine % 2 == 0 { "aws" } else { "gcp" },
+        if machine.is_multiple_of(2) {
+            "aws"
+        } else {
+            "gcp"
+        },
         "auth-read-only",
         format!("tenant-{machine}"),
         "all-regions",

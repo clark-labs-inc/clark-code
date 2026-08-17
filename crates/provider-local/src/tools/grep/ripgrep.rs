@@ -116,7 +116,7 @@ pub(super) async fn search(
         };
         match_count = match_count.saturating_add(contribution);
         output.push(line);
-        if output.len() % 64 == 0 {
+        if output.len().is_multiple_of(64) {
             ctx.report(format!("ripgrep found {match_count} matches\n"));
         }
     }
