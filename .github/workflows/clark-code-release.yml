@@ -84,11 +84,11 @@ jobs:
               ;;
             linux)
               platforms=linux
-              matrix='{"include":[{"name":"Linux","os":"ubuntu-latest-16-cores","platform":"linux","rust_targets":""}]}'
+              matrix='{"include":[{"name":"Linux","os":"ubuntu-24.04","platform":"linux","rust_targets":""}]}'
               ;;
             all)
               platforms=macos,linux
-              matrix='{"include":[{"name":"macOS","os":"macos-15-xlarge","platform":"macos","rust_targets":"aarch64-apple-darwin,x86_64-apple-darwin"},{"name":"Linux","os":"ubuntu-latest-16-cores","platform":"linux","rust_targets":""}]}'
+              matrix='{"include":[{"name":"macOS","os":"macos-15-xlarge","platform":"macos","rust_targets":"aarch64-apple-darwin,x86_64-apple-darwin"},{"name":"Linux","os":"ubuntu-24.04","platform":"linux","rust_targets":""}]}'
               ;;
             *)
               echo "::error::Unknown release platform: $REQUESTED_PLATFORM"
@@ -686,7 +686,7 @@ jobs:
         id: cargo-nextest-platform-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          key: cargo-nextest-${{ runner.os }}-ubuntu-latest-16-cores-0.9.143
+          key: cargo-nextest-${{ runner.os }}-ubuntu-24.04-0.9.143
           path: ~/.cargo/bin/cargo-nextest
       - name: Install the exact cargo-nextest executable
         if: runner.os == 'Linux' && steps.platform-record-cache.outputs.cache-hit != 'true' && steps.cargo-nextest-platform-cache.outputs.cache-hit != 'true'
@@ -695,7 +695,7 @@ jobs:
         if: runner.os == 'Linux' && steps.platform-record-cache.outputs.cache-hit != 'true' && steps.cargo-nextest-platform-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          key: cargo-nextest-${{ runner.os }}-ubuntu-latest-16-cores-0.9.143
+          key: cargo-nextest-${{ runner.os }}-ubuntu-24.04-0.9.143
           path: ~/.cargo/bin/cargo-nextest
       - name: Set up pinned bounded kache
         uses: kunobi-ninja/kache-action@49398d37113c616fdb61be434cb497e3c2c8f3e6 # v1
