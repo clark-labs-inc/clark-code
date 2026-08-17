@@ -112,7 +112,7 @@ jobs:
     name: Composed Rust and frontend build
     needs: [product-changes, release-contracts]
     if: ${{ needs.product-changes.outputs.required == 'true' && needs.release-contracts.result == 'success' }}
-    runs-on: clark-release-linux
+    runs-on: ubuntu-latest-16-cores
     environment: release
     timeout-minutes: 60
     services:
@@ -251,7 +251,7 @@ jobs:
         id: cargo-zigbuild-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          key: cargo-zigbuild-${{ runner.os }}-clark-release-linux-x86_64-0.23.0-v3
+          key: cargo-zigbuild-${{ runner.os }}-ubuntu-latest-16-cores-x86_64-0.23.0-v3
           path: ~/.cargo/bin/cargo-zigbuild
       - name: Install the exact cargo-zigbuild executable
         if: steps.cargo-zigbuild-cache.outputs.cache-hit != 'true'
@@ -260,7 +260,7 @@ jobs:
         if: steps.cargo-zigbuild-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          key: cargo-zigbuild-${{ runner.os }}-clark-release-linux-x86_64-0.23.0-v3
+          key: cargo-zigbuild-${{ runner.os }}-ubuntu-latest-16-cores-x86_64-0.23.0-v3
           path: ~/.cargo/bin/cargo-zigbuild
       - name: Verify the exact cargo-zigbuild executable
         run: |
