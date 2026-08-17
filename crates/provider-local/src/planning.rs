@@ -675,7 +675,7 @@ impl ContextTransform for PlanReminderTransform {
                         && context
                             .iteration
                             .is_multiple_of(PERIODIC_EXECUTION_REMINDER_TURNS))
-                        .then_some(ExecutionReminderReason::Periodic)
+                    .then_some(ExecutionReminderReason::Periodic)
                 });
             reason.and_then(|reason| {
                 render_execution_reminder(
