@@ -436,9 +436,25 @@ jobs:
           targets: x86_64-unknown-linux-musl
       - name: Install the repository Linux linker
         if: steps.worker-cache.outputs.cache-hit != 'true'
+        shell: bash
         run: |
-          sudo apt-get update
-          sudo apt-get install -y mold
+          set -euo pipefail
+          # GitHub's Ubuntu mirror list prefers azure.archive.ubuntu.com. A
+          # degraded Azure mirror can otherwise leave apt blocked until this
+          # entire job times out, even after the public archive answers.
+          if [[ -f /etc/apt/apt-mirrors.txt ]]; then
+            sudo sed -i \
+              's#http://azure.archive.ubuntu.com/ubuntu#https://archive.ubuntu.com/ubuntu#g' \
+              /etc/apt/apt-mirrors.txt
+          fi
+          apt_network=(
+            -o Acquire::Retries=3
+            -o Acquire::http::Timeout=20
+            -o Acquire::https::Timeout=20
+          )
+          sudo timeout 300 apt-get "${apt_network[@]}" update
+          sudo env DEBIAN_FRONTEND=noninteractive timeout 300 \
+            apt-get "${apt_network[@]}" install -y --no-install-recommends mold
       - name: Restore exact Zig toolchain
         if: steps.worker-cache.outputs.cache-hit != 'true'
         id: zig-cache
