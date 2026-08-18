@@ -29,4 +29,5 @@ describe("specialist navigation state", () => {
     useSpecialistStore.getState().close();
     expect(useSpecialistStore.getState().scoutScopeOpen).toBe(false);
   });
+
 });

@@ -4,6 +4,11 @@
 //! once and ships to native and WASM.
 
 mod checklist;
+mod transcript_pages;
+
+pub use transcript_pages::{
+    TranscriptPage, TRANSCRIPT_PAGE_ITEMS, TRANSCRIPT_PAGE_TARGET_BYTES, TRANSCRIPT_TAIL_ITEMS,
+};
 
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
@@ -90,6 +95,12 @@ pub struct Snapshot {
     /// animates through the upload instead of sitting static.
     #[serde(default)]
     pub starting: bool,
+    /// Absolute index of `timeline[0]` in the user-visible transcript. Older
+    /// snapshots default to zero. Native persistence may seal an immutable
+    /// prefix into transcript pages while projection keeps only this bounded
+    /// active tail resident.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub timeline_offset: usize,
     pub runs: IndexMap<RunId, RunView>,
     pub timeline: Vec<TimelineItem>,
     /// Provider history replacement captured at `timeline_index`. Reopening
@@ -139,7 +150,11 @@ impl Snapshot {
         let mut items = checkpoint
             .map(|checkpoint| checkpoint.transcript.items.clone())
             .unwrap_or_default();
-        let tail_start = checkpoint.map_or(0, |checkpoint| checkpoint.timeline_index);
+        let tail_start = checkpoint.map_or(0, |checkpoint| {
+            checkpoint
+                .timeline_index
+                .saturating_sub(self.timeline_offset)
+        });
 
         for item in self.timeline.iter().skip(tail_start) {
             match item {
@@ -582,7 +597,7 @@ pub fn apply(snapshot: &mut Snapshot, event: &AgentEvent) {
         AgentEvent::ContextCompacted { transcript, .. } => {
             snapshot.model_context_checkpoint = Some(ModelContextCheckpoint {
                 transcript: transcript.clone(),
-                timeline_index: snapshot.timeline.len(),
+                timeline_index: snapshot.timeline_offset + snapshot.timeline.len(),
             });
         }
 
@@ -675,6 +690,10 @@ pub fn apply(snapshot: &mut Snapshot, event: &AgentEvent) {
             }
         }
     }
+}
+
+fn is_zero(value: &usize) -> bool {
+    *value == 0
 }
 
 /// A terminal run must never leave tool rows looking live. Providers normally

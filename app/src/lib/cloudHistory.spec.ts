@@ -9,7 +9,7 @@ import {
   cloudDelete,
   configureCloudHistoryCredentials,
   flushCloudPuts,
-  MAX_SNAPSHOT_BYTES,
+  LARGE_SNAPSHOT_BYTES,
   onCloudHistoryWarning,
   resetCloudHistory,
   scheduleCloudPut,
@@ -102,8 +102,8 @@ describe("cloud history size backstop", () => {
     expect("plan" in (snapshot as Snapshot & { plan?: unknown })).toBe(false);
   });
 
-  it("checkpoints an oversized UTF-8 snapshot without leaving flush permanently pending", async () => {
-    invoke.mockResolvedValueOnce(undefined);
+  it("publishes a large UTF-8 snapshot through the segmented native transport", async () => {
+    invoke.mockResolvedValueOnce({ rev: 1 });
     const warning = vi.fn();
     const unsubscribe = onCloudHistoryWarning(warning);
     const snapshot: Snapshot = {
@@ -112,7 +112,7 @@ describe("cloud history size backstop", () => {
         item: "message",
         run: "r1",
         role: "user",
-        blocks: [{ type: "text", text: "😀".repeat(Math.ceil(MAX_SNAPSHOT_BYTES / 4)) }],
+        blocks: [{ type: "text", text: "😀".repeat(Math.ceil(LARGE_SNAPSHOT_BYTES / 4)) }],
       }],
       tool_calls: {},
       artifacts: [],
@@ -133,18 +133,16 @@ describe("cloud history size backstop", () => {
 
     await expect(flushCloudPuts(100)).resolves.toBe(true);
     expect(invoke).toHaveBeenCalledOnce();
-    expect(invoke).toHaveBeenCalledWith(
-      "desktop_conv_checkpoint_local",
-      expect.objectContaining({
-        checkpoint: expect.objectContaining({ id: "oversized-utf8", snapshot }),
-      }),
-    );
-    expect(warning).toHaveBeenCalledWith(expect.stringContaining("too large for cross-device sync"));
+    expect(invoke).toHaveBeenCalledWith("desktop_conv_put", expect.objectContaining({
+      id: "oversized-utf8",
+      snapshot,
+    }));
+    expect(warning).not.toHaveBeenCalled();
     unsubscribe();
   });
 
-  it("does not repeatedly serialize an already-oversized running transcript", async () => {
-    invoke.mockResolvedValueOnce(undefined);
+  it("defers an oversized live checkpoint to the terminal bounded-sync pass", async () => {
+    invoke.mockResolvedValueOnce({ rev: 1 });
     const warning = vi.fn();
     const unsubscribe = onCloudHistoryWarning(warning);
     const snapshot: Snapshot = {
@@ -153,7 +151,7 @@ describe("cloud history size backstop", () => {
         item: "message",
         run: "r1",
         role: "user",
-        blocks: [{ type: "text", text: "x".repeat(MAX_SNAPSHOT_BYTES + 1) }],
+        blocks: [{ type: "text", text: "x".repeat(LARGE_SNAPSHOT_BYTES + 1) }],
       }],
       tool_calls: {},
       artifacts: [],
@@ -168,18 +166,20 @@ describe("cloud history size backstop", () => {
     };
 
     scheduleCloudPut(creds, meta, snapshot, "running");
-    await vi.waitFor(() => expect(warning).toHaveBeenCalledOnce());
     scheduleCloudPut(creds, meta, snapshot, "running");
     await Promise.resolve();
 
-    expect(warning).toHaveBeenCalledOnce();
+    expect(warning).not.toHaveBeenCalled();
+    expect(invoke).not.toHaveBeenCalled();
+
+    scheduleCloudPut(creds, meta, snapshot, "idle");
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledOnce());
     expect(invoke).toHaveBeenCalledOnce();
-    expect(invoke).toHaveBeenCalledWith(
-      "desktop_conv_checkpoint_local",
-      expect.objectContaining({
-        checkpoint: expect.objectContaining({ id: "oversized-running", snapshot }),
-      }),
-    );
+    expect(invoke).toHaveBeenCalledWith("desktop_conv_put", expect.objectContaining({
+      id: "oversized-running",
+      snapshot,
+      status: "idle",
+    }));
     unsubscribe();
   });
 

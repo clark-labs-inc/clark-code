@@ -52,34 +52,42 @@ export interface ConversationBlockWindow {
   blocks: ConversationBlock[];
   rowKeys: string[];
   windowed: boolean;
+  start: number;
+  end: number;
+  hasEarlier: boolean;
+  hasLater: boolean;
 }
 
 /**
- * Group only enough recent raw timeline items to fill the visible block
- * window. Most transcripts need at most `2 * limit` items; unusually dense
- * tool/goal runs expand geometrically until the block contract is satisfied.
- * This bounds the common streamed-token path without changing what the user
- * sees or breaking stable keys/timeline indices.
+ * Group one fixed-size raw timeline page. Paging by raw items (rather than by
+ * grouped blocks) is load-bearing: a single work block can contain thousands
+ * of contiguous tool calls, so a block-count limit alone does not bound DOM or
+ * diff-summary work. `endExclusive === null` follows the live tail.
  */
 export function conversationBlockWindow(
   timeline: TimelineItem[],
   goal: GoalState | undefined,
-  showAll: boolean,
+  endExclusive: number | null,
   limit: number,
 ): ConversationBlockWindow {
-  let start = showAll ? 0 : Math.max(0, timeline.length - limit * 2);
-  let grouped = group(timeline.slice(start), goal, start);
-
-  while (!showAll && start > 0 && grouped.length <= limit) {
-    const covered = timeline.length - start;
-    start = Math.max(0, timeline.length - covered * 2);
-    grouped = group(timeline.slice(start), goal, start);
-  }
-
-  const windowed = !showAll && (start > 0 || grouped.length > limit);
-  const blocks = windowed ? grouped.slice(-limit) : grouped;
+  const pageSize = Math.max(1, Math.floor(limit));
+  const end = endExclusive === null
+    ? timeline.length
+    : Math.max(0, Math.min(timeline.length, Math.floor(endExclusive)));
+  const start = Math.max(0, end - pageSize);
+  const blocks = group(timeline.slice(start, end), goal, start);
   const rowKeys = blocks.flatMap((block) =>
     block.kind === "goal_work" ? block.blocks.map((child) => child.key) : [block.key]
   );
-  return { blocks, rowKeys, windowed };
+  const hasEarlier = start > 0;
+  const hasLater = end < timeline.length;
+  return {
+    blocks,
+    rowKeys,
+    windowed: hasEarlier || hasLater,
+    start,
+    end,
+    hasEarlier,
+    hasLater,
+  };
 }

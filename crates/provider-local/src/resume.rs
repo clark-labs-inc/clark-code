@@ -11,7 +11,14 @@ use content::{
     user_content,
 };
 
-pub(crate) fn to_agent_messages(resume: Option<&ResumeTranscript>) -> Vec<ca::AgentMessage> {
+/// Rebuild model context from durable history. Image bytes remain in the
+/// provider-agnostic resume transcript for UI/history fidelity, but a text-only
+/// coding route must never inherit historical multimodal blocks. Live tool
+/// execution already applies the same policy before appending results.
+pub(crate) fn to_agent_messages(
+    resume: Option<&ResumeTranscript>,
+    native_image_support: bool,
+) -> Vec<ca::AgentMessage> {
     let mut messages = Vec::new();
     let Some(resume) = resume else {
         return messages;
@@ -29,7 +36,7 @@ pub(crate) fn to_agent_messages(resume: Option<&ResumeTranscript>) -> Vec<ca::Ag
         match item {
             ResumeItem::Message { role, blocks } => match role {
                 Role::User => {
-                    if let Some(content) = user_content(blocks) {
+                    if let Some(content) = user_content(blocks, native_image_support) {
                         messages.push(ca::AgentMessage::User {
                             content,
                             timestamp: None,
@@ -77,9 +84,10 @@ pub(crate) fn to_agent_messages(resume: Option<&ResumeTranscript>) -> Vec<ca::Ag
                     timestamp: None,
                     usage: None,
                 });
-                let result = tool_result_content(content).unwrap_or_else(|| {
-                    ca::ToolResultContent::text(format!("{title} ({status:?})"))
-                });
+                let result =
+                    tool_result_content(content, native_image_support).unwrap_or_else(|| {
+                        ca::ToolResultContent::text(format!("{title} ({status:?})"))
+                    });
                 messages.push(ca::AgentMessage::ToolResult {
                     tool_call_id: id.clone(),
                     tool_name: name,
@@ -224,7 +232,7 @@ mod tests {
                 },
             ],
         };
-        let messages = to_agent_messages(Some(&transcript));
+        let messages = to_agent_messages(Some(&transcript), false);
         assert_eq!(messages.len(), 4);
         assert!(format!("{messages:?}").contains("private"));
         assert!(matches!(messages[2], ca::AgentMessage::Assistant { .. }));
@@ -269,7 +277,7 @@ mod tests {
         assert!(serialized.contains("durable structured finding"));
         assert!(!serialized.contains("opaque-provider-payload"));
 
-        let replayed = to_agent_messages(Some(&transcript));
+        let replayed = to_agent_messages(Some(&transcript), false);
         let replayed = format!("{replayed:?}");
         assert!(replayed.contains("complete native reasoning"));
         assert!(replayed.contains("durable structured finding"));
@@ -314,7 +322,7 @@ mod tests {
             ResumeItem::ToolCall { status: ToolStatus::Completed, title, .. }
                 if title == "Ran tests"
         ));
-        let replayed = to_agent_messages(Some(&transcript));
+        let replayed = to_agent_messages(Some(&transcript), false);
         assert_eq!(replayed.len(), 4);
         assert!(matches!(replayed[2], ca::AgentMessage::Assistant { .. }));
         assert!(matches!(replayed[3], ca::AgentMessage::ToolResult { .. }));
@@ -343,7 +351,7 @@ mod tests {
             }],
         };
 
-        let messages = to_agent_messages(Some(&transcript));
+        let messages = to_agent_messages(Some(&transcript), true);
         let ca::AgentMessage::ToolResult { content, .. } = &messages[1] else {
             panic!("expected tool result");
         };
@@ -357,6 +365,41 @@ mod tests {
         let round_trip = from_agent_messages(&messages);
         let serialized = serde_json::to_string(&round_trip).unwrap();
         assert!(serialized.contains("QUJDREVGRw=="));
+    }
+
+    #[test]
+    fn text_only_resume_keeps_tool_receipt_but_drops_historical_image_input() {
+        let transcript = ResumeTranscript {
+            truncated: false,
+            items: vec![ResumeItem::ToolCall {
+                id: "image-call".into(),
+                tool_name: Some("view_image".into()),
+                title: "Viewed image".into(),
+                kind: ToolKind::ViewImage,
+                status: ToolStatus::Completed,
+                locations: Vec::new(),
+                arguments: Some(serde_json::json!({"path":"screenshot.png"})),
+                content: vec![
+                    ContentBlock::text("vision-derived description of the screenshot"),
+                    ContentBlock::Image {
+                        mime_type: "image/png".into(),
+                        data: "QUJDREVGRw==".into(),
+                        uri: None,
+                    },
+                ],
+            }],
+        };
+
+        let messages = to_agent_messages(Some(&transcript), false);
+        let ca::AgentMessage::ToolResult { content, .. } = &messages[1] else {
+            panic!("expected tool result");
+        };
+        assert_eq!(content.blocks.len(), 1);
+        assert!(matches!(
+            &content.blocks[0],
+            ca::ToolResultBlock::Text(text)
+                if text.text == "vision-derived description of the screenshot"
+        ));
     }
 
     #[test]
@@ -375,7 +418,7 @@ mod tests {
             }],
         };
 
-        let messages = to_agent_messages(Some(&transcript));
+        let messages = to_agent_messages(Some(&transcript), false);
         let ca::AgentMessage::ToolResult {
             is_error, content, ..
         } = &messages[1]
@@ -395,7 +438,7 @@ mod tests {
                 blocks: vec![ContentBlock::text("recent request")],
             }],
         };
-        let messages = to_agent_messages(Some(&transcript));
+        let messages = to_agent_messages(Some(&transcript), false);
         assert!(matches!(
             &messages[0],
             ca::AgentMessage::Custom { kind, .. } if kind == "resume_boundary"
@@ -415,7 +458,7 @@ mod tests {
                 ],
             }],
         };
-        let messages = to_agent_messages(Some(&transcript));
+        let messages = to_agent_messages(Some(&transcript), false);
         let rendered = format!("{messages:?}");
         assert!(rendered.contains("skill_123"));
         assert!(rendered.contains("rev_456"));
@@ -438,7 +481,7 @@ mod tests {
                 },
             }],
         };
-        let messages = to_agent_messages(Some(&transcript));
+        let messages = to_agent_messages(Some(&transcript), false);
         let ca::AgentMessage::Custom { payload, .. } = &messages[0] else {
             panic!("expected proposed-plan context");
         };

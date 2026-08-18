@@ -26,7 +26,10 @@ pub use access_failure::classify_provider_access_failure;
 pub use domain::*;
 pub use error::{Error, Result};
 pub use ids::*;
-pub use projection::{apply, normalize_snapshot_value, reduce_all, Snapshot, TimelineItem};
+pub use projection::{
+    apply, normalize_snapshot_value, reduce_all, Snapshot, TimelineItem, TranscriptPage,
+    TRANSCRIPT_PAGE_ITEMS, TRANSCRIPT_PAGE_TARGET_BYTES, TRANSCRIPT_TAIL_ITEMS,
+};
 pub use provider::{
     AttachmentKind, BackgroundTask, BackgroundTaskState, ClientResponse, CollaborationMode,
     ExperimentCapability, ModelCapability, OutputStyleCapability, PlanDecision,

@@ -14,6 +14,7 @@ import { ManagedWorktreeBasePicker } from "./ManagedWorktreeJourney";
 import { ParallelWorkContext } from "./ParallelWorkContext";
 import { useSpecialistStore } from "../store/specialistStore";
 import { specialistModelSettings } from "../lib/specialistModel";
+import { specialistWorkflowCommand } from "../lib/specialists";
 
 const ITEM =
   "flex h-[22px] min-w-0 items-center gap-1 rounded-md bg-composer-context px-1.5 text-xs font-medium leading-none";
@@ -114,6 +115,7 @@ export function ComposerContextBar() {
   const [inspectionRemote, setInspectionRemote] = useState<RemoteInfo | null>(null);
   const [inspectionError, setInspectionError] = useState<string | null>(null);
   const selectedSpecialistSettings = specialistModelSettings(specialistContext);
+  const workflowCommand = specialistWorkflowCommand(specialistContext);
   const executionSettings = selectedSpecialistSettings
     ? { ...localSettings, ...selectedSpecialistSettings }
     : localSettings;
@@ -377,6 +379,14 @@ export function ComposerContextBar() {
         // at narrow widths and the popovers keep their own z-index.
         className={`${mobileExpanded ? "flex" : "hidden"} mt-1.5 min-w-0 max-w-full flex-wrap items-center justify-start gap-1.5 overflow-visible sm:mt-0 sm:flex`}
       >
+        {workflowCommand && (
+          <span
+            className={`${ITEM} shrink-0 text-accent`}
+            title="This conversation is pinned to an explicit specialist workflow."
+          >
+            {workflowCommand}
+          </span>
+        )}
         {session ? (
           <>
             <span

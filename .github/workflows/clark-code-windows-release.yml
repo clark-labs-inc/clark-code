@@ -336,12 +336,11 @@ jobs:
         run: |
           set -euo pipefail
           export PATH="$HOME/.cache/clark-release-tools/zig-0.16.0:$PATH"
-          (
-            cd "$GITHUB_WORKSPACE/../clark-desktop"
-            AGENT_CODE_WORKER_TARGET_DIR="$GITHUB_WORKSPACE/$PRODUCT_DIR/target/remote-worker" \
-              AGENT_CODE_WORKER_OUTPUT_DIR="$GITHUB_WORKSPACE/$PRODUCT_DIR/binaries" \
-              scripts/stage-code-worker.sh --target x86_64-unknown-linux-musl --profile release
-          )
+          AGENT_CODE_WORKER_TARGET_DIR="$GITHUB_WORKSPACE/$PRODUCT_DIR/target/remote-worker" \
+            AGENT_CODE_WORKER_OUTPUT_DIR="$GITHUB_WORKSPACE/$PRODUCT_DIR/binaries" \
+            "$PRODUCT_DIR/scripts/stage-code-worker.sh" \
+              --target x86_64-unknown-linux-musl \
+              --profile release
           CLARK_SCIENTIST_TARGET_DIR="$GITHUB_WORKSPACE/$PRODUCT_DIR/target/scientist" \
             "$PRODUCT_DIR/scripts/stage-scientist-worker.sh" \
               --autoresearch-source "$GITHUB_WORKSPACE/../clark-autoresearch" \

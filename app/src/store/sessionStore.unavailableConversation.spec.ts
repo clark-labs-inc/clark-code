@@ -6,7 +6,7 @@ import {
   loadComposerDraft,
   saveComposerDraft,
 } from "../lib/composerDraft";
-import { liveSessions, snapshotCache } from "./sessionStore.runtime";
+import { liveSessions, newLiveEntry, snapshotCache } from "./sessionStore.runtime";
 import { useSessionStore } from "./sessionStore";
 
 const previousSession = { id: "previous-chat", provider: "local" } as Session;
@@ -81,6 +81,40 @@ afterEach(() => {
 });
 
 describe("unavailable conversation navigation", () => {
+  it("retries an orphaned selected session instead of treating its id as restored", async () => {
+    const bridge = failingBridge();
+    useSessionStore.setState({
+      bridge,
+      session: { id: "missing-chat", provider: "local" } as Session,
+      snapshot: emptySnapshot(),
+    });
+
+    await useSessionStore.getState().openConversation("missing-chat");
+
+    expect(bridge.openSession).toHaveBeenCalledOnce();
+    expect(useSessionStore.getState().unavailableConversation).toMatchObject({
+      id: "missing-chat",
+      kind: "unavailable",
+    });
+  });
+
+  it("keeps an actually attached selected session as a no-op", async () => {
+    const bridge = failingBridge();
+    const attached = { id: "missing-chat", provider: "local" } as Session;
+    liveSessions.set("missing-chat", newLiveEntry(attached, {
+      historyPrefix: null,
+      remote: null,
+      remoteHost: null,
+      projectRoot: "/tmp/missing-project",
+    }));
+    useSessionStore.setState({ bridge, session: attached });
+
+    await useSessionStore.getState().openConversation("missing-chat");
+
+    expect(bridge.openSession).not.toHaveBeenCalled();
+    expect(useSessionStore.getState().session).toBe(attached);
+  });
+
   it("renders the cached target while native reattachment remains in flight", async () => {
     let finishOpen!: (session: Session) => void;
     const openGate = new Promise<Session>((resolve) => {

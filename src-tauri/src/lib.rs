@@ -397,6 +397,8 @@ pub fn run_with_product_and_context(
             commands::mcp_credentials_sync,
             commands::desktop_conv_list,
             commands::desktop_conv_get,
+            commands::desktop_conv_transcript_pages,
+            commands::desktop_conv_append_transcript_pages,
             commands::desktop_conv_put,
             commands::desktop_conv_checkpoint_local,
             commands::desktop_conv_delete,

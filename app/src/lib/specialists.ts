@@ -293,6 +293,19 @@ export function researchRuntimeSpecialist(
   return definition?.engine === "research_runtime" ? definition : null;
 }
 
+/** Visible label for a conversation pinned to a non-default specialist
+ * workflow. Ordinary navigation returns to the default, while saved slash
+ * command conversations keep their explicit mode and must make it legible. */
+export function specialistWorkflowCommand(
+  context: SpecialistContext | null | undefined,
+): string | null {
+  if (!context?.workflow) return null;
+  const definition = SPECIALIST_REGISTRY.get(context.kind);
+  if (!definition || context.workflow === definition.defaultWorkflow) return null;
+  const command = definition.slashCommands.find(({ workflow }) => workflow === context.workflow);
+  return command?.prefixes.find((prefix) => prefix.startsWith("/")) ?? null;
+}
+
 export function productSpecialistTarget(
   context: SpecialistContext | null | undefined,
   trainingEnabled = false,

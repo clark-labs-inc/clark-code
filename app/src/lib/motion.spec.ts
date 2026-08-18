@@ -10,7 +10,6 @@ import {
   REDUCED_EXIT,
   REDUCED_TRANSITION,
   RISE_SMALL,
-  SCREEN_FADE,
   SLIDE_LEFT,
   SLIDE_RIGHT,
   accessibleMotion,
@@ -60,14 +59,6 @@ describe("motion policy", () => {
     expect(SLIDE_RIGHT.initial).toMatchObject({ opacity: 0, transform: "translateX(5px)" });
     expect(SLIDE_LEFT.animate).toMatchObject({ transform: "translateX(0)" });
     expect(SLIDE_RIGHT.animate).toMatchObject({ transform: "translateX(0)" });
-  });
-
-  it("keeps primary screen changes spatially stable", () => {
-    expect(SCREEN_FADE.initial).toEqual({ opacity: 0 });
-    expect(SCREEN_FADE.animate).toEqual({ opacity: 1 });
-    expect(SCREEN_FADE.exit).toMatchObject({ opacity: 0 });
-    expect(JSON.stringify(SCREEN_FADE)).not.toContain("translate");
-    expect(JSON.stringify(SCREEN_FADE)).not.toContain("scale");
   });
 
   it("staggeredTransition preserves per-index choreography and overrides", () => {

@@ -40,19 +40,6 @@ export const FADE = {
   transition: { duration: DUR.fast, ease: EASE.out },
 } as const;
 
-/** A restrained crossfade for primary workspace screen changes. Large reading
- * surfaces stay spatially stable so switching context does not disturb scroll
- * position or feel like the whole application is sliding around. */
-export const SCREEN_FADE = {
-  initial: { opacity: 0 },
-  animate: { opacity: 1 },
-  exit: {
-    opacity: 0,
-    transition: { duration: DUR.fast, ease: EASE.inOut },
-  },
-  transition: TRANSITION,
-} satisfies MotionProps;
-
 /** A gentle rise: fade + a few px up. The canonical "a card/row appeared"
  * motion. A direct transform string gives every supported WebView the best
  * chance to keep it on the compositor; it never changes layout height. */

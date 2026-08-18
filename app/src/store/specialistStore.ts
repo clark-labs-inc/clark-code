@@ -98,9 +98,17 @@ export const useSpecialistStore = create<SpecialistState>((set, get) => ({
   contexts: initialContexts,
   open: (kind, context = {}) => {
     if (!isSpecialistKind(kind)) return;
+    // Opening a specialist from navigation starts its default workflow. A
+    // slash command may select a narrower workflow for the next conversation,
+    // but that choice must not silently stick to later free-form prompts.
+    // Saved conversations pass their full context explicitly below and keep
+    // the workflow they were created with.
+    const requestedContext = Object.keys(context).length === 0
+      ? { workflow: SPECIALISTS[kind].defaultWorkflow }
+      : context;
     const contexts = {
       ...get().contexts,
-      [kind]: { ...get().contexts[kind], ...context, kind },
+      [kind]: { ...get().contexts[kind], ...requestedContext, kind },
     };
     set({
       active: kind,

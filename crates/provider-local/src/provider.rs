@@ -503,7 +503,10 @@ impl Provider for LocalAgentProvider {
         if let Some(resume) = hydrated_resume.as_mut() {
             crate::attachments::hydrate_resume_attachments(resume).await;
         }
-        let resumed_transcript = crate::resume::to_agent_messages(hydrated_resume.as_ref());
+        let resumed_transcript = crate::resume::to_agent_messages(
+            hydrated_resume.as_ref(),
+            crate::config::model_supports_images(&config.model),
+        );
         {
             let mut s = self.session.lock().await;
             s.system_prompt = prompt;

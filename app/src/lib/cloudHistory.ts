@@ -11,7 +11,7 @@
 // desktop app for a native-retained signed-in account.
 
 import { invoke } from "@tauri-apps/api/core";
-import { normalizeSnapshot, type Snapshot } from "../core-bridge/types";
+import { normalizeSnapshot, type Snapshot, type TranscriptPage } from "../core-bridge/types";
 import { migratePlanningSnapshot, type ConversationMeta } from "./history";
 import type { AuthSession } from "./auth";
 import { codeKeyAccountBinding } from "./account";
@@ -22,6 +22,7 @@ import {
   type CloudSummary,
 } from "./cloudHistoryTypes";
 import { prepareSnapshotForUpload } from "./snapshotUpload";
+import { preparePagedSnapshot, transcriptPageBatches } from "./transcriptPaging";
 import {
   repositoryFingerprintForRoot,
   repositoryIdentityForRoot,
@@ -71,6 +72,7 @@ export async function cloudGet(c: CloudCreds, id: string): Promise<Snapshot | nu
   if (epoch !== cloudHistoryEpoch || !sameCloudOwner(configuredCreds, c)) return null;
   if (typeof detail?.rev === "number") {
     serverRevisions.set(id, detail.rev);
+    serverTimelineOffsets.set(id, detail.snapshot?.timeline_offset ?? 0);
     conflicted.delete(id);
   }
   // Durable cloud history can outlive the snapshot schema that produced it.
@@ -100,6 +102,23 @@ export async function cloudGet(c: CloudCreds, id: string): Promise<Snapshot | nu
     }
   }
   return snapshot;
+}
+
+/** Fetch at most eight immutable pages before an absolute timeline index. */
+export async function cloudGetTranscriptPages(
+  c: CloudCreds,
+  id: string,
+  beforeIndex: number,
+  limit = 4,
+): Promise<TranscriptPage[]> {
+  const epoch = cloudHistoryEpoch;
+  const pages = await invoke<TranscriptPage[]>("desktop_conv_transcript_pages", {
+    id,
+    beforeIndex,
+    limit: Math.min(8, Math.max(1, limit)),
+  });
+  if (epoch !== cloudHistoryEpoch || !sameCloudOwner(configuredCreds, c)) return [];
+  return pages;
 }
 
 /** Upsert a conversation snapshot with optimistic concurrency. The stable
@@ -137,27 +156,6 @@ async function cloudPut(
   return summary.rev;
 }
 
-async function checkpointLocal(job: PendingPush, snapshot: Snapshot): Promise<void> {
-  await invoke("desktop_conv_checkpoint_local", {
-    checkpoint: {
-      id: job.meta.id,
-      title: job.meta.title,
-      provider: job.meta.provider,
-      project: job.meta.project ?? null,
-      repositoryFingerprint: job.meta.project
-        ? repositoryIdentityForRoot(job.meta.project)?.fingerprint ?? null
-        : null,
-      remoteHost: job.meta.remoteHost ?? null,
-      mode: job.meta.mode ?? null,
-      titleLocked: job.meta.titleLocked ?? false,
-      specialistContext: job.meta.specialist ?? null,
-      baseRev: serverRevisions.get(job.meta.id) ?? job.meta.rev ?? 0,
-      snapshot,
-      status: job.status,
-    },
-  });
-}
-
 // --- Single-flight, coalescing write pipeline -----------------------------
 //
 // Per conversation we keep at most one PUT in flight and at most one queued
@@ -176,11 +174,11 @@ interface PendingPush {
   epoch: number;
 }
 
-/** Absolute backstop: skip cloud sync for a snapshot this large so one pathological
- *  transcript can't hammer the network. Must stay ≤ the server's desktop
- *  snapshot body limit (`DESKTOP_SNAPSHOT_BODY_LIMIT_BYTES`, currently 10 MiB)
- *  so anything we do send is always accepted rather than silently 413'd. */
-export const MAX_SNAPSHOT_BYTES = 8 * 1024 * 1024;
+/** Once a live projection reaches this size, publish one checkpoint and rely on
+ * the ordered trajectory stream until the terminal checkpoint. The product
+ * transport segments snapshots independently, so this is a serialization-rate
+ * threshold rather than a correctness or upload limit. */
+export const LARGE_SNAPSHOT_BYTES = 8 * 1024 * 1024;
 
 const inflight = new Set<string>();
 const pending = new Map<string, PendingPush>();
@@ -189,12 +187,12 @@ const pending = new Map<string, PendingPush>();
 // because rev is a timestamp (always "newer"), a no-op PUT would also make
 // every mobile/web poller re-download the full snapshot it already has.
 const lastSent = new Map<string, string>();
-// Once a running transcript crosses the server-safe snapshot limit, repeatedly
-// serializing the same multi-megabyte history every two seconds only blocks the
-// UI; it cannot possibly succeed. Keep trajectory events syncing and retry the
-// full snapshot once at the terminal/idle boundary (or after compaction).
-const oversized = new Set<string>();
+// After the first large live checkpoint succeeds, repeatedly serializing the
+// growing projection every two seconds only competes with rendering. Trajectory
+// events remain current; the full segmented checkpoint runs again at idle.
+const largeSnapshots = new Set<string>();
 const serverRevisions = new Map<string, number>();
+const serverTimelineOffsets = new Map<string, number>();
 const conflicted = new Set<string>();
 const retryTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const retryAttempts = new Map<string, number>();
@@ -237,8 +235,9 @@ export function resetCloudHistory(): void {
   pending.clear();
   lastSent.clear();
   serverRevisions.clear();
+  serverTimelineOffsets.clear();
   conflicted.clear();
-  oversized.clear();
+  largeSnapshots.clear();
   deleting.clear();
   deleteGenerations.clear();
   resetArtifactCloudSync();
@@ -323,6 +322,29 @@ function fingerprint(job: PendingPush, snapshotJson: string): string {
   return `${(h >>> 0).toString(16)}:${payload.length}`;
 }
 
+function exceedsApproximateChars(value: unknown, limit: number): boolean {
+  const stack: unknown[] = [value];
+  let total = 0;
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (typeof current === "string") total += current.length;
+    else if (Array.isArray(current)) stack.push(...current);
+    else if (current && typeof current === "object") stack.push(...Object.values(current));
+    if (total > limit) return true;
+  }
+  return false;
+}
+
+function deferLiveCheckpoint(snapshot: Snapshot): boolean {
+  if (snapshot.timeline.length > 320) return true;
+  const latest = snapshot.timeline[snapshot.timeline.length - 1];
+  if (exceedsApproximateChars(latest, 1024 * 1024)) return true;
+  if (latest?.item === "tool_call") {
+    return exceedsApproximateChars(snapshot.tool_calls[latest.id], 1024 * 1024);
+  }
+  return false;
+}
+
 /** Queue a conversation snapshot for cloud sync (coalesced + single-flight). */
 export function scheduleCloudPut(
   creds: CloudCreds,
@@ -335,7 +357,7 @@ export function scheduleCloudPut(
   if (!sameCreds(configuredCreds, creds) || deleting.has(meta.id)) return;
   // A stale branch stays read-only until cloudGet reloads its exact base.
   if (conflicted.has(meta.id)) return;
-  if (status === "running" && oversized.has(meta.id)) return;
+  if (status === "running" && (largeSnapshots.has(meta.id) || deferLiveCheckpoint(snapshot))) return;
   // Monotonic rev: pushes now also happen mid-run (throttled), where the
   // timeline length is stable while message text grows — so a length-based
   // rev would make the server drop streamed updates as stale. A millisecond
@@ -390,36 +412,40 @@ async function drainPush(id: string): Promise<void> {
   let ok = false;
   try {
     // Serialize exactly, then fingerprint and size-check what we'll send.
-    const prepared = prepareSnapshotForUpload(job.snapshot);
+    const paged = preparePagedSnapshot(
+      job.snapshot,
+      serverTimelineOffsets.get(id) ?? job.snapshot.timeline_offset ?? 0,
+    );
+    const prepared = prepareSnapshotForUpload(paged.head);
     const mark = fingerprint(job, prepared.json);
-    if (prepared.bytes > MAX_SNAPSHOT_BYTES) {
-      if (oversized.has(id) && lastSent.get(id) === mark) {
-        ok = true;
-        if (pending.has(id)) queueMicrotask(() => void drainPush(id));
-        return;
-      }
-      oversized.add(id);
-      // Compact the local read model even though the full cloud snapshot is
-      // intentionally not advanced. Acknowledged trajectory events remain the
-      // cross-device authority, while the local checkpoint prevents the same
-      // event payloads from accumulating forever on this machine.
-      await checkpointLocal(job, prepared.snapshot);
-      // This exact snapshot is locally durable and its ordered events are
-      // already cloud-authoritative. A later changed or compacted snapshot is
-      // scheduled normally; retaining this one would make every flush look
-      // permanently unfinished.
-      lastSent.set(id, mark);
-      ok = true;
-      warningHandler?.(
-        "This task’s full transcript is too large for cross-device sync. Its trajectory is safe in Clark cloud and the latest view stays on this device; start a new task to restore full transcript sync.",
-      );
-      if (pending.has(id)) queueMicrotask(() => void drainPush(id));
-      return;
-    }
-    oversized.delete(id);
+    const large = prepared.bytes > LARGE_SNAPSHOT_BYTES;
     if (lastSent.get(id) !== mark) {
       const creds = configuredCreds;
       if (!creds) throw new CloudWriteCancelled();
+      if (paged.pageEndLocal > paged.pageStartLocal) {
+        const repositoryFingerprint = job.meta.project
+          ? await repositoryFingerprintForRoot(job.meta.project, creds.accountScope)
+          : null;
+        for (const pages of transcriptPageBatches(
+          job.snapshot,
+          paged.pageStartLocal,
+          paged.pageEndLocal,
+        )) {
+          if (!jobIsCurrent(id, job) || !sameCreds(configuredCreds, creds)) {
+            throw new CloudWriteCancelled();
+          }
+          await invoke("desktop_conv_append_transcript_pages", {
+            id: job.meta.id,
+            title: job.meta.title,
+            provider: job.meta.provider,
+            project: job.meta.project ?? null,
+            repositoryFingerprint,
+            remoteHost: job.meta.remoteHost ?? null,
+            mode: job.meta.mode ?? null,
+            pages,
+          });
+        }
+      }
       const storedRev = await cloudPut(
         creds,
         job.meta,
@@ -432,7 +458,10 @@ async function drainPush(id: string): Promise<void> {
       );
       if (jobIsCurrent(id, job)) {
         serverRevisions.set(id, storedRev);
+        serverTimelineOffsets.set(id, paged.sealedThrough);
         lastSent.set(id, mark);
+        if (large) largeSnapshots.add(id);
+        else largeSnapshots.delete(id);
       }
     }
     if (jobIsCurrent(id, job)) {
@@ -496,8 +525,9 @@ function forgetConversationPushState(id: string): void {
   retryAttempts.delete(id);
   lastSent.delete(id);
   serverRevisions.delete(id);
+  serverTimelineOffsets.delete(id);
   conflicted.delete(id);
-  oversized.delete(id);
+  largeSnapshots.delete(id);
 }
 
 /** Delete a conversation from the cloud. Tombstone local write scheduling first,

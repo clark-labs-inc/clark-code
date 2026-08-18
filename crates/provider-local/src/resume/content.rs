@@ -1,7 +1,10 @@
 use agent_core::ContentBlock;
 use agent_loop as ca;
 
-pub(super) fn user_content(blocks: &[ContentBlock]) -> Option<ca::UserContent> {
+pub(super) fn user_content(
+    blocks: &[ContentBlock],
+    native_image_support: bool,
+) -> Option<ca::UserContent> {
     let mut rich = Vec::new();
     for block in blocks {
         match block {
@@ -13,7 +16,7 @@ pub(super) fn user_content(blocks: &[ContentBlock]) -> Option<ca::UserContent> {
                 mime_type,
                 data,
                 uri,
-            } => rich.push(ca::UserBlock::Image(ca::ImageContent {
+            } if native_image_support => rich.push(ca::UserBlock::Image(ca::ImageContent {
                 source: uri
                     .clone()
                     .unwrap_or_else(|| format!("data:{mime_type};base64,{data}")),
@@ -30,7 +33,8 @@ pub(super) fn user_content(blocks: &[ContentBlock]) -> Option<ca::UserContent> {
                     text: format!("[Selected Clark Code skill: {name} ({id}@{revision})]"),
                 }))
             }
-            ContentBlock::Audio { .. }
+            ContentBlock::Image { .. }
+            | ContentBlock::Audio { .. }
             | ContentBlock::Thinking { .. }
             | ContentBlock::Resource { text: None, .. } => {}
         }
@@ -111,7 +115,10 @@ pub(super) fn tool_result_block(block: &ca::ToolResultBlock) -> ContentBlock {
     }
 }
 
-pub(super) fn tool_result_content(blocks: &[ContentBlock]) -> Option<ca::ToolResultContent> {
+pub(super) fn tool_result_content(
+    blocks: &[ContentBlock],
+    native_image_support: bool,
+) -> Option<ca::ToolResultContent> {
     let mut content = Vec::new();
     for block in blocks {
         match block {
@@ -125,19 +132,22 @@ pub(super) fn tool_result_content(blocks: &[ContentBlock]) -> Option<ca::ToolRes
                 mime_type,
                 data,
                 uri,
-            } => content.push(ca::ToolResultBlock::Image(ca::ImageContent {
-                source: uri
-                    .clone()
-                    .unwrap_or_else(|| format!("data:{mime_type};base64,{data}")),
-                media_type: Some(mime_type.clone()),
-                alt: None,
-            })),
+            } if native_image_support => {
+                content.push(ca::ToolResultBlock::Image(ca::ImageContent {
+                    source: uri
+                        .clone()
+                        .unwrap_or_else(|| format!("data:{mime_type};base64,{data}")),
+                    media_type: Some(mime_type.clone()),
+                    alt: None,
+                }))
+            }
             ContentBlock::ResourceLink { uri, name } => {
                 content.push(ca::ToolResultBlock::Text(ca::TextContent {
                     text: name.as_deref().unwrap_or(uri).to_string(),
                 }))
             }
-            ContentBlock::Audio { .. }
+            ContentBlock::Image { .. }
+            | ContentBlock::Audio { .. }
             | ContentBlock::Thinking { .. }
             | ContentBlock::Resource { text: None, .. }
             | ContentBlock::SkillReference { .. } => {}

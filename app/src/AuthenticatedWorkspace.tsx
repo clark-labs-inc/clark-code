@@ -1,7 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from "react";
-import { AnimatePresence, useReducedMotion } from "motion/react";
-import * as m from "motion/react-m";
 import { useSessionStore } from "./store/sessionStore";
 import { useFanOutStore } from "./store/fanOutStore";
 import { useHotkeys } from "./lib/hotkeys";
@@ -25,7 +23,6 @@ import { ConversationMutationTransition } from "./surfaces/ConversationMutationT
 import { PanelErrorBoundary } from "./components/PanelErrorBoundary";
 import { ArtifactWorkspaceEmpty } from "./surfaces/work/ArtifactWorkspaceEmpty";
 import type { Artifact } from "./core-bridge/types";
-import { SCREEN_FADE, accessibleMotion } from "./lib/motion";
 import {
   DEFAULT_ARTIFACT_PANEL_WIDTH,
   MIN_ARTIFACT_PANEL_WIDTH,
@@ -112,7 +109,6 @@ export default function AuthenticatedWorkspace({
   const [subagentsPanelWidth, setSubagentsPanelWidth] = useState(480);
   const [resizingArtifactPanel, setResizingArtifactPanel] = useState(false);
   const [splitPaneWidth, setSplitPaneWidth] = useState(0);
-  const reduceMotion = useReducedMotion();
   const splitPaneRef = useRef<HTMLDivElement>(null);
   const artifactResizeCleanupRef = useRef<(() => void) | null>(null);
   const terminalTouched = useRef(false);
@@ -310,17 +306,15 @@ export default function AuthenticatedWorkspace({
         {/* Cached target content stays visible while its native runtime
             reattaches. The full-pane screen is only for a start/open that has
             no target session metadata to render yet. */}
-        {/* Keep only one interactive workspace mounted at a time.  popLayout
-            briefly left both the start and conversation composers in the
-            accessibility tree during a session transition, so keyboard and
-            automation could target the exiting textarea. */}
-        <AnimatePresence initial={false} mode="wait">
-          <m.div
-            key={workspaceStage}
-            data-workspace-stage={workspaceStage}
-            {...accessibleMotion(SCREEN_FADE, reduceMotion)}
-            className="flex min-h-0 flex-1 flex-col"
-          >
+        {/* Keep one stable workspace shell across navigation. Full-pane exit
+            and enter fades create a blank luminance pulse that reads like a
+            camera shutter, while keyed remounts make the whole screen feel
+            unstable. The branch still owns exactly one interactive composer;
+            local rows, dialogs, and progress states retain their subtle motion. */}
+        <div
+          data-workspace-stage={workspaceStage}
+          className="flex min-h-0 flex-1 flex-col"
+        >
             {openingScreen ? (
               <OpeningScreen />
             ) : unavailableConversation ? (
@@ -431,8 +425,7 @@ export default function AuthenticatedWorkspace({
                 <Composer />
               </>
             )}
-          </m.div>
-        </AnimatePresence>
+        </div>
         {/* The terminal drawer lives at the shell level (not inside a branch)
             so it survives switching between the start screen and a session —
             and so the sidebar can open it in a freshly picked project folder

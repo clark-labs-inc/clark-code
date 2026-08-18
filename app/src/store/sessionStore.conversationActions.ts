@@ -834,7 +834,13 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
     // Already opening this one (double-click, impatient re-click) → no-op; the
     // in-flight open keeps its spinner.
     if (get().opening?.id === id) return;
-    if (session?.id === id) {
+    // A matching session id is only enough to short-circuit when the native
+    // session is still attached. Preview/session shells can survive an
+    // interrupted open with an empty snapshot; treating those as open makes
+    // every later sidebar click a permanent no-op (most visibly for Spec,
+    // which then looks like a brand-new document). Let the normal restore path
+    // repair an orphaned shell.
+    if (session?.id === id && liveSessions.has(id)) {
       if (targetMeta?.specialist) {
         useSpecialistStore.getState().open(targetMeta.specialist.kind, targetMeta.specialist);
       } else {

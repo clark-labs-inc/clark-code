@@ -47,10 +47,12 @@ import { GoalWorkSummary } from "./GoalWorkSummary";
 import { ProviderIncidentCard } from "./ProviderIncidentCard";
 import { SpecialistConversationPresentationCard } from "./specialists/SpecialistConversationShowcase";
 import { ReplySkeleton, STREAMING_REPLY_RESERVE_LINES } from "./StreamingReply";
-import type { Artifact, ToolCall } from "../core-bridge/types";
+import type { Artifact, ToolCall, TranscriptPage } from "../core-bridge/types";
 import { effectiveModelSettings, isIncludedCodingModel } from "../lib/localAgent";
 import { specialistPresentationFromPayload } from "../lib/specialistPresentation";
 import { hasTerminalProviderIncident } from "../lib/providerIncidentPresentation";
+import { EarlierHistoryButton, NewerHistoryControls } from "../components/TranscriptPager";
+import { cloudCreds, cloudGetTranscriptPages } from "../lib/cloudHistory";
 
 /** The only live-work indicator in the transcript. CSS owns both its pulse and
  * reduced-motion fallback so the visual policy cannot diverge from skeletons. */
@@ -129,8 +131,8 @@ function DismissButton({ onClick, muted = false }: { onClick: () => void; muted?
   );
 }
 
-/** How many timeline blocks render before older history collapses behind a
- *  "Show earlier" control. Generous enough that normal sessions never notice. */
+/** Maximum raw timeline rows mounted at once. History navigation replaces the
+ * page instead of accumulating DOM, so this stays constant for any transcript. */
 const TIMELINE_WINDOW = 80;
 
 /** Conversation is intentionally kept mounted while live sessions switch, so
@@ -170,10 +172,16 @@ export function Conversation({
   const pinnedScrollActive = useRef(false);
   const scrollingToBottom = useRef(false);
   const upwardWheel = useRef(false);
-  const [showAll, setShowAll] = useState(false);
+  const [historyEnd, setHistoryEnd] = useState<number | null>(null);
+  const [remoteHistoryPages, setRemoteHistoryPages] = useState<TranscriptPage[]>([]);
+  const [remoteHistoryLoading, setRemoteHistoryLoading] = useState(false);
+  const auth = useSessionStore((s) => s.auth);
   const activity = currentActivity(snapshot);
-  // Collapse history again when switching conversations.
-  useEffect(() => setShowAll(false), [sessionId]);
+  // Follow the live tail again when switching conversations.
+  useEffect(() => {
+    setHistoryEnd(null);
+    setRemoteHistoryPages([]);
+  }, [sessionId]);
   // Pin to the bottom only when the user is already there — never yank them up
   // while they're reading scrollback. A small rAF follower absorbs uneven text
   // batches and tool-card height changes into continuous viewport movement.
@@ -268,17 +276,30 @@ export function Conversation({
     }
   };
 
+  const historyPageView = useMemo(() => remoteHistoryPages.length === 0 ? null : ({
+    timeline: remoteHistoryPages.flatMap((page) => page.items),
+    toolCalls: Object.assign({}, ...remoteHistoryPages.map((page) => page.toolCalls ?? {})),
+    artifacts: remoteHistoryPages.flatMap((page) => page.artifacts ?? []),
+    providerIncidents: Object.assign(
+      {},
+      ...remoteHistoryPages.map((page) => page.providerIncidents ?? {}),
+    ),
+  }), [remoteHistoryPages]);
   const {
-    timeline,
-    tool_calls: toolCalls,
-    artifacts,
+    timeline: liveTimeline,
+    tool_calls: liveToolCalls,
+    artifacts: liveArtifacts,
     runs,
     pending_permission,
     execution_checklist,
     proposed_plan,
     goal,
-    provider_incidents: providerIncidents,
+    provider_incidents: liveProviderIncidents,
   } = snapshot;
+  const timeline = historyPageView?.timeline ?? liveTimeline;
+  const toolCalls = historyPageView?.toolCalls ?? liveToolCalls;
+  const artifacts = historyPageView?.artifacts ?? liveArtifacts;
+  const providerIncidents = historyPageView?.providerIncidents ?? liveProviderIncidents;
   // Mode flips (e.g. Shift+Tab to "Full access") auto-grant a pending request:
   // unmount this request's AnimatePresence child so its exit animation runs on
   // the full card, instead of PermissionGate tearing its own content out mid-
@@ -295,10 +316,25 @@ export function Conversation({
     : false;
   const showPermissionGate = !!pending_permission && !permissionAutoGranted;
   const blockWindow = useMemo(
-    () => conversationBlockWindow(timeline, goal, showAll, TIMELINE_WINDOW),
-    [goal, showAll, timeline],
+    () => conversationBlockWindow(timeline, goal, historyEnd, TIMELINE_WINDOW),
+    [goal, historyEnd, timeline],
   );
-  const { blocks, rowKeys, windowed } = blockWindow;
+  const { blocks, rowKeys, hasEarlier, hasLater, start, end } = blockWindow;
+  const remoteBeforeIndex = remoteHistoryPages[0]?.startIndex ?? snapshot.timeline_offset ?? 0;
+  const loadRemoteEarlier = useCallback(async () => {
+    const creds = cloudCreds(auth);
+    if (!creds || !sessionId || remoteHistoryLoading || remoteBeforeIndex <= 0) return;
+    setRemoteHistoryLoading(true);
+    try {
+      const pages = await cloudGetTranscriptPages(creds, sessionId, remoteBeforeIndex, 4);
+      if (pages.length > 0) {
+        setRemoteHistoryPages(pages);
+        setHistoryEnd(null);
+      }
+    } finally {
+      setRemoteHistoryLoading(false);
+    }
+  }, [auth, remoteBeforeIndex, remoteHistoryLoading, sessionId]);
   const enteringRows = enteringChatRowKeys(rowMotionRef.current, sessionId, rowKeys);
   useLayoutEffect(() => {
     commitChatRowKeys(rowMotionRef.current, sessionId, rowKeys);
@@ -342,9 +378,8 @@ export function Conversation({
 
   const visible = timeline;
   const transientMotion = reduce ? EXPAND_REDUCED : EXPAND;
-  // Long transcripts: render only the recent window. A 400-item DOM makes every
-  // style/layout pass (and each streamed frame) pay for history the user isn't
-  // reading — the dominant cost on slower machines. "Show earlier" reveals all.
+  // Long transcripts always render one bounded page. Streaming therefore never
+  // makes layout or React reconciliation scale with total transcript length.
   const awaitingReply = isAwaitingAssistantReply(visible);
   // Tool rows and actively streaming unphased responses own their live state;
   // completed commentary keeps this row visible until the run advances or ends.
@@ -407,7 +442,7 @@ export function Conversation({
           blocks={item.blocks}
           phase={item.phase}
           timelineIndex={block.timelineIndex}
-          animateEntry={enteringRows.has(block.key)}
+          animateEntry={historyEnd === null && enteringRows.has(block.key)}
           streaming={streaming}
         />
       );
@@ -486,16 +521,30 @@ export function Conversation({
           </p>
         )}
 
-        {windowed && (
-          <button
-            onClick={() => setShowAll(true)}
-            className="mx-auto rounded-full border border-border-subtle bg-bg-elevated px-3.5 py-1.5 text-xs font-medium text-ink-muted transition hover:bg-bg-hover hover:text-ink-secondary"
-          >
-            Show earlier history
-          </button>
+        {(hasEarlier || remoteBeforeIndex > 0) && (
+          <EarlierHistoryButton
+            onClick={() => {
+              if (hasEarlier) setHistoryEnd(start);
+              else void loadRemoteEarlier();
+            }}
+          />
         )}
 
         {blocks.map(renderBlock)}
+
+        {(hasLater || remoteHistoryPages.length > 0) && (
+          <NewerHistoryControls
+            onNewer={() => remoteHistoryPages.length > 0
+              ? setRemoteHistoryPages([])
+              : setHistoryEnd(
+                end + TIMELINE_WINDOW >= timeline.length ? null : end + TIMELINE_WINDOW,
+              )}
+            onLatest={() => {
+              setRemoteHistoryPages([]);
+              setHistoryEnd(null);
+            }}
+          />
+        )}
 
         {toolReplyReserve && (
           <div data-qa="reply-tool-reserve">

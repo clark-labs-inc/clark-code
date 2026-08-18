@@ -34,6 +34,15 @@ const cssSource: string = readFileSync(
 );
 
 describe("GUI motion policy", () => {
+  it("keeps the primary workspace shell stable across navigation", () => {
+    const workspace = sourceModules["../AuthenticatedWorkspace.tsx"];
+
+    expect(workspace).toContain("data-workspace-stage={workspaceStage}");
+    expect(workspace).not.toContain("key={workspaceStage}");
+    expect(workspace).not.toContain("SCREEN_FADE");
+    expect(workspace).not.toContain("<AnimatePresence initial={false} mode=\"wait\">");
+  });
+
   it("uses lightweight m components behind the strict LazyMotion boundary", () => {
     const violations = sources.filter(({ source }) =>
       /import\s*\{[^}]*\bmotion\b[^}]*\}\s*from\s*["']motion\/react["']/.test(source)

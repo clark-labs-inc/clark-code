@@ -233,6 +233,88 @@ pub async fn desktop_conv_get(
     }
 }
 
+/// Fetch a bounded immutable transcript window. The WebView receives only the
+/// requested pages; native and service layers never reconstruct full history.
+#[tauri::command]
+pub async fn desktop_conv_transcript_pages(
+    app: AppHandle,
+    id: String,
+    before_index: usize,
+    limit: usize,
+    state: State<'_, AppState>,
+) -> Result<Value, String> {
+    let _access = current_account_access(state.inner()).await?;
+    match product_cloud_request(
+        "conversation.transcript_pages",
+        serde_json::json!({
+            "id": id,
+            "beforeIndex": before_index,
+            "limit": limit.clamp(1, 8),
+        }),
+        &app,
+        state.inner(),
+    )
+    .await?
+    {
+        ProductCloudOutcome::Ok(pages) => Ok(pages),
+        ProductCloudOutcome::Unauthorized(error) => {
+            let _ = app.emit("cloud-auth-expired", ());
+            Err(error)
+        }
+        ProductCloudOutcome::NotFound(error)
+        | ProductCloudOutcome::Conflict(error)
+        | ProductCloudOutcome::Unavailable(error)
+        | ProductCloudOutcome::Rejected(error) => Err(error),
+    }
+}
+
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn desktop_conv_append_transcript_pages(
+    app: AppHandle,
+    id: String,
+    title: String,
+    provider: String,
+    project: Option<String>,
+    repository_fingerprint: Option<String>,
+    remote_host: Option<String>,
+    mode: Option<String>,
+    pages: Vec<agent_core::TranscriptPage>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let _access = current_account_access(state.inner()).await?;
+    if pages.is_empty() || pages.len() > 4 {
+        return Err("transcript page batch must contain 1 to 4 pages".into());
+    }
+    match product_cloud_request(
+        "conversation.append_transcript_pages",
+        serde_json::json!({
+            "id": id,
+            "title": title,
+            "provider": provider,
+            "project": project,
+            "repositoryFingerprint": repository_fingerprint,
+            "remoteHost": remote_host,
+            "mode": mode,
+            "pages": pages,
+        }),
+        &app,
+        state.inner(),
+    )
+    .await?
+    {
+        ProductCloudOutcome::Ok(_) => Ok(()),
+        ProductCloudOutcome::Unauthorized(error) => {
+            let _ = app.emit("cloud-auth-expired", ());
+            Err(error)
+        }
+        ProductCloudOutcome::NotFound(error)
+        | ProductCloudOutcome::Conflict(error)
+        | ProductCloudOutcome::Unavailable(error)
+        | ProductCloudOutcome::Rejected(error) => Err(error),
+    }
+}
+
 /// Insert or replace a desktop conversation snapshot.
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]

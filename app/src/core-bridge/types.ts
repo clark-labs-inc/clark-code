@@ -431,6 +431,8 @@ export interface Snapshot {
    * row animated through the upload; cleared when `RunStarted` lands. */
   starting?: boolean;
   runs: Record<string, RunView>;
+  /** Absolute index of timeline[0] when older immutable pages are archived. */
+  timeline_offset?: number;
   timeline: TimelineItem[];
   model_context_checkpoint?: ModelContextCheckpoint;
   tool_calls: Record<string, ToolCall>;
@@ -442,6 +444,16 @@ export interface Snapshot {
   focus?: WorkspaceFocus;
   fan_out?: FanOut;
   provider_incidents: Record<string, ProviderIncident>;
+}
+
+/** Immutable cloud transcript page. Pages are loaded into a bounded history
+ * viewport and never merged into the live projection. */
+export interface TranscriptPage {
+  startIndex: number;
+  items: TimelineItem[];
+  toolCalls?: Record<string, ToolCall>;
+  artifacts?: Artifact[];
+  providerIncidents?: Record<string, ProviderIncident>;
 }
 
 export function emptySnapshot(): Snapshot {
