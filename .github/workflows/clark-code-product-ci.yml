@@ -204,9 +204,22 @@ jobs:
           cache: pnpm
           cache-dependency-path: .release-cache/foundation-pnpm-lock.yaml
       - name: Install native build dependencies
+        shell: bash
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
+          set -euo pipefail
+          if [[ -f /etc/apt/apt-mirrors.txt ]]; then
+            sudo sed -i \
+              's#http://azure.archive.ubuntu.com/ubuntu#https://archive.ubuntu.com/ubuntu#g' \
+              /etc/apt/apt-mirrors.txt
+          fi
+          apt_network=(
+            -o Acquire::Retries=3
+            -o Acquire::http::Timeout=20
+            -o Acquire::https::Timeout=20
+          )
+          sudo timeout 300 apt-get "${apt_network[@]}" update
+          sudo env DEBIAN_FRONTEND=noninteractive timeout 300 \
+            apt-get "${apt_network[@]}" install -y --no-install-recommends \
             libwebkit2gtk-4.1-dev \
             libayatana-appindicator3-dev \
             librsvg2-dev \
