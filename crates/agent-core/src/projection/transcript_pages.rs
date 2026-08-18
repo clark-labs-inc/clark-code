@@ -99,29 +99,29 @@ impl Snapshot {
         for page in &mut pages {
             for item in &page.items {
                 match item {
-                    TimelineItem::ToolCall { id, .. } => {
-                        if !timeline_references_tool(&self.timeline, id) {
-                            if let Some(call) = self.tool_calls.shift_remove(id) {
-                                page.tool_calls.insert(id.clone(), call);
-                            }
+                    TimelineItem::ToolCall { id, .. }
+                        if !timeline_references_tool(&self.timeline, id) =>
+                    {
+                        if let Some(call) = self.tool_calls.shift_remove(id) {
+                            page.tool_calls.insert(id.clone(), call);
                         }
                     }
-                    TimelineItem::Artifact { id } => {
-                        if !timeline_references_artifact(&self.timeline, id) {
-                            if let Some(position) = self
-                                .artifacts
-                                .iter()
-                                .position(|artifact| artifact.id == *id)
-                            {
-                                page.artifacts.push(self.artifacts.remove(position));
-                            }
+                    TimelineItem::Artifact { id }
+                        if !timeline_references_artifact(&self.timeline, id) =>
+                    {
+                        if let Some(position) = self
+                            .artifacts
+                            .iter()
+                            .position(|artifact| artifact.id == *id)
+                        {
+                            page.artifacts.push(self.artifacts.remove(position));
                         }
                     }
-                    TimelineItem::ProviderIncident { id, .. } => {
-                        if !timeline_references_incident(&self.timeline, id) {
-                            if let Some(incident) = self.provider_incidents.shift_remove(id) {
-                                page.provider_incidents.insert(id.clone(), incident);
-                            }
+                    TimelineItem::ProviderIncident { id, .. }
+                        if !timeline_references_incident(&self.timeline, id) =>
+                    {
+                        if let Some(incident) = self.provider_incidents.shift_remove(id) {
+                            page.provider_incidents.insert(id.clone(), incident);
                         }
                     }
                     _ => {}
