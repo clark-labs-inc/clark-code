@@ -189,7 +189,7 @@ fn entity(index: usize) -> MaterializedEntity {
             .unwrap(),
         labels: BTreeSet::from([format!("service-{index:04}")]),
         environments: BTreeSet::from(["test".to_string()]),
-        critical: index % 2 == 0,
+        critical: index.is_multiple_of(2),
         classification: EnterpriseClassification::Internal,
         discovery_epoch_sequence: 1,
         evidence_digests: BTreeSet::from(["a".repeat(64)]),

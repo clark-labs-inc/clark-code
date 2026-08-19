@@ -5,13 +5,15 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use agent_core::AgentEvent;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Manager};
 use tokio::sync::Mutex;
 
 use crate::state::AppState;
 
+mod cloud_boundary;
 mod cloud_compaction;
 mod outbox;
+use cloud_boundary::{ProductTrajectoryCloudBoundary, TrajectoryCloudBoundary};
 pub(crate) use outbox::{
     checkpoint_snapshot, delete_conversation, interrupt_live_runs, merge_local_summaries,
     migrate_legacy_database, quarantine_snapshot_branch, recover_snapshot, set_archived,
@@ -20,6 +22,8 @@ pub(crate) use outbox::{
 
 const BUILD_GIT_SHA: &str = env!("CLARK_BUILD_GIT_SHA");
 const BUILD_GIT_DIRTY: &str = env!("CLARK_BUILD_GIT_DIRTY");
+const AUTH_REFRESH_WAIT: Duration = Duration::from_secs(60);
+const CLOUD_AUTH_EXPIRED_PREFIX: &str = "cloud_auth_expired:";
 
 pub(crate) fn build_git_sha() -> &'static str {
     BUILD_GIT_SHA
@@ -70,7 +74,7 @@ pub struct CloudTrajectoryClient {
     /// Atomic native account state, read per attempt so refresh reaches every
     /// request without mixing a bearer and account from different generations.
     state: AppState,
-    app: AppHandle,
+    cloud: Arc<dyn TrajectoryCloudBoundary>,
     outbox: outbox::TrajectoryOutbox,
     flush_lock: Arc<Mutex<()>>,
     flush_scheduled: Arc<AtomicBool>,
@@ -114,19 +118,38 @@ impl CloudTrajectoryClient {
         app: AppHandle,
         outbox_path: std::path::PathBuf,
     ) -> Result<Self, String> {
-        let outbox = outbox::TrajectoryOutbox::new(outbox_path, &owner_scope, &conversation_id);
-        Ok(Self {
+        let cloud = Arc::new(ProductTrajectoryCloudBoundary::new(app, state.clone()));
+        Ok(Self::with_cloud_boundary(
             conversation_id,
-            owner_scope: owner_scope.clone(),
+            config,
+            owner_scope,
+            state,
+            cloud,
+            outbox_path,
+        ))
+    }
+
+    fn with_cloud_boundary(
+        conversation_id: String,
+        config: CloudTrajectoryConfig,
+        owner_scope: String,
+        state: AppState,
+        cloud: Arc<dyn TrajectoryCloudBoundary>,
+        outbox_path: std::path::PathBuf,
+    ) -> Self {
+        let outbox = outbox::TrajectoryOutbox::new(outbox_path, &owner_scope, &conversation_id);
+        Self {
+            conversation_id,
+            owner_scope,
             config,
             state,
-            app,
+            cloud,
             outbox,
             flush_lock: Arc::new(Mutex::new(())),
             flush_scheduled: Arc::new(AtomicBool::new(false)),
             flush_retry_scheduled: Arc::new(AtomicBool::new(false)),
             flush_retry_attempt: Arc::new(AtomicUsize::new(0)),
-        })
+        }
     }
 
     pub async fn initialize(
@@ -207,12 +230,11 @@ impl CloudTrajectoryClient {
             if let Err(error) = result {
                 tracing::warn!(%error, "cloud trajectory flush deferred");
                 if error.starts_with("cloud_deleted:") {
-                    let _ = client
-                        .app
-                        .emit("cloud-conversation-deleted", &client.conversation_id);
-                } else {
-                    let _ = client.app.emit(
-                        "cloud-sync-warning",
+                    client
+                        .cloud
+                        .emit_conversation_deleted(&client.conversation_id);
+                } else if should_emit_cloud_sync_warning(&error) {
+                    client.cloud.emit_sync_warning(
                         "Clark Code saved this run locally and will sync it when the cloud is reachable.",
                     );
                 }
@@ -268,9 +290,9 @@ impl CloudTrajectoryClient {
     }
 
     async fn deliver(&self, request: &AppendRequest) -> Result<(), String> {
-        // Transient failures use only the short prefix of this schedule; a 401
-        // unlocks the longer tail so the frontend has time to refresh the JWT
-        // (asked for via `cloud-auth-expired`) before the token is re-read.
+        // Transient transport failures use only the short prefix of this
+        // schedule. A 401 instead asks the frontend to refresh, then waits for
+        // the native account generation to rotate before re-reading the token.
         let mut last_error = String::new();
         let mut auth_retry = false;
         for (attempt, delay) in [0_u64, 250, 1_000, 2_000, 3_000, 4_000]
@@ -280,6 +302,7 @@ impl CloudTrajectoryClient {
             if delay > 0 {
                 tokio::time::sleep(Duration::from_millis(delay)).await;
             }
+            let account_generation = self.state.runtime_registry.cloud_account_generation();
             let current_account = self
                 .state
                 .runtime_registry
@@ -291,24 +314,25 @@ impl CloudTrajectoryClient {
                         .to_string()
                 })?;
             drop(current_account);
-            let payload = serde_json::json!({
-                "conversationId": self.conversation_id,
-                "request": request,
-            });
-            match crate::commands::product_cloud_request(
-                "conversation.append_trajectory",
-                payload,
-                &self.app,
-                &self.state,
-            )
-            .await?
-            {
+            match self.cloud.append(&self.conversation_id, request).await? {
                 crate::commands::ProductCloudOutcome::Ok(_) => return Ok(()),
                 crate::commands::ProductCloudOutcome::Unauthorized(error) => {
-                    last_error = error;
-                    if !auth_retry {
-                        auth_retry = true;
-                        let _ = self.app.emit("cloud-auth-expired", ());
+                    last_error = format!("{CLOUD_AUTH_EXPIRED_PREFIX} {error}");
+                    if auth_retry {
+                        return Err(last_error);
+                    }
+                    auth_retry = true;
+                    self.cloud.emit_auth_expired();
+                    if !self
+                        .state
+                        .runtime_registry
+                        .wait_for_cloud_account_generation_change(
+                            account_generation,
+                            AUTH_REFRESH_WAIT,
+                        )
+                        .await
+                    {
+                        return Err(last_error);
                     }
                 }
                 crate::commands::ProductCloudOutcome::NotFound(_) => {
@@ -370,9 +394,19 @@ fn event_kind(event: &Value) -> String {
     format!("trace.{source}.{inner}")
 }
 
+fn should_emit_cloud_sync_warning(error: &str) -> bool {
+    !error.starts_with(CLOUD_AUTH_EXPIRED_PREFIX) && !error.starts_with("cloud_account_changed:")
+}
+
+#[cfg(test)]
+mod auth_refresh_e2e;
+
 #[cfg(test)]
 mod tests {
-    use super::{build_git_dirty, build_git_sha, event_kind, normalize_snapshot_value};
+    use super::{
+        build_git_dirty, build_git_sha, event_kind, normalize_snapshot_value,
+        should_emit_cloud_sync_warning,
+    };
     use serde_json::json;
 
     #[test]
@@ -395,6 +429,19 @@ mod tests {
                 || (revision.len() == 40 && revision.bytes().all(|byte| byte.is_ascii_hexdigit()))
         );
         assert_eq!(build_git_dirty(), env!("CLARK_BUILD_GIT_DIRTY") == "true");
+    }
+
+    #[test]
+    fn auth_refresh_does_not_masquerade_as_a_cloud_outage() {
+        assert!(!should_emit_cloud_sync_warning(
+            "cloud_auth_expired: request returned 401"
+        ));
+        assert!(!should_emit_cloud_sync_warning(
+            "cloud_account_changed: signed out"
+        ));
+        assert!(should_emit_cloud_sync_warning(
+            "Clark cloud transport failed: connection reset"
+        ));
     }
 
     #[test]

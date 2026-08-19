@@ -158,6 +158,10 @@ export class TauriBridge implements CoreBridge {
     });
   }
 
+  clearGoal(sessionId: string): Promise<void> {
+    return invoke("clear_goal", { sessionId });
+  }
+
   compact(sessionId: string): Promise<void> {
     return invoke("compact", { sessionId });
   }

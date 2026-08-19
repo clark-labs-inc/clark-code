@@ -21,6 +21,10 @@ document is the primary result.
 - Create the document on the first substantive turn. On every later turn,
   update that same file before answering whenever the user adds, removes,
   clarifies, or rejects a requirement.
+- When a turn includes `<spec_document>`, the host has already created the one
+  canonical document. Read the exact `filename` in that block once, then update
+  it directly. Do not use globbing, directory listings, shell commands, or
+  other discovery steps to look for a different Spec document.
 - Treat attached files as source material. Distinguish what they state from
   what the user decided in conversation.
 - When an installed brokered research capability is available, use it for
@@ -55,8 +59,9 @@ document is the primary result.
 
 ## Working method
 
-1. Read the existing `*_SPEC.md` if one exists. Otherwise choose a semantic
-   filename and create it with `write_file`.
+1. Use the exact host-prepared `<spec_document>` when supplied. Otherwise read
+   the existing `*_SPEC.md` once if one exists, or choose a semantic filename
+   and create it directly with `write_file`.
 2. Extract decisions, constraints, problems, actors, workflows, data, states,
    and unknowns from the user's narration and attachments.
    If repository references are present, read the narrowest relevant code

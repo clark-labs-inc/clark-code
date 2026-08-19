@@ -82,7 +82,7 @@ impl MacHelperBackend {
             Ok(response) => Ok(response),
             Err(CallError::Remote(message)) => Err(ComputerUseError::HelperRejected(message)),
             Err(CallError::Transport(error)) => {
-                let _ = connection.force_terminate();
+                drop(connection.force_terminate());
                 if let Ok(mut manager) = self.manager.lock() {
                     manager.invalidate(&connection);
                 }
@@ -565,7 +565,7 @@ impl Drop for Connection {
             }
         }
         if let Some(socket_path) = self.socket_path.as_ref() {
-            let _ = fs::remove_file(socket_path);
+            drop(fs::remove_file(socket_path));
         }
     }
 }
@@ -623,7 +623,7 @@ fn connect_service(path: &Path, deadline: Instant) -> Result<UnixStream, Compute
         }
         std::thread::sleep(Duration::from_millis(25));
     }
-    let _ = fs::remove_file(path);
+    drop(fs::remove_file(path));
     Err(ComputerUseError::HelperUnavailable(format!(
         "computer-use service did not open its authenticated socket within {} seconds: {}",
         SERVICE_STARTUP_TIMEOUT.as_secs(),

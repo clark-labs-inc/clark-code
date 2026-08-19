@@ -87,6 +87,7 @@ type AppActions = Pick<
   | "dismissJustUpdated"
   | "dismissError"
   | "flashNotice"
+  | "flashWarning"
   | "dismissNotice"
   | "dismissWarning"
   | "dismissFailedRun"
@@ -444,6 +445,7 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
   dismissJustUpdated: () => set({ justUpdatedTo: null }),
   dismissError: () => set({ error: null }),
   flashNotice: (message) => set({ notice: message }),
+  flashWarning: (message) => set({ warning: message }),
   dismissNotice: () => set({ notice: null }),
   dismissWarning: () => set({ warning: null }),
   dismissFailedRun: (runId) =>

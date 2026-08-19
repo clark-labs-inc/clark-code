@@ -134,7 +134,8 @@ impl DeterministicFixture {
         )?;
         observation.provider_resource_type = Some(format!("benchmark.{native_prefix}"));
         observation.environments = BTreeSet::from(["production".into()]);
-        observation.critical = kind == EnterpriseEntityKind::Service && service_index % 100 == 0;
+        observation.critical =
+            kind == EnterpriseEntityKind::Service && service_index.is_multiple_of(100);
         Ok(observation)
     }
 

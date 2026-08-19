@@ -47,6 +47,16 @@ impl LocalAgentProvider {
         Ok(goal.state(None))
     }
 
+    /// Remove the session's standing goal entirely. User-initiated via the
+    /// host; the engine sees `None` on its next continuation decision and
+    /// stops, and the projection retires the receipt. Allowed while a run is
+    /// active — the in-flight turn finishes, then the loop stops.
+    pub(super) async fn clear_session_goal(&self, session: &SessionId) -> Result<()> {
+        self.ensure_goal_session(session)?;
+        self.session.lock().await.goal = None;
+        Ok(())
+    }
+
     fn ensure_goal_session(&self, session: &SessionId) -> Result<()> {
         if self.session_id.as_ref() == Some(session) {
             Ok(())

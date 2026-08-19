@@ -6,6 +6,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 
@@ -293,6 +294,7 @@ impl WorkerRuntime {
 #[derive(Default)]
 pub(crate) struct RuntimeRegistry {
     cloud_account: Arc<RwLock<Option<CloudAccountState>>>,
+    cloud_account_generation: AtomicU64,
     command_claims: Mutex<HashMap<String, claims::CommandClaim>>,
     sessions: Mutex<HashMap<SessionPartitionKey, Arc<Mutex<HostSession>>>>,
     workers: Mutex<HashMap<WorkerHandle, Arc<WorkerRuntime>>>,
@@ -309,6 +311,31 @@ impl RuntimeRegistry {
 
     pub(crate) async fn cloud_account(&self) -> Option<CloudAccountState> {
         self.cloud_account.read().await.clone()
+    }
+
+    pub(crate) fn cloud_account_generation(&self) -> u64 {
+        self.cloud_account_generation.load(Ordering::SeqCst)
+    }
+
+    /// Wait for a credential/account transaction to publish a new native
+    /// generation. This is intentionally bounded: a failed renderer-side token
+    /// refresh must never hold the durable trajectory flush forever.
+    pub(crate) async fn wait_for_cloud_account_generation_change(
+        &self,
+        observed: u64,
+        maximum: Duration,
+    ) -> bool {
+        let deadline = Instant::now() + maximum;
+        loop {
+            if self.cloud_account_generation() != observed {
+                return true;
+            }
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return false;
+            }
+            tokio::time::sleep(remaining.min(Duration::from_millis(100))).await;
+        }
     }
 
     pub(crate) async fn current_skill_catalogs(&self) -> Arc<provider_local::SkillCatalogService> {
@@ -331,7 +358,9 @@ impl RuntimeRegistry {
     pub(crate) async fn cloud_account_generation_write(
         &self,
     ) -> OwnedRwLockWriteGuard<Option<CloudAccountState>> {
-        self.cloud_account.clone().write_owned().await
+        let generation = self.cloud_account.clone().write_owned().await;
+        self.cloud_account_generation.fetch_add(1, Ordering::SeqCst);
+        generation
     }
 
     pub(crate) async fn set_cloud_account(&self, account: Option<CloudAccountState>) {

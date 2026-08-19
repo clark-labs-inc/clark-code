@@ -339,7 +339,7 @@ impl ApprovalStore {
             fs::rename(&temporary, self.root.join("approvals.json")).map_err(store_error)?;
             sync_store_directory(self.root.as_ref())
         })() {
-            let _ = fs::remove_file(&temporary);
+            drop(fs::remove_file(&temporary));
             return Err(error);
         }
         Ok(())

@@ -86,6 +86,15 @@ impl ProductRequestContext<'_> {
         crate::commands::write_workspace_markdown(conversation_id, filename, markdown).await
     }
 
+    pub async fn ensure_workspace_markdown(
+        &self,
+        conversation_id: &str,
+        filename: &str,
+        markdown: &[u8],
+    ) -> Result<bool, String> {
+        crate::commands::ensure_workspace_markdown(conversation_id, filename, markdown).await
+    }
+
     pub async fn remove_workspace_markdown(
         &self,
         source_uri: &str,

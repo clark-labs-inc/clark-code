@@ -380,7 +380,7 @@ fn query_target(
         provider_namespace: Some("benchmark".into()),
         authority_scope: Some("tenant-scale".into()),
         label_contains: Some(fixture.target_label()),
-        critical: Some(fixture.target_service_index() % 100 == 0),
+        critical: Some(fixture.target_service_index().is_multiple_of(100)),
         after_entity_id: None,
         limit: 10,
     })?;

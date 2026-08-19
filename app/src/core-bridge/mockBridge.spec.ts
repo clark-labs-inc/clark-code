@@ -393,4 +393,22 @@ describe("MockBridge", () => {
       blocks: [expect.objectContaining({ text: expect.stringContaining("The steer took effect") })],
     }));
   });
+
+  it("clears an active goal from the simulated snapshot", async () => {
+    const bridge = new MockBridge();
+    await bridge.openSession("local", {}, { kind: "new", options: {} });
+    await bridge.prompt("mock-session", [{ type: "text", text: "goal simulation active" }]);
+    await waitFor(
+      (state) => state.goal?.status === "active" &&
+        state.timeline.filter((item) => item.item === "tool_call").length === 24,
+      bridge,
+    );
+
+    await bridge.clearGoal("mock-session");
+
+    const cleared = await waitFor((state) => state.goal === undefined, bridge);
+    expect(cleared.goal).toBeUndefined();
+    // Transcript is kept — only the goal receipt retires.
+    expect(cleared.timeline.filter((item) => item.item === "tool_call")).toHaveLength(24);
+  });
 });

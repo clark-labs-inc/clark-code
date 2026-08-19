@@ -463,7 +463,8 @@ fn remap_event(event: &mut AgentEvent, run: &RunId, session: &SessionId) {
         } => *value = run.clone(),
         AgentEvent::Surface { .. }
         | AgentEvent::Trace { run: None, .. }
-        | AgentEvent::Error { run: None, .. } => {}
+        | AgentEvent::Error { run: None, .. }
+        | AgentEvent::GoalCleared {} => {}
     }
 }
 

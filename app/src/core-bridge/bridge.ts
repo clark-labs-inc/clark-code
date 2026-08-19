@@ -380,6 +380,9 @@ export interface CoreBridge {
   /** Resume an active standing goal from its latest durable recovery point
    * without manufacturing a visible user message. Native bridge only. */
   resumeSavedProgress?(sessionId: string): Promise<PromptReceipt>;
+  /** User-initiated removal of the session's standing goal. The transcript
+   *  stays; only the goal receipt is retired. Native bridge only. */
+  clearGoal?(sessionId: string): Promise<void>;
   /** Replace the provider's model-visible history with a compact summary.
    *  This is a standalone control operation, not a user prompt. */
   compact?(sessionId: string): Promise<void>;

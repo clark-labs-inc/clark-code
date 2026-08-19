@@ -1,9 +1,9 @@
-import { useMemo, useRef } from "react";
+import { useMemo, useRef, useState } from "react";
 import { ArrowUp, Loader2, X } from "lucide-react";
 
 import { useSessionStore } from "../../store/sessionStore";
-import { withActiveSpecialistSkill } from "../../lib/specialists";
-import { scopedSpecPrompt } from "../../lib/specDocuments";
+import type { SpecialistSkillReference } from "../../lib/specialists";
+import { preparedSpecDocumentPrompt, scopedSpecPrompt } from "../../lib/specDocuments";
 import { productModule } from "../../product/productModule";
 import { composerDraftOwner } from "../../lib/composerDraft";
 import { recordSpecPrompt } from "../../lib/specPromptHistory";
@@ -14,6 +14,55 @@ export interface SpecSelection {
   text: string;
   label: string;
   key: string;
+}
+
+interface SpecSkillCatalog {
+  skills: readonly {
+    id: string;
+    revision: string;
+    invocationName: string;
+    enabled: boolean;
+  }[];
+}
+
+function specSelectionSkillReferences(
+  catalog: SpecSkillCatalog,
+): SpecialistSkillReference[] {
+  const skill = catalog.skills.find(
+    (candidate) => candidate.enabled && candidate.invocationName === "spec:spec",
+  );
+  return skill ? [{
+    type: "skill_reference",
+    id: skill.id,
+    revision: skill.revision,
+    name: skill.invocationName,
+  }] : [];
+}
+
+/** Section discussions can open before the composer's background skill read
+ * settles. Retry through the authoritative reload boundary instead of making
+ * the send button appear inert against one stale or failed catalog snapshot. */
+export async function resolveSpecSelectionSkillReferences(
+  list: (() => Promise<SpecSkillCatalog>) | undefined,
+  reload: (() => Promise<SpecSkillCatalog>) | undefined,
+): Promise<SpecialistSkillReference[]> {
+  let listFailure: unknown;
+  if (list) {
+    try {
+      const catalog = await list();
+      const references = specSelectionSkillReferences(catalog);
+      if (references.length > 0) return references;
+    } catch (error) {
+      listFailure = error;
+    }
+  }
+
+  if (reload) {
+    const catalog = await reload();
+    return specSelectionSkillReferences(catalog);
+  }
+  if (listFailure) throw listFailure;
+  return [];
 }
 
 function selectionBlock(target: Node | null): Element | null {
@@ -86,7 +135,9 @@ export function SpecSelectionThread({
   const busy = useSessionStore((state) => state.snapshot.starting === true || Object.values(state.snapshot.runs)
     .some((run) => run.status === "running" || run.status === "queued"));
   const flashNotice = useSessionStore((state) => state.flashNotice);
+  const flashWarning = useSessionStore((state) => state.flashWarning);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const [submitting, setSubmitting] = useState(false);
   const actions = useMemo(() => specInteractionActions(selection.text), [selection.text]);
 
   const applyAction = (prompt: string) => {
@@ -104,35 +155,47 @@ export function SpecSelectionThread({
       flashNotice("Start the spec with the main composer before discussing a selection.");
       return;
     }
-    if (!clean || busy) return;
+    if (!clean || busy || submitting) return;
+    setSubmitting(true);
     onDraftChange("");
-    const catalog = await bridge?.listSkills?.(
-      cwd,
-      activeRemote ? { id: activeRemote.id } : null,
-    );
-    const references = withActiveSpecialistSkill(
-      [],
-      catalog?.skills ?? [],
-      "spec",
-      "spec:spec",
-    );
-    if (references.length === 0) {
-      flashNotice("The Spec workflow is unavailable. Reload skills and try again.");
-      onDraftChange(clean);
-      return;
-    }
     try {
-      await productModule().specialistWorkspace?.prepareDocument?.("spec", session.id);
-    } catch {
-      flashNotice("Could not load the saved spec. Try again.");
-      onDraftChange(clean);
-      return;
-    }
-    const outcome = await send(scopedSpecPrompt(selection.text, clean, selection.label), references);
-    if (outcome.kind === "not_sent") {
-      onDraftChange(clean);
-    } else {
-      recordSpecPrompt(composerDraftOwner(auth?.user ?? null), session.id, clean);
+      const remote = activeRemote ? { id: activeRemote.id } : null;
+      let references: SpecialistSkillReference[];
+      try {
+        references = await resolveSpecSelectionSkillReferences(
+          bridge?.listSkills ? () => bridge.listSkills!(cwd, remote) : undefined,
+          bridge?.reloadSkills ? () => bridge.reloadSkills!(cwd, remote) : undefined,
+        );
+      } catch (error) {
+        flashWarning(`Could not load the Spec workflow: ${String(error)}`);
+        onDraftChange(clean);
+        return;
+      }
+      if (references.length === 0) {
+        flashWarning("The Spec workflow is unavailable. Reload skills and try again.");
+        onDraftChange(clean);
+        return;
+      }
+      let prepared: { filename: string } | null | undefined;
+      try {
+        prepared = await productModule().specialistWorkspace?.prepareDocument?.("spec", session.id);
+      } catch {
+        flashWarning("Could not load the saved spec. Try again.");
+        onDraftChange(clean);
+        return;
+      }
+      const selectionPrompt = scopedSpecPrompt(selection.text, clean, selection.label);
+      const outcome = await send(
+        prepared ? preparedSpecDocumentPrompt(selectionPrompt, prepared.filename) : selectionPrompt,
+        references,
+      );
+      if (outcome.kind === "not_sent") {
+        onDraftChange(clean);
+      } else {
+        recordSpecPrompt(composerDraftOwner(auth?.user ?? null), session.id, clean);
+      }
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -174,6 +237,12 @@ export function SpecSelectionThread({
         </div>
       </div>
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4" aria-live="polite">
+        {submitting && turns.length === 0 && (
+          <div className="flex items-center gap-2 text-xs text-accent">
+            <Loader2 className="size-3.5 animate-[spin_1s_linear_infinite]" />
+            Starting this discussion…
+          </div>
+        )}
         {turns.map((turn, index) => (
           <div key={`${turn.runId}:${index}`} className="space-y-3">
             <div>
@@ -189,7 +258,7 @@ export function SpecSelectionThread({
                   {turn.reply}
                 </div>
               </div>
-            ) : busy && index === turns.length - 1 ? (
+            ) : (busy || submitting) && index === turns.length - 1 ? (
               <div className="flex items-center gap-2 text-xs text-accent">
                 <Loader2 className="size-3.5 animate-[spin_1s_linear_infinite]" />
                 Updating this section…
@@ -211,6 +280,7 @@ export function SpecSelectionThread({
               void submit();
             }
           }}
+          disabled={submitting}
           rows={1}
           placeholder="Answer, revise, or ask about this…"
           aria-label="Selection discussion message"
@@ -219,11 +289,14 @@ export function SpecSelectionThread({
         <button
           type="button"
           onClick={() => void submit()}
-          disabled={!draft.trim() || busy}
+          disabled={!draft.trim() || busy || submitting}
+          aria-busy={submitting || undefined}
           aria-label="Send selection discussion"
           className="grid size-7 shrink-0 place-items-center rounded-full bg-accent text-on-accent hover:bg-accent-hover disabled:bg-transparent disabled:text-ink-muted"
         >
-          <ArrowUp className="size-3.5" />
+          {submitting
+            ? <Loader2 className="size-3.5 animate-[spin_1s_linear_infinite]" />
+            : <ArrowUp className="size-3.5" />}
         </button>
       </div>
     </aside>

@@ -367,6 +367,11 @@ export class MockBridge implements CoreBridge {
 
   async setCollaborationMode(_sessionId: string, _mode: "default" | "plan"): Promise<void> {}
 
+  async clearGoal(_sessionId: string): Promise<void> {
+    this.snapshot.goal = undefined;
+    this.emit();
+  }
+
   async addReadRoots(_sessionId: string, _roots: string[]): Promise<void> {}
 
   async removeReadRoots(_sessionId: string, _roots: string[]): Promise<void> {}

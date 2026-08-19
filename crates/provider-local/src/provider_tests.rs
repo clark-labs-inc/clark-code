@@ -644,6 +644,35 @@ async fn typed_goal_state_resumes_blocked_goals() {
 }
 
 #[tokio::test]
+async fn typed_goal_can_be_cleared_and_replaced() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut provider = LocalAgentProvider::new();
+    provider.connect(provider_test_config()).await.unwrap();
+    let session = provider
+        .new_session(SessionOptions {
+            cwd: Some(directory.path().to_string_lossy().into_owned()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    {
+        let mut state = provider.session.lock().await;
+        crate::tools::goal::start_goal(&mut state, "ship the migration".into()).unwrap();
+    }
+    assert!(provider.goal_state(&session.id).await.unwrap().is_some());
+
+    provider.clear_goal(&session.id).await.unwrap();
+    assert!(provider.goal_state(&session.id).await.unwrap().is_none());
+
+    // A cleared goal frees the session for a fresh objective immediately.
+    {
+        let mut state = provider.session.lock().await;
+        crate::tools::goal::start_goal(&mut state, "next objective".into()).unwrap();
+    }
+    assert!(provider.goal_state(&session.id).await.unwrap().is_some());
+}
+
+#[tokio::test]
 async fn prompt_admission_accepts_same_blocked_goal_and_rejects_conflicting_goal() {
     let directory = tempfile::tempdir().unwrap();
     let mut provider = LocalAgentProvider::new();

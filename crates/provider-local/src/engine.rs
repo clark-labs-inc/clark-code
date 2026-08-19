@@ -139,12 +139,24 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
             && completed_goal_id.as_deref() == Some(goal.id.as_str())
     };
     if let Some(goal) = starting_goal {
-        let _ = tx
-            .send(AgentEvent::GoalUpdated {
-                run: run.clone(),
-                goal,
-            })
-            .await;
+        // The user may clear (or replace) the goal between this decision and
+        // the emission. Re-check under the session lock so a stale receipt can
+        // never resurrect a goal the user just removed.
+        let still_current = tc
+            .session
+            .lock()
+            .await
+            .goal
+            .as_ref()
+            .is_some_and(|current| current.id == goal.id);
+        if still_current {
+            let _ = tx
+                .send(AgentEvent::GoalUpdated {
+                    run: run.clone(),
+                    goal,
+                })
+                .await;
+        }
     }
 
     let execution = match RootExecutionTrace::new(&tc.session_id, &run, tx.clone()) {
@@ -498,12 +510,21 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
                     (next, state)
                 };
                 if let Some(goal) = goal_state {
-                    let _ = tx
-                        .send(AgentEvent::GoalUpdated {
-                            run: run.clone(),
-                            goal,
-                        })
-                        .await;
+                    let still_current = tc
+                        .session
+                        .lock()
+                        .await
+                        .goal
+                        .as_ref()
+                        .is_some_and(|current| current.id == goal.id);
+                    if still_current {
+                        let _ = tx
+                            .send(AgentEvent::GoalUpdated {
+                                run: run.clone(),
+                                goal,
+                            })
+                            .await;
+                    }
                 }
                 match next {
                     Some(GoalStep::Continue { text, note }) => {
@@ -644,12 +665,21 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
                 .filter(|goal| !is_completed_before_run(goal))
                 .map(|goal| goal.state(Some(&run)));
             if let Some(goal) = goal_state {
-                let _ = tx
-                    .send(AgentEvent::GoalUpdated {
-                        run: run.clone(),
-                        goal,
-                    })
-                    .await;
+                let still_current = tc
+                    .session
+                    .lock()
+                    .await
+                    .goal
+                    .as_ref()
+                    .is_some_and(|current| current.id == goal.id);
+                if still_current {
+                    let _ = tx
+                        .send(AgentEvent::GoalUpdated {
+                            run: run.clone(),
+                            goal,
+                        })
+                        .await;
+                }
             }
             if let Some((code, message)) = mapped.ui_error.clone() {
                 let _ = tx

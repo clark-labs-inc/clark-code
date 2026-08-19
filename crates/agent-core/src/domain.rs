@@ -780,6 +780,11 @@ pub enum AgentEvent {
         run: RunId,
         goal: GoalState,
     },
+    /// The user removed the session's standing goal. Projection retires the
+    /// receipt and providers stop continuing the goal; replay stays
+    /// deterministic because a later `GoalUpdated` for the same goal id is
+    /// suppressed by the provider until a new goal is created.
+    GoalCleared {},
     /// Cumulative token/cost accounting for a run so presentation can update
     /// after each completed model call instead of waiting for the terminal
     /// outcome. Providers emit the complete total to keep replay idempotent.

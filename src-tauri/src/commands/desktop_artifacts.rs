@@ -1,5 +1,6 @@
 //! Product-neutral, handle-bound reads from conversation workspaces.
 
+use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 
 mod workspace_file;
@@ -150,6 +151,59 @@ pub(crate) async fn write_workspace_markdown(
     .map_err(|error| format!("Spec materialization task failed: {error}"))?
 }
 
+fn ensure_workspace_markdown_file(
+    workspace: &Path,
+    filename: &str,
+    markdown: &[u8],
+) -> Result<bool, String> {
+    std::fs::create_dir_all(workspace)
+        .map_err(|error| format!("could not prepare Spec workspace: {error}"))?;
+    let relative = Path::new(filename);
+    let destination = workspace.join(relative);
+    match std::fs::OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(&destination)
+    {
+        Ok(mut file) => {
+            if let Err(error) = file.write_all(markdown) {
+                drop(file);
+                let _ = std::fs::remove_file(&destination);
+                return Err(format!("could not seed Spec document: {error}"));
+            }
+            Ok(true)
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            workspace_file::open_markdown_file(workspace, relative, MAX_DESKTOP_ARTIFACT_BYTES)?;
+            Ok(false)
+        }
+        Err(error) => Err(format!("could not seed Spec document: {error}")),
+    }
+}
+
+pub(crate) async fn ensure_workspace_markdown(
+    conversation_id: &str,
+    filename: &str,
+    markdown: &[u8],
+) -> Result<bool, String> {
+    validate_workspace_session(conversation_id)?;
+    let relative = Path::new(filename);
+    if relative.components().count() != 1
+        || !provider_local::is_markdown(relative)
+        || !filename.to_ascii_lowercase().ends_with("_spec.md")
+    {
+        return Err("invalid Spec workspace filename".into());
+    }
+    let workspace = session_workspace_path(conversation_id)?;
+    let filename = filename.to_string();
+    let bytes = markdown.to_vec();
+    tokio::task::spawn_blocking(move || {
+        ensure_workspace_markdown_file(&workspace, &filename, &bytes)
+    })
+    .await
+    .map_err(|error| format!("Spec seed task failed: {error}"))?
+}
+
 pub(crate) async fn remove_workspace_markdown(
     source_uri: &str,
     conversation_id: &str,
@@ -185,6 +239,33 @@ pub async fn workspace_artifact_read(uri: String) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn initial_spec_seed_never_replaces_an_existing_draft() {
+        let root = tempfile::tempdir().expect("temporary directory");
+        assert!(ensure_workspace_markdown_file(
+            root.path(),
+            "customer-segmentation_SPEC.md",
+            b"<!-- Spec draft -->\n",
+        )
+        .unwrap());
+        std::fs::write(
+            root.path().join("customer-segmentation_SPEC.md"),
+            b"# Customer segmentation\n",
+        )
+        .unwrap();
+
+        assert!(!ensure_workspace_markdown_file(
+            root.path(),
+            "customer-segmentation_SPEC.md",
+            b"<!-- replacement -->\n",
+        )
+        .unwrap());
+        assert_eq!(
+            std::fs::read(root.path().join("customer-segmentation_SPEC.md")).unwrap(),
+            b"# Customer segmentation\n",
+        );
+    }
 
     #[test]
     fn pending_workspace_uri_is_conversation_bound_and_traversal_safe() {

@@ -69,7 +69,7 @@ fn validate_args(args: &[OsString]) -> Result<String, String> {
     const MAX_SETUP_REQUESTS: usize = 32;
     const MAX_PARAMETER_CHARS: usize = 30_000;
     if args.is_empty()
-        || args.len() % 2 != 0
+        || !args.len().is_multiple_of(2)
         || args.len() / 2 > MAX_SETUP_REQUESTS
         || args.chunks_exact(2).any(|pair| pair[0] != "--request-b64")
     {

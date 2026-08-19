@@ -119,6 +119,10 @@ impl Provider for LocalAgentProvider {
         self.resume_session_goal(session).await
     }
 
+    async fn clear_goal(&mut self, session: &SessionId) -> Result<()> {
+        self.clear_session_goal(session).await
+    }
+
     async fn add_read_roots(&mut self, session: &SessionId, roots: Vec<String>) -> Result<()> {
         if self.session_id.as_ref() != Some(session) {
             return Err(Error::SessionNotFound(session.to_string()));

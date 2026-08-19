@@ -356,6 +356,7 @@ pub fn run_with_product_and_context(
             commands::set_mode,
             commands::set_collaboration_mode,
             commands::set_output_style,
+            commands::clear_goal,
             sandbox_setup::local_sandbox_status,
             sandbox_setup::local_sandbox_setup,
             commands::side_question,

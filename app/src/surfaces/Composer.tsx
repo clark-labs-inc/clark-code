@@ -87,6 +87,7 @@ import { productModule, productName } from "../product/productModule";
 import { composerBrandingCopy } from "./composerBranding";
 import { SpecComposerCodeContext, useSpecComposerCodeContext } from "./SpecComposerCodeContext";
 import { recordSpecPrompt } from "../lib/specPromptHistory";
+import { initialSpecDocument, preparedSpecDocumentPrompt } from "../lib/specDocuments";
 import { approvalPolicyForSpecialist } from "../lib/permissions";
 import { specialistModelSettings } from "../lib/specialistModel";
 import { isQuickChatProject } from "../lib/projectSidebar";
@@ -851,15 +852,17 @@ function ScopedComposer() {
         return;
       }
     }
-    const prompt = specCodeContext.prompt(t);
+    let prompt = specCodeContext.prompt(t);
     if (specSession) {
       const liveConversationId = useSessionStore.getState().session?.id;
       if (liveConversationId) {
         try {
-          await productModule().specialistWorkspace?.prepareDocument?.(
+          const prepared = await productModule().specialistWorkspace?.prepareDocument?.(
             "spec",
             liveConversationId,
+            initialSpecDocument(t),
           );
+          if (prepared) prompt = preparedSpecDocumentPrompt(prompt, prepared.filename);
         } catch (error) {
           flashNotice(`Could not load the saved spec: ${humanizeError(String(error))}`);
           if (startedNewSession) useSessionStore.getState().setComposerPrefill(t);

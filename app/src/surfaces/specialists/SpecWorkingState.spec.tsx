@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { SpecWorkingState } from "./SpecWorkingState";
 
 describe("SpecWorkingState", () => {
-  it("shows the live activity instead of a boilerplate document", () => {
+  it("shows simple draft progress without exposing backend tool steps", () => {
     const markup = renderToStaticMarkup(
       <SpecWorkingState
         hasSubmittedPrompt
@@ -27,9 +27,11 @@ describe("SpecWorkingState", () => {
     );
 
     expect(markup).toContain("Building your spec");
-    expect(markup).toContain("Searching for supported repositories");
-    expect(markup).toContain("1 of 2 planned steps");
+    expect(markup).toContain("Writing the first draft");
+    expect(markup).toContain("Draft progress");
     expect(markup).toContain('role="progressbar"');
+    expect(markup).not.toContain("Searching supported repositories");
+    expect(markup).not.toContain("Searching for supported repositories");
     expect(markup).not.toContain("Problem and outcome");
   });
 

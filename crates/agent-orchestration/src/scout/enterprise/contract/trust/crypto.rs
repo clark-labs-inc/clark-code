@@ -98,7 +98,7 @@ fn hex_encode(bytes: &[u8]) -> String {
     bytes.iter().fold(
         String::with_capacity(bytes.len() * 2),
         |mut output, byte| {
-            let _ = write!(output, "{byte:02x}");
+            write!(output, "{byte:02x}").expect("writing to String cannot fail");
             output
         },
     )

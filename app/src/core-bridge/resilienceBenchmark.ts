@@ -8,8 +8,11 @@ import type {
 
 export type ResilienceFault =
   | "rate_limit"
+  | "request_timeout"
+  | "upstream_unavailable"
   | "duplicated_tool_ids"
   | "event_stream_disconnect"
+  | "tool_host_disconnect"
   | "provider_process_loss"
   | "cloud_sync_delay"
   | "user_cancel";
@@ -106,25 +109,41 @@ function incident(
   detail: string,
   maxAttempts: number,
 ): ProviderIncident {
+  const rateLimited = category === "rate_limit";
+  const providerStatus = category === "upstream_unavailable"
+    ? 503
+    : category === "timeout"
+      ? 504
+      : rateLimited
+        ? 429
+        : undefined;
+  const providerErrorType = category === "upstream_unavailable"
+    ? "upstream_unavailable"
+    : category === "timeout"
+      ? "request_timeout"
+      : rateLimited
+        ? "rate_limit"
+        : undefined;
   return {
     id: `${run}-${suffix}`,
     status: "retrying",
     scope,
-    failure_class: category === "rate_limit" ? "rate_limited" : "transient_transport",
+    failure_class: rateLimited ? "rate_limited" : "transient_transport",
     category,
     message,
     detail,
     model: RESILIENCE_BENCHMARK.model,
     provider_route: "http://127.0.0.1:11434/v1",
-    ...(category === "rate_limit" ? { provider_status: 429, provider_error_type: "rate_limit" } : {}),
+    ...(providerStatus === undefined ? {} : { provider_status: providerStatus }),
+    ...(providerErrorType === undefined ? {} : { provider_error_type: providerErrorType }),
     request: {
       idempotency_key: `${run}-${suffix}-request`,
       provider_request_id: `benchmark-${suffix}`,
       attempts: 1,
       max_attempts: maxAttempts,
       retries: {
-        transient: category === "rate_limit" ? 0 : 1,
-        rate_limit: category === "rate_limit" ? 1 : 0,
+        transient: rateLimited ? 0 : 1,
+        rate_limit: rateLimited ? 1 : 0,
         authentication: 0,
       },
       output_started: false,
@@ -227,6 +246,30 @@ export async function playResilienceSimulation(
       13,
     ));
   }
+  if (faults.has("request_timeout")) {
+    appendIncident(snapshot, run, incident(
+      run,
+      "request-timeout",
+      started,
+      "model_request",
+      "timeout",
+      "the agent is waiting for the model to respond.",
+      "The model request exceeded its response deadline before output began.",
+      3,
+    ));
+  }
+  if (faults.has("upstream_unavailable")) {
+    appendIncident(snapshot, run, incident(
+      run,
+      "upstream-unavailable",
+      started,
+      "model_request",
+      "upstream_unavailable",
+      "the agent is waiting for model service recovery.",
+      "The selected upstream returned HTTP 503 before output began.",
+      5,
+    ));
+  }
   if (faults.has("event_stream_disconnect")) {
     appendIncident(snapshot, run, incident(
       run,
@@ -236,6 +279,18 @@ export async function playResilienceSimulation(
       "connection_lost",
       "the agent briefly lost the model connection.",
       "The response stream ended before any model output was committed.",
+      4,
+    ));
+  }
+  if (faults.has("tool_host_disconnect")) {
+    appendIncident(snapshot, run, incident(
+      run,
+      "tool-host",
+      started,
+      "tool_execution_host",
+      "connection_lost",
+      "the agent briefly lost the workspace connection.",
+      "The tool execution host disconnected after the latest completed tool receipt.",
       4,
     ));
   }

@@ -31,6 +31,7 @@ const registration: SecurityRepositoryRegistration = {
 describe("Security scanner cloud boundary", () => {
   beforeEach(() => {
     invoke.mockReset();
+    vi.unstubAllGlobals();
   });
 
   it("registers with the product account bearer before local evidence sync", async () => {
@@ -75,6 +76,7 @@ describe("Security scanner cloud boundary", () => {
   });
 
   it("ingests sealed local scans before Security insights are queried", async () => {
+    vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
     const fingerprint = `git:${"b".repeat(64)}`;
     invoke
       .mockResolvedValueOnce({
@@ -104,5 +106,16 @@ describe("Security scanner cloud boundary", () => {
       "product_request",
       "product_request",
     ]);
+  });
+
+  it("keeps the browser preview on deterministic projection data", async () => {
+    const result = await syncSecurityInsights(
+      creds,
+      "org-1",
+      "/work/service",
+    );
+
+    expect(result).toBeNull();
+    expect(invoke).not.toHaveBeenCalled();
   });
 });

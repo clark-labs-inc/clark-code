@@ -7,6 +7,10 @@ import { productRequest } from "../product/productBridge";
 
 const SECURITY_ORGANIZATION_PREFIX = "agent-desktop:security-organization:";
 
+function inTauri(): boolean {
+  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+}
+
 export interface SecurityOrganization {
   id: string;
   name: string;
@@ -140,7 +144,11 @@ export async function syncSecurityInsights(
   organizationId: string,
   cwd: string,
 ): Promise<SecurityCloudSyncResult | null> {
-  if (!organizationId.trim() || !cwd.trim()) return null;
+  // Browser previews use the deterministic specialist projection fixtures and
+  // have no native repository or sealed-scan boundary. Do not turn that valid
+  // preview mode into a canvas error by attempting a Tauri command that cannot
+  // exist there.
+  if (!inTauri() || !organizationId.trim() || !cwd.trim()) return null;
   const repository = await inspectSecurityRepository(cwd);
   if (!repository) return null;
   const registration = await registerSecurityRepository(creds, organizationId, cwd);

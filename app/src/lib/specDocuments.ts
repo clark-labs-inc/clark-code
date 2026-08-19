@@ -95,7 +95,9 @@ export function specFileStem(title?: string | null): string {
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-zA-Z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
-    .toLowerCase();
+    .toLowerCase()
+    .slice(0, 96)
+    .replace(/-+$/g, "");
   return display || "untitled-feature";
 }
 
@@ -118,6 +120,32 @@ export function latestSpecArtifact(artifacts: readonly Artifact[]): Artifact | n
  * as if they were already part of the generated document. */
 export function initialSpecMarkdown(_title?: string | null): string {
   return "";
+}
+
+/** Seed the conversation workspace with one canonical document before the
+ * model starts. The comment is invisible in the editor while still giving the
+ * persistence boundary non-empty Markdown. */
+export function initialSpecDocument(prompt: string): { filename: string; markdown: string } {
+  return {
+    filename: specFilename(prompt, "md"),
+    markdown: "<!-- Spec draft -->\n",
+  };
+}
+
+/** Tell the Spec workflow which host-prepared file is authoritative. Keeping
+ * this after the user's own copy lets prompt history and titles retain only
+ * what the person wrote. */
+export function preparedSpecDocumentPrompt(message: string, filename: string): string {
+  return `${message.trim()}
+
+Continue the feature-specification workflow for the current SPEC.md.
+
+The host has already prepared the only canonical document for this conversation:
+<spec_document>
+${JSON.stringify({ filename }, null, 2)}
+</spec_document>
+
+Read this exact file once and update it directly. Do not search, glob, list directories, or run shell commands to discover another Spec document.`;
 }
 
 export interface ScopedSpecPromptDetails {

@@ -386,6 +386,14 @@ pub trait Provider: Send + Sync {
         ))
     }
 
+    /// Remove the session's standing goal. User-initiated on the host: the
+    /// goal stops continuing and the projected receipt is retired.
+    async fn clear_goal(&mut self, _session: &SessionId) -> Result<()> {
+        Err(crate::error::Error::Unsupported(
+            "this provider does not expose durable goal controls".into(),
+        ))
+    }
+
     /// Admit additional host-approved read-only roots to a live session.
     /// Providers that cannot safely change their filesystem boundary keep the
     /// default rejection instead of presenting a UI-only attachment.

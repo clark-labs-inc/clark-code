@@ -1,13 +1,16 @@
 {
-  "version": 1,
+  "version": 2,
   "storageKey": "agent-desktop:resilience-benchmark",
   "model": "local-model",
   "modelLabel": "Free",
   "provider": "managed-agent",
   "faults": [
     "rate_limit",
+    "request_timeout",
+    "upstream_unavailable",
     "duplicated_tool_ids",
     "event_stream_disconnect",
+    "tool_host_disconnect",
     "provider_process_loss",
     "cloud_sync_delay",
     "user_cancel"

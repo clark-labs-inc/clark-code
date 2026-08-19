@@ -187,7 +187,11 @@ pub(super) fn enterprise_batches(enterprise: &EnterpriseId) -> Vec<EnterpriseBat
                 enterprise,
                 kind,
                 AuthorityRef::new(
-                    if machine % 2 == 0 { "aws" } else { "gcp" },
+                    if machine.is_multiple_of(2) {
+                        "aws"
+                    } else {
+                        "gcp"
+                    },
                     format!("tenant-{machine}"),
                     format!("{prefix}:{index}"),
                 )
@@ -629,7 +633,11 @@ fn coverage_batch_from_current(graph: &EnterpriseGraph, epoch: u64) -> Enterpris
 
 fn coverage_key(machine: usize) -> CoverageKey {
     CoverageKey::new(
-        if machine % 2 == 0 { "aws" } else { "gcp" },
+        if machine.is_multiple_of(2) {
+            "aws"
+        } else {
+            "gcp"
+        },
         "auth-read-only",
         format!("tenant-{machine}"),
         "all-regions",

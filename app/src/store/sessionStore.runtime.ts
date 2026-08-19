@@ -647,6 +647,9 @@ export interface SessionState {
       { action: "continue_planning"; feedback?: string },
   ) => Promise<void>;
   setOutputStyle: (style: string) => void;
+  /** Remove the session's standing goal. The transcript is kept intact; the
+   *  goal stops continuing and its receipt is retired. */
+  clearGoal: () => Promise<void>;
   toggleTerminal: () => void;
   setTerminalOpen: (open: boolean) => void;
   /** Make a folder the current project (seeding the next session). With no
@@ -675,6 +678,8 @@ export interface SessionState {
   dismissError: () => void;
   /** Show a transient success/info toast that auto-dismisses. */
   flashNotice: (message: string) => void;
+  /** Show a transient warning toast that auto-dismisses. */
+  flashWarning: (message: string) => void;
   /** Clear the transient notice toast. */
   dismissNotice: () => void;
   /** Clear the transient warning toast. */

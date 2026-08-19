@@ -19,7 +19,7 @@ import { cn } from "../lib/cn";
 import { DIALOG, OVERLAY, accessibleMotion } from "../lib/motion";
 import { RemoteFolderBrowser } from "./EnvironmentPicker";
 import type { ManagedWorktreeBase } from "../core-bridge/bridge";
-import { loadManagedWorktreeBase } from "../lib/managedWorktreeSettings";
+import { loadManagedWorktreeBase, saveManagedWorktreeBase } from "../lib/managedWorktreeSettings";
 import { useModalFocus } from "../lib/modalFocus";
 import { newProjectDialogKeyboardIntent } from "../lib/newProjectDialog";
 
@@ -133,6 +133,11 @@ export function NewProjectDialog() {
     }
   };
 
+  const chooseLocalBase = (next: ManagedWorktreeBase) => {
+    setLocalBase(next);
+    saveManagedWorktreeBase(next, accountScope, localPath);
+  };
+
   const pickHost = (id: string) => {
     setSelectedHostIdLocal(id);
     setRemoteRoot(hosts.find((h) => h.id === id)?.remoteRoot ?? "");
@@ -224,26 +229,32 @@ export function NewProjectDialog() {
                       <button
                         type="button"
                         aria-pressed={localBase === "current"}
-                        onClick={() => setLocalBase("current")}
+                        onClick={() => chooseLocalBase("current")}
                         className={cn(
-                          "flex min-h-12 items-start gap-2 rounded-lg px-2.5 py-2 text-left text-xs transition hover:bg-bg-hover",
-                          localBase === "current" && "bg-bg-elevated shadow-lifted",
+                          "flex min-h-12 items-start gap-2 rounded-lg border px-2.5 py-2 text-left text-xs transition hover:bg-bg-hover",
+                          localBase === "current"
+                            ? "border-accent/60 bg-accent-subtle"
+                            : "border-transparent",
                         )}
                       >
                         <GitBranch className="mt-0.5 size-3.5 shrink-0" />
-                        <span><strong className="block font-medium">This checkout</strong><span className="mt-0.5 block text-ink-faint">Use this exact folder and revision.</span></span>
+                        <span className="min-w-0 flex-1"><strong className="block font-medium">This checkout</strong><span className="mt-0.5 block text-ink-faint">Use this exact folder and revision.</span></span>
+                        {localBase === "current" && <Check className="mt-0.5 size-3.5 shrink-0 text-accent" />}
                       </button>
                       <button
                         type="button"
                         aria-pressed={localBase === "default"}
-                        onClick={() => setLocalBase("default")}
+                        onClick={() => chooseLocalBase("default")}
                         className={cn(
-                          "flex min-h-12 items-start gap-2 rounded-lg px-2.5 py-2 text-left text-xs transition hover:bg-bg-hover",
-                          localBase === "default" && "bg-bg-elevated shadow-lifted",
+                          "flex min-h-12 items-start gap-2 rounded-lg border px-2.5 py-2 text-left text-xs transition hover:bg-bg-hover",
+                          localBase === "default"
+                            ? "border-accent/60 bg-accent-subtle"
+                            : "border-transparent",
                         )}
                       >
                         <GitFork className="mt-0.5 size-3.5 shrink-0" />
-                        <span><strong className="block font-medium">Fresh default branch</strong><span className="mt-0.5 block text-ink-faint">Create an isolated sibling worktree.</span></span>
+                        <span className="min-w-0 flex-1"><strong className="block font-medium">Fresh default branch</strong><span className="mt-0.5 block text-ink-faint">Create an isolated sibling worktree.</span></span>
+                        {localBase === "default" && <Check className="mt-0.5 size-3.5 shrink-0 text-accent" />}
                       </button>
                     </div>
                   </div>

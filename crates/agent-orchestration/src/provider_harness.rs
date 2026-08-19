@@ -178,7 +178,7 @@ impl ProviderHarness {
         {
             Ok(stream) => stream,
             Err(error) => {
-                let _ = provider.close_session(&session.id).await;
+                drop(provider.close_session(&session.id).await);
                 return Err(HarnessError::Failed(error.to_string()));
             }
         };
@@ -193,20 +193,24 @@ impl ProviderHarness {
             Some(timeout) => match tokio::time::timeout(timeout, collect).await {
                 Ok(result) => result,
                 Err(_) => {
-                    let _ = provider
-                        .cancel(&session.id, &RunId::new("orchestration-timeout"))
-                        .await;
+                    drop(
+                        provider
+                            .cancel(&session.id, &RunId::new("orchestration-timeout"))
+                            .await,
+                    );
                     Err(HarnessError::TimedOut(self.config.id.clone()))
                 }
             },
             None => collect.await,
         };
         if matches!(collected, Err(HarnessError::Cancelled)) {
-            let _ = provider
-                .cancel(&session.id, &RunId::new("orchestration-cancelled"))
-                .await;
+            drop(
+                provider
+                    .cancel(&session.id, &RunId::new("orchestration-cancelled"))
+                    .await,
+            );
         }
-        let _ = provider.close_session(&session.id).await;
+        drop(provider.close_session(&session.id).await);
         collected
     }
 }

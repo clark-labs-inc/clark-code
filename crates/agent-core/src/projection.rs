@@ -546,6 +546,10 @@ pub fn apply(snapshot: &mut Snapshot, event: &AgentEvent) {
             }
         }
 
+        AgentEvent::GoalCleared {} => {
+            snapshot.goal = None;
+        }
+
         AgentEvent::RunUsageUpdated { run, usage } => {
             let view = snapshot.runs.entry(run.clone()).or_insert_with(|| RunView {
                 id: run.clone(),

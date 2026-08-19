@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  initialSpecDocument,
   initialSpecMarkdown,
   latestSpecArtifact,
   parseScopedSpecPrompt,
+  preparedSpecDocumentPrompt,
   scopedSpecPrompt,
   specCodeContextPrompt,
   specDocumentTitle,
@@ -22,6 +24,25 @@ describe("spec document conventions", () => {
       .toBe("customer-segmentation_SPEC.md");
     expect(specFilename("Customer Segmentation Spec", "pdf"))
       .toBe("customer-segmentation_SPEC.pdf");
+  });
+
+  it("bounds prompt-derived filenames for native and cloud persistence", () => {
+    const filename = specFilename("A very long feature request ".repeat(30), "md");
+    expect(filename.length).toBeLessThanOrEqual(104);
+    expect(filename).toMatch(/_SPEC\.md$/);
+  });
+
+  it("prepares one invisible draft and points the workflow at its exact path", () => {
+    const initial = initialSpecDocument("Customer segmentation");
+    expect(initial).toEqual({
+      filename: "customer-segmentation_SPEC.md",
+      markdown: "<!-- Spec draft -->\n",
+    });
+
+    const prompt = preparedSpecDocumentPrompt("Describe the segments.", initial.filename);
+    expect(prompt.startsWith("Describe the segments.")).toBe(true);
+    expect(prompt).toContain('"filename": "customer-segmentation_SPEC.md"');
+    expect(prompt).toContain("Do not search, glob, list directories");
   });
 
   it("projects the completed document H1 into the saved Spec title", () => {

@@ -306,6 +306,49 @@ async fn account_generation_transition_blocks_readers_until_it_is_complete() {
 }
 
 #[tokio::test]
+async fn account_generation_wait_observes_a_same_account_token_rotation() {
+    let registry = std::sync::Arc::new(RuntimeRegistry::new());
+    registry
+        .set_cloud_account(Some(CloudAccountState {
+            rest_base: "https://product.example".into(),
+            account: AccountKey::new("account-a").unwrap(),
+            token: zeroize::Zeroizing::new("expired-token".into()),
+        }))
+        .await;
+    let observed = registry.cloud_account_generation();
+    let waiting = {
+        let registry = registry.clone();
+        tokio::spawn(async move {
+            registry
+                .wait_for_cloud_account_generation_change(observed, Duration::from_secs(1))
+                .await
+        })
+    };
+
+    registry
+        .set_cloud_account(Some(CloudAccountState {
+            rest_base: "https://product.example".into(),
+            account: AccountKey::new("account-a").unwrap(),
+            token: zeroize::Zeroizing::new("refreshed-token".into()),
+        }))
+        .await;
+
+    assert!(waiting.await.unwrap());
+}
+
+#[tokio::test]
+async fn account_generation_wait_is_bounded_when_refresh_never_arrives() {
+    let registry = RuntimeRegistry::new();
+    let observed = registry.cloud_account_generation();
+
+    assert!(
+        !registry
+            .wait_for_cloud_account_generation_change(observed, Duration::from_millis(10))
+            .await
+    );
+}
+
+#[tokio::test]
 async fn command_claims_are_native_account_and_host_bound() {
     let registry = RuntimeRegistry::new();
     let account_a = AccountKey::new("account-a").unwrap();

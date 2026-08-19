@@ -224,6 +224,26 @@ fn goal_update_projects_authoritative_state_and_run() {
 }
 
 #[test]
+fn goal_cleared_retires_the_projected_goal() {
+    let goal = GoalState {
+        id: "goal-1".into(),
+        objective: "ship the feature".into(),
+        status: GoalStatus::Active,
+        run: None,
+        tokens_used: 0,
+        time_used_seconds: 0,
+        continuations: 0,
+        updated_at_ms: 1,
+        blocker_reason: None,
+    };
+    let mut snap = reduce_all(&[AgentEvent::GoalUpdated { run: run(), goal }]);
+    assert!(snap.goal.is_some());
+
+    apply(&mut snap, &AgentEvent::GoalCleared {});
+    assert!(snap.goal.is_none());
+}
+
+#[test]
 fn explicit_phase_patches_latest_agent_message_idempotently() {
     let phase = AgentEvent::MessagePhase {
         run: run(),

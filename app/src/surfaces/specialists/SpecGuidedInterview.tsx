@@ -12,6 +12,7 @@ import {
 } from "../../lib/composerDraft";
 import { accessibleMotion, RISE, RISE_SMALL, SLIDE_RIGHT, staggeredTransition } from "../../lib/motion";
 import { guidedSpecPrompt, type SpecGuidanceReport } from "../../lib/specGuidance";
+import { initialSpecDocument, preparedSpecDocumentPrompt } from "../../lib/specDocuments";
 import { recordSpecPrompt } from "../../lib/specPromptHistory";
 import { withActiveSpecialistSkill } from "../../lib/specialists";
 import { productModule } from "../../product/productModule";
@@ -197,14 +198,23 @@ export function SpecGuidedInterview({
       setSubmitting(false);
       return;
     }
+    let prepared: { filename: string } | null | undefined;
     try {
-      await productModule().specialistWorkspace?.prepareDocument?.("spec", targetSession.id);
+      prepared = await productModule().specialistWorkspace?.prepareDocument?.(
+        "spec",
+        targetSession.id,
+        initialSpecDocument(plainPrompt),
+      );
     } catch {
       flashNotice("Could not load the saved spec. Try again.");
       setSubmitting(false);
       return;
     }
-    const outcome = await send(guidedSpecPrompt(report.current, answer), references);
+    const guidedPrompt = guidedSpecPrompt(report.current, answer);
+    const outcome = await send(
+      prepared ? preparedSpecDocumentPrompt(guidedPrompt, prepared.filename) : guidedPrompt,
+      references,
+    );
     if (outcome.kind === "not_sent") {
       setSubmitting(false);
       return;

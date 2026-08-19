@@ -1099,6 +1099,42 @@ pub async fn set_output_style(
         .map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+pub async fn clear_goal(
+    app: AppHandle,
+    session_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let _account_lifecycle = state.account_lifecycle.read().await;
+    let sid = SessionId::new(session_id);
+    let session_key = SessionKey::from_session(&sid)?;
+    let entry = state
+        .runtime_registry
+        .current_session_entry(&session_key)
+        .await
+        .ok_or("no such session")?;
+    let projection_gate = entry.lock().await.projection_gate.clone();
+    let _projection = projection_gate.lock().await;
+    let mut session = entry.lock().await;
+    session
+        .provider
+        .clear_goal(&sid)
+        .await
+        .map_err(|error| error.to_string())?;
+    // Journal the removal before projecting it so recovery and replay converge
+    // on the same cleared state.
+    let checkpoint = match session.trajectory.as_ref() {
+        Some(trajectory) => Some(trajectory.append(&[AgentEvent::GoalCleared {}]).await?),
+        None => None,
+    };
+    apply(&mut session.snapshot, &AgentEvent::GoalCleared {});
+    if let Some(checkpoint) = checkpoint {
+        session.snapshot.history_checkpoint = Some(checkpoint);
+    }
+    let _ = app.emit("snapshot", &session.snapshot);
+    Ok(())
+}
+
 /// Real-backend coverage for the Tauri commands that have no `State<AppState>`
 /// dependency (`list_commands`, `changes_*`) — the
 /// exact functions the webview's `invoke()` calls, exercised directly against a

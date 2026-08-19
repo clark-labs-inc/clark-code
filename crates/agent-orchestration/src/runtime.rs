@@ -293,7 +293,7 @@ impl Coordinator {
             .lock()
             .expect("active lock")
             .insert(path.clone(), cancel.clone());
-        let _ = self.control.set_status(&path, AgentStatus::Running);
+        drop(self.control.set_status(&path, AgentStatus::Running));
         events(CoordinatorEvent::Running {
             path: path.clone(),
             attempt,
@@ -368,7 +368,7 @@ impl Coordinator {
     }
 
     fn fail_attempt(&self, path: &AgentPath, error: String, events: &CoordinatorEventSink) {
-        let _ = self.control.fail(path, error.clone());
+        drop(self.control.fail(path, error.clone()));
         events(CoordinatorEvent::Failed {
             path: path.clone(),
             error,

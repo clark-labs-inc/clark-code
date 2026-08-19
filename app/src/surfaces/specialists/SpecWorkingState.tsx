@@ -53,7 +53,9 @@ export function SpecWorkingState({
     <div
       role="status"
       aria-live="polite"
-      aria-label={`${hasSubmittedPrompt ? "Building your spec" : "Getting your spec ready"}: ${activity.label}`}
+      aria-label={hasSubmittedPrompt
+        ? "Building your spec: Writing the first draft"
+        : "Getting your spec ready"}
       className="mx-auto flex min-h-[22rem] max-w-[36rem] flex-col justify-center"
     >
       <SpecRunProgress activity={activity} calls={calls} />

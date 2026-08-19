@@ -156,6 +156,7 @@ type InteractionActions = Pick<
   | "setCollaborationMode"
   | "decidePlan"
   | "setOutputStyle"
+  | "clearGoal"
   | "toggleTerminal"
   | "setTerminalOpen"
   | "openProjectTerminal"
@@ -883,6 +884,29 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
       void bridge.setCollaborationMode(session.id, mode).catch((error) => {
         if (authAccountMatches(auth, get().auth)) set({ error: String(error) });
       });
+    }
+  },
+
+  clearGoal: async () => {
+    const { auth, bridge, session, historyPrefix } = get();
+    if (!session || !bridge?.clearGoal) return;
+    const entry = session.id ? liveSessions.get(session.id) : undefined;
+    // The host journals the removal, but the restore prefix this session was
+    // reopened on still carries the goal. Clear it there too so the live/prefix
+    // merge can't resurrect the receipt the user just removed.
+    if (entry?.historyPrefix?.goal) {
+      entry.historyPrefix = { ...entry.historyPrefix, goal: undefined };
+    }
+    set({
+      snapshot: { ...get().snapshot, goal: undefined },
+      ...(historyPrefix?.goal
+        ? { historyPrefix: { ...historyPrefix, goal: undefined } }
+        : {}),
+    });
+    try {
+      await bridge.clearGoal(session.id);
+    } catch (error) {
+      if (authAccountMatches(auth, get().auth)) set({ error: String(error) });
     }
   },
 

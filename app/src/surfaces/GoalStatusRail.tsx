@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Files, Target, X } from "lucide-react";
+import { Files, Target, Trash2, X } from "lucide-react";
 import { summarizeEdits } from "../lib/diff";
 import {
   formatGoalDuration,
@@ -19,6 +19,7 @@ export function GoalStatusRail() {
   const storedGoal = useSessionStore((state) => state.snapshot.goal);
   const calls = useSessionStore((state) => state.snapshot.tool_calls);
   const timeline = useSessionStore((state) => state.snapshot.timeline);
+  const clearGoal = useSessionStore((state) => state.clearGoal);
   const goal = storedGoal && shouldShowGoalStatus(storedGoal, timeline) ? storedGoal : undefined;
   const [open, setOpen] = useState<OpenReceipt>(null);
   const [, tick] = useState(0);
@@ -54,6 +55,17 @@ export function GoalStatusRail() {
           {goal.blocker_reason}
         </p>
       )}
+      <button
+        type="button"
+        onClick={() => {
+          clearGoal();
+          setOpen(null);
+        }}
+        className="mt-3 inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs font-medium text-danger transition hover:bg-danger/8"
+      >
+        <Trash2 className="size-3.5" aria-hidden />
+        Clear goal
+      </button>
     </div>
   ) : open === "changes" && edits ? (
     <div>
