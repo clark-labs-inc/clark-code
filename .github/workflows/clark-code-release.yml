@@ -526,15 +526,9 @@ jobs:
               --target x86_64-unknown-linux-musl \
               --profile release
           CARGO_TARGET_DIR="$shared_target_dir" \
-            cargo build \
-              --locked \
-              --manifest-path "$PRODUCT_DIR/Cargo.toml" \
-              --release \
-              -p clark-cli \
-              --target x86_64-unknown-linux-gnu
-          install -m 0755 \
-            "$shared_target_dir/x86_64-unknown-linux-gnu/release/clark" \
-            "$PRODUCT_DIR/binaries/clark-execution-cell-x86_64-unknown-linux-gnu"
+            "$PRODUCT_DIR/scripts/stage-portable-linux-cli.sh" \
+              --target x86_64-unknown-linux-gnu \
+              --profile release
           node "$PRODUCT_DIR/scripts/shared-worker-cache.mjs" receipt \
             --manifest "$RUNNER_TEMP/shared-worker-identity.json" \
             --agent-code-worker "$PRODUCT_DIR/binaries/agent-code-worker-x86_64-unknown-linux-musl" \
