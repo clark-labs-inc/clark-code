@@ -285,15 +285,20 @@ impl Provider for LocalAgentProvider {
             .map(|plan| plan.context_revisions.clone())
             .unwrap_or_default();
 
-        let id = if !config.tools_enabled && config.response_format.is_some() {
-            config
-                .cache_session_id
-                .as_deref()
-                .map(SessionId::new)
-                .unwrap_or_else(|| SessionId::new(uuid::Uuid::new_v4().to_string()))
-        } else {
-            SessionId::new(uuid::Uuid::new_v4().to_string())
-        };
+        let cache_session_id = (!config.tools_enabled && config.response_format.is_some())
+            .then(|| config.cache_session_id.clone())
+            .flatten();
+        let id = options.session_id.clone().unwrap_or_else(|| {
+            if !config.tools_enabled && config.response_format.is_some() {
+                config
+                    .cache_session_id
+                    .as_deref()
+                    .map(SessionId::new)
+                    .unwrap_or_else(|| SessionId::new(uuid::Uuid::new_v4().to_string()))
+            } else {
+                SessionId::new(uuid::Uuid::new_v4().to_string())
+            }
+        });
         let sandbox_preset = match collaboration_mode {
             CollaborationMode::Plan => exec_sandbox::SandboxPreset::ReadOnly,
             CollaborationMode::Default => {
@@ -550,7 +555,10 @@ impl Provider for LocalAgentProvider {
         self.background.clear_all().await;
 
         self.sandbox = Some(sandbox);
-        self.llm = self.llm.take().map(|llm| llm.with_session_id(id.as_str()));
+        self.llm = self
+            .llm
+            .take()
+            .map(|llm| llm.with_session_id(cache_session_id.as_deref().unwrap_or(id.as_str())));
         self.session_id = Some(id.clone());
         let sandbox = self.sandbox.as_ref().expect("sandbox was just installed");
         let checkout_root = sandbox.root().to_string_lossy().into_owned();

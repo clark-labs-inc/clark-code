@@ -183,6 +183,7 @@ async fn local_agent_runs_real_git_and_edits_only_the_selected_worktree() {
         .expect("connect Clark Code test provider");
     let session = provider
         .new_session(SessionOptions {
+            session_id: None,
             cwd: Some(fixture.detached.to_string_lossy().into_owned()),
             mode: None,
             collaboration_mode: None,

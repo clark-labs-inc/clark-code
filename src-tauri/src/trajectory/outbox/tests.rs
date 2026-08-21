@@ -248,7 +248,20 @@ async fn checkpoint_discards_only_acknowledged_covered_batches() {
     let second = outbox.enqueue(&request("second")).await.unwrap();
     outbox.acknowledge(&first.batch_id).await.unwrap();
     outbox.acknowledge(&second.batch_id).await.unwrap();
-    checkpoint_snapshot(
+    commit_pending_snapshot(
+        path.clone(),
+        "owner".into(),
+        "session".into(),
+        json!({"id":"session"}),
+        Snapshot::new(),
+        0,
+        first.local_seq,
+        false,
+        "checkpoint-mutation".into(),
+    )
+    .await
+    .unwrap();
+    assert!(acknowledge_snapshot_publication(
         path,
         "owner".into(),
         "session".into(),
@@ -257,9 +270,10 @@ async fn checkpoint_discards_only_acknowledged_covered_batches() {
         99,
         first.local_seq,
         false,
+        "checkpoint-mutation".into(),
     )
     .await
-    .unwrap();
+    .unwrap());
     let conn = open(&outbox.path).unwrap();
     let remaining: Vec<i64> = conn
         .prepare("SELECT local_seq FROM trajectory_outbox ORDER BY local_seq")
@@ -277,7 +291,20 @@ async fn equal_cloud_revision_prefers_the_newer_local_read_model() {
     let path = dir.path().join("outbox.sqlite3");
     let mut local = Snapshot::new();
     local.session = Some(SessionId::new("local-checkpoint"));
-    checkpoint_snapshot(
+    commit_pending_snapshot(
+        path.clone(),
+        "owner".into(),
+        "conversation".into(),
+        json!({"id":"conversation"}),
+        local.clone(),
+        7,
+        0,
+        false,
+        "local-checkpoint".into(),
+    )
+    .await
+    .unwrap();
+    assert!(acknowledge_snapshot_publication(
         path.clone(),
         "owner".into(),
         "conversation".into(),
@@ -286,9 +313,10 @@ async fn equal_cloud_revision_prefers_the_newer_local_read_model() {
         7,
         0,
         false,
+        "local-checkpoint".into(),
     )
     .await
-    .unwrap();
+    .unwrap());
 
     let mut cloud = Snapshot::new();
     cloud.session = Some(SessionId::new("older-cloud-snapshot"));
@@ -305,6 +333,249 @@ async fn equal_cloud_revision_prefers_the_newer_local_read_model() {
     assert_eq!(
         recovered.snapshot.session.as_ref().map(SessionId::as_str),
         Some("local-checkpoint")
+    );
+}
+
+#[tokio::test]
+async fn newer_pending_snapshot_survives_a_superseded_publication_ack() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("outbox.sqlite3");
+    let mut stale = Snapshot::new();
+    stale.session = Some(SessionId::new("superseded-local"));
+    commit_pending_snapshot(
+        path.clone(),
+        "owner".into(),
+        "conversation".into(),
+        json!({"id":"conversation", "title":"Superseded"}),
+        stale.clone(),
+        7,
+        0,
+        false,
+        "mutation-superseded".into(),
+    )
+    .await
+    .unwrap();
+    let mut local = Snapshot::new();
+    local.session = Some(SessionId::new("pending-local"));
+    commit_pending_snapshot(
+        path.clone(),
+        "owner".into(),
+        "conversation".into(),
+        json!({"id":"conversation", "title":"Pending"}),
+        local,
+        7,
+        0,
+        false,
+        "mutation-stable".into(),
+    )
+    .await
+    .unwrap();
+
+    let recovered = recover_snapshot(path.clone(), "owner".into(), "conversation".into(), None)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        recovered.snapshot.session.as_ref().map(SessionId::as_str),
+        Some("pending-local")
+    );
+    assert!(recovered.needs_snapshot_publication);
+    assert_eq!(
+        recovered.pending_mutation_id.as_deref(),
+        Some("mutation-stable")
+    );
+
+    assert!(!acknowledge_snapshot_publication(
+        path.clone(),
+        "owner".into(),
+        "conversation".into(),
+        json!({"id":"conversation", "title":"Stale"}),
+        stale,
+        8,
+        0,
+        false,
+        "mutation-superseded".into(),
+    )
+    .await
+    .unwrap());
+    let after_stale_ack =
+        recover_snapshot(path.clone(), "owner".into(), "conversation".into(), None)
+            .await
+            .unwrap()
+            .unwrap();
+    assert_eq!(
+        after_stale_ack.pending_mutation_id.as_deref(),
+        Some("mutation-stable"),
+        "an older cloud acknowledgement must not clear newer local work"
+    );
+    assert_eq!(
+        after_stale_ack
+            .snapshot
+            .session
+            .as_ref()
+            .map(SessionId::as_str),
+        Some("pending-local"),
+        "an older cloud acknowledgement must not overwrite newer snapshot bytes"
+    );
+
+    assert!(acknowledge_snapshot_publication(
+        path.clone(),
+        "owner".into(),
+        "conversation".into(),
+        json!({"id":"conversation", "title":"Pending"}),
+        recovered.snapshot,
+        8,
+        0,
+        false,
+        "mutation-stable".into(),
+    )
+    .await
+    .unwrap());
+    let acknowledged = recover_snapshot(path, "owner".into(), "conversation".into(), None)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(acknowledged.pending_mutation_id, None);
+    assert!(!acknowledged.needs_snapshot_publication);
+}
+
+#[tokio::test]
+async fn pending_snapshot_is_not_discarded_when_an_uncertain_put_advanced_cloud_revision() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("outbox.sqlite3");
+    let mut local = Snapshot::new();
+    local.session = Some(SessionId::new("uncertain-local"));
+    commit_pending_snapshot(
+        path.clone(),
+        "owner".into(),
+        "conversation".into(),
+        json!({"id":"conversation"}),
+        local,
+        7,
+        0,
+        false,
+        "uncertain-mutation".into(),
+    )
+    .await
+    .unwrap();
+    let mut cloud = Snapshot::new();
+    cloud.session = Some(SessionId::new("server-revision-eight"));
+
+    let recovered = recover_snapshot(
+        path,
+        "owner".into(),
+        "conversation".into(),
+        Some((cloud, 8)),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+
+    assert_eq!(
+        recovered.snapshot.session.as_ref().map(SessionId::as_str),
+        Some("uncertain-local")
+    );
+    assert_eq!(
+        recovered.pending_mutation_id.as_deref(),
+        Some("uncertain-mutation")
+    );
+    assert!(recovered.needs_snapshot_publication);
+}
+
+#[tokio::test]
+async fn staged_artifact_bytes_and_upload_receipt_survive_database_reopen() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("outbox.sqlite3");
+    commit_pending_snapshot(
+        path.clone(),
+        "owner".into(),
+        "conversation".into(),
+        json!({"id":"conversation"}),
+        Snapshot::new(),
+        0,
+        0,
+        false,
+        "artifact-parent".into(),
+    )
+    .await
+    .unwrap();
+    let markdown = b"# Durable report\n".to_vec();
+    stage_artifact(
+        path.clone(),
+        "owner".into(),
+        "conversation".into(),
+        "doc:report.md".into(),
+        "report.md".into(),
+        markdown.clone(),
+        "hash-one".into(),
+    )
+    .await
+    .unwrap();
+
+    let reopened = staged_artifact(
+        path.clone(),
+        "owner".into(),
+        "conversation".into(),
+        "doc:report.md".into(),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(reopened.filename, "report.md");
+    assert_eq!(reopened.markdown, markdown);
+    assert_eq!(reopened.remote_uri, None);
+
+    let stale_ack = mark_staged_artifact_uploaded(
+        path.clone(),
+        "owner".into(),
+        "conversation".into(),
+        "doc:report.md".into(),
+        "older-hash".into(),
+        "/api/desktop/conversations/conversation/artifacts/obsolete".into(),
+    )
+    .await;
+    assert_eq!(
+        stale_ack.unwrap_err(),
+        "artifact stage was replaced before upload acknowledgement"
+    );
+    assert_eq!(
+        staged_artifact(
+            path.clone(),
+            "owner".into(),
+            "conversation".into(),
+            "doc:report.md".into(),
+        )
+        .await
+        .unwrap()
+        .unwrap()
+        .remote_uri,
+        None,
+        "an older upload must not acknowledge replacement bytes"
+    );
+
+    mark_staged_artifact_uploaded(
+        path.clone(),
+        "owner".into(),
+        "conversation".into(),
+        "doc:report.md".into(),
+        "hash-one".into(),
+        "/api/desktop/conversations/conversation/artifacts/artifact-1".into(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        staged_artifact(
+            path,
+            "owner".into(),
+            "conversation".into(),
+            "doc:report.md".into(),
+        )
+        .await
+        .unwrap()
+        .unwrap()
+        .remote_uri
+        .as_deref(),
+        Some("/api/desktop/conversations/conversation/artifacts/artifact-1")
     );
 }
 

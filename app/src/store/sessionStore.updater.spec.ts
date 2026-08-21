@@ -9,7 +9,7 @@ const updater = vi.hoisted(() => ({
   relaunchApp: vi.fn(async () => {}),
   consumeJustUpdated: vi.fn(async () => null),
 }));
-const flushCloudPuts = vi.hoisted(() => vi.fn(async () => true));
+const prepareCloudDurability = vi.hoisted(() => vi.fn(async () => true));
 
 vi.mock("../lib/updater", () => updater);
 vi.mock("../lib/nativeMenu", () => ({
@@ -18,7 +18,7 @@ vi.mock("../lib/nativeMenu", () => ({
 }));
 vi.mock("../lib/cloudHistory", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../lib/cloudHistory")>()),
-  flushCloudPuts,
+  prepareCloudDurability,
 }));
 
 import { useSessionStore } from "./sessionStore";
@@ -35,7 +35,7 @@ beforeEach(() => {
   updater.cancelUpdateDrain.mockResolvedValue(undefined);
   updater.relaunchApp.mockResolvedValue(undefined);
   updater.consumeJustUpdated.mockResolvedValue(null);
-  flushCloudPuts.mockResolvedValue(true);
+  prepareCloudDurability.mockResolvedValue(true);
   useSessionStore.getState().endSession({ force: true });
   useSessionStore.setState({
     update: null,
@@ -104,7 +104,7 @@ describe("update coordinator", () => {
     await vi.waitFor(() => expect(updater.relaunchApp).toHaveBeenCalledOnce());
     expect(updater.beginUpdateDrain).toHaveBeenCalledOnce();
     expect(updater.refreshStagedUpdate).toHaveBeenCalledOnce();
-    expect(flushCloudPuts).toHaveBeenCalledOnce();
+    expect(prepareCloudDurability).toHaveBeenCalledOnce();
     expect(updater.installStagedUpdate).toHaveBeenCalledOnce();
     expect(useSessionStore.getState()).toMatchObject({
       updateWaiting: false,

@@ -74,6 +74,14 @@ fn open_once(path: &Path) -> Result<Connection, Error> {
             "ALTER TABLE journal_conversation ADD COLUMN local_live INTEGER NOT NULL DEFAULT 0",
             [],
         );
+        let _ = conn.execute(
+            "ALTER TABLE journal_conversation ADD COLUMN snapshot_pending INTEGER NOT NULL DEFAULT 0",
+            [],
+        );
+        let _ = conn.execute(
+            "ALTER TABLE journal_conversation ADD COLUMN pending_mutation_id TEXT",
+            [],
+        );
         initialized.insert(path.to_path_buf());
     }
     Ok(conn)

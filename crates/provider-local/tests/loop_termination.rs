@@ -378,6 +378,7 @@ async fn required_tool_contract_violation_gets_one_isolated_repair() {
         .await
         .expect("start prompt");
     let mut visible_text = String::new();
+    let mut visible_thinking = String::new();
     let outcome = loop {
         match stream.next().await.expect("run reaches terminal event") {
             AgentEvent::MessageChunk {
@@ -387,7 +388,7 @@ async fn required_tool_contract_violation_gets_one_isolated_repair() {
             AgentEvent::MessageChunk {
                 delta: ContentBlock::Thinking { text },
                 ..
-            } => visible_text.push_str(&text),
+            } => visible_thinking.push_str(&text),
             AgentEvent::RunFinished { outcome, .. } => break outcome,
             _ => {}
         }
@@ -399,6 +400,7 @@ async fn required_tool_contract_violation_gets_one_isolated_repair() {
     assert_eq!(usage.output_tokens, 11, "{outcome:?}");
     assert_eq!(usage.context_tokens, 110, "{outcome:?}");
     assert!(!visible_text.contains(DISCARDED), "{visible_text}");
+    assert!(visible_thinking.contains(DISCARDED), "{visible_thinking}");
     assert!(visible_text.contains(DELIVERED), "{visible_text}");
     let requests = server.await.expect("model server task");
     assert_eq!(requests.len(), 2);

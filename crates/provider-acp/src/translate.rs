@@ -272,6 +272,7 @@ fn tool_call_patch(v: &Value) -> ToolCallPatch {
     ToolCallPatch {
         title: public_tool_title(v),
         kind: v.get("kind").map(|k| tool_kind(k.as_str())),
+        raw_input: v.get("rawInput").cloned(),
         status: v.get("status").map(|st| tool_status(st.as_str())),
         locations: v.get("locations").map(|l| locations(Some(l))),
         append_content: tool_content(v.get("content")),
@@ -474,7 +475,8 @@ mod tests {
     fn raw_tool_title_updates_are_ignored() {
         let update = json!({
             "type":"tool_call_update", "toolCallId":"t1",
-            "toolName":"web_fetch", "title":"web_fetch"
+            "toolName":"web_fetch", "title":"web_fetch",
+            "rawInput":{"url":"https://example.com/docs"}
         });
 
         let AgentEvent::ToolCallUpdate { patch, .. } = update_to_event(&update, &run()).unwrap()
@@ -483,6 +485,10 @@ mod tests {
         };
 
         assert_eq!(patch.title, None);
+        assert_eq!(
+            patch.raw_input,
+            Some(json!({"url": "https://example.com/docs"}))
+        );
     }
 
     #[test]

@@ -201,12 +201,14 @@ pub async fn desktop_conv_get(
                 snapshot["sync_pending"] = true.into();
             }
             detail["snapshot"] = snapshot;
-            detail["syncPending"] = recovered.pending.into();
             // A trajectory batch can be acknowledged before this recovered full
             // snapshot is checkpointed. Tell the WebView to publish the exact
-            // recovered projection rather than treating `syncPending` as proof
-            // that mobile already has it.
+            // recovered projection rather than inferring cross-device durability
+            // from the local snapshot's `sync_pending` warning marker.
             detail["snapshotRecoveryRequired"] = snapshot_recovery_required.into();
+            if let Some(mutation_id) = recovered.pending_mutation_id {
+                detail["snapshotPendingMutationId"] = mutation_id.into();
+            }
             Ok(detail)
         }
         (Some(detail), None) => Ok(detail),
@@ -223,8 +225,10 @@ pub async fn desktop_conv_get(
                 snapshot["sync_pending"] = true.into();
             }
             detail["snapshot"] = snapshot;
-            detail["syncPending"] = recovered.pending.into();
             detail["snapshotRecoveryRequired"] = recovered.needs_snapshot_publication.into();
+            if let Some(mutation_id) = recovered.pending_mutation_id {
+                detail["snapshotPendingMutationId"] = mutation_id.into();
+            }
             Ok(detail)
         }
         (None, None) => Err(format!(
@@ -333,7 +337,7 @@ pub async fn desktop_conv_put(
     mut snapshot: Value,
     status: Option<String>,
     base_rev: Option<i64>,
-    mutation_id: Option<String>,
+    mutation_id: String,
     state: State<'_, AppState>,
 ) -> Result<Value, String> {
     let access = current_account_access(state.inner()).await?;
@@ -371,6 +375,7 @@ pub async fn desktop_conv_put(
         "rev": rev,
         "archived": false,
     });
+    let pending_mutation_id = mutation_id.clone();
     let summary = match product_cloud_request(
         "conversation.put",
         serde_json::json!({
@@ -403,8 +408,8 @@ pub async fn desktop_conv_put(
         ProductCloudOutcome::Conflict(error) => {
             crate::trajectory::quarantine_snapshot_branch(
                 crate::trajectory::outbox_path(&app)?,
-                owner_scope,
-                id,
+                owner_scope.clone(),
+                id.clone(),
             )
             .await?;
             return Err(error);
@@ -431,7 +436,7 @@ pub async fn desktop_conv_put(
             "cloud_conflict: product cloud revision {stored_rev} is newer than local revision {rev}"
         ));
     }
-    crate::trajectory::checkpoint_snapshot(
+    let acknowledged = crate::trajectory::acknowledge_snapshot_publication(
         crate::trajectory::outbox_path(&app)?,
         owner_scope,
         id.clone(),
@@ -440,14 +445,23 @@ pub async fn desktop_conv_put(
         stored_rev,
         checkpoint_seq,
         local_live,
+        pending_mutation_id.clone(),
     )
     .await?;
+    if !acknowledged {
+        tracing::debug!(
+            event = "conversation_snapshot_ack_superseded",
+            conversation_id = %id,
+            mutation_id = %pending_mutation_id,
+            "ignored a cloud acknowledgement for a superseded local snapshot"
+        );
+    }
     Ok(summary)
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct LocalConversationCheckpoint {
+pub struct PendingConversationCommit {
     id: String,
     title: String,
     provider: String,
@@ -460,49 +474,51 @@ pub struct LocalConversationCheckpoint {
     base_rev: i64,
     snapshot: Value,
     status: Option<String>,
+    mutation_id: String,
 }
 
-/// Compact the account-scoped local journal independently of the cloud's full
-/// snapshot size limit. The trajectory prefix remains the cloud authority;
-/// this checkpoint only prevents already-acknowledged batches from occupying
-/// unbounded local disk when a transcript is too large for a snapshot PUT.
+/// Commit the renderer's exact pending full snapshot before attempting cloud
+/// delivery. The account-scoped FULL-synchronous journal is the process-restart
+/// boundary; product cloud remains the cross-device authority and receives the
+/// same stable mutation id during asynchronous replay.
 #[tauri::command]
-pub async fn desktop_conv_checkpoint_local(
+pub async fn desktop_conv_commit_pending(
     app: AppHandle,
-    checkpoint: LocalConversationCheckpoint,
+    commit: PendingConversationCommit,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let access = current_account_access(state.inner()).await?;
-    let checkpoint_seq = checkpoint
+    let checkpoint_seq = commit
         .snapshot
         .get("history_checkpoint")
         .and_then(Value::as_i64)
         .unwrap_or_default();
-    let snapshot = crate::trajectory::normalize_snapshot_value(checkpoint.snapshot);
+    let snapshot = crate::trajectory::normalize_snapshot_value(commit.snapshot);
     let typed_snapshot: Snapshot = serde_json::from_value(snapshot)
         .map_err(|error| format!("local checkpoint desktop snapshot: {error}"))?;
     let metadata = serde_json::json!({
-        "id": checkpoint.id,
-        "title": checkpoint.title,
-        "provider": checkpoint.provider,
-        "project": checkpoint.project,
-        "repositoryFingerprint": checkpoint.repository_fingerprint,
-        "remoteHost": checkpoint.remote_host,
-        "mode": checkpoint.mode,
-        "titleLocked": checkpoint.title_locked,
-        "specialistContext": checkpoint.specialist_context,
-        "rev": checkpoint.base_rev,
+        "id": commit.id,
+        "title": commit.title,
+        "provider": commit.provider,
+        "project": commit.project,
+        "repositoryFingerprint": commit.repository_fingerprint,
+        "remoteHost": commit.remote_host,
+        "mode": commit.mode,
+        "titleLocked": commit.title_locked,
+        "specialistContext": commit.specialist_context,
+        "rev": commit.base_rev,
         "archived": false,
     });
-    crate::trajectory::checkpoint_snapshot(
+    crate::trajectory::commit_pending_snapshot(
         crate::trajectory::outbox_path(&app)?,
         access.owner_scope,
-        checkpoint.id,
+        commit.id,
         metadata,
         typed_snapshot,
-        checkpoint.base_rev,
+        commit.base_rev,
         checkpoint_seq,
-        checkpoint.status.as_deref() == Some("running"),
+        commit.status.as_deref() == Some("running"),
+        commit.mutation_id,
     )
     .await
 }

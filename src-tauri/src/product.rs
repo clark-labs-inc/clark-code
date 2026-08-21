@@ -14,7 +14,7 @@ use std::sync::Arc;
 use tauri::AppHandle;
 use zeroize::Zeroizing;
 
-use crate::runtime_registry::{AccountKey, CloudAccountState};
+use crate::runtime_registry::{AccountKey, CloudAccountState, SessionKey};
 use crate::state::AppState;
 use crate::ProviderInfo;
 
@@ -69,12 +69,29 @@ impl ProductAccountAuthority {
 }
 
 impl ProductRequestContext<'_> {
+    async fn workspace_root(&self, conversation_id: &str) -> Option<PathBuf> {
+        let session_key = SessionKey::parse(conversation_id).ok()?;
+        let entry = self
+            .state
+            .runtime_registry
+            .current_session_entry(&session_key)
+            .await?;
+        let session = entry.lock().await;
+        session
+            .session
+            .environment
+            .as_ref()
+            .and_then(|environment| environment.docs_root.as_deref())
+            .map(PathBuf::from)
+    }
+
     pub async fn read_workspace_markdown(
         &self,
         source_uri: &str,
         conversation_id: &str,
     ) -> Result<(String, Vec<u8>), String> {
-        crate::commands::read_workspace_markdown(source_uri, conversation_id).await
+        let workspace = self.workspace_root(conversation_id).await;
+        crate::commands::read_workspace_markdown_in(source_uri, conversation_id, workspace).await
     }
 
     pub async fn write_workspace_markdown(
@@ -83,7 +100,9 @@ impl ProductRequestContext<'_> {
         filename: &str,
         markdown: &[u8],
     ) -> Result<(), String> {
-        crate::commands::write_workspace_markdown(conversation_id, filename, markdown).await
+        let workspace = self.workspace_root(conversation_id).await;
+        crate::commands::write_workspace_markdown_in(conversation_id, filename, markdown, workspace)
+            .await
     }
 
     pub async fn ensure_workspace_markdown(
@@ -92,7 +111,14 @@ impl ProductRequestContext<'_> {
         filename: &str,
         markdown: &[u8],
     ) -> Result<bool, String> {
-        crate::commands::ensure_workspace_markdown(conversation_id, filename, markdown).await
+        let workspace = self.workspace_root(conversation_id).await;
+        crate::commands::ensure_workspace_markdown_in(
+            conversation_id,
+            filename,
+            markdown,
+            workspace,
+        )
+        .await
     }
 
     pub async fn remove_workspace_markdown(
@@ -100,7 +126,8 @@ impl ProductRequestContext<'_> {
         source_uri: &str,
         conversation_id: &str,
     ) -> Result<(), String> {
-        crate::commands::remove_workspace_markdown(source_uri, conversation_id).await
+        let workspace = self.workspace_root(conversation_id).await;
+        crate::commands::remove_workspace_markdown_in(source_uri, conversation_id, workspace).await
     }
 
     pub async fn skill_catalog_service(&self) -> Arc<provider_local::SkillCatalogService> {

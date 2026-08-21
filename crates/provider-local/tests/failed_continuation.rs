@@ -135,6 +135,7 @@ async fn new_provider(
         .unwrap();
     let session = provider
         .new_session(SessionOptions {
+            session_id: None,
             cwd: Some(root.to_string_lossy().to_string()),
             mode: None,
             collaboration_mode: None,

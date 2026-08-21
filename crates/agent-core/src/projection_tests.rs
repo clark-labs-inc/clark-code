@@ -284,6 +284,34 @@ fn explicit_phase_patches_latest_agent_message_idempotently() {
 }
 
 #[test]
+fn explicit_final_phase_overrides_a_provisional_commentary_classification() {
+    let events = vec![
+        AgentEvent::MessageChunk {
+            run: run(),
+            role: Role::Agent,
+            delta: ContentBlock::text("tail and final answer"),
+        },
+        AgentEvent::MessagePhase {
+            run: run(),
+            phase: MessagePhase::Commentary,
+        },
+        AgentEvent::MessagePhase {
+            run: run(),
+            phase: MessagePhase::FinalAnswer,
+        },
+    ];
+
+    let snap = reduce_all(&events);
+    assert!(matches!(
+        &snap.timeline[0],
+        TimelineItem::Message {
+            phase: Some(MessagePhase::FinalAnswer),
+            ..
+        }
+    ));
+}
+
+#[test]
 fn tool_after_unphased_text_classifies_it_as_commentary() {
     let events = vec![
         AgentEvent::MessageChunk {
@@ -415,6 +443,8 @@ fn tool_call_then_update_patches_in_place_without_duplicate_timeline_entry() {
             run: run(),
             id: id.clone(),
             patch: ToolCallPatch {
+                title: Some("Read src/main.rs".into()),
+                raw_input: Some(serde_json::json!({"path": "src/main.rs"})),
                 status: Some(ToolStatus::Completed),
                 append_content: vec![ContentBlock::text("file contents")],
                 ..Default::default()
@@ -431,6 +461,11 @@ fn tool_call_then_update_patches_in_place_without_duplicate_timeline_entry() {
         1
     );
     let tc = &snap.tool_calls[&id];
+    assert_eq!(tc.title, "Read src/main.rs");
+    assert_eq!(
+        tc.raw_input,
+        Some(serde_json::json!({"path": "src/main.rs"}))
+    );
     assert_eq!(tc.status, ToolStatus::Completed);
     assert_eq!(tc.content, vec![ContentBlock::text("file contents")]);
 }

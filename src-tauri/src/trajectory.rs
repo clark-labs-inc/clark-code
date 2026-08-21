@@ -15,9 +15,10 @@ mod cloud_compaction;
 mod outbox;
 use cloud_boundary::{ProductTrajectoryCloudBoundary, TrajectoryCloudBoundary};
 pub(crate) use outbox::{
-    checkpoint_snapshot, delete_conversation, interrupt_live_runs, merge_local_summaries,
+    acknowledge_snapshot_publication, commit_pending_snapshot, delete_conversation,
+    interrupt_live_runs, mark_staged_artifact_uploaded, merge_local_summaries,
     migrate_legacy_database, quarantine_snapshot_branch, recover_snapshot, set_archived,
-    wait_for_acknowledged_prefix,
+    stage_artifact, staged_artifact, wait_for_acknowledged_prefix,
 };
 
 const BUILD_GIT_SHA: &str = env!("CLARK_BUILD_GIT_SHA");

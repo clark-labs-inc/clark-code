@@ -9,10 +9,8 @@ use agent_loop as ca;
 use async_channel::Sender;
 use async_trait::async_trait;
 
-/// Rough serialized size of a transcript, for detecting a real compaction
-/// shrink. Message COUNT is the wrong signal: compaction trades many messages
-/// for a summary + recent tail, which can leave the count flat while cutting
-/// the text massively.
+/// Serialized transcript size detects compaction shrink even when the message
+/// count stays flat after trading history for a summary and recent tail.
 fn transcript_chars(messages: &[ca::AgentMessage]) -> usize {
     messages
         .iter()
@@ -24,8 +22,13 @@ use crate::tools::final_answer::{FINAL_ANSWER_DETAILS_KEY, FINAL_ANSWER_TOOL};
 use crate::tools::ToolRegistry;
 
 use super::{
-    final_answer_stream::FinalAnswerStreams, locations_from_details, markdown_artifact,
-    mobile_screenshot_artifact, tool_result_to_content, tool_title,
+    final_answer_stream::FinalAnswerStreams,
+    locations_from_details, markdown_artifact, mobile_screenshot_artifact, reasoning_stream,
+    streaming_tool_call::{
+        emit_execution_start, execution_update_event, streamed_tool_event, ExecutionStart,
+        StreamingToolCalls,
+    },
+    tool_result_to_content,
 };
 
 pub(crate) struct DesktopEventSink {
@@ -39,6 +42,7 @@ pub(crate) struct DesktopEventSink {
     /// checkpoint produces another user-visible notice.
     last_compaction_checkpoint: std::sync::Mutex<Option<String>>,
     final_answer_streams: std::sync::Mutex<FinalAnswerStreams>,
+    streaming_tool_calls: std::sync::Mutex<StreamingToolCalls>,
     /// The app-managed document workspace (canonical), when this is a local
     /// session. Markdown files written here are surfaced as inline artifacts.
     docs_dir: Option<std::path::PathBuf>,
@@ -58,6 +62,7 @@ impl DesktopEventSink {
             execution: None,
             last_compaction_checkpoint: std::sync::Mutex::new(None),
             final_answer_streams: std::sync::Mutex::new(FinalAnswerStreams::default()),
+            streaming_tool_calls: std::sync::Mutex::new(StreamingToolCalls::default()),
             docs_dir,
         }
     }
@@ -177,12 +182,17 @@ impl ca::EventSink for DesktopEventSink {
                 chunk:
                     ca::AssistantStreamChunk::ToolCallDelta {
                         index,
+                        id_delta,
                         name_delta,
                         arguments_delta,
-                        ..
                     },
                 ..
-            } => Some((*index, name_delta.clone(), arguments_delta.clone())),
+            } => Some((
+                *index,
+                id_delta.clone(),
+                name_delta.clone(),
+                arguments_delta.clone(),
+            )),
             _ => None,
         };
         let event = super::redaction::event(event);
@@ -204,6 +214,10 @@ impl ca::EventSink for DesktopEventSink {
                 self.final_answer_streams
                     .lock()
                     .expect("final answer stream lock")
+                    .reset_message();
+                self.streaming_tool_calls
+                    .lock()
+                    .expect("streaming tool calls lock")
                     .reset_message();
             }
             // The in-loop compactor rewrote the model-visible transcript.
@@ -274,14 +288,14 @@ impl ca::EventSink for DesktopEventSink {
                 chunk:
                     ca::AssistantStreamChunk::ToolCallDelta {
                         index,
+                        id_delta,
                         name_delta,
                         arguments_delta,
-                        ..
                     },
                 ..
             } => {
-                let (index, name_delta, arguments_delta) =
-                    private_tool_delta.unwrap_or((index, name_delta, arguments_delta));
+                let (index, id_delta, name_delta, arguments_delta) =
+                    private_tool_delta.unwrap_or((index, id_delta, name_delta, arguments_delta));
                 let delta = self
                     .final_answer_streams
                     .lock()
@@ -295,6 +309,28 @@ impl ca::EventSink for DesktopEventSink {
                             role: desktop::Role::Agent,
                             delta: desktop::ContentBlock::text(delta),
                         })
+                        .await;
+                }
+                let announced = self
+                    .streaming_tool_calls
+                    .lock()
+                    .expect("streaming tool calls lock")
+                    .observe_delta(
+                        index,
+                        id_delta.as_deref(),
+                        name_delta.as_deref(),
+                        arguments_delta.as_deref(),
+                    );
+                if let Some((tool_call_id, tool_name, parsed_args)) = announced {
+                    let _ = self
+                        .events
+                        .send(streamed_tool_event(
+                            &self.run,
+                            &self.registry,
+                            tool_call_id,
+                            tool_name,
+                            parsed_args,
+                        ))
                         .await;
                 }
             }
@@ -321,24 +357,7 @@ impl ca::EventSink for DesktopEventSink {
                 chunk: ca::AssistantStreamChunk::ReasoningDetails { delta },
                 ..
             } => {
-                let details = ca::ReasoningDetailsContent::new(delta);
-                for item in details.as_items() {
-                    let readable = match item {
-                        ca::ReasoningItem::Text { text, .. } => Some(text),
-                        ca::ReasoningItem::Summary { summary, .. } => Some(summary),
-                        ca::ReasoningItem::Encrypted { .. } => None,
-                    };
-                    if let Some(readable) = readable.filter(|text| !text.is_empty()) {
-                        let _ = self
-                            .events
-                            .send(desktop::AgentEvent::MessageChunk {
-                                run: self.run.clone(),
-                                role: desktop::Role::Agent,
-                                delta: desktop::ContentBlock::thinking(readable),
-                            })
-                            .await;
-                    }
-                }
+                reasoning_stream::emit_details(&self.events, &self.run, delta).await;
             }
             ca::AgentEvent::ToolExecutionStart {
                 tool_call_id,
@@ -352,54 +371,28 @@ impl ca::EventSink for DesktopEventSink {
                         .begin(&tool_call_id, &args);
                     return;
                 }
-                let executor = self.registry.get(&tool_name);
-                let kind = executor
-                    .as_ref()
-                    .map(|tool| tool.kind())
-                    .unwrap_or_default();
-                if let Some(execution) = &self.execution {
-                    execution.tool_started(
-                        &tool_call_id,
-                        &tool_name,
-                        executor.as_ref().is_some_and(|tool| tool.mutating()),
-                    );
-                }
-                let id = ToolCallId::new(tool_call_id);
-                let _ = self
-                    .events
-                    .send(desktop::AgentEvent::ToolCall {
-                        run: self.run.clone(),
-                        call: desktop::ToolCall {
-                            id,
-                            tool_name: Some(tool_name.clone()),
-                            title: tool_title(&tool_name, &args),
-                            kind,
-                            status: desktop::ToolStatus::Pending,
-                            locations: Vec::new(),
-                            content: Vec::new(),
-                            raw_input: Some(args),
-                            progress: None,
-                        },
-                    })
-                    .await;
+                emit_execution_start(
+                    &self.events,
+                    &self.run,
+                    &self.registry,
+                    self.execution.as_ref(),
+                    &self.streaming_tool_calls,
+                    ExecutionStart {
+                        tool_call_id,
+                        tool_name,
+                        args,
+                    },
+                )
+                .await;
             }
             ca::AgentEvent::ToolExecutionUpdate {
                 tool_call_id,
                 partial,
                 ..
             } => {
-                let blocks = tool_result_to_content(&partial);
                 let _ = self
                     .events
-                    .send(desktop::AgentEvent::ToolCallUpdate {
-                        run: self.run.clone(),
-                        id: ToolCallId::new(tool_call_id),
-                        patch: desktop::ToolCallPatch {
-                            status: Some(desktop::ToolStatus::InProgress),
-                            append_content: blocks,
-                            ..Default::default()
-                        },
-                    })
+                    .send(execution_update_event(&self.run, tool_call_id, partial))
                     .await;
             }
             ca::AgentEvent::ToolExecutionEnd {

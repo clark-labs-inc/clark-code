@@ -1,8 +1,8 @@
 //! Transactional local outbox for Desktop trajectory delivery.
 //!
-//! Cloud remains authoritative. SQLite only holds the last acknowledged cloud
-//! snapshot plus event batches that have not yet been covered by a later cloud
-//! snapshot. Stable event IDs make replay to the cloud idempotent.
+//! SQLite owns restart safety for pending snapshots, artifact bytes, and event
+//! batches. Product cloud remains the cross-device authority; stable mutation
+//! and event IDs make replay across a process death idempotent.
 
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -50,6 +50,17 @@ pub struct RecoveredSnapshot {
     /// event delivery can be acknowledged before the corresponding full
     /// snapshot is published.
     pub needs_snapshot_publication: bool,
+    /// Stable idempotency identity for a locally committed full-snapshot write
+    /// that had not reached product cloud before the previous process exited.
+    pub pending_mutation_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StagedArtifact {
+    pub filename: String,
+    pub sha256: String,
+    pub markdown: Vec<u8>,
+    pub remote_uri: Option<String>,
 }
 
 impl TrajectoryOutbox {
@@ -234,7 +245,61 @@ impl TrajectoryOutbox {
     }
 }
 
-pub async fn checkpoint_snapshot(
+#[allow(clippy::too_many_arguments)]
+pub async fn commit_pending_snapshot(
+    path: PathBuf,
+    owner_scope: String,
+    conversation_id: String,
+    metadata: Value,
+    snapshot: Snapshot,
+    base_rev: i64,
+    checkpoint_seq: i64,
+    local_live: bool,
+    mutation_id: String,
+) -> Result<(), String> {
+    blocking(move || {
+        let mut conn = open(&path)?;
+        let tx = conn.transaction().map_err(sql_error)?;
+        let now = now_ms();
+        tx.execute(
+            r#"INSERT INTO journal_conversation
+               (owner_key, conversation_id, metadata_json, base_snapshot_json, base_rev,
+                checkpoint_seq, local_live, snapshot_pending, pending_mutation_id,
+                created_at_ms, updated_at_ms)
+               VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1, ?8, ?9, ?9)
+               ON CONFLICT(owner_key, conversation_id) DO UPDATE SET
+                 metadata_json = excluded.metadata_json,
+                 base_snapshot_json = excluded.base_snapshot_json,
+                 base_rev = excluded.base_rev,
+                 checkpoint_seq = excluded.checkpoint_seq,
+                 local_live = excluded.local_live,
+                 snapshot_pending = 1,
+                 pending_mutation_id = excluded.pending_mutation_id,
+                 updated_at_ms = excluded.updated_at_ms"#,
+            params![
+                owner_key(&owner_scope),
+                conversation_id,
+                serde_json::to_vec(&metadata).map_err(|error| error.to_string())?,
+                serde_json::to_vec(&snapshot).map_err(|error| error.to_string())?,
+                base_rev,
+                checkpoint_seq,
+                local_live,
+                mutation_id,
+                now,
+            ],
+        )
+        .map_err(sql_error)?;
+        tx.commit().map_err(sql_error)?;
+        Ok(())
+    })
+    .await
+}
+
+/// Promote a published snapshot only if it is still the exact mutation stored
+/// as pending. A late cloud response returns `false` without changing newer
+/// snapshot bytes, their mutation identity, or the covered trajectory prefix.
+#[allow(clippy::too_many_arguments)]
+pub async fn acknowledge_snapshot_publication(
     path: PathBuf,
     owner_scope: String,
     conversation_id: String,
@@ -243,35 +308,167 @@ pub async fn checkpoint_snapshot(
     rev: i64,
     checkpoint_seq: i64,
     local_live: bool,
-) -> Result<(), String> {
+    mutation_id: String,
+) -> Result<bool, String> {
     blocking(move || {
         let mut conn = open(&path)?;
         let tx = conn.transaction().map_err(sql_error)?;
-        let now = now_ms();
-        tx.execute(
-            r#"INSERT INTO journal_conversation
-               (owner_key, conversation_id, metadata_json, base_snapshot_json, base_rev, checkpoint_seq, local_live, created_at_ms, updated_at_ms)
-               VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)
-               ON CONFLICT(owner_key, conversation_id) DO UPDATE SET
-                 metadata_json = excluded.metadata_json,
-                 base_snapshot_json = excluded.base_snapshot_json,
-                 base_rev = excluded.base_rev,
-                 checkpoint_seq = excluded.checkpoint_seq,
-                 local_live = excluded.local_live,
-                 updated_at_ms = excluded.updated_at_ms"#,
-            params![owner_key(&owner_scope), conversation_id, serde_json::to_vec(&metadata).map_err(|e| e.to_string())?, serde_json::to_vec(&snapshot).map_err(|e| e.to_string())?, rev, checkpoint_seq, local_live, now],
-        )
-        .map_err(sql_error)?;
-        tx.execute(
-            r#"DELETE FROM trajectory_outbox
+        let acknowledged = tx
+            .execute(
+                r#"UPDATE journal_conversation
+               SET metadata_json = ?4,
+                   base_snapshot_json = ?5,
+                   base_rev = ?6,
+                   checkpoint_seq = ?7,
+                   local_live = ?8,
+                   snapshot_pending = 0,
+                   pending_mutation_id = NULL,
+                   updated_at_ms = ?9
                WHERE owner_key = ?1 AND conversation_id = ?2
-                 AND acknowledged = 1 AND local_seq <= ?3"#,
-            params![owner_key(&owner_scope), conversation_id, checkpoint_seq],
+                 AND pending_mutation_id = ?3"#,
+                params![
+                    owner_key(&owner_scope),
+                    conversation_id,
+                    mutation_id,
+                    serde_json::to_vec(&metadata).map_err(|error| error.to_string())?,
+                    serde_json::to_vec(&snapshot).map_err(|error| error.to_string())?,
+                    rev,
+                    checkpoint_seq,
+                    local_live,
+                    now_ms(),
+                ],
+            )
+            .map_err(sql_error)?
+            > 0;
+        if acknowledged {
+            tx.execute(
+                r#"DELETE FROM trajectory_outbox
+                   WHERE owner_key = ?1 AND conversation_id = ?2
+                     AND acknowledged = 1 AND local_seq <= ?3"#,
+                params![owner_key(&owner_scope), conversation_id, checkpoint_seq],
+            )
+            .map_err(sql_error)?;
+        }
+        tx.commit().map_err(sql_error)?;
+        if acknowledged {
+            reclaim_free_pages(&conn)?;
+        }
+        Ok(acknowledged)
+    })
+    .await
+}
+
+pub async fn staged_artifact(
+    path: PathBuf,
+    owner_scope: String,
+    conversation_id: String,
+    logical_id: String,
+) -> Result<Option<StagedArtifact>, String> {
+    blocking(move || {
+        let conn = open(&path)?;
+        conn.query_row(
+            r#"SELECT filename, sha256, markdown, remote_uri FROM artifact_stage
+               WHERE owner_key = ?1 AND conversation_id = ?2 AND logical_id = ?3"#,
+            params![owner_key(&owner_scope), conversation_id, logical_id],
+            |row| {
+                Ok(StagedArtifact {
+                    filename: row.get(0)?,
+                    sha256: row.get(1)?,
+                    markdown: row.get(2)?,
+                    remote_uri: row.get(3)?,
+                })
+            },
+        )
+        .optional()
+        .map_err(sql_error)
+    })
+    .await
+}
+
+pub async fn stage_artifact(
+    path: PathBuf,
+    owner_scope: String,
+    conversation_id: String,
+    logical_id: String,
+    filename: String,
+    markdown: Vec<u8>,
+    sha256: String,
+) -> Result<StagedArtifact, String> {
+    blocking(move || {
+        let conn = open(&path)?;
+        let now = now_ms();
+        conn.execute(
+            r#"INSERT INTO artifact_stage
+               (owner_key, conversation_id, logical_id, filename, sha256, markdown,
+                created_at_ms, updated_at_ms)
+               VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)
+               ON CONFLICT(owner_key, conversation_id, logical_id) DO UPDATE SET
+                 filename = excluded.filename,
+                 sha256 = excluded.sha256,
+                 markdown = excluded.markdown,
+                 remote_uri = CASE
+                   WHEN artifact_stage.sha256 = excluded.sha256
+                   THEN artifact_stage.remote_uri ELSE NULL END,
+                 updated_at_ms = excluded.updated_at_ms"#,
+            params![
+                owner_key(&owner_scope),
+                conversation_id,
+                logical_id,
+                filename,
+                sha256,
+                markdown,
+                now,
+            ],
         )
         .map_err(sql_error)?;
-        tx.commit().map_err(sql_error)?;
-        reclaim_free_pages(&conn)?;
-        Ok(())
+        conn.query_row(
+            r#"SELECT filename, sha256, markdown, remote_uri FROM artifact_stage
+               WHERE owner_key = ?1 AND conversation_id = ?2 AND logical_id = ?3"#,
+            params![owner_key(&owner_scope), conversation_id, logical_id],
+            |row| {
+                Ok(StagedArtifact {
+                    filename: row.get(0)?,
+                    sha256: row.get(1)?,
+                    markdown: row.get(2)?,
+                    remote_uri: row.get(3)?,
+                })
+            },
+        )
+        .map_err(sql_error)
+    })
+    .await
+}
+
+pub async fn mark_staged_artifact_uploaded(
+    path: PathBuf,
+    owner_scope: String,
+    conversation_id: String,
+    logical_id: String,
+    sha256: String,
+    remote_uri: String,
+) -> Result<(), String> {
+    blocking(move || {
+        let conn = open(&path)?;
+        let updated = conn
+            .execute(
+                r#"UPDATE artifact_stage SET remote_uri = ?5, updated_at_ms = ?6
+               WHERE owner_key = ?1 AND conversation_id = ?2 AND logical_id = ?3
+                 AND sha256 = ?4"#,
+                params![
+                    owner_key(&owner_scope),
+                    conversation_id,
+                    logical_id,
+                    sha256,
+                    remote_uri,
+                    now_ms(),
+                ],
+            )
+            .map_err(sql_error)?;
+        if updated == 1 {
+            Ok(())
+        } else {
+            Err("artifact stage was replaced before upload acknowledgement".into())
+        }
     })
     .await
 }

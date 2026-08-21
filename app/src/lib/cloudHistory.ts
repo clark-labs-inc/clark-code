@@ -29,7 +29,7 @@ import {
 } from "./repositoryKnowledge";
 import {
   configureArtifactCloudCredentials,
-  flushArtifactCloudSync,
+  prepareArtifactCloudDurability,
   forgetArtifactCloudConversation,
   resetArtifactCloudSync,
   scheduleArtifactCloudSync,
@@ -98,7 +98,7 @@ export async function cloudGet(c: CloudCreds, id: string): Promise<Snapshot | nu
       // otherwise mobile keeps reading the pre-restart running snapshot forever.
       // The same write permanently removes quarantined provider residue instead
       // of merely hiding it in this renderer.
-      scheduleCloudPut(c, meta, snapshot, "idle");
+      scheduleCloudPut(c, meta, snapshot, "idle", detail.snapshotPendingMutationId);
     }
   }
   return snapshot;
@@ -180,8 +180,10 @@ interface PendingPush {
  * threshold rather than a correctness or upload limit. */
 export const LARGE_SNAPSHOT_BYTES = 8 * 1024 * 1024;
 
-const inflight = new Set<string>();
+const inflight = new Map<string, string>();
 const pending = new Map<string, PendingPush>();
+const locallyDurableMutations = new Set<string>();
+const checkpointChains = new Map<string, Promise<void>>();
 // Fingerprint of the last successfully-PUT payload per conversation. Skipping
 // byte-identical re-sends matters twice over: it saves the upload itself, and
 // because rev is a timestamp (always "newer"), a no-op PUT would also make
@@ -233,6 +235,8 @@ export function resetCloudHistory(): void {
   retryTimers.clear();
   retryAttempts.clear();
   pending.clear();
+  inflight.clear();
+  locallyDurableMutations.clear();
   lastSent.clear();
   serverRevisions.clear();
   serverTimelineOffsets.clear();
@@ -351,6 +355,8 @@ export function scheduleCloudPut(
   meta: ConversationMeta,
   snapshot: Snapshot,
   status: "running" | "idle" = "idle",
+  pendingMutationId?: string,
+  artifactsAlreadyScheduled = false,
 ): void {
   // Never let a stale render callback resurrect work after sign-out or switch
   // an account's queued transcript onto a different native account generation.
@@ -365,10 +371,16 @@ export function scheduleCloudPut(
   // single-flight queue guarantee spacing), survives restarts, and nothing
   // reads the rev back as a length — it is purely an ordering token.
   const rev = Date.now();
-  scheduleArtifactCloudSync(creds, meta.id, snapshot, () => {
-    const current = configuredCreds;
-    if (current) scheduleCloudPut(current, meta, snapshot, status);
-  }, warningHandler ?? undefined, status === "idle");
+  if (!artifactsAlreadyScheduled) {
+    scheduleArtifactCloudSync(creds, meta.id, snapshot, () => {
+      const current = configuredCreds;
+      // The callback is the completion of this exact artifact scheduling pass.
+      // Skip rediscovery here so an idle same-digest native receipt cannot form
+      // an onReady -> schedule -> restage loop. A later external snapshot still
+      // revalidates its final bytes.
+      if (current) scheduleCloudPut(current, meta, snapshot, status, undefined, true);
+    }, warningHandler ?? undefined, status === "idle");
+  }
   const cloudSafeSnapshot = snapshotForArtifactCloud(meta.id, snapshot);
   clearRetry(meta.id);
   pending.set(meta.id, {
@@ -377,26 +389,83 @@ export function scheduleCloudPut(
     snapshot: cloudSafeSnapshot,
     rev,
     status,
-    mutationId: mutationId(),
+    mutationId: pendingMutationId ?? mutationId(),
     epoch: cloudHistoryEpoch,
   });
   void drainPush(meta.id);
 }
 
-/** Wait for every currently queued/in-flight snapshot write to settle. The
- *  updater calls this only after runs and follow-ups drain, so no new streaming
- *  snapshots should appear. Returns false on a failed or timed-out delivery;
- *  callers can keep the app running and retry instead of losing the final tail. */
-export async function flushCloudPuts(timeoutMs = 5000): Promise<boolean> {
+/** Wait until every queued/in-flight snapshot and artifact has crossed the
+ * native durable boundary. Cloud replay may continue after this returns: an
+ * update is restart-safe once native storage owns the exact pending mutation. */
+export async function prepareCloudDurability(timeoutMs = 5000): Promise<boolean> {
   const startedAt = Date.now();
-  if (!(await flushArtifactCloudSync(timeoutMs))) return false;
+  if (!(await prepareArtifactCloudDurability(timeoutMs))) return false;
   for (const id of [...pending.keys()]) void drainPush(id);
   const deadline = startedAt + timeoutMs;
-  while (inflight.size > 0) {
+  const hasUndurableSnapshot = () =>
+    [...pending.values()].some((job) => !locallyDurableMutations.has(job.mutationId))
+    || [...inflight.values()].some(
+      (mutationId) => !locallyDurableMutations.has(mutationId),
+    );
+  while (hasUndurableSnapshot()) {
     if (Date.now() >= deadline) return false;
+    for (const [id, job] of pending) {
+      if (
+        locallyDurableMutations.has(job.mutationId)
+        || (inflight.has(id) && !locallyDurableMutations.has(inflight.get(id)!))
+      ) continue;
+      try {
+        await ensurePendingSnapshotDurable(id, job);
+      } catch {
+        return false;
+      }
+    }
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
-  return pending.size === 0;
+  return true;
+}
+
+async function ensurePendingSnapshotDurable(id: string, job: PendingPush): Promise<void> {
+  if (locallyDurableMutations.has(job.mutationId)) return;
+  const creds = configuredCreds;
+  if (!creds || !sameCreds(creds, job.creds) || !jobIsCurrent(id, job)) {
+    throw new CloudWriteCancelled();
+  }
+  const repositoryFingerprint = job.meta.project
+    ? await repositoryFingerprintForRoot(job.meta.project, creds.accountScope)
+    : null;
+  const previous = checkpointChains.get(id) ?? Promise.resolve();
+  const checkpoint = previous.catch(() => {}).then(async () => {
+    if (!sameCreds(configuredCreds, creds) || !jobIsCurrent(id, job)) {
+      throw new CloudWriteCancelled();
+    }
+    await invoke("desktop_conv_commit_pending", {
+      commit: {
+        id: job.meta.id,
+        title: job.meta.title,
+        provider: job.meta.provider,
+        project: job.meta.project ?? null,
+        repositoryFingerprint,
+        remoteHost: job.meta.remoteHost ?? null,
+        mode: job.meta.mode ?? null,
+        titleLocked: job.meta.titleLocked ?? false,
+        specialistContext: job.meta.specialist ?? null,
+        baseRev: serverRevisions.get(id) ?? job.meta.rev ?? 0,
+        snapshot: job.snapshot,
+        status: job.status,
+        mutationId: job.mutationId,
+      },
+    });
+  });
+  checkpointChains.set(id, checkpoint);
+  try {
+    await checkpoint;
+  } finally {
+    if (checkpointChains.get(id) === checkpoint) checkpointChains.delete(id);
+  }
+  if (!jobIsCurrent(id, job)) throw new CloudWriteCancelled();
+  locallyDurableMutations.add(job.mutationId);
 }
 
 async function drainPush(id: string): Promise<void> {
@@ -408,7 +477,7 @@ async function drainPush(id: string): Promise<void> {
   }
   clearRetry(id);
   pending.delete(id);
-  inflight.add(id);
+  inflight.set(id, job.mutationId);
   let ok = false;
   try {
     // Serialize exactly, then fingerprint and size-check what we'll send.
@@ -422,10 +491,11 @@ async function drainPush(id: string): Promise<void> {
     if (lastSent.get(id) !== mark) {
       const creds = configuredCreds;
       if (!creds) throw new CloudWriteCancelled();
+      await ensurePendingSnapshotDurable(id, job);
+      const repositoryFingerprint = job.meta.project
+        ? await repositoryFingerprintForRoot(job.meta.project, creds.accountScope)
+        : null;
       if (paged.pageEndLocal > paged.pageStartLocal) {
-        const repositoryFingerprint = job.meta.project
-          ? await repositoryFingerprintForRoot(job.meta.project, creds.accountScope)
-          : null;
         for (const pages of transcriptPageBatches(
           job.snapshot,
           paged.pageStartLocal,
@@ -467,6 +537,7 @@ async function drainPush(id: string): Promise<void> {
     if (jobIsCurrent(id, job)) {
       ok = true;
       retryAttempts.delete(id);
+      locallyDurableMutations.delete(job.mutationId);
     }
   } catch (error) {
     if (!jobIsCurrent(id, job)) {
@@ -499,7 +570,7 @@ async function drainPush(id: string): Promise<void> {
       retryPendingPush(id);
     }
   } finally {
-    inflight.delete(id);
+    if (inflight.get(id) === job.mutationId) inflight.delete(id);
   }
   // Chain a newer snapshot after success. An account reset can replace a job
   // while its old request is still in flight, so it also needs one fresh drain.

@@ -1,7 +1,12 @@
 mod event_sink;
 mod final_answer_stream;
 mod proposed_plan_stream;
+mod reasoning_stream;
 pub(crate) mod redaction;
+mod required_tool_text;
+mod stream_progress;
+mod streaming_tool_call;
+mod tool_call_stream;
 mod tool_title;
 mod translate;
 
@@ -27,7 +32,10 @@ use crate::tools::{
     ProducedArtifact, ToolCtx, ToolExecutor, ToolOutcome, ToolRegistry, ToolSignal,
 };
 
+#[cfg(test)]
 use proposed_plan_stream::ProposedPlanStreamFilter;
+use stream_progress::StreamProgress;
+use tool_call_stream::ToolCallStreamGate;
 use tool_title::tool_title;
 use translate::*;
 
@@ -146,15 +154,16 @@ impl ca::StreamFn for AgentLoopStream {
             });
             let chunk_tx = tx.clone();
             let reasoning_tx = tx.clone();
-            let proposal_filter =
-                Arc::new(std::sync::Mutex::new(ProposedPlanStreamFilter::default()));
+            let stream_progress = StreamProgress::new(force_tool_call);
             let mut discarded_usage = Vec::new();
             let mut repair_attempts = 0_u8;
             let turn = loop {
-                let proposal_filter_for_text = proposal_filter.clone();
                 let chunk_tx = chunk_tx.clone();
                 let reasoning_tx = reasoning_tx.clone();
                 let incidents_for_retry = incidents.clone();
+                let tool_call_gate = Arc::new(std::sync::Mutex::new(ToolCallStreamGate::new(
+                    stream_terminal_tool,
+                )));
                 let response = llm
                     .stream_chat_observed_with_tool_choice(
                         &messages,
@@ -166,48 +175,26 @@ impl ca::StreamFn for AgentLoopStream {
                                 .then_some(crate::tools::final_answer::FINAL_ANSWER_TOOL),
                         },
                         crate::llm::StreamObservers::new(
-                            move |delta: &str| {
-                                if force_tool_call {
-                                    return;
-                                }
-                                let visible = proposal_filter_for_text
-                                    .lock()
-                                    .map(|mut filter| filter.feed(delta))
-                                    .unwrap_or_else(|_| delta.to_string());
-                                if !visible.is_empty() {
-                                    let _ = chunk_tx.send(ca::StreamEvent::Chunk(
-                                        ca::AssistantStreamChunk::Text { delta: visible },
-                                    ));
-                                }
+                            {
+                                let stream_progress = stream_progress.clone();
+                                move |delta: &str| stream_progress.observe_text(&chunk_tx, delta)
                             },
                             move |delta: &str| {
-                                // Required-tool responses remain staged until the
-                                // complete turn proves it honored that contract.
-                                if !force_tool_call {
-                                    let _ = reasoning_tx.send(ca::StreamEvent::Chunk(
-                                        ca::AssistantStreamChunk::Reasoning {
-                                            delta: delta.to_string(),
-                                        },
-                                    ));
-                                }
+                                // Reasoning is a typed progress channel, not the
+                                // user-facing answer contract. Keep it live even
+                                // while required-tool prose remains quarantined.
+                                let _ = reasoning_tx.send(ca::StreamEvent::Chunk(
+                                    ca::AssistantStreamChunk::Reasoning {
+                                        delta: delta.to_string(),
+                                    },
+                                ));
                             },
                             {
                                 let tool_tx = tx.clone();
+                                let tool_call_gate = tool_call_gate.clone();
+                                let stream_progress = stream_progress.clone();
                                 move |delta: crate::llm::WireToolCallDelta| {
-                                    // The effect completion gate can reject a premature
-                                    // final_answer after generation. Keep those arguments
-                                    // staged so rejected answer text never reaches the UI.
-                                    if !stream_terminal_tool {
-                                        return;
-                                    }
-                                    let _ = tool_tx.send(ca::StreamEvent::Chunk(
-                                        ca::AssistantStreamChunk::ToolCallDelta {
-                                            index: delta.index,
-                                            id_delta: delta.id_delta,
-                                            name_delta: delta.name_delta,
-                                            arguments_delta: delta.arguments_delta,
-                                        },
-                                    ));
+                                    stream_progress.observe_tool(&tool_tx, &tool_call_gate, delta)
                                 }
                             },
                             move |context| incidents_for_retry.observe_retry(context),
@@ -241,6 +228,7 @@ impl ca::StreamFn for AgentLoopStream {
                 if let Some(usage) = invalid.usage {
                     discarded_usage.push(usage);
                 }
+                stream_progress.reset_attempt();
                 if repair_attempts == 0 {
                     repair_attempts = 1;
                     messages.push(crate::llm::ChatMessage::system(
@@ -275,13 +263,6 @@ impl ca::StreamFn for AgentLoopStream {
             match turn {
                 Ok(mut turn) => {
                     if force_tool_call {
-                        if !turn.reasoning.is_empty() {
-                            let _ = tx.send(ca::StreamEvent::Chunk(
-                                ca::AssistantStreamChunk::Reasoning {
-                                    delta: turn.reasoning.clone(),
-                                },
-                            ));
-                        }
                         // Hold text until the required structured boundary is
                         // known. Ordinary tool turns may carry progress
                         // commentary, while terminal delivery comes only from
@@ -291,25 +272,14 @@ impl ca::StreamFn for AgentLoopStream {
                         });
                         if is_terminal {
                             turn.text.clear();
-                        } else if !turn.text.is_empty() {
-                            let _ =
-                                tx.send(ca::StreamEvent::Chunk(ca::AssistantStreamChunk::Text {
-                                    delta: turn.text.clone(),
-                                }));
+                        } else {
+                            stream_progress.finish_ordinary_turn(&tx, &turn.text);
                         }
                     }
                     // If a response ended while the stream filter was holding
                     // a possible tag prefix, release it. A malformed marker
                     // must remain visible rather than disappearing.
-                    if let Ok(mut filter) = proposal_filter.lock() {
-                        let visible = filter.finish();
-                        if !visible.is_empty() {
-                            let _ =
-                                tx.send(ca::StreamEvent::Chunk(ca::AssistantStreamChunk::Text {
-                                    delta: visible,
-                                }));
-                        }
-                    }
+                    stream_progress.finish_filter(&tx);
                     incidents.mark_recovered();
                     if let Some(metadata) = &turn.response_metadata {
                         if let Ok(payload) = serde_json::to_value(metadata) {

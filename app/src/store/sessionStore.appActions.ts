@@ -24,7 +24,7 @@ import {
   deriveTitle,
   effectiveApprovalPolicy,
   emptySnapshot,
-  flushCloudPuts,
+  prepareCloudDurability,
   getBridge,
   hasContent,
   appInitializationState,
@@ -419,8 +419,10 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
       }
       set({ update: refreshed.update });
 
-      if (!(await flushCloudPuts())) {
-        throw new Error("Clark Code could not save the final conversation state; update postponed.");
+      if (!(await prepareCloudDurability())) {
+        throw new Error(
+          "Clark Code could not commit restart-safe conversation state locally; update postponed.",
+        );
       }
 
       set({ updateWaiting: false, updateApplying: true });

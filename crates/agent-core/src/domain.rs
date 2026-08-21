@@ -271,6 +271,10 @@ pub struct ToolCallPatch {
     pub title: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<ToolKind>,
+    /// Replace the opaque provider input once streamed arguments have reached
+    /// the validated execution boundary.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raw_input: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub status: Option<ToolStatus>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

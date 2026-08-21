@@ -23,7 +23,24 @@ pub fn workspace_root() -> Option<PathBuf> {
 
 /// The workspace directory for one session (`~/.agent/workspace/<session>`).
 pub fn session_workspace(session_id: &str) -> Option<PathBuf> {
+    if !is_safe_session_id(session_id) {
+        return None;
+    }
     workspace_root().map(|root| root.join(session_id))
+}
+
+/// Session workspace names are path components, not paths. This is also the
+/// boundary that lets the host bind a public conversation id to a local
+/// document workspace without allowing traversal through that binding.
+pub fn is_safe_session_id(session_id: &str) -> bool {
+    let path = Path::new(session_id);
+    !session_id.is_empty()
+        && !session_id.contains(['/', '\\'])
+        && matches!(
+            path.components().next(),
+            Some(std::path::Component::Normal(_))
+        )
+        && path.components().count() == 1
 }
 
 /// Whether `path` is exactly one per-session directory directly beneath the
@@ -110,6 +127,15 @@ mod tests {
             assert!(ws.starts_with(&root));
             assert!(ws.ends_with("sess-1"));
         }
+    }
+
+    #[test]
+    fn session_workspace_rejects_path_traversal() {
+        assert!(is_safe_session_id("conversation-1"));
+        assert!(!is_safe_session_id("../outside"));
+        assert!(!is_safe_session_id("nested/conversation-1"));
+        assert!(!is_safe_session_id(""));
+        assert!(session_workspace("../outside").is_none());
     }
 
     #[test]

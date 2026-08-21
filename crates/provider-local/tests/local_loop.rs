@@ -522,6 +522,7 @@ async fn local_loop_reads_file_and_answers() {
 
     let session = provider
         .new_session(SessionOptions {
+            session_id: None,
             cwd: Some(dir.path().to_string_lossy().to_string()),
             mode: None,
             collaboration_mode: None,
@@ -627,6 +628,7 @@ async fn local_loop_projects_text_with_tool_as_commentary_then_plain_text_as_fin
         .unwrap();
     let session = provider
         .new_session(SessionOptions {
+            session_id: None,
             cwd: Some(dir.path().to_string_lossy().to_string()),
             mode: None,
             collaboration_mode: None,
@@ -715,6 +717,7 @@ async fn local_loop_auto_compacts_large_transcript_before_sampling() {
 
     let session = provider
         .new_session(SessionOptions {
+            session_id: None,
             cwd: Some(dir.path().to_string_lossy().to_string()),
             mode: None,
             collaboration_mode: None,
@@ -803,6 +806,7 @@ async fn mutating_tool_waits_for_permission_then_writes() {
         .unwrap();
     let session = provider
         .new_session(SessionOptions {
+            session_id: None,
             cwd: Some(dir.path().to_string_lossy().to_string()),
             mode: None,
             collaboration_mode: None,
@@ -918,6 +922,7 @@ async fn image_attachments_are_described_by_vision_fallback_before_the_coding_ca
 
     let session = provider
         .new_session(SessionOptions {
+            session_id: None,
             cwd: Some(dir.path().to_string_lossy().to_string()),
             mode: None,
             collaboration_mode: None,
@@ -1078,6 +1083,7 @@ async fn plan_mode_journey_denies_edits_threads_feedback_and_builds_after_approv
         .unwrap();
     let session = provider
         .new_session(SessionOptions {
+            session_id: None,
             cwd: Some(dir.path().to_string_lossy().to_string()),
             mode: None,
             collaboration_mode: Some(CollaborationMode::Plan),
@@ -1317,6 +1323,7 @@ async fn giant_tool_output_is_preserved_before_the_next_model_call() {
     let mut provider = connect_provider(addr).await;
     let session = provider
         .new_session(SessionOptions {
+            session_id: None,
             cwd: Some(dir.path().to_string_lossy().to_string()),
             mode: None,
             collaboration_mode: None,
@@ -1372,6 +1379,7 @@ async fn steering_message_is_injected_into_the_active_run() {
     let mut provider = connect_provider(addr).await;
     let session = provider
         .new_session(SessionOptions {
+            session_id: None,
             cwd: Some(dir.path().to_string_lossy().to_string()),
             mode: None,
             collaboration_mode: None,
@@ -1478,6 +1486,7 @@ async fn context_overflow_recovers_by_compacting_and_continuing() {
     };
     let session = provider
         .new_session(SessionOptions {
+            session_id: None,
             cwd: Some(dir.path().to_string_lossy().to_string()),
             mode: None,
             collaboration_mode: None,
@@ -1550,6 +1559,7 @@ async fn parallel_read_batch_returns_both_results_in_order() {
     let mut provider = connect_provider(addr).await;
     let session = provider
         .new_session(SessionOptions {
+            session_id: None,
             cwd: Some(dir.path().to_string_lossy().to_string()),
             mode: None,
             collaboration_mode: None,
@@ -1615,6 +1625,7 @@ async fn goal_mode_continues_the_run_until_update_goal_complete() {
     let mut provider = connect_provider(addr).await;
     let session = provider
         .new_session(SessionOptions {
+            session_id: None,
             cwd: Some(dir.path().to_string_lossy().to_string()),
             mode: None,
             collaboration_mode: None,
@@ -1750,6 +1761,7 @@ async fn goal_mode_continues_beyond_the_previous_24_turn_limit() {
     let mut provider = connect_provider(addr).await;
     let session = provider
         .new_session(SessionOptions {
+            session_id: None,
             cwd: Some(dir.path().to_string_lossy().to_string()),
             mode: None,
             collaboration_mode: None,

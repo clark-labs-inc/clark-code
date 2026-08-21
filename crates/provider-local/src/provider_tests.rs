@@ -764,6 +764,7 @@ async fn new_session_seeds_system_prompt_without_history() {
     let mut p = LocalAgentProvider::new();
     p.connect(provider_test_config()).await.unwrap();
     let opts = SessionOptions {
+        session_id: None,
         cwd: Some(dir.path().to_string_lossy().to_string()),
         mode: None,
         collaboration_mode: None,
@@ -779,6 +780,71 @@ async fn new_session_seeds_system_prompt_without_history() {
     assert!(!s.system_prompt.contains("# Resumed conversation"));
     drop(s);
     assert!(p.registry.as_ref().unwrap().get("read_skill").is_some());
+}
+
+#[tokio::test]
+async fn host_session_id_is_used_before_document_workspace_creation() {
+    let dir = tempfile::tempdir().unwrap();
+    let requested = SessionId::new(format!("conversation-{}", uuid::Uuid::new_v4()));
+    let expected_workspace = crate::workspace::session_workspace(requested.as_str()).unwrap();
+    let mut provider = LocalAgentProvider::new();
+    provider.connect(provider_test_config()).await.unwrap();
+
+    let session = provider
+        .new_session(SessionOptions {
+            session_id: Some(requested.clone()),
+            cwd: Some(dir.path().to_string_lossy().into_owned()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+    let expected_workspace_string = expected_workspace.to_string_lossy().into_owned();
+    assert_eq!(session.id, requested);
+    assert_eq!(
+        session
+            .environment
+            .and_then(|environment| environment.docs_root)
+            .as_deref(),
+        Some(expected_workspace_string.as_str())
+    );
+    let _ = std::fs::remove_dir_all(expected_workspace);
+}
+
+#[tokio::test]
+async fn host_session_id_does_not_replace_the_specialist_cache_identity() {
+    let dir = tempfile::tempdir().unwrap();
+    let requested = SessionId::new(format!("conversation-{}", uuid::Uuid::new_v4()));
+    let expected_workspace = crate::workspace::session_workspace(requested.as_str()).unwrap();
+    let mut provider = LocalAgentProvider::new();
+    provider
+        .connect(provider_test_config_with_extra(serde_json::json!({
+            "tools_enabled": false,
+            "response_format": {"type": "json_object"},
+            "cache_session_id": "product-specialist-cache-1",
+            "memories": false,
+        })))
+        .await
+        .unwrap();
+
+    let session = provider
+        .new_session(SessionOptions {
+            session_id: Some(requested.clone()),
+            cwd: Some(dir.path().to_string_lossy().into_owned()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(session.id, requested);
+    assert_eq!(
+        provider
+            .llm
+            .as_ref()
+            .and_then(|llm| llm.session_id_for_test()),
+        Some("product-specialist-cache-1")
+    );
+    let _ = std::fs::remove_dir_all(expected_workspace);
 }
 
 #[tokio::test]
@@ -960,6 +1026,7 @@ async fn collaboration_mode_option_controls_plan_mode_independently() {
 
     let session = p
         .new_session(SessionOptions {
+            session_id: None,
             cwd: Some(dir.path().to_string_lossy().to_string()),
             mode: Some("auto".to_string()),
             collaboration_mode: Some(CollaborationMode::Plan),
@@ -980,6 +1047,7 @@ async fn collaboration_mode_option_controls_plan_mode_independently() {
     // A provider instance reused for a fresh session must not inherit the
     // stale flag.
     p.new_session(SessionOptions {
+        session_id: None,
         cwd: Some(dir.path().to_string_lossy().to_string()),
         mode: Some("auto".to_string()),
         collaboration_mode: Some(CollaborationMode::Default),
@@ -1069,6 +1137,7 @@ async fn set_mode_transitions_queue_the_one_shot_exit_note() {
     p.connect(provider_test_config()).await.unwrap();
     let session = p
         .new_session(SessionOptions {
+            session_id: None,
             cwd: Some(dir.path().to_string_lossy().to_string()),
             mode: Some("auto".to_string()),
             collaboration_mode: Some(CollaborationMode::Plan),
@@ -1104,6 +1173,7 @@ async fn new_session_replays_typed_resume_into_history() {
     let mut p = LocalAgentProvider::new();
     p.connect(provider_test_config()).await.unwrap();
     let opts = SessionOptions {
+        session_id: None,
         cwd: Some(dir.path().to_string_lossy().to_string()),
         mode: None,
         collaboration_mode: None,
@@ -1347,6 +1417,7 @@ async fn side_question_leaves_session_transcript_byte_identical() {
     let mut p = LocalAgentProvider::new();
     p.connect(provider_test_config()).await.unwrap();
     p.new_session(SessionOptions {
+        session_id: None,
         cwd: Some(dir.path().to_string_lossy().to_string()),
         mode: None,
         collaboration_mode: None,

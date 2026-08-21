@@ -416,7 +416,15 @@ pub fn apply(snapshot: &mut Snapshot, event: &AgentEvent) {
         }
 
         AgentEvent::MessagePhase { run, phase } => {
-            set_latest_unphased_agent_message(&mut snapshot.timeline, run, *phase);
+            if *phase == MessagePhase::FinalAnswer {
+                // Final-answer delivery is an authoritative boundary. A
+                // quarantined trailing commentary token can arrive after a
+                // streamed tool row and coalesce with the answer; in that case
+                // the explicit final phase must win over the earlier fallback.
+                set_latest_agent_message_phase(&mut snapshot.timeline, run, *phase);
+            } else {
+                set_latest_unphased_agent_message(&mut snapshot.timeline, run, *phase);
+            }
         }
 
         AgentEvent::SpecialistPresentation { run, presentation } => {
@@ -461,6 +469,9 @@ pub fn apply(snapshot: &mut Snapshot, event: &AgentEvent) {
                 }
                 if let Some(k) = patch.kind {
                     tc.kind = k;
+                }
+                if let Some(raw_input) = &patch.raw_input {
+                    tc.raw_input = Some(raw_input.clone());
                 }
                 if let Some(s) = patch.status {
                     tc.status = s;
@@ -752,6 +763,25 @@ fn set_latest_unphased_agent_message(
         if message_phase.is_none() {
             *message_phase = Some(phase);
         }
+    }
+}
+
+fn set_latest_agent_message_phase(timeline: &mut [TimelineItem], run: &RunId, phase: MessagePhase) {
+    if let Some(TimelineItem::Message {
+        role: Role::Agent,
+        phase: message_phase,
+        ..
+    }) = timeline.iter_mut().rev().find(|item| {
+        matches!(
+            item,
+            TimelineItem::Message {
+                run: message_run,
+                role: Role::Agent,
+                ..
+            } if message_run == run
+        )
+    }) {
+        *message_phase = Some(phase);
     }
 }
 

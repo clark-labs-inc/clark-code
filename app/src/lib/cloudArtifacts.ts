@@ -2,10 +2,11 @@
 //
 // The live snapshot keeps its absolute local URI for instant preview. Before
 // cloud persistence, this module replaces that URI with either a durable product
-// API URI or a workspace-relative retry intent. Upload leases stay inside the
-// native host and retries continue until sign-out/account reset or deletion.
+// API URI or a workspace-relative retry intent. Native staging owns the exact
+// bytes across renderer restarts; renderer retries resume from that receipt.
 
 import type { Artifact, Snapshot } from "../core-bridge/types";
+import { invoke } from "@tauri-apps/api/core";
 import { productRequest } from "../product/productBridge";
 import { productModule } from "../product/productModule";
 
@@ -33,6 +34,15 @@ interface UploadJob {
   onWarning?: (message: string) => void;
   attempts: number;
   epoch: number;
+  stagedSourceUri?: string;
+  stagedSha256?: string;
+  durabilityError?: string;
+}
+
+interface StagedArtifactReceipt {
+  sourceUri: string;
+  sha256: string;
+  remoteUri?: string | null;
 }
 
 const readyUris = new Map<string, string>();
@@ -45,6 +55,8 @@ let syncEpoch = 0;
 
 const RETRY_INITIAL_MS = 1_000;
 const RETRY_MAX_MS = 30_000;
+
+class ArtifactJobSuperseded extends Error {}
 
 function isMarkdown(artifact: Artifact): boolean {
   return artifact.mime_type?.toLowerCase().startsWith("text/markdown") === true
@@ -221,31 +233,64 @@ async function drain(key: string): Promise<void> {
   inflight.add(key);
   clearTimer(key);
   try {
+    if (!job.stagedSourceUri) {
+      const staged = await invoke<StagedArtifactReceipt>("desktop_artifact_stage", {
+        desktopId: job.conversationId,
+        logicalId: job.logicalId,
+        sourceUri: job.sourceUri,
+      });
+      if (job.epoch !== syncEpoch || jobs.get(key) !== job) {
+        throw new ArtifactJobSuperseded();
+      }
+      job.stagedSourceUri = staged.sourceUri;
+      job.stagedSha256 = staged.sha256;
+      job.durabilityError = undefined;
+      if (staged.remoteUri && isCloudArtifactUri(staged.remoteUri)) {
+        readyUris.set(key, staged.remoteUri);
+        jobs.delete(key);
+        job.onReady();
+        return;
+      }
+    }
     const artifact = await productRequest<UploadedArtifact>("artifact.upload", {
       desktopId: job.conversationId,
       logicalId: job.logicalId,
-      sourceUri: job.sourceUri,
+      sourceUri: job.stagedSourceUri,
     });
-    if (
-      job.epoch !== syncEpoch
-      || jobs.get(key) !== job
-      || artifact.state !== "uploaded"
-      || !isCloudArtifactUri(artifact.uri)
-    ) {
+    if (job.epoch !== syncEpoch || jobs.get(key) !== job) {
+      throw new ArtifactJobSuperseded();
+    }
+    if (artifact.state !== "uploaded" || !isCloudArtifactUri(artifact.uri)) {
       throw new Error("the product did not confirm the uploaded artifact");
     }
+    await invoke("desktop_artifact_mark_uploaded", {
+      desktopId: job.conversationId,
+      logicalId: job.logicalId,
+      sha256: job.stagedSha256,
+      remoteUri: artifact.uri,
+    });
     readyUris.set(key, artifact.uri);
     jobs.delete(key);
     job.onReady();
   } catch (error) {
+    if (error instanceof ArtifactJobSuperseded) return;
     const message = String(error);
+    if (message.includes("artifact stage was replaced before upload acknowledgement")) {
+      jobs.delete(key);
+      return;
+    }
+    if (!job.stagedSourceUri) job.durabilityError = message;
     const sourceMissing = /artifact is unavailable|workspace is unavailable|no the agent workspace/i.test(
       message,
     );
     const permanentlyInvalid = /exceeds the 8 MB|not Markdown|invalid artifact|quota exceeded|400 Bad Request|403 Forbidden|413 Payload Too Large/i.test(
       message,
     );
-    if (sourceMissing || permanentlyInvalid) {
+    if (!job.stagedSourceUri) {
+      job.onWarning?.(
+        "A generated document could not be saved locally, so Clark Code will not restart until it is safe.",
+      );
+    } else if (sourceMissing || permanentlyInvalid) {
       jobs.delete(key);
       nonRetryable.add(key);
       if (permanentlyInvalid) {
@@ -258,6 +303,7 @@ async function drain(key: string): Promise<void> {
     }
   } finally {
     inflight.delete(key);
+    if (jobs.get(key) !== job) void drain(key);
   }
 }
 
@@ -283,14 +329,21 @@ export function scheduleArtifactCloudSync(
       || (!finalizeDocuments && isSpecDocument(artifact))
     ) continue;
     const key = uploadJobKey(conversationId, artifact, sourceUri);
-    if (readyUris.has(key) || nonRetryable.has(key)) continue;
+    if ((readyUris.has(key) && !finalizeDocuments) || nonRetryable.has(key)) continue;
     const pending = pendingWorkspaceUri(artifact, conversationId);
     const existing = jobs.get(key);
-    if (existing) {
+    if (existing && !finalizeDocuments) {
       existing.onReady = onReady;
       existing.onWarning = onWarning;
       continue;
     }
+    if (existing) clearTimer(key);
+    // An idle snapshot is the final byte boundary. Re-stage even an artifact
+    // that was uploaded earlier in the run: the agent may have edited the same
+    // path in place, and only the native digest can prove the ready URI still
+    // names those exact bytes. Replacing the immutable job also fences a late
+    // completion from the older digest.
+    readyUris.delete(key);
     const job: UploadJob = {
       conversationId,
       logicalId: pending.logicalId,
@@ -319,6 +372,7 @@ export function resetArtifactCloudSync(): void {
   for (const timer of retryTimers.values()) clearTimeout(timer);
   retryTimers.clear();
   jobs.clear();
+  inflight.clear();
   readyUris.clear();
   nonRetryable.clear();
 }
@@ -337,10 +391,11 @@ export function forgetArtifactCloudConversation(conversationId: string): void {
   }
 }
 
-export async function flushArtifactCloudSync(timeoutMs: number): Promise<boolean> {
+export async function prepareArtifactCloudDurability(timeoutMs: number): Promise<boolean> {
   for (const key of jobs.keys()) void drain(key);
   const deadline = Date.now() + timeoutMs;
-  while (jobs.size > 0 || inflight.size > 0) {
+  while ([...jobs.values()].some((job) => !job.stagedSourceUri)) {
+    if ([...jobs.values()].some((job) => job.durabilityError)) return false;
     if (Date.now() >= deadline) return false;
     await new Promise((resolve) => setTimeout(resolve, 25));
   }

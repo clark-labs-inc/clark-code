@@ -292,6 +292,78 @@ async fn desktop_sink_projects_final_answer_as_text_without_a_tool_row() {
 }
 
 #[tokio::test]
+async fn desktop_sink_announces_an_ordinary_tool_while_arguments_stream() {
+    let (send, receive) = async_channel::unbounded();
+    let sink = DesktopEventSink::new(
+        send,
+        RunId::new("run-1"),
+        Arc::new(ToolRegistry::new(None)),
+        None,
+    );
+    ca::EventSink::emit(
+        &sink,
+        ca::AgentEvent::MessageStart {
+            message: empty_assistant(ca::StopReason::EndTurn, None),
+        },
+    )
+    .await;
+    ca::EventSink::emit(
+        &sink,
+        ca::AgentEvent::MessageUpdate {
+            partial: empty_assistant(ca::StopReason::EndTurn, None),
+            chunk: ca::AssistantStreamChunk::ToolCallDelta {
+                index: 0,
+                id_delta: Some("call-1".into()),
+                name_delta: Some("read_file".into()),
+                arguments_delta: Some("{\"path\":".into()),
+            },
+        },
+    )
+    .await;
+
+    let events = std::iter::from_fn(|| receive.try_recv().ok()).collect::<Vec<_>>();
+    let call = events
+        .iter()
+        .find_map(|event| match event {
+            desktop::AgentEvent::ToolCall { call, .. } => Some(call),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("streamed tool row missing: {events:?}"));
+    assert_eq!(call.id, ToolCallId::new("call-1"));
+    assert_eq!(call.tool_name.as_deref(), Some("read_file"));
+    assert_eq!(call.title, "Reading a file");
+    assert_eq!(call.status, desktop::ToolStatus::Pending);
+    assert_eq!(call.raw_input, None);
+
+    ca::EventSink::emit(
+        &sink,
+        ca::AgentEvent::ToolExecutionStart {
+            tool_call_id: "call-1".into(),
+            tool_name: "read_file".into(),
+            args: json!({"path": "src/main.rs"}),
+        },
+    )
+    .await;
+    let execution_events = std::iter::from_fn(|| receive.try_recv().ok()).collect::<Vec<_>>();
+    let definitive = execution_events
+        .iter()
+        .find_map(|event| match event {
+            desktop::AgentEvent::ToolCallUpdate { id, patch, .. } => Some((id, patch)),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("execution tool update missing: {execution_events:?}"));
+    assert_eq!(definitive.0, &ToolCallId::new("call-1"));
+    assert_eq!(definitive.1.title.as_deref(), Some("Read src/main.rs"));
+    assert_eq!(definitive.1.raw_input, Some(json!({"path": "src/main.rs"})));
+
+    let snapshot = agent_core::reduce_all(events.iter().chain(execution_events.iter()));
+    assert_eq!(snapshot.tool_calls.len(), 1);
+    let projected = &snapshot.tool_calls[&ToolCallId::new("call-1")];
+    assert_eq!(projected.title, "Read src/main.rs");
+    assert_eq!(projected.raw_input, Some(json!({"path": "src/main.rs"})));
+}
+
+#[tokio::test]
 async fn desktop_sink_captures_only_canonical_completed_turns() {
     let (send, _receive) = async_channel::unbounded();
     let sink = DesktopEventSink::new(

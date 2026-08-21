@@ -398,6 +398,11 @@ impl LlmClient {
         self
     }
 
+    #[cfg(test)]
+    pub(crate) fn session_id_for_test(&self) -> Option<&str> {
+        self.session_id.as_deref()
+    }
+
     pub fn new(config: &LocalConfig) -> Result<Self, String> {
         let mut client = Self::from_parts_with_client_version(
             &config.base_url,

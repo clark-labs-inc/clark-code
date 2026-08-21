@@ -130,6 +130,6 @@ pub use tools::{
 };
 // The app-managed document workspace, so the host can confine artifact reads.
 pub use workspace::{
-    initialize_quick_chat_workspace, is_markdown, is_quick_chat_workspace, is_session_workspace,
-    session_workspace, workspace_root,
+    initialize_quick_chat_workspace, is_markdown, is_quick_chat_workspace, is_safe_session_id,
+    is_session_workspace, session_workspace, workspace_root,
 };

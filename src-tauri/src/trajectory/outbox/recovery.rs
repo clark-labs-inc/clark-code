@@ -20,7 +20,7 @@ pub(super) fn recover_sync(
     let cached = conn
         .query_row(
             r#"SELECT metadata_json, base_snapshot_json, base_rev, checkpoint_seq, local_live,
-                      created_at_ms, updated_at_ms
+                      created_at_ms, updated_at_ms, snapshot_pending, pending_mutation_id
                FROM journal_conversation WHERE owner_key = ?1 AND conversation_id = ?2"#,
             params![owner, conversation_id],
             |row| {
@@ -32,6 +32,8 @@ pub(super) fn recover_sync(
                     row.get::<_, bool>(4)?,
                     row.get::<_, i64>(5)?,
                     row.get::<_, i64>(6)?,
+                    row.get::<_, bool>(7)?,
+                    row.get::<_, Option<String>>(8)?,
                 ))
             },
         )
@@ -47,6 +49,8 @@ pub(super) fn recover_sync(
         base_rev,
         created_at_ms,
         updated_at_ms,
+        snapshot_pending,
+        pending_mutation_id,
     ) = match (cloud, cached) {
         (Some((snapshot, _)), None) => {
             return Ok(Some(RecoveredSnapshot {
@@ -54,6 +58,7 @@ pub(super) fn recover_sync(
                 pending: false,
                 metadata: None,
                 needs_snapshot_publication: false,
+                pending_mutation_id: None,
             }));
         }
         (
@@ -66,13 +71,18 @@ pub(super) fn recover_sync(
                 local_live,
                 created_at_ms,
                 updated_at_ms,
+                snapshot_pending,
+                pending_mutation_id,
             )),
-        ) if cloud_rev == cached_rev => {
+        ) if cloud_rev == cached_rev || snapshot_pending => {
             // A local checkpoint may be ahead of the last full cloud snapshot
             // while its individual trajectory events are already durable in
-            // cloud. Equal server revisions therefore select the newer local
-            // read model; a different revision still means another device won
-            // authority and enters the divergence branch below.
+            // cloud. A pending full-snapshot mutation must also remain the read
+            // model when the server revision advanced: its first PUT may have
+            // committed before the response was lost. Replaying the same
+            // mutation ID lets product cloud distinguish that idempotent ack
+            // from a genuine cross-device conflict without discarding local
+            // state first.
             let snapshot = serde_json::from_value(normalize_snapshot_value(
                 serde_json::from_slice(&bytes).map_err(|e| e.to_string())?,
             ))
@@ -86,9 +96,11 @@ pub(super) fn recover_sync(
                 cached_rev,
                 created_at_ms,
                 updated_at_ms,
+                snapshot_pending,
+                pending_mutation_id,
             )
         }
-        (Some((snapshot, cloud_rev)), Some((metadata, _, _, _, _, created_at_ms, _))) => {
+        (Some((snapshot, cloud_rev)), Some((metadata, _, _, _, _, created_at_ms, _, _, _))) => {
             // Another device advanced the authority. Preserve this device's
             // batches for idempotent trajectory delivery, but never overlay the
             // divergent branch onto the newer cloud snapshot.
@@ -103,7 +115,7 @@ pub(super) fn recover_sync(
             tx.execute(
                 r#"UPDATE journal_conversation
                    SET base_snapshot_json = ?3, base_rev = ?4, checkpoint_seq = 0,
-                       local_live = 0,
+                       local_live = 0, snapshot_pending = 0, pending_mutation_id = NULL,
                        updated_at_ms = ?5
                    WHERE owner_key = ?1 AND conversation_id = ?2"#,
                 params![
@@ -125,11 +137,23 @@ pub(super) fn recover_sync(
                 cloud_rev,
                 created_at_ms,
                 updated_at_ms,
+                false,
+                None,
             )
         }
         (
             None,
-            Some((metadata, bytes, base_rev, checkpoint, local_live, created_at_ms, updated_at_ms)),
+            Some((
+                metadata,
+                bytes,
+                base_rev,
+                checkpoint,
+                local_live,
+                created_at_ms,
+                updated_at_ms,
+                snapshot_pending,
+                pending_mutation_id,
+            )),
         ) => (
             metadata,
             serde_json::from_value(normalize_snapshot_value(
@@ -142,6 +166,8 @@ pub(super) fn recover_sync(
             base_rev,
             created_at_ms,
             updated_at_ms,
+            snapshot_pending,
+            pending_mutation_id,
         ),
         (None, None) => return Ok(None),
     };
@@ -173,7 +199,7 @@ pub(super) fn recover_sync(
     }
     drop(query);
 
-    let mut needs_snapshot_publication = replayed;
+    let mut needs_snapshot_publication = replayed || snapshot_pending;
     if allow_recovery && (owned_live || replayed) {
         let events = interrupt_live_runs(
             &mut snapshot,
@@ -243,6 +269,7 @@ pub(super) fn recover_sync(
             updated_at_ms,
         )?),
         needs_snapshot_publication,
+        pending_mutation_id,
     }))
 }
 

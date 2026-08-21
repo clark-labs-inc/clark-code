@@ -5,7 +5,7 @@ use tauri::{AppHandle, State};
 
 use super::{make_provider, prepare_provider_config, register_session, ProviderLaunchRequest};
 use crate::product::{ProductRemoteSessionRequest, ProductRequestContext};
-use crate::runtime_registry::{AccountKey, WorkerHandle};
+use crate::runtime_registry::{AccountKey, SessionKey, WorkerHandle};
 use crate::state::AppState;
 
 #[derive(serde::Deserialize)]
@@ -267,6 +267,17 @@ pub async fn session_open(
             mut options,
             bind_id,
         } => {
+            // Allocate the public identity before the provider creates any
+            // session-scoped state. Renaming a provider session afterward is
+            // too late for document workspaces and other native handles.
+            let session_id = bind_id
+                .map(SessionId::new)
+                .unwrap_or_else(|| SessionId::new(uuid::Uuid::new_v4().to_string()));
+            SessionKey::from_session(&session_id)?;
+            if !provider_local::is_safe_session_id(session_id.as_str()) {
+                return Err("session identity cannot be used as a workspace name".into());
+            }
+            options.session_id = Some(session_id.clone());
             if protected_full_access {
                 options.mode = Some("full".into());
                 options.collaboration_mode = Some(agent_core::CollaborationMode::Default);
@@ -275,8 +286,8 @@ pub async fn session_open(
                 .new_session(options)
                 .await
                 .map_err(|e| e.to_string())?;
-            if let Some(bind) = bind_id {
-                session.id = SessionId::new(bind);
+            if session.id != session_id {
+                session.id = session_id;
             }
             session
         }

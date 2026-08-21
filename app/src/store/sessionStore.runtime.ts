@@ -100,7 +100,7 @@ import {
   configureCloudHistoryCredentials,
   resetCloudHistory,
   scheduleCloudPut,
-  flushCloudPuts,
+  prepareCloudDurability,
   onCloudHistoryConflict,
   onCloudHistoryWarning,
 } from "../lib/cloudHistory";
@@ -133,7 +133,7 @@ export {
   cancelUpdateDrain, checkAndStageUpdate, cloudCreds, cloudDelete, cloudGet, cloudList,
   cloudSetArchived, cloudShare, cloudUnshare, codeKeyAccountBinding, configureCloudHistoryCredentials, consumeJustUpdated,
   conversationProjectRoot, copyText, deriveTitle, effectiveModelSettings, emptySnapshot,
-  fileToAttachment, flushCloudPuts, getBridge, hasContent, hostReady, installStagedUpdate,
+  fileToAttachment, getBridge, hasContent, hostReady, installStagedUpdate, prepareCloudDurability,
   liveProjectRoot, loadApprovalPolicy, loadApprovalPolicies, loadAuthSession, loadBrowserEnabled, loadChatModels,
   loadCollaborationMode, loadLocalSettings, loadMemoriesEnabled, loadOrchestrationEnabled, loadOutputStyle, loadRecentProjects,
   loadSshHosts, localConnectConfig, localSettingsReady, minLoadDuration, nextApprovalPolicy, normalizeCodingModel, normalizeReasoningEffort,

@@ -226,6 +226,7 @@ async fn run_attachment_benchmark(mode: EvalMode, local_cwd: Option<PathBuf>) {
             mode: None,
             collaboration_mode: None,
             resume: None,
+            session_id: None,
         })
         .await
         .expect("create attachment benchmark session");

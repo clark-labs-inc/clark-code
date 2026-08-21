@@ -453,12 +453,6 @@ export function projectedSpecialistAccess(
     : "free";
 }
 
-export function specialistUsesIncludedModel(
-  context: SpecialistContext | null | undefined,
-): boolean {
-  return Boolean(context && SPECIALIST_REGISTRY.get(context.kind)?.modelPolicy === "included");
-}
-
 /** Keep already verified access distinct from a later specialist-data
  * failure. A failed overview/query is a canvas error, not evidence that the
  * user's paid coverage became unverifiable. */

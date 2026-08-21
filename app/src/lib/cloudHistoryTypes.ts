@@ -20,6 +20,7 @@ export interface CloudSummary {
 export interface CloudDetail extends Partial<CloudSummary> {
   snapshot?: WireSnapshot;
   snapshotRecoveryRequired?: boolean;
+  snapshotPendingMutationId?: string;
 }
 
 export function metaFromSummary(row: CloudSummary): ConversationMeta {

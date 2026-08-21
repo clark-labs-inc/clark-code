@@ -176,6 +176,11 @@ pub struct ProviderConfig {
 /// Options when opening a new session.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct SessionOptions {
+    /// Host-assigned identity for the conversation. Providers that allocate
+    /// session-scoped filesystem state must use this identity before creating
+    /// that state so native handles remain bound to the public conversation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<SessionId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
