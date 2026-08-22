@@ -214,6 +214,54 @@ fn cancellation_registry_targets_the_requested_run() {
 }
 
 #[tokio::test]
+async fn a_new_prompt_supersedes_a_run_parked_on_a_permission_request() {
+    use agent_core::ids::PermissionRequestId;
+    use tokio::sync::oneshot::error::TryRecvError;
+    let mut provider = LocalAgentProvider::new();
+
+    // A previous turn was abandoned mid-run (e.g. its remote host timed out
+    // while it waited for this permission answer): its run task is still
+    // registered and it still holds the session's single armed request.
+    let parked = CancellationToken::new();
+    provider
+        .run_cancellations
+        .register(&RunId::new("run-1"), parked.clone());
+    let (stale_responder, mut stale_response) = tokio::sync::oneshot::channel();
+    provider
+        .control
+        .lock()
+        .await
+        .arm(PermissionRequestId::new("perm-call_stale"), stale_responder)
+        .expect("stale request arms");
+
+    assert!(provider.supersede_parked_runs().await);
+
+    // The parked run is cancelled and its armed request dropped, so the
+    // parked waiter's response channel closes: it ends as Cancelled instead
+    // of leaking while blocking every later turn's permission prompt.
+    assert!(parked.is_cancelled());
+    assert!(matches!(
+        stale_response.try_recv(),
+        Err(TryRecvError::Closed)
+    ));
+
+    // The next run can arm its own request. Before the fix this `arm` failed
+    // ("request ... was still pending when ... tried to start") and escalated
+    // to a fatal `tool_fatal` run failure.
+    let (responder, _response) = tokio::sync::oneshot::channel();
+    provider
+        .control
+        .lock()
+        .await
+        .arm(PermissionRequestId::new("perm-call_next"), responder)
+        .expect("next run arms after supersede");
+
+    // A session with nothing parked reports no supersession.
+    let mut fresh = LocalAgentProvider::new();
+    assert!(!fresh.supersede_parked_runs().await);
+}
+
+#[tokio::test]
 async fn new_session_requires_cwd() {
     let mut p = LocalAgentProvider::new();
     p.connect(ProviderConfig::default()).await.unwrap();

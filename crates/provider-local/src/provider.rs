@@ -649,6 +649,11 @@ impl Provider for LocalAgentProvider {
 
     async fn prompt(&mut self, session: &SessionId, input: PromptInput) -> Result<EventStream> {
         self.validate_prompt(session, &input).await?;
+        // The accepted turn supersedes any previous turn still parked on a
+        // permission answer — its armed request can never be resolved by this
+        // new run and would otherwise poison the session (see
+        // `supersede_parked_runs`).
+        self.supersede_parked_runs().await;
         let sandbox = self.sandbox.clone().ok_or(Error::NotConnected)?;
         let config = self.config()?.clone();
         if config.tools_enabled && !self.isolation.disposable_writer() {

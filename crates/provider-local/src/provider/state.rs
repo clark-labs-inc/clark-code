@@ -181,6 +181,22 @@ impl LocalAgentProvider {
         RunId::new(format!("run-{}-{sequence}", self.run_namespace))
     }
 
+    /// A new user turn supersedes any still-parked previous turn.
+    ///
+    /// A run parked on a permission answer owns the session's single armed
+    /// permission request. If its host abandoned it (remote stream timeout,
+    /// restart, retry), that request must not poison every later turn: the
+    /// next `arm()` would refuse and the new run would die as `tool_fatal`.
+    /// Cancel the leftover run task(s) and drop the armed request; the parked
+    /// waiter observes cancellation (or its closed response channel) and ends
+    /// as `Cancelled` instead of leaking.
+    pub(super) async fn supersede_parked_runs(&mut self) -> bool {
+        let superseded = self.run_cancellations.has_active();
+        self.run_cancellations.cancel_all();
+        self.control.lock().await.clear();
+        superseded
+    }
+
     pub(super) fn config(&self) -> Result<&LocalConfig> {
         self.config.as_ref().ok_or(Error::NotConnected)
     }

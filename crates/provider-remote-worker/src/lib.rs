@@ -255,7 +255,7 @@ impl Provider for RemoteWorkerProvider {
         self.active
             .lock()
             .await
-            .insert(public_run.clone(), request_id);
+            .insert(public_run.clone(), request_id.clone());
         let (tx, rx) = async_channel::bounded(64);
         tx.send(AgentEvent::RunStarted {
             run: public_run.clone(),
@@ -264,8 +264,14 @@ impl Provider for RemoteWorkerProvider {
         .map_err(|_| Error::Transport("remote event stream closed".into()))?;
         let active = self.active.clone();
         let public_session = public_session.clone();
+        let worker = self.worker.clone();
+        let worker_request_id = request_id.clone();
         tokio::spawn(async move {
             let mut finished = false;
+            // Whether the worker's request itself reached a terminal frame.
+            // Only then is the worker-side run guaranteed to be over; every
+            // other exit abandons it and must be cancelled below.
+            let mut terminal = false;
             while let Some(frame) = frames.next().await {
                 match frame {
                     Ok(RemoteWorkerFrame::Progress(progress)) if progress.kind == "agent_event" => {
@@ -280,6 +286,9 @@ impl Provider for RemoteWorkerProvider {
                             }
                             Err(error) => {
                                 emit_failure(&tx, &public_run, &error.to_string()).await;
+                                // `emit_failure` delivered a terminal
+                                // RunFinished; don't emit another one below.
+                                finished = true;
                                 break;
                             }
                         }
@@ -288,6 +297,7 @@ impl Provider for RemoteWorkerProvider {
                     Ok(RemoteWorkerFrame::Terminal(Response::Result { kind, .. }))
                         if kind == "plugin_result" =>
                     {
+                        terminal = true;
                         if !finished {
                             emit_failure(
                                 &tx,
@@ -299,6 +309,7 @@ impl Provider for RemoteWorkerProvider {
                         break;
                     }
                     Ok(RemoteWorkerFrame::Terminal(Response::Error { code, message, .. })) => {
+                        terminal = true;
                         if code == "cancelled" {
                             emit_cancelled(&tx, &public_run).await;
                         } else {
@@ -308,14 +319,39 @@ impl Provider for RemoteWorkerProvider {
                         break;
                     }
                     Ok(RemoteWorkerFrame::Terminal(_)) => {
+                        terminal = true;
                         emit_failure(&tx, &public_run, "unexpected remote terminal response").await;
+                        finished = true;
                         break;
                     }
                     Err(error) => {
                         emit_failure(&tx, &public_run, &error).await;
+                        // The failure receipt above is terminal; the missing
+                        // worker terminal still requires an abandon-run
+                        // cancel, but not a second failure event.
+                        finished = true;
                         break;
                     }
                 }
+            }
+            if !terminal && !finished {
+                // The frame stream ended without the worker's request reaching
+                // a terminal response (transport drop or per-frame timeout
+                // while the run was parked, e.g. waiting on a permission
+                // answer). Nobody will ever resolve that prompt, so tell the
+                // worker to cancel the abandoned run — otherwise its
+                // `session.prompt` loop keeps the run parked forever, holding
+                // the worker session's armed permission request and poisoning
+                // every later turn in this conversation.
+                emit_failure(
+                    &tx,
+                    &public_run,
+                    "remote worker stream ended without a terminal run event",
+                )
+                .await;
+            }
+            if !terminal {
+                abandon_run(worker.as_ref(), &worker_request_id).await;
             }
             active.lock().await.remove(&public_run);
         });
@@ -470,6 +506,23 @@ fn remap_event(event: &mut AgentEvent, run: &RunId, session: &SessionId) {
     }
 }
 
+/// Best-effort cancellation of a run the desktop stopped consuming without a
+/// terminal receipt. The worker's `session.prompt` loop only cancels its
+/// provider run when *this* request is cancelled — dropping the stream here
+/// does not propagate over SSH. Without this the worker-side run stays parked
+/// forever (e.g. holding the session's armed permission request).
+async fn abandon_run(worker: &dyn WorkerClient, request_id: &str) {
+    let _ = worker
+        .request(Request {
+            schema_version: PROTOCOL_VERSION,
+            request_id: format!("cancel-{}", uuid::Uuid::new_v4().simple()),
+            command: RequestCommand::Cancel {
+                target_request_id: request_id.to_string(),
+            },
+        })
+        .await;
+}
+
 async fn emit_failure(tx: &async_channel::Sender<AgentEvent>, run: &RunId, message: &str) {
     let _ = tx
         .send(AgentEvent::Error {
@@ -561,6 +614,13 @@ mod tests {
                 requests: StdMutex::new(Vec::new()),
             }
         }
+
+        fn with_frames(frames: Vec<Result<RemoteWorkerFrame, String>>) -> Self {
+            Self {
+                frames: StdMutex::new(Some(frames)),
+                requests: StdMutex::new(Vec::new()),
+            }
+        }
     }
 
     #[async_trait]
@@ -600,11 +660,17 @@ mod tests {
                         other => Err(format!("unexpected operation: {other}")),
                     }
                 }
-                RequestCommand::Cancel { .. } => Ok(Response::result(
-                    Some(request.request_id),
-                    "cancelled",
-                    json!({"active": true}),
-                )),
+                RequestCommand::Cancel { target_request_id } => {
+                    self.requests
+                        .lock()
+                        .unwrap()
+                        .push(format!("cancel:{target_request_id}"));
+                    Ok(Response::result(
+                        Some(request.request_id),
+                        "cancelled",
+                        json!({"active": true}),
+                    ))
+                }
                 _ => Err("unexpected request".into()),
             }
         }
@@ -845,5 +911,140 @@ mod tests {
         assert!(requests
             .iter()
             .any(|operation| operation == "session.remove_read_roots"));
+    }
+
+    fn agent_event_frame(sequence: u64, event: AgentEvent) -> Result<RemoteWorkerFrame, String> {
+        Ok(RemoteWorkerFrame::Progress(
+            code_remote::RemoteWorkerProgress {
+                sequence,
+                kind: "agent_event".into(),
+                data: serde_json::to_value(event).unwrap(),
+            },
+        ))
+    }
+
+    #[tokio::test]
+    async fn an_abandoned_run_is_cancelled_on_the_worker() {
+        // Regression: a remote run parks waiting for a permission answer, the
+        // desktop's per-frame request timeout surfaces as a stream error with
+        // no worker terminal response. The abandoned request must be
+        // cancelled on the worker so its parked run (and the armed permission
+        // request it holds) ends instead of poisoning every later turn.
+        let remote_run = RunId::new("private-worker-run");
+        let worker = Arc::new(FakeWorker::with_frames(vec![
+            agent_event_frame(
+                0,
+                AgentEvent::RunStarted {
+                    run: remote_run.clone(),
+                },
+            ),
+            agent_event_frame(
+                1,
+                AgentEvent::MessageChunk {
+                    run: remote_run.clone(),
+                    role: Role::Agent,
+                    delta: ContentBlock::text("listing files"),
+                },
+            ),
+            Err("remote worker request timed out: session.prompt-7a9a743c".into()),
+        ]));
+        let mut provider = RemoteWorkerProvider::with_client(
+            worker.clone(),
+            "project-1".into(),
+            PathBuf::from("/srv/project"),
+        );
+        provider.connect(ProviderConfig::default()).await.unwrap();
+        let session = provider
+            .new_session(SessionOptions {
+                cwd: Some("/srv/project".into()),
+                ..SessionOptions::default()
+            })
+            .await
+            .unwrap();
+
+        let events = provider
+            .prompt(&session.id, PromptInput::text("inspect"))
+            .await
+            .unwrap()
+            .collect::<Vec<_>>()
+            .await;
+
+        // Exactly one terminal receipt, typed as an interruption.
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event, AgentEvent::RunFinished { .. }))
+                .count(),
+            1
+        );
+        assert!(matches!(
+            events.last(),
+            Some(AgentEvent::RunFinished { outcome, .. })
+                if outcome.status == RunStatus::Failed
+                    && outcome.failure_kind == Some(RunFailureKind::RuntimeInterrupted)
+        ));
+        // The pump task owns the event channel, so collecting it waited for
+        // the abandon-run cancel to complete.
+        let requests = worker.requests.lock().unwrap().clone();
+        assert!(
+            requests
+                .iter()
+                .any(|request| request.starts_with("cancel:session.prompt-")),
+            "abandoned run was not cancelled on the worker: {requests:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_completed_run_is_not_cancelled_on_the_worker() {
+        let remote_run = RunId::new("private-worker-run");
+        let worker = Arc::new(FakeWorker::new(vec![
+            AgentEvent::RunStarted {
+                run: remote_run.clone(),
+            },
+            AgentEvent::RunFinished {
+                run: remote_run,
+                outcome: RunOutcome {
+                    status: RunStatus::Done,
+                    stop_reason: Some("complete".into()),
+                    error: None,
+                    failure_kind: None,
+                    usage: None,
+                    execution: None,
+                },
+            },
+        ]));
+        let mut provider = RemoteWorkerProvider::with_client(
+            worker.clone(),
+            "project-1".into(),
+            PathBuf::from("/srv/project"),
+        );
+        provider.connect(ProviderConfig::default()).await.unwrap();
+        let session = provider
+            .new_session(SessionOptions {
+                cwd: Some("/srv/project".into()),
+                ..SessionOptions::default()
+            })
+            .await
+            .unwrap();
+
+        let events = provider
+            .prompt(&session.id, PromptInput::text("inspect"))
+            .await
+            .unwrap()
+            .collect::<Vec<_>>()
+            .await;
+
+        assert!(matches!(
+            events.last(),
+            Some(AgentEvent::RunFinished { outcome, .. })
+                if outcome.status == RunStatus::Done
+        ));
+        let requests = worker.requests.lock().unwrap().clone();
+        assert!(
+            !requests
+                .iter()
+                .any(|request| request.starts_with("cancel:")),
+            "completed run must not be cancelled: {requests:?}"
+        );
     }
 }
