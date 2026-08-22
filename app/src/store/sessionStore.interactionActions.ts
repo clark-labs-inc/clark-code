@@ -20,6 +20,7 @@ import {
   copyText,
   deriveTitle,
   effectiveApprovalPolicy,
+  effectiveCollaborationMode,
   effectiveModelSettings,
   emptySnapshot,
   epochStale,
@@ -43,6 +44,7 @@ import {
   saveApprovalPolicies,
   saveChatModels,
   saveCollaborationMode,
+  saveCollaborationModes,
   saveLocalSettings,
   saveOutputStyle,
   scheduleCloudPut,
@@ -451,7 +453,11 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
     const options: SessionOptions = {
       cwd: projectRoot,
       mode: state.approvalPolicy,
-      collaboration_mode: state.collaborationMode,
+      collaboration_mode: effectiveCollaborationMode(
+        state.collaborationMode,
+        state.collaborationModes,
+        session.id,
+      ),
       ...(resume ? { resume } : {}),
     };
     const submittedAttachments = state.attachments;
@@ -874,16 +880,26 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
       )?.specialist?.kind
       : activeSpecialistContext()?.kind;
     if (focusedSpecialist === "scout" && mode !== "default") return;
-    saveCollaborationMode(mode, codeKeyAccountBinding(get().auth));
     const { auth, bridge, session } = get();
-    set({
-      collaborationMode: mode,
-      ...(session ? { session: { ...session, collaboration_mode: mode } } : {}),
-    });
-    if (bridge?.setCollaborationMode && session) {
-      void bridge.setCollaborationMode(session.id, mode).catch((error) => {
-        if (authAccountMatches(auth, get().auth)) set({ error: String(error) });
+    if (session) {
+      // A chat is in focus — pin the mode to THAT conversation only, never the
+      // account-wide default, so switching plan mode here doesn't travel to a
+      // sibling session. The non-focused start screen keeps the global default.
+      const next = { ...get().collaborationModes, [session.id]: mode };
+      saveCollaborationModes(next, codeKeyAccountBinding(auth));
+      set({
+        collaborationModes: next,
+        session: { ...session, collaboration_mode: mode },
       });
+      if (bridge?.setCollaborationMode) {
+        void bridge.setCollaborationMode(session.id, mode).catch((error) => {
+          if (authAccountMatches(auth, get().auth)) set({ error: String(error) });
+        });
+      }
+    } else {
+      // No open chat — this is the account's global default.
+      saveCollaborationMode(mode, codeKeyAccountBinding(auth));
+      set({ collaborationMode: mode });
     }
   },
 
@@ -921,9 +937,12 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
       });
       if (!authAccountMatches(auth, get().auth) || get().session?.id !== session.id) return;
       if (decision.action === "implement") {
-        saveCollaborationMode("default", codeKeyAccountBinding(get().auth));
+        saveCollaborationModes(
+          { ...get().collaborationModes, [session.id]: "default" },
+          codeKeyAccountBinding(get().auth),
+        );
         set((state) => ({
-          collaborationMode: "default",
+          collaborationModes: { ...state.collaborationModes, [session.id]: "default" },
           session: state.session ? { ...state.session, collaboration_mode: "default" } : null,
           snapshot: state.snapshot.proposed_plan?.id === planId
             ? {

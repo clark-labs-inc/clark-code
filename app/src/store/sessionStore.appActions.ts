@@ -36,6 +36,7 @@ import {
   loadBrowserEnabled,
   loadChatModels,
   loadCollaborationMode,
+  loadCollaborationModes,
   loadLocalSettings,
   loadMemoriesEnabled,
   loadOrchestrationEnabled,
@@ -98,6 +99,7 @@ type AppActions = Pick<
   | "setLocalSettings"
   | "setProjectMode"
   | "setSelectedHostId"
+  | "bumpSshHostsRevision"
   | "setProjectFolder"
   | "pickProjectFolder"
   | "setMemoriesEnabled"
@@ -164,6 +166,7 @@ function activateSignedInAccount(
     orchestrationEnabled: loadOrchestrationEnabled(accountScope),
     approvalPolicy: loadApprovalPolicy(accountScope),
     collaborationMode: loadCollaborationMode(accountScope),
+    collaborationModes: loadCollaborationModes(accountScope),
     outputStyle: loadOutputStyle(accountScope),
     selectedHostId: loadSshHosts(accountScope)[0]?.id ?? null,
     projectMode: "local",
@@ -174,7 +177,6 @@ function activateSignedInAccount(
     memoryOverview: null,
     globalMemoryOverview: null,
     pendingManagedWorktreePath: null,
-    deferredSessionStartDraft: null,
     terminalLaunch: null,
     mcpOpen: false,
     sshOpen: false,
@@ -855,9 +857,7 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
       ...(changedProject
         ? {
             pendingManagedWorktreePath: null,
-            deferredSessionStartDraft: null,
             worktreeTransition: null,
-            dirtyWorktreeApproval: null,
             worktreePreparing: false,
             connecting: false,
             opening: null,
@@ -880,9 +880,7 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
       ...(changedMode
         ? {
             pendingManagedWorktreePath: null,
-            deferredSessionStartDraft: null,
             worktreeTransition: null,
-            dirtyWorktreeApproval: null,
             worktreePreparing: false,
           }
         : {}),
@@ -896,13 +894,14 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
       selectedHostId: id,
       ...(changedHost
         ? {
-            dirtyWorktreeApproval: null,
-            deferredSessionStartDraft: null,
             connecting: false,
             opening: null,
           }
         : {}),
     });
+  },
+  bumpSshHostsRevision: () => {
+    set((s) => ({ sshHostsRevision: s.sshHostsRevision + 1 }));
   },
 
   setProjectFolder: (path) => {
@@ -1038,6 +1037,7 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
       orchestrationEnabled: loadOrchestrationEnabled(null),
       approvalPolicy: loadApprovalPolicy(null),
       collaborationMode: loadCollaborationMode(null),
+      collaborationModes: loadCollaborationModes(null),
       outputStyle: loadOutputStyle(null),
       selectedHostId: loadSshHosts(null)[0]?.id ?? null,
       projectMode: "local",
@@ -1048,7 +1048,6 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
       memoryOverview: null,
       globalMemoryOverview: null,
       pendingManagedWorktreePath: null,
-      deferredSessionStartDraft: null,
       terminalLaunch: null,
       mcpOpen: false,
       sshOpen: false,

@@ -21,8 +21,10 @@ import { loadOutputStyle, saveOutputStyle } from "./outputStyle";
 import {
   loadApprovalPolicy,
   loadCollaborationMode,
+  loadCollaborationModes,
   saveApprovalPolicy,
   saveCollaborationMode,
+  saveCollaborationModes,
 } from "./permissions";
 import { selectedSecurityOrganization, selectSecurityOrganization } from "./securityCloud";
 import { loadSshHosts, saveSshHosts, type SshHost } from "./sshHosts";
@@ -110,12 +112,14 @@ describe("account-owned desktop state", () => {
   it("does not reuse execution modes, output style, or organization choices", () => {
     saveApprovalPolicy("full", accountOne);
     saveCollaborationMode("plan", accountOne);
+    saveCollaborationModes({ "shared-conversation-id": "plan" }, accountOne);
     saveOutputStyle("teaching", accountOne);
     setOrganizationForRepository("repo-fingerprint", "org-one", accountOne);
     selectSecurityOrganization("repo-fingerprint", "security-org-one", accountOne);
 
     expect(loadApprovalPolicy(accountTwo)).toBe("auto");
     expect(loadCollaborationMode(accountTwo)).toBe("default");
+    expect(loadCollaborationModes(accountTwo)).toEqual({});
     expect(loadOutputStyle(accountTwo)).toBe("default");
     expect(organizationForRepository("repo-fingerprint", accountTwo)).toBeNull();
     expect(selectedSecurityOrganization("repo-fingerprint", accountTwo)).toBeNull();

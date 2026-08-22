@@ -158,6 +158,10 @@ export function EnvironmentPicker({
     const next = hosts.map((entry) => entry.id === host.id ? { ...entry, remoteRoot } : entry);
     setHosts(next);
     saveSshHosts(next, accountScope);
+    // Persisting `remoteRoot` lives outside the store (localStorage), so signal
+    // the store that hosts changed: `startBlockedReason()` re-reads localStorage
+    // and stays stale (composer stays disabled) without this re-evaluation.
+    useSessionStore.getState().bumpSshHostsRevision();
     onEnvironmentChanged?.(remoteRoot);
   };
 

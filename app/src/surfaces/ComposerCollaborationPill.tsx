@@ -1,10 +1,17 @@
 import { ListChecks, Play } from "lucide-react";
 import { cn } from "../lib/cn";
 import { useSessionStore } from "../store/sessionStore";
+import { effectiveCollaborationMode } from "../store/sessionStore.runtime";
 
 /** Explicit execution-vs-planning control, independent from approvals. */
 export function ComposerCollaborationPill() {
-  const mode = useSessionStore((state) => state.collaborationMode);
+  const mode = useSessionStore((state) =>
+    effectiveCollaborationMode(
+      state.collaborationMode,
+      state.collaborationModes,
+      state.session?.id,
+    ),
+  );
   const setMode = useSessionStore((state) => state.setCollaborationMode);
   const isLocalTarget = useSessionStore((state) =>
     state.session ? state.session.provider === "local" : state.activeProvider === "local",

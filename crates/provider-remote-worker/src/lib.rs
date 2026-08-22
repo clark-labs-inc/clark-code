@@ -391,13 +391,15 @@ impl Provider for RemoteWorkerProvider {
 
     async fn respond(
         &mut self,
-        session: &SessionId,
+        _session: &SessionId,
         response: ClientResponse,
     ) -> agent_core::Result<()> {
+        // This adapter is bound to exactly one worker session. The host
+        // addresses it by the *public* session id, which the native registry
+        // overwrites on the returned `Session` and therefore never equals this
+        // worker's private `session-{uuid}` handle. Match provider-local and
+        // ignore the public id here; the private handle is what the worker keys.
         let worker_session = self.worker_session.as_deref().ok_or(Error::NotConnected)?;
-        if session.as_str() != worker_session {
-            return Err(Error::SessionNotFound(session.to_string()));
-        }
         let response = self
             .worker
             .request(self.request(
@@ -708,6 +710,46 @@ mod tests {
             &events[2],
             AgentEvent::RunFinished { run, .. } if run == &public_run
         ));
+        assert!(worker
+            .requests
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|operation| operation == "session.respond"));
+    }
+
+    #[tokio::test]
+    async fn adapter_respond_accepts_the_public_session_id() {
+        let worker = Arc::new(FakeWorker::new(Vec::new()));
+        let mut provider = RemoteWorkerProvider::with_client(
+            worker.clone(),
+            "project-1".into(),
+            PathBuf::from("/srv/project"),
+        );
+        provider.connect(ProviderConfig::default()).await.unwrap();
+        let session = provider
+            .new_session(SessionOptions {
+                cwd: Some("/srv/project".into()),
+                ..SessionOptions::default()
+            })
+            .await
+            .unwrap();
+        // Once `session_open` overwrites the returned Session's id with the
+        // host's public id, it never equals the worker's private `session-{uuid}`
+        // handle. The adapter must still route the response to the private handle.
+        let public_id = SessionId::new("public-37019c86-ad62-49fd-a2b7-ee943041931b");
+        assert_ne!(public_id, session.id);
+        provider
+            .respond(
+                &public_id,
+                ClientResponse::Permission {
+                    request: agent_core::PermissionRequestId::new("permission-2"),
+                    option: "allow-once".into(),
+                    feedback: None,
+                },
+            )
+            .await
+            .unwrap();
         assert!(worker
             .requests
             .lock()

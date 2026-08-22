@@ -233,7 +233,7 @@ function DefaultSpecialistConversationPresentationCard({
             <div className="text-xs font-semibold text-ink">
               {variant === "example" ? "Illustrative example" : "Specialist analysis"}
             </div>
-            <div className="truncate text-xs text-ink-faint">
+            <div data-qa="specialist-example-label" className="truncate text-xs text-ink-faint">
               {variant === "example" ? "Demo data · no work has run" : "Evidence and decision surface"}
             </div>
           </div>

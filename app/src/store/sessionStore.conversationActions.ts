@@ -15,6 +15,7 @@ import {
   cloudCreds,
   conversationProjectRoot,
   effectiveApprovalPolicy,
+  effectiveCollaborationMode,
   effectiveModelSettings,
   emptySnapshot,
   epochStale,
@@ -40,8 +41,6 @@ import { saveManagedWorktreeBase } from "../lib/managedWorktreeSettings";
 import {
   composerDraftRef,
   composerDraftOwner,
-  loadComposerDraft,
-  moveComposerDraft,
   saveComposerDraft,
   specialistStartComposerDraftId,
 } from "../lib/composerDraft";
@@ -211,9 +210,6 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
     if (!bridge?.createManagedWorktree || !worktreeTransition) return;
     const transition = worktreeTransition;
     const transitionEpoch = nextSessionEpoch();
-    // An explicit isolated choice supersedes any earlier "keep working here"
-    // acknowledgement for the same dirty checkout.
-    set({ dirtyWorktreeApproval: null });
     if (
       transition.action !== "create_isolated"
       && transition.action !== "preserve_changes"
@@ -271,14 +267,6 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
     set({
       worktreeTransition: null,
       worktreePreparing: false,
-      dirtyWorktreeApproval: transition && !transition.sourceIsManaged
-        ? {
-            sourceRoot: transition.sourceRoot,
-            sourceBranch: transition.sourceBranch,
-            sourceRevision: transition.sourceRevision,
-            sourceChanges: transition.sourceChanges,
-          }
-        : null,
       notice: transition && !transition.sourceIsManaged
         ? resumeStart
           ? "Starting this chat in the current checkout."
@@ -312,9 +300,7 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
       projectMode: "local",
       error: null,
       pendingManagedWorktreePath: null,
-      deferredSessionStartDraft: null,
       worktreeTransition: null,
-      dirtyWorktreeApproval: null,
     });
     await get().startSession({ quickChat });
   },
@@ -427,40 +413,14 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
                 "This checkout needs a safe branch transition before the agent can start an isolated session.",
               );
             }
-            const approval = get().dirtyWorktreeApproval;
-            const approvalMatches = Boolean(
-              approval
-              && approval.sourceRoot === plan.sourceRoot
-              && approval.sourceBranch === plan.sourceBranch
-              && approval.sourceRevision === plan.sourceRevision
-              && approval.sourceChanges.changedFiles === plan.sourceChanges.changedFiles
-              && approval.sourceChanges.untrackedFiles === plan.sourceChanges.untrackedFiles
-              && approval.sourceChanges.conflictedFiles === plan.sourceChanges.conflictedFiles,
-            );
-            if (!plan.sourceIsManaged && plan.requiresConfirmation && !approvalMatches) {
-              set({
-                connecting: false,
-                opening: null,
-                worktreeTransition: plan,
-                worktreePreparing: false,
-                dirtyWorktreeApproval: null,
-                deferredSessionStartDraft: startOptions?.submittedDraft
-                  ? {
-                      owner: composerDraftOwner(auth?.user ?? null),
-                      text: startOptions.submittedDraft,
-                    }
-                  : get().deferredSessionStartDraft,
-              });
-              return;
-            }
-            if (approvalMatches) set({ dirtyWorktreeApproval: null });
-            // The selected checkout is the default workspace. Only create a
-            // sibling worktree when the user explicitly chose the default
-            // branch as the isolated starting point; selecting a project must
-            // otherwise keep its checkout path stable.
+            // Route the starting point purely by the persisted chip. A plain
+            // send works in the current checkout by default with no prompt —
+            // even when it has uncommitted changes. Choosing "Default branch"
+            // forks a clean sibling worktree (leaving source changes untouched)
+            // without pausing. Deliberate branch changes still go through the
+            // explicit BranchPicker modal, not here.
             if (
               !plan.sourceIsManaged
-              && !approvalMatches
               && get().managedWorktreeBase === "default"
             ) {
               set({ worktreePreparing: true });
@@ -711,7 +671,6 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
         }),
       );
       nativeSession = null;
-      const deferredSessionStartDraft = get().deferredSessionStartDraft;
       set({
         session,
         snapshot: emptySnapshot(),
@@ -729,32 +688,9 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
         activeRemoteHost: remoteHost,
         activeProjectRoot: projectRoot,
         pendingManagedWorktreePath: null,
-        deferredSessionStartDraft: null,
         worktreePreparing: false,
         worktreeTransition: null,
       });
-      // Only an explicitly deferred first prompt may cross the ownership
-      // boundary after a dirty-checkout decision. A different draft can be a
-      // newer edit from another device (or an old New session draft); moving it
-      // here leaks that text into the new conversation. The equality check is
-      // the local CAS: if the New session draft changed while the decision was
-      // open, preserve it under New session and start with an empty composer.
-      if (
-        isLocal
-        && !isRemote
-        && !quickChat
-        && !specialistContext
-        && deferredSessionStartDraft
-        && deferredSessionStartDraft.owner === composerDraftOwner(get().auth?.user ?? null)
-        && loadComposerDraft(deferredSessionStartDraft.owner, null) === deferredSessionStartDraft.text
-      ) {
-        moveComposerDraft(
-          deferredSessionStartDraft.owner,
-          null,
-          session.id,
-          deferredSessionStartDraft.text,
-        );
-      }
     } catch (e) {
       // Brought up a tunnel but failed afterward → tear it back down.
       if (nativeSession) void bridge.closeSession?.(nativeSession.id);
@@ -814,9 +750,7 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
       activeRemote: null,
       activeRemoteHost: null,
       activeProjectRoot: null,
-      deferredSessionStartDraft: null,
       worktreeTransition: null,
-      dirtyWorktreeApproval: null,
       worktreePreparing: false,
       selectedConversationIds: new Set(),
     });
@@ -1046,7 +980,11 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
       // model starts it on that model again, not the current default.
       const collaboration_mode = openingMeta?.specialist?.kind === "scout"
         ? "default" as const
-        : get().collaborationMode;
+        : effectiveCollaborationMode(
+          get().collaborationMode,
+          get().collaborationModes,
+          id,
+        );
       // The approval level likewise comes from this chat's own override when it
       // has one, else the global default — so reopening a chat you'd set to
       // "Full access" restarts it there, not on whatever the composer happens

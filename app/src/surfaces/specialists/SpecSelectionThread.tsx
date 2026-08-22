@@ -178,7 +178,15 @@ export function SpecSelectionThread({
       }
       let prepared: { filename: string } | null | undefined;
       try {
-        prepared = await productModule().specialistWorkspace?.prepareDocument?.("spec", session.id);
+        // Selection discussions operate on the saved Spec artifact. A product
+        // that does not implement the preparation boundary must fail closed
+        // before dispatching a prompt; silently treating the document as
+        // local-only loses the artifact context and makes the UI appear stuck.
+        const prepareDocument = productModule().specialistWorkspace?.prepareDocument;
+        if (!prepareDocument) {
+          throw new Error("Spec document preparation is not configured");
+        }
+        prepared = await prepareDocument("spec", session.id);
       } catch {
         flashWarning("Could not load the saved spec. Try again.");
         onDraftChange(clean);

@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useSessionStore } from "./sessionStore";
 import type { CoreBridge } from "../core-bridge/bridge";
 import { emptySnapshot, type Session } from "../core-bridge/types";
-import { liveSessions, newLiveEntry, effectiveApprovalPolicy } from "./sessionStore.runtime";
+import { liveSessions, newLiveEntry, effectiveApprovalPolicy, effectiveCollaborationMode } from "./sessionStore.runtime";
 
 const session = {
   id: "sess-1",
@@ -39,6 +39,7 @@ beforeEach(() => {
     approvalPolicy: "auto",
     approvalPolicies: {},
     collaborationMode: "default",
+    collaborationModes: {},
     activeProvider: "local",
     auth: null,
     connecting: false,
@@ -81,11 +82,13 @@ describe("approval and collaboration mode", () => {
     expect(bridge.setMode).not.toHaveBeenCalled();
   });
 
-  it("syncs collaboration mode independently", () => {
+  it("syncs collaboration mode independently per chat", () => {
     const bridge = stubBridge();
     useSessionStore.setState({ bridge, session });
     useSessionStore.getState().setCollaborationMode("plan");
-    expect(useSessionStore.getState().collaborationMode).toBe("plan");
+    // Only THIS chat's override moved; the account-wide default is untouched.
+    expect(useSessionStore.getState().collaborationModes["sess-1"]).toBe("plan");
+    expect(useSessionStore.getState().collaborationMode).toBe("default");
     expect(bridge.setCollaborationMode).toHaveBeenCalledWith("sess-1", "plan");
   });
 
@@ -138,5 +141,44 @@ describe("per-chat approval isolation", () => {
     expect(bridge.setMode).toHaveBeenCalledTimes(1);
     expect(bridge.setMode).toHaveBeenCalledWith("sess-1", "full");
     expect(bridge.setMode).not.toHaveBeenCalledWith("sess-2", expect.anything());
+  });
+});
+
+describe("per-chat collaboration isolation", () => {
+  // Switching plan mode in one conversation must not leak into a sibling
+  // session. Before the fix a single global setting was the only mode and
+  // setCollaborationMode rewrote it for every chat — exactly the "planning
+  // travels to another session" complaint.
+
+  it("switching plan mode in one chat does not affect another's effective mode", () => {
+    const bridge = stubBridge();
+    // Two live local chats in the background pool.
+    liveSessions.set(session.id, newLiveEntry(session, { historyPrefix: null, remote: null, remoteHost: null, projectRoot: "/a" }));
+    liveSessions.set(sessionB.id, newLiveEntry(sessionB, { historyPrefix: null, remote: null, remoteHost: null, projectRoot: "/b" }));
+    useSessionStore.setState({ bridge, session });
+
+    // Focus chat A and put it into plan mode.
+    useSessionStore.getState().setCollaborationMode("plan");
+    expect(useSessionStore.getState().collaborationModes["sess-1"]).toBe("plan");
+
+    // Chat B still runs under the account default — its own override is
+    // untouched, and the host was never told to change B.
+    const state = useSessionStore.getState();
+    expect(state.collaborationModes["sess-2"]).toBeUndefined();
+    expect(effectiveCollaborationMode(state.collaborationMode, state.collaborationModes, "sess-2")).toBe("default");
+
+    // setCollaborationMode was called exactly once — for chat A only, never B.
+    expect(bridge.setCollaborationMode).toHaveBeenCalledTimes(1);
+    expect(bridge.setCollaborationMode).toHaveBeenCalledWith("sess-1", "plan");
+    expect(bridge.setCollaborationMode).not.toHaveBeenCalledWith("sess-2", expect.anything());
+  });
+
+  it("sets the account-wide default when no chat is open (start screen)", () => {
+    const bridge = stubBridge();
+    useSessionStore.setState({ bridge, session: null });
+    useSessionStore.getState().setCollaborationMode("plan");
+    expect(useSessionStore.getState().collaborationMode).toBe("plan");
+    expect(useSessionStore.getState().collaborationModes["sess-1"]).toBeUndefined();
+    expect(bridge.setCollaborationMode).not.toHaveBeenCalled();
   });
 });

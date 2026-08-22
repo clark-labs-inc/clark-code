@@ -189,3 +189,52 @@ export function saveCollaborationMode(mode: CollaborationMode, scope?: string | 
     /* ignore */
   }
 }
+
+const COLLABORATION_MODES_KEY = "agent-desktop:collaboration-modes";
+
+/** Only the two known modes are ever stored; anything else is dropped. */
+function normalizeCollaborationMode(value: unknown): CollaborationMode | undefined {
+  return value === "default" || value === "plan" ? value : undefined;
+}
+
+/** Per-conversation collaboration-mode overrides, keyed by conversation id. A
+ *  chat with no entry falls back to the account's global default
+ *  (`collaborationMode`). Mirrors `approvalPolicies`: each chat keeps its own
+ *  mode so switching plan mode in one conversation never edits what another
+ *  runs. Persisted here rather than the single global key so opening a sibling
+ *  chat never inherits the focused chat's mode. */
+export function loadCollaborationModes(scope?: string | null): Record<string, CollaborationMode> {
+  try {
+    const key = accountScopedKey(COLLABORATION_MODES_KEY, scope);
+    const raw = localStorage.getItem(key);
+    if (!raw) return {};
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    const modes: Record<string, CollaborationMode> = {};
+    for (const [id, value] of Object.entries(parsed as Record<string, unknown>)) {
+      const mode = normalizeCollaborationMode(value);
+      if (mode) modes[id] = mode;
+    }
+    const normalized = JSON.stringify(modes);
+    if (normalized !== raw) localStorage.setItem(key, normalized);
+    return modes;
+  } catch {
+    return {};
+  }
+}
+
+export function saveCollaborationModes(
+  modes: Record<string, CollaborationMode>,
+  scope?: string | null,
+): void {
+  try {
+    const cleaned: Record<string, CollaborationMode> = {};
+    for (const [id, value] of Object.entries(modes)) {
+      const mode = normalizeCollaborationMode(value);
+      if (mode) cleaned[id] = mode;
+    }
+    localStorage.setItem(accountScopedKey(COLLABORATION_MODES_KEY, scope), JSON.stringify(cleaned));
+  } catch {
+    /* Non-fatal, mirroring saveCollaborationMode. */
+  }
+}

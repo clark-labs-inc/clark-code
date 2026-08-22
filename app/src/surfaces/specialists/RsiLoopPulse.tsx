@@ -313,7 +313,7 @@ export function RsiLoopPulseCard({
         <div className="mb-3 flex items-center justify-between gap-3">
           <div>
             <div className="text-xs font-semibold text-ink">Illustrative example</div>
-            <div className="text-xs text-ink-faint">Demo data · no code has changed</div>
+            <div data-qa="specialist-example-label" className="text-xs text-ink-faint">Demo data · no code has changed</div>
           </div>
           {onUsePrompt && (
             <button

@@ -259,9 +259,17 @@ try {
     toastType = "warning",
     configure,
     reset,
+    control,
   }) => {
     await setProbeMode(mode);
     await configure?.();
+    if (control) {
+      check(
+        await page.evaluate((key) => localStorage.getItem(key), productControlKey)
+          === JSON.stringify(control),
+        "Spec product preparation control was not installed before the rejection probe",
+      );
+    }
     const promptsBefore = await promptCallCount();
     await selectionComposer.fill(question);
     await selectionSend.click();
@@ -297,6 +305,7 @@ try {
     question: "Preserve this draft when the saved document cannot load.",
     notice: "Could not load the saved spec. Try again.",
     screenshot: screenshots.documentFailure,
+    control: { prepareDocument: "fail" },
     configure: () => page.evaluate((key) => {
       localStorage.setItem(key, JSON.stringify({ prepareDocument: "fail" }));
     }, productControlKey),

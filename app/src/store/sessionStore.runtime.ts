@@ -8,7 +8,6 @@ import {
   type PromptReceipt,
   type ProjectWorktreeTransitionPlan,
   type SessionOptions,
-  type WorktreeChangeSummary,
 } from "../core-bridge/bridge";
 import { syncFanOut, resetFanOut } from "./fanOutStore";
 import {
@@ -80,9 +79,11 @@ import {
   loadApprovalPolicy,
   loadApprovalPolicies,
   loadCollaborationMode,
+  loadCollaborationModes,
   saveApprovalPolicy,
   saveApprovalPolicies,
   saveCollaborationMode,
+  saveCollaborationModes,
   pickAllowOption,
   wouldAutoApprove,
   nextApprovalPolicy,
@@ -135,11 +136,11 @@ export {
   conversationProjectRoot, copyText, deriveTitle, effectiveModelSettings, emptySnapshot,
   fileToAttachment, getBridge, hasContent, hostReady, installStagedUpdate, prepareCloudDurability,
   liveProjectRoot, loadApprovalPolicy, loadApprovalPolicies, loadAuthSession, loadBrowserEnabled, loadChatModels,
-  loadCollaborationMode, loadLocalSettings, loadMemoriesEnabled, loadOrchestrationEnabled, loadOutputStyle, loadRecentProjects,
+  loadCollaborationMode, loadCollaborationModes, loadLocalSettings, loadMemoriesEnabled, loadOrchestrationEnabled, loadOutputStyle, loadRecentProjects,
   loadSshHosts, localConnectConfig, localSettingsReady, minLoadDuration, nextApprovalPolicy, normalizeCodingModel, normalizeReasoningEffort,
   markAuthReconnectRequired, notify, onCloudHistoryConflict, onCloudHistoryWarning, onSettingsMenuRequested, onUpdateMenuRequested, pickAllowOption,
   pickFolder, provisionCodeKey, refreshAuthSession, refreshStagedUpdate, relaunchApp, releaseSnapshotCheckpoints, remoteTarget,
-  repositoryFingerprintForRoot, resetCloudHistory, resetFanOut, restorePendingAttachments, revokeAttachmentPreviews, saveApprovalPolicy, saveApprovalPolicies, saveBrowserEnabled, saveChatModels, saveCollaborationMode,
+  repositoryFingerprintForRoot, resetCloudHistory, resetFanOut, restorePendingAttachments, revokeAttachmentPreviews, saveApprovalPolicy, saveApprovalPolicies, saveBrowserEnabled, saveChatModels, saveCollaborationMode, saveCollaborationModes,
   saveLocalSettings, saveMemoriesEnabled, saveOrchestrationEnabled, saveOutputStyle, scheduleCloudPut, settleRuns,
   signInWithGoogle, snapshotBeforeTimelineItem, syncFanOut, toUpload,
   updateDrainBlockerCount, wouldAutoApprove,
@@ -423,27 +424,10 @@ export interface SessionState {
   localSettings: LocalAgentSettings;
   /** Preferred immutable base for newly created managed worktrees. */
   managedWorktreeBase: ManagedWorktreeBase;
-  /** A dirty-source isolation choice awaiting explicit user confirmation. */
+  /** A clean, isolated worktree awaiting the user's deliberate branch choice. */
   worktreeTransition: ProjectWorktreeTransitionPlan | null;
-  /** One explicit "keep working here" acknowledgement for the next start.
-   * It is bound to the observed checkout state and consumed once, so a
-   * folder/branch/host change cannot silently reuse the permission. */
-  dirtyWorktreeApproval: {
-    sourceRoot: string;
-    sourceBranch?: string | null;
-    sourceRevision: string | null;
-    sourceChanges: WorktreeChangeSummary;
-  } | null;
   /** A managed checkout already created for a start that can be retried. */
   pendingManagedWorktreePath: string | null;
-  /** The exact first prompt whose session start paused at the dirty-checkout
-   * decision. This is the only draft allowed to cross from the New session
-   * composer into the eventually created conversation; an unrelated or newer
-   * draft must remain owned by New session. */
-  deferredSessionStartDraft: {
-    owner: string;
-    text: string;
-  } | null;
   /** True while the host prepares a managed checkout for the next session. */
   worktreePreparing: boolean;
   /** Per-conversation model + reasoning-effort settings, keyed by conversation
@@ -461,6 +445,10 @@ export interface SessionState {
   projectMode: "local" | "remote";
   /** The saved SSH host selected for a remote session (id into sshHosts). */
   selectedHostId: string | null;
+  /** Bumped whenever the persisted SSH host list changes (remote folder picked,
+   *  host saved/edited) so UI reading `startBlockedReason()` — which re-reads
+   *  localStorage — re-evaluates its blocked state. */
+  sshHostsRevision: number;
   /** The native worker attachment for the active session (null when local). */
   activeRemote: RemoteInfo | null;
   /** The SSH destination of the active remote session, for the history badge. */
@@ -495,6 +483,12 @@ export interface SessionState {
   approvalPolicy: ApprovalPolicy;
   /** Read-only planning is independent from action approval policy. */
   collaborationMode: CollaborationMode;
+  /** Per-conversation collaboration-mode overrides, keyed by conversation id.
+   *  A chat with no entry falls back to the account's global `collaborationMode`
+   *  default. Mirrors `approvalPolicies`: each chat keeps its own mode so
+   *  switching plan mode in one conversation never edits what another runs.
+   *  Persisted to localStorage (the cloud stores transcripts, not prefs). */
+  collaborationModes: Record<string, CollaborationMode>;
   /** The agent's reply tone/persona for this session — see `lib/outputStyle.ts`. */
   outputStyle: string;
   /** Whether the in-chat terminal drawer is open. */
@@ -541,6 +535,9 @@ export interface SessionState {
   setManagedWorktreeBase: (base: ManagedWorktreeBase) => void;
   setProjectMode: (mode: "local" | "remote") => void;
   setSelectedHostId: (id: string | null) => void;
+  /** Signal that the persisted SSH host list changed (a remote folder was set
+   *  or a host was saved), so `startBlockedReason` re-evaluates. */
+  bumpSshHostsRevision: () => void;
   setProjectFolder: (path: string) => void;
   /** Open the native folder picker and return the selected path after it has
    *  been committed to account-scoped project state. */
@@ -795,6 +792,18 @@ export function effectiveApprovalPolicy(
 ): ApprovalPolicy {
   if (!id) return globalDefault;
   return approvalPolicies[id] ?? globalDefault;
+}
+
+/** The collaboration mode a conversation actually runs with: its own override
+ *  when it has one, otherwise the account's global default. Null when there is
+ *  no open chat — the start screen uses the global default directly. */
+export function effectiveCollaborationMode(
+  globalDefault: CollaborationMode,
+  collaborationModes: Record<string, CollaborationMode>,
+  id: string | null | undefined,
+): CollaborationMode {
+  if (!id) return globalDefault;
+  return collaborationModes[id] ?? globalDefault;
 }
 
 /** Pin a chat to its current approval policy the first time it goes live, so a

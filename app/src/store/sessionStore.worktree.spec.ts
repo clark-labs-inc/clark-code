@@ -130,7 +130,6 @@ beforeEach(() => {
     managedWorktreeBase: "current",
     worktreeTransition: null,
     pendingManagedWorktreePath: null,
-    deferredSessionStartDraft: null,
     worktreePreparing: false,
   });
 });
@@ -171,7 +170,7 @@ describe("managed worktree session journeys", () => {
     });
   });
 
-  it("requires an explicit dirty-source preservation choice before creating anything", async () => {
+  it("works in the dirty current checkout without prompting", async () => {
     const bridge = bridgeFor(plan({
       sourceChanges: { changedFiles: 2, untrackedFiles: 1, conflictedFiles: 0 },
       preservation: "changes_remain_in_source",
@@ -181,42 +180,7 @@ describe("managed worktree session journeys", () => {
 
     await useSessionStore.getState().startSession();
 
-    expect(useSessionStore.getState().worktreeTransition?.requiresConfirmation).toBe(true);
-    expect(vi.mocked(bridge.createManagedWorktree)).not.toHaveBeenCalled();
-    expect(vi.mocked(bridge.openSession)).not.toHaveBeenCalled();
-
-    useSessionStore.getState().setManagedWorktreeBase("default");
-    await useSessionStore.getState().confirmManagedWorktreeStart();
-
-    expect(vi.mocked(bridge.createManagedWorktree)).toHaveBeenCalledWith(sourceRoot, {
-      base: "default",
-      targetBranch: null,
-    });
-    expect(vi.mocked(bridge.openSession).mock.calls[0]?.[2]).toMatchObject({
-      kind: "new",
-      options: { cwd: managedRoot },
-    });
-    expect(useSessionStore.getState().notice).toContain("Started an isolated chat from Default branch (origin/main)");
-    expect(useSessionStore.getState().notice).toContain("source changes remain in /tmp/project");
-  });
-
-  it("continues the interrupted start immediately when the user chooses this checkout", async () => {
-    const bridge = bridgeFor(plan({
-      sourceChanges: { changedFiles: 1, untrackedFiles: 1, conflictedFiles: 0 },
-      preservation: "changes_remain_in_source",
-      requiresConfirmation: true,
-    }));
-    useSessionStore.setState({ bridge, providers: await bridge.listProviders() });
-
-    await useSessionStore.getState().startSession();
-    expect(useSessionStore.getState().worktreeTransition).not.toBeNull();
-
-    useSessionStore.getState().dismissManagedWorktreeStart();
-    expect(useSessionStore.getState().dirtyWorktreeApproval).toMatchObject({ sourceRoot });
-    await vi.waitFor(() => expect(vi.mocked(bridge.openSession)).toHaveBeenCalledTimes(1));
-
     expect(useSessionStore.getState().worktreeTransition).toBeNull();
-    expect(useSessionStore.getState().dirtyWorktreeApproval).toBeNull();
     expect(vi.mocked(bridge.createManagedWorktree)).not.toHaveBeenCalled();
     expect(vi.mocked(bridge.openSession).mock.calls[0]?.[2]).toMatchObject({
       kind: "new",
@@ -224,7 +188,31 @@ describe("managed worktree session journeys", () => {
     });
   });
 
-  it("starts in an unborn checkout after acknowledging its untracked files", async () => {
+  it("auto-forks a clean worktree from the default branch on a dirty checkout", async () => {
+    const bridge = bridgeFor(plan({
+      sourceChanges: { changedFiles: 1, untrackedFiles: 1, conflictedFiles: 0 },
+      preservation: "changes_remain_in_source",
+      requiresConfirmation: true,
+    }));
+    useSessionStore.setState({
+      bridge,
+      providers: await bridge.listProviders(),
+      managedWorktreeBase: "default",
+    });
+
+    await useSessionStore.getState().startSession();
+
+    expect(useSessionStore.getState().worktreeTransition).toBeNull();
+    expect(vi.mocked(bridge.createManagedWorktree)).toHaveBeenCalledWith(sourceRoot, {
+      base: "default",
+    });
+    expect(vi.mocked(bridge.openSession).mock.calls[0]?.[2]).toMatchObject({
+      kind: "new",
+      options: { cwd: managedRoot },
+    });
+  });
+
+  it("starts directly in an unborn checkout with untracked files", async () => {
     const bridge = bridgeFor(plan({
       sourceRevision: null,
       sourceChanges: { changedFiles: 0, untrackedFiles: 26, conflictedFiles: 0 },
@@ -235,11 +223,8 @@ describe("managed worktree session journeys", () => {
     useSessionStore.setState({ bridge, providers: await bridge.listProviders() });
 
     await useSessionStore.getState().startSession();
-    expect(useSessionStore.getState().worktreeTransition?.sourceRevision).toBeNull();
 
-    useSessionStore.getState().dismissManagedWorktreeStart();
-    await vi.waitFor(() => expect(vi.mocked(bridge.openSession)).toHaveBeenCalledTimes(1));
-
+    expect(useSessionStore.getState().worktreeTransition).toBeNull();
     expect(vi.mocked(bridge.createManagedWorktree)).not.toHaveBeenCalled();
     expect(vi.mocked(bridge.openSession).mock.calls[0]?.[2]).toMatchObject({
       kind: "new",
@@ -356,7 +341,7 @@ describe("managed worktree session journeys", () => {
     expect(useSessionStore.getState().pendingManagedWorktreePath).toBeNull();
   });
 
-  it("carries the unsent draft into the session composer after a new-checkout choice", async () => {
+  it("starts immediately in the dirty checkout with a submitted draft", async () => {
     const bridge = bridgeFor(plan({
       sourceChanges: { changedFiles: 2, untrackedFiles: 1, conflictedFiles: 0 },
       preservation: "changes_remain_in_source",
@@ -366,17 +351,17 @@ describe("managed worktree session journeys", () => {
     saveComposerDraft(draftOwner, null, "fix the login bug");
 
     await useSessionStore.getState().startSession({ submittedDraft: "fix the login bug" });
-    expect(useSessionStore.getState().worktreeTransition?.requiresConfirmation).toBe(true);
 
-    await useSessionStore.getState().confirmManagedWorktreeStart();
-
-    const startedId = useSessionStore.getState().session?.id;
-    expect(startedId).toBe("managed-chat");
-    expect(loadComposerDraft(draftOwner, startedId!)).toBe("fix the login bug");
-    expect(loadComposerDraft(draftOwner, null)).toBe("");
+    expect(useSessionStore.getState().worktreeTransition).toBeNull();
+    expect(useSessionStore.getState().session?.id).toBe("managed-chat");
+    expect(vi.mocked(bridge.createManagedWorktree)).not.toHaveBeenCalled();
+    expect(vi.mocked(bridge.openSession).mock.calls[0]?.[2]).toMatchObject({
+      kind: "new",
+      options: { cwd: sourceRoot },
+    });
   });
 
-  it("keeps the unsent draft after choosing to keep working in this checkout", async () => {
+  it("keeps the New session draft untouched on a dirty direct start", async () => {
     const bridge = bridgeFor(plan({
       sourceChanges: { changedFiles: 1, untrackedFiles: 1, conflictedFiles: 0 },
       preservation: "changes_remain_in_source",
@@ -386,15 +371,11 @@ describe("managed worktree session journeys", () => {
     saveComposerDraft(draftOwner, null, "refactor the checkout flow");
 
     await useSessionStore.getState().startSession({ submittedDraft: "refactor the checkout flow" });
-    expect(useSessionStore.getState().worktreeTransition).not.toBeNull();
 
-    useSessionStore.getState().dismissManagedWorktreeStart();
-    await vi.waitFor(() => {
-      const startedId = useSessionStore.getState().session?.id;
-      if (!startedId) throw new Error("session never started");
-      expect(loadComposerDraft(draftOwner, startedId)).toBe("refactor the checkout flow");
-      expect(loadComposerDraft(draftOwner, null)).toBe("");
-    });
+    const startedId = useSessionStore.getState().session?.id;
+    expect(startedId).toBe("managed-chat");
+    expect(loadComposerDraft(draftOwner, startedId!)).toBe("");
+    expect(loadComposerDraft(draftOwner, null)).toBe("refactor the checkout flow");
   });
 
   it("keeps an unrelated New session draft out of a normally created conversation", async () => {

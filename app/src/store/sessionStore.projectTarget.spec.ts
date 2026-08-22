@@ -120,3 +120,36 @@ describe("new-session target follows the opened conversation", () => {
     expect(loadSshHosts(null)[0]?.remoteRoot).toBe("/home/ubuntu/datasets");
   });
 });
+
+describe("remote folder pick unblocks a blocked start (reactivity)", () => {
+  it("re-evaluates startBlockedReason once hosts are persisted and signalled", () => {
+    saveSshHosts([{
+      id: "gpu",
+      label: "GPU box",
+      host: "ubuntu@gpu",
+      remoteRoot: "",
+    }], null);
+    useSessionStore.setState({
+      projectMode: "remote",
+      selectedHostId: "gpu",
+    });
+
+    // No remote folder yet -> the composer is blocked.
+    expect(useSessionStore.getState().startBlockedReason())
+      .toContain("Choose a remote folder before starting.");
+
+    // Simulate EnvironmentPicker persisting a chosen remote folder to
+    // localStorage, then signalling the store (the fix); the selectors that
+    // read startBlockedReason re-evaluate and the blocker clears.
+    saveSshHosts([{
+      id: "gpu",
+      label: "GPU box",
+      host: "ubuntu@gpu",
+      remoteRoot: "/home/ubuntu/datasets",
+    }], null);
+    useSessionStore.getState().bumpSshHostsRevision();
+
+    expect(useSessionStore.getState().startBlockedReason()).toBeNull();
+    expect(useSessionStore.getState().sshHostsRevision).toBeGreaterThan(0);
+  });
+});
