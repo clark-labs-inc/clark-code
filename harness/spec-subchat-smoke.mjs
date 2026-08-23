@@ -1,5 +1,4 @@
 import { spawn, execFileSync } from "node:child_process";
-import { once } from "node:events";
 import { createServer } from "node:net";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -7,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { setTimeout as sleep } from "node:timers/promises";
 
 import { launch } from "./launch.mjs";
+import { stopProcessTree } from "./process-tree.mjs";
 
 const repoDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const productEntry = path.join(repoDir, "harness", "fixtures", "spec-product-entry.ts");
@@ -31,40 +31,6 @@ function reservePort() {
 
 function check(condition, message) {
   if (!condition) throw new Error(message);
-}
-
-async function stopDevServer(child) {
-  if (!child || child.exitCode !== null) return;
-  try {
-    if (process.platform === "win32") {
-      execFileSync("taskkill", ["/pid", String(child.pid), "/t", "/f"], {
-        stdio: "ignore",
-      });
-    } else if (child.pid) {
-      // pnpm launches Vite as a child. Kill the detached process group so a
-      // failed browser assertion cannot leave Vite holding the CI step open.
-      process.kill(-child.pid, "SIGTERM");
-    }
-  } catch {
-    // The child may have exited between the status check and the tree kill.
-  }
-  await Promise.race([
-    once(child, "exit"),
-    sleep(5_000),
-  ]);
-  if (child.exitCode === null) {
-    try {
-      if (process.platform === "win32") {
-        execFileSync("taskkill", ["/pid", String(child.pid), "/t", "/f"], {
-          stdio: "ignore",
-        });
-      } else if (child.pid) {
-        process.kill(-child.pid, "SIGKILL");
-      }
-    } catch {
-      // The process was already reaped.
-    }
-  }
 }
 
 const port = await reservePort();
@@ -546,5 +512,5 @@ try {
   process.exitCode = 1;
 } finally {
   await browser?.close();
-  await stopDevServer(dev);
+  await stopProcessTree(dev);
 }

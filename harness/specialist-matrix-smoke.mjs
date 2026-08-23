@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { setTimeout as sleep } from "node:timers/promises";
 
 import { launch } from "./launch.mjs";
+import { stopProcessTree } from "./process-tree.mjs";
 
 const repoDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const fixtureEntry = path.join(repoDir, "harness", "fixtures", "specialist-product-entry.ts");
@@ -98,6 +99,7 @@ const dev = spawn(
       VITE_FORCE_MOCK_BRIDGE: "1",
       VITE_PRODUCT_DEV_AUTH: "1",
     },
+    detached: process.platform !== "win32",
     stdio: ["ignore", "pipe", "pipe"],
   },
 );
@@ -465,5 +467,5 @@ try {
   process.exitCode = 1;
 } finally {
   await browser?.close();
-  dev.kill("SIGTERM");
+  await stopProcessTree(dev);
 }
