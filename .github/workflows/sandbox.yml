@@ -5,6 +5,8 @@ env:
   CARGO_TARGET_AARCH64_PC_WINDOWS_MSVC_RUSTFLAGS: "-C target-feature=+crt-static"
 
 on:
+  push:
+    branches: [main]
   pull_request:
     paths:
       - "Cargo.toml"
