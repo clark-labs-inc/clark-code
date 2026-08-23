@@ -5,7 +5,6 @@ import {
   ChevronDown,
   Clock3,
   Download,
-  FileText,
   ListTree,
   Share2,
   Sparkles,
@@ -20,6 +19,8 @@ import {
   specFilename,
 } from "../../lib/specDocuments";
 import { MarkdownContent, MARKDOWN_CLASSES } from "../MarkdownContent";
+import { SpecDownloadMenu, SpecPromptHistoryMenu } from "./SpecWorkspaceHeaderMenus";
+import { SpecLiveDraft } from "./SpecLiveDraft";
 import { Composer } from "../Composer";
 import { PermissionGate } from "../PermissionGate";
 import { cn } from "../../lib/cn";
@@ -33,7 +34,8 @@ import {
 } from "../../lib/specPromptHistory";
 import { specDocumentDiff, specDocumentInteraction } from "../../lib/specDiff";
 import { specGuidance } from "../../lib/specGuidance";
-import { currentSpecToolCalls } from "../../lib/specProgress";
+import { currentSpecToolCalls, specLiveStatus, type SpecLiveStatus } from "../../lib/specProgress";
+import { completedDocumentWrites, specLiveDraft } from "../../lib/specLiveDraft";
 import { specSelectionConversations } from "../../lib/specSelectionThreads";
 import { accessibleMotion, RISE } from "../../lib/motion";
 import { SpecDocumentDiff, type LiveSpecDocumentDiff } from "./SpecDocumentDiff";
@@ -64,6 +66,7 @@ export function SpecWorkspace() {
   const renameConversation = useSessionStore((state) => state.renameConversation);
   const documentRef = useRef<HTMLDivElement>(null);
   const loadedArtifactUriRef = useRef<string | null>(null);
+  const streamedFirstDraftRef = useRef(false);
   const [markdown, setMarkdown] = useState(() => initialSpecMarkdown(title));
   const [documentLoadState, setDocumentLoadState] = useState<"idle" | "loading" | "ready" | "unavailable">("idle");
   const markdownRef = useRef(markdown);
@@ -92,10 +95,27 @@ export function SpecWorkspace() {
   const hasSubmittedPrompt = promptHistory.length > 0 || snapshot.timeline.some(
     (item) => item.item === "message" && item.role === "user",
   );
-  const visibleActivity = artifact && !hasDocument && documentLoadState === "loading"
-    ? { busy: true, label: "Opening your saved spec…" }
-    : activity;
+  const opening = Boolean(artifact) && !hasDocument && documentLoadState === "loading";
+  // Only `busy` (and progress/steps, via spread) are consumed from this; the
+  // "Opening your saved spec…" copy lives once, on `runStatus` below.
+  const visibleActivity = opening ? { ...activity, busy: true } : activity;
   const runCalls = useMemo(() => currentSpecToolCalls(snapshot), [snapshot]);
+  const liveStatus = useMemo(() => specLiveStatus(snapshot, runCalls), [snapshot, runCalls]);
+  const liveDraft = useMemo(() => specLiveDraft(runCalls), [runCalls]);
+  const documentWrites = useMemo(() => completedDocumentWrites(snapshot), [snapshot]);
+
+  // This component is not keyed by conversation, so refs outlive a switch. A
+  // draft streamed in one conversation must not suppress another's reveal.
+  useEffect(() => {
+    streamedFirstDraftRef.current = false;
+  }, [session?.id]);
+  useEffect(() => {
+    if (liveDraft?.kind === "document") streamedFirstDraftRef.current = true;
+  }, [liveDraft]);
+  // The load of a saved document is not run activity, so it overrides the ladder.
+  const runStatus: SpecLiveStatus = opening
+    ? { label: "Opening your saved spec…", source: "starting" }
+    : liveStatus;
   const selectionConversations = useMemo(
     () => specSelectionConversations(snapshot.timeline),
     [snapshot.timeline],
@@ -123,6 +143,13 @@ export function SpecWorkspace() {
     markdownRef.current = text;
     setMarkdown(text);
     if (!animateChange) return;
+    // The all-adds diff of an empty page was this surface's reveal before the
+    // draft streamed itself. When the reader has just watched the document being
+    // typed, replaying it as a green-diff animation shows the same content a
+    // second time. Rewrites of an existing document keep the animation — the
+    // draft panel does not render over a live document, so the diff is still
+    // the only view of what changed.
+    if (!previous.trim() && streamedFirstDraftRef.current) return;
     const diff = specDocumentDiff(previous, text);
     if (!diff) return;
     revisionRef.current += 1;
@@ -159,17 +186,34 @@ export function SpecWorkspace() {
     } else {
       setDocumentLoadState(markdownRef.current.trim() ? "ready" : "loading");
     }
+    // Coalesces the 350 ms poll against a slow read. Deliberately per-instance:
+    // a re-run means something changed that warrants a fresh read, and `alive`
+    // already guarantees only the newest instance applies its result. Sharing
+    // this across instances would make a re-run skip its own read and could
+    // leave the document blank with nothing left to re-trigger it.
     let reading = false;
     const refresh = async () => {
       if (reading) return;
       reading = true;
-      const text = await readDocText(artifact.uri);
-      reading = false;
+      let text: string | null = null;
+      try {
+        text = await readDocText(artifact.uri);
+      } finally {
+        // `finally`, because a rejected read used to leave the flag latched and
+        // silently wedge every later poll tick for this instance.
+        reading = false;
+      }
       if (!alive) return;
       if (text?.trim()) {
         applyDocumentText(text, activity.busy);
         setDocumentLoadState("ready");
-      } else if (!activity.busy) {
+        return;
+      }
+      // An empty read is only evidence of a missing document when there is
+      // nothing already on screen. Otherwise it is a transient — a write in
+      // flight, a truncated read — and must not replace a readable spec with an
+      // error state.
+      if (!activity.busy && !markdownRef.current.trim()) {
         setDocumentLoadState("unavailable");
       }
     };
@@ -179,7 +223,12 @@ export function SpecWorkspace() {
       alive = false;
       if (poll !== null) window.clearInterval(poll);
     };
-  }, [activity.busy, applyDocumentText, artifact?.id, artifact?.uri, snapshot.timeline.length, title]);
+    // `documentWrites` replaces `snapshot.timeline.length`: it advances when a
+    // file actually lands, whereas timeline growth is mostly announcements of
+    // work that has written nothing yet — reading then could only return the
+    // previous contents, and at the moment a run ended it could read empty and
+    // flip a good document to "unavailable".
+  }, [activity.busy, applyDocumentText, artifact?.id, artifact?.uri, documentWrites, title]);
 
   useEffect(() => {
     if (!documentDiff) return;
@@ -291,39 +340,13 @@ export function SpecWorkspace() {
               <Clock3 className="size-4" /> <span className="hidden lg:inline [[data-text-size='150']_&]:hidden [[data-text-size='175']_&]:hidden [[data-text-size='200']_&]:hidden">Prompts</span>
             </button>
             {historyOpen && (
-              <div
-                data-qa="spec-prompt-history"
-                className="popover-surface absolute right-0 top-full z-30 mt-1 w-80 max-w-[calc(100vw-2rem)] rounded-xl bg-bg-elevated p-2 shadow-lifted ring-1 ring-border-subtle"
-              >
-                <div className="flex items-center justify-between px-2 py-1.5">
-                  <p className="text-xs font-semibold text-ink">Recent prompts</p>
-                  <span className="text-xs text-ink-faint">Last {promptHistory.length}</span>
-                </div>
-                {promptHistory.length === 0 ? (
-                  <p className="px-2 py-3 text-xs leading-5 text-ink-faint">
-                    Your latest prompts will stay here for context.
-                  </p>
-                ) : (
-                  <ol className="max-h-72 space-y-1 overflow-y-auto">
-                    {[...promptHistory].reverse().map((prompt, index) => (
-                      <li key={`${prompt.submittedAt}:${prompt.text}`}>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setComposerPrefill(prompt.text);
-                            setHistoryOpen(false);
-                          }}
-                          title="Put this prompt back in the composer"
-                          className="w-full rounded-lg px-2.5 py-2 text-left text-xs leading-5 text-ink-secondary hover:bg-bg-hover hover:text-ink"
-                        >
-                          <span className="mr-2 text-ink-faint">{promptHistory.length - index}.</span>
-                          {prompt.text}
-                        </button>
-                      </li>
-                    ))}
-                  </ol>
-                )}
-              </div>
+              <SpecPromptHistoryMenu
+                prompts={promptHistory}
+                onPick={(text) => {
+                  setComposerPrefill(text);
+                  setHistoryOpen(false);
+                }}
+              />
             )}
           </div>
           <div className="relative">
@@ -338,22 +361,10 @@ export function SpecWorkspace() {
               <Download className="size-4" /> <span className="hidden lg:inline [[data-text-size='150']_&]:hidden [[data-text-size='175']_&]:hidden [[data-text-size='200']_&]:hidden">Download</span> <ChevronDown className="hidden size-3 lg:block [[data-text-size='150']_&]:hidden [[data-text-size='175']_&]:hidden [[data-text-size='200']_&]:hidden" />
             </button>
             {downloadOpen && (
-              <div className="popover-surface absolute right-0 top-full z-30 mt-1 w-52 rounded-xl bg-bg-elevated p-1.5 shadow-lifted ring-1 ring-border-subtle">
-                <button
-                  type="button"
-                  onClick={() => void downloadDocument("md")}
-                  className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs text-ink hover:bg-bg-hover"
-                >
-                  <FileText className="size-4 text-ink-muted" /> {specFilename(documentTitle, "md")}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void downloadDocument("pdf")}
-                  className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs text-ink hover:bg-bg-hover"
-                >
-                  <FileText className="size-4 text-ink-muted" /> {specFilename(documentTitle, "pdf")}
-                </button>
-              </div>
+              <SpecDownloadMenu
+                documentTitle={documentTitle}
+                onDownload={(format) => void downloadDocument(format)}
+              />
             )}
           </div>
           <button
@@ -394,7 +405,21 @@ export function SpecWorkspace() {
         <main className="relative min-h-0 min-w-0 flex-1 overflow-y-auto px-5 pb-28 pt-6 sm:px-7">
           {hasDocument ? (
             <>
-              {activity.busy && <SpecRunProgress activity={activity} calls={runCalls} compact />}
+              {activity.busy && (
+                <SpecRunProgress
+                  status={runStatus}
+                  activity={activity}
+                  calls={runCalls}
+                  compact
+                />
+              )}
+              {/* Only a fragment being written earns a panel here. A full
+                  rewrite is already named by the progress card, and stacking the
+                  incoming document above the current one would show two specs at
+                  once — the settled diff animation covers that handoff. */}
+              {liveDraft?.kind === "revision" && (
+                <SpecLiveDraft draft={liveDraft} className="mb-5" />
+              )}
               <div
                 ref={documentRef}
                 data-qa="spec-document"
@@ -444,9 +469,24 @@ export function SpecWorkspace() {
                 </AnimatePresence>
               </div>
             </>
+          ) : liveDraft ? (
+            // The first draft, arriving as it is written. This is the stretch
+            // that used to be a progress card over an empty page.
+            <>
+              {activity.busy && (
+                <SpecRunProgress
+                  status={runStatus}
+                  activity={activity}
+                  calls={runCalls}
+                  compact
+                />
+              )}
+              <SpecLiveDraft draft={liveDraft} />
+            </>
           ) : (
             <SpecWorkingState
               activity={visibleActivity}
+              status={runStatus}
               calls={runCalls}
               hasSubmittedPrompt={hasSubmittedPrompt}
               documentUnavailable={documentLoadState === "unavailable"}

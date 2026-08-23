@@ -97,13 +97,25 @@ fn parse_numstat(
     out
 }
 
+/// One consistent view of "what changed since the baseline": the snapshotted
+/// working-tree object plus every file that differs from `base` in it.
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct ChangesSummary {
+    /// The tree object the summary was computed against. Per-file diff calls
+    /// pass this back so every diff describes the same instant as the listed
+    /// stats — while a run is streaming edits, re-snapshotting per click both
+    /// re-hashes the whole checkout and shows a diff the summary never listed.
+    pub tree: String,
+    pub files: Vec<ChangedFile>,
+}
+
 /// Every file that differs between the baseline checkpoint and the current
 /// working tree, with per-file +/- line counts.
 pub async fn changes_summary(
     exec: &dyn Executor,
     root: &Path,
     base: &str,
-) -> Result<Vec<ChangedFile>, String> {
+) -> Result<ChangesSummary, String> {
     if !crate::checkpoint::is_git_repo(exec, root).await {
         return Err("not a git repository".into());
     }
@@ -128,30 +140,45 @@ pub async fn changes_summary(
         tree.as_str(),
     ];
     let (numstat, name_status) = tokio::join!(
-        crate::git_metadata::required(exec, root, &numstat_args),
-        crate::git_metadata::required(exec, root, &name_status_args),
+        crate::git_metadata::required_tree_op(exec, root, &numstat_args),
+        crate::git_metadata::required_tree_op(exec, root, &name_status_args),
     );
     let numstat = numstat?;
     let name_status = name_status?;
 
-    Ok(parse_numstat(&numstat, &parse_name_status(&name_status)))
+    Ok(ChangesSummary {
+        files: parse_numstat(&numstat, &parse_name_status(&name_status)),
+        tree,
+    })
 }
 
 /// Unified diff of one file against the baseline.
+///
+/// `tree` is the working-tree object a preceding [`changes_summary`] returned;
+/// passing it keeps the diff consistent with that summary and skips re-hashing
+/// the checkout. `None` snapshots fresh. A caller holding a stale `tree` (its
+/// object pruned by aggressive gc) gets an error and should retry with `None`.
 pub async fn changes_diff(
     exec: &dyn Executor,
     root: &Path,
     base: &str,
+    tree: Option<&str>,
     path: &str,
     previous_path: Option<&str>,
 ) -> Result<String, String> {
-    let tree = crate::checkpoint::working_tree(exec, root).await?;
+    let tree = match tree {
+        Some(tree) if tree.len() <= 64 && tree.bytes().all(|b| b.is_ascii_hexdigit()) => {
+            tree.to_string()
+        }
+        Some(_) => return Err("invalid tree id".into()),
+        None => crate::checkpoint::working_tree(exec, root).await?,
+    };
     let mut args = vec!["diff", "--find-renames", base, &tree, "--"];
     if let Some(previous) = previous_path.filter(|previous| *previous != path) {
         args.push(previous);
     }
     args.push(path);
-    crate::git_metadata::required(exec, root, &args).await
+    crate::git_metadata::required_tree_op(exec, root, &args).await
 }
 
 fn validate_path(root: &Path, path: &str) -> Result<(), String> {
@@ -194,7 +221,7 @@ pub async fn changes_revert(
     validate_path(root, path)?;
     if let Some(previous) = previous_path {
         validate_path(root, previous)?;
-        crate::git_metadata::required(
+        crate::git_metadata::required_tree_op(
             exec,
             root,
             &["restore", "--source", base, "--worktree", "--", previous],
@@ -210,7 +237,7 @@ pub async fn changes_revert(
             .await
             .unwrap_or(false);
     if existed {
-        crate::git_metadata::required(
+        crate::git_metadata::required_tree_op(
             exec,
             root,
             &["restore", "--source", base, "--worktree", "--", path],
@@ -268,7 +295,8 @@ mod tests {
 
         let summary = changes_summary(&LocalExecutor, root, &base)
             .await
-            .expect("summary");
+            .expect("summary")
+            .files;
         let paths: Vec<_> = summary.iter().map(|c| c.path.as_str()).collect();
         assert!(paths.contains(&"keep.txt"), "{paths:?}");
         assert!(paths.contains(&"new.txt"), "{paths:?}");
@@ -277,7 +305,7 @@ mod tests {
         assert_eq!(new.additions, 1);
 
         // Per-file diff renders a unified diff.
-        let diff = changes_diff(&LocalExecutor, root, &base, "keep.txt", None)
+        let diff = changes_diff(&LocalExecutor, root, &base, None, "keep.txt", None)
             .await
             .expect("diff");
         assert!(diff.contains("-two"), "{diff}");
@@ -299,7 +327,8 @@ mod tests {
         // Everything reverted → empty summary.
         let after = changes_summary(&LocalExecutor, root, &base)
             .await
-            .expect("summary after");
+            .expect("summary after")
+            .files;
         assert!(after.is_empty(), "{after:?}");
     }
 
@@ -330,7 +359,10 @@ mod tests {
         let renamed = "café name\u{2003}new.txt";
         std::fs::rename(root.join("keep.txt"), root.join(renamed)).unwrap();
 
-        let summary = changes_summary(&LocalExecutor, root, &base).await.unwrap();
+        let summary = changes_summary(&LocalExecutor, root, &base)
+            .await
+            .unwrap()
+            .files;
         assert_eq!(summary.len(), 1, "{summary:?}");
         let changed = &summary[0];
         assert_eq!(changed.path, renamed);
@@ -341,6 +373,7 @@ mod tests {
             &LocalExecutor,
             root,
             &base,
+            None,
             &changed.path,
             changed.previous_path.as_deref(),
         )
@@ -362,5 +395,54 @@ mod tests {
             "one\ntwo\n"
         );
         assert!(!root.join(renamed).exists());
+    }
+    #[tokio::test]
+    async fn a_pinned_tree_keeps_the_diff_consistent_with_its_summary() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        init_repo(root);
+        std::fs::write(root.join("file.txt"), "one\n").unwrap();
+        let base = create_checkpoint(&LocalExecutor, root)
+            .await
+            .unwrap()
+            .unwrap();
+
+        std::fs::write(root.join("file.txt"), "one\ntwo\n").unwrap();
+        let summary = changes_summary(&LocalExecutor, root, &base).await.unwrap();
+        assert_eq!(summary.files.len(), 1);
+
+        // The checkout moves on — a run streaming edits does this constantly.
+        std::fs::write(root.join("file.txt"), "one\ntwo\nthree\n").unwrap();
+
+        // Fresh snapshot sees the newer state...
+        let fresh = changes_diff(&LocalExecutor, root, &base, None, "file.txt", None)
+            .await
+            .unwrap();
+        assert!(fresh.contains("+three"), "{fresh}");
+        // ...while the pinned tree still describes exactly what the summary
+        // listed, so the stats and the diff a click opens cannot disagree.
+        let pinned = changes_diff(
+            &LocalExecutor,
+            root,
+            &base,
+            Some(summary.tree.as_str()),
+            "file.txt",
+            None,
+        )
+        .await
+        .unwrap();
+        assert!(pinned.contains("+two"), "{pinned}");
+        assert!(!pinned.contains("+three"), "{pinned}");
+
+        assert!(changes_diff(
+            &LocalExecutor,
+            root,
+            &base,
+            Some("not-a-tree"),
+            "file.txt",
+            None
+        )
+        .await
+        .is_err());
     }
 }

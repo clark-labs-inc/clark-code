@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
@@ -165,4 +165,34 @@ test("tracked text contains no obvious credential material", () => {
       && secret.test(readFileSync(resolve(root, relative), "utf8"))
   ));
   assert.deepEqual(leaks, []);
+});
+
+test("performance instrumentation stays out of an ordinary frontend build", () => {
+  // The recorder in app/src/perf exists to measure an optimized build inside
+  // the real WebView, so it cannot be gated on `import.meta.env.DEV` — that
+  // flag is false in exactly the build we need to observe. Two independent
+  // mechanisms keep it out of a normal bundle (a `__CLARK_PERF__` define that
+  // is a literal `false`, and an alias that resolves to an empty module). This
+  // asserts the outcome rather than either mechanism, so the boundary survives
+  // a change to how it is implemented.
+  const build = spawnSync("corepack", ["pnpm@10", "--dir", "app", "build"], {
+    cwd: root,
+    encoding: "utf8",
+    // A cold Vite build on a loaded machine can exceed the default.
+    timeout: 600_000,
+    env: { ...process.env, VITE_PERF_HOOKS: "" },
+  });
+  assert.equal(build.status, 0, build.stderr ?? "frontend build failed");
+
+  // app/dist is gitignored, so walk it directly rather than through git.
+  const dist = resolve(root, "app/dist");
+  assert.ok(existsSync(dist), "app/dist was not produced");
+  const emitted = readdirSync(dist, { recursive: true, encoding: "utf8" })
+    .filter((name) => name.endsWith(".js"));
+  assert.ok(emitted.length > 0, "no JavaScript was emitted to app/dist");
+
+  const forbidden = /__clarkPerf|installPerfHooks|perf_write_report|perf-emit-tick|perf_clock_probe/;
+  const leaked = emitted.filter((relative) =>
+    forbidden.test(readFileSync(resolve(dist, relative), "utf8")));
+  assert.deepEqual(leaked, [], `performance hooks reached a normal build: ${leaked.join(", ")}`);
 });

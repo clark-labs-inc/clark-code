@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { emptySnapshot, normalizeSnapshot, type Snapshot } from "./types";
+import {
+  RESERVED_MARKERS_FOR_TEST,
+  RESERVED_MARKER_ANCHOR_SOURCE,
+} from "./providerOutputQuarantine";
 
 describe("provider output quarantine", () => {
   it("removes contaminated agent output from rendering and resumed context", () => {
@@ -111,5 +115,63 @@ describe("provider output quarantine", () => {
     };
 
     expect(normalizeSnapshot(snapshot).timeline).toEqual(snapshot.timeline);
+  });
+});
+
+describe("marker pre-filter", () => {
+  it("anchors are underscore-free runs of the markers they guard", () => {
+    // The pre-filter's soundness rests on this: normalization only removes
+    // underscore characters and folds case, so an underscore-free run of a
+    // marker survives into the original string. If a marker is ever added
+    // without an anchor, the pre-filter would start skipping real detections —
+    // this test is what stops that.
+    const anchors = RESERVED_MARKER_ANCHOR_SOURCE
+      .split("|")
+      .filter((part) => !part.startsWith("["));
+    expect(anchors.length).toBeGreaterThan(0);
+    for (const anchor of anchors) {
+      expect(anchor).not.toContain("_");
+      const guarded = RESERVED_MARKERS_FOR_TEST.filter((marker) => marker.includes(anchor));
+      expect(guarded.length, `no marker contains anchor ${anchor}`).toBeGreaterThan(0);
+    }
+    for (const marker of RESERVED_MARKERS_FOR_TEST) {
+      const covered = anchors.some((anchor) => marker.includes(anchor));
+      expect(covered, `marker ${marker} has no anchor, so the pre-filter would skip it`).toBe(true);
+    }
+  });
+
+  it("still detects markers the pre-filter must not skip", () => {
+    const cases = [
+      "begin_of_sentence",
+      "BEGIN_OF_SENTENCE",
+      "begin__of__sentence",
+      "begin▁of▁sentence",
+      "prefix require_escalated_model suffix",
+      "ExPiRaTiOn_PlAcEhOlDeR",
+      "skillconstraint_hard",
+    ];
+    for (const text of cases) {
+      const snapshot: Snapshot = {
+        ...emptySnapshot(),
+        timeline: [{ item: "message", run: "r", role: "agent", blocks: [{ type: "text", text }] }],
+      } as Snapshot;
+      expect(normalizeSnapshot(snapshot).timeline, `should reject: ${text}`).toEqual([]);
+    }
+  });
+
+  it("keeps clean text that merely resembles a marker", () => {
+    const cases = [
+      "the sentence ends here",
+      "placeholder text for the form",
+      "escalated to the on-call engineer",
+      "a skillconstraint on its own is not the reserved form",
+    ];
+    for (const text of cases) {
+      const snapshot: Snapshot = {
+        ...emptySnapshot(),
+        timeline: [{ item: "message", run: "r", role: "agent", blocks: [{ type: "text", text }] }],
+      } as Snapshot;
+      expect(normalizeSnapshot(snapshot).timeline.length, `should keep: ${text}`).toBe(1);
+    }
   });
 });

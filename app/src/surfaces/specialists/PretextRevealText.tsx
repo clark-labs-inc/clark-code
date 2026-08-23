@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { layout, prepare } from "@chenglou/pretext";
 
 import { SPEC_TEXT_REVEAL } from "../../lib/motion";
+import { usePretextGeometry } from "../../lib/pretextLayout";
 
 function textChunks(text: string): string[] {
   return text.match(/\S+\s*/g) ?? (text ? [text] : []);
@@ -16,12 +16,18 @@ export function specTextRevealInterval(chunkCount: number): number {
 }
 
 /** Reveals a newly saved line word by word while Pretext reserves its final
- * wrapped height. The accessible copy remains complete and stable throughout. */
+ * wrapped height. The accessible copy remains complete and stable throughout.
+ *
+ * `text` is a settled revision, not a stream: the reveal restarts whenever it
+ * changes. Growing text belongs in `SpecStreamingLine`. */
 export function PretextRevealText({ text, reduceMotion }: { text: string; reduceMotion: boolean | null }) {
   const chunks = useMemo(() => textChunks(text), [text]);
   const [visibleCount, setVisibleCount] = useState(reduceMotion ? chunks.length : Math.min(1, chunks.length));
-  const [reservedHeight, setReservedHeight] = useState<number | null>(null);
   const textRef = useRef<HTMLSpanElement>(null);
+  // Reserves the final wrapped height so landing words never reflow the page.
+  // The shared hook keeps `prepare` off the resize path — it is width-independent,
+  // and re-segmenting the whole string on every observer tick was pure waste.
+  const geometry = usePretextGeometry(textRef, text);
 
   useEffect(() => {
     if (reduceMotion || chunks.length <= 1) {
@@ -41,27 +47,6 @@ export function PretextRevealText({ text, reduceMotion }: { text: string; reduce
     return () => window.clearInterval(timer);
   }, [chunks, reduceMotion]);
 
-  useEffect(() => {
-    const element = textRef.current;
-    if (!element || !text) return;
-    const measure = () => {
-      const style = window.getComputedStyle(element);
-      const width = element.getBoundingClientRect().width;
-      const fontSize = Number.parseFloat(style.fontSize);
-      const lineHeight = Number.parseFloat(style.lineHeight) || fontSize * 1.5;
-      if (width <= 0 || !Number.isFinite(lineHeight)) return;
-      const font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
-      const prepared = prepare(text, font, {
-        letterSpacing: Number.parseFloat(style.letterSpacing) || 0,
-      });
-      setReservedHeight(layout(prepared, width, lineHeight).height);
-    };
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, [text]);
-
   const complete = visibleCount >= chunks.length;
   return (
     <span
@@ -69,7 +54,7 @@ export function PretextRevealText({ text, reduceMotion }: { text: string; reduce
       data-qa="spec-pretext-reveal"
       data-pretext-complete={complete ? "true" : "false"}
       className="block"
-      style={reservedHeight === null ? undefined : { minHeight: reservedHeight }}
+      style={geometry.ready ? { minHeight: geometry.height } : undefined}
     >
       <span className="sr-only">{text}</span>
       <span aria-hidden="true">

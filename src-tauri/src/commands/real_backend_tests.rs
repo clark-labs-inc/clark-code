@@ -74,16 +74,21 @@ async fn changes_summary_and_diff_see_a_real_edit_against_a_real_checkpoint() {
     .await
     .expect("changes_summary succeeds against a real checkpoint");
     assert!(summary
+        .files
         .iter()
         .any(|f| f.path == "main.rs" && f.status == "modified"));
     assert!(summary
+        .files
         .iter()
         .any(|f| f.path == "new_file.rs" && f.status == "added"));
 
+    // Pinning the summary's tree is the ChangesPanel path: the per-file diff
+    // must describe the same instant as the listed stats.
     let diff = provider_local::changes_diff(
         &provider_local::LocalExecutor,
         std::path::Path::new(&cwd),
         &base,
+        Some(summary.tree.as_str()),
         "main.rs",
         None,
     )

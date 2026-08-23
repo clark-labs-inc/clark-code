@@ -305,6 +305,81 @@ async fn unavailable_branch_owner_requires_manual_repair() {
 }
 
 #[tokio::test]
+async fn a_stale_lock_holder_cannot_release_the_stealers_lock() {
+    use super::registry::acquire_registry_lock;
+
+    let temp = initialized_repo();
+    let repo = temp.path().join("project");
+    let registry =
+        super::registry::registry_path(&super::registry::common_git_dir(&repo).await.unwrap());
+
+    let first = acquire_registry_lock(&registry).await.unwrap();
+    let lock_path = registry.with_file_name(format!(
+        "{}.lock",
+        registry.file_name().unwrap().to_string_lossy()
+    ));
+    assert!(lock_path.exists());
+
+    // Simulate the staleness steal: another process decided the first holder
+    // was dead, removed its lock, and took its own.
+    std::fs::remove_file(&lock_path).unwrap();
+    let second = acquire_registry_lock(&registry).await.unwrap();
+    assert!(lock_path.exists());
+
+    // The original holder finally drops. It must NOT delete the second
+    // holder's live lock — that reopened the registry to a third writer and
+    // lost entries.
+    drop(first);
+    assert!(
+        lock_path.exists(),
+        "first holder released the second holder's lock"
+    );
+
+    drop(second);
+    assert!(!lock_path.exists(), "owner release must still work");
+}
+
+#[tokio::test]
+async fn one_unreadable_worktree_does_not_hide_the_others() {
+    let temp = initialized_repo();
+    let repo = temp.path().join("project");
+
+    let request = || ManagedWorktreeRequest {
+        base: ManagedWorktreeBase::Current,
+        label: None,
+        target_branch: None,
+    };
+    let healthy = project_managed_worktree_create(repo.to_string_lossy().into_owned(), request())
+        .await
+        .unwrap();
+    let broken = project_managed_worktree_create(repo.to_string_lossy().into_owned(), request())
+        .await
+        .unwrap();
+
+    // Break the second checkout the way real repositories break: its HEAD now
+    // names a ref that does not exist, so `rev-parse --verify HEAD` fails and
+    // its status is unreadable. The listing used to `?` out on that entry and
+    // hide every worktree, including the healthy one.
+    let broken_git_dir = git_text(
+        Path::new(&broken.path),
+        &["rev-parse", "--path-format=absolute", "--git-dir"],
+    );
+    std::fs::write(
+        Path::new(&broken_git_dir).join("HEAD"),
+        "ref: refs/heads/agent/does-not-exist\n",
+    )
+    .unwrap();
+
+    let listed = project_managed_worktree_list(repo.to_string_lossy().into_owned())
+        .await
+        .unwrap();
+    assert_eq!(listed.len(), 2, "{listed:?}");
+    let by_id = |id: &str| listed.iter().find(|w| w.id == id).unwrap();
+    assert_eq!(by_id(&healthy.id).state, ManagedWorktreeState::Ready);
+    assert_eq!(by_id(&broken.id).state, ManagedWorktreeState::Unavailable);
+}
+
+#[tokio::test]
 async fn creates_and_explicitly_cleans_a_branch_backed_managed_worktree() {
     let temp = initialized_repo();
     let repo = temp.path().join("project");

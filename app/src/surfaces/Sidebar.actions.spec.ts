@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import sidebarSource from "./Sidebar.tsx?raw";
+// The row itself lives in its own memoized module; the sidebar wires the state
+// into it. Assertions about row markup have to read the row's source.
+import conversationRowSource from "./sidebar/ConversationRow.tsx?raw";
 
 describe("Sidebar creation actions", () => {
   it("keeps New session, Quick Chat, and New project as distinct actions", () => {
@@ -20,10 +23,10 @@ describe("Sidebar creation actions", () => {
     expect(sidebarSource).toContain("const unseenWorkIds = useSessionStore(");
     expect(sidebarSource).toContain("unseen={");
     expect(sidebarSource).toContain("unseenWorkIds.includes(c.id)");
-    expect(sidebarSource).toContain("bg-info");
+    expect(conversationRowSource).toContain("bg-info");
     // A stream in flight outranks the finished marker on the same row.
-    const streamingIndex = sidebarSource.indexOf(") : streaming ?");
-    const unseenIndex = sidebarSource.indexOf(") : unseen ?");
+    const streamingIndex = conversationRowSource.indexOf(") : streaming ?");
+    const unseenIndex = conversationRowSource.indexOf(") : unseen ?");
     expect(streamingIndex).toBeGreaterThan(-1);
     expect(unseenIndex).toBeGreaterThan(streamingIndex);
   });

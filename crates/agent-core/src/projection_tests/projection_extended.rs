@@ -157,6 +157,7 @@ fn every_event_variant_reduces_without_panic() {
                 }],
                 content: vec![],
                 raw_input: Some(serde_json::json!({"cmd": "ls"})),
+                streamed_input: String::new(),
                 progress: None,
             },
         },

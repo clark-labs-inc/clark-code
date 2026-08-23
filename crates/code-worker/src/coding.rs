@@ -239,10 +239,13 @@ impl CodingPlugin {
                 "provider stream ended without a terminal run receipt".into(),
             ));
         }
-        let snapshot = handle.lock().await.snapshot.clone();
+        // Deliberately no snapshot here. Every event already crossed as a
+        // progress frame and the desktop projects its own state from them; a
+        // full conversation clone in the terminal frame was pure overhead, and
+        // once it outgrew the response bound the substituted error made a
+        // successful run report as failed.
         Ok(json!({
             "session_id": request.session_id,
-            "snapshot": snapshot,
             "outcome": outcome,
         }))
     }

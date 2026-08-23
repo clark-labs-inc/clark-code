@@ -2,10 +2,12 @@ import { FileText } from "lucide-react";
 
 import type { ToolCall } from "../../core-bridge/types";
 import type { Activity } from "../../lib/activity";
+import type { SpecLiveStatus } from "../../lib/specProgress";
 import { SpecRunProgress } from "./SpecRunProgress";
 
 interface SpecWorkingStateProps {
   activity: Activity;
+  status: SpecLiveStatus;
   calls: readonly ToolCall[];
   hasSubmittedPrompt: boolean;
   documentUnavailable?: boolean;
@@ -13,6 +15,7 @@ interface SpecWorkingStateProps {
 
 export function SpecWorkingState({
   activity,
+  status,
   calls,
   hasSubmittedPrompt,
   documentUnavailable = false,
@@ -58,7 +61,7 @@ export function SpecWorkingState({
         : "Getting your spec ready"}
       className="mx-auto flex min-h-[22rem] max-w-[36rem] flex-col justify-center"
     >
-      <SpecRunProgress activity={activity} calls={calls} />
+      <SpecRunProgress status={status} activity={activity} calls={calls} />
       <p className="mt-4 text-center text-xs leading-5 text-ink-faint">
         The first real draft will appear here as soon as it is ready. You can stop the run at any time.
       </p>

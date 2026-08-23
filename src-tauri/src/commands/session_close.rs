@@ -71,7 +71,7 @@ pub async fn session_close(
                         live.snapshot.history_checkpoint = Some(checkpoint);
                         live.snapshot.clone()
                     };
-                    let _ = app.emit("snapshot", snapshot);
+                    crate::snapshot_emit::emit_snapshot(&app, &snapshot);
                 }
                 Err(error) => {
                     terminal_error = Some(error);
@@ -79,11 +79,11 @@ pub async fn session_close(
                         "cloud-sync-warning",
                         "Clark Code stopped this session, but could not safely save its final state to product cloud.",
                     );
-                    let _ = app.emit("snapshot", snapshot);
+                    crate::snapshot_emit::emit_snapshot(&app, &snapshot);
                 }
             }
         } else {
-            let _ = app.emit("snapshot", snapshot);
+            crate::snapshot_emit::emit_snapshot(&app, &snapshot);
         }
     }
 

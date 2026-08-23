@@ -105,6 +105,11 @@ pub enum ManagedWorktreeState {
     /// checkout may now be archived after every live session has closed.
     Saved,
     Missing,
+    /// The checkout exists but its Git status could not be read (for example a
+    /// broken or unborn HEAD). Shown, never archivable, and — critically — it
+    /// must not poison the rest of the list: one unreadable checkout used to
+    /// fail the whole listing, hiding every other worktree with it.
+    Unavailable,
 }
 
 #[derive(Clone, Debug, Serialize)]

@@ -575,3 +575,163 @@ final result: passed
 - Frontend verification: 166 test files and 737 tests passed; typecheck, production build, and `git diff --check` passed.
 
 final result: passed
+
+# Design QA — live Spec run trail
+
+## Source and rendered evidence
+
+- Reported state (light, compact card over a live document): a single pill reading
+  `Working` with `1 of 2 updates` and no indication of what the agent was doing.
+- Browser-rendered implementation: `spec-run-trail-light.png`,
+  `spec-run-trail-dark.png`
+- Expanded disclosure: `spec-run-trail-expanded.png`
+- Pre-draft hero: `spec-run-trail-predraft.png`
+- State: active Spec run, eight tool calls in the turn (one cancelled, one failed,
+  one running), rendered through `?spec-run-preview` at 900 × 620, deviceScaleFactor 2.
+
+## Findings
+
+- [P1] Indefinite copy — the label degraded to a bare `Working…` whenever no tool
+  call was in flight, which is most of the time between calls and during all text
+  and reasoning streaming. Read as a hang.
+  - Fixed with a nine-rung ladder in `specLiveStatus` that names the most specific
+    thing the snapshot supports, and reaches `Working…` only when the snapshot
+    carries no evidence at all. The rung is asserted in tests, so the ordering
+    cannot silently erode.
+- [P1] Meaningless denominator — `N of M updates` counted tool calls of the turn
+  and moved as new ones appeared. "Updates" names nothing a reader can picture.
+  - Fixed with a typed receipt: files actually changed on disk when there are any,
+    otherwise the agent's own plan position, otherwise nothing. An empty slot beats
+    an invented number.
+- [P2] Invisible work — a run's shape was not represented at all.
+  - Fixed with a trail of one glyph per tool call, in timeline order, capped at
+    seven with a `+N` head elision that never elides the running call.
+- [P2] Toolbar affordance — the first trail pass boxed every glyph in `bg-chip`,
+  which is this codebase's interactive surface, so the strip read as a row of icon
+  buttons rather than a progress trail.
+  - Fixed by boxing only the running glyph. Finished and queued work is a bare
+    mark, so the single tinted pill says "you are here".
+- [P2] Duplicated progress — the receipt's step count and the progress bar drew the
+  same checklist position twice.
+  - Fixed by suppressing the bar when the receipt is already the step count, and
+    keeping it when the receipt is about changed files instead.
+- Remaining P0/P1/P2 findings: none.
+
+## Required fidelity surfaces
+
+- Typography: existing DM Sans product typography and the established mono
+  treatment for paths; no new type scale.
+- Spacing and layout: the card keeps its prior 44rem reading rail, dot, and
+  disclosure rhythm. The trail row is fixed height and the label is truncated to
+  one line, so streamed tokens never reflow the card; the expanded panel is capped
+  at `max-h-64` with internal scroll so a long turn cannot push the document off
+  screen.
+- Colors and tokens: reuses `accent`, `accent-subtle`, `ink-muted`, `ink-faint`,
+  `danger`, and `border-subtle`. No parallel palette.
+- Status encoding: shape before colour. A failure swaps its kind glyph for a
+  triangle, so it stays unmistakable under `html.colorblind`, where success and
+  danger become blue and orange.
+- Copy and content: the label states the current activity and the receipt states a
+  verified quantity. No invented counts, and no elapsed timer — the snapshot
+  carries no timestamps.
+
+## Browser verification
+
+- Light, dark, and `colorblind` renders all legible; the failed glyph remained
+  identifiable by shape under the daltonised palette.
+- Both variants expand and collapse; the pre-draft hero gained the label and trail
+  behind a `Show steps` disclosure.
+- Accessibility: each glyph carries an `aria-label` of kind, title, and status
+  (verified in the DOM, e.g. `Edit: Writing the first product-ready draft — Running`).
+  The token-chatty visible label is `aria-hidden`, with an `sr-only`
+  `aria-live="polite"` region carrying one coarse sentence per rung so a screen
+  reader is not re-announced on every streamed token.
+- Reduced motion: `.breathe` is covered by the application-wide
+  `prefers-reduced-motion` block in `index.css`, and status survives without it —
+  motion is never the only carrier.
+- Browser console errors: none.
+- A structural guard in `activityIcons.spec.tsx` now enforces that
+  `surfaces/work/WorkLine.tsx` never imports the kind-icon map, so the dense chat
+  row's icon restraint is a checked boundary rather than a coincidence. Verified to
+  fail when deliberately violated.
+- Frontend verification: 183 test files and 854 tests passed; typecheck passed.
+
+final result: passed
+
+# Design QA — the spec written live
+
+## Source and rendered evidence
+
+- Reported state: during the model's generation of a first draft the page showed
+  only a progress card. The document body was invisible for the **entire** time
+  the model was emitting it — tens of seconds — then appeared in one jump.
+- Browser-rendered implementation: `spec-live-draft-early.png`,
+  `spec-live-draft-mid.png`, `spec-live-draft-dark.png`
+- Wrapping live line at a narrow measure: `spec-live-draft-narrow.png`
+- State: a document replayed word by word through `?spec-run-preview&step=draft`
+  at 900 × 720 and 460 × 720, deviceScaleFactor 2.
+
+## Findings
+
+- [P0] The document existed on the frontend nowhere until the file was on disk.
+  The payload was streaming through the provider adapter token by token and being
+  discarded in-process; the earliest full-content signal was `raw_input` at
+  `ToolExecutionStart`, already one whole generation later than the tokens.
+  - Fixed by decoding the payload field out of the streaming arguments and
+    carrying it as `ToolCall.streamed_input`. Restricted to tools whose payload
+    *is* the document, because a partial JSON fragment cannot be redacted — the
+    keystroke and credential tools that `redaction` scrubs must never stream.
+- [P1] Only `write_file.content` is a whole document. `edit_file.new_string` and
+  `apply_patch.patch` are fragments, and presenting either as "the spec" would
+  swap the document for a snippet.
+  - Fixed by typing the draft: a `document` stands in for the spec, a `revision`
+    gets a compact monospace panel above the existing document instead.
+- [P1] Streaming text as ordinary flowed HTML reflows the page every time a word
+  wraps, shoving settled prose around while it is being read.
+  - Fixed by splitting the stream at the last closed line: settled lines render
+    as real Markdown, and the one open line goes to Pretext, which reports its
+    wrapped geometry before anything paints. Measured over a full stream: 24
+    samples, line counts 1→3, block height always exactly `lines × lineHeight`,
+    and the settled `h1` held a single position throughout.
+- [P2] A reserved height animated instead of applying. The reduced-motion block
+  in `index.css` sets a universal `transition-duration` without constraining
+  `transition-property`, whose initial value is `all` — so it *creates* 120 ms
+  transitions on layout properties rather than only shortening existing ones.
+  - Worked around locally with `transition-none` on the measured block; the
+    global rule is filed separately, since narrowing it touches every surface.
+- [P2] A list line being typed showed its raw `- ` against the bullets directly
+  above it.
+  - Fixed for list markers only, where the settled form is an unambiguous bullet.
+    Heading hashes stay visible on purpose: `## ` tells the reader a section is
+    arriving, which is information rather than noise.
+- Remaining P0/P1/P2 findings: none.
+
+## Required fidelity surfaces
+
+- Typography: settled lines are the real document typography (Newsreader
+  headings, DM Sans body); the live line inherits the same size and leading, so
+  nothing shifts weight when a line closes.
+- Spacing and layout: the reading rail is unchanged at 44rem. The live block
+  claims its height in one write and never transitions it.
+- Colors and tokens: the caret is `bg-accent`; the revision header reuses
+  `accent` and `border-subtle`. No new palette.
+- Copy and content: the document is the model's own text, decoded — never
+  paraphrased or repaired beyond the Markdown renderer's existing
+  truncation handling. A partial trailing word is held back so a reader never
+  watches a fragment resolve into a different word.
+
+## Browser verification
+
+- Light, dark, and a 460 px measure all render; the live line wraps to 2 and 3
+  lines at the narrow measure with correct per-line positions.
+- Accessibility: the settled Markdown is the readable copy. The measured live
+  line is `aria-hidden`, and the panel carries one `aria-live="polite"` sentence
+  ("Writing the specification.") rather than announcing every streamed token.
+- Reduced motion was active in the verification browser, which is how the
+  transition finding surfaced. The caret's `breathe` degrades through the
+  application-wide block; the document's legibility never depended on it.
+- Browser console errors: none.
+- Verification: 772 Rust tests, 874 frontend tests, typecheck, production build,
+  `cargo fmt --all --check`, and clippy with `-D warnings` all passed.
+
+final result: passed

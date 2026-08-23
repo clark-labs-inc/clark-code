@@ -26,6 +26,9 @@ mod security_report;
 mod session_credentials;
 // Public so the gated `tests/remote_e2e.rs` harness can drive the real
 // orchestration against a live host; otherwise host-internal.
+#[cfg(feature = "perf-profiling")]
+mod perf;
+mod snapshot_emit;
 pub mod ssh;
 mod state;
 mod terminal;
@@ -55,7 +58,7 @@ pub struct ProviderInfo {
 
 const SIGNED_COMPUTER_USE_SMOKE_ARG: &str = "--computer-use-signed-smoke";
 const WINDOWS_CONSOLE_SMOKE_ARG: &str = "--windows-console-smoke";
-#[cfg(feature = "debug-diagnostics")]
+#[cfg(any(feature = "debug-diagnostics", feature = "perf-profiling"))]
 const OPEN_DEVTOOLS_ENV: &str = "CLARK_DESKTOP_OPEN_DEVTOOLS";
 
 /// Read-only packaged-app probe for the release workflow. Calling
@@ -411,6 +414,10 @@ pub fn run_with_product_and_context(
             terminal::terminal_write,
             terminal::terminal_resize,
             terminal::terminal_close,
+            #[cfg(feature = "perf-profiling")]
+            perf::perf_write_report,
+            #[cfg(feature = "perf-profiling")]
+            perf::perf_clock_probe,
         ])
         .setup(|app| {
             let local_history_path = app
@@ -463,9 +470,11 @@ pub fn run_with_product_and_context(
             // Packaged debug builds normally exercise the same closed WebView
             // surface as production. An explicit owner-local diagnostic flag
             // can open the inspector before renderer startup failures erase
-            // their useful JavaScript exception. The feature itself is
-            // compile-time forbidden in release builds.
-            #[cfg(feature = "debug-diagnostics")]
+            // their useful JavaScript exception. `debug-diagnostics` is
+            // compile-time forbidden in release builds; `perf-profiling` is
+            // deliberately release-compatible, because the rendering costs it
+            // exists to measure only appear in an optimized build.
+            #[cfg(any(feature = "debug-diagnostics", feature = "perf-profiling"))]
             if std::env::var_os(OPEN_DEVTOOLS_ENV).as_deref() == Some(std::ffi::OsStr::new("1")) {
                 if let Some(window) = app.get_webview_window("main") {
                     window.open_devtools();
@@ -512,6 +521,8 @@ pub fn run_with_product_and_context(
         let state = app.state::<AppState>().inner().clone();
         let receipt = tauri::async_runtime::block_on(state.runtime_registry.shutdown_all());
         let terminals = app.state::<terminal::Terminals>().shutdown_all();
+        #[cfg(feature = "perf-profiling")]
+        perf::flush();
         tracing::info!(
             event = "runtime_registry_shutdown",
             sessions = receipt.sessions,

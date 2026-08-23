@@ -56,11 +56,19 @@ async function start(): Promise<void> {
 
   // Headless profiling hook (harness/profile-chat-switch.mjs): expose the store
   // and bridge only in dev/preview bundles — never inside the shipped Tauri app.
-  if (import.meta.env.DEV) {
+  // `__CLARK_PERF__` additionally opens it for a deliberately built performance
+  // bundle, because the rendering costs under investigation only exist in an
+  // optimized build (see app/src/perf/).
+  if (import.meta.env.DEV || __CLARK_PERF__) {
     (window as unknown as Record<string, unknown>).__agentDesktopProfiling = {
       store: useSessionStore,
       getBridge,
     };
+  }
+
+  if (__CLARK_PERF__) {
+    const { installPerfHooks } = await import("@clark-perf");
+    installPerfHooks({ store: useSessionStore, getBridge });
   }
 
   ReactDOM.createRoot(document.getElementById("root")!).render(

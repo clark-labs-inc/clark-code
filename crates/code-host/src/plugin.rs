@@ -97,6 +97,11 @@ impl ProgressCapture {
         if captured.overflowed {
             return;
         }
+        // This serialization exists only to charge the frame against the
+        // replay budget; the wire writes its own copy later. Sharing one
+        // encoding would mean carrying pre-serialized lines through the
+        // host/worker response channel — a cross-crate refactor that is not
+        // worth one extra to_vec per frame. Known, accepted cost.
         let bytes = serde_json::to_vec(frame).map_or(MAX_REPLAY_BYTES + 1, |value| value.len());
         if captured.frames.len() >= MAX_REPLAY_FRAMES
             || captured.bytes.saturating_add(bytes) > MAX_REPLAY_BYTES

@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   currentActivity,
-  executionDiagnostic,
   isAwaitingAssistantReply,
   isThinkingOnlyMessage,
   shouldShowPending,
@@ -230,31 +229,5 @@ describe("currentActivity", () => {
     };
     expect(shouldShowPending(snapshot)).toBe(true);
     expect(currentActivity(snapshot).label).toBe("Working…");
-  });
-});
-
-describe("executionDiagnostic", () => {
-  it("summarizes typed root lifecycle evidence without parsing prose", () => {
-    expect(executionDiagnostic({
-      status: "done",
-      execution: {
-        execution_id: "session:run-1",
-        root_path: "/root",
-        attempts: 2,
-        recoveries: 1,
-        child_executions: 0,
-        completed_children: 0,
-        failed_children: 0,
-        weighted_tokens: 120,
-        cost_usd: 0.01,
-        changed_paths: ["src/lib.rs"],
-        completed_tools: ["edit_file"],
-        failed_tools: [],
-      },
-    })).toBe("Root execution: 2 attempts · 1 recovered interruption · 1 changed path");
-  });
-
-  it("stays absent for providers without a lifecycle receipt", () => {
-    expect(executionDiagnostic({ status: "done" })).toBeUndefined();
   });
 });

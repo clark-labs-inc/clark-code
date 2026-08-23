@@ -330,6 +330,7 @@ fn tool_after_unphased_text_classifies_it_as_commentary() {
                 locations: vec![],
                 content: vec![],
                 raw_input: None,
+                streamed_input: String::new(),
                 progress: None,
             },
         },
@@ -422,6 +423,160 @@ fn legacy_message_without_phase_deserializes_unphased() {
 }
 
 #[test]
+fn replace_input_supplants_a_stale_streamed_prefix_instead_of_splicing() {
+    // When a provider rewinds its own argument stream, the validated payload no
+    // longer extends what was rendered. Appending it would show both drafts
+    // spliced together; the replace channel exists so the patch can say
+    // "start over with this".
+    let id = ToolCallId::new("tc-write");
+    let events = vec![
+        AgentEvent::ToolCall {
+            run: run(),
+            call: ToolCall {
+                tool_name: Some("write_file".into()),
+                id: id.clone(),
+                title: "Writing a file".into(),
+                kind: ToolKind::Edit,
+                status: ToolStatus::Pending,
+                locations: vec![],
+                content: vec![],
+                raw_input: None,
+                streamed_input: String::new(),
+                progress: None,
+            },
+        },
+        AgentEvent::ToolCallUpdate {
+            run: run(),
+            id: id.clone(),
+            patch: ToolCallPatch {
+                append_input: "first pass ".into(),
+                ..Default::default()
+            },
+        },
+        AgentEvent::ToolCallUpdate {
+            run: run(),
+            id: id.clone(),
+            patch: ToolCallPatch {
+                replace_input: Some("different text entirely".into()),
+                ..Default::default()
+            },
+        },
+    ];
+
+    let snap = reduce_all(&events);
+    assert_eq!(
+        snap.tool_calls[&id].streamed_input,
+        "different text entirely"
+    );
+}
+
+#[test]
+fn streamed_document_input_is_released_once_the_call_settles() {
+    // It is a live view of a payload mid-generation. `raw_input` carries the same
+    // text afterwards, and a whole ToolCall is serialized into every sealed
+    // transcript page — so keeping it would store each written document twice,
+    // forever.
+    let id = ToolCallId::new("tc-write");
+    let document = "# Spec\n\nBody that is long enough to matter.\n";
+    let events = vec![
+        AgentEvent::ToolCall {
+            run: run(),
+            call: ToolCall {
+                tool_name: Some("write_file".into()),
+                id: id.clone(),
+                title: "Writing a file".into(),
+                kind: ToolKind::Edit,
+                status: ToolStatus::Pending,
+                locations: vec![],
+                content: vec![],
+                raw_input: None,
+                streamed_input: String::new(),
+                progress: None,
+            },
+        },
+        AgentEvent::ToolCallUpdate {
+            run: run(),
+            id: id.clone(),
+            patch: ToolCallPatch {
+                append_input: document.into(),
+                ..Default::default()
+            },
+        },
+    ];
+
+    let mut snapshot = reduce_all(&events);
+    assert_eq!(snapshot.tool_calls[&id].streamed_input, document);
+
+    apply(
+        &mut snapshot,
+        &AgentEvent::ToolCallUpdate {
+            run: run(),
+            id: id.clone(),
+            patch: ToolCallPatch {
+                status: Some(ToolStatus::Completed),
+                raw_input: Some(serde_json::json!({"content": document})),
+                ..Default::default()
+            },
+        },
+    );
+
+    let tc = &snapshot.tool_calls[&id];
+    assert_eq!(tc.streamed_input, "");
+    // The text is not lost — the validated arguments still carry it.
+    assert_eq!(tc.raw_input, Some(serde_json::json!({"content": document})));
+    // Nothing of it survives on the wire.
+    assert!(!serde_json::to_string(tc)
+        .unwrap()
+        .contains("streamed_input"));
+}
+
+#[test]
+fn streamed_document_input_accumulates_across_argument_deltas() {
+    // A write whose payload is a whole document arrives as many deltas. The
+    // projection has to join them, or the UI can only ever show the last one.
+    let id = ToolCallId::new("tc-write");
+    let events = vec![
+        AgentEvent::ToolCall {
+            run: run(),
+            call: ToolCall {
+                tool_name: Some("write_file".into()),
+                id: id.clone(),
+                title: "Writing a file".into(),
+                kind: ToolKind::Edit,
+                status: ToolStatus::Pending,
+                locations: vec![],
+                content: vec![],
+                raw_input: None,
+                streamed_input: String::new(),
+                progress: None,
+            },
+        },
+        AgentEvent::ToolCallUpdate {
+            run: run(),
+            id: id.clone(),
+            patch: ToolCallPatch {
+                append_input: "# Spec\n\n".into(),
+                ..Default::default()
+            },
+        },
+        AgentEvent::ToolCallUpdate {
+            run: run(),
+            id: id.clone(),
+            patch: ToolCallPatch {
+                append_input: "## Recommendation\n".into(),
+                ..Default::default()
+            },
+        },
+    ];
+
+    let snap = reduce_all(&events);
+    let tc = &snap.tool_calls[&id];
+    assert_eq!(tc.streamed_input, "# Spec\n\n## Recommendation\n");
+    // Streamed input is the tool's argument, never its output.
+    assert!(tc.content.is_empty());
+}
+
+#[test]
 fn tool_call_then_update_patches_in_place_without_duplicate_timeline_entry() {
     let id = ToolCallId::new("tc-1");
     let events = vec![
@@ -436,6 +591,7 @@ fn tool_call_then_update_patches_in_place_without_duplicate_timeline_entry() {
                 locations: vec![],
                 content: vec![],
                 raw_input: None,
+                streamed_input: String::new(),
                 progress: None,
             },
         },
@@ -485,6 +641,7 @@ fn replace_content_supersedes_streamed_partials() {
                 locations: vec![],
                 content: vec![],
                 raw_input: None,
+                streamed_input: String::new(),
                 progress: None,
             },
         },
@@ -548,6 +705,7 @@ fn structured_tool_progress_survives_final_content_replacement() {
                 locations: vec![],
                 content: vec![],
                 raw_input: None,
+                streamed_input: String::new(),
                 progress: None,
             },
         },
@@ -638,6 +796,7 @@ fn terminal_run_settles_only_its_unfinished_tool_calls() {
                     locations: vec![],
                     content: vec![],
                     raw_input: None,
+                    streamed_input: String::new(),
                     progress: None,
                 },
             },
@@ -652,6 +811,7 @@ fn terminal_run_settles_only_its_unfinished_tool_calls() {
                     locations: vec![],
                     content: vec![],
                     raw_input: None,
+                    streamed_input: String::new(),
                     progress: None,
                 },
             },
@@ -666,6 +826,7 @@ fn terminal_run_settles_only_its_unfinished_tool_calls() {
                     locations: vec![],
                     content: vec![],
                     raw_input: None,
+                    streamed_input: String::new(),
                     progress: None,
                 },
             },
@@ -707,6 +868,7 @@ fn permission_clears_when_its_gated_tool_proceeds() {
                 locations: vec![],
                 content: vec![],
                 raw_input: None,
+                streamed_input: String::new(),
                 progress: None,
             },
         },

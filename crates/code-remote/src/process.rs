@@ -21,9 +21,21 @@ const STDERR_LIMIT_BYTES: usize = 64 * 1024;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(20 * 60);
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
 const CHILD_EXIT_TIMEOUT: Duration = Duration::from_secs(30);
-const HEALTH_CHECK_TIMEOUT: Duration = Duration::from_millis(750);
+// Generous enough for a loaded transatlantic link: a false "dead" verdict is
+// expensive (the worker is replaced and its in-flight invocations cancelled),
+// while a true one only delays reconnect by the same bound.
+const HEALTH_CHECK_TIMEOUT: Duration = Duration::from_secs(3);
 
 const PROGRESS_BUFFER: usize = 256;
+/// How long a full progress buffer may stall the shared reader before the
+/// slow request is failed. A consumer that is merely busy for a few seconds
+/// (a paint-blocked UI, a large batch append) rides it out — killing the run
+/// was strictly worse than every other request briefly waiting. A consumer
+/// wedged past this still fails rather than deadlocking the connection.
+#[cfg(not(test))]
+const BACKPRESSURE_GRACE: Duration = Duration::from_secs(60);
+#[cfg(test)]
+const BACKPRESSURE_GRACE: Duration = Duration::from_millis(200);
 
 type Pending = Arc<Mutex<HashMap<String, PendingRequest>>>;
 
@@ -397,6 +409,12 @@ impl RemoteWorker {
         .map_err(|_| RemoteWorkerError::Timeout("health_check".into()))??;
         match response {
             Response::Result { kind, .. } if kind == "pong" => Ok(()),
+            // A worker that answers `busy` is alive and serving — its request
+            // permits are saturated, which is a load condition, not a health
+            // condition. Treating it as unhealthy made connect() replace the
+            // worker and cancel the very requests that had it saturated. Kept
+            // for workers deployed before Ping was exempted from permits.
+            Response::Error { ref code, .. } if code == "busy" => Ok(()),
             Response::Error { code, message, .. } => Err(RemoteWorkerError::Protocol(format!(
                 "worker health {code}: {message}"
             ))),
@@ -528,11 +546,10 @@ impl Drop for RemoteWorker {
     }
 }
 
-fn spawn_reader(
-    stdout: tokio::process::ChildStdout,
-    pending: Pending,
-    protocol_version: u32,
-) -> JoinHandle<()> {
+fn spawn_reader<R>(stdout: R, pending: Pending, protocol_version: u32) -> JoinHandle<()>
+where
+    R: tokio::io::AsyncRead + Unpin + Send + 'static,
+{
     tokio::spawn(async move {
         let mut reader = BufReader::new(stdout);
         let mut line = Vec::with_capacity(4096);
@@ -566,12 +583,13 @@ fn spawn_reader(
                         break;
                     }
                     let Some(request_id) = response.request_id().map(str::to_string) else {
-                        fail_pending(
-                            &pending,
-                            RemoteWorkerError::Protocol("response missing request_id".into()),
-                        )
-                        .await;
-                        break;
+                        // The worker answers pre-parse failures (an oversized
+                        // or undecodable request line) with an id-less error —
+                        // it cannot know which request the bytes belonged to.
+                        // That frame indicts one caller, not the connection;
+                        // failing every pending request over it turned a
+                        // single bad request into a host-wide outage.
+                        continue;
                     };
                     deliver_response(&pending, request_id, response).await;
                 }
@@ -605,8 +623,8 @@ async fn fail_pending(pending: &Pending, error: RemoteWorkerError) {
     }
 }
 
-async fn deliver_response(pending: &Pending, request_id: String, response: Response) {
-    let mut pending = pending.lock().await;
+async fn deliver_response(pending_map: &Pending, request_id: String, response: Response) {
+    let mut pending = pending_map.lock().await;
     let Some(request) = pending.get_mut(&request_id) else {
         // A timed-out or explicitly abandoned request may finish late. It has
         // no authority to attach to another request and can be discarded by id.
@@ -652,15 +670,34 @@ async fn deliver_response(pending: &Pending, request_id: String, response: Respo
     };
     match request.frames.try_send(Ok(frame)) {
         Ok(()) => {}
-        Err(mpsc::error::TrySendError::Full(_)) => {
-            let request = pending
-                .remove(&request_id)
-                .expect("pending request existed");
+        Err(mpsc::error::TrySendError::Full(frame)) => {
+            // The buffer is full: block the shared reader on this consumer for
+            // a bounded grace instead of failing the request outright. That IS
+            // the backpressure — the worker's stdout stops draining and its
+            // writes stall — and it must happen outside the pending-map lock
+            // or every other request's terminal delivery wedges with it.
+            let sender = request.frames.clone();
             drop(pending);
-            let _ = request
-                .frames
-                .send(Err(RemoteWorkerError::Backpressure(request_id)))
-                .await;
+            match tokio::time::timeout(BACKPRESSURE_GRACE, sender.send(frame)).await {
+                Ok(Ok(())) => {}
+                Ok(Err(_closed)) => {
+                    pending_map.lock().await.remove(&request_id);
+                }
+                Err(_elapsed) => {
+                    let request = pending_map.lock().await.remove(&request_id);
+                    if let Some(request) = request {
+                        // try_send, never send: the buffer is exactly what is
+                        // full, and a blocking send of the failure notice would
+                        // wedge this reader on the consumer that already is not
+                        // draining. If there is no room, dropping the request
+                        // closes the channel, which the consumer observes as
+                        // end-of-stream after draining.
+                        let _ = request
+                            .frames
+                            .try_send(Err(RemoteWorkerError::Backpressure(request_id)));
+                    }
+                }
+            }
         }
         Err(mpsc::error::TrySendError::Closed(_)) => {
             pending.remove(&request_id);
@@ -880,6 +917,136 @@ mod tests {
         assert!(portable_request_id("prompt-1:part"));
         assert!(!portable_request_id("../escape"));
         assert!(!portable_request_id(&"x".repeat(129)));
+    }
+
+    #[tokio::test]
+    async fn a_briefly_slow_consumer_rides_out_a_full_buffer() {
+        // The buffer being momentarily full is a load condition, not a failure.
+        // This used to fail the request the instant try_send saw Full — which
+        // killed a streaming run whenever the UI was busy for a few frames.
+        let pending: Pending = Arc::new(Mutex::new(HashMap::new()));
+        let (frames, mut receiver) = mpsc::channel(1);
+        pending.lock().await.insert(
+            "request-1".into(),
+            PendingRequest {
+                frames,
+                next_sequence: 0,
+            },
+        );
+
+        // Fill the buffer, then deliver one more while a consumer drains it
+        // just inside the grace.
+        deliver_response(
+            &pending,
+            "request-1".into(),
+            Response::progress("request-1", 0, "agent_event", serde_json::Value::Null),
+        )
+        .await;
+        let drain = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            let first = receiver.recv().await.expect("first frame");
+            (first, receiver)
+        });
+        deliver_response(
+            &pending,
+            "request-1".into(),
+            Response::progress("request-1", 1, "agent_event", serde_json::Value::Null),
+        )
+        .await;
+
+        let (first, mut receiver) = drain.await.unwrap();
+        assert!(matches!(first, Ok(RemoteWorkerFrame::Progress(_))));
+        let second = receiver.recv().await.expect("second frame");
+        assert!(matches!(second, Ok(RemoteWorkerFrame::Progress(_))));
+        // The request is still pending — nothing failed it.
+        assert!(pending.lock().await.contains_key("request-1"));
+    }
+
+    #[tokio::test]
+    async fn a_wedged_consumer_still_fails_after_the_grace() {
+        let pending: Pending = Arc::new(Mutex::new(HashMap::new()));
+        let (frames, mut receiver) = mpsc::channel(1);
+        pending.lock().await.insert(
+            "request-1".into(),
+            PendingRequest {
+                frames,
+                next_sequence: 0,
+            },
+        );
+
+        deliver_response(
+            &pending,
+            "request-1".into(),
+            Response::progress("request-1", 0, "agent_event", serde_json::Value::Null),
+        )
+        .await;
+        // Nobody drains: after the (test-shortened) grace the request must be
+        // failed with Backpressure rather than wedging the reader forever.
+        deliver_response(
+            &pending,
+            "request-1".into(),
+            Response::progress("request-1", 1, "agent_event", serde_json::Value::Null),
+        )
+        .await;
+
+        assert!(!pending.lock().await.contains_key("request-1"));
+        // The buffered frame arrives; the failure notice either fit the buffer
+        // (delivered as a Backpressure error) or could not (the channel closes,
+        // which the consumer observes as end-of-stream). Both are terminal;
+        // neither wedges the reader.
+        assert!(matches!(
+            receiver.recv().await,
+            Some(Ok(RemoteWorkerFrame::Progress(_)))
+        ));
+        match receiver.recv().await {
+            Some(Err(RemoteWorkerError::Backpressure(_))) | None => {}
+            other => panic!("expected backpressure failure or close, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn an_idless_error_frame_does_not_fail_unrelated_requests() {
+        // The worker answers pre-parse failures (oversized or undecodable
+        // request lines) with an error carrying no request id. That frame
+        // indicts one caller; treating it as a protocol breach failed every
+        // pending request on the connection and killed the reader.
+        let pending: Pending = Arc::new(Mutex::new(HashMap::new()));
+        let (frames, mut receiver) = mpsc::channel(4);
+        pending.lock().await.insert(
+            "request-1".into(),
+            PendingRequest {
+                frames,
+                next_sequence: 0,
+            },
+        );
+
+        let idless = serde_json::to_string(&Response::error(
+            None,
+            "request_too_large",
+            "control request exceeds 1048576 bytes",
+        ))
+        .unwrap();
+        let addressed = serde_json::to_string(&Response::result(
+            Some("request-1".into()),
+            "done",
+            serde_json::Value::Null,
+        ))
+        .unwrap();
+        let feed = format!("{idless}\n{addressed}\n");
+        let reader = spawn_reader(
+            std::io::Cursor::new(feed.into_bytes()),
+            pending,
+            code_host::PROTOCOL_VERSION,
+        );
+
+        // The addressed result must still arrive after the id-less error.
+        let frame = receiver.recv().await.expect("frame").expect("ok frame");
+        assert!(matches!(
+            frame,
+            RemoteWorkerFrame::Terminal(Response::Result { .. })
+        ));
+        // EOF then fails the drained map without panicking.
+        reader.await.unwrap();
     }
 
     #[tokio::test]

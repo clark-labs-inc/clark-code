@@ -3,8 +3,14 @@ import { describe, expect, it } from "vitest";
 
 import { SpecWorkingState } from "./SpecWorkingState";
 
+const idle = { label: "Ready", source: "unknown" } as const;
+
 describe("SpecWorkingState", () => {
-  it("shows simple draft progress without exposing backend tool steps", () => {
+  // Superseded a "without exposing backend tool steps" contract on purpose: the
+  // wait before the first draft is the longest stare in the flow, and an
+  // indefinite "Writing the first draft…" through all of it reads as a hang. The
+  // hero now names the real activity and shows which tools ran.
+  it("shows what it is doing while the first draft is still coming", () => {
     const markup = renderToStaticMarkup(
       <SpecWorkingState
         hasSubmittedPrompt
@@ -16,6 +22,7 @@ describe("SpecWorkingState", () => {
           locations: [],
           content: [],
         }]}
+        status={{ label: "Searching for supported repositories", source: "tool_title" }}
         activity={{
           busy: true,
           label: "Searching for supported repositories",
@@ -27,11 +34,11 @@ describe("SpecWorkingState", () => {
     );
 
     expect(markup).toContain("Building your spec");
-    expect(markup).toContain("Writing the first draft");
+    expect(markup).toContain("Searching for supported repositories");
     expect(markup).toContain("Draft progress");
     expect(markup).toContain('role="progressbar"');
-    expect(markup).not.toContain("Searching supported repositories");
-    expect(markup).not.toContain("Searching for supported repositories");
+    expect(markup).toContain("Tools used in this run");
+    // The document's own scaffolding still stays out of the waiting state.
     expect(markup).not.toContain("Problem and outcome");
   });
 
@@ -40,6 +47,7 @@ describe("SpecWorkingState", () => {
       <SpecWorkingState
         hasSubmittedPrompt={false}
         calls={[]}
+        status={idle}
         activity={{ busy: false, label: "Ready" }}
       />,
     );
@@ -53,6 +61,7 @@ describe("SpecWorkingState", () => {
       <SpecWorkingState
         hasSubmittedPrompt
         calls={[]}
+        status={idle}
         activity={{ busy: false, label: "Ready" }}
         documentUnavailable
       />,

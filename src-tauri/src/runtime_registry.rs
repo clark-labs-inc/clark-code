@@ -177,6 +177,8 @@ impl WorkerHandle {
 
 pub(crate) struct WorkerRuntime {
     key: WorkerKey,
+    /// Configuration-independent identity, for retiring superseded workers.
+    identity: WorkerIdentity,
     account: AccountKey,
     project_id: ProjectKey,
     project_root: PathBuf,
@@ -213,6 +215,49 @@ impl WorkerKey {
         }
         Ok(Self(format!("{:x}", digest.finalize())))
     }
+}
+
+/// What a worker serves, independent of how it is configured.
+///
+/// `WorkerKey` includes the worker configuration, so a model or reasoning
+/// change mints a new key and a new worker — correct, because the remote
+/// process is spawned with its configuration baked in. But the *previous*
+/// worker for the same checkout then served no future session, and nothing
+/// removed it: every model change leaked one `ssh -M` master locally and one
+/// worker process on the host, for the life of the app.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+struct WorkerIdentity(String);
+
+impl WorkerIdentity {
+    fn from_spec(account: &AccountKey, spec: &RemoteWorkerSpec) -> Self {
+        use sha2::{Digest, Sha256};
+
+        let mut digest = Sha256::new();
+        for part in [
+            account.0.as_bytes(),
+            spec.host.as_bytes(),
+            spec.project_id.as_bytes(),
+            spec.remote_root.as_os_str().as_encoded_bytes(),
+            spec.trajectory_root.as_os_str().as_encoded_bytes(),
+        ] {
+            digest.update((part.len() as u64).to_le_bytes());
+            digest.update(part);
+        }
+        Self(format!("{:x}", digest.finalize()))
+    }
+}
+
+/// Handles whose runtimes are superseded by a newer worker for the same
+/// identity. Pure selection so the retirement rule is unit-testable.
+fn superseded_handles<'a>(
+    workers: impl Iterator<Item = (&'a WorkerHandle, &'a WorkerIdentity)>,
+    identity: &WorkerIdentity,
+    keep: &WorkerHandle,
+) -> Vec<WorkerHandle> {
+    workers
+        .filter(|(handle, candidate)| *handle != keep && *candidate == identity)
+        .map(|(handle, _)| handle.clone())
+        .collect()
 }
 
 #[derive(Clone)]
@@ -495,6 +540,7 @@ impl RuntimeRegistry {
         spec.validate().map_err(|error| error.to_string())?;
         let project_id = ProjectKey::parse(spec.project_id.clone())?;
         let key = WorkerKey::from_spec(&account, &spec)?;
+        let identity = WorkerIdentity::from_spec(&account, &spec);
         let gate = self.connect_gate(&key).await;
         let _connecting = gate.lock().await;
         if let Some(handle) = self.handles_by_key.lock().await.get(&key).cloned() {
@@ -509,6 +555,7 @@ impl RuntimeRegistry {
                 let old_worker = runtime.worker.replace(worker).await;
                 let replacement = Arc::new(WorkerRuntime {
                     key,
+                    identity,
                     account,
                     project_id,
                     project_root: spec.remote_root.clone(),
@@ -529,6 +576,7 @@ impl RuntimeRegistry {
         let info = worker.info().clone();
         let runtime = Arc::new(WorkerRuntime {
             key: key.clone(),
+            identity: identity.clone(),
             account,
             project_id,
             project_root: spec.remote_root.clone(),
@@ -541,7 +589,58 @@ impl RuntimeRegistry {
             .await
             .insert(handle.clone(), runtime.clone());
         self.handles_by_key.lock().await.insert(key, handle.clone());
+        self.retire_superseded_workers(&identity, &handle).await;
         Ok((handle, runtime, WorkerConnectionKind::Started))
+    }
+
+    /// Retire every worker this new one supersedes: same checkout identity,
+    /// older configuration. Each was one leaked `ssh -M` master plus one remote
+    /// worker process per model or reasoning change, held until sign-out.
+    ///
+    /// Removal from the maps is what stops new placements; teardown is scoped
+    /// to what is safe now. A slot no other `Arc` holds has no live session —
+    /// shut its worker down gracefully. A slot a session still pins keeps
+    /// serving that session and is reaped by `Drop` (`kill_on_drop`) when the
+    /// session closes.
+    async fn retire_superseded_workers(&self, identity: &WorkerIdentity, keep: &WorkerHandle) {
+        let victims = {
+            let workers = self.workers.lock().await;
+            superseded_handles(
+                workers
+                    .iter()
+                    .map(|(handle, runtime)| (handle, &runtime.identity)),
+                identity,
+                keep,
+            )
+        };
+        if victims.is_empty() {
+            return;
+        }
+        let mut retired = Vec::with_capacity(victims.len());
+        {
+            let mut workers = self.workers.lock().await;
+            let mut handles_by_key = self.handles_by_key.lock().await;
+            for handle in victims {
+                if let Some(runtime) = workers.remove(&handle) {
+                    if handles_by_key.get(&runtime.key) == Some(&handle) {
+                        handles_by_key.remove(&runtime.key);
+                    }
+                    retired.push(runtime);
+                }
+            }
+        }
+        for runtime in retired {
+            let idle = Arc::strong_count(&runtime.worker) == 1;
+            tracing::info!(
+                event = "remote_worker_superseded",
+                idle,
+                "retiring remote worker superseded by a new configuration"
+            );
+            if idle {
+                let worker = runtime.worker.current().await;
+                let _ = worker.disconnect().await;
+            }
+        }
     }
 
     pub(crate) async fn resolve(

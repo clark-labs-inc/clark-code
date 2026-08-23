@@ -202,21 +202,43 @@ pub async fn load_git_history(
     }))
 }
 
+/// Bounds on the discovery walk, so a huge tree costs a bounded scan instead
+/// of an unbounded crawl. The depth bound is deliberately generous — a
+/// shallower cap was removed once because real checkouts live deeper than it
+/// (`discovers_repositories_beyond_the_old_depth_cap` pins that) — so the
+/// directory budget is the load-bearing limit.
+const MAX_DISCOVERY_DEPTH: usize = 16;
+const MAX_DISCOVERY_DIRECTORIES: usize = 4_096;
+
 pub async fn discover_repositories(
     exec: &dyn Executor,
     root: &Path,
 ) -> Result<Vec<RepositoryIdentity>, String> {
     let mut candidates = vec![root.to_path_buf()];
-    let mut pending = VecDeque::from([root.to_path_buf()]);
-    while let Some(directory) = pending.pop_front() {
+    let mut pending = VecDeque::from([(root.to_path_buf(), 0_usize)]);
+    let mut visited = 0_usize;
+    while let Some((directory, depth)) = pending.pop_front() {
+        if visited >= MAX_DISCOVERY_DIRECTORIES {
+            break;
+        }
+        visited += 1;
         let Ok(entries) = exec.read_dir(&directory).await else {
             continue;
         };
+        // Decide "is this a repo root" from the whole listing before descending
+        // anywhere. The previous single pass broke on `.git` mid-listing, so
+        // subdirectories enumerated before it were already enqueued and ones
+        // after were not — which repos got discovered depended on filesystem
+        // enumeration order. A repo root now deterministically stops descent;
+        // its linked worktrees are added from `linked_worktree_roots` below.
+        if entries.iter().any(|entry| entry.name == ".git") {
+            candidates.push(directory);
+            continue;
+        }
+        if depth >= MAX_DISCOVERY_DEPTH {
+            continue;
+        }
         for entry in entries {
-            if entry.name == ".git" {
-                candidates.push(directory.clone());
-                break;
-            }
             if !entry.is_dir
                 || entry.is_symlink
                 || matches!(
@@ -226,7 +248,7 @@ pub async fn discover_repositories(
             {
                 continue;
             }
-            pending.push_back(directory.join(entry.name));
+            pending.push_back((directory.join(entry.name), depth + 1));
         }
     }
     let linked = stream::iter(candidates.clone())

@@ -50,6 +50,7 @@ pub(super) fn streamed_tool_event(
             locations: Vec::new(),
             content: Vec::new(),
             raw_input,
+            streamed_input: String::new(),
             progress: None,
         },
     }
@@ -93,6 +94,7 @@ pub(super) fn execution_tool_event(
                 locations: Vec::new(),
                 content: Vec::new(),
                 raw_input: Some(args),
+                streamed_input: String::new(),
                 progress: None,
             },
         }
@@ -194,6 +196,15 @@ impl StreamingToolCalls {
             candidate.name.clone(),
             parsed_arguments,
         ))
+    }
+
+    /// The announced call id at a provider tool-call index, once the row
+    /// exists. Lets a later delta for the same index patch that row.
+    pub(super) fn announced_id(&self, index: usize) -> Option<String> {
+        self.candidates
+            .get(&index)
+            .filter(|candidate| candidate.announced && !candidate.id.is_empty())
+            .map(|candidate| candidate.id.clone())
     }
 
     pub(super) fn was_announced(&self, tool_call_id: &str) -> bool {

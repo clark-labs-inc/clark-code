@@ -215,7 +215,7 @@ impl RootExecutionTrace {
                     Ok(changes) => {
                         receipt
                             .changed_paths
-                            .extend(changes.into_iter().map(|change| change.path));
+                            .extend(changes.files.into_iter().map(|change| change.path));
                     }
                     Err(error) => {
                         tracing::debug!(%error, "root execution change receipt unavailable");

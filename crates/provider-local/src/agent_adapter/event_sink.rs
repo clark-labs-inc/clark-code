@@ -22,6 +22,7 @@ use crate::tools::final_answer::{FINAL_ANSWER_DETAILS_KEY, FINAL_ANSWER_TOOL};
 use crate::tools::ToolRegistry;
 
 use super::{
+    document_stream::{DocumentStreams, SettledDocument},
     final_answer_stream::FinalAnswerStreams,
     locations_from_details, markdown_artifact, mobile_screenshot_artifact, reasoning_stream,
     streaming_tool_call::{
@@ -42,6 +43,7 @@ pub(crate) struct DesktopEventSink {
     /// checkpoint produces another user-visible notice.
     last_compaction_checkpoint: std::sync::Mutex<Option<String>>,
     final_answer_streams: std::sync::Mutex<FinalAnswerStreams>,
+    document_streams: std::sync::Mutex<DocumentStreams>,
     streaming_tool_calls: std::sync::Mutex<StreamingToolCalls>,
     /// The app-managed document workspace (canonical), when this is a local
     /// session. Markdown files written here are surfaced as inline artifacts.
@@ -62,6 +64,7 @@ impl DesktopEventSink {
             execution: None,
             last_compaction_checkpoint: std::sync::Mutex::new(None),
             final_answer_streams: std::sync::Mutex::new(FinalAnswerStreams::default()),
+            document_streams: std::sync::Mutex::new(DocumentStreams::default()),
             streaming_tool_calls: std::sync::Mutex::new(StreamingToolCalls::default()),
             docs_dir,
         }
@@ -219,6 +222,10 @@ impl ca::EventSink for DesktopEventSink {
                     .lock()
                     .expect("streaming tool calls lock")
                     .reset_message();
+                self.document_streams
+                    .lock()
+                    .expect("document stream lock")
+                    .reset_message();
             }
             // The in-loop compactor rewrote the model-visible transcript.
             // Surface it — a silent context rewrite reads as the agent
@@ -311,6 +318,16 @@ impl ca::EventSink for DesktopEventSink {
                         })
                         .await;
                 }
+                let document_delta = self
+                    .document_streams
+                    .lock()
+                    .expect("document stream lock")
+                    .observe_delta(
+                        index,
+                        id_delta.as_deref(),
+                        name_delta.as_deref(),
+                        arguments_delta.as_deref(),
+                    );
                 let announced = self
                     .streaming_tool_calls
                     .lock()
@@ -321,6 +338,7 @@ impl ca::EventSink for DesktopEventSink {
                         name_delta.as_deref(),
                         arguments_delta.as_deref(),
                     );
+                let announced_id = announced.as_ref().map(|(id, _, _)| id.clone());
                 if let Some((tool_call_id, tool_name, parsed_args)) = announced {
                     let _ = self
                         .events
@@ -332,6 +350,28 @@ impl ca::EventSink for DesktopEventSink {
                             parsed_args,
                         ))
                         .await;
+                }
+                // Ordered after the announce so the first delta patches a row
+                // that exists. `announced_id` covers the same-delta case.
+                if let Some(delta) = document_delta {
+                    if let Some(id) = announced_id.or_else(|| {
+                        self.streaming_tool_calls
+                            .lock()
+                            .expect("streaming tool calls lock")
+                            .announced_id(index)
+                    }) {
+                        let _ = self
+                            .events
+                            .send(desktop::AgentEvent::ToolCallUpdate {
+                                run: self.run.clone(),
+                                id: ToolCallId::new(id),
+                                patch: desktop::ToolCallPatch {
+                                    append_input: delta,
+                                    ..Default::default()
+                                },
+                            })
+                            .await;
+                    }
                 }
             }
             ca::AgentEvent::MessageUpdate {
@@ -370,6 +410,37 @@ impl ca::EventSink for DesktopEventSink {
                         .expect("final answer stream lock")
                         .begin(&tool_call_id, &args);
                     return;
+                }
+                // Complete the streamed document from the validated arguments.
+                // This still precedes the write, so it is the earliest point a
+                // reader can have the whole thing. A faithful stream gets its
+                // remainder appended; an untrusted one is replaced wholesale —
+                // the reducer appends `append_input`, so appending a whole
+                // payload onto a stale prefix would splice two drafts.
+                let settled = self
+                    .document_streams
+                    .lock()
+                    .expect("document stream lock")
+                    .settle(&tool_call_id, &tool_name, &args);
+                if let Some(settled) = settled {
+                    let patch = match settled {
+                        SettledDocument::Append(suffix) => desktop::ToolCallPatch {
+                            append_input: suffix,
+                            ..Default::default()
+                        },
+                        SettledDocument::Replace(payload) => desktop::ToolCallPatch {
+                            replace_input: Some(payload),
+                            ..Default::default()
+                        },
+                    };
+                    let _ = self
+                        .events
+                        .send(desktop::AgentEvent::ToolCallUpdate {
+                            run: self.run.clone(),
+                            id: ToolCallId::new(tool_call_id.clone()),
+                            patch,
+                        })
+                        .await;
                 }
                 emit_execution_start(
                     &self.events,

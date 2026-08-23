@@ -265,8 +265,13 @@ pub(crate) async fn local_branch_list(project_path: &str) -> Result<Vec<ProjectB
 }
 
 /// Switch a clean selected checkout to an existing local branch. Git receives
-/// arguments directly (never through a shell), and the clean-tree gate avoids
-/// silently carrying edits from one branch to another.
+/// arguments directly (never through a shell).
+///
+/// The clean-tree gate is best-effort, not a guarantee: `git switch` carries
+/// non-conflicting local modifications by design, so a file written between
+/// the status check and the switch (an agent editing concurrently) rides
+/// along, exactly as it would under plain git. Closing that window would
+/// require stash-like machinery this product deliberately never uses.
 #[tauri::command]
 pub async fn project_branch_switch(
     project_path: String,

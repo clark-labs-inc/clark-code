@@ -878,13 +878,10 @@ svg.lucide {
   from { opacity: 0; }
   to { opacity: 1; }
 }
-.skeleton,
-.spec-writing-line {
+.skeleton {
   position: relative;
   overflow: hidden;
   transform: translateZ(0);
-}
-.skeleton {
   --loading-shimmer-color: color-mix(in oklab, var(--color-ink) 7%, transparent);
   --loading-shimmer-duration: 1.5s;
   --loading-shimmer-easing: ease-in-out;
@@ -916,8 +913,7 @@ svg.lucide {
 .reply-stream-bar {
   height: 0.68rem;
 }
-.skeleton::after,
-.spec-writing-line::after {
+.skeleton::after {
   position: absolute;
   inset: 0;
   content: "";
@@ -931,17 +927,6 @@ svg.lucide {
   will-change: transform;
   animation: shimmer var(--loading-shimmer-duration) var(--loading-shimmer-easing) infinite;
   animation-delay: var(--loading-shimmer-delay);
-}
-
-/* Spec writing deliberately moves more slowly than a generic loading preview:
-   the traveling highlight makes ongoing work unmistakable without suggesting
-   that document sections are arriving at spinner speed. */
-.spec-writing-line {
-  --loading-shimmer-color: color-mix(in oklab, var(--color-accent) 32%, transparent);
-  --loading-shimmer-duration: 3.2s;
-  --loading-shimmer-easing: var(--ease-agent-inout);
-  --loading-shimmer-delay: var(--spec-writing-delay, 0ms);
-  background: color-mix(in oklab, var(--color-ink) 10%, transparent);
 }
 
 /* Gentle, uniform fade-in for content that mounts without a motion wrapper. */
@@ -983,8 +968,7 @@ svg.lucide {
     scroll-behavior: auto !important;
   }
 
-  .skeleton::after,
-  .spec-writing-line::after {
+  .skeleton::after {
     animation: none !important;
   }
 
@@ -997,7 +981,6 @@ svg.lucide {
   .breathe,
   .desktop-bootstrap-mark,
   .skeleton,
-  .spec-writing-line,
   .permission-guide-arrow,
   .permission-guide-cursor,
   .permission-guide-target,

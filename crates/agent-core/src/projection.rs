@@ -4,8 +4,13 @@
 //! once and ships to native and WASM.
 
 mod checklist;
+mod delta;
 mod transcript_pages;
 
+pub use delta::{
+    apply_delta, diff_after_apply, touched_keys, DeltaError, SnapshotDelta, SnapshotScalars,
+    TouchedKeys,
+};
 pub use transcript_pages::{
     TranscriptPage, TRANSCRIPT_PAGE_ITEMS, TRANSCRIPT_PAGE_TARGET_BYTES, TRANSCRIPT_TAIL_ITEMS,
 };
@@ -486,6 +491,23 @@ pub fn apply(snapshot: &mut Snapshot, event: &AgentEvent) {
                     tc.content = content.clone();
                 }
                 tc.content.extend(patch.append_content.iter().cloned());
+                if let Some(input) = &patch.replace_input {
+                    tc.streamed_input = input.clone();
+                }
+                tc.streamed_input.push_str(&patch.append_input);
+                // Streamed input exists only while the payload is still being
+                // generated: it is how the UI shows a document mid-write. Once
+                // the call settles, `raw_input` holds the same text and the file
+                // itself is authoritative, so keeping it would store every
+                // written document twice — in the snapshot crossing the IPC
+                // boundary on each token, and in every sealed transcript page.
+                if matches!(
+                    tc.status,
+                    ToolStatus::Completed | ToolStatus::Failed | ToolStatus::Cancelled
+                ) {
+                    tc.streamed_input.clear();
+                    tc.streamed_input.shrink_to_fit();
+                }
             }
             // A status change on a gated tool means its permission prompt was
             // resolved (approved → it runs, denied → it fails), so clear the gate.

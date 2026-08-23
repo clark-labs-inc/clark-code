@@ -55,6 +55,21 @@ impl RemoteWorkerExecutor {
         response_data(response)
     }
 
+    /// Best-effort cancellation of a request this side is abandoning. The
+    /// remote bound for a started process is far larger than any local frame
+    /// budget (hours vs minutes), so abandoning without this leaves the
+    /// command running as an orphan on the host.
+    async fn cancel_abandoned(&self, id: &str) {
+        let cancellation = Request {
+            schema_version: PROTOCOL_VERSION,
+            request_id: format!("cancel-{}", uuid::Uuid::new_v4().simple()),
+            command: RequestCommand::Cancel {
+                target_request_id: id.to_string(),
+            },
+        };
+        let _ = self.worker.request(cancellation).await;
+    }
+
     async fn call_cancellable(
         &self,
         method: &str,
@@ -70,17 +85,22 @@ impl RemoteWorkerExecutor {
         loop {
             tokio::select! {
                 _ = cancel.cancelled() => {
-                    let cancellation = Request {
-                        schema_version: PROTOCOL_VERSION,
-                        request_id: format!("cancel-{}", uuid::Uuid::new_v4().simple()),
-                        command: RequestCommand::Cancel { target_request_id: id },
-                    };
-                    let _ = self.worker.request(cancellation).await;
+                    self.cancel_abandoned(&id).await;
                     return Err("command cancelled".into());
                 }
-                frame = request.next() => match frame.map_err(|error| error.to_string())? {
-                    code_remote::RemoteWorkerFrame::Progress(_) => {}
-                    code_remote::RemoteWorkerFrame::Terminal(response) => return response_data(response),
+                frame = request.next() => match frame {
+                    Ok(code_remote::RemoteWorkerFrame::Progress(_)) => {}
+                    Ok(code_remote::RemoteWorkerFrame::Terminal(response)) => {
+                        return response_data(response);
+                    }
+                    // A local frame failure (per-frame timeout, backpressure)
+                    // abandons the request, but the remote side may still be
+                    // running it — tell the worker before reporting the error,
+                    // exactly as the user-cancel arm does.
+                    Err(error) => {
+                        self.cancel_abandoned(&id).await;
+                        return Err(error.to_string().into());
+                    }
                 }
             }
         }
@@ -209,7 +229,17 @@ impl Executor for RemoteWorkerExecutor {
     }
 
     async fn walk(&self, root: &Path) -> ExecResult<Vec<WalkEntry>> {
-        let result: WalkResult = decode(self.call(method::FS_WALK, path_value(root)).await?)?;
+        // Bound the response before it crosses the transport; consumers (the
+        // @-mention picker) truncate far below this anyway. A worker deployed
+        // before the bound ignores the field, so this is best-effort there.
+        let params = serde_json::json!({
+            "path": root.to_string_lossy(),
+            "max_entries": 20_000usize,
+        });
+        let result: WalkResult = decode(self.call(method::FS_WALK, params).await?)?;
+        if result.truncated {
+            tracing::debug!(root = %root.display(), "remote walk truncated at the wire bound");
+        }
         Ok(result
             .entries
             .into_iter()

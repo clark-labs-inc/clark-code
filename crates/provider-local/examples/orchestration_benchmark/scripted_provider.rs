@@ -314,6 +314,7 @@ impl Provider for ScriptedProvider {
                         .collect(),
                     content: vec![],
                     raw_input: Some(serde_json::json!({"task_id": envelope.task.id})),
+                    streamed_input: String::new(),
                     progress: None,
                 },
             });

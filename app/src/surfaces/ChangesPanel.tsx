@@ -116,33 +116,55 @@ function ChangesPopover({ runs, onClose }: { runs: string[]; onClose: () => void
   // behavior) — the picker below lets the user diff against any later turn.
   const [base, setBase] = useState(runs[0]);
   const [files, setFiles] = useState<ChangedFile[] | null>(null);
+  // The working-tree object the summary was computed against. Per-file diffs
+  // pass it back so stats and diff describe the same instant — and a click
+  // stops re-hashing the whole checkout (multiple git round trips per click on
+  // a remote host).
+  const [tree, setTree] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    setBase((current) => changesBaseForRuns(current, runs));
-    setFiles(null);
-  }, [runs]);
+  // Loads can overlap (a turn finishing re-fires this while a click-initiated
+  // refresh is in flight); only the newest response may land.
+  const loadEpoch = useRef(0);
 
   const load = useCallback(async () => {
+    const epoch = ++loadEpoch.current;
     setLoading(true);
     setError(null);
     try {
       // minLoadDuration holds the spinner for one spin — `git diff --stat` over
       // a small tree resolves in a single frame and React never paints the
       // spinning state, so the refresh click looks frozen.
-      const files = await minLoadDuration(invoke<ChangedFile[]>("changes_summary", { cwd, base, remote }));
-      setFiles(files);
+      const summary = await minLoadDuration(
+        invoke<{ tree: string; files: ChangedFile[] }>("changes_summary", { cwd, base, remote }),
+      );
+      if (loadEpoch.current !== epoch) return;
+      setFiles(summary.files);
+      setTree(summary.tree);
     } catch (e) {
+      if (loadEpoch.current !== epoch) return;
       setError(String(e));
     } finally {
-      setLoading(false);
+      if (loadEpoch.current === epoch) setLoading(false);
     }
   }, [cwd, base, remote]);
 
+  // One effect owns both baseline convergence and (re)loading. Splitting them
+  // ("clear on runs change" + "load when `load`'s identity changes") deadlocked:
+  // a turn finishing while the popover is open keeps `base` valid, so `load`'s
+  // identity never changed, the cleared list never reloaded, and the panel sat
+  // on "Comparing…" until a manual refresh.
   useEffect(() => {
+    const next = changesBaseForRuns(base, runs);
+    if (next !== base) {
+      // Converge the baseline first; this effect re-runs with the new value.
+      setBase(next);
+      return;
+    }
+    setFiles(null);
+    setTree(null);
     void load();
-  }, [load]);
+  }, [base, load, runs]);
 
   const totalAdd = (files ?? []).reduce((n, f) => n + f.additions, 0);
   const totalDel = (files ?? []).reduce((n, f) => n + f.deletions, 0);
@@ -214,6 +236,7 @@ function ChangesPopover({ runs, onClose }: { runs: string[]; onClose: () => void
                 file={f}
                 cwd={cwd}
                 base={base}
+                tree={tree}
                 remote={remote}
                 onReverted={() => void load()}
               />
@@ -229,12 +252,15 @@ function FileRow({
   file,
   cwd,
   base,
+  tree,
   remote,
   onReverted,
 }: {
   file: ChangedFile;
   cwd: string;
   base: string;
+  /** Working-tree object of the summary this row came from. */
+  tree: string | null;
   remote: RemoteWorkerArg | null;
   onReverted: () => void;
 }) {
@@ -248,14 +274,22 @@ function FileRow({
     const next = !open;
     setOpen(next);
     if (next && diff === null) {
+      const fetch = (pinned: string | null) => invoke<string>("changes_diff", {
+        cwd,
+        base,
+        tree: pinned,
+        path: file.path,
+        previousPath: file.previous_path ?? null,
+        remote,
+      });
       try {
-        setDiff(await invoke<string>("changes_diff", {
-          cwd,
-          base,
-          path: file.path,
-          previousPath: file.previous_path ?? null,
-          remote,
-        }));
+        try {
+          setDiff(await fetch(tree));
+        } catch {
+          // The pinned tree object can be pruned by aggressive gc between the
+          // summary and the click; a fresh snapshot is the correct fallback.
+          setDiff(await fetch(null));
+        }
       } catch (e) {
         setDiff(`(diff unavailable: ${String(e)})`);
       }

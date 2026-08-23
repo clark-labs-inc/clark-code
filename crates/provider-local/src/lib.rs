@@ -64,7 +64,7 @@ mod skills;
 mod tools;
 mod workspace;
 
-pub use changes::{changes_diff, changes_revert, changes_summary, ChangedFile};
+pub use changes::{changes_diff, changes_revert, changes_summary, ChangedFile, ChangesSummary};
 pub use checkpoint::{create_checkpoint, is_git_repo, release_checkpoints};
 // Discover compatible setup from other coding agents without mutating it.
 pub use commands::{discover_commands, CustomCommand};

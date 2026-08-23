@@ -306,10 +306,23 @@ impl HeadlessHost {
                     "plugin invocation cancelled",
                 ),
             ),
-            Err(error) => (
-                TrajectoryStatus::Failed,
-                Response::error(Some(request_id.into()), "plugin_failed", error.to_string()),
-            ),
+            // Caller mistakes and worker failures are different verdicts and
+            // the desktop retries, reports, and gates on them differently.
+            // Collapsing everything into `plugin_failed` made an unsafe path,
+            // an unknown session id, and a genuine internal failure
+            // indistinguishable on the wire.
+            Err(error) => {
+                let code = match &error {
+                    PluginError::InvalidInput(_) => "invalid_input",
+                    PluginError::UnknownPlugin(_) => "unknown_plugin",
+                    PluginError::UnsupportedOperation { .. } => "unsupported_operation",
+                    _ => "plugin_failed",
+                };
+                (
+                    TrajectoryStatus::Failed,
+                    Response::error(Some(request_id.into()), code, error.to_string()),
+                )
+            }
         };
         let error = match &response {
             Response::Error { message, .. } => Some(message.clone()),

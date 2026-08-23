@@ -128,8 +128,8 @@ async fn checkpoint_and_change_review_are_scoped_to_the_linked_worktree() {
         .await
         .expect("worktree changes");
 
-    assert!(changes.iter().any(|change| change.path == "tracked.txt"));
-    assert!(changes.iter().any(|change| change.path == "created.txt"));
+    assert!(changes.files.iter().any(|change| change.path == "tracked.txt"));
+    assert!(changes.files.iter().any(|change| change.path == "created.txt"));
     assert_eq!(
         std::fs::read_to_string(fixture.main.join("tracked.txt")).expect("read main file"),
         "main\n"

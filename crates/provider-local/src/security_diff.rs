@@ -102,7 +102,7 @@ pub async fn collect_security_diff_inventory(
         args.push(scope_name.clone());
     }
     let args = args.iter().map(String::as_str).collect::<Vec<_>>();
-    let raw = crate::git_metadata::required(exec, root, &args).await?;
+    let raw = crate::git_metadata::required_tree_op(exec, root, &args).await?;
     let mut records = parse_raw_diff(&raw)?;
     records.retain(|record| {
         !is_security_output(&record.file.path)

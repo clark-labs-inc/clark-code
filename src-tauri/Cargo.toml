@@ -27,6 +27,27 @@ debug-diagnostics = [
     "tracing-subscriber/json",
 ]
 
+# Release-profile performance investigation. Unlike debug-diagnostics this is
+# deliberately release-COMPATIBLE: the jitter under investigation only exists at
+# opt-level 3 inside the real platform WebView, so it cannot be measured in a
+# dev build. Opens the inspector and records emit-path timing and payload size.
+# Never in `default`; a branded release must not pass -F perf-profiling.
+#   serde_json/raw_value lets the emit path serialize the snapshot exactly once
+#   and still report its true wire size (see src/perf.rs).
+perf-profiling = [
+    "tauri/devtools",
+    "serde_json/raw_value",
+]
+
+# Tauri's OWN emit/eval spans. Separate feature because tauri/tracing turns
+# WebView eval into a blocking round-trip to the platform main thread, so it
+# perturbs the very latency it measures. Attribution runs only, never a
+# baseline.
+perf-profiling-tauri-spans = [
+    "perf-profiling",
+    "tauri/tracing",
+]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

@@ -209,17 +209,39 @@ try {
   dev.kill("SIGTERM");
 }
 
-for (const r of results) {
+/** The reduced-motion exit budget, matching `--dur-fast` in app/src/index.css.
+ *  Reduced motion is a low-motion vocabulary, not a no-motion one: the exit is
+ *  a short opacity-only fade, because a hard cut reads as a glitch. This probe
+ *  used to require a 0 ms transition here, which contradicted both the source
+ *  CSS and docs/gui-motion.md and left the reduced rows permanently red — a
+ *  detector that always fails cannot report a regression. */
+const REDUCED_EXIT_BUDGET_MS = 120;
+/** Tolerance for the float round-trip through `getComputedStyle`. */
+const DURATION_EPSILON_MS = 5;
+
+/** One verdict, used for both the printed line and the exit code. These were
+ *  two separate copies of the same conditions, which is how the stale contract
+ *  above survived in one of them. */
+function verdict(r) {
   const toastDurationMs = Number.parseFloat(r.toastProbe.transitionDuration) * 1000;
+  const toastAnimationMs = Number.parseFloat(r.toastProbe.animationDuration) * 1000;
   const toastMotionValid = r.reduce
-    ? toastDurationMs === 0 && Number.parseFloat(r.toastProbe.animationDuration) === 0
+    ? toastDurationMs > 0
+      && toastDurationMs <= REDUCED_EXIT_BUDGET_MS + DURATION_EPSILON_MS
+      && toastAnimationMs === 0
     : toastDurationMs > 0 && toastDurationMs <= 300;
   const toastSemanticsValid = r.toastProbe.live === "polite" && r.toastProbe.borderRadius === "12px";
-  const bad = r.res.intermediateFrames === 0
-    || !r.res.fades
-    || (r.reduce && r.res.spatialFrames > 0)
-    || !toastMotionValid
-    || !toastSemanticsValid;
+  const reasons = [];
+  if (r.res.intermediateFrames === 0) reasons.push("no intermediate frames (hard cut)");
+  if (!r.res.fades) reasons.push("did not fade out");
+  if (r.reduce && r.res.spatialFrames > 0) reasons.push("spatial motion under reduced motion");
+  if (!toastMotionValid) reasons.push(`toast transition ${Math.round(toastDurationMs)}ms/animation ${Math.round(toastAnimationMs)}ms outside contract`);
+  if (!toastSemanticsValid) reasons.push("toast semantics (live region or radius)");
+  return { toastDurationMs, bad: reasons.length > 0, reasons };
+}
+
+for (const r of results) {
+  const { toastDurationMs, bad, reasons } = verdict(r);
   console.log(
     `${bad ? "FAIL" : "PASS"} ${r.res.engine}/${r.res.mode}: frames=${r.res.frames} ` +
     `intermediate=${r.res.intermediateFrames} fadeMs=${r.res.fadeCompleteMs} ` +
@@ -227,17 +249,7 @@ for (const r of results) {
     `spatialFrames=${r.res.spatialFrames} toastMs=${Math.round(toastDurationMs)} ` +
     `toastLive=${r.toastProbe.live} errors=${r.errors.length}`,
   );
+  if (bad) console.log("  reasons:", reasons.join("; "));
   if (r.errors.length) console.log("  console errors:", r.errors.join(" | "));
 }
-process.exitCode = results.some((r) =>
-  r.res.intermediateFrames === 0
-  || !r.res.fades
-  || (r.reduce && r.res.spatialFrames > 0)
-  || (r.reduce
-    ? Number.parseFloat(r.toastProbe.transitionDuration) !== 0
-      || Number.parseFloat(r.toastProbe.animationDuration) !== 0
-    : Number.parseFloat(r.toastProbe.transitionDuration) <= 0
-      || Number.parseFloat(r.toastProbe.transitionDuration) > 0.3)
-  || r.toastProbe.live !== "polite"
-  || r.toastProbe.borderRadius !== "12px",
-) ? 1 : 0;
+process.exitCode = results.some((r) => verdict(r).bad) ? 1 : 0;

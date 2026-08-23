@@ -135,8 +135,9 @@ useSpecialistStore.subscribe((state, previous) => {
 
 // Dev-only test seam: lets headless harnesses inject store state (e.g. a low
 // credit balance) to exercise UI that depends on the live backend. Stripped from
-// production builds.
-if (import.meta.env.DEV && typeof window !== "undefined") {
+// production builds. A performance bundle (`VITE_PERF_HOOKS=1`) opts in too, so
+// the same harness contract works against an optimized build.
+if ((import.meta.env.DEV || __CLARK_PERF__) && typeof window !== "undefined") {
   (window as unknown as { __agentDesktopStore?: typeof useSessionStore }).__agentDesktopStore =
     useSessionStore;
 }

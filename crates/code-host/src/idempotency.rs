@@ -11,6 +11,19 @@ use crate::Response;
 const RECEIPT_VERSION: u32 = 2;
 const MAX_RECEIPT_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_RECEIPT_STORE_BYTES: u64 = 512 * 1024 * 1024;
+/// How long a settled receipt stays replayable once capacity is needed.
+///
+/// A receipt's purpose is to answer a RETRY of the same request id — which
+/// happens within a reconnect window measured in seconds, not days. Under
+/// capacity pressure, settled receipts older than this are evicted to make
+/// room; in-progress receipts are never touched (they detect duplicate
+/// concurrent execution, and evicting one would license exactly that).
+///
+/// Without eviction the store only grew — request ids are fresh UUIDs — and a
+/// worker that reached the 512 MiB cap answered `receipt_capacity_exhausted`
+/// to every request from then on: permanently bricked until someone deleted
+/// `request-receipts/` by hand.
+const SETTLED_RECEIPT_RETENTION: std::time::Duration = std::time::Duration::from_secs(60 * 60);
 
 #[derive(Clone, Debug)]
 pub(crate) struct IdempotencyStore {
@@ -153,8 +166,14 @@ fn reserve_blocking(
     };
     let mut line = serde_json::to_vec(&started).map_err(|error| error.to_string())?;
     line.push(b'\n');
+    let mut usage_bytes = usage_bytes;
     if usage_bytes.saturating_add(line.len() as u64) > capacity_bytes {
-        return Ok(Reservation::CapacityExhausted);
+        usage_bytes = evict_settled_receipts(root, state)?;
+        if usage_bytes.saturating_add(line.len() as u64) > capacity_bytes {
+            // Everything left is in-progress or inside the replay window;
+            // refusing is the only honest answer now.
+            return Ok(Reservation::CapacityExhausted);
+        }
     }
     let mut options = OpenOptions::new();
     options.create_new(true).write(true);
@@ -286,6 +305,54 @@ fn complete_blocking(
     Ok(())
 }
 
+/// Delete settled receipts older than the replay window and return the new
+/// usage. Runs only under capacity pressure, so the common path never scans.
+fn evict_settled_receipts(root: &Path, state: &mut StoreState) -> Result<u64, String> {
+    let now = std::time::SystemTime::now();
+    let mut usage_bytes = 0_u64;
+    for entry in std::fs::read_dir(root).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let path = entry.path();
+        if path.extension().and_then(|value| value.to_str()) != Some("jsonl") {
+            continue;
+        }
+        let metadata = entry.metadata().map_err(|error| error.to_string())?;
+        let expired = metadata
+            .modified()
+            .ok()
+            .and_then(|modified| now.duration_since(modified).ok())
+            .is_some_and(|age| age > SETTLED_RECEIPT_RETENTION);
+        if expired && receipt_is_settled(&path) {
+            match std::fs::remove_file(&path) {
+                Ok(()) => continue,
+                // Raced with another remover; either way it no longer counts.
+                Err(error) if error.kind() == ErrorKind::NotFound => continue,
+                Err(error) => {
+                    state.usage_bytes = None;
+                    return Err(error.to_string());
+                }
+            }
+        }
+        usage_bytes = usage_bytes.saturating_add(metadata.len());
+    }
+    state.usage_bytes = Some(usage_bytes);
+    Ok(usage_bytes)
+}
+
+/// True only when the receipt provably reached a terminal entry. Unreadable or
+/// ambiguous files are conservatively treated as live and kept.
+fn receipt_is_settled(path: &Path) -> bool {
+    let Ok(contents) = std::fs::read_to_string(path) else {
+        return false;
+    };
+    contents.lines().nth(1).is_some_and(|second| {
+        matches!(
+            serde_json::from_str::<ReceiptEntry>(second),
+            Ok(ReceiptEntry::Completed { .. } | ReceiptEntry::ReplayUnavailable { .. })
+        )
+    })
+}
+
 fn store_usage(root: &Path, state: &mut StoreState) -> Result<u64, String> {
     if let Some(usage_bytes) = state.usage_bytes {
         return Ok(usage_bytes);
@@ -343,23 +410,97 @@ mod tests {
 
     use super::*;
 
-    #[tokio::test]
-    async fn full_store_refuses_new_work_without_evicting_old_receipts() {
-        let root = tempfile::tempdir().unwrap();
-        let store = IdempotencyStore::with_capacity(root.path(), 1);
+    /// Age a receipt file past the replay retention window.
+    fn expire(root: &Path, request_id: &str) {
+        let path = receipt_path(&root.join("request-receipts"), request_id);
+        let stale = std::time::SystemTime::now() - SETTLED_RECEIPT_RETENTION * 2;
+        let file = File::options().append(true).open(&path).unwrap();
+        file.set_modified(stale).unwrap();
+    }
 
-        let reservation = store
-            .reserve("request-1", &json!({"work": 1}))
+    /// Bytes currently on disk under the store root.
+    fn usage(root: &Path) -> u64 {
+        std::fs::read_dir(root.join("request-receipts"))
+            .unwrap()
+            .map(|entry| entry.unwrap().metadata().unwrap().len())
+            .sum()
+    }
+
+    #[tokio::test]
+    async fn a_full_store_evicts_expired_settled_receipts_and_keeps_serving() {
+        let root = tempfile::tempdir().unwrap();
+        let store = IdempotencyStore::with_capacity(root.path(), 10_000);
+
+        let request = json!({"work": 1});
+        let Reservation::Fresh { request_hash } =
+            store.reserve("request-1", &request).await.unwrap()
+        else {
+            panic!("first reservation must fit");
+        };
+        store
+            .complete(
+                "request-1",
+                request_hash,
+                Ok(Vec::new()),
+                Response::result(Some("request-1".into()), "done", json!({})),
+            )
             .await
             .unwrap();
 
-        assert!(matches!(reservation, Reservation::CapacityExhausted));
-        assert_eq!(
-            std::fs::read_dir(root.path().join("request-receipts"))
-                .unwrap()
-                .count(),
-            0
-        );
+        // A second store over the same root, sized so nothing further fits
+        // while the settled receipt is present.
+        let full = IdempotencyStore::with_capacity(root.path(), usage(root.path()) + 4);
+
+        // Within the replay window the settled receipt is protected: the next
+        // reservation that does not fit is refused, not served by eviction.
+        assert!(matches!(
+            full.reserve("request-2", &json!({"work": 2}))
+                .await
+                .unwrap(),
+            Reservation::CapacityExhausted
+        ));
+
+        // Past the window it is reclaimable, and the store keeps serving
+        // instead of staying bricked until manual cleanup.
+        expire(root.path(), "request-1");
+        assert!(matches!(
+            full.reserve("request-2", &json!({"work": 2}))
+                .await
+                .unwrap(),
+            Reservation::Fresh { .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn eviction_never_touches_an_in_progress_receipt() {
+        let root = tempfile::tempdir().unwrap();
+        let store = IdempotencyStore::with_capacity(root.path(), 10_000);
+
+        // In progress: reserved, never completed. Evicting it would license
+        // duplicate concurrent execution of the same request id.
+        assert!(matches!(
+            store
+                .reserve("request-1", &json!({"work": 1}))
+                .await
+                .unwrap(),
+            Reservation::Fresh { .. }
+        ));
+        expire(root.path(), "request-1");
+
+        let full = IdempotencyStore::with_capacity(root.path(), usage(root.path()) + 4);
+        assert!(matches!(
+            full.reserve("request-2", &json!({"work": 2}))
+                .await
+                .unwrap(),
+            Reservation::CapacityExhausted
+        ));
+        // The aged in-progress receipt still answers as a duplicate.
+        assert!(matches!(
+            full.reserve("request-1", &json!({"work": 1}))
+                .await
+                .unwrap(),
+            Reservation::Ambiguous
+        ));
     }
 
     #[tokio::test]

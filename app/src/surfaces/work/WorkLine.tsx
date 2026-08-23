@@ -1,4 +1,4 @@
-import { memo, useEffect, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { AnimatePresence, useReducedMotion } from "motion/react";
 import * as m from "motion/react-m";
 import {
@@ -7,7 +7,7 @@ import {
 import { cn } from "../../lib/cn";
 import { lastProgressLine } from "../../lib/activity";
 import { callDiffStat, langFromPath, parseDiff, type DiffStat } from "../../lib/diff";
-import { highlightLines } from "../../lib/highlight";
+import { highlightCacheKey, highlightLines } from "../../lib/highlight";
 import { ansiToHtml } from "../../lib/ansi";
 import { contentText, imageBlocks, imageSource, sameContentBlocks } from "../../lib/contentBlocks";
 import { openProjectPath } from "../../lib/openPath";
@@ -63,6 +63,11 @@ function DiffStatBadge({ stat }: { stat: DiffStat }) {
   );
 }
 
+/** Quiet period before tokenizing a diff that is still arriving. Short enough
+ *  to feel immediate once a tool call settles, long enough that a streaming
+ *  diff tokenizes once instead of once per token. */
+const DIFF_HIGHLIGHT_QUIET_MS = 120;
+
 export function DiffBody({ text }: { text: string }) {
   const parsed = parseDiff(text);
   // Not a structured diff — render the old plain-monospace view.
@@ -92,14 +97,46 @@ export function DiffBody({ text }: { text: string }) {
     }
   }
   const [hl, setHl] = useState<string[] | null>(null);
+  // What the current rows were rendered from. Keyed on language and source
+  // together (source alone would skip a re-highlight when the same text is
+  // shown for a different file type), and carrying the source so the effect can
+  // tell a diff that grew from one that was replaced.
+  const highlightedFor = useRef<{ key: string; lang: string; text: string } | null>(null);
   useEffect(() => {
-    if (!lang) return;
+    const previous = highlightedFor.current;
+    if (!lang) {
+      // A reused instance whose new content has no language must not keep
+      // showing rows tokenized from the previous diff.
+      if (previous !== null) {
+        highlightedFor.current = null;
+        setHl(null);
+      }
+      return;
+    }
+    const key = highlightCacheKey(lang, text);
+    if (previous?.key === key) return;
+    // Rows carry over only while this is the same diff growing (streamed text
+    // gains a suffix). A language change or rewritten content means the rows
+    // describe some other diff — misaligned colors are worse than plain text.
+    if (previous !== null && !(previous.lang === lang && text.startsWith(previous.text))) {
+      highlightedFor.current = null;
+      setHl(null);
+    }
     let alive = true;
-    highlightLines(codeLines.join("\n"), lang).then((rows) => {
-      if (alive && rows) setHl(rows);
-    });
+    // A diff that is still streaming re-enters this effect on every token, and
+    // tokenizing costs more than a frame, so wait for the text to stop changing
+    // instead of starting a pass that the next token invalidates. Existing rows
+    // stay on screen meanwhile rather than flashing back to plain text.
+    const timer = window.setTimeout(() => {
+      highlightLines(codeLines.join("\n"), lang).then((rows) => {
+        if (!alive || !rows) return;
+        highlightedFor.current = { key, lang, text };
+        setHl(rows);
+      });
+    }, DIFF_HIGHLIGHT_QUIET_MS);
     return () => {
       alive = false;
+      window.clearTimeout(timer);
     };
     // codeLines/lang derive from `text`; re-highlight when it changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps

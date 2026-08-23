@@ -18,16 +18,33 @@ export function diffStats(text: string): DiffStat | null {
   if (!text.startsWith("diff ")) return null;
   let adds = 0;
   let dels = 0;
-  for (const line of text.split("\n")) {
-    if (line.startsWith("diff ") || line.startsWith("@@")) continue;
-    if (line.startsWith("index ") || line.startsWith("similarity ") || line.startsWith("rename ")) continue;
-    if (line.startsWith("new file") || line.startsWith("deleted file")) continue;
-    if (line.startsWith("old mode") || line.startsWith("new mode")) continue;
-    if (line.startsWith("copy from") || line.startsWith("copy to")) continue;
-    if (line.startsWith("+++ ") || line.startsWith("--- ")) continue;
-    if (line.startsWith("\\")) continue; // "\ No newline at end of file"
-    if (line.startsWith("+")) adds++;
-    else if (line.startsWith("-")) dels++;
+  // Walks line boundaries instead of `split("\n")`. This is re-derived for
+  // every edit in a conversation whenever the change summary renders, so on a
+  // long session it was allocating one string per diff line per pass.
+  //
+  // Every prefix the previous form tested for — `diff `, `@@`, `index `,
+  // `new file`, `+++ `, `\`, and the rest — only ever skipped the line. The
+  // sole prefixes that changed a count were `+` and `-`, and the only ones
+  // that could shadow them are `+++ ` and `--- `. So the whole ladder reduces
+  // to those two tests, and a line starting with anything else needs no test
+  // at all.
+  let start = 0;
+  while (start < text.length) {
+    let end = text.indexOf("\n", start);
+    if (end < 0) end = text.length;
+    const first = text.charCodeAt(start);
+    if (first === 43 /* + */) {
+      if (!(text.charCodeAt(start + 1) === 43 && text.charCodeAt(start + 2) === 43
+        && text.charCodeAt(start + 3) === 32)) {
+        adds += 1;
+      }
+    } else if (first === 45 /* - */) {
+      if (!(text.charCodeAt(start + 1) === 45 && text.charCodeAt(start + 2) === 45
+        && text.charCodeAt(start + 3) === 32)) {
+        dels += 1;
+      }
+    }
+    start = end + 1;
   }
   return adds || dels ? { adds, dels } : null;
 }

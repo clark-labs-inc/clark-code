@@ -43,8 +43,26 @@ pub async fn serve_stdio(
     let mut shutting_down = false;
     while !shutting_down {
         while tasks.try_join_next().is_some() {}
-        let line = read_bounded_line(&mut input, config.max_request_bytes).await?;
-        let Some(line) = line else { break };
+        let line = match read_bounded_line(&mut input, config.max_request_bytes).await? {
+            BoundedLine::Line(line) => line,
+            BoundedLine::Eof => break,
+            BoundedLine::Oversized => {
+                // One oversized request is that caller's error, not grounds to
+                // exit the process — this worker serves every session on the
+                // host, and `?`-ing out of the serve loop killed them all.
+                // The id is unknowable without buffering the line being
+                // refused, so the error is unaddressed; the desktop reader
+                // skips frames without a request id.
+                let _ = output_tx
+                    .send(Response::error(
+                        None,
+                        "request_too_large",
+                        format!("control request exceeds {} bytes", config.max_request_bytes),
+                    ))
+                    .await;
+                continue;
+            }
+        };
         if line.iter().all(u8::is_ascii_whitespace) {
             continue;
         }
@@ -68,7 +86,13 @@ pub async fn serve_stdio(
         };
         let request_id = request.request_id.clone();
         let shutdown = matches!(request.command, RequestCommand::Shutdown);
-        let permit = if shutdown {
+        let ping = matches!(&request.command, RequestCommand::Ping);
+        // Ping answers without a permit, like Shutdown. A saturated worker is
+        // mid-work by definition, and health checks exist to be answered at
+        // exactly that moment — refusing them with `busy` made the desktop
+        // classify a fully loaded worker as dead, replace it, and cancel every
+        // invocation it was busy with.
+        let permit = if shutdown || ping {
             None
         } else {
             match permits.clone().try_acquire_owned() {
@@ -86,7 +110,6 @@ pub async fn serve_stdio(
                 }
             }
         };
-        let ping = matches!(&request.command, RequestCommand::Ping);
         let worker_name = config.worker_name.clone();
         let worker_version = worker_version.to_string();
         let model = config.provider.model.clone();
@@ -117,35 +140,49 @@ pub async fn serve_stdio(
     Ok(())
 }
 
+enum BoundedLine {
+    Line(Vec<u8>),
+    /// The line exceeded the bound. Its bytes were drained up to and including
+    /// the newline without being buffered, so the loop can keep serving.
+    Oversized,
+    Eof,
+}
+
 async fn read_bounded_line<R: AsyncBufRead + Unpin>(
     reader: &mut R,
     maximum_bytes: usize,
-) -> std::io::Result<Option<Vec<u8>>> {
+) -> std::io::Result<BoundedLine> {
     let mut line = Vec::with_capacity(8 * 1024);
+    let mut oversized = false;
     loop {
         let available = reader.fill_buf().await?;
         if available.is_empty() {
-            return if line.is_empty() {
-                Ok(None)
+            return Ok(if oversized {
+                BoundedLine::Oversized
+            } else if line.is_empty() {
+                BoundedLine::Eof
             } else {
-                Ok(Some(line))
-            };
+                BoundedLine::Line(line)
+            });
         }
         let newline = available.iter().position(|byte| *byte == b'\n');
         let consumed = newline.map_or(available.len(), |index| index + 1);
-        if line.len().saturating_add(consumed) > maximum_bytes {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!("control request exceeds {maximum_bytes} bytes"),
-            ));
+        if !oversized && line.len().saturating_add(consumed) > maximum_bytes {
+            oversized = true;
+            line = Vec::new();
         }
-        line.extend_from_slice(&available[..consumed]);
+        if !oversized {
+            line.extend_from_slice(&available[..consumed]);
+        }
         reader.consume(consumed);
         if newline.is_some() {
+            if oversized {
+                return Ok(BoundedLine::Oversized);
+            }
             while matches!(line.last(), Some(b'\n' | b'\r')) {
                 line.pop();
             }
-            return Ok(Some(line));
+            return Ok(BoundedLine::Line(line));
         }
     }
 }
@@ -168,6 +205,49 @@ fn bounded_response_line(response: Response, maximum_bytes: usize) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn an_oversized_line_is_drained_and_the_reader_keeps_serving() {
+        // One oversized request must cost only that request. Erroring out of
+        // the read (and therefore the serve loop) exited the worker process,
+        // killing every session on the host.
+        let oversized = "x".repeat(64);
+        let feed = format!("{oversized}\n{{\"ok\":1}}\n");
+        let mut reader = tokio::io::BufReader::new(std::io::Cursor::new(feed.into_bytes()));
+
+        assert!(matches!(
+            read_bounded_line(&mut reader, 16).await.unwrap(),
+            BoundedLine::Oversized
+        ));
+        // The bytes were consumed up to the newline: the next read yields the
+        // following, well-sized line intact.
+        match read_bounded_line(&mut reader, 16).await.unwrap() {
+            BoundedLine::Line(line) => assert_eq!(line, b"{\"ok\":1}"),
+            other => panic!("expected the next line, got {}", kind_of(&other)),
+        }
+        assert!(matches!(
+            read_bounded_line(&mut reader, 16).await.unwrap(),
+            BoundedLine::Eof
+        ));
+    }
+
+    #[tokio::test]
+    async fn an_oversized_final_line_without_newline_still_reports_oversized() {
+        let feed = "y".repeat(64);
+        let mut reader = tokio::io::BufReader::new(std::io::Cursor::new(feed.into_bytes()));
+        assert!(matches!(
+            read_bounded_line(&mut reader, 16).await.unwrap(),
+            BoundedLine::Oversized
+        ));
+    }
+
+    fn kind_of(line: &BoundedLine) -> &'static str {
+        match line {
+            BoundedLine::Line(_) => "Line",
+            BoundedLine::Oversized => "Oversized",
+            BoundedLine::Eof => "Eof",
+        }
+    }
 
     #[test]
     fn bounded_response_has_one_line() {

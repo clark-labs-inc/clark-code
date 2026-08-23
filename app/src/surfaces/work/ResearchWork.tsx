@@ -5,12 +5,9 @@ import {
   Bot,
   ChevronDown,
   ChevronRight,
-  Circle,
-  CircleCheck,
   ExternalLink,
   Globe2,
   Loader2,
-  TriangleAlert,
   X,
 } from "lucide-react";
 import { cn } from "../../lib/cn";
@@ -24,13 +21,14 @@ import {
 import { extractSources } from "../../lib/sources";
 import { openExternal } from "../../lib/account";
 import { MarkdownContent, MARKDOWN_CLASSES } from "../MarkdownContent";
+import { STATUS_LABEL } from "../../lib/toolLabels";
+import { ProgressIcon, STATUS_TEXT } from "../toolPresentation";
 import type {
   ContentBlock,
   ToolCall,
   ToolCallProgress,
   ToolProgressAgent,
   ToolProgressPhase,
-  ToolStatus,
 } from "../../core-bridge/types";
 
 function blocksText(blocks: ContentBlock[]): string {
@@ -40,49 +38,6 @@ function blocksText(blocks: ContentBlock[]): string {
 export function researchQuery(call: ToolCall): string {
   const query = (call.raw_input as { query?: string } | undefined)?.query;
   return (query || call.title.replace(/^[a-z][a-z0-9_]*:\s*/, "")).trim();
-}
-
-const STATUS_LABEL: Record<ToolStatus, string> = {
-  pending: "Pending",
-  in_progress: "Running",
-  completed: "Complete",
-  cancelled: "Cancelled",
-  failed: "Failed",
-};
-
-const STATUS_TEXT: Record<ToolStatus, string> = {
-  pending: "text-ink-faint",
-  in_progress: "text-accent",
-  completed: "text-success",
-  cancelled: "text-ink-faint",
-  failed: "text-danger",
-};
-
-function ProgressIcon({
-  status,
-  className,
-}: {
-  status: ToolStatus;
-  className?: string;
-}) {
-  if (status === "completed") {
-    return <CircleCheck aria-hidden className={cn("text-success", className)} />;
-  }
-  if (status === "in_progress") {
-    return (
-      <Loader2
-        aria-hidden
-        className={cn("animate-[spin_1s_linear_infinite] text-accent", className)}
-      />
-    );
-  }
-  if (status === "failed") {
-    return <TriangleAlert aria-hidden className={cn("text-danger", className)} />;
-  }
-  if (status === "cancelled") {
-    return <X aria-hidden className={cn("text-ink-faint", className)} />;
-  }
-  return <Circle aria-hidden className={cn("text-ink-faint", className)} />;
 }
 
 function Phase({ phase }: { phase: ToolProgressPhase }) {

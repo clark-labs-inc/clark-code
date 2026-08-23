@@ -8,6 +8,10 @@ use super::{
     DEFAULT_REMOTE, GIT_TIMEOUT,
 };
 
+/// POSIX single-quoting only — correct for every remote worker target that
+/// exists (`RemoteArch` is Linux and macOS). If a Windows remote arch is ever
+/// added, these commands must route through a shell-kind switch like
+/// `git_metadata::shell_word_for` instead of gaining a quoting variant here.
 fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }

@@ -6,6 +6,10 @@
 
 export type SidebarConversationMutationKind = "archive" | "delete" | "restore";
 
+/** What a click or keypress on a conversation row is asking for: open it,
+ *  add or remove it from the selection, or extend the selection to it. */
+export type ConversationSelectionIntent = "open" | "toggle" | "range";
+
 export interface SidebarConversationMutation {
   /** Lets a delayed completion announcement ignore a newer operation. */
   id: number;

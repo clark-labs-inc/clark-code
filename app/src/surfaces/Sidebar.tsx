@@ -2,8 +2,8 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { AnimatePresence, useReducedMotion } from "motion/react";
 import * as m from "motion/react-m";
 import {
-  Plus, MessageSquare, Archive, ArchiveRestore, ChevronRight, PanelLeftClose, PanelLeft,
-  FolderPlus, Search, X, Trash2, Loader2, Library,
+  Plus, MessageSquare, Archive, ChevronRight, PanelLeftClose, PanelLeft,
+  FolderPlus, Search, X, Trash2, Library,
 } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
 import { liveSessions, openRemote } from "../store/sessionStore.runtime";
@@ -39,7 +39,7 @@ import {
   adjacentConversationId,
   conversationMutationStatusLabel,
   conversationRangeIds,
-  type SidebarConversationMutationKind,
+  type ConversationSelectionIntent,
 } from "../lib/sidebarConversationInteractions";
 import {
   DUR,
@@ -58,13 +58,12 @@ import {
   type ProjectMenuPosition,
 } from "./ProjectActionsMenu";
 import { ProjectDragAndDrop, type ProjectDropEdge } from "./ProjectDragAndDrop";
-import type { ConversationMeta } from "../lib/history";
+import { ConversationRow } from "./sidebar/ConversationRow";
+import { ArchivedRow } from "./sidebar/ArchivedRow";
 import { useSpecialistStore } from "../store/specialistStore";
 import { SpecialistNavigation } from "./specialists/SpecialistNavigation";
 import { productName } from "../product/productModule";
 import { announce } from "@atlaskit/pragmatic-drag-and-drop-live-region";
-
-type ConversationSelectionIntent = "open" | "toggle" | "range";
 
 interface SidebarScrollAnchor {
   id: string;
@@ -92,227 +91,6 @@ function projectMoveDestinations(
   ];
 }
 
-function ConversationRow({
-  c,
-  active,
-  streaming,
-  unseen,
-  opening,
-  selected,
-  mutation,
-  onSelect,
-  onRangeStep,
-  onArchive,
-  onContextMenu,
-}: {
-  c: ConversationMeta;
-  active: boolean;
-  /** A run is currently streaming in this conversation. */
-  streaming: boolean;
-  /** Finished in the background and not opened yet — the blue "done" dot. */
-  unseen: boolean;
-  /** This conversation is currently being (re)opened. */
-  opening: boolean;
-  /** In the sidebar's Shift-click selection. */
-  selected: boolean;
-  mutation: SidebarConversationMutationKind | null;
-  onSelect: (id: string, intent: ConversationSelectionIntent, additive?: boolean) => void;
-  onRangeStep: (id: string, direction: -1 | 1) => void;
-  onArchive: (id: string) => void;
-  onContextMenu: (e: React.MouseEvent, id: string) => void;
-}) {
-  const rename = useSessionStore((s) => s.renameConversation);
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(c.title);
-  const mutating = mutation !== null;
-
-  const commit = () => {
-    setEditing(false);
-    rename(c.id, draft);
-  };
-
-  return (
-    <div
-      onContextMenu={(e) => {
-        if (!mutating) onContextMenu(e, c.id);
-      }}
-      aria-busy={mutating || undefined}
-      className={cn(
-        "group relative flex min-h-7 items-center gap-1 rounded-lg px-2 py-0.5 text-sm transition duration-fast ease-agent",
-        mutating && "opacity-60",
-        selected
-          ? "bg-bg-tertiary text-ink"
-          : active || opening
-            ? "bg-bg-tertiary text-ink"
-            : "text-ink-secondary hover:bg-bg-hover hover:text-ink",
-      )}
-    >
-      {editing ? (
-        <div className="flex min-w-0 flex-1 items-center gap-2">
-          <MessageSquare className="size-3.5 shrink-0 text-ink-faint" />
-          <input
-            autoFocus
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onBlur={commit}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") commit();
-              if (e.key === "Escape") {
-                setDraft(c.title);
-                setEditing(false);
-              }
-            }}
-            aria-label="Rename conversation"
-            autoCorrect="off"
-            autoCapitalize="off"
-            spellCheck={false}
-            className="composer-input min-w-0 flex-1 rounded-md bg-bg-sunken px-1.5 py-0.5 text-sm text-ink outline-none ring-1 ring-border-subtle"
-          />
-        </div>
-      ) : (
-        <button
-          onClick={(e) => {
-            const additive = e.metaKey || e.ctrlKey;
-            if (e.shiftKey) {
-              onSelect(c.id, "range", additive);
-            } else if (additive) {
-              onSelect(c.id, "toggle");
-            } else {
-              onSelect(c.id, "open");
-            }
-          }}
-          onKeyDown={(e) => {
-            if (e.shiftKey && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
-              e.preventDefault();
-              onRangeStep(c.id, e.key === "ArrowDown" ? 1 : -1);
-              return;
-            }
-            if (e.key === " " && (e.shiftKey || e.metaKey || e.ctrlKey)) {
-              e.preventDefault();
-              onSelect(c.id, e.shiftKey ? "range" : "toggle", e.metaKey || e.ctrlKey);
-            }
-          }}
-          onDoubleClick={() => {
-            setDraft(c.title);
-            setEditing(true);
-          }}
-          disabled={mutating}
-          data-sidebar-conversation-button={c.id}
-          aria-pressed={selected}
-          aria-describedby="sidebar-selection-help"
-          aria-label={
-            mutating
-              ? `${mutation === "archive" ? "Archiving" : mutation === "delete" ? "Deleting" : "Restoring"} ${c.title}`
-              : `Conversation: ${c.title}${unseen ? ", has finished work you haven't reviewed" : ""}${selected ? ", selected" : ""}`
-          }
-          className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
-          title={`${c.title} — Shift-click or Shift+Arrow selects a range`}
-        >
-          {mutating || opening ? (
-            <Loader2 className="size-3.5 shrink-0 animate-[spin_1s_linear_infinite] text-ink-muted" />
-          ) : streaming ? (
-            <span className="relative grid size-3.5 shrink-0 place-items-center" aria-hidden="true">
-              <span className="absolute size-2 animate-ping rounded-full bg-accent/40" />
-              <span className="size-1.5 rounded-full bg-accent" />
-            </span>
-          ) : unseen ? (
-            <span className="grid size-3.5 shrink-0 place-items-center" aria-hidden="true">
-              <span className="size-2 rounded-full bg-info" />
-            </span>
-          ) : selected ? (
-            <span className="grid size-3 shrink-0 place-items-center" aria-hidden="true">
-              <span className="size-2 rounded-sm bg-accent" />
-            </span>
-          ) : (
-            <span className="size-3 shrink-0" aria-hidden="true" />
-          )}
-          <span className="min-w-0 flex-1 truncate leading-5">{c.title}</span>
-        </button>
-      )}
-      {!editing && (
-        <button
-          onClick={() => onArchive(c.id)}
-          disabled={mutating}
-          title="Archive conversation"
-          aria-label="Archive conversation"
-          className="shrink-0 rounded-md p-1 text-ink-faint opacity-0 transition hover:bg-bg-sunken hover:text-ink group-hover:opacity-100 group-focus-within:opacity-100 disabled:cursor-wait"
-        >
-          <Archive className="size-3.5" />
-        </button>
-      )}
-    </div>
-  );
-}
-
-/** A dimmed, minimal row inside the collapsed "Archived" section. Clicking the
- *  row restores the conversation (returns it to the active list); the trash
- *  button permanently deletes it (local cache + cloud) behind an inline confirm,
- *  since that can't be undone. */
-function ArchivedRow({
-  c,
-  mutation,
-  onRestore,
-  onDelete,
-}: {
-  c: ConversationMeta;
-  mutation: SidebarConversationMutationKind | null;
-  onRestore: (id: string) => void;
-  onDelete: (id: string) => void;
-}) {
-  const [confirming, setConfirming] = useState(false);
-  const mutating = mutation !== null;
-  return (
-    <div
-      aria-busy={mutating || undefined}
-      className="group flex min-h-7 w-full items-center gap-1 rounded-lg px-2 py-0.5 text-sm text-ink-faint transition hover:bg-bg-hover"
-    >
-      <button
-        onClick={() => onRestore(c.id)}
-        disabled={mutating}
-        title={`Restore “${c.title}”`}
-        aria-label={mutating ? `Restoring ${c.title}` : `Restore ${c.title} and open it`}
-        className="flex min-w-0 flex-1 items-center gap-1.5 text-left transition hover:text-ink-secondary"
-      >
-        {mutating ? (
-          <Loader2 className="size-3.5 shrink-0 animate-[spin_1s_linear_infinite] text-ink-muted" />
-        ) : (
-          <MessageSquare className="size-3.5 shrink-0 text-ink-faint" />
-        )}
-        <span className="min-w-0 flex-1 truncate leading-5">{c.title}</span>
-        <ArchiveRestore className="size-3.5 shrink-0 opacity-0 transition group-hover:opacity-100" />
-      </button>
-      {confirming ? (
-        <span className="flex shrink-0 items-center gap-1">
-          <button
-            onClick={() => onDelete(c.id)}
-            disabled={mutating}
-            aria-label={`Permanently delete ${c.title}`}
-            className="rounded-md px-1.5 py-0.5 text-xs font-medium text-danger transition hover:bg-danger/10"
-          >
-            Delete
-          </button>
-          <button
-            onClick={() => setConfirming(false)}
-            aria-label="Cancel delete"
-            className="rounded-md px-1.5 py-0.5 text-xs text-ink-muted transition hover:bg-bg-hover hover:text-ink"
-          >
-            Cancel
-          </button>
-        </span>
-      ) : (
-          <button
-            onClick={() => setConfirming(true)}
-            disabled={mutating}
-          title="Delete permanently"
-          aria-label={`Delete ${c.title} permanently`}
-          className="grid size-6 shrink-0 place-items-center rounded-md text-ink-faint opacity-0 transition hover:bg-danger/10 hover:text-danger group-hover:opacity-100"
-        >
-          <Trash2 className="size-3.5" />
-        </button>
-      )}
-    </div>
-  );
-}
 
 /** Right-click menu for one-or-many conversations. Acts on the whole sidebar
  *  selection when the right-clicked row is part of it, otherwise just the
@@ -663,7 +441,22 @@ export function Sidebar({
   // Reading every row's geometry during a scroll forces synchronous layout on
   // large histories. We only need an anchor immediately before an operation
   // changes the list, so capture it at that boundary instead.
-  const captureScrollAnchor = () => {
+  // The row callbacks below are passed to memoized rows, so their identity has
+  // to survive a re-render or the memo never holds — and Motion re-measures
+  // every layout-animated row it re-renders. Reading the volatile values from
+  // a ref updated each render gives the handlers today's values without
+  // putting those values in a dependency array. Behaviour is unchanged: a
+  // handler still sees whatever was current when it was called.
+  const latest = useRef({ mutatingIds, selectedIds, activeConversationIds });
+  // Committed in a layout effect rather than during render: a render React
+  // discards must not leave its values behind. This still runs before the
+  // browser paints, so no event handler can observe a stale value.
+  useLayoutEffect(() => {
+    latest.current = { mutatingIds, selectedIds, activeConversationIds };
+  });
+
+  const captureScrollAnchor = useCallback(() => {
+    const { activeConversationIds } = latest.current;
     const container = conversationListRef.current;
     if (!container) return;
     const containerRect = container.getBoundingClientRect();
@@ -680,9 +473,9 @@ export function Sidebar({
       order: activeConversationIds,
       offset: firstVisible.getBoundingClientRect().top - containerRect.top,
     };
-  };
+  }, []);
 
-  const focusConversation = (id: string): boolean => {
+  const focusConversation = useCallback((id: string): boolean => {
     const container = conversationListRef.current;
     if (!container) return false;
     const button = Array.from(
@@ -692,12 +485,12 @@ export function Sidebar({
     button.focus({ preventScroll: true });
     button.scrollIntoView({ block: "nearest" });
     return true;
-  };
+  }, []);
 
-  const requestMutationFocus = (id: string | null) => {
+  const requestMutationFocus = useCallback((id: string | null) => {
     mutationFocusIdRef.current = id;
-    mutationFocusOrderRef.current = activeConversationIds;
-  };
+    mutationFocusOrderRef.current = latest.current.activeConversationIds;
+  }, []);
 
   // Keep the first visible conversation at the same visual offset when rows
   // above it archive, delete, or restore. Motion smooths the surrounding move;
@@ -781,11 +574,12 @@ export function Sidebar({
     if (deleteConfirming) deleteConfirmRef.current?.focus();
   }, [deleteConfirming]);
 
-  const selectConversation = (
+  const selectConversation = useCallback((
     id: string,
     intent: ConversationSelectionIntent,
     additive = false,
   ) => {
+    const { mutatingIds, selectedIds, activeConversationIds } = latest.current;
     if (mutatingIds.has(id)) return;
     if (intent === "open") {
       selectionAnchorRef.current = id;
@@ -807,9 +601,10 @@ export function Sidebar({
     if (range.length === 0) return;
     if (!anchor || !activeConversationIds.includes(anchor)) selectionAnchorRef.current = id;
     setSelection(additive ? new Set([...selectedIds, ...range]) : new Set(range));
-  };
+  }, [openConversation, setSelection]);
 
-  const extendSelectionWithKeyboard = (id: string, direction: -1 | 1) => {
+  const extendSelectionWithKeyboard = useCallback((id: string, direction: -1 | 1) => {
+    const { activeConversationIds } = latest.current;
     if (!selectionAnchorRef.current || !activeConversationIds.includes(selectionAnchorRef.current)) {
       selectionAnchorRef.current = id;
     }
@@ -818,23 +613,23 @@ export function Sidebar({
     selectConversation(target, "range");
     if (typeof requestAnimationFrame === "function") requestAnimationFrame(() => focusConversation(target));
     else focusConversation(target);
-  };
+  }, [focusConversation, selectConversation]);
 
-  const restoreAndOpenConversation = (id: string) => {
+  const restoreAndOpenConversation = useCallback((id: string) => {
     captureScrollAnchor();
     restoredFocusIdRef.current = id;
     void restoreConversation(id);
-  };
-  const archiveConversationWithFocus = (id: string) => {
+  }, [captureScrollAnchor, restoreConversation]);
+  const archiveConversationWithFocus = useCallback((id: string) => {
     captureScrollAnchor();
     requestMutationFocus(id);
     void archiveConversation(id);
-  };
-  const deleteArchivedConversation = (id: string) => {
+  }, [archiveConversation, captureScrollAnchor, requestMutationFocus]);
+  const deleteArchivedConversation = useCallback((id: string) => {
     captureScrollAnchor();
     requestMutationFocus(null);
     void deleteConversation(id);
-  };
+  }, [captureScrollAnchor, deleteConversation, requestMutationFocus]);
   const archiveSelectedWithFocus = () => {
     captureScrollAnchor();
     requestMutationFocus(selectionAnchorRef.current);
@@ -928,7 +723,8 @@ export function Sidebar({
     }
   };
 
-  const openContextMenu = (e: React.MouseEvent, id: string) => {
+  const openContextMenu = useCallback((e: React.MouseEvent, id: string) => {
+    const { mutatingIds, selectedIds } = latest.current;
     e.preventDefault();
     if (mutatingIds.size > 0) return;
     setProjectMenu(null);
@@ -943,7 +739,7 @@ export function Sidebar({
       setSelection(new Set([id]));
       setMenu({ x: e.clientX, y: e.clientY, ids: [id] });
     }
-  };
+  }, [setSelection]);
 
   if (collapsed || narrow) {
     return (
@@ -1180,14 +976,8 @@ export function Sidebar({
                               ? conversationMutation?.kind ?? "archive"
                               : null;
                             return (
-                              <m.div
-                                key={c.id}
-                                data-sidebar-conversation-id={c.id}
-                                layout={reduceMotion ? false : "position"}
-                                {...accessibleMotion(RISE_SMALL, reduceMotion)}
-                                transition={staggeredTransition(reduceMotion, 0, 0.04, { duration: DUR.fast })}
-                              >
-                                <ConversationRow
+                              <ConversationRow
+                                  key={c.id}
                                   c={c}
                                   active={navigatedConversationId === c.id}
                                   streaming={runningIds.includes(c.id)}
@@ -1203,7 +993,6 @@ export function Sidebar({
                                   onArchive={archiveConversationWithFocus}
                                   onContextMenu={openContextMenu}
                                 />
-                              </m.div>
                             );
                           })}
                         </AnimatePresence>

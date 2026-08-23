@@ -439,3 +439,37 @@ fn native_retry_policy_is_typed_and_bounded_to_transient_connect_failures() {
         &code_remote::RemoteWorkerError::CredentialInvalid("TOKEN".into())
     ));
 }
+
+#[test]
+fn supersession_retires_same_identity_only_and_never_the_new_worker() {
+    // A model change mints a new WorkerKey for the same checkout. The old
+    // worker for that checkout must be retired — it was one leaked ssh master
+    // and remote process per model change — while workers for OTHER checkouts
+    // and the newly started worker itself are untouched.
+    let checkout_a = super::WorkerIdentity("identity-a".into());
+    let checkout_b = super::WorkerIdentity("identity-b".into());
+    let old_a = super::WorkerHandle::generate();
+    let new_a = super::WorkerHandle::generate();
+    let only_b = super::WorkerHandle::generate();
+
+    let table = [
+        (&old_a, &checkout_a),
+        (&new_a, &checkout_a),
+        (&only_b, &checkout_b),
+    ];
+    let victims = super::superseded_handles(
+        table.iter().map(|(handle, identity)| (*handle, *identity)),
+        &checkout_a,
+        &new_a,
+    );
+    assert_eq!(victims, vec![old_a.clone()]);
+
+    // No sibling: nothing to retire.
+    let table = [(&new_a, &checkout_a), (&only_b, &checkout_b)];
+    let none = super::superseded_handles(
+        table.iter().map(|(handle, identity)| (*handle, *identity)),
+        &checkout_a,
+        &new_a,
+    );
+    assert!(none.is_empty());
+}

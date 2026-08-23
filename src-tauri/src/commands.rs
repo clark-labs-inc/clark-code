@@ -276,7 +276,7 @@ fn spawn_provider_stream(
                 session.snapshot.history_checkpoint = Some(checkpoint);
                 session.snapshot.clone()
             };
-            let _ = app.emit("snapshot", &snapshot);
+            crate::snapshot_emit::emit_snapshot(&app, &snapshot);
             for payload in specialist_projections {
                 match state
                     .product
@@ -327,7 +327,7 @@ pub async fn changes_summary(
     base: String,
     remote: Option<RemoteArg>,
     state: State<'_, AppState>,
-) -> Result<Vec<provider_local::ChangedFile>, String> {
+) -> Result<provider_local::ChangesSummary, String> {
     let exec = project_executor(remote, state.inner()).await?;
     provider_local::changes_summary(exec.as_ref(), std::path::Path::new(&cwd), &base).await
 }
@@ -337,6 +337,7 @@ pub async fn changes_summary(
 pub async fn changes_diff(
     cwd: String,
     base: String,
+    tree: Option<String>,
     path: String,
     previous_path: Option<String>,
     remote: Option<RemoteArg>,
@@ -347,6 +348,7 @@ pub async fn changes_diff(
         exec.as_ref(),
         std::path::Path::new(&cwd),
         &base,
+        tree.as_deref(),
         &path,
         previous_path.as_deref(),
     )
@@ -580,7 +582,7 @@ async fn register_session(
             tracing::warn!(%error, session = %replaced_id, "superseded provider close failed");
         }
     }
-    let _ = app.emit("snapshot", &snapshot);
+    crate::snapshot_emit::emit_snapshot(app, &snapshot);
     serde_json::to_value(&session).map_err(|e| e.to_string())
 }
 
@@ -715,7 +717,7 @@ pub async fn steer(
             );
         }
         s.snapshot.history_checkpoint = Some(checkpoint);
-        let _ = app.emit("snapshot", &s.snapshot);
+        crate::snapshot_emit::emit_snapshot(&app, &s.snapshot);
     }
     Ok(())
 }
@@ -839,7 +841,7 @@ pub async fn prompt(
         // the reducer; a rejection below clears it directly.
         s.snapshot.starting = true;
         s.snapshot.history_checkpoint = Some(prompt_checkpoint);
-        let _ = app.emit("snapshot", &s.snapshot);
+        crate::snapshot_emit::emit_snapshot(&app, &s.snapshot);
 
         s.provider
             .prompt(
@@ -858,7 +860,7 @@ pub async fn prompt(
             // state so the activity row does not stay animated under the error.
             let mut s = entry.lock().await;
             s.snapshot.starting = false;
-            let _ = app.emit("snapshot", &s.snapshot);
+            crate::snapshot_emit::emit_snapshot(&app, &s.snapshot);
             tracing::error!(
                 event = "conversation_prompt_rejected",
                 conversation_id = %sid,
@@ -896,14 +898,14 @@ pub async fn prompt(
         apply(&mut session.snapshot, &first);
         session.snapshot.clone()
     };
-    let _ = app.emit("snapshot", &allocated_snapshot);
+    crate::snapshot_emit::emit_snapshot(&app, &allocated_snapshot);
     let checkpoint = trajectory.append(std::slice::from_ref(&first)).await?;
     let snapshot = {
         let mut session = entry.lock().await;
         session.snapshot.history_checkpoint = Some(checkpoint);
         session.snapshot.clone()
     };
-    let _ = app.emit("snapshot", &snapshot);
+    crate::snapshot_emit::emit_snapshot(&app, &snapshot);
 
     // Fold events into this session's snapshot and push each update to the
     // webview (tagged by `snapshot.session`, so the UI routes it correctly).
@@ -965,7 +967,7 @@ pub async fn compact(
         session.snapshot.history_checkpoint = Some(checkpoint);
         session.snapshot.clone()
     };
-    let _ = app.emit("snapshot", &snapshot);
+    crate::snapshot_emit::emit_snapshot(&app, &snapshot);
 
     spawn_provider_stream(
         app,
@@ -1131,7 +1133,7 @@ pub async fn clear_goal(
     if let Some(checkpoint) = checkpoint {
         session.snapshot.history_checkpoint = Some(checkpoint);
     }
-    let _ = app.emit("snapshot", &session.snapshot);
+    crate::snapshot_emit::emit_snapshot(&app, &session.snapshot);
     Ok(())
 }
 

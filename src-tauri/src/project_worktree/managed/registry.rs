@@ -20,11 +20,18 @@ const STALE_REGISTRY_LOCK_AGE: Duration = Duration::from_secs(10 * 60);
 
 pub(super) struct RegistryLock {
     path: PathBuf,
+    /// Random token written into the lock file at creation. Release must prove
+    /// the file is still ours: after a staleness steal, the original holder's
+    /// unconditional `remove_file` was deleting the *stealer's* live lock,
+    /// letting a third writer in and losing registry entries.
+    owner: String,
 }
 
 impl Drop for RegistryLock {
     fn drop(&mut self) {
-        let _ = fs::remove_file(&self.path);
+        if fs::read_to_string(&self.path).is_ok_and(|content| content == self.owner) {
+            let _ = fs::remove_file(&self.path);
+        }
     }
 }
 
@@ -68,9 +75,21 @@ pub(super) async fn acquire_registry_lock(registry_path: &Path) -> Result<Regist
             .create_new(true)
             .open(&lock_path)
         {
-            Ok(file) => {
+            Ok(mut file) => {
+                let owner = Uuid::new_v4().to_string();
+                if let Err(error) = std::io::Write::write_all(&mut file, owner.as_bytes()) {
+                    drop(file);
+                    let _ = fs::remove_file(&lock_path);
+                    return Err(format!(
+                        "Write managed-worktree lifecycle lock {}: {error}",
+                        lock_path.display()
+                    ));
+                }
                 drop(file);
-                return Ok(RegistryLock { path: lock_path });
+                return Ok(RegistryLock {
+                    path: lock_path,
+                    owner,
+                });
             }
             Err(error) if error.kind() == ErrorKind::AlreadyExists => {
                 if registry_lock_is_stale(&lock_path) {

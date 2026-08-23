@@ -1,7 +1,14 @@
-//! Bounded Git metadata commands used by repository discovery and context.
+//! Bounded Git commands running under a protected, non-interactive profile:
+//! no optional locks, no repository-selected hooks/helpers, no interactive
+//! auth prompts.
 //!
-//! These commands are observational. They must not acquire optional locks,
-//! execute repository-selected hooks/helpers, or wait for interactive auth.
+//! Two time bounds share that profile. Metadata commands (`rev-parse`,
+//! `symbolic-ref`, …) are observational and answer in milliseconds, so a short
+//! bound turns a wedged repository into a fast failure. Tree operations
+//! (`add -A` into a checkpoint index, `write-tree`, cross-tree `diff`,
+//! `restore`) legitimately scale with repository size — bounding those at the
+//! metadata timeout made checkpointing silently unavailable on large checkouts,
+//! which removes undo exactly where it matters most.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -10,7 +17,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::exec::Executor;
 
-const COMMAND_TIMEOUT: Duration = if cfg!(windows) {
+pub(crate) const COMMAND_TIMEOUT: Duration = if cfg!(windows) {
     // Windows ARM VMs commonly run Git's x64 distribution under emulation.
     // Metadata remains bounded, but five seconds is too short under parallel
     // test/build load and turns valid repositories into false negatives.
@@ -19,6 +26,12 @@ const COMMAND_TIMEOUT: Duration = if cfg!(windows) {
     Duration::from_secs(5)
 };
 const DISABLED_HOOKS_PATH: &str = if cfg!(windows) { "NUL" } else { "/dev/null" };
+
+/// Bound for commands whose work scales with the repository, not with the
+/// question being asked. Large enough for `git add -A` to hash a big working
+/// tree (locally or across an SSH executor), small enough that a genuinely
+/// wedged target still surfaces as an error instead of an indefinite hang.
+pub(crate) const TREE_OP_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// Read-only identity for the checkout selected by a local or remote executor.
 ///
@@ -62,6 +75,30 @@ pub(crate) async fn required_with_env(
     env: &[(&str, &str)],
 ) -> Result<String, String> {
     let output = run(exec, root, args, env).await?;
+    if output.code != Some(0) {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+/// Like [`required`], for commands whose runtime scales with the repository.
+pub(crate) async fn required_tree_op(
+    exec: &dyn Executor,
+    root: &Path,
+    args: &[&str],
+) -> Result<String, String> {
+    required_tree_op_with_env(exec, root, args, &[]).await
+}
+
+/// Like [`required_with_env`], for commands whose runtime scales with the
+/// repository. Same protected profile, longer bound.
+pub(crate) async fn required_tree_op_with_env(
+    exec: &dyn Executor,
+    root: &Path,
+    args: &[&str],
+    env: &[(&str, &str)],
+) -> Result<String, String> {
+    let output = run_bounded(exec, root, args, env, TREE_OP_TIMEOUT).await?;
     if output.code != Some(0) {
         return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
     }
@@ -265,11 +302,21 @@ async fn run(
     args: &[&str],
     env: &[(&str, &str)],
 ) -> Result<exec_core::ExecOutput, String> {
+    run_bounded(exec, root, args, env, COMMAND_TIMEOUT).await
+}
+
+async fn run_bounded(
+    exec: &dyn Executor,
+    root: &Path,
+    args: &[&str],
+    env: &[(&str, &str)],
+    timeout: Duration,
+) -> Result<exec_core::ExecOutput, String> {
     let arguments = args.iter().map(|arg| shell_word(arg)).collect::<Vec<_>>();
     exec.exec(
         &protected_git_command(&arguments.join(" "), env),
         root,
-        COMMAND_TIMEOUT,
+        timeout,
         &CancellationToken::new(),
     )
     .await

@@ -11,6 +11,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+use futures::StreamExt;
 use tauri::State;
 
 use crate::AppState;
@@ -212,36 +213,58 @@ pub async fn project_managed_worktree_list(
         read_registry(&registry_path)?.entries
     };
     let attached = attached_worktree_paths(&root).await?;
-    let mut worktrees = Vec::with_capacity(entries.len());
-
-    for record in entries {
-        let path = PathBuf::from(&record.path);
-        let Ok(canonical) = path.canonicalize() else {
-            worktrees.push(public_record(
-                record,
-                ManagedWorktreeState::Missing,
-                WorktreeChangeSummary::default(),
-                None,
-            ));
-            continue;
-        };
-        if !attached.iter().any(|candidate| candidate == &canonical) {
-            worktrees.push(public_record(
-                record,
-                ManagedWorktreeState::Missing,
-                WorktreeChangeSummary::default(),
-                None,
-            ));
-            continue;
-        }
-        let status = managed_status(&root, &canonical, &record).await?;
-        worktrees.push(public_record(
-            record,
-            status.state,
-            status.changes,
-            Some(status.head_revision),
-        ));
-    }
+    // Each entry's status is ~3 git processes including a full `git status`
+    // scan of its checkout; serialized, N worktrees made one click cost N
+    // sequential status scans. Statuses are independent — run them with
+    // bounded concurrency, keeping registry order for the caller's sort.
+    let mut worktrees: Vec<_> = futures::stream::iter(entries)
+        .map(|record| {
+            let root = root.clone();
+            let attached = &attached;
+            async move {
+                let path = PathBuf::from(&record.path);
+                let Ok(canonical) = path.canonicalize() else {
+                    return public_record(
+                        record,
+                        ManagedWorktreeState::Missing,
+                        WorktreeChangeSummary::default(),
+                        None,
+                    );
+                };
+                if !attached.iter().any(|candidate| candidate == &canonical) {
+                    return public_record(
+                        record,
+                        ManagedWorktreeState::Missing,
+                        WorktreeChangeSummary::default(),
+                        None,
+                    );
+                }
+                match managed_status(&root, &canonical, &record).await {
+                    Ok(status) => public_record(
+                        record,
+                        status.state,
+                        status.changes,
+                        Some(status.head_revision),
+                    ),
+                    // One unreadable checkout (broken HEAD, transient git
+                    // failure) degrades to its own row instead of failing the
+                    // listing — the user must still be able to see and archive
+                    // every other one.
+                    Err(error) => {
+                        tracing::warn!(%error, path = %record.path, "managed worktree status unavailable");
+                        public_record(
+                            record,
+                            ManagedWorktreeState::Unavailable,
+                            WorktreeChangeSummary::default(),
+                            None,
+                        )
+                    }
+                }
+            }
+        })
+        .buffered(4)
+        .collect()
+        .await;
     worktrees.sort_by_key(|worktree| std::cmp::Reverse(worktree.created_at_ms));
     Ok(worktrees)
 }

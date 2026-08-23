@@ -259,6 +259,14 @@ pub struct ToolCall {
     /// Opaque, provider-specific raw input for debugging/inspection.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub raw_input: Option<serde_json::Value>,
+    /// The tool's document payload as it is still being generated, decoded from
+    /// the provider's streaming arguments. Present only for tools whose payload
+    /// is itself the artifact a person is waiting to read — a file being
+    /// written — so the UI can show the document while the model types it
+    /// instead of after the write lands. Superseded by `raw_input` once the
+    /// arguments validate.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub streamed_input: String,
     /// Latest structured public progress for this tool call.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub progress: Option<ToolCallProgress>,
@@ -282,6 +290,17 @@ pub struct ToolCallPatch {
     /// Content blocks to append (streaming tool output).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub append_content: Vec<ContentBlock>,
+    /// Decoded document text to append to `streamed_input` (streaming tool
+    /// *input*, as distinct from `append_content`'s tool output).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub append_input: String,
+    /// Replace `streamed_input` wholesale. Used when the validated arguments
+    /// prove the streamed prefix untrustworthy (a provider rewound or reordered
+    /// its own argument stream): appending the validated payload onto a stale
+    /// prefix would splice two drafts together. Applied before `append_input`,
+    /// mirroring `replace_content`/`append_content`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replace_input: Option<String>,
     /// Replace the call's content wholesale — the final result superseding any
     /// streamed partials, so progress lines don't linger (or duplicate the
     /// result) once the call completes. Applied before `append_content`.

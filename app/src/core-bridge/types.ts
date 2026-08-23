@@ -117,6 +117,12 @@ export interface ToolCall {
   locations: FsLocation[];
   content: ContentBlock[];
   raw_input?: unknown;
+  /** The tool's document payload as it is still being generated, decoded from
+   *  the provider's streaming arguments. Present only for tools whose payload
+   *  *is* the artifact a person is waiting to read (a file being written), so
+   *  the document can be shown while the model types it rather than after the
+   *  write lands. Completed from the validated arguments before the write. */
+  streamed_input?: string;
   progress?: ToolCallProgress;
 }
 

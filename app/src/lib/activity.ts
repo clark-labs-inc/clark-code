@@ -1,7 +1,7 @@
 // Derive the single "what is happening right now" signal from a snapshot, so the
 // UI can always answer: happening now? progress? Pure + tested.
 
-import type { RunOutcome, Snapshot, TimelineItem, ToolCall } from "../core-bridge/types";
+import type { Snapshot, TimelineItem, ToolCall } from "../core-bridge/types";
 
 /** Private reasoning is durable history, not a second live-work surface. While
  * it is the only agent output, Conversation keeps it hidden and lets the one
@@ -34,19 +34,6 @@ export function isAwaitingAssistantReply(timeline: readonly TimelineItem[]): boo
     && item.phase !== "commentary"
     && item.blocks.some((block) => block.type === "text" && block.text.trim().length > 0)
   );
-}
-
-/** Compact, typed diagnostics for the provider-local root execution receipt. */
-export function executionDiagnostic(outcome?: RunOutcome): string | undefined {
-  const execution = outcome?.execution;
-  if (!execution) return undefined;
-  const attemptLabel = execution.attempts === 1 ? "attempt" : "attempts";
-  const parts = [`Root execution: ${execution.attempts} ${attemptLabel}`];
-  if (execution.recoveries > 0) parts.push(`${execution.recoveries} recovered interruption${execution.recoveries === 1 ? "" : "s"}`);
-  if (execution.child_executions > 0) parts.push(`${execution.completed_children}/${execution.child_executions} subagents completed`);
-  if (execution.changed_paths.length > 0) parts.push(`${execution.changed_paths.length} changed path${execution.changed_paths.length === 1 ? "" : "s"}`);
-  if (execution.failed_tools.length > 0) parts.push(`${execution.failed_tools.length} failed/cancelled tool${execution.failed_tools.length === 1 ? "" : "s"}`);
-  return parts.join(" · ");
 }
 
 /** The most recent streamed progress line of a tool call (e.g. a subagent step),

@@ -201,6 +201,14 @@ pub(crate) async fn run_turn(tc: TurnContext, tx: Sender<AgentEvent>, run: RunId
                         id,
                     })
                     .await;
+                // Housekeeping rides the moment a checkpoint was just taken:
+                // the repo is known-Git, and old baselines age out here rather
+                // than pinning every turn's tree forever.
+                crate::checkpoint::prune_stale_checkpoints(
+                    tc.ctx.executor.as_ref(),
+                    tc.ctx.sandbox.root(),
+                )
+                .await;
             }
             Ok(None) => {}
             Err(error) => tracing::warn!(%error, "working-tree checkpoint unavailable"),

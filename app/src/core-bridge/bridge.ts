@@ -87,7 +87,13 @@ export type WorktreeTransitionAction =
   | "switch_clean"
   | "preserve_changes";
 export type WorktreePreservation = "clean" | "changes_remain_in_source" | "owner_checkout";
-export type ManagedWorktreeState = "ready" | "dirty" | "committed" | "saved" | "missing";
+export type ManagedWorktreeState =
+  | "ready"
+  | "dirty"
+  | "committed"
+  | "saved"
+  | "missing"
+  | "unavailable";
 
 export interface WorktreeChangeSummary {
   changedFiles: number;

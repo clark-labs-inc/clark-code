@@ -11,6 +11,11 @@ use std::{
 use tokio::process::Command;
 
 const SSH_CONNECT_TIMEOUT: &str = "10";
+/// Hard bound on one discovery command (probe, folder listing). `ConnectTimeout`
+/// only limits the TCP connect: a host that accepts the connection and then
+/// stalls in auth or in the remote command otherwise hangs the Tauri command —
+/// and the UI behind it — indefinitely.
+const SSH_OVERALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 fn background_command(program: &str) -> Command {
     let mut command = Command::new(program);
@@ -404,16 +409,24 @@ async fn ssh_output(host: &str, remote_command: &str) -> Result<Vec<u8>, String>
     if host.is_empty() {
         return Err("SSH host is required".into());
     }
-    let output = background_command("ssh")
+    let mut command = background_command("ssh");
+    command
         .args([
+            // Fail interactive prompts (passphrase, host-key confirmation)
+            // immediately instead of leaving ssh waiting on a null stdin —
+            // the same posture as the worker transport's master connection.
+            "-o",
+            "BatchMode=yes",
             "-o",
             &format!("ConnectTimeout={SSH_CONNECT_TIMEOUT}"),
             host,
             remote_command,
         ])
         .stdin(Stdio::null())
-        .output()
+        .kill_on_drop(true);
+    let output = tokio::time::timeout(SSH_OVERALL_TIMEOUT, command.output())
         .await
+        .map_err(|_| format!("SSH request to {host} timed out"))?
         .map_err(|error| format!("spawning ssh: {error}"))?;
     if !output.status.success() {
         let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();

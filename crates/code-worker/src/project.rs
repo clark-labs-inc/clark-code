@@ -14,7 +14,7 @@ use code_host::{HeadlessPlugin, PluginContext, PluginError, PluginManifest};
 use exec_core::{collect_system_capabilities, Executor, LocalExecutor};
 use exec_protocol::{
     method, CanonicalizeResult, MetaResult, PathParams, ProcessStartParams, ReadDirResult,
-    ReadResult, RenameParams, SystemCapabilityCensusResult, WalkResult, WireDirEntry,
+    ReadResult, RenameParams, SystemCapabilityCensusResult, WalkParams, WalkResult, WireDirEntry,
     WireWalkEntry, WriteNewResult, WriteParams,
 };
 use serde::de::DeserializeOwned;
@@ -192,9 +192,21 @@ async fn dispatch(
             })
         }
         method::FS_WALK => {
-            let path = path_param(request.params, root)?;
-            let entries = fs.walk(&path).await.map_err(failed)?;
+            let params: WalkParams = decode(request.params)?;
+            let path = confined(&params.path, root)?;
+            // The whole listing crosses the transport as one response line, so
+            // it must be bounded even when the caller sent no bound: a large
+            // monorepo's walk otherwise exceeds the response limit and the
+            // request fails outright instead of returning a useful prefix.
+            let cap = params
+                .max_entries
+                .unwrap_or(WALK_SAFETY_CAP)
+                .min(WALK_SAFETY_CAP);
+            let mut entries = fs.walk(&path).await.map_err(failed)?;
+            let truncated = entries.len() > cap;
+            entries.truncate(cap);
             encode(WalkResult {
+                truncated,
                 entries: entries
                     .into_iter()
                     .map(|entry| WireWalkEntry {
@@ -225,6 +237,10 @@ async fn dispatch(
         ))),
     }
 }
+
+/// Upper bound on `fs/walk` entries in one response. ~120 bytes each keeps the
+/// worst case well inside the transport's response budget.
+const WALK_SAFETY_CAP: usize = 20_000;
 
 fn path_param(value: Value, root: &Path) -> Result<PathBuf, PluginError> {
     let params: PathParams = decode(value)?;
@@ -300,6 +316,15 @@ mod tests {
         method_name: &str,
         params: serde_json::Value,
     ) -> Response {
+        invoke_as(root, "project-test", method_name, params).await
+    }
+
+    async fn invoke_as(
+        root: &std::path::Path,
+        request_id: &str,
+        method_name: &str,
+        params: serde_json::Value,
+    ) -> Response {
         let config = WorkerConfig {
             projects: vec![ProjectRegistration {
                 id: "fixture".into(),
@@ -312,7 +337,7 @@ mod tests {
         let host = crate::build_host(&config).unwrap();
         host.handle(Request {
             schema_version: PROTOCOL_VERSION,
-            request_id: "project-test".into(),
+            request_id: request_id.into(),
             command: RequestCommand::Invoke {
                 plugin: "project".into(),
                 operation: "executor.call".into(),
@@ -361,6 +386,56 @@ mod tests {
         )
         .await;
         assert!(matches!(response, Response::Error { .. }));
+    }
+
+    #[tokio::test]
+    async fn a_walk_over_the_bound_returns_a_truncated_prefix_not_a_failure() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        for index in 0..8 {
+            std::fs::write(root.join(format!("file-{index}.txt")), b"x").unwrap();
+        }
+
+        async fn walk(
+            root: &std::path::Path,
+            request_id: &str,
+            params: serde_json::Value,
+        ) -> exec_protocol::WalkResult {
+            match invoke_as(root, request_id, method::FS_WALK, params).await {
+                Response::Result { data, .. } => serde_json::from_value(data).unwrap(),
+                other => panic!("walk failed: {other:?}"),
+            }
+        }
+
+        let result = walk(
+            &root,
+            "walk-bounded",
+            serde_json::json!({
+                "path": root.to_string_lossy(),
+                "max_entries": 3usize,
+            }),
+        )
+        .await;
+        assert!(result.truncated);
+        assert_eq!(result.entries.len(), 3);
+
+        // Without a caller bound the safety cap applies (a no-op here), and a
+        // small tree reports itself complete.
+        let result = walk(
+            &root,
+            "walk-unbounded",
+            serde_json::json!({ "path": root.to_string_lossy() }),
+        )
+        .await;
+        assert!(!result.truncated);
+        // The listing also contains the worker's own trajectory files, so
+        // count the fixture files rather than the whole tree.
+        let fixtures = result
+            .entries
+            .iter()
+            .filter(|entry| entry.path.contains("file-"))
+            .count();
+        assert_eq!(fixtures, 8, "{result:?}");
     }
 
     #[tokio::test]

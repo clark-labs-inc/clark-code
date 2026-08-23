@@ -264,6 +264,9 @@ fn tool_call(v: &Value) -> ToolCall {
         locations: locations(v.get("locations")),
         content: tool_content(v.get("content")),
         raw_input: v.get("rawInput").cloned(),
+        // ACP surfaces validated arguments only; there is no argument-delta
+        // channel to decode a document from.
+        streamed_input: String::new(),
         progress: None,
     }
 }
@@ -276,6 +279,8 @@ fn tool_call_patch(v: &Value) -> ToolCallPatch {
         status: v.get("status").map(|st| tool_status(st.as_str())),
         locations: v.get("locations").map(|l| locations(Some(l))),
         append_content: tool_content(v.get("content")),
+        append_input: String::new(),
+        replace_input: None,
         replace_content: None,
         progress: None,
     }

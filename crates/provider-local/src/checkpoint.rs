@@ -76,7 +76,7 @@ pub(crate) async fn working_tree(exec: &dyn Executor, root: &Path) -> Result<Str
             .await?
             .is_some()
         {
-            crate::git_metadata::required_with_env(
+            crate::git_metadata::required_tree_op_with_env(
                 exec,
                 root,
                 &["read-tree", "HEAD"],
@@ -84,14 +84,17 @@ pub(crate) async fn working_tree(exec: &dyn Executor, root: &Path) -> Result<Str
             )
             .await?;
         }
-        crate::git_metadata::required_with_env(
+        // `add -A` hashes every modified and untracked file; on a large
+        // checkout that exceeds the metadata bound, and a timed-out checkpoint
+        // silently strips the run of its undo baseline and Changes panel.
+        crate::git_metadata::required_tree_op_with_env(
             exec,
             root,
             &["add", "-A"],
             &[("GIT_INDEX_FILE", index_value.as_str())],
         )
         .await?;
-        let tree = crate::git_metadata::required_with_env(
+        let tree = crate::git_metadata::required_tree_op_with_env(
             exec,
             root,
             &["write-tree"],
@@ -134,6 +137,60 @@ pub async fn create_checkpoint(exec: &dyn Executor, root: &Path) -> Result<Optio
     let reference = format!("refs/agent/checkpoints/{sha}");
     crate::git_metadata::required(exec, root, &["update-ref", &reference, &sha]).await?;
     Ok(Some(sha))
+}
+
+/// How long a checkpoint ref pins its trees after creation.
+///
+/// Checkpoints are undo/diff baselines for recent work. Their refs are GC
+/// roots, so without a horizon every turn of every conversation pinned its
+/// full working tree forever — measured here as a 1.2 GB `.git` — because the
+/// only release path was permanent conversation deletion, which most
+/// conversations never receive. Past this horizon the ref is dropped; the
+/// commit objects remain until normal Git maintenance, and a Changes panel
+/// pointed at a pruned baseline reports an error and offers newer baselines.
+const CHECKPOINT_RETENTION: std::time::Duration = std::time::Duration::from_secs(30 * 24 * 60 * 60);
+/// Bound one sweep so a huge backlog amortizes across runs instead of
+/// stalling the run that happened to trip it.
+const MAX_PRUNED_PER_SWEEP: usize = 64;
+
+/// Drop checkpoint refs older than the retention horizon. Best-effort: a run
+/// must never fail because housekeeping could not.
+pub async fn prune_stale_checkpoints(exec: &dyn Executor, root: &Path) {
+    let listing = match crate::git_metadata::optional(
+        exec,
+        root,
+        &[
+            "for-each-ref",
+            "--format=%(refname) %(creatordate:unix)",
+            "refs/agent/checkpoints/",
+        ],
+    )
+    .await
+    {
+        Ok(Some(listing)) => listing,
+        Ok(None) | Err(_) => return,
+    };
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let horizon = now.saturating_sub(CHECKPOINT_RETENTION.as_secs());
+    let stale = listing
+        .lines()
+        .filter_map(|line| {
+            let (reference, created) = line.rsplit_once(' ')?;
+            let created: u64 = created.trim().parse().ok()?;
+            (created < horizon && reference.starts_with("refs/agent/checkpoints/"))
+                .then(|| reference.to_string())
+        })
+        .take(MAX_PRUNED_PER_SWEEP);
+    for reference in stale {
+        if let Err(error) =
+            crate::git_metadata::required(exec, root, &["update-ref", "-d", &reference]).await
+        {
+            tracing::debug!(%error, reference, "stale checkpoint ref not pruned");
+        }
+    }
 }
 
 /// Release checkpoint-retention refs after their owning conversation is
@@ -183,6 +240,174 @@ mod tests {
             String::from_utf8_lossy(&output.stderr)
         );
         String::from_utf8_lossy(&output.stdout).to_string()
+    }
+
+    /// Records which time bound each git command was given. The distinction is
+    /// the contract under test: `add -A`/`write-tree` scale with the checkout
+    /// and must get the tree bound, while metadata stays on the short bound so
+    /// a wedged repository still fails fast. When this was uniform at the
+    /// metadata bound, checkpointing on large checkouts timed out and the run
+    /// silently lost its undo baseline.
+    struct TimeoutProbe {
+        calls: std::sync::Mutex<Vec<(String, std::time::Duration)>>,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::exec::Executor for TimeoutProbe {
+        async fn read(&self, _: &Path) -> exec_core::ExecResult<Vec<u8>> {
+            unreachable!("not used by working_tree")
+        }
+        async fn write(&self, _: &Path, _: &[u8]) -> exec_core::ExecResult<()> {
+            unreachable!("not used by working_tree")
+        }
+        async fn create_dir_all(&self, _: &Path) -> exec_core::ExecResult<()> {
+            unreachable!("not used by working_tree")
+        }
+        async fn remove_file(&self, _: &Path) -> exec_core::ExecResult<()> {
+            Ok(())
+        }
+        async fn remove_dir_all(&self, _: &Path) -> exec_core::ExecResult<()> {
+            unreachable!("not used by working_tree")
+        }
+        async fn rename(&self, _: &Path, _: &Path) -> exec_core::ExecResult<()> {
+            unreachable!("not used by working_tree")
+        }
+        async fn read_dir(&self, _: &Path) -> exec_core::ExecResult<Vec<exec_core::DirEntry>> {
+            unreachable!("not used by working_tree")
+        }
+        async fn metadata(&self, _: &Path) -> exec_core::ExecResult<exec_core::FileMeta> {
+            unreachable!("not used by working_tree")
+        }
+        async fn canonicalize(&self, _: &Path) -> exec_core::ExecResult<PathBuf> {
+            unreachable!("not used by working_tree")
+        }
+        async fn home_dir(&self, _: &Path) -> exec_core::ExecResult<PathBuf> {
+            unreachable!("not used by working_tree")
+        }
+        async fn walk(&self, _: &Path) -> exec_core::ExecResult<Vec<exec_core::WalkEntry>> {
+            unreachable!("not used by working_tree")
+        }
+        async fn exec(
+            &self,
+            command: &str,
+            _cwd: &Path,
+            timeout: std::time::Duration,
+            _cancel: &tokio_util::sync::CancellationToken,
+        ) -> exec_core::ExecResult<exec_core::ExecOutput> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push((command.to_string(), timeout));
+            let ok = |stdout: &str| exec_core::ExecOutput {
+                stdout: stdout.as_bytes().to_vec(),
+                stderr: Vec::new(),
+                code: Some(0),
+            };
+            if command.contains("--git-path") {
+                return Ok(ok("/tmp/probe-checkpoint.idx\n"));
+            }
+            if command.contains("rev-parse --verify HEAD") {
+                // No HEAD: exercises the empty-repository branch and skips
+                // read-tree, keeping the scripted surface small.
+                return Ok(exec_core::ExecOutput {
+                    stdout: Vec::new(),
+                    stderr: Vec::new(),
+                    code: Some(1),
+                });
+            }
+            if command.contains("write-tree") {
+                return Ok(ok("0123456789abcdef0123456789abcdef01234567\n"));
+            }
+            Ok(ok(""))
+        }
+    }
+
+    #[tokio::test]
+    async fn repository_scaled_commands_get_the_tree_bound() {
+        let probe = TimeoutProbe {
+            calls: std::sync::Mutex::new(Vec::new()),
+        };
+        let tree = working_tree(&probe, Path::new("/repo")).await.unwrap();
+        assert_eq!(tree, "0123456789abcdef0123456789abcdef01234567");
+
+        let calls = probe.calls.lock().unwrap();
+        assert!(!calls.is_empty());
+        for (command, timeout) in calls.iter() {
+            let expected = if command.contains("add -A") || command.contains("write-tree") {
+                crate::git_metadata::TREE_OP_TIMEOUT
+            } else {
+                crate::git_metadata::COMMAND_TIMEOUT
+            };
+            assert_eq!(
+                *timeout, expected,
+                "unexpected bound for {command:?}: {timeout:?}"
+            );
+        }
+        let hashed_everything = calls.iter().any(|(command, _)| command.contains("add -A"));
+        assert!(hashed_everything, "working_tree no longer stages the tree");
+    }
+
+    #[tokio::test]
+    async fn pruning_drops_only_refs_past_the_retention_horizon() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        git(root, &["init", "-q"]);
+        std::fs::write(root.join("file.txt"), "content\n").unwrap();
+        git(root, &["add", "."]);
+        git(root, &["commit", "-qm", "base"]);
+
+        let fresh = create_checkpoint(&LocalExecutor, root)
+            .await
+            .unwrap()
+            .unwrap();
+
+        // Manufacture a checkpoint whose committer date is past the horizon.
+        // The date env vars take strict formats only; epoch form is exact.
+        let tree = git(root, &["rev-parse", "HEAD^{tree}"]);
+        let forty_days_ago = format!(
+            "@{} +0000",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs()
+                - 40 * 24 * 60 * 60
+        );
+        let stale = {
+            let output = Command::new("git")
+                .arg("-C")
+                .arg(root)
+                .args(["commit-tree", tree.trim(), "-m", "agent checkpoint old"])
+                .env("GIT_AUTHOR_NAME", "t")
+                .env("GIT_AUTHOR_EMAIL", "t@t")
+                .env("GIT_COMMITTER_NAME", "t")
+                .env("GIT_COMMITTER_EMAIL", "t@t")
+                .env("GIT_COMMITTER_DATE", &forty_days_ago)
+                .env("GIT_AUTHOR_DATE", &forty_days_ago)
+                .output()
+                .unwrap();
+            assert!(output.status.success());
+            String::from_utf8_lossy(&output.stdout).trim().to_string()
+        };
+        git(
+            root,
+            &[
+                "update-ref",
+                &format!("refs/agent/checkpoints/{stale}"),
+                &stale,
+            ],
+        );
+
+        prune_stale_checkpoints(&LocalExecutor, root).await;
+
+        let refs = git(root, &["for-each-ref", "refs/agent/checkpoints/"]);
+        assert!(
+            refs.contains(&fresh),
+            "fresh checkpoint must survive: {refs}"
+        );
+        assert!(
+            !refs.contains(&stale),
+            "stale checkpoint must be pruned: {refs}"
+        );
     }
 
     #[tokio::test]

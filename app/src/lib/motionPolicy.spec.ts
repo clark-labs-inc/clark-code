@@ -152,8 +152,8 @@ describe("GUI motion policy", () => {
     expect(cssSource).toMatch(
       /\.activity-dots > span\s*\{[^}]*animation: activity-dot-pulse/s,
     );
-    expect(cssSource).toContain(".skeleton::after,\n.spec-writing-line::after");
-    expect(cssSource).not.toMatch(/\.spec-writing-line::after\s*\{[^}]*translateX/s);
+    expect(cssSource).toContain(".skeleton::after {");
+    expect(cssSource).not.toMatch(/\.skeleton::after\s*\{[^}]*translateX/s);
     expect(cssSource).not.toMatch(
       /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.reply-skeleton\s*\{\s*display: none !important;/,
     );

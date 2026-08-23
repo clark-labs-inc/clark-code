@@ -16,6 +16,9 @@ function changeSummary(worktree: ManagedWorktree): string {
 }
 
 function lifecycleCopy(worktree: ManagedWorktree, inUse: boolean): string {
+  if (worktree.state === "unavailable") {
+    return "Git could not read this checkout's status. It stays listed and untouched.";
+  }
   if (worktree.state === "missing") {
     return "This checkout is missing. the agent leaves its registry entry untouched.";
   }

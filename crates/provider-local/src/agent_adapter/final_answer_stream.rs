@@ -10,6 +10,7 @@ use std::collections::BTreeMap;
 
 use serde_json::Value;
 
+use super::partial_json::partial_json_string_field;
 use crate::llm::output_quarantine;
 use crate::tools::final_answer::FINAL_ANSWER_TOOL;
 
@@ -111,75 +112,6 @@ impl FinalAnswerStreams {
         let emitted = self.active.remove(tool_call_id).unwrap_or_default();
         answer.strip_prefix(&emitted).unwrap_or(answer).to_string()
     }
-}
-
-/// Decode the currently complete prefix of a JSON string field. The input may
-/// end anywhere, including inside an escape or UTF-16 surrogate pair.
-fn partial_json_string_field(input: &str, field: &str) -> Option<(String, bool)> {
-    let needle = format!("\"{field}\"");
-    let after_key = input.split_once(&needle)?.1.trim_start();
-    let raw = after_key
-        .strip_prefix(':')?
-        .trim_start()
-        .strip_prefix('"')?;
-    let bytes = raw.as_bytes();
-    let mut index = 0;
-    let mut safe_end = 0;
-    let mut complete = false;
-
-    while index < bytes.len() {
-        match bytes[index] {
-            b'"' => {
-                safe_end = index;
-                complete = true;
-                break;
-            }
-            b'\\' => {
-                let escape = *bytes.get(index + 1)?;
-                if escape == b'u' {
-                    let first_end = index + 6;
-                    if first_end > bytes.len() {
-                        break;
-                    }
-                    let first = u16::from_str_radix(&raw[index + 2..first_end], 16).ok()?;
-                    if (0xD800..=0xDBFF).contains(&first) {
-                        let second_end = first_end + 6;
-                        if second_end > bytes.len() || &bytes[first_end..first_end + 2] != b"\\u" {
-                            break;
-                        }
-                        let second =
-                            u16::from_str_radix(&raw[first_end + 2..second_end], 16).ok()?;
-                        if !(0xDC00..=0xDFFF).contains(&second) {
-                            return None;
-                        }
-                        index = second_end;
-                    } else if (0xDC00..=0xDFFF).contains(&first) {
-                        return None;
-                    } else {
-                        index = first_end;
-                    }
-                } else if matches!(
-                    escape,
-                    b'"' | b'\\' | b'/' | b'b' | b'f' | b'n' | b'r' | b't'
-                ) {
-                    index += 2;
-                } else {
-                    return None;
-                }
-                safe_end = index;
-            }
-            _ => {
-                let character = raw[index..].chars().next()?;
-                index += character.len_utf8();
-                safe_end = index;
-            }
-        }
-    }
-
-    let quoted = format!("\"{}\"", &raw[..safe_end]);
-    serde_json::from_str::<String>(&quoted)
-        .ok()
-        .map(|decoded| (decoded, complete))
 }
 
 #[cfg(test)]

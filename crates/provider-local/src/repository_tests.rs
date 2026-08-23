@@ -194,6 +194,36 @@ async fn discovers_repositories_beyond_the_old_depth_cap() {
     assert_eq!(repositories[0].root, canonical_root.to_string_lossy());
 }
 
+#[tokio::test]
+async fn a_repository_root_stops_descent_deterministically() {
+    // The old walk broke out of the directory listing when it met `.git`, so
+    // subdirectories enumerated BEFORE it were already queued and ones after
+    // were not — whether a nested repo was discovered depended on filesystem
+    // enumeration order. The contract now: a repo root is a discovery unit and
+    // is never descended into, regardless of listing order.
+    let parent = tempfile::tempdir().unwrap();
+    let outer = parent.path().join("outer");
+    tokio::fs::create_dir_all(&outer).await.unwrap();
+    git(&outer, "init").await;
+
+    // Both sides of `.git` in typical enumeration orders.
+    for nested in ["aaa-nested", "zzz-nested"] {
+        let root = outer.join(nested);
+        tokio::fs::create_dir_all(&root).await.unwrap();
+        git(&root, "init").await;
+    }
+
+    let repositories = discover_repositories(&LocalExecutor, parent.path())
+        .await
+        .unwrap();
+    let roots: Vec<_> = repositories
+        .iter()
+        .map(|repository| repository.root.as_str())
+        .collect();
+    assert_eq!(repositories.len(), 1, "{roots:?}");
+    assert!(roots[0].ends_with("outer"), "{roots:?}");
+}
+
 #[test]
 fn remote_sanitization_removes_credentials_and_normalizes_identity() {
     let (url, canonical) = sanitize_remote("https://token@example.com/Org/Repo.git").unwrap();

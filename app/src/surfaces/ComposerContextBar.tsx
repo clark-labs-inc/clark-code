@@ -205,8 +205,33 @@ export function ComposerContextBar() {
 
   useEffect(() => {
     if (!canInspect) return;
-    const timer = window.setInterval(() => setRefreshTick((tick) => tick + 1), 15_000);
-    return () => window.clearInterval(timer);
+    // Each tick runs the full project probe (a `git status` scan plus several
+    // rev-parses) through the host — and on a remote project, over SSH. A
+    // hidden window gets nothing from that, so pause the timer while hidden
+    // and refresh once immediately on return, when the answer is stalest.
+    let timer: number | null = null;
+    const start = () => {
+      if (timer === null) {
+        timer = window.setInterval(() => setRefreshTick((tick) => tick + 1), 15_000);
+      }
+    };
+    const onVisibility = () => {
+      if (document.hidden) {
+        if (timer !== null) {
+          window.clearInterval(timer);
+          timer = null;
+        }
+      } else {
+        setRefreshTick((tick) => tick + 1);
+        start();
+      }
+    };
+    if (!document.hidden) start();
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      if (timer !== null) window.clearInterval(timer);
+    };
   }, [canInspect, inspectionKey]);
 
   const isRemoteSession = Boolean(session && activeRemoteHost);

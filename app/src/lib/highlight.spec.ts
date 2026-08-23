@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { highlight, resolveLang } from "./highlight";
+import { clearHighlightCaches, highlight, highlightCacheKey, resolveLang } from "./highlight";
 
 describe("resolveLang", () => {
   it("maps common aliases to a Shiki grammar id", () => {
@@ -55,5 +55,28 @@ describe("highlight", () => {
     const r2 = await highlight("x = 1", "ruby");
     expect(r2.lang).toBe("ruby");
     expect(r2.html).toBeTruthy();
+  });
+});
+
+describe("highlight cache", () => {
+  it("keys on language and exact source, so neither can collide", () => {
+    // A shared separator that cannot occur in a language id keeps the two
+    // fields unambiguous: without it, ("ts", "x") and ("t", "sx") would
+    // produce the same key and return each other's tokens.
+    expect(highlightCacheKey("ts", "a")).not.toBe(highlightCacheKey("t", "sa"));
+    expect(highlightCacheKey("ts", "a")).toBe(highlightCacheKey("ts", "a"));
+    expect(highlightCacheKey(undefined, "a")).not.toBe(highlightCacheKey("ts", "a"));
+    // Growing source is a different key — a streaming fence must not be served
+    // the tokens of its own shorter prefix.
+    expect(highlightCacheKey("ts", "const a")).not.toBe(highlightCacheKey("ts", "const ab"));
+  });
+
+  it("returns the same result object for a repeated request", async () => {
+    clearHighlightCaches();
+    const first = await highlight("const a = 1;\n", "ts");
+    const second = await highlight("const a = 1;\n", "ts");
+    // Identity, not equality: a cache hit must skip tokenizing entirely, which
+    // is the whole point — tokenizing costs more than a frame.
+    expect(second).toBe(first);
   });
 });

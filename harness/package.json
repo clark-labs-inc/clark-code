@@ -12,7 +12,11 @@
     "test:ssh-settings": "node ssh-settings-smoke.mjs",
     "test:model-picker": "node model-picker-smoke.mjs",
     "test:pragmatic-dnd": "node pragmatic-dnd-smoke.mjs",
-    "test:product-boundary": "node --test product-boundary.spec.mjs"
+    "test:product-boundary": "node --test product-boundary.spec.mjs",
+    "perf:preflight": "node perf-preflight.mjs",
+    "perf:stream": "node perf-stream.mjs",
+    "perf:compare": "node perf-compare.mjs",
+    "test:highlight-staleness": "node highlight-staleness-probe.mjs"
   },
   "dependencies": {
     "playwright": "^1.62.1"

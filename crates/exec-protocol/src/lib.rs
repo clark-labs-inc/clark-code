@@ -32,6 +32,19 @@ pub struct PathParams {
     pub path: String,
 }
 
+/// Parameters for `fs/walk`. Wire-compatible with [`PathParams`]: a worker
+/// that predates the bound ignores the extra field and walks unbounded, so the
+/// caller must still treat the response as possibly huge.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct WalkParams {
+    pub path: String,
+    /// Stop after this many entries. A full monorepo walk serialized as one
+    /// response line can exceed the transport's response bound, failing the
+    /// request outright — a bounded prefix is strictly more useful.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_entries: Option<usize>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ReadResult {
     /// File bytes, base64. Files may be binary, so never raw JSON strings.
@@ -96,6 +109,10 @@ pub struct SystemCapabilityCensusResult {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct WalkResult {
+    /// True when `max_entries` (or the worker's own safety cap) truncated the
+    /// listing. Absent in responses from workers that predate the bound.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub truncated: bool,
     pub entries: Vec<WireWalkEntry>,
 }
 
