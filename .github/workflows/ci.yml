@@ -54,10 +54,16 @@ jobs:
         with:
           key: cargo-nextest-${{ runner.os }}-0.9.143
           path: ~/.cargo/bin/cargo-nextest
-      - name: Install Linux keyring dependencies
+      - name: Install Linux workspace dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libdbus-1-dev pkg-config
+          sudo apt-get install -y \
+            libdbus-1-dev \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            pkg-config
       - name: Format
         run: cargo fmt --all --check
       - name: Clippy core and providers
