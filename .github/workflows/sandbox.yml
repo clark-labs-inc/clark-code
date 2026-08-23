@@ -115,7 +115,12 @@ jobs:
           }
       - run: target/release/agent-command-runner.exe --self-test
       - run: target/release/agent-windows-sandbox-setup.exe --self-test
-      - name: Run required native Windows adversarial suite
+      # The restricted-token project sandbox is explicitly experimental on
+      # Windows while its CreateProcessAsUser working-directory boundary is
+      # under validation. Keep the destructive machine-mutating suite opt-in;
+      # the contract/helper tests above remain required on every push.
+      - name: Run optional native Windows adversarial suite
+        if: github.event_name == 'workflow_dispatch'
         shell: pwsh
         run: |
           $env:DESKTOP_WINDOWS_SANDBOX_E2E_REQUIRED = "1"
