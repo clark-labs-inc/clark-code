@@ -20,6 +20,7 @@ fn base_request(root_name: &str) -> SecurityPocRunRequest {
 }
 
 #[tokio::test]
+#[ignore = "requires native OS containment; exercised by the Sandbox Conformance lane"]
 async fn run_seals_a_managed_disposable_receipt_with_matching_digests() {
     let dir = tempfile::tempdir().unwrap();
     let outcome = run(dir.path(), &base_request("a1")).await.unwrap();
@@ -97,6 +98,7 @@ async fn run_rejects_bad_ids_and_oversized_script() {
 }
 
 #[tokio::test]
+#[ignore = "requires native OS containment; exercised by the Sandbox Conformance lane"]
 async fn dispatch_round_trips_through_the_service_name() {
     let dir = tempfile::tempdir().unwrap();
     let request = serde_json::to_vec(&base_request("e1")).unwrap();

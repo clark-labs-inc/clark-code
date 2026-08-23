@@ -14,6 +14,7 @@ on:
       - "crates/exec-sandbox-protocol/**"
       - "crates/exec-sandbox-windows/**"
       - "crates/install-context/**"
+      - "crates/security-poc-runner/**"
       - "scripts/bundled-tools.json"
       - "scripts/stage-bundled-tools.py"
       - "src-tauri/tauri.sandbox.macos.conf.json"
@@ -67,6 +68,8 @@ jobs:
         env:
           DESKTOP_SANDBOX_E2E_REQUIRED: "1"
         run: cargo nextest run -p exec-core -p exec-sandbox-protocol -p exec-sandbox -p desktop-install-context --no-fail-fast
+      - name: Run security PoC containment receipts
+        run: cargo nextest run -p security-poc-runner --run-ignored all --no-fail-fast
       - name: Capture native benchmark
         run: cargo run -p exec-sandbox --example sandbox_benchmark -- --iterations 5000 --launch-iterations 30
 
