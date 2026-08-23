@@ -139,6 +139,7 @@ impl Provider for FakeProvider {
                     locations: vec![],
                     content: vec![],
                     raw_input: None,
+                    streamed_input: String::new(),
                     progress: None,
                 },
             },
