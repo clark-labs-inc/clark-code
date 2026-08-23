@@ -3,8 +3,10 @@
 // and the equivalent file picker without starting an agent/model run.
 
 import { spawn } from "node:child_process";
+import { existsSync, statSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -13,7 +15,19 @@ import { launch, VIEWPORT } from "./launch.mjs";
 
 const repoDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
-const outDir = path.join(repoDir, "target", "pragmatic-dnd-smoke", `${stamp}-${process.pid}`);
+const outDir = process.env.PRAGMATIC_DND_OUTPUT_DIR
+  ? path.resolve(process.env.PRAGMATIC_DND_OUTPUT_DIR)
+  : path.join(
+      (() => {
+        const targetRoot = path.join(repoDir, "target");
+        try {
+          if (existsSync(targetRoot) && statSync(targetRoot).isDirectory()) return targetRoot;
+        } catch {}
+        return path.join(tmpdir(), "agent-desktop-harness");
+      })(),
+      "pragmatic-dnd-smoke",
+      `${stamp}-${process.pid}`,
+    );
 
 function reservePort() {
   return new Promise((resolve, reject) => {

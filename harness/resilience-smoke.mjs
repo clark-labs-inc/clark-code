@@ -1,6 +1,8 @@
 import { spawn } from "node:child_process";
 import { createServer } from "node:net";
+import { existsSync, statSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -11,8 +13,28 @@ const repoDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
 const outDir = process.env.RESILIENCE_E2E_OUTPUT_DIR
   ? path.resolve(process.env.RESILIENCE_E2E_OUTPUT_DIR)
-  : path.join(repoDir, "target", "resilience-smoke", `${stamp}-${process.pid}`);
+  : path.join(
+      (() => {
+        const targetRoot = path.join(repoDir, "target");
+        try {
+          // `target` is a shared-workspace symlink on the development laptop.
+          // If its volume is absent, do not fail before the browser harness
+          // starts or try to write the failure receipt through the dead link.
+          if (existsSync(targetRoot) && statSync(targetRoot).isDirectory()) {
+            return targetRoot;
+          }
+        } catch {
+          // Fall through to an explicit temporary evidence root.
+        }
+        return path.join(tmpdir(), "agent-desktop-resilience");
+      })(),
+      "resilience-smoke",
+      `${stamp}-${process.pid}`,
+    );
 const RESILIENCE_VERSION = 2;
+const productEntry = path.resolve(
+  process.env.DESKTOP_PRODUCT_ENTRY ?? path.join(repoDir, "app", "src", "product", "neutralEntry.ts"),
+);
 const cases = [
   { id: "clean", mask: 0, expected: "recovered" },
   { id: "new-transport-faults", mask: 38, expected: "recovered" },
@@ -45,7 +67,12 @@ const dev = spawn(
   ["--dir", "app", "dev", "--host", "127.0.0.1", "--port", String(port), "--strictPort"],
   {
     cwd: repoDir,
-    env: { ...process.env, VITE_PRODUCT_DEV_AUTH: "1" },
+    env: {
+      ...process.env,
+      DESKTOP_PRODUCT_ENTRY: productEntry,
+      VITE_FORCE_MOCK_BRIDGE: "1",
+      VITE_PRODUCT_DEV_AUTH: "1",
+    },
     stdio: ["ignore", "pipe", "pipe"],
   },
 );
