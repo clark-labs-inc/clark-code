@@ -66,5 +66,7 @@ jobs:
           node-version: 24.18.0
           cache: pnpm
           cache-dependency-path: app/pnpm-lock.yaml
+      - name: Install frontend dependencies for the boundary build
+        run: pnpm --dir app install --frozen-lockfile
       - name: Check product decomposition contract
         run: node --test harness/product-boundary.spec.mjs
