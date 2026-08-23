@@ -175,7 +175,10 @@ test("performance instrumentation stays out of an ordinary frontend build", () =
   // is a literal `false`, and an alias that resolves to an empty module). This
   // asserts the outcome rather than either mechanism, so the boundary survives
   // a change to how it is implemented.
-  const build = spawnSync("corepack", ["pnpm@10", "--dir", "app", "build"], {
+  // CI pins pnpm before this contract runs. Invoke that pinned binary directly;
+  // `corepack pnpm@10 ...` is not a stable command form across Node releases
+  // and can exit 1 without forwarding the underlying build diagnostics.
+  const build = spawnSync("pnpm", ["--dir", "app", "build"], {
     cwd: root,
     encoding: "utf8",
     // A cold Vite build on a loaded machine can exceed the default.
