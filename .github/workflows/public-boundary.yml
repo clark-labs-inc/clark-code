@@ -58,5 +58,13 @@ jobs:
             git diff --check HEAD^ HEAD
           fi
 
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+        with:
+          version: 10.34.5
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
       - name: Check product decomposition contract
         run: node --test harness/product-boundary.spec.mjs
