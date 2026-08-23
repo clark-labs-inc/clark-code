@@ -1,4 +1,5 @@
 import { spawn, execFileSync } from "node:child_process";
+import { once } from "node:events";
 import { createServer } from "node:net";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -32,6 +33,40 @@ function check(condition, message) {
   if (!condition) throw new Error(message);
 }
 
+async function stopDevServer(child) {
+  if (!child || child.exitCode !== null) return;
+  try {
+    if (process.platform === "win32") {
+      execFileSync("taskkill", ["/pid", String(child.pid), "/t", "/f"], {
+        stdio: "ignore",
+      });
+    } else if (child.pid) {
+      // pnpm launches Vite as a child. Kill the detached process group so a
+      // failed browser assertion cannot leave Vite holding the CI step open.
+      process.kill(-child.pid, "SIGTERM");
+    }
+  } catch {
+    // The child may have exited between the status check and the tree kill.
+  }
+  await Promise.race([
+    once(child, "exit"),
+    sleep(5_000),
+  ]);
+  if (child.exitCode === null) {
+    try {
+      if (process.platform === "win32") {
+        execFileSync("taskkill", ["/pid", String(child.pid), "/t", "/f"], {
+          stdio: "ignore",
+        });
+      } else if (child.pid) {
+        process.kill(-child.pid, "SIGKILL");
+      }
+    } catch {
+      // The process was already reaped.
+    }
+  }
+}
+
 const port = await reservePort();
 const url = `http://127.0.0.1:${port}/`;
 const dev = spawn(
@@ -45,6 +80,7 @@ const dev = spawn(
       VITE_FORCE_MOCK_BRIDGE: "1",
       VITE_PRODUCT_DEV_AUTH: "1",
     },
+    detached: process.platform !== "win32",
     stdio: ["ignore", "pipe", "pipe"],
   },
 );
@@ -501,5 +537,5 @@ try {
   process.exitCode = 1;
 } finally {
   await browser?.close();
-  dev.kill("SIGTERM");
+  await stopDevServer(dev);
 }
