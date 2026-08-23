@@ -286,6 +286,15 @@ try {
     const state = window.__agentDesktopProfiling.store.getState();
     state.dismissNotice();
     state.dismissWarning();
+  }).then(async () => {
+    // Sonner dismisses the fixed warning toast id asynchronously. Wait for
+    // that DOM removal before the next rejection probe, otherwise a rapid
+    // warning replacement can be swallowed by the closing toast instance.
+    await page.waitForFunction(
+      () => !document.querySelector('[data-sonner-toast][data-type="warning"]'),
+      undefined,
+      { timeout: 5_000 },
+    );
   });
   const expectRejectedTransition = async ({
     mode,
