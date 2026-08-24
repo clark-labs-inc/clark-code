@@ -55,7 +55,7 @@ jobs:
           version: 0.14.2
           cache-key-prefix: clark-code-sandbox-${{ matrix.os }}
       - name: Install exact prebuilt cargo-nextest
-        uses: taiki-e/install-action@82cd3e7658a6f96c86c0234aeeda1748937cb0a1 # v2
+        uses: taiki-e/install-action@ba47c86ac325773530516bb756137ac718732518 # v2
         with:
           tool: cargo-nextest@0.9.143
       - name: Build verified release bubblewrap
@@ -88,7 +88,7 @@ jobs:
         with:
           cache-on-failure: true
       - name: Install exact prebuilt cargo-nextest
-        uses: taiki-e/install-action@82cd3e7658a6f96c86c0234aeeda1748937cb0a1 # v2
+        uses: taiki-e/install-action@ba47c86ac325773530516bb756137ac718732518 # v2
         with:
           tool: cargo-nextest@0.9.143
       - run: cargo nextest run -p exec-sandbox-protocol -p exec-sandbox-windows -p exec-sandbox --no-fail-fast
