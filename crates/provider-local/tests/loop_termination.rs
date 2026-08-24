@@ -347,7 +347,7 @@ async fn one_failed_run_does_not_override_the_goal_blocker_contract() {
 }
 
 #[tokio::test]
-async fn required_tool_contract_violation_gets_one_isolated_repair() {
+async fn broad_auto_prose_gets_one_isolated_tool_protocol_repair() {
     const DISCARDED: &str = "I am done, but I forgot the final-answer tool.";
     const DELIVERED: &str = "The structured final answer was repaired.";
     let root = tempfile::tempdir().expect("temporary project");
@@ -410,8 +410,8 @@ async fn required_tool_contract_violation_gets_one_isolated_repair() {
         .collect::<Vec<_>>();
     for request in &requests {
         assert!(
-            String::from_utf8_lossy(request).contains(r#""tool_choice":"required""#),
-            "required tool choice missing"
+            String::from_utf8_lossy(request).contains(r#""tool_choice":"auto""#),
+            "portable auto tool choice missing"
         );
     }
     let idempotency_key = |request: &str| {
@@ -424,8 +424,7 @@ async fn required_tool_contract_violation_gets_one_isolated_repair() {
     assert!(idempotency_key(&request_text[0]).is_none());
     assert!(idempotency_key(&request_text[1]).is_none());
     assert!(
-        request_text[1]
-            .contains("previous response violated the required structured-tool boundary"),
+        request_text[1].contains("previous response did not call a structured tool"),
         "repair request lacked a precise contract correction"
     );
 }
@@ -474,7 +473,7 @@ async fn unstructured_provider_output_is_quarantined_before_visible_history() {
     assert!(events.iter().any(|event| matches!(
         event,
         AgentEvent::Trace { source, .. }
-            if source == "provider_output_contract_violation"
+            if source == "model_tool_protocol_recovery"
     )));
     assert!(events.iter().any(|event| matches!(
         event,
@@ -486,7 +485,7 @@ async fn unstructured_provider_output_is_quarantined_before_visible_history() {
     assert_eq!(requests.len(), 3);
     assert!(
         String::from_utf8_lossy(&requests[1])
-            .contains("previous response violated the required structured-tool boundary"),
+            .contains("previous response did not call a structured tool"),
         "second provider request was not an isolated contract repair"
     );
     let final_request = String::from_utf8_lossy(&requests[2]);
@@ -647,7 +646,7 @@ async fn unresolved_effect_blocks_final_answer_until_canonical_verification() {
         "verification resolver was not automatically exposed"
     );
     assert!(
-        first_follow_up.contains(r#""tool_choice":"required""#),
-        "the provider request did not require a structured tool boundary"
+        first_follow_up.contains(r#""tool_choice":"auto""#),
+        "the provider request did not use the portable auto tool-choice mode"
     );
 }

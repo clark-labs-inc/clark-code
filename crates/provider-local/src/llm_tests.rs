@@ -261,7 +261,7 @@ fn openrouter_uses_unified_reasoning_and_strict_response_contracts() {
 }
 
 #[test]
-fn required_tool_choice_is_explicit_on_the_wire() {
+fn forced_tool_choice_uses_auto_or_named_singleton_on_the_wire() {
     let client = LlmClient::from_parts(
         "https://api.example.test/v1",
         "test-model",
@@ -278,8 +278,8 @@ fn required_tool_choice_is_explicit_on_the_wire() {
 
     assert_eq!(client.body(&[], &tools)["tool_choice"], json!("auto"));
     assert_eq!(
-        client.body_requiring_tool(&[], &tools)["tool_choice"],
-        json!("required")
+        client.body_forced_tool(&[], &tools)["tool_choice"],
+        json!("auto")
     );
     assert_eq!(
         client.body_requiring_named_tool(&[], &tools, "final_answer")["tool_choice"],

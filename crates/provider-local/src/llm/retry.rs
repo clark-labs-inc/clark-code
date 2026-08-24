@@ -22,6 +22,10 @@ const MAX_TRANSIENT_RETRIES: usize = 3;
 /// not published text or executed a tool. More replays make an upstream stream
 /// outage feel like an endless task instead of a short invisible recovery.
 const MAX_STREAM_TRANSIENT_RETRIES: usize = 1;
+/// OpenRouter may normalize a provider-side network failure into HTTP 200 plus
+/// `finish_reason=stop`. Its typed native reason remains safe to replay before
+/// output and gets two bounded retries so free/cold routes can recover.
+const MAX_NATIVE_NETWORK_RETRIES: usize = 2;
 const MAX_TRANSIENT_DELAY: Duration = Duration::from_secs(8);
 const MAX_SERVER_TRANSIENT_DELAY: Duration = Duration::from_secs(30);
 const MAX_AUTH_RETRIES: usize = 1;
@@ -565,6 +569,21 @@ impl LlmClient {
                 }
             }
         }
+        if accumulator.native_network_error() {
+            let output_started = accumulator.emitted_output();
+            return Err(AttemptError::Transient(RetryableFailure {
+                category: ProviderIncidentCategory::ConnectionLost,
+                message: "model stream ended with native_finish_reason=network_error".to_string(),
+                retry_after: None,
+                retry_safe: !text_guard.published()
+                    && !reasoning_guard.published()
+                    && !accumulator.emitted_tool_call(),
+                provider_status: Some(status.as_u16()),
+                provider_error_type: Some("native_network_error".to_string()),
+                provider_request_id,
+                output_started,
+            }));
+        }
         if let Some(error) = accumulator.stream_error.take() {
             if error.is_rate_limited() {
                 return Err(AttemptError::RateLimited(RetryableFailure {
@@ -691,13 +710,10 @@ fn transient_delay(server_hint: Option<Duration>, retry: usize) -> Duration {
 }
 
 fn transient_retry_limit(failure: &RetryableFailure) -> usize {
-    if matches!(
-        failure.provider_error_type.as_deref(),
-        Some("stream_transport")
-    ) {
-        MAX_STREAM_TRANSIENT_RETRIES
-    } else {
-        MAX_TRANSIENT_RETRIES
+    match failure.provider_error_type.as_deref() {
+        Some("stream_transport") => MAX_STREAM_TRANSIENT_RETRIES,
+        Some("native_network_error") => MAX_NATIVE_NETWORK_RETRIES,
+        _ => MAX_TRANSIENT_RETRIES,
     }
 }
 
@@ -725,3 +741,7 @@ mod tests;
 #[cfg(test)]
 #[path = "retry_streaming_tests.rs"]
 mod streaming_tests;
+
+#[cfg(test)]
+#[path = "native_finish_retry_tests.rs"]
+mod native_finish_retry_tests;

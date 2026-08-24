@@ -38,7 +38,7 @@ pub(super) fn map_loop_error_with_completion_state(
         agent_loop::LoopError::Stream(agent_loop::StreamError::Fatal(message))
             if message
                 .strip_prefix("provider_error:")
-                .is_some_and(|message| message.starts_with(crate::llm::REQUIRED_TOOL_CONTRACT_VIOLATION))
+                .is_some_and(|message| message.starts_with(crate::agent_adapter::TOOL_PROTOCOL_RECOVERY_EXHAUSTED))
     );
     let mapped = map_loop_error(error);
 
@@ -93,7 +93,7 @@ fn map_stream_error(error: agent_loop::StreamError) -> MappedLoopError {
         agent_loop::StreamError::Fatal(message) if message.starts_with("provider_error:") => {
             let message = message.strip_prefix("provider_error:").unwrap_or(&message);
             let message = message
-                .strip_prefix(crate::llm::REQUIRED_TOOL_CONTRACT_VIOLATION)
+                .strip_prefix(crate::agent_adapter::TOOL_PROTOCOL_RECOVERY_EXHAUSTED)
                 .unwrap_or(message)
                 .trim()
                 .to_string();
@@ -283,11 +283,11 @@ mod tests {
     }
 
     #[test]
-    fn completed_goal_stays_done_when_required_tool_repair_is_exhausted() {
+    fn completed_goal_stays_done_when_tool_protocol_repair_is_exhausted() {
         let mapped = map_loop_error_with_completion_state(
             agent_loop::LoopError::Stream(agent_loop::StreamError::Fatal(format!(
-                "provider_error:{} provider ignored required tool choice",
-                crate::llm::REQUIRED_TOOL_CONTRACT_VIOLATION
+                "provider_error:{} model returned no structured tool call",
+                crate::agent_adapter::TOOL_PROTOCOL_RECOVERY_EXHAUSTED
             ))),
             false,
             true,

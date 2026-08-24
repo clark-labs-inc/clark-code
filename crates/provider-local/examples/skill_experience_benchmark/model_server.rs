@@ -16,7 +16,10 @@ pub async fn one_shot(
         let request = read_request_json(&mut socket).await?;
         let body = final_body(
             &response_text,
-            request.get("tool_choice").and_then(Value::as_str) == Some("required"),
+            request
+                .get("tools")
+                .and_then(Value::as_array)
+                .is_some_and(|tools| !tools.is_empty()),
         );
         let response = format!(
             "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
@@ -56,8 +59,8 @@ fn message_text(content: &Value) -> Option<String> {
     )
 }
 
-fn final_body(text: &str, required_tool: bool) -> String {
-    if required_tool {
+fn final_body(text: &str, structured_tool_response: bool) -> String {
+    if structured_tool_response {
         return [
             format!(
                 "data: {}\n\n",

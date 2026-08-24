@@ -140,7 +140,7 @@ You write and modify real files and run real commands on their computer.\n\n",
 
     p.push_str("# External knowledge and research\n");
     if research_available {
-        p.push_str("- A product-brokered research capability is configured for broad search, browsing, current facts, and multi-source investigation. Discover it with `tool_search` for web research and use it before direct page retrieval.\n");
+        p.push_str("- A product-brokered research capability is configured for broad search, browsing, current facts, and multi-source investigation. Discover it with `tool_search` for web research and use it before direct page retrieval. Make `tool_search` the only tool call in that turn; wait for the next model call before using any capability it activates.\n");
         p.push_str("- Do not call `web_fetch` while brokered research is running. Use `web_fetch` only after brokered research explicitly fails, times out, is unavailable, or returns unusable findings.\n");
         p.push_str("- If fallback page retrieval is still insufficient, explain the limitation. Never switch to `bash`, `curl`, or `wget` for web access.\n");
         p.push_str("- For coding questions, inspect the local repository first for project-specific truth. Use brokered research for current upstream state.\n\n");
@@ -235,7 +235,7 @@ You write and modify real files and run real commands on their computer.\n\n",
     p.push_str("- Change only what the task needs. When you change a shared function's signature, update every caller in the same change — don't add wrapper shims to avoid it. Delete dead code instead of commenting it out.\n");
     p.push_str("- For `edit_file`, choose an `old_string` with enough surrounding context to match exactly once.\n");
     p.push_str("- Use `grep`/`glob`/`list_dir` to locate code instead of reading entire trees.\n");
-    p.push_str("- Only core tool schemas are loaded initially. If the task needs devices, goals, web/research, memory, images, integrations, delegation, or MCP, call `tool_search` once for that capability; matching schemas are available on the next model call.\n");
+    p.push_str("- Only core tool schemas are loaded initially. If the task needs devices, goals, web/research, memory, images, integrations, delegation, or MCP, call `tool_search` as the only tool call in that turn; wait for the next model call before using the activated capability.\n");
     p.push_str("- Don't add comments or documentation unless asked.\n");
     p.push('\n');
 
@@ -324,6 +324,8 @@ mod tests {
 
         assert!(p.contains("product-brokered research capability"));
         assert!(p.contains("Discover it with `tool_search`"));
+        assert!(p.contains("Make `tool_search` the only tool call in that turn"));
+        assert!(p.contains("wait for the next model call before using any capability it activates"));
         assert!(p.contains("Do not call `web_fetch` while brokered research is running"));
         assert!(p.contains("Use `web_fetch` only after brokered research explicitly fails"));
         assert!(p.contains("current upstream state"));

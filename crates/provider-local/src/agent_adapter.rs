@@ -1,6 +1,7 @@
 mod document_stream;
 mod event_sink;
 mod final_answer_stream;
+mod model_attempt_receipt;
 mod partial_json;
 mod proposed_plan_stream;
 mod reasoning_stream;
@@ -11,6 +12,8 @@ mod streaming_tool_call;
 mod tool_call_stream;
 mod tool_title;
 mod translate;
+
+pub(crate) const TOOL_PROTOCOL_RECOVERY_EXHAUSTED: &str = "tool_protocol_recovery_exhausted:";
 
 use std::sync::Arc;
 
@@ -34,6 +37,7 @@ use crate::tools::{
     ProducedArtifact, ToolCtx, ToolExecutor, ToolOutcome, ToolRegistry, ToolSignal,
 };
 
+use model_attempt_receipt::emit_model_attempt_receipt;
 #[cfg(test)]
 use proposed_plan_stream::ProposedPlanStreamFilter;
 use stream_progress::StreamProgress;
@@ -199,7 +203,20 @@ impl ca::StreamFn for AgentLoopStream {
                                     stream_progress.observe_tool(&tool_tx, &tool_call_gate, delta)
                                 }
                             },
-                            move |context| incidents_for_retry.observe_retry(context),
+                            {
+                                let events = events.clone();
+                                let run = run.clone();
+                                move |context| {
+                                    emit_model_attempt_receipt(
+                                        &events,
+                                        &run,
+                                        None,
+                                        Some(&context),
+                                        "retrying",
+                                    );
+                                    incidents_for_retry.observe_retry(context);
+                                }
+                            },
                         ),
                     )
                     .await;
@@ -216,12 +233,20 @@ impl ca::StreamFn for AgentLoopStream {
                     .as_ref()
                     .and_then(|metadata| serde_json::to_value(metadata).ok())
                     .unwrap_or(Value::Null);
+                emit_model_attempt_receipt(
+                    &events,
+                    &run,
+                    invalid.response_metadata.as_ref(),
+                    None,
+                    "discarded",
+                );
                 let _ = events
                     .send(desktop::AgentEvent::Trace {
                         run: Some(run.clone()),
-                        source: "provider_output_contract_violation".to_string(),
+                        source: "model_tool_protocol_recovery".to_string(),
                         payload: json!({
-                            "contract": "required_tool_call",
+                            "contract": "structured_tool_protocol",
+                            "tool_choice": "auto",
                             "repair_attempt": repair_attempts,
                             "response": payload,
                         }),
@@ -234,7 +259,7 @@ impl ca::StreamFn for AgentLoopStream {
                 if repair_attempts == 0 {
                     repair_attempts = 1;
                     messages.push(crate::llm::ChatMessage::system(
-                        "Your previous response violated the required structured-tool boundary and was discarded. Call exactly one appropriate available tool now. Do not return a prose-only response.",
+                        "Your previous response did not call a structured tool and was discarded because this turn still needs an action or typed delivery. Call exactly one appropriate available tool now. Do not return a prose-only response.",
                     ));
                     continue;
                 }
@@ -246,8 +271,8 @@ impl ca::StreamFn for AgentLoopStream {
                     continue;
                 }
                 break Err(crate::llm::LlmError::Provider(format!(
-                    "{} provider ignored required tool choice after generic and named repair attempts",
-                    crate::llm::REQUIRED_TOOL_CONTRACT_VIOLATION
+                    "{} model returned no structured tool call after broad auto guidance and a named final_answer repair attempt",
+                    TOOL_PROTOCOL_RECOVERY_EXHAUSTED
                 )));
             };
 
@@ -284,15 +309,7 @@ impl ca::StreamFn for AgentLoopStream {
                     stream_progress.finish_filter(&tx);
                     incidents.mark_recovered();
                     if let Some(metadata) = &turn.response_metadata {
-                        if let Ok(payload) = serde_json::to_value(metadata) {
-                            let _ = events
-                                .send(desktop::AgentEvent::Trace {
-                                    run: Some(run.clone()),
-                                    source: "model_response".to_string(),
-                                    payload,
-                                })
-                                .await;
-                        }
+                        emit_model_attempt_receipt(&events, &run, Some(metadata), None, "accepted");
                     }
                     if let Some(usage) = turn.usage {
                         let mut usage = totals.add(usage);
@@ -333,6 +350,13 @@ impl ca::StreamFn for AgentLoopStream {
                             .await;
                     }
                     if turn.text.is_empty() && turn.tool_calls.is_empty() {
+                        emit_model_attempt_receipt(
+                            &events,
+                            &run,
+                            turn.response_metadata.as_ref(),
+                            None,
+                            "empty",
+                        );
                         let _ = tx.send(ca::StreamEvent::Error {
                             partial: empty_assistant(ca::StopReason::Error, None),
                             kind: ca::stream::StreamErrorKind::ZeroOutputTransport,
@@ -352,6 +376,13 @@ impl ca::StreamFn for AgentLoopStream {
                 }
                 Err(error) => {
                     if let Some((reason, metadata)) = error.quarantine_receipt() {
+                        emit_model_attempt_receipt(
+                            &events,
+                            &run,
+                            Some(metadata),
+                            None,
+                            "quarantined",
+                        );
                         let _ = events
                             .send(desktop::AgentEvent::Trace {
                                 run: Some(run.clone()),
@@ -364,6 +395,7 @@ impl ca::StreamFn for AgentLoopStream {
                             .await;
                     }
                     if let Some(context) = error.provider_failure().cloned() {
+                        emit_model_attempt_receipt(&events, &run, None, Some(&context), "failed");
                         incidents.observe_terminal(context);
                     }
                     let (kind, message) = stream_error(error);
