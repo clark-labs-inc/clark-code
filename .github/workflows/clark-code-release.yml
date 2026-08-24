@@ -704,7 +704,7 @@ jobs:
           key: cargo-nextest-${{ runner.os }}-ubuntu-24.04-0.9.143
           path: ~/.cargo/bin/cargo-nextest
       - name: Set up pinned bounded kache
-        uses: kunobi-ninja/kache-action@49398d37113c616fdb61be434cb497e3c2c8f3e6 # v1
+        uses: kunobi-ninja/kache-action@2a32076dd54cb368a65e53d8a4796907be6acdec # v1
         if: steps.platform-record-cache.outputs.cache-hit != 'true'
         with:
           version: 0.14.2

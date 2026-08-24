@@ -177,7 +177,7 @@ jobs:
           toolchain: 1.97.1
           targets: x86_64-unknown-linux-musl
       - name: Set up pinned bounded kache
-        uses: kunobi-ninja/kache-action@49398d37113c616fdb61be434cb497e3c2c8f3e6 # v1
+        uses: kunobi-ninja/kache-action@2a32076dd54cb368a65e53d8a4796907be6acdec # v1
         with:
           version: 0.14.2
           cache-executables: false

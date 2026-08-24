@@ -50,7 +50,7 @@ jobs:
         with:
           cache-targets: false
       - name: Set up pinned kache
-        uses: kunobi-ninja/kache-action@49398d37113c616fdb61be434cb497e3c2c8f3e6 # v1
+        uses: kunobi-ninja/kache-action@2a32076dd54cb368a65e53d8a4796907be6acdec # v1
         with:
           version: 0.14.2
           cache-key-prefix: clark-code-sandbox-${{ matrix.os }}
