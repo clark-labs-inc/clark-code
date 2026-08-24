@@ -30,4 +30,12 @@ describe("Sidebar creation actions", () => {
     expect(streamingIndex).toBeGreaterThan(-1);
     expect(unseenIndex).toBeGreaterThan(streamingIndex);
   });
+
+  it("scrolls specialist navigation together with ordinary conversations", () => {
+    const scrollRegion = sidebarSource.indexOf('ref={conversationListRef}');
+    const specialistNavigation = sidebarSource.indexOf('<SpecialistNavigation />', scrollRegion);
+
+    expect(scrollRegion).toBeGreaterThan(-1);
+    expect(specialistNavigation).toBeGreaterThan(scrollRegion);
+  });
 });

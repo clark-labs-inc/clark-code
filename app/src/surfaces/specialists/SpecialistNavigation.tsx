@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
+  ChevronRight,
   Loader2,
   MessageSquare,
   Network,
@@ -139,15 +140,25 @@ export function SpecialistNavigation({ rail = false }: { rail?: boolean }) {
   const deleteConversation = useSessionStore((state) => state.deleteConversation);
   const setComposerPrefill = useSessionStore((state) => state.setComposerPrefill);
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
+  const [navigationOpen, setNavigationOpen] = useState(() => active !== null);
+
+  // Ordinary conversations should get the sidebar's full height. Keep the
+  // last expanded specialist branch in the store so reopening this section
+  // still lands on the same saved specialist history.
+  useEffect(() => {
+    setNavigationOpen(active !== null);
+  }, [active]);
 
   const choose = (kind: SpecialistKind) => {
     setConfirmingDeleteId(null);
+    setNavigationOpen(true);
     if (active !== kind) endSession();
     open(kind);
   };
 
   const newSpec = () => {
     setConfirmingDeleteId(null);
+    setNavigationOpen(true);
     endSession();
     open("spec");
     setComposerPrefill("");
@@ -180,89 +191,106 @@ export function SpecialistNavigation({ rail = false }: { rail?: boolean }) {
 
   return (
     <section data-qa="specialist-navigation" aria-label="Specialist lenses" className="px-2 pb-2 pt-1">
-      <div className="flex h-6 items-center px-2 text-xs font-semibold uppercase leading-none tracking-[0.12em] text-ink-faint">
+      <button
+        type="button"
+        onClick={() => setNavigationOpen((open) => !open)}
+        aria-controls="specialist-navigation-list"
+        aria-expanded={navigationOpen}
+        className="flex h-7 w-full items-center gap-1.5 rounded-md px-2 text-left text-xs font-semibold uppercase leading-none tracking-[0.12em] text-ink-faint transition hover:bg-bg-hover hover:text-ink"
+      >
+        <ChevronRight
+          className={cn("size-3 shrink-0 transition-transform", navigationOpen && "rotate-90")}
+          aria-hidden="true"
+        />
         Specialist lenses
-      </div>
-      <div className="space-y-0.5">
-        {ITEMS.map(({ kind, icon: Icon }) => {
-          const selected = active === kind;
-          // Access gates paid specialist actions, not the user's navigation
-          // history. Keep saved chats visible during entitlement checks,
-          // downgrades, and outages so a selected recovery target never vanishes.
-          const specialistConversations = specialistConversationsForNavigation(
-            conversations,
-            kind,
-          );
-          return (
-            <div key={kind}>
-              <div className="flex h-9 items-center">
-                <button
-                  type="button"
-                  data-qa={`specialist-nav-${kind}`}
-                  onClick={() => choose(kind)}
-                  aria-current={selected ? "page" : undefined}
-                  className={cn(
-                    "flex h-full min-w-0 flex-1 items-center gap-2.5 rounded-md px-2 text-sm font-medium leading-none transition",
-                    selected
-                      ? "text-ink"
-                      : "text-ink-secondary hover:bg-bg-hover hover:text-ink",
-                  )}
-                >
-                  <Icon className={cn("size-[18px] shrink-0", selected && "text-accent")} />
-                  <span className="truncate">{SPECIALISTS[kind].label}</span>
-                </button>
-                {selected && kind === "spec" && (
+        {!navigationOpen && active && (
+          <span className="ml-auto truncate text-xs font-normal normal-case tracking-normal text-ink-muted">
+            {SPECIALISTS[active].label}
+          </span>
+        )}
+      </button>
+      {navigationOpen && (
+        <div id="specialist-navigation-list" className="space-y-0.5">
+          {ITEMS.map(({ kind, icon: Icon }) => {
+            const selected = active === kind;
+            // Access gates paid specialist actions, not the user's navigation
+            // history. Keep saved chats visible during entitlement checks,
+            // downgrades, and outages so a selected recovery target never vanishes.
+            const specialistConversations = specialistConversationsForNavigation(
+              conversations,
+              kind,
+            );
+            return (
+              <div key={kind}>
+                <div className="flex h-9 items-center">
                   <button
                     type="button"
-                    data-qa="specialist-new-spec"
-                    onClick={newSpec}
-                    aria-label="New spec"
-                    title="New spec"
-                    className="mr-1 grid size-7 shrink-0 place-items-center rounded-md text-ink-faint transition hover:bg-accent-subtle hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-focus"
+                    data-qa={`specialist-nav-${kind}`}
+                    onClick={() => choose(kind)}
+                    aria-current={selected ? "page" : undefined}
+                    className={cn(
+                      "flex h-full min-w-0 flex-1 items-center gap-2.5 rounded-md px-2 text-sm font-medium leading-none transition",
+                      selected
+                        ? "text-ink"
+                        : "text-ink-secondary hover:bg-bg-hover hover:text-ink",
+                    )}
                   >
-                    <Plus className="size-4" />
+                    <Icon className={cn("size-[18px] shrink-0", selected && "text-accent")} />
+                    <span className="truncate">{SPECIALISTS[kind].label}</span>
                   </button>
+                  {selected && kind === "spec" && (
+                    <button
+                      type="button"
+                      data-qa="specialist-new-spec"
+                      onClick={newSpec}
+                      aria-label="New spec"
+                      title="New spec"
+                      className="mr-1 grid size-7 shrink-0 place-items-center rounded-md text-ink-faint transition hover:bg-accent-subtle hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-focus"
+                    >
+                      <Plus className="size-4" />
+                    </button>
+                  )}
+                </div>
+                {expanded === kind && specialistConversations.length > 0 && (
+                  <div className="relative ml-[17px] border-l border-accent/40 py-0.5 pl-[14px]">
+                    {specialistConversations.map((conversation) => (
+                      <div
+                        key={conversation.id}
+                        className="relative before:absolute before:-left-[14px] before:top-1/2 before:w-[14px] before:border-t before:border-accent/40"
+                      >
+                        <SpecialistConversationRow
+                          conversation={conversation}
+                          selected={navigatedConversationId === conversation.id}
+                          opening={openingId === conversation.id}
+                          running={
+                            runningIds.includes(conversation.id)
+                            || (sessionId === conversation.id && activeConversationBusy)
+                          }
+                          deleting={
+                            mutatingIds.has(conversation.id)
+                            && conversationMutation?.kind === "delete"
+                          }
+                          confirmingDelete={confirmingDeleteId === conversation.id}
+                          onOpen={() => {
+                            setConfirmingDeleteId(null);
+                            void openConversation(conversation.id);
+                          }}
+                          onRequestDelete={() => setConfirmingDeleteId(conversation.id)}
+                          onConfirmDelete={() => {
+                            setConfirmingDeleteId(null);
+                            void deleteConversation(conversation.id);
+                          }}
+                          onCancelDelete={() => setConfirmingDeleteId(null)}
+                        />
+                      </div>
+                    ))}
+                  </div>
                 )}
               </div>
-              {expanded === kind && specialistConversations.length > 0 && (
-                <div className="relative ml-[17px] border-l border-accent/40 py-0.5 pl-[14px]">
-                  {specialistConversations.map((conversation) => (
-                    <div
-                      key={conversation.id}
-                      className="relative before:absolute before:-left-[14px] before:top-1/2 before:w-[14px] before:border-t before:border-accent/40"
-                    >
-                      <SpecialistConversationRow
-                        conversation={conversation}
-                        selected={navigatedConversationId === conversation.id}
-                        opening={openingId === conversation.id}
-                        running={
-                          runningIds.includes(conversation.id)
-                          || (sessionId === conversation.id && activeConversationBusy)
-                        }
-                        deleting={
-                          mutatingIds.has(conversation.id)
-                          && conversationMutation?.kind === "delete"
-                        }
-                        confirmingDelete={confirmingDeleteId === conversation.id}
-                        onOpen={() => {
-                          setConfirmingDeleteId(null);
-                          void openConversation(conversation.id);
-                        }}
-                        onRequestDelete={() => setConfirmingDeleteId(conversation.id)}
-                        onConfirmDelete={() => {
-                          setConfirmingDeleteId(null);
-                          void deleteConversation(conversation.id);
-                        }}
-                        onCancelDelete={() => setConfirmingDeleteId(null)}
-                      />
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      )}
     </section>
   );
 }

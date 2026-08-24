@@ -873,8 +873,6 @@ export function Sidebar({
         )}
       </div>
 
-      <SpecialistNavigation />
-
       {(searchOpen || filter) && (
         <div className="px-2 pb-2">
           <div className="flex min-h-8 items-center gap-2 rounded-lg bg-bg px-2.5 py-1 ring-1 ring-border-subtle transition focus-within:ring-border-strong">
@@ -933,6 +931,12 @@ export function Sidebar({
           }
         }}
       >
+        {/* Keep specialist navigation in the same scroll region as ordinary
+            conversations. A persistent specialist tree otherwise steals most
+            of the sidebar's usable height and makes scrolling the chat list
+            feel ineffective. */}
+        <SpecialistNavigation />
+
         {conversations.length === 0 && groups.length === 0 ? (
           <p className="px-1 py-6 text-center text-xs text-ink-faint">
             {conversationsLoading ? "Loading conversations…" : "Your conversations will show up here."}

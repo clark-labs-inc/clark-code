@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
 import { SpecialistConversationRow } from "./SpecialistNavigation";
+import navigationSource from "./SpecialistNavigation.tsx?raw";
 
 const conversation = {
   id: "spec-1",
@@ -91,5 +92,13 @@ describe("SpecialistConversationRow", () => {
     expect(hidden).not.toContain("Permanently delete Customer segmentation");
     expect(confirming).toContain("Permanently delete Customer segmentation");
     expect(confirming).toContain('aria-label="Cancel delete"');
+  });
+});
+
+describe("SpecialistNavigation layout", () => {
+  it("keeps the full navigation section collapsible", () => {
+    expect(navigationSource).toContain("aria-controls=\"specialist-navigation-list\"");
+    expect(navigationSource).toContain("aria-expanded={navigationOpen}");
+    expect(navigationSource).toContain("setNavigationOpen(active !== null)");
   });
 });
