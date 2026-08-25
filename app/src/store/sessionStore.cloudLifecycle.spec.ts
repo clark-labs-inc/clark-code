@@ -177,6 +177,7 @@ describe("other-device conversation lifecycle events", () => {
       runningIds: ["deleted"],
       composerPrefill: { text: "stale retry" },
       sideQuestion: {
+        sessionId: "deleted",
         question: "old question",
         answer: null,
         error: null,
@@ -267,28 +268,6 @@ describe("other-device conversation lifecycle events", () => {
       kind: "refresh_required",
     });
     expect(useSpecialistStore.getState().active).toBeNull();
-  });
-
-  it("automatically reloads the latest Spec revision after a conflict", async () => {
-    const openConversation = vi.fn(async () => {});
-    useSessionStore.setState({
-      session: { id: "spec-changed", provider: "specialist" } as Session,
-      conversations: [{
-        ...conversation("spec-changed"),
-        provider: "specialist",
-        specialist: { kind: "spec" as const },
-      }],
-      openConversation,
-    });
-
-    handleCloudHistoryConflict(
-      useSessionStore.setState,
-      useSessionStore.getState,
-      bridge,
-      "spec-changed",
-    );
-
-    await vi.waitFor(() => expect(openConversation).toHaveBeenCalledWith("spec-changed"));
   });
 
   it("does not replace an explicit cleanup with a conflict refresh screen", () => {

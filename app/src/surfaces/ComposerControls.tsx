@@ -132,7 +132,7 @@ export function ModelPill() {
             itemRefs.current[next]?.focus();
           }}
           style={{ left: menuPosition.left, bottom: menuPosition.bottom }}
-          className="popover-surface fixed z-[70] max-h-[calc(100vh-7rem)] w-72 max-w-[calc(100vw-1.5rem)] overflow-y-auto rounded-2xl bg-bg-elevated p-1.5 shadow-lifted ring-1 ring-border-subtle"
+          className="popover-surface fixed z-elevated max-h-[calc(100vh-7rem)] w-72 max-w-[calc(100vw-1.5rem)] overflow-y-auto rounded-2xl bg-bg-elevated p-1.5 shadow-lifted ring-1 ring-border-subtle"
         >
           <div className="px-2.5 py-1.5 text-xs font-medium uppercase tracking-wide text-ink-faint">
             Model

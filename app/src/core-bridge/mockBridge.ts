@@ -74,7 +74,6 @@ const PROVIDERS: ProviderInfo[] = [
 ];
 
 const SPECIALIST_SKILLS: SkillCatalogEntry[] = [
-  ["spec:spec", "Co-create an evolving, downloadable feature specification through guided conversation."],
   ["scout:scout", "Map systems from bounded, evidence-backed investigation."],
   ["security:security-scan", "Assess repository security posture and validate findings."],
   ["security:security-diff", "Review a change set for security regressions."],
@@ -281,16 +280,12 @@ export class MockBridge implements CoreBridge {
     blocks: ContentBlock[],
     attachments: import("../lib/attachments").Upload[] = [],
   ): Promise<PromptReceipt> {
-    const specWorkflow = blocks.some(
-      (block) => block.type === "skill_reference" && block.name === "spec:spec",
-    );
     const userText = blocks
       .map((b) => b.type === "text" ? b.text : b.type === "skill_reference" ? "" : "[attachment]")
       .filter(Boolean)
       .join(" ");
     const runId = `run-${Date.now()}`;
-    if (specWorkflow) void this.playSpecRun(userText, runId);
-    else void this.playRun(userText, runId);
+    void this.playRun(userText, runId);
     // Native attachment admission can remain pending after the optimistic user
     // turn is visible. Keep that boundary realistic so the browser smoke proves
     // the composer clears before the provider receipt, not merely after it.
@@ -538,68 +533,6 @@ export class MockBridge implements CoreBridge {
   private emit() {
     const frozen = structuredClone(this.snapshot);
     for (const h of this.handlers) h(frozen);
-  }
-
-  private async playSpecRun(userText: string, run: string) {
-    this.snapshot.runs[run] = { id: run, status: "running", checkpoint: "mock-spec-checkpoint" };
-    this.snapshot.timeline.push({
-      item: "message",
-      run,
-      role: "user",
-      blocks: [{ type: "text", text: userText }],
-    });
-    this.emit();
-    await sleep(350);
-    const markdown = `# Customer Segmentation
-
-## 1. Overview
-
-This spec defines how the system segments customers based on behavior, demographics, and engagement signals to support targeted experiences.
-
-## 2. User problems
-
-Teams lack a consistent, automated way to group customers. Manual exports and spreadsheet logic are slow, error-prone, and difficult to maintain.
-
-## 3. Interaction rules
-
-- Keep the canvas vertically oriented. Do not drag to the right.
-- Reuse an existing result when inputs match; never launch duplicate computations.
-- If inputs change during an active computation, follow the queue or restart rule defined below.
-
-When inputs change while a computation is in progress, the system should follow the queue or restart behavior defined in the flow below.
-
-## 4. Edge cases
-
-| Scenario | Expected behavior |
-| --- | --- |
-| Content wider than the canvas | Adapt based on the chosen wrap, clip, or new-row rule. |
-| Very large segment results | Paginate results and preserve applied filters and sorting. |
-| Source data updates mid-run | Follow queue or restart policy and notify the user. |
-
-## 5. Acceptance criteria
-
-- Users cannot drag or pan the canvas horizontally.
-- The system reuses results when inputs are identical.`;
-    this.snapshot.artifacts = [{
-      id: "mock-customer-segmentation-spec",
-      title: "customer-segmentation_SPEC.md",
-      kind: "file",
-      mime_type: "text/markdown",
-      uri: `data:text/markdown;charset=utf-8,${encodeURIComponent(markdown)}`,
-    }];
-    // Keep the run active long enough for the Spec workspace to render the
-    // saved revision as a live edit. This mirrors native runs, where the agent
-    // can write the document before its terminal narration settles.
-    this.emit();
-    await sleep(900);
-    this.snapshot.timeline.push({
-      item: "message",
-      run,
-      role: "agent",
-      blocks: [{ type: "text", text: "I updated the living Customer Segmentation specification." }],
-    });
-    this.snapshot.runs[run] = { id: run, status: "done", checkpoint: "mock-spec-checkpoint" };
-    this.emit();
   }
 
   /** Simulate a realistic streaming run: user turn → plan → tool call →

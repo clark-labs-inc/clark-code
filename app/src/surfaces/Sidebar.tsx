@@ -135,7 +135,7 @@ function ConversationContextMenu({
     >
       {confirming ? (
         <div className="px-1.5 py-1">
-          <div className="mb-2 px-1 text-xs text-ink-muted">
+          <div className="mb-2 px-1 text-sm text-ink-muted">
             Permanently delete {count > 1 ? `these ${count} conversations` : "this conversation"}? This can't be undone.
           </div>
           <div className="flex items-center gap-1.5">
@@ -145,14 +145,14 @@ function ConversationContextMenu({
                 onDelete();
                 onClose();
               }}
-              className="flex-1 rounded-lg bg-danger/10 px-2 py-1.5 text-xs font-medium text-danger transition hover:bg-danger/20"
+              className="flex-1 rounded-lg bg-danger/10 px-2 py-1.5 text-sm font-medium text-danger transition hover:bg-danger/20"
             >
               Delete
             </button>
             <button
               role="menuitem"
               onClick={() => setConfirming(false)}
-              className="flex-1 rounded-lg px-2 py-1.5 text-xs text-ink-muted transition hover:bg-bg-hover hover:text-ink"
+              className="flex-1 rounded-lg px-2 py-1.5 text-sm text-ink-muted transition hover:bg-bg-hover hover:text-ink"
             >
               Cancel
             </button>
@@ -166,7 +166,7 @@ function ConversationContextMenu({
               onArchive();
               onClose();
             }}
-            className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-sm text-ink-secondary transition hover:bg-accent-subtle hover:text-ink"
+            className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-base text-ink-secondary transition hover:bg-accent-subtle hover:text-ink"
           >
             <Archive className="size-4" />
             Archive {label}
@@ -174,7 +174,7 @@ function ConversationContextMenu({
           <button
             role="menuitem"
             onClick={() => setConfirming(true)}
-            className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-sm text-ink-secondary transition hover:bg-danger/10 hover:text-danger"
+            className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-base text-ink-secondary transition hover:bg-danger/10 hover:text-danger"
           >
             <Trash2 className="size-4" />
             Delete {label}
@@ -199,7 +199,6 @@ export function Sidebar({
   const conversations = useSessionStore((s) => s.conversations);
   const conversationsLoading = useSessionStore((s) => s.conversationsLoading);
   const session = useSessionStore((s) => s.session);
-  const activeSpecialist = useSpecialistStore((state) => state.active);
   const activeProjectRoot = useSessionStore((s) => s.activeProjectRoot);
   const openingId = useSessionStore((s) => s.opening?.id ?? null);
   const unavailableId = useSessionStore((s) => s.unavailableConversation?.id ?? null);
@@ -395,12 +394,10 @@ export function Sidebar({
     [visible],
   );
   const rememberedProjects = useMemo(
-    () => activeSpecialist === "spec"
-      ? recentProjects.filter((path) => path !== defaultProject.trim())
-      : defaultProject.trim()
+    () => defaultProject.trim()
       ? [defaultProject.trim(), ...recentProjects.filter((path) => path !== defaultProject.trim())]
       : recentProjects,
-    [activeSpecialist, defaultProject, recentProjects],
+    [defaultProject, recentProjects],
   );
   const groups = useMemo(
     () => stableProjectOrder(
@@ -799,7 +796,7 @@ export function Sidebar({
     <aside
       ref={asideRef}
       className={cn(
-        "flex min-h-0 shrink-0 overflow-hidden text-sm leading-5",
+        "flex min-h-0 shrink-0 overflow-hidden text-base leading-5",
         resizingSidebar && "cursor-col-resize select-none",
       )}
       style={{ width: renderedWidth }}
@@ -829,7 +826,7 @@ export function Sidebar({
           type="button"
           onClick={() => newConversation()}
           title="Start a new session in the current project"
-          className="flex min-h-8 w-full items-center gap-2.5 rounded-lg px-2 py-1 text-sm font-medium text-ink-secondary transition hover:bg-bg-hover hover:text-ink"
+          className="flex min-h-8 w-full items-center gap-2.5 rounded-lg px-2 py-1 text-base font-medium text-ink-secondary transition hover:bg-bg-hover hover:text-ink"
         >
           <Plus className="size-4" /> New session
         </button>
@@ -837,7 +834,7 @@ export function Sidebar({
           type="button"
           onClick={() => void startQuickChat()}
           title="Start in a temporary the agent workspace — no project required"
-          className="flex min-h-8 w-full items-center gap-2.5 rounded-lg px-2 py-1 text-sm font-medium text-ink-secondary transition hover:bg-bg-hover hover:text-ink"
+          className="flex min-h-8 w-full items-center gap-2.5 rounded-lg px-2 py-1 text-base font-medium text-ink-secondary transition hover:bg-bg-hover hover:text-ink"
         >
           <MessageSquare className="size-4" /> Quick Chat
         </button>
@@ -845,7 +842,7 @@ export function Sidebar({
           type="button"
           onClick={() => setNewProjectOpen(true)}
           title="Choose a folder or remote SSH host and start a session"
-          className="flex min-h-8 w-full items-center gap-2.5 rounded-lg px-2 py-1 text-sm font-medium text-ink-secondary transition hover:bg-bg-hover hover:text-ink"
+          className="flex min-h-8 w-full items-center gap-2.5 rounded-lg px-2 py-1 text-base font-medium text-ink-secondary transition hover:bg-bg-hover hover:text-ink"
         >
           <FolderPlus className="size-4" /> New project…
         </button>
@@ -857,13 +854,13 @@ export function Sidebar({
           <button
             type="button"
             onClick={onOpenArtifacts}
-            className="mt-1 flex min-h-8 w-full items-center gap-2.5 rounded-lg px-2 py-1 text-sm font-medium text-ink-secondary transition hover:bg-bg-hover hover:text-ink"
+            className="mt-1 flex min-h-8 w-full items-center gap-2.5 rounded-lg px-2 py-1 text-base font-medium text-ink-secondary transition hover:bg-bg-hover hover:text-ink"
           >
             <Library className="size-4" />
             <span>Artifacts</span>
             <span
               className={cn(
-                "ml-auto min-w-5 rounded-full px-1.5 text-center text-xs tabular-nums",
+                "ml-auto min-w-5 rounded-full px-1.5 text-center text-sm tabular-nums",
                 artifactCount > 0 ? "bg-chip text-ink-faint" : "text-ink-faint",
               )}
             >
@@ -892,7 +889,7 @@ export function Sidebar({
                   setSearchOpen(false);
                 }
               }}
-              className="composer-input min-w-0 flex-1 bg-transparent text-sm text-ink outline-none placeholder:text-ink-faint"
+              className="composer-input min-w-0 flex-1 bg-transparent text-base text-ink outline-none placeholder:text-ink-faint"
             />
             {filter && (
               <button
@@ -938,17 +935,17 @@ export function Sidebar({
         <SpecialistNavigation />
 
         {conversations.length === 0 && groups.length === 0 ? (
-          <p className="px-1 py-6 text-center text-xs text-ink-faint">
+          <p className="px-1 py-6 text-center text-sm text-ink-faint">
             {conversationsLoading ? "Loading conversations…" : "Your conversations will show up here."}
           </p>
         ) : visible.length === 0 && groups.length === 0 ? (
-          <p className="px-1 py-6 text-center text-xs text-ink-faint">
+          <p className="px-1 py-6 text-center text-sm text-ink-faint">
             No conversations match “{filter}”.
           </p>
         ) : (
           <div className="flex flex-col">
             {groups.length > 0 && (
-              <div className="px-2 pb-1 pt-2 text-xs font-medium text-ink-faint">Projects</div>
+              <div className="px-2 pb-1 pt-2 text-sm font-medium text-ink-faint">Projects</div>
             )}
             <AnimatePresence initial={false} mode="popLayout">
               {groups.map((g) => (
@@ -1008,7 +1005,7 @@ export function Sidebar({
             </AnimatePresence>
 
             {groups.length === 0 && archivedConvos.length > 0 && (
-              <p className="px-1 py-6 text-center text-xs text-ink-faint">
+              <p className="px-1 py-6 text-center text-sm text-ink-faint">
                 No active conversations.
               </p>
             )}
@@ -1025,13 +1022,13 @@ export function Sidebar({
           disabled={archivedConvos.length === 0}
           aria-controls="archived-conversations"
           aria-expanded={archivedConvos.length > 0 ? archivedOpen : undefined}
-          className="flex min-h-9 w-full items-center gap-2 px-4 py-1 text-sm font-medium text-ink-muted transition hover:text-ink disabled:cursor-default disabled:opacity-55"
+          className="flex min-h-9 w-full items-center gap-2 px-4 py-1 text-base font-medium text-ink-muted transition hover:text-ink disabled:cursor-default disabled:opacity-55"
         >
           <ChevronRight
             className={`size-3 shrink-0 transition-transform ${archivedOpen && archivedConvos.length > 0 ? "rotate-90" : ""}`}
           />
           <span>Archived</span>
-          <span className="ml-auto shrink-0 text-xs font-normal tabular-nums text-ink-faint">
+          <span className="ml-auto shrink-0 text-sm font-normal tabular-nums text-ink-faint">
             {archivedConvos.length}
           </span>
         </button>
@@ -1080,7 +1077,7 @@ export function Sidebar({
               className="absolute inset-x-0 bottom-full z-10 bg-bg-secondary px-3 py-2 shadow-soft"
             >
               {deleteConfirming && selectedIds.size > 0 ? (
-                <div className="flex items-center gap-1.5 text-xs text-ink-muted">
+                <div className="flex items-center gap-1.5 text-sm text-ink-muted">
                   <span className="min-w-0 flex-1">Delete {selectedIds.size} permanently?</span>
                   <button
                     ref={deleteConfirmRef}
@@ -1100,7 +1097,7 @@ export function Sidebar({
                   </button>
                 </div>
               ) : (
-                <div className="flex items-center gap-1.5 text-xs text-ink-muted">
+                <div className="flex items-center gap-1.5 text-sm text-ink-muted">
                   <span className="min-w-0 flex-1 tabular-nums">{selectionStatus}</span>
                   {selectedIds.size > 0 && (
                     <>

@@ -44,7 +44,7 @@ function DetailView({ text }: { text: string }) {
 function withChips(text: string) {
   return text.split(/(`[^`]+`)/g).map((part, index) =>
     part.length > 1 && part.startsWith("`") && part.endsWith("`")
-      ? <code key={index} className="rounded-[5px] bg-chip px-[0.32em] py-[0.12em] font-mono text-[0.85em] text-ink">{part.slice(1, -1)}</code>
+      ? <code key={index} className="text-ink">{part.slice(1, -1)}</code>
       : part,
   );
 }

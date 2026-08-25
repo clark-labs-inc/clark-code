@@ -24,6 +24,7 @@ import {
   deriveTitle,
   effectiveApprovalPolicy,
   emptySnapshot,
+  epochStale,
   prepareCloudDurability,
   getBridge,
   hasContent,
@@ -68,6 +69,7 @@ import {
   saveMemoriesEnabled,
   saveOrchestrationEnabled,
   scheduleCloudPut,
+  sessionEpoch,
   settleRuns,
   signInWithGoogle,
   snapshotCache,
@@ -297,7 +299,6 @@ export function handleCloudHistoryConflict(
     const meta = before.conversations.find(
       (conversation) => conversation.id === conversationId,
     );
-    const autoReloadSpec = meta?.specialist?.kind === "spec";
     set({
       session: null,
       snapshot: emptySnapshot(),
@@ -322,17 +323,6 @@ export function handleCloudHistoryConflict(
       activeProjectRoot: null,
       warning: null,
     });
-    if (autoReloadSpec) {
-      queueMicrotask(() => {
-        const current = get();
-        if (
-          current.unavailableConversation?.id === conversationId
-          && current.unavailableConversation.kind === "refresh_required"
-        ) {
-          void current.openConversation(conversationId);
-        }
-      });
-    }
     return;
   }
 
@@ -915,13 +905,18 @@ export function createAppActions(set: SessionSet, get: SessionGet): AppActions {
 
   pickProjectFolder: async () => {
     const requestAuth = get().auth;
+    const requestEpoch = sessionEpoch;
     try {
       const picked = await pickFolder(get().localSettings.cwd || undefined);
-      if (!picked || !authAccountMatches(requestAuth, get().auth)) return null;
+      if (
+        !picked
+        || epochStale(requestEpoch)
+        || !authAccountMatches(requestAuth, get().auth)
+      ) return null;
       get().setProjectFolder(picked);
       return picked;
     } catch (e) {
-      if (!authAccountMatches(requestAuth, get().auth)) return null;
+      if (epochStale(requestEpoch) || !authAccountMatches(requestAuth, get().auth)) return null;
       set({ error: String(e) });
       return null;
     }

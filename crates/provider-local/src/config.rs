@@ -169,6 +169,12 @@ pub struct LocalConfig {
     /// addition to the project and Clark Code document workspace. They never widen
     /// write access and are ignored for remote sessions.
     pub sandbox_read_roots: Vec<PathBuf>,
+    /// Absolute directories outside the project that sandboxed commands may
+    /// write — shared build caches reached through in-project symlinks, not
+    /// arbitrary host access. Seeded by the host, extended by
+    /// `.agent/settings.json`, applied only to the WorkspaceWrite preset
+    /// (Plan Mode stays read-only).
+    pub sandbox_write_roots: Vec<PathBuf>,
     /// Whether durable memory is enabled — exposes the `memory` tool and injects
     /// the project + global memory into the system prompt. On by default; the
     /// user turns it off from the profile menu (`extra.memories = false`).
@@ -466,6 +472,8 @@ impl LocalConfig {
             .into_iter()
             .map(PathBuf::from)
             .collect();
+        let (sandbox_write_roots, _) =
+            crate::project_settings::validated_write_roots(&str_vec(extra, "sandbox_write_roots"));
         let remote_worker = extra
             .get("worker_execution_residency")
             .and_then(Value::as_str)
@@ -509,6 +517,7 @@ impl LocalConfig {
             remote_worker,
             sandbox_mode,
             sandbox_read_roots,
+            sandbox_write_roots,
             memories_enabled,
             memory_scope,
             compatible_memory_import_enabled,
@@ -633,6 +642,19 @@ mod tests {
             ]
         );
         assert_eq!(cfg.mode_for("bash"), PermissionMode::Deny);
+    }
+
+    #[test]
+    fn host_sandbox_write_roots_must_be_absolute_paths() {
+        let absolute = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("host-cache");
+        let pc = ProviderConfig {
+            extra: serde_json::json!({
+                "sandbox_write_roots": [absolute.to_string_lossy(), "relative/escape"],
+            }),
+            ..Default::default()
+        };
+        let cfg = LocalConfig::from_provider_config(&pc);
+        assert_eq!(cfg.sandbox_write_roots, vec![absolute]);
     }
 
     #[test]

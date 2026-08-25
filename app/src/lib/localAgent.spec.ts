@@ -104,17 +104,17 @@ describe("product-supplied model settings", () => {
 describe("product specialist extension binding", () => {
   it("passes the conversation recipe to native product capability composition", () => {
     const config = localConnectConfig(
-      { ...DEFAULT_LOCAL_SETTINGS, cwd: "/managed/spec-document" },
+      { ...DEFAULT_LOCAL_SETTINGS, cwd: "/managed/scout-document" },
       undefined,
       undefined,
-      "spec",
+      "scout",
       "id:account",
     );
 
     expect(config.extra).toMatchObject({
-      specialist_kind: "spec",
-      hard_constraints: ["no_delete", "no_github_push"],
+      specialist_kind: "scout",
     });
+    expect(config.extra).not.toHaveProperty("hard_constraints");
   });
 
   it("exposes account-scoped recent checkouts to Scout as read-only census roots", () => {
@@ -176,20 +176,6 @@ describe("product specialist extension binding", () => {
     });
   });
 
-  it("carries Spec hard constraints into a remote worker recipe", () => {
-    const config = localConnectConfig(
-      { ...DEFAULT_LOCAL_SETTINGS, cwd: "/local" },
-      { worker_handle: "worker-remote", cwd: "/remote/project" },
-      undefined,
-      "spec",
-    );
-
-    expect(config.extra).toEqual({
-      remote_worker: { worker_handle: "worker-remote", cwd: "/remote/project" },
-      specialist_kind: "spec",
-      hard_constraints: ["no_delete", "no_github_push"],
-    });
-  });
 });
 
 describe("account-scoped project context", () => {

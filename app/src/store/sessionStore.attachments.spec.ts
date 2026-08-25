@@ -57,6 +57,25 @@ beforeEach(() => {
 });
 
 describe("first-turn attachments", () => {
+  it("drops a file whose encoding finishes after the composer changes", async () => {
+    let finishEncoding!: (buffer: ArrayBuffer) => void;
+    const encoding = new Promise<ArrayBuffer>((resolve) => {
+      finishEncoding = resolve;
+    });
+    const file = new File(["draft"], "draft.txt", { type: "text/plain" });
+    Object.defineProperty(file, "arrayBuffer", {
+      configurable: true,
+      value: () => encoding,
+    });
+
+    const adding = useSessionStore.getState().addFiles([file]);
+    useSessionStore.getState().endSession();
+    finishEncoding(new TextEncoder().encode("draft").buffer);
+    await adding;
+
+    expect(useSessionStore.getState().attachments).toEqual([]);
+  });
+
   it("keeps staged files while creating the session and sends them with the first prompt", async () => {
     const bridge = bridgeStub();
     const attachment: PendingAttachment = {

@@ -86,6 +86,34 @@ fn sse_text(text: &str) -> String {
     .join("\n\n")
 }
 
+/// The agent loop's structured-tool protocol discards prose-only responses
+/// while `final_answer` is advertised (see `agent_adapter`'s repair loop), so
+/// the coding call must deliver its terminal answer as a typed tool call.
+fn sse_final_answer(content: &str) -> String {
+    let chunk = json!({
+        "choices": [{
+            "delta": {
+                "tool_calls": [{
+                    "index": 0,
+                    "id": "call_attachment_benchmark",
+                    "type": "function",
+                    "function": {
+                        "name": "final_answer",
+                        "arguments": json!({ "content": content }).to_string(),
+                    }
+                }]
+            }
+        }]
+    });
+    [
+        format!("data: {chunk}"),
+        r#"data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}"#.to_string(),
+        "data: [DONE]".to_string(),
+        String::new(),
+    ]
+    .join("\n\n")
+}
+
 fn http_response(body: &str) -> Vec<u8> {
     format!(
         "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
@@ -102,7 +130,7 @@ async fn scripted_model() -> (String, JoinHandle<Vec<Value>>) {
     let addr = listener.local_addr().expect("scripted model address");
     let bodies = [
         sse_text(VISION_DESCRIPTION),
-        sse_text("attachment benchmark complete"),
+        sse_final_answer("attachment benchmark complete"),
     ];
     let handle = tokio::spawn(async move {
         let mut captured = Vec::with_capacity(bodies.len());

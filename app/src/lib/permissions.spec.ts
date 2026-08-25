@@ -102,7 +102,6 @@ describe("nextApprovalPolicy", () => {
 describe("specialist approval policy", () => {
   it("forces uninterrupted specialists to full access without changing others", () => {
     expect(approvalPolicyForSpecialist("ask", "scout")).toBe("full");
-    expect(approvalPolicyForSpecialist("ask", "spec")).toBe("full");
     expect(approvalPolicyForSpecialist("auto", "security")).toBe("auto");
     expect(approvalPolicyForSpecialist("ask", null)).toBe("ask");
   });

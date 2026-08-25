@@ -402,7 +402,7 @@ function PolicyList({
         <Card>
           {items.map((c) => (
             <div key={c} className="flex items-center gap-2 px-3 py-2">
-              <code className="min-w-0 flex-1 truncate font-mono text-xs text-ink-secondary">{c}</code>
+              <code className="min-w-0 flex-1 truncate text-ink-secondary">{c}</code>
               <button
                 onClick={() => onRemove(c)}
                 aria-label={`Remove ${c}`}

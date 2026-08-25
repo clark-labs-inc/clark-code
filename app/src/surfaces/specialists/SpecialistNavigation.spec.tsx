@@ -5,16 +5,16 @@ import { SpecialistConversationRow } from "./SpecialistNavigation";
 import navigationSource from "./SpecialistNavigation.tsx?raw";
 
 const conversation = {
-  id: "spec-1",
+  id: "scout-1",
   title: "Customer segmentation",
   provider: "specialist" as const,
   createdAt: 1,
   updatedAt: 2,
-  specialist: { kind: "spec" as const },
+  specialist: { kind: "scout" as const },
 };
 
 describe("SpecialistConversationRow", () => {
-  it("marks the active spec as selected", () => {
+  it("marks the selected specialist conversation as selected", () => {
     const markup = renderToStaticMarkup(
       <SpecialistConversationRow
         conversation={conversation}
@@ -35,7 +35,7 @@ describe("SpecialistConversationRow", () => {
     expect(markup).toContain("bg-accent-subtle font-medium text-ink");
   });
 
-  it("animates and announces real work on the active spec", () => {
+  it("animates and announces real work on the running conversation", () => {
     const markup = renderToStaticMarkup(
       <SpecialistConversationRow
         conversation={conversation}

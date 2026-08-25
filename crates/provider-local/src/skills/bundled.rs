@@ -10,7 +10,6 @@ const SCOUT: &str = include_str!("../../skills/scout/SKILL.md");
 const SECURITY_SCAN: &str = include_str!("../../skills/security/security-scan/SKILL.md");
 const SECURITY_DIFF: &str = include_str!("../../skills/security/security-diff/SKILL.md");
 const SECURITY_DEEP: &str = include_str!("../../skills/security/security-deep/SKILL.md");
-const SPEC: &str = include_str!("../../skills/spec/SKILL.md");
 
 const BASH: &[&str] = &["bash"];
 const SCOUT_TOOLS: &[&str] = &[
@@ -38,8 +37,6 @@ const SECURITY_DEEP_TOOLS: &[&str] = &[
     "glob",
     "bash",
 ];
-const SPEC_TOOLS: &[&str] = &["read_file", "write_file", "edit_file"];
-
 pub(super) fn skills() -> Vec<Skill> {
     vec![
         bundled("github", "agent://skills/github", GITHUB, BASH),
@@ -86,11 +83,6 @@ pub(super) fn skills() -> Vec<Skill> {
             );
             security.allow_implicit_invocation = false;
             security
-        },
-        {
-            let mut spec = bundled("spec", "agent://skills/spec", SPEC, SPEC_TOOLS);
-            spec.allow_implicit_invocation = false;
-            spec
         },
     ]
 }

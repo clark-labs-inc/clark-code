@@ -33,7 +33,7 @@ export const MARKDOWN_CLASSES =
   "[&_h1]:mb-1.5 [&_h1]:mt-5 [&_h1]:text-lg [&_h1]:font-semibold [&_h1]:tracking-tight [&_h1]:text-ink [&_h2]:mb-1.5 [&_h2]:mt-5 [&_h2]:font-semibold [&_h2]:tracking-tight [&_h2]:text-ink [&_h3]:mb-1 [&_h3]:mt-4 [&_h3]:font-semibold [&_h3]:text-ink " +
   "[&_a]:text-ink [&_a]:underline [&_a]:decoration-ink-faint [&_a]:underline-offset-2 hover:[&_a]:decoration-ink [&_strong]:font-semibold [&_strong]:text-ink " +
   "[&_pre]:my-2 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:border [&_pre]:border-border-subtle [&_pre]:bg-bg-sunken [&_pre]:p-3 [&_pre]:font-mono [&_pre]:text-xs [&_pre]:leading-relaxed [&_pre>code]:bg-transparent [&_pre>code]:p-0 [&_pre>code]:border-0 " +
-  "[&_:not(pre)>code]:rounded-[4px] [&_:not(pre)>code]:bg-chip [&_:not(pre)>code]:px-[0.3em] [&_:not(pre)>code]:py-[0.08em] [&_:not(pre)>code]:font-mono [&_:not(pre)>code]:text-[0.84em] [&_:not(pre)>code]:text-ink-secondary " +
+  "[&_:not(pre)>code]:text-ink-secondary " +
   "[&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-3 [&_blockquote]:text-ink-muted " +
   "[&_table]:w-full [&_table]:table-fixed [&_th]:break-words [&_td]:break-words [&_td]:overflow-wrap-anywhere";
 

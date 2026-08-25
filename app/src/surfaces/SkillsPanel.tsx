@@ -121,7 +121,7 @@ export function SkillsPanel(props: SkillsPanelProps) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 p-6">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-scrim p-6">
       <div
         role="dialog"
         aria-modal="true"

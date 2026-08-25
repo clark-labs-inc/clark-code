@@ -62,7 +62,7 @@ export function SideQuestionCard() {
     <AnimatePresence>
       {sideQuestion && (
         <m.div
-          className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 px-4 pt-[12vh]"
+          className="fixed inset-0 z-50 flex items-start justify-center bg-scrim px-4 pt-[12vh]"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={reduce ? REDUCED_EXIT : { opacity: 0 }}

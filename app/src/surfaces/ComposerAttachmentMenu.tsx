@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { FileUp, FolderOpen, Paperclip, Plus } from "lucide-react";
+import { FileUp, FolderOpen, Plus } from "lucide-react";
 
 interface ComposerAttachmentMenuProps {
   disabled?: boolean;
-  paperclip?: boolean;
   onFiles: (files: File[]) => void;
 }
 
@@ -16,7 +15,6 @@ function pickedFiles(input: HTMLInputElement): File[] {
  * provider upload behavior. */
 export function ComposerAttachmentMenu({
   disabled = false,
-  paperclip = false,
   onFiles,
 }: ComposerAttachmentMenuProps) {
   const [open, setOpen] = useState(false);
@@ -90,7 +88,7 @@ export function ComposerAttachmentMenu({
         title="Attach files or a folder"
         className="grid size-8 shrink-0 place-items-center rounded-full bg-bg-tertiary text-ink-muted transition duration-base ease-agent hover:bg-accent-subtle hover:text-accent disabled:opacity-40"
       >
-        {paperclip ? <Paperclip className="size-4" /> : <Plus className="size-4" />}
+        <Plus className="size-4" />
       </button>
 
       {open && (
@@ -99,18 +97,18 @@ export function ComposerAttachmentMenu({
           aria-label="Add"
           className="popover-surface absolute bottom-full left-0 z-40 mb-2 w-[40rem] max-w-[calc(100vw-4rem)] rounded-2xl bg-bg-elevated p-1.5 shadow-lifted ring-1 ring-border-subtle"
         >
-          <div className="px-2.5 pb-1 pt-1.5 text-xs font-medium text-ink-faint">
+          <div className="px-2.5 pb-1 pt-1.5 text-sm font-medium text-ink-faint">
             Add
           </div>
           <button
             type="button"
             role="menuitem"
             onClick={() => choose(fileRef.current)}
-            className="flex min-h-9 w-full items-center gap-2.5 rounded-xl px-2.5 py-1.5 text-left text-sm text-ink transition duration-base ease-agent hover:bg-bg-hover focus-visible:bg-bg-hover"
+            className="flex min-h-9 w-full items-center gap-2.5 rounded-xl px-2.5 py-1.5 text-left text-base text-ink transition duration-base ease-agent hover:bg-bg-hover focus-visible:bg-bg-hover"
           >
             <FileUp className="size-4 shrink-0 text-ink-muted" />
             <span className="shrink-0">Files</span>
-            <span className="min-w-0 truncate text-xs text-ink-faint">
+            <span className="min-w-0 truncate text-sm text-ink-faint">
               Images, documents, and other project context
             </span>
           </button>
@@ -118,11 +116,11 @@ export function ComposerAttachmentMenu({
             type="button"
             role="menuitem"
             onClick={() => choose(folderRef.current)}
-            className="flex min-h-9 w-full items-center gap-2.5 rounded-xl px-2.5 py-1.5 text-left text-sm text-ink transition duration-base ease-agent hover:bg-bg-hover focus-visible:bg-bg-hover"
+            className="flex min-h-9 w-full items-center gap-2.5 rounded-xl px-2.5 py-1.5 text-left text-base text-ink transition duration-base ease-agent hover:bg-bg-hover focus-visible:bg-bg-hover"
           >
             <FolderOpen className="size-4 shrink-0 text-ink-muted" />
             <span className="shrink-0">Folder</span>
-            <span className="min-w-0 truncate text-xs text-ink-faint">
+            <span className="min-w-0 truncate text-sm text-ink-faint">
               Attach the files inside a folder
             </span>
           </button>

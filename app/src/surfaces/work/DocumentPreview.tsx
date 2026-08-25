@@ -106,7 +106,7 @@ export function DocumentPreview({
         title={`Preview of ${title}`}
         srcDoc={preview.html}
         sandbox=""
-        className="h-full min-h-[38rem] w-full rounded-lg border border-border bg-white shadow-soft"
+        className="h-full min-h-[38rem] w-full rounded-lg border border-border bg-media-page shadow-soft"
       />
     </div>
   );
@@ -159,7 +159,7 @@ function PreviewPage({ previewId, page, title }: { previewId: string; page: numb
   return (
     <div
       ref={containerRef}
-      className="mx-auto grid min-h-80 w-full max-w-5xl place-items-center bg-white shadow-lifted"
+      className="mx-auto grid min-h-80 w-full max-w-5xl place-items-center bg-media-page shadow-lifted"
     >
       {url ? (
         <img src={url} alt={`${title}, page ${page + 1}`} className="block h-auto w-full" />

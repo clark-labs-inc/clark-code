@@ -268,4 +268,29 @@ mod tests {
             .check_write(&workspace.path().join("escape/new.txt"))
             .is_err());
     }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_shared_cache_writes_are_allowed_inside_an_explicit_extra_root() {
+        // The shared-build-cache shape: an in-project `target/` symlink whose
+        // resolved target lives outside the workspace. Writes stay denied while
+        // the cache root is ungranted and succeed once it is an explicit extra
+        // write root (`.agent/settings.json` → policy wiring).
+        let workspace = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        std::os::unix::fs::symlink(cache.path(), workspace.path().join("target")).unwrap();
+
+        let granted = SandboxPolicy::workspace_write(
+            workspace.path().to_path_buf(),
+            vec![cache.path().to_path_buf()],
+        );
+        assert!(granted
+            .check_write(&workspace.path().join("target/debug/blob"))
+            .is_ok());
+
+        let ungranted = SandboxPolicy::workspace_write(workspace.path().to_path_buf(), Vec::new());
+        assert!(ungranted
+            .check_write(&workspace.path().join("target/debug/blob"))
+            .is_err());
+    }
 }

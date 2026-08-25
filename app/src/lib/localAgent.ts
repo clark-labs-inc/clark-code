@@ -96,12 +96,6 @@ export const INCLUDED_CODING_MODEL_ID = productModels.includedModel ?? "";
  * without an included route fall back to their default model. */
 export const QUICK_CHAT_MODEL_ID = INCLUDED_CODING_MODEL_ID || DEFAULT_LOCAL_SETTINGS.model;
 
-const SPEC_HARD_CONSTRAINTS = ["no_delete", "no_github_push"] as const;
-
-function specialistHardConstraints(specialistKind?: string): readonly string[] {
-  return specialistKind?.trim() === "spec" ? SPEC_HARD_CONSTRAINTS : [];
-}
-
 /** The coding models the active product exposes in the composer picker.
  *  `defaultReasoningEffort` is the highest effort supported by that model. */
 export const CODING_MODELS = productModels.models;
@@ -139,13 +133,14 @@ export function quickChatModelSettings(settings: LocalAgentSettings): LocalAgent
   };
 }
 
-/** Short display label for the current model id. */
+/** Short display label for the current model id. Picker-catalog labels win so a
+ *  regular conversation shows the selectable name even when the product pins
+ *  the same id as its specialist route. */
 export function modelLabel(id: string): string {
   const model = normalizeCodingModel(id);
-  if (productModels.specialistModel !== undefined && model === SPECIALIST_MODEL_ID) {
-    return SPECIALIST_MODEL_LABEL;
-  }
-  return CODING_MODELS.find((candidate) => candidate.id === model)!.label;
+  const catalogEntry = CODING_MODELS.find((candidate) => candidate.id === model);
+  if (catalogEntry) return catalogEntry.label;
+  return SPECIALIST_MODEL_LABEL;
 }
 
 export function loadLocalSettings(scope?: string | null): LocalAgentSettings {
@@ -396,7 +391,6 @@ export function localConnectConfig(
     ?? (isSpecialist
       ? SPECIALIST_REASONING_EFFORT
       : normalizeReasoningEffort(model, s.reasoningEffort));
-  const hardConstraints = specialistHardConstraints(specialistKind);
   if (remote) {
     const remoteSessionExtra = productModels.remoteSessionExtra?.({
       ...(productSpecialist ? {
@@ -414,9 +408,6 @@ export function localConnectConfig(
         remote_worker: remote,
         ...(specialistKind?.trim()
           ? { specialist_kind: specialistKind.trim() }
-          : {}),
-        ...(hardConstraints.length > 0
-          ? { hard_constraints: [...hardConstraints] }
           : {}),
         ...(scout ? {
           scout_cartography: {
@@ -451,9 +442,6 @@ export function localConnectConfig(
       // Per-project shell-command policy the engine consults to skip / block the gate.
       command_allowlist: loadAllowlist(project, scope),
       command_denylist: loadDenylist(project, scope),
-      ...(hardConstraints.length > 0
-        ? { hard_constraints: [...hardConstraints] }
-        : {}),
       // MCP servers to spawn + expose as tools.
       mcp_servers: enabledMcpConfigs(loadMcpServers(scope)),
       // Durable memory: exposes the `memory` tool + injects saved facts.

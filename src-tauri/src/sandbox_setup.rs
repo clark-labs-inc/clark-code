@@ -12,21 +12,22 @@ pub struct LocalSandboxStatus {
 }
 
 #[tauri::command]
-pub fn local_sandbox_status(cwd: String) -> Result<LocalSandboxStatus, String> {
-    sandbox_status(Path::new(&cwd))
+pub async fn local_sandbox_status(cwd: String) -> Result<LocalSandboxStatus, String> {
+    sandbox_status(Path::new(&cwd)).await
 }
 
 #[tauri::command]
 pub async fn local_sandbox_setup(cwd: String) -> Result<LocalSandboxStatus, String> {
     let cwd = PathBuf::from(cwd);
-    let policy =
-        provider_local::local_sandbox_setup_policy(&cwd).map_err(|error| error.to_string())?;
+    let policy = provider_local::local_sandbox_setup_policy(&cwd)
+        .await
+        .map_err(|error| error.to_string())?;
     let sandbox_manager = manager(policy.clone())?;
     if matches!(
         sandbox_manager.status(),
         exec_sandbox::SandboxStatus::Enforced { .. }
     ) {
-        return sandbox_status(&cwd);
+        return sandbox_status(&cwd).await;
     }
     let action = sandbox_manager
         .setup_action()?
@@ -64,7 +65,7 @@ pub async fn local_sandbox_setup(cwd: String) -> Result<LocalSandboxStatus, Stri
         .map_err(|join| format!("Windows sandbox fallback task failed: {join}"))?
         .map_err(|fallback| format!("{error}; elevated fallback failed: {fallback}"))?;
     }
-    let status = sandbox_status(&cwd)?;
+    let status = sandbox_status(&cwd).await?;
     if status.state != "enforced" {
         return Err(status
             .reason
@@ -73,9 +74,10 @@ pub async fn local_sandbox_setup(cwd: String) -> Result<LocalSandboxStatus, Stri
     Ok(status)
 }
 
-fn sandbox_status(cwd: &Path) -> Result<LocalSandboxStatus, String> {
-    let policy =
-        provider_local::local_sandbox_setup_policy(cwd).map_err(|error| error.to_string())?;
+async fn sandbox_status(cwd: &Path) -> Result<LocalSandboxStatus, String> {
+    let policy = provider_local::local_sandbox_setup_policy(cwd)
+        .await
+        .map_err(|error| error.to_string())?;
     let manager = manager(policy)?;
     let backend = match manager.status() {
         exec_sandbox::SandboxStatus::Enforced { backend }
@@ -118,11 +120,12 @@ fn manager(policy: exec_sandbox::SandboxPolicy) -> Result<exec_sandbox::SandboxM
 }
 
 #[cfg(windows)]
-pub(crate) fn release_smoke_executor(
+pub(crate) async fn release_smoke_executor(
     cwd: &Path,
 ) -> Result<exec_sandbox::SandboxedExecutor, String> {
-    let policy =
-        provider_local::local_sandbox_setup_policy(cwd).map_err(|error| error.to_string())?;
+    let policy = provider_local::local_sandbox_setup_policy(cwd)
+        .await
+        .map_err(|error| error.to_string())?;
     exec_sandbox::SandboxedExecutor::with_manager(manager(policy)?)
 }
 

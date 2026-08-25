@@ -24,26 +24,17 @@ const MODE_ICON: Record<ApprovalPolicy, typeof Shield> = {
   full: ShieldAlert,
 };
 
-export function SpecialistFullAccessIndicator({ specialist }: { specialist: string }) {
-  const isSpec = specialist === "spec";
-  const name = isSpec ? "Spec" : "Scout";
-  const explanation = isSpec
-    ? "Spec can research, read, and write without asking. File deletion and GitHub pushes stay blocked."
-    : "Scout always uses Full access";
+export function ScoutFullAccessIndicator() {
   return (
     <div
-      aria-label={`${name} uses protected Full access`}
-      title={explanation}
+      aria-label="Scout uses protected Full access"
+      title="Scout always uses Full access"
       className="flex min-h-8 items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-medium text-warning"
     >
       <ShieldAlert className="size-3.5" />
-      {isSpec ? "Full access · protected" : "Full access"}
+      Full access
     </div>
   );
-}
-
-export function ScoutFullAccessIndicator() {
-  return <SpecialistFullAccessIndicator specialist="scout" />;
 }
 
 /** Approval policy selector. Sandboxed "Approve for me" is the default. */
@@ -125,7 +116,7 @@ export function ComposerPermissionPill() {
   if (!isLocalTarget && !protectedFullAccess) return null;
 
   if (protectedFullAccess && specialist) {
-    return <SpecialistFullAccessIndicator specialist={specialist} />;
+    return <ScoutFullAccessIndicator />;
   }
 
   return (

@@ -7,7 +7,6 @@
     "test:attachments": "node attachment-smoke.mjs",
     "test:full-gui": "node full-gui-smoke.mjs",
     "test:resilience": "node resilience-smoke.mjs",
-    "test:spec-subchat": "node spec-subchat-smoke.mjs",
     "test:specialists": "node specialist-matrix-smoke.mjs",
     "test:ssh-settings": "node ssh-settings-smoke.mjs",
     "test:model-picker": "node model-picker-smoke.mjs",

@@ -253,7 +253,7 @@ impl Provider for LocalAgentProvider {
     }
 
     async fn new_session(&mut self, options: SessionOptions) -> Result<Session> {
-        let config = self.config()?.clone();
+        let mut config = self.config()?.clone();
         let scout_full_access = config.scout_cartography.is_some();
         let collaboration_mode = if scout_full_access {
             CollaborationMode::Default
@@ -310,14 +310,34 @@ impl Provider for LocalAgentProvider {
         // immutable policy reaches both direct filesystem operations and
         // child-process compilation. Remote sessions run this same provider
         // inside their durable worker, so its executor remains process-local.
+        let cwd = options
+            .cwd
+            .or(config.cwd.clone())
+            .ok_or_else(|| Error::Unsupported("local provider requires a project `cwd`".into()))?;
+
+        // Project-scoped config (`.agent/settings.json`) loads before executor
+        // construction: `sandbox_write_roots` must reach the session's initial
+        // sandbox policy, which cannot exist yet. Read directly rather than
+        // through a session executor; disposable-writer isolation never honors it.
+        let project = if self.isolation.disposable_writer() {
+            crate::project_settings::ProjectSettings::default()
+        } else {
+            crate::project_settings::load(&LocalExecutor, std::path::Path::new(&cwd)).await
+        };
+        if !self.isolation.disposable_writer() {
+            let (roots, rejected) =
+                crate::project_settings::validated_write_roots(&project.sandbox_write_roots);
+            for entry in rejected {
+                tracing::warn!(entry, "ignoring non-absolute sandbox_write_roots entry");
+            }
+            config.sandbox_write_roots.extend(roots);
+            self.config = Some(config.clone());
+        }
         let (sandbox, executor, sandbox_temp): (
             Sandbox,
             Arc<dyn Executor>,
             Option<tempfile::TempDir>,
         ) = {
-            let cwd = options.cwd.or(config.cwd.clone()).ok_or_else(|| {
-                Error::Unsupported("local provider requires a project `cwd`".into())
-            })?;
             let mut sandbox = Sandbox::new(&cwd)
                 .map_err(Error::Io)?
                 .with_read_roots(config.sandbox_read_roots.clone());
@@ -331,7 +351,8 @@ impl Provider for LocalAgentProvider {
                 }
             }
 
-            let (executor, sandbox_temp) = build_local_executor(&config, &sandbox, sandbox_preset)?;
+            let (executor, sandbox_temp) =
+                build_local_executor(&config, &mut sandbox, sandbox_preset)?;
             (sandbox, executor, sandbox_temp)
         };
         self.executor = executor;
@@ -406,15 +427,8 @@ impl Provider for LocalAgentProvider {
             None
         };
 
-        // Project-scoped config (`.agent/settings.json`) mirrors Claude Code's
-        // configurable commit attribution and also layers permissions/hooks
-        // beneath the global UI-driven config.
-        let project = if self.isolation.disposable_writer() {
-            crate::project_settings::ProjectSettings::default()
-        } else {
-            crate::project_settings::load(self.executor.as_ref(), sandbox.root()).await
-        };
-
+        // Project-scoped config (`.agent/settings.json`) was loaded before the
+        // executor above so its `sandbox_write_roots` could shape sandbox policy.
         let available_tools = self
             .registry
             .as_ref()
@@ -1196,13 +1210,15 @@ impl Provider for LocalAgentProvider {
                     if let (Some(config), Some(sandbox)) =
                         (self.config.as_ref(), self.sandbox.as_ref())
                     {
+                        let mut sandbox = sandbox.as_ref().clone();
                         let (executor, sandbox_temp) = build_local_executor(
                             config,
-                            sandbox,
+                            &mut sandbox,
                             exec_sandbox::SandboxPreset::WorkspaceWrite,
                         )?;
                         self.executor = executor;
                         self.sandbox_temp = sandbox_temp;
+                        self.sandbox = Some(Arc::new(sandbox));
                     }
                 }
                 Ok(())
@@ -1243,9 +1259,11 @@ impl Provider for LocalAgentProvider {
         if !plan_mode {
             if let (Some(config), Some(sandbox)) = (self.config.as_ref(), self.sandbox.as_ref()) {
                 let preset = exec_sandbox::SandboxPreset::for_session_mode(Some(&mode));
-                let (executor, sandbox_temp) = build_local_executor(config, sandbox, preset)?;
+                let mut sandbox = sandbox.as_ref().clone();
+                let (executor, sandbox_temp) = build_local_executor(config, &mut sandbox, preset)?;
                 self.executor = executor;
                 self.sandbox_temp = sandbox_temp;
+                self.sandbox = Some(Arc::new(sandbox));
             }
         }
         self.session_mode = Some(mode);
@@ -1273,9 +1291,11 @@ impl Provider for LocalAgentProvider {
                     exec_sandbox::SandboxPreset::for_session_mode(self.session_mode.as_deref())
                 }
             };
-            let (executor, sandbox_temp) = build_local_executor(config, sandbox, preset)?;
+            let mut sandbox = sandbox.as_ref().clone();
+            let (executor, sandbox_temp) = build_local_executor(config, &mut sandbox, preset)?;
             self.executor = executor;
             self.sandbox_temp = sandbox_temp;
+            self.sandbox = Some(Arc::new(sandbox));
         }
         self.session.lock().await.planning.set_mode(mode);
         Ok(())

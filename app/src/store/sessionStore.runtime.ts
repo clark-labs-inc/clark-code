@@ -202,14 +202,16 @@ export interface UnavailableConversation {
 }
 
 /** `/btw` overlay state. `loading` is true while the forked side-question call
- *  is in flight; a stale token (bumped on dismiss) lets a late result be
- *  dropped without clobbering a closed/newer overlay. */
+ *  is in flight; exact session ownership plus a unique token lets a late
+ *  result be dropped without clobbering a closed/newer overlay. */
 export interface SideQuestionState {
+  /** Conversation that owns this overlay and its in-flight result. */
+  sessionId: string;
   question: string;
   answer: string | null;
   error: string | null;
   loading: boolean;
-  /** Monotonic token; only a result that matches this token is applied. */
+  /** Process-monotonic token; only a result that matches this token is applied. */
   token: number;
 }
 

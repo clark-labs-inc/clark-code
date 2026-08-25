@@ -16,13 +16,13 @@ import { useSpecialistStore } from "./specialistStore";
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 
-describe("conversation-bound Spec workspace", () => {
+describe("conversation-bound specialist workspace", () => {
   beforeEach(() => {
     liveSessions.clear();
     localStorage.clear();
     invoke.mockReset();
     invoke.mockResolvedValue({
-      id: "worker-spec-1",
+      id: "worker-scout-1",
       cwd: "/srv/enterprise/project",
       arch: "linux-x86_64",
       sshTransport: "control_master",
@@ -33,12 +33,18 @@ describe("conversation-bound Spec workspace", () => {
     installProductModule({
       ...neutralProduct,
       specialistWorkspace: {
-        isConversationBound: (kind) => kind === "spec",
+        isConversationBound: (kind) => kind === "scout",
       },
     });
     useSpecialistStore.setState({
-      active: "spec",
-      contexts: { spec: { kind: "spec" } },
+      active: "scout",
+      contexts: {
+        scout: {
+          kind: "scout",
+          organizationId: "018f8e8a-4722-7c68-b5b7-a4c6793c85b0",
+          workspaceId: "028f8e8a-4722-7c68-b5b7-a4c6793c85b0",
+        },
+      },
     });
     useSessionStore.setState({
       bridge: null,
@@ -116,13 +122,13 @@ describe("conversation-bound Spec workspace", () => {
     expect(state.localSettings.cwd).toBe("/repo/remembered-project");
     expect(state.recentProjects).toEqual(["/repo/remembered-project"]);
     expect(state.activeProjectRoot).toBe(path);
-    expect(state.conversations[0]?.specialist?.kind).toBe("spec");
+    expect(state.conversations[0]?.specialist?.kind).toBe("scout");
     expect(loadComposerDraft(draftOwner, id)).toBe("");
     expect(loadComposerDraft(draftOwner, null)).toBe("ordinary chat draft");
   });
 
-  it("runs Spec on the selected SSH project while retaining its document workspace", async () => {
-    const id = "remote-spec-document";
+  it("runs Scout on the selected SSH project while retaining its conversation workspace", async () => {
+    const id = "remote-scout-workspace";
     const documentPath = `/Users/test/.agent/workspace/${id}`;
     saveSshHosts([{
       id: "enterprise-host",
@@ -181,14 +187,17 @@ describe("conversation-bound Spec workspace", () => {
       {
         extra: {
           remote_worker: {
-            worker_handle: "worker-spec-1",
+            worker_handle: "worker-scout-1",
             cwd: "/srv/enterprise/project",
           },
-          specialist_kind: "spec",
-          hard_constraints: ["no_delete", "no_github_push"],
+          specialist_kind: "scout",
+          scout_cartography: expect.objectContaining({
+            organization_id: "018f8e8a-4722-7c68-b5b7-a4c6793c85b0",
+            workspace_id: "028f8e8a-4722-7c68-b5b7-a4c6793c85b0",
+          }),
         },
       },
-      {
+      expect.objectContaining({
         kind: "new",
         options: {
           cwd: "/srv/enterprise/project",
@@ -196,7 +205,7 @@ describe("conversation-bound Spec workspace", () => {
           collaboration_mode: "default",
         },
         bindId: id,
-      },
+      }),
     );
     expect(bridge.prepareQuickChatWorkspace).toHaveBeenCalledTimes(1);
     expect(useSessionStore.getState()).toMatchObject({
@@ -207,7 +216,7 @@ describe("conversation-bound Spec workspace", () => {
         provider: "local",
         project: "/srv/enterprise/project",
         remoteHost: "ubuntu@enterprise",
-        specialist: { kind: "spec" },
+        specialist: expect.objectContaining({ kind: "scout" }),
       })],
     });
   });

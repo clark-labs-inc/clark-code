@@ -81,7 +81,7 @@ function ConversationRowImpl({
         }}
         aria-busy={mutating || undefined}
         className={cn(
-          "group relative flex min-h-7 items-center gap-1 rounded-lg px-2 py-0.5 text-sm transition duration-fast ease-agent",
+          "group relative flex min-h-7 items-center gap-1 rounded-lg px-2 py-0.5 text-base transition duration-fast ease-agent",
           mutating && "opacity-60",
           selected
             ? "bg-bg-tertiary text-ink"
@@ -109,7 +109,7 @@ function ConversationRowImpl({
               autoCorrect="off"
               autoCapitalize="off"
               spellCheck={false}
-              className="composer-input min-w-0 flex-1 rounded-md bg-bg-sunken px-1.5 py-0.5 text-sm text-ink outline-none ring-1 ring-border-subtle"
+              className="composer-input min-w-0 flex-1 rounded-md bg-bg-sunken px-1.5 py-0.5 text-base text-ink outline-none ring-1 ring-border-subtle"
             />
           </div>
         ) : (

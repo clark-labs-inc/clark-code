@@ -121,7 +121,7 @@ function SettingsPreview({
                   granted ? "bg-success" : "bg-ink-faint/40",
                 )}>
                   <span className={cn(
-                    "absolute top-0.5 size-2.5 rounded-full bg-white shadow-sm transition-transform",
+                    "absolute top-0.5 size-2.5 rounded-full bg-knob shadow-sm transition-transform",
                     granted ? "translate-x-3" : "left-0.5",
                   )} />
                 </span>

@@ -60,10 +60,6 @@ pub async fn skills_list(
         event = "skill_catalog_listed",
         skill_count = snapshot.skills.len(),
         enabled_count = snapshot.skills.iter().filter(|skill| skill.enabled).count(),
-        spec_enabled = snapshot
-            .skills
-            .iter()
-            .any(|skill| skill.invocation_name == "spec:spec" && skill.enabled),
         "skill catalog returned to composer"
     );
     Ok(snapshot)

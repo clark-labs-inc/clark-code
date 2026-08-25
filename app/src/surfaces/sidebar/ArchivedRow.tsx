@@ -29,7 +29,7 @@ function ArchivedRowImpl({
   return (
     <div
       aria-busy={mutating || undefined}
-      className="group flex min-h-7 w-full items-center gap-1 rounded-lg px-2 py-0.5 text-sm text-ink-faint transition hover:bg-bg-hover"
+      className="group flex min-h-7 w-full items-center gap-1 rounded-lg px-2 py-0.5 text-base text-ink-faint transition hover:bg-bg-hover"
     >
       <button
         onClick={() => onRestore(c.id)}
@@ -52,14 +52,14 @@ function ArchivedRowImpl({
             onClick={() => onDelete(c.id)}
             disabled={mutating}
             aria-label={`Permanently delete ${c.title}`}
-            className="rounded-md px-1.5 py-0.5 text-xs font-medium text-danger transition hover:bg-danger/10"
+            className="rounded-md px-1.5 py-0.5 text-sm font-medium text-danger transition hover:bg-danger/10"
           >
             Delete
           </button>
           <button
             onClick={() => setConfirming(false)}
             aria-label="Cancel delete"
-            className="rounded-md px-1.5 py-0.5 text-xs text-ink-muted transition hover:bg-bg-hover hover:text-ink"
+            className="rounded-md px-1.5 py-0.5 text-sm text-ink-muted transition hover:bg-bg-hover hover:text-ink"
           >
             Cancel
           </button>

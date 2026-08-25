@@ -47,6 +47,7 @@ import {
   saveCollaborationModes,
   saveLocalSettings,
   saveOutputStyle,
+  sessionEpoch,
   scheduleCloudPut,
   snapshotBeforeTimelineItem,
   snapshotCache,
@@ -75,6 +76,7 @@ import {
 
 const RAPID_DUPLICATE_WINDOW_MS = 750;
 const modelReconfigureChains = new Map<string, Promise<void>>();
+let sideQuestionToken = 0;
 
 function isExplicitStopCommand(text: string): boolean {
   return /^(?:\/stop|stop|cancel|abort)[.!]?$/i.test(text.trim());
@@ -345,6 +347,7 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
   addFiles: async (files) => {
     const state = get();
     const requestAuth = state.auth;
+    const requestEpoch = sessionEpoch;
     const providerId = state.session?.provider ?? state.activeProvider ?? "local";
     const providerCapabilities = state.session?.capabilities
       ?? state.providers.find((provider) => provider.id === providerId)?.capabilities;
@@ -363,7 +366,7 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
       set({ error: `${tooBig} file(s) skipped — over ${MAX_ATTACHMENT_BYTES / 1024 / 1024}MB.` });
     }
     const prepared = await Promise.all(incoming.map(fileToAttachment));
-    if (!authAccountMatches(requestAuth, get().auth)) {
+    if (epochStale(requestEpoch) || !authAccountMatches(requestAuth, get().auth)) {
       for (const attachment of prepared) {
         if (attachment.previewUrl) URL.revokeObjectURL(attachment.previewUrl);
       }
@@ -982,17 +985,18 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
   setTerminalOpen: (open) => set({ terminalOpen: open }),
   openProjectTerminal: async (path) => {
     const requestAuth = get().auth;
+    const requestEpoch = sessionEpoch;
     let target = path?.trim();
     if (!target) {
       try {
         target = (await pickFolder(get().localSettings.cwd || undefined))?.trim() || undefined;
       } catch (e) {
-        if (!authAccountMatches(requestAuth, get().auth)) return;
+        if (epochStale(requestEpoch) || !authAccountMatches(requestAuth, get().auth)) return;
         set({ error: String(e) });
         return;
       }
     }
-    if (!authAccountMatches(requestAuth, get().auth)) return;
+    if (epochStale(requestEpoch) || !authAccountMatches(requestAuth, get().auth)) return;
     if (!target) return;
     const cwd = target;
     // Move the composer to the picked project: detach a live session bound to a
@@ -1125,30 +1129,46 @@ export function createInteractionActions(set: SessionSet, get: SessionGet): Inte
     // The fork lives on the host; if this bridge can't fork, surface it in the
     // overlay rather than as a generic app error.
     if (!bridge.sideQuestion) {
-      set({ sideQuestion: { question: text, answer: null, error: "Side questions aren't available here.", loading: false, token: 0 } });
+      set({
+        sideQuestion: {
+          sessionId: session.id,
+          question: text,
+          answer: null,
+          error: "Side questions aren't available here.",
+          loading: false,
+          token: ++sideQuestionToken,
+        },
+      });
       return;
     }
-    const token = (get().sideQuestion?.token ?? 0) + 1;
-    set({ sideQuestion: { question: text, answer: null, error: null, loading: true, token } });
+    const token = ++sideQuestionToken;
+    set({
+      sideQuestion: {
+        sessionId: session.id,
+        question: text,
+        answer: null,
+        error: null,
+        loading: true,
+        token,
+      },
+    });
     try {
       const answer = await bridge.sideQuestion(session.id, text);
       // Drop a stale result: the user dismissed or asked a newer question.
       const current = get().sideQuestion;
-      if (!current || current.token !== token) return;
+      if (!current || current.sessionId !== session.id || current.token !== token) return;
       set({ sideQuestion: { ...current, answer, error: null, loading: false } });
     } catch (e) {
       const current = get().sideQuestion;
-      if (!current || current.token !== token) return;
+      if (!current || current.sessionId !== session.id || current.token !== token) return;
       set({ sideQuestion: { ...current, answer: null, error: String(e), loading: false } });
     }
   },
 
   dismissSideQuestion: () => {
-    // Bump the token so an in-flight answer can't revive the overlay after the
-    // user closed it. Never touches the main run's cancellation path.
-    const current = get().sideQuestion;
+    // Clearing the uniquely-tokened overlay makes every in-flight completion
+    // stale. Never touches the main run's cancellation path.
     set({ sideQuestion: null });
-    if (current) void current; // token dies with the cleared state
   },
 
   };

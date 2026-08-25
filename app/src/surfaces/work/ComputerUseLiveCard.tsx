@@ -366,7 +366,7 @@ export function ComputerUseLiveCard({
         maxWidth: floating ? "calc(100vw - 1.5rem)" : undefined,
       } : undefined}
       className={cn(
-        "ml-auto w-full max-w-[27rem] overflow-hidden rounded-2xl border border-white/[0.08] bg-[#171819] text-white shadow-[0_16px_45px_rgba(0,0,0,0.22)]",
+        "ml-auto w-full max-w-[27rem] overflow-hidden rounded-2xl border border-white/[0.08] bg-[#171819] text-white shadow-float",
         floating && "fixed z-50 max-w-none",
         interaction === "drag" && "cursor-grabbing",
       )}

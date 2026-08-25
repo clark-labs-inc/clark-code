@@ -188,7 +188,7 @@ export function ManagedWorktreeTransitionContent({
 
   return (
     <div
-      className="fixed inset-0 z-[70] flex items-center justify-center bg-black/35 p-4 backdrop-blur-[1px]"
+      className="fixed inset-0 z-elevated flex items-center justify-center bg-scrim p-4 backdrop-blur-[1px]"
       role="presentation"
     >
       <section

@@ -219,19 +219,19 @@ fn specialist_requires_full_access(config: &ProviderConfig) -> bool {
             .extra
             .get("specialist_kind")
             .and_then(Value::as_str)
-            .is_some_and(|kind| matches!(kind, "scout" | "spec"))
+            .is_some_and(|kind| kind == "scout")
         || config
             .extra
             .get("specialist")
             .and_then(Value::as_str)
-            .is_some_and(|kind| matches!(kind, "scout" | "spec"))
+            .is_some_and(|kind| kind == "scout")
         || config
             .extra
             .get("specialist")
             .and_then(Value::as_object)
             .and_then(|specialist| specialist.get("kind"))
             .and_then(Value::as_str)
-            .is_some_and(|kind| matches!(kind, "scout" | "spec"))
+            .is_some_and(|kind| kind == "scout")
 }
 
 /// One native transaction that constructs, configures, connects, and binds a
@@ -429,7 +429,6 @@ mod tests {
     fn protected_specialist_bindings_require_full_access() {
         for extra in [
             json!({ "scout_cartography": { "workspace_id": "workspace-1" } }),
-            json!({ "specialist_kind": "spec" }),
             json!({ "specialist": "scout" }),
             json!({ "specialist": { "kind": "scout" } }),
         ] {

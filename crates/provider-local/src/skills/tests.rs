@@ -281,37 +281,6 @@ async fn bundled_sentry_skill_is_read_only_and_resolves_through_its_alias() {
 }
 
 #[tokio::test]
-async fn bundled_spec_skill_requires_document_tools_and_stays_explicit() {
-    let temp = tempfile::tempdir().unwrap();
-    let mut catalog = discover_catalog_with_home(&LocalExecutor, temp.path(), None).await;
-    catalog.resolve_capabilities(&HashSet::from(["read_file".to_string()]), &[]);
-    assert!(catalog.resolve_name("spec").is_err());
-
-    catalog.resolve_capabilities(
-        &HashSet::from([
-            "read_file".to_string(),
-            "write_file".to_string(),
-            "edit_file".to_string(),
-        ]),
-        &[],
-    );
-    let spec = catalog.resolve_name("spec").unwrap();
-    assert_eq!(spec.name, "spec:spec");
-    assert!(!spec.allow_implicit_invocation);
-    let body = catalog.read(&LocalExecutor, spec).await.unwrap();
-    assert!(body.contains("Conversation is the input method"));
-    assert!(body.contains("primary result"));
-    assert!(body.contains("Ask one short, high-information question at a time"));
-    assert!(body.contains("<selected_spec_content>"));
-    assert!(body.contains("<spec_document>"));
-    assert!(body.contains("Do not use globbing, directory listings, shell commands"));
-    assert!(body.contains("state not verified"));
-    assert!(body.contains("installed brokered research capability"));
-    assert!(body.contains("do not block document work"));
-    assert!(body.contains("Never\n  reverse-engineer a problem statement"));
-}
-
-#[tokio::test]
 async fn bundled_scout_skill_requires_the_typed_evidence_toolchain() {
     let temp = tempfile::tempdir().unwrap();
     let mut catalog = discover_catalog_with_home(&LocalExecutor, temp.path(), None).await;

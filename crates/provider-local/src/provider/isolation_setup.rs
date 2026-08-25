@@ -8,10 +8,14 @@ fn windows_sandbox_data_root() -> Result<std::path::PathBuf> {
 
 pub(super) fn build_local_executor(
     config: &LocalConfig,
-    sandbox: &Sandbox,
+    sandbox: &mut Sandbox,
     preset: exec_sandbox::SandboxPreset,
 ) -> Result<(Arc<dyn Executor>, Option<tempfile::TempDir>)> {
-    if explicit_host_execution_allowed(config.sandbox_mode, preset) {
+    // Keep the file-tool trust flag exactly in sync with process containment:
+    // Full Access / disabled sandbox lifts both; any contained preset restores
+    // both, even on a sandbox cloned from a previously trusted session.
+    sandbox.host_trusted = explicit_host_execution_allowed(config.sandbox_mode, preset);
+    if sandbox.host_trusted {
         return Ok((Arc::new(LocalExecutor), None));
     }
 
@@ -43,6 +47,11 @@ pub(super) fn build_local_executor(
             exec_sandbox::SandboxPolicy::read_only().with_write_roots(extra_write_roots)
         }
         exec_sandbox::SandboxPreset::WorkspaceWrite => {
+            // Project-approved external write targets (shared machine caches,
+            // typically reached through an in-project symlink such as Cargo's
+            // `target/`) join the workspace here. Plan Mode's ReadOnly preset
+            // never receives them.
+            extra_write_roots.extend(config.sandbox_write_roots.iter().cloned());
             exec_sandbox::SandboxPolicy::workspace_write(
                 sandbox.root().to_path_buf(),
                 extra_write_roots,
@@ -81,8 +90,7 @@ fn explicit_host_execution_allowed(
     mode: crate::config::LocalSandboxMode,
     preset: exec_sandbox::SandboxPreset,
 ) -> bool {
-    mode == crate::config::LocalSandboxMode::Disabled
-        || preset == exec_sandbox::SandboxPreset::DangerFullAccess
+    crate::sandbox::preset_runs_on_bare_host(mode, preset)
 }
 
 #[cfg(windows)]
@@ -124,12 +132,22 @@ fn auto_enroll_windows_workspace(
     }
 }
 
-/// Stable policy used by the desktop's explicit Windows setup flow. Session
+/// Stable policy used by the desktop's explicit sandbox-setup flow. Session
 /// directories nest under these roots, so one consented ACL reconciliation is
-/// reusable without broadening access beyond Clark Code's project/docs/temp areas.
-pub fn local_sandbox_setup_policy(cwd: &std::path::Path) -> Result<exec_sandbox::SandboxPolicy> {
+/// reusable without broadening access beyond Clark Code's project/docs/temp
+/// areas plus the project's own `sandbox_write_roots` grants — keeping the
+/// enrolled perimeter identical to what WorkspaceWrite sessions will enforce.
+pub async fn local_sandbox_setup_policy(
+    cwd: &std::path::Path,
+) -> Result<exec_sandbox::SandboxPolicy> {
+    let project = crate::project_settings::load(&LocalExecutor, cwd).await;
+    let (granted, rejected) =
+        crate::project_settings::validated_write_roots(&project.sandbox_write_roots);
+    for entry in rejected {
+        tracing::warn!(entry, "ignoring non-absolute sandbox_write_roots entry");
+    }
     #[cfg(not(windows))]
-    let write_roots = Vec::new();
+    let mut write_roots = Vec::new();
     #[cfg(windows)]
     let mut write_roots = Vec::new();
     #[cfg(windows)]
@@ -140,6 +158,7 @@ pub fn local_sandbox_setup_policy(cwd: &std::path::Path) -> Result<exec_sandbox:
         let temp_root = windows_sandbox_data_root()?.join("sandbox-tmp");
         write_roots.push(temp_root);
     }
+    write_roots.extend(granted);
     Ok(exec_sandbox::SandboxPolicy::workspace_write(
         cwd.to_path_buf(),
         write_roots,
@@ -170,5 +189,32 @@ mod tests {
             LocalSandboxMode::Auto,
             SandboxPreset::DangerFullAccess
         ));
+    }
+
+    #[tokio::test]
+    async fn setup_policy_enrolls_the_same_grants_sessions_will_use() {
+        let project = tempfile::tempdir().unwrap();
+        let cache = tempfile::tempdir().unwrap();
+        let absolute_root = cache.path().canonicalize().unwrap();
+        std::fs::create_dir_all(project.path().join(".agent")).unwrap();
+        std::fs::write(
+            project.path().join(".agent/settings.json"),
+            serde_json::json!({
+                "sandbox_write_roots": [
+                    absolute_root.to_string_lossy(),
+                    "relative/escape"
+                ]
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let policy = super::local_sandbox_setup_policy(project.path())
+            .await
+            .unwrap();
+        assert!(policy.write_roots.contains(&absolute_root));
+        // Exactly the checkout plus the one absolute grant survived; the
+        // relative entry was refused rather than enrolled.
+        assert_eq!(policy.write_roots.len(), 2);
     }
 }

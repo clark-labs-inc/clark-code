@@ -103,9 +103,10 @@
   --text-2xl: max(1.5rem, calc(1.5rem * var(--text-size-scale)));      /* 24px at 100% */
   --text-3xl: max(1.875rem, calc(1.875rem * var(--text-size-scale)));  /* 30px at 100% */
 
-  /* Three visible corner tiers: compact controls, standard controls, and
-     floating overlays. Structural content stays flat instead of becoming a
-     stack of cards. */
+  /* Three visible corner tiers: micro chips, compact controls, standard
+     controls, and floating overlays. Structural content stays flat instead of
+     becoming a stack of cards. */
+  --radius-xs: 5px;
   --radius-sm: 6px;
   --radius-md: 6px;
   --radius-lg: 8px;
@@ -114,6 +115,22 @@
 
   --shadow-soft: none;
   --shadow-lifted: 0 10px 32px rgba(48, 40, 35, 0.09);
+  /* Depth beyond popovers: sunken artifact previews, floating instrument
+     panels, and lifted action buttons. The accent glow follows --color-accent,
+     so it adapts to theme automatically. */
+  --shadow-deep: 0 22px 60px -42px rgba(0, 0, 0, 0.9);
+  --shadow-float: 0 16px 45px rgba(0, 0, 0, 0.22);
+  --shadow-button: 0 12px 28px -18px rgba(0, 0, 0, 0.85);
+  --shadow-glow-accent: 0 12px 28px -16px var(--color-accent);
+
+  /* Fixed surfaces that must NOT follow light/dark: modal scrims sit on any
+     canvas; media pages/stages are literal paper/screen content; switch knobs
+     stay light on tinted tracks in both themes. */
+  --color-scrim: rgb(0 0 0 / 0.4);
+  --color-scrim-strong: rgb(0 0 0 / 0.55);
+  --color-media-page: #ffffff;
+  --color-media-stage: #000000;
+  --color-knob: #ffffff;
 
   /* ── Motion tokens ───────────────────────────────────────────────
    * One easing curve and a small, deliberate speed scale for the whole
@@ -508,6 +525,18 @@ samp,
   letter-spacing: normal; /* monospace shouldn't inherit the body's tracking */
 }
 
+/* Inline code chips — one shared chip everywhere (prose, permission copy,
+   memory cards, settings). Block code inside <pre> is excluded; it keeps the
+   surface styling owned by MarkdownContent's pre rules. Size, radius, chrome,
+   and family are fixed by the system; color stays caller-owned. */
+code:not(pre code) {
+  border-radius: var(--radius-xs);
+  background: var(--color-chip);
+  padding: 0.1em 0.32em;
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+}
+
 /* Syntax-highlighted code (Shiki, JS regex engine — no WASM). Shiki emits a
    <pre class="shiki …"> with inline light colors and --shiki-dark variables on
    every token. We override its inline background (the MarkdownContent pre surface is
@@ -616,16 +645,21 @@ html.dark .shiki-inline span {
 
 /* Structured diff body (DiffBody) — a file header, hunk rows, and per-line
    tinted code with an old/new line-number gutter. Tints use the semantic
-   success/danger tokens so they read in both themes; the gutter is faint. */
+   success/danger tokens so they read in both themes; the gutter is faint.
+   Gutter tracks are `--diff-gutter-ch` wide (set from the widest line number
+   in the diff) so ≥1000-line files never overflow their column, and a 1ch
+   column-gap keeps the two numbers visibly separate even when both fill
+   their full track. */
 .diff-body .diff-row {
   display: grid;
-  grid-template-columns: 3ch 3ch 1ch 1fr;
+  grid-template-columns: calc(var(--diff-gutter-ch, 3) * 1ch) calc(var(--diff-gutter-ch, 3) * 1ch) 1ch 1fr;
+  column-gap: 1ch;
+  padding-left: 0.75rem;
   white-space: pre;
 }
 .diff-body .diff-gutter-old,
 .diff-body .diff-gutter-new {
   text-align: right;
-  padding-right: 0.5ch;
   color: var(--color-ink-muted);
   user-select: none;
 }
@@ -821,6 +855,20 @@ svg.lucide {
      dimming overlay also fades) doesn't trigger a re-composite of the shadow. */
   isolation: isolate;
 }
+
+/* ── Stacking ladder ──────────────────────────────────────────────
+ * One documented order instead of scattered arbitrary z values:
+ *   0–10 inline content · 20–30 sticky chrome · 40 dropdowns ·
+ *   50 modals + popovers (z-50) · 70 elevated chrome above open
+ *   popovers (.z-elevated) · 90 toasts (.z-toast) ·
+ *   100 critical, must top everything (.z-critical).
+ * New layers join this ladder; `z-[N]` stays banned in surfaces. */
+.z-elevated { z-index: 70; }
+.z-toast { z-index: 90; }
+.z-critical { z-index: 100; }
+
+/* Muted text that lives on the fixed-dark media stage (video artifacts). */
+.media-stage-muted { color: rgb(255 255 255 / 0.7); }
 
 @keyframes spin {
   to { transform: rotate(360deg); }

@@ -6,7 +6,10 @@ Linux bubblewrap, and Windows restricted-token execution.
 
 Core invariants:
 
-- the selected project root is the only writable project capability;
+- the selected project root is the only writable project capability, plus
+  explicitly granted absolute roots from `.agent/settings.json`
+  (`sandbox_write_roots`, for shared machine-level build caches reached through
+  in-project symlinks); they never apply in Plan Mode's read-only preset;
 - read-before-edit remains enforced above process isolation;
 - explicit read roots do not imply write access;
 - environment and working-directory inputs are validated before launch;

@@ -207,7 +207,8 @@ impl LocalAgentProvider {
         plan_mode: bool,
     ) -> Result<()> {
         let current = self.sandbox.as_ref().ok_or(Error::NotConnected)?;
-        let sandbox = Arc::new(current.as_ref().clone().replacing_read_roots(roots));
+        let mut sandbox = current.as_ref().clone();
+        sandbox = sandbox.replacing_read_roots(roots);
         let mut config = self.config()?.clone();
         config.sandbox_read_roots = sandbox.read_roots().to_vec();
         let preset = if plan_mode {
@@ -215,10 +216,10 @@ impl LocalAgentProvider {
         } else {
             exec_sandbox::SandboxPreset::for_session_mode(self.session_mode.as_deref())
         };
-        let (executor, sandbox_temp) = build_local_executor(&config, &sandbox, preset)?;
+        let (executor, sandbox_temp) = build_local_executor(&config, &mut sandbox, preset)?;
         self.executor = executor;
         self.sandbox_temp = sandbox_temp;
-        self.sandbox = Some(sandbox);
+        self.sandbox = Some(Arc::new(sandbox));
         self.config = Some(config);
         Ok(())
     }

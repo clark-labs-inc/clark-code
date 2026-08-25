@@ -262,6 +262,93 @@ async fn a_new_prompt_supersedes_a_run_parked_on_a_permission_request() {
 }
 
 #[tokio::test]
+async fn project_settings_extend_the_session_sandbox_write_roots() {
+    let project = tempfile::tempdir().unwrap();
+    let cache = tempfile::tempdir().unwrap();
+    let absolute_root = cache.path().canonicalize().unwrap();
+    std::fs::create_dir_all(project.path().join(".agent")).unwrap();
+    std::fs::write(
+        project.path().join(".agent/settings.json"),
+        serde_json::json!({
+            "sandbox_write_roots": [absolute_root.to_string_lossy(), "relative/escape"]
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let mut provider = LocalAgentProvider::new();
+    provider.connect(provider_test_config()).await.unwrap();
+    let session = provider
+        .new_session(SessionOptions {
+            cwd: Some(project.path().to_string_lossy().into_owned()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+    // The absolute shared-cache root reaches the session config (and from there
+    // the WorkspaceWrite sandbox policy); the relative entry is refused instead
+    // of silently widened.
+    assert_eq!(
+        provider.config().unwrap().sandbox_write_roots,
+        vec![absolute_root.clone()]
+    );
+
+    // Executor rebuilds on later mode switches reuse the same merged inputs.
+    provider
+        .set_collaboration_mode(&session.id, CollaborationMode::Plan)
+        .await
+        .unwrap();
+    assert_eq!(
+        provider.config().unwrap().sandbox_write_roots,
+        vec![absolute_root]
+    );
+}
+
+#[tokio::test]
+async fn full_access_lifts_file_tool_containment_and_auto_restores_it() {
+    let project = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let mut provider = LocalAgentProvider::new();
+    // Unlike `provider_test_config` (sandbox_mode disabled → always host
+    // trusted), this fixture exercises the contained presets themselves.
+    let mut config = provider_test_config();
+    config
+        .extra
+        .as_object_mut()
+        .unwrap()
+        .insert("sandbox_mode".to_string(), serde_json::json!("auto"));
+    provider.connect(config).await.unwrap();
+    let session = provider
+        .new_session(SessionOptions {
+            cwd: Some(project.path().to_string_lossy().into_owned()),
+            mode: Some("ask".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+    // ask/auto: contained.
+    assert!(!provider.sandbox.as_ref().unwrap().host_trusted());
+
+    // Full Access: file-tool containment lifts with the process sandbox.
+    provider.set_mode(&session.id, "full".into()).await.unwrap();
+    assert!(provider.sandbox.as_ref().unwrap().host_trusted());
+    let trusted = provider.sandbox.as_ref().unwrap();
+    assert!(trusted
+        .resolve_for_write(outside.path().join("x.txt").to_str().unwrap())
+        .is_ok());
+
+    // Back to auto: walls return without restarting the session.
+    provider.set_mode(&session.id, "auto".into()).await.unwrap();
+    let contained = provider.sandbox.as_ref().unwrap();
+    assert!(!contained.host_trusted());
+    assert!(contained
+        .resolve_for_write(outside.path().join("x.txt").to_str().unwrap())
+        .is_err());
+}
+
+#[tokio::test]
 async fn new_session_requires_cwd() {
     let mut p = LocalAgentProvider::new();
     p.connect(ProviderConfig::default()).await.unwrap();
@@ -275,7 +362,16 @@ async fn live_session_can_admit_and_revoke_an_explicit_read_only_repository() {
     let repository = tempfile::tempdir().unwrap();
     std::fs::write(repository.path().join("README.md"), "code evidence").unwrap();
     let mut provider = LocalAgentProvider::new();
-    provider.connect(provider_test_config()).await.unwrap();
+    // Unlike `provider_test_config` (sandbox_mode disabled → always host
+    // trusted), this fixture exercises the contained presets so read-root
+    // admission and revocation actually gate file-tool reads.
+    let mut config = provider_test_config();
+    config
+        .extra
+        .as_object_mut()
+        .unwrap()
+        .insert("sandbox_mode".to_string(), serde_json::json!("auto"));
+    provider.connect(config).await.unwrap();
     let session = provider
         .new_session(SessionOptions {
             cwd: Some(workspace.path().to_string_lossy().into_owned()),

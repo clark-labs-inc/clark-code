@@ -46,7 +46,7 @@ export function ComposerParentFolderDialog({
       {open && (
         <m.div
           {...accessibleMotion(OVERLAY, reduceMotion)}
-          className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-6"
+          className="fixed inset-0 z-50 grid place-items-center bg-scrim p-6"
           onMouseDown={(event) => event.target === event.currentTarget && onCancel()}
         >
           <m.div

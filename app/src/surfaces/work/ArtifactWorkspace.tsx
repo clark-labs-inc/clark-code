@@ -302,11 +302,11 @@ function ArtifactPreview({
 
   if (isVideoArtifact(artifact) && artifact.uri) {
     return (
-      <div className="flex min-h-full flex-col items-center justify-center gap-3 bg-black p-8">
+      <div className="flex min-h-full flex-col items-center justify-center gap-3 bg-media-stage p-8">
         {/* Artifact events do not yet carry a captions track; the note below makes that limitation explicit. */}
         {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
         <video src={artifact.uri} controls preload="metadata" className="max-h-[70vh] max-w-full" />
-        <p className="text-xs text-white/70">Captions are not available for this video artifact.</p>
+        <p className="media-stage-muted text-xs">Captions are not available for this video artifact.</p>
       </div>
     );
   }

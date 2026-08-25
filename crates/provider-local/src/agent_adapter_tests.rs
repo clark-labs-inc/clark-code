@@ -489,6 +489,25 @@ fn tool_title_special_cases_image_tools() {
 }
 
 #[test]
+fn overlong_tool_titles_mark_their_cut_instead_of_ending_mid_token() {
+    let command = format!("grep -rn {} src", "x".repeat(120));
+    let title = tool_title("bash", &json!({ "command": command }));
+    assert_eq!(title.chars().count(), 80);
+    assert!(
+        title.ends_with('…'),
+        "cut titles must be visibly elided: {title}"
+    );
+    // A title that fits keeps its exact text, unmarked.
+    assert_eq!(
+        tool_title(
+            "bash",
+            &json!({ "command": "cargo nextest run -p provider-local" })
+        ),
+        "cargo nextest run -p provider-local"
+    );
+}
+
+#[test]
 fn produced_image_artifact_preserves_its_typed_preview_uri() {
     let artifact = produced_artifact_to_desktop(
         &crate::tools::ProducedArtifact {

@@ -73,7 +73,7 @@ fn run_windows_sandbox_smoke(output: &Path, cwd: &Path) {
         .build()
         .unwrap_or_else(|error| fail(&format!("sandbox smoke runtime failed: {error}")));
     let result = runtime.block_on(async {
-        let executor = crate::sandbox_setup::release_smoke_executor(cwd)?;
+        let executor = crate::sandbox_setup::release_smoke_executor(cwd).await?;
         let ordinary = executor
             .exec_streaming(
                 &inside_command,

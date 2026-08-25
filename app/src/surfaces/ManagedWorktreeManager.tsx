@@ -120,25 +120,25 @@ export function ManagedWorktreeManager({
     <div className="p-1.5">
       <div className="mb-2 flex items-center justify-between gap-2 px-1">
         <div>
-          <span className="block text-xs font-medium text-ink-muted">Isolated worktrees</span>
-          <span className="block text-xs text-ink-faint">Protect work, then archive the checkout.</span>
+          <span className="block text-sm font-medium text-ink-muted">Isolated worktrees</span>
+          <span className="block text-sm text-ink-faint">Protect work, then archive the checkout.</span>
         </div>
         <button
           type="button"
           disabled={loading || busy}
           onClick={() => void refresh()}
-          className="rounded-md px-1.5 py-1 text-xs text-ink-muted transition hover:bg-bg-hover hover:text-ink disabled:opacity-40"
+          className="rounded-md px-1.5 py-1 text-sm text-ink-muted transition hover:bg-bg-hover hover:text-ink disabled:opacity-40"
         >
           Refresh
         </button>
       </div>
 
       {loading ? (
-        <div className="flex items-center justify-center gap-2 px-3 py-6 text-xs text-ink-muted">
+        <div className="flex items-center justify-center gap-2 px-3 py-6 text-sm text-ink-muted">
           <Loader2 className="size-3.5 animate-spin" /> Checking worktrees…
         </div>
       ) : worktrees.length === 0 ? (
-        <p className="px-3 py-6 text-center text-xs leading-4 text-ink-faint">
+        <p className="px-3 py-6 text-center text-sm leading-4 text-ink-faint">
           No isolated worktrees need attention for this project.
         </p>
       ) : (
@@ -159,17 +159,17 @@ export function ManagedWorktreeManager({
                   )}>
                     {worktree.state === "saved" ? <Check className="size-3" /> : <GitFork className="size-3" />}
                   </span>
-                  <span className="min-w-0 flex-1 truncate text-xs font-medium text-ink-secondary">{worktree.label}</span>
-                  <span className="text-xs font-medium uppercase tracking-wide text-ink-faint">
+                  <span className="min-w-0 flex-1 truncate text-sm font-medium text-ink-secondary">{worktree.label}</span>
+                  <span className="text-sm font-medium uppercase tracking-wide text-ink-faint">
                     {inUse ? "in use" : worktree.state}
                   </span>
                 </div>
-                <p className="mt-1 truncate font-mono text-xs text-ink-faint" title={worktree.path}>{worktree.path}</p>
-                <p className="mt-2 text-xs leading-4 text-ink-muted">{lifecycleCopy(worktree, inUse)}</p>
+                <p className="mt-1 truncate font-mono text-sm text-ink-faint" title={worktree.path}>{worktree.path}</p>
+                <p className="mt-2 text-sm leading-4 text-ink-muted">{lifecycleCopy(worktree, inUse)}</p>
 
                 {confirming ? (
                   <div className="mt-2 rounded-lg border border-danger/20 bg-danger/5 p-2">
-                    <p className="text-xs leading-4 text-ink-secondary">
+                    <p className="text-sm leading-4 text-ink-secondary">
                       Archive this checkout? Its chat history stays available{worktree.state === "saved" ? ", and the saved branch stays in Git" : ""}.
                     </p>
                     <div className="mt-2 flex justify-end gap-1.5">
@@ -177,7 +177,7 @@ export function ManagedWorktreeManager({
                         type="button"
                         disabled={archiving}
                         onClick={() => setConfirmingId(null)}
-                        className="rounded-md px-2 py-1 text-xs text-ink-muted hover:bg-bg-hover hover:text-ink disabled:opacity-40"
+                        className="rounded-md px-2 py-1 text-sm text-ink-muted hover:bg-bg-hover hover:text-ink disabled:opacity-40"
                       >
                         Keep checkout
                       </button>
@@ -185,7 +185,7 @@ export function ManagedWorktreeManager({
                         type="button"
                         disabled={archiving}
                         onClick={() => void archive(worktree.id)}
-                        className="flex items-center gap-1 rounded-md bg-danger/10 px-2 py-1 text-xs font-medium text-danger hover:bg-danger/20 disabled:opacity-40"
+                        className="flex items-center gap-1 rounded-md bg-danger/10 px-2 py-1 text-sm font-medium text-danger hover:bg-danger/20 disabled:opacity-40"
                       >
                         {archiving && <Loader2 className="size-3 animate-spin" />}
                         Archive checkout
@@ -199,7 +199,7 @@ export function ManagedWorktreeManager({
                       disabled={!canUse}
                       title={canUse ? "Use this isolated checkout for a new chat" : "This checkout is no longer available"}
                       onClick={() => onUseWorktree(worktree.path)}
-                      className="flex items-center gap-1 rounded-md px-1.5 py-1 text-xs text-ink-muted transition hover:bg-bg-hover hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
+                      className="flex items-center gap-1 rounded-md px-1.5 py-1 text-sm text-ink-muted transition hover:bg-bg-hover hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       <FolderOpen className="size-3" />
                       Use for new chat
@@ -209,7 +209,7 @@ export function ManagedWorktreeManager({
                         type="button"
                         disabled={!canSave}
                         onClick={() => void saveBranch(worktree.id)}
-                        className="flex items-center gap-1 rounded-md bg-accent-subtle px-1.5 py-1 text-xs font-medium text-accent transition hover:bg-accent/15 disabled:opacity-40"
+                        className="flex items-center gap-1 rounded-md bg-accent-subtle px-1.5 py-1 text-sm font-medium text-accent transition hover:bg-accent/15 disabled:opacity-40"
                       >
                         {saving ? <Loader2 className="size-3 animate-spin" /> : <GitBranch className="size-3" />}
                         Save commits as branch
@@ -227,7 +227,7 @@ export function ManagedWorktreeManager({
                               : "This checkout cannot be archived yet"
                         }
                         onClick={() => setConfirmingId(worktree.id)}
-                        className="flex items-center gap-1 rounded-md px-1.5 py-1 text-xs text-danger transition hover:bg-danger/10 disabled:cursor-not-allowed disabled:opacity-40"
+                        className="flex items-center gap-1 rounded-md px-1.5 py-1 text-sm text-danger transition hover:bg-danger/10 disabled:cursor-not-allowed disabled:opacity-40"
                       >
                         <Archive className="size-3" />
                         Archive checkout
@@ -241,13 +241,13 @@ export function ManagedWorktreeManager({
         </div>
       )}
 
-      {error && <p className="mt-2 px-1 text-xs leading-4 text-danger">{error}</p>}
+      {error && <p className="mt-2 px-1 text-sm leading-4 text-danger">{error}</p>}
       <div className="mt-2 flex justify-end">
         <button
           type="button"
           disabled={busy}
           onClick={onBack}
-          className="rounded-lg px-2.5 py-1.5 text-xs text-ink-muted hover:bg-bg-hover hover:text-ink disabled:opacity-40"
+          className="rounded-lg px-2.5 py-1.5 text-sm text-ink-muted hover:bg-bg-hover hover:text-ink disabled:opacity-40"
         >
           Back
         </button>

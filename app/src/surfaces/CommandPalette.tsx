@@ -169,7 +169,7 @@ export function CommandPalette({
     <AnimatePresence>
       <m.div
         {...accessibleMotion(OVERLAY, reduce)}
-        className="fixed inset-0 z-50 flex items-start justify-center bg-black/55 px-4 pt-[12vh]"
+        className="fixed inset-0 z-50 flex items-start justify-center bg-scrim-strong px-4 pt-[12vh]"
         onMouseDown={(e) => e.target === e.currentTarget && setOpen(false)}
       >
         <m.div

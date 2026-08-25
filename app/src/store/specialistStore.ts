@@ -62,6 +62,25 @@ interface SpecialistState {
   setAccountScope: (scope: string | null) => void;
 }
 
+export function contextsAfterSpecialistOpen(
+  current: Partial<Record<SpecialistKind, SpecialistContext>>,
+  kind: SpecialistKind,
+  defaultWorkflow: string,
+  context: Partial<SpecialistContext> = {},
+): Partial<Record<SpecialistKind, SpecialistContext>> {
+  const requestedContext = Object.keys(context).length === 0
+    ? { workflow: defaultWorkflow }
+    : context;
+  return {
+    ...current,
+    // Opening establishes a new ownership boundary. Saved conversations pass
+    // their complete durable context, while a new lens gets only its default
+    // workflow. Merging with the previous context here lets composer-local
+    // fields such as Spec's repository focus leak into unrelated composers.
+    [kind]: { ...requestedContext, kind },
+  };
+}
+
 function tabsFrom(persisted: PersistedSpecialistState) {
   return Object.fromEntries(
     SPECIALIST_KINDS.map((kind) => {
@@ -103,18 +122,17 @@ export const useSpecialistStore = create<SpecialistState>((set, get) => ({
     // but that choice must not silently stick to later free-form prompts.
     // Saved conversations pass their full context explicitly below and keep
     // the workflow they were created with.
-    const requestedContext = Object.keys(context).length === 0
-      ? { workflow: SPECIALISTS[kind].defaultWorkflow }
-      : context;
-    const contexts = {
-      ...get().contexts,
-      [kind]: { ...get().contexts[kind], ...requestedContext, kind },
-    };
+    const contexts = contextsAfterSpecialistOpen(
+      get().contexts,
+      kind,
+      SPECIALISTS[kind].defaultWorkflow,
+      context,
+    );
     set({
       active: kind,
       expanded: kind,
       contexts,
-      ...(kind === "scout" ? {} : { scoutScopeOpen: false }),
+      scoutScopeOpen: false,
     });
     savePersisted(get().accountScope, get().tabs, contexts);
   },

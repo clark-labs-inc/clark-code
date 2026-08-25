@@ -39,10 +39,16 @@ impl Sandbox {
     }
 
     pub(super) fn ensure_read_contained(&self, path: &Path) -> Result<(), String> {
+        if self.host_trusted {
+            return Ok(());
+        }
         ensure(self.readable(path), "readable", path, &self.root)
     }
 
     pub(super) fn ensure_write_contained(&self, path: &Path) -> Result<(), String> {
+        if self.host_trusted {
+            return Ok(());
+        }
         ensure(self.writable(path), "writable", path, &self.root)
     }
 

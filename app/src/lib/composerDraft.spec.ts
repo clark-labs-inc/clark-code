@@ -58,12 +58,12 @@ describe("composer drafts", () => {
   });
 
   it("clears an accepted specialist-start prompt without moving it into the session", () => {
-    const start = specialistStartComposerDraftId("spec");
-    saveComposerDraft(owner, start, "write the specification now");
+    const start = specialistStartComposerDraftId("security");
+    saveComposerDraft(owner, start, "scan the auth service now");
 
-    expect(clearComposerDraftIfUnchanged(owner, start, "write the specification now")).toBe(true);
+    expect(clearComposerDraftIfUnchanged(owner, start, "scan the auth service now")).toBe(true);
     expect(loadComposerDraft(owner, start)).toBe("");
-    expect(loadComposerDraft(owner, "created-spec-session")).toBe("");
+    expect(loadComposerDraft(owner, "created-security-session")).toBe("");
   });
 
   it("keeps Scout and Security pre-conversation drafts cloud-key isolated", () => {
@@ -84,7 +84,7 @@ describe("composer drafts", () => {
     );
 
     expect(loadComposerDraft(owner, null)).toBe("");
-    expect(specialistStartComposerDraftId("spec")).toBe("specialist:spec:new.v3");
+    expect(specialistStartComposerDraftId("rsi")).toBe("specialist:rsi:new.v3");
   });
 
   it("uses stable account identity precedence", () => {

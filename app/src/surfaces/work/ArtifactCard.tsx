@@ -131,7 +131,7 @@ export function ArtifactCard({
           src={uri}
           controls
           preload="metadata"
-          className="max-h-[28rem] w-full rounded-2xl bg-black"
+          className="max-h-[28rem] w-full rounded-2xl bg-media-stage"
           onError={() => setBroke(true)}
         />
       );
@@ -177,7 +177,7 @@ export function ArtifactCard({
         </header>
 
         <div className="relative">
-          <div className="overflow-hidden rounded-2xl bg-bg-sunken shadow-[0_22px_60px_-42px_rgba(0,0,0,0.9)]">
+          <div className="overflow-hidden rounded-2xl bg-bg-sunken shadow-deep">
             {body}
           </div>
 
@@ -187,7 +187,7 @@ export function ArtifactCard({
                 type="button"
                 onClick={() => onOpen(artifact)}
                 aria-label={`Open ${artifact.title} in workspace`}
-                className="flex h-10 items-center gap-2 rounded-xl bg-accent px-4 text-sm font-semibold text-on-accent shadow-[0_12px_28px_-16px_var(--color-accent)] transition duration-fast ease-agent hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-focus"
+                className="flex h-10 items-center gap-2 rounded-xl bg-accent px-4 text-sm font-semibold text-on-accent shadow-glow-accent transition duration-fast ease-agent hover:bg-accent-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-focus"
               >
                 <ArrowUpRight className="size-4" /> Open workspace
               </button>
@@ -196,7 +196,7 @@ export function ArtifactCard({
               type="button"
               onClick={saveCopy}
               aria-label={`Save a copy of ${artifact.title}`}
-              className="flex h-10 items-center gap-2 rounded-xl bg-bg-elevated px-4 text-sm font-semibold text-ink-secondary ring-1 ring-border-subtle shadow-[0_12px_28px_-18px_rgba(0,0,0,0.85)] transition duration-fast ease-agent hover:bg-bg-hover hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-focus"
+              className="flex h-10 items-center gap-2 rounded-xl bg-bg-elevated px-4 text-sm font-semibold text-ink-secondary ring-1 ring-border-subtle shadow-button transition duration-fast ease-agent hover:bg-bg-hover hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-focus"
             >
               <Download className="size-4" /> Save a copy
             </button>

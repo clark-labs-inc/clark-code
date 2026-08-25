@@ -7,15 +7,18 @@ fn argument<'a>(args: &'a Value, key: &str) -> Option<&'a str> {
         .filter(|value| !value.is_empty())
 }
 
+/// Titles cap at one compact line; a cut is always marked so a row never ends
+/// mid-token looking broken (e.g. `--include=C` with no ellipsis).
+const SNIPPET_MAX_CHARS: usize = 80;
+
 fn snippet(value: &str) -> String {
-    value
-        .lines()
-        .next()
-        .unwrap_or_default()
-        .trim()
-        .chars()
-        .take(80)
-        .collect()
+    let first = value.lines().next().unwrap_or_default().trim();
+    if first.chars().count() <= SNIPPET_MAX_CHARS {
+        return first.to_string();
+    }
+    let mut cut: String = first.chars().take(SNIPPET_MAX_CHARS - 1).collect();
+    cut.push('…');
+    cut
 }
 
 fn activity_with_argument(args: &Value, key: &str, verb: &str, fallback: &str) -> String {

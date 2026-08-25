@@ -316,9 +316,9 @@ function SecurityPopover({
           <div className="rounded-lg border border-dashed border-border-subtle px-4 py-5 text-center">
             <p className="text-sm font-medium text-ink-secondary">No scans yet</p>
             <p className="mt-1 text-xs text-ink-muted">
-              Run <code className="font-mono">/security</code>,{" "}
-              <code className="font-mono">/security-diff</code>, or{" "}
-              <code className="font-mono">/security-deep</code>.
+              Run <code>/security</code>,{" "}
+              <code>/security-diff</code>, or{" "}
+              <code>/security-deep</code>.
             </p>
           </div>
         ) : (

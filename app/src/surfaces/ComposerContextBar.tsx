@@ -21,9 +21,8 @@ const ITEM =
 
 export function composerContextKind(
   activeSpecialist: string | null,
-): "checkout" | "enterprise" | "spec" {
+): "checkout" | "enterprise" {
   if (activeSpecialist === "scout") return "enterprise";
-  if (activeSpecialist === "spec") return "spec";
   return "checkout";
 }
 
@@ -329,42 +328,6 @@ export function ComposerContextBar() {
             <LocationIcon className="size-3 shrink-0" />
             <span className="max-w-36 truncate">{locationLabel}</span>
           </span>
-        )}
-      </div>
-    );
-  }
-  if (contextKind === "spec") {
-    return (
-      <div
-        className="relative mx-auto mb-1.5 flex w-full max-w-[70rem] flex-wrap items-center gap-1.5"
-        data-testid="spec-execution-context"
-        aria-label="Spec execution target"
-      >
-        {session ? (
-          <>
-            <span
-              className={`${ITEM} shrink-0 text-ink-secondary`}
-              title={isRemoteSession ? `Remote: ${locationLabel}` : "This Mac"}
-            >
-              <LocationIcon className="size-3 shrink-0" />
-              <span className="max-w-36 truncate">{locationLabel}</span>
-            </span>
-            {isRemoteSession && checkoutRoot && (
-              <span
-                className={`${ITEM} text-ink-secondary`}
-                title={`Remote project: ${checkoutRoot}`}
-              >
-                <Folder className="size-3 shrink-0" />
-                <span className="max-w-48 truncate">{projectDisplayName(checkoutRoot)}</span>
-              </span>
-            )}
-          </>
-        ) : (
-          <EnvironmentPicker
-            compact
-            allowCloud={false}
-            showLocalFolder={false}
-          />
         )}
       </div>
     );

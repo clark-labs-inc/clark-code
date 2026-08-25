@@ -133,7 +133,7 @@ function BrowserPdfPage({
         <img
           src={url}
           alt={`${title}, page ${page}`}
-          className="block h-auto w-full bg-white shadow-lifted"
+          className="block h-auto w-full bg-media-page shadow-lifted"
         />
       ) : failed ? (
         <span className="text-xs text-ink-faint">Page {page} unavailable</span>

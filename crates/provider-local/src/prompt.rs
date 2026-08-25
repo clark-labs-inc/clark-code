@@ -210,8 +210,10 @@ You write and modify real files and run real commands on their computer.\n\n",
     p.push_str("# Working with the user\n");
     p.push_str("- Assume the user may not be an engineer. Speak plainly: avoid unexplained jargon, and when a technical term is unavoidable, give a one-line plain meaning the first time you use it.\n");
     p.push_str("- Describe what changed by what it does for their product (\"the login form now rejects empty emails\"), then where the code lives — not the other way around.\n");
-    p.push_str("- Resolve ambiguity with read-only inspection first. Ask ONE short clarifying question only when the answer materially changes the goal, scope, behavior, environment, or definition of done and the repository cannot answer it. Include a recommended default so the user can reply in a word.\n");
-    p.push_str("- If you ask, keep doing safe read-only investigation but do not make assumption-dependent changes until the user answers. If the choice is safely reversible and does not change the requested outcome, state the assumption briefly and proceed without asking.\n");
+    p.push_str("- Resolve ambiguity with read-only inspection first; never ask what the repository itself can answer.\n");
+    p.push_str("- Opening a conversation with a request to build something: do not build from the first prompt alone. Clarify step by step — one short question at a time in plain chat, each offering two or three concrete options plus your recommended default so the user can reply in a word. Ask only what materially changes what you will build; usually two or three questions total, and skip the interview entirely for small, precise, or self-contained requests. Once the answers arrive, build immediately without re-interviewing.\n");
+    p.push_str("- On later turns: ask at most ONE short clarifying question, only when the answer materially changes the goal, scope, behavior, environment, or definition of done.\n");
+    p.push_str("- If you ask, keep doing safe read-only investigation while waiting but do not make assumption-dependent changes until the user answers. If the choice is safely reversible and does not change the requested outcome, state the assumption briefly and proceed without asking.\n");
     p.push_str("- When a command or build fails, fix it yourself. Never hand the user a raw error message or ask them to run terminal or git commands.\n");
     p.push('\n');
 
@@ -495,6 +497,32 @@ mod tests {
         assert!(git < p.find("# Working with the user").unwrap());
         assert!(git < p.find("# Judgment").unwrap());
         assert!(git < p.find("# Behavior").unwrap());
+    }
+
+    #[test]
+    fn opening_build_request_clarifies_step_by_step_before_building() {
+        let dir = tempfile::tempdir().unwrap();
+        let sb = Sandbox::new(dir.path()).unwrap();
+        let p = system_prompt(&sb, false, false, None, None);
+
+        // Spec folded into ordinary conversation: interview first, then build.
+        assert!(p.contains("Opening a conversation with a request to build something"));
+        assert!(p.contains("Clarify step by step"));
+        assert!(p.contains("one short question at a time"));
+        assert!(p.contains("recommended default so the user can reply in a word"));
+        assert!(p.contains(
+            "skip the interview entirely for small, precise, or self-contained requests"
+        ));
+        assert!(p.contains("build immediately without re-interviewing"));
+        // The single-question rule is explicitly scoped to later turns so it
+        // cannot be read as overriding the opening interview.
+        let opening = p
+            .find("Opening a conversation with a request to build something")
+            .unwrap();
+        let later = p
+            .find("On later turns: ask at most ONE short clarifying question")
+            .unwrap();
+        assert!(opening < later);
     }
 
     #[test]

@@ -22,8 +22,8 @@ fn specialist_config() -> CloudTrajectoryConfig {
     CloudTrajectoryConfig {
         metadata: json!({
             "specialistContext": {
-                "kind": "spec",
-                "workflow": "spec:spec"
+                "kind": "scout",
+                "workflow": "scout:scout"
             }
         }),
         ..config()
@@ -689,7 +689,7 @@ async fn successful_cloud_list_suppresses_deleted_cache_but_keeps_local_work() {
 async fn cloud_list_recovers_a_missing_specialist_binding_from_owner_scoped_cache() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("outbox.sqlite3");
-    let outbox = TrajectoryOutbox::new(path.clone(), "owner", "spec-session");
+    let outbox = TrajectoryOutbox::new(path.clone(), "owner", "scout-session");
     outbox
         .initialize(&specialist_config(), &Snapshot::new(), 7)
         .await
@@ -699,8 +699,8 @@ async fn cloud_list_recovers_a_missing_specialist_binding_from_owner_scoped_cach
         path,
         "owner".into(),
         vec![json!({
-            "id": "spec-session",
-            "title": "Sharing spec",
+            "id": "scout-session",
+            "title": "Sharing scout map",
             "provider": "local",
             "rev": 7,
             "createdAt": 1,
@@ -713,15 +713,15 @@ async fn cloud_list_recovers_a_missing_specialist_binding_from_owner_scoped_cach
 
     assert_eq!(
         rows[0]["specialistContext"],
-        json!({"kind": "spec", "workflow": "spec:spec"})
+        json!({"kind": "scout", "workflow": "scout:scout"})
     );
 }
 
 #[tokio::test]
-async fn cloud_list_recovers_legacy_spec_binding_from_typed_skill_reference() {
+async fn cloud_list_recovers_a_legacy_specialist_binding_from_typed_skill_reference() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("outbox.sqlite3");
-    let outbox = TrajectoryOutbox::new(path.clone(), "owner", "legacy-spec-session");
+    let outbox = TrajectoryOutbox::new(path.clone(), "owner", "legacy-scout-session");
     outbox
         .initialize(&config(), &Snapshot::new(), 7)
         .await
@@ -732,7 +732,7 @@ async fn cloud_list_recovers_legacy_spec_binding_from_typed_skill_reference() {
             "role": "user",
             "blocks": [{
                 "type": "skill_reference",
-                "name": "spec:spec"
+                "name": "scout:scout"
             }]
         }]
     });
@@ -748,8 +748,8 @@ async fn cloud_list_recovers_legacy_spec_binding_from_typed_skill_reference() {
         path,
         "owner".into(),
         vec![json!({
-            "id": "legacy-spec-session",
-            "title": "Sharing spec",
+            "id": "legacy-scout-session",
+            "title": "Sharing scout map",
             "provider": "local",
             "rev": 7,
             "createdAt": 1,
@@ -762,7 +762,7 @@ async fn cloud_list_recovers_legacy_spec_binding_from_typed_skill_reference() {
 
     assert_eq!(
         rows[0]["specialistContext"],
-        json!({"kind": "spec", "workflow": "spec:spec"})
+        json!({"kind": "scout", "workflow": "scout:scout"})
     );
 }
 

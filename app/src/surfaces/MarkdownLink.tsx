@@ -95,7 +95,7 @@ function LocalFileMenu({
       role="menu"
       aria-label="File actions"
       style={{ left: position.x, top: position.y }}
-      className="popover-surface fixed z-[100] w-56 rounded-xl bg-bg-elevated p-1.5 shadow-lifted ring-1 ring-border-subtle"
+      className="popover-surface fixed z-critical w-56 rounded-xl bg-bg-elevated p-1.5 shadow-lifted ring-1 ring-border-subtle"
     >
       <MenuItem
         icon={ExternalLink}

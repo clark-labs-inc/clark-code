@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState, type CSSProperties } from "react";
 import { AnimatePresence, useReducedMotion } from "motion/react";
 import * as m from "motion/react-m";
 import {
@@ -32,6 +32,11 @@ function kindVerb(call: ToolCall): string {
   if (call.kind === "execute" && call.status === "in_progress") return "Running";
   return KIND_VERB[call.kind];
 }
+
+/** Target-less titles that are prose ("Entered plan mode", a thinking summary)
+ *  keep the sentence voice; every other kind's title is a path, URL, pattern,
+ *  or command and reads in the same compact mono as its sibling rows. */
+const PROSE_TITLE_KINDS: ReadonlySet<ToolKind> = new Set<ToolKind>(["think", "other"]);
 
 function blocksText(blocks: ContentBlock[]): string {
   return contentText(blocks);
@@ -83,6 +88,14 @@ export function DiffBody({ text }: { text: string }) {
   }
 
   const lang = langFromPath(parsed.path);
+  // Gutter width follows the widest line number in THIS diff (GitHub-style), so
+  // files with ≥1000 lines get a wider column instead of digits overflowing the
+  // fixed 3ch track and colliding across the old/new gutters.
+  const gutterCh = parsed.lines.reduce((w, l) => {
+    const n = l.kind === "del" ? l.oldNo : l.kind === "add" ? l.newNo : l.kind === "context" ? (l.oldNo ?? l.newNo ?? 0) : 0;
+    return Math.max(w, String(n).length);
+  }, 3);
+
   // Collect the in-hunk code lines (prefixes stripped) as one block to highlight
   // in the file's language, so a diff of a Rust file shows colored Rust — not
   // just flat red/green text. lineCodeIdx maps each parsed line → code-block row.
@@ -143,7 +156,10 @@ export function DiffBody({ text }: { text: string }) {
   }, [text, lang]);
 
   return (
-    <div className="diff-body font-mono text-xs leading-[1.55]">
+    <div
+      className="diff-body font-mono text-xs leading-[1.55]"
+      style={{ "--diff-gutter-ch": gutterCh } as CSSProperties}
+    >
       <div className="flex items-center gap-2 border-b border-border-subtle px-3 py-1.5">
         <FileText className="size-3.5 shrink-0 text-ink-faint" />
         <span className="min-w-0 flex-1 truncate text-ink-secondary">{parsed.path}</span>
@@ -342,7 +358,7 @@ function WorkLineImpl({ call, active }: { call: ToolCall; active: boolean }) {
           <span
             className={cn(
               "min-w-0 flex-1 truncate",
-              call.kind === "execute" ? "font-mono text-xs" : "",
+              !PROSE_TITLE_KINDS.has(call.kind) && "font-mono text-xs",
             )}
           >
             {call.kind === "execute" && <span className="text-ink-faint">{verb} </span>}

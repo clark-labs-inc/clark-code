@@ -28,9 +28,9 @@ use serde_json::Value;
 use super::partial_json::partial_json_string_field;
 
 /// The payload field to project, per eligible tool. `edit_file` streams its
-/// replacement text; `old_string` is search input, not the document. The Spec
-/// skill mandates exactly these two tools; `apply_patch` payloads are code
-/// patches with no single target to gate on, so they do not stream.
+/// replacement text; `old_string` is search input, not the document.
+/// `apply_patch` payloads are code patches with no single target to gate on,
+/// so they do not stream.
 fn streamed_field(tool_name: &str) -> Option<&'static str> {
     match tool_name {
         "write_file" => Some("content"),

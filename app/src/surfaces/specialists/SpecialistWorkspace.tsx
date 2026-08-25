@@ -58,7 +58,6 @@ import { SecurityCanvas } from "./SecurityCanvas";
 import { ScientistCanvas } from "./ScientistCanvas";
 import { CanvasStatus } from "./SpecialistPrimitives";
 import { SpecialistAccessGate } from "./SpecialistAccessGate";
-import { SpecWorkspace } from "./SpecWorkspace";
 import { ScoutOrganizationDialog } from "./ScoutOrganizationDialog";
 import { ScoutScopeDialog } from "./ScoutScopeDialog";
 import { ContextualConversation } from "./ContextualConversation";
@@ -185,12 +184,6 @@ export function SpecialistWorkspace({
   }, [setContext]);
 
   const load = useCallback(async () => {
-    if (active === "spec") {
-      setServerAccess("ready");
-      setData(EMPTY_DATA);
-      setError(null);
-      return;
-    }
     if (projected !== "ready" || !credentials) {
       clearSensitiveData();
       setServerAccess(projected === "action_needed" ? "action_needed" : "free");
@@ -473,8 +466,6 @@ export function SpecialistWorkspace({
       setCreatingOrganization(false);
     }
   }, [credentials, organizationDomain, organizationName, selectOrganization]);
-
-  if (active === "spec") return <SpecWorkspace />;
 
   const canvas = (
     <div className="min-h-0 flex-1 overflow-y-auto bg-bg-secondary/30">

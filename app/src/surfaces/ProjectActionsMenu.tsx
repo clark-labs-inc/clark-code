@@ -56,7 +56,7 @@ export function ProjectHeader({
   return (
     <div
       title={group.title}
-      className="group mb-0.5 mt-2 flex h-7 items-center gap-2 rounded-lg px-2 text-sm font-medium text-ink-secondary first:mt-0 hover:bg-bg-hover"
+      className="group mb-0.5 mt-2 flex h-7 items-center gap-2 rounded-lg px-2 text-base font-medium text-ink-secondary first:mt-0 hover:bg-bg-hover"
     >
       {reorderable && (
         <span
@@ -74,7 +74,7 @@ export function ProjectHeader({
         <span className="min-w-0 truncate">{group.label}</span>
         {group.repositoryLabel && (
           <span
-            className="shrink-0 text-xs font-normal text-ink-faint"
+            className="shrink-0 text-sm font-normal text-ink-faint"
             aria-label={`Repository ${group.repositoryLabel}`}
           >
             {group.repositoryLabel}
@@ -139,7 +139,7 @@ function MenuItem({
       disabled={disabled}
       autoFocus={autoFocus}
       onClick={onClick}
-      className={`flex h-8 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-sm transition disabled:cursor-not-allowed disabled:opacity-40 ${
+      className={`flex h-8 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-base transition disabled:cursor-not-allowed disabled:opacity-40 ${
         danger
           ? "text-ink-secondary hover:bg-danger/10 hover:text-danger"
           : "text-ink-secondary hover:bg-bg-hover hover:text-ink"
@@ -312,7 +312,7 @@ export function ProjectActionsMenu({
             >
               <ChevronLeft className="size-4" />
             </button>
-            <span className="text-xs font-medium text-ink-muted">Move {group.label}</span>
+            <span className="text-sm font-medium text-ink-muted">Move {group.label}</span>
           </div>
           {moveDestinations.map((destination) => (
             <button
@@ -325,13 +325,13 @@ export function ProjectActionsMenu({
                 onMove(destination.index);
                 onClose();
               }}
-              className="flex min-h-8 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-sm text-ink-secondary transition hover:bg-bg-hover hover:text-ink disabled:cursor-default disabled:bg-bg-sunken disabled:text-ink-muted"
+              className="flex min-h-8 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-base text-ink-secondary transition hover:bg-bg-hover hover:text-ink disabled:cursor-default disabled:bg-bg-sunken disabled:text-ink-muted"
             >
               <span className="grid size-4 shrink-0 place-items-center">
                 {destination.current && <Check className="size-3.5" />}
               </span>
               <span>{destination.label}</span>
-              {destination.current && <span className="ml-auto text-xs text-ink-faint">Current</span>}
+              {destination.current && <span className="ml-auto text-sm text-ink-faint">Current</span>}
             </button>
           ))}
         </div>
@@ -347,7 +347,7 @@ export function ProjectActionsMenu({
             onClose();
           }}
         >
-          <label className="mb-2 block text-xs font-medium text-ink-muted" htmlFor="project-alias">
+          <label className="mb-2 block text-sm font-medium text-ink-muted" htmlFor="project-alias">
             Project name
           </label>
           <input
@@ -355,13 +355,13 @@ export function ProjectActionsMenu({
             autoFocus
             value={name}
             onChange={(event) => setName(event.target.value)}
-            className="composer-input h-8 w-full rounded-lg bg-bg-sunken px-2.5 text-sm text-ink outline-none ring-1 ring-border-subtle focus:ring-border-strong"
+            className="composer-input h-8 w-full rounded-lg bg-bg-sunken px-2.5 text-base text-ink outline-none ring-1 ring-border-subtle focus:ring-border-strong"
           />
           <div className="mt-2 flex justify-end gap-1.5">
-            <button type="button" onClick={() => setMode("menu")} className="rounded-lg px-2.5 py-1.5 text-xs text-ink-muted hover:bg-bg-hover hover:text-ink">
+            <button type="button" onClick={() => setMode("menu")} className="rounded-lg px-2.5 py-1.5 text-sm text-ink-muted hover:bg-bg-hover hover:text-ink">
               Cancel
             </button>
-            <button type="submit" disabled={!name.trim()} className="rounded-lg bg-accent px-2.5 py-1.5 text-xs font-medium text-on-accent disabled:opacity-40">
+            <button type="submit" disabled={!name.trim()} className="rounded-lg bg-accent px-2.5 py-1.5 text-sm font-medium text-on-accent disabled:opacity-40">
               Rename
             </button>
           </div>
@@ -376,10 +376,10 @@ export function ProjectActionsMenu({
             void submitWorktree();
           }}
         >
-          <div className="mb-2 text-xs text-ink-muted">
+          <div className="mb-2 text-sm text-ink-muted">
             Fetches the latest <span className="font-medium text-ink-secondary">origin/main</span> commit into a sibling checkout without changing this checkout.
           </div>
-          <label className="mb-1.5 block text-xs font-medium text-ink-muted" htmlFor="worktree-name">
+          <label className="mb-1.5 block text-sm font-medium text-ink-muted" htmlFor="worktree-name">
             Worktree name
           </label>
           <input
@@ -391,14 +391,14 @@ export function ProjectActionsMenu({
             autoCorrect="off"
             autoCapitalize="off"
             spellCheck={false}
-            className="composer-input h-8 w-full rounded-lg bg-bg-sunken px-2.5 text-sm text-ink outline-none ring-1 ring-border-subtle focus:ring-border-strong"
+            className="composer-input h-8 w-full rounded-lg bg-bg-sunken px-2.5 text-base text-ink outline-none ring-1 ring-border-subtle focus:ring-border-strong"
           />
-          {error && <p className="mt-2 text-xs leading-4 text-danger">{error}</p>}
+          {error && <p className="mt-2 text-sm leading-4 text-danger">{error}</p>}
           <div className="mt-2 flex justify-end gap-1.5">
-            <button type="button" disabled={creating} onClick={() => setMode("menu")} className="rounded-lg px-2.5 py-1.5 text-xs text-ink-muted hover:bg-bg-hover hover:text-ink disabled:opacity-40">
+            <button type="button" disabled={creating} onClick={() => setMode("menu")} className="rounded-lg px-2.5 py-1.5 text-sm text-ink-muted hover:bg-bg-hover hover:text-ink disabled:opacity-40">
               Cancel
             </button>
-            <button type="submit" disabled={!worktreeName.trim() || creating} className="flex items-center gap-1.5 rounded-lg bg-accent px-2.5 py-1.5 text-xs font-medium text-on-accent disabled:opacity-40">
+            <button type="submit" disabled={!worktreeName.trim() || creating} className="flex items-center gap-1.5 rounded-lg bg-accent px-2.5 py-1.5 text-sm font-medium text-on-accent disabled:opacity-40">
               {creating && <Loader2 className="size-3 animate-spin" />}
               Create
             </button>
@@ -422,13 +422,13 @@ export function ProjectActionsMenu({
 
       {mode === "remove" && (
         <div className="p-1.5">
-          <p className="text-xs leading-4 text-ink-muted">
+          <p className="text-sm leading-4 text-ink-muted">
             Remove <span className="font-medium text-ink">{group.label}</span> from Projects?
             {group.convos.length > 0 && ` Its ${group.convos.length} active chat${group.convos.length === 1 ? "" : "s"} will be archived.`}
           </p>
-          <p className="mt-1 text-xs leading-4 text-ink-faint">Files on disk won't be changed.</p>
+          <p className="mt-1 text-sm leading-4 text-ink-faint">Files on disk won't be changed.</p>
           <div className="mt-2 flex justify-end gap-1.5">
-            <button type="button" onClick={() => setMode("menu")} className="rounded-lg px-2.5 py-1.5 text-xs text-ink-muted hover:bg-bg-hover hover:text-ink">
+            <button type="button" onClick={() => setMode("menu")} className="rounded-lg px-2.5 py-1.5 text-sm text-ink-muted hover:bg-bg-hover hover:text-ink">
               Cancel
             </button>
             <button
@@ -437,7 +437,7 @@ export function ProjectActionsMenu({
                 onRemove();
                 onClose();
               }}
-              className="rounded-lg bg-danger/10 px-2.5 py-1.5 text-xs font-medium text-danger hover:bg-danger/20"
+              className="rounded-lg bg-danger/10 px-2.5 py-1.5 text-sm font-medium text-danger hover:bg-danger/20"
             >
               Remove
             </button>

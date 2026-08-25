@@ -9,7 +9,7 @@ import { authConnection } from "../lib/auth";
 import { productModule } from "../product/productModule";
 import { useProductAccess } from "../lib/useProductAccess";
 const ACTION =
-  "flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-sm text-ink-secondary transition duration-base ease-agent hover:bg-accent-subtle hover:text-ink";
+  "flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-base text-ink-secondary transition duration-base ease-agent hover:bg-accent-subtle hover:text-ink";
 
 /** Account trigger → product-owned account popover. Product access state and
  * management destinations are supplied by the active product module.
@@ -60,11 +60,11 @@ export function ProfileMenu({ variant = "topbar" }: { variant?: "topbar" | "rail
           {user.avatar ? (
             <img src={user.avatar} alt="" className="size-5 shrink-0 rounded-full" />
           ) : (
-            <span className="grid aspect-square min-h-5 min-w-5 shrink-0 place-items-center rounded-full bg-bg-tertiary text-xs font-medium text-ink-secondary">
+            <span className="grid aspect-square min-h-5 min-w-5 shrink-0 place-items-center rounded-full bg-bg-tertiary text-sm font-medium text-ink-secondary">
               {user.name.charAt(0).toUpperCase()}
             </span>
           )}
-          <span className="min-w-0 flex-1 truncate text-sm font-medium leading-5 text-ink">{user.name}</span>
+          <span className="min-w-0 flex-1 truncate text-base font-medium leading-5 text-ink">{user.name}</span>
           <ChevronsUpDown className="size-3.5 shrink-0 text-ink-faint" />
         </button>
       ) : (
@@ -77,7 +77,7 @@ export function ProfileMenu({ variant = "topbar" }: { variant?: "topbar" | "rail
           {user.avatar ? (
             <img src={user.avatar} alt="" className="size-7 rounded-full" />
           ) : (
-            <span className="grid aspect-square min-h-7 min-w-7 shrink-0 place-items-center rounded-full bg-bg-tertiary text-xs font-semibold text-ink-secondary transition hover:bg-bg-hover">
+            <span className="grid aspect-square min-h-7 min-w-7 shrink-0 place-items-center rounded-full bg-bg-tertiary text-sm font-semibold text-ink-secondary transition hover:bg-bg-hover">
               {user.name.charAt(0).toUpperCase()}
             </span>
           )}
@@ -97,8 +97,8 @@ export function ProfileMenu({ variant = "topbar" }: { variant?: "topbar" | "rail
           )}
         >
             <div className="px-3 py-2.5">
-              <div className="truncate text-sm font-medium text-ink">{user.name}</div>
-              {user.email && <div className="truncate text-xs text-ink-muted">{user.email}</div>}
+              <div className="truncate text-base font-medium text-ink">{user.name}</div>
+              {user.email && <div className="truncate text-sm text-ink-muted">{user.email}</div>}
             </div>
 
             {(accountNeedsReconnect || accountOffline) && (
@@ -106,10 +106,10 @@ export function ProfileMenu({ variant = "topbar" }: { variant?: "topbar" | "rail
                 role="alert"
                 className="mx-2 rounded-xl border border-danger/20 bg-danger/10 px-3 py-2.5"
               >
-                <div className="text-sm font-medium text-danger">
+                <div className="text-base font-medium text-danger">
                   {accountNeedsReconnect ? "Account needs reconnecting" : "Account service unavailable"}
                 </div>
-                <div className="mt-0.5 text-xs leading-4 text-ink-secondary">
+                <div className="mt-0.5 text-sm leading-4 text-ink-secondary">
                   {accountNeedsReconnect
                     ? "Local work is safe. Reconnect this account to restore cloud features."
                     : "Local work remains available while Clark reconnects."}
@@ -118,7 +118,7 @@ export function ProfileMenu({ variant = "topbar" }: { variant?: "topbar" | "rail
                   <button
                     type="button"
                     onClick={() => void reconnect()}
-                    className="mt-2 text-xs font-semibold text-accent hover:underline"
+                    className="mt-2 text-sm font-semibold text-accent hover:underline"
                   >
                     Reconnect account
                   </button>
@@ -146,8 +146,8 @@ export function ProfileMenu({ variant = "topbar" }: { variant?: "topbar" | "rail
                 <span className="flex items-center gap-2.5">
                   <Brain className="size-4 shrink-0 text-ink-muted" />
                   <span className="leading-tight">
-                    <span className="block text-sm text-ink-secondary">Enable memories</span>
-                    <span className="block text-xs text-ink-faint">
+                    <span className="block text-base text-ink-secondary">Enable memories</span>
+                    <span className="block text-sm text-ink-faint">
                       Remember facts across chats — per project and globally
                     </span>
                   </span>
@@ -193,7 +193,7 @@ function Toggle({ on }: { on: boolean }) {
     >
       <span
         className={cn(
-          "absolute left-0.5 top-0.5 size-[14px] rounded-full bg-white shadow-sm transition-transform",
+          "absolute left-0.5 top-0.5 size-[14px] rounded-full bg-knob shadow-sm transition-transform",
           on ? "translate-x-[13px]" : "translate-x-0",
         )}
       />

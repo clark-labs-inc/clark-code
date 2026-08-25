@@ -75,7 +75,7 @@ export function Toggle({
       >
         <span
           className={cn(
-            "absolute left-0.5 top-0.5 size-[14px] rounded-full bg-white shadow-sm transition-transform",
+            "absolute left-0.5 top-0.5 size-[14px] rounded-full bg-knob shadow-sm transition-transform",
             on ? "translate-x-[13px]" : "translate-x-0",
           )}
         />

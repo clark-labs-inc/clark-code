@@ -25,9 +25,8 @@ describe("composer execution location", () => {
 });
 
 describe("composer context authority", () => {
-  it("keeps Scout enterprise-scoped and gives Spec an execution target", () => {
+  it("keeps Scout enterprise-scoped and ordinary sessions on the checkout context", () => {
     expect(composerContextKind("scout")).toBe("enterprise");
-    expect(composerContextKind("spec")).toBe("spec");
     expect(composerContextKind(null)).toBe("checkout");
   });
 

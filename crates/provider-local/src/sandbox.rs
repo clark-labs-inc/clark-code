@@ -10,6 +10,17 @@ use std::path::{Component, Path, PathBuf};
 
 mod access;
 
+/// Whether this (mode, preset) pair runs tools on the bare host — the same
+/// condition under which the provider's executor skips the sandbox. Kept next
+/// to `Sandbox` so the trust flag and its trigger stay in one place.
+pub(super) fn preset_runs_on_bare_host(
+    mode: crate::config::LocalSandboxMode,
+    preset: exec_sandbox::SandboxPreset,
+) -> bool {
+    mode == crate::config::LocalSandboxMode::Disabled
+        || preset == exec_sandbox::SandboxPreset::DangerFullAccess
+}
+
 /// A project root resolved on the same machine as this provider process. A
 /// durable remote worker runs the provider there, so containment is always
 /// canonical and symlink-aware instead of emulating another filesystem.
@@ -27,6 +38,11 @@ pub struct Sandbox {
     /// Read-only roots explicitly approved by the host. These extend reads
     /// without becoming writable roots.
     read_roots: Vec<PathBuf>,
+    /// Set when this session's executor runs on the bare host (Full Access /
+    /// disabled sandbox): process containment is already lifted, so file-tool
+    /// path walls would be inconsistent friction, not security. Only the
+    /// Clark-internal private-state guard still applies.
+    pub(super) host_trusted: bool,
 }
 
 impl Sandbox {
@@ -47,7 +63,23 @@ impl Sandbox {
             task_scope: None,
             docs: None,
             read_roots: Vec::new(),
+            host_trusted: false,
         })
+    }
+
+    /// Mark this sandbox as running beside an unsandboxed host executor (Full
+    /// Access): file-tool containment stops enforcing project walls so the
+    /// model-facing tools match what shell commands can already do. The
+    /// Clark-internal private-state guard stays active in every mode.
+    pub fn with_host_trust(mut self) -> Self {
+        self.host_trusted = true;
+        self
+    }
+
+    /// Whether containment is lifted because the session's executor is the
+    /// bare host executor (Full Access / disabled sandbox).
+    pub fn host_trusted(&self) -> bool {
+        self.host_trusted
     }
 
     pub fn root(&self) -> &Path {
@@ -440,5 +472,43 @@ mod tests {
             .resolve_for_write(extra.path().join("changed.txt").to_str().unwrap())
             .unwrap_err()
             .contains("writable roots"));
+    }
+
+    #[test]
+    fn full_access_host_trust_lifts_containment_but_keeps_clark_private_guard() {
+        let project = temp_root();
+        let outside = tempfile::tempdir().unwrap();
+        let outside_file = outside.path().join("notes.txt");
+        std::fs::write(&outside_file, "host file").unwrap();
+        let private_dir = project.path().join(".agent/scout/enterprises/e1/private");
+        std::fs::create_dir_all(&private_dir).unwrap();
+
+        let trusted = Sandbox::new(project.path()).unwrap().with_host_trust();
+        assert!(trusted.host_trusted());
+
+        // Reads and writes anywhere on the host now resolve — matching what an
+        // unsandboxed shell executor can already do.
+        assert!(trusted
+            .resolve_existing(outside_file.to_str().unwrap())
+            .is_ok());
+        assert!(trusted
+            .resolve_for_write(outside.path().join("new.txt").to_str().unwrap())
+            .is_ok());
+        assert!(trusted.resolve_for_write("src/new.rs").is_ok());
+
+        // Clark's own signing/identity material stays refused even here.
+        assert!(trusted
+            .resolve_existing(private_dir.join("signing-bootstrap").to_str().unwrap())
+            .is_err());
+
+        // The default sandbox keeps every wall.
+        let contained = Sandbox::new(project.path()).unwrap();
+        assert!(!contained.host_trusted());
+        assert!(contained
+            .resolve_existing(outside_file.to_str().unwrap())
+            .is_err());
+        assert!(contained
+            .resolve_for_write(outside.path().join("new.txt").to_str().unwrap())
+            .is_err());
     }
 }

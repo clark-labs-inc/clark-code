@@ -50,7 +50,7 @@ export function UnavailableConversationPanel({
         </h1>
         <p className="mt-2 text-sm leading-6 text-ink-muted">
           {conversation.kind === "refresh_required"
-            ? "Clark Code stopped the stale copy so it can’t overwrite newer history. Reload the latest version to continue; your recent Spec prompts remain in Prompt history."
+            ? "Clark Code stopped the stale copy so it can’t overwrite newer history. Reload the latest version to continue."
             : "Clark Code couldn’t reopen it. The chat stays selected so you can retry or remove the unavailable entry from your history."}
         </p>
 

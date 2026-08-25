@@ -4,7 +4,12 @@ import { AnimatePresence } from "motion/react";
 import { X, Pencil, Target, Sparkles } from "lucide-react";
 import { useSessionStore } from "../store/sessionStore";
 import type { QueuedMessage, SkillReferenceBlock } from "../store/sessionStore";
-import { effectiveApprovalPolicy, openRemote } from "../store/sessionStore.runtime";
+import {
+  effectiveApprovalPolicy,
+  epochStale,
+  openRemote,
+  sessionEpoch,
+} from "../store/sessionStore.runtime";
 import {
   getBridge,
   type LocalSandboxStatus,
@@ -31,7 +36,7 @@ import {
   type SlashCommand,
 } from "../lib/slashCommands";
 import { listCustomCommands } from "../lib/customCommands";
-import { fuzzyFilter } from "../lib/fuzzy";
+import { fuzzyFilter, fuzzyFilterProjectPaths } from "../lib/fuzzy";
 import { cn } from "../lib/cn";
 import { humanizeError } from "../lib/errors";
 import { inTauri, pickFolder } from "../lib/pickFolder";
@@ -52,7 +57,6 @@ import { useGatedWorkflowGate } from "../lib/useGatedWorkflowGate";
 import { AttachmentChips } from "./ComposerAttachments";
 import { ComposerContextBar } from "./ComposerContextBar";
 import { ComposerAttachmentMenu } from "./ComposerAttachmentMenu";
-import { ComposerVoiceButton } from "./ComposerVoiceButton";
 import { ComposerAutocomplete } from "./ComposerAutocomplete";
 import { ComposerParentFolderDialog } from "./ComposerParentFolderDialog";
 import { ComposerPermissionPill } from "./ComposerPermissionPill";
@@ -75,9 +79,7 @@ import {
   shouldThumbnailPastedText,
   type PendingPaste,
 } from "../lib/attachments";
-import { mergeVoiceTranscriptDraft, type VoiceDraftSession } from "../lib/voiceNarration";
 import {
-  isSpecComposerSession,
   specialistSlashIntent,
   specialistWorkflowAvailable,
   withActiveSpecialistSkill,
@@ -85,9 +87,6 @@ import {
 import { useSpecialistStore } from "../store/specialistStore";
 import { productModule, productName } from "../product/productModule";
 import { composerBrandingCopy } from "./composerBranding";
-import { SpecComposerCodeContext, useSpecComposerCodeContext } from "./SpecComposerCodeContext";
-import { recordSpecPrompt } from "../lib/specPromptHistory";
-import { initialSpecDocument, preparedSpecDocumentPrompt } from "../lib/specDocuments";
 import { approvalPolicyForSpecialist } from "../lib/permissions";
 import { specialistModelSettings } from "../lib/specialistModel";
 import { isQuickChatProject } from "../lib/projectSidebar";
@@ -122,7 +121,6 @@ function ScopedComposer() {
     ?? (activeSpecialist ? specialistStartComposerDraftId(activeSpecialist) : null);
   const draft = useComposerDraftState(draftOwner, draftConversationId);
   const { value } = draft;
-  const draftValueRef = draft.valueRef;
   const setDraftValue = draft.setValue;
   const [caret, setCaret] = useState(0);
   const [projFiles, setProjFiles] = useState<string[]>([]);
@@ -144,7 +142,6 @@ function ScopedComposer() {
   const [pendingPastes, setPendingPastes] = useState<PendingPaste[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const taRef = useRef<HTMLTextAreaElement>(null);
-  const voiceDraftSessionRef = useRef<VoiceDraftSession | null>(null);
   const bridge = useSessionStore((s) => s.bridge);
   const activeProvider = useSessionStore((s) => s.activeProvider);
   const approvalPolicy = useSessionStore((s) => approvalPolicyForSpecialist(
@@ -219,7 +216,6 @@ function ScopedComposer() {
   const quickChatSession = Boolean(
     session && isQuickChatProject(activeProjectRoot ?? undefined, session.id),
   );
-  const specSession = isSpecComposerSession(activeSpecialist);
   const usesConversationWorkspace = Boolean(
     activeSpecialist
     && productModule().specialistWorkspace?.isConversationBound(activeSpecialist),
@@ -240,7 +236,7 @@ function ScopedComposer() {
     error: skillCatalogError,
     loading: skillsLoading,
     reload: reloadSkills,
-  } = useSkillCatalog(bridge, cwd, remote, localTarget || specSession);
+  } = useSkillCatalog(bridge, cwd, remote, localTarget);
   const busy = useSessionStore((s) =>
     Object.values(s.snapshot.runs).some((r) => r.status === "running" || r.status === "queued"),
   );
@@ -327,21 +323,8 @@ function ScopedComposer() {
   }, [prefill, setDraftValue, setPrefill, skillCatalog]);
 
   const trigger = useMemo(() => detectComposerTrigger(value, caret), [value, caret]);
-  const specCodeContext = useSpecComposerCodeContext({
-    enabled: specSession,
-    draftKey: draftConversationId,
-    trigger,
-    value,
-    caret,
-    textareaRef: taRef,
-    setValue: setDraftValue,
-    setCaret,
-  });
-  const hasContent = value.trim().length > 0
-    || attachments.length > 0
-    || pendingPastes.length > 0
-    || selectedSkills.length > 0
-    || specCodeContext.references.length > 0;
+  const hasContent = value.trim().length > 0 || attachments.length > 0
+    || pendingPastes.length > 0 || selectedSkills.length > 0;
   const submission = composerSubmissionState({
     hasContent,
     hasSession: !!session,
@@ -367,7 +350,7 @@ function ScopedComposer() {
   const sandboxBlocked = sandboxBlocksSubmission(sandboxCheckRequired, sandboxStatus);
   const canSend = submission.canSubmit && !sandboxBlocked && !submitting;
 
-  const mentionProjectRoot = specSession ? specCodeContext.repositoryRoot : cwd;
+  const mentionProjectRoot = cwd;
 
   useEffect(() => setProjFiles([]), [mentionProjectRoot, remote?.id]);
   useEffect(() => setParentDirectories([]), [cwd, remote?.id]);
@@ -418,10 +401,9 @@ function ScopedComposer() {
         ? []
         : parentDirectorySuggestions(trigger.query, parentDirectories);
       if (trigger.query.startsWith("..")) return parentSuggestions;
-      if (specSession) return specCodeContext.suggestions(trigger.query, projFiles);
       return [
         ...parentSuggestions,
-        ...specCodeContext.suggestions(trigger.query, projFiles),
+        ...fuzzyFilterProjectPaths(projFiles, trigger.query, 8),
       ].slice(0, 8);
     }
     if (trigger.type === "$") {
@@ -451,8 +433,6 @@ function ScopedComposer() {
     activeProvider,
     customCommands,
     skillCatalog,
-    specCodeContext,
-    specSession,
     specialistSession,
   ]);
 
@@ -495,7 +475,6 @@ function ScopedComposer() {
 
   const accept = (s: ComposerSuggestion) => {
     if (!trigger) return;
-    if (specCodeContext.acceptSuggestion(s)) return;
     if (s.kind === "parent_directory_menu") {
       const before = value.slice(0, trigger.start);
       const after = value.slice(caret);
@@ -601,6 +580,8 @@ function ScopedComposer() {
 
   const submit = async ({ workflowAccessApproved = false } = {}) => {
     if (!canSend) return;
+    let operationEpoch = sessionEpoch;
+    const operationStale = () => epochStale(operationEpoch);
     const expandedPastes = expandPendingPastes(value, pendingPastes);
     const specialistIntent = specialistSlashIntent(expandedPastes);
     if (specialistIntent) {
@@ -616,6 +597,7 @@ function ScopedComposer() {
       } catch {
         flashNotice("The specialist request moved, but its previous cloud draft still needs to sync.");
       }
+      if (operationStale()) return;
       if (useSpecialistStore.getState().active !== specialistIntent.kind) {
         useSessionStore.getState().endSession();
       }
@@ -623,7 +605,6 @@ function ScopedComposer() {
       useSpecialistStore.getState().setTab(specialistIntent.tab);
       setPendingPastes([]);
       setSelectedSkills([]);
-      specCodeContext.reset();
       return;
     }
     const t = expandPromptSlashCommand(expandedPastes);
@@ -635,7 +616,12 @@ function ScopedComposer() {
       return;
     }
     if (submission.shouldPickProjectFolder) {
-      await pickProjectFolder();
+      const pickedProject = await pickProjectFolder();
+      if (!pickedProject) return;
+      // Picking the project intentionally advances the session epoch. The
+      // picker action already rejects a result if navigation advanced it; the
+      // selected project now becomes this same composer's new operation scope.
+      operationEpoch = sessionEpoch;
       if (useSessionStore.getState().startBlockedReason()) return;
       const current = useSessionStore.getState();
       const selectedCwd = current.activeProjectRoot ?? current.localSettings.cwd;
@@ -656,6 +642,7 @@ function ScopedComposer() {
           // Fail closed. The inline card performs its own query and renders the
           // actionable setup or repair error after the selected cwd propagates.
         }
+        if (operationStale()) return;
         setSandboxObservation({ cwd: selectedCwd, status: selectedStatus });
         if (sandboxBlocksSubmission(true, selectedStatus)) return;
       }
@@ -711,7 +698,6 @@ function ScopedComposer() {
       setPendingPastes([]);
       setEditTimelineIndex(null);
       setSelectedSkills([]);
-      specCodeContext.reset();
       await askSideQuestion(sideQuestion);
       return;
     }
@@ -732,21 +718,7 @@ function ScopedComposer() {
     }));
     const specialist = useSpecialistStore.getState();
     const workflow = specialist.active ? specialist.contexts[specialist.active]?.workflow : undefined;
-    let availableSkills = skillCatalog?.skills ?? [];
-    if (
-      specialist.active === "spec"
-      && !availableSkills.some((skill) => skill.enabled && skill.invocationName === "spec:spec")
-      && bridge?.reloadSkills
-    ) {
-      try {
-        const refreshed = await bridge.reloadSkills(cwd, remote);
-        setSkillCatalog(refreshed);
-        availableSkills = refreshed.skills;
-      } catch (error) {
-        flashNotice(`Could not load the Spec workflow: ${humanizeError(String(error))}`);
-        return;
-      }
-    }
+    const availableSkills = skillCatalog?.skills ?? [];
     const skillReferences = withActiveSpecialistSkill(
       selectedSkillReferences, availableSkills, specialist.active, workflow,
     );
@@ -767,32 +739,31 @@ function ScopedComposer() {
       try {
         await bridge.addReadRoots(session.id, composerReadRoots);
       } catch (error) {
+        if (operationStale()) return;
         flashNotice(`Could not attach that parent folder: ${humanizeError(String(error))}`);
         return;
       }
+      if (operationStale()) return;
     }
     const submittedDraftText = value;
     const submittedPastes = pendingPastes;
     const submittedSkills = selectedSkills;
     const submittedParentReferences = parentReferences;
-    const submittedSpecReferences = specCodeContext.references;
     const acceptCurrentDraft = () => {
       if (!draft.acceptSubmitted(submittedDraftText)) return false;
       setPendingPastes([]);
       setEditTimelineIndex(null);
       setSelectedSkills([]);
       setParentReferences([]);
-      specCodeContext.reset();
       return true;
     };
     const restoreCurrentDraft = () => {
-      setPrefill(null);
+      if (!operationStale()) setPrefill(null);
       setDraftValue(submittedDraftText);
       setPendingPastes(submittedPastes);
       setEditTimelineIndex(editIndex);
       setSelectedSkills(submittedSkills);
       setParentReferences(submittedParentReferences);
-      specCodeContext.replaceReferences(submittedSpecReferences);
     };
     const startedNewSession = !session;
     let composerReleased = false;
@@ -845,32 +816,24 @@ function ScopedComposer() {
       composerDraftRef.current = "";
       startDraftSettleResult = await settleAcceptedDraft();
       startDraftSettled = true;
+      if (operationStale()) {
+        saveComposerDraft(draftOwner, draftConversationId, submittedDraftText);
+        return;
+      }
       await start({ submittedDraft: t, readRoots: composerReadRoots });
+      if (sessionEpoch !== operationEpoch + 1) {
+        saveComposerDraft(draftOwner, draftConversationId, submittedDraftText);
+        return;
+      }
       const startedSession = useSessionStore.getState().session;
       if (!startedSession) {
         useSessionStore.getState().setComposerPrefill(t);
         return;
       }
     }
-    let prompt = specCodeContext.prompt(t);
-    if (specSession) {
-      const liveConversationId = useSessionStore.getState().session?.id;
-      if (liveConversationId) {
-        try {
-          const prepared = await productModule().specialistWorkspace?.prepareDocument?.(
-            "spec",
-            liveConversationId,
-            initialSpecDocument(t),
-          );
-          if (prepared) prompt = preparedSpecDocumentPrompt(prompt, prepared.filename);
-        } catch (error) {
-          flashNotice(`Could not load the saved spec: ${humanizeError(String(error))}`);
-          if (startedNewSession) useSessionStore.getState().setComposerPrefill(t);
-          return;
-        }
-      }
-    }
+    const prompt = t.trim();
     if (!startedNewSession) {
+      if (operationStale()) return;
       if (!acceptCurrentDraft()) {
         flashNotice("The draft changed before it could be sent. Review it and try again.");
         return;
@@ -885,13 +848,6 @@ function ScopedComposer() {
           if (!startedNewSession) restoreCurrentDraft();
           return;
         }
-        if (specSession) {
-          recordSpecPrompt(
-            draftOwner,
-            useSessionStore.getState().session?.id ?? null,
-            t,
-          );
-        }
         const settling = startDraftSettled
           ? Promise.resolve(startDraftSettleResult)
           : settleAcceptedDraft();
@@ -905,13 +861,6 @@ function ScopedComposer() {
         if (startedNewSession) useSessionStore.getState().setComposerPrefill(t);
         else restoreCurrentDraft();
         return;
-      }
-      if (specSession) {
-        recordSpecPrompt(
-          draftOwner,
-          useSessionStore.getState().session?.id ?? null,
-          t,
-        );
       }
       const settling = startDraftSettled
         ? Promise.resolve(startDraftSettleResult)
@@ -1035,7 +984,7 @@ function ScopedComposer() {
       <div
         className={cn(
           "relative z-10 mx-auto w-full rounded-lg border px-2.5 transition duration-base ease-agent",
-          specSession ? "max-w-[70rem] py-3" : "conversation-column-width py-[1.375rem]",
+          "conversation-column-width py-[1.375rem]",
           specialistSession && "specialist-composer-surface",
           "border-border bg-composer-surface shadow-none",
           dragging
@@ -1083,8 +1032,6 @@ function ScopedComposer() {
             })}
           </div>
         )}
-
-        {specSession && <SpecComposerCodeContext controller={specCodeContext} />}
 
         {goalIntent !== null && (
           <div className="flex items-center gap-1.5 pb-1 pt-0.5 text-xs font-medium text-accent">
@@ -1135,10 +1082,8 @@ function ScopedComposer() {
           autoCapitalize="off"
           spellCheck={false}
           placeholder={
-            specSession
-              ? "Describe what should change, ask a question, or dictate an idea…"
-              : !session
-                ? branding.initialPlaceholder
+            !session
+              ? branding.initialPlaceholder
               : busy
                 ? "Queue a follow-up…"
                 : branding.projectPlaceholder
@@ -1152,55 +1097,26 @@ function ScopedComposer() {
           <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             <ComposerAttachmentMenu
               disabled={connecting || submitting}
-              paperclip={Boolean(specSession)}
               onFiles={(files) => void addFiles(files)}
             />
-            {specSession && (
-              <ComposerVoiceButton
-                disabled={connecting || submitting}
-                onError={(message) => {
-                  voiceDraftSessionRef.current = null;
-                  flashNotice(message);
-                }}
-                onTranscript={(transcript, state) => {
-                  const merged = mergeVoiceTranscriptDraft(
-                    draftValueRef.current,
-                    voiceDraftSessionRef.current,
-                    transcript,
-                  );
-                  voiceDraftSessionRef.current = state === "partial" ? merged.session : null;
-                  setDraftValue(merged.value);
-                  requestAnimationFrame(() => {
-                    const textarea = taRef.current;
-                    textarea?.focus();
-                    textarea?.setSelectionRange(merged.value.length, merged.value.length);
-                  });
-                }}
-              />
-            )}
-            {!specSession && <ComposerPermissionPill />}
-            {!specSession && activeSpecialist !== "scout" && <ComposerCollaborationPill />}
+            <ComposerPermissionPill />
+            {activeSpecialist !== "scout" && <ComposerCollaborationPill />}
           </div>
 
           <div className="flex shrink-0 items-center gap-2.5">
-            {specSession
-              ? <span
-                aria-label="Whole specification scope"
-                className="hidden shrink-0 px-1 text-xs font-medium text-ink-faint sm:inline-flex"
-              >
-                Whole spec
-              </span>
-              : specialistSession
-                ? <span
+            {specialistSession ? (
+              <span
                 title={`${activeSpecialist ?? "Specialist"} specialist`}
                 aria-label={`${activeSpecialist ?? "Specialist"} specialist`}
                 className="hidden shrink-0 rounded-lg bg-accent-soft px-2.5 py-1.5 text-xs font-medium capitalize text-accent sm:inline-flex"
               >
                 {activeSpecialist ?? "Specialist"}
-                </span>
-                : quickChatSession
-                  ? <QuickChatModelLabel />
-                  : <ModelPill />}
+              </span>
+            ) : quickChatSession ? (
+              <QuickChatModelLabel />
+            ) : (
+              <ModelPill />
+            )}
             <ComposerSendAction
               submitting={submitting}
               busy={busy}
@@ -1226,7 +1142,7 @@ function ScopedComposer() {
         <p
           className={cn(
             "mx-auto mt-2 w-full px-1 text-xs",
-            specSession ? "max-w-[70rem]" : "conversation-column-width",
+            "conversation-column-width",
             startError ? "text-danger" : "text-ink-faint",
           )}
         >

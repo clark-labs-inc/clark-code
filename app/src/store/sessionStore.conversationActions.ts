@@ -771,9 +771,8 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
     // A matching session id is only enough to short-circuit when the native
     // session is still attached. Preview/session shells can survive an
     // interrupted open with an empty snapshot; treating those as open makes
-    // every later sidebar click a permanent no-op (most visibly for Spec,
-    // which then looks like a brand-new document). Let the normal restore path
-    // repair an orphaned shell.
+    // every later sidebar click a permanent no-op. Let the normal restore
+    // path repair an orphaned shell.
     if (session?.id === id && liveSessions.has(id)) {
       if (targetMeta?.specialist) {
         useSpecialistStore.getState().open(targetMeta.specialist.kind, targetMeta.specialist);
@@ -796,7 +795,7 @@ export function createConversationActions(set: SessionSet, get: SessionGet): Con
     // user's actual text is already persisted under that surface's exact draft
     // key and remains there when they return.
     composerDraftRef.current = "";
-    set({ composerPrefill: null });
+    set({ composerPrefill: null, sideQuestion: null });
     // Leaving the current conversation: clear any swarm panel now. The reattach
     // branch re-syncs from the target's snapshot; a cold open stays cleared
     // until the resumed session streams its own fan-out.

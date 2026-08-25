@@ -59,6 +59,7 @@ beforeEach(() => {
     connecting: false,
     opening: null,
     queued: [],
+    sideQuestion: null,
     conversations: [],
     localSettings: { ...baseSettings },
     chatModels: {},
@@ -141,6 +142,14 @@ describe("per-conversation model", () => {
         specialist: { kind: "security" },
       }],
       composerPrefill: { text: sentinel },
+      sideQuestion: {
+        sessionId: "previous-chat",
+        question: "stale side question",
+        answer: null,
+        error: null,
+        loading: true,
+        token: 1,
+      },
     });
     useSpecialistStore.setState({
       open: (kind, context = {}) => useSpecialistStore.setState((state) => ({
@@ -175,6 +184,7 @@ describe("per-conversation model", () => {
       session: securitySession.id,
     });
     expect(useSessionStore.getState().composerPrefill).toBeNull();
+    expect(useSessionStore.getState().sideQuestion).toBeNull();
     expect(composerDraftRef.current).toBe("");
     expect(loadComposerDraft(owner, securitySession.id)).toBe("");
     expect(loadComposerDraft(owner, null)).toBe(sentinel);

@@ -30,7 +30,7 @@ function UpdateOverlay() {
           animate={{ opacity: 1 }}
           exit={reduce ? REDUCED_EXIT : { opacity: 0 }}
           transition={{ duration: reduce ? DUR.fast : DUR.base, ease: EASE.out }}
-          className="fixed inset-0 z-[100] grid place-items-center bg-bg/80 backdrop-blur-sm"
+          className="fixed inset-0 z-critical grid place-items-center bg-bg/80 backdrop-blur-sm"
         >
           <div
             className="popover-surface flex w-72 flex-col items-center gap-3 rounded-2xl border border-border-subtle bg-bg-elevated p-6 text-center shadow-xl"
@@ -72,7 +72,7 @@ function JustUpdatedToast() {
   return (
     <AnimatePresence initial={false}>
       {version && (
-        <div className="fixed bottom-4 left-1/2 z-[90] -translate-x-1/2">
+        <div className="fixed bottom-4 left-1/2 z-toast -translate-x-1/2">
           <m.div
             key="just-updated"
             {...accessibleMotion(RISE, reduce)}

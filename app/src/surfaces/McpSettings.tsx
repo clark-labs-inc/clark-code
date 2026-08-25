@@ -285,7 +285,7 @@ export function McpSettings() {
       {open && (
         <m.div
           {...accessibleMotion(OVERLAY, reduce)}
-          className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-6"
+          className="fixed inset-0 z-50 grid place-items-center bg-scrim p-6"
           onClick={close}
         >
           <m.div

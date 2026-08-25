@@ -275,7 +275,7 @@ try {
     const catalogKinds = await page.evaluate(
       () => window.__specialistMatrixProbe.catalog.manifests.map((manifest) => manifest.kind),
     );
-    check(JSON.stringify(catalogKinds) === JSON.stringify(["spec", "scout", "security", "rsi"]), "Catalog kinds drifted from the product contract");
+    check(JSON.stringify(catalogKinds) === JSON.stringify(["scout", "security", "rsi"]), "Catalog kinds drifted from the product contract");
     checks.push(`${specialist.kind}_catalog_and_ready_state`);
 
     await verifyCanvas(page, specialist);
@@ -440,8 +440,7 @@ try {
     product_entry: productEntry,
     source_revision: sourceRevision,
     source_dirty: sourceDirty,
-    catalog_kinds: ["spec", "scout", "security", "rsi"],
-    dedicated_spec_suite: "pnpm --dir harness test:spec-subchat",
+    catalog_kinds: ["scout", "security", "rsi"],
     provider: { kind: "mock", model: null, paid_calls: 0 },
     viewports: { desktop: desktopViewport, mobile: mobileViewport },
     results,

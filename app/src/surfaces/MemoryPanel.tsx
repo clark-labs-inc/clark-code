@@ -12,8 +12,7 @@ const MD =
   "[&_p]:my-1.5 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0 " +
   "[&_ul]:my-1.5 [&_ul]:list-disc [&_ul]:pl-4 [&_ul]:marker:text-ink-faint [&_li]:my-0.5 " +
   "[&_h1]:mb-1 [&_h1]:mt-2 [&_h1]:text-sm [&_h1]:font-semibold [&_h2]:mb-1 [&_h2]:mt-2 [&_h2]:text-sm [&_h2]:font-semibold [&_h3]:mb-0.5 [&_h3]:mt-1.5 [&_h3]:font-semibold " +
-  "[&_a]:text-ink [&_a]:underline [&_a]:decoration-ink-faint [&_strong]:font-semibold [&_strong]:text-ink " +
-  "[&_code]:rounded [&_code]:border [&_code]:border-border-subtle [&_code]:bg-chip [&_code]:px-1 [&_code]:py-px [&_code]:font-mono [&_code]:text-[0.85em]";
+  "[&_a]:text-ink [&_a]:underline [&_a]:decoration-ink-faint [&_strong]:font-semibold [&_strong]:text-ink";
 
 const KIND_TONE: Record<string, string> = {
   user: "border-info/40 text-info",
@@ -134,7 +133,7 @@ function MemoryPopover() {
       </div>
 
       <footer className="border-t border-border-subtle px-3 py-2 text-xs text-ink-faint">
-        The agent curates memory itself with its <code className="rounded bg-chip px-1 py-px font-mono">memory</code> tool.
+        The agent curates memory itself with its <code>memory</code> tool.
       </footer>
     </div>
   );

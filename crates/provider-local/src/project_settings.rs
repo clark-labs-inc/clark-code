@@ -8,7 +8,7 @@
 //! This is intentionally a single flat file, not a directory of fragments —
 //! see `.claude/settings.json` for the convention this mirrors.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
@@ -74,6 +74,26 @@ pub struct SkillsConfig {
     pub disabled: Vec<String>,
 }
 
+/// Split configured [`ProjectSettings::sandbox_write_roots`] entries into
+/// absolute directory roots (kept, order-preserving) and rejected entries
+/// (reported so hosts can warn instead of silently dropping a typo'd path).
+pub fn validated_write_roots(entries: &[String]) -> (Vec<PathBuf>, Vec<String>) {
+    let mut roots = Vec::new();
+    let mut rejected = Vec::new();
+    for entry in entries {
+        let trimmed = entry.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if Path::new(trimmed).is_absolute() {
+            roots.push(PathBuf::from(trimmed));
+        } else {
+            rejected.push(trimmed.to_string());
+        }
+    }
+    (roots, rejected)
+}
+
 #[derive(Clone, Debug, Default, Deserialize)]
 pub struct ProjectSettings {
     #[serde(default)]
@@ -86,6 +106,18 @@ pub struct ProjectSettings {
     pub attribution: Option<AttributionConfig>,
     #[serde(default)]
     pub skills: SkillsConfig,
+    /// Absolute directories outside the project that sandboxed commands may
+    /// write. This exists for shared machine-level build caches reached
+    /// through symlinks inside the checkout (for example Cargo's `target/`
+    /// pointing at a volume-wide cache): the session sandbox refuses any write
+    /// whose resolved target leaves the project/docs/temp roots, so builds
+    /// there fail without this explicit grant. Like every key in this file it
+    /// is trusted project configuration — keep the list as narrow as the
+    /// workflow requires. Relative entries are ignored by
+    /// [`validated_write_roots`]; Plan Mode's read-only preset never receives
+    /// them.
+    #[serde(default)]
+    pub sandbox_write_roots: Vec<String>,
     #[serde(
         default,
         rename = "includeCoAuthoredBy",
@@ -171,6 +203,19 @@ mod tests {
     }
 
     #[test]
+    fn validated_write_roots_keeps_absolute_and_reports_relative_entries() {
+        let absolute = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("shared-cache");
+        let (roots, rejected) = validated_write_roots(&[
+            absolute.to_string_lossy().into_owned(),
+            "relative/escape".to_string(),
+            format!("  {}  ", absolute.to_string_lossy()),
+            "   ".to_string(),
+        ]);
+        assert_eq!(roots, vec![absolute.clone(), absolute]);
+        assert_eq!(rejected, vec!["relative/escape".to_string()]);
+    }
+
+    #[test]
     fn parses_hooks_permissions_check_command_and_attribution() {
         let json = serde_json::json!({
             "hooks": {
@@ -183,6 +228,7 @@ mod tests {
                 "commit": "Co-Authored-By: Custom Agent <agent@example.com>"
             },
             "skills": { "disabled": ["github:yeet"] },
+            "sandbox_write_roots": ["/volumes/shared-cache", "not/absolute"],
             "includeGitInstructions": false
         });
         let settings: ProjectSettings = serde_json::from_value(json).unwrap();
@@ -193,6 +239,9 @@ mod tests {
         assert_eq!(settings.permissions.deny, vec!["rm -rf /"]);
         assert_eq!(settings.check_command.as_deref(), Some("cargo check"));
         assert_eq!(settings.skills.disabled, vec!["github:yeet"]);
+        let (write_roots, rejected_roots) = validated_write_roots(&settings.sandbox_write_roots);
+        assert_eq!(write_roots.len(), 1);
+        assert_eq!(rejected_roots, vec!["not/absolute".to_string()]);
         assert_eq!(
             settings.commit_attribution(),
             "Co-Authored-By: Custom Agent <agent@example.com>"

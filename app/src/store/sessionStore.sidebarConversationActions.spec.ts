@@ -243,6 +243,7 @@ describe("sidebar conversation mutations", () => {
       }],
       composerPrefill: { text: "stale retry" },
       sideQuestion: {
+        sessionId: "opening",
         question: "old question",
         answer: null,
         error: null,

@@ -12,7 +12,10 @@ const productionSources = Object.entries(sourceModules).filter(
 
 describe("GUI typography policy", () => {
   it("keeps absolute font sizes on the shared semantic type ramp", () => {
-    const absoluteArbitrarySize = /\btext-\[[0-9.]+(?:px|rem)\]/g;
+    // Any `text-[…]` utility bypasses --text-* tokens — px, rem, and em alike.
+    // Relative-to-context sizing belongs to shared CSS classes (e.g. the
+    // inline-code chip in index.css), not per-surface utilities.
+    const absoluteArbitrarySize = /\btext-\[[^\]]+\]/g;
     const violations = productionSources.flatMap(([path, source]) => {
       const matches = source.match(absoluteArbitrarySize) ?? [];
       return matches.map((className) => `${path}: ${className}`);

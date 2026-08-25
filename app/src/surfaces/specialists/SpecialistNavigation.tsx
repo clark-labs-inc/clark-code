@@ -1,12 +1,5 @@
 import { useEffect, useState } from "react";
-import {
-  ChevronRight,
-  Loader2,
-  MessageSquare,
-  Network,
-  Plus,
-  Trash2,
-} from "lucide-react";
+import { ChevronRight, Loader2, MessageSquare, Network, Trash2 } from "lucide-react";
 import { useSessionStore } from "../../store/sessionStore";
 import { useSpecialistStore } from "../../store/specialistStore";
 import {
@@ -56,7 +49,7 @@ export function SpecialistConversationRow({
       data-qa={`specialist-conversation-${conversation.specialist?.kind}-${conversation.id}`}
       aria-busy={working || undefined}
       className={cn(
-        "group relative flex h-8 w-full items-center gap-1 rounded-md px-1 text-xs leading-none transition",
+        "group relative flex h-8 w-full items-center gap-1 rounded-md px-1 text-sm leading-none transition",
         selected
           ? "bg-accent-subtle font-medium text-ink"
           : "text-ink-muted hover:bg-bg-hover hover:text-ink",
@@ -138,7 +131,6 @@ export function SpecialistNavigation({ rail = false }: { rail?: boolean }) {
   const activeConversationBusy = useSessionStore((state) => currentActivity(state.snapshot).busy);
   const openConversation = useSessionStore((state) => state.openConversation);
   const deleteConversation = useSessionStore((state) => state.deleteConversation);
-  const setComposerPrefill = useSessionStore((state) => state.setComposerPrefill);
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
   const [navigationOpen, setNavigationOpen] = useState(() => active !== null);
 
@@ -154,14 +146,6 @@ export function SpecialistNavigation({ rail = false }: { rail?: boolean }) {
     setNavigationOpen(true);
     if (active !== kind) endSession();
     open(kind);
-  };
-
-  const newSpec = () => {
-    setConfirmingDeleteId(null);
-    setNavigationOpen(true);
-    endSession();
-    open("spec");
-    setComposerPrefill("");
   };
 
   if (rail) {
@@ -196,7 +180,7 @@ export function SpecialistNavigation({ rail = false }: { rail?: boolean }) {
         onClick={() => setNavigationOpen((open) => !open)}
         aria-controls="specialist-navigation-list"
         aria-expanded={navigationOpen}
-        className="flex h-7 w-full items-center gap-1.5 rounded-md px-2 text-left text-xs font-semibold uppercase leading-none tracking-[0.12em] text-ink-faint transition hover:bg-bg-hover hover:text-ink"
+        className="flex h-7 w-full items-center gap-1.5 rounded-md px-2 text-left text-sm font-semibold uppercase leading-none tracking-[0.12em] text-ink-faint transition hover:bg-bg-hover hover:text-ink"
       >
         <ChevronRight
           className={cn("size-3 shrink-0 transition-transform", navigationOpen && "rotate-90")}
@@ -204,7 +188,7 @@ export function SpecialistNavigation({ rail = false }: { rail?: boolean }) {
         />
         Specialist lenses
         {!navigationOpen && active && (
-          <span className="ml-auto truncate text-xs font-normal normal-case tracking-normal text-ink-muted">
+          <span className="ml-auto truncate text-sm font-normal normal-case tracking-normal text-ink-muted">
             {SPECIALISTS[active].label}
           </span>
         )}
@@ -229,7 +213,7 @@ export function SpecialistNavigation({ rail = false }: { rail?: boolean }) {
                     onClick={() => choose(kind)}
                     aria-current={selected ? "page" : undefined}
                     className={cn(
-                      "flex h-full min-w-0 flex-1 items-center gap-2.5 rounded-md px-2 text-sm font-medium leading-none transition",
+                      "flex h-full min-w-0 flex-1 items-center gap-2.5 rounded-md px-2 text-base font-medium leading-none transition",
                       selected
                         ? "text-ink"
                         : "text-ink-secondary hover:bg-bg-hover hover:text-ink",
@@ -238,18 +222,6 @@ export function SpecialistNavigation({ rail = false }: { rail?: boolean }) {
                     <Icon className={cn("size-[18px] shrink-0", selected && "text-accent")} />
                     <span className="truncate">{SPECIALISTS[kind].label}</span>
                   </button>
-                  {selected && kind === "spec" && (
-                    <button
-                      type="button"
-                      data-qa="specialist-new-spec"
-                      onClick={newSpec}
-                      aria-label="New spec"
-                      title="New spec"
-                      className="mr-1 grid size-7 shrink-0 place-items-center rounded-md text-ink-faint transition hover:bg-accent-subtle hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-focus"
-                    >
-                      <Plus className="size-4" />
-                    </button>
-                  )}
                 </div>
                 {expanded === kind && specialistConversations.length > 0 && (
                   <div className="relative ml-[17px] border-l border-accent/40 py-0.5 pl-[14px]">

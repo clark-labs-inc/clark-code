@@ -31,23 +31,12 @@ export interface SpecialistContext {
   targetId?: string;
 }
 
-/** The visible specialist lens owns composer context. A background Spec
- * session must never leak its repository chip into Scout or another lens. */
-export function isSpecComposerSession(
-  active: SpecialistKind | null,
-): boolean {
-  return active === "spec";
-}
-
 /** Filesystem roots a conversation-bound specialist may inspect without
  * making its document workspace writable. */
 export function specialistReadRoots(
   context: SpecialistContext | null | undefined,
   recentProjects: string[],
 ): string[] {
-  if (context?.kind === "spec") {
-    return context.repositoryPath?.trim() ? [context.repositoryPath.trim()] : [];
-  }
   return context?.kind === "scout" ? recentProjects : [];
 }
 

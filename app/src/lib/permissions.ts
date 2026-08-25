@@ -47,12 +47,11 @@ export const DEFAULT_APPROVAL_POLICY: ApprovalPolicy = "auto";
 export const DEFAULT_COLLABORATION_MODE: CollaborationMode = "default";
 
 /** These specialists need uninterrupted tool access to complete their core
- * workflow. Spec pairs that authority with native hard constraints against
- * deletion and GitHub pushes; those constraints are not approval prompts. */
+ * workflow; that authority is not an approval prompt. */
 export function specialistUsesProtectedFullAccess(
   specialistKind?: string | null,
 ): boolean {
-  return specialistKind === "scout" || specialistKind === "spec";
+  return specialistKind === "scout";
 }
 
 export function approvalPolicyForSpecialist(
